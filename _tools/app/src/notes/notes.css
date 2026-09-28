@@ -125,6 +125,28 @@
 @keyframes notes-sync-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .notes-sync.is-syncing svg { animation-duration: 3s; } }
 
+/* Fixed Markdown headings: only a section body becomes an input, so headings and the other
+   sections keep their own painted positions while a note is being edited. */
+.notes-sections { flex: 1; min-height: 64px; overflow-y: auto; padding: 0 var(--space-2) var(--space-4) 0; }
+.notes-section { min-width: 0; }
+.notes-section-heading-row { display: flex; align-items: center; min-height: 40px; margin-top: var(--space-4); border-bottom: 1px solid var(--color-border); }
+.notes-section-heading { display: flex; align-items: stretch; flex: 1; min-width: 0; height: 40px; margin: 0; font: inherit; }
+.notes-section-heading > button { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--color-text); font: 600 var(--type-body)/1.3 var(--font-ui); text-align: left; cursor: pointer; }
+.notes-section-heading > button > svg { width: 16px; height: 16px; flex: none; color: var(--color-faint); transition: transform 120ms ease; }
+.notes-section-heading > button > svg.is-open { transform: rotate(90deg); }
+.notes-section[data-level="4"] .notes-section-heading > button, .notes-section[data-level="5"] .notes-section-heading > button, .notes-section[data-level="6"] .notes-section-heading > button { color: var(--color-muted); }
+.notes-section-heading > button > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notes-section-more { flex: none; width: 32px; height: 32px; opacity: 0; }
+.notes-section-heading-row:hover .notes-section-more, .notes-section-more:focus-visible { opacity: 1; }
+.notes-section-more svg { width: 16px; height: 16px; }
+.notes-section-body { min-height: 24px; padding: var(--space-2) 0 var(--space-1) var(--space-6); cursor: text; overflow-wrap: anywhere; }
+.notes-section-body.is-empty { color: var(--color-muted); }
+.notes-section-body-editor { display: block; width: calc(100% - 20px); min-height: 64px; margin: var(--space-2) 0 var(--space-1) var(--space-4); box-sizing: border-box; padding: var(--space-2); border: 0; border-radius: var(--radius-control) var(--radius-control) 0 0; outline: none; resize: vertical; background: var(--color-surface); box-shadow: inset 0 -2px 0 var(--color-focus); color: inherit; font: var(--type-body)/1.85 var(--font-ui); white-space: pre-wrap; tab-size: 4; }
+.notes-section-body-editor:focus-visible { outline: none; }
+.notes-section-rename { width: min(100%, 32ch); height: 32px; margin: 0; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); outline: none; background: var(--color-surface); box-shadow: inset 0 -2px 0 var(--color-focus); color: inherit; font: 600 var(--type-body)/1.3 var(--font-ui); }
+.notes-section-add { display: inline-flex; align-items: center; gap: var(--space-2); height: 36px; margin-top: var(--space-4); padding: 0 var(--space-1); border: 0; background: transparent; color: var(--color-faint); font: inherit; cursor: pointer; }
+.notes-section-add:hover { color: var(--color-text); }
+
 /* The list and the editor are mutually exclusive PC views. */
 .notes-main { flex: 1; min-height: 0; display: flex; }
 .notes-main--editor { overflow: auto; }
@@ -188,3 +210,5 @@
 .notes-recovery-surface__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-4); }
 .notes-recovery-surface__head h2 { margin: 0; font: 600 var(--type-title) / 1.3 var(--font-ui); }
 .notes-recovery-surface .notes-recovery-pin, .notes-recovery-surface .notes-recovery-qr { margin-top: var(--space-3); }
+
+.notes-rendered__empty svg { width:20px; height:20px; color:var(--color-faint); }

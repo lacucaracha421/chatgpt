@@ -8,27 +8,41 @@ const note:MobileNote={id:'a'.repeat(32),title:'제목',body:'내용',pinned:fal
 const saves=()=>mock.native.mock.calls.filter(([op])=>op==='notesSave').map(([,p])=>p);
 const state=(notes:MobileNote[])=>async(op:string,p:Record<string,unknown>)=>op==='notesSave'?{createdAt:'2026-09-14',updatedAt:'2026-09-14',...notes.find(n=>n.id===p.id),...p,localRevision:Number(p.expectedRevision)+1,pending:true}:{unlocked:true,notes};
 beforeEach(()=>{mock.native.mockReset();mock.native.mockImplementation(state([note]));});
-afterEach(()=>{cleanup();vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals();});
+afterEach(()=>{cleanup();localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals();});
 async function openNote(title:string){fireEvent.click(await screen.findByText(title));}
 async function openTrash(){fireEvent.click(await screen.findByRole('button',{name:'메모 목록 더보기'}));fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:/^휴지통/}));}
-const rendered=(text:string)=>screen.findByText(text,{selector:'.notes-rendered p'});
+const rendered=(text:string)=>screen.findByText(text,{selector:'.notes-rendered p, .notes-section-body p, .notes-section-body .markdown p'});
 async function editBody(){fireEvent.click(await rendered('내용'));return await screen.findByRole('textbox',{name:'메모 내용'});}
 
 it('shows text notes rendered, edits the source on tap and returns to the rendered view when leaving the text',async()=>{
  mock.native.mockImplementation(state([{...note,body:'# 제목줄\n- [ ] 우유\n\n내용'}]));
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
- expect(await screen.findByRole('heading',{name:'제목줄'})).toBeTruthy();
- expect(screen.queryByRole('textbox',{name:'메모 내용'})).toBeNull();
+ expect(await screen.findByRole('button',{name:'제목줄'})).toBeTruthy();
+ expect(screen.queryByRole('textbox',{name:'메모 구간 본문'})).toBeNull();
  expect(screen.queryByRole('button',{name:/^(보기|편집)$/})).toBeNull();
  expect(screen.getByRole('button',{name:'마크다운 도움말'})).toBeTruthy();
  // A rendered task checkbox rewrites its line.
  fireEvent.click(screen.getByRole('checkbox'));
  await waitFor(()=>expect(saves().some(s=>String(s.body).includes('- [x] 우유'))).toBe(true));
  fireEvent.click(await rendered('내용'));
- const area=await screen.findByRole('textbox',{name:'메모 내용'});
+ const area=await screen.findByRole('textbox',{name:'메모 구간 본문'});
  // Tapping the rest of the note (here its title) leaves the source view.
  fireEvent.blur(area,{relatedTarget:screen.getByRole('textbox',{name:'메모 제목'})});
- await waitFor(()=>expect(screen.queryByRole('textbox',{name:'메모 내용'})).toBeNull());
+ await waitFor(()=>expect(screen.queryByRole('textbox',{name:'메모 구간 본문'})).toBeNull());
+});
+it('folds fixed sections on the tablet, remembers the fold, and renames from the bottom sheet',async()=>{
+ localStorage.clear();
+ const fixed={...note,body:'# 하나\n첫 본문\n## 둘\n둘째 본문'};
+ mock.native.mockImplementation(state([fixed]));
+ const backRef={current:null};render(<Notes active backRef={backRef}/>);await openNote('제목');
+ fireEvent.click(await screen.findByRole('button',{name:'하나'}));
+ expect(screen.queryByText('첫 본문',{selector:'.notes-section-body p'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'둘 더보기'}));
+ const sheet=within(await screen.findByRole('dialog'));fireEvent.click(sheet.getByRole('button',{name:'이름 바꾸기'}));
+ const rename=await screen.findByRole('textbox',{name:'제목 이름'});fireEvent.change(rename,{target:{value:'둘 변경'}});fireEvent.keyDown(rename,{key:'Enter'});
+ await waitFor(()=>expect(saves().some(save=>save.body==='# 하나\n첫 본문\n## 둘 변경\n둘째 본문')).toBe(true));
+ cleanup();render(<Notes active backRef={{current:null}}/>);await openNote('제목');
+ expect(screen.queryByText('첫 본문',{selector:'.notes-section-body p'})).toBeNull();
 });
 it('places the source caret under the rendered text that was tapped',async()=>{
  const caretPositionFromPoint=vi.fn(()=>{
