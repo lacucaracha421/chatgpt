@@ -7,6 +7,7 @@ import {clockLabel} from './homeDashboard';
 import type {CharacterIndex} from './characterModel';
 import type {ReviewScope} from './CharacterReview';
 import {readOverviewSnapshot, readReviewOverview, writeOverviewSnapshot, type ReviewNames, type ReviewOverview} from './useCharacterReview';
+import {Scrubber} from './Scrubber';
 import './characterReview.css';
 
 type State =
@@ -81,6 +82,8 @@ export function CharacterReviewOverview({libraryId, characters, refreshKey, paus
   }, [libraryId, refreshKey, retry]);
 
   const value = state.phase === 'ready' ? state.value : null;
+  const scroller = useRef<HTMLDivElement>(null);
+  const scrubberSort=useMemo(()=>({kind:'fallback' as const}),[]);
   const stale = state.phase === 'ready' && state.stale;
   const serverSeries = !!value?.exact;
   return <div className="review-overlay review-overview" role="dialog" aria-modal="true" aria-label="캐릭터 검토">
@@ -106,7 +109,7 @@ export function CharacterReviewOverview({libraryId, characters, refreshKey, paus
       <h2>모두 검토했습니다</h2>
       <p>PC가 새 후보를 보내면 여기에 나타납니다.</p>
     </div>}
-    {value && value.total > 0 && <div className="overview-scroll">
+    {value && value.total > 0 && <div ref={scroller} className="overview-scroll">
       {value.groups.map(group => <section key={group.seriesId} className="overview-series" aria-label={`${group.seriesName} ${group.count}건`}>
         <button className="overview-series-head" onClick={() => onOpen({series: {id: group.seriesId, name: group.seriesName}, serverSeries})} aria-label={`${group.seriesName} 전체 검토 ${group.count}건`}>
           <span className="overview-cover"><Portrait id={covers[group.seriesId]} paused={paused}/></span>
@@ -122,6 +125,7 @@ export function CharacterReviewOverview({libraryId, characters, refreshKey, paus
         </div>
       </section>)}
       {value.rest > 0 && <p className="overview-rest">외 <span className="numeric">{value.rest}</span>건 · 전체 검토에서 이어서 볼 수 있습니다.</p>}
+      <Scrubber scrollRef={scroller} total={value.groups.length} sort={scrubberSort} hidden={paused}/>
     </div>}
   </div>;
 }

@@ -1,4 +1,4 @@
-import {useEffect,useLayoutEffect,useRef,useState} from 'react';
+import {useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import type React from 'react';
 import {ChevronDownIcon,ChevronRightIcon,MagnifyingGlassIcon,PhotoIcon,TrashIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
@@ -13,6 +13,8 @@ import {usePullToRefresh} from './usePullToRefresh';
 import type {Asset,View} from './types';
 import type {CharacterIndex} from './characterModel';
 import {SimilarityReviewEntry} from './SimilarityReview';
+import {Scrubber} from './Scrubber';
+import {createKoreanMatcher} from '../src/shared/koreanSearch';
 export function Highlight({name,query}:{name:string;query:string}) {
   const at=name.toLocaleLowerCase().indexOf(query.trim().toLocaleLowerCase());
   return at<0||!query.trim()?<>{name}</>:<>{name.slice(0,at)}<mark>{name.slice(at,at+query.trim().length)}</mark>{name.slice(at+query.trim().length)}</>;
@@ -71,7 +73,7 @@ function useFolderFit(active:boolean,scroller:React.RefObject<HTMLDivElement|nul
   },[active,scroller,grid,key]);
   return fit;
 }
-export function LibraryRoot({active=true,entries,characters,items,total,paused,busy,revision,onSelect,onRefresh,albumTree,albumError,segment,onSegment,restoreScroll,onScroll,similarity,onTrash}:{/** False while a folder is open: the root stays mounted, hidden, so going back is instant. */active?:boolean;/** Opens the Library Trash; absent until the lifecycle authority is adopted. */onTrash?():void;similarity?:{enabled:boolean;refreshKey:unknown;onOpen():void};entries:Entry[];characters?:CharacterIndex;items:Asset[];total?:number;paused:boolean;busy:boolean;revision:number;onSelect(view:View):void;onRefresh():void;albumTree:AlbumTree|null;albumError:string;segment:'folders'|'albums';onSegment(segment:'folders'|'albums'):void;restoreScroll:number;onScroll(top:number):void}) {
+export function LibraryRoot({active=true,entries,characters,items,total,paused,busy,revision,onSelect,onRefresh,albumTree,albumError,segment,onSegment,restoreScroll,onScroll,similarity,onTrash}:{/** False while a folder is open: the root stays mounted, hidden, so going back is instant. */active?:boolean;/** Opens the Library Trash; absent until the lifecycle authority is adopted. */onTrash?():void;similarity?:{enabled:boolean;refreshKey:unknown;scope?:string;onOpen():void};entries:Entry[];characters?:CharacterIndex;items:Asset[];total?:number;paused:boolean;busy:boolean;revision:number;onSelect(view:View):void;onRefresh():void;albumTree:AlbumTree|null;albumError:string;segment:'folders'|'albums';onSegment(segment:'folders'|'albums'):void;restoreScroll:number;onScroll(top:number):void}) {
   const [query,setQuery]=useState('');
   const [searchOpen,setSearchOpen]=useState(false);
   const [queueOpen,setQueueOpen]=useState(false);
@@ -85,7 +87,7 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
   const rows=query.trim()?results:[];
   const {covers,onVisible}=useFolderCovers(rows,paused||segment==='albums',revision);
   // Waiting review work is one quiet "확인 N" in the bar, shown only while something waits.
-  const similarityCount=useSimilarityReviewCount(!!similarity?.enabled&&!paused,similarity?.refreshKey)??0;
+  const similarityCount=useSimilarityReviewCount(!!similarity?.enabled&&active&&!paused,similarity?.refreshKey,similarity?.scope)??0;
   const waiting=similarityCount;
   const openQueue=()=>setQueueOpen(true);
   const topFolders=entries.filter(entry=>!entry.parent_id);
@@ -94,6 +96,13 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
   const searching=searchOpen||!!query;
   const closeSearch=()=>{setQuery('');setSearchOpen(false);};
   const label=segment==='albums'?'앨범 찾기':'폴더·캐릭터 찾기';
+  const albumItems=useMemo(()=>{
+    if(!albumTree)return [];
+    const known=new Set(albumTree.albums.map(album=>album.id)),search=query.trim(),matches=createKoreanMatcher(search);
+    return albumTree.albums.filter(album=>search?matches(album.name):!album.parentId||!known.has(album.parentId));
+  },[albumTree,query]);
+  const scrubberValues=useMemo(()=>segment==='albums'?albumItems.map(album=>album.name):query.trim()?rows.map(entry=>entry.name):topFolders.map(entry=>entry.name),[albumItems,query,rows,segment,topFolders]);
+  const scrubberSort=useMemo(()=>({kind:'fallback' as const}),[]);
   return <div className={`library-root${fit?' is-fit':''}`} style={{display:active?undefined:'none',...(fit?{'--root-cover-height':`${fit.cover}px`} as React.CSSProperties:{})}}>
     {searching
       ?<TopBarSearch title="에셋" loading={busy&&'목록 불러오는 중'} onClose={closeSearch}><label className="top-bar__search"><MagnifyingGlassIcon aria-hidden="true"/><input type="search" autoFocus aria-label={label} placeholder={label} value={query} onChange={event=>setQuery(event.target.value)}/></label>{query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>setQuery('')}/>}</TopBarSearch>
@@ -105,9 +114,10 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
     <section className="library-root-folders" ref={folders}><h2 className="section-label">분류{!!topFolders.length&&<span className="numeric">{topFolders.length}</span>}</h2><FolderCards items={topFolders} entries={entries} characters={characters} paused={paused} revision={revision} onSelect={onSelect}/>{!entries.length&&<p className="hint">아직 게시된 분류가 없습니다.</p>}
     {fit&&fit.hidden>0&&!scrolled&&<p className="library-end-line"><ChevronDownIcon aria-hidden="true"/>아래에 분류 {fit.hidden}개 더</p>}</section>
     </>}
+    <Scrubber scrollRef={host} total={scrubberValues.length} sort={scrubberSort} hidden={!active||paused||queueOpen}/>
   </div>
   {queueOpen&&<BottomSheet title="확인할 것" onClose={()=>setQueueOpen(false)}>
-    {similarity&&<SimilarityReviewEntry enabled={similarity.enabled&&!paused} refreshKey={similarity.refreshKey} onOpen={()=>{setQueueOpen(false);similarity.onOpen();}}/>}
+    {similarity&&<SimilarityReviewEntry enabled={similarity.enabled&&active&&!paused} refreshKey={similarity.refreshKey} onOpen={()=>{setQueueOpen(false);similarity.onOpen();}}/>}
   </BottomSheet>}
   </div>;
 }

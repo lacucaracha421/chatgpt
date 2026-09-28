@@ -6,6 +6,8 @@ import {CatalogCover} from './CatalogCover';
 import {catalogDetailPath,type CatalogDetail} from './catalogModel';
 import {catalogDisplayTitle} from '../src/manga/catalogDisplayTitle';
 import {useDueFlush} from './useSimilarityReview';
+import {useCachedHomeSource} from './homeCache';
+import {Scrubber} from './Scrubber';
 import {DUPLICATE_REVIEW_EVENT,DUPLICATE_SETTLED_EVENT,commitDuplicateDecision,duplicatesPath,flushDuplicateDecisions,nextDuplicateDue,readDuplicateIntents,undoDuplicateDecision,
   type DuplicateCandidate,type DuplicateChoice,type DuplicateFeed,type DuplicateIntent,type DuplicateOutcome,type DuplicateState,type DuplicateWork} from './catalogDuplicates';
 import './characterReview.css';
@@ -22,18 +24,15 @@ export function useDuplicateDecisionFlush(enabled:boolean){
 }
 
 /** Pairs that need a look (undecided on the server, minus this device's queued decisions); null while unknown. */
-export function useDuplicateCount(enabled:boolean):number|null{
-  const [count,setCount]=useState<number|null>(null);
-  useEffect(()=>{
-    if(!enabled)return;
-    const controller=new AbortController();
-    void api<DuplicateFeed>(duplicatesPath('undecided',null,1),controller.signal).then(feed=>{
-      if(controller.signal.aborted)return;
+export function useDuplicateCount(enabled:boolean, scope = '', refreshKey:unknown = 0):number|null{
+  const count = useCachedHomeSource<number|null>({
+    enabled, scope, source: 'duplicates', signalKey: 'catalog', initial: null, forceKey: refreshKey,
+    read: async signal => {
+      const feed=await api<DuplicateFeed>(duplicatesPath('undecided',null,1),signal);
       const queued=Object.values(readDuplicateIntents()).filter(intent=>intent.base===null).length;
-      setCount(Number.isSafeInteger(feed?.counts?.undecided)?Math.max(0,feed.counts.undecided-queued):null);
-    },()=>{if(!controller.signal.aborted)setCount(null);});
-    return()=>controller.abort();
-  },[enabled]);
+      return Number.isSafeInteger(feed?.counts?.undecided)?Math.max(0,feed.counts.undecided-queued):null;
+    },
+  });
   return enabled?count:null;
 }
 
@@ -92,6 +91,7 @@ export function CatalogDuplicates({context,active=true,onClose}:{context:string|
   const [notice,setNotice]=useState('');
   const [reload,setReload]=useState(0);
   const loading=useRef<AbortController|null>(null);
+  const scroller=useRef<HTMLDivElement>(null);
 
   const load=useCallback(async(from:string|null)=>{
     loading.current?.abort();
@@ -172,7 +172,7 @@ export function CatalogDuplicates({context,active=true,onClose}:{context:string|
       {tab==='undecided'?<><h2>검토할 중복 판본이 없어요</h2><p>확실한 판본은 PC가 자동으로 묶어요. 헷갈리는 것만 여기에 모여요.</p></>
         :<><h2>처리한 판본이 없어요</h2><p>묶거나 다른 작품으로 표시한 판본이 여기에 보여요.</p></>}
     </div>}
-    {state.phase==='ready'&&!!shown.length&&<div className="duplicates-list">
+    {state.phase==='ready'&&!!shown.length&&<div ref={scroller} className="duplicates-list">
       {shown.map(item=>{
         const local=queued[item.candidateId];
         const current=local?.decision??item.decision?.decision??null;
@@ -196,6 +196,7 @@ export function CatalogDuplicates({context,active=true,onClose}:{context:string|
         </article>;
       })}
       {cursor&&<Button variant="ghost" onClick={()=>void load(cursor)}>더 보기</Button>}
+      <Scrubber scrollRef={scroller} total={shown.length} sort={{kind:'fallback'}} hidden={!active||state.phase!=='ready'} onEndReached={cursor?()=>{void load(cursor);}:undefined}/>
     </div>}
     {undo&&<div className="review-snackbar duplicates-snackbar" role="status">
       <span>{SAVED[undo.decision]}</span>

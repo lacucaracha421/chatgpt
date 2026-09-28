@@ -1,10 +1,11 @@
-import {useEffect, useMemo, useState, type MutableRefObject, type ReactNode} from 'react';
+import {useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode} from 'react';
 import {ArrowUpRightIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronRightIcon, ComputerDesktopIcon, MagnifyingGlassIcon, PhotoIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {IconButton} from './ui';
 import {TopBar, TopBarSearch} from './TopBar';
 import {api, native} from './transport';
 import {Cover} from './CoverGroup';
 import {Gallery} from './Gallery';
+import {Scrubber} from './Scrubber';
 import {DEFAULT_DENSITY} from './model';
 import type {Asset} from './types';
 import {usePrivacyMode} from './privacyMode';
@@ -79,7 +80,8 @@ function ArtistToday({artist, privateMode, onOpen}: {artist: LibraryArtist; priv
   </button>;
 }
 
-function ArtistHub({artists, assignments, query, privateMode, onOpen}: {artists: LibraryArtist[]; assignments: ArtistAssignment[]; query: string; privateMode: boolean; onOpen(artist: LibraryArtist): void}) {
+function ArtistHub({artists, assignments, query, privateMode, paused, onOpen}: {artists: LibraryArtist[]; assignments: ArtistAssignment[]; query: string; privateMode: boolean; paused:boolean; onOpen(artist: LibraryArtist): void}) {
+  const scroller=useRef<HTMLDivElement>(null);
   const major = useMemo(() => artists.some(artist => artist.main) ? artists.filter(artist => artist.main) : artists, [artists]);
   const visible = useMemo(() => query.trim() ? artists.filter(artist => matchesArtist(artist, query)) : orderedArtists(major), [artists, major, query]);
   const picks = todayArtists(artists);
@@ -87,11 +89,13 @@ function ArtistHub({artists, assignments, query, privateMode, onOpen}: {artists:
   const others = picks.slice(1, 3);
   const assignmentCount = new Map<string, number>();
   assignments.forEach(row => assignmentCount.set(row.artistId, (assignmentCount.get(row.artistId) ?? 0) + 1));
-  return <div className="artist-scroll" aria-label="작가 목록">
+  const scrubberSort=useMemo(()=>({kind:'fallback' as const}),[]);
+  return <div ref={scroller} className="artist-scroll" aria-label="작가 목록">
     {query.trim() ? <div className="artist-search-hint"><strong>결과 {visible.length.toLocaleString('ko-KR')}명</strong><span>이름 · 핸들 · 초성으로 찾기</span></div> : <div className="artist-content">
       {main && <section className="artist-section" aria-label="오늘"><SectionHeading title="오늘" meta={`${new Date().getMonth() + 1}월 ${new Date().getDate()}일 · ${picks.length}명`} /><ArtistToday artist={main} privateMode={privateMode} onOpen={() => onOpen(main)} /><div className="artist-other-picks">{others.map(artist => <button key={artist.id} className="artist-other-pick" onClick={() => onOpen(artist)} aria-label={`${artistName(artist)} 작가`}><Collage assets={assetsFromIds(artist.coverAssetIds)} privateMode={privateMode} /><span className="artist-pick-text"><strong>{artistName(artist)}</strong><small>{artist.lastOpenedAt ? `${daysSince(artist.lastOpenedAt) ?? 0}일 동안 안 봄` : artist.recentCount ? `최근 30일 ${artist.recentCount}장` : '주요 작가'}</small></span><ChevronRightIcon aria-hidden="true" /></button>)}</div></section>}
     </div>}
     <section className={`artist-section${query.trim() ? '' : ' artist-content'}`} aria-label="주요 작가"><div className="artist-sort-line"><SectionHeading title={query.trim() ? '검색 결과' : '최근 저장 순'} meta={query.trim() ? undefined : <>주요 작가 · {major.length}명</>} /><span>{assignments.length ? `${assignmentCount.size}명 게시` : ''}</span></div><div className="artist-grid">{visible.map(artist => <ArtistTile key={artist.id} artist={artist} privateMode={privateMode} query={query} onOpen={() => onOpen(artist)} />)}</div>{visible.length === 0 && <div className="artist-empty"><PhotoIcon aria-hidden="true" /><h2>검색 결과가 없습니다</h2><p>이름, 핸들 또는 초성을 바꿔 보세요.</p></div>}</section>
+    <Scrubber scrollRef={scroller} total={visible.length} sort={scrubberSort} hidden={paused}/>
   </div>;
 }
 
@@ -115,7 +119,7 @@ function ArtistIntro({artist, privateMode, sort, filter, onSort, onFilter, asset
   </div>;
 }
 
-function ArtistDetail({summary, assignments, privateMode, onBack, onOpenViewer}: {summary: LibraryArtist; assignments: ArtistAssignment[]; privateMode: boolean; onBack(): void; onOpenViewer(items: Asset[], index: number): void}) {
+function ArtistDetail({summary, assignments, privateMode, paused, onBack, onOpenViewer}: {summary: LibraryArtist; assignments: ArtistAssignment[]; privateMode: boolean; paused:boolean; onBack(): void; onOpenViewer(items: Asset[], index: number): void}) {
   const [artist, setArtist] = useState(summary);
   const [missing, setMissing] = useState(false);
   const [assets, setAssets] = useState<Asset[]>(() => assetsFromIds(assignments.filter(row => row.artistId === summary.id).map(row => row.assetId)));
@@ -160,11 +164,11 @@ function ArtistDetail({summary, assignments, privateMode, onBack, onOpenViewer}:
   if (missing) return <div className="artist-screen"><TopBar back={{label:'작가 목록으로', onClick:onBack}} crumbs={<span className="top-bar__crumbs">홈 › 작가 ›</span>} title={artistName(summary)} /><EmptyArtists /></div>;
   const shown = filtered.length ? filtered : fallback;
   return <div className="artist-screen"><TopBar back={{label:'작가 목록으로', onClick:onBack}} crumbs={<span className="top-bar__crumbs">홈 › 작가 ›</span>} title={artistName(artist)} actions={profile ? <IconButton label="작가 프로필 열기" icon={ArrowUpRightIcon} onClick={() => { void native('openExternal', {url: profile}).catch(() => {}); }} /> : undefined} />
-    <div className="artist-detail-scroll"><Gallery items={shown} density={DEFAULT_DENSITY} identity={`artist:${artist.id}:${sort}:${filter}:${source}`} restoreScroll={0} onScroll={() => {}} onReady={ready => setAssets(current => current.map(asset => asset.id === ready.id ? {...asset, ...ready} : asset))} onNearEnd={loadMore} paused={privateMode} privacy={privateMode} intro={<ArtistIntro artist={artist} privateMode={privateMode} sort={sort} filter={filter} onSort={() => setSort(value => value === 'newest' ? 'oldest' : 'newest')} onFilter={setFilter} assets={shown} />} onOpen={index => { if (!privateMode) onOpenViewer(shown, index); }} />{!shown.length && <div className="artist-detail-empty">PC가 이 작가의 asset id를 아직 게시하지 않았습니다.</div>}</div>
+    <div className="artist-detail-scroll"><Gallery items={shown} density={DEFAULT_DENSITY} identity={`artist:${artist.id}:${sort}:${filter}:${source}`} restoreScroll={0} onScroll={() => {}} onReady={ready => setAssets(current => current.map(asset => asset.id === ready.id ? {...asset, ...ready} : asset))} onNearEnd={loadMore} paused={privateMode||paused} privacy={privateMode} intro={<ArtistIntro artist={artist} privateMode={privateMode} sort={sort} filter={filter} onSort={() => setSort(value => value === 'newest' ? 'oldest' : 'newest')} onFilter={setFilter} assets={shown} />} onOpen={index => { if (!privateMode) onOpenViewer(shown, index); }} />{!shown.length && <div className="artist-detail-empty">PC가 이 작가의 asset id를 아직 게시하지 않았습니다.</div>}</div>
   </div>;
 }
 
-export function Artists({endpoint, backRef, onOpenViewer}: {endpoint: string; backRef: MutableRefObject<(() => boolean) | null>; onOpenViewer(items: Asset[], index: number): void}) {
+export function Artists({endpoint, backRef, onOpenViewer, paused=false}: {endpoint: string; backRef: MutableRefObject<(() => boolean) | null>; onOpenViewer(items: Asset[], index: number): void; paused?:boolean}) {
   const [privateMode] = usePrivacyMode();
   const [state, setState] = useState<ArtistState>('loading');
   const [artists, setArtists] = useState<LibraryArtist[]>([]);
@@ -191,7 +195,7 @@ export function Artists({endpoint, backRef, onOpenViewer}: {endpoint: string; ba
     return () => { backRef.current = null; };
   }, [backRef, detail, searchOpen]);
   const closeSearch = () => { setSearchOpen(false); setQuery(''); };
-  if (detail) return <ArtistDetail summary={detail} assignments={assignments} privateMode={privateMode} onBack={() => setDetail(null)} onOpenViewer={onOpenViewer} />;
+  if (detail) return <ArtistDetail summary={detail} assignments={assignments} privateMode={privateMode} paused={paused} onBack={() => setDetail(null)} onOpenViewer={onOpenViewer} />;
   const header = searchOpen ? <TopBarSearch title="작가" onClose={closeSearch}><label className="top-bar__search"><MagnifyingGlassIcon aria-hidden="true" /><input autoFocus type="search" aria-label="작가 검색" placeholder="이름, 핸들, 초성" value={query} onChange={event => setQuery(event.target.value)} />{query && <IconButton label="검색어 지우기" icon={XMarkIcon} onClick={() => setQuery('')} />}</label></TopBarSearch> : <TopBar back={{label:'홈으로', onClick:() => window.dispatchEvent(new Event('lakomics-back'))}} crumbs={<span className="top-bar__crumbs">홈 ›</span>} title="작가" count={artists.length ? artists.length.toLocaleString('ko-KR') : undefined} actions={state === 'ready' ? <IconButton label="작가 검색" icon={MagnifyingGlassIcon} onClick={() => setSearchOpen(true)} /> : undefined} />;
-  return <div className="artist-screen">{header}{state === 'loading' ? <div className="artist-empty" role="status"><span>작가 목록을 불러오는 중입니다</span></div> : state === 'empty' ? <EmptyArtists /> : <ArtistHub artists={artists} assignments={assignments} query={query} privateMode={privateMode} onOpen={setDetail} />}</div>;
+  return <div className="artist-screen">{header}{state === 'loading' ? <div className="artist-empty" role="status"><span>작가 목록을 불러오는 중입니다</span></div> : state === 'empty' ? <EmptyArtists /> : <ArtistHub artists={artists} assignments={assignments} query={query} privateMode={privateMode} paused={paused} onOpen={setDetail} />}</div>;
 }

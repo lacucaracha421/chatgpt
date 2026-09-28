@@ -7,6 +7,8 @@ import {PlayIcon, PhotoIcon} from '@heroicons/react/24/outline';
 import type {Asset} from './types';
 import {dateLabel, justifiedRows, rowHeight} from './model';
 import {invalidateTicket, loadThumbnail, mediaTicket, prefetchThumbnails} from './media';
+import {Scrubber} from './Scrubber';
+import type {ScrubberSort} from './scrubberModel';
 
 /**
  * Private Vault tiles. `asset.preview` is the native vault route, used as-is: no tickets,
@@ -85,8 +87,12 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, va
  */
 const observeShownRect = (instance: Virtualizer<HTMLDivElement, Element>, callback: (rect: {width: number; height: number}) => void) =>
   observeElementRect(instance, rect => { if (rect.width > 0 && rect.height > 0) callback(rect); });
+/** Keep a bounded row cushion so a fast fling still paints neutral tiles while thumbs arrive. */
+export const GALLERY_ROW_OVERSCAN = 8;
 
-export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault}: {items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
+export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort}: {items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
+  /** Additional visibility guard for sheets owned by the parent screen. */scrubberHidden?:boolean;
+  /** Optional sort metadata; the date fallback follows the existing gallery order. */scrubberSort?:ScrubberSort;
   /** Private Vault mode: same layout and gestures, no library media client. */
   vault?:GalleryVaultSource}) {
   const parent = useRef<HTMLDivElement>(null);
@@ -101,7 +107,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   },[intro!=null]);
   const [width, setWidth] = useState(600);
   const rows = useMemo(() => justifiedRows(items, width, rowHeight(density, width)), [items, width, density]);
-  const virtualizer = useVirtualizer({count: rows.length, getScrollElement: () => parent.current, estimateSize: i => rows[i].height + 10, overscan: 2,scrollMargin:introHeight,observeElementRect:observeShownRect});
+  const virtualizer = useVirtualizer({count: rows.length, getScrollElement: () => parent.current, estimateSize: i => rows[i].height + 10, overscan: GALLERY_ROW_OVERSCAN,scrollMargin:introHeight,observeElementRect:observeShownRect});
   const oldRows = useRef(rows);
   // Assets added by a page append (same gallery, same head, more items) arrive once each; the
   // first page of a place, a replaced list and tiles re-mounted while scrolling back never do.
@@ -141,6 +147,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     return () => controller.abort();
   }, [lastRow, rows, paused, privacy, vault]);
   const checkEnd = () => {const element = parent.current; if (!paused && element && element.clientHeight > 0 && element.scrollHeight - element.scrollTop - element.clientHeight < element.clientHeight) onNearEnd();};
+  const sort = useMemo<ScrubberSort>(() => scrubberSort ?? {kind:'date',values:items.map(asset => asset.collected_at ?? asset.created_at)}, [items, scrubberSort]);
   useEffect(checkEnd, [items.length, onNearEnd, paused]);
   return <div className={`gallery-scroll${stale?' is-stale':''}`} ref={parent} onScroll={event => {if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" tabIndex={0}>
     {/* The refresh pill is a zero-height sticky overlay, so it never changes the intro height. */}
@@ -151,5 +158,6 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
         {rows[virtual.index].items.map(item => <Tile key={item.asset.id} {...item} height={rows[virtual.index].height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} arriving={arrivals.arriving(item.asset.id)} onArrived={arrivals.arrived}/>) }
       </div>)}
     </div>
+    <Scrubber scrollRef={parent} total={items.length} sort={sort} hidden={paused || scrubberHidden} onEndReached={onNearEnd}/>
   </div>;
 }

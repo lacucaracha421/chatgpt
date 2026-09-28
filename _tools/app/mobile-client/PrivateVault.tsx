@@ -104,7 +104,7 @@ export function PrivateVault({onClose,backRef,density=1}:{onClose():void;backRef
           </>}
           <Button variant="ghost" disabled={busy} onClick={()=>{setError('');void native<VaultState>('vaultPick').then(apply).catch(reason=>setError(errorText(reason)));}}>{state.selected?'다른 USB 폴더 선택':'USB 폴더 선택'}</Button>
         </div> : <>
-          <Gallery items={assets} vault={gallery} density={density} identity={`vault:${state.epoch}:${filters.media}`} restoreScroll={0} onScroll={ignore} onOpen={setSelected} onReady={shaped} onNearEnd={ignore} paused={open}
+          <Gallery items={assets} vault={gallery} density={density} identity={`vault:${state.epoch}:${filters.media}`} restoreScroll={0} onScroll={ignore} onOpen={setSelected} onReady={shaped} onNearEnd={ignore} paused={open} scrubberHidden={filtersOpen!==null}
             intro={<>
               <FilterChips value={filters} onChange={value=>{setFilters(value);setFiltersOpen(null);}} open={filtersOpen} onOpen={setFiltersOpen} aspect={false} duration={false}/>
               {assets.length===0&&<div className="empty-state"><p>{state.items.length?'조건에 맞는 항목이 없습니다.':'보관함이 비어 있습니다.'}</p></div>}

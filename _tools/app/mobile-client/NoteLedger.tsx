@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState,type MutableRefObject,type ReactNode} from 'react';
+import {useEffect,useMemo,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
 import {ArrowLeftIcon,ArrowPathIcon,CheckIcon,ChevronDownIcon,ChevronLeftIcon,ChevronRightIcon,EllipsisHorizontalIcon,PlusIcon,WalletIcon} from '@heroicons/react/24/outline';
 import {PinIcon} from './PinIcon';
 import {Button,IconButton} from './ui';
@@ -8,6 +8,8 @@ import {addDays,addMonths,cycleLabel,dayNumber,inTrial,isEnded,localToday,monthl
 import {forkedIds,keepOnly,ledgerLimitProblem,ledgerSizeProblem,monthLabel,won,type LedgerEntry,type Planned,type Recurring} from '../src/notes/ledger/model';
 import {baseIncome,donePlans,ledgerEntries,monthNotesOf,monthSummary,type Charge,type MonthSummary} from '../src/notes/ledger/summary';
 import {ChargeSheet,EntrySheet,IncomeSheet,longDate,PlanSheet,RecurringSheet,type EntryDraft} from './NoteLedgerSheets';
+import {Scrubber} from './Scrubber';
+import type {ScrubberSort} from './scrubberModel';
 import './ledger.css';
 
 /**
@@ -67,7 +69,10 @@ export function NoteLedger({store,ledger,notes,saveState,onLeave,onMore,backRef}
   const all=useMemo(()=>ledgerEntries(monthNotes),[monthNotes]);
   const summary=monthSummary(ledger,monthNotes,month,today,all);
   const recurring=ledger.recurring??[],planned=ledger.planned??[];
+  const scroller=useRef<HTMLDivElement>(null);
   const names=useMemo(()=>[...new Set(all.map(e=>e.name.trim()).filter(Boolean))],[all]);
+  const scrubberValues=useMemo(()=>tab==='recurring'?recurring.map(item=>item.name):tab==='plans'?planned.map(item=>item.name):[...summary.entries.map(entry=>entry.date),...summary.pastCharges.map(charge=>charge.date)],[tab,recurring,planned,summary.entries,summary.pastCharges]);
+  const scrubberSort=useMemo<ScrubberSort>(()=>({kind:'date',values:scrubberValues}),[scrubberValues]);
   const openSheet=(next:LedgerSheet)=>{setProblem(null);setSheet(next);};
   // ---- Writes. The latest store copy is edited, so several quick writes never drop one another.
   const latest=(id:string)=>store.snapshot().notes.find(n=>n.id===id);
@@ -231,9 +236,10 @@ export function NoteLedger({store,ledger,notes,saveState,onLeave,onMore,backRef}
       <Button variant="ghost" className="ledger-income" onClick={()=>openSheet({kind:'income'})}><WalletIcon aria-hidden="true"/>{incomeBase===null?'수입 적기':<>수입 <span className="numeric">{plain(incomeBase)}</span>{summary.incomeDate&&<> · <span className="numeric">{Number(summary.incomeDate.slice(8))}</span>일</>}</>}</Button>
     </div>
     <div className="ledger-tabs" role="tablist" aria-label="가계부">{TABS.map(([key,text])=><button key={key} type="button" role="tab" aria-selected={tab===key} onClick={()=>setTab(key)}>{text}</button>)}</div>
-    <div className="ledger-scroll" role="tabpanel">
+    <div ref={scroller} className="ledger-scroll" role="tabpanel">
       {problem&&!sheet&&<p className="notes-limit" role="alert">{problem}</p>}
       {tab==='month'?monthTab():tab==='entries'?entriesTab():tab==='recurring'?recurringTab():plansTab()}
+      <Scrubber scrollRef={scroller} total={scrubberValues.length} sort={scrubberSort} hidden={sheet!==null}/>
     </div>
     <Button variant="primary" className="notes-fab" onClick={fab.open}><PlusIcon aria-hidden="true"/>{fab.label}</Button>
     {sheet?.kind==='entry'&&<EntrySheet error={problem} key={sheet.draft.id??'new'} initial={sheet.draft} names={names} onClose={()=>setSheet(null)} onSave={saveEntry}

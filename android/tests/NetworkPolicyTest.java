@@ -66,6 +66,11 @@ public final class NetworkPolicyTest {
  for(String path:new String[]{"/v1/library/characters/exclusions/","/v1/library/characters/exclusions/extra","/v1/library/characters/exclusion","/v1/library/characters/exclusionsx","/v1/library/characters/replica"})for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
  reject(()->NetworkPolicy.api("/v1/library/characters/exclusions%2f..","POST"));
  pass(()->NetworkPolicy.api("/v1/collections/status","GET"));
+ // AV product-code handoff: the tablet may submit one lookup, never read the PC inbox.
+ pass(()->NetworkPolicy.api("/v1/av-lookups","POST"));
+ pass(()->NetworkPolicy.api("/v1/av-lookups?source=tablet","POST"));
+ for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/av-lookups",method));
+ for(String path:new String[]{"/v1/av-lookups/","/v1/av-lookups/extra","/v1/av-lookups/../collections"})for(String method:new String[]{"GET","POST"})reject(()->NetworkPolicy.api(path,method));
  // Personal Collection edits: the device may submit the command, but the edit feed is a
  // publisher-only read of every edit, so GET stays denied with or without a query.
  pass(()->NetworkPolicy.api("/v1/collections/personal-edits","POST"));

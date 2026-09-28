@@ -1,8 +1,9 @@
-import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {BellIcon, RectangleStackIcon} from '@heroicons/react/24/outline';
 import {Button, Dialog, DialogDescription} from './ui';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useSegmentMotion} from './motion';
+import {Scrubber} from './Scrubber';
 import {errorText} from './transport';
 import type {CollectionSummary} from './collectionModel';
 import {commitReleases, invalidateReleases, loadShelf, releaseEpoch, releaseStore, type ReleaseStore} from './releaseStore';
@@ -138,6 +139,7 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
   const news = {kr: korean.filter(row => row.volumes.some(volume => volume.fresh)).length, jp: japan.filter(row => row.aheadVolumes.some(volume => volume.fresh)).length};
   const others = groupReleases(data.events.filter(event => !shown.has(event.collectionId)));
   const unread = Math.max(counts.unread, data.events.length);
+  const scrubberSort=useMemo(()=>({kind:'date' as const,values:data.events.map(event=>event.detectedAt)}),[data.events]);
   const busy = working !== null;
   const revision = shelf?.revision ?? '';
   const workOf = (id: string) => works.find(work => work.id === id);
@@ -203,6 +205,8 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
         <ul className="collection-release-volumes">{group.events.map(event => <li key={event.eventId}><span className="numeric">{releaseLine(event)}</span></li>)}</ul>
       </section>)}
     </>}
+
+    <Scrubber scrollRef={scroller} total={data.events.length} sort={scrubberSort} hidden={!active||!data.loaded||confirmAll}/>
 
     {confirmAll && <Dialog open title="모두 확인할까요?" onClose={() => setConfirmAll(false)}><DialogDescription className="collection-sheet-label">새 알림 {unread.toLocaleString()}개를 읽음으로 바꿉니다. 발매 정보는 그대로 남고, PC에서도 읽음으로 바뀝니다.</DialogDescription>
       <div className="library-sheet collection-memo-choice">

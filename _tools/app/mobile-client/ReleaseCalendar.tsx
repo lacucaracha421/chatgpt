@@ -1,12 +1,14 @@
 import {BookmarkIcon as BookmarkOutlineIcon} from '@heroicons/react/24/outline';
 import {BookmarkIcon} from '@heroicons/react/24/solid';
-import {useEffect, useMemo, useState, type MutableRefObject} from 'react';
+import {useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {TopBar} from './TopBar';
-import {api, ApiError, errorText} from './transport';
+import {api, ApiError, errorText, native} from './transport';
 import {usePrivacyMode} from './privacyMode';
 import {commitUpcomingWishlist, flushUpcomingWishlist, readUpcomingWishlistIntents, reconcileUpcomingWishlist, visibleUpcomingWishlist} from './upcomingWishlistOutbox';
 import {PlatformBadges} from '../src/collections/PlatformBadges';
+import type {Ticket} from './types';
 import {detailLabel, filterReleaseEntries, groupReleaseEntries, kindLabel, normalizeReleaseCalendarReply, releaseDateLabel, visibleWishlistIds, wishlistIds, type KindFilter, type ReleaseCalendarEntry, type ReleaseCalendarReply} from './releaseCalendarModel';
+import {Scrubber} from './Scrubber';
 import './releaseCalendar.css';
 
 type ScreenState = 'loading' | 'ready' | 'empty' | 'error';
@@ -15,11 +17,17 @@ function HomeCoverImage({cover, alt, privacy}: {cover: ReleaseCalendarEntry['cov
   const [url, setUrl] = useState('');
   useEffect(() => {
     if (privacy || !cover) { setUrl(''); return; }
-    if (cover.url && /^https:\/\//.test(cover.url)) { setUrl(cover.url); return; }
-    if (!cover.sha256) { setUrl(''); return; }
+    const sha256 = cover.sha256;
+    if (!sha256) {
+      if (cover.url && /^https:\/\//.test(cover.url)) { setUrl(cover.url); return; }
+      setUrl(''); return;
+    }
     const controller = new AbortController();
     setUrl('');
-    void api<{url?: string}>(`/v1/home/covers/${encodeURIComponent(cover.sha256)}/media-ticket`, controller.signal, undefined, 'POST').then(reply => {
+    const request = window.LakomicsNative
+      ? native<Ticket>('homeCover', {sha256}, controller.signal)
+      : api<Ticket>(`/v1/home/covers/${encodeURIComponent(sha256)}/media-ticket`, controller.signal, undefined, 'POST');
+    void request.then(reply => {
       if (!controller.signal.aborted && reply?.url && /^https:\/\//.test(reply.url)) setUrl(reply.url);
     }, () => {});
     return () => controller.abort();
@@ -125,6 +133,9 @@ export function ReleaseCalendar({onClose, backRef}: ReleaseCalendarProps) {
   const authoritativeIds = useMemo(() => reply ? wishlistIds(reply) : new Set<string>(), [reply]);
   const localIntents = readUpcomingWishlistIntents();
   const visibleIds = useMemo(() => visibleWishlistIds(authoritativeIds, localIntents), [authoritativeIds, tick]);
+  const scroller = useRef<HTMLElement>(null);
+  const calendarEntries = useMemo(() => reply ? filterReleaseEntries(wishlistOnly ? reply.wishlist : reply.entries, kind, wishlistOnly, visibleIds) : [], [reply, kind, wishlistOnly, visibleIds]);
+  const scrubberSort=useMemo(()=>({kind:'date' as const,values:calendarEntries.map(entry=>entry.date)}),[calendarEntries]);
   const count = visibleIds.size;
 
   function toggle(entry: ReleaseCalendarEntry) {
@@ -145,10 +156,11 @@ export function ReleaseCalendar({onClose, backRef}: ReleaseCalendarProps) {
       <button type="button" className="release-calendar-interest" aria-pressed={wishlistOnly} onClick={() => setWishlistOnly(value => !value)}><BookmarkIcon aria-hidden="true" />관심 목록 <span className="numeric">{count.toLocaleString('ko-KR')}</span></button>
     </div>
     {error && <div className="release-calendar-error" role="alert"><span>{error}</span><button type="button" onClick={() => setRetry(value => value + 1)}>다시 시도</button></div>}
-    <main className="release-calendar-scroll" aria-label="발매 캘린더 목록">
+    <main ref={scroller} className="release-calendar-scroll" aria-label="발매 캘린더 목록">
       {state === 'loading' && <div className="release-calendar-loading" role="status">발매 캘린더를 불러오는 중입니다</div>}
       {state === 'empty' && <EmptyCalendar wishlistOnly={false} />}
       {state === 'ready' && reply && <CalendarBody reply={reply} kind={kind} wishlistOnly={wishlistOnly} visibleIds={visibleIds} privacy={privateMode} referenceYear={referenceYear} onToggle={toggle} />}
+      <Scrubber scrollRef={scroller} total={calendarEntries.length} sort={scrubberSort} hidden={state!=='ready'} />
     </main>
   </div>;
 }

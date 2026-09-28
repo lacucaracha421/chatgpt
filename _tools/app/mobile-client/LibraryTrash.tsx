@@ -4,6 +4,7 @@ import {ArrowLeftIcon, ArrowUturnLeftIcon, CheckCircleIcon, PhotoIcon, TrashIcon
 import {Button, IconButton} from './ui';
 import {errorText} from './transport';
 import {mediaTicket} from './media';
+import {Scrubber} from './Scrubber';
 import type {Asset} from './types';
 import {
   ASSET_LIFECYCLE_EVENT, TILE_LABEL, conflictNotice, dismissLifecycle, formatBytes, readLifecycle, readTrash, setLifecycle,
@@ -38,6 +39,7 @@ export function LibraryTrash({onClose, backRef, known, onRestored}: {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [working, setWorking] = useState(false);
+  const scroller = useRef<HTMLDivElement>(null);
   const alive = useRef(true);
   const activeIds = useRef('');
 
@@ -88,6 +90,7 @@ export function LibraryTrash({onClose, backRef, known, onRestored}: {
   };
 
   const tiles = useMemo(() => trashTiles(items, lifecycle, known), [items, lifecycle, known]);
+  const scrubberSort=useMemo(()=>({kind:'date' as const,values:tiles.map(tile=>tile.trashedAt)}),[tiles]);
 
   // Thumbnails: trashed Assets through the trash-scoped tickets; a pending trash is still an
   // ordinary Asset on the server and uses the ordinary (cached) thumbnail.
@@ -152,7 +155,7 @@ export function LibraryTrash({onClose, backRef, known, onRestored}: {
     {phase === 'loading' && <div className="loading-line" role="status" aria-label="휴지통 불러오는 중"/>}
     {phase === 'error' && <div className="empty-state trash-empty"><h2>휴지통을 불러오지 못했습니다</h2><p>{error}</p><Button onClick={() => { setPhase('loading'); void reload(); }}>다시 시도</Button></div>}
     {phase === 'ready' && !tiles.length && <div className="empty-state trash-empty"><TrashIcon aria-hidden="true"/><h2>휴지통이 비어 있습니다</h2>{!active && <p>이 서버는 아직 휴지통 동기화를 지원하지 않습니다.</p>}</div>}
-    {phase === 'ready' && tiles.length > 0 && <div className="trash-scroll">
+    {phase === 'ready' && tiles.length > 0 && <div ref={scroller} className="trash-scroll">
       <div className="trash-grid">
         {tiles.map(tile => {
           const label = TILE_LABEL[tile.status];
@@ -168,6 +171,7 @@ export function LibraryTrash({onClose, backRef, known, onRestored}: {
         })}
       </div>
       {hasMore && <div className="trash-more"><Button variant="ghost" disabled={working} onClick={() => { void more(); }}>더 보기</Button></div>}
+      <Scrubber scrollRef={scroller} total={tiles.length} sort={scrubberSort} hidden={phase!=='ready'} onEndReached={hasMore?more:undefined}/>
     </div>}
     {phase === 'ready' && tiles.length > 0 && <footer className="trash-actions">
       <span className="numeric muted">{chosen.length ? `${chosen.length}개 선택` : '복원할 항목을 선택하세요'}</span>

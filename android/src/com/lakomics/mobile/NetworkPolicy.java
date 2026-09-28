@@ -64,6 +64,9 @@ final class NetworkPolicy {
   // the single-segment Collection read above does not match them either.
   get=get || p.equals("/v1/collections/releases");
   post=post || p.equals("/v1/collections/releases/acknowledge");
+  // AV product-code lookup requests are the tablet's only AV write. The PC inbox read remains
+  // publisher-only and is intentionally absent from the GET allowlist.
+  post=post || p.equals("/v1/av-lookups");
   // Collection bindings (MangaDex / Kakao 연결): the capability status, the two provider
   // searches, and filing/reading bind requests, and nothing else. The request log GET and the
   // per-request result POST are publisher-only (the PC applies the choice) and stay unreachable:

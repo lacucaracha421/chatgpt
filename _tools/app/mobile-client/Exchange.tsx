@@ -1,4 +1,4 @@
-import {Fragment, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject} from 'react';
+import {Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {
   ArrowLeftIcon, ArrowsUpDownIcon, CheckIcon, ChevronDownIcon, ComputerDesktopIcon, DeviceTabletIcon, EllipsisHorizontalIcon,
   ExclamationTriangleIcon, FolderIcon, PaperClipIcon,
@@ -7,6 +7,7 @@ import {Button, IconButton} from './ui';
 import {errorText, native} from './transport';
 import {formatBytes} from './libraryTrash';
 import {useExchangeThumbnail} from './useExchange';
+import {Scrubber} from './Scrubber';
 import {
   ACTIVE_STATES, batchPart, defaultTarget, errorCode, EXCHANGE_NOTICE_EVENT, rowView, screenMessage, timelineEntries, TOKEN_CODES, withDevice,
   type ExchangeDevice, type ExchangeRow, type ExchangeSnapshot,
@@ -85,7 +86,8 @@ export function Exchange({snapshot, onSnapshot, backRef, onClose}: {
     }).finally(() => setBusy(false));
   };
 
-  const blocks = usable && target ? buildTimeline(timelineEntries(snapshot, target, receivedOnly)) : [];
+  const blocks = useMemo(() => usable && target ? buildTimeline(timelineEntries(snapshot, target, receivedOnly)) : [], [usable, target, receivedOnly, snapshot]);
+  const scrubberSort=useMemo(()=>({kind:'date' as const,values:blocks.map(block=>block.at)}),[blocks]);
   const scroller = useRef<HTMLDivElement>(null);
   const shown = useRef({count: 0, device: ''});
   // Open at the newest end, and follow new blocks while the reader is already there.
@@ -149,6 +151,7 @@ export function Exchange({snapshot, onSnapshot, backRef, onClose}: {
           : <Empty title={`${withParticle(peerName, '과', '와')} 주고받은 파일이 없습니다`}
               text={`여기서 보낸 파일과 받은 파일이 시간순으로 쌓입니다. ${receiveNote} 다른 앱의 공유 메뉴에서 Lakomics를 골라도 보낼 수 있습니다.`}
               limits={['파일당 최대 2GB', '폴더는 zip 하나로', '안 받으면 24시간 뒤 삭제']}/>)}
+      <Scrubber scrollRef={scroller} total={blocks.length} sort={scrubberSort} hidden={!usable||!target||choosing}/>
     </div>
     {usable && target && <footer className="exchange-composer">
       <p className="exchange-composer-to"><b>{peerName}(으)로 보내기</b>파일당 최대 2GB · 받지 않으면 24시간 뒤 삭제</p>

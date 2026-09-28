@@ -9,7 +9,7 @@ import {localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCou
 import {FilmDetails} from './FilmDetails';
 import {CollectionBindings} from './CollectionBindings';
 import type {BindProvider} from './collectionBindings';
-import {createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent} from 'react';
+import {createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent} from 'react';
 import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,useSegmentMotion,useTabIndicator,type CardArrival} from './motion';
 import {ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
@@ -23,13 +23,15 @@ import {PaperbackEngine, type BookTexture} from '../src/collections/physical/Pap
 import {loadCoverImage} from '../src/collections/physical/loadCoverImage';
 import {drawGameCase, GAME_CASE_REST} from '../src/collections/drawGameCase';
 import {usePrivacyMode} from './privacyMode';
+import {Scrubber} from './Scrubber';
+import type {ScrubberSort} from './scrubberModel';
 
 import {api, errorText, native} from './transport';
 import {mediaTicket} from './media';
 import {collectionCardCredit, collectionCardDate, originalTitle, collectionCover, collectionPath, defaultCollectionFilters, editions, editionVolumes, ratingLabel, SORT_LABELS, sortDirectionLabels, volumeLabel, volumeReleaseLabel} from './collectionModel';
 import type {CollectionDetail, CollectionKind, CollectionPage, CollectionSummary, CollectionFilters as Filters} from './collectionModel';
 import type {Ticket} from './types';
-import {AvCollectionDetail, AvCollectionList, type AvListView, AV_LIST_VIEW_KEY} from './AvCollections';
+import {AvCollectionDetail, AvCollectionList, AvLookupSender, type AvListView, AV_LIST_VIEW_KEY} from './AvCollections';
 import './library.css';
 import './Collections.css';
 
@@ -633,11 +635,20 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   // remembered list, a refresh) shows at once.
   const mainArrivals=useAppendArrivals(main.page,main.items.map(work=>work.id));
   const showcaseArrivals=useAppendArrivals(showcase.page,showcase.items.map(work=>work.id));
+  const mainScrubberSort=useMemo<ScrubberSort>(()=>tab==='av'&&avView==='performers'
+    ?{kind:'fallback'}
+    :filters.sort==='name'
+    ?{kind:'name',values:main.items.map(work=>work.name)}
+    :filters.sort==='recent'||filters.sort==='media_date'
+      ?{kind:'date',values:main.items.map(work=>work.releaseDate??work.av?.releaseDate??work.createdAt??work.year)}
+      :{kind:'fallback'},[avView,filters.sort,main.items,tab]);
+  const showcaseScrubberSort=useMemo<ScrubberSort>(()=>({kind:'fallback'}),[]);
   return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
     {header}
     <div ref={listRef} className="collection-list" style={{display:selected||showcaseAll||inboxOpen?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
       {listPull}
       {tab==='av'?<>
+      <AvLookupSender/>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
       {unpublished(main)?unpublishedNotice:main.busy&&!main.committed?<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<div className="empty-state"><RectangleStackIcon/><h2>PC 앱이 AV 작품을 아직 보내지 않았습니다</h2><p>PC 앱에서 AV 컬렉션을 게시하면 여기에 표시됩니다.</p></div>:<AvCollectionList items={main.items} showcase={showcase.items} showcaseOpen={showcaseOpen} onShowcase={()=>setShowcaseOpen(open=>!open)} revision={revision} active={live&&!selected} view={avView} onView={chooseAvView} onOpen={openWork} total={main.page?.totalCount} filters={filters} sortLabel={sortLabel} onSort={()=>setSheet('sort')} onRating={()=>setSheet('rating')} onReset={()=>changeFilters({...filters,rating:'all'})}/>}
       {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
@@ -658,8 +669,9 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
         {main.committed&&!main.items.length&&<div className="empty-state"><RectangleStackIcon/><h2>{filtered?'조건에 맞는 작품이 없습니다':'아직 작품이 없습니다'}</h2>{filtered&&<p>검색어나 별점 조건을 바꿔 보세요.</p>}</div>}
         <div className={`collection-grid collection-grid-${shownType}`}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={live&&!selected&&!inboxOpen} caption={captionOf(work)} onOpen={openWork} arriving={mainArrivals.arriving(work.id)} onArrived={mainArrivals.arrived}/>)}</div>
         {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
-        {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
+      {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
       </>}</>}
+      <Scrubber scrollRef={listRef} total={main.items.length} sort={mainScrubberSort} hidden={!active||paused||!!selected||showcaseAll||inboxOpen||sheet!==null} onEndReached={main.loadMore}/>
     </div>
     {/* Always mounted so its pull-to-refresh gesture is attached; hidden until opened. */}
     <div ref={showcaseRef} className="collection-list" style={{display:showcaseAll&&!selected?undefined:'none'}} onScroll={event=>{if(nearEnd(event.currentTarget))showcase.loadMore();}}>{showcaseAll&&<>
@@ -668,6 +680,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       {showcase.error&&<div className="error-message" role="alert">{showcase.error}<Button variant="ghost" onClick={showcase.reload}>처음부터 새로고침</Button></div>}
       {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcase.items.map(work=><WorkCard key={work.id} work={work} revision={showcase.page?.revision??''} active={live} meta={false} caption={captionOf(work)} onOpen={openWork} arriving={showcaseArrivals.arriving(work.id)} onArrived={showcaseArrivals.arrived}/>)}</div>}
       {showcase.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
+      <Scrubber scrollRef={showcaseRef} total={showcase.items.length} sort={showcaseScrubberSort} hidden={!active||paused||!!selected||!showcaseAll} onEndReached={showcase.loadMore}/>
     </>}</div>
     {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={openWork} ownedOf={ownedOf} watching={watching}
       cover={(work,workRevision,name)=>work?<Artwork item={work} id={collectionCover(work)} revision={workRevision} active={active&&!paused&&!selected} label={name}/>:<span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>}/>}

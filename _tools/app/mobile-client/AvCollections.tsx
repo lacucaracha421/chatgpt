@@ -6,6 +6,9 @@ import {BottomSheet} from './BottomSheet';
 import {artworkTicket} from './Collections';
 import {collectionCover, type AvPerson, type CollectionDetail, type CollectionFilters, type CollectionSummary} from './collectionModel';
 import type {Ticket} from './types';
+import {api} from './transport';
+import {normalizeProductCode, readAvLookupRecent, writeAvLookupRecent, type AvLookupRecent} from './avLookup';
+import {Button} from './ui';
 import './avCollections.css';
 
 export type AvListView = 'works' | 'performers';
@@ -120,6 +123,85 @@ function AvShelfTile({item,revision,active,onOpen,order}:{item:AvItem;revision:s
 
 function PerformerShelf({person,works,current,items,revision,active,onOpen}:{person:AvPerson;works:AvItem[];current:AvItem;items:AvItem[];revision:string;active:boolean;onOpen(id:string):void}) {
   return <section className="av-performer-shelf" aria-label={`${person.name} 작품`}><header><div className="av-performer-heading"><AvPortrait person={person} current={current} items={items} revision={revision}/><span><b>{person.name}</b>{person.nameJa&&<small lang="ja">{person.nameJa}</small>}</span></div><span className="muted numeric">소장 {works.length}편 <span aria-hidden="true">›</span></span></header><div className="av-shelf-row">{works.map(work=><AvShelfTile key={work.id} item={work} revision={revision} active={active} onOpen={onOpen}/>)}</div></section>;
+}
+
+type LookupFeedback = {kind: 'sent'; code: string} | {kind: 'offline' | 'rate' | 'invalid'};
+
+function lookupError(reason: unknown): Exclude<LookupFeedback['kind'], 'sent'> {
+  const status = reason && typeof reason === 'object' && 'status' in reason ? (reason as {status?: unknown}).status : undefined;
+  if (status === 429) return 'rate';
+  if (status === 422) return 'invalid';
+  return 'offline';
+}
+
+function recentTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '보낸 시간 알 수 없음';
+  return date.toLocaleString('ko-KR', {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'});
+}
+
+export function AvLookupSender() {
+  const [value, setValue] = useState('');
+  const [recent, setRecent] = useState<AvLookupRecent[]>(() => readAvLookupRecent());
+  const [feedback, setFeedback] = useState<LookupFeedback | null>(null);
+  const [sending, setSending] = useState(false);
+  const attempt = useRef<{requestId: string; code: string} | null>(null);
+  const normalized = normalizeProductCode(value);
+
+  const send = async () => {
+    if (!normalized || sending) {
+      if (!normalized) setFeedback({kind: 'invalid'});
+      return;
+    }
+    const code = normalized;
+    const current = attempt.current?.code === code ? attempt.current : null;
+    const requestId = current?.requestId ?? crypto.randomUUID();
+    attempt.current = {requestId, code};
+    setSending(true);
+    setFeedback(null);
+    try {
+      await api('/v1/av-lookups', undefined, {requestId, productCode: code, sourceUrl: null}, 'POST');
+      const entry = {code, sentAt: new Date().toISOString()};
+      const next = [entry, ...recent.filter(item => item.code !== code)].slice(0, 5);
+      setRecent(next);
+      writeAvLookupRecent(next);
+      attempt.current = null;
+      setFeedback({kind: 'sent', code});
+    } catch (reason) {
+      setFeedback({kind: lookupError(reason)});
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const message = feedback?.kind === 'sent'
+    ? `${feedback.code}을 PC로 보냈어요. PC에서 작품을 고르면 여기에 나타나요.`
+    : feedback?.kind === 'rate'
+      ? '요청이 많아요. 잠시 후 다시 보내 주세요'
+      : feedback?.kind === 'invalid'
+        ? '품번이 올바르지 않아요. 예: SSIS-001'
+        : feedback?.kind === 'offline'
+          ? '오프라인이라 품번을 보내지 못했어요. 연결을 확인하고 다시 시도해 주세요.'
+          : '';
+
+  return <section className="av-lookup-sender" aria-label="품번 보내기">
+    <div className="av-lookup-heading"><div><h2>품번 보내기</h2><p>PC에서 작품을 고를 수 있도록 품번을 보냅니다.</p></div><span className="numeric muted">최근 {recent.length}/5</span></div>
+    <div className="av-lookup-form">
+      <label htmlFor="av-product-code">품번</label>
+      <div className="av-lookup-controls">
+        <input id="av-product-code" value={value} placeholder="예: SSIS-001" autoCapitalize="characters" onChange={event => {
+          const next = event.target.value.toUpperCase();
+          setValue(next);
+          if (attempt.current?.code !== normalizeProductCode(next)) attempt.current = null;
+          setFeedback(null);
+        }}/>
+        <Button type="button" variant="primary" disabled={!normalized || sending} onClick={() => void send()}>{sending ? '보내는 중…' : feedback?.kind === 'offline' || feedback?.kind === 'rate' ? '다시 보내기' : '보내기'}</Button>
+      </div>
+      {normalized && <p className="av-lookup-preview" aria-live="polite">정규화된 품번: <strong className="numeric">{normalized}</strong></p>}
+    </div>
+    {message && <p className={`av-lookup-feedback is-${feedback?.kind}`} role="status" aria-live="polite">{message}</p>}
+    {recent.length > 0 && <ul className="av-lookup-recent" aria-label="최근 보낸 품번">{recent.map(entry => <li key={`${entry.code}-${entry.sentAt}`}><strong className="numeric">{entry.code}</strong><time dateTime={entry.sentAt}>{recentTime(entry.sentAt)}</time></li>)}</ul>}
+  </section>;
 }
 
 export function AvCollectionList({items,showcase,showcaseOpen,onShowcase,revision,active,view,onView,onOpen,total,filters,sortLabel,onSort,onRating,onReset}:{items:CollectionSummary[];showcase:CollectionSummary[];showcaseOpen:boolean;onShowcase():void;revision:string;active:boolean;view:AvListView;onView(view:AvListView):void;onOpen(id:string):void;total?:number;filters:CollectionFilters;sortLabel:string;onSort():void;onRating():void;onReset():void}) {

@@ -4,6 +4,7 @@ import {onVisible} from './useVisibleInterval';
  */
 import {useEffect, useState} from 'react';
 import {api} from './transport';
+import {useCachedHomeSource} from './homeCache';
 import {nextSimilarityDue, queuedSimilarity, readSimilarityIntents, SIMILARITY_REVIEW_EVENT} from './similarityReviewOutbox';
 import {flushSimilarityReview, similarityPath, type SimilarityFeed} from './similarityReviewDelivery';
 
@@ -51,19 +52,8 @@ export function useSimilarityReviewBackgroundFlush(enabled: boolean) {
  * Pairs left to review, or `null` while unknown or when the feature is off. The server count
  * already hides confirmed decisions; queued local decisions are subtracted here.
  */
-export function useSimilarityReviewCount(enabled: boolean, refreshKey: unknown): number | null {
-  const [total, setTotal] = useState<{value: number; queued: number} | null>(null);
+export function useSimilarityReviewCount(enabled: boolean, refreshKey: unknown, scope = '', forceKey: unknown = refreshKey): number | null {
   const [changed, setChanged] = useState(0);
-  useEffect(() => {
-    if (!enabled) return;
-    const controller = new AbortController();
-    void api<SimilarityFeed>(similarityPath({limit: 1}), controller.signal).then(feed => {
-      if (controller.signal.aborted) return;
-      setTotal(feed?.ready === true && Number.isSafeInteger(feed.counts?.open)
-        ? {value: feed.counts.open, queued: queuedSimilarity(readSimilarityIntents()).reviews.size} : null);
-    }, () => { if (!controller.signal.aborted) setTotal(null); });
-    return () => controller.abort();
-  }, [enabled, refreshKey, changed]);
   useEffect(() => {
     if (!enabled) return;
     let timer = 0;
@@ -71,6 +61,14 @@ export function useSimilarityReviewCount(enabled: boolean, refreshKey: unknown):
     window.addEventListener(SIMILARITY_REVIEW_EVENT, read);
     return () => { clearTimeout(timer); window.removeEventListener(SIMILARITY_REVIEW_EVENT, read); };
   }, [enabled]);
+  const total = useCachedHomeSource<{value: number; queued: number} | null>({
+    enabled, scope, source: 'similarity', initial: null, forceKey: `${String(forceKey)}:${changed}`, forceOnMount: !scope,
+    read: async signal => {
+      const feed = await api<SimilarityFeed>(similarityPath({limit: 1}), signal);
+      return feed?.ready === true && Number.isSafeInteger(feed.counts?.open)
+        ? {value: feed.counts.open, queued: queuedSimilarity(readSimilarityIntents()).reviews.size} : null;
+    },
+  });
   // A pause (a dialog, the viewer or another tab over the Library) keeps the last known count
   // instead of removing the row, which would move everything below it; it is re-read on return.
   if (!total) return null;

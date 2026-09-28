@@ -13,11 +13,11 @@ import {useLibraryTrash} from './useLibraryTrash';
 import {useSimilarityReviewBackgroundFlush} from './useSimilarityReview';
 import {useDuplicateDecisionFlush} from './CatalogDuplicates';
 import type {ViewerCharacterContext} from './Viewer';
-import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {BookOpenIcon, PhotoIcon, PencilSquareIcon, HomeIcon, RectangleStackIcon, AdjustmentsHorizontalIcon, ArrowsUpDownIcon, LockClosedIcon, ChevronRightIcon, PlayIcon} from '@heroicons/react/24/outline';
 import {Exchange} from './Exchange';
 import {useExchange} from './useExchange';
-import {sendingSummary} from './homeDashboard';
+import {currentHomeTodoBadges, PENDING_LIMIT, sendingSummary, subscribeHomeTodoBadges, type HomeTodoBadgeSnapshot} from './homeDashboard';
 
 import {Button, IconButton, Mark} from './ui';
 import {api, errorText, native} from './transport';
@@ -53,11 +53,37 @@ import {faultCandidates} from '../src/games/fault/host';
 import {useLevelMotion,useScrollMemory,useTabMotion} from './motion';
 import {setOutboxConnection} from './outboxConnection';
 import {usePrivacyMode} from './privacyMode';
+import {createPortal} from 'react-dom';
 /** The durable outboxes follow the connection before any screen re-renders against it. */
 const adoptConnection=(next:Status)=>{setOutboxConnection(next.configured?next.endpoint:null);return next;};
 
 const HOME: View = {tab:'home', title:'홈'};
 const LIBRARY = LIBRARY_ROOT;
+const HOME_PAGE_KEY = `${viewKey(HOME)}:null`;
+function readLocalStatus(): Status {
+  try {
+    const raw = window.LakomicsNative?.localStatus?.();
+    if (!raw) return {configured:false, endpoint:''};
+    const value = JSON.parse(raw) as {configured?: unknown; endpoint?: unknown};
+    if (typeof value.configured !== 'boolean' || typeof value.endpoint !== 'string') return {configured:false, endpoint:''};
+    return value.configured && value.endpoint ? {configured:true, endpoint:value.endpoint} : {configured:false, endpoint:''};
+  } catch { return {configured:false, endpoint:''}; }
+}
+function homeTodoBadgeValue(value: number) { return value >= PENDING_LIMIT ? `${PENDING_LIMIT}+` : String(value); }
+export function HomeTodoBadges({snapshot, pending, onPending, onSimilar, onDuplicates}: {snapshot: HomeTodoBadgeSnapshot; pending: number | null; onPending(): void; onSimilar(): void; onDuplicates(): void}) {
+  const items = [
+    {label: '처리 대기', value: pending, onOpen: onPending},
+    {label: '유사 이미지', value: snapshot.similar, onOpen: onSimilar},
+    {label: '중복', value: snapshot.duplicates, onOpen: onDuplicates},
+  ].filter(item => item.value !== null && item.value > 0);
+  if (!items.length) return null;
+  return <div className="home-header-todo-badges" aria-label="홈 확인 항목">{items.map(item => <button type="button" className="home-header-todo-badge" key={item.label} onClick={item.onOpen} aria-label={`${item.label} ${homeTodoBadgeValue(item.value!)}`}><span>{item.label}</span><span className="numeric">{homeTodoBadgeValue(item.value!)}</span></button>)}</div>;
+}
+function HomeTodoBadgePortal(props: {snapshot: HomeTodoBadgeSnapshot; pending: number | null; onPending(): void; onSimilar(): void; onDuplicates(): void}) {
+  const [target, setTarget] = useState<HTMLElement | null>(null);
+  useEffect(() => { setTarget(document.getElementById('context-tools')); }, []);
+  return target ? createPortal(<HomeTodoBadges {...props} />, target) : null;
+}
 async function readPage(view:View,cursor:string|null,filters:AssetFiltersValue,signal:AbortSignal):Promise<Page> {
   const path=pagePath(view,cursor,filters);
   const reply=await api<AlbumAssetPage&Page>(path,signal);
@@ -91,7 +117,10 @@ export function App() {
   const artistsBack=useRef<(()=>boolean)|null>(null);
   const vaultBack=useRef<(()=>boolean)|null>(null);
   const viewerBack = useRef<(()=>boolean)|null>(null);
-  const [status, setStatus] = useState<Status>({configured:false, endpoint:''});
+  const [status, setStatus] = useState<Status>(() => adoptConnection(readLocalStatus()));
+  // A saved native connection is enough to enter Home. The asynchronous status read below
+  // remains authoritative and can still move the app back to the connection screen.
+  const startedWithLocalConnection = useRef(status.configured);
   const [privacyMode] = usePrivacyMode();
   // Queued personal Collection edits are sent on start and on return, whatever screen is open.
   useCollectionEditBackgroundFlush(status.configured);
@@ -143,6 +172,7 @@ export function App() {
   const trash = useLibraryTrash(status.configured, status.endpoint, setViewer);
   const exchange = useExchange(status.configured, status.endpoint, exchangeOpen);
   const visibleItems = useMemo(() => trash.hidden.size ? page.items.filter(item => !trash.hidden.has(item.id)) : page.items, [page.items, trash.hidden]);
+  const homeTodoSnapshot = useSyncExternalStore(subscribeHomeTodoBadges, currentHomeTodoBadges, currentHomeTodoBadges);
   const [density, setDensity] = useState(() => {try {return validDensity(JSON.parse(localStorage.getItem('lakomics.mobile.density') ?? '1'));} catch {return DEFAULT_DENSITY;}});
   const entries=useMemo(()=>mergeLibraryEntries(classifications,characterIndex),[classifications,characterIndex]);
   const entriesRef=useRef(entries);entriesRef.current=entries;
@@ -150,6 +180,8 @@ export function App() {
   const albumTreeRef=useRef(albumTree);albumTreeRef.current=albumTree;
   const appRef=useRef<HTMLDivElement>(null),mainRef=useRef<HTMLElement>(null),bodyRef=useRef<HTMLDivElement>(null);
   const scroll = useRef(0), gate = useRef(new RequestGate()), secondaryGate = useRef(new RequestGate());
+  const secondaryAt = useRef(0), secondaryPending = useRef(false), capturesRef = useRef<Asset[] | null>(captures);
+  capturesRef.current = captures;
   const latest = useRef({page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, calendarOpen}); latest.current = {calendarOpen, page, viewer, settings, status, area, viewSettings, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen};
   const lastIntent = useRef<{view:View; cursor:string|null; previous:(string|null)[]; filters:AssetFiltersValue}>({view:LIBRARY,cursor:null,previous:[],filters:{...EMPTY_FILTERS}});
   const lastLibrary = useRef<SavedPosition | undefined>(undefined);
@@ -161,6 +193,7 @@ export function App() {
   const pageGenerations = useRef<boolean|null>(null);
   useEffect(() => {pageGenerations.current = null;}, [status.endpoint]);
   const viewCache = useRef(new Map<string, Committed>());
+  const homePageAt = useRef(0);
   const moreGate = useRef(new RequestGate());
   const [loadingMore, setLoadingMore] = useState(false), [moreError, setMoreError] = useState('');
   const morePending = useRef(false);
@@ -182,7 +215,10 @@ export function App() {
 
   const load = useCallback(async (view: View, cursor: string | null = null, previous: (string | null)[] = [], restore = 0, fresh = false, nextFilters: AssetFiltersValue = EMPTY_FILTERS) => {
     const visible = latest.current.page;
-    if(visible.version) viewCache.current.set(`${viewKey(visible.view,visible.filters)}:${visible.cursor}`,{...visible,restoreScroll:scroll.current});
+    if(visible.version) {
+      viewCache.current.set(`${viewKey(visible.view,visible.filters)}:${visible.cursor}`,{...visible,restoreScroll:scroll.current});
+      if (visible.view.tab === 'home') homePageAt.current = Date.now();
+    }
     if (visible.view.tab === 'library' && view.tab === 'home') lastLibrary.current = {view:visible.view,cursor:visible.cursor,previous:visible.previous,scroll:scroll.current,filters:visible.filters};
     cancelMore();
     const request = gate.current.begin(); lastIntent.current = {view,cursor,previous,filters:nextFilters}; setBusy(true); setError(''); setFilterNotice('');
@@ -369,14 +405,20 @@ export function App() {
     const state = latest.current.page;
     void load(state.view, state.cursor, state.previous, scroll.current, true, state.filters);
   }, [load, cancelMore]);
-  const refreshSecondary = useCallback(async () => {
+  const refreshSecondary = useCallback(async (force = false) => {
+    if (!force && capturesRef.current !== null && Date.now() - secondaryAt.current < 60_000) return;
+    if (secondaryPending.current) {
+      if (!force) return;
+      secondaryGate.current.cancel(); secondaryPending.current = false;
+    }
+    secondaryPending.current = true;
     const request = secondaryGate.current.begin(); setSecondaryError('');
     try {
       const result = await api<{captures: Asset[]}>('/v1/captures/pending?limit=40', request.signal);
-      if (secondaryGate.current.current(request.id)) setCaptures(result.captures.map(item => ({...item,pending:true})).reverse());
+      if (secondaryGate.current.current(request.id)) { secondaryAt.current = Date.now(); setCaptures(result.captures.map(item => ({...item,pending:true})).reverse()); }
     } catch {
       if (secondaryGate.current.current(request.id) && !request.signal.aborted) setSecondaryError('처리 대기 목록을 갱신하지 못했습니다.');
-    }
+    } finally { secondaryPending.current = false; }
   }, []);
   // Warm every thumbnail into the native cache while the app is open on an unmetered link.
   useEffect(() => status.configured ? startThumbnailWarm(status.endpoint) : undefined, [status.configured, status.endpoint]);
@@ -396,7 +438,7 @@ export function App() {
     void api<{items:Classification[]}>('/v1/library/classifications', controller.signal).then(result => setClassifications(result.items)).catch(reason => {if (!controller.signal.aborted) setIndexError(errorText(reason));});
     // A root card can be tapped before this passive startup effect runs.
     // Do not overwrite that newer navigation with the initial root read.
-    if(lastIntent.current.view.root) void load(LIBRARY);
+    if(lastIntent.current.view.root && !startedWithLocalConnection.current) void load(LIBRARY);
     return () => {controller.abort(); gate.current.cancel(); secondaryGate.current.cancel(); moreGate.current.cancel(); prefetched.current?.controller.abort();};
   }, [status, load]);
   useEffect(() => { if (page.version && page.view.tab === 'home' && !page.cursor) void refreshSecondary(); return () => secondaryGate.current.cancel(); }, [page.version, page.view.tab, page.cursor, refreshSecondary]);
@@ -404,9 +446,11 @@ export function App() {
     const state = latest.current;
     if (!state.status.configured || state.viewer || state.settings) return;
     viewCache.current.clear();
+    secondaryAt.current = 0;
+    void refreshSecondary(true);
     setIndexRevision(value=>value+1);
     void load(state.page.view, state.page.cursor, state.page.previous, 0, true, state.page.filters);
-  }, [load]);
+  }, [load, refreshSecondary]);
   // Leaves the character boundary for the actual context it was opened from, falling back to
   // the Library root when nothing was committed beforehand. Deliberately not routed through the global
   // back chain, which would close an unrelated open surface first.
@@ -451,6 +495,13 @@ export function App() {
   const exitCharacters=useCallback(()=>{if(!libraryHome())restoreBeforeCharacter();},[libraryHome,restoreBeforeCharacter]);
   useEffect(() => {
     const visible = () => {if (document.visibilityState === 'visible' && latest.current.status.configured && latest.current.page.view.tab === 'home') void refreshSecondary();};
+    const listChanged = () => {
+      viewCache.current.delete(HOME_PAGE_KEY); homePageAt.current = 0; secondaryAt.current = 0;
+      if (latest.current.status.configured && latest.current.page.view.tab === 'home') {
+        void refreshSecondary(true);
+        void load(HOME, null, [], 0, true, EMPTY_FILTERS);
+      }
+    };
     const back = () => {
       const state = latest.current;
       // The FAULT game covers everything, so it closes before any surface beneath it.
@@ -480,8 +531,8 @@ export function App() {
       else if (!state.page.view.root) goParent();
       else void native('finish').catch(() => {});
     };
-    const removeVisible=onVisible(visible); window.addEventListener('lakomics-back', back);
-    return () => {removeVisible(); window.removeEventListener('lakomics-back', back);};
+    const removeVisible=onVisible(visible); window.addEventListener('lakomics-list-generation', listChanged); window.addEventListener('lakomics-back', back);
+    return () => {removeVisible(); window.removeEventListener('lakomics-list-generation', listChanged); window.removeEventListener('lakomics-back', back);};
   }, [refreshSecondary, load, restoreBeforeCharacter,goParent,returnHome,libraryHome]);
   useEffect(() => {
     const folderId=page.view.classification??(page.view.characterNode?entries.find(entry=>entry.characterNode===page.view.characterNode)?.id:undefined);
@@ -556,7 +607,14 @@ export function App() {
     setHomeOrigin(null); homeRestore.current = null;
     setArea('assets');
     if (latest.current.page.view.tab === 'home') retainAssets();
-    else select(HOME);
+    else {
+      const cached = viewCache.current.get(HOME_PAGE_KEY);
+      if (cached && Date.now() - homePageAt.current < 60_000) {
+        gate.current.cancel(); cancelMore(); setBusy(false); setError(''); setFilterNotice(''); setFilters(cached.filters);
+        lastIntent.current = {view:cached.view,cursor:cached.cursor,previous:cached.previous,filters:cached.filters};
+        setPage({...cached, restoreScroll:cached.restoreScroll});
+      } else select(HOME);
+    }
   };
   // Records a Library entry opened from Home, with Home's scroll offset (Home unmounts there).
   const fromHome = (entry:View) => {
@@ -571,7 +629,7 @@ export function App() {
   };
   const updateStatus = (next: Status) => {
     gate.current.cancel(); secondaryGate.current.cancel(); cancelMore(); viewCache.current.clear(); observedGeneration.current=null; clearMediaCache();
-    setViewer(null); setSimilarity(false); setExchangeOpen(false); setArtistsOpen(false); setViewSettings(false); setFiltersOpen(null); setFilterVersion(null); setFilterNotice(''); setFilters({...EMPTY_FILTERS}); setCharacterIndex(undefined); setClassifications([]); setLibrarySegment('folders'); setCaptures(null); setCollectionRequest(null); setNoteRequest(null); setDuplicateRequest(0); resetReleaseStore();
+    setViewer(null); setSimilarity(false); setExchangeOpen(false); setArtistsOpen(false); setViewSettings(false); setFiltersOpen(null); setFilterVersion(null); setFilterNotice(''); setFilters({...EMPTY_FILTERS}); setCharacterIndex(undefined); setClassifications([]); setLibrarySegment('folders'); secondaryAt.current = 0; secondaryPending.current = false; setCaptures(null); setCollectionRequest(null); setNoteRequest(null); setDuplicateRequest(0); resetReleaseStore();
     lastLibrary.current = undefined; beforeCharacter.current = undefined; lastIntent.current={view:LIBRARY,cursor:null,previous:[],filters:EMPTY_FILTERS}; setRecentFolders([]);
     try {localStorage.removeItem(RECENT_FOLDERS_KEY);} catch { /* optional */ }
     try {localStorage.removeItem('lakomics.mobile.position');} catch { /* optional */ }
@@ -634,7 +692,12 @@ export function App() {
   const rootPage=useRef<{items:Asset[];total?:number}>({items:[]});
   if(page.view.root)rootPage.current={items:visibleItems,total:page.version&&!page.has_more?visibleItems.length:undefined};
   const demo = import.meta.env.DEV && new URLSearchParams(location.search).has('demo');
+  const homeTopBar = status.configured && area === 'assets' && page.view.tab === 'home';
+  const homePendingBadge = homeTopBar && captures !== null ? captures.length : null;
+  const homeTodoForBar = homeTodoSnapshot.scope === status.endpoint ? homeTodoSnapshot : {scope: status.endpoint, pending: null, similar: null, duplicates: null};
+  const openPendingBadge = () => { if (captures?.length) setViewer({items: captures, index: 0, pending: true}); else void refreshSecondary(true); };
   return <div className="mobile-app" ref={appRef}>
+    {homeTopBar&&<HomeTodoBadgePortal snapshot={homeTodoForBar} pending={homePendingBadge} onPending={openPendingBadge} onSimilar={()=>setSimilarity(true)} onDuplicates={()=>{setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n=>n+1);}}/>}
     {/* Every configured area except Home draws its own title bar. */}
     {!(status.configured&&(area!=='assets'||page.view.tab==='library')||artistsOpen)&&<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&vaultPresent&&<IconButton label="비밀 보관함 열기" icon={LockClosedIcon} onClick={()=>setVaultOpen(true)}/>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<span className="header-action-badge"><IconButton label={exchangeLabel} icon={ArrowsUpDownIcon} onClick={()=>setExchangeOpen(true)}/>{exchangeBadge&&<span className="header-badge" aria-hidden="true">{exchangeBadge}</span>}</span>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={()=>setSettings(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>}
     {status.configured ? <div className="app-body" ref={bodyRef} data-active-tab={area==='assets'?page.view.tab:area}>
@@ -643,7 +706,7 @@ export function App() {
         {page.view.tab==='library'&&!page.view.root&&!page.view.characters&&<LibraryHeader title={page.view.title} count={hasActiveFilters(page.filters)?`${page.items.length}${page.has_more?'+':''}`:currentEntry?.asset_count??currentAlbum?.assetCount??`${page.items.length}${page.has_more?'+':''}`} crumbs={crumbs} onBack={()=>window.dispatchEvent(new Event('lakomics-back'))} loading={busy&&'목록 불러오는 중'} onOptions={()=>{setOptionsScope(page.view.album?page.items:[]);setViewSettings(true);}} changed={activeFilterCount(page.filters)+(density!==DEFAULT_DENSITY?1:0)}/>}
         {/* The Library root stays mounted while a folder is open, so going back shows its folders,
             covers and position at once instead of rebuilding them. */}
-        <LibraryRoot key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} onTrash={trash.available?()=>trash.setOpen(true):undefined} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onRefresh={refresh} albumTree={albumTree} albumError={albumError} segment={librarySegment} onSegment={setLibrarySegment} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,onOpen:()=>setSimilarity(true)}}/>
+        <LibraryRoot key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} onTrash={trash.available?()=>trash.setOpen(true):undefined} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onRefresh={refresh} albumTree={albumTree} albumError={albumError} segment={librarySegment} onSegment={setLibrarySegment} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,scope:status.endpoint,onOpen:()=>setSimilarity(true)}}/>
         {page.view.characters || page.view.root ? null : page.view.tab === 'home' ? <Home items={visibleItems} hasMore={page.has_more} captures={captures} busy={busy} paused={paused} secondaryError={secondaryError} scope={status.endpoint} exchange={exchange.snapshot} characters={characterIndex}
           review={{enabled:false,refreshKey:0}} similarityKey={similarityClosed} onArtists={() => setArtistsOpen(true)}
           onRecent={() => {fromHome({tab:'library',title:'최근 저장'});select({tab:'library',title:'최근 저장'});}} onRevisit={(key,title) => {const view:View={tab:'library',revisit:key,title};fromHome(view);select(view);}} onLibrary={() => {fromHome(lastLibrary.current?.view ?? LIBRARY);openLibrary();}} onRefresh={refresh}
@@ -652,7 +715,7 @@ export function App() {
           onReview={() => {}} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
           onDuplicates={() => {setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
           onReleases={() => setCalendarOpen(true)} onWork={id => {setHomeOrigin({area:'collections'});openCollections({kind:'work',id});}}/> : <>
-        <Gallery items={visibleItems} intro={intro} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused}/>
+        <Gallery items={visibleItems} intro={intro} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings || !!filtersOpen}/>
         <LoadingLine label={loadingMore&&'다음 자산을 불러오는 중'} className="is-bottom"/>
         </>}
         {charactersVisited && <CharacterBrowser hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>setViewer({items,index,character})} backRef={characterBack} onExit={exitCharacters}/>}
@@ -664,7 +727,7 @@ export function App() {
         </div>
       </main>
       {calendarOpen && <div className="release-calendar-layer"><ReleaseCalendar onClose={() => setCalendarOpen(false)} backRef={calendarBack}/></div>}
-      {artistsOpen && <Artists endpoint={status.endpoint} backRef={artistsBack} onOpenViewer={(items,index) => setViewer({items,index})}/>}
+      {artistsOpen && <Artists endpoint={status.endpoint} backRef={artistsBack} paused={settings||!!viewer} onOpenViewer={(items,index) => setViewer({items,index})}/>}
       {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest} onCalendar={() => setCalendarOpen(true)} onReturnHome={homeOrigin?.area==='collections'?returnHome:undefined}/>}
       {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack} request={noteRequest} onReturnHome={homeOrigin?.area==='notes'?returnHome:undefined} onHomeEntryGone={homeOrigin?.area==='notes'?forgetHome:undefined}/>}
       {catalogVisited && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} paused={settings || !!viewer} backRef={catalogBack} openDuplicates={duplicateRequest} onReturnHome={homeOrigin?.area==='catalog'?returnHome:undefined}/>}

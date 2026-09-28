@@ -2,10 +2,10 @@ import {useEffect, useState, useSyncExternalStore} from 'react';
 import {rowView, type ExchangeSnapshot} from './exchange';
 import {koreanReleases, localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCounts, shortReleaseDate, type MangaShelf, type ReleaseCaption, type ReleaseCounts} from './collectionReleases';
 import type {CollectionSummary} from './collectionModel';
-import {currentShelf, loadShelf, observePublication, releaseEpoch, subscribeReleases} from './releaseStore';
+import {currentShelf, invalidateReleases, loadShelf, observePublication, releaseEpoch, subscribeReleases} from './releaseStore';
 import {useSimilarityReviewCount} from './useSimilarityReview';
 import {useDuplicateCount} from './CatalogDuplicates';
-import {useVisibleInterval} from './useVisibleInterval';
+import {useCachedHomeSource} from './homeCache';
 import {ApiError, api, native} from './transport';
 import type {RefreshJob} from './CatalogRefresh';
 import {fetchLibrarySummary, type LibrarySummary} from './librarySummary';
@@ -44,6 +44,27 @@ export const TODO_LABELS: Record<TodoKey, {label: string; unit: string; note: st
 export const TODO_ORDER: TodoKey[] = ['pending', 'character', 'similar', 'duplicates'];
 /** The pending-capture read's page size: a full page reads as "40+". */
 export const PENDING_LIMIT = 40;
+
+export type HomeTodoBadgeSnapshot = {
+  scope: string;
+  pending: number | null;
+  similar: number | null;
+  duplicates: number | null;
+};
+
+let homeTodoBadgeSnapshot: HomeTodoBadgeSnapshot = {scope: '', pending: null, similar: null, duplicates: null};
+const homeTodoBadgeListeners = new Set<() => void>();
+
+export function currentHomeTodoBadges() { return homeTodoBadgeSnapshot; }
+export function subscribeHomeTodoBadges(listener: () => void) {
+  homeTodoBadgeListeners.add(listener);
+  return () => homeTodoBadgeListeners.delete(listener);
+}
+function publishHomeTodoBadges(next: HomeTodoBadgeSnapshot) {
+  if (homeTodoBadgeSnapshot.scope === next.scope && homeTodoBadgeSnapshot.pending === next.pending && homeTodoBadgeSnapshot.similar === next.similar && homeTodoBadgeSnapshot.duplicates === next.duplicates) return;
+  homeTodoBadgeSnapshot = next;
+  homeTodoBadgeListeners.forEach(listener => listener());
+}
 
 export type ReleaseRow = {id: string; name: string; unread: number; caption: ReleaseCaption | null};
 export type UpcomingRow = {id: string; name: string; date: string; volumeNumber: number};
@@ -226,17 +247,11 @@ export const REVISIT_PATH = '/v1/library/revisit?limit=12';
  * Reads 다시 보기 once per visit (the server's groups only change by day) and again after
  * `key` moves (다시 연결). A failed read keeps what was shown; nothing shown means no section.
  */
-export function useHomeRevisit(enabled: boolean, key: unknown) {
-  const [groups, setGroups] = useState<RevisitGroup[]>([]);
-  useEffect(() => {
-    if (!enabled) return;
-    const controller = new AbortController();
-    void api<Revisit>(REVISIT_PATH, controller.signal).then(reply => {
-      if (!controller.signal.aborted) setGroups(revisitGroups(reply));
-    }, () => {});
-    return () => controller.abort();
-  }, [enabled, key]);
-  return groups;
+export function useHomeRevisit(enabled: boolean, scope: string, forceKey?: unknown) {
+  return useCachedHomeSource({
+    enabled, scope, source: 'revisit', signalKey: 'listGeneration', initial: [] as RevisitGroup[], forceKey,
+    read: async signal => revisitGroups(await api<Revisit>(REVISIT_PATH, signal)),
+  });
 }
 
 /* ---- 메모 ---- */
@@ -275,17 +290,18 @@ export function memoRows(notes: Note[], today = localToday()): MemoRow[] {
 }
 export type HomeMemos = {rows: MemoRow[]; locked: boolean} | null;
 /** Reads the on-device notes (no network) whenever Home is shown and `key` moves. */
-export function useHomeMemos(enabled: boolean, key: unknown): HomeMemos {
-  const [memos, setMemos] = useState<HomeMemos>(null);
-  useEffect(() => {
-    if (!enabled) return;
-    let live = true;
-    void native<NotesState>('notesState', {}).then(state => {
-      if (live) setMemos({rows: memoRows(state.notes ?? []), locked: !state.unlocked});
-    }, () => { if (live) setMemos(current => current ?? {rows: [], locked: true}); });
-    return () => { live = false; };
-  }, [enabled, key]);
-  return memos;
+export function useHomeMemos(enabled: boolean, scope: string, forceKey?: unknown): HomeMemos {
+  return useCachedHomeSource({
+    enabled, scope, source: 'memos', signalKey: 'notes', initial: null as HomeMemos, forceKey,
+    read: async () => {
+      try {
+        const state = await native<NotesState>('notesState', {});
+        return {rows: memoRows(state.notes ?? []), locked: !state.unlocked};
+      } catch {
+        return {rows: [], locked: true};
+      }
+    },
+  });
 }
 
 function validHomeEntry(value: unknown): value is UpcomingHomeEntry {
@@ -296,29 +312,53 @@ function validHomeEntry(value: unknown): value is UpcomingHomeEntry {
 
 export function normalizeUpcomingReply(value: unknown): UpcomingHomeReply {
   const reply = value && typeof value === 'object' ? value as UpcomingHomeReply : {};
-  return {...reply, entries: (reply.entries ?? []).filter(validHomeEntry), wishlist: (reply.wishlist ?? []).filter(validHomeEntry)};
+  return {...reply, entries: (Array.isArray(reply.entries) ? reply.entries : []).filter(validHomeEntry), wishlist: (Array.isArray(reply.wishlist) ? reply.wishlist : []).filter(validHomeEntry)};
 }
 
 export function wishlistIds(reply: UpcomingHomeReply | null): Set<string> {
   return new Set((reply?.wishlist ?? []).map(entry => entry.id));
 }
 
-export function useHomeUpcoming(enabled: boolean, scope: string, key: unknown) {
-  const [reply, setReply] = useState<UpcomingHomeReply | null>(null);
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    if (!enabled) return;
-    const controller = new AbortController();
-    void flushUpcomingWishlist(controller.signal, scope).then(() => api<unknown>('/v1/home/upcoming', controller.signal)).then(value => {
-      if (controller.signal.aborted) return;
-      const next = normalizeUpcomingReply(value);
+export const HOME_UPCOMING_CACHE_KEY = 'lakomics.mobile.homeUpcoming.v1';
+const HOME_UPCOMING_CACHE_LIMIT = 4;
+type UpcomingCacheEntry = {scope: string; reply: UpcomingHomeReply; at: number};
+
+function readUpcomingCache(): UpcomingCacheEntry[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(HOME_UPCOMING_CACHE_KEY) ?? 'null') as unknown;
+    if (!Array.isArray(saved)) return [];
+    return saved.flatMap(value => {
+      if (!value || typeof value !== 'object') return [];
+      const row = value as {scope?: unknown; reply?: unknown; at?: unknown};
+      if (typeof row.scope !== 'string' || !row.scope || !row.reply || typeof row.reply !== 'object') return [];
+      return [{scope: row.scope, reply: normalizeUpcomingReply(row.reply), at: typeof row.at === 'number' && Number.isFinite(row.at) ? row.at : 0}];
+    }).slice(0, HOME_UPCOMING_CACHE_LIMIT);
+  } catch { return []; }
+}
+
+function cachedUpcoming(scope: string): UpcomingHomeReply | null {
+  if (!scope) return null;
+  return readUpcomingCache().find(value => value.scope === scope)?.reply ?? null;
+}
+
+function rememberUpcoming(scope: string, reply: UpcomingHomeReply): void {
+  if (!scope) return;
+  const next = [{scope, reply, at: Date.now()}, ...readUpcomingCache().filter(value => value.scope !== scope)].slice(0, HOME_UPCOMING_CACHE_LIMIT);
+  try { localStorage.setItem(HOME_UPCOMING_CACHE_KEY, JSON.stringify(next)); } catch { /* Optional first paint cache. */ }
+}
+
+export function useHomeUpcoming(enabled: boolean, scope: string, forceKey?: unknown) {
+  const reply = useCachedHomeSource<UpcomingHomeReply | null>({
+    enabled, scope, source: 'upcoming', signalKey: 'upcoming', initial: cachedUpcoming(scope), forceKey,
+    read: async signal => {
+      await flushUpcomingWishlist(signal, scope);
+      const next = normalizeUpcomingReply(await api<unknown>('/v1/home/upcoming', signal));
       reconcileUpcomingWishlist(wishlistIds(next));
-      setReply(next); setTick(n => n + 1);
-    }, () => {
-      if (!controller.signal.aborted) setReply(current => current ?? {entries: [], wishlist: []});
-    });
-    return () => controller.abort();
-  }, [enabled, scope, key]);
+      rememberUpcoming(scope, next);
+      return next;
+    },
+  });
+  const [tick, setTick] = useState(0);
   const ids = wishlistIds(reply);
   const pending = readUpcomingWishlistIntents();
   for (const id of Object.keys(pending)) ids.add(id);
@@ -331,32 +371,21 @@ export function useHomeUpcoming(enabled: boolean, scope: string, key: unknown) {
   return {entries: reply?.entries ?? [], wishlist: ids, wishlistPending: tick, toggle};
 }
 
-export function useHomeAvPick(enabled: boolean, key: unknown) {
-  const [pick, setPick] = useState<AvPick | null>(null);
-  useEffect(() => {
-    if (!enabled) return;
-    const controller = new AbortController();
-    void api<AvPickReply>('/v1/home/av-pick', controller.signal).then(value => {
-      if (!controller.signal.aborted) setPick(value?.pick ?? null);
-    }, reason => {
-      if (!controller.signal.aborted && (reason as {status?: number})?.status === 404) setPick(null);
-    });
-    return () => controller.abort();
-  }, [enabled, key]);
-  return pick;
+export function useHomeAvPick(enabled: boolean, scope: string, forceKey?: unknown) {
+  return useCachedHomeSource<AvPick | null | undefined>({
+    enabled, scope, source: 'avPick', signalKey: 'avPick', initial: undefined, forceKey,
+    read: async signal => {
+      try { return (await api<AvPickReply>('/v1/home/av-pick', signal))?.pick ?? null; }
+      catch (reason) { if ((reason as {status?: number})?.status === 404) return null; throw reason; }
+    },
+  });
 }
 
-export function useHomeArtists(enabled: boolean, key: unknown) {
-  const [artists, setArtists] = useState<LibraryArtist[]>([]);
-  useEffect(() => {
-    if (!enabled) return;
-    const controller = new AbortController();
-    void api<LibraryArtistsReply>('/v1/library/artists', controller.signal).then(value => {
-      if (!controller.signal.aborted) setArtists((value?.artists ?? []).filter(artist => !artist.hidden));
-    }, () => {});
-    return () => controller.abort();
-  }, [enabled, key]);
-  return artists;
+export function useHomeArtists(enabled: boolean, scope: string, forceKey?: unknown) {
+  return useCachedHomeSource({
+    enabled, scope, source: 'artists', signalKey: 'artists', initial: [] as LibraryArtist[], forceKey,
+    read: async signal => (await api<LibraryArtistsReply>('/v1/library/artists', signal))?.artists?.filter(artist => !artist.hidden) ?? [],
+  });
 }
 
 /* ---- Offline snapshot ---- */
@@ -409,18 +438,28 @@ export type HomeDashboardInput = {
   similarityKey: unknown;
   exchange: ExchangeSnapshot | null;
 };
-/** How often Home re-checks the release counts and the Collections publication while visible. */
-const CHECK_MS = 60_000;
-
 export function useHomeDashboard({enabled, scope, pending, similarityKey, exchange}: HomeDashboardInput) {
-  const similar = useSimilarityReviewCount(enabled, similarityKey);
-  const duplicates = useDuplicateCount(enabled);
-  const [counts, setCounts] = useState<ReleaseCounts | null>(null);
-  const [probe, setProbe] = useState(0);
-  const [catalogJob, setCatalogJob] = useState<RefreshJob | null>(null);
-  /** undefined: not read yet; null: this server has no summary route (count the first page instead). */
-  const [summary, setSummary] = useState<LibrarySummary | null | undefined>(undefined);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [unreachable, setUnreachable] = useState(false);
+  const fail = (reason: unknown) => { if (isOffline(reason)) setUnreachable(true); };
+  const similar = useSimilarityReviewCount(enabled, similarityKey, scope, refreshKey);
+  const duplicates = useDuplicateCount(enabled, scope, refreshKey);
+  const counts = useCachedHomeSource<ReleaseCounts | null>({
+    enabled, scope, source: 'releaseCounts', signalKey: 'releases', initial: null, forceKey: refreshKey,
+    read: async signal => { const reply = await api<unknown>(RELEASE_COUNTS_PATH, signal); setUnreachable(false); return reply ? releaseCounts(reply) : NO_RELEASES; }, onError: fail,
+  });
+  const collectionRevision = useCachedHomeSource<string | null>({
+    enabled, scope, source: 'collectionsStatus', signalKey: 'collections', initial: null, forceKey: refreshKey,
+    read: async signal => { const reply = await api<{revision?: string | null}>('/v1/collections/status', signal); setUnreachable(false); return reply?.revision ?? null; }, onError: fail,
+  });
+  const summary = useCachedHomeSource<LibrarySummary | null | undefined>({
+    enabled, scope, source: 'summary', signalKey: 'listGeneration', initial: undefined, forceKey: refreshKey,
+    read: async signal => { const reply = await fetchLibrarySummary(signal); setUnreachable(false); return reply; }, onError: fail,
+  });
+  const catalogJob = useCachedHomeSource<RefreshJob | null>({
+    enabled, scope, source: 'catalogJob', signalKey: 'catalog', initial: null, forceKey: refreshKey,
+    read: async signal => (await api<{job?: RefreshJob | null}>('/v1/mobile-catalog/refresh', signal))?.job ?? null,
+  });
   const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine !== false);
   const epoch = useSyncExternalStore(subscribeReleases, releaseEpoch);
   const shelf = useSyncExternalStore(subscribeReleases, currentShelf);
@@ -433,30 +472,7 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
     return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
   }, []);
 
-  // Two small reads per visit (and per minute while visible): the unread counts, and the
-  // Collections publication revision that decides whether the kept shelf is still current.
-  useVisibleInterval(() => setProbe(n => n + 1), enabled ? CHECK_MS : null);
-  useEffect(() => {
-    if (!enabled) return;
-    const controller = new AbortController();
-    const fail = (reason: unknown) => { if (!controller.signal.aborted && isOffline(reason)) setUnreachable(true); };
-    void api<unknown>(RELEASE_COUNTS_PATH, controller.signal).then(reply => {
-      if (controller.signal.aborted) return;
-      setUnreachable(false); setCounts(reply ? releaseCounts(reply) : NO_RELEASES);
-    }, fail);
-    void api<{revision?: string | null}>('/v1/collections/status', controller.signal).then(reply => {
-      if (!controller.signal.aborted) observePublication(reply?.revision ?? null);
-    }, fail);
-    // 자산 현황: one small aggregate read per visit and per minute, like the other counts.
-    void fetchLibrarySummary(controller.signal).then(reply => {
-      if (!controller.signal.aborted) setSummary(reply);
-    }, fail);
-    // The catalog refresh job for 서버 상태 (older servers answer with an error: no job).
-    void api<{job?: RefreshJob | null}>('/v1/mobile-catalog/refresh', controller.signal).then(reply => {
-      if (!controller.signal.aborted) setCatalogJob(reply?.job ?? null);
-    }, () => {});
-    return () => controller.abort();
-  }, [enabled, probe]);
+  useEffect(() => { observePublication(collectionRevision); }, [collectionRevision]);
 
   // The heavy shelf read: only when the shared store has nothing current for this epoch.
   useEffect(() => {
@@ -464,7 +480,7 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
     const controller = new AbortController();
     void loadShelf(controller.signal).catch(reason => { if (!controller.signal.aborted && isOffline(reason)) setUnreachable(true); });
     return () => controller.abort();
-  }, [enabled, epoch, probe]);
+  }, [enabled, epoch]);
 
   const offline = !online || unreachable;
   const live: Record<TodoKey, number | null> = {pending, character: null, similar, duplicates};
@@ -480,6 +496,13 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
 
   const pick = <T,>(value: T | null, kept: Stamped<T> | undefined) => value ?? kept?.value ?? null;
   const todos = Object.fromEntries(TODO_ORDER.map(key => [key, pick(live[key], snapshot.counts[key])])) as Record<TodoKey, number | null>;
+  useEffect(() => {
+    if (!enabled || !scope) return;
+    publishHomeTodoBadges({scope, pending: todos.pending, similar: todos.similar, duplicates: todos.duplicates});
+  }, [enabled, scope, todos.pending, todos.similar, todos.duplicates]);
+  useEffect(() => () => {
+    publishHomeTodoBadges({scope, pending: null, similar: null, duplicates: null});
+  }, [scope]);
   const kept = Object.values(snapshot.counts).map(entry => entry?.at ?? 0);
   return {
     todos,
@@ -501,8 +524,9 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
     /** The server answered without a summary route: count the first page instead. */
     summaryUnsupported: summary === null && !offline,
     /** Re-check now (the offline notice's 다시 연결). */
-    retry: () => { setOnline(typeof navigator === 'undefined' || navigator.onLine !== false); setProbe(n => n + 1); },
-    probe,
+    retry: () => { invalidateReleases(); setOnline(typeof navigator === 'undefined' || navigator.onLine !== false); setUnreachable(false); setRefreshKey(key => key + 1); },
+    probe: refreshKey,
+    refreshKey,
     offline,
     /** When the values shown offline were last fresh. */
     since: kept.length ? Math.max(...kept) : null,

@@ -41,7 +41,8 @@ final class PickerLibrary {
     private void load(){try{connection=revision();if(connection.isEmpty())return;try(InputStream in=file.openRead()){ByteArrayOutputStream out=new ByteArrayOutputStream();CloudClient.copy(in,out,96L*1024*1024,null);JSONObject o=new JSONObject(out.toString("UTF-8"));if(!o.getString("connection").equals(connection))return;snapshot=decode(o);source=o.optString("source","");}}catch(Exception ignored){file.delete();}}
     synchronized JSONObject status(){try{return new JSONObject().put("syncing",running).put("scanned",scanned).put("mediaCount",snapshot.media.size()).put("albumCount",snapshot.albums.size()).put("lastSyncedAt",Math.max(snapshot.syncedAt,verifiedAt)).put("error",error).put("ready",snapshot.syncedAt>0);}catch(JSONException e){throw new IllegalStateException(e);}}
     PickerSnapshot current(){refresh(false);return snapshot;}
-    synchronized void resume(){schedule.resume();refresh(false);}
+    synchronized void resume(){schedule.resume(SystemClock.elapsedRealtime());refresh(false);}
+    synchronized void interaction(){schedule.interaction(SystemClock.elapsedRealtime());schedulePending();}
     synchronized void pause(){
         schedule.pause();if(trailing!=null){trailing.cancel(false);trailing=null;}
         if(active!=null)active.cancel();

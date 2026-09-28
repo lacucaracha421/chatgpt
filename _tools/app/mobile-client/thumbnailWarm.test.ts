@@ -2,7 +2,7 @@ import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 const mocks = vi.hoisted(() => ({api:vi.fn(), native:vi.fn()}));
 vi.mock('./transport', () => ({api:mocks.api, native:mocks.native}));
 import {clearMediaCache} from './media';
-import {resetWarmProgress, setWarmEnabled, startThumbnailWarm, warmState} from './thumbnailWarm';
+import {resetWarmProgress, setWarmEnabled, startThumbnailWarm, START_DELAY, warmState} from './thumbnailWarm';
 
 const asset = (id:string) => ({id, kind:'image'});
 const pages:Record<string,{items:{id:string;kind:string}[];has_more:boolean;next_cursor:string|null}> = {
@@ -27,7 +27,7 @@ afterEach(() => { vi.useRealTimers(); stop?.(); stop = null; clearMediaCache(); 
 it('walks every Library page once, asking native for each thumbnail, then reports done', async () => {
   stop = startThumbnailWarm('https://server.invalid');
   // The first screen gets a head start before background work begins.
-  await vi.advanceTimersByTimeAsync(4_000);
+  await vi.advanceTimersByTimeAsync(START_DELAY - 1_000);
   expect(mocks.api).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(1_500);
   await vi.waitFor(() => expect(warmState().status).toBe('done'));
@@ -39,7 +39,7 @@ it('walks every Library page once, asking native for each thumbnail, then report
   expect(warmState().warmed).toBe(3);
   // A finished pass is not repeated within a day.
   stop(); stop = startThumbnailWarm('https://server.invalid');
-  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   await vi.waitFor(() => expect(warmState().status).toBe('done'));
   expect(mocks.api).toHaveBeenCalledTimes(2);
 });
@@ -47,13 +47,13 @@ it('walks every Library page once, asking native for each thumbnail, then report
 it('resumes from the saved cursor for the same endpoint only', async () => {
   localStorage.setItem('lakomics.mobile.thumbnailWarm', JSON.stringify({scope:'https://server.invalid', cursor:'c2', warmed:2, completedAt:null, generation:'cache-1'}));
   stop = startThumbnailWarm('https://server.invalid');
-  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   await vi.waitFor(() => expect(warmState().status).toBe('done'));
   expect(mocks.api.mock.calls.map(([path]) => path)).toEqual([expect.stringContaining('cursor=c2')]);
   expect(warmState().warmed).toBe(3);
   stop(); mocks.api.mockClear();
   stop = startThumbnailWarm('https://other.invalid');
-  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   await vi.waitFor(() => expect(warmState().status).toBe('done'));
   expect(mocks.api.mock.calls[0][0]).not.toContain('cursor=');
 });
@@ -87,7 +87,7 @@ it.each([
 it('allows charging even below fifty percent',async()=>{
   const original=mocks.native.getMockImplementation()!;
   mocks.native.mockImplementation((op:string,payload:{assetId:string})=>op==='status'?Promise.resolve({battery:{charging:true,level:10,powerSave:false}}):original(op,payload));
-  stop=startThumbnailWarm('charging-test');await vi.advanceTimersByTimeAsync(5500);
+  stop=startThumbnailWarm('charging-test');await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   expect(mocks.api).toHaveBeenCalledTimes(2);
 });
 
@@ -96,9 +96,9 @@ it('resumes at the failed page after a transient error',async()=>{
   let fail=1;
   mocks.api.mockImplementation(async(path:string)=>{const cursor=new URL(path,'https://x.invalid').searchParams.get('cursor')??'first';if(cursor==='c2'&&fail-->0)throw new Error('network');return pages[cursor];});
   stop=startThumbnailWarm('https://server.invalid');
-  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   await vi.waitFor(()=>expect(warmState().status).toBe('error'));
-  await vi.advanceTimersByTimeAsync(65_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 60_500);
   await vi.waitFor(()=>expect(warmState().status).toBe('done'));
   expect(cursors()).toEqual(['first','c2','c2']);
   expect(warmState().warmed).toBe(3);
@@ -107,9 +107,9 @@ it('starts again from the first page when the server rejects the saved cursor',a
   let fail=1;
   mocks.api.mockImplementation(async(path:string)=>{const cursor=new URL(path,'https://x.invalid').searchParams.get('cursor')??'first';if(cursor==='c2'&&fail-->0)throw Object.assign(new Error('Invalid cursor'),{status:400});return pages[cursor];});
   stop=startThumbnailWarm('https://server.invalid');
-  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   await vi.waitFor(()=>expect(warmState().status).toBe('error'));
-  await vi.advanceTimersByTimeAsync(65_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 60_500);
   await vi.waitFor(()=>expect(warmState().status).toBe('done'));
   expect(cursors()).toEqual(['first','c2','first','c2']);
   expect(warmState().warmed).toBe(3);
@@ -118,13 +118,13 @@ it('bounds retries at one page: the third consecutive failure starts the pass ag
   let fail=3;
   mocks.api.mockImplementation(async(path:string)=>{const cursor=new URL(path,'https://x.invalid').searchParams.get('cursor')??'first';if(cursor==='c2'&&fail-->0)throw new Error('network');return pages[cursor];});
   stop=startThumbnailWarm('https://server.invalid');
-  await vi.advanceTimersByTimeAsync(5_500);
-  for(let retry=0;retry<3;retry++)await vi.advanceTimersByTimeAsync(65_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 500);
+  for(let retry=0;retry<3;retry++)await vi.advanceTimersByTimeAsync(START_DELAY + 60_500);
   await vi.waitFor(()=>expect(warmState().status).toBe('done'));
   expect(cursors()).toEqual(['first','c2','c2','c2','first','c2']);
 });
 
-const start = async () => {stop?.();stop=startThumbnailWarm('https://server.invalid');await vi.advanceTimersByTimeAsync(5_500);};
+const start = async () => {stop?.();stop=startThumbnailWarm('https://server.invalid');await vi.advanceTimersByTimeAsync(START_DELAY + 500);};
 const downloads = () => mocks.native.mock.calls.filter(([op])=>op==='thumbnail').map(([,payload])=>payload.assetId);
 const daily = async () => {stop?.();stop=null;vi.setSystemTime(Date.now()+24*60*60*1000+1);await start();};
 
@@ -227,7 +227,7 @@ it('probes the native cache with each thumbnail revision, the same key the tiles
   const revised = {first:{items:[{id:'a',kind:'image',thumbnail_revision:'r2'},asset('b')],has_more:false,next_cursor:null}};
   mocks.api.mockImplementation(async () => revised.first);
   stop = startThumbnailWarm('https://server.invalid');
-  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   await vi.waitFor(() => expect(warmState().status).toBe('done'));
   const probes = mocks.native.mock.calls.filter(([op]) => op === 'thumbnailsCached').map(([, payload]) => payload);
   expect(probes[0]).toEqual({assetIds:['a','b'], revisions:['r2','']});
@@ -238,12 +238,12 @@ it('starts on the native power event instead of re-checking the battery every mi
   const original=mocks.native.getMockImplementation()!;let charging=false;
   mocks.native.mockImplementation((op,payload)=>op==='status'?Promise.resolve({battery:{charging,level:20,powerSave:false}}):original(op,payload));
   stop=startThumbnailWarm('https://server.invalid');
-  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   expect(warmState().status).toBe('waiting');
   await vi.advanceTimersByTimeAsync(10*60_000);
   expect(mocks.native.mock.calls.filter(([op])=>op==='status')).toHaveLength(1);
   charging=true;window.dispatchEvent(new CustomEvent('lakomics-power',{detail:{charging:true,level:20,powerSave:false}}));
-  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   await vi.waitFor(()=>expect(warmState().status).toBe('done'));
   expect(cursors()).toEqual(['first','c2']);
 });
@@ -251,13 +251,13 @@ it('retries a failed page as soon as native reports the network is back',async()
   let fail=1;
   mocks.api.mockImplementation(async(path:string)=>{const cursor=new URL(path,'https://x.invalid').searchParams.get('cursor')??'first';if(cursor==='c2'&&fail-->0)throw new Error('network');return pages[cursor];});
   stop=startThumbnailWarm('https://server.invalid');
-  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   await vi.waitFor(()=>expect(warmState().status).toBe('error'));
   // A network event that is not a restore (going offline) changes nothing.
   window.dispatchEvent(new CustomEvent('lakomics-network',{detail:{online:false,restored:false}}));
   await vi.advanceTimersByTimeAsync(5_500);expect(cursors()).toEqual(['first','c2']);
   window.dispatchEvent(new CustomEvent('lakomics-network',{detail:{online:true,restored:true}}));
-  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   await vi.waitFor(()=>expect(warmState().status).toBe('done'));
   expect(cursors()).toEqual(['first','c2','c2']);
 });

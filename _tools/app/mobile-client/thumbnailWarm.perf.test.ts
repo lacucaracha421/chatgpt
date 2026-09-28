@@ -9,7 +9,7 @@ import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native}));
 import {clearMediaCache} from './media';
-import {resetWarmProgress, setWarmEnabled, startThumbnailWarm, warmState} from './thumbnailWarm';
+import {resetWarmProgress, setWarmEnabled, startThumbnailWarm, START_DELAY, warmState} from './thumbnailWarm';
 
 /** The Linux library had 9,300 Assets on 2026-09-26; the walk reads 100 per page. */
 const ASSETS=9300, PAGE=100;
@@ -37,7 +37,7 @@ const tally=()=>{const ops=new Map<string,number>();for(const [op] of mocks.nati
 it('one full pass: pages, status checks and thumbnail bridge calls', async()=>{
   mocks.api.mockImplementation(async(path:string)=>pageOf(new URL(path,'https://x.invalid').searchParams.get('cursor')));
   stop=startThumbnailWarm('https://server.invalid');
-  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   await vi.waitFor(()=>expect(warmState().status).toBe('done'),{timeout:20_000});
   const ops=tally();
   console.info(`[perf] warm-up full pass (${ASSETS} assets): apiPages=${mocks.api.mock.calls.length} nativeStatus=${ops.get('status')??0} nativeThumbnail=${ops.get('thumbnail')??0} (each native thumbnail = one mediaWorkers slot + SecureSettings.read + cache lookup, even on a cache hit)`);
@@ -52,7 +52,7 @@ it('a transient page failure mid-pass resumes at the failed page', async()=>{
     return pageOf(cursor);
   });
   stop=startThumbnailWarm('https://server.invalid');
-  await vi.advanceTimersByTimeAsync(5_500);
+  await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   await vi.waitFor(()=>expect(warmState().status).toBe('error'),{timeout:20_000});
   const before=mocks.api.mock.calls.length;
   // The retry comes after RETRY_AFTER (60 s).
@@ -71,7 +71,7 @@ it('a transient page failure mid-pass resumes at the failed page', async()=>{
 const nextDay=async()=>{
   stop?.();stop=null;clearMediaCache();mocks.api.mockClear();mocks.native.mockClear();
   vi.setSystemTime(Date.now()+24*60*60*1000+1);
-  stop=startThumbnailWarm('https://server.invalid');await vi.advanceTimersByTimeAsync(5_500);
+  stop=startThumbnailWarm('https://server.invalid');await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   await vi.waitFor(()=>expect(warmState().status).toBe('done'));
 };
 
@@ -83,7 +83,7 @@ it('gates a cached 9,300-asset sweep, unchanged daily pass and 50 additions',asy
     if(!cursor&&added)return {items:[...Array.from({length:added},(_,i)=>({id:`new${i}`,kind:'image'})),...pageOf(null).items.slice(0,PAGE-added)],has_more:true,next_cursor:'50'};
     return pageOf(cursor);
   });
-  stop=startThumbnailWarm('https://server.invalid');await vi.advanceTimersByTimeAsync(5_500);
+  stop=startThumbnailWarm('https://server.invalid');await vi.advanceTimersByTimeAsync(START_DELAY + 500);
   expect(warmState().status).toBe('done');
   expect(mocks.api).toHaveBeenCalledTimes(93);
   expect(tally().get('thumbnailsCached')).toBe(93);

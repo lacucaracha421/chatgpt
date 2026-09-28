@@ -2,6 +2,7 @@ import {meteredConnection,warmConnection as connection} from './warmNetwork';
 export {meteredConnection} from './warmNetwork';
 import {api,native} from './transport';
 import {onNetworkRestored,onPowerChange} from './deviceSignals';
+import {onVisible} from './useVisibleInterval';
 import {normalizePage, pagePath} from './model';
 import {EMPTY_FILTERS} from './assetFilters';
 import {ALL_ASSETS} from './libraryModel';
@@ -30,7 +31,8 @@ const WARM_PAGE = 100, REPEAT_AFTER = 24 * 60 * 60 * 1000, RETRY_AFTER = 60_000,
 // Waiting for a charger is ended by native `lakomics-power`; this only covers a missed event.
 const POWER_FALLBACK = 30 * 60 * 1000;
 // Let the first screen load before background work starts after launch or return.
-const START_DELAY = 5_000, FULL_REPEAT_AFTER = 30 * REPEAT_AFTER;
+export const START_DELAY = 30_000;
+const IDLE_DELAY = 3_000, FULL_REPEAT_AFTER = 30 * REPEAT_AFTER;
 const EVENT = 'lakomics-thumbnail-warm';
 
 function read<T>(key:string):T|null { try {const value = localStorage.getItem(key); return value ? JSON.parse(value) as T : null;} catch {return null;} }
@@ -160,6 +162,7 @@ async function pass(scope:string, signal:AbortSignal) {
  */
 export function startThumbnailWarm(scope:string) {
   let controller:AbortController|null = null, timer = 0, stopped = false;
+  let notBefore = Date.now() + START_DELAY, lastInteraction = Date.now();
   /** What the pending retry timer waits for; the matching native event ends the wait early. */
   let waiting:'power'|'network'|null = null;
   const halt = () => { controller?.abort(); controller = null; clearTimeout(timer); timer = 0; waiting = null; };
@@ -171,7 +174,8 @@ export function startThumbnailWarm(scope:string) {
     if (document.visibilityState === 'hidden') { halt(); publish({status:'waiting', warmed:progress.warmed, completedAt:progress.completedAt}); return; }
     if (controller || timer) return;
     waiting = null;
-    timer = window.setTimeout(() => { timer = 0; begin(); }, START_DELAY);
+    const wait = Math.max(0, notBefore - Date.now(), lastInteraction + IDLE_DELAY - Date.now());
+    timer = window.setTimeout(() => { timer = 0; begin(); }, wait);
   };
   const begin = () => {
     if (stopped || controller || !warmEnabled() || meteredConnection() || document.visibilityState === 'hidden') return;
@@ -190,19 +194,38 @@ export function startThumbnailWarm(scope:string) {
       timer = window.setTimeout(() => { timer = 0; waiting = null; evaluate(); }, RETRY_AFTER);
     });
   };
-  const toggle = () => { halt(); evaluate(); };
+  const toggle = () => { halt(); notBefore = Date.now() + START_DELAY; lastInteraction = Date.now(); evaluate(); };
+  const resume = () => { halt(); notBefore = Date.now() + START_DELAY; lastInteraction = Date.now(); evaluate(); };
+  const interaction = () => {
+    if (stopped) return;
+    lastInteraction = Date.now();
+    if (controller) halt(); else { clearTimeout(timer); timer = 0; waiting = null; }
+    evaluate();
+  };
   const wake = (kind:'power'|'network') => () => {
     if (stopped || waiting !== kind) return;
     clearTimeout(timer); timer = 0; waiting = null; evaluate();
   };
   const removePower = onPowerChange(wake('power')), removeNetwork = onNetworkRestored(wake('network'));
+  const removeVisible = onVisible(resume);
   document.addEventListener('visibilitychange', evaluate);
+  window.addEventListener('pointerdown', interaction, {passive:true});
+  window.addEventListener('touchstart', interaction, {passive:true});
+  window.addEventListener('keydown', interaction, {passive:true});
+  window.addEventListener('wheel', interaction, {passive:true});
+  window.addEventListener('scroll', interaction, {passive:true, capture:true});
   window.addEventListener(`${EVENT}-toggle`, toggle);
   connection()?.addEventListener?.('change', evaluate);
   evaluate();
   return () => {
     stopped = true; halt(); removePower(); removeNetwork();
+    removeVisible();
     document.removeEventListener('visibilitychange', evaluate);
+    window.removeEventListener('pointerdown', interaction);
+    window.removeEventListener('touchstart', interaction);
+    window.removeEventListener('keydown', interaction);
+    window.removeEventListener('wheel', interaction);
+    window.removeEventListener('scroll', interaction, true);
     window.removeEventListener(`${EVENT}-toggle`, toggle);
     connection()?.removeEventListener?.('change', evaluate);
   };

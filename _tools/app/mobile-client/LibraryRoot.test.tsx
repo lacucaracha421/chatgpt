@@ -8,6 +8,7 @@ import {closeVisibleSearch} from './TopBar';
 import {FolderCards} from './FolderCards';
 import {mergeLibraryEntries} from './libraryModel';
 import type {CharacterIndex} from './characterModel';
+import {resetHomeSourceCache} from './homeCache';
 const mocks=vi.hoisted(()=>({api:vi.fn(async()=>({items:[{id:'cover',kind:'image',preview:'data:image/png;base64,AA'}],has_more:false,next_cursor:null})),native:vi.fn(),thumbnail:vi.fn(async(asset)=>asset)}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:String}));
 vi.mock('./media',()=>({loadThumbnail:mocks.thumbnail}));
@@ -18,8 +19,16 @@ const characters:CharacterIndex={version:1,authority:'pc',authorityEpoch:0,capab
 ],scopes:[]};
 const entries=mergeLibraryEntries([{id:'game',name:'게임',parent_id:null,asset_count:20},{id:'s',name:'블루 아카이브',parent_id:'game',asset_count:10}],characters);
 const props={entries,characters,recentFolders:['s'],items:[{id:'all-cover',kind:'image',preview:'data:image/png;base64,AA'}],total:20,paused:false,busy:false,revision:1,onSelect:vi.fn(),onRefresh:vi.fn(),albumTree:null,albumError:'',segment:'folders' as const,onSegment:vi.fn(),restoreScroll:0,onScroll:vi.fn()};
-beforeEach(()=>{vi.stubGlobal('ResizeObserver',class{observe(){}unobserve(){}disconnect(){}});});
+beforeEach(()=>{resetHomeSourceCache();vi.stubGlobal('ResizeObserver',class{observe(){}unobserve(){}disconnect(){}});});
 afterEach(()=>{cleanup();vi.clearAllMocks();vi.unstubAllGlobals();});
+it('does not read the similarity queue while the retained root is hidden',async()=>{
+ const scope='https://library-root.example';
+ const view=render(<LibraryRoot {...props} active={false} similarity={{enabled:true,refreshKey:0,scope,onOpen:vi.fn()}}/>);
+ await act(async()=>{await Promise.resolve();});
+ expect(mocks.api.mock.calls.some(([path])=>String(path).startsWith('/v1/library/similarity/review'))).toBe(false);
+ view.rerender(<LibraryRoot {...props} active similarity={{enabled:true,refreshKey:0,scope,onOpen:vi.fn()}}/>);
+ await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/similarity/review'))).toHaveLength(1));
+});
 it('shows root cards and All without recent folders, then searches every character level from the bar',async()=>{
  render(<LibraryRoot {...props}/>);
  expect(screen.getByRole('heading',{name:'에셋'})).toBeTruthy();

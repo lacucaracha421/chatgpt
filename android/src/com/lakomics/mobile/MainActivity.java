@@ -76,7 +76,7 @@ public final class MainActivity extends Activity {
  private boolean batteryAllowsWarm(){try{JSONObject b=batteryState();return b.optBoolean("charging")||(b.optInt("level",-1)>=50&&!b.optBoolean("powerSave",true));}catch(Exception e){return false;}}
  private JSONObject connectionStatus()throws Exception{return settings.status().put("battery",batteryState());}
  private static JSONObject mediaBusy(){try{return new JSONObject().put("code","media_busy");}catch(JSONException e){return null;}}
- private static boolean optionalWork(String op){return Arrays.asList("thumbnail","media","collectionArtwork","catalogImage","mediaTickets","pickerRefresh").contains(op);}
+ private static boolean optionalWork(String op){return Arrays.asList("thumbnail","media","collectionArtwork","homeCover","catalogImage","mediaTickets","pickerRefresh").contains(op);}
  private void cancelOptional(String id,CancellationSignal signal){
   signal.cancel();nonEssential.remove(id,signal);
   try{emit("lakomics-native",new JSONObject().put("id",id).put("ok",false).put("cancelled",true));}catch(JSONException ignored){}
@@ -238,6 +238,8 @@ public final class MainActivity extends Activity {
  };
  final class Bridge {
   @JavascriptInterface public void cancel(String id){CancellationSignal s=active.remove(id);if(s!=null)s.cancel();}
+  /** Local startup hint only: never exposes the saved token or performs a network check. */
+  @JavascriptInterface public String localStatus(){try{return settings.status().toString();}catch(Exception ignored){return "{\"configured\":false,\"endpoint\":\"\"}";}}
   @JavascriptInterface public void request(String id,String operation,String payload){
    if("perfLog".equals(operation)){PerfLog.javascript(payload);return;}
    // A note save carries up to 128 KiB of text (256 KiB plaintext); every other request stays small.
@@ -255,7 +257,7 @@ public final class MainActivity extends Activity {
    final long vaultEpoch=vault.epoch();
    if(optionalWork(operation)){synchronized(MainActivity.this){nonEssential.put(id,signal);if(stopped)cancelOptional(id,signal);}}
    final PerfLog.Op perf=operation.equals("thumbnail")||operation.equals("media")?perfPool.submit(operation,mediaWorkers.getQueue().size()):null;
-   final boolean mediaWork=operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("catalogImage");
+   final boolean mediaWork=operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("homeCover") || operation.equals("catalogImage");
    final Runnable task=()->{if(perf!=null)perfPool.start(perf);try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
     if(perf!=null){perf.asset=PerfLog.id(p.optString("assetId"));perf.request=PerfLog.id(p.optString("perfId"));}
     switch(operation){
@@ -283,6 +285,7 @@ public final class MainActivity extends Activity {
      case "thumbnail":data=thumbnail(p.getString("assetId"),p.optString("revision",""),signal);break;
      case "thumbnailsCached":if(media==null)throw new IOException("Cache unavailable");data=media.thumbnailsCached(p.getJSONArray("assetIds"),p.optJSONArray("revisions"),signal);break;
      case "collectionArtwork":if(media==null)throw new IOException("Cache unavailable");data=media.collectionArtwork(p.getString("collectionId"),p.getString("artworkId"),p.getString("variant"),p.getString("revision"),p.optString("digest",""),signal);break;
+     case "homeCover":data=media==null?client.api("/v1/home/covers/"+p.getString("sha256")+"/media-ticket","POST",new JSONObject(),signal):media.homeCover(p.getString("sha256"),signal);break;
      case "catalogImage":if(media==null)throw new IOException("Cache unavailable");data=media.catalogImage(p.getString("workId"),p.getString("revision"),p.getString("kind"),p.getInt("index"),p.getString("url"),signal);break;
      case "mediaTickets":data=media==null?new JSONObject().put("items",new JSONArray()):!ticketWarmAllowed()?new JSONObject().put("items",new JSONArray()).put("waiting","power"):media.prewarmTickets(p.getJSONArray("assetIds"),signal,MainActivity.this::ticketWarmAllowed);break;
      case "media":data=media==null?client.api("/v1/library/assets/"+Uri.encode(p.getString("assetId"))+"/media-ticket","POST",new JSONObject().put("variant","original"),signal):media.browser(p.getString("assetId"),"original",p.optString("mime"),signal);break;
@@ -370,6 +373,7 @@ public final class MainActivity extends Activity {
   super.onActivityResult(request,result,data);
  }
  @Override public void onBackPressed(){emit("lakomics-back",null);}
+ @Override public void onUserInteraction(){super.onUserInteraction();if(Build.VERSION.SDK_INT>=33)PickerLibrary.get(this).interaction();}
  private void hideStatusBar(){
   if(Build.VERSION.SDK_INT>=30){
    WindowInsetsController controller=getWindow().getInsetsController();

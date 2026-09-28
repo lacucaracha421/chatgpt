@@ -266,6 +266,20 @@ final class MediaRepository {
   if(!imageMime(first.optString("content_type")) || first.optLong("size_bytes",Long.MAX_VALUE)>ThumbnailCache.MAX_FILE)throw new IOException("Artwork exceeds limit");
   fillFrom(variant,scope,signal,first,source);signal.throwIfCanceled();return local(scope,first.getString("content_type"));
  }
+ JSONObject homeCover(String sha256,CancellationSignal signal)throws Exception{
+  if(sha256==null || !sha256.matches("[a-f0-9]{64}"))throw new IllegalArgumentException();
+  Scope scope=scopedIdentity("home/cover/"+sha256);
+  try(InputStream input=new BufferedInputStream(cache.open(scope.key,scope.generation))){
+   input.mark(16);byte[] header=new byte[12];int count=input.read(header);input.reset();
+   String mime=count==12 && header[0]=='R' && header[1]=='I' && header[2]=='F' && header[3]=='F' && header[8]=='W' && header[9]=='E' && header[10]=='B' && header[11]=='P'?"image/webp":java.net.URLConnection.guessContentTypeFromStream(input);
+   if(imageMime(mime))return local(scope,mime);
+  }catch(FileNotFoundException ignored){}
+  TicketSource source=fresh->client.api("/v1/home/covers/"+sha256+"/media-ticket","POST",new JSONObject(),signal);
+  JSONObject first=source.read(false);
+  if(!sha256.equals(first.optString("sha256")))throw new IOException("Home cover changed; refresh metadata");
+  if(!imageMime(first.optString("content_type")) || first.optLong("size_bytes",Long.MAX_VALUE)>ThumbnailCache.MAX_FILE)throw new IOException("Home cover exceeds limit");
+  fillFrom("thumbnail",scope,signal,first,source);signal.throwIfCanceled();return local(scope,first.getString("content_type"));
+ }
  ParcelFileDescriptor open(String id,String variant,CancellationSignal cancel)throws FileNotFoundException{
   CancellationSignal signal=cancel==null?new CancellationSignal():cancel;
   try{

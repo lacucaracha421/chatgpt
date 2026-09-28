@@ -1,12 +1,12 @@
-import {cleanup, fireEvent, render, screen, within} from '@testing-library/react';
+import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ApiError} from './transport';
 import {ReleaseCalendar} from './ReleaseCalendar';
 import {groupReleaseEntries, releaseDateLabel, type ReleaseCalendarEntry} from './releaseCalendarModel';
 import {setOutboxConnection} from './outboxConnection';
 
-const mocks = vi.hoisted(() => ({api: vi.fn()}));
-vi.mock('./transport', async () => { const actual = await vi.importActual<typeof import('./transport')>('./transport'); return {...actual, api: mocks.api}; });
+const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn()}));
+vi.mock('./transport', async () => { const actual = await vi.importActual<typeof import('./transport')>('./transport'); return {...actual, api: mocks.api, native: mocks.native}; });
 
 const entry = (id: string, kind: ReleaseCalendarEntry['kind'], date: string | null, precision: ReleaseCalendarEntry['precision'], extra: Partial<ReleaseCalendarEntry> = {}): ReleaseCalendarEntry => ({
   id, kind, title: id, originalTitle: null, date, precision, region: kind === 'movie' ? 'korea' : null, platforms: kind === 'game' ? ['PC'] : [], releaseType: null, cover: {url: `https://img.example/${id}.jpg`}, ...extra,
@@ -25,7 +25,7 @@ const reply = {
 beforeEach(() => {
   localStorage.clear();
   setOutboxConnection('https://example.invalid');
-  mocks.api.mockReset();
+  mocks.api.mockReset(); mocks.native.mockReset();
   mocks.api.mockImplementation(async (path: string) => {
     if (path === '/v1/home/upcoming') return reply;
     if (path === '/v1/home/upcoming/wishlist') return {version: 1, operationId: 'op', sequence: 1, revision: 2};
@@ -33,7 +33,7 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => { cleanup(); setOutboxConnection(null); });
+afterEach(() => { cleanup(); setOutboxConnection(null); delete window.LakomicsNative; });
 
 describe('release calendar model', () => {
   it('keeps PC precision wording and groups exact dates inside month sections', () => {
@@ -50,6 +50,22 @@ describe('release calendar model', () => {
 });
 
 describe('ReleaseCalendar', () => {
+  it('asks native for hashed Home covers when the Android bridge is available', async () => {
+    const sha256 = 'b'.repeat(64);
+    const hashed = {...reply, entries: reply.entries.map((row, index) => index === 0 ? {...row, cover: {sha256}} : row)};
+    mocks.api.mockImplementation(async (path: string) => {
+      if (path === '/v1/home/upcoming') return hashed;
+      if (path === '/v1/home/upcoming/wishlist') return {version: 1, operationId: 'op', sequence: 1, revision: 2};
+      throw new Error(`unexpected path ${path}`);
+    });
+    mocks.native.mockResolvedValue({url: 'https://app.lakomics.local/media-cache/1/hashed', expires_in: 240});
+    window.LakomicsNative = {request: vi.fn(), cancel: vi.fn()};
+    render(<ReleaseCalendar onClose={vi.fn()} />);
+    await screen.findByText('game-one');
+    await waitFor(() => expect(mocks.native).toHaveBeenCalledWith('homeCover', {sha256}, expect.any(AbortSignal)));
+    expect(mocks.api.mock.calls.some(([path]) => path === `/v1/home/covers/${sha256}/media-ticket`)).toBe(false);
+  });
+
   it('filters by kind and then by the counted interest list', async () => {
     render(<ReleaseCalendar onClose={vi.fn()} />);
     expect(await screen.findByRole('heading', {name: '2026년 10월'})).toBeTruthy();

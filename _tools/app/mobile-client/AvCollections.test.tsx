@@ -47,6 +47,84 @@ describe('tablet AV collections',()=>{
     expect(document.querySelector('.av-performer-list')).toBeTruthy();
   });
 
+  it('normalizes a typed code, sends the tablet client request, and records the sent code',async()=>{
+    const base=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async(path:string,...args:unknown[])=>{
+      if(path==='/v1/av-lookups')return {requestId:(args[1] as {requestId:string}).requestId,sequence:1,receivedAt:'2026-09-28T10:00:00Z'};
+      return base(path);
+    });
+    render(<Collections {...props}/>);
+    fireEvent.click(await screen.findByRole('tab',{name:'AV'}));
+    const input=await screen.findByRole('textbox',{name:'품번'});
+    fireEvent.change(input,{target:{value:'ssis123'}});
+    expect(screen.getByText('SSIS-123',{selector:'strong'})).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'보내기'}));
+    await waitFor(()=>expect(screen.getByText('SSIS-123을 PC로 보냈어요. PC에서 작품을 고르면 여기에 나타나요.')).toBeTruthy());
+    const call=mocks.api.mock.calls.find(([path])=>path==='/v1/av-lookups');
+    expect(call?.[2]).toMatchObject({productCode:'SSIS-123',sourceUrl:null});
+    expect((call?.[2] as {requestId:string}).requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(screen.getByRole('list',{name:'최근 보낸 품번'}).textContent).toContain('SSIS-123');
+  });
+
+  it('retries a failed send with the same request id',async()=>{
+    const base=mocks.api.getMockImplementation()!;
+    let failed=true;
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path==='/v1/av-lookups'){
+        if(failed){failed=false;throw new Error('offline');}
+        return {requestId:'retry',sequence:1,receivedAt:'2026-09-28T10:00:00Z'};
+      }
+      return base(path);
+    });
+    render(<Collections {...props}/>);
+    fireEvent.click(await screen.findByRole('tab',{name:'AV'}));
+    const input=await screen.findByRole('textbox',{name:'품번'});
+    fireEvent.change(input,{target:{value:'SSIS-001'}});
+    fireEvent.click(screen.getByRole('button',{name:'보내기'}));
+    await screen.findByText(/오프라인이라 품번을 보내지 못했어요/);
+    const retry=screen.getByRole('button',{name:'다시 보내기'});
+    fireEvent.click(retry);
+    await screen.findByText(/SSIS-001을 PC로 보냈어요/);
+    const calls=mocks.api.mock.calls.filter(([path])=>path==='/v1/av-lookups');
+    expect(calls).toHaveLength(2);
+    expect((calls[0]![2] as {requestId:string}).requestId).toBe((calls[1]![2] as {requestId:string}).requestId);
+  });
+
+  it.each([
+    [429,'요청이 많아요. 잠시 후 다시 보내 주세요'],
+    [422,'품번이 올바르지 않아요. 예: SSIS-001'],
+  ])('shows the server error for status %s',async(status,message)=>{
+    const base=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path==='/v1/av-lookups')throw {status};
+      return base(path);
+    });
+    render(<Collections {...props}/>);
+    fireEvent.click(await screen.findByRole('tab',{name:'AV'}));
+    const input=await screen.findByRole('textbox',{name:'품번'});
+    fireEvent.change(input,{target:{value:'SSIS-001'}});
+    fireEvent.click(screen.getByRole('button',{name:'보내기'}));
+    expect(await screen.findByText(message)).toBeTruthy();
+  });
+
+  it('keeps only the last five sent codes in local storage and on screen',async()=>{
+    const base=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async(path:string)=>path==='/v1/av-lookups'?{}:base(path));
+    render(<Collections {...props}/>);
+    fireEvent.click(await screen.findByRole('tab',{name:'AV'}));
+    const input=await screen.findByRole('textbox',{name:'품번'});
+    for(let number=1;number<=6;number++){
+      const code=`SSIS-${String(number).padStart(3,'0')}`;
+      fireEvent.change(input,{target:{value:code}});
+      fireEvent.click(screen.getByRole('button',{name:'보내기'}));
+      await screen.findByText(new RegExp(`${code}을 PC로 보냈어요`));
+    }
+    const list=screen.getByRole('list',{name:'최근 보낸 품번'});
+    expect(list.querySelectorAll('li')).toHaveLength(5);
+    expect(list.textContent).not.toContain('SSIS-001');
+    expect(JSON.parse(localStorage.getItem('lakomics.mobile.avLookupRecent')!)).toHaveLength(5);
+  });
+
   it('persists the last-used 작품 · 배우별 view',async()=>{
     const first=render(<Collections {...props}/>);
     fireEvent.click(await screen.findByRole('tab',{name:'AV'}));

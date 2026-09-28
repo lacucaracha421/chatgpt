@@ -21,6 +21,7 @@ import {copySecret,SecretEditor,SecretGate} from './NoteSecret';
 import {revealCaret} from './noteCaret';
 import './notes.css';
 import {matchesKoreanSearch} from '../src/shared/koreanSearch';
+import {Scrubber} from './Scrubber';
 
 /** A decrypted note as native returns it (Notes v2 fields are optional: v1 notes lack them). */
 export type MobileNote=Note;
@@ -263,6 +264,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   const trashed=listed.filter(n=>n.deleted).length,archived=listed.filter(n=>!n.deleted&&n.archived).length;
   const status=state.error?'확인 필요':state.saving?'저장 중':state.syncing?'동기화 중':pending?'동기화 대기':'동기화됨';
   const list=useRef<HTMLDivElement>(null);
+  const scrubberSort=useMemo(()=>({kind:'date' as const,values:visible.map(note=>note.updatedAt)}),[visible]);
   const pull=usePullToRefresh(list,()=>void store.sync(),state.syncing,!active||!state.unlocked||editing);
   // A dot marks a note still waiting to sync; the words are there for screen readers.
   const meta=(n:Note)=><>{n.pending&&<i className="note-card__pending" aria-hidden="true"/>}{n.conflictCopy&&<><b>사본</b> · </>}{relativeTime(n.updatedAt)}{n.pending&&<span className="sr-only"> · 동기화 대기</span>}</>;
@@ -328,6 +330,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
         {scope==='all'&&archived>0&&<div className="notes-links">
           {archived>0&&<button className="notes-trash-link" onClick={()=>setScope('archive')}><ArchiveBoxIcon aria-hidden="true"/>보관함 <span className="numeric">{archived}</span></button>}
         </div>}
+        <Scrubber scrollRef={list} total={visible.length} sort={scrubberSort} hidden={!active||!!note||sheet!==null}/>
       </div>
       {scope==='all'&&<Button variant="primary" className="notes-fab" onClick={()=>setSheet('new')}><PlusIcon aria-hidden="true"/>새 메모</Button>}
     </div>

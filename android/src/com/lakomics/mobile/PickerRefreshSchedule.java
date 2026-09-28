@@ -28,15 +28,27 @@ final class PickerRefreshSchedule {
         return ready && current!=null && current.equals(stored);
     }
     static final long MIN_INTERVAL=5*60_000;
+    static final long START_DELAY=30_000;
+    static final long IDLE_DELAY=3_000;
     private long last=-1;
+    private long foregroundAt=-1, lastInteraction=-1;
     private boolean foreground, pending, running;
     void request(boolean force,long now) {
         if(force || last<0 || now-last>=15*60_000)pending=true;
     }
-    void resume(){foreground=true;}
+    /** Compatibility for the Android-free schedule checks that predate settle timing. */
+    void resume(){foreground=true;foregroundAt=-1;lastInteraction=-1;}
+    void resume(long now){foreground=true;foregroundAt=now;lastInteraction=now;}
+    void interaction(long now){if(foreground)lastInteraction=now;}
     void pause(){foreground=false;if(running){pending=true;last=-1;}}
-    long delay(long now){return !foreground||!pending||running?-1:last<0?0:Math.max(0,MIN_INTERVAL-(now-last));}
+    long delay(long now){
+        if(!foreground||!pending||running)return -1;
+        long interval=last<0?0:Math.max(0,MIN_INTERVAL-(now-last));
+        long settle=foregroundAt<0?0:Math.max(0,foregroundAt+START_DELAY-now);
+        long idle=lastInteraction<0?0:Math.max(0,lastInteraction+IDLE_DELAY-now);
+        return Math.max(interval,Math.max(settle,idle));
+    }
     void started(long now){pending=false;running=true;last=now;}
     void finished(){running=false;}
-    void reset(){last=-1;pending=false;running=false;}
+    void reset(){last=-1;foregroundAt=-1;lastInteraction=-1;pending=false;running=false;}
 }

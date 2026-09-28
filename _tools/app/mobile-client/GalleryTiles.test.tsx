@@ -4,12 +4,19 @@ import {Gallery} from './Gallery';
 import {dateLabel} from './model';
 import * as media from './media';
 import * as warm from './originalTicketWarm';
-const measured=vi.hoisted(()=>({sizes:[] as number[]}));
-vi.mock('@tanstack/react-virtual',()=>({useVirtualizer:({count,estimateSize}:{count:number;estimateSize(i:number):number})=>{
+const measured=vi.hoisted(()=>({sizes:[] as number[],overscan:0}));
+vi.mock('@tanstack/react-virtual',()=>({useVirtualizer:({count,estimateSize,overscan}:{count:number;estimateSize(i:number):number;overscan:number})=>{
+ measured.overscan=overscan;
  measured.sizes=Array.from({length:count},(_,i)=>estimateSize(i));
  return {measure(){},getTotalSize:()=>measured.sizes.reduce((a,b)=>a+b,0),getVirtualItems:()=>measured.sizes.map((_size,index)=>({key:index,index,start:measured.sizes.slice(0,index).reduce((a,b)=>a+b,0)}))};
 }}));
 afterEach(()=>{cleanup();vi.unstubAllGlobals();vi.restoreAllMocks();});
+it('keeps a bounded row cushion and paints a placeholder before a thumbnail resolves',()=>{
+ vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});
+ render(<Gallery items={[{id:'waiting',kind:'image'}]} density={1} identity="waiting" restoreScroll={0} onScroll={()=>{}} onOpen={()=>{}} onReady={()=>{}} onNearEnd={()=>{}} paused/>);
+ expect(screen.getByRole('button').querySelector('.missing-media')).toBeTruthy();
+ expect(measured.overscan).toBe(8);
+});
 it('keeps accessible creator/date and video labels without caption space under tiles',()=>{
  vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});
  const asset={id:'one',kind:'video',preview:'data:image/png;base64,AA',width:600,height:800,creator_name:'작가',collected_at:'2026-09-23'};

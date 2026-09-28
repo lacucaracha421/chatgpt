@@ -1,4 +1,4 @@
-/* Shared cover primitives (Library root and folder cards use them too). */
+/* Shared cover geometry used by Home and the Library folder previews. */
 .home-cover { display:flex; position:relative; align-items:center; justify-content:center; background:var(--color-surface); overflow:hidden; min-width:0; height:100%; }
 .home-cover img { width:100%; height:100%; object-fit:cover; display:block; }
 .home-cover-group { display:grid; grid-template-columns:2fr 1fr; grid-template-rows:1fr 1fr; gap:2px; height:clamp(130px,16vw,190px); }
@@ -7,276 +7,148 @@
 @media (max-width:1000px) { .home-cover-group { height:170px; } }
 @media (max-width:480px) { .home-cover-group { height:132px; } }
 
-/*
- * Home (HOME-DASH-002, direction A: cover shelf + number tiles). Numbers are tiles cut from one
- * surface by 1px lines; everything quiet folds into one status line; the only images are the
- * 신간 · 발매 예정 covers and 다시 보기. No shadows, small radii (DESIGN.md §4).
- */
-.home-scroll { flex:1; min-height:0; overflow:auto; padding:12px 16px 24px; scrollbar-width:thin; display:flex; flex-direction:column; gap:18px; }
+/* Home A: four content blocks share the available screen height. */
+.home-scroll { flex:1; min-height:0; overflow:auto; padding:10px 16px 16px; scrollbar-width:thin; display:flex; flex-direction:column; }
 .home-scroll button { font:inherit; color:inherit; text-align:left; }
 .home-scroll > .home-status { margin-top:-8px; }
 .home-icon { width:18px; height:18px; flex:none; color:var(--color-muted); }
-.home-chev { width:16px; height:16px; flex:none; color:var(--color-muted); }
+.home-chev { width:16px; height:16px; flex:none; color:var(--color-faint); }
 .home-ok { width:18px; height:18px; flex:none; color:#7fb88a; }
-.home-stale { flex:none; margin-left:8px; padding:0 5px; border:1px solid var(--color-border); border-radius:2px; font-size:12px; line-height:20px; color:var(--color-muted); white-space:nowrap; vertical-align:1px; }
+.home-c { gap:0; padding-top:10px; }
+/* flex-basis 0 makes the grid height definite, so the fr rows share the screen instead of growing it. */
+.home-c-grid { flex:1 1 0; min-height:0; display:grid; grid-template-rows:minmax(0,.9fr) minmax(0,1.35fr) minmax(0,1.15fr) minmax(0,1fr); gap:12px; }
+.home-block { display:flex; min-width:0; min-height:0; overflow:hidden; }
+.home-sec { display:flex; flex:1; min-width:0; min-height:0; flex-direction:column; }
+.home-sh { display:flex; align-items:center; gap:8px; min-width:0; min-height:24px; margin-bottom:6px; flex:none; }
+.home-sh h2 { margin:0; color:var(--color-faint); font-size:15px; font-weight:600; white-space:nowrap; }
+.home-sh-more { display:inline-flex; align-items:center; justify-content:center; flex:none; width:44px; height:44px; margin:-10px -8px -10px auto; padding:0; border:0; background:none; color:var(--color-faint); }
+.home-sh-more svg { width:18px; height:18px; }
+.home-sh-more:focus-visible, .home-shelf-item:focus-visible, .home-revisit:focus-visible, .home-artist-strip:focus-visible, .home-asset-tile:focus-visible, .home-tall-memo:focus-visible { outline:2px solid var(--color-focus); outline-offset:2px; }
 
-/* Section heading: the index label (5px square + fading hairline, DESIGN.md §6), then 전체 ›. */
-.home-sec { display:flex; flex-direction:column; min-width:0; }
-.home-sh { display:flex; align-items:center; gap:8px; min-height:36px; min-width:0; margin-bottom:6px; }
-.home-sh::before { content:''; width:5px; height:5px; flex:none; background:var(--color-muted); }
-.home-sh h2 { margin:0; font-size:15.5px; font-weight:600; white-space:nowrap; }
-.home-sh-meta { display:flex; align-items:center; min-width:0; overflow:hidden; font-size:13px; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
-.home-sh-meta .numeric { margin:0 2px; font-size:15px; color:var(--color-text); }
-.home-sh-rule { flex:1; min-width:12px; height:1px; background:linear-gradient(90deg,var(--color-border-strong),transparent); }
-.home-sh-more { display:inline-flex; align-items:center; gap:2px; flex:none; min-width:44px; height:44px; margin:-4px -6px -4px 0; padding:0 4px 0 8px; border:0; background:none; font-size:13.5px; color:var(--color-muted); white-space:nowrap; }
-.home-sh-more svg { width:15px; height:15px; }
-
-/* Number tiles. */
-.home-top { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,3fr); gap:10px; align-items:stretch; }
-.home-top > .home-sec > .home-tiles { flex:1; min-height:172px; }
-.home-tiles { display:grid; gap:1px; overflow:hidden; border:1px solid var(--color-border); border-radius:3px; background:var(--color-border); }
-.home-todo { grid-auto-rows:minmax(0,1fr); }
-.home-tile { position:relative; display:flex; flex-direction:column; justify-content:space-between; gap:4px; min-width:0; min-height:74px; padding:10px 12px 9px 14px; border:0; border-radius:0; background:var(--color-surface); }
-.home-tile:active, .home-seg:active, .home-memo:active, .home-shelf-item:active .home-shelf-art, .home-revisit:active .home-revisit-pics { background:var(--color-surface-pressed, var(--color-control-pressed)); }
-.home-tile-n { font-size:30px; font-weight:500; line-height:1; color:var(--color-text); white-space:nowrap; }
-.home-tile-n small { margin-left:3px; font:500 13px var(--font-ui); color:var(--color-muted); }
-.home-tile-text { display:flex; flex-direction:column; min-width:0; }
-.home-tile-l { overflow:hidden; font-size:13.5px; font-weight:500; line-height:1.4; color:#c4c6c8; white-space:nowrap; text-overflow:ellipsis; }
-.home-tile-s { overflow:hidden; font-size:12px; line-height:1.4; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
-.home-tile-text .home-progress { margin-top:6px; }
-.home-tile.is-act { background:var(--color-surface-elevated); }
-.home-tile.is-act .home-tile-n { font-size:34px; color:var(--color-accent); }
-.home-tile.is-act .home-tile-l { color:var(--color-text); }
-/* Three or four counts: two by two (the third spans the row), the notes left out, so the row keeps its height. */
-.home-todo.is-many { grid-template-columns:repeat(2,minmax(0,1fr)); }
-.home-todo.is-many .home-tile:last-child:nth-child(odd) { grid-column:1 / -1; }
-.home-todo.is-many .home-tile { min-height:60px; padding:8px 10px 7px 12px; gap:3px; }
-.home-todo.is-many .home-tile .home-tile-n { font-size:26px; }
-.home-todo.is-many .home-tile-s { display:none; }
-.home-stats.is-row .home-tile { min-height:74px; }
-.home-scroll.is-stale .home-tile-n { color:#c4c6c8; }
+.home-memo-grid { display:grid; flex:1; min-height:0; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1px; overflow:hidden; border:1px solid var(--color-border); border-radius:3px; background:var(--color-border); }
+.home-memo-grid.is-three { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.home-tall-memo { display:flex; flex-direction:column; gap:8px; min-width:0; min-height:0; overflow:hidden; padding:10px 11px; border:0; border-radius:0; background:var(--color-surface); }
+.home-tall-memo:active, .home-asset-tile:active, .home-revisit:active, .home-artist-strip:active { background:var(--color-surface-pressed,var(--color-control-pressed)); }
+.home-memo-title { display:flex; align-items:center; gap:6px; min-width:0; color:var(--color-text); font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.home-memo-snippet { display:-webkit-box; overflow:hidden; -webkit-line-clamp:6; -webkit-box-orient:vertical; color:var(--color-muted); font-size:12px; line-height:1.45; text-align:left; white-space:normal; }
+.home-checklist-lines { display:flex; flex-direction:column; gap:4px; overflow:hidden; min-height:0; }
+.home-checklist-lines > span { display:flex; align-items:center; gap:6px; overflow:hidden; color:var(--color-muted); font-size:12px; white-space:nowrap; text-overflow:ellipsis; }
+.home-checklist-lines i { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; flex:none; border:1px solid var(--color-border-strong); border-radius:2px; font-style:normal; font-size:12px; color:var(--color-accent); }
+.home-checklist-lines i.is-checked { border-color:var(--color-accent); }
+.home-memo-foot { display:flex; align-items:center; gap:4px; margin-top:auto; color:var(--color-muted); font-size:12px; }
+.home-memo-foot .home-progress { flex:1; margin-left:4px; }
+.home-ledger-month, .home-ledger-latest small { color:var(--color-muted); font-size:12px; }
+.home-ledger-total { display:block; margin-top:auto; font-size:24px; font-weight:500; line-height:1.1; }
+.home-ledger-bars, .home-ledger-latest { display:flex; flex-direction:column; gap:5px; min-width:0; margin-top:auto; }
+.home-ledger-bars > span > span, .home-ledger-latest > span { display:flex; justify-content:space-between; gap:4px; min-width:0; color:var(--color-muted); font-size:12px; }
+.home-ledger-bars b, .home-ledger-latest b { overflow:hidden; font-weight:500; white-space:nowrap; text-overflow:ellipsis; }
+.home-ledger-bars em, .home-ledger-latest em { flex:none; font-style:normal; color:var(--color-text); }
+.home-ledger-bars .home-progress { height:3px; margin-top:2px; }
+.home-tall-memo.is-empty, .home-memo-locked { color:var(--color-muted); font-size:12px; }
+.home-memo-locked { margin:5px 0 0; }
+.home-tall-memo.is-loading { background:var(--color-surface-elevated); }
 
 .home-progress { display:block; height:3px; overflow:hidden; border-radius:2px; background:var(--color-border); }
 .home-progress > i { display:block; height:100%; background:var(--color-accent); }
 .home-progress.is-muted > i { background:var(--color-muted); }
 
-/* The status line: quiet things in one line, a running transfer with its progress, the server dot. */
-.home-status { display:flex; align-items:center; min-width:0; min-height:48px; overflow:hidden; padding:0 4px 0 6px; border:1px solid var(--color-border); border-radius:3px; background:var(--color-surface); font-size:14px; color:var(--color-muted); white-space:nowrap; }
-.home-status.is-alert { border-color:#5a3838; }
-.home-seg { position:relative; display:flex; align-items:center; gap:7px; flex:none; min-width:0; height:46px; padding:0 8px; border:0; background:none; color:var(--color-muted); }
-.home-seg + .home-seg::before { content:''; position:absolute; left:0; top:13px; width:1px; height:20px; background:var(--color-border); }
-.home-seg + .home-seg { padding-left:14px; }
-.home-seg.is-grow { flex:1 1 auto; }
-.home-seg.is-news { flex:0 1 auto; }
-.home-seg b { font-weight:500; color:var(--color-text); }
-.home-seg .numeric { font-size:17px; color:var(--color-text); }
-.home-seg .numeric.is-accent { color:var(--color-accent); }
-.home-seg .home-progress { width:84px; flex:none; }
-.home-seg-text { min-width:0; overflow:hidden; text-overflow:ellipsis; }
-.home-seg-text .numeric { margin:0 2px; }
-.home-seg.is-server { margin-left:auto; }
-.home-seg.is-server .home-seg-text { max-width:260px; }
-.home-dot { display:inline-block; width:8px; height:8px; flex:none; border-radius:50%; background:#7fb88a; }
-.home-dot.is-busy { background:#d8c07a; }
-.home-dot.is-off { background:var(--color-danger); }
-
-/* 신간 · 발매 예정: a date rail above each cover, covers at the book ratio, bled to the right edge. */
-.home-shelf { display:flex; gap:14px; align-items:flex-start; margin-right:-16px; padding-right:16px; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; }
+/* 신간: a date and D-day rail, then the cover and one title line. */
+.home-shelf { container-type:size; display:flex; flex:1; min-height:0; gap:12px; overflow:hidden; overscroll-behavior-x:contain; scrollbar-width:none; }
 .home-shelf::-webkit-scrollbar { display:none; }
-.home-shelf-item { display:flex; flex-direction:column; flex:none; width:133px; min-width:0; padding:0; border:0; background:none; }
-.home-rail { display:flex; align-items:baseline; gap:5px; height:26px; margin-bottom:8px; border-bottom:1px solid var(--color-border); white-space:nowrap; }
-.home-rail-d { font-size:13.5px; font-weight:600; color:var(--color-text); }
-.home-rail-d.numeric, .home-rail-d .numeric { font-size:17px; font-weight:500; line-height:1; }
-.home-rail-w { font-size:12px; color:var(--color-muted); }
-.home-rail-dd { margin-left:auto; font-size:14px; line-height:1; color:var(--color-muted); }
+/* Covers grow with the row: the item width follows the shelf height (rail + title + platforms ≈ 72px). */
+.home-shelf-item { display:grid; grid-template-rows:auto auto auto auto; align-content:start; flex:0 0 auto; width:clamp(84px,calc((100cqh - 72px) * 2 / 3),170px); min-width:0; height:100%; padding:0; border:0; background:none; }
+.home-rail { display:flex; align-items:baseline; gap:5px; min-height:20px; margin-bottom:5px; border-bottom:1px solid var(--color-border); white-space:nowrap; }
+.home-rail-d { color:var(--color-text); font-size:12px; font-weight:600; line-height:1.2; }
+.home-rail-dd { margin-left:auto; color:var(--color-muted); font-size:12px; line-height:1.2; }
 .home-rail.is-new { border-bottom-color:var(--color-accent); }
 .home-rail.is-new .home-rail-d { color:var(--color-accent); }
-.home-shelf-art { position:relative; display:block; overflow:hidden; border-radius:var(--radius-tile); background:var(--color-surface-elevated); }
-.home-newmark { position:absolute; left:0; top:0; padding:0 6px; background:var(--color-accent); font:600 11.5px/20px var(--font-ui); color:var(--color-on-accent); }
-.home-shelf-title { margin-top:7px; overflow:hidden; font-size:14px; font-weight:500; line-height:1.3; white-space:nowrap; text-overflow:ellipsis; }
-.home-shelf-sub { display:flex; flex-wrap:nowrap; align-items:center; overflow:hidden; font-size:12.5px; line-height:1.45; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
-.home-shelf-sub .platform-badges { flex-wrap:nowrap; overflow:hidden; }
-.home-shelf-sub .numeric { font-size:14px; color:var(--color-muted); }
-.home-kind { display:inline-block; flex:none; margin-right:5px; padding:0 4px; border:1px solid var(--color-border-strong); border-radius:2px; font-size:11px; font-weight:500; line-height:15px; color:var(--color-muted); }
-
-/* 다시 보기: justified rows (every image at its own ratio), the caption under, never over. */
-.home-revisits { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
-.home-revisit { display:flex; flex-direction:column; min-width:0; padding:0; border:0; background:none; }
-.home-revisit-pics { display:flex; flex-direction:column; gap:4px; }
-.home-jrow { display:flex; gap:4px; }
-.home-jcell { display:block; flex-basis:0; min-width:0; overflow:hidden; border-radius:1px; background:var(--color-surface); }
-.home-jcell .home-cover { width:100%; height:100%; }
-.home-revisits.is-single .home-jrow { max-height:220px; }
-.home-revisit-cap { display:flex; align-items:center; gap:8px; min-width:0; min-height:48px; padding-top:4px; }
-.home-revisit-text { display:flex; flex-direction:column; flex:1; min-width:0; }
-.home-revisit-text strong { overflow:hidden; font-size:14.5px; font-weight:600; line-height:1.35; white-space:nowrap; text-overflow:ellipsis; }
-.home-revisit-text small { overflow:hidden; font-size:12.5px; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
-
-/* 메모: compact two-column cards. */
-.home-memos { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-.home-memo { display:flex; align-items:center; gap:12px; min-width:0; min-height:62px; overflow:hidden; padding:0 10px 0 0; border:1px solid var(--color-border); border-radius:3px; background:var(--color-surface); }
-.home-memo-strip { width:3px; align-self:stretch; flex:none; background:var(--color-border-strong); }
-.home-memo-text { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
-.home-memo-text strong { overflow:hidden; font-size:14.5px; font-weight:600; line-height:1.3; white-space:nowrap; text-overflow:ellipsis; }
-.home-memo-text small { display:flex; align-items:center; gap:4px; overflow:hidden; font-size:12.5px; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
-.home-memo-text small .numeric { font-size:14.5px; color:var(--color-text); }
-.home-memo-text small .home-progress { width:64px; flex:none; margin-left:4px; }
-
-/* Offline notice with 다시 연결. */
-.home-offline { display:flex; align-items:center; gap:12px; padding:9px 14px; border:1px solid #4a3232; border-radius:3px; background:#231d1d; }
-.home-offline > svg { width:22px; height:22px; flex:none; color:var(--color-danger); }
-.home-offline > div { flex:1; min-width:0; }
-.home-offline strong { font-size:15px; font-weight:600; }
-.home-offline p { margin:2px 0 0; font-size:13px; color:#cfc4c4; }
-.home-retry { flex:none; min-height:44px; padding:0 12px; border:1px solid #6a4545; border-radius:4px; background:none; font-size:13.5px; white-space:nowrap; }
-
-@media (max-width:700px) {
-  .home-top, .home-revisits, .home-memos { grid-template-columns:1fr; }
-  .home-stats.is-row { grid-template-columns:repeat(3,minmax(0,1fr)) !important; }
-  .home-status { flex-wrap:wrap; }
-}
-
-/* Tablet Home C (TABLET-PARITY-001, Revision 2). The existing surfaces and type scale stay
- * intact; only the dashboard composition changes at this screen. */
-.home-c { gap:14px; padding-top:10px; }
-.home-c .home-sec { min-width:0; }
-.home-c .home-sh { min-height:30px; margin-bottom:5px; }
-.home-c .home-sh h2 { font-size:15px; }
-.home-c-top, .home-c-middle, .home-c-bottom { display:grid; gap:10px; align-items:stretch; }
-.home-c-top { grid-template-columns:1fr; }
-.home-c-middle, .home-c-bottom { grid-template-columns:repeat(2,minmax(0,1fr)); }
-.home-c-top > .home-sec, .home-c-middle > .home-sec, .home-c-bottom > .home-sec { min-width:0; }
-
-.home-tall-memo:active, .home-todo-tile:active, .home-asset-tile:active { background:var(--color-surface-pressed,var(--color-control-pressed)); }
-.home-memo-title { display:flex; align-items:center; gap:6px; min-width:0; color:var(--color-muted); font-size:12px; }
-
-.home-memo-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1px; height:182px; overflow:hidden; border:1px solid var(--color-border); border-radius:3px; background:var(--color-border); }
-.home-memo-grid.is-three { grid-template-columns:repeat(3,minmax(0,1fr)); }
-.home-tall-memo { display:flex; flex-direction:column; gap:8px; min-width:0; padding:10px 11px; border:0; border-radius:0; background:var(--color-surface); }
-.home-memo-snippet { display:-webkit-box; overflow:hidden; -webkit-line-clamp:6; -webkit-box-orient:vertical; color:var(--color-muted); font-size:12px; line-height:1.45; text-align:left; white-space:normal; }
-.home-tall-memo .home-memo-title { color:var(--color-text); font-size:13px; font-weight:600; }
-.home-checklist-lines { display:flex; flex-direction:column; gap:4px; overflow:hidden; min-height:0; }
-.home-checklist-lines > span { display:flex; align-items:center; gap:6px; overflow:hidden; font-size:12px; white-space:nowrap; text-overflow:ellipsis; }
-.home-checklist-lines i { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; flex:none; border:1px solid var(--color-border-strong); border-radius:2px; font-style:normal; font-size:11px; color:var(--color-accent); }
-.home-checklist-lines i.is-checked { border-color:var(--color-accent); }
-.home-memo-foot { display:flex; align-items:center; gap:4px; margin-top:auto; color:var(--color-muted); font-size:11px; }
-.home-memo-foot .home-progress { flex:1; margin-left:4px; }
-.home-ledger-total { display:block; font-size:24px; font-weight:500; line-height:1.1; }
-.home-ledger-month { color:var(--color-muted); font-size:11px; }
-.home-ledger-bars, .home-ledger-latest { display:flex; flex-direction:column; gap:5px; min-width:0; margin-top:auto; }
-.home-ledger-bars > span > span, .home-ledger-latest > span { display:flex; justify-content:space-between; gap:4px; min-width:0; color:var(--color-muted); font-size:11px; }
-.home-ledger-bars b, .home-ledger-latest b { overflow:hidden; font-weight:500; white-space:nowrap; text-overflow:ellipsis; }
-.home-ledger-bars em, .home-ledger-latest em { flex:none; font-style:normal; color:var(--color-text); }
-.home-ledger-bars .home-progress { height:3px; margin-top:2px; }
-.home-ledger-latest small { color:var(--color-muted); font-size:11px; }
-.home-tall-memo.is-empty { color:var(--color-muted); font-size:12px; }
-.home-memo-locked { margin:5px 0 0; color:var(--color-muted); font-size:12px; }
-
-.home-c > .home-sec:nth-of-type(2) { min-width:0; }
-.home-c .home-shelf { gap:12px; }
-.home-c .home-shelf-item { width:112px; }
-.home-c .home-rail { height:22px; margin-bottom:5px; }
-.home-c .home-shelf-art { height:132px; }
-.home-c .home-shelf-art > .collection-art, .home-c .home-shelf-art > .home-home-image, .home-c .home-shelf-art > .home-cover-placeholder { width:100%; height:100%; }
-.home-c .home-shelf-title { margin-top:5px; font-size:12px; }
-.home-c .home-shelf-sub { font-size:11px; }
-.home-c .home-kind { font-size:10px; line-height:14px; }
-.home-external-item .home-shelf-art { position:relative; }
-.home-interest { position:absolute; right:4px; bottom:4px; width:22px; height:22px; border-radius:50%; background:rgba(0,0,0,.68); color:#e9c46a; font-size:16px; line-height:22px; text-align:center; }
-.home-empty-shelf { margin:0; color:var(--color-muted); font-size:13px; }
+.home-shelf-art { position:relative; display:block; width:100%; min-height:0; aspect-ratio:2 / 3; overflow:hidden; border-radius:var(--radius-tile); background:var(--color-surface-elevated); }
+.home-shelf-art > .collection-art, .home-shelf-art > .home-home-image, .home-shelf-art > .home-cover-placeholder { width:100%; height:100%; display:block; object-fit:cover; }
+.home-newmark { position:absolute; left:6px; top:6px; padding:0 6px; border-radius:3px; background:var(--color-accent); color:var(--color-on-accent); font:600 12px/20px var(--font-ui); }
+.home-shelf-title { margin-top:5px; overflow:hidden; color:var(--color-text); font-size:15px; font-weight:600; line-height:1.2; white-space:nowrap; text-overflow:ellipsis; }
+.home-shelf-sub { display:flex; align-items:center; min-height:20px; margin-top:3px; overflow:hidden; color:var(--color-muted); font-size:12px; white-space:nowrap; }
+.home-shelf-sub .platform-badges { flex-wrap:nowrap; gap:4px; overflow:hidden; }
+.home-shelf-item.is-loading .home-rail, .home-shelf-item.is-loading .home-shelf-art, .home-shelf-item.is-loading .home-shelf-title { background:var(--color-surface-elevated); color:transparent; }
+.home-empty-shelf { align-self:center; color:var(--color-muted); font-size:12px; }
 .home-home-image { display:block; object-fit:cover; }
 .home-cover-placeholder { display:flex; align-items:center; justify-content:center; min-width:0; min-height:0; overflow:hidden; background:var(--color-surface-elevated); color:var(--color-muted); }
 .home-cover-placeholder svg { width:20px; height:20px; }
 .home-cover-placeholder.is-private, .home-private-cell { background:#17191b; }
 
-.home-c-middle { grid-template-columns:minmax(0,1.08fr) minmax(0,.92fr); }
-.home-c-middle.is-wide { grid-template-columns:1fr; }
-.home-av-card { display:flex; flex-direction:column; gap:10px; min-height:168px; padding:12px; border:1px solid var(--color-border); border-radius:3px; background:var(--color-surface); }
-.home-av-head, .home-av-work { display:flex; align-items:center; gap:10px; min-width:0; }
-.home-av-head > span:last-child, .home-av-work > span:last-child { display:flex; flex-direction:column; gap:2px; min-width:0; }
-.home-av-head small, .home-av-work small { color:var(--color-muted); font-size:11px; }
-.home-av-head strong { font-size:17px; font-weight:600; }
-.home-av-head em, .home-av-work em { overflow:hidden; color:var(--color-muted); font-size:11px; font-style:normal; white-space:nowrap; text-overflow:ellipsis; }
-.home-av-portrait { position:relative; display:flex; align-items:center; justify-content:center; width:62px; height:74px; flex:none; overflow:hidden; border-radius:2px; background:var(--color-surface-elevated); color:var(--color-accent); }
-.home-av-portrait > .home-home-image, .home-av-portrait > .home-cover-placeholder { width:100%; height:100%; }
-.home-av-portrait b { position:absolute; font-size:22px; font-weight:500; }
-.home-av-work { margin-top:auto; padding-top:9px; border-top:1px solid var(--color-border); }
-.home-av-mini { width:34px; height:44px; flex:none; overflow:hidden; background:var(--color-surface-elevated); }
-.home-av-mini > .home-home-image, .home-av-mini > .home-cover-placeholder { width:100%; height:100%; }
-.home-todo-cards { display:grid; grid-template-rows:repeat(3,minmax(0,1fr)); gap:1px; height:168px; overflow:hidden; border:1px solid var(--color-border); border-radius:3px; background:var(--color-border); }
-.home-todo-tile { display:flex; align-items:center; gap:9px; min-width:0; padding:8px 11px; border:0; border-radius:0; background:var(--color-surface); }
-.home-todo-tile strong { width:45px; flex:none; font-size:23px; font-weight:500; color:var(--color-accent); }
-.home-todo-tile strong small { margin-left:2px; font-size:10px; color:var(--color-muted); }
-.home-todo-tile span { overflow:hidden; flex:1; font-size:12.5px; font-weight:600; white-space:nowrap; text-overflow:ellipsis; }
-.home-todo-tile em { overflow:hidden; max-width:90px; color:var(--color-muted); font-size:10px; font-style:normal; white-space:nowrap; text-overflow:ellipsis; }
-.home-todo-tile:only-child { min-height:0; }
-.home-c-middle.is-wide .home-todo-cards { grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:1fr; height:88px; }
-.home-c-middle.is-wide .home-todo-tile { flex-direction:column; align-items:flex-start; justify-content:center; gap:2px; }
-.home-c-middle.is-wide .home-todo-tile span { flex:none; max-width:100%; }
-.home-c-middle.is-wide .home-todo-tile em { max-width:100%; }
-
-.home-c-bottom { grid-template-columns:minmax(0,1.45fr) minmax(0,.85fr); }
-.home-c-revisits { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
-.home-c .home-revisit, .home-c .home-revisit.is-empty { min-width:0; }
-.home-c .home-revisit-pics { height:154px; overflow:hidden; }
-.home-c .home-jcell { background:var(--color-surface-elevated); }
-.home-private-cell { display:block; width:100%; height:100%; }
-.home-c .home-revisit-cap { min-height:38px; }
-.home-c .home-revisit-text strong { font-size:12px; }
-.home-c .home-revisit-text small { font-size:10.5px; }
-.home-asset-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1px; height:192px; overflow:hidden; border:1px solid var(--color-border); border-radius:3px; background:var(--color-border); }
-.home-asset-tile { display:flex; flex-direction:column; justify-content:center; gap:4px; min-width:0; padding:10px; border:0; border-radius:0; background:var(--color-surface); }
-.home-asset-tile strong { font-size:25px; font-weight:500; }
-.home-asset-tile strong small { margin-left:2px; font-size:11px; color:var(--color-muted); }
-.home-asset-tile span { color:var(--color-muted); font-size:11px; }
-
+/* Release detail keeps the interest action available after a cover tap. */
 .home-detail-sheet { display:flex; flex-direction:column; gap:8px; }
 .home-detail-cover { width:92px; height:116px; overflow:hidden; border-radius:2px; background:var(--color-surface-elevated); }
 .home-detail-cover > .home-home-image, .home-detail-cover > .home-cover-placeholder { width:100%; height:100%; }
+.home-kind { display:inline-block; align-self:flex-start; padding:0 4px; border:1px solid var(--color-border-strong); border-radius:2px; color:var(--color-muted); font-size:12px; line-height:18px; }
 .home-detail-original, .home-detail-meta, .home-detail-description { margin:0; color:var(--color-muted); font-size:12px; }
 .home-detail-description { color:var(--color-text); line-height:1.5; }
-.home-interest-action { min-height:44px; margin-top:5px; padding:0 12px; border:1px solid var(--color-accent); border-radius:3px; background:var(--color-accent); color:var(--color-on-accent); font-weight:600; }
+.home-interest-action { min-height:44px; margin-top:5px; padding:0 12px; border:1px solid var(--color-accent); border-radius:3px; background:var(--color-accent); color:var(--color-on-accent); font-size:15px; font-weight:600; }
 
-/* The Tab S11 at its display-size setting is ~674 CSS px wide: keep Home C's two columns there. */
+/* 오늘: the AV face sits beside the one-year mosaic. */
+.home-today-grid { display:grid; flex:1; min-height:0; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; }
+.home-today-grid.is-wide { grid-template-columns:1fr; }
+.home-today-av { display:flex; min-width:0; min-height:0; }
+.home-av-card { display:grid; grid-template-columns:minmax(96px,.58fr) minmax(0,1fr); align-items:stretch; gap:12px; width:100%; height:100%; min-height:0; padding:0; background:none; }
+.home-av-face { display:flex; align-items:center; justify-content:center; min-width:0; min-height:0; overflow:hidden; border-radius:3px; background:var(--color-surface-elevated); }
+.home-av-face > .home-home-image, .home-av-face > .home-cover-placeholder { width:100%; height:100%; object-fit:cover; }
+.home-av-face > .home-home-image { object-position:100% 25%; }
+.home-av-face b { font-size:24px; font-weight:500; }
+.home-av-side { display:flex; align-items:flex-start; min-width:0; padding-top:4px; }
+.home-av-side strong { overflow:hidden; color:var(--color-text); font-size:15px; font-weight:600; line-height:1.3; white-space:nowrap; text-overflow:ellipsis; }
+.home-av-card.is-loading { pointer-events:none; }
+.home-av-card.is-loading .home-av-face, .home-av-placeholder-line { background:var(--color-surface-elevated); }
+.home-av-placeholder-line { display:block; width:78%; height:12px; border-radius:2px; }
+.home-av-placeholder-line.is-short { width:54%; margin-top:8px; }
+.home-revisit, .home-artist-strip { display:flex; flex-direction:column; min-width:0; min-height:0; padding:0; border:0; background:none; }
+.home-revisit-pics, .home-artist-pics { display:flex; flex:1; flex-direction:column; min-height:0; gap:4px; overflow:hidden; }
+.home-jrow, .home-artist-pics { display:flex; gap:4px; min-height:0; }
+.home-jcell, .home-artist-cell { display:block; flex:1 1 0; min-width:0; min-height:0; overflow:hidden; border-radius:2px; background:var(--color-surface-elevated); }
+.home-jcell .home-cover, .home-artist-cell .home-cover { width:100%; height:100%; }
+.home-caption { display:block; flex:none; min-height:20px; padding-top:4px; overflow:hidden; color:var(--color-faint); font-size:12px; line-height:1.2; white-space:nowrap; text-overflow:ellipsis; }
+.home-revisit.is-empty { display:flex; }
+.home-revisit.is-empty > .home-private-cell { flex:1; min-height:0; }
+
+/* 기록: artist strip, then the four destination numbers. */
+.home-record-content { display:grid; flex:1; min-height:0; grid-template-rows:minmax(0,1fr) auto; gap:8px; }
+.home-artist-pics { flex-direction:row; }
+.home-artist-strip.is-empty .home-artist-pics { flex:1; }
+.home-asset-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); min-height:66px; overflow:hidden; border-top:1px solid var(--color-border); }
+.home-asset-tile { display:flex; flex-direction:column; justify-content:center; gap:2px; min-width:0; padding:6px 8px; border:0; border-right:1px solid var(--color-border); background:none; }
+.home-asset-tile:last-child { border-right:0; }
+.home-asset-tile strong { color:var(--color-text); font-size:24px; font-weight:500; line-height:1; white-space:nowrap; }
+.home-asset-tile strong small { margin-left:2px; color:var(--color-muted); font-size:12px; }
+.home-asset-tile span { overflow:hidden; color:var(--color-muted); font-size:12px; white-space:nowrap; text-overflow:ellipsis; }
+
+/* Offline remains explicit; stale age is intentionally kept out of section headers. */
+.home-offline { display:flex; align-items:center; gap:12px; flex:none; margin-bottom:10px; padding:9px 14px; border:1px solid #4a3232; border-radius:3px; background:#231d1d; }
+.home-offline > svg { width:22px; height:22px; flex:none; color:var(--color-danger); }
+.home-offline > div { flex:1; min-width:0; }
+.home-offline strong { font-size:15px; font-weight:600; }
+.home-offline p { margin:2px 0 0; color:#cfc4c4; font-size:12px; }
+.home-retry { flex:none; min-height:44px; padding:0 12px; border:1px solid #6a4545; border-radius:4px; background:none; font-size:12px; white-space:nowrap; }
+
+/* Home header badges share the same quiet pill treatment as the approved tablet mockup. */
+.home-header-todo-badges { display:flex; align-items:center; gap:4px; min-width:0; }
+.home-header-todo-badge { display:inline-flex; align-items:center; min-height:30px; padding:0 9px; border:1px solid var(--color-border-strong); border-radius:999px; background:rgba(221,216,202,.08); color:var(--color-muted); font-size:12px; white-space:nowrap; }
+.home-header-todo-badge .numeric { margin-left:4px; color:var(--color-accent); font-size:12px; }
+.home-header-todo-badge:active { background:var(--color-surface-pressed,var(--color-control-pressed)); }
+
+/* Home entry only: a fresh tab settles by block, not when a source refreshes. */
+@keyframes home-block-enter { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+.home-enter-block { animation:home-block-enter 180ms var(--ease-standard) both; }
+.home-c-grid > .home-enter-block:nth-child(1) { animation-delay:0ms; }
+.home-c-grid > .home-enter-block:nth-child(2) { animation-delay:30ms; }
+.home-c-grid > .home-enter-block:nth-child(3) { animation-delay:60ms; }
+.home-c-grid > .home-enter-block:nth-child(4) { animation-delay:90ms; }
+
 @media (max-width:520px) {
-  .home-c-top, .home-c-middle, .home-c-bottom { grid-template-columns:1fr; }
-  .home-c-revisits { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .home-c-grid { gap:9px; }
+  .home-today-grid { grid-template-columns:1fr; }
+  .home-today-grid:not(.is-wide) .home-today-av { min-height:112px; }
+  .home-record-content { gap:5px; }
+  .home-asset-tile { padding-inline:4px; }
 }
 
-/* A long AV title stays within two lines so the card keeps Home C's one-screen height. */
-.home-av-work strong { display:-webkit-box; overflow:hidden; -webkit-line-clamp:2; -webkit-box-orient:vertical; white-space:normal; }
-
-/* Fit the whole Home on one Galaxy Tab S11 screen (≈674 × 950 CSS px of content, 2026-09-28):
-   each block gives up a little height instead of the page scrolling. */
-.home-c { gap:11px; }
-.home-c .home-sh { min-height:28px; margin-bottom:4px; }
-.home-c .home-memo-grid { height:160px; }
-.home-c .home-shelf-item { width:104px; }
-.home-c .home-shelf-art { height:122px; }
-.home-c .home-av-card { min-height:150px; gap:8px; }
-.home-c .home-todo-cards { height:150px; }
-.home-c .home-revisit-pics { height:140px; }
-.home-c .home-asset-grid { height:172px; }
-
-/* 오늘의 AV 배우: face | name (+ details later) (2026-09-28). */
-.home-c .home-av-split { display:grid; grid-template-columns:96px minmax(0,1fr); gap:12px; min-height:0; padding:10px; }
-.home-av-face { position:relative; display:flex; align-items:center; justify-content:center; height:100%; min-height:112px; overflow:hidden; border-radius:2px; background:var(--color-surface-elevated); }
-.home-av-face > .home-home-image, .home-av-face > .home-cover-placeholder { width:100%; height:100%; }
-/* A DVD jacket is back | spine | front: the performer is on the right half. */
-.home-av-face > .home-home-image { object-position:100% 25%; }
-.home-av-face b { font-size:22px; font-weight:500; }
-.home-av-side { display:flex; flex-direction:column; gap:3px; min-width:0; }
-.home-av-side strong { overflow:hidden; font-size:17px; font-weight:600; white-space:nowrap; text-overflow:ellipsis; }
-.home-av-side em { overflow:hidden; color:var(--color-muted); font-size:11.5px; font-style:normal; white-space:nowrap; text-overflow:ellipsis; }
-.home-av-fact { margin-top:6px; color:var(--color-muted); font-size:12px; }
-.home-av-fact b { margin-right:2px; color:var(--color-text); font-size:16px; font-weight:500; }
-
-/* The middle row gives up height; 신간 · 발매 예정 gets it back as breathing room. */
-.home-c .home-todo-cards { height:132px; }
-.home-c .home-todo-tile { padding:5px 11px; }
-.home-c .home-shelf-item { width:110px; }
-.home-c .home-shelf-art { height:134px; }
-.home-c .home-rail { margin-bottom:7px; }
-.home-c .home-shelf-title { margin-top:7px; }
-.home-c .home-shelf-sub { margin-top:4px; min-height:20px; }
-.home-c .home-shelf-sub .platform-badges { gap:4px; }
+@media (prefers-reduced-motion:reduce) {
+  .home-enter-block { animation:none; }
+}

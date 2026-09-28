@@ -1,5 +1,5 @@
 import {usePublicationCheck} from './usePublicationCheck';
-import {useCallback,useEffect,useLayoutEffect,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
+import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
 import {useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from './motion';
 import {catalogDisplayTitle} from '../src/manga/catalogDisplayTitle';
 import {ArrowLeftIcon,BookmarkIcon,BookOpenIcon,ChevronDownIcon,MagnifyingGlassIcon,FunnelIcon,XMarkIcon} from '@heroicons/react/24/outline';
@@ -12,6 +12,7 @@ import {CatalogReader} from './CatalogReader';
 import {CatalogRefreshBanner,CatalogRefreshControl,useCatalogRefresh,useNow} from './CatalogRefresh';
 import {BottomSheet} from './BottomSheet';
 import {usePullToRefresh} from './usePullToRefresh';
+import {Scrubber} from './Scrubber';
 import {CatalogSettings} from './CatalogSettings';
 import {CatalogDuplicates,DuplicateReviewEntry,useDuplicateCount} from './CatalogDuplicates';
 import {useBookmarks,usePendingRetry} from './useBookmarks';
@@ -45,7 +46,7 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
   const [duplicates,setDuplicates]=useState(false);
   useEffect(()=>{if(openDuplicates)setDuplicates(true);},[openDuplicates]);
   const closeDuplicates=useCallback(()=>{setDuplicates(false);onReturnHome?.();},[onReturnHome]);
-  const duplicateCount=useDuplicateCount(settings);
+  const duplicateCount=useDuplicateCount(settings, endpoint);
   const [preferenceCheck,setPreferenceCheck]=useState(0);
   // The list is the first page plus the pages appended while scrolling.
   const [more,setMore]=useState<{items:CatalogItem[];nextCursor:string|null}|null>(null);
@@ -386,6 +387,7 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
   const SORTS:Record<CatalogQuery['sort'],string>={latest:'최신순',views:'조회순',hotDay:'오늘 인기',hotWeek:'이번 주 인기',hotMonth:'이번 달 인기'};
   const bookmarkScope=query.scope==='bookmarked';
   const revision=page?.publicationRevision??'0'.repeat(64);
+  const scrubberSort=useMemo(()=>query.sort==='latest' ? {kind:'date' as const,values:items.map(item=>item.posted)} : {kind:'fallback' as const},[items,query.sort]);
 
   useLevelMotion(section,active?(selected?'detail':'list'):null,selected?1:0);
   // Search lives in the shared bar: the magnifier opens it, and it stays open while a query is set.
@@ -419,6 +421,7 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
           {moreBusy&&<p className="hint catalog-more-status" role="status">더 불러오는 중…</p>}
           {moreError&&<div className="inline-error" role="alert"><span>{moreError}</span><Button variant="ghost" onClick={()=>{setMoreError('');window.setTimeout(loadMore);}}>다시 시도</Button></div>}
           {items.length>0&&!nextCursor&&!moreBusy&&<p className="hint catalog-more-status">마지막 작품입니다</p>}</>}
+        <Scrubber scrollRef={list} total={items.length} sort={scrubberSort} hidden={!active||paused||!!selected||!!reader||settings||duplicates||sheet!==null||suggestOpen} onEndReached={loadMore}/>
       </div>
     </div>
     {selected&&<div className="catalog-detail">

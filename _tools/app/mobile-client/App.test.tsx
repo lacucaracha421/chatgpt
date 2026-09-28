@@ -37,7 +37,25 @@ beforeEach(()=>{
     return{items:path.includes('classification_id=b')?b:a,has_more:false,next_cursor:null};
   });
 });
-afterEach(()=>{cleanup();vi.unstubAllGlobals();});
+afterEach(()=>{cleanup();vi.unstubAllGlobals();delete window.LakomicsNative;});
+it('renders Home from a saved native connection while the async status read is pending', async()=>{
+  let resolveStatus!: (value: unknown) => void;
+  window.LakomicsNative={localStatus:()=>JSON.stringify({configured:true,endpoint:'https://example.invalid'}),request:vi.fn(),cancel:vi.fn()};
+  mocks.native.mockImplementation((op:string)=>op==='status' ? new Promise(resolve=>{resolveStatus=resolve;}) : Promise.resolve({configured:true,endpoint:'https://example.invalid'}));
+  render(<App/>);
+  expect(screen.getByRole('button',{name:'전체 보기'})).toBeTruthy();
+  expect(screen.queryByText('어디서든,')).toBeNull();
+  await act(async()=>{resolveStatus({configured:false,endpoint:''});});
+  expect(await screen.findByRole('button',{name:'라이브러리 연결'})).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'전체 보기'})).toBeNull();
+});
+it('keeps the connect screen while a device without a saved connection is checking',()=>{
+  window.LakomicsNative={localStatus:()=>JSON.stringify({configured:false,endpoint:''}),request:vi.fn(),cancel:vi.fn()};
+  mocks.native.mockImplementation((op:string)=>op==='status' ? new Promise(()=>{}) : Promise.resolve({configured:false,endpoint:''}));
+  render(<App/>);
+  expect(screen.getByRole('button',{name:'연결 확인 중'})).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'전체 보기'})).toBeNull();
+});
 it('points the durable outboxes at the configured connection as soon as the status arrives',async()=>{
   setOutboxConnection(null);
   render(<App/>);
