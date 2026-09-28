@@ -33,7 +33,7 @@ import { CharacterGroups } from "./CharacterGroups";
 import { ReferenceCandidateDialog } from "./ReferenceCandidateDialog";
 import { ShadowReview } from "./ShadowReview";
 import { shadowReviewApi, type ShadowReviewApi } from "./shadowReviewApi";
-import { S36CharacterExclusion, S36SeriesControl, readinessLabel, useS36Publication, useS36Readiness, s36PublicationApi, type S36Readiness } from "./S36Publication";
+import { S36CharacterExclusion, S36ScoringWarning, S36SeriesControl, readinessLabel, useS36Publication, useS36Readiness, s36PublicationApi, type S36Readiness } from "./S36Publication";
 import { characterApi, draftReferenceRegions, type CharacterApi, type CharacterTarget } from "./api";
 import { characterHubApi, type CharacterBrowsePage, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesFolder, type SeriesGalleryFilter } from "./hubApi";
 import "./CharacterManagement.css";
@@ -360,7 +360,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const s36Stalled = Boolean(s36Settings?.series.includes(series.classificationId) && !s36Settings.scoringEnabled);
   // Recovery surfaces only while automation is actually off or stalled.
   const automationRecovery = !series.autoClassify ? <Button size="sm" variant="ghost" disabled={busy || Boolean(picking)} onClick={() => void action(() => hubApi.saveSeries({ ...series, autoClassify: true }))}>자동 분류 다시 켜기</Button>
-    : s36Stalled && !current && !currentGroup ? <small className="s36-series__warning" role="status">S36 시험 채점이 꺼져 자동 분류가 멈춰 있습니다</small> : null;
+    : s36Stalled && !current && !currentGroup ? <S36ScoringWarning disabled={busy || Boolean(picking)} onChanged={() => { setReadinessVersion(v => v + 1); refresh(); }} /> : null;
   const focusedName = current?.displayName ?? currentGroup?.name;
   const currentStatus = current ? characterStatus(current, readiness.get(current.id), s36Driven(current.id)) : null;
   const candidateReview = !picking && !current && !currentGroup && candidateCount > 0 && s36Settings?.series.includes(series.classificationId)

@@ -105,21 +105,21 @@ it("shows sync problems as the indicator's problem state and opens cloud setting
   await user.click(trigger);
   expect(screen.getByRole("alert")).toHaveTextContent("동기화 문제 3개");
   await user.click(screen.getByRole("button", { name: "동기화 설정 열기" }));
-  expect(onNavigate).toHaveBeenLastCalledWith({ kind: "settings", section: "cloud" });
+  expect(onNavigate).toHaveBeenLastCalledWith({ kind: "settings", section: "connection" });
 });
 
 it("offers the instant lightweight-mode toggle only in the native app", async () => {
   const user = userEvent.setup();
   const { unmount } = render(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null} onNavigate={vi.fn()} />);
   await user.click(screen.getByRole("button", { name: "상태" }));
-  expect(screen.queryByRole("checkbox", { name: "가벼운 모드" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("switch", { name: "가벼운 모드" })).not.toBeInTheDocument();
   unmount();
 
   workload.native = true;
   render(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null} onNavigate={vi.fn()} />);
   await user.click(screen.getByRole("button", { name: "상태" }));
   const pc = screen.getByRole("region", { name: "이 PC" });
-  const toggle = within(pc).getByRole("checkbox", { name: "가벼운 모드" });
+  const toggle = within(pc).getByRole("switch", { name: "가벼운 모드" });
   expect(toggle).not.toBeChecked();
   await user.click(toggle);
   expect(workload.update).toHaveBeenCalledWith({ lightweight: true });

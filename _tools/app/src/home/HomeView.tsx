@@ -1,5 +1,4 @@
-import { BookmarkIcon } from "@heroicons/react/24/solid";
-import { CheckCircleIcon, ChevronRightIcon, DocumentTextIcon, ListBulletIcon, LockClosedIcon, SignalSlashIcon, WalletIcon } from "@heroicons/react/24/outline";
+import { BookOpenIcon, CheckCircleIcon, ChevronRightIcon, PauseCircleIcon, DocumentTextIcon, FilmIcon, FolderIcon, InboxIcon, ListBulletIcon, LockClosedIcon, Square2StackIcon, TagIcon, UserIcon, WalletIcon } from "@heroicons/react/24/outline";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useAuthoritySyncHealth, useCloudSyncStatus } from "../app/useCloudProblems";
 import { useWorkloadProfile } from "../app/workloadProfile";
@@ -9,7 +8,6 @@ import { PlatformBadges } from "../collections/PlatformBadges";
 import { useAvLinkPendingCount, type AvLinkApi } from "../collections/AvLinkInbox";
 import { groupInbox, localDay } from "../collections/releaseCaption";
 import { useReleaseData } from "../collections/releaseData";
-import { exchangeStore as defaultExchangeStore, useExchangeSnapshot, type ExchangeSnapshot, type ExchangeStore } from "../exchange/exchangeStore";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useLibrary } from "../library/LibraryContext";
 import type { AssetView, ClassificationEntry, CollectionSummary, HomeOverview, ReleaseCalendar, ReleaseWishlistItem } from "../library/types";
@@ -21,22 +19,22 @@ import { usePrivacy } from "../privacy/PrivacyContext";
 import { AvPortrait } from "../collections/av/AvPortrait";
 import { shadowReviewApi, type ShadowReviewApi, type ShadowReviewItem } from "../characters/shadowReviewApi";
 import { localDateAndOffset, useArtistGateway, useArtistRead } from "../artists/artistStore";
-import { displayDate } from "../shared/displayDate";
-import { characterReviewGroups, clockLabel, dateBlock, daysAfter, localBoundaries, memoRows, receivedFrom, releaseRows, sendingSummary, serverOutage, tallyCandidates, UPCOMING_DAYS, weekdayLabel, upcomingRows, watchedMangaCount, type MemoRow, type ReleaseKind, type ReleaseRow, type UpcomingRow } from "./homeModel";
-import { HomeRevisit } from "./HomeRevisit";
+import { avProfileLines, clockLabel, dateBlock, daysAfter, localBoundaries, memoRows, releaseRows, serverOutage, UPCOMING_DAYS, weekdayLabel, upcomingRows, type MemoRow, type ReleaseRow, type UpcomingRow } from "./homeModel";
+import { HomeArtist, HomeRevisit } from "./HomeRevisit";
+import { useConnectionRows, type ConnectionRow } from "../layout/ConnectionStatusBlock";
 import { CharacterReviewOverview, type CharacterReviewScope } from "./CharacterReviewOverview";
 import { shadowPageSource, type CharacterReviewSource } from "./characterReviewSource";
+import { avGateway } from "../collections/avClient";
+import type { AvPerformerProfile } from "../collections/avTypes";
 import "./home.css";
 
 const ShadowReview = lazy(() => import("../characters/ShadowReview").then((module) => ({ default: module.ShadowReview })));
 const CatalogReviewDialog = lazy(() => import("../manga/CatalogReviewDialog").then((module) => ({ default: module.CatalogReviewDialog })));
 
 const native = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-const KIND_LABEL: Record<ReleaseKind, string> = { manga: "만화", game: "게임", movie: "영화", anime: "애니" };
-type KindFilter = "all" | ReleaseKind;
 type Dialog = ({ kind: "character" } & CharacterReviewScope) | { kind: "duplicates" };
 type HomeShelfRow = { source: "release"; row: ReleaseRow } | { source: "upcoming"; row: UpcomingRow };
-/** Home reads one page of S36 candidates: the exact total (page summary) and a series hint. */
+/** Home reads one page of S36 candidates: the exact total from the page summary. */
 const CHARACTER_PAGE = 200;
 type CharacterQueue = { total: number; items: Pick<ShadowReviewItem, "targetId" | "targetName" | "verdict">[] };
 
@@ -53,7 +51,6 @@ export type HomeViewProps = {
   refreshVersion?: number;
   onNavigate: (view: AssetView) => void;
   onQueuesRequested?: () => void;
-  exchange?: ExchangeStore;
   notes?: NotesStore;
   shadowApi?: Pick<ShadowReviewApi, "page">;
   /** Exact per-character counts for the 캐릭터 검토 overview; defaults to reading the whole S36 list. */
@@ -69,8 +66,8 @@ export type HomeViewProps = {
 };
 
 /**
- * PC Home (HOME-DASH-001, layout B "priority ledger"): the index holds nearby state, while
- * the content keeps the release shelf and the image-first artist revisit list beside the queue.
+ * PC Home (HOME-DASH-001, layout D): the index holds nearby state, while the content keeps the
+ * release shelf, image-first revisit/artist blocks and the review queue in the approved split.
  * Every row opens the PC screen that owns it. Reads happen when Home opens (and the asset
  * counts again after imports); live parts follow the stores the app already keeps (exchange,
  * notes, cloud progress, server-sync health, the 신간 cache). No polling.
@@ -78,7 +75,7 @@ export type HomeViewProps = {
 /** Covers on the 발매 예정 shelf; the rest are in the 발매 캘린더. */
 const SHELF_MAX = 40;
 
-export function HomeView({ collections, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, exchange = defaultExchangeStore, notes, shadowApi, characterSource, taggerSource, taggerApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, onOpenAsset }: HomeViewProps) {
+export function HomeView({ collections, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, notes, shadowApi, characterSource, taggerSource, taggerApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, onOpenAsset }: HomeViewProps) {
   const { gateway, library } = useLibrary();
   const root = library?.root ?? "";
   const { privacyMode } = usePrivacy();
@@ -158,19 +155,18 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gateway, queueRead]);
 
-  const transfer = useExchangeSnapshot(exchange);
   const store = useMemo(() => notes ?? (root ? notesStore(root) : null), [notes, root]);
   const notesState = useSyncExternalStore(store?.subscribe ?? noopSubscribe, store?.snapshot ?? emptyNotes);
   useEffect(() => { void store?.load(); }, [store]);
   const cloud = useCloudSyncStatus(gateway, root);
   const { health } = useAuthoritySyncHealth(gateway, root);
+  const connectionRows = useConnectionRows({ gateway, cloud, authorityHealth: health });
   const artistGateway = useArtistGateway();
   const [artistSeed, setArtistSeed] = useState(0);
   const { localDate, offsetMinutes } = localDateAndOffset(at);
   const artistTodayRead = useArtistRead((artist) => artist.today(localDate, offsetMinutes, artistSeed, []), `today:${localDate}:${artistSeed}:`);
 
   const outage = serverOutage(health, cloud.progress);
-  const staleAt = outage ? clockLabel(outage.since ?? overview?.server.confirmedAt ?? at) : null;
 
   const go = (view: AssetView) => () => onNavigate(view);
   const releaseView: AssetView = { kind: "collections", typeFilter: "manga", showcase: false, releaseProvider: "kakao" };
@@ -179,18 +175,12 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
   /* 확인할 것; 캐릭터 검토 names its busiest series (from the first page) and opens the overview */
   const seriesNames = useMemo(() => new Map(classifications.map((entry) => [entry.id, entry.name])), [classifications]);
   const seriesName = useMemo(() => (id: string) => seriesNames.get(id), [seriesNames]);
-  const characterHint = useMemo(() => {
-    if (!characterQueue) return null;
-    const groups = characterReviewGroups(tallyCandidates(characterQueue.items), characters, seriesName);
-    const complete = characterQueue.items.length >= characterQueue.total;
-    if (groups.length === 0) return null;
-    if (complete && groups.length === 1 && groups[0].characters.length === 1) return `${groups[0].seriesName} › ${groups[0].characters[0].name}`;
-    return groups.slice(0, 2).map((group) => group.seriesName).join(" · ") + (groups.length > 2 ? " 외" : "");
-  }, [characterQueue, characters, seriesName]);
   const source = useMemo(() => characterSource ?? (shadowQueueApi ? shadowPageSource(shadowQueueApi) : null), [characterSource, shadowQueueApi]);
-  const taggerQueueCounts = restricted ? null : overview?.tagger ?? null;
+  // The tagger count is one cheap COUNT in the overview, so it shows even in lightweight mode.
+  const taggerQueueCounts = overview?.tagger ?? null;
+  const characterReading = Boolean(shadowQueueApi) && !restricted && characterQueue === null;
   const openTaggerReview = () => {
-    if (!activeTaggerSource || restricted || taggerLoading) return;
+    if (!activeTaggerSource || taggerLoading) return;
     setTaggerLoading(true);
     void activeTaggerSource(() => undefined, () => true).then((items) => {
       if (!items) return;
@@ -199,32 +189,23 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
     }, (reason) => console.warn("tagger review read failed", reason)).finally(() => setTaggerLoading(false));
   };
   const todos = [
-    { key: "pending", label: "처리 대기", unit: "건", note: staleAt ? `${staleAt} 기준 · 태블릿 수집 요청` : "태블릿 수집 요청 · 아직 안 받음", count: overview?.server.capturesPending ?? 0, open: go({ kind: "settings", section: "cloud" }) },
-    { key: "character", label: "캐릭터 검토", unit: "건", note: characterHint ?? "자동 분류 후보 확인", count: characterQueue?.total ?? 0,
-      open: () => setReviewOverview(true) },
-    { key: "tagger", label: "태거 검토", unit: "건", note: taggerLoading ? "목록 불러오는 중" : taggerQueueCounts ? `태거 추천 ${taggerQueueCounts.recommendation.toLocaleString()} · 검토로 돌림 ${taggerQueueCounts.veto.toLocaleString()}` : null,
-      count: taggerQueueCounts?.total ?? 0, open: openTaggerReview },
-    { key: "similar", label: "유사 이미지", unit: "쌍", note: "같은 그림일 수 있음", count: reviewCount, open: go({ kind: "similarity_review" }) },
-    { key: "duplicates", label: "중복 판본", unit: "건", note: "카탈로그 · 같은 작품", count: duplicateCount, open: () => setDialog({ kind: "duplicates" }) },
-    { key: "unsorted", label: "미분류", unit: "장", note: "분류가 없는 새 자산", count: unsortedCount ?? 0, open: go({ kind: "unsorted" }) },
-    { key: "av-link", label: "AV 품번", unit: "건", note: null, count: avLinkCount, open: go({ kind: "collections", typeFilter: "av", showcase: false }) },
+    { key: "character", label: "캐릭터", count: characterQueue?.total ?? 0, Icon: UserIcon, open: () => setReviewOverview(true) },
+    { key: "tagger", label: "태거", count: taggerQueueCounts?.total ?? 0, Icon: TagIcon, open: openTaggerReview },
+    { key: "similar", label: "유사 이미지", count: reviewCount, unit: "쌍", Icon: Square2StackIcon, open: go({ kind: "similarity_review" }) },
+    { key: "duplicates", label: "중복 판본", count: duplicateCount, Icon: BookOpenIcon, open: () => setDialog({ kind: "duplicates" }) },
+    { key: "unsorted", label: "미분류", count: unsortedCount ?? 0, Icon: FolderIcon, open: go({ kind: "unsorted" }) },
+    { key: "av-link", label: "AV 품번", count: avLinkCount, Icon: FilmIcon, open: go({ kind: "collections", typeFilter: "av", showcase: false }) },
+    { key: "pending", label: "처리 대기", count: overview?.server.capturesPending ?? 0, Icon: InboxIcon, open: go({ kind: "settings", section: "connection" }) },
   ].filter((todo) => todo.count > 0);
 
   /* 발매 예정: released unread rows first, then the dated upcoming rows. */
   const releases = releaseRows(collections, board, inbox, wishlist, today);
   const upcomingAll = upcomingRows(collections, board, inbox, wishlist, today);
   const upcoming = upcomingAll.filter((row) => daysAfter(row.date, today) <= UPCOMING_DAYS);
-  const nextLater = upcomingAll.find((row) => daysAfter(row.date, today) > UPCOMING_DAYS) ?? null;
-  const [kind, setKind] = useState<KindFilter>("all");
   const shelfAll: HomeShelfRow[] = [...releases.map((row) => ({ source: "release" as const, row })), ...upcoming.map((row) => ({ source: "upcoming" as const, row }))];
-  const shelfRows = shelfAll.filter(({ row }) => kind === "all" || row.kind === kind);
+  const shelfRows = shelfAll;
   const openRelease = (row: ReleaseRow) => row.collection ? onNavigate({ kind: "collection", collectionId: row.collection.id }) : onNavigate(calendarView(row.kind === "movie" ? "movie" : "game"));
   const openUpcoming = (row: UpcomingRow) => row.collectionId ? onNavigate({ kind: "collection", collectionId: row.collectionId }) : onNavigate(calendarView(row.kind === "movie" ? "movie" : "game"));
-
-  /* 전송 */
-  const sending = sendingSummary(transfer);
-  const transferOffline = transfer.availability.state === "offline";
-  const from = receivedFrom(transfer);
 
   /* 메모 */
   const memos = memoRows(notesState.notes, today);
@@ -238,8 +219,8 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
     return title.provider === "igdb" ? igdbImagePreviewUrl(title.cover, "cover") : tmdbImagePreviewUrl(title.cover, "poster");
   };
 
-  const index = <HomeIndex memos={memos} locked={Boolean(notesState.keyringLocked)} transfer={transfer} sending={sending} transferOffline={transferOffline} outage={outage} from={from}
-    overview={overview} trashCount={trashCount} privacyMode={privacyMode} onNavigate={onNavigate} />;
+  const index = <HomeIndex memos={memos} locked={Boolean(notesState.keyringLocked)} overview={overview} trashCount={trashCount} privacyMode={privacyMode}
+    connectionRows={connectionRows} onNavigate={onNavigate} />;
   const closeDialog = () => { setDialog(null); if (reviewOverview) setReviewRead((value) => value + 1); else setQueueRead((value) => value + 1); };
   const dialogs = dialog && <Suspense fallback={null}>
     {dialog.kind === "character"
@@ -248,8 +229,6 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
   </Suspense>;
 
   const artistRows = artistGateway && !artistTodayRead.error ? artistTodayRead.data : null;
-  const watched = watchedMangaCount(board);
-  const shelfCalm = shelfAll.length ? undefined : <span>새 신간 없음{watched > 0 && <> · 만화 <b className="numeric">{watched}</b>편 지켜보는 중</>}{nextLater && <> · 다음 <b className="numeric">{dateBlock(nextLater.date, today).day}</b> {nextLater.name}</>}</span>;
   const calendarTarget = calendarApi ? calendarView() : releaseView;
   const calendarPorts = useMemo(() => new Set((calendar?.entries ?? []).filter((entry) => entry.port).map((entry) => entry.id)), [calendar]);
 
@@ -265,26 +244,11 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
   return <div className="home-view">
     <ViewToolbar title="홈" titleContent={<span className="home-title-date"><span className="numeric">{`${at.getMonth() + 1}.${at.getDate()}`}</span> {weekdayLabel(at)}</span>} chrome={{ navigation: index }} />
     <div className="home-scroll">
-      <div className="home-ledger">
-        {outage && <div className="home-offline" role="status">
-          <SignalSlashIcon aria-hidden="true" />
-          <span><b>서버에 닿지 않음</b>{outage.since && <><span className="numeric">{clockLabel(outage.since)}</span>부터 — </>}이 PC의 라이브러리 · 검토 · 메모는 그대로입니다. 전송과 처리 대기만 마지막 값입니다.</span>
-        </div>}
-
-        <div className="home-columns">
-          <div className="home-lane">
-            <Section title="발매 예정"
-              actions={<>
-                <div className="home-chips" role="radiogroup" aria-label="종류">
-                  {(["all", "manga", "game", "movie", "anime"] as const).map((value) => {
-                    const count = value === "all" ? shelfAll.length : shelfAll.filter(({ row }) => row.kind === value).length;
-                    return <button key={value} type="button" role="radio" aria-checked={kind === value} className="home-chip" onClick={() => setKind(value)}>
-                      {value === "all" ? "전체" : KIND_LABEL[value]} <span className="numeric">{count}</span></button>;
-                  })}
-                </div>
-                <button type="button" className="home-header-action" onClick={go(calendarTarget)}>발매 캘린더 <Chevron /></button>
-              </>}
-              calm={shelfCalm}>
+      <div className="home-content">
+        {outage && <div className="home-offline" role="status">서버에 닿지 않음{outage.since && <> · <span className="numeric">{clockLabel(outage.since)}</span>부터</>}</div>}
+        <div className="home-grid">
+          <div className="home-grid__left">
+            <HomeSection title="캘린더" onOpen={() => onNavigate(calendarTarget)}>
               {shelfRows.length > 0
                 ? <ShelfScroller>
                   {shelfRows.slice(0, SHELF_MAX).map((item) => {
@@ -297,81 +261,80 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
                     const left = !released ? daysAfter(rowDate, today) : null;
                     const url = cover(row);
                     const volume = row.volume ?? null;
+                    const platforms = row.kind === "game" ? upcomingRow?.platforms ?? release?.title?.platforms ?? [] : [];
+                    const port = calendarPorts.has(row.key.replace(/^title:/, ""));
                     return <button key={`${item.source}:${row.key}`} type="button" className="home-shelf__item" onClick={() => release ? openRelease(release) : openUpcoming(upcomingRow!)}
-                      aria-label={`${row.name} ${released ? "발매됨" : `${block.day} ${upcomingRow!.detail}`}`}>
+                      aria-label={`${row.name} ${released ? "발매됨" : `${block.day} D-${left}`}`}>
                       <span className="home-shelf__date">
-                        {released && !row.date ? <span>새 권</span> : <span className="numeric">{block.day}</span>}
-                        {released ? row.date && <span>나옴</span> : <><span>{block.weekday.slice(0, 1)}</span><span className="home-shelf__days numeric">D-{left}</span></>}
+                        {released ? (row.date ? <span className="numeric">{block.day}</span> : <span>새 권</span>) : <span className="numeric">{block.day}</span>}
+                        {!released && <span className="home-shelf__days numeric">D-{left}</span>}
                       </span>
                       <span className={`home-shelf__art${!url ? " home-cover--title" : ""}`} aria-hidden="true">
                         {url && <img src={url} alt="" loading="lazy" decoding="async" draggable={false} />}
                         {released && <span className="home-shelf__new">NEW</span>}
-                        {row.watch && <span className="home-shelf__watch" title="관심 목록"><BookmarkIcon aria-hidden="true" /></span>}
                         {volume !== null && <span className="home-shelf__volume numeric">{volume}</span>}
                       </span>
                       <span className="home-shelf__title">{row.name}</span>
-                      {upcomingRow?.platforms?.length
-                        ? <span className="home-shelf__detail home-shelf__detail--badges"><PlatformBadges platforms={upcomingRow.platforms} port={calendarPorts.has(upcomingRow.key.replace(/^title:/, ""))} />{upcomingRow.moved && <span className="home-shelf__moved">날짜 바뀜</span>}</span>
-                        : <span className="home-shelf__detail"><span className="home-kind">{KIND_LABEL[row.kind]}</span>{released ? release?.caption.text : upcomingRow?.detail}</span>}
+                      {platforms.length > 0 && <span className="home-shelf__platforms"><PlatformBadges platforms={platforms} port={port} /></span>}
                     </button>;
                   })}
                 </ShelfScroller>
                 : <div className="home-shelf home-shelf--empty">
-                  {/* An invisible tile keeps the shelf's height, so switching kinds never moves the sections below. */}
                   <div className="home-shelf__track" aria-hidden="true"><span className="home-shelf__item home-shelf__ghost">
-                    <span className="home-shelf__date" /><span className="home-shelf__art" /><span className="home-shelf__title">&nbsp;</span><span className="home-shelf__detail">&nbsp;</span>
+                    <span className="home-shelf__date" /><span className="home-shelf__art" /><span className="home-shelf__title">&nbsp;</span>
                   </span></div>
-                  <p className="home-shelf__empty">이 종류의 발매 항목 없음</p>
+                  <p className="home-shelf__empty">새 신간 없음</p>
                 </div>}
-            </Section>
-            <Section title="다시 보기"
-              actions={<>
-                <button type="button" className="home-header-action" onClick={() => setArtistSeed((value) => value + 1)}>다른 작가</button>
-                <button type="button" className="home-header-action" onClick={go({ kind: "artists", section: "main" })}>작가 전체 <Chevron /></button>
-              </>}>
-              <HomeRevisit gateway={gateway} localDate={localDate} artist={artistRows?.[0] ?? null} privacyMode={privacyMode}
-                onOpenAsset={onOpenAsset} onOpenArtist={(creatorKey) => onNavigate({ kind: "creator", creatorKey })} />
-            </Section>
+            </HomeSection>
+            <div className="home-grid__duo">
+              <HomeSection title="다시 보기">
+                <HomeRevisit gateway={gateway} localDate={localDate} privacyMode={privacyMode} onOpenAsset={onOpenAsset} />
+              </HomeSection>
+              <HomeSection title="작가" actions={<button type="button" className="home-header-action" onClick={() => setArtistSeed((value) => value + 1)}>다른 작가</button>} onOpen={() => onNavigate({ kind: "artists", section: "main" })}>
+                <HomeArtist artist={artistRows?.[0] ?? null} privacyMode={privacyMode} onOpenAsset={onOpenAsset} onOpenArtist={(creatorKey) => onNavigate({ kind: "creator", creatorKey })} />
+              </HomeSection>
+            </div>
           </div>
-          <div className="home-lane home-lane--side">
-            <Section title="검토"
-              calm={todos.length ? undefined : <Ok>모두 확인함</Ok>}>
-              {todos.length > 0 && <div className="home-queue-list">
-                {todos.map((todo) => <button key={todo.key} type="button" className="home-row home-row--todo" onClick={todo.open}>
-                  <span className="home-row__n numeric">{todo.count.toLocaleString()}<small>{todo.unit}</small></span>
-                  <span className="home-row__t">{todo.label}{todo.note && <small>{todo.note}</small>}</span><Chevron />
-                </button>)}
-              </div>}
-            </Section>
-            {!privacyMode && overview?.avPerformer && <Section title="오늘의 AV 배우"
-              actions={<button type="button" className="home-header-action" onClick={go({ kind: "collections", typeFilter: "av", showcase: false })}>AV <Chevron /></button>}>
+          <div className="home-grid__right">
+            {!privacyMode && overview?.avPerformer && <HomeSection title="AV 배우" onOpen={() => onNavigate({ kind: "collections", typeFilter: "av", showcase: false })}>
               <div className="home-av-performer">
-                <span className="home-av-performer__portrait">
-                  {overview.avPerformer.portrait ? <AvPortrait portrait={overview.avPerformer.portrait} name={overview.avPerformer.displayName} size="home" /> : overview.avPerformer.latestWork.frontArtworkId && <img src={workArtworkThumbnailUrl(overview.avPerformer.latestWork.frontArtworkId)} alt="" loading="lazy" decoding="async" />}
-                </span>
-                <div className="home-av-performer__identity">
-                  <b>{overview.avPerformer.displayName}</b>
-                  {overview.avPerformer.originalName && <small>{overview.avPerformer.originalName}</small>}
-                  <div className="home-av-performer__facts">
-                    <span><strong className="numeric">{overview.avPerformer.knownWorks.toLocaleString()}</strong>출연작</span>
-                    <span><strong className="numeric">{overview.avPerformer.ownedWorks.toLocaleString()}</strong>소장</span>
-                  </div>
-                  <div className="home-av-performer__latest">
-                    <small>최근작{overview.avPerformer.latestWork.releaseDate && <> · <span className="numeric">{displayDate(overview.avPerformer.latestWork.releaseDate, at)}</span></>}</small>
-                    <b>{overview.avPerformer.latestWork.title}</b>
-                    {overview.avPerformer.latestWork.productCode && <span>{overview.avPerformer.latestWork.productCode}</span>}
+                <div className="home-av-performer__row">
+                  <span className="home-av-performer__portrait">
+                    {overview.avPerformer.portrait
+                      ? <AvPortrait portrait={overview.avPerformer.portrait} name={overview.avPerformer.displayName} size="home" />
+                      : overview.avPerformer.latestWork.frontArtworkId && <img src={workArtworkThumbnailUrl(overview.avPerformer.latestWork.frontArtworkId)} alt="" loading="lazy" decoding="async" />}
+                  </span>
+                  <div className="home-av-performer__identity">
+                    <b>{overview.avPerformer.displayName}</b>
+                    {overview.avPerformer.originalName && <small>{overview.avPerformer.originalName}</small>}
+                    <div className="home-av-performer__facts">
+                      <span><strong className="numeric">{overview.avPerformer.knownWorks.toLocaleString()}</strong> 출연</span>
+                      <span><strong className="numeric">{overview.avPerformer.ownedWorks.toLocaleString()}</strong> 소장</span>
+                    </div>
+                    <AvProfileBrief personId={overview.avPerformer.id} today={at} />
                   </div>
                 </div>
                 <div className="home-av-performer__works">
-                  <span>소장 최근 <span className="numeric">{overview.avPerformer.recentOwnedWorks.length}</span>편</span>
-                  <div>
-                    {overview.avPerformer.recentOwnedWorks.map((work) => <span key={work.collectionId} className="home-av-performer__jacket">
-                      {work.frontArtworkId && <img src={workArtworkThumbnailUrl(work.frontArtworkId)} alt={`${work.title} 앞표지`} loading="lazy" decoding="async" />}
-                    </span>)}
-                  </div>
+                  {overview.avPerformer.recentOwnedWorks.slice(0, 3).map((work) => <button key={work.collectionId} type="button" className="home-av-performer__work" title={work.title}
+                    onClick={() => onNavigate({ kind: "collection", collectionId: work.collectionId })}>
+                    <span className="home-av-performer__jacket">{work.frontArtworkId && <img src={workArtworkThumbnailUrl(work.frontArtworkId)} alt={`${work.title} 앞표지`} loading="lazy" decoding="async" />}</span>
+                    {work.productCode && <small className="numeric">{work.productCode}</small>}
+                  </button>)}
                 </div>
               </div>
-            </Section>}
+            </HomeSection>}
+            <HomeSection title="검토">
+              {(todos.length > 0 || characterReading)
+                ? <div className="home-review-list">{characterReading && <div className="home-review-row home-review-row--reading" role="status" aria-label="캐릭터 검토 수 세는 중">
+                  <UserIcon className="home-review-row__icon" aria-hidden="true" /><span>캐릭터</span><span className="home-review-row__count home-review-row__skeleton" aria-hidden="true" />
+                </div>}{todos.map((todo) => <button key={todo.key} type="button" className="home-review-row" onClick={todo.open}>
+                  <todo.Icon className="home-review-row__icon" aria-hidden="true" />
+                  <span>{todo.label}</span>
+                  <span className="home-review-row__count numeric">{todo.count.toLocaleString()}{todo.unit && <small>{todo.unit}</small>}</span>
+                </button>)}</div>
+                : !restricted && <div className="home-review-empty"><CheckCircleIcon aria-hidden="true" /><span>모두 확인함</span></div>}
+              {restricted && <div className="home-review-paused" role="status"><PauseCircleIcon aria-hidden="true" /><span>가벼운 모드 · 캐릭터 검토 수를 세지 않음</span></div>}
+            </HomeSection>
           </div>
         </div>
       </div>
@@ -385,10 +348,6 @@ const EMPTY_NOTES = { notes: [], keyringLocked: false } as unknown as ReturnType
 const emptyNotes = () => EMPTY_NOTES;
 
 function Chevron() { return <ChevronRightIcon className="home-chevron" aria-hidden="true" />; }
-function Ok({ children }: { children: ReactNode }) { return <><CheckCircleIcon className="home-ok" aria-hidden="true" /><span>{children}</span></>; }
-function Progress({ value }: { value: number }) {
-  return <span className="home-progress" aria-hidden="true"><i style={{ width: `${Math.round(Math.min(1, Math.max(0, value)) * 100)}%` }} /></span>;
-}
 /** A horizontally scrolling shelf (like the tablet's swipe): mouse wheel and drag move it
  * smoothly, a released drag glides, and arrow buttons page while there is more to either side. */
 function ShelfScroller({ children }: { children: ReactNode }) {
@@ -492,103 +451,106 @@ function ShelfScroller({ children }: { children: ReactNode }) {
   </div>;
 }
 
-/**
- * One ledger section: a square-marked heading line, then rows between 1px rules. A section
- * with nothing to do collapses to its heading plus one calm line.
- */
-function Section({ title, hint, summary, calm, stale, alert = false, onOpen, actions, children }: {
-  title: string; hint?: string; summary?: ReactNode; calm?: ReactNode; stale?: string | null; alert?: boolean; onOpen?: () => void; actions?: ReactNode; children?: ReactNode;
-}) {
-  const open = !calm;
-  const head = <>
-    <h2 className="home-section__title">{title}</h2>
-    {hint && <span className="home-section__hint">· {hint}</span>}
-    {summary}
-    {calm && <span className="home-section__calm">{calm}</span>}
-    <span className="home-section__space" />
-    {actions && <div className="home-section__actions">{actions}</div>}
-    {stale && <span className="home-stale"><span className="numeric">{stale}</span> 기준</span>}
-    {onOpen && <Chevron />}
-  </>;
-  return <section className="home-section" data-open={open ? "true" : undefined} data-alert={alert ? "true" : undefined} aria-label={title}>
-    {onOpen
-      ? <button type="button" className="home-section__head" onClick={onOpen} aria-label={`${title} 열기`}>{head}</button>
-      : <div className="home-section__head">{head}</div>}
-    {open && children && <div className="home-section__body">{children}</div>}
-  </section>;
-}
-
 function MemoIcon({ memo }: { memo: MemoRow }) {
   const Icon = memo.kind === "checklist" ? ListBulletIcon : memo.kind === "ledger" ? WalletIcon : memo.kind === "secret" ? LockClosedIcon : DocumentTextIcon;
   return <Icon className="home-memo__icon" aria-hidden="true" />;
 }
-/** The index while Home is open: asset totals, pinned notes as tiles, then transfers (연결 lives in 상태). */
-function HomeIndex({ memos, locked, transfer, sending, transferOffline, outage, from, overview, trashCount, privacyMode, onNavigate }: {
-  memos: MemoRow[]; locked: boolean;
-  transfer: ExchangeSnapshot; sending: ReturnType<typeof sendingSummary>; transferOffline: boolean; outage: { since: string | null } | null;
-  from: string | null; overview: HomeOverview | null; trashCount: number; privacyMode: boolean; onNavigate: (view: AssetView) => void;
+function HomeSection({ title, onOpen, actions, children }: { title: string; onOpen?: () => void; actions?: ReactNode; children: ReactNode }) {
+  return <section className="home-section" aria-label={title}>
+    <SectionLabel title={title} onOpen={onOpen} actions={actions} />
+    <div className="home-section__body">{children}</div>
+  </section>;
+}
+
+function SectionLabel({ title, onOpen, actions }: { title: string; onOpen?: () => void; actions?: ReactNode }) {
+  return <div className="home-section-label">
+    <span>{title}</span>
+    <span className="home-section-label__rule" />
+    {actions && <span className="home-section-label__actions">{actions}</span>}
+    {onOpen && <button type="button" className="home-section-label__more" aria-label={`${title} 전체`} onClick={onOpen}><Chevron /></button>}
+  </div>;
+}
+
+function HomeIndex({ memos, locked, overview, trashCount, privacyMode, connectionRows, onNavigate }: {
+  memos: MemoRow[]; locked: boolean; overview: HomeOverview | null; trashCount: number; privacyMode: boolean;
+  connectionRows: ConnectionRow[]; onNavigate: (view: AssetView) => void;
 }) {
-  const openExchange = () => onNavigate({ kind: "exchange" });
-  const paused = transferOffline || Boolean(outage);
   return <nav className="home-index" aria-label="홈 인덱스">
-    <IndexLabel title="자산 현황" />
-    {overview && <div className="home-index__stats">
-      <div className="home-index__stat-media">
-        <button type="button" onClick={() => onNavigate({ kind: "statistics" })}><b className="numeric">{overview.assets.images.toLocaleString()}</b><small>이미지</small></button>
-        <button type="button" onClick={() => onNavigate({ kind: "statistics" })}><b className="numeric">{overview.assets.videos.toLocaleString()}</b><small>영상</small></button>
-      </div>
-      <div className="home-index__stat-collections" style={{ gridTemplateColumns: `repeat(${privacyMode ? 3 : 4}, minmax(0, 1fr))` }}>
-        {(["game", "manga", "movie"] as const).map((type) => <button key={type} type="button" onClick={() => onNavigate({ kind: "collections", typeFilter: type, showcase: false })}>
-          <b className="numeric">{overview.collections[type].toLocaleString()}</b><small>{{ game: "게임", manga: "만화", movie: "영화" }[type]}</small>
+    <section className="home-index__section" aria-label="메모">
+      <SectionLabel title="메모" onOpen={() => onNavigate({ kind: "notes" })} />
+      <div className="home-index__memo-stack">
+        {memos.slice(0, 2).map((memo) => <button key={memo.id} type="button" className="home-memo-tile" onClick={() => onNavigate({ kind: "notes", noteId: memo.id })}>
+          <span className="home-memo-tile__head"><MemoIcon memo={memo} /><b>{memo.title || "제목 없음"}</b>{memo.kind === "checklist" && <em className="numeric">{memo.done}/{memo.total}</em>}{memo.kind === "ledger" && <em>{memo.month}월</em>}</span>
+          <MemoTileBody memo={memo} />
         </button>)}
-        {!privacyMode && <button type="button" onClick={() => onNavigate({ kind: "collections", typeFilter: "av", showcase: false })}>
-          <b className="numeric">{overview.collections.av.toLocaleString()}</b><small>AV</small>
-        </button>}
+        <button type="button" className="home-memo-add" onClick={() => onNavigate({ kind: "notes" })} aria-label={memos.length === 0 && locked ? "메모 잠금 해제" : "새 메모"}>
+          ＋ {memos.length === 0 && locked ? "메모 잠금 해제" : "새 메모"}
+        </button>
       </div>
-      <div className="home-index__stats-foot">
-        <button type="button" onClick={() => onNavigate({ kind: "classification", classificationId: null })}>오늘 <span className="numeric">+{overview.assets.today.toLocaleString()}</span></button>
-        <button type="button" onClick={() => onNavigate({ kind: "classification", classificationId: null })}>이번 주 <span className="numeric">+{overview.assets.week.toLocaleString()}</span></button>
-        {trashCount > 0 && <button type="button" onClick={() => onNavigate({ kind: "trash" })}>휴지통 <span className="numeric">{trashCount.toLocaleString()}</span></button>}
+    </section>
+
+    <section className="home-index__section" aria-label="자산 현황">
+      <SectionLabel title="자산 현황" />
+      {overview && <div className="home-assets">
+        <div className="home-assets__media">
+          <button type="button" onClick={() => onNavigate({ kind: "statistics" })}><b className="numeric">{overview.assets.images.toLocaleString()}</b><small>이미지</small></button>
+          <button type="button" onClick={() => onNavigate({ kind: "statistics" })}><b className="numeric">{overview.assets.videos.toLocaleString()}</b><small>영상</small></button>
+        </div>
+        <div className="home-assets__collections" style={{ gridTemplateColumns: `repeat(${privacyMode ? 3 : 4}, minmax(0, 1fr))` }}>
+          {(["game", "manga", "movie"] as const).map((type) => <button key={type} type="button" onClick={() => onNavigate({ kind: "collections", typeFilter: type, showcase: false })}>
+            <b className="numeric">{overview.collections[type].toLocaleString()}</b><small>{{ game: "게임", manga: "만화", movie: "영화" }[type]}</small>
+          </button>)}
+          {!privacyMode && <button type="button" onClick={() => onNavigate({ kind: "collections", typeFilter: "av", showcase: false })}>
+            <b className="numeric">{overview.collections.av.toLocaleString()}</b><small>AV</small>
+          </button>}
+        </div>
+        <div className="home-assets__foot">
+          <button type="button" onClick={() => onNavigate({ kind: "classification", classificationId: null })}>오늘 <span className="numeric">+{overview.assets.today.toLocaleString()}</span></button>
+          <button type="button" onClick={() => onNavigate({ kind: "classification", classificationId: null })}>이번 주 <span className="numeric">+{overview.assets.week.toLocaleString()}</span></button>
+          {trashCount > 0 && <button type="button" onClick={() => onNavigate({ kind: "trash" })}>휴지통 <span className="numeric">{trashCount.toLocaleString()}</span></button>}
+        </div>
+      </div>}
+    </section>
+
+    <section className="home-index__section" aria-label="상태">
+      <SectionLabel title="상태" />
+      <div className="home-status">
+        {connectionRows.map((row) => <button key={row.key} type="button" className="home-status__row" data-tone={row.tone} onClick={() => onNavigate(row.view)} aria-label={`${row.label} ${row.time ?? row.value}`}>
+          <span className="home-status__dot" aria-hidden="true" /><span>{row.label}</span><span className="home-status__value">{row.time ?? row.value}</span>
+        </button>)}
       </div>
-    </div>}
-
-    <IndexLabel title="메모" count={memos.length} />
-    <div className="home-index__memo-grid">
-      {memos.map((memo) => <button key={memo.id} type="button" className={`home-memo-tile home-memo-tile--${memo.kind}`} onClick={() => onNavigate({ kind: "notes", noteId: memo.id })}
-        style={memo.color ? { borderTopColor: memo.color } : undefined}>
-        <span className="home-memo-tile__head"><MemoIcon memo={memo} /><b>{memo.title || "제목 없음"}</b></span>
-        <MemoTileBody memo={memo} />
-      </button>)}
-      <button type="button" className="home-memo-tile home-memo-tile--new" onClick={() => onNavigate({ kind: "notes" })} aria-label="새 메모">
-        <span aria-hidden="true">＋</span><small>{memos.length === 0 && locked ? "메모 잠금 해제" : "새 메모"}</small>
-      </button>
-    </div>
-
-    <IndexLabel title="전송" />
-    <div className="home-index__transfer-grid">
-      <button type="button" className="home-transfer-tile" onClick={openExchange} aria-label={`받은 파일 ${transfer.unseen}개`}>
-        <small>받은 파일</small>
-        <b className="numeric">{transfer.unseen}<span>개</span></b>
-        <em>{transfer.unseen > 0 ? `${from ? `${from}에서 · ` : ""}아직 안 봄` : "새 파일 없음"}</em>
-      </button>
-      <button type="button" className="home-transfer-tile" onClick={openExchange} aria-label={sending ? `${paused ? "보내기 멈춤" : "보내는 중"} ${sending.name}` : "보낼 파일 없음"}>
-        <small>{sending && paused ? "보내기 멈춤" : "보내는 중"}</small>
-        <b className="numeric">{sending ? paused ? <>{sending.more + 1}<span>개</span></> : sending.progress === null ? "…" : <>{Math.round(sending.progress * 100)}<span>%</span></> : "—"}</b>
-        <em>{sending ? paused ? "연결되면 이어서 보냄" : `${sending.name}${sending.more > 0 ? ` 외 ${sending.more}` : ""}` : "보낼 파일 없음"}</em>
-      </button>
-    </div>
+    </section>
   </nav>;
 }
 
 function MemoTileBody({ memo }: { memo: MemoRow }) {
-  if (memo.kind === "checklist") return <span className="home-memo-tile__body">
-    <b className="numeric">{memo.done}<span>/{memo.total}</span></b><small>완료</small>{memo.total > 0 && <Progress value={memo.done / memo.total} />}
-  </span>;
-  if (memo.kind === "ledger") return <span className="home-memo-tile__body"><small>{memo.month}월 {memo.label}</small><b className="numeric">{memo.amount.toLocaleString()}<span>원</span></b></span>;
-  if (memo.kind === "secret") return <span className="home-memo-tile__body"><small>암호 메모</small></span>;
-  return <span className="home-memo-tile__body home-memo-tile__snippet">{memo.snippet || "내용 없음"}</span>;
+  if (memo.kind === "checklist") return <ul className="home-memo-checklist">
+    {memo.items.map((item, index) => <li key={index} data-checked={item.checked ? "true" : undefined}><span className="home-memo-checklist__mark" aria-hidden="true" /><span>{item.text}</span></li>)}
+  </ul>;
+  if (memo.kind === "ledger") return <>
+    <span className="home-memo-amount numeric">{memo.amount.toLocaleString()}<small>원</small></span>
+    <span className="home-memo-ledger-rows">
+      {memo.available !== null && <span><span>쓴 돈</span><b className="numeric">{memo.spent.toLocaleString()}</b></span>}
+      {memo.scheduled > 0 && <span><span>예정</span><b className="numeric">{memo.scheduled.toLocaleString()}</b></span>}
+      {memo.perDay !== null && <span><span>하루</span><b className="numeric">{memo.perDay.toLocaleString()}</b></span>}
+    </span>
+  </>;
+  if (memo.kind === "secret") return <span className="home-memo-secret">암호 메모</span>;
+  return <span className="home-memo-text">{memo.snippet || "내용 없음"}</span>;
 }
 
-function IndexLabel({ title, count }: { title: string; count?: number }) {
-  return <h2 className="home-index__label">{title}{count !== undefined && <span className="numeric">{count}</span>}</h2>;
+/** A few StashDB facts under the performer's name, from the profile the PC already cached (no fetch). */
+function AvProfileBrief({ personId, today }: { personId: string; today: Date }) {
+  const [profile, setProfile] = useState<AvPerformerProfile | null>(null);
+  useEffect(() => {
+    if (!native()) return;
+    let live = true;
+    setProfile(null);
+    void avGateway.getPerformerProfile(personId).then((value) => { if (live) setProfile(value?.status === "matched" ? value : null); }, () => undefined);
+    return () => { live = false; };
+  }, [personId]);
+  if (!profile) return null;
+  const lines = avProfileLines(profile, today);
+  if (!lines.length) return null;
+  return <div className="home-av-performer__profile">{lines.map((line) => <span key={line}>{line}</span>)}</div>;
 }

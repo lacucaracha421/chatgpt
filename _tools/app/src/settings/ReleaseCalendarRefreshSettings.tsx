@@ -7,8 +7,7 @@ import { Button } from "../shared/ui/Button";
 
 const SOURCE_LABEL = { igdb: "게임", tmdb: "영화", tmdb_tv: "애니" } as const;
 
-/** Settings › 외부 서비스: refetch the 발매 캘린더 now, without the daily limit. */
-export function ReleaseCalendarRefreshSettings() {
+export function useReleaseCalendarRefresh() {
   const { gateway } = useLibrary();
   const api = gateway.releaseCalendar;
   const [calendar, setCalendar] = useState<ReleaseCalendar | null>(null);
@@ -20,8 +19,6 @@ export function ReleaseCalendarRefreshSettings() {
     void api?.calendar().then(value => { if (active) setCalendar(value); }).catch(() => undefined);
     return () => { active = false; };
   }, [api]);
-
-  if (!api) return null;
 
   async function refreshNow() {
     if (!api || busy) return;
@@ -36,14 +33,20 @@ export function ReleaseCalendarRefreshSettings() {
     } finally { setBusy(false); }
   }
 
+  return { calendar, busy, message, refreshNow };
+}
+
+/** Settings › 연결: refetch the 발매 캘린더 now, without the daily limit. */
+export function ReleaseCalendarRefreshSettings() {
+  const { calendar, busy, message, refreshNow } = useReleaseCalendarRefresh();
+  if (!calendar) return null;
   return <dl className="settings-view__property">
     <dt>발매 캘린더</dt>
-    <dd className="settings-view__credential-status">평소에는 하루에 한 번 자동으로 받습니다. 누르면 기다리지 않고 게임·영화·애니 발매 정보를 지금 다시 받습니다.</dd>
     {calendar?.sources.map(source => <dd key={source.provider} className="settings-view__row-note">
       {SOURCE_LABEL[source.provider]} · {source.fetchedAt ? `마지막으로 받음 ${new Date(source.fetchedAt).toLocaleString("ko-KR")}` : "받은 기록 없음"}
       {source.errorCode && ` · ${RELEASE_SOURCE_PROBLEM[source.errorCode] ?? "받지 못했습니다."}`}
     </dd>)}
-    <Button size="sm" disabled={busy} onClick={() => void refreshNow()}>{busy ? "받는 중…" : "지금 새로 받기"}</Button>
+    <dd className="settings-view__inline-controls"><Button size="sm" variant="quiet" disabled={busy} onClick={() => void refreshNow()}>{busy ? "받는 중…" : "새로 받기"}</Button></dd>
     {message && <dd className="settings-view__row-message" role="status">{message}</dd>}
   </dl>;
 }

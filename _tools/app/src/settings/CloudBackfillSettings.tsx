@@ -59,10 +59,9 @@ function useCloudBackfill() {
 }
 
 /**
- * Everyday sync status for Settings › 클라우드. The first line is a one-line
- * conclusion; `children` (connection controls) render between it and the detail.
+ * Everyday sync status for Settings › 연결. The connection controls render before this status.
  */
-export function CloudBackfillSettings({ connectionReady = null, children }: { connectionReady?: boolean | null; children?: ReactNode }) {
+export function CloudBackfillSettings({ connectionReady = null, children, embedded = false }: { connectionReady?: boolean | null; children?: ReactNode; embedded?: boolean }) {
   const { gateway, progress, busy, message, setMessage, error, setError, act, active, total, percent, settled } = useCloudBackfill();
 
   const retry = () => act(async () => {
@@ -79,10 +78,8 @@ export function CloudBackfillSettings({ connectionReady = null, children }: { co
     <>
       <p className="cloud-backfill__conclusion" role="status"><strong>{verdict}</strong></p>
       {children}
-      <section className="cloud-backfill" aria-labelledby="cloud-backfill-title">
-        <h3 className="settings-view__group-title" id="cloud-backfill-title">동기화 상태</h3>
-        <p className="settings-view__row-note">PC의 자료를 모바일에서도 볼 수 있도록 복사합니다.</p>
-        {progress && cloudProblemCount(progress) > 0 && <p className="settings-view__row-note">실패 자료와 수신·연결·기록 전송 문제를 합산합니다.</p>}
+      <section className="cloud-backfill" aria-label={embedded ? "동기화 상태" : undefined} aria-labelledby={embedded ? undefined : "cloud-backfill-title"}>
+        {!embedded && <h3 className="settings-view__group-title" id="cloud-backfill-title">동기화 상태</h3>}
         {error && <Toast tone="error" onDismiss={() => setError(null)}>{error}</Toast>}
         {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
 
@@ -94,22 +91,9 @@ export function CloudBackfillSettings({ connectionReady = null, children }: { co
           <progress aria-label="모바일 라이브러리 동기화 진행률" aria-valuenow={percent} max={100} value={percent} />
           {progress && <p>대기 {progress.queued} · 전송 중 {active}</p>}
           {progress && progress.failed > 0 && <p className="cloud-backfill__problem">확인 필요 {progress.failed.toLocaleString()}개</p>}
-          {progress?.lastError && <p className="cloud-backfill__error">최근 오류: {progress.lastError}</p>}
+          {progress && cloudProblemCount(progress) > 0 && <p className="cloud-backfill__problem">문제 {cloudProblemCount(progress).toLocaleString()}개</p>}
+          {progress?.lastError && <p className="cloud-backfill__error">{progress.lastError}</p>}
         </div>
-
-        {progress?.activity?.map((activity) => <dl className="settings-view__property" key={activity.direction}>
-          <dt>{activity.direction === "capture" ? "클라우드 → PC" : "PC → 클라우드"}</dt>
-          <dd>
-            <div>마지막 성공 {activity.lastSuccessAt ? new Date(activity.lastSuccessAt).toLocaleString("ko-KR") : "아직 기록 없음"}</div>
-            {activity.metadataLastError && <p role="alert">{activity.metadataLastError}</p>}
-            {activity.metadataLastSuccessAt && <p>모바일 기록 전송 {new Date(activity.metadataLastSuccessAt).toLocaleString("ko-KR")}</p>}
-            {activity.lastError && <p role="alert">{activity.lastError}</p>}
-            {activity.problems > 0 && <p>확인 필요 {activity.problems}개</p>}
-            <details><summary>최근 실행 상세</summary>
-              <p>마지막 시도 {activity.lastAttemptAt ? new Date(activity.lastAttemptAt).toLocaleString("ko-KR") : "아직 기록 없음"} · 처리 {activity.processed}개</p>
-            </details>
-          </dd>
-        </dl>)}
         {progress?.controlState === "paused" && progress.replicationEnabled !== false && gateway.cloudBackfillSetControlState && <Button size="sm" disabled={busy} onClick={() => void act(async () => {
           await gateway.cloudBackfillSetControlState!("running");
           notifyCloudBackfillSupervisor();
@@ -171,7 +155,6 @@ export function CloudBackfillMaintenance() {
         </>}
         <Button size="sm" disabled={busy} onClick={() => void reconcile()}>동기화 상태 복구</Button>
       </div>
-      <p className="settings-view__row-note">사전 점검은 읽기만 합니다. 전체 업로드는 처음 연결할 때 한 번만 준비하며, 확인 후 시작합니다.</p>
     </section>
   );
 }

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkspaceChromeProvider, ChromeTarget } from "../layout/WorkspaceChrome";
 import { NotesWorkspace, SECRET_IDLE_MS } from "./NotesView";
+import { caretOffsetAtPoint } from "./model";
 import { NotesStore, type Note, type NotesRequest } from "./store";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -52,7 +53,7 @@ it("renders text notes as Markdown and ticking a task rewrites that line", async
   await userEvent.click(screen.getAllByRole("checkbox")[1]!);
   await settle(store);
   expect(last(fake.saves())).toMatchObject({ body: "# 오늘\n- [ ] 우유\n- [x] 빵", type: "text" });
-  // No visible 보기/편집 toggle: clicking the text edits it; Esc or leaving it shows Markdown again.
+  // No visible 보기/편집 toggle: clicking the text edits it; Esc returns to the list.
   expect(screen.queryByRole("button", { name: "편집" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "마크다운 도움말" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("heading", { name: "오늘" }));
@@ -61,11 +62,84 @@ it("renders text notes as Markdown and ticking a task rewrites that line", async
   expect(source).toHaveValue("# 오늘\n- [ ] 우유\n- [x] 빵");
   await userEvent.keyboard("{Escape}");
   expect(screen.queryByRole("textbox", { name: "메모 본문" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /할 일/ }));
   await userEvent.click(screen.getByRole("heading", { name: "오늘" }));
   await waitFor(() => expect(screen.getByRole("textbox", { name: "메모 본문" })).toHaveFocus());
   await userEvent.click(screen.getByRole("textbox", { name: "메모 제목" }));
   expect(screen.queryByRole("textbox", { name: "메모 본문" })).not.toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "오늘" })).toBeInTheDocument();
+});
+
+it("filters kinds in the top chips and scopes and labels in the 보기 menu", async () => {
+  const fake = backend([
+    base("memo", { title: "메모", body: "일반", labels: ["업무"] }),
+    base("todo", { title: "체크", type: "checklist", items: [] }),
+    base("budget", { title: "가계부", type: "ledger", pinned: true, income: null, recurring: [], planned: [] }),
+    base("secret", { title: "암호", type: "secret", fields: [], memo: "" }),
+    base("archived", { title: "보관", body: "오래된 메모", archived: true }),
+  ]);
+  const store = new NotesStore(fake.request); surface(store);
+  const list = () => within(screen.getByLabelText("메모 목록"));
+  expect(await screen.findByRole("radio", { name: "가계부" })).toBeInTheDocument();
+  expect(screen.getByRole("radio", { name: "암호" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("radio", { name: "체크리스트" }));
+  expect(list().getByRole("button", { name: /체크/ })).toBeInTheDocument();
+  expect(list().queryByRole("button", { name: /메모 일반/ })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("radio", { name: "전체" }));
+  await userEvent.click(screen.getByRole("button", { name: /보기/ }));
+  expect(await screen.findByRole("menuitem", { name: /보관함/ })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("menuitem", { name: /보관함/ }));
+  expect(list().getByRole("button", { name: /보관/ })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /보기/ }));
+  await userEvent.click(screen.getByRole("menuitem", { name: /모든 메모/ }));
+  await userEvent.click(screen.getByRole("button", { name: /보기/ }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "업무" }));
+  expect(list().getByRole("button", { name: /메모/ })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /라벨: 업무/ }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "라벨 해제" }));
+});
+
+it("maps a rendered-text click to a source caret and falls back to the body end", async () => {
+  const fake = backend([base("note", { body: "첫 줄\n\n아래 줄의 본문" })]);
+  const store = new NotesStore(fake.request); surface(store);
+  const caretPositionFromPoint = vi.fn(() => {
+    const mirror = [...document.body.children].find((element) => (element as HTMLElement).style.position === "fixed" && (element as HTMLElement).style.visibility === "hidden") as HTMLElement | undefined;
+    return mirror?.firstChild ? { offsetNode: mirror.firstChild, offset: 7 } : null;
+  });
+  const originalCaretPositionFromPoint = (document as Document & { caretPositionFromPoint?: unknown }).caretPositionFromPoint;
+  Object.defineProperty(document, "caretPositionFromPoint", { configurable: true, value: caretPositionFromPoint });
+  try {
+    await userEvent.click(await screen.findByRole("button", { name: /note/ }));
+    fireEvent.click(screen.getByText("아래 줄의 본문"), { clientX: 120, clientY: 200 });
+    const area = await screen.findByRole("textbox", { name: "메모 본문" }) as HTMLTextAreaElement;
+    await waitFor(() => expect(area.selectionStart).toBe(7));
+    expect(caretOffsetAtPoint(area, 120, 200)).toBe(7);
+  } finally {
+    Object.defineProperty(document, "caretPositionFromPoint", { configurable: true, value: originalCaretPositionFromPoint });
+  }
+});
+
+it("undoes and redoes title and body edits per open note", async () => {
+  const fake = backend([base("note", { title: "원래 제목", body: "원래 본문" }), base("other", { body: "다른 본문" })]);
+  const store = new NotesStore(fake.request); surface(store);
+  await userEvent.click(await screen.findByRole("button", { name: /원래 제목/ }));
+  const title = screen.getByRole("textbox", { name: "메모 제목" });
+  fireEvent.change(title, { target: { value: "새 제목" } });
+  await userEvent.click(screen.getByText("원래 본문", { selector: ".notes-rendered *" }));
+  const body = await screen.findByRole("textbox", { name: "메모 본문" });
+  fireEvent.change(body, { target: { value: "새 본문" } });
+  expect(screen.getByRole("button", { name: "되돌리기" })).toBeEnabled();
+  fireEvent.keyDown(body, { key: "z", ctrlKey: true });
+  expect(body).toHaveValue("원래 본문");
+  fireEvent.keyDown(body, { key: "z", ctrlKey: true, shiftKey: true });
+  expect(body).toHaveValue("새 본문");
+  await userEvent.click(title);
+  fireEvent.change(title, { target: { value: "두 번째 제목" } });
+  await userEvent.click(screen.getByRole("button", { name: "되돌리기" }));
+  expect(title).toHaveValue("새 제목");
+  await userEvent.click(screen.getByRole("button", { name: "메모 닫기" }));
+  await userEvent.click(screen.getByRole("button", { name: /다른/ }));
+  expect(screen.getByRole("button", { name: "되돌리기" })).toBeDisabled();
 });
 
 it("creates a checklist, adds items with Enter, checks one into the 완료 group and reorders with Alt+Arrow", async () => {
@@ -112,25 +186,29 @@ it("colours, labels, label filter, search and archive", async () => {
   await userEvent.keyboard("  개인  {Enter}");
   await settle(store);
   expect(last(fake.saves())).toMatchObject({ labels: ["개인"] });
-  // Side label list filters the list.
-  const labels = within(screen.getByLabelText("라벨", { selector: ".notes-label-index" }));
-  await userEvent.click(labels.getByRole("button", { name: /업무/ }));
-  const list = within(screen.getByLabelText("메모 목록"));
-  expect(list.getAllByRole("button").map((b) => b.textContent)).toEqual([expect.stringContaining("회의")]);
+  await userEvent.click(screen.getByRole("button", { name: "메모 닫기" }));
+  // The view menu filters by label.
+  await userEvent.click(screen.getByRole("button", { name: /보기/ }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: "업무" }));
+  const list = () => within(screen.getByLabelText("메모 목록"));
+  expect(list().getAllByRole("button").map((b) => b.textContent)).toEqual([expect.stringContaining("회의")]);
   // Search: secret notes match by title only (their values stay hidden).
-  await userEvent.click(screen.getByRole("button", { name: /모든 메모/ }));
-  expect(list.getAllByRole("button")).toHaveLength(3);
-  expect(list.getByRole("button", { name: /계정/ })).toHaveTextContent("암호 메모");
+  await userEvent.click(screen.getByRole("button", { name: /보기/ }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: "모든 메모" }));
+  expect(list().getAllByRole("button")).toHaveLength(3);
+  expect(list().getByRole("button", { name: /계정/ })).toHaveTextContent("암호 메모");
   // Archive leaves the main list and shows up under 보관함.
-  await userEvent.click(list.getByRole("button", { name: /회의/ }));
+  await userEvent.click(list().getByRole("button", { name: /회의/ }));
   // Archive lives in the ⋯ menu next to 휴지통.
   expect(screen.queryByRole("button", { name: "보관" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "메모 더보기" }));
   await userEvent.click(await screen.findByRole("menuitem", { name: "보관함으로 보내기" }));
   await settle(store);
-  expect(list.queryByRole("button", { name: /회의/ })).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "보관함" }));
-  expect(list.getByRole("button", { name: /회의/ })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "메모 닫기" }));
+  expect(list().queryByRole("button", { name: /회의/ })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /보기/ }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: "보관함" }));
+  expect(list().getByRole("button", { name: /회의/ })).toBeInTheDocument();
 });
 
 it("search matches checklist items and labels but only titles of secret notes", async () => {
@@ -196,9 +274,11 @@ it("hides a note's content on the board from the 더보기 menu and shows it aga
   await userEvent.click(await screen.findByRole("menuitem", { name: "목록에서 내용 숨기기" }));
   await settle(store);
   expect(last(fake.saves())).toMatchObject({ id: "API", concealed: true });
+  await userEvent.click(screen.getByRole("button", { name: "메모 닫기" }));
   await waitFor(() => expect(document.querySelector('[data-note-id="API"]')).toHaveTextContent("숨긴 메모 · 열어서 보기"));
   expect(document.querySelector('[data-note-id="API"]')).not.toHaveTextContent("sk-secret-value");
-  await userEvent.click(screen.getAllByRole("button", { name: "메모 더보기" })[0]!);
+  await userEvent.click(screen.getByRole("button", { name: /API/ }));
+  await userEvent.click(screen.getByRole("button", { name: "메모 더보기" }));
   await userEvent.click(await screen.findByRole("menuitem", { name: "목록에서 내용 보이기" }));
   await settle(store);
   expect(last(fake.saves())).toMatchObject({ id: "API", concealed: false });

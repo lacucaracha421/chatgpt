@@ -178,3 +178,68 @@ export function noteLimitProblem(note: LimitedNote): string | null {
 export function labelKey(label: string): string {
   return label.normalize("NFC").toLowerCase();
 }
+
+const CARET_STYLE_PROPERTIES = [
+  "boxSizing", "width", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+  "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
+  "fontFamily", "fontSize", "fontWeight", "fontStyle", "letterSpacing", "lineHeight",
+  "textTransform", "wordSpacing", "textIndent", "tabSize",
+] as const;
+
+/** Measures the source caret in a textarea without changing the live editor's scroll position. */
+export function caretOffset(area: HTMLTextAreaElement): { top: number; height: number } {
+  const style = getComputedStyle(area);
+  const mirror = document.createElement("div");
+  for (const property of CARET_STYLE_PROPERTIES) mirror.style[property] = style[property];
+  Object.assign(mirror.style, {
+    position: "absolute",
+    visibility: "hidden",
+    top: "0",
+    left: "-9999px",
+    whiteSpace: "pre-wrap",
+    overflowWrap: "break-word",
+    width: `${area.offsetWidth}px`,
+  });
+  mirror.textContent = area.value.slice(0, area.selectionEnd ?? area.value.length);
+  const marker = document.createElement("span");
+  marker.textContent = "\u200b";
+  mirror.append(marker);
+  document.body.append(mirror);
+  const result = { top: marker.offsetTop, height: marker.offsetHeight || parseFloat(style.lineHeight) || 20 };
+  mirror.remove();
+  return result;
+}
+
+/** Finds a source offset at a rendered-text point, using the same wrapped-text mirror as tablet Notes. */
+export function caretOffsetAtPoint(area: HTMLTextAreaElement, x: number, y: number): number | null {
+  const style = getComputedStyle(area);
+  const rect = area.getBoundingClientRect();
+  const mirror = document.createElement("div");
+  for (const property of CARET_STYLE_PROPERTIES) mirror.style[property] = style[property];
+  Object.assign(mirror.style, {
+    position: "fixed",
+    visibility: "hidden",
+    pointerEvents: "none",
+    top: `${rect.top}px`,
+    left: `${rect.left}px`,
+    width: `${rect.width || area.offsetWidth}px`,
+    height: `${rect.height || area.offsetHeight}px`,
+    whiteSpace: "pre-wrap",
+    overflowWrap: "break-word",
+    overflow: "hidden",
+  });
+  mirror.textContent = area.value;
+  document.body.append(mirror);
+  const documentWithCaret = document as Document & {
+    caretPositionFromPoint?: (pointX: number, pointY: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (pointX: number, pointY: number) => Range | null;
+  };
+  const position = documentWithCaret.caretPositionFromPoint?.(x, y);
+  const range = position ? null : documentWithCaret.caretRangeFromPoint?.(x, y);
+  const node = position?.offsetNode ?? range?.startContainer;
+  const offset = position?.offset ?? range?.startOffset;
+  const text = mirror.firstChild;
+  const result = node === text && offset !== undefined ? Math.max(0, Math.min(area.value.length, offset)) : null;
+  mirror.remove();
+  return result;
+}

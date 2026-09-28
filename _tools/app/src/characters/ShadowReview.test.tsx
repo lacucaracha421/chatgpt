@@ -53,7 +53,7 @@ it("accepts with the keyboard through the manual decision path, advances and upd
   await user.keyboard("a");
   await waitFor(() => expect(decide).toHaveBeenLastCalledWith(expect.objectContaining({ targetId: "kisaki", assetIds: ["a2"], decision: "rejected" })));
   expect(await screen.findByRole("heading", { name: "확인할 항목이 없습니다" })).toBeInTheDocument();
-  expect(screen.getByText(/S36 시험 채점이 켜져 있어야/)).toBeInTheDocument();
+  expect(screen.getByText("새 이미지가 채점되면 여기에 나타납니다.")).toBeInTheDocument();
   expect(screen.getByLabelText("진행 상황")).toHaveTextContent("추천 수락2/7");
 });
 

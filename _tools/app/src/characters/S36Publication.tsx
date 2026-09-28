@@ -27,6 +27,27 @@ export const s36PublicationApi: S36PublicationApi = {
 
 const EVENT = "lakomics-s36-publication";
 
+export async function enableS36Scoring() {
+  await invoke("set_character_shadow_enabled", { enabled: true });
+  window.dispatchEvent(new Event(EVENT));
+}
+
+export function S36ScoringWarning({ disabled, onChanged }: { disabled?: boolean; onChanged?: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function enable() {
+    if (busy) return;
+    setBusy(true); setError(null);
+    try { await enableS36Scoring(); onChanged?.(); }
+    catch (cause) { setError(commandErrorMessage(cause, "S36 채점을 켜지 못했습니다.")); }
+    finally { setBusy(false); }
+  }
+  return <>
+    <small className="s36-series__warning" role="status">S36 채점이 꺼져 있어 자동 분류가 멈춰 있습니다 <Button size="sm" variant="quiet" disabled={disabled || busy} onClick={() => void enable()}>켜기</Button></small>
+    {error && <small className="s36-series__message" role="alert">{error}</small>}
+  </>;
+}
+
 /** One shared view of the settings; every change notifies the other controls. */
 export function useS36Publication(api: S36PublicationApi) {
   const [settings, setSettings] = useState<S36PublicationSettings | null>(null);
@@ -90,7 +111,7 @@ export function S36SeriesControl({ seriesId, seriesName, disabled, onChanged, re
     </fieldset>
     {s36 && <Button size="sm" variant="ghost" disabled={disabled || clearing} onClick={() => setConfirming(true)}>S36 자동 분류 해제</Button>}
     {readyCount > 0 && <small className="s36-series__ready" role="status">{s36 ? `제외한 캐릭터 중 ${readyCount}명은 S36을 켜도 됩니다` : `S36 켜도 되는 캐릭터 ${readyCount}명`}</small>}
-    {s36 && !settings.scoringEnabled && <small className="s36-series__warning" role="status">설정 → 일반의 S36 시험 채점이 꺼져 있어 자동 분류가 멈춰 있습니다.</small>}
+    {s36 && !settings.scoringEnabled && <S36ScoringWarning disabled={disabled} onChanged={onChanged} />}
     {(message || error) && <small className="s36-series__message" role="status">{message || error}</small>}
     {confirming && <Dialog open title="S36 자동 분류 해제" onClose={() => { if (!clearing) setConfirming(false); }}>
       <p>{seriesName}에서 S36이 자동으로 넣고 아직 아무도 확인하지 않은 분류를 모두 해제합니다. 직접 판단한 것과 기존 분류기가 넣은 것은 그대로 둡니다.</p>

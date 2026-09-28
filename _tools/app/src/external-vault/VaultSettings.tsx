@@ -5,7 +5,8 @@ import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { EncryptedVaultSidecarCleanupPreview, EncryptedVaultStatus, LibraryGateway } from "../library/types";
 import { Button } from "../shared/ui/Button";
-import { TextField } from "../shared/ui/TextField";
+import { Checkbox } from "../shared/ui/Checkbox";
+import { TextInput } from "../shared/ui/TextInput";
 import { vaultErrorMessage } from "./vaultErrors";
 import { useVaultImportJob } from "./vaultImportJob";
 import { setVaultRecoveryPending } from "./vaultRecoveryGuard";
@@ -13,7 +14,7 @@ import "./externalVault.css";
 
 type Mode = "idle" | "create" | "password";
 
-/** Settings > 데이터 관리 > 비밀 보관함 (ADR-0039). */
+/** Settings > 보관함 > 비밀 보관함 (ADR-0039). */
 export function VaultSettings({ onChanged, onSaved }: { onChanged?: () => void | Promise<void>; onSaved?: (message: string) => void }) {
   const { gateway } = useLibrary();
   const [status, setStatus] = useState<EncryptedVaultStatus | null>(null);
@@ -62,12 +63,13 @@ export function VaultSettings({ onChanged, onSaved }: { onChanged?: () => void |
   }
   const present = status !== null && status.state !== "absent";
   const unlocked = status?.state === "unlocked";
-  return <dl className="settings-view__property">
+  return <>
+  <dl className="settings-view__property external-vault-settings">
     <dt>상태</dt>
     <dd className="settings-view__path">{present ? status.root : "연결된 보관함 없음"}</dd>
-    <dd className="settings-view__row-note">
+    <dd className="settings-view__status external-vault-settings__state">
       {!present
-        ? "USB 폴더에 암호화된 보관함을 만듭니다. 비밀번호를 잊으면 만들 때 받은 복구키로만 열 수 있습니다."
+        ? "설정 안 됨"
         : [unlocked ? `열림 · ${(status.itemCount ?? 0).toLocaleString()}개` : "잠김 · 비밀 화면에서 열 수 있습니다", unlocked && status.backupIndex ? "백업 목록으로 연 읽기 전용" : null, status.remembered ? "이 PC에서 기억함" : null].filter(Boolean).join(" · ")}
     </dd>
     {mode === "idle" && <dd className="settings-view__actions">
@@ -93,8 +95,9 @@ export function VaultSettings({ onChanged, onSaved }: { onChanged?: () => void |
         if (ok) setMode("idle");
       }} />}
     {error && <dd className="settings-view__row-message" role="alert">{error}</dd>}
-    {unlocked && !status.backupIndex && mode === "idle" && <SidecarCleanup gateway={gateway} vaultId={status.vaultId} onChanged={onChanged} onSaved={onSaved} />}
-  </dl>;
+  </dl>
+  {unlocked && !status.backupIndex && mode === "idle" && <SidecarCleanup gateway={gateway} vaultId={status.vaultId} onChanged={onChanged} onSaved={onSaved} />}
+  </>;
 }
 
 /**
@@ -150,7 +153,7 @@ function SidecarCleanup({ gateway, vaultId, onChanged, onSaved }: {
 
   const count = preview?.count ?? 0;
   if (count === 0 && result === null) return null;
-  return <>
+  return <dl className="settings-view__property external-vault-cleanup-row">
     <dt className="external-vault-cleanup__title">영상 썸네일 파일 정리</dt>
     {count > 0 && <dd className="settings-view__row-note">
       영상 옆에 있던 썸네일 이미지 {count.toLocaleString()}개를 해당 영상의 썸네일로 옮기고 목록에서 뺍니다.
@@ -172,7 +175,7 @@ function SidecarCleanup({ gateway, vaultId, onChanged, onSaved }: {
     </dd>}
     {result && <dd className="settings-view__row-message" role="status">{result}</dd>}
     {error && <dd className="settings-view__row-message" role="alert">{error}</dd>}
-  </>;
+  </dl>;
 }
 
 function CreateForm({ busy, onCancel, onError, onCreate }: { busy: boolean; onCancel(): void; onError(message: string | null): void; onCreate(root: string, password: string, remember: boolean): Promise<void> }) {
@@ -202,9 +205,9 @@ function CreateForm({ busy, onCancel, onError, onCreate }: { busy: boolean; onCa
         <span className="settings-view__path">{root ?? "폴더를 선택하지 않았습니다"}</span>
         <Button type="button" size="sm" disabled={busy} onClick={() => void chooseFolder()}>보관할 폴더 선택</Button>
       </div>
-      <TextField type="password" label="비밀번호" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} />
-      <TextField type="password" label="비밀번호 확인" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} />
-      <label className="external-vault-check"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />이 PC에서 기억</label>
+      <label className="ui-field"><span>비밀번호</span><TextInput type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+      <label className="ui-field"><span>비밀번호 확인</span><TextInput type="password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} /></label>
+      <Checkbox checked={remember} onChange={(event) => setRemember(event.target.checked)}>이 PC에서 기억</Checkbox>
       <div className="external-vault-actions">
         <Button type="submit" size="sm" variant="primary" disabled={busy}>{busy ? "만드는 중…" : "만들기"}</Button>
         <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onCancel}>취소</Button>
@@ -228,10 +231,9 @@ function PasswordForm({ busy, onCancel, onError, onChange }: { busy: boolean; on
   }
   return <dd className="external-vault-form-row">
     <form className="external-vault-form" onSubmit={submit}>
-      <TextField key={kind} type={kind === "password" ? "password" : "text"} label={kind === "password" ? "현재 비밀번호" : "복구키"}
-        autoComplete="off" spellCheck={false} value={current} onChange={(event) => setCurrent(event.target.value)} />
-      <TextField type="password" label="새 비밀번호" autoComplete="new-password" value={next} onChange={(event) => setNext(event.target.value)} />
-      <TextField type="password" label="새 비밀번호 확인" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} />
+      <label className="ui-field"><span>{kind === "password" ? "현재 비밀번호" : "복구키"}</span><TextInput key={kind} type={kind === "password" ? "password" : "text"} autoComplete="off" spellCheck={false} value={current} onChange={(event) => setCurrent(event.target.value)} /></label>
+      <label className="ui-field"><span>새 비밀번호</span><TextInput type="password" autoComplete="new-password" value={next} onChange={(event) => setNext(event.target.value)} /></label>
+      <label className="ui-field"><span>새 비밀번호 확인</span><TextInput type="password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} /></label>
       <div className="external-vault-actions">
         <Button type="submit" size="sm" variant="primary" disabled={busy}>변경</Button>
         <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => { setKind(kind === "password" ? "recoveryKey" : "password"); setCurrent(""); }}>
@@ -256,10 +258,9 @@ function RecoveryKeyStep({ recoveryKey, onDone }: { recoveryKey: string; onDone(
   }, [recoveryKey]);
   return <div className="external-vault-recovery" role="group" aria-label="비밀 보관함 복구키">
     <strong>복구키</strong>
-    <p>비밀번호를 잊었을 때 보관함을 여는 유일한 방법입니다. 지금 한 번만 표시됩니다.</p>
     {qr && <img className="external-vault-recovery__qr" src={qr} alt="복구키 QR 코드" width={220} height={220} />}
     <textarea className="ui-input external-vault-recovery__key" aria-label="복구키" value={recoveryKey} readOnly spellCheck={false} autoComplete="off" />
-    <label className="external-vault-check"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />복구키를 안전한 곳에 보관했습니다</label>
+    <Checkbox checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)}>복구키를 안전한 곳에 보관했습니다</Checkbox>
     <div className="external-vault-actions"><Button size="sm" variant="primary" disabled={!confirmed} onClick={onDone}>계속</Button></div>
   </div>;
 }

@@ -17,5 +17,5 @@ it("lists server, catalog and 발매 캘린더 state and opens the screen that o
   expect(within(block).getByRole("button", { name: "서버 연결 안 됨" })).toHaveAttribute("data-tone", "off");
   expect(await within(block).findByRole("button", { name: "카탈로그 갱신 실패" })).toHaveAttribute("data-tone", "off");
   await userEvent.click(await within(block).findByRole("button", { name: "발매 캘린더 IGDB · TMDB" }));
-  expect(onNavigate).toHaveBeenLastCalledWith({ kind: "settings", section: "external_services" });
+  expect(onNavigate).toHaveBeenLastCalledWith({ kind: "settings", section: "connection" });
 });

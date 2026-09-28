@@ -2,9 +2,8 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetReleaseDataForTests } from "../collections/releaseData";
-import { EMPTY_EXCHANGE, ExchangeStore, type ExchangeSnapshot } from "../exchange/exchangeStore";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
-import type { AuthoritySyncHealth, CollectionSummary, HomeOverview, ReleaseBoardEntry, ReleaseInboxItem, ReleaseWishlistItem } from "../library/types";
+import type { AuthoritySyncHealth, CollectionSummary, HomeOverview, ReleaseBoardEntry, ReleaseWishlistItem } from "../library/types";
 import { NotesStore, type Note } from "../notes/store";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import type { AvLinkApi } from "../collections/AvLinkInbox";
@@ -69,21 +68,17 @@ const healthy: AuthoritySyncHealth = {
 };
 const note = (id: string, fields: Partial<Note>): Note => ({ id, title: "", body: "", pinned: true, deleted: false, createdAt: iso(1), updatedAt: iso(1), localRevision: 1, pending: false, conflict: false, ...fields });
 
-function exchangeWith(snapshot: Partial<ExchangeSnapshot>) {
-  const value = { ...EMPTY_EXCHANGE, availability: { state: "ready" as const, message: null, needsToken: false }, devices: [{ deviceId: "tab", name: "Galaxy Tab S11", kind: "tablet" }], ...snapshot };
-  return new ExchangeStore(async <T,>() => value as T, async () => () => undefined);
-}
 function notesWith(notes: Note[]) {
   return new NotesStore(async <T,>() => ({ unlocked: true, notes, lastSyncedAt: null }) as T);
 }
 
 type Candidate = { targetId: string; targetName: string };
-type Setup = { props?: Partial<HomeViewProps>; exchange?: Partial<ExchangeSnapshot>; notes?: Note[]; characters?: number; candidates?: Candidate[]; privacy?: boolean };
-function renderHome({ props = {}, exchange = {}, notes = [], characters = 0, candidates = [], privacy = false }: Setup = {}) {
+type Setup = { props?: Partial<HomeViewProps>; notes?: Note[]; characters?: number; candidates?: Candidate[]; privacy?: boolean };
+function renderHome({ props = {}, notes = [], characters = 0, candidates = [], privacy = false }: Setup = {}) {
   const onNavigate = vi.fn();
   const shadowApi = { page: vi.fn().mockResolvedValue({ items: candidates, nextOffset: null, policyVersion: null, summary: { automatic: { pending: Math.max(characters, candidates.length), accepted: 0, rejected: 0 }, recommended: { pending: 0, accepted: 0, rejected: 0 }, byOrigin: {} } }) };
   const view = render(<PrivacyProvider privacyMode={privacy} setPrivacyMode={vi.fn()}><WorkspaceChromeProvider scope="home"><ChromeTarget name="navigation" />
-    <HomeView collections={[]} reviewCount={0} unsortedCount={0} trashCount={0} onNavigate={onNavigate} exchange={exchangeWith(exchange)} notes={notesWith(notes)}
+    <HomeView collections={[]} reviewCount={0} unsortedCount={0} trashCount={0} onNavigate={onNavigate} notes={notesWith(notes)}
       shadowApi={shadowApi} now={() => NOW} {...props} />
   </WorkspaceChromeProvider></PrivacyProvider>);
   return { onNavigate, shadowApi, view };
@@ -113,208 +108,91 @@ afterEach(() => {
 });
 
 describe("HomeView", () => {
-  it("hides an empty tagger queue and shows the exact reason counts when pending", async () => {
-    const emptySource = vi.fn(async () => []);
-    renderHome({ props: { taggerSource: emptySource } });
-    await waitFor(() => expect(gateway.getHomeOverview).toHaveBeenCalledOnce());
-    expect(emptySource).not.toHaveBeenCalled();
-    expect(within(section("검토")).queryByRole("button", { name: /태거 검토/ })).not.toBeInTheDocument();
-    cleanup();
-
-    const asset = (id: string) => ({ id, originalName: `${id}.png`, title: null, byteSize: 1, width: 100, height: 100,
-      collectedAt: "2026-09-27T00:00:00Z", favorite: false, sourceUrl: null, sourcePublishedAt: null, creatorName: null,
-      creatorHandle: null, creatorUrl: null, importSource: null, importBatchId: null, originalModifiedAt: null,
-      media: { kind: "image" } }) as never;
-    const taggerSource = vi.fn(async () => [
-      { asset: asset("a1"), seriesId: "series", targetId: "char", targetName: "라라", targetFingerprint: "fp", evidence: { source: "tagger" as const, reason: "recommendation" as const, pixaiScore: .9, canaryScore: .91 } },
-      { asset: asset("a2"), seriesId: "series", targetId: "char", targetName: "라라", targetFingerprint: "fp", evidence: { source: "tagger" as const, reason: "recommendation" as const, pixaiScore: .92, canaryScore: .93 } },
-      { asset: asset("a3"), seriesId: "series", targetId: "char", targetName: "라라", targetFingerprint: "fp", evidence: { source: "tagger" as const, reason: "veto" as const, pixaiScore: .1, canaryScore: .2 } },
-    ]);
-    gateway.getHomeOverview.mockResolvedValue(overview({ total: 48213, today: 0, week: 41 }, {}, { tagger: { total: 3, recommendation: 2, veto: 1 } }));
-    renderHome({ props: {
-      taggerSource,
-      characters: [{ id: "char", seriesClassificationId: "series", displayName: "라라", thumbnailAssetId: null, references: [] }] as never,
-      classifications: [{ id: "series", parentId: null, name: "백합" }] as never,
-    } });
-    const row = await within(section("검토")).findByRole("button", { name: /태거 검토/ });
-    expect(row.textContent?.replace(/\s+/g, "")).toBe("3건태거검토태거추천2·검토로돌림1");
-    expect(taggerSource).not.toHaveBeenCalled();
-    await user().click(row);
-    await waitFor(() => expect(taggerSource).toHaveBeenCalledOnce());
-    expect(await screen.findByRole("region", { name: "백합" })).toHaveTextContent("라라");
-  });
-
-  it("collapses calm sections to one line each and reads the day's boundaries", async () => {
-    const { shadowApi } = renderHome();
+  it("renders up to two memo blocks with checklist details and the quiet add row", async () => {
+    const items = ["**우유**", "- [ ] 커피 원두", "[세제 리필](https://example.test)", "건전지 AA", "택배 상자", "여섯 번째"].map((text, index) => ({ id: `i${index}`, text, checked: index < 2, order: String.fromCharCode(97 + index) }));
+    const { onNavigate } = renderHome({ notes: [
+      note("n1", { title: "장보기", type: "checklist", items, updatedAt: iso(5) }),
+      note("n2", { title: "가계부", type: "ledger", income: 500000, recurring: [], planned: [], updatedAt: iso(4) }),
+      note("n3", { title: "세 번째 메모", body: "보이면 안 되는 세 번째 메모", updatedAt: iso(3) }),
+    ] });
     const index = screen.getByRole("navigation", { name: "홈 인덱스" });
-    await waitFor(() => expect(within(index).getByRole("button", { name: /48,213이미지/ })).toBeInTheDocument());
-    expect(within(section("검토")).getByText("모두 확인함")).toBeInTheDocument();
-    expect(within(section("발매 예정")).getByText(/새 신간 없음/)).toBeInTheDocument();
-    expect(within(index).getByRole("button", { name: "받은 파일 0개" })).toHaveTextContent("새 파일 없음");
-    expect(within(index).getByRole("button", { name: "보낼 파일 없음" })).toBeInTheDocument();
-    expect(within(index).getByRole("button", { name: "새 메모" })).toBeInTheDocument();
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(screen.queryByText(/기준$/)).not.toBeInTheDocument();
-    expect(gateway.getHomeOverview).toHaveBeenCalledWith(new Date(2026, 8, 26).toISOString(), new Date(2026, 8, 21).toISOString(), "2026-09-26");
-    expect(shadowApi.page).toHaveBeenCalledWith({ offset: 0, limit: 200 });
-    // 연결 moved to the 상태 panel (2026-09-28); the index order is 자산 현황, 메모, 전송.
-    expect(within(index).getAllByRole("heading").map((heading) => heading.textContent?.replace(/\d+$/, ""))).toEqual(["자산 현황", "메모", "전송"]);
+    await waitFor(() => expect(within(index).getByRole("button", { name: /장보기/ })).toBeInTheDocument());
+    expect(index.querySelectorAll(".home-memo-tile")).toHaveLength(2);
+    expect(within(index).getByRole("button", { name: /장보기/ })).toHaveTextContent("우유커피 원두세제 리필건전지 AA택배 상자");
+    expect(within(index).queryByText("여섯 번째")).not.toBeInTheDocument();
+    expect(within(index).getByRole("button", { name: /가계부/ })).toHaveTextContent("500,000원쓴 돈0하루100,000");
+    expect(within(index).queryByText("세 번째 메모")).not.toBeInTheDocument();
+    await user().click(within(index).getByRole("button", { name: "메모 전체" }));
+    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "notes" });
+    await user().click(within(index).getByRole("button", { name: "새 메모" }));
+    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "notes" });
   });
 
-  it("shows the Artist hub's daily picks with privacy safe slots and navigation", async () => {
-    artistFixture.gateway = {};
-    artistFixture.rows = [{
-      artist: { id: "artist:moon", label: "달그림자", assetCount: 42, coverAssetIds: ["portrait"], pinned: false },
-      kind: "unseen", reason: "142일 동안 안 봄", assetIds: ["a1", "a2"],
-    }];
-    const { onNavigate } = renderHome({ privacy: true });
-    const revisit = await screen.findByRole("region", { name: "다시 보기" });
-    await waitFor(() => expect(within(revisit).getByRole("region", { name: "1년 전 오늘" })).toHaveTextContent("1년 전 오늘2장"));
-    const artist = within(revisit).getByRole("region", { name: "오늘의 작가 · 달그림자" });
-    expect(artist).toHaveTextContent("142일 동안 안 봄 · 소장 42장");
-    expect(revisit.querySelectorAll("img")).toHaveLength(0);
-    await user().click(within(artist).getByRole("button", { name: /오늘의 작가 · 달그림자/ }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "creator", creatorKey: "artist:moon" });
-    await user().click(within(revisit).getByRole("button", { name: "작가 전체" }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "artists", section: "main" });
-  });
-
-  it("shows AV review and today's performer, opens Collections › AV, and hides both in privacy mode", async () => {
+  it("orders the D index, renders status rows from the shared hook, and hides zero review rows", async () => {
+    gateway.getHomeOverview.mockResolvedValue(overview({ total: 48213, today: 146, week: 812, images: 41230, videos: 1204 }, { capturesPending: 23 }, { collections: { game: 84, manga: 212, movie: 57, av: 31 }, tagger: { total: 3, recommendation: 2, veto: 1 } }));
+    gateway.listCatalogReview.mockResolvedValue({ rows: [{ state: "pending", actionable: true }, { state: "pending", actionable: true }], inspectedWorks: 0, comparisons: 0, skippedBuckets: 0 });
     const avLinkApi = { pendingCount: vi.fn().mockResolvedValue(4) } as unknown as AvLinkApi;
-    const latest = { collectionId: "av-1", productCode: "MOCK-417", title: "여름 끝의 약속", releaseDate: "2026-09-12", frontArtworkId: "cover-1" };
-    gateway.getHomeOverview.mockResolvedValue(overview({ total: 48213, today: 0, week: 41 }, {}, {
-      collections: { game: 0, manga: 0, movie: 0, av: 9 },
-      avPerformer: { id: "person-1", displayName: "하야세 미오", originalName: "早瀬みお", knownWorks: 24, ownedWorks: 9,
-        latestWork: latest, recentOwnedWorks: [latest, { ...latest, collectionId: "av-2", frontArtworkId: "cover-2" }, { ...latest, collectionId: "av-3", frontArtworkId: "cover-3" }], portrait: null },
-    }));
-    const { onNavigate } = renderHome({ props: { avLinkApi } });
-    const row = await within(section("검토")).findByRole("button", { name: /AV 품번/ });
-    expect(row.textContent?.replace(/\s+/g, "")).toBe("4건AV품번");
-    const performer = await screen.findByRole("region", { name: "오늘의 AV 배우" });
-    expect(performer).toHaveTextContent("하야세 미오");
-    expect(performer).toHaveTextContent("早瀬みお");
-    expect(performer).toHaveTextContent("24출연작");
-    expect(performer).toHaveTextContent("9소장");
-    expect(performer).toHaveTextContent("9.12");
-    expect(performer.querySelectorAll("img")).toHaveLength(4);
-    await user().click(row);
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "av", showcase: false });
-    await user().click(within(performer).getByRole("button", { name: /AV/ }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "av", showcase: false });
+    const { onNavigate } = renderHome({ props: { reviewCount: 6, unsortedCount: 318, trashCount: 37, avLinkApi }, characters: 14 });
+    const index = screen.getByRole("navigation", { name: "홈 인덱스" });
+    await waitFor(() => expect(within(index).getByRole("button", { name: /41,230이미지/ })).toBeInTheDocument());
+    expect([...index.querySelectorAll("[aria-label]")].map((element) => element.getAttribute("aria-label")).filter((label) => ["메모", "자산 현황", "상태"].includes(label ?? ""))).toEqual(["메모", "자산 현황", "상태"]);
+    const todo = section("검토");
+    await waitFor(() => expect(within(todo).getAllByRole("button").map((button) => button.textContent?.replace(/\s+/g, ""))).toEqual([
+      "캐릭터14", "태거3", "유사이미지6쌍", "중복판본2", "미분류318", "AV품번4", "처리대기23"]));
+    expect(within(todo).queryByText("같은 그림일 수 있음")).not.toBeInTheDocument();
+    await user().click(within(todo).getByRole("button", { name: /유사 이미지/ }));
+    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "similarity_review" });
+    await user().click(within(todo).getByRole("button", { name: /처리 대기/ }));
+    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "settings", section: "connection" });
+    expect(within(index).getByRole("button", { name: "서버 연결됨" })).toBeInTheDocument();
+    expect(within(index).getByRole("button", { name: /카탈로그/ })).toBeInTheDocument();
+    expect(within(index).getByRole("button", { name: /발매 캘린더/ })).toBeInTheDocument();
+
     cleanup();
-
-    renderHome({ props: { avLinkApi }, privacy: true });
-    expect(within(section("검토")).queryByRole("button", { name: /AV 품번/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "오늘의 AV 배우" })).not.toBeInTheDocument();
-    const index = await screen.findByRole("navigation", { name: "홈 인덱스" });
-    await waitFor(() => expect(within(index).getByRole("button", { name: /48,213이미지/ })).toBeInTheDocument());
-    expect(within(index).queryByRole("button", { name: /9AV/ })).not.toBeInTheDocument();
-  });
-
-  it("uses the saved AV performer portrait on the Home card", async () => {
-    const latest = { collectionId: "av-1", productCode: "MOCK-417", title: "여름 끝의 약속", releaseDate: "2026-09-12", frontArtworkId: "cover-1" };
-    gateway.getHomeOverview.mockResolvedValue(overview({ total: 48213, today: 0, week: 41 }, {}, {
-      collections: { game: 0, manga: 0, movie: 0, av: 9 },
-      avPerformer: { id: "person-1", displayName: "하야세 미오", originalName: "早瀬みお", knownWorks: 24, ownedWorks: 9,
-        latestWork: latest, recentOwnedWorks: [latest], portrait: { kind: "commons", dataUrl: "data:image/png;base64,portrait", fileName: "mio.png", author: "저자", license: "CC BY", licenseUrl: null, sourceUrl: "https://commons.wikimedia.org/wiki/File:mio.png" } },
-    }));
+    gateway.getHomeOverview.mockResolvedValue(overview({ total: 0, today: 0, week: 0 }));
+    gateway.listCatalogReview.mockResolvedValue({ rows: [], inspectedWorks: 0, comparisons: 0, skippedBuckets: 0 });
     renderHome();
-    const performer = await screen.findByRole("region", { name: "오늘의 AV 배우" });
-    expect(within(performer).getByRole("img", { name: "하야세 미오 대표 이미지" })).toHaveAttribute("src", "data:image/png;base64,portrait");
+    // The character count is read first (a reading row), then the section settles.
+    expect(await within(section("검토")).findByText("모두 확인함")).toBeInTheDocument();
+    expect(within(section("검토")).queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("lays out a busy day and sends every row to the screen that owns it", async () => {
-    gateway.getHomeOverview.mockResolvedValue(overview({ total: 48213, today: 146, week: 812, images: 41230, videos: 1204 }, { capturesPending: 23 }, { collections: { game: 84, manga: 212, movie: 57, av: 31 } }));
-    gateway.listCatalogReview.mockResolvedValue({ rows: [{ state: "pending", actionable: true }, { state: "pending", actionable: true }, { state: "confirm", actionable: true }], inspectedWorks: 0, comparisons: 0, skippedBuckets: 0 });
+  it("keeps all calendar rows, drops the old chips and navigates from the section chevron", async () => {
     const sea = work("m1", "바다 건너 편지", { unreadReleaseCount: 1 });
     const star = work("m2", "별빛 식당");
     gateway.collectionTracking.releaseBoard.mockResolvedValue([entry("m1", 12, [{ volumeNumber: 13, date: "2026-09-24" }]), entry("m2", 7, [{ volumeNumber: 8, date: "2026-09-30" }])]);
-    const inbox: ReleaseInboxItem[] = [{ collectionId: "m1", collectionName: "바다 건너 편지", provider: "kakao", event: { id: "e1", kind: "new_volume", volumeNumber: 13, previousValue: null, currentValue: "2026-09-24", detectedAt: iso(9) } }];
-    gateway.collectionTracking.listInbox.mockResolvedValue(inbox);
+    gateway.collectionTracking.listInbox.mockResolvedValue([{ collectionId: "m1", collectionName: "바다 건너 편지", provider: "kakao", event: { id: "e1", kind: "new_volume", volumeNumber: 13, previousValue: null, currentValue: "2026-09-24", detectedAt: iso(9) } }]);
     gateway.releaseCalendar.wishlist.mockResolvedValue([
       title("igdb:1", "들판의 기록 II", "game", "2026-09-25", { released: true, unread: [{ id: "w1", itemId: "igdb:1", kind: "released", previousValue: null, currentValue: "2026-09-25", detectedAt: iso(8), readAt: null }] }),
       title("tmdb:2", "여름의 끝", "movie", "2026-10-15", { unread: [{ id: "w2", itemId: "tmdb:2", kind: "date_changed", previousValue: "2026-10-22", currentValue: "2026-10-15", detectedAt: iso(7), readAt: null }] }),
     ]);
-    const ledger = note("n2", { title: "가계부", type: "ledger", income: 500000, recurring: [], planned: [], updatedAt: iso(3) });
-    const { onNavigate } = renderHome({
-      props: { collections: [sea, star], reviewCount: 6, unsortedCount: 318, trashCount: 37 },
-      exchange: { unseen: 3, received: [{ transferId: "r1", fileName: "a.png", sizeBytes: 1, fromName: "Galaxy Tab S11", receivedAt: iso(13), exists: true }],
-        outgoing: [{ transferId: "o1", fileName: "스케치_0926.zip", sizeBytes: 100, toName: "Galaxy Tab S11", state: "uploading", done: 62, message: null, note: null, retryable: false, cancellable: true, createdAt: iso(14) }] },
-      notes: [note("n1", { title: "장보기", type: "checklist", items: [{ id: "i1", text: "우유", checked: true, order: "a" }, { id: "i2", text: "빵", checked: false, order: "b" }] as never, updatedAt: iso(5) }), ledger],
-      characters: 14,
-    });
-    const user = userEvent.setup();
-
-    // 확인할 것: five cells in the product order.
-    const todo = section("검토");
-    await waitFor(() => expect(within(todo).getAllByRole("button").map((button) => button.textContent?.replace(/\s+/g, ""))).toEqual([
-      "23건처리대기태블릿수집요청·아직안받음", "14건캐릭터검토자동분류후보확인", "6쌍유사이미지같은그림일수있음", "2건중복판본카탈로그·같은작품", "318장미분류분류가없는새자산"]));
-    await user.click(within(todo).getByRole("button", { name: /처리 대기/ }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "settings", section: "cloud" });
-    await user.click(within(todo).getByRole("button", { name: /유사 이미지/ }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "similarity_review" });
-    await user.click(within(todo).getByRole("button", { name: /미분류/ }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "unsorted" });
-    await user.click(within(todo).getByRole("button", { name: /캐릭터 검토/ }));
-    await user.click(await screen.findByRole("button", { name: "홈으로 돌아가기" }));
-    await user.click(within(section("검토")).getByRole("button", { name: /중복 판본/ }));
-    expect(await screen.findByRole("dialog", { name: "중복 후보 검토" })).toBeInTheDocument();
-
-    // 발매 예정: released unread items first, then the wishlist calendar items.
-    const shelf = section("발매 예정");
-    await waitFor(() => expect(within(shelf).getByRole("button", { name: /바다 건너 편지/ })).toHaveTextContent("13권"));
-    await user.click(within(shelf).getByRole("button", { name: /바다 건너 편지/ }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "collection", collectionId: "m1" });
-    expect(within(shelf).getByRole("button", { name: /들판의 기록 II/ })).toHaveTextContent("게임");
-    await user.click(within(shelf).getByRole("button", { name: /여름의 끝/ }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "movie", showcase: false, releaseCalendar: true });
-    expect(within(shelf).getByRole("button", { name: /별빛 식당/ })).toHaveTextContent("8권");
-    expect(within(shelf).getByRole("button", { name: /여름의 끝/ })).toHaveTextContent("영화");
-    await user.click(within(shelf).getByRole("radio", { name: "영화 1" }));
-    expect(within(shelf).queryByRole("button", { name: /별빛 식당/ })).not.toBeInTheDocument();
-    await user.click(within(shelf).getByRole("radio", { name: "전체 4" }));
-    await user.click(within(shelf).getByRole("button", { name: /별빛 식당/ }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "collection", collectionId: "m2" });
-    await user.click(within(shelf).getByRole("button", { name: /발매 캘린더/ }));
+    const { onNavigate } = renderHome({ props: { collections: [sea, star] } });
+    const shelf = section("캘린더");
+    await waitFor(() => expect(within(shelf).getByRole("button", { name: /바다 건너 편지/ })).toBeInTheDocument());
+    expect(within(shelf).queryByRole("radio")).not.toBeInTheDocument();
+    expect(within(shelf).queryByText("날짜 바뀜")).not.toBeInTheDocument();
+    await user().click(within(shelf).getByRole("button", { name: "캘린더 전체" }));
     expect(onNavigate).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "game", showcase: false, releaseCalendar: true });
-
-    // 전송, 자산 현황, 메모 now live in the index.
-    const index = screen.getByRole("navigation", { name: "홈 인덱스" });
-    await waitFor(() => expect(within(index).getByRole("button", { name: /받은 파일/ })).toHaveTextContent("받은 파일3개Galaxy Tab S11에서 · 아직 안 봄"));
-    expect(within(index).getByRole("button", { name: /보내는 중/ })).toHaveTextContent("보내는 중62%스케치_0926.zip");
-    await user.click(within(index).getByRole("button", { name: /보내는 중/ }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "exchange" });
-    await waitFor(() => expect(within(index).getByRole("button", { name: /오늘 \+146/ })).toBeInTheDocument());
-    expect(within(index).getByRole("button", { name: /41,230이미지/ })).toBeInTheDocument();
-    expect(within(index).getByRole("button", { name: /1,204영상/ })).toBeInTheDocument();
-    expect(within(index).getByRole("button", { name: /31AV/ })).toBeInTheDocument();
-    await user.click(within(index).getByRole("button", { name: /41,230이미지/ }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "statistics" });
-    await user.click(within(index).getByRole("button", { name: /휴지통/ }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "trash" });
-    await user.click(within(index).getByRole("button", { name: /오늘 \+146/ }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "classification", classificationId: null });
-    await waitFor(() => expect(within(index).getByRole("button", { name: /장보기/ })).toHaveTextContent("1/2완료"));
-    expect(within(index).getByRole("button", { name: /가계부/ })).toHaveTextContent("9월 쓸 수 있는 돈");
-    await user.click(within(index).getByRole("button", { name: /장보기/ }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "notes", noteId: "n1" });
-    await user.click(within(index).getByRole("button", { name: /가계부/ }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "notes", noteId: "n2" });
   });
 
-  it("offline: one notice, compact connection detail, and 기준 only on server-derived sections", async () => {
-    gateway.authoritySyncHealth.mockResolvedValue({ ...healthy, authorityPassFailure: { code: "network", at: iso(14, 31) } });
-    gateway.getHomeOverview.mockResolvedValue(overview({ total: 10, today: 2, week: 5 }, { live: false, confirmedAt: iso(14, 30), capturesPending: 4 }));
-    const { onNavigate } = renderHome({ exchange: { unseen: 1, availability: { state: "offline", message: null, needsToken: false },
-      outgoing: [{ transferId: "o1", fileName: "a.zip", sizeBytes: 10, toName: "Galaxy Tab S11", state: "waiting", done: 0, message: null, note: null, retryable: true, cancellable: true, createdAt: iso(14) }] } });
-    expect(await screen.findByRole("status")).toHaveTextContent("서버에 닿지 않음14:31부터 — 이 PC의 라이브러리 · 검토 · 메모는 그대로입니다.");
-    const index = screen.getByRole("navigation", { name: "홈 인덱스" });
-    void onNavigate;
-    expect(within(index).getByRole("button", { name: /보내기 멈춤/ })).toHaveTextContent("연결되면 이어서 보냄");
-    await waitFor(() => expect(within(section("검토")).getByRole("button", { name: /처리 대기/ })).toHaveTextContent("14:31 기준"));
-    expect(screen.queryByRole("region", { name: "신간" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "전송" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "자산 현황" })).not.toBeInTheDocument();
+  it("renders the revisit mosaic, today's artist strip, and the compact AV block", async () => {
+    artistFixture.gateway = {};
+    artistFixture.rows = [{ artist: { id: "artist:moon", label: "달그림자", assetCount: 42, coverAssetIds: ["portrait"], pinned: false }, kind: "unseen", reason: "숨겨야 하는 이유", assetIds: ["a1", "a2"] }];
+    const latest = { collectionId: "av-1", productCode: "MOCK-417", title: "여름 끝의 약속", releaseDate: "2026-09-12", frontArtworkId: "cover-1" };
+    gateway.getHomeOverview.mockResolvedValue(overview({ total: 48213, today: 0, week: 41 }, {}, { collections: { game: 0, manga: 0, movie: 0, av: 9 }, avPerformer: { id: "person-1", displayName: "하야세 미오", originalName: "早瀬みお", knownWorks: 24, ownedWorks: 9, latestWork: latest, recentOwnedWorks: [latest, { ...latest, collectionId: "av-2", frontArtworkId: "cover-2" }, { ...latest, collectionId: "av-3", frontArtworkId: "cover-3" }], portrait: null } }));
+    const { onNavigate } = renderHome({ privacy: true });
+    const revisit = await screen.findByRole("region", { name: "1년 전 오늘" });
+    expect(revisit).toHaveTextContent("1년 전 오늘2장");
+    expect(revisit.querySelectorAll("img")).toHaveLength(0);
+    const artist = screen.getByRole("region", { name: "작가" });
+    expect(artist).toHaveTextContent("달그림자42장");
+    expect(artist).not.toHaveTextContent("숨겨야 하는 이유");
+    await user().click(within(artist).getByRole("button", { name: /달그림자/ }));
+    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "creator", creatorKey: "artist:moon" });
+    cleanup();
+
+    renderHome();
+    expect(screen.queryByRole("region", { name: "AV 배우" })).not.toBeInTheDocument();
   });
 });
 
@@ -341,9 +219,9 @@ describe("HomeView 캐릭터 검토", () => {
     const shadowApi = pagedApi(items);
     const { onNavigate } = renderHome({ props: { characters: targets, classifications, shadowApi } });
     const todo = section("검토");
-    const cell = await within(todo).findByRole("button", { name: /캐릭터 검토/ });
+    const cell = await within(todo).findByRole("button", { name: /캐릭터/ });
     // One page on Home: the total from the summary, the series seen so far as a hint.
-    await waitFor(() => expect(flat(cell)).toBe("470건캐릭터검토백합·명조"));
+    await waitFor(() => expect(flat(cell)).toBe("캐릭터470"));
     expect(shadowApi.page).toHaveBeenCalledTimes(1);
     expect(within(todo).queryByRole("group")).not.toBeInTheDocument();
 
@@ -383,15 +261,15 @@ describe("HomeView 캐릭터 검토", () => {
     // Back returns to Home, which reads its total again.
     const calls = shadowApi.page.mock.calls.length;
     await user().click(screen.getByRole("button", { name: "홈으로 돌아가기" }));
-    await waitFor(() => expect(flat(within(section("검토")).getByRole("button", { name: /캐릭터 검토/ }))).toBe("320건캐릭터검토명조·백합"));
+    await waitFor(() => expect(flat(within(section("검토")).getByRole("button", { name: /캐릭터/ }))).toBe("캐릭터320"));
     expect(shadowApi.page.mock.calls.length).toBe(calls + 1);
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
   it("names the one waiting character on Home", async () => {
     renderHome({ props: { characters: targets, classifications, shadowApi: pagedApi(repeat("lala", "라라", 3)) } });
-    const cell = await within(section("검토")).findByRole("button", { name: /캐릭터 검토/ });
-    await waitFor(() => expect(flat(cell)).toBe("3건캐릭터검토백합›라라"));
+    const cell = await within(section("검토")).findByRole("button", { name: /캐릭터/ });
+    await waitFor(() => expect(flat(cell)).toBe("캐릭터3"));
   });
 
   it("shows a reading state until the whole list is counted", async () => {
@@ -403,7 +281,7 @@ describe("HomeView 캐릭터 검토", () => {
       return [{ targetId: "lala", targetName: "라라", automatic: 2, recommended: 0, other: 0 }];
     });
     renderHome({ props: { characters: targets, classifications, characterSource, shadowApi: pagedApi(repeat("lala", "라라", 2)) } });
-    await user().click(await within(section("검토")).findByRole("button", { name: /캐릭터 검토/ }));
+    await user().click(await within(section("검토")).findByRole("button", { name: /캐릭터/ }));
     expect(await screen.findByRole("status")).toHaveTextContent("후보 목록 읽는 중 · 200 / 470건");
     expect(screen.queryByRole("region", { name: "백합" })).not.toBeInTheDocument();
     release();
@@ -416,7 +294,7 @@ describe("HomeView 캐릭터 검토", () => {
     const { view } = renderHome({ props: { characters: targets, classifications, shadowApi } });
     await waitFor(() => expect(within(screen.getByRole("navigation", { name: "홈 인덱스" })).getByText(/이번 주/)).toBeInTheDocument());
     expect(shadowApi.page).not.toHaveBeenCalled();
-    expect(within(section("검토")).queryByRole("button", { name: /캐릭터 검토/ })).not.toBeInTheDocument();
+    expect(within(section("검토")).queryByRole("button", { name: /캐릭터/ })).not.toBeInTheDocument();
 
     const rerender = () => view.rerender(<WorkspaceChromeProvider scope="home"><ChromeTarget name="navigation" />
       <HomeView collections={[]} reviewCount={0} unsortedCount={0} trashCount={0} onNavigate={vi.fn()} shadowApi={shadowApi} now={() => NOW}
@@ -425,7 +303,7 @@ describe("HomeView 캐릭터 검토", () => {
     workload.restricted = false;
     rerender();
     await waitFor(() => expect(shadowApi.page).toHaveBeenCalledOnce());
-    await user().click(await within(section("검토")).findByRole("button", { name: /캐릭터 검토/ }));
+    await user().click(await within(section("검토")).findByRole("button", { name: /캐릭터/ }));
     expect(await screen.findByRole("region", { name: "백합" })).toBeInTheDocument();
 
     // Turned on while the overview is open: a notice, no further reads.
@@ -439,3 +317,12 @@ describe("HomeView 캐릭터 검토", () => {
 });
 
 const user = () => userEvent.setup();
+
+describe("avProfileLines", () => {
+  it("writes birth date with age, body and career in short lines", async () => {
+    const { avProfileLines } = await import("./homeModel");
+    expect(avProfileLines({ birthDate: "1998-03-02", heightCm: 158, bandIn: 32.7, waistIn: 22.4, hipIn: 33.5, cup: "D", careerStart: 2019, careerEnd: null }, new Date(2026, 8, 29)))
+      .toEqual(["1998.3.2 · 28세", "158cm · B83(D) W57 H85", "2019– · 7년차"]);
+    expect(avProfileLines({ birthDate: null, heightCm: null, bandIn: null, waistIn: null, hipIn: null, cup: null, careerStart: null, careerEnd: null }, new Date())).toEqual([]);
+  });
+});

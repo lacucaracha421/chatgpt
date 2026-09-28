@@ -197,13 +197,15 @@ it("keeps month notes out of the list and 보관함, and opens the one ledger fr
   await within(list).findByRole("button", { name: /가계부/ });
   expect(within(list).getAllByRole("button").map((b) => b.querySelector(".notes-card__title-text")!.textContent)).toEqual(["가계부", "장보기"]);
   expect(within(list).getByRole("button", { name: /가계부/ })).toHaveTextContent(/월 쓸 수 있는 돈 ₩/);
-  expect(screen.getByRole("button", { name: /모든 메모/ })).toHaveTextContent("2");
-  await userEvent.click(screen.getByRole("button", { name: "보관함" }));
+  await userEvent.click(screen.getByRole("button", { name: /^보기 · / }));
+  expect(await screen.findByRole("menuitem", { name: /모든 메모/ })).toHaveTextContent("2");
+  await userEvent.click(screen.getByRole("menuitem", { name: /보관함/ }));
   // Only the month whose ledger no longer exists shows (read-only); months of the ledger stay hidden.
   expect(within(list).getAllByRole("button").map((b) => b.querySelector(".notes-card__title-text")!.textContent)).toEqual(["가계부 2025년 1월"]);
   await userEvent.click(within(list).getByRole("button", { name: /가계부 2025년 1월/ }));
-  expect(screen.getByText("새 버전의 앱에서 만든 메모입니다. 앱을 업데이트하면 편집할 수 있습니다.")).toBeInTheDocument();
+  expect(screen.getByText("새 버전에서 만든 메모입니다. 업데이트 후 편집할 수 있습니다.")).toBeInTheDocument();
   // 새 메모 → 가계부 opens the existing ledger instead of creating a second one.
+  await userEvent.click(screen.getByRole("button", { name: "메모 닫기" }));
   await userEvent.click(screen.getByRole("button", { name: "새 메모" }));
   await userEvent.click(await screen.findByRole("menuitem", { name: "가계부" }));
   expect(await screen.findByRole("group", { name: "새 기록" })).toBeInTheDocument();

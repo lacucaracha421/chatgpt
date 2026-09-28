@@ -28,6 +28,9 @@
 .external-vault-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .external-vault-message--error { color: var(--color-danger); }
 .external-vault-form-row { grid-column: 1 / -1; }
+.external-vault-settings__state { grid-row: 3; }
+.external-vault-settings > .settings-view__actions { grid-row: 1 / span 3; }
+.external-vault-cleanup-row > .external-vault-cleanup { grid-column: 1 / -1; }
 .external-vault-form { display: grid; gap: var(--space-3); max-width: 24rem; }
 .external-vault-form__folder { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .external-vault-recovery { display: grid; gap: var(--space-3); max-width: 24rem; padding: var(--space-4) 0; }

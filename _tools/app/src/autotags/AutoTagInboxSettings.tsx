@@ -3,11 +3,11 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { Button } from "../shared/ui/Button";
-import { Toggle } from "../shared/ui/Toggle";
+import { Switch } from "../shared/ui/Switch";
 import { autoTagInboxResult, getAutoTagInbox, runAutoTagInboxNow, setAutoTagInbox, type AutoTagInbox } from "./autoTagInbox";
 import { invalidateAutoTagVocabulary } from "./autoTagVocabulary";
 
-export function AutoTagInboxSettings({ disabled }: { disabled: boolean }) {
+export function useAutoTagInbox(disabled: boolean) {
   const [settings, setSettings] = useState<AutoTagInbox | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
@@ -38,19 +38,31 @@ export function AutoTagInboxSettings({ disabled }: { disabled: boolean }) {
     if (result.processed.length) invalidateAutoTagVocabulary();
     setMessage({ text: result.skipped ?? (result.processed.length ? autoTagInboxResult(result.settings) : "새로 가져올 파일이 없습니다."), error: Object.values(result.settings.last ?? {}).some(last => last.error != null) });
   }
-  const locked = disabled || busy || !settings;
-  return <dl className="settings-view__property">
-    <dt>매일 자동 가져오기</dt>
-    <dd className="settings-view__row-note">이 PC에서 라이브러리를 연 뒤 약 2분 후, 이후 한 시간마다 자동 태그와 그림체 파일을 확인합니다. 가벼운 모드에서는 쉽니다.</dd>
-    <dd className="settings-view__path">{settings ? settings.folder ?? "폴더를 선택하면 자동 가져오기가 켜집니다." : "확인 중…"}</dd>
-    <Button size="sm" disabled={locked} onClick={() => void perform(chooseFolder)}>폴더 선택</Button>
-    <Button size="sm" disabled={locked || !settings?.folder} onClick={() => void perform(async () => { setSettings(await setAutoTagInbox(null, settings!.applyTaggerReview)); })}>사용 안 함</Button>
-    <dd><Toggle disabled={locked} checked={settings?.applyTaggerReview ?? true} onChange={event => {
-      const checked = event.currentTarget.checked;
-      void perform(async () => { setSettings(await setAutoTagInbox(settings!.folder, checked)); });
-    }}>가져온 뒤 태거 판정 자동 반영</Toggle></dd>
-    <Button size="sm" disabled={locked || !settings?.folder} onClick={() => void perform(runNow)}>{busy ? "처리 중…" : "지금 가져오기"}</Button>
-    {settings && <dd className="settings-view__path">{autoTagInboxResult(settings)}</dd>}
-    {message && <dd className="settings-view__row-message" role={message.error ? "alert" : "status"}>{message.text}</dd>}
-  </dl>;
+  const disable = () => perform(async () => { if (settings?.folder) setSettings(await setAutoTagInbox(null, settings.applyTaggerReview)); });
+  const setApplyTaggerReview = (checked: boolean) => perform(async () => { if (settings) setSettings(await setAutoTagInbox(settings.folder, checked)); });
+  return { settings, busy, message, locked: disabled || busy || !settings, chooseFolder: () => perform(chooseFolder), disable, runNow: () => perform(runNow), setApplyTaggerReview };
+}
+
+export function AutoTagInboxSettings({ disabled }: { disabled: boolean }) {
+  const { settings, busy, message, locked, chooseFolder, disable, runNow, setApplyTaggerReview } = useAutoTagInbox(disabled);
+  return <>
+    <dl className="settings-view__property">
+      <dt>매일 가져오기 폴더</dt>
+      <dd className="settings-view__status settings-view__path">{settings ? settings.folder ?? "설정 안 됨" : "확인 중…"}</dd>
+      <dd className="settings-view__inline-controls">
+        <Button size="sm" disabled={locked} onClick={() => void chooseFolder()}>폴더 선택</Button>
+        <Button size="sm" variant="quiet" disabled={locked || !settings?.folder} onClick={() => void disable()}>사용 안 함</Button>
+      </dd>
+    </dl>
+    <dl className="settings-view__property">
+      <dt>가져온 뒤 태거 판정 자동 반영</dt>
+      <dd className="settings-view__inline-controls"><Switch disabled={locked} checked={settings?.applyTaggerReview ?? true} onChange={event => void setApplyTaggerReview(event.currentTarget.checked)} aria-label="가져온 뒤 태거 판정 자동 반영" /></dd>
+    </dl>
+    <dl className="settings-view__property">
+      <dt>최근 자동 가져오기</dt>
+      {settings && <dd className="settings-view__status">{autoTagInboxResult(settings)}</dd>}
+      <dd className="settings-view__inline-controls"><Button size="sm" variant="quiet" disabled={locked || !settings?.folder} onClick={() => void runNow()}>{busy ? "처리 중…" : "지금 가져오기"}</Button></dd>
+    </dl>
+    {message && <p className="settings-view__row-message" role={message.error ? "alert" : "status"}>{message.text}</p>}
+  </>;
 }

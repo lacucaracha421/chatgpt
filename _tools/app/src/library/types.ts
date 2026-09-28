@@ -363,6 +363,7 @@ export type AssetAspectFilter = "all" | "square" | "landscape" | "portrait";
 
 export type AssetView =
   | { kind: "classification"; classificationId: string | null; characterId?: string; characterGroupId?: string }
+  | { kind: "albums" }
   | { kind: "album"; albumId: string }
   | { kind: "unsorted" }
   /** The 작가 hub; `section` defaults to 주요 작가 with the 오늘 strip. */
@@ -378,7 +379,7 @@ export type AssetView =
   | { kind: "notes"; noteId?: string }
   | { kind: "exchange" }
   | { kind: "private_vault" }
-  | { kind: "settings"; section?: "general" | "library" | "cloud" | "catalog" | "external_services" | "data" | "about" | "advanced" }
+  | { kind: "settings"; section?: "frequent" | "display" | "library" | "connection" | "catalog" | "vault" | "advanced" }
   | { kind: "manga" }
   | { kind: "collections"; typeFilter: CollectionType; showcase: boolean; releaseProvider?: CollectionUpdateProvider; releaseCalendar?: boolean }
   | { kind: "collection"; collectionId: string; tmdbSearch?: { query: string; mediaType: "movie" | "tv" } };

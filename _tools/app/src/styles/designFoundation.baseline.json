@@ -115,16 +115,16 @@
       "legacyToken": 1
     },
     "_tools/app/src/collections/platformBadges.css": {
-      "offScaleSpacing": 1,
+      "offScaleSpacing": 0,
       "offRoleFontSize": 0,
-      "pillRadius": 1,
+      "pillRadius": 0,
       "legacyToken": 0
     },
     "_tools/app/src/collections/releaseCalendar.css": {
-      "offScaleSpacing": 2,
+      "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 9
+      "legacyToken": 0
     },
     "_tools/app/src/exchange/exchange.css": {
       "offScaleSpacing": 20,
@@ -151,10 +151,10 @@
       "legacyToken": 0
     },
     "_tools/app/src/home/home.css": {
-      "offScaleSpacing": 68,
-      "offRoleFontSize": 61,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 2,
       "pillRadius": 0,
-      "legacyToken": 1
+      "legacyToken": 0
     },
     "_tools/app/src/layout/PublicationStatus.css": {
       "offScaleSpacing": 0,
@@ -193,10 +193,10 @@
       "legacyToken": 24
     },
     "_tools/app/src/notes/notes.css": {
-      "offScaleSpacing": 54,
+      "offScaleSpacing": 29,
       "offRoleFontSize": 0,
-      "pillRadius": 3,
-      "legacyToken": 13
+      "pillRadius": 0,
+      "legacyToken": 11
     },
     "_tools/app/src/shared/markdown/markdown.css": {
       "offScaleSpacing": 1,

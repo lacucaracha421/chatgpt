@@ -344,7 +344,7 @@ export function CollectionBrowser({
           {releaseProvider && !releaseCalendar && <CollectionReleases provider={releaseProvider} collections={collections} data={releases.data} loading={releases.loading} error={releases.error}
             query={libraryState.query} coverUrl={collectionCoverUrl} onOpen={collectionId => onViewChange({ kind: "collection", collectionId })} onChanged={onChanged} onProviderChange={openInbox} />}
           {releaseCalendar && <ReleaseCalendarView query={libraryState.query} onWishlistChange={loadWishlistUnread}
-            onOpenSettings={() => onViewChange({ kind: "settings", section: "external_services" })} />}
+            onOpenSettings={() => onViewChange({ kind: "settings", section: "connection" })} />}
           {!inbox && showcase && visible.length > 0 &&
             <CollectionExhibition items={visible} page={exhibition.page} onPageChange={changeExhibitionPage} render={collection => renderCollection(collection)} scrollRef={stageRef} />}
           {!inbox && showcase && visible.length === 0 && <div className="collection-browser__empty"><EmptyState title="쇼케이스에 컬렉션이 없습니다.">라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다.</EmptyState></div>}
@@ -380,7 +380,7 @@ export function CollectionBrowser({
           onClose={() => setIgdbOpen(false)}
           onOpenSettings={() => {
             setIgdbOpen(false);
-            onViewChange({ kind: "settings", section: "external_services" });
+            onViewChange({ kind: "settings", section: "connection" });
           }}
           onApplied={async (collection) => {
             try {
@@ -399,7 +399,7 @@ export function CollectionBrowser({
           onClose={() => setTmdbOpen(false)}
           onOpenSettings={() => {
             setTmdbOpen(false);
-            onViewChange({ kind: "settings", section: "external_services" });
+            onViewChange({ kind: "settings", section: "connection" });
           }}
           onApplied={async (collection) => {
             try {

@@ -309,7 +309,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
             : skipped.current.size > 0
               ? <EmptyState title="건너뛴 항목만 남았습니다"><Button size="sm" onClick={restoreSkipped}>건너뛴 항목 다시 보기</Button></EmptyState>
               : <EmptyState title="확인할 항목이 없습니다">
-                <p className="shadow-review__empty-copy">{mode === "doubtful" ? "S36이 지지하지 않는 기존 자동 분류가 없습니다. 기존 이미지 채점을 돌리면 대상이 채워집니다." : "새 이미지가 채점되면 여기에 나타납니다. 설정 → 일반의 S36 시험 채점이 켜져 있어야 합니다."}</p>
+                <p className="shadow-review__empty-copy">{mode === "doubtful" ? "S36이 지지하지 않는 기존 자동 분류가 없습니다. 기존 이미지 채점을 돌리면 대상이 채워집니다." : "새 이미지가 채점되면 여기에 나타납니다."}</p>
                 {last && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void undo()}>되돌리기: {last.item.targetName} {last.decision === "accepted" ? "맞음" : "아님"} <kbd>Z</kbd></Button>}
                 {decisionError && <p className="character-message" role="alert">{decisionError}</p>}
                 {backfillButton}

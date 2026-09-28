@@ -1,10 +1,12 @@
-import { BookmarkIcon, BookOpenIcon, ExchangeIcon, HomeIcon, MagnifyingGlassIcon, NoteIcon, PhotoIcon, PlusIcon, RectangleStackIcon } from "../shared/ui/ArchiveIcons";
+import { BookmarkIcon, BookOpenIcon, ExchangeIcon, FolderIcon, HomeIcon, MagnifyingGlassIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon } from "../shared/ui/ArchiveIcons";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType } from "../library/types";
+import { useOptionalLibrary } from "../library/LibraryContext";
 import { useVaultExportJob, vaultExportProgressText } from "../external-vault/vaultExportJob";
 import { useVaultImportJob, vaultImportProgressText } from "../external-vault/vaultImportJob";
-import { ArtistIndex, ArtistIndexCount, isArtistView } from "../artists/ArtistIndex";
+import { ArtistIndex, isArtistView } from "../artists/ArtistIndex";
+import { useArtistOverview } from "../artists/artistStore";
 import { CommandPalette } from "./CommandPalette";
 import { useAutoTagPaletteSearch } from "../autotags/autoTagPalette";
 import { MoreEntryList, MorePanel } from "./MorePanel";
@@ -73,7 +75,14 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   const resize = useRef<{ id: number; x: number; width: number } | null>(null);
   const areaName = { home: "홈", assets: "에셋", collections: "컬렉션", manga: "망가", notes:"메모", exchange: "전송", private_vault: "비밀", manage: "더보기" }[area];
   const artistView = isArtistView(view);
-  const areaTitle = view.kind === "settings" ? "설정" : area === "manage" ? "더보기" : artistView ? "작가" : areaName;
+  const areaTitle = view.kind === "settings" ? "설정" : area === "manage" ? "더보기" : areaName;
+  const hideEmptyNotesIndex = area === "notes"
+    && chrome?.meta != null
+    && !chrome?.meta?.navigation
+    && !chrome?.meta?.actions
+    && chrome?.meta?.search?.kind !== "surface";
+  const assetTotalCount = useAssetTotalCount(area === "assets");
+  const artistOverview = useArtistOverview();
   const enterArea = (next: RailArea) => {
     if (next === "collections" && view.kind === "collection") {
       onNavigate(collectionList.current ?? { kind: "collections", typeFilter: collectionType, showcase: false });
@@ -128,9 +137,9 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
         <MorePanel entries={moreEntries} current={area === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />
       </div>
     </nav>
-    <aside className="workspace-index" style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
+    {!hideEmptyNotesIndex && <aside className="workspace-index" style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
       <header className="workspace-index__head" aria-label={areaName} data-tauri-drag-region="deep">
-        <span className="workspace-index__title" aria-hidden="true">{areaTitle}{artistView && <ArtistIndexCount />}</span>
+        <span className="workspace-index__title" aria-hidden="true">{areaTitle}</span>
         <div className="workspace-index__head-actions">
           <ChromeTarget name="search" />
           <ChromeTarget name="actions" />
@@ -138,6 +147,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
         </div>
       </header>
       <div className="workspace-index__scroll">
+        {area === "assets" && <AssetIndexTop view={view} onNavigate={onNavigate} totalCount={assetTotalCount} artistCount={artistOverview?.main ?? null} albumCount={places?.albums.length ?? null} />}
         <div hidden={area !== "assets" || artistView} className="workspace-index__assets">{assetNavigation}</div>
         {artistView && <ArtistIndex view={view} onNavigate={onNavigate} />}
         <ChromeTarget name="navigation" className="workspace-index__view-navigation" />
@@ -158,7 +168,73 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
           onWidthChange(event.key === "Home" ? MIN_SIDEBAR_WIDTH : event.key === "End" ? MAX_SIDEBAR_WIDTH : clampSidebarWidth(width + (event.key === "ArrowRight" ? 8 : -8)));
         }}
       />
-    </aside>
+    </aside>}
     <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={entries} search={paletteSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} findTags={findTags} fallbackFocus={() => paletteButton.current} />
   </div>;
+}
+
+function AssetIndexTop({ view, onNavigate, totalCount, artistCount, albumCount }: {
+  view: AssetView;
+  onNavigate: (view: AssetView) => void;
+  totalCount: number | null;
+  artistCount: number | null;
+  albumCount: number | null;
+}) {
+  return <nav className="classification-sidebar__pins asset-index__top" aria-label="에셋 보기">
+    <AssetIndexTopRow icon={<FolderIcon aria-hidden="true" />} label="전체" count={totalCount} selected={view.kind === "classification" && view.classificationId === null} onClick={() => onNavigate({ kind: "classification", classificationId: null })} />
+    <AssetIndexTopRow icon={<PersonIcon aria-hidden="true" />} label="작가" count={artistCount} selected={view.kind === "artists" || view.kind === "creator"} onClick={() => onNavigate({ kind: "artists" })} />
+    <AssetIndexTopRow icon={<PhotoIcon aria-hidden="true" />} label="앨범" count={albumCount} selected={view.kind === "albums" || view.kind === "album"} onClick={() => onNavigate({ kind: "albums" })} />
+  </nav>;
+}
+
+function AssetIndexTopRow({ icon, label, count, selected, onClick }: {
+  icon: ReactNode;
+  label: string;
+  count: number | null;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return <button type="button" className="classification-sidebar__quick-view" style={{ minHeight: "32px" }} aria-label={count === null ? label : `${label} ${formatIndexCount(count)}개`} aria-current={selected ? "page" : undefined} onClick={onClick}>
+    <span className="classification-sidebar__quick-view-surface">
+      {icon}
+      <span className="classification-sidebar__quick-view-label">{label}</span>
+      {count !== null && <span className="classification-sidebar__badge" style={{ color: "var(--color-faint)" }} aria-hidden="true">{formatIndexCount(count)}</span>}
+    </span>
+  </button>;
+}
+
+function useAssetTotalCount(enabled: boolean): number | null {
+  const library = useOptionalLibrary();
+  const gateway = library?.gateway;
+  const [count, setCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (!enabled || !gateway) {
+      setCount(null);
+      return;
+    }
+    let active = true;
+    void gateway.listAssets({
+      classificationId: null,
+      albumId: null,
+      collectionId: null,
+      directOnly: false,
+      unclassifiedOnly: false,
+      mediaKind: null,
+      aspectRatio: null,
+      sort: "newest",
+      randomPivot: null,
+      after: null,
+      limit: 1,
+    }).then((page) => {
+      if (active) setCount(page.totalCount ?? null);
+    }).catch(() => {
+      if (active) setCount(null);
+    });
+    return () => { active = false; };
+  }, [enabled, gateway]);
+  return count;
+}
+
+function formatIndexCount(count: number) {
+  return count.toLocaleString("ko-KR");
 }

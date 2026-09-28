@@ -1,24 +1,12 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
-import { Button } from "../shared/ui/Button";
-import { Toggle } from "../shared/ui/Toggle";
-import { TextField } from "../shared/ui/TextField";
+import { Switch } from "../shared/ui/Switch";
+import { TextInput } from "../shared/ui/TextInput";
 import { useWorkloadProfile, updateWorkloadSettings, nativeWorkload } from "./workloadProfile";
 
-function requestScanCancellation(setNotice: (notice: string) => void) {
-  return invoke("workload_cancel_scans").then(() => {
-    window.dispatchEvent(new Event("lakomics:cancel-user-scans"));
-    setNotice("진행 중인 검사가 안전한 지점에서 중단됩니다.");
-  }, () => setNotice("검사 중단 요청을 보내지 못했습니다."));
-}
-
-/** The instant lightweight-mode switch shown in the status panel; automatic switching stays in Settings. */
+/** The instant lightweight-mode switch shown in the status panel. */
 export function LightweightModeToggle() {
   const profile = useWorkloadProfile();
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  useAutoDismiss(notice, setNotice);
   if (!nativeWorkload()) return null;
   const toggle = async () => {
     setBusy(true);
@@ -27,20 +15,17 @@ export function LightweightModeToggle() {
   };
   return <div className="lightweight-toggle">
     <div className="chrome-settings-controls">
-      <Toggle checked={profile.lightweight} disabled={busy || !profile.ready} onChange={() => void toggle()}>가벼운 모드</Toggle>
+      <Switch checked={profile.lightweight} disabled={busy || !profile.ready} onChange={() => void toggle()} aria-label="가벼운 모드" />
     </div>
-    <p className="chrome-settings-note">{profile.lightweight ? "분석·정리를 줄이고 모바일 동기화만 유지합니다." : profile.restricted ? "일반 모드 · 천천히 재개 중" : "켜면 분석·정리를 줄이고 모바일 동기화만 유지합니다."}</p>
-    {profile.lightweight && <Button size="sm" variant="ghost" onClick={() => void requestScanCancellation(setNotice)}>검사 중단 요청</Button>}
+    {profile.restricted && <small className="chrome-settings-note">일반 모드 · 천천히 재개 중</small>}
     {profile.error && <p role="alert" className="chrome-settings-note">{profile.error}</p>}
-    {notice && <p role="status" className="chrome-settings-note">{notice}</p>}
   </div>;
 }
 
+/** Settings rows for lightweight mode. The surrounding screen owns the group label. */
 export function WorkloadControls() {
   const profile = useWorkloadProfile();
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  useAutoDismiss(notice, setNotice);
   const [minutes, setMinutes] = useState(String(profile.autoEnterMinutes ?? 10));
   useEffect(() => { setMinutes(String(profile.autoEnterMinutes ?? 10)); }, [profile.autoEnterMinutes]);
   if (!nativeWorkload()) return null;
@@ -49,36 +34,34 @@ export function WorkloadControls() {
     try { await updateWorkloadSettings({ lightweight: !profile.lightweight }); }
     finally { setBusy(false); }
   };
-  const cancelScans = () => requestScanCancellation(setNotice);
-  const label = profile.lightweight ? "가벼운 모드 켜짐" : profile.restricted ? "일반 모드 · 천천히 재개 중" : "가벼운 모드";
-  return <section aria-label="가벼운 모드" className="settings-view__section">
-    <header className="settings-view__header"><h2>가벼운 모드</h2></header>
+  const applyMinutes = () => {
+    const value = Number(minutes);
+    if (!Number.isInteger(value) || value < 1 || value > 1440 || busy) return;
+    void updateWorkloadSettings({ autoEnterMinutes: value });
+  };
+  const status = profile.lightweight ? "켜짐" : profile.restricted ? "천천히 재개 중" : "꺼짐";
+  return <>
     <dl className="settings-view__property">
       <dt>PC 작업 줄이기</dt>
-      <dd>모바일 동기화를 유지하며 분석과 정리 작업을 줄입니다. 이 PC에만 적용됩니다.</dd>
-      <Button disabled={busy || !profile.ready} aria-pressed={profile.lightweight} onClick={() => void toggle()}>{label}</Button>
+      <dd className="settings-view__status">{status}</dd>
+      <dd className="settings-view__inline-controls"><Switch aria-label="PC 작업 줄이기" checked={profile.lightweight} disabled={busy || !profile.ready} onChange={() => void toggle()} /></dd>
     </dl>
     <dl className="settings-view__property">
-      <dt>자동 전환</dt><dd>창이 숨겨지거나 포커스를 잃은 상태가 이어지면 켭니다.</dd>
-      <Toggle aria-label="가벼운 모드 자동 전환" checked={profile.autoEnterMinutes !== null} disabled={!profile.ready || busy} onChange={event => void updateWorkloadSettings({ autoEnterMinutes: event.target.checked ? 10 : null })}>{profile.autoEnterMinutes === null ? "꺼짐" : "켜짐"}</Toggle>
+      <dt>자동 전환</dt>
+      <dd className="settings-view__inline-controls"><Switch aria-label="가벼운 모드 자동 전환" checked={profile.autoEnterMinutes !== null} disabled={!profile.ready || busy} onChange={event => void updateWorkloadSettings({ autoEnterMinutes: event.target.checked ? 10 : null })} /></dd>
     </dl>
-    {profile.autoEnterMinutes !== null && <dl className="settings-view__property">
-      <dt>자동 전환 대기</dt><dd>현재 {profile.autoEnterMinutes}분</dd>
+    <dl className="settings-view__property">
+      <dt>자동 전환 대기</dt>
+      <dd className="settings-view__status">{profile.autoEnterMinutes === null ? "자동 전환 꺼짐" : `${profile.autoEnterMinutes}분`}</dd>
       <dd className="settings-view__inline-controls">
-        <TextField label="대기 시간 (분)" type="number" min={1} max={1440} value={minutes} onChange={event => setMinutes(event.target.value)} />
-        <Button size="sm" disabled={!Number.isInteger(Number(minutes)) || Number(minutes) < 1 || Number(minutes) > 1440} onClick={() => void updateWorkloadSettings({ autoEnterMinutes: Number(minutes) })}>적용</Button>
+        <TextInput aria-label="자동 전환 대기 (분)" type="number" min={1} max={1440} value={minutes} disabled={!profile.ready || profile.autoEnterMinutes === null} onChange={event => setMinutes(event.target.value)} onBlur={applyMinutes} onKeyDown={event => { if (event.key === "Enter") applyMinutes(); }} />
       </dd>
-    </dl>}
-    <dl className="settings-view__property">
-      <dt>닫기 동작</dt><dd>트레이에 숨기면 모바일 동기화가 계속됩니다. 종료는 트레이 메뉴에서 선택하세요.</dd>
-      <Toggle checked={profile.closeToTray} disabled={!profile.ready || !profile.trayAvailable} onChange={event => void updateWorkloadSettings({ closeToTray: event.target.checked })}>닫기 버튼으로 트레이에 숨기기</Toggle>
     </dl>
-    {profile.ready && !profile.trayAvailable && <p role="status">트레이를 사용할 수 없어 닫으면 앱이 종료됩니다.</p>}
-    {profile.lightweight && <dl className="settings-view__property">
-      <dt>진행 중인 검사</dt><dd>직접 시작한 검사는 계속됩니다. 필요한 경우 중단을 요청하세요.</dd>
-      <Button size="sm" onClick={() => void cancelScans()}>진행 중인 검사 중단 요청</Button>
-    </dl>}
-    {profile.error && <p role="alert">{profile.error}</p>}
-    {notice && <p role="status">{notice}</p>}
-  </section>;
+    <dl className="settings-view__property">
+      <dt>닫기 버튼으로 트레이에 숨기기</dt>
+      <dd className="settings-view__inline-controls"><Switch aria-label="닫기 버튼으로 트레이에 숨기기" checked={profile.closeToTray} disabled={!profile.ready || !profile.trayAvailable} onChange={event => void updateWorkloadSettings({ closeToTray: event.target.checked })} /></dd>
+      {profile.ready && !profile.trayAvailable && <dd className="settings-view__status">트레이 사용 불가</dd>}
+    </dl>
+    {profile.error && <p className="settings-view__row-message" role="alert">{profile.error}</p>}
+  </>;
 }

@@ -557,7 +557,7 @@ describe("CollectionBrowser", () => {
     await user.type(screen.getByRole("searchbox", { name: "게임 검색" }), "astral");
     await user.click(screen.getByRole("button", { name: "검색" }));
     await user.click(await screen.findByRole("button", { name: "IGDB 설정 열기" }));
-    expect(onViewChange).toHaveBeenCalledWith({ kind: "settings", section: "external_services" });
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "settings", section: "connection" });
     expect(screen.queryByRole("heading", { name: "IGDB에서 게임 추가" })).not.toBeInTheDocument();
   });
 

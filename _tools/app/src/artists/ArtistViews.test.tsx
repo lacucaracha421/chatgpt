@@ -130,7 +130,7 @@ describe("ArtistIndex", () => {
     render(<LibraryProvider gateway={libraryGateway(artistGateway())}><ArtistIndex view={{ kind: "creator", creatorKey: "artist:moon" }} onNavigate={onNavigate} /></LibraryProvider>);
     const pinned = await screen.findByRole("button", { name: "달그림자 12장" });
     expect(pinned).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: "주요 작가 2" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "Rin Kagura 12장" })).not.toHaveAttribute("aria-current");
     expect(screen.getByRole("button", { name: "작가 미상 7" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "같은 작가일 수 있어요 1" }));
     expect(onNavigate).toHaveBeenLastCalledWith({ kind: "artists", section: "merge" });
@@ -138,15 +138,34 @@ describe("ArtistIndex", () => {
     expect(onNavigate).toHaveBeenLastCalledWith({ kind: "creator", creatorKey: "unknown:none" });
   });
 
-  it("shows the style recommendation badge and the reposter cleanup row", async () => {
+  it("shows the style recommendation badge and removes the old cleanup groups", async () => {
     const gateway = artistGateway();
     gateway.overview = vi.fn().mockResolvedValue({ ...overview, styleSuggestionCount: 4, reposter: 3 });
     const onNavigate = vi.fn();
     render(<LibraryProvider gateway={libraryGateway(gateway)}><ArtistIndex view={{ kind: "artists", section: "reposter" }} onNavigate={onNavigate} /></LibraryProvider>);
 
     expect(await screen.findByLabelText("추천 4")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "퍼온 계정 3" }));
-    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "artists", section: "reposter" });
+    expect(screen.queryByRole("button", { name: /퍼온 계정/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /그 외 작가/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /한 장뿐인 작가들/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /숨긴 작가/ })).not.toBeInTheDocument();
+  });
+
+  it("searches non-main artists by name and 초성", async () => {
+    const user = userEvent.setup();
+    const gateway = artistGateway();
+    gateway.list = vi.fn().mockImplementation(async (query) => query.bucket === "main"
+      ? { total: 1, artists: [artist("rin", "Rin Kagura")] }
+      : { total: 2, artists: [artist("rin", "Rin Kagura"), artist("seori", "서리", { main: false, hidden: true, assetCount: 4 })] });
+    const onNavigate = vi.fn();
+    render(<LibraryProvider gateway={libraryGateway(gateway)}><ArtistIndex view={{ kind: "artists" }} onNavigate={onNavigate} /></LibraryProvider>);
+
+    const search = screen.getByRole("searchbox", { name: "주요 작가 찾기" });
+    await user.type(search, "ㅅㄹ");
+    const result = await screen.findByRole("button", { name: "서리 4장" });
+    expect(result).toBeInTheDocument();
+    await user.click(result);
+    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "creator", creatorKey: "seori" });
   });
 });
 

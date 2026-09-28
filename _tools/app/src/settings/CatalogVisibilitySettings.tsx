@@ -4,9 +4,11 @@ import { commandErrorMessage } from "../library/errorMessage";
 import type { CatalogBlockedTag, CatalogVisibilityPolicy } from "../library/types";
 import { catalogCategories } from "../manga/catalogCategories";
 import { Button } from "../shared/ui/Button";
+import { Badge } from "../shared/ui/Badge";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { Switch } from "../shared/ui/Switch";
+import { TextInput } from "../shared/ui/TextInput";
 import { Toast } from "../shared/ui/Toast";
-import { Toggle } from "../shared/ui/Toggle";
 
 export function CatalogVisibilitySettings() {
   const { gateway } = useLibrary();
@@ -85,7 +87,6 @@ export function CatalogVisibilitySettings() {
 
   return <section className="catalog-visibility-settings" aria-labelledby="catalog-visibility-title">
     <h4 id="catalog-visibility-title">검색 결과 숨김</h4>
-    <p className="settings-view__row-note">선택한 분류와 정확히 일치하는 태그를 검색 결과에서 숨깁니다.</p>
     {busy ? <p role="status">저장 중…</p> : saved && <p role="status">저장됨</p>}
     {error && <Toast tone="error" onDismiss={() => setError(null)}>{error}</Toast>}
     {!policy ? loadFailed
@@ -94,24 +95,23 @@ export function CatalogVisibilitySettings() {
       <fieldset className="catalog-visibility-settings__categories" disabled={busy}>
         <legend>숨길 분류</legend>
         <div>
-          {catalogCategories.map((category) => <Toggle
-            key={category.id}
-            checked={policy.hiddenCategories.includes(category.id)}
-            onChange={(event) => void changeCategory(category.id, event.target.checked)}
-          >{category.label} 숨기기</Toggle>)}
+          {catalogCategories.map((category) => <label className="settings-view__category-row" key={category.id}>
+            <span>{category.label}</span>
+            <Switch aria-label={`${category.label} 숨기기`} checked={policy.hiddenCategories.includes(category.id)} onChange={(event) => void changeCategory(category.id, event.target.checked)} />
+          </label>)}
         </div>
       </fieldset>
       <div className="catalog-visibility-settings__tags">
         <span className="catalog-visibility-settings__label">차단 태그</span>
         <form className="catalog-visibility-settings__tag-form" onSubmit={addTag}>
-          <input className="settings-view__token" aria-label="차단 태그 종류" autoComplete="off" placeholder="artist" value={namespace} disabled={busy} onChange={(event) => setNamespace(event.target.value)} />
-          <input className="settings-view__token" aria-label="차단 태그 값" autoComplete="off" placeholder="태그 값" value={value} disabled={busy} onChange={(event) => setValue(event.target.value)} />
-          <Button size="sm" type="submit" disabled={busy || !namespace.trim() || !value.trim()}>태그 차단</Button>
+          <TextInput aria-label="차단 태그 종류" autoComplete="off" placeholder="artist" value={namespace} disabled={busy} onChange={(event) => setNamespace(event.target.value)} />
+          <TextInput aria-label="차단 태그 값" autoComplete="off" placeholder="태그 값" value={value} disabled={busy} onChange={(event) => setValue(event.target.value)} />
+          <Button size="sm" variant="secondary" type="submit" disabled={busy || !namespace.trim() || !value.trim()}>태그 차단</Button>
         </form>
         {policy.blockedTags.length === 0 ? <p>차단한 태그가 없습니다.</p> : <ul>
           {policy.blockedTags.map((tag) => <li key={`${tag.namespace}\0${tag.value}`}>
-            <code>{tag.namespace}:{tag.value}</code>
-            <Button size="sm" disabled={busy} aria-label={`${tag.namespace}:${tag.value} 차단 해제`} onClick={() => void changeTag(tag, false)}>해제</Button>
+            <Badge>{tag.namespace}:{tag.value}</Badge>
+            <Button size="sm" variant="quiet" disabled={busy} aria-label={`${tag.namespace}:${tag.value} 차단 해제`} onClick={() => void changeTag(tag, false)}>해제</Button>
           </li>)}
         </ul>}
       </div>

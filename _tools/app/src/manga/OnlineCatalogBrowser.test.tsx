@@ -288,7 +288,7 @@ describe("OnlineCatalogBrowser", () => {
         <CatalogVisibilitySettings />
       </LibraryProvider>,
     );
-    await userEvent.click(await screen.findByRole("checkbox", { name: "만화 숨기기" }));
+    await userEvent.click(await screen.findByRole("switch", { name: "만화 숨기기" }));
     expect(gateway.setCatalogCategoryHidden).toHaveBeenCalledWith(2, true);
     settings.unmount();
 

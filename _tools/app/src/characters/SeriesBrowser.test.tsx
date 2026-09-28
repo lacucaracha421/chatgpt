@@ -876,9 +876,11 @@ it("moves FAULT and the S36 series control into the series overflow", async () =
 it("shows S36 recovery in the header only while S36 classification is stalled", async () => {
   vi.spyOn(s36PublicationApi, "get").mockResolvedValue({ series: ["series"], excludedTargets: [], scoringEnabled: false });
   vi.spyOn(s36PublicationApi, "readiness").mockResolvedValue([]);
+  const invoke = vi.mocked(tauriCore.invoke).mockResolvedValue(undefined);
   await mount(undefined);
-  expect(await screen.findByText("S36 시험 채점이 꺼져 자동 분류가 멈춰 있습니다")).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "자동 분류 다시 켜기" })).not.toBeInTheDocument();
+  expect(await screen.findByText("S36 채점이 꺼져 있어 자동 분류가 멈춰 있습니다")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "켜기" }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("set_character_shadow_enabled", { enabled: true }));
 });
 
 it("reaches each reference's crop check in one tap from the character panel and saves the choice", async () => {

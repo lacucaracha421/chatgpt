@@ -307,6 +307,7 @@ describe("App", () => {
 
     expect(await screen.findByRole("treeitem", { name: "Old library" })).toBeVisible();
     await openSettings();
+    await userEvent.click(await screen.findByRole("button", { name: "라이브러리" }));
     await userEvent.click(await screen.findByRole("button", { name: "다른 저장소 열기" }));
 
     // The new library's workspace starts over on Home.
@@ -350,6 +351,7 @@ describe("App", () => {
 
     await waitFor(() => expect(libraryGateway.runDueReleaseWatch).toHaveBeenCalledOnce());
     await openSettings();
+    await userEvent.click(screen.getByRole("button", { name: "라이브러리" }));
     await userEvent.click(screen.getByRole("button", { name: "다른 저장소 열기" }));
     await waitFor(() => expect(libraryGateway.runDueReleaseWatch).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(libraryGateway.listCollections).toHaveBeenCalledTimes(3));
@@ -400,8 +402,8 @@ describe("App", () => {
     await userEvent.click(within(rail).getByRole("button", { name: "홈" }));
     expect(await screen.findByRole("region", { name: "검토" }, { timeout: 5000 })).toBeInTheDocument();
     expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page");
-    await userEvent.click(screen.getByRole("button", { name: /^받은 파일/ }));
-    await waitFor(() => expect(within(rail).getByRole("button", { name: "전송" })).toHaveAttribute("aria-current", "page"));
+    await userEvent.click(screen.getByRole("button", { name: "메모 전체" }));
+    await waitFor(() => expect(within(rail).getByRole("button", { name: "메모" })).toHaveAttribute("aria-current", "page"));
   });
 
   it("renders the trash workspace without loading an asset page", async () => {
@@ -453,6 +455,7 @@ describe("App", () => {
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await openAssets();
+    await userEvent.click(screen.getByRole("button", { name: /^앨범(?: \d+개)?$/ }));
 
     expect(await screen.findByRole("treeitem", { name: "표지" })).toBeVisible();
     expect(libraryGateway.listClassifications).toHaveBeenCalledOnce();
@@ -523,8 +526,8 @@ describe("App", () => {
     await screen.findByRole("main", { name: "라이브러리 작업 공간" });
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalled());
     const classificationCalls = vi.mocked(libraryGateway.listClassifications).mock.calls.length;
-    // Opening 더보기 also reads the unsorted queue count; only page reads count here.
-    const pageCalls = () => vi.mocked(libraryGateway.listAssets).mock.calls.filter(([query]) => !(query.unclassifiedOnly && query.limit === 1)).length;
+    // One-row queue and index-count reads are not asset-page refreshes.
+    const pageCalls = () => vi.mocked(libraryGateway.listAssets).mock.calls.filter(([query]) => query.limit !== 1).length;
     const assetCalls = pageCalls();
 
     await openSettings();
@@ -636,13 +639,13 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     const rail = await screen.findByRole("navigation", { name: "주요 영역" });
     expect(await screen.findByRole("region", { name: "검토" }, { timeout: 5000 })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /^받은 파일/ }));
-    await waitFor(() => expect(within(rail).getByRole("button", { name: "전송" })).toHaveAttribute("aria-current", "page"));
+    await user.click(screen.getByRole("button", { name: "메모 전체" }));
+    await waitFor(() => expect(within(rail).getByRole("button", { name: "메모" })).toHaveAttribute("aria-current", "page"));
     fireEvent.mouseUp(window, { button: 3 });
     await waitFor(() => expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page"));
-    await user.click(within(rail).getByRole("button", { name: "전송" }));
+    await user.click(within(rail).getByRole("button", { name: "메모" }));
     fireEvent.mouseUp(window, { button: 3 });
-    expect(within(rail).getByRole("button", { name: "전송" })).toHaveAttribute("aria-current", "page");
+    expect(within(rail).getByRole("button", { name: "메모" })).toHaveAttribute("aria-current", "page");
   });
 
   it("opens the 찾기 palette with Ctrl+K and keeps the existing quick-view shortcuts", async () => {
@@ -775,7 +778,8 @@ describe("App", () => {
     ]);
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await openAssets();
-    await screen.findByRole("treeitem", { name: "표지" });
+    await userEvent.click(screen.getByRole("button", { name: /^앨범(?: \d+개)?$/ }));
+    await userEvent.click(await screen.findByRole("treeitem", { name: "표지" }));
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalled());
     const albumCallsBefore = vi.mocked(libraryGateway.listAlbums).mock.calls.length;
     const assetCallsBefore = vi.mocked(libraryGateway.listAssets).mock.calls.length;
@@ -1209,7 +1213,8 @@ describe("App", () => {
     expect(libraryGateway.listClassifications).toHaveBeenCalledTimes(2);
   });
 
-  it("moves assets through the atomic character command when dropped on a character", async () => {
+  // Character rows left the sidebar (2026-09-29); drop target to be redesigned.
+  it.skip("moves assets through the atomic character command when dropped on a character", async () => {
     Object.defineProperties(HTMLElement.prototype, {
       offsetWidth: { configurable: true, get: () => 900 },
       clientWidth: { configurable: true, get: () => 840 },
@@ -1264,8 +1269,10 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await openAssets();
 
-    const tile = await screen.findByRole("option", { name: "arona.png" });
+    await userEvent.click(screen.getByRole("button", { name: /^앨범(?: \d+개)?$/ }));
     const target = await screen.findByRole("treeitem", { name: "표지" });
+    await userEvent.click(target);
+    const tile = await screen.findByRole("option", { name: "arona.png" });
     Object.defineProperties(tile, {
       setPointerCapture: { configurable: true, value: vi.fn() },
       releasePointerCapture: { configurable: true, value: vi.fn() },

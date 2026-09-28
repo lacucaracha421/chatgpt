@@ -1,14 +1,14 @@
-import type { ExchangeSnapshot } from "../exchange/exchangeStore";
 import type { AuthoritySyncHealth, CloudBackfillProgress, CollectionSummary, ReleaseBoardEntry, ReleaseInboxItem, ReleaseWishlistItem } from "../library/types";
 import { koreanReleases, releaseCaption, shortReleaseDate, type ReleaseCaption } from "../collections/releaseCaption";
 import { releaseEventLine } from "../collections/releaseCalendarFormat";
 import { byOrder, noteColorValue, stripMarkdown } from "../notes/model";
 import type { Note } from "../notes/store";
+import type { AvPerformerProfile } from "../collections/avTypes";
 import { LEDGER, LEDGER_MONTH } from "../notes/ledger/model";
 import { monthNotesOf, monthSummary } from "../notes/ledger/summary";
 
 /**
- * PC Home (HOME-DASH-001, layout B "priority ledger"): pure shaping of data other screens
+ * PC Home (HOME-DASH-001, layout D): pure shaping of data other screens
  * already read. Nothing here reads or polls; HomeView owns the reads.
  */
 
@@ -113,29 +113,13 @@ export function upcomingRows(collections: CollectionSummary[], board: Map<string
   return [...manga, ...titles].sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name, "ko") || a.key.localeCompare(b.key));
 }
 
-/* ---- 전송 ---- */
-const ACTIVE_OUTGOING = new Set(["queued", "zipping", "hashing", "uploading", "waiting", "interrupted"]);
-export type SendingSummary = { name: string; more: number; peer: string | null; progress: number | null };
-/** Outgoing transfers still under way, as one line: the first file, how many more, overall progress. */
-export function sendingSummary(snapshot: ExchangeSnapshot): SendingSummary | null {
-  const rows = snapshot.outgoing.filter((row) => ACTIVE_OUTGOING.has(row.state));
-  if (!rows.length) return null;
-  const size = rows.reduce((sum, row) => sum + Math.max(0, row.sizeBytes), 0);
-  const done = rows.reduce((sum, row) => sum + Math.max(0, Math.min(row.done, row.sizeBytes)), 0);
-  return { name: rows[0]!.fileName, more: rows.length - 1, peer: rows[0]!.toName, progress: size > 0 ? done / size : null };
-}
-/** The device received files came from most recently. */
-export function receivedFrom(snapshot: ExchangeSnapshot) {
-  return [...snapshot.received].sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))[0]?.fromName ?? null;
-}
-
 /* ---- 메모 ---- */
 export type MemoRow =
-  | { id: string; title: string; color: string | null; kind: "checklist"; done: number; total: number }
-  | { id: string; title: string; color: string | null; kind: "ledger"; month: number; label: "쓸 수 있는 돈" | "쓴 돈"; amount: number }
+  | { id: string; title: string; color: string | null; kind: "checklist"; done: number; total: number; items: { text: string; checked: boolean }[] }
+  | { id: string; title: string; color: string | null; kind: "ledger"; month: number; amount: number; available: number | null; spent: number; scheduled: number; perDay: number | null }
   | { id: string; title: string; color: string | null; kind: "secret" }
   | { id: string; title: string; color: string | null; kind: "text"; snippet: string };
-/** Pinned notes, most recently edited first, one line each (the tablet Home's rule); ledger month notes never show. */
+/** Pinned notes, most recently edited first; ledger month notes never show. Home renders the first two. */
 export function memoRows(notes: Note[], today: string): MemoRow[] {
   return notes.filter((note) => note.pinned && !note.deleted && !note.archived && note.type !== LEDGER_MONTH)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -146,13 +130,14 @@ export function memoRows(notes: Note[], today: string): MemoRow[] {
       if (note.type === LEDGER) {
         const summary = monthSummary(note, monthNotesOf(notes, note.id), today.slice(0, 7), today);
         return { ...base, title: base.title || "가계부", kind: "ledger", month: Number(today.slice(5, 7)),
-          ...(summary.available !== null ? { label: "쓸 수 있는 돈" as const, amount: summary.available } : { label: "쓴 돈" as const, amount: summary.spent }) };
+          amount: summary.available ?? summary.spent, available: summary.available, spent: summary.spent, scheduled: summary.scheduled, perDay: summary.perDay };
       }
       if (note.type === "checklist" && !note.readOnly) {
         const items = [...(note.items ?? [])].sort(byOrder);
-        return { ...base, kind: "checklist", done: items.filter((item) => item.checked).length, total: items.length };
+        return { ...base, kind: "checklist", done: items.filter((item) => item.checked).length, total: items.length,
+          items: items.slice(0, 5).map((item) => ({ text: stripMarkdown(item.text), checked: item.checked })) };
       }
-      return { ...base, kind: "text", snippet: note.body.split("\n").map(stripMarkdown).map((line) => line.trim()).filter(Boolean).join(" ").slice(0, 160) };
+      return { ...base, kind: "text", snippet: note.body.split("\n").map(stripMarkdown).map((line) => line.replace(/\\([\\`*_{}[\]()#+.!><-])/g, "$1").trim()).filter(Boolean).join(" ").slice(0, 160) };
     });
 }
 
@@ -244,4 +229,21 @@ export function characterReviewGroups(
   for (const group of result) group.characters.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "ko"));
   // "기타" last; otherwise busiest first.
   return result.sort((a, b) => Number(a.seriesId === null) - Number(b.seriesId === null) || b.total - a.total || a.seriesName.localeCompare(b.seriesName, "ko"));
+}
+
+/** Home's short performer profile: "1998.3.2 · 28세", "158cm · B83 W57 H85", "2019– · 8년차". */
+export function avProfileLines(profile: Pick<AvPerformerProfile, "birthDate" | "heightCm" | "bandIn" | "waistIn" | "hipIn" | "cup" | "careerStart" | "careerEnd">, today: Date): string[] {
+  const lines: string[] = [];
+  const birth = profile.birthDate && /^\d{4}-\d{2}-\d{2}$/.test(profile.birthDate) ? profile.birthDate.split("-").map(Number) : null;
+  if (birth) {
+    const [year, month, day] = birth as [number, number, number];
+    const age = today.getFullYear() - year - (today.getMonth() + 1 < month || (today.getMonth() + 1 === month && today.getDate() < day) ? 1 : 0);
+    lines.push(`${year}.${month}.${day}${age >= 0 ? ` · ${age}세` : ""}`);
+  }
+  const cm = (inches: number | null) => inches ? Math.round(inches * 2.54) : null;
+  const size = [cm(profile.bandIn) && `B${cm(profile.bandIn)}${profile.cup ? `(${profile.cup})` : ""}`, cm(profile.waistIn) && `W${cm(profile.waistIn)}`, cm(profile.hipIn) && `H${cm(profile.hipIn)}`].filter(Boolean).join(" ");
+  const body = [profile.heightCm ? `${profile.heightCm}cm` : null, size || null].filter(Boolean).join(" · ");
+  if (body) lines.push(body);
+  if (profile.careerStart !== null) lines.push(profile.careerEnd !== null ? `${profile.careerStart}–${profile.careerEnd} · 은퇴` : `${profile.careerStart}– · ${Math.max(1, today.getFullYear() - profile.careerStart)}년차`);
+  return lines;
 }

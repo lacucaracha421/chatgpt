@@ -37,8 +37,8 @@ export const NAVIGATION_GROUP_LABELS: Record<NavigationEntryGroup, string> = {
 
 type SettingsSection = NonNullable<Extract<AssetView, { kind: "settings" }>["section"]>;
 const SETTINGS_SECTIONS = [
-  ["general", "일반"], ["library", "라이브러리"], ["cloud", "클라우드"], ["catalog", "온라인 카탈로그"],
-  ["external_services", "연결"], ["data", "데이터 관리"], ["about", "정보·도움말"], ["advanced", "고급"],
+  ["frequent", "자주 쓰는 것"], ["display", "화면"], ["library", "라이브러리"], ["connection", "연결"],
+  ["catalog", "카탈로그"], ["vault", "보관함"], ["advanced", "고급"],
 ] as const satisfies readonly (readonly [SettingsSection, string])[];
 
 const ARTIST_KINDS: AssetView["kind"][] = ["artists", "creator"];

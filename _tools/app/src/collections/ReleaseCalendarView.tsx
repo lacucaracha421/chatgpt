@@ -1,13 +1,16 @@
-import { BookmarkIcon as BookmarkOutlineIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, BookmarkIcon as BookmarkOutlineIcon, CalendarDaysIcon, CheckIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { BookmarkIcon } from "@heroicons/react/24/solid";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type SVGProps } from "react";
 import { igdbImagePreviewUrl, tmdbImagePreviewUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { ReleaseCalendar, ReleaseTitle, ReleaseWishlistEvent, ReleaseWishlistItem } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
+import { displayDateTime, displayDDay } from "../shared/displayDate";
+import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
-import { EmptyState } from "../shared/ui/EmptyState";
+import { SegmentedControl } from "../shared/ui/SegmentedControl";
+import { Skeleton } from "../shared/ui/Skeleton";
 import { PlatformBadges } from "./PlatformBadges";
 import { groupReleases, RELEASE_SOURCE_PROBLEM, releaseDateLabel, releaseEventLine } from "./releaseCalendarFormat";
 import "./releaseCalendar.css";
@@ -30,13 +33,27 @@ function coverUrl(title: ReleaseTitle): string | null {
   return title.provider === "igdb" ? igdbImagePreviewUrl(title.cover, "cover") : tmdbImagePreviewUrl(title.cover, "poster");
 }
 
-function ago(value: string | null): string | null {
-  if (!value) return null;
-  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(value)) / 60_000));
-  if (!Number.isFinite(minutes)) return null;
-  if (minutes < 60) return minutes < 1 ? "방금" : `${minutes}분 전`;
-  const hours = Math.round(minutes / 60);
-  return hours < 24 ? `${hours}시간 전` : `${Math.round(hours / 24)}일 전`;
+function groupHeadingLabel(label: string, referenceYear: number): string {
+  const month = /^(\d{4})년 (\d{1,2})월$/.exec(label);
+  return month && Number(month[1]) === referenceYear ? `${month[2]}월` : label;
+}
+
+function EmptyCalendarState({ title, icon: Icon }: { title: string; icon: ComponentType<SVGProps<SVGSVGElement>> }) {
+  return <section className="release-calendar__empty" aria-label={title}>
+    <Icon aria-hidden="true" />
+    <p>{title}</p>
+  </section>;
+}
+
+function LoadingCalendarState() {
+  return <div className="release-calendar__skeletons" aria-label="발매 정보 불러오는 중" role="status">
+    {Array.from({ length: 8 }, (_, index) => <div key={index} className="release-calendar__skeleton-tile">
+      <div className="release-calendar__skeleton-date"><Skeleton label="발매 정보 불러오는 중" /><Skeleton label="발매 정보 불러오는 중" /><span /></div>
+      <Skeleton className="release-calendar__skeleton-cover" label="발매 정보 불러오는 중" />
+      <Skeleton className="release-calendar__skeleton-title" label="발매 정보 불러오는 중" />
+      <Skeleton className="release-calendar__skeleton-badge" label="발매 정보 불러오는 중" />
+    </div>)}
+  </div>;
 }
 
 /**
@@ -90,6 +107,19 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
   const needle = query.trim();
   const matchesQuery = createKoreanMatcher(needle);
   const matches = (title: ReleaseTitle) => (kind === "all" || title.kind === kind) && matchesQuery([title.title, title.originalTitle]);
+  const currentEntries = (calendar?.entries ?? []).filter(entry => matchesQuery([entry.title, entry.originalTitle]));
+  const kindCounts = {
+    all: currentEntries.length,
+    game: currentEntries.filter(entry => entry.kind === "game").length,
+    movie: currentEntries.filter(entry => entry.kind === "movie").length,
+    anime: currentEntries.filter(entry => entry.kind === "anime").length,
+  };
+  const kindOptions = ([
+    { value: "all", label: "전체" },
+    { value: "game", label: "게임" },
+    { value: "movie", label: "영화" },
+    { value: "anime", label: "애니" },
+  ] as const);
   const tiles: Tile[] = watchOnly
     ? (wishlist ?? []).filter(matches).map(item => ({ ...item, watched: true }))
     : (calendar?.entries ?? []).filter(matches).map(entry => ({ ...entry, watched: wishById.has(entry.id), unread: wishById.get(entry.id)?.unread ?? [] }));
@@ -131,61 +161,71 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
 
   const sources = calendar?.sources ?? [];
   const problems = sources.filter(source => source.errorCode);
-  const latest = sources.map(source => source.fetchedAt).filter((value): value is string => Boolean(value)).sort()[0] ?? null;
+  const latest = sources.map(source => source.fetchedAt).filter((value): value is string => Boolean(value)).sort().pop() ?? null;
   const allUnread = (wishlist ?? []).flatMap(item => item.unread);
 
   return <section className="release-calendar" aria-label="발매 캘린더">
-    <div className="release-calendar__bar">
-      <div className="release-calendar__segments" role="radiogroup" aria-label="종류">
-        {([["all", "전체"], ["game", "게임"], ["movie", "영화"], ["anime", "애니"]] as const).map(([value, label]) =>
-          <button key={value} type="button" role="radio" aria-checked={kind === value} className="release-calendar__segment" onClick={() => setKind(value)}>{label}</button>)}
+    <div className="release-calendar__top-row">
+      <div className="release-calendar__segments-frame">
+        <SegmentedControl
+          className="release-calendar__segments"
+          label="종류"
+          options={kindOptions}
+          value={kind}
+          onChange={setKind}
+        />
+        <div className="release-calendar__segment-counts" aria-hidden="true">
+          {kindOptions.map(option => <span key={option.value}>{kindCounts[option.value].toLocaleString()}</span>)}
+        </div>
       </div>
-      <button type="button" className="release-calendar__filter" aria-pressed={watchOnly} onClick={() => setWatchOnly(value => !value)}>
-        <BookmarkIcon aria-hidden="true" />관심 목록<span className="release-calendar__filter-count">{(wishlist?.length ?? 0).toLocaleString()}</span>
-        {unreadTotal > 0 && <span className="release-calendar__new" aria-label={`새 알림 ${unreadTotal}개`}>NEW {unreadTotal}</span>}
-      </button>
+      <Button type="button" variant="quiet" size="sm" className={`release-calendar__filter${watchOnly ? " is-selected" : ""}`} aria-pressed={watchOnly} onClick={() => setWatchOnly(value => !value)}>
+        <BookmarkOutlineIcon aria-hidden="true" />관심 <span className="release-calendar__filter-count">{(wishlist?.length ?? 0).toLocaleString()}</span>
+      </Button>
+      {unreadTotal > 0 && <Badge variant="accent">NEW {unreadTotal}</Badge>}
       <div className="release-calendar__actions">
-        <span className="release-calendar__updated" role="status">{refreshing ? "갱신 중…" : latest ? `갱신 ${ago(latest)}` : calendar ? "아직 불러오지 않음" : ""}</span>
-        {watchOnly && allUnread.length > 0 && <Button size="sm" disabled={Boolean(pending)} onClick={() => void acknowledge("all", allUnread)}>모두 확인</Button>}
-        <Button size="sm" variant="ghost" disabled={refreshing || !api} onClick={() => void refreshNow()}>새로 고침</Button>
+        {!refreshing && latest && <span className="release-calendar__updated">갱신 {displayDateTime(latest)}</span>}
+        {watchOnly && allUnread.length > 0 && <Button type="button" size="sm" variant="quiet" disabled={Boolean(pending)} onClick={() => void acknowledge("all", allUnread)}>모두 확인</Button>}
+        <Button type="button" size="sm" variant="quiet" disabled={refreshing || !api} onClick={() => void refreshNow()}><ArrowPathIcon aria-hidden="true" />새로 고침</Button>
       </div>
     </div>
     {problems.length > 0 && <div className="release-calendar__status" role="status">
-      {problems.map(source => <span key={source.provider}>{source.provider === "igdb" ? "게임" : source.provider === "tmdb_tv" ? "애니" : "영화"} ({PROVIDER_LABEL[source.provider]}): {RELEASE_SOURCE_PROBLEM[source.errorCode!] ?? "불러오지 못했습니다."}
-        {source.errorCode === "credential_not_configured" && onOpenSettings && <Button size="sm" variant="ghost" onClick={onOpenSettings}>외부 서비스 설정</Button>}</span>)}
+      {problems.map(source => <div className="release-calendar__status-line" key={source.provider}>{source.provider === "igdb" ? "게임" : source.provider === "tmdb_tv" ? "애니" : "영화"} ({PROVIDER_LABEL[source.provider]}): {RELEASE_SOURCE_PROBLEM[source.errorCode!] ?? "불러오지 못했습니다."}
+        {source.errorCode === "credential_not_configured" && onOpenSettings && <Button type="button" size="sm" variant="quiet" onClick={onOpenSettings}>외부 서비스 설정</Button>}</div>)}
     </div>}
     {error && <p className="release-calendar__error" role="alert">{error}</p>}
     <div className="release-calendar__body">
-      {!calendar && !error && <p className="release-calendar__hint" role="status">발매 캘린더를 불러오는 중…</p>}
+      {api && !calendar && !error && <LoadingCalendarState />}
       {calendar && groups.length === 0 && (watchOnly
-        ? <EmptyState title="관심 목록이 비어 있습니다."><p>캘린더에서 책갈피를 눌러 기다리는 게임·영화·애니를 모아 보세요. 발매일이 바뀌거나 발매되면 여기에서 알려 드립니다.</p></EmptyState>
-        : <EmptyState title={needle ? "조건에 맞는 작품이 없습니다." : "앞으로 6개월 동안의 발매 정보가 없습니다."}><p>{needle ? "검색어를 바꿔 보세요." : "IGDB·TMDB 연결을 확인한 뒤 새로 고침을 눌러 주세요."}</p></EmptyState>)}
+        ? <EmptyCalendarState title="관심 목록 비어 있음" icon={BookmarkOutlineIcon} />
+        : needle ? <EmptyCalendarState title="검색 결과 없음" icon={MagnifyingGlassIcon} /> : <EmptyCalendarState title="6개월 안의 발매 정보 없음" icon={CalendarDaysIcon} />)}
       {groups.map(group => <section key={group.key} className="release-calendar__month" aria-label={group.label}>
-        <h3 className="release-calendar__month-title">{group.label}<span className="release-calendar__month-count">{group.items.length.toLocaleString()}</span></h3>
+        <h3 className="release-calendar__month-title"><span className="release-calendar__section-mark" aria-hidden="true" /><span className="release-calendar__month-name">{groupHeadingLabel(group.label, referenceYear)}</span><span className="release-calendar__month-count">{group.items.length.toLocaleString()}</span><span className="release-calendar__month-rule" aria-hidden="true" /></h3>
         <ul className="release-calendar__grid">
           {group.items.map(tile => {
             const url = privacyMode ? null : coverUrl(tile);
-            const detail = tile.kind === "game" ? tile.platforms.join(" · ") || "게임" : tile.kind === "anime" ? "일본 방영" : tile.region === "korea" ? "국내 개봉" : "개봉 (해외 기준)";
+            const dDay = tile.released === true ? null : displayDDay(tile.date);
             return <li key={tile.id} className={`release-calendar__tile${tile.watched ? " is-watched" : ""}${tile.unread.length ? " is-new" : ""}`}>
-              <div className={`release-calendar__cover release-calendar__cover--${tile.kind}`}>
-                {url ? <img src={url} alt="" loading="lazy" decoding="async" draggable={false} /> : <span aria-hidden="true">{tile.kind === "game" ? "GAME" : tile.kind === "anime" ? "ANIME" : "MOVIE"}</span>}
+              <div className="release-calendar__date-row">
+                <span className="release-calendar__date">{releaseDateLabel(tile.date, tile.precision, referenceYear)}</span>
+                {dDay && dDay !== "D-DAY" && <span className="release-calendar__dday">{dDay}</span>}
                 <button type="button" className="release-calendar__watch" aria-pressed={tile.watched} disabled={pending === tile.id}
-                  aria-label={tile.watched ? `${tile.title} 관심 목록에서 빼기` : `${tile.title} 관심 목록에 추가`} title={tile.watched ? "관심 목록에서 빼기" : "관심 목록에 추가"}
+                  aria-label={tile.watched ? `${tile.title} 관심 목록에서 빼기` : `${tile.title} 관심 목록에 추가`}
                   onClick={() => void toggle(tile)}>
                   {tile.watched ? <BookmarkIcon aria-hidden="true" /> : <BookmarkOutlineIcon aria-hidden="true" />}
                 </button>
               </div>
-              <div className="release-calendar__meta">
-                <strong title={tile.originalTitle ?? tile.title}>{tile.title}</strong>
-                <span className="release-calendar__date">{releaseDateLabel(tile.date, tile.precision, referenceYear)}{tile.released ? " · 발매됨" : ""}</span>
-                {tile.kind === "game" && tile.platforms.length > 0
-                  ? <PlatformBadges platforms={tile.platforms} port={tile.port} />
-                  : <span className="release-calendar__detail"><span className="release-calendar__kind">{tile.kind === "game" ? "게임" : tile.kind === "anime" ? "애니" : "영화"}</span>{detail}</span>}
-                {tile.unread.length > 0 && <div className="release-calendar__news">
-                  <span className="release-calendar__events">{tile.unread.map(event => <span key={event.id} className="release-calendar__event">{releaseEventLine(event, referenceYear)}</span>)}</span>
-                  <Button size="sm" variant="ghost" className="release-calendar__confirm" disabled={Boolean(pending)} aria-label={`${tile.title} 알림 확인`} onClick={() => void acknowledge(tile.id, tile.unread)}>확인</Button>
-                </div>}
+              <div className={`release-calendar__cover release-calendar__cover--${tile.kind}`}>
+                {url ? <img src={url} alt="" loading="lazy" decoding="async" draggable={false} /> : <span aria-hidden="true">{tile.kind === "game" ? "GAME" : tile.kind === "anime" ? "ANIME" : "MOVIE"}</span>}
+                {tile.unread.length > 0 && <Badge className="release-calendar__new-badge" variant="accent">NEW</Badge>}
               </div>
+              <strong className="release-calendar__title">{tile.title}</strong>
+              {tile.kind === "game" && tile.platforms.length > 0 && <PlatformBadges platforms={tile.platforms} port={tile.port} />}
+              {tile.unread.length > 0 && <div className="release-calendar__news">
+                {tile.unread.map(event => <div key={event.id} className="release-calendar__event">
+                  <span>{releaseEventLine(event, referenceYear)}</span>
+                  <Button type="button" size="icon" variant="quiet" className="release-calendar__confirm" disabled={Boolean(pending)} aria-label={`${tile.title} 알림 확인`} onClick={() => void acknowledge(tile.id, [event])}><CheckIcon aria-hidden="true" /></Button>
+                </div>)}
+              </div>}
             </li>;
           })}
         </ul>

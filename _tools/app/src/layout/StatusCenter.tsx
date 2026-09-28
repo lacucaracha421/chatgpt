@@ -149,7 +149,7 @@ export function StatusCenter({
           <RadixDialog.Close className="ui-button ui-button--icon ui-button--ghost" aria-label="상태 닫기"><XMarkIcon aria-hidden="true" /></RadixDialog.Close>
         </div>
         <div className="ui-anchored-panel__body status-center__body">
-          {cloud && <SyncBlock cloud={cloud} onOpenSettings={() => go({ kind: "settings", section: "cloud" })} />}
+          {cloud && <SyncBlock cloud={cloud} onOpenSettings={() => go({ kind: "settings", section: "connection" })} />}
           <AuthoritySyncBlock summary={authority} />
           {connections?.(go)}
           <StatusBlock title="작업">

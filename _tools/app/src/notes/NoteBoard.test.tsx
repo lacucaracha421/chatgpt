@@ -74,25 +74,22 @@ it("shows pinned notes first with a pin mark, and checklist, secret, label and s
   expect(safe.querySelectorAll(".notes-card__secret-row")).toHaveLength(2);
 });
 
-it("opens a card in the editor panel beside the board, and closes it with the button or Esc back to the card", async () => {
+it("replaces the board with a full editor, and closes it with the button or Esc back to the card", async () => {
   surface([base("a", { title: "첫 메모", body: "하나" }), base("b", { title: "둘째 메모", body: "둘" })]);
   const card = await screen.findByRole("button", { name: /첫 메모/ });
   await userEvent.click(card);
   expect(screen.getByRole("textbox", { name: "메모 제목" })).toHaveValue("첫 메모");
-  expect(card).toHaveAttribute("aria-current", "true");
-  // The board stays next to the panel, so another card opens directly.
-  await userEvent.click(screen.getByRole("button", { name: /둘째 메모/ }));
-  expect(screen.getByRole("textbox", { name: "메모 제목" })).toHaveValue("둘째 메모");
+  expect(screen.queryByLabelText("메모 목록")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "메모 닫기" }));
   expect(screen.queryByRole("textbox", { name: "메모 제목" })).not.toBeInTheDocument();
-  await waitFor(() => expect(screen.getByRole("button", { name: /둘째 메모/ })).toHaveFocus());
+  await waitFor(() => expect(screen.getByRole("button", { name: /첫 메모/ })).toHaveFocus());
   await userEvent.keyboard("{Enter}");
-  expect(screen.getByRole("textbox", { name: "메모 제목" })).toHaveValue("둘째 메모");
+  expect(screen.getByRole("textbox", { name: "메모 제목" })).toHaveValue("첫 메모");
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("textbox", { name: "메모 제목" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /둘째 메모/ }));
   await userEvent.click(screen.getByText("둘", { selector: ".notes-rendered *" }));
   await waitFor(() => expect(screen.getByRole("textbox", { name: "메모 본문" })).toHaveFocus());
-  // Esc in the text first returns to the rendered view; the next Esc closes the panel.
-  await userEvent.keyboard("{Escape}");
-  expect(screen.getByRole("textbox", { name: "메모 제목" })).toBeInTheDocument();
   await userEvent.keyboard("{Escape}");
   expect(screen.queryByRole("textbox", { name: "메모 제목" })).not.toBeInTheDocument();
 });

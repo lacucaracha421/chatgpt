@@ -37,13 +37,36 @@ it("keeps 홈, 에셋, 컬렉션, 망가, 메모 and 전송 in the rail, 비밀 
   expect(within(rail).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent))
     .toEqual(["홈", "에셋", "컬렉션", "망가", "메모", "전송", "비밀", "찾기", "더보기"]);
   expect(within(rail).getByRole("button", { name: "찾기" })).toHaveAttribute("aria-keyshortcuts", "Control+K Control+F");
-  expect(screen.queryByRole("button", { name: "작가" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "전체" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "작가" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "앨범" })).toBeInTheDocument();
   await userEvent.click(within(rail).getByRole("button", { name: "메모" }));
   expect(onNavigate).toHaveBeenLastCalledWith({ kind: "notes" });
   await userEvent.click(within(rail).getByRole("button", { name: "전송" }));
   expect(onNavigate).toHaveBeenLastCalledWith({ kind: "exchange" });
   await userEvent.click(within(rail).getByRole("button", { name: "비밀" }));
   expect(onNavigate).toHaveBeenLastCalledWith({ kind: "private_vault" });
+});
+
+it("keeps the three asset index destinations visible and selected across asset modes", async () => {
+  const user = userEvent.setup();
+  const onNavigate = vi.fn();
+  const { rerender } = render(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={onNavigate} />);
+  expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("button", { name: "작가" })).not.toHaveAttribute("aria-current");
+  expect(screen.getByRole("button", { name: "앨범" })).not.toHaveAttribute("aria-current");
+  await user.click(screen.getByRole("button", { name: "작가" }));
+  expect(onNavigate).toHaveBeenLastCalledWith({ kind: "artists" });
+
+  rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "artists" }} onNavigate={onNavigate} />);
+  expect(screen.getByRole("button", { name: "작가" })).toHaveAttribute("aria-current", "page");
+  await user.click(screen.getByRole("button", { name: "앨범" }));
+  expect(onNavigate).toHaveBeenLastCalledWith({ kind: "albums" });
+
+  rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "albums" }} onNavigate={onNavigate} />);
+  expect(screen.getByRole("button", { name: "앨범" })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("button", { name: "전체" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "작가" })).toBeInTheDocument();
 });
 
 it("opens Home from the first rail entry, marks it current there and names the index 홈", async () => {
@@ -86,6 +109,25 @@ it("marks 에셋 current in the 작가 quick view, 메모 on notes and 더보기
   rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "trash" }} onNavigate={vi.fn()} />);
   expect(screen.getByRole("button", { name: "더보기" })).toHaveAttribute("aria-current", "page");
   expect(screen.getByRole("button", { name: "메모" })).not.toHaveAttribute("aria-current");
+});
+
+it("omits the empty index column from 메모", async () => {
+  render(<WorkspaceChromeProvider scope="notes">
+    <WorkspaceNavigation {...baseProps} view={{ kind: "notes" }} onNavigate={vi.fn()} />
+    <ViewToolbar title="메모" chrome={{ search: { scope: "메모", query: "", label: "메모 검색", onApply: vi.fn() } }} />
+  </WorkspaceChromeProvider>);
+
+  await waitFor(() => expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument());
+});
+
+it("keeps the index column when another view contributes navigation", async () => {
+  render(<WorkspaceChromeProvider scope="home">
+    <WorkspaceNavigation {...baseProps} view={{ kind: "home" }} onNavigate={vi.fn()} />
+    <ViewToolbar title="홈" chrome={{ navigation: <nav aria-label="홈 인덱스" /> }} />
+  </WorkspaceChromeProvider>);
+
+  expect(screen.getByRole("complementary", { name: "탐색 인덱스" })).toBeInTheDocument();
+  expect(await screen.findByRole("navigation", { name: "홈 인덱스" })).toBeInTheDocument();
 });
 
 it("keeps status out of the rail and shows no search placeholder where search is unsupported", () => {
@@ -151,11 +193,11 @@ it("opens the 찾기 palette with Ctrl+K, filters by name and navigates with Ent
   expect(within(palette).getAllByRole("option").map((option) => option.getAttribute("aria-label") ?? option.textContent)).toEqual(["휴지통 1개"]);
   await user.clear(field);
   await user.type(field, "설정");
-  expect(within(palette).getAllByRole("option").map((option) => option.textContent)).toEqual(["설정", "설정 · 일반", "설정 · 라이브러리", "설정 · 클라우드", "설정 · 온라인 카탈로그", "설정 · 연결", "설정 · 데이터 관리", "설정 · 정보·도움말", "설정 · 고급"]);
-  await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}");
-  expect(within(palette).getByRole("option", { name: "설정 · 클라우드" })).toHaveAttribute("aria-selected", "true");
+  expect(within(palette).getAllByRole("option").map((option) => option.textContent)).toEqual(["설정", "설정 · 자주 쓰는 것", "설정 · 화면", "설정 · 라이브러리", "설정 · 연결", "설정 · 카탈로그", "설정 · 보관함", "설정 · 고급"]);
+  await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}");
+  expect(within(palette).getByRole("option", { name: "설정 · 연결" })).toHaveAttribute("aria-selected", "true");
   await user.keyboard("{Enter}");
-  expect(onNavigate).toHaveBeenLastCalledWith({ kind: "settings", section: "cloud" });
+  expect(onNavigate).toHaveBeenLastCalledWith({ kind: "settings", section: "connection" });
   expect(screen.queryByRole("dialog", { name: "찾기" })).not.toBeInTheDocument();
   expect(focusBefore).toHaveFocus();
 });

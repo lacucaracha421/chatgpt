@@ -41,7 +41,7 @@ it("renders the nightly result and chooses the folder, review toggle and manual 
   render(<AutoTagSettings disabled={false} />);
   expect(await screen.findByText(/태거 판정 12건 반영.*그림체 8,960장/)).toBeTruthy();
   expect(screen.getByText("/tmp/inbox")).toBeTruthy();
-  await user.click(screen.getByRole("checkbox", { name: "가져온 뒤 태거 판정 자동 반영" }));
+  await user.click(screen.getByRole("switch", { name: "가져온 뒤 태거 판정 자동 반영" }));
   expect(invoke).toHaveBeenCalledWith("set_auto_tag_inbox", { folder: "/tmp/inbox", applyTaggerReview: false });
   vi.mocked(open).mockResolvedValue("/tmp/daily");
   await user.click(screen.getByRole("button", { name: "폴더 선택" }));

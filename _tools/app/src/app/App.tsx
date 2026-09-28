@@ -75,6 +75,7 @@ import { FaultGameProvider } from "../games/FaultGame";
 const CollectionBrowser = lazy(() => import("../collections/CollectionBrowser").then((module) => ({ default: module.CollectionBrowser })));
 const CollectionOverlay = lazy(() => import("../collections/CollectionOverlay").then((module) => ({ default: module.CollectionOverlay })));
 const ArtistHub = lazy(() => import("../artists/ArtistHub").then((module) => ({ default: module.ArtistHub })));
+const AlbumOverview = lazy(() => import("../albums/AlbumOverview").then((module) => ({ default: module.AlbumOverview })));
 const ExchangeView = lazy(() => import("../exchange/ExchangeView").then((module) => ({ default: module.ExchangeView })));
 const HomeView = lazy(() => import("../home/HomeView").then((module) => ({ default: module.HomeView })));
 const NotesView = lazy(() => import("../notes/NotesView").then((module) => ({default:module.NotesView})));
@@ -102,7 +103,7 @@ type AppProps = {
 function backNavigationTab(view: AssetView): string {
   switch (view.kind) {
     // The 작가 hub is an asset quick view: back from it returns to the folder it was opened from.
-    case "classification": case "album":
+    case "classification": case "albums": case "album":
     case "artists": case "creator": return "assets";
     case "collection": case "collections": return "collections";
     default: return view.kind;
@@ -197,6 +198,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [clearAssetSelectionRequest, setClearAssetSelectionRequest] = useState(0);
   const [maintenance, setMaintenance] = useState<"restore" | null>(null);
   const [createClassificationRequest, setCreateClassificationRequest] = useState(0);
+  const [createAlbumRequest, setCreateAlbumRequest] = useState(0);
   const [browserStatus, setBrowserStatus] = useState<AssetBrowserStatus>({
     loadedCount: 0,
     selectedAsset: null,
@@ -801,6 +803,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               expandedAlbumIds={preferences.expandedAlbumIds}
               sidebarWidth={sidebarWidth}
               createClassificationRequest={createClassificationRequest}
+              createAlbumRequest={createAlbumRequest}
               onViewChange={navigateView}
               onExpandedIdsChange={(expandedClassificationIds) =>
                 updatePreferences({ expandedClassificationIds })
@@ -906,6 +909,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onViewChange={navigateView}
                     onChanged={refreshCollections}
                   />
+                ) : view.kind === "albums" ? (
+                  <AlbumOverview albums={albums} onNavigate={navigateView} onCreateAlbum={() => setCreateAlbumRequest((current) => current + 1)} onChanged={() => void refreshAlbums()} />
                 ) : view.kind === "artists" ? (
                   <ArtistHub view={view} onNavigate={navigateView} privacyMode={preferences.privacyMode} />
                 ) : (

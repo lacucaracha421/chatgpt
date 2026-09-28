@@ -44,9 +44,9 @@ function renderSettings() {
 
 it("loads and changes persistent category visibility", async () => {
   const { gateway } = renderSettings();
-  const manga = await screen.findByRole("checkbox", { name: "만화 숨기기" });
+  const manga = await screen.findByRole("switch", { name: "만화 숨기기" });
   expect(manga).toBeChecked();
-  const doujinshi = screen.getByRole("checkbox", { name: "동인지 숨기기" });
+  const doujinshi = screen.getByRole("switch", { name: "동인지 숨기기" });
   expect(doujinshi).not.toBeChecked();
 
   await userEvent.click(doujinshi);
@@ -79,7 +79,7 @@ it("adds and removes exact namespace and value tag pairs", async () => {
 
 it("reloads the saved policy when the settings surface is reopened", async () => {
   const { gateway, view } = renderSettings();
-  expect(await screen.findByRole("checkbox", { name: "만화 숨기기" })).toBeChecked();
+  expect(await screen.findByRole("switch", { name: "만화 숨기기" })).toBeChecked();
   view.unmount();
   render(
     <LibraryProvider gateway={gateway}>
@@ -87,7 +87,7 @@ it("reloads the saved policy when the settings surface is reopened", async () =>
     </LibraryProvider>,
   );
 
-  expect(await screen.findByRole("checkbox", { name: "만화 숨기기" })).toBeChecked();
+  expect(await screen.findByRole("switch", { name: "만화 숨기기" })).toBeChecked();
   expect(gateway.getCatalogVisibilityPolicy).toHaveBeenCalledTimes(2);
 });
 
@@ -107,6 +107,6 @@ it("can retry after the initial policy load fails", async () => {
 
   await userEvent.click(await screen.findByRole("button", { name: "다시 시도" }));
 
-  expect(await screen.findByRole("checkbox", { name: "만화 숨기기" })).toBeChecked();
+  expect(await screen.findByRole("switch", { name: "만화 숨기기" })).toBeChecked();
   expect(gateway.getCatalogVisibilityPolicy).toHaveBeenCalledTimes(2);
 });
