@@ -142,22 +142,16 @@
 .home-c .home-sec { min-width:0; }
 .home-c .home-sh { min-height:30px; margin-bottom:5px; }
 .home-c .home-sh h2 { font-size:15px; }
-.home-c-top, .home-c-middle, .home-c-bottom { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; align-items:stretch; }
+.home-c-top, .home-c-middle, .home-c-bottom { display:grid; gap:10px; align-items:stretch; }
+.home-c-top { grid-template-columns:1fr; }
+.home-c-middle, .home-c-bottom { grid-template-columns:repeat(2,minmax(0,1fr)); }
 .home-c-top > .home-sec, .home-c-middle > .home-sec, .home-c-bottom > .home-sec { min-width:0; }
 
-.home-transfer-grid { display:grid; grid-template-rows:repeat(2,minmax(0,1fr)); gap:1px; height:182px; overflow:hidden; border:1px solid var(--color-border); border-radius:3px; background:var(--color-border); }
-.home-transfer-card { position:relative; display:flex; flex-direction:column; gap:5px; min-width:0; padding:10px 12px; border:0; border-radius:0; background:var(--color-surface); }
-.home-transfer-card:active, .home-tall-memo:active, .home-todo-tile:active, .home-asset-tile:active { background:var(--color-surface-pressed,var(--color-control-pressed)); }
-.home-transfer-label, .home-memo-title { display:flex; align-items:center; gap:6px; min-width:0; color:var(--color-muted); font-size:12px; }
-.home-transfer-card strong { overflow:hidden; font-size:14px; font-weight:600; white-space:nowrap; text-overflow:ellipsis; }
-.home-transfer-meta, .home-transfer-empty { overflow:hidden; color:var(--color-muted); font-size:12px; white-space:nowrap; text-overflow:ellipsis; }
-.home-transfer-percent { position:absolute; right:12px; bottom:26px; font-size:12px; color:var(--color-muted); }
-.home-transfer-card .home-progress { margin-top:auto; }
-.home-transfer-thumbs { display:flex; gap:6px; min-height:54px; margin-top:auto; }
-.home-transfer-thumb { display:flex; align-items:center; justify-content:center; width:54px; height:54px; overflow:hidden; border-radius:2px; background:var(--color-surface-elevated); color:var(--color-muted); }
-.home-transfer-thumb img { width:100%; height:100%; object-fit:cover; }
+.home-tall-memo:active, .home-todo-tile:active, .home-asset-tile:active { background:var(--color-surface-pressed,var(--color-control-pressed)); }
+.home-memo-title { display:flex; align-items:center; gap:6px; min-width:0; color:var(--color-muted); font-size:12px; }
 
 .home-memo-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1px; height:182px; overflow:hidden; border:1px solid var(--color-border); border-radius:3px; background:var(--color-border); }
+.home-memo-grid.is-three { grid-template-columns:repeat(3,minmax(0,1fr)); }
 .home-tall-memo { display:flex; flex-direction:column; gap:8px; min-width:0; padding:10px 11px; border:0; border-radius:0; background:var(--color-surface); }
 .home-memo-snippet { display:-webkit-box; overflow:hidden; -webkit-line-clamp:6; -webkit-box-orient:vertical; color:var(--color-muted); font-size:12px; line-height:1.45; text-align:left; white-space:normal; }
 .home-tall-memo .home-memo-title { color:var(--color-text); font-size:13px; font-weight:600; }
@@ -256,7 +250,7 @@
    each block gives up a little height instead of the page scrolling. */
 .home-c { gap:11px; }
 .home-c .home-sh { min-height:28px; margin-bottom:4px; }
-.home-c .home-transfer-grid, .home-c .home-memo-grid { height:160px; }
+.home-c .home-memo-grid { height:160px; }
 .home-c .home-shelf-item { width:104px; }
 .home-c .home-shelf-art { height:122px; }
 .home-c .home-av-card { min-height:150px; gap:8px; }
@@ -264,7 +258,7 @@
 .home-c .home-revisit-pics { height:140px; }
 .home-c .home-asset-grid { height:172px; }
 
-/* 오늘의 AV 배우: face | name + covers (2026-09-28). */
+/* 오늘의 AV 배우: face | name (+ details later) (2026-09-28). */
 .home-c .home-av-split { display:grid; grid-template-columns:96px minmax(0,1fr); gap:12px; min-height:0; padding:10px; }
 .home-av-face { position:relative; display:flex; align-items:center; justify-content:center; height:100%; min-height:112px; overflow:hidden; border-radius:2px; background:var(--color-surface-elevated); }
 .home-av-face > .home-home-image, .home-av-face > .home-cover-placeholder { width:100%; height:100%; }
@@ -274,9 +268,8 @@
 .home-av-side { display:flex; flex-direction:column; gap:3px; min-width:0; }
 .home-av-side strong { overflow:hidden; font-size:17px; font-weight:600; white-space:nowrap; text-overflow:ellipsis; }
 .home-av-side em { overflow:hidden; color:var(--color-muted); font-size:11.5px; font-style:normal; white-space:nowrap; text-overflow:ellipsis; }
-.home-av-covers { display:flex; gap:6px; margin-top:auto; }
-.home-av-cover { display:block; width:auto; height:64px; aspect-ratio:1.42; overflow:hidden; border-radius:2px; background:var(--color-surface-elevated); }
-.home-av-cover > .home-home-image, .home-av-cover > .home-cover-placeholder { width:100%; height:100%; }
+.home-av-fact { margin-top:6px; color:var(--color-muted); font-size:12px; }
+.home-av-fact b { margin-right:2px; color:var(--color-text); font-size:16px; font-weight:500; }
 
 /* The middle row gives up height; 신간 · 발매 예정 gets it back as breathing room. */
 .home-c .home-todo-cards { height:132px; }

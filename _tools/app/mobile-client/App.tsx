@@ -14,9 +14,10 @@ import {useSimilarityReviewBackgroundFlush} from './useSimilarityReview';
 import {useDuplicateDecisionFlush} from './CatalogDuplicates';
 import type {ViewerCharacterContext} from './Viewer';
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
-import {BookOpenIcon, PhotoIcon, PencilSquareIcon, HomeIcon, RectangleStackIcon, AdjustmentsHorizontalIcon, LockClosedIcon, ChevronRightIcon, PlayIcon} from '@heroicons/react/24/outline';
+import {BookOpenIcon, PhotoIcon, PencilSquareIcon, HomeIcon, RectangleStackIcon, AdjustmentsHorizontalIcon, ArrowsUpDownIcon, LockClosedIcon, ChevronRightIcon, PlayIcon} from '@heroicons/react/24/outline';
 import {Exchange} from './Exchange';
 import {useExchange} from './useExchange';
+import {sendingSummary} from './homeDashboard';
 
 import {Button, IconButton, Mark} from './ui';
 import {api, errorText, native} from './transport';
@@ -599,6 +600,10 @@ export function App() {
   const seriesEntry=entries.find(item=>item.id===seriesNode?.seriesId);
   const characterCrumbs=[{id:'root',name:'에셋',onSelect:openRoot},...ancestorsOf(entries,seriesEntry?.id).map(entry=>({id:entry.id,name:entry.name,onSelect:()=>select(entryView(entry))}))];
   const paused=area!=='assets'||settings||!!viewer||!!fault||similarity||trash.open||exchangeOpen||artistsOpen||calendarOpen;
+  const exchangeSending=sendingSummary(exchange.snapshot);
+  const exchangeUnseen=exchange.snapshot?.unseen ?? 0;
+  const exchangeBadge=exchangeUnseen>0 ? (exchangeUnseen>99 ? '99+' : String(exchangeUnseen)) : exchangeSending ? (exchangeSending.progress===null ? '…' : `${Math.round(exchangeSending.progress*100)}%`) : '';
+  const exchangeLabel=exchangeUnseen>0 ? `전송 · 받은 파일 ${exchangeUnseen}개` : exchangeSending ? `전송 · 보내는 중 ${exchangeBadge}` : '전송';
   const intro=<>{filterable&&!sameFilters(filters,page.filters)&&<p className="hint">필터 적용 대기</p>}{!!childEntries.length&&<section className="folder-intro"><h2>폴더 {childEntries.length}</h2><FolderCards strip items={childEntries} entries={entries} characters={characterIndex} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{page.view.album&&albumTree&&albumTree.albums.some(album=>album.parentId===page.view.album?.id&&album.id!==page.view.album?.id)&&<section className="folder-intro"><h2>하위 앨범</h2><Albums key={`${albumTree.libraryId}:${albumTree.epoch}:${page.view.album.id}`} tree={albumTree} parentId={page.view.album.id} paused={paused} revision={indexRevision+1} onSelect={select}/></section>}{!page.items.length&&<div className="empty-state"><RectangleStackIcon/><h2>{busy?'에셋을 불러오고 있습니다':hasActiveFilters(page.filters)?'조건에 맞는 자산이 없습니다':'아직 자산이 없습니다'}</h2></div>}</>;
   // A drill-down level is a committed Library place; its depth decides the entrance direction.
   // Home, other tabs and filter changes are not levels, so they never slide.
@@ -631,7 +636,7 @@ export function App() {
   const demo = import.meta.env.DEV && new URLSearchParams(location.search).has('demo');
   return <div className="mobile-app" ref={appRef}>
     {/* Every configured area except Home draws its own title bar. */}
-    {!(status.configured&&(area!=='assets'||page.view.tab==='library')||artistsOpen)&&<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&vaultPresent&&<IconButton label="비밀 보관함 열기" icon={LockClosedIcon} onClick={()=>setVaultOpen(true)}/>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={()=>setSettings(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>}
+    {!(status.configured&&(area!=='assets'||page.view.tab==='library')||artistsOpen)&&<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&vaultPresent&&<IconButton label="비밀 보관함 열기" icon={LockClosedIcon} onClick={()=>setVaultOpen(true)}/>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<span className="header-action-badge"><IconButton label={exchangeLabel} icon={ArrowsUpDownIcon} onClick={()=>setExchangeOpen(true)}/>{exchangeBadge&&<span className="header-badge" aria-hidden="true">{exchangeBadge}</span>}</span>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={()=>setSettings(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>}
     {status.configured ? <div className="app-body" ref={bodyRef} data-active-tab={area==='assets'?page.view.tab:area}>
       <main className="library-main" ref={mainRef} style={{display:area!=='assets'||artistsOpen?'none':undefined}}>
         {page.view.tab==='home'&&<HeaderTools active={area==='assets'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2></div></HeaderTools>}

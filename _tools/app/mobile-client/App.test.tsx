@@ -3,6 +3,7 @@ import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
 import type {HomeProps} from './Home';
+import type {ExchangeSnapshot} from './exchange';
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:()=> 'connection failed',
   ApiError:class ApiError extends Error{status:number|null;details:unknown;constructor(message:string,status:number|null,details:unknown){super(message);this.status=status;this.details=details;}}}));
@@ -14,6 +15,7 @@ import {App} from './App';
 import {ApiError} from './transport';
 import {outboxConnection,setOutboxConnection} from './outboxConnection';
 const a=[{id:'a1',kind:'image'},{id:'a2',kind:'image'}],b=[{id:'b1',kind:'image'},{id:'b2',kind:'image'}];
+const exchangeSnapshot = (overrides: Partial<ExchangeSnapshot> = {}): ExchangeSnapshot => ({configured: true, tokenConfigured: true, receiveSupported: true, deviceId: 'tablet', deviceName: '태블릿', code: '', devices: [{deviceId: 'pc', name: '작업실 PC', kind: 'pc', lastSeenAt: '2026-09-25T11:29:00Z'}], incoming: [], unseen: 0, outgoing: [], ...overrides});
 async function openFolder(name:string){
   if(!screen.queryByRole('button',{name})){
     // From another tab Library first returns to its last place; reselecting it goes to the root.
@@ -40,6 +42,28 @@ it('points the durable outboxes at the configured connection as soon as the stat
   setOutboxConnection(null);
   render(<App/>);
   await waitFor(()=>expect(outboxConnection()).toBe('https://example.invalid'));
+});
+it('shows unseen transfers in the Home header and opens the exchange screen', async () => {
+  const snapshot = exchangeSnapshot({unseen: 3});
+  mocks.native.mockImplementation(async (op: string) => op === 'status' ? {configured: true, endpoint: 'https://example.invalid'} : op === 'exchangeState' || op === 'exchangeVisible' ? snapshot : {configured: true, endpoint: 'https://example.invalid'});
+  render(<App/>);
+  await screen.findByRole('heading', {name: '에셋'});
+  fireEvent.click(await screen.findByRole('button', {name: '홈', exact: true}));
+  await screen.findByRole('button', {name: '전체 보기'});
+  const transfer = await screen.findByRole('button', {name: '전송 · 받은 파일 3개'});
+  expect(transfer.closest('.header-action-badge')?.querySelector('.header-badge')?.textContent).toBe('3');
+  fireEvent.click(transfer);
+  expect(await screen.findByRole('dialog', {name: '전송'})).toBeTruthy();
+});
+it('shows the outgoing transfer percentage when there are no unseen files', async () => {
+  const snapshot = exchangeSnapshot({outgoing: [{transferId: 'tx1', batchId: 'b1', fileName: '스케치.zip', sizeBytes: 100, bytes: 62, peer: 'pc', peerId: 'pc', state: 'uploading', code: '', createdAt: '2026-09-25T10:00:00Z'}]});
+  mocks.native.mockImplementation(async (op: string) => op === 'status' ? {configured: true, endpoint: 'https://example.invalid'} : op === 'exchangeState' || op === 'exchangeVisible' ? snapshot : {configured: true, endpoint: 'https://example.invalid'});
+  render(<App/>);
+  await screen.findByRole('heading', {name: '에셋'});
+  fireEvent.click(await screen.findByRole('button', {name: '홈', exact: true}));
+  await screen.findByRole('button', {name: '전체 보기'});
+  const transfer = await screen.findByRole('button', {name: '전송 · 보내는 중 62%'});
+  expect(transfer.closest('.header-action-badge')?.querySelector('.header-badge')?.textContent).toBe('62%');
 });
 it('opens character browsing inside Library and uses Android back for its parent',async()=>{
   const original=mocks.api.getMockImplementation()!;

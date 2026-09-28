@@ -81,16 +81,27 @@ describe('home model', () => {
 describe('Home C', () => {
   const region = (name: string) => screen.getByRole('region', {name});
   it('renders the C blocks, merges upcoming titles, and has no character review tile or tag metric', async () => {
+    notes = [...pinnedNotes(), note('second', {type: 'text', title: '두 번째 메모', body: '두 번째 메모 내용', updatedAt: '2026-09-02T12:00:00Z'})];
     const input = props({captures: Array.from({length: 40}, (_, i) => item(`capture-${i}`)), exchange: exchange(true)});
     render(<Home {...input}/>);
-    expect(region('전송')).toBeTruthy(); expect(region('메모')).toBeTruthy();
+    expect(screen.queryByRole('region', {name: '전송'})).toBeNull();
+    const memo = region('메모');
+    await within(memo).findByRole('button', {name: /Todo/});
+    expect(within(memo).getByRole('button', {name: /두 번째 메모/})).toBeTruthy();
+    expect(memo.querySelector('.home-memo-grid')?.querySelectorAll('button')).toHaveLength(3);
     expect(within(region('확인할 것')).queryByText('캐릭터 검토')).toBeNull();
     expect(within(region('자산 현황')).queryByText(/캐릭터 자동 태그/)).toBeNull();
-    expect(await within(region('전송')).findByText('62%')).toBeTruthy();
     expect(await within(region('신간 · 발매 예정')).findByRole('button', {name: /Hades II/})).toBeTruthy();
-    expect(within(region('메모')).getAllByText('250,000원')).toHaveLength(2);
-    expect(within(region('메모')).getByText('마트')).toBeTruthy();
+    expect(within(memo).getAllByText('250,000원')).toHaveLength(2);
+    expect(within(memo).getByText('마트')).toBeTruthy();
     expect(within(region('확인할 것')).getAllByRole('button')).toHaveLength(3);
+  });
+  it('uses two memo cards when only one non-ledger note is pinned', async () => {
+    render(<Home {...props()}/>);
+    const memo = await screen.findByRole('region', {name: '메모'});
+    await within(memo).findByRole('button', {name: /Todo/});
+    expect(memo.querySelector('.home-memo-grid')?.querySelectorAll('button')).toHaveLength(2);
+    expect(within(memo).queryByRole('button', {name: /두 번째 메모/})).toBeNull();
   });
   it('masks hidden pinned memo content and uses platform badges for game shelf entries', async () => {
     const game = {...upcomingEntry, platforms: ['PC', 'PS5'], port: true};

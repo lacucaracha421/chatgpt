@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState, useSyncExternalStore, type ReactNode} from 'react';
-import {ArrowsUpDownIcon, ChevronRightIcon, ListBulletIcon, RectangleStackIcon, SignalSlashIcon, WalletIcon} from '@heroicons/react/24/outline';
+import {ChevronRightIcon, ListBulletIcon, RectangleStackIcon, SignalSlashIcon, WalletIcon} from '@heroicons/react/24/outline';
 import {Artwork} from './Collections';
 import {collectionCover} from './collectionModel';
 import {localToday} from './collectionReleases';
@@ -8,7 +8,6 @@ import {currentShelf, subscribeReleases} from './releaseStore';
 import {addedToday, clockLabel, dateBlock, daysAfter, PENDING_LIMIT, shelfEntries, TODO_LABELS, useHomeArtists, useHomeAvPick, useHomeDashboard, useHomeMemos, useHomeRevisit, useHomeUpcoming, type HomeCover, type MemoRow, type RevisitGroup, type ShelfEntry, type TodoKey, type UpcomingHomeEntry} from './homeDashboard';
 import type {CharacterIndex} from './characterModel';
 import type {ExchangeSnapshot} from './exchange';
-import {useExchangeThumbnail} from './useExchange';
 import {api} from './transport';
 import {BottomSheet} from './BottomSheet';
 import {usePrivacyMode} from './privacyMode';
@@ -73,22 +72,19 @@ function ShelfExternal({entry, today, interested, privacy, onOpen}: {entry: Upco
   return <button className="home-shelf-item home-external-item" onClick={onOpen} aria-label={`${entry.title}${date ? ` · ${days === 0 ? '오늘' : `D-${days}`}` : ''}`}><span className="home-rail"><span className="home-rail-d">{block?.day ?? '발매 예정'}</span>{block && <><span className="home-rail-w">{block.weekday.slice(0, 1)}</span><span className="home-rail-dd numeric">{days === 0 ? '오늘' : days !== null && days > 0 ? `D-${days}` : '일정 미정'}</span></>}</span><span className="home-shelf-art"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} /><span className="home-interest" aria-label={interested ? '관심 목록에 있음' : '관심 목록에 없음'}>{interested ? '♥' : '♡'}</span></span><span className="home-shelf-title">{entry.title}</span><span className="home-shelf-sub">{hasGamePlatforms ? <PlatformBadges platforms={entry.platforms!} port={entry.port === true} /> : <><span className="home-kind">{upcomingKind[entry.kind]}</span><span>{entry.platforms?.slice(0, 2).join(' · ') || entry.releaseType || '발매 예정'}</span></>}</span></button>;
 }
 
-function ExchangeThumb({transferId, enabled, privacy, name}: {transferId: string; enabled: boolean; privacy: boolean; name: string}) {
-  const url = useExchangeThumbnail(transferId, enabled && !privacy);
-  return <span className="home-transfer-thumb">{url ? <img src={url} alt={name} /> : <RectangleStackIcon aria-hidden="true" />}</span>;
-}
-
-function TransferPanel({sending, exchange, privacy, onOpen}: {sending: ReturnType<typeof useHomeDashboard>['sending']; exchange: ExchangeSnapshot | null; privacy: boolean; onOpen(): void}) {
-  const received = (exchange?.incoming ?? []).filter(row => row.state === 'saved' || row.state === 'downloading' || row.state === 'saving').slice(0, 2);
-  return <Section title="전송" onMore={onOpen} moreLabel="보내기 · 받기 전체"><div className="home-transfer-grid"><button className="home-transfer-card" onClick={onOpen} aria-label={sending ? `보내는 중 ${sending.name}` : '보낼 파일 없음'}><span className="home-transfer-label"><ArrowsUpDownIcon className="home-icon" />보내는 중</span>{sending ? <><strong>{sending.name}</strong><span className="home-transfer-meta">{sending.peer}{sending.more ? ` · 외 ${sending.more}개` : ''}</span><Progress value={sending.progress ?? 0} muted={!sending.progress} />{sending.progress !== null && <span className="numeric home-transfer-percent">{Math.round(sending.progress * 100)}%</span>}</> : <span className="home-transfer-empty">보낼 파일이 없습니다.</span>}</button><button className="home-transfer-card" onClick={onOpen} aria-label={`받은 파일 ${exchange?.unseen ?? 0}개`}><span className="home-transfer-label"><RectangleStackIcon className="home-icon" />받은 파일 <span className="numeric">{exchange?.unseen ?? 0}</span></span><span className="home-transfer-thumbs">{received.map(row => <ExchangeThumb key={row.transferId} transferId={row.transferId} enabled={row.state === 'saved'} privacy={privacy} name={row.fileName} />)}{received.length === 0 && <span className="home-transfer-empty">최근 받은 파일이 없습니다.</span>}</span></button></div></Section>;
-}
-
 function MemoPanel({rows, memos, onOpen}: {rows: MemoRow[]; memos: ReturnType<typeof useHomeMemos>; onOpen(id?: string): void}) {
-  // The left card is the newest pinned note that is not a 가계부 (checklist, text or secret).
-  const pinned = rows.find(row => row.kind !== 'ledger');
+  const nonLedger = rows.filter((row): row is Exclude<MemoRow, {kind: 'ledger'}> => row.kind !== 'ledger');
+  const pinned = nonLedger[0];
+  const second = nonLedger[1];
   const checklist = pinned?.kind === 'checklist' ? pinned : undefined;
   const ledger = rows.find((row): row is Extract<MemoRow, {kind: 'ledger'}> => row.kind === 'ledger');
-  return <Section title="메모" onMore={() => onOpen()} moreLabel="메모 전체"><div className="home-memo-grid">{checklist ? <button className="home-tall-memo" onClick={() => onOpen(checklist.id)}><span className="home-memo-title"><ListBulletIcon className="home-icon" />{checklist.title || 'Todo'}</span><span className="home-checklist-lines">{checklist.items.map((item, index) => <span key={index}><i className={item.checked ? 'is-checked' : ''}>{item.checked ? '✓' : ''}</i>{item.text}</span>)}</span><span className="home-memo-foot"><span className="numeric">{checklist.done}/{checklist.total}</span> 완료<Progress value={checklist.total ? checklist.done / checklist.total : 0} muted /></span></button> : pinned ? <button className="home-tall-memo" onClick={() => onOpen(pinned.id)}><span className="home-memo-title"><ListBulletIcon className="home-icon" />{pinned.title || '메모'}</span><span className="home-memo-snippet">{pinned.kind === 'text' ? pinned.snippet : '잠긴 메모'}</span></button> : <button className="home-tall-memo is-empty" onClick={() => onOpen()}><span className="home-memo-title"><ListBulletIcon className="home-icon" />메모</span><span>고정한 메모가 없습니다.</span></button>}{ledger ? <button className="home-tall-memo" onClick={() => onOpen(ledger.id)}><span className="home-memo-title"><WalletIcon className="home-icon" />{ledger.title || '가계부'}</span><small className="home-ledger-month">{ledger.month}월 쓴 돈</small><strong className="home-ledger-total numeric">{grouped(ledger.amount)}원</strong>{ledger.categories.length > 0 ? <span className="home-ledger-bars">{ledger.categories.map(category => <span key={category.label}><span><b>{category.label}</b><em className="numeric">{grouped(category.amount)}원</em></span><Progress value={ledger.amount ? category.amount / ledger.amount : 0} /></span>)}</span> : <span className="home-ledger-latest"><small>최근 기록</small>{ledger.latest.map(entry => <span key={`${entry.label}:${entry.amount}`}><b>{entry.label}</b><em className="numeric">{grouped(entry.amount)}원</em></span>)}</span>}</button> : <button className="home-tall-memo is-empty" onClick={() => onOpen()}><span className="home-memo-title"><WalletIcon className="home-icon" />가계부</span><span>고정한 가계부가 없습니다.</span></button>}</div>{!checklist && !ledger && memos?.locked && <p className="home-memo-locked">메모가 잠겨 있습니다.</p>}</Section>;
+  const renderNote = (note: Exclude<MemoRow, {kind: 'ledger'}>, key: string) => note.kind === 'checklist'
+    ? <button key={key} className="home-tall-memo" onClick={() => onOpen(note.id)}><span className="home-memo-title"><ListBulletIcon className="home-icon" />{note.title || 'Todo'}</span><span className="home-checklist-lines">{note.items.map((item, index) => <span key={index}><i className={item.checked ? 'is-checked' : ''}>{item.checked ? '✓' : ''}</i>{item.text}</span>)}</span><span className="home-memo-foot"><span className="numeric">{note.done}/{note.total}</span> 완료<Progress value={note.total ? note.done / note.total : 0} muted /></span></button>
+    : <button key={key} className="home-tall-memo" onClick={() => onOpen(note.id)}><span className="home-memo-title"><ListBulletIcon className="home-icon" />{note.title || '메모'}</span><span className="home-memo-snippet">{note.kind === 'text' ? note.snippet : '잠긴 메모'}</span></button>;
+  const noteCard = pinned ? renderNote(pinned, pinned.id) : <button key="empty-note" className="home-tall-memo is-empty" onClick={() => onOpen()}><span className="home-memo-title"><ListBulletIcon className="home-icon" />메모</span><span>고정한 메모가 없습니다.</span></button>;
+  const ledgerCard = ledger ? <button key={ledger.id} className="home-tall-memo" onClick={() => onOpen(ledger.id)}><span className="home-memo-title"><WalletIcon className="home-icon" />{ledger.title || '가계부'}</span><small className="home-ledger-month">{ledger.month}월 쓴 돈</small><strong className="home-ledger-total numeric">{grouped(ledger.amount)}원</strong>{ledger.categories.length > 0 ? <span className="home-ledger-bars">{ledger.categories.map(category => <span key={category.label}><span><b>{category.label}</b><em className="numeric">{grouped(category.amount)}원</em></span><Progress value={ledger.amount ? category.amount / ledger.amount : 0} /></span>)}</span> : <span className="home-ledger-latest"><small>최근 기록</small>{ledger.latest.map(entry => <span key={`${entry.label}:${entry.amount}`}><b>{entry.label}</b><em className="numeric">{grouped(entry.amount)}원</em></span>)}</span>}</button> : <button key="empty-ledger" className="home-tall-memo is-empty" onClick={() => onOpen()}><span className="home-memo-title"><WalletIcon className="home-icon" />가계부</span><span>고정한 가계부가 없습니다.</span></button>;
+  const cards = [noteCard, ledgerCard, ...(second ? [renderNote(second, second.id)] : [])];
+  return <Section title="메모" onMore={() => onOpen()} moreLabel="메모 전체"><div className={`home-memo-grid${second ? ' is-three' : ''}`}>{cards}</div>{!checklist && !ledger && memos?.locked && <p className="home-memo-locked">메모가 잠겨 있습니다.</p>}</Section>;
 }
 
 function RevisitCard({group, paused, privacy, noChevron, onOpen}: {group: RevisitGroup; paused: boolean; privacy: boolean; noChevron?: boolean; onOpen(): void}) {
@@ -113,8 +109,8 @@ function AssetTile({value, title, unit, onOpen, label}: {value: string; title: s
 
 /**
  * 오늘의 AV 배우 as two columns (2026-09-28): the performer's face on the left — cropped from the
- * right half of the latest front cover, where the jacket shows her — and on the right the name
- * with the owned covers under it. No work titles.
+ * right half of the latest front cover, where the jacket shows her — and her name on the right.
+ * The right column leaves room for performer details later; no work covers or titles.
  */
 function AvCard({pick, privacy}: {pick: NonNullable<ReturnType<typeof useHomeAvPick>>; privacy: boolean}) {
   const cover = pick.latestWork?.cover ?? pick.cover ?? null;
@@ -124,7 +120,7 @@ function AvCard({pick, privacy}: {pick: NonNullable<ReturnType<typeof useHomeAvP
     <span className="home-av-side">
       <strong>{pick.name}</strong>
       {pick.aliases?.[0] && <em>{pick.aliases[0]}</em>}
-      {cover && <span className="home-av-covers"><span className="home-av-cover"><HomeCoverImage cover={cover} alt={pick.latestWork?.code ?? '최근 작품'} privacy={privacy} /></span></span>}
+      {pick.workCount ? <span className="home-av-fact"><b className="numeric">{count(pick.workCount)}</b>편 소장</span> : null}
     </span>
   </article>;
 }
@@ -174,7 +170,7 @@ export function Home(props: HomeProps) {
 
   return <div className={`home-scroll home-c${privacy ? ' is-private' : ''}${stale ? ' is-stale' : ''}`} aria-label="홈">
     {stale && <div className="home-offline" role="status"><SignalSlashIcon aria-hidden="true" /><div><strong>오프라인 — 서버에 닿지 않습니다</strong><p>{d.since ? <>숫자와 목록은 <span className="numeric">{clockLabel(d.since)}</span> 기준으로 남겨 둔 값입니다. 메모는 그대로 쓸 수 있습니다.</> : '연결되면 다시 불러옵니다. 메모는 그대로 쓸 수 있습니다.'}</p></div><button className="home-retry" onClick={() => { d.retry(); setRetries(value => value + 1); props.onRefresh?.(); }}>다시 연결</button></div>}
-    <div className="home-c-top"><TransferPanel sending={d.sending} exchange={props.exchange} privacy={privacy} onOpen={props.onExchange} /><MemoPanel rows={memos?.rows ?? []} memos={memos} onOpen={props.onNotes} /></div>
+    <div className="home-c-top"><MemoPanel rows={memos?.rows ?? []} memos={memos} onOpen={props.onNotes} /></div>
     <Section title="신간 · 발매 예정" meta={<><span className="numeric">{mangaEntries.length + externalEntries.length}</span>개<Stale at={stale ? d.releasesAt ?? d.upcomingAt : null} /></>} onMore={props.onReleases} moreLabel="신간 · 발매 예정 전체"><div className="home-shelf">{mangaEntries.slice(0, 12).map(entry => <ShelfManga key={`manga:${entry.kind}:${entry.id}:${entry.kind === 'upcoming' ? entry.volumeNumber : ''}`} entry={entry} today={today} privacy={privacy} cover={cover(entry.id, entry.name)} onOpen={() => props.onWork(entry.id)} />)}{externalEntries.slice(0, 12).map(entry => <ShelfExternal key={`${entry.kind}:${entry.id}`} entry={entry} today={today} interested={upcoming.wishlist.has(entry.id)} privacy={privacy} onOpen={() => setDetail(entry)} />)}{mangaEntries.length + externalEntries.length === 0 && <p className="home-empty-shelf">발매 예정 작품이 없습니다.</p>}</div></Section>
     <div className={`home-c-middle${!avPick || privacy ? ' is-wide' : ''}`}>{!privacy && avPick && <Section title="오늘의 AV 배우"><AvCard pick={avPick} privacy={privacy} /></Section>}<Section title="확인할 것" meta={<Stale at={d.todosAt} />}><div className="home-todo-cards">{todoKeys.map(key => <TodoTile key={key} keyName={key} value={d.todos[key]} stale={stale} onOpen={openTodo[key]} />)}</div></Section></div>
     <div className="home-c-bottom"><Section title="다시 보기" meta="예전에 모은 것" onMore={props.onArtists} moreLabel="작가 전체"><div className="home-revisits home-c-revisits">{dateGroup ? <RevisitCard group={{...dateGroup, title: '1년 전 오늘'}} paused={paused} privacy={privacy} onOpen={() => props.onRevisit?.('date', dateGroup.title)} /> : <EmptyRevisit title="1년 전 오늘" />}{artistGroup ? <RevisitCard group={artistGroup} paused={paused} privacy={privacy} noChevron onOpen={() => props.onArtists?.()} /> : <EmptyRevisit title="오늘의 작가" onOpen={props.onArtists} />}</div></Section><Section title="자산 현황" meta={<Stale at={summary ? d.summaryAt : null} />}><div className="home-asset-grid">{statValues.map((value, index) => <AssetTile key={statLabels[index]} value={value} unit={statUnits[index]!} title={statLabels[index]!} label={statAria[index]!} onOpen={statActions[index]!} />)}</div></Section></div>
