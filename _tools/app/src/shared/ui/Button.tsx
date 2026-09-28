@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes, PropsWithChildren, Ref } from "react";
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "quiet";
 type ButtonSize = "sm" | "md" | "icon";
 
 type SharedButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "className"> & {

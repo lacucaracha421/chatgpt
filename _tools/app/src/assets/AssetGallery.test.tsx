@@ -21,7 +21,7 @@ describe("AssetGallery", () => {
     vi.setSystemTime(new Date(2026, 8, 23));
     const items = [{ ...asset(0), collectedAt: new Date(2026, 8, 23, 12).toISOString() }];
     const { container, rerender } = render(<AssetGallery layout="masonry" items={items} />);
-    expect(container.querySelector(".asset-gallery__date")).toHaveTextContent("09.23");
+    expect(container.querySelector(".asset-gallery__date")).toHaveTextContent("9.23");
     rerender(<AssetGallery layout="masonry" items={items} fullDateHeadings />);
     expect(container.querySelector(".asset-gallery__date")).toHaveTextContent("2026.09.23");
   });
@@ -40,7 +40,7 @@ describe("AssetGallery", () => {
       heading.querySelector(".asset-gallery__date-day")?.textContent,
       heading.querySelector(".asset-gallery__date-weekday")?.textContent,
       heading.querySelector(".asset-gallery__date-count")?.textContent,
-    ])).toEqual([["09.24", "오늘", "2"], ["09.23", "수", "1"]]);
+    ])).toEqual([["9.24", "오늘", "2"], ["9.23", "수", "1"]]);
     rerender(<AssetGallery layout="masonry" items={items} fullDateHeadings />);
     expect(container.querySelector(".asset-gallery__date-day")).toHaveTextContent(/^2026\.09\.24$/);
     expect(container.querySelector(".asset-gallery__date-weekday")).toHaveTextContent("오늘");

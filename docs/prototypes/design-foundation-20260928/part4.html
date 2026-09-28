@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lakomics 디자인 방향</title>
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/fonts.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
+<style>
+  :root { --font: "Pretendard Variable", "Pretendard", sans-serif; --num: "Rajdhani Numbers", "Pretendard Variable", sans-serif; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: #0e0f10; color: var(--color-text); font: 15px/1.5 var(--font); padding: 32px 16px 48px; }
+  main { max-width: 1320px; margin: 0 auto; }
+  h1 { font-size: 24px; font-weight: 600; margin: 0 0 4px; }
+  .lead { color: var(--color-muted); margin: 0 0 16px; }
+  .switch { display: inline-flex; border: 1px solid var(--color-border); border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+  .switch button { all: unset; padding: 8px 16px; font-size: 14px; color: var(--color-muted); background: var(--color-control); cursor: pointer; }
+  .switch button + button { border-left: 1px solid var(--color-border); }
+  .switch button[aria-pressed=true] { background: var(--color-filter-selected); color: var(--color-text); font-weight: 600; }
+  .explain { color: var(--color-muted); font-size: 13px; margin: 0 0 24px; min-height: 40px; max-width: 900px; }
+  .screens { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 32px; align-items: start; }
+  @media (max-width: 1100px) { .screens { grid-template-columns: 1fr; } }
+  .cap { font-size: 12px; color: var(--color-faint); margin-bottom: 8px; }
+
+  .pickers { display: flex; flex-wrap: wrap; gap: 16px 32px; margin: 8px 0 8px; align-items: center; }
+  .pick { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-muted); }
+  .pick button { all: unset; width: 28px; height: 28px; border-radius: 2px; cursor: pointer; border: 1px solid #3a3c40; position: relative; }
+  .pick button[aria-pressed=true] { outline: 2px solid #e7e9ec; outline-offset: 2px; }
+  .pick button span { position: absolute; inset: 6px; border-radius: 1px; }
+  .pick .name { min-width: 96px; color: var(--color-text); }
+
+  /* ===== Colour themes (override the app tokens inside the screens) ===== */
+  /* Re-derive the echo inside the theme box so it masks with the themed sidebar colour. */
+  #theme { --selection-echo: 3px 3px 0 -1px var(--color-sidebar), 3px 3px 0 0 var(--color-selection-echo); }
+  #theme .pc, #theme .tab { color: var(--color-text); }
+  .t-ink { }
+  .t-slate { --color-bg: #15181d; --color-sidebar: #191d23; --color-toolbar: #181c21; --color-surface: #20252c; --color-surface-elevated: #272d35; --color-surface-hover: #2b313a; --color-control: #1f242b; --color-border: #2f3640; --color-border-strong: #4a5360; --color-filter-selected: #333b46; --color-text: #e4e8ee; --color-muted: #9aa3ae; --color-faint: #737c88; }
+  .t-warm { --color-bg: #191715; --color-sidebar: #1d1b18; --color-toolbar: #1c1a17; --color-surface: #25221e; --color-surface-elevated: #2c2924; --color-surface-hover: #302c27; --color-control: #24211d; --color-border: #37332d; --color-border-strong: #57514a; --color-filter-selected: #3b3731; --color-text: #ebe6dc; --color-muted: #aaa396; --color-faint: #817b70; }
+  .t-forest { --color-bg: #121714; --color-sidebar: #161c18; --color-toolbar: #151b17; --color-surface: #1d241f; --color-surface-elevated: #242c26; --color-surface-hover: #28312a; --color-control: #1c231e; --color-border: #2c362f; --color-border-strong: #475449; --color-filter-selected: #313c34; --color-text: #e3ebe5; --color-muted: #9aa89e; --color-faint: #738077; }
+  .t-dim { --color-bg: #2a2b2e; --color-sidebar: #303134; --color-toolbar: #2e2f32; --color-surface: #37383c; --color-surface-elevated: #3f4044; --color-surface-hover: #434449; --color-control: #35363a; --color-border: #45464b; --color-border-strong: #62646a; --color-filter-selected: #4c4d52; --color-text: #eceef0; --color-muted: #b1b4b8; --color-faint: #8b8e93; }
+  .t-paper { --color-bg: #f3f1ec; --color-sidebar: #ebe8e1; --color-toolbar: #eeebe5; --color-surface: #ffffff; --color-surface-elevated: #ffffff; --color-surface-hover: #f6f4ef; --color-control: #ffffff; --color-border: #dcd8cf; --color-border-strong: #b9b4a9; --color-filter-selected: #e2ded5; --color-text: #1d1d1b; --color-muted: #5f5d57; --color-faint: #8c897f; --color-section-mark: rgba(29,29,27,.55); --section-label-rule: linear-gradient(90deg, rgba(29,29,27,.25), rgba(29,29,27,.04)); --color-selection-echo: rgba(29,29,27,.35); --shadow-floating: 0 1px 3px rgba(0,0,0,.08), 0 8px 20px rgba(0,0,0,.1); }
+  .t-nierlight { --color-bg: #d6d1c0; --color-sidebar: #ccc6b3; --color-toolbar: #d0cab8; --color-surface: #e0dccd; --color-surface-elevated: #e4e0d2; --color-surface-hover: #dad5c5; --color-control: #e0dccd; --color-border: #b5ae9b; --color-border-strong: #8e8773; --color-filter-selected: #c4bdaa; --color-text: #45423a; --color-muted: #6b675c; --color-faint: #8a8574; --color-section-mark: rgba(69,66,58,.7); --section-label-rule: linear-gradient(90deg, rgba(69,66,58,.4), rgba(69,66,58,.06)); --color-selection-echo: rgba(69,66,58,.5); --shadow-floating: 0 1px 3px rgba(0,0,0,.08), 0 8px 20px rgba(0,0,0,.1); }
+  /* Accents: on light themes the ivory accent turns into dark ink so selection stays visible. */
+  .a-ivory { }
+  .t-paper.a-ivory, .t-nierlight.a-ivory { --color-accent: #2b2a27; --color-on-accent: #f3f1ec; --color-sidebar-selection: #2b2a27; }
+  .a-red { --color-accent: #e0452f; --color-on-accent: #fff; --color-sidebar-selection: #e0452f; }
+  .a-teal { --color-accent: #4fb3bf; --color-on-accent: #0d1b1d; --color-sidebar-selection: #4fb3bf; }
+  .a-amber { --color-accent: #e3b04b; --color-on-accent: #1d1606; --color-sidebar-selection: #e3b04b; }
+
+  /* ===== Shared screen chrome ===== */
+  .pc { display: grid; grid-template-columns: 208px 1fr; height: 620px; background: var(--color-bg); border: 1px solid var(--color-border); position: relative; overflow: hidden; }
+  .idx { background: var(--color-sidebar); border-right: 1px solid var(--color-border); padding: 16px 8px; }
+  .idx .lbl { font-size: 12px; color: var(--color-faint); padding: 0 8px; margin: 16px 0 4px; display: flex; align-items: center; gap: 8px; }
+  .idx .lbl:first-child { margin-top: 0; }
+  .idx .it { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px; font-size: 15px; color: var(--color-muted); position: relative; }
+  .idx .it svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+  .idx .it.on { color: var(--color-text); }
+  .content { padding: 32px 32px 24px; overflow: hidden; position: relative; }
+  .content h2 { margin: 0; font-size: 20px; font-weight: 600; }
+  .content .sub { font-size: 12px; color: var(--color-muted); margin: 4px 0 24px; font-variant-numeric: tabular-nums; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); margin-bottom: 24px; }
+  .stats div { padding: 0 16px 0 0; }
+  .stats b { display: block; font: 500 24px/1 var(--num); }
+  .stats span { font-size: 12px; color: var(--color-muted); }
+  .grp { margin-bottom: 24px; }
+  .gl { font-size: 12px; color: var(--color-faint); display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; padding: 8px 0; border-bottom: 1px solid var(--color-border); font-size: 15px; }
+  .row small { display: block; font-size: 12px; color: var(--color-muted); }
+  .row .kbd { font-size: 12px; color: var(--color-faint); font-variant-numeric: tabular-nums; }
+  .sw { width: 32px; height: 18px; border-radius: 9px; background: var(--color-control); border: 1.5px solid var(--color-border-strong); position: relative; flex: none; }
+  .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--color-muted); }
+  .sw.on { background: var(--color-accent); border-color: var(--color-accent); }
+  .sw.on::after { left: auto; right: 2px; background: var(--color-on-accent); }
+  .seg { display: inline-flex; border: 1px solid var(--color-border); border-radius: 4px; overflow: hidden; }
+  .seg span { padding: 0 12px; height: 28px; display: flex; align-items: center; font-size: 13px; color: var(--color-muted); background: var(--color-control); font-variant-numeric: tabular-nums; }
+  .seg span + span { border-left: 1px solid var(--color-border); }
+  .seg span.on { background: var(--color-filter-selected); color: var(--color-text); font-weight: 600; }
+  .inp { height: 32px; display: flex; align-items: center; padding: 0 12px; background: var(--color-surface); border-radius: 4px; font-size: 13px; color: var(--color-muted); width: 280px; font-family: var(--font-mono); }
+  .qb { font-size: 13px; color: var(--color-muted); display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; border-radius: 4px; background: var(--color-surface-hover); }
+  .menu { position: absolute; top: 76px; right: 32px; width: 220px; background: var(--color-surface-elevated); border: 1px solid var(--color-border-strong); padding: 4px 0 8px; box-shadow: var(--shadow-floating); font-size: 14px; z-index: 3; }
+  .menu .mi { height: 30px; display: flex; align-items: center; padding: 0 12px; color: var(--color-muted); position: relative; }
+  .menu .mi.on { color: var(--color-text); font-weight: 600; }
+  .menu .mi .k { margin-left: auto; font-size: 12px; color: var(--color-faint); font-weight: 400; font-variant-numeric: tabular-nums; }
+  .menu .hr { height: 1px; background: var(--color-border); margin: 4px 0; }
+
+  .tab { width: 420px; height: 740px; background: var(--color-bg); border: 1px solid var(--color-border); overflow: hidden; position: relative; font-size: 17px; }
+  .tab .top { height: 56px; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--color-border); }
+  .tab .top b { flex: 1; font-size: 22px; font-weight: 600; }
+  .tab .badge { height: 24px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border-radius: 2px; background: var(--color-surface-elevated); color: var(--color-muted); font-size: 13px; font-weight: 600; }
+  .tab .badge em { font: 500 14px var(--num); font-style: normal; color: var(--color-accent); }
+  .tab .body { padding: 16px; display: grid; gap: 24px; }
+  .today { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: end; }
+  .today .n { font: 500 72px/0.8 var(--num); letter-spacing: -.02em; }
+  .today .meta { font-size: 13px; color: var(--color-muted); padding-bottom: 4px; }
+  .today .meta b { color: var(--color-text); font-weight: 600; font-size: 17px; display: block; }
+  .sh { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-faint); margin-bottom: 8px; }
+  .sh .more { margin-left: auto; font-size: 13px; }
+  .shelf { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .shelf .c i { display: block; aspect-ratio: 2/3; border-radius: 2px; }
+  .shelf .c .d { display: flex; justify-content: space-between; font: 500 14px var(--num); color: var(--color-muted); margin-bottom: 4px; }
+  .shelf .c .d em { font-style: normal; color: var(--color-text); }
+  .shelf .c .t { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 4px; }
+  .memos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .memo { background: var(--color-surface); padding: 12px; min-height: 96px; position: relative; }
+  .memo b { font-size: 15px; display: block; margin-bottom: 4px; }
+  .memo span { font-size: 13px; color: var(--color-muted); }
+  .memo .big { font: 500 28px/1 var(--num); color: var(--color-text); display: block; margin-top: 8px; }
+  .strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
+  .strip i { aspect-ratio: 4/3; }
+  .nav { position: absolute; left: 0; right: 0; bottom: 0; height: 56px; border-top: 1px solid var(--color-border); display: grid; grid-template-columns: repeat(5, 1fr); background: var(--color-toolbar); }
+  .nav span { display: grid; place-items: center; font-size: 11px; color: var(--color-faint); position: relative; }
+  .nav span.on { color: var(--color-text); font-weight: 600; }
+
+  /* ===== A · Swiss only ===== */
+  .v-swiss .idx .it.on { font-weight: 600; }
+  .v-swiss .idx .it.on::before { content: none; }
+  .v-swiss .gl, .v-swiss .sh { text-transform: none; }
+  .v-swiss .gl::after { content: ""; flex: 1; height: 1px; background: var(--color-border); }
+  .v-swiss .content h2 { font-size: 32px; letter-spacing: -.02em; }
+  .v-swiss .stats { border-top: 1px solid var(--color-text); padding-top: 8px; }
+  .v-swiss .stats b { font: 700 32px/1 var(--font); letter-spacing: -.03em; }
+  .v-swiss .today .n { font: 700 88px/0.8 var(--font); letter-spacing: -.05em; }
+  .v-swiss .menu { border-radius: 0; }
+  .v-swiss .tab .body > div:first-child { border-top: 1px solid var(--color-text); padding-top: 8px; }
+
+  /* ===== B · Blend (Swiss order + mac manners + NieR signature in three places) ===== */
+  .v-blend .idx .it.on { background: var(--color-sidebar-selection); color: var(--color-on-accent); font-weight: 600; box-shadow: var(--selection-echo); margin-right: 4px; }
+  .v-blend .idx .it.on::after { content: ""; position: absolute; right: 8px; width: 7px; height: 7px; background: var(--color-on-accent); }
+  .v-blend .idx .lbl::before, .v-blend .gl::before, .v-blend .sh::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+  .v-blend .idx .lbl::after, .v-blend .gl::after, .v-blend .sh::after { content: ""; flex: 1; height: 1px; background: var(--section-label-rule); order: 2; }
+  .v-blend .sh .more { order: 3; margin-left: 8px; }
+  .v-blend .stats { border-top: 1px solid var(--color-border-strong); padding-top: 12px; }
+  .v-blend .menu::before, .v-blend .menu::after { content: ""; position: absolute; width: 8px; height: 8px; border: 1px solid var(--color-accent); }
+  .v-blend .menu::before { top: -4px; left: -4px; border-right: 0; border-bottom: 0; }
+  .v-blend .menu::after { bottom: -4px; right: -4px; border-left: 0; border-top: 0; }
+  .v-blend .menu .mi.on::after { content: ""; position: absolute; right: 44px; width: 5px; height: 5px; background: var(--color-accent); }
+  .v-blend .nav span.on::before { content: ""; position: absolute; top: 8px; width: 5px; height: 5px; background: var(--color-accent); }
+
+  /* ===== C · NieR (refined from the game: fan design-system palette #d1cdb7 / #dad4bb / #b4af9a / #57544a / #4e4b42 / #3f3d36 / #cd664d) ===== */
+  /* Default = dark adaptation; light themes (종이, NieR 베이지) switch to the in-game beige. */
+  .v-nier { --n-bg: #1b1a17; --n-grid: #211f1c; --n-panel: #23221e; --n-item: #2e2c27; --n-ink: #d1cdb7; --n-ink-2: #a8a38f; --n-dark: #d1cdb7; --n-on-dark: #262520; --n-line: #3d3b34; --n-shadow: rgba(0,0,0,.45); --n-alert: #cd664d; }
+  .t-paper .v-nier, .t-nierlight .v-nier { --n-bg: #d1cdb7; --n-grid: #ccc8b1; --n-panel: #dad4bb; --n-item: #c4bfa9; --n-ink: #3f3d36; --n-ink-2: #6b675c; --n-dark: #4e4b42; --n-on-dark: #dad4bb; --n-line: #b4af9a; --n-shadow: rgba(63,61,54,.22); }
+  .v-nier .pc, .v-nier .tab { color: var(--n-ink); background-color: var(--n-bg); background-image: linear-gradient(to right, var(--n-grid) 1px, transparent 1px), linear-gradient(to bottom, var(--n-grid) 1px, transparent 1px); background-size: 5px 5px; border-color: var(--n-line); }
+  .v-nier .idx { background: transparent; border-right: 2px solid var(--n-line); padding: 16px 12px; }
+  /* Section header = dark title block with light text (a whole block, not an edge stripe). */
+  .v-nier .idx .lbl, .v-nier .gl, .v-nier .sh { background: var(--n-dark); color: var(--n-on-dark); height: 24px; padding: 0 8px; margin: 16px 0 8px; font-size: 11px; letter-spacing: .24em; text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
+  .v-nier .idx .lbl:first-child { margin-top: 0; }
+  .v-nier .idx .lbl::before, .v-nier .gl::before, .v-nier .sh::before { content: ""; width: 6px; height: 6px; background: var(--n-on-dark); flex: none; }
+  .v-nier .sh .more { margin-left: auto; color: var(--n-on-dark); }
+  /* Items: light-brown bars with a square inside on the left; the current one inverts, with the thin lines above and below as on hover in the game. */
+  .v-nier .idx .it { background: var(--n-item); color: var(--n-ink); margin-bottom: 6px; height: 30px; letter-spacing: .04em; }
+  .v-nier .idx .it svg { display: none; }
+  .v-nier .idx .it::before { content: ""; width: 10px; height: 10px; background: var(--n-dark); flex: none; }
+  .v-nier .idx .it.on { background: var(--n-dark); color: var(--n-on-dark); box-shadow: 4px 4px 0 var(--n-shadow); margin: 12px 0 14px; }
+  .v-nier .idx .it.on::before { background: var(--n-on-dark); }
+  .v-nier .idx .it.on::after { content: ""; position: absolute; left: 0; right: 0; top: -6px; bottom: -6px; border-top: 2px solid var(--n-dark); border-bottom: 2px solid var(--n-dark); pointer-events: none; }
+  .v-nier .content { padding: 24px 28px; }
+  .v-nier .content h2 { font-size: 26px; font-weight: 500; letter-spacing: .28em; text-shadow: 4px 3px 0 var(--n-shadow); }
+  .v-nier .content .sub { color: var(--n-ink-2); letter-spacing: .08em; }
+  .v-nier .stats { gap: 12px; }
+  .v-nier .stats div { background: var(--n-panel); padding: 10px 12px; box-shadow: 4px 4px 0 var(--n-shadow); }
+  .v-nier .stats b { font: 500 26px/1 var(--num); }
+  .v-nier .stats span { color: var(--n-ink-2); letter-spacing: .12em; }
+  .v-nier .grp { background: var(--n-panel); box-shadow: 4px 4px 0 var(--n-shadow); padding: 0 12px 4px; margin-bottom: 20px; }
+  .v-nier .gl { margin: 0 -12px 4px; }
+  .v-nier .row { border-bottom: 2px solid var(--n-line); color: var(--n-ink); }
+  .v-nier .row:last-child { border-bottom: 0; }
+  .v-nier .row small { color: var(--n-ink-2); }
+  .v-nier .sw { background: var(--n-item); border-color: var(--n-dark); }
+  .v-nier .sw.on { background: var(--n-dark); border-color: var(--n-dark); }
+  .v-nier .sw.on::after { background: var(--n-on-dark); }
+  .v-nier .seg { border-color: var(--n-dark); border-radius: 0; }
+  .v-nier .seg span { background: var(--n-item); color: var(--n-ink); }
+  .v-nier .seg span + span { border-color: var(--n-line); }
+  .v-nier .seg span.on { background: var(--n-dark); color: var(--n-on-dark); }
+  .v-nier .qb { background: var(--n-item); color: var(--n-ink); border-radius: 0; }
+  .v-nier .inp { background: var(--n-item); color: var(--n-ink); border-radius: 0; }
+  /* Pop-up = dark title bar + light body + hard offset shadow; selected item inverts with the square. */
+  .v-nier .menu { background: var(--n-panel); border: 0; box-shadow: 6px 6px 0 var(--n-shadow); padding: 0 0 8px; color: var(--n-ink); }
+  .v-nier .menu::before { content: "정렬"; display: flex; align-items: center; height: 26px; padding: 0 12px; margin-bottom: 6px; background: var(--n-dark); color: var(--n-on-dark); font-size: 11px; letter-spacing: .24em; }
+  .v-nier .menu .mi { color: var(--n-ink); margin: 0 8px 4px; padding: 0 8px; gap: 8px; background: var(--n-item); height: 28px; }
+  .v-nier .menu .mi::before { content: ""; width: 8px; height: 8px; background: var(--n-dark); flex: none; }
+  .v-nier .menu .mi.on { background: var(--n-dark); color: var(--n-on-dark); font-weight: 500; }
+  .v-nier .menu .mi.on::before { background: var(--n-on-dark); }
+  .v-nier .menu .mi .k { color: inherit; opacity: .6; }
+  .v-nier .menu .hr { background: var(--n-line); height: 2px; margin: 6px 8px; }
+  /* Tablet */
+  .v-nier .tab .top { border-bottom: 2px solid var(--n-line); }
+  .v-nier .tab .top b { letter-spacing: .3em; font-weight: 500; text-shadow: 3px 2px 0 var(--n-shadow); }
+  .v-nier .tab .badge { background: var(--n-item); color: var(--n-ink); border-radius: 0; }
+  .v-nier .tab .badge em { color: var(--n-alert); }
+  .v-nier .today .n { text-shadow: 5px 4px 0 var(--n-shadow); }
+  .v-nier .today .meta { color: var(--n-ink-2); }
+  .v-nier .today .meta b { color: var(--n-ink); letter-spacing: .08em; }
+  .v-nier .sh { margin: 0 0 8px; }
+  .v-nier .shelf .c .d { color: var(--n-ink-2); }
+  .v-nier .shelf .c .d em { color: var(--n-ink); }
+  .v-nier .shelf .c i { border-radius: 0; box-shadow: 4px 4px 0 var(--n-shadow); }
+  .v-nier .memo { background: var(--n-panel); box-shadow: 4px 4px 0 var(--n-shadow); }
+  .v-nier .memo span { color: var(--n-ink-2); }
+  .v-nier .memo .big { color: var(--n-ink); }
+  .v-nier .nav { background: var(--n-panel); border-top: 2px solid var(--n-line); }
+  .v-nier .nav span { color: var(--n-ink-2); letter-spacing: .12em; }
+  .v-nier .nav span.on { background: var(--n-dark); color: var(--n-on-dark); }
+</style>
+</head>
+<body>
+<main>
+  <h1>디자인 방향 — 스위스 · macOS · NieR</h1>
+  <p class="lead">같은 화면 두 개(PC 설정, 태블릿 Home)를 세 가지 섞는 정도로 그렸습니다. 버튼으로 바꿔 보세요. 아래에서 바탕색과 강조색도 바꿀 수 있습니다(C · NieR는 어두운/베이지 두 벌 — 밝은 바탕을 고르면 베이지).</p>
+  <div class="switch" id="sw"><button data-v="swiss" aria-pressed="false">A · 스위스만</button><button data-v="blend" aria-pressed="true">B · 섞은 안 (추천)</button><button data-v="nier" aria-pressed="false">C · NieR (게임식)</button></div>
+  <div class="pickers">
+    <div class="pick" id="themes">바탕색 <span class="name" id="tname"></span>
+      <button data-t="ink" title="먹색"><span style="background:#161718"></span></button>
+      <button data-t="slate" title="짙은 남색"><span style="background:#15181d"></span></button>
+      <button data-t="warm" title="따뜻한 먹"><span style="background:#191715"></span></button>
+      <button data-t="forest" title="짙은 녹색"><span style="background:#121714"></span></button>
+      <button data-t="dim" title="중간 회색"><span style="background:#2a2b2e"></span></button>
+      <button data-t="paper" title="종이 (밝게)"><span style="background:#f3f1ec"></span></button>
+      <button data-t="nierlight" title="NieR 베이지 (밝게)"><span style="background:#d6d1c0"></span></button>
+    </div>
+    <div class="pick" id="accents">강조색 <span class="name" id="aname"></span>
+      <button data-a="ivory" title="아이보리"><span style="background:#ddd8ca"></span></button>
+      <button data-a="red" title="스위스 레드"><span style="background:#e0452f"></span></button>
+      <button data-a="teal" title="청록"><span style="background:#4fb3bf"></span></button>
+      <button data-a="amber" title="호박색"><span style="background:#e3b04b"></span></button>
+    </div>
+  </div>
+  <p class="explain" id="ex"></p>
+
+  <div id="theme" class="t-ink a-ivory">
+  <div id="root" class="v-blend">
+    <div class="screens">
+      <div>
+        <div class="cap">PC · 설정 (정렬 메뉴를 연 상태)</div>
+        <div class="pc">
+          <aside class="idx">
+            <div class="lbl">설정</div>
+            <div class="it on"><svg viewBox="0 0 24 24"><path d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"/></svg>일반</div>
+            <div class="it"><svg viewBox="0 0 24 24"><path d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg>라이브러리</div>
+            <div class="it"><svg viewBox="0 0 24 24"><path d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg>연결</div>
+            <div class="it"><svg viewBox="0 0 24 24"><path d="M10.5 19.5h3m-6.75 2.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-15a2.25 2.25 0 0 0-2.25-2.25H6.75A2.25 2.25 0 0 0 4.5 4.5v15a2.25 2.25 0 0 0 2.25 2.25Z"/></svg>태블릿</div>
+            <div class="lbl">관리</div>
+            <div class="it"><svg viewBox="0 0 24 24"><path d="M11.42 15.17 17.25 21A2.652 2.652 0 0 0 21 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 1 1-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 0 0 4.486-6.336l-3.276 3.277a3.004 3.004 0 0 1-2.25-2.25l3.276-3.276a4.5 4.5 0 0 0-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085"/></svg>복구 · 진단</div>
+          </aside>
+          <section class="content">
+            <h2>일반</h2>
+            <div class="sub">라이브러리 v113 · 마지막 백업 9.28 21:21</div>
+            <div class="stats"><div><b>9,441</b><span>이미지</span></div><div><b>459</b><span>영상</span></div><div><b>38.2 GB</b><span>사용 중</span></div></div>
+            <div class="grp"><div class="gl">보기</div>
+              <div class="row"><span>숨김 폴더 보기</span><span class="sw on"></span></div>
+              <div class="row"><span>앱 배율</span><span class="seg"><span>90</span><span class="on">100</span><span>110</span><span>125</span></span></div>
+              <div class="row"><span>기본 정렬</span><span class="qb">수집일 ⌄</span></div>
+            </div>
+            <div class="grp"><div class="gl">라이브러리</div>
+              <div class="row"><span>위치</span><span class="inp">~/New_lakomics_assets</span></div>
+              <div class="row"><span>가벼운 모드<small>영상 미리보기 준비를 멈춥니다</small></span><span class="sw"></span></div>
+            </div>
+            <div class="menu"><div class="mi on">수집일<span class="k">⌘1</span></div><div class="mi">이름<span class="k">⌘2</span></div><div class="mi">크기<span class="k">⌘3</span></div><div class="mi">좋아요<span class="k">⌘4</span></div><div class="hr"></div><div class="mi">오래된 순으로<span class="k">⇧⌘R</span></div></div>
+          </section>
+        </div>
+      </div>
+      <div>
+        <div class="cap">태블릿 · Home</div>
+        <div class="tab">
+          <div class="top"><b>홈</b><span class="badge">확인할 것<em>3</em></span><span class="badge">중복<em>40</em></span></div>
+          <div class="body">
+            <div class="today"><span class="n">23</span><span class="meta"><b>오늘 수집</b>이번 주 33 · 전체 9,441</span></div>
+            <div><div class="sh">신간<span class="more">›</span></div>
+              <div class="shelf">
+                <div class="c"><div class="d"><em>10.4</em>D-6</div><i style="background:linear-gradient(160deg,#8a3b4a,#3a1d2a)"></i><div class="t">체인소맨 17권</div></div>
+                <div class="c"><div class="d"><em>10.9</em>D-11</div><i style="background:linear-gradient(160deg,#2f5a7a,#132433)"></i><div class="t">Silksong</div></div>
+                <div class="c"><div class="d"><em>10.15</em>D-17</div><i style="background:linear-gradient(160deg,#6b5a2f,#2a2213)"></i><div class="t">Castlevania</div></div>
+                <div class="c"><div class="d"><em>10.22</em>D-24</div><i style="background:linear-gradient(160deg,#4a6b3b,#1c2a16)"></i><div class="t">룩백</div></div>
+              </div></div>
+            <div><div class="sh">메모<span class="more">›</span></div>
+              <div class="memos"><div class="memo"><b>Todo</b><span>확장 번역 느림 · 모바일 새 이미지 애니메이션 · 사이드바 전체·작가·앨범</span></div><div class="memo"><b>가계부</b><span>9월 쓴 돈</span><span class="big">401,780</span></div></div></div>
+            <div><div class="sh">오늘의 작가 · til83488<span class="more">›</span></div>
+              <div class="strip"><i style="background:linear-gradient(135deg,#7a3b3b,#c98a6a)"></i><i style="background:linear-gradient(135deg,#3b5a7a,#8ab4c9)"></i><i style="background:linear-gradient(135deg,#5a3b7a,#b48ac9)"></i></div></div>
+          </div>
+          <div class="nav"><span class="on">홈</span><span>에셋</span><span>컬렉션</span><span>카탈로그</span><span>메모</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div>
+</main>
+<script>
+  const text = {
+    swiss: '스위스만: 표식 없이 격자·큰 숫자·가는 선만으로 질서를 만듭니다. 제목과 숫자가 크고 굵으며, 선택은 굵은 글자뿐. 가장 차분하고 편집 디자인 같지만, 앱다운 개성은 약합니다.',
+    blend: '섞은 안: 스위스의 줄 맞춤·큰 숫자 대비 위에, macOS처럼 조용한 메뉴(오른쪽 흐린 단축키, 설명 최소)를 얹고, NieR 표식은 세 군데만 — 현재 위치 선택, 구역 이름의 네모+가는 선, 떠 있는 창의 모서리 꺾쇠. 치수는 네모 5 · 선 1 · 어긋남 3으로 고정.',
+    nier: 'NieR (게임에 가깝게 다시 그림): 5px 모눈 바탕, 제목은 넓은 자간 + 어긋난 그림자, 구역 머리는 어두운 제목 블록, 항목은 연갈색 막대 안 왼쪽 네모, 선택은 반전 + 위아래 가는 선 + 흐림 없는 그림자, 팝업은 어두운 제목줄. 기본은 어두운 버전이고, 바탕색을 종이·NieR 베이지로 바꾸면 게임 속 베이지 버전이 됩니다.',
+  };
+  const root = document.getElementById('root'), ex = document.getElementById('ex');
+  const set = v => { root.className = 'v-' + v; ex.textContent = text[v]; document.querySelectorAll('#sw button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === v))); };
+  document.getElementById('sw').addEventListener('click', e => { const b = e.target.closest('button'); if (b) set(b.dataset.v); });
+  const params = new URLSearchParams(location.search);
+  set(params.get('v') || 'blend');
+  const names = { ink: '먹색 (지금)', slate: '짙은 남색', warm: '따뜻한 먹', forest: '짙은 녹색', dim: '중간 회색', paper: '종이 (밝게)', nierlight: 'NieR 베이지 (밝게)', ivory: '아이보리 (지금)', red: '스위스 레드', teal: '청록', amber: '호박색' };
+  const themeBox = document.getElementById('theme');
+  let theme = params.get('t') || 'ink', accent = params.get('a') || 'ivory';
+  const paint = () => {
+    themeBox.className = `t-${theme} a-${accent}`;
+    document.getElementById('tname').textContent = names[theme];
+    document.getElementById('aname').textContent = names[accent] + ((theme === 'paper' || theme === 'nierlight') && accent === 'ivory' ? ' → 밝은 바탕에선 먹색' : '');
+    document.querySelectorAll('#themes button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.t === theme)));
+    document.querySelectorAll('#accents button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.a === accent)));
+  };
+  document.getElementById('themes').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { theme = b.dataset.t; paint(); } });
+  document.getElementById('accents').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { accent = b.dataset.a; paint(); } });
+  paint();
+</script>
+</body>
+</html>

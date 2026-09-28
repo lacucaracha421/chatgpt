@@ -10,14 +10,14 @@ describe("date masonry", () => {
     vi.setSystemTime(new Date(2026, 8, 23));
     const items = [item("a"), item("b"), item("c", 4)];
     const current = buildMasonryLayout(items, 640, 180, 20, true, true);
-    expect(current.headings.map(heading => heading.label)).toEqual(["09.05", "09.04"]);
-    expect(collectedDate(items[0].collectedAt)).toMatchObject({ key: "2026.09.05", label: "09.05", time: "21:07" });
+    expect(current.headings.map(heading => heading.label)).toEqual(["9.5", "9.4"]);
+    expect(collectedDate(items[0].collectedAt)).toMatchObject({ key: "2026.09.05", label: "9.5", time: "21:07" });
     const fullDates = buildMasonryLayout(items, 640, 180, 20, true, true, true);
     expect(fullDates.headings.map(heading => heading.label)).toEqual(["2026.09.05", "2026.09.04"]);
     expect(fullDates.tiles).toEqual(current.tiles);
     vi.setSystemTime(new Date(2027, 0, 1));
     const next = buildMasonryLayout(items, 640, 180, 20, true, true);
-    expect(next.headings.map(heading => heading.label)).toEqual(["2026.09.05", "2026.09.04"]);
+    expect(next.headings.map(heading => heading.label)).toEqual(["2026.9.5", "2026.9.4"]);
     expect(next.tiles).toEqual(current.tiles);
     expect(next.headings.map(({ label: _label, ...heading }) => heading)).toEqual(current.headings.map(({ label: _label, ...heading }) => heading));
   });

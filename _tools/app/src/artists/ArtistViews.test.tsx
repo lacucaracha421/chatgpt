@@ -214,8 +214,8 @@ describe("ArtistHub", () => {
     const grid = await screen.findByRole("list", { name: "주요 작가" });
     expect(within(grid).getByRole("button", { name: /^Rin Kagura 12장/ })).toBeInTheDocument();
     expect(within(grid).getByRole("button", { name: /^하늘고래 12장/ })).toBeInTheDocument();
-    expect(within(grid).getByText("최근 저장 09.12")).toBeInTheDocument();
-    expect(within(grid).getByText("최근 30일 3장 · 저장 09.12")).toBeInTheDocument();
+    expect(within(grid).getByText("최근 저장 9.12")).toBeInTheDocument();
+    expect(within(grid).getByText("최근 30일 3장 · 저장 9.12")).toBeInTheDocument();
     await user.click(within(grid).getByRole("button", { name: /^Rin Kagura 12장/ }));
     expect(onNavigate).toHaveBeenCalledWith({ kind: "creator", creatorKey: "rin" });
 

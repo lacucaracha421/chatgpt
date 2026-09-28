@@ -41,6 +41,7 @@
 input[type="checkbox"].ui-checkbox,
 input[type="checkbox"].ui-switch {
   appearance: none;
+  flex: none;
   margin: 0;
   padding: 0;
 }
@@ -197,6 +198,95 @@ select.ui-text-input {
   font-size: var(--type-meta);
 }
 
+.ui-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--row-height);
+  font-size: var(--type-body);
+  cursor: pointer;
+}
+
+.ui-choice--switch {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+}
+
+.ui-choice__label {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.ui-choice__description {
+  color: var(--color-muted);
+  font-size: var(--type-meta);
+}
+
+.ui-segmented {
+  display: inline-flex;
+  overflow: hidden;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.ui-segmented__cell {
+  height: calc(var(--control-height) - (2 * var(--border-width)));
+  padding: 0 var(--space-3);
+  border: 0;
+  border-left: var(--border-width) solid var(--color-border);
+  background: var(--color-control);
+  color: var(--color-muted);
+  font: 500 var(--type-body) / 1 var(--font-ui);
+  cursor: pointer;
+}
+
+.ui-segmented__cell:first-child {
+  border-left: 0;
+}
+
+.ui-segmented__cell[aria-checked="true"] {
+  background: var(--color-filter-selected);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.ui-tabs {
+  display: flex;
+  gap: var(--space-6);
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.ui-tabs__tab {
+  position: relative;
+  height: var(--control-height);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-muted);
+  font: 500 var(--type-body) / 1 var(--font-ui);
+  cursor: pointer;
+}
+
+/* Selection is weight and colour only: no coloured edge stripes (DESIGN.md section 12). */
+.ui-tabs__tab[aria-selected="true"] {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.ui-tabs__count {
+  margin-left: var(--space-1);
+  color: var(--color-faint);
+  font-size: var(--type-meta);
+}
+
+.ui-segmented__cell:focus-visible,
+.ui-tabs__tab:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--border-width);
+}
+
 .ui-button.ui-button--quiet {
   position: relative;
   display: inline-flex;
@@ -238,5 +328,65 @@ select.ui-text-input {
   input[type="checkbox"].ui-switch,
   .ui-text-input {
     transition: none;
+  }
+}
+
+/* Floating surfaces draw the NieR corner brackets as inset backgrounds because dialogs and anchored panels clip anything outside their box. */
+.ui-menu.ui-menu,
+.ui-anchored-panel.ui-anchored-panel,
+.ui-dialog.ui-dialog.ui-dialog:not(.ui-dialog--fullscreen):not(:has(.classification-index)):not(:has(>.library-sheet)) {
+  border-radius: 0;
+  background-image:
+    linear-gradient(var(--color-accent), var(--color-accent)),
+    linear-gradient(var(--color-accent), var(--color-accent)),
+    linear-gradient(var(--color-accent), var(--color-accent)),
+    linear-gradient(var(--color-accent), var(--color-accent));
+  background-repeat: no-repeat;
+  /* Drawn just inside the 1px border (a border paints over border-box backgrounds). */
+  background-size: 8px 2px, 2px 8px, 8px 2px, 2px 8px;
+  background-position: left top, left top, right bottom, right bottom;
+  background-origin: padding-box;
+  animation: ui-floating-surface-open var(--motion-standard) var(--ease-standard) both;
+}
+
+/* Bottom sheets retain their edge-attached shape and existing sheet animation. */
+.ui-dialog.ui-dialog:has(>.library-sheet) {
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+@keyframes ui-floating-surface-open {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.ui-skeleton {
+  background: color-mix(in srgb, var(--color-surface) 70%, var(--color-bg));
+  border-radius: var(--radius-mark);
+  animation: ui-skeleton-in 400ms ease-out 300ms both, ui-skeleton-breathe 2.4s ease-in-out 700ms infinite;
+}
+
+@keyframes ui-skeleton-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ui-skeleton-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-menu.ui-menu,
+  .ui-anchored-panel.ui-anchored-panel,
+  .ui-dialog.ui-dialog.ui-dialog:not(.ui-dialog--fullscreen):not(:has(.classification-index)):not(:has(>.library-sheet)),
+  .ui-skeleton {
+    animation: none;
+    opacity: 1;
   }
 }

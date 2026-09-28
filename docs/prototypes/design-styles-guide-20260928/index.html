@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>디자인 스타일 안내서</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
+<style>
+  :root {
+    --bg: #141516; --panel: #1b1c1e; --line: #2e3033; --text: #e8e9eb; --muted: #a0a3a6; --faint: #74787c; --accent: #ddd8ca;
+    --font: "Pretendard Variable", "Pretendard", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 15px/1.6 var(--font); padding: 32px 16px 64px; }
+  main { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 28px; margin: 0 0 8px; letter-spacing: -.01em; }
+  .lead { color: var(--muted); margin: 0 0 32px; max-width: 720px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 40px; }
+  nav.toc a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 4px; }
+  nav.toc a:hover { color: var(--text); border-color: var(--faint); }
+  h2.part { font-size: 13px; font-weight: 600; color: var(--faint); letter-spacing: .08em; margin: 48px 0 16px; }
+  .style { display: grid; grid-template-columns: 1fr 380px; gap: 24px; padding: 24px 0; border-top: 1px solid var(--line); }
+  @media (max-width: 880px) { .style { grid-template-columns: 1fr; } }
+  .style h3 { margin: 0; font-size: 20px; }
+  .style .era { font-size: 13px; color: var(--faint); margin: 2px 0 12px; }
+  .style p { margin: 0 0 12px; color: var(--muted); }
+  .style ul { margin: 0 0 12px; padding-left: 18px; color: var(--muted); font-size: 14px; }
+  .style ul b { color: var(--text); font-weight: 500; }
+  .fit { font-size: 13px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; color: var(--muted); }
+  .fit b { color: var(--text); font-weight: 600; }
+  .demo { border-radius: 6px; overflow: hidden; min-height: 260px; position: relative; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .demo * { box-sizing: border-box; }
+
+  /* 1 Skeuomorphism */
+  .d-skeu { background: repeating-linear-gradient(45deg, #6b4f35 0 6px, #715339 6px 12px); }
+  .d-skeu .win { width: 290px; background: linear-gradient(#f4f1ea, #e3ddd0); border-radius: 10px; box-shadow: 0 10px 24px rgba(0,0,0,.5), inset 0 1px 0 #fff; overflow: hidden; font-family: "Helvetica Neue", Arial, sans-serif; }
+  .d-skeu .bar { height: 36px; background: linear-gradient(#b8c3d1, #7f8fa6); border-bottom: 1px solid #56657b; color: #fff; text-shadow: 0 -1px 0 #4a5870; font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  .d-skeu .body { padding: 16px; color: #3a3a3a; font-size: 14px; text-shadow: 0 1px 0 #fff; }
+  .d-skeu .btns { display: flex; gap: 8px; margin-top: 14px; }
+  .d-skeu button { flex: 1; height: 34px; border-radius: 8px; border: 1px solid #8a8a8a; background: linear-gradient(#fdfdfd, #d9d9d9); font-weight: 700; color: #333; text-shadow: 0 1px 0 #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+  .d-skeu button.p { background: linear-gradient(#7fb2ee, #2d6fcf); color: #fff; text-shadow: 0 -1px 0 #1d4f99; border-color: #245aa8; }
+
+  /* 2 Flat */
+  .d-flat { background: #ecf0f1; }
+  .d-flat .win { width: 290px; background: #fff; font-family: "Segoe UI", Arial, sans-serif; }
+  .d-flat .bar { height: 44px; background: #2980b9; color: #fff; display: flex; align-items: center; padding: 0 16px; font-size: 18px; font-weight: 300; }
+  .d-flat .body { padding: 16px; color: #2c3e50; font-size: 14px; }
+  .d-flat .tiles { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin-top: 12px; }
+  .d-flat .tiles i { height: 48px; }
+  .d-flat button { margin-top: 12px; width: 100%; height: 36px; border: 0; background: #27ae60; color: #fff; font-size: 14px; }
+
+  /* 3 Material */
+  .d-mat { background: #fef7ff; }
+  .d-mat .win { width: 300px; background: #f3edf7; border-radius: 28px; padding: 24px; font-family: Roboto, "Segoe UI", sans-serif; box-shadow: 0 2px 6px rgba(0,0,0,.15); }
+  .d-mat h4 { margin: 0 0 8px; font-size: 22px; font-weight: 400; color: #1d1b20; }
+  .d-mat p { margin: 0 0 20px; font-size: 14px; color: #49454f; }
+  .d-mat .btns { display: flex; justify-content: flex-end; gap: 8px; }
+  .d-mat button { height: 40px; padding: 0 20px; border-radius: 20px; border: 0; font-size: 14px; font-weight: 500; background: transparent; color: #6750a4; }
+  .d-mat button.p { background: #6750a4; color: #fff; }
+  .d-mat .fab { position: absolute; right: 20px; bottom: 20px; width: 56px; height: 56px; border-radius: 16px; background: #eaddff; color: #21005d; display: grid; place-items: center; font-size: 26px; box-shadow: 0 3px 8px rgba(0,0,0,.2); }
+
+  /* 4 Apple modern */
+  .d-apple { background: linear-gradient(135deg, #5b7fd6, #c86dd7 60%, #f2a65a); }
+  .d-apple .win { width: 300px; background: rgba(246,246,246,.72); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); border-radius: 12px; border: .5px solid rgba(255,255,255,.5); box-shadow: 0 20px 40px rgba(0,0,0,.3); overflow: hidden; font-family: -apple-system, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif; color: #1d1d1f; }
+  .d-apple .bar { height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; }
+  .d-apple .bar i { width: 12px; height: 12px; border-radius: 50%; }
+  .d-apple .menu { padding: 4px 6px 8px; font-size: 13px; }
+  .d-apple .menu div { padding: 4px 10px; border-radius: 5px; display: flex; justify-content: space-between; }
+  .d-apple .menu div.on { background: #0a84ff; color: #fff; }
+  .d-apple .menu div span { color: #8a8a8e; }
+  .d-apple .menu div.on span { color: rgba(255,255,255,.8); }
+  .d-apple .menu hr { border: 0; border-top: 1px solid rgba(0,0,0,.1); margin: 4px 8px; }
+
+  /* 5 Fluent */
+  .d-fluent { background: linear-gradient(160deg, #1f3b64, #0b1a33); }
+  .d-fluent .win { width: 300px; background: rgba(32,32,32,.86); border: 1px solid rgba(255,255,255,.08); border-radius: 8px; box-shadow: 0 16px 32px rgba(0,0,0,.4); font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; color: #fff; padding: 20px; }
+  .d-fluent h4 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+  .d-fluent p { margin: 0 0 20px; font-size: 13px; color: #c8c8c8; }
+  .d-fluent .btns { display: flex; gap: 8px; background: rgba(255,255,255,.03); margin: 0 -20px -20px; padding: 16px 20px; border-top: 1px solid rgba(255,255,255,.06); }
+  .d-fluent button { flex: 1; height: 32px; border-radius: 4px; border: 1px solid rgba(255,255,255,.08); border-bottom-color: rgba(255,255,255,.04); background: rgba(255,255,255,.06); color: #fff; font-size: 13px; }
+  .d-fluent button.p { background: #60cdff; color: #000; border-color: transparent; }
+
+  /* 6 Glass */
+  .d-glass { background: radial-gradient(circle at 20% 30%, #ff6fb5 0 18%, transparent 19%), radial-gradient(circle at 80% 70%, #6fb7ff 0 22%, transparent 23%), #241a3c; }
+  .d-glass .win { width: 280px; padding: 24px; border-radius: 20px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.3); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); color: #fff; font-family: var(--font); box-shadow: 0 8px 32px rgba(0,0,0,.25); }
+  .d-glass .big { font-size: 34px; font-weight: 700; }
+  .d-glass small { opacity: .75; }
+  .d-glass button { margin-top: 16px; width: 100%; height: 40px; border-radius: 12px; border: 1px solid rgba(255,255,255,.4); background: rgba(255,255,255,.18); color: #fff; font-weight: 600; }
+
+  /* 7 Neumorphism */
+  .d-neu { background: #e3e8ef; }
+  .d-neu .win { width: 260px; padding: 28px; border-radius: 28px; background: #e3e8ef; box-shadow: 10px 10px 22px #bec4cc, -10px -10px 22px #ffffff; font-family: var(--font); color: #5a6574; text-align: center; }
+  .d-neu .knob { width: 120px; height: 120px; margin: 0 auto 20px; border-radius: 50%; background: #e3e8ef; box-shadow: inset 8px 8px 16px #bec4cc, inset -8px -8px 16px #fff; display: grid; place-items: center; font-size: 28px; font-weight: 700; }
+  .d-neu button { width: 100%; height: 44px; border: 0; border-radius: 14px; background: #e3e8ef; color: #5a6574; font-weight: 600; box-shadow: 6px 6px 12px #bec4cc, -6px -6px 12px #fff; }
+
+  /* 8 Swiss */
+  .d-swiss { background: #f2efe8; }
+  .d-swiss .win { width: 300px; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; color: #111; }
+  .d-swiss .num { font-size: 88px; font-weight: 700; line-height: .85; letter-spacing: -.04em; }
+  .d-swiss .rule { height: 6px; background: #e0301e; width: 64px; margin: 12px 0; }
+  .d-swiss .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; font-size: 13px; border-top: 1px solid #111; padding-top: 8px; }
+  .d-swiss .grid b { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+
+  /* 9 Neo-brutalism */
+  .d-brut { background: #fff6d6; }
+  .d-brut .win { width: 290px; background: #fff; border: 3px solid #111; box-shadow: 6px 6px 0 #111; padding: 18px; font-family: "Arial Black", Arial, sans-serif; color: #111; }
+  .d-brut h4 { margin: 0 0 8px; font-size: 22px; }
+  .d-brut .tags { display: flex; gap: 6px; margin-bottom: 14px; }
+  .d-brut .tags span { border: 2px solid #111; padding: 2px 8px; font-size: 12px; background: #9bf6ff; font-family: Arial, sans-serif; font-weight: 700; }
+  .d-brut .tags span:nth-child(2) { background: #ffadad; }
+  .d-brut button { width: 100%; height: 44px; border: 3px solid #111; background: #ffd60a; font-weight: 900; font-size: 15px; box-shadow: 4px 4px 0 #111; }
+
+  /* 10 Modern SaaS / "AI look" */
+  .d-saas { background: radial-gradient(ellipse at top, #2a1f4d, #0b0b12 70%); }
+  .d-saas .win { width: 300px; padding: 20px; border-radius: 16px; background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02)); border: 1px solid rgba(255,255,255,.1); box-shadow: 0 0 40px rgba(139,92,246,.25); font-family: Inter, var(--font); color: #ededf2; }
+  .d-saas .pill { display: inline-block; font-size: 11px; padding: 3px 10px; border-radius: 999px; background: rgba(139,92,246,.15); color: #c4b5fd; border: 1px solid rgba(139,92,246,.4); margin-bottom: 10px; }
+  .d-saas h4 { margin: 0 0 6px; font-size: 20px; background: linear-gradient(90deg, #fff, #a78bfa); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .d-saas p { margin: 0 0 16px; font-size: 13px; color: #9a9ab0; }
+  .d-saas .card { padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,.04); border-left: 3px solid #8b5cf6; font-size: 13px; margin-bottom: 14px; }
+  .d-saas button { width: 100%; height: 40px; border: 0; border-radius: 10px; background: linear-gradient(90deg, #7c3aed, #db2777); color: #fff; font-weight: 600; box-shadow: 0 0 24px rgba(219,39,119,.4); }
+
+  /* 11 Game UI - NieR */
+  .d-nier { background: #d5d0bf; }
+  .d-nier .win { width: 290px; font-family: "Helvetica Neue", Arial, sans-serif; color: #4a473f; }
+  .d-nier .head { display: flex; align-items: center; gap: 8px; font-size: 18px; letter-spacing: .12em; margin-bottom: 10px; }
+  .d-nier .head::before { content: ""; width: 10px; height: 10px; background: #4a473f; }
+  .d-nier .head::after { content: ""; flex: 1; height: 1px; background: #4a473f; opacity: .5; }
+  .d-nier .item { height: 32px; display: flex; align-items: center; padding: 0 12px; font-size: 14px; letter-spacing: .06em; margin-bottom: 4px; background: rgba(74,71,63,.12); }
+  .d-nier .item.on { background: #4a473f; color: #d5d0bf; box-shadow: 4px 4px 0 -1px #d5d0bf, 4px 4px 0 0 #4a473f; position: relative; }
+  .d-nier .item.on::after { content: ""; position: absolute; right: 10px; width: 8px; height: 8px; background: #d5d0bf; }
+  .d-nier .desc { margin-top: 12px; padding: 8px 10px; border: 1px solid rgba(74,71,63,.5); font-size: 12px; }
+
+  /* 12 Media apps */
+  .d-media { background: #0f1115; align-items: stretch; flex-direction: column; justify-content: center; }
+  .d-media .hero { height: 110px; border-radius: 6px; background: linear-gradient(90deg, #0f1115 10%, transparent 70%), linear-gradient(135deg, #5c3b2e, #1e3a55); display: flex; flex-direction: column; justify-content: flex-end; padding: 12px 16px; color: #fff; font-family: var(--font); }
+  .d-media .hero b { font-size: 18px; }
+  .d-media .hero span { font-size: 12px; color: #b9bcc2; }
+  .d-media .row { display: flex; gap: 8px; margin-top: 12px; }
+  .d-media .row i { flex: 1; aspect-ratio: 2/3; border-radius: 4px; }
+  .d-media .row i:nth-child(1) { background: #6b3b3b; } .d-media .row i:nth-child(2) { background: #34506b; } .d-media .row i:nth-child(3) { background: #4b6b3b; } .d-media .row i:nth-child(4) { background: #6b5b3b; } .d-media .row i:nth-child(5) { background: #3b3b6b; }
+
+  /* Glossary + map */
+  .gloss { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .gloss div { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 12px 14px; }
+  .gloss b { display: block; margin-bottom: 2px; }
+  .gloss span { font-size: 13px; color: var(--muted); }
+  .map { position: relative; height: 420px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; margin-top: 12px; }
+  .map .ax { position: absolute; font-size: 12px; color: var(--faint); }
+  .map .h { position: absolute; left: 50%; top: 16px; bottom: 16px; width: 1px; background: var(--line); }
+  .map .v { position: absolute; top: 50%; left: 16px; right: 16px; height: 1px; background: var(--line); }
+  .map .pt { position: absolute; transform: translate(-50%, -50%); font-size: 12px; white-space: nowrap; padding: 2px 8px; border-radius: 3px; background: #26282b; border: 1px solid var(--line); }
+  .map .pt.me { background: var(--accent); color: #202628; font-weight: 700; border-color: var(--accent); }
+  .compare { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; }
+  .compare th, .compare td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .compare th { color: var(--faint); font-weight: 500; }
+  .compare td:first-child { color: var(--text); font-weight: 500; white-space: nowrap; }
+  .compare td { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>디자인 스타일 안내서</h1>
+  <p class="lead">앱과 웹에서 자주 말하는 디자인 "스타일"을 시대 순서로 모았습니다. 오른쪽 그림은 그 스타일 흉내를 낸 작은 견본입니다(실제 제품 화면이 아니라 특징만 따라 그린 것). 각 항목 아래에 Lakomics에 쓸 만한 점을 적었습니다.</p>
+
+  <nav class="toc">
+    <a href="#skeu">스큐어모피즘</a><a href="#flat">플랫</a><a href="#material">머티리얼</a><a href="#apple">Apple (macOS·iOS)</a><a href="#fluent">Windows Fluent</a><a href="#glass">글래스모피즘</a><a href="#neu">뉴모피즘</a><a href="#swiss">스위스 스타일</a><a href="#brut">네오 브루탈리즘</a><a href="#saas">"AI 느낌" SaaS</a><a href="#nier">게임 UI (NieR)</a><a href="#media">미디어 앱</a><a href="#terms">용어</a><a href="#map">한눈에 보기</a>
+  </nav>
+
+  <h2 class="part">1 · 운영체제와 큰 흐름</h2>
+
+  <div class="style" id="skeu">
+    <div>
+      <h3>스큐어모피즘 (Skeuomorphism)</h3>
+      <div class="era">2007–2013 · 초기 iPhone(iOS 6까지), 옛 macOS</div>
+      <p>화면 속 물건을 <b>진짜 물건처럼</b> 그리는 방식. 가죽 달력, 나무 책장, 금속 버튼, 광택 나는 버튼처럼 재질·그림자·빛 반사를 흉내 냅니다.</p>
+      <ul><li><b>장점:</b> 처음 보는 사람도 "누르면 되겠다"를 바로 앎</li><li><b>단점:</b> 무겁고 낡아 보이기 쉬움, 화면이 장식으로 복잡</li></ul>
+      <div class="fit"><b>Lakomics:</b> 앱 전체에는 안 맞음. 다만 <b>만화책·게임 케이스의 물성 표현</b>이 바로 이 계열이고, 소장품 감상 화면에서만 제한적으로 씁니다.</div>
+    </div>
+    <div class="demo d-skeu"><div class="win"><div class="bar">메모</div><div class="body">오늘 수집한 이미지 23장<div class="btns"><button>취소</button><button class="p">저장</button></div></div></div></div>
+  </div>
+
+  <div class="style" id="flat">
+    <div>
+      <h3>플랫 디자인 (Flat)</h3>
+      <div class="era">2010–2015 · Windows Phone "Metro", iOS 7, 초기 웹</div>
+      <p>스큐어모피즘의 반대. 그림자·질감을 <b>전부 빼고</b> 단색 면과 글자만 남깁니다. 강한 원색, 네모 타일.</p>
+      <ul><li><b>장점:</b> 깔끔, 빠름, 어떤 화면 크기에도 잘 맞음</li><li><b>단점:</b> 무엇이 버튼인지 헷갈림, 밋밋함</li></ul>
+      <div class="fit"><b>Lakomics:</b> "그림자는 떠 있는 것에만"이라는 우리 규칙의 뿌리. 다만 원색 대신 어두운 중성색을 씁니다.</div>
+    </div>
+    <div class="demo d-flat"><div class="win"><div class="bar">갤러리</div><div class="body">최근 항목<div class="tiles"><i style="background:#e74c3c"></i><i style="background:#f1c40f"></i><i style="background:#9b59b6"></i></div><button>새로 만들기</button></div></div></div>
+  </div>
+
+  <div class="style" id="material">
+    <div>
+      <h3>머티리얼 디자인 (Material Design)</h3>
+      <div class="era">2014–현재 · Google, Android. 최신은 Material 3 ("Material You", 2021)</div>
+      <p>플랫에 <b>"종이가 겹쳐 있다"</b>는 규칙을 더한 체계. 높이(그림자)로 순서를 보여 주고, 움직임에 물리 규칙을 줍니다. Material 3는 크게 둥근 모서리, 알약 버튼, 배경화면에서 뽑은 파스텔 색이 특징.</p>
+      <ul><li><b>장점:</b> 규칙이 매우 자세함(간격 8 격자, 누르는 영역 48, 글자 단계 등) — 우리가 참고한 숫자도 여기서 옴</li><li><b>단점:</b> 그대로 쓰면 "구글 앱"처럼 보임, 둥글고 귀여운 인상</li></ul>
+      <div class="fit"><b>Lakomics:</b> 규칙(격자·크기)은 빌려 왔지만 모양(알약·큰 반경·파스텔)은 쓰지 않음. 입력창 "면 + 입력 중 밑줄"이 머티리얼의 Filled 입력창 계열.</div>
+    </div>
+    <div class="demo d-mat"><div class="win"><h4>휴지통으로 옮길까요?</h4><p>2개 항목이 30일 뒤 삭제됩니다.</p><div class="btns"><button>취소</button><button class="p">옮기기</button></div></div><div class="fab">+</div></div>
+  </div>
+
+  <div class="style" id="apple">
+    <div>
+      <h3>Apple 스타일 (macOS · iOS)</h3>
+      <div class="era">macOS Big Sur(2020) 이후, iOS 7 이후 · Human Interface Guidelines</div>
+      <p>반투명한 창 뒤로 배경이 흐리게 비치는 <b>"비브런시(Vibrancy)"</b>, 부드럽게 둥근 모서리, SF 폰트, 파란 강조색. 메뉴는 촘촘하고 단축키가 오른쪽에 흐리게 붙습니다.</p>
+      <ul><li><b>특징:</b> 설명 글자를 거의 안 씀, 아이콘(SF Symbols)이 일관됨, 움직임이 짧고 부드러움</li><li><b>Mac vs iPad:</b> 같은 회사지만 Mac은 글자 13, iPad는 17 — 우리가 PC 15 / 태블릿 17로 나눈 근거</li><li><b>단점:</b> 반투명은 느린 PC에서 무겁고, 따라 하면 "가짜 맥"처럼 보임</li></ul>
+      <div class="fit"><b>Lakomics:</b> 크기 규칙, 누르는 영역 44, 토글 스위치 모양, "글자는 최소로"를 빌려 옴. 반투명·파란 강조는 쓰지 않음.</div>
+    </div>
+    <div class="demo d-apple"><div class="win"><div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div><div class="menu"><div class="on">수집일 순<span>⌘1</span></div><div>이름 순<span>⌘2</span></div><div>크기 순<span>⌘3</span></div><hr><div>보기 옵션…<span>⌘J</span></div></div></div></div>
+  </div>
+
+  <div class="style" id="fluent">
+    <div>
+      <h3>Windows Fluent Design</h3>
+      <div class="era">2017–현재 · Windows 10/11, Microsoft Office</div>
+      <p>Windows 11의 모습. 배경화면 색이 은은하게 비치는 <b>"미카(Mica)"</b> 창, 8px 둥근 모서리, 아래쪽 버튼 영역이 살짝 다른 면, 하늘색 강조. Segoe UI Variable 폰트.</p>
+      <ul><li><b>장점:</b> Windows에서 쓰면 "원래 있던 앱"처럼 자연스러움</li><li><b>단점:</b> Linux·Android에서는 어색, 회사 느낌이 강함</li></ul>
+      <div class="fit"><b>Lakomics:</b> Windows·Linux·태블릿 모두에서 같아야 해서 어느 OS 스타일도 그대로 따르지 않음. 대화상자 아래 버튼 영역을 나누는 방식 정도는 참고할 만함.</div>
+    </div>
+    <div class="demo d-fluent"><div class="win"><h4>휴지통으로 옮길까요?</h4><p>2개 항목이 30일 뒤 삭제됩니다.</p><div class="btns"><button class="p">옮기기</button><button>취소</button></div></div></div>
+  </div>
+
+  <h2 class="part">2 · 유행한 스타일 (트렌드)</h2>
+
+  <div class="style" id="glass">
+    <div>
+      <h3>글래스모피즘 (Glassmorphism)</h3>
+      <div class="era">2020–현재 · macOS Big Sur 영향, 2025 Apple "Liquid Glass"로 다시 유행</div>
+      <p>반투명 유리판 뒤로 <b>화려한 배경이 흐리게</b> 비치는 카드. 얇은 흰 테두리, 큰 반경.</p>
+      <ul><li><b>장점:</b> 첫인상이 화려하고 최신 느낌</li><li><b>단점:</b> 글자가 배경에 따라 안 읽힘, 무거움, 금방 질림</li></ul>
+      <div class="fit"><b>Lakomics:</b> 작품 이미지가 주인공인 앱이라 배경을 흐리는 유리 효과는 방해가 됨 — DESIGN.md에서 금지.</div>
+    </div>
+    <div class="demo d-glass"><div class="win"><small>오늘 수집</small><div class="big">1,284</div><small>이번 주 +33</small><button>자세히</button></div></div>
+  </div>
+
+  <div class="style" id="neu">
+    <div>
+      <h3>뉴모피즘 (Neumorphism)</h3>
+      <div class="era">2019–2021 · Dribbble(디자이너 작품 공유 사이트)에서 유행</div>
+      <p>배경과 <b>같은 색</b>의 버튼이 밝은 그림자·어두운 그림자로 튀어나오거나 파인 것처럼 보이는 방식. 말랑한 플라스틱 느낌.</p>
+      <ul><li><b>장점:</b> 부드럽고 촉감 있어 보임</li><li><b>단점:</b> 대비가 너무 낮아 버튼이 안 보임, 실제 앱에선 거의 실패 — 지금은 "한때 유행"</li></ul>
+      <div class="fit"><b>Lakomics:</b> 쓰지 않음. 어두운 화면에서는 특히 안 보임.</div>
+    </div>
+    <div class="demo d-neu"><div class="win"><div class="knob">72%</div><button>동기화</button></div></div>
+  </div>
+
+  <div class="style" id="swiss">
+    <div>
+      <h3>스위스 스타일 (International Typographic Style)</h3>
+      <div class="era">1950년대 스위스 포스터 → 지금도 편집·브랜드 디자인의 기본</div>
+      <p>장식 없이 <b>격자, 큰 글자, 여백, 강한 대비</b>만으로 질서를 만드는 방식. 숫자·제목을 아주 크게, 나머지는 작게. 빨강 같은 포인트 색 하나.</p>
+      <ul><li><b>장점:</b> 오래 봐도 질리지 않음, 정보가 또렷</li><li><b>단점:</b> 잘못 하면 딱딱하고 차가움</li></ul>
+      <div class="fit"><b>Lakomics:</b> 가장 가까운 뿌리 중 하나. "글자 크기 4단계", "간격 사다리", "큰 숫자는 Rajdhani"가 이 생각에서 나옴.</div>
+    </div>
+    <div class="demo d-swiss"><div class="win"><div class="num">23</div><div class="rule"></div><div class="grid"><div><b>오늘</b>이미지 23장</div><div><b>이번 주</b>이미지 33장</div><div><b>전체</b>9,441장</div><div><b>분류 안 됨</b>40장</div></div></div></div>
+  </div>
+
+  <div class="style" id="brut">
+    <div>
+      <h3>네오 브루탈리즘 (Neo-brutalism)</h3>
+      <div class="era">2021–현재 · Gumroad, 일부 스타트업 웹</div>
+      <p>일부러 <b>투박하게</b>. 두꺼운 검은 테두리, 딱딱한 검은 그림자, 형광 원색, 굵은 글자. "예쁘게 다듬지 않았다"는 개성.</p>
+      <ul><li><b>장점:</b> 한눈에 기억에 남음, 재미있음</li><li><b>단점:</b> 시끄러워서 오래 쓰는 도구에는 피곤함</li></ul>
+      <div class="fit"><b>Lakomics:</b> 안 맞음. 다만 "딱딱한 그림자(흐림 없는 그림자)"는 우리 NieR 선택 표식의 그림자 테두리와 같은 기법.</div>
+    </div>
+    <div class="demo d-brut"><div class="win"><h4>체인소맨 17권</h4><div class="tags"><span>만화</span><span>D-6</span></div><button>찜하기</button></div></div>
+  </div>
+
+  <div class="style" id="saas">
+    <div>
+      <h3>"AI 느낌" — 요즘 SaaS 스타일</h3>
+      <div class="era">2022–현재 · AI 서비스, 스타트업 랜딩 페이지, AI가 만든 화면에서 특히 자주 보임</div>
+      <p>사용자가 "AI 같아서 싫다"고 한 바로 그 계열. 어두운 바탕에 <b>보라·분홍 그라데이션, 빛 번짐(glow), 알약 배지, 카드 왼쪽 색 띠, 그라데이션 글자</b>. Linear·Vercel 같은 잘 만든 원조가 있는데, 그 겉모습만 복사한 화면이 너무 많아져서 "흔한 AI 디자인"의 상징이 됨.</p>
+      <ul><li><b>왜 AI처럼 보이나:</b> 누구나 같은 재료(보라 그라데이션, 글로우, 색 띠, 둥근 카드)를 조합해서 개성이 없음</li><li><b>알아보는 법:</b> 강조색이 보라/분홍, 빛 번짐, 제목에 그라데이션, "✨", 모든 게 둥근 카드</li></ul>
+      <div class="fit"><b>Lakomics:</b> 피해야 할 목록. DESIGN.md에 "색 띠 금지", "장식용 그라데이션·글로우 금지"로 적혀 있음.</div>
+    </div>
+    <div class="demo d-saas"><div class="win"><span class="pill">✨ New</span><h4>스마트 자동 태그</h4><p>AI가 이미지를 분석해 태그를 붙입니다.</p><div class="card">이번 주 18장 자동 분류</div><button>시작하기</button></div></div>
+  </div>
+
+  <h2 class="part">3 · Lakomics와 가까운 참고</h2>
+
+  <div class="style" id="nier">
+    <div>
+      <h3>게임 UI — NieR:Automata</h3>
+      <div class="era">2017 · 게임 메뉴 디자인의 대표 사례 (비슷한 계열: Persona 5는 반대로 화려한 쪽)</div>
+      <p>베이지 바탕에 <b>작은 네모 표식, 가는 선, 선택된 줄을 반전(어두운 면)</b>하고 살짝 어긋난 테두리를 겹치는 방식. 글자 간격을 넓게, 장식은 기하학 도형만.</p>
+      <ul><li><b>장점:</b> 절제됐는데 확실한 개성이 있음, 선택 상태가 매우 분명</li><li><b>단점:</b> 전부 따라 하면 "게임 메뉴"가 되어 도구 앱으로는 과함</li></ul>
+      <div class="fit"><b>Lakomics:</b> 사이드바 선택(아이보리 면 + 어두운 네모 + 어긋난 테두리), 구역 이름 앞 작은 네모와 가는 선이 여기서 옴. 앱의 "얼굴"이 되는 부분.</div>
+    </div>
+    <div class="demo d-nier"><div class="win"><div class="head">ITEMS</div><div class="item on">수집일</div><div class="item">이름</div><div class="item">크기</div><div class="desc">수집한 날짜가 최근인 순서로 정렬합니다.</div></div></div>
+  </div>
+
+  <div class="style" id="media">
+    <div>
+      <h3>미디어 앱 (Plex · Apple TV · Steam 라이브러리)</h3>
+      <div class="era">2010년대–현재 · 영상·게임 모음 앱</div>
+      <p><b>작품 이미지가 화면의 주인공</b>. 어두운 바탕, 큰 배경 이미지(히어로)가 아래로 흐려지며 글자와 겹치고, 포스터가 줄지어 섬. UI 자체는 거의 안 보이게.</p>
+      <ul><li><b>장점:</b> 소장품이 돋보임, 오래 봐도 편함</li><li><b>단점:</b> 이미지가 없으면 텅 비어 보임</li></ul>
+      <div class="fit"><b>Lakomics:</b> 컬렉션 상세(배경 위 표지 + 아래로 흐려짐)와 "미디어가 1순위"라는 원칙이 여기서 옴.</div>
+    </div>
+    <div class="demo d-media"><div class="hero"><b>체인소맨</b><span>만화 · 17권 · 10.4 발매</span></div><div class="row"><i></i><i></i><i></i><i></i><i></i></div></div>
+  </div>
+
+  <h2 class="part" id="terms">4 · 알아 두면 좋은 용어</h2>
+  <div class="gloss">
+    <div><b>계층 (Hierarchy)</b><span>무엇을 먼저 보게 할지의 순서. 크기·굵기·색·위치로 만듦.</span></div>
+    <div><b>어포던스 (Affordance)</b><span>"이건 누를 수 있겠다"는 느낌. 스큐어모피즘은 강하고 플랫은 약함.</span></div>
+    <div><b>대비 (Contrast)</b><span>글자와 바탕의 밝기 차이. 너무 낮으면 안 읽힘(뉴모피즘의 실패 원인).</span></div>
+    <div><b>밀도 (Density)</b><span>한 화면에 담는 정보량. PC 관리 도구는 높게, 태블릿 감상은 낮게.</span></div>
+    <div><b>높이 · 엘리베이션 (Elevation)</b><span>화면 위에 "떠 있는 정도". 그림자로 표현. 메뉴 &lt; 대화상자 순으로 높음.</span></div>
+    <div><b>반경 (Radius)</b><span>모서리 둥근 정도. 작으면 단정·전문적, 크면 친근·귀여움.</span></div>
+    <div><b>토큰 (Design token)</b><span>색·간격·크기에 붙인 이름. 예: "보조 글자 = 12px". 한 곳만 바꾸면 전체가 바뀜.</span></div>
+    <div><b>디자인 시스템</b><span>토큰 + 부품 + 규칙 묶음. Material, Apple HIG, Fluent가 대표. 오늘 만든 DESIGN.md 12장이 Lakomics의 것.</span></div>
+    <div><b>컴포넌트 (Component)</b><span>재사용하는 부품. 버튼, 입력창, 배지 등.</span></div>
+    <div><b>스켈레톤 (Skeleton)</b><span>불러오는 동안 나올 자리를 회색 모양으로 미리 보여 주는 것.</span></div>
+    <div><b>토스트 (Toast)</b><span>화면 아래에 잠깐 떴다 사라지는 알림.</span></div>
+    <div><b>시트 · 모달 · 팝오버</b><span>시트 = 아래에서 올라오는 판, 모달(대화상자) = 가운데 창 + 뒤를 어둡게, 팝오버 = 버튼 옆 작은 창.</span></div>
+    <div><b>비브런시 · 미카 · 아크릴</b><span>Apple·Windows의 반투명 창 재질 이름.</span></div>
+    <div><b>이징 (Easing)</b><span>움직임의 속도 곡선. 처음 빠르고 끝이 느린 곡선이 자연스러움.</span></div>
+    <div><b>히어로 (Hero)</b><span>화면 위쪽의 크고 대표적인 이미지 영역.</span></div>
+    <div><b>그리드 (Grid)</b><span>줄을 맞추기 위한 보이지 않는 칸. 간격 사다리(4·8·12…)와 함께 씀.</span></div>
+  </div>
+
+  <h2 class="part" id="map">5 · 한눈에 보기</h2>
+  <p style="color:var(--muted);margin:0">가로: 절제 ↔ 장식 · 세로: 각지고 단단함 ↔ 둥글고 부드러움. 아이보리가 Lakomics의 현재 위치.</p>
+  <div class="map">
+    <div class="h"></div><div class="v"></div>
+    <span class="ax" style="left:16px;top:50%;transform:translateY(-130%)">절제</span>
+    <span class="ax" style="right:16px;top:50%;transform:translateY(-130%)">장식</span>
+    <span class="ax" style="left:50%;top:8px;transform:translateX(8px)">각지고 단단함</span>
+    <span class="ax" style="left:50%;bottom:8px;transform:translateX(8px)">둥글고 부드러움</span>
+    <span class="pt" style="left:14%;top:22%">스위스</span>
+    <span class="pt" style="left:30%;top:18%">NieR</span>
+    <span class="pt me" style="left:22%;top:32%">Lakomics</span>
+    <span class="pt" style="left:26%;top:44%">미디어 앱</span>
+    <span class="pt" style="left:20%;top:56%">플랫</span>
+    <span class="pt" style="left:40%;top:62%">Fluent</span>
+    <span class="pt" style="left:44%;top:72%">Apple</span>
+    <span class="pt" style="left:52%;top:84%">머티리얼 3</span>
+    <span class="pt" style="left:72%;top:14%">네오 브루탈리즘</span>
+    <span class="pt" style="left:74%;top:66%">"AI 느낌" SaaS</span>
+    <span class="pt" style="left:82%;top:80%">글래스모피즘</span>
+    <span class="pt" style="left:64%;top:88%">뉴모피즘</span>
+    <span class="pt" style="left:86%;top:40%">스큐어모피즘</span>
+  </div>
+
+  <h2 class="part">6 · 같은 부품, 스타일별 비교</h2>
+  <table class="compare">
+    <tr><th>부품</th><th>Apple</th><th>머티리얼 3</th><th>Fluent</th><th>Lakomics</th></tr>
+    <tr><td>버튼</td><td>둥근 사각(6~10), 파랑 채움</td><td>알약, 보라 채움</td><td>둥근 사각 4, 하늘색</td><td>반경 4, 아이보리 채움은 화면당 하나</td></tr>
+    <tr><td>토글</td><td>둥근 알약, 초록</td><td>둥근 알약, 손잡이 커짐</td><td>둥근 알약, 테두리</td><td>둥근 알약, 아이보리</td></tr>
+    <tr><td>입력창</td><td>옅은 테두리 + 둥근 사각</td><td>면 + 밑줄 또는 테두리</td><td>면 + 아래쪽 강조선</td><td>면만, 입력 중 파란 밑줄</td></tr>
+    <tr><td>선택 표시</td><td>파란 면</td><td>연한 색 면 + 알약</td><td>왼쪽 작은 색 막대</td><td>NieR 슬랩 / 밝은 회색 면</td></tr>
+    <tr><td>메뉴</td><td>반투명, 단축키 표시</td><td>그림자 있는 면</td><td>미카 재질, 둥근 8</td><td>불투명 어두운 면, 가는 선</td></tr>
+    <tr><td>폰트</td><td>SF Pro</td><td>Roboto</td><td>Segoe UI Variable</td><td>Pretendard + Rajdhani</td></tr>
+  </table>
+</main>
+</body>
+</html>

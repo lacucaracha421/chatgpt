@@ -42,7 +42,7 @@ PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 
 카드보다 **명도 차이 → 1px separator → 간격 → typography** 순으로 계층을 만든다.
 
-- Radius has four steps (section 12): 0 media tiles · 2 marks (badges, checkboxes, covers) · 4 controls, rows, menus/popovers · 8 dialogs and tablet bottom sheets.
+- Radius has four steps (section 12): 0 media tiles and floating menus/dialogs · 2 marks (badges, checkboxes, covers) · 4 controls and rows · 8 tablet bottom sheets.
 - dialog: 필요할 때만 더 큰 surface와 shadow.
 - shadow는 실제로 떠 있는 menu/dialog/drag preview와 의미 있는 collectible object에만 쓴다.
 - 일반 grid tile, toolbar, settings row, sidebar section에 장식용 shadow를 퍼뜨리지 않는다.
@@ -134,6 +134,14 @@ PC 자산 기본 보기는 **수집일별 masonry/waterfall**이다. justified r
 
 Decided with the user on 2026-09-28 from `docs/prototypes/design-foundation-20260928/` (`index.html`, `part2.html`). PC and the Android tablet share one foundation; they differ only in size. Values are tokens in `_tools/app/src/styles/tokens.css` (PC) with tablet overrides in `_tools/app/mobile-client/mobile.css`; shared control styles live in `_tools/app/src/styles/controls.css`. Use the role tokens, never raw numbers.
 
+### Direction
+
+Decided 2026-09-28 from `part4.html` (option B): **Swiss order, macOS manners, NieR signature.**
+
+- **Swiss order (structure):** strict left alignment and grid, strong size contrast (large numbers, small quiet meta), hairline dividers instead of boxes, one accent colour. Works in the dark theme: slightly warm off-white text, ivory as the single accent.
+- **macOS manners (behaviour, never the skin):** dense tidy menus with faint shortcut hints on the right, almost no explanatory text, short soft motion, full keyboard control, settings apply immediately. No traffic-light buttons, translucency, blue selection or SF look-alikes.
+- **NieR signature (only three places, fixed sizes):** the current-location selection (ivory slab, dark square mark at the right end, 3px echo), section labels (5px square + fading 1px hairline), and floating menus/dialogs (small corner brackets). Nowhere else — no beige game palette, wide-tracked caps, per-item squares or frames on buttons, chips and cards. The fuller game-style version (option C) was tried and rejected.
+
 ### Spacing
 
 Steps are **4 · 8 · 12 · 16 · 24 · 32** (`--space-1/2/3/4/6/8`). The closer the relationship, the smaller the step.
@@ -164,7 +172,7 @@ Section names use meta in `--color-faint`. Only showcase/detail hero titles over
 
 ### Radius
 
-0 media tiles and edge-attached surfaces · 2 marks (badges, checkboxes, covers, selection) · 4 buttons, inputs, row cards, menus/popovers · 8 dialogs and tablet bottom sheets (top corners). 50% only for content that is itself round (a performer face). No pill shapes except the toggle switch.
+0 media tiles, edge-attached surfaces, and menus/popovers/dialogs (they carry the corner brackets) · 2 marks (badges, checkboxes, covers, selection) · 4 buttons, inputs, row cards · 8 tablet bottom sheets (top corners only). 50% only for content that is itself round (a performer face). No pill shapes except the toggle switch.
 
 ### Colour roles
 
@@ -175,6 +183,10 @@ Colour values stay as they are; this fixes where they may appear.
 - `--color-danger`: delete, failure, errors. `--color-success`: completed/synced states.
 - Surfaces: `--color-bg` page, `--color-sidebar` index/panels, `--color-surface` rows and inputs, `--color-surface-elevated` menus and badges. Text: `--color-text`, `--color-muted` (meta, icons), `--color-faint` (section names, hints).
 - Platform brand colours only inside platform badges; work colours only in artwork.
+
+### No coloured edge stripes
+
+Do not mark state with a coloured bar along one edge of a block (an accent underline under a chip or button, a left accent bar on a row or card, a top stripe on a panel); the user rejects it as generic AI-looking UI (2026-09-28). Show selection with a face change, text weight/colour, or the existing NieR selection marks.
 
 ### Words
 
@@ -194,10 +206,45 @@ Large blocks (cards, dialogs, the primary button) may combine a face and a borde
 | Checkbox (`--checkbox-size`) | 16 | 20 | square mark: 1.5px border, radius 2; checked = accent border with an inner solid accent square |
 | Toggle switch | 32×18 | 40×22 | round track and round knob (the one round control); on = accent track, dark knob |
 | Badge (`--badge-height`) | 20 | 24 | radius 2, padding 0 8, icon 14/16, gap 4, weight 600 meta text; variants: plain (`--color-surface-elevated` + muted text), icon-only (square), count (tabular), accent (NEW), danger; a tappable tablet badge keeps an invisible 44 hit area |
-| Segmented control | control height | control height | 2–4 filters of the same list; joined cells, radius 4, selected = `--color-filter-selected` |
-| Tabs | control height | control height | switch to different content; text + 2px accent underline on the selected tab |
+| Segmented control | control height | control height | 2–4 filters of the same list; joined cells, radius 4, selected = `--color-filter-selected` face and weight 600 |
+| Tabs | control height | control height | switch to different content; the selected tab is brighter text at weight 600 (no underline or colour stripe) |
 
 Use a toggle for a single setting that applies immediately; use checkboxes to pick several items that a button then applies.
+
+### Floating surfaces
+
+| Need | PC | Tablet |
+| --- | --- | --- |
+| Immediate choice (sort, view, more) | menu/popover next to its button | bottom sheet (thumb reach, swipe down to close) |
+| Hard-to-undo confirmation, multi-field settings | dialog | dialog (delete confirmations only) |
+| Full screen | viewer, reader, note editor only | same |
+
+Menus, popovers and dialogs are square (radius 0) with the NieR corner brackets: 8px L-shapes in `--color-accent`, 2px thick, just inside the 1px border at the top-left and bottom-right corners (drawn as backgrounds so scrolling dialogs do not clip them). A menu may start with a section label (5px square + hairline); items carry a 16px icon, the current choice is weight 600 with a 5px accent square at the right (no slab inside menus), shortcuts sit right-aligned in `--color-faint`, and a related toggle (e.g. newest/oldest) may sit as a segmented control at the bottom. A destructive dialog shows what it affects (up to two overlapping thumbnails) beside a short title; the verb is the button label ("휴지통으로"). Menus open in 140 ms (fade + 4px rise), no bounce.
+
+### States
+
+- **Loading:** skeleton blocks in the shape of the content, `color-mix` of surface toward the page background, breathing slowly (opacity .55 → 1, 2.4 s); they fade in only after 300 ms so fast loads show nothing; with reduced motion they are static. No "…불러오는 중" text and no spinners in content areas.
+- **Empty:** a faint 32px icon and one line ("이미지 없음"); one button only when there is a real next step.
+- **Error:** one line and "다시 시도"; codes and explanations go behind the ⓘ help button.
+
+### Dates and numbers
+
+Dot notation: current year `10.4`, other years `2025.9.28`, no zero padding; times are 24-hour `21:45`; "오늘 21:45" is written as just `21:45` in a dated group and `어제 21:45` for yesterday — no other relative times ("3분 전"). Days left `D-6`; past dates show the date only. Counts use thousands separators (`1,284`) and a unit without a space (`23장`, `17권`). Date group headings may use the longer `9월 28일 (일)`. Use the shared formatters in `src/shared/displayDate.ts`.
+
+### Feedback and motion
+
+- **Press (tablet):** the face darkens to `--color-surface-pressed` while pressed and returns immediately on release; no scaling, no lingering pressed state. **Hover (PC):** the face lightens. Keyboard focus is a separate blue outline.
+- **Selected chips and segments:** `--color-filter-selected` face and weight 600; unselected text is muted.
+- **Motion:** 90 ms small feedback (press, colour), 140 ms open/close (menus, sheets, popovers), 200 ms screen transitions; `--ease-standard`; no bounce, no looping decoration except the skeleton breathing.
+- **Toasts:** success is shown in place (the changed row briefly tints toward `--color-success` and a check fades) — no success toast, except "되돌리기" after an undoable action (e.g. moving to the trash). Failures always show a one-line toast with "다시 시도".
+
+### Theme
+
+The default is the current dark neutral ("먹색") with the ivory accent. A light "종이" theme (`#f3f1ec` page, ink-dark selection instead of ivory) is a later Settings option; colours stay token-driven so themes only swap token values (see `part4.html` for the tried palettes).
+
+### Shared components first
+
+Buttons, inputs, checkboxes, toggles, badges, segmented controls and tabs always come from the shared components in `_tools/app/src/shared/ui/` (used by both PC and tablet): `Button` (including `variant="quiet"`), `TextInput`/`Field`, `Checkbox`, `Switch`, `Badge`, `SegmentedControl`, `Tabs`. If a screen needs a shape they lack, add a variant to the shared component instead of styling a local copy. Screen-specific controls are allowed only for surfaces designed as their own object — the media viewer, the manga reader, Works covers and cases, and the NieR selection marks — and the code says why. The older `Toggle` (a checkbox) and `TextField` are legacy; screens move to `Checkbox` and `TextInput` when they are migrated.
 
 ### Icons and rows
 

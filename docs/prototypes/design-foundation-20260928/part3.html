@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lakomics 디자인 기초 3</title>
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
+<style>
+  :root { --font: "Pretendard Variable", "Pretendard", sans-serif; --type-title: 20px; --type-body: 15px; --type-meta: 12px; --type-number: 24px; --control: 32px; --row: 48px; }
+  .tablet { --type-title: 22px; --type-body: 17px; --type-meta: 13px; --type-number: 28px; --control: 44px; --row: 64px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--color-bg); color: var(--color-text); font: 15px/1.5 var(--font); padding: 32px 16px 48px; }
+  main { max-width: 1120px; margin: 0 auto; }
+  h1 { font-size: 24px; font-weight: 600; margin: 0 0 4px; }
+  .lead { color: var(--color-muted); margin: 0 0 24px; }
+  section { border-top: 1px solid var(--color-border); padding: 24px 0 32px; }
+  h2 { font-size: 18px; font-weight: 600; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+  h2::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); }
+  .why { color: var(--color-muted); font-size: 13px; margin: 0 0 16px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .cols3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 860px) { .cols, .cols3 { grid-template-columns: 1fr; } }
+  .panel { background: var(--color-sidebar); border: 1px solid var(--color-border); padding: 16px; min-width: 0; position: relative; overflow: hidden; }
+  .panel h3 { margin: 0 0 12px; font-size: 12px; font-weight: 500; color: var(--color-faint); display: flex; justify-content: space-between; gap: 8px; }
+  .panel h3 span { color: var(--color-muted); font-weight: 400; text-align: right; }
+  .bad h3 { color: #d9a07a; }
+  .note { font-size: 13px; color: var(--color-muted); margin: 12px 0 0; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: var(--control); padding: 0 12px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-control); color: var(--color-text); font: 500 var(--type-body)/1 var(--font); cursor: pointer; }
+  .btn--primary { background: var(--color-accent); color: var(--color-on-accent); border-color: var(--color-accent); }
+  .btn--quiet { border: 0; background: transparent; color: var(--color-muted); font-weight: 400; padding: 0 8px; }
+  svg.i { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .tablet svg.i { width: 24px; height: 24px; }
+
+  /* 1. States */
+  .grid4 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .tile { aspect-ratio: 3/4; background: var(--color-surface); border-radius: 2px; }
+  .sk { background: linear-gradient(90deg, var(--color-surface) 0, var(--color-surface-hover) 50%, var(--color-surface) 100%); background-size: 200% 100%; animation: sk 1.4s ease-in-out infinite; }
+  .sk-line { height: 12px; border-radius: 2px; margin-top: 8px; }
+  @keyframes sk { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+  .bar { position: relative; height: 2px; background: var(--color-border); overflow: hidden; margin-bottom: 12px; }
+  .bar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 40%; background: linear-gradient(90deg, transparent, var(--color-accent), transparent); animation: sweep 1.2s cubic-bezier(.4,0,.2,1) infinite; }
+  @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+  .center { display: grid; place-items: center; gap: 8px; text-align: center; padding: 32px 0; color: var(--color-muted); font-size: var(--type-body); }
+  .center svg.i { width: 32px; height: 32px; color: var(--color-faint); }
+  .center small { font-size: var(--type-meta); color: var(--color-faint); }
+  .old-text { color: var(--color-muted); font-size: 12px; padding: 32px 0; text-align: center; }
+  .statebox { min-height: 220px; }
+  .seg { display: inline-flex; border: 1px solid var(--color-border); border-radius: 4px; overflow: hidden; margin-bottom: 12px; }
+  .seg button { all: unset; padding: 4px 12px; font-size: 13px; color: var(--color-muted); background: var(--color-control); cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--color-border); }
+  .seg button[aria-pressed=true] { background: var(--color-filter-selected); color: var(--color-text); }
+
+
+  .calm { background: color-mix(in srgb, var(--color-surface) 70%, var(--color-bg)); }
+  .breathe { background: color-mix(in srgb, var(--color-surface) 70%, var(--color-bg)); animation: breathe 2.4s ease-in-out infinite; }
+  @keyframes breathe { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+  .fadein { animation: fadein 400ms ease-out 300ms both; }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .breathe, .sk { animation: none; } }
+  /* 2. Dates */
+  .fmt { display: grid; gap: 0; }
+  .fmt .r { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--color-surface); font-size: var(--type-body); }
+  .fmt .r + .r { border-top: 1px solid var(--color-border); }
+  .fmt .r .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fmt .r .m { font-size: var(--type-meta); color: var(--color-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .fmt .r .d { font-size: var(--type-meta); color: var(--color-accent); font-variant-numeric: tabular-nums; }
+  .rules { margin: 12px 0 0; padding-left: 18px; font-size: 13px; color: var(--color-muted); display: grid; gap: 4px; }
+  .rules b { color: var(--color-text); font-weight: 500; }
+
+  /* 3. Surfaces */
+  .stage { position: relative; height: 320px; background: var(--color-bg); border: 1px solid var(--color-border); overflow: hidden; }
+  .stage .page { position: absolute; inset: 0; padding: 16px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; align-content: start; opacity: .5; }
+  .tablet .stage .page { grid-template-columns: repeat(3, 1fr); }
+  .stage .page i { aspect-ratio: 3/4; background: var(--color-surface); }
+  .scrim { position: absolute; inset: 0; background: var(--color-overlay); }
+  .dialog { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 300px; background: var(--color-surface-elevated); border: 1px solid var(--color-border-strong); border-radius: 8px; padding: 16px; box-shadow: var(--shadow-dialog); }
+  .dialog b { display: block; font-size: var(--type-body); margin-bottom: 4px; }
+  .dialog p { margin: 0 0 16px; font-size: var(--type-meta); color: var(--color-muted); }
+  .dialog .f { display: flex; justify-content: flex-end; gap: 8px; }
+  .pop { position: absolute; top: 48px; right: 16px; width: 180px; background: var(--color-surface-elevated); border: 1px solid var(--color-border-strong); border-radius: 4px; padding: 4px; box-shadow: var(--shadow-floating); }
+  .pop div { padding: 0 8px; height: 32px; display: flex; align-items: center; font-size: var(--type-body); border-radius: 2px; }
+  .pop div.on { background: var(--color-surface-hover); }
+  .sheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--color-surface-elevated); border-radius: 8px 8px 0 0; border-top: 1px solid var(--color-border-strong); padding: 8px 24px 24px; }
+  .sheet .grab { width: 40px; height: 4px; background: var(--color-border-strong); border-radius: 2px; margin: 0 auto 16px; }
+  .sheet .opt { height: 48px; display: flex; align-items: center; justify-content: space-between; font-size: var(--type-body); border-top: 1px solid var(--color-border); }
+  .sheet .opt:first-of-type { border-top: 0; }
+  .sheet .opt .mk { width: 8px; height: 8px; background: var(--color-accent); }
+  .label { position: absolute; left: 8px; top: 8px; font-size: 12px; color: var(--color-faint); z-index: 2; }
+
+
+  /* Floating surface variants */
+  .fv { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 960px) { .fv { grid-template-columns: 1fr; } }
+  .fstage { position: relative; height: 480px; background: var(--color-bg); border: 1px solid var(--color-border); overflow: hidden; }
+  .fstage .page { position: absolute; inset: 0; padding: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; align-content: start; opacity: .45; }
+  .fstage .page i { aspect-ratio: 3/4; background: var(--color-surface); }
+  .open { animation: pop 140ms cubic-bezier(0.2,0,0,1) both; }
+  @keyframes pop { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: none; } }
+  .m { position: absolute; top: 16px; right: 16px; width: 208px; background: var(--color-surface-elevated); font-size: 15px; box-shadow: var(--shadow-floating); }
+  .d { position: absolute; left: 16px; right: 16px; bottom: 16px; background: var(--color-surface-elevated); box-shadow: var(--shadow-dialog); }
+  .mi { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 12px; position: relative; }
+  .mi svg.i { width: 16px; height: 16px; color: var(--color-muted); }
+  .mi .k { margin-left: auto; font-size: 12px; color: var(--color-faint); }
+  .sec { display: flex; align-items: center; gap: 8px; padding: 8px 12px 4px; font-size: 12px; color: var(--color-faint); }
+  .sec::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+  .sec::after { content: ""; flex: 1; height: 1px; background: var(--section-label-rule); }
+  .hr { height: 1px; background: var(--color-border); margin: 4px 0; }
+  /* V1 NieR frame */
+  .v1 .m, .v1 .d { border: 1px solid var(--color-border-strong); border-radius: 0; }
+  .v1 .m::before, .v1 .m::after, .v1 .d::before, .v1 .d::after { content: ""; position: absolute; width: 8px; height: 8px; border: 1px solid var(--color-accent); }
+  .v1 .m::before, .v1 .d::before { top: -4px; left: -4px; border-right: 0; border-bottom: 0; }
+  .v1 .m::after, .v1 .d::after { bottom: -4px; right: -4px; border-left: 0; border-top: 0; }
+  .v1 .m { padding: 4px 0 8px; }
+  .v1 .mi.on { background: var(--color-accent); color: var(--color-on-accent); margin: 0 8px 0 4px; padding: 0 8px; box-shadow: 3px 3px 0 -1px var(--color-surface-elevated), 3px 3px 0 0 var(--color-selection-echo); }
+  .v1 .mi.on::after { content: ""; position: absolute; right: 8px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; background: var(--color-on-accent); }
+  .v1 .d { padding: 0 0 16px; }
+  .v1 .d .sec { padding: 12px 16px 8px; }
+  .v1 .d b { display: block; padding: 0 16px; font-size: 17px; font-weight: 600; }
+  .v1 .d p { margin: 4px 16px 16px; font-size: 13px; color: var(--color-muted); }
+  .v1 .d .f { display: flex; justify-content: flex-end; gap: 8px; padding: 0 16px; }
+  /* V2 content-led */
+  .v2 .m, .v2 .d { border: 1px solid var(--color-border-strong); border-radius: 4px; }
+  .v2 .m { padding: 4px; }
+  .v2 .mi { border-radius: 2px; }
+  .v2 .mi.on { color: var(--color-text); font-weight: 600; }
+  .v2 .mi.on svg.i { color: var(--color-accent); }
+  .v2 .mi:not(.on) { color: var(--color-muted); }
+  .v2 .ord { display: flex; margin: 4px 8px 4px; border: 1px solid var(--color-border); border-radius: 4px; overflow: hidden; }
+  .v2 .ord span { flex: 1; text-align: center; font-size: 13px; padding: 4px 0; color: var(--color-muted); background: var(--color-control); }
+  .v2 .ord span + span { border-left: 1px solid var(--color-border); }
+  .v2 .ord span.on { background: var(--color-filter-selected); color: var(--color-text); font-weight: 600; }
+  .v2 .d { padding: 16px; display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center; border-radius: 8px; }
+  .v2 .thumbs { display: flex; }
+  .v2 .thumbs i { width: 56px; height: 76px; border-radius: 2px; border: 2px solid var(--color-surface-elevated); }
+  .v2 .thumbs i + i { margin-left: -20px; transform: rotate(4deg); }
+  .v2 .d b { font-size: 17px; font-weight: 600; display: block; }
+  .v2 .d p { margin: 4px 0 0; font-size: 13px; color: var(--color-muted); }
+  .v2 .d .f { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
+  /* V3 both */
+  .v3 .m, .v3 .d { border: 1px solid var(--color-border-strong); border-radius: 0; }
+  .v3 .m::before, .v3 .d::before { content: ""; position: absolute; width: 8px; height: 8px; top: -4px; left: -4px; border: 1px solid var(--color-accent); border-right: 0; border-bottom: 0; }
+  .v3 .m::after, .v3 .d::after { content: ""; position: absolute; width: 8px; height: 8px; bottom: -4px; right: -4px; border: 1px solid var(--color-accent); border-left: 0; border-top: 0; }
+  .v3 .m { padding: 4px 0 8px; }
+  .v3 .mi.on { color: var(--color-text); font-weight: 600; }
+  .v3 .mi.on::after { content: ""; position: absolute; right: 12px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; background: var(--color-accent); }
+  .v3 .mi:not(.on) { color: var(--color-muted); }
+  .v3 .mi.on svg.i { color: var(--color-text); }
+  .v3 .ord { display: flex; margin: 4px 12px; border: 1px solid var(--color-border); overflow: hidden; }
+  .v3 .ord span { flex: 1; text-align: center; font-size: 13px; padding: 4px 0; color: var(--color-muted); background: var(--color-control); }
+  .v3 .ord span + span { border-left: 1px solid var(--color-border); }
+  .v3 .ord span.on { background: var(--color-filter-selected); color: var(--color-text); font-weight: 600; }
+  .v3 .d { padding: 0 16px 16px; }
+  .v3 .d .sec { padding: 12px 0 12px; }
+  .v3 .d .body { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center; margin-bottom: 16px; }
+  .v3 .thumbs { display: flex; }
+  .v3 .thumbs i { width: 56px; height: 76px; border: 2px solid var(--color-surface-elevated); }
+  .v3 .thumbs i + i { margin-left: -20px; transform: rotate(4deg); }
+  .v3 .d b { font-size: 17px; font-weight: 600; display: block; }
+  .v3 .d p { margin: 4px 0 0; font-size: 13px; color: var(--color-muted); }
+  .v3 .d .f { display: flex; justify-content: flex-end; gap: 8px; }
+  /* 4. Press feedback */
+  .press { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { all: unset; display: inline-flex; align-items: center; height: var(--control); padding: 0 16px; background: var(--color-surface); border-radius: 4px; font-size: var(--type-body); color: var(--color-text); cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; transition: background 90ms, transform 90ms; }
+  .chip[aria-pressed=true] { background: var(--color-filter-selected); color: var(--color-text); font-weight: 600; }
+  .chip[aria-pressed=false] { color: var(--color-muted); }
+  .pa .chip:active { background: var(--color-surface-pressed); }
+  .pb .chip:active { transform: scale(.96); }
+  .pc .chip:active { background: var(--color-surface-pressed); transform: scale(.97); }
+  .stuck .chip.hold { background: var(--color-surface-pressed); outline: 1px solid var(--color-border-strong); }
+
+
+  .tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--color-border); }
+  .tabs button { all: unset; position: relative; height: 44px; display: inline-flex; align-items: center; font: 500 17px var(--font); color: var(--color-muted); cursor: pointer; }
+  .tabs button[aria-selected=true] { color: var(--color-text); font-weight: 600; }
+  .tb .tabs button[aria-selected=true]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: var(--color-text); }
+  .tc .tabs { border-bottom: 0; gap: 4px; }
+  .tc .tabs button { padding: 0 12px; border-radius: 4px; height: 36px; }
+  .tc .tabs button[aria-selected=true] { background: var(--color-filter-selected); }
+  /* 5. Motion */
+  .mo { display: grid; grid-template-columns: 140px 1fr; gap: 12px; align-items: center; }
+  .mo small { font-size: 12px; color: var(--color-muted); }
+  .track { position: relative; height: 32px; background: var(--color-surface); border-radius: 2px; }
+  .dot { position: absolute; left: 4px; top: 4px; width: 24px; height: 24px; background: var(--color-accent); border-radius: 2px; }
+  .track.go .dot { left: calc(100% - 28px); }
+
+  /* 6. Toasts */
+  .toast-stage { position: relative; height: 200px; background: var(--color-bg); border: 1px solid var(--color-border); overflow: hidden; }
+  .toast { position: absolute; left: 50%; bottom: 16px; transform: translate(-50%, 16px); opacity: 0; display: flex; align-items: center; gap: 12px; padding: 0 8px 0 16px; height: 44px; background: var(--color-surface-elevated); border: 1px solid var(--color-border-strong); border-radius: 4px; box-shadow: var(--shadow-floating); font-size: 15px; white-space: nowrap; transition: opacity 140ms, transform 140ms var(--ease-standard); }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast .x { color: var(--color-danger); }
+  .saved { position: absolute; left: 16px; top: 16px; right: 16px; display: flex; align-items: center; gap: 8px; padding: 12px; background: var(--color-surface); font-size: 15px; transition: background 600ms; }
+  .saved.flash { background: color-mix(in srgb, var(--color-success) 18%, var(--color-surface)); transition: none; }
+  .ok { color: var(--color-success); opacity: 0; transition: opacity 140ms; }
+  .ok.on { opacity: 1; }
+</style>
+</head>
+<body>
+<main>
+  <h1>디자인 기초 3 — 상태 · 날짜 · 떠 있는 창 · 반응 · 움직임 · 알림</h1>
+  <p class="lead">1·2차 결정을 모두 적용했습니다. 버튼과 칩은 실제로 눌러 볼 수 있습니다.</p>
+
+  <!-- 1. States -->
+  <section>
+    <h2>불러오는 중 · 비어 있음 · 오류</h2>
+    <p class="why">위의 전환 버튼으로 상태를 바꿔 보세요. 불러오는 중 표시를 두 가지로 비교합니다.</p>
+    <div class="seg" id="stateSeg"><button aria-pressed="true" data-s="loading">불러오는 중</button><button aria-pressed="false" data-s="empty">비어 있음</button><button aria-pressed="false" data-s="error">오류</button></div>
+    <div class="cols3">
+      <div class="panel bad statebox"><h3>지금 <span>문구 위주, 화면마다 다름</span></h3><div id="s-now"></div></div>
+      <div class="panel statebox"><h3>A · 뼈대(스켈레톤) <span>자리 모양 미리 보임 (추천)</span></h3><div id="s-a"></div></div>
+      <div class="panel statebox"><h3>B · 위쪽 가는 막대 <span>지금 태블릿 상단 막대와 같음</span></h3><div id="s-b"></div></div>
+    </div>
+
+    <h2 style="margin-top:24px">뼈대를 더 차분하게</h2>
+    <p class="why">번쩍이는 빛 줄기를 없애고 색 대비를 낮췄습니다. 셋 다 0.3초 뒤에 천천히 나타납니다(빨리 끝나면 아예 안 보임).</p>
+    <div class="cols3">
+      <div class="panel statebox"><h3>A1 · 정지 <span>움직임 없음, 가장 조용함</span></h3><div class="fadein"><div class="grid4"><div class="tile calm"></div><div class="tile calm"></div><div class="tile calm"></div><div class="tile calm"></div><div class="tile calm"></div><div class="tile calm"></div></div><div class="calm sk-line" style="width:60%"></div></div></div>
+      <div class="panel statebox"><h3>A2 · 느린 숨쉬기 <span>2.4초 주기로 은은하게 (추천)</span></h3><div class="fadein"><div class="grid4"><div class="tile breathe"></div><div class="tile breathe"></div><div class="tile breathe"></div><div class="tile breathe"></div><div class="tile breathe"></div><div class="tile breathe"></div></div><div class="breathe sk-line" style="width:60%"></div></div></div>
+      <div class="panel statebox"><h3>A · 처음 안 <span>빛 줄기가 지나감</span></h3><div class="fadein"><div class="grid4"><div class="tile sk"></div><div class="tile sk"></div><div class="tile sk"></div><div class="tile sk"></div><div class="tile sk"></div><div class="tile sk"></div></div><div class="sk sk-line" style="width:60%"></div></div></div>
+    </div>
+    <ul class="rules">
+      <li><b>비어 있음</b> — 흐린 아이콘 + 한 줄. 할 수 있는 일이 있을 때만 버튼 하나</li>
+      <li><b>오류</b> — 한 줄 + "다시 시도". 오류 코드·설명문은 ⓘ 도움말로</li>
+      <li><b>0.3초 안에 끝나는 로딩</b>은 아무것도 보여 주지 않음 (깜빡임 방지)</li>
+    </ul>
+  </section>
+
+  <!-- 2. Dates -->
+  <section>
+    <h2>날짜 · 숫자 표기</h2>
+    <p class="why">오늘은 2026년 9월 28일로 가정. 같은 목록을 두 가지 표기로.</p>
+    <div class="cols">
+      <div class="panel">
+        <h3>A · 점 표기 <span>짧고 가지런함 (추천)</span></h3>
+        <div class="fmt">
+          <div class="r"><span class="t">체인소맨 17권</span><span class="d">D-6</span><span class="m">10.4</span></div>
+          <div class="r"><span class="t">Hollow Knight: Silksong</span><span class="d">D-11</span><span class="m">10.9</span></div>
+          <div class="r"><span class="t">작년에 받은 이미지</span><span class="m">2025.9.28</span></div>
+          <div class="r"><span class="t">오늘 수집</span><span class="m">21:45</span></div>
+          <div class="r"><span class="t">어제 수집</span><span class="m">어제 21:45</span></div>
+          <div class="r"><span class="t">전체 이미지</span><span class="m">1,284장</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>B · 한글 표기 <span>자연스럽지만 길어짐</span></h3>
+        <div class="fmt">
+          <div class="r"><span class="t">체인소맨 17권</span><span class="d">D-6</span><span class="m">10월 4일</span></div>
+          <div class="r"><span class="t">Hollow Knight: Silksong</span><span class="d">D-11</span><span class="m">10월 9일</span></div>
+          <div class="r"><span class="t">작년에 받은 이미지</span><span class="m">2025년 9월 28일</span></div>
+          <div class="r"><span class="t">오늘 수집</span><span class="m">오후 9:45</span></div>
+          <div class="r"><span class="t">어제 수집</span><span class="m">어제 오후 9:45</span></div>
+          <div class="r"><span class="t">전체 이미지</span><span class="m">1,284장</span></div>
+        </div>
+      </div>
+    </div>
+    <ul class="rules">
+      <li>올해 날짜는 연도 생략, 다른 해만 연도. 시각은 24시간(21:45). 남은 날은 <b>D-6</b>, 지난 날은 날짜만</li>
+      <li>"3분 전" 같은 상대 시간은 <b>오늘·어제</b>까지만, 그 이상은 날짜</li>
+      <li>큰 수는 쉼표(1,284), 단위는 붙여서(장·권·개). 날짜 제목(수집일 그룹)은 한 단계 크게 <b>9월 28일 (일)</b> 유지</li>
+    </ul>
+  </section>
+
+  <!-- 3. Surfaces -->
+  <section>
+    <h2>떠 있는 창 종류</h2>
+    <p class="why">무엇을 하느냐에 따라 창 종류를 고정합니다.</p>
+    <div class="cols">
+      <div>
+        <div class="stage"><span class="label">PC · 선택 = 작은 메뉴</span><div class="page"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="pop"><div>수집일 최신순</div><div class="on">수집일 오래된순</div><div>이름순</div><div>크기순</div></div></div>
+        <p class="note">정렬·보기·더보기 같은 즉시 선택. 바깥을 누르면 닫힘</p>
+      </div>
+      <div>
+        <div class="stage"><span class="label">PC · 확인·설정 = 대화상자</span><div class="page"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="scrim"></div>
+          <div class="dialog"><b>2개를 휴지통으로 옮길까요?</b><p>30일 뒤 완전히 삭제됩니다.</p><div class="f"><button class="btn btn--quiet">취소</button><button class="btn btn--primary">옮기기</button></div></div></div>
+        <p class="note">되돌리기 어려운 확인, 여러 항목을 입력하는 설정</p>
+      </div>
+      <div class="tablet">
+        <div class="stage"><span class="label">태블릿 · 선택·필터 = 아래 시트</span><div class="page"><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="scrim"></div>
+          <div class="sheet"><div class="grab"></div><div class="opt">수집일 최신순<span class="mk"></span></div><div class="opt">이름순</div><div class="opt">크기순</div></div></div>
+        <p class="note">엄지가 닿는 아래쪽. 아래로 쓸어 닫기</p>
+      </div>
+      <div class="tablet">
+        <div class="stage"><span class="label">태블릿 · 삭제 확인만 = 대화상자</span><div class="page"><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="scrim"></div>
+          <div class="dialog"><b>2개를 휴지통으로 옮길까요?</b><p>30일 뒤 완전히 삭제됩니다.</p><div class="f"><button class="btn btn--quiet">취소</button><button class="btn btn--primary">옮기기</button></div></div></div>
+        <p class="note">전체 화면은 뷰어·리더·메모 편집기만</p>
+      </div>
+    </div>
+
+    <h2 style="margin-top:24px">메뉴 · 대화상자를 덜 심심하게</h2>
+    <p class="why">색 띠 없이, 앱 고유의 NieR 표식과 "내용을 보여 주기"로 개성을 줍니다. 모두 140ms로 살짝 떠오르며 열립니다. <button class="btn" id="replay" style="height:28px;font-size:13px">다시 열기</button></p>
+    <div class="fv">
+      <div><div class="panel" style="padding:0;border:0;background:none"><h3 style="margin-bottom:8px">1 · NieR 프레임 <span>모서리 꺾쇠, 구역 표식, 선택 슬랩</span></h3><div class="fstage v1"><div class="page"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="m open"><div class="sec">정렬</div><div class="mi on">수집일</div><div class="mi">이름</div><div class="mi">크기</div><div class="mi">좋아요</div></div>
+  <div class="d open"><div class="sec">휴지통</div><b>2개를 옮길까요?</b><p>30일 뒤 완전히 삭제됩니다.</p><div class="f"><button class="btn btn--quiet">취소</button><button class="btn btn--primary">휴지통으로</button></div></div></div></div></div>
+      <div><div class="panel" style="padding:0;border:0;background:none"><h3 style="margin-bottom:8px">2 · 내용 중심 <span>아이콘, 순서 전환, 대상 썸네일</span></h3><div class="fstage v2"><div class="page"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="m open"><div class="mi on"><svg class="i" viewBox="0 0 24 24"><path d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>수집일</div><div class="mi"><svg class="i" viewBox="0 0 24 24"><path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12"/></svg>이름</div><div class="mi"><svg class="i" viewBox="0 0 24 24"><path d="M3.75 3v11.25A2.25 2.25 0 0 0 6 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0 1 18 16.5h-2.25m-7.5 0h7.5m-7.5 0-1 3m8.5-3 1 3m0 0 .5 1.5m-.5-1.5h-9.5m0 0-.5 1.5"/></svg>크기</div><div class="mi"><svg class="i" viewBox="0 0 24 24"><path d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z"/></svg>좋아요</div><div class="hr"></div><div class="ord"><span class="on">최신</span><span>오래된</span></div></div>
+  <div class="d open"><div class="thumbs"><i style="background:#5b4636"></i><i style="background:#34506b"></i></div><div><b>2개를 휴지통으로</b><p>30일 뒤 완전히 삭제됩니다.</p></div><div class="f"><button class="btn btn--quiet">취소</button><button class="btn btn--primary">휴지통으로</button></div></div></div></div></div>
+      <div><div class="panel" style="padding:0;border:0;background:none"><h3 style="margin-bottom:8px">3 · 둘을 섞음 <span>꺾쇠·표식 + 아이콘·썸네일 (추천)</span></h3><div class="fstage v3"><div class="page"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="m open"><div class="sec">정렬</div><div class="mi on"><svg class="i" viewBox="0 0 24 24"><path d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>수집일</div><div class="mi"><svg class="i" viewBox="0 0 24 24"><path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12"/></svg>이름</div><div class="mi"><svg class="i" viewBox="0 0 24 24"><path d="M3.75 3v11.25A2.25 2.25 0 0 0 6 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0 1 18 16.5h-2.25m-7.5 0h7.5m-7.5 0-1 3m8.5-3 1 3m0 0 .5 1.5m-.5-1.5h-9.5m0 0-.5 1.5"/></svg>크기</div><div class="mi"><svg class="i" viewBox="0 0 24 24"><path d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z"/></svg>좋아요</div><div class="ord"><span class="on">최신</span><span>오래된</span></div></div>
+  <div class="d open"><div class="sec">휴지통</div><div class="body"><div class="thumbs"><i style="background:#5b4636"></i><i style="background:#34506b"></i></div><div><b>2개를 옮길까요?</b><p>30일 뒤 완전히 삭제됩니다.</p></div></div><div class="f"><button class="btn btn--quiet">취소</button><button class="btn btn--primary">휴지통으로</button></div></div></div></div></div>
+    </div>
+  </section>
+
+  <!-- 4. Press feedback -->
+  <section>
+    <h2>누름 반응 (태블릿)</h2>
+    <p class="why">칩을 눌렀다 떼 보세요. 누르는 동안만 반응하고, 떼면 곧바로 원래대로(지금 버그: 눌림 효과가 남음). 선택된 칩은 밝은 회색 면 + 굵은 글자(색 띠 없음).</p>
+    <div class="cols3 tablet">
+      <div class="panel pa"><h3>A · 면이 짙어짐 <span>조용함 (추천)</span></h3><div class="press"><button class="chip" aria-pressed="true">전체</button><button class="chip" aria-pressed="false">이미지</button><button class="chip" aria-pressed="false">영상</button></div></div>
+      <div class="panel pb"><h3>B · 살짝 작아짐 <span>iOS 느낌</span></h3><div class="press"><button class="chip" aria-pressed="true">전체</button><button class="chip" aria-pressed="false">이미지</button><button class="chip" aria-pressed="false">영상</button></div></div>
+      <div class="panel pc"><h3>C · 둘 다 <span>가장 분명함</span></h3><div class="press"><button class="chip" aria-pressed="true">전체</button><button class="chip" aria-pressed="false">이미지</button><button class="chip" aria-pressed="false">영상</button></div></div>
+    </div>
+    <p class="note">PC는 마우스를 올리면 면이 밝아지고(누름은 A와 같음), 키보드 초점은 파란 테두리로 따로 보입니다.</p>
+    <h2 style="margin-top:24px">탭도 색 띠 없이</h2>
+    <p class="why">2차 견본의 탭(아이보리 밑줄 2px)도 같은 방식이라 바꿔 봤습니다. 눌러서 바꿀 수 있습니다.</p>
+    <div class="cols3 tablet">
+      <div class="panel"><h3>A · 글자만 <span>선택은 밝고 굵게 (추천)</span></h3><div class="tabs"><button aria-selected="true">정보</button><button aria-selected="false">권 목록</button><button aria-selected="false">메모</button></div></div>
+      <div class="panel tb"><h3>B · 가는 흰 밑줄 1px <span>위치가 더 분명</span></h3><div class="tabs"><button aria-selected="true">정보</button><button aria-selected="false">권 목록</button><button aria-selected="false">메모</button></div></div>
+      <div class="panel tc"><h3>C · 회색 면 <span>칩과 같은 모양</span></h3><div class="tabs"><button aria-selected="true">정보</button><button aria-selected="false">권 목록</button><button aria-selected="false">메모</button></div></div>
+    </div>
+
+  </section>
+
+  <!-- 5. Motion -->
+  <section>
+    <h2>움직임 시간</h2>
+    <p class="why">버튼을 누르면 네 속도로 동시에 움직입니다. 규칙: 작은 반응 90 · 열고 닫기 140 · 화면 전환 200. 튕김·반복 장식 없음.</p>
+    <button class="btn" id="play">움직이기</button>
+    <div class="mo" style="margin-top:16px">
+      <small>90ms · 누름, 색 바뀜</small><div class="track" data-ms="90"><span class="dot"></span></div>
+      <small>140ms · 메뉴·시트 열기</small><div class="track" data-ms="140"><span class="dot"></span></div>
+      <small>200ms · 화면 전환</small><div class="track" data-ms="200"><span class="dot"></span></div>
+      <small>400ms · 너무 느림 (비교용)</small><div class="track" data-ms="400"><span class="dot"></span></div>
+    </div>
+  </section>
+
+  <!-- 6. Toasts -->
+  <section>
+    <h2>알림 (토스트)</h2>
+    <p class="why">성공은 화면 자체가 바뀌는 것으로 충분합니다. 버튼을 눌러 보세요.</p>
+    <div class="cols3">
+      <div><div class="toast-stage" id="t1"><div class="toast">저장했습니다</div></div><button class="btn" style="margin-top:8px" data-t="t1">B · 성공도 알림</button></div>
+      <div><div class="toast-stage" id="t2"><div class="saved"><span>앨범 이름: 2026 여름</span><span class="ok">✓</span></div></div><button class="btn" style="margin-top:8px" data-t="t2">A · 성공은 제자리 표시만 (추천)</button></div>
+      <div><div class="toast-stage" id="t3"><div class="toast"><span class="x">!</span>저장하지 못했습니다<button class="btn btn--quiet" style="color:var(--color-accent)">다시 시도</button></div></div><button class="btn" style="margin-top:8px" data-t="t3">실패는 항상 알림</button></div>
+    </div>
+    <p class="note">되돌릴 수 있는 작업(휴지통으로 옮기기 등)만 성공 알림에 "되돌리기"를 붙입니다.</p>
+  </section>
+</main>
+<script>
+  const views = {
+    now: { loading: '<div class="old-text">목록을 불러오는 중…</div>', empty: '<div class="old-text">표시할 항목이 없습니다. 다른 필터를 선택하거나 새로운 이미지를 추가해 보세요.</div>', error: '<div class="old-text">목록을 불러오지 못했습니다. (network_error: 503) 잠시 후 다시 시도하거나 설정에서 서버 주소를 확인하세요.</div>' },
+    a: { loading: '<div class="grid4">' + '<div class="tile sk"></div>'.repeat(6) + '</div><div class="sk sk-line" style="width:60%"></div>' },
+    b: { loading: '<div class="bar"></div><div class="grid4">' + '<div class="tile"></div>'.repeat(6) + '</div>' },
+  };
+  const icon = p => `<svg class="i" viewBox="0 0 24 24"><path d="${p}"/></svg>`;
+  const empty = '<div class="center">' + icon('m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z') + '<span>이미지 없음</span></div>';
+  const error = '<div class="center">' + icon('M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z') + '<span>불러오지 못했습니다</span><button class="btn">다시 시도</button></div>';
+  views.a.empty = views.b.empty = empty; views.a.error = views.b.error = error;
+  const show = s => { for (const k of ['now', 'a', 'b']) document.getElementById('s-' + k).innerHTML = views[k][s]; };
+  show('loading');
+  document.getElementById('stateSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; document.querySelectorAll('#stateSeg button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); show(b.dataset.s); });
+  document.querySelectorAll('.tabs').forEach(g=>g.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;g.querySelectorAll('button').forEach(x=>x.setAttribute('aria-selected',String(x===b)));}));
+  document.getElementById('replay').addEventListener('click',()=>document.querySelectorAll('.open').forEach(el=>{el.classList.remove('open');void el.offsetWidth;el.classList.add('open');}));
+  document.querySelectorAll('.press').forEach(g => g.addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; g.querySelectorAll('.chip').forEach(x => x.setAttribute('aria-pressed', String(x === b))); }));
+  document.getElementById('play').addEventListener('click', () => document.querySelectorAll('.track').forEach(t => { t.querySelector('.dot').style.transition = `left ${t.dataset.ms}ms cubic-bezier(0.2,0,0,1)`; t.classList.toggle('go'); }));
+  document.querySelectorAll('[data-t]').forEach(b => b.addEventListener('click', () => {
+    const st = document.getElementById(b.dataset.t);
+    if (b.dataset.t === 't2') { const s = st.querySelector('.saved'), ok = st.querySelector('.ok'); s.classList.add('flash'); ok.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => s.classList.remove('flash'))); setTimeout(() => ok.classList.remove('on'), 1200); return; }
+    const t = st.querySelector('.toast'); t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2200);
+  }));
+</script>
+</body>
+</html>

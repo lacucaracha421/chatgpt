@@ -195,7 +195,7 @@ describe("HomeView", () => {
     expect(performer).toHaveTextContent("早瀬みお");
     expect(performer).toHaveTextContent("24출연작");
     expect(performer).toHaveTextContent("9소장");
-    expect(performer).toHaveTextContent("09.12");
+    expect(performer).toHaveTextContent("9.12");
     expect(performer.querySelectorAll("img")).toHaveLength(4);
     await user().click(row);
     expect(onNavigate).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "av", showcase: false });

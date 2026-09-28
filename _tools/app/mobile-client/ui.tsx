@@ -1,8 +1,14 @@
 import type {ComponentType, SVGProps} from 'react';
 import {Button} from '../src/shared/ui/Button';
 export {Button};
+export {Badge} from '../src/shared/ui/Badge';
+export {Checkbox} from '../src/shared/ui/Checkbox';
 export {Dialog} from '../src/shared/ui/Dialog';
 export {Description as DialogDescription} from '@radix-ui/react-dialog';
+export {Field, TextInput} from '../src/shared/ui/TextInput';
+export {SegmentedControl} from '../src/shared/ui/SegmentedControl';
+export {Switch} from '../src/shared/ui/Switch';
+export {Tabs} from '../src/shared/ui/Tabs';
 /**
  * An icon-only action. It is never a submit button: inside a search form (the clear X)
  * it would otherwise become the form's default button, so the keyboard Search/Enter key

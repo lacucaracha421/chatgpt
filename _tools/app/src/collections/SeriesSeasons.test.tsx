@@ -20,7 +20,7 @@ it("formats season and episode air dates with the shared date rule", () => {
   vi.setSystemTime(new Date(2026, 8, 23));
   render(<SeriesSeasons series={{ ...series, seasons: [{ ...season(2, 1, 1), airDate: "2025-12-31" }] }} />);
   expect(screen.getByText("2025.12.31")).toBeInTheDocument();
-  expect(screen.getByText("01.01 · 24분")).toBeInTheDocument();
+  expect(screen.getByText("1.1 · 24분")).toBeInTheDocument();
 });
 
 it("uses cached posters and bounded episode pages, resetting selection on season changes", async () => {
