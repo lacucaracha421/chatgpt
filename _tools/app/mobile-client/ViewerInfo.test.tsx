@@ -6,7 +6,7 @@ vi.mock('./transport', () => ({
   native: mocks.native,
   errorText: (reason: unknown) => reason instanceof Error ? reason.message.slice(0, 180) : '연결을 확인한 뒤 다시 시도해 주세요.',
 }));
-import {ViewerInfo, creatorText, infoFields, openableSource, sectionHasVisibleTitle, sizeLabel, sourceLabel, summaryText} from './ViewerInfo';
+import {ViewerInfo, creatorText, infoFields, openableSource, sectionHasVisibleTitle, sizeLabel, sourceLabel, sourceOpenUrl, summaryText} from './ViewerInfo';
 
 /** A complete Asset, so a test states only the fields it is actually about. */
 const asset = (overrides: Partial<Asset> = {}): Asset => ({
@@ -33,6 +33,11 @@ describe('ViewerInfo field projection', () => {
     expect(rows.map(row => row.label)).toEqual(['작가', '출처', '수집일', '해상도', '형식', '크기']);
     expect(rows.map(row => row.value)).toContain('1,200 × 800');
     expect(rows.map(row => row.value)).toContain('472 KB');
+  });
+  it('opens an X or Twitter post instead of its media page', () => {
+    expect(sourceOpenUrl('https://x.com/user/status/123/photo/1')).toBe('https://x.com/user/status/123');
+    expect(sourceOpenUrl('https://twitter.com/user/status/123/video/2?x=1')).toBe('https://twitter.com/user/status/123?x=1');
+    expect(sourceOpenUrl('https://example.com/user/status/123/photo/1')).toBe('https://example.com/user/status/123/photo/1');
   });
   it('omits unknown dimensions, size and duration instead of inventing them', () => {
     const {rows} = infoFields({id: 'a', kind: 'video', preview: 'x'});

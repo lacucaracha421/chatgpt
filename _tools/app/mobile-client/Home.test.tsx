@@ -74,6 +74,10 @@ describe('home model', () => {
     expect((rows[0] as Extract<typeof rows[number], {kind: 'checklist'}>).items[0]).toEqual({text: '우유', checked: true});
     expect(rows[1]).toMatchObject({kind: 'ledger', amount: 250000, label: '쓴 돈', categories: [], latest: [{label: '마트', amount: 250000}]});
   });
+  it('unescapes Markdown punctuation in the Home memo preview', () => {
+    const rows = memoRows([note('plain', {type: 'text', title: '메모', body: '\\# nai \\# 확장 **읽기**'})], '2026-09-25');
+    expect(rows[0]).toMatchObject({kind: 'text', snippet: '# nai # 확장 읽기'});
+  });
   it('keeps shelf ordering and today counts deterministic', () => {
     const release = (id: string, date: string | null) => ({id, name: id, unread: 1, caption: {kind: 'new' as const, text: '신간 1권', date}});
     expect(shelfEntries([release('old', '9.16'), release('today', null)], [{id: 'soon', name: 'soon', date: '2026-09-30', volumeNumber: 8}], '2026-09-25').map(row => row.id)).toEqual(['today', 'old', 'soon']);

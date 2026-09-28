@@ -61,6 +61,15 @@ it('searches nested albums as folder-style result rows and opens a Library scope
  fireEvent.change(screen.getByRole('searchbox',{name:'앨범 찾기'}),{target:{value:'missing'}});
  expect(screen.getByText('일치하는 앨범이 없습니다.')).toBeTruthy();
 });
+it('keeps folder thumbnails mounted while switching to albums and back',async()=>{
+ const tree={adopted:true,libraryId:'a'.repeat(32),epoch:1,code:'',albums:[{id:'a',parentId:null,name:'앨범 A',iconKey:null,colorKey:null}]};
+ function Root(){const [segment,onSegment]=useState<'folders'|'albums'>('folders');return <LibraryRoot {...props} albumTree={tree} segment={segment} onSegment={onSegment}/>;}
+ render(<Root/>);
+ const folderImage=await waitFor(()=>{const image=document.querySelector('.library-root-folders img');if(!image)throw new Error('folder thumbnail not ready');return image;});
+ fireEvent.click(screen.getByRole('tab',{name:'앨범'}));await screen.findByText('앨범 A');
+ fireEvent.click(screen.getByRole('tab',{name:'분류'}));
+ expect(document.querySelector('.library-root-folders img')).toBe(folderImage);
+});
 it('aligns cards at the top with an identical cover boundary in grids and strips',()=>{
  const folders=[{id:'a',name:'Parent',parent_id:null,asset_count:1},{id:'b',name:'Plain',parent_id:null,asset_count:0},{id:'c',name:'Child',parent_id:'a',asset_count:1}];
  const view=render(<FolderCards items={folders.slice(0,2)} entries={folders} paused revision={1} onSelect={()=>{}}/>);

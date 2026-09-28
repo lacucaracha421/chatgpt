@@ -18,7 +18,7 @@ import {genericView,isLedgerKind,LEDGER,LEDGER_MONTH} from '../src/notes/ledger/
 import {LedgerCard,NoteLedger} from './NoteLedger';
 import {NoteChecklist} from './NoteChecklist';
 import {copySecret,SecretEditor,SecretGate} from './NoteSecret';
-import {revealCaret} from './noteCaret';
+import {caretOffsetAtPoint,revealCaret} from './noteCaret';
 import './notes.css';
 import {matchesKoreanSearch} from '../src/shared/koreanSearch';
 import {Scrubber} from './Scrubber';
@@ -226,7 +226,13 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   }
   function startBodyEdit(event?:MouseEvent){
     if(event&&(event.target as HTMLElement).closest('a,button,input,label'))return;
-    setEditingBody(true);requestAnimationFrame(()=>bodyRef.current?.focus());
+    const point=event?{x:event.clientX,y:event.clientY}:null;
+    setEditingBody(true);requestAnimationFrame(()=>{
+      const area=bodyRef.current;
+      if(!area)return;
+      area.focus();
+      if(point){const offset=caretOffsetAtPoint(area,point.x,point.y);if(offset!==null)area.setSelectionRange(offset,offset);}
+    });
   }
   // ---- Keyboard: fit the editor to the visible area above the keyboard and keep the caret in view.
   const section=useRef<HTMLElement>(null);
@@ -291,9 +297,9 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
       <div className="notes-editor"><SecretGate store={store} onOpened={()=>{setCreatingSecret(false);select(store.create('secret'));requestAnimationFrame(()=>titleRef.current?.focus());}} onCancel={()=>setCreatingSecret(false)}/></div>
     </>}
     {state.ready&&state.unlocked&&note&&ledgerOpen&&<NoteLedger store={store} ledger={note} notes={state.notes} backRef={ledgerBack} onLeave={close} onMore={()=>setSheet('more')}
-      saveState={state.saving?'저장 중':state.notes.some(n=>n.pending&&(n.id===note.id||n.ledger===note.id))?'저장됨':'동기화됨'}/>}
+      saveState={state.error?'확인 필요':state.saving?'저장 중':editing?'':state.notes.some(n=>n.pending&&(n.id===note.id||n.ledger===note.id))?'저장됨':'동기화됨'}/>}
     {state.ready&&state.unlocked&&note&&!ledgerOpen&&<>
-      <header className="notes-top is-sub"><IconButton label="메모 목록" icon={ArrowLeftIcon} onClick={close}/><span className="notes-save-state" role="status">{state.saving?'저장 중':note.pending?'저장됨':'동기화됨'}</span><span className="notes-top__space"/>
+      <header className="notes-top is-sub"><IconButton label="메모 목록" icon={ArrowLeftIcon} onClick={close}/><span className="notes-save-state" role="status">{state.error?'확인 필요':state.saving?'저장 중':editing?'':note.pending?'저장됨':'동기화됨'}</span><span className="notes-top__space"/>
         {canConvert&&<IconButton label={kind==='checklist'?'메모로 바꾸기':'체크리스트로 바꾸기'} icon={kind==='checklist'?DocumentTextIcon:ListBulletIcon} onClick={convert}/>}
         {!note.deleted&&kind==='text'&&!note.readOnly&&<MarkdownHelpButton/>}
         {!note.deleted&&isSecret(note)&&!note.redacted&&<IconButton label="지금 잠그기" icon={LockClosedIcon} onClick={lockSecrets}/>}

@@ -92,6 +92,7 @@ describe('tab return retention',()=>{
     mocks.api.mockImplementation((path:string)=>{
       if(path.endsWith('/status'))return Promise.resolve({revision:'r1'});
       if(path.startsWith('/v1/collections/releases'))return Promise.resolve({revision:1,counts:{unread:0,collections:[]},items:[],nextCursor:null,hasMore:false});
+      if(path.startsWith('/v1/collections?')&&path.includes('showcase=true'))return Promise.resolve(page);
       if(path.startsWith('/v1/collections?'))return ++lists===1?oldList.promise:Promise.resolve(page);
       return ++details===1?oldDetail.promise:Promise.resolve({revision:'r1',item});
     });
@@ -304,20 +305,39 @@ describe('read-only collections',()=>{
     fireEvent.click(screen.getByRole('button',{name:'초기화'}));
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('rating=all'));
   });
-  it('keeps Showcase folded until asked, then reads it without list filters and opens its full view',async()=>{
+  it('preloads the Showcase count, keeps it folded until asked, and opens its full view',async()=>{
     const backRef:{current:(()=>boolean)|null}={current:null};
     render(<Collections active paused={false} backRef={backRef}/>);await screen.findByText('밤의 도서관');
     const showcaseCalls=()=>mocks.api.mock.calls.filter(([path])=>path.includes('showcase=true'));
     const fold=screen.getByRole('button',{name:/쇼케이스/});
-    expect(fold.getAttribute('aria-expanded')).toBe('false');expect(showcaseCalls()).toHaveLength(0);
+    expect(fold.getAttribute('aria-expanded')).toBe('false');await waitFor(()=>expect(showcaseCalls()).toHaveLength(1));
     fireEvent.click(fold);
-    await waitFor(()=>expect(showcaseCalls()).toHaveLength(1));
+    expect(showcaseCalls()).toHaveLength(1);
     expect(showcaseCalls()[0][0]).not.toMatch(/rating=|sort=/);
     fireEvent.click(screen.getByRole('button',{name:'전체 보기'}));
     expect(await screen.findByText('PC에서 정한 순서대로 보여 줍니다.')).toBeTruthy();
     act(()=>{expect(backRef.current?.()).toBe(true);});
     expect(screen.getByRole('tab',{name:'게임'})).toBeTruthy();
     expect(showcaseCalls()).toHaveLength(1);
+  });
+  it('updates Showcase per type and hides the previous type while the new list loads',async()=>{
+    let finishManga!:(value:CollectionPage)=>void;
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path.includes('showcase=true')){
+        if(path.includes('type=manga'))return new Promise(resolve=>{finishManga=resolve;});
+        return {...page,totalCount:1,items:[{...item,id:'game-showcase',name:'게임 쇼케이스'}]};
+      }
+      if(path.includes('type=manga'))return {...page,items:[{...item,id:'manga-main',name:'만화 작품'}]};
+      return {...page,totalCount:1};
+    });
+    render(<Collections active paused={false} backRef={{current:null}}/>);
+    const fold=await screen.findByRole('button',{name:/쇼케이스/});await waitFor(()=>expect(screen.getByText('밤의 도서관')).toBeTruthy());
+    fireEvent.click(fold);expect(await screen.findByText('게임 쇼케이스')).toBeTruthy();
+    pressTab('만화');await screen.findByText('만화 작품');
+    expect(screen.queryByText('게임 쇼케이스')).toBeNull();
+    await act(async()=>finishManga({...page,totalCount:2,items:[{...item,id:'manga-showcase',name:'만화 쇼케이스'}]}));
+    expect(await screen.findByText('만화 쇼케이스')).toBeTruthy();
+    expect(document.querySelector('.collection-fold')?.textContent).toContain('2');
   });
   it('does not present unfiltered results from an older server as filtered results',async()=>{
     mocks.api.mockResolvedValue({...page,filterVersion:undefined});

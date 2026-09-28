@@ -260,6 +260,7 @@ export type MemoRow =
   | {id: string; title: string; color: string | null; kind: 'ledger'; month: number; label: '쓸 수 있는 돈' | '쓴 돈'; amount: number; categories: {label: string; amount: number}[]; latest: {label: string; amount: number}[]}
   | {id: string; title: string; color: string | null; kind: 'secret'}
   | {id: string; title: string; color: string | null; kind: 'text'; snippet: string};
+const homeMemoSnippet = (body: string) => body.split('\n').map(stripMarkdown).map(line => line.replace(/\\([\\`*_{}[\]()#+.!><-])/g, '$1')).map(line => line.trim()).filter(Boolean).join(' ').slice(0, 160);
 /** Pinned notes, most recently edited first, as one line each; month notes of a 가계부 never show. */
 export function memoRows(notes: Note[], today = localToday()): MemoRow[] {
   return notes.filter(note => note.pinned && !note.deleted && !note.archived && note.type !== LEDGER_MONTH)
@@ -285,7 +286,7 @@ export function memoRows(notes: Note[], today = localToday()): MemoRow[] {
         const items = [...(note.items ?? [])].sort(byOrder);
         return {...base, kind: 'checklist', done: items.filter(item => item.checked).length, total: items.length, items: items.slice(0, 5).map(item => ({text: item.text, checked: item.checked}))};
       }
-      return {...base, kind: 'text', snippet: note.body.split('\n').map(stripMarkdown).map(line => line.trim()).filter(Boolean).join(' ').slice(0, 160)};
+      return {...base, kind: 'text', snippet: homeMemoSnippet(note.body)};
     });
 }
 export type HomeMemos = {rows: MemoRow[]; locked: boolean} | null;

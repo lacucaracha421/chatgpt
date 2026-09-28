@@ -30,6 +30,25 @@ it('shows text notes rendered, edits the source on tap and returns to the render
  fireEvent.blur(area,{relatedTarget:screen.getByRole('textbox',{name:'메모 제목'})});
  await waitFor(()=>expect(screen.queryByRole('textbox',{name:'메모 내용'})).toBeNull());
 });
+it('places the source caret under the rendered text that was tapped',async()=>{
+ const caretPositionFromPoint=vi.fn(()=>{
+  const mirror=[...document.body.children].find(element=>{const style=(element as HTMLElement).style;return style.position==='fixed'&&style.visibility==='hidden';}) as HTMLElement|undefined;
+  return mirror?.firstChild?{offsetNode:mirror.firstChild,offset:7}:null;
+ });
+ Object.defineProperty(document,'caretPositionFromPoint',{configurable:true,value:caretPositionFromPoint});
+ mock.native.mockImplementation(state([{...note,body:'첫 줄\n\n아래 줄의 본문'}]));
+ try {
+  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
+  fireEvent.click(await rendered('아래 줄의 본문'),{clientX:120,clientY:200});
+  const area=await screen.findByRole('textbox',{name:'메모 내용'}) as HTMLTextAreaElement;
+  await waitFor(()=>expect(area.selectionStart).toBe(7));
+ } finally {delete (document as Document & {caretPositionFromPoint?:unknown}).caretPositionFromPoint;}
+});
+it('does not show the saved indicator while an open note is being edited',async()=>{
+ mock.native.mockImplementation(state([{...note,pending:true}]));
+ render(<Notes active backRef={{current:null}}/>);await openNote('제목');
+ expect(screen.queryByText('저장됨')).toBeNull();
+});
 it('keeps typing made during a save and writes it against the acknowledged local revision',async()=>{
  let finish!:(value:MobileNote)=>void;
  mock.native.mockImplementation(async(op,p)=>{

@@ -16,6 +16,28 @@ export function caretOffset(area:HTMLTextAreaElement):{top:number;height:number}
   return result;
 }
 
+/** Finds the source offset under a tap by measuring the textarea's own wrapping. */
+export function caretOffsetAtPoint(area:HTMLTextAreaElement,x:number,y:number):number|null {
+  const style=getComputedStyle(area),rect=area.getBoundingClientRect();
+  const mirror=document.createElement('div');
+  for(const key of COPIED)mirror.style[key]=style[key];
+  Object.assign(mirror.style,{position:'fixed',visibility:'hidden',pointerEvents:'none',top:`${rect.top}px`,left:`${rect.left}px`,width:`${rect.width||area.offsetWidth}px`,height:`${rect.height||area.offsetHeight}px`,whiteSpace:'pre-wrap',overflowWrap:'break-word',overflow:'hidden'});
+  mirror.textContent=area.value;
+  document.body.append(mirror);
+  const documentWithCaret=document as Document & {
+    caretPositionFromPoint?: (x:number,y:number)=>{offsetNode:Node;offset:number}|null;
+    caretRangeFromPoint?: (x:number,y:number)=>Range|null;
+  };
+  const position=documentWithCaret.caretPositionFromPoint?.(x,y);
+  const range=position?null:documentWithCaret.caretRangeFromPoint?.(x,y);
+  const node=position?.offsetNode??range?.startContainer;
+  const offset=position?.offset??range?.startOffset;
+  const text=mirror.firstChild;
+  const result=node===text&&offset!==undefined?Math.max(0,Math.min(area.value.length,offset)):null;
+  mirror.remove();
+  return result;
+}
+
 /**
  * Scrolls `pane` so the focused field's caret sits above the keyboard. The note editor calls
  * it when the visible viewport shrinks (the keyboard opened) and while typing, so the line

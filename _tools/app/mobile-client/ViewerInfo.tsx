@@ -33,6 +33,18 @@ export function openableSource(url: string | undefined): url is string {
   return !!url && /^https?:\/\//.test(url);
 }
 
+/** X and Twitter media links point at an image page; opening the post is less surprising. */
+export function sourceOpenUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (!/^(?:www\.)?(?:x\.com|twitter\.com)$/i.test(parsed.hostname)) return url;
+    parsed.pathname = parsed.pathname.replace(/\/(?:photo|video)\/\d+\/?$/i, '') || '/';
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 function sourcePublishedLabel(value: string): string {
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date.toLocaleDateString('ko-KR', {year: 'numeric', month: '2-digit', day: '2-digit'}) : value;
@@ -152,7 +164,7 @@ export function ViewerInfo({asset, mediaError = '', onClose}: {asset: Asset; med
     const snapshot = {assetId: lifetime.current.assetId, generation: lifetime.current.generation};
     setStatus(null);
     try {
-      await native('openExternal', {url: source});
+      await native('openExternal', {url: sourceOpenUrl(source)});
     } catch (reason) {
       if (current(snapshot)) setStatus({kind: 'failed', label: errorText(reason) || '출처를 열지 못했습니다.'});
     }

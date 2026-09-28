@@ -105,6 +105,17 @@ it('only requests nearby strip covers and retains loaded previews through foldin
   expect(mocks.loadThumbnail).toHaveBeenCalledTimes(2);
   expect(mocks.loadThumbnail.mock.calls.at(-1)?.[0].id).toBe('thumb-8');
 });
+it('keeps a loaded character folder thumbnail when the published revision changes',async()=>{
+ const first=structuredClone(index);first.nodes=first.nodes.map(item=>item.id==='group:g'?{...item,thumbnailAssetId:'group-thumb'}:item);
+ let current=first;
+ mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?current:page());
+ const view=render(<CharacterBrowser {...props} initialNode="series:s"/>);
+ const image=await waitFor(()=>{const element=document.querySelector('.character-card img');if(!element)throw new Error('thumbnail not ready');return element;});
+ current={...first,revision:'b'.repeat(64)};
+ view.rerender(<CharacterBrowser {...props} initialNode="series:s" refreshKey={2}/>);
+ await waitFor(()=>expect(document.querySelector('.character-card img')).toBe(image));
+ expect(mocks.loadThumbnail).toHaveBeenCalledTimes(1);
+});
 
 it('keeps series filters usable while folded and offers folding inside a group',async()=>{
   render(<CharacterBrowser {...props} initialNode="series:s"/>);

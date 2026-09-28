@@ -512,9 +512,11 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   const mainKey=JSON.stringify([collectionPath(type,search,false,null,filters),refresh]);
   const main=useCollectionList(cursor=>collectionPath(type,search,false,cursor,filters),mainKey,live,
     {slot:type,prepare:prepareCovers,validate:result=>{if(result.ready&&result.filterVersion!==1)throw new Error('별점 필터와 정렬을 사용하려면 서버 업데이트가 필요합니다.');}});
-  const wantShowcase=live&&(showcaseOpen||showcaseAll)&&(!filtered||showcaseAll);
+  const wantShowcase=live&&(!filtered||showcaseAll);
   const showcaseKey=JSON.stringify([collectionPath(type,'',true,null),refresh]);
   const showcase=useCollectionList(cursor=>collectionPath(type,'',true,cursor),showcaseKey,wantShowcase,{slot:type,prepare:prepareCovers});
+  const showcaseItems=showcase.committed?showcase.items:[];
+  const showcasePage=showcase.committed?showcase.page:null;
   const listPull=usePullToRefresh(listRef,bump,main.busy,!live||!!selected||showcaseAll||inboxOpen);
   const showcasePull=usePullToRefresh(showcaseRef,bump,showcase.busy,!live||!showcaseAll||!!selected);
   const detailPull=usePullToRefresh(detailRef,()=>setDetailRefresh(n=>n+1),!!selected&&!detail&&!detailError,!active||paused||!selected);
@@ -613,7 +615,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
     :inboxOpen
       ?<TopBar back={{label:'뒤로',onClick:closeInbox}} crumbs={<span className="top-bar__crumbs">컬렉션</span>} title="신간"/>
     :showcaseAll
-      ?<TopBar loading={showcase.busy&&'쇼케이스 불러오는 중'} back={{label:'뒤로',onClick:()=>setShowcaseAll(false)}} crumbs={<span className="top-bar__crumbs">컬렉션 › {labels[type]}</span>} title={<>쇼케이스{showcase.page?.totalCount!=null&&<span className="numeric muted"> {showcase.page.totalCount.toLocaleString()}</span>}</>}/>
+      ?<TopBar loading={showcase.busy&&'쇼케이스 불러오는 중'} back={{label:'뒤로',onClick:()=>setShowcaseAll(false)}} crumbs={<span className="top-bar__crumbs">컬렉션 › {labels[type]}</span>} title={<>쇼케이스{showcasePage?.totalCount!=null&&<span className="numeric muted"> {showcasePage.totalCount.toLocaleString()}</span>}</>}/>
       :searching&&tab!=='av'
         ?<TopBarSearch title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
@@ -650,15 +652,15 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       {tab==='av'?<>
       <AvLookupSender/>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
-      {unpublished(main)?unpublishedNotice:main.busy&&!main.committed?<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<div className="empty-state"><RectangleStackIcon/><h2>PC 앱이 AV 작품을 아직 보내지 않았습니다</h2><p>PC 앱에서 AV 컬렉션을 게시하면 여기에 표시됩니다.</p></div>:<AvCollectionList items={main.items} showcase={showcase.items} showcaseOpen={showcaseOpen} onShowcase={()=>setShowcaseOpen(open=>!open)} revision={revision} active={live&&!selected} view={avView} onView={chooseAvView} onOpen={openWork} total={main.page?.totalCount} filters={filters} sortLabel={sortLabel} onSort={()=>setSheet('sort')} onRating={()=>setSheet('rating')} onReset={()=>changeFilters({...filters,rating:'all'})}/>}
+      {unpublished(main)?unpublishedNotice:main.busy&&!main.committed?<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<div className="empty-state"><RectangleStackIcon/><h2>PC 앱이 AV 작품을 아직 보내지 않았습니다</h2><p>PC 앱에서 AV 컬렉션을 게시하면 여기에 표시됩니다.</p></div>:<AvCollectionList items={main.items} showcase={showcaseItems} showcaseOpen={showcaseOpen} onShowcase={()=>setShowcaseOpen(open=>!open)} revision={revision} active={live&&!selected} view={avView} onView={chooseAvView} onOpen={openWork} total={main.page?.totalCount} filters={filters} sortLabel={sortLabel} onSort={()=>setSheet('sort')} onRating={()=>setSheet('rating')} onReset={()=>changeFilters({...filters,rating:'all'})}/>}
       {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
       {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
       </>:<>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
       {unpublished(main)?unpublishedNotice:<>
         {!filtered&&<section className="collection-showcase-fold" aria-label="쇼케이스">
-          <div className="collection-section"><button className="collection-fold" aria-expanded={showcaseOpen} onClick={()=>setShowcaseOpen(open=>!open)}><h2>쇼케이스{showcase.page?.totalCount!=null&&<span className="numeric muted"> {showcase.page.totalCount.toLocaleString()}</span>}</h2><ChevronDownIcon aria-hidden="true"/></button>{showcaseOpen&&<Button variant="ghost" className="collection-more" onClick={()=>setShowcaseAll(true)}>전체 보기<ChevronRightIcon/></Button>}</div>
-          {showcaseOpen&&<div className="collection-shelf">{showcase.busy&&!showcase.items.length&&<p role="status" className="hint">쇼케이스를 불러오는 중…</p>}{showcase.error&&<p className="error-message" role="alert">{showcase.error}</p>}{!showcase.busy&&showcase.committed&&!showcase.items.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}{showcase.items.map(work=><WorkCard key={work.id} work={card(work)} revision={showcase.page?.revision??''} active={live&&!selected} meta={false} caption={captionOf(work)} onOpen={openWork}/>)}</div>}
+          <div className="collection-section"><button className="collection-fold" aria-expanded={showcaseOpen} onClick={()=>setShowcaseOpen(open=>!open)}><h2>쇼케이스{showcasePage?.totalCount!=null&&<span className="numeric muted"> {showcasePage.totalCount.toLocaleString()}</span>}</h2><ChevronDownIcon aria-hidden="true"/></button>{showcaseOpen&&<Button variant="ghost" className="collection-more" onClick={()=>setShowcaseAll(true)}>전체 보기<ChevronRightIcon/></Button>}</div>
+          {showcaseOpen&&<div className="collection-shelf">{showcase.busy&&!showcaseItems.length&&<p role="status" className="hint">쇼케이스를 불러오는 중…</p>}{showcase.error&&<p className="error-message" role="alert">{showcase.error}</p>}{!showcase.busy&&showcase.committed&&!showcaseItems.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}{showcaseItems.map(work=><WorkCard key={work.id} work={card(work)} revision={showcasePage?.revision??''} active={live&&!selected} meta={false} caption={captionOf(work)} onOpen={openWork}/>)}</div>}
         </section>}
         <div className="collection-section collection-all"><h2>{filtered?'검색 결과':'전체'}{main.page?.totalCount!=null&&<span className="numeric muted collection-total" aria-label="필터 결과 개수"> {main.page.totalCount.toLocaleString()}</span>}</h2>
         <div className="filter-chips collection-chips" role="group" aria-label="정렬과 필터">
@@ -678,9 +680,9 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       {showcasePull}
       <p className="hint collection-showcase-note">PC에서 정한 순서대로 보여 줍니다.</p>
       {showcase.error&&<div className="error-message" role="alert">{showcase.error}<Button variant="ghost" onClick={showcase.reload}>처음부터 새로고침</Button></div>}
-      {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcase.items.map(work=><WorkCard key={work.id} work={work} revision={showcase.page?.revision??''} active={live} meta={false} caption={captionOf(work)} onOpen={openWork} arriving={showcaseArrivals.arriving(work.id)} onArrived={showcaseArrivals.arrived}/>)}</div>}
+      {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcaseItems.map(work=><WorkCard key={work.id} work={work} revision={showcasePage?.revision??''} active={live} meta={false} caption={captionOf(work)} onOpen={openWork} arriving={showcaseArrivals.arriving(work.id)} onArrived={showcaseArrivals.arrived}/>)}</div>}
       {showcase.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
-      <Scrubber scrollRef={showcaseRef} total={showcase.items.length} sort={showcaseScrubberSort} hidden={!active||paused||!!selected||!showcaseAll} onEndReached={showcase.loadMore}/>
+      <Scrubber scrollRef={showcaseRef} total={showcaseItems.length} sort={showcaseScrubberSort} hidden={!active||paused||!!selected||!showcaseAll} onEndReached={showcase.loadMore}/>
     </>}</div>
     {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={openWork} ownedOf={ownedOf} watching={watching}
       cover={(work,workRevision,name)=>work?<Artwork item={work} id={collectionCover(work)} revision={workRevision} active={active&&!paused&&!selected} label={name}/>:<span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>}/>}
