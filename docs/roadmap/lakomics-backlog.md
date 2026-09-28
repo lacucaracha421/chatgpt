@@ -180,6 +180,41 @@ Status: `TODO` — direction chosen by the user 2026-09-27 after a read-only tri
 - Proposed design: store the feature per image (like the character caches, rebuilt by one backfill + daily new images); per unknown image rank artists by their best (or top-3 mean) neighbour similarity; show candidates above a calibrated threshold in the 작가 미상 view and on the image inspector ("닮은 작가: ○○ · 유사도"), grouped per suggested artist for bulk confirmation; dismissals are remembered. Optionally show the Danbooru name as a hint when its confidence is high.
 - Before building: finish the full-library run, exclude near-duplicates (same post / PDQ match) from the evaluation, pick the threshold on walk-forward data, and check the false-suggestion rate on a sample the user reviews. Heavy runs go one at a time on the laptop (see PC load limits) or on a rented GPU.
 
+## TABLET-FEEDBACK-20260928 — Tablet real-use feedback, 2026-09-28 evening
+
+Collected by the user while using tablet 0.8.64. Grouped for execution; design items get Claude mockups first.
+
+- **Bugs and polish (batch 1, after the scrubber lands):** sort/filter sheet flickers when it opens (에셋); thumbnail-size setting is not kept; filter chips keep a selected/pressed effect (remove it); 메모 shows "저장됨" while editing (hide it); Folder/Album switch looks like thumbnails reload; character folder thumbnails flicker (cache miss?); 쇼케이스 per-type counts do not update and the game view briefly shows every Showcase; bottom-bar tab switch shows the un-blurred background for a moment before the gradient applies; 출처 열기 should open the post (drop Twitter/X `/photo/N`); Home: "마법소녀를 동경해서" thumbnail refreshes on each Home visit while 신간 calendar covers stay (compare paths); 메모 editor puts the caret at the top when tapping text lower down; Catalog image request path optimisation.
+- **Design (mockups first):** Home — remove 관심 marks from the release calendar, drop the "발매 예정" label, consistent text sizes, fewer words and more content, drop or fold 처리할 것, a transition animation when switching to Home; Collections — 신간/캘린더 blend into the page and replace that toggle-button style (used elsewhere too); 신간 캘린더 bookmark mark placed outside the cover; 에셋 top level split into 분류 · 앨범 · 작가 (artist entry point on the tablet); artist list sort and edit on the tablet; 메모 gets a 피드백 kind (feedback and fix notes about the user's own apps).
+- **Later / questions:** after PC AV work (StashDB profile) carry the AV design to the tablet and Home. Decided 2026-09-28: the tablet AV performer page also shows the StashDB profile (same fields as the PC screen A: 생년월일·나이, 키, 사이즈, 가슴 유형, 활동, 링크). Needs the PC to publish the profile (today `collection_person_profiles` is PC-only and excluded from snapshots) — a publication field plus a server model change; the chosen StashDB portrait may follow later.
+- **Catalog refresh reach (answered 2026-09-28):** a tablet 카탈로그 갱신 (`POST /v1/mobile-catalog/refresh`) updates only the server publication (`mobile_catalog_server_additions`, re-applied over later PC publications); the PC never reads it and only catches up on its own kHentai update. Decided 2026-09-28: the PC imports the server additions into its local catalog (the PC stays the catalog owner and publisher; its own kHentai update keeps running) — do not switch the PC to read the server catalog.
+- **HOLD — 가계부 import (decided 2026-09-28):** no personal API exists (Naver Pay has no consumer API; 오픈뱅킹/마이데이터 need a registered business and review or a licence). When resumed: import the Excel/CSV history the user downloads from Naver Pay (결제내역 → 엑셀 다운로드) and their card companies, one parser per source, user confirms before saving. Notification capture (NotificationListenerService, restricted setting on sideloaded apps) is the optional later step.
+
+## USER-FEEDBACK-20260928B — Second feedback batch, 2026-09-28 night
+
+- **Tablet:** animate new images arriving when a list refreshes (new tiles fade/slide in instead of popping).
+- **PC 메모:** consider editing in a full editor instead of the right-hand panel; the sync button keeps re-rendering (distracting); decide what to do with the empty space in the 메모 sidebar (fill or remove); the editor forces the caret to the top on focus (same bug as the tablet); add undo with Ctrl+Z (and a visible 되돌리기).
+- **PC 망가:** remove metadata of local folders that no longer exist (production data change — needs the user's choice of confirm flow); show local-folder counts in the sidebar; the reading viewer (not the tagged detail viewer) flickers on every page turn.
+- **PC 카탈로그:** automatic confirmation of duplicate editions.
+- **PC 에셋 (third batch, 2026-09-28):** sidebar top level = 전체 · 작가 · 앨범, and these three stay pinned at the top of the sidebar inside 작가 and 앨범; 앨범 laid out as a mosaic like the tablet, add/edit from the sidebar; 작가 tab hides "그 외 작가" and one-image artists, and 주요 작가 are searchable; hide character folders from the sidebar; after multi-selecting assets, the character picker groups smarter (same group together, sort by count instead of name); plain click must not start multi-select on the PC (only Ctrl/Shift-click does).
+- **PC Home:** text minimised like the tablet design A (`docs/prototypes/tablet-home-minimal-20260928/`).
+- **PC 설정 remake:** gather frequently used functions in one place, one type scale and form style, remove unused settings.
+- **PC rail 찾기:** the user rarely uses it; proposal: remove the rail button, keep Ctrl+K.
+- **PC 자연어 검색:** earlier trial `docs/research/oss-trial-clip-20260927.md` (SigLIP2-base P@10 KO 0.25 / EN 0.53 / image 0.64; Korean about half of English). Proposal to decide: tag search first on the auto tags (Korean query → tags), SigLIP2 only as a fallback for mood/scene queries (~1 h backfill on this PC).
+- **PC animation polish** like the tablet — last, after everything above.
+- **PC video thumbnails** are intermittently not generated (unknown cause — investigate with the failing files).
+- **PC 발매 캘린더:** remove the anime/film release-type captions (일본 방영, 국내 상영 …) in the calendar view too (Home already dropped them); consistent spacing between icon badges and text.
+- **Design rules (approved 2026-09-28, do first in the next session):** add a one-page spacing/type/badge section to `DESIGN.md` — spacing steps 4 · 8 · 12 · 16 · 24 (icon↔text and badge↔badge 4, groups in a row 8, card padding 12–16, sections 24), 3–4 type sizes (title · body · meta · number), one badge spec (e.g. height 20, icon 14, one radius) — then apply it in the Home, Settings and calendar redesigns; tablet memory follow-up: WebView renderer baseline grew 55 → ~170 MB over 1 h 45 min with one 704 MB spike (large image in the viewer?) — check viewer image release and WebView image-cache bounds (HOME-OPT-001).
+- **Decided 2026-09-28 (user):** PC 메모 edits in a full editor that replaces the 메모 area (Esc/back returns to the list); remove the 메모 sidebar and move the kind filters (전체 · 메모 · 체크리스트 · 가계부 · 피드백) to top chips; vanished local manga folders: show a "없어진 폴더 N개" list, delete only the selected ones, automatic backup first; duplicate editions: auto-confirm only certain matches (same title, artist, page count and near-identical cover), keep the rest in review, log auto decisions and allow undo.
+
+## HOME-OPT-001 — Home optimisation and debugging pass (PC and tablet)
+
+Status: `TODO` — added by the user 2026-09-28 after the Home redesigns (PC `b5c4eafa` and follow-ups, tablet 0.8.60–0.8.62).
+
+- Measure first: time to first useful Home paint and number/size of requests on PC (dev and release) and on the tablet (cold and warm start), and which sections wait on which reads (overview, calendar, wishlist, revisit slate, artist today, AV pick, memos, exchange).
+- Look for Home bugs the redesign may have introduced: layout shifts while sections load, stale counts after returning from another screen, shelf scroll/drag edge cases, privacy mode, empty states, offline/server-down behaviour, one-screen fit on the tablet with long names.
+- Fix what the measurements and checks show; no speculative rewrites (see docs/agents/implementation.md, Performance work).
+
 ## PC-DECLUTTER-001 — PC app declutter (concepts A+B+C, staged)
 
 Status: `IN PROGRESS` — stages C and A are implemented; the former Revisit dependency for stage B was replaced by the Artist hub (`57a4fa85`, `532b7cc0`) and PC Home (`b5c4eafa`). The remaining scope is native Windows acceptance and any concrete declutter regression. Concepts in `docs/prototypes/pc-declutter-20260924/` remain the design record.
@@ -375,6 +410,8 @@ The following initial plan is retained as context; the implementation checkpoint
 ## MOBILE-UX-001 — Portrait real-use follow-up
 
 Status: `PARTIAL` — the browse-first redesign and later Catalog/Notes/Home parity work are shipped through Android 0.8.61; the tablet's current release and acceptance records are in the 2026-09-28 checkpoint and `android/README.md`. Remaining: landscape two-pane Library, older dimension/duplicate-check evaluations, 3D model files and classification-capacity investigation. The 3-column root card option is dropped.
+
+- `HOLD` 2026-09-28 (user): landscape layout is on hold — the need is not clear yet. Discussed reasons to turn the tablet: wide content (video, landscape art), two-page manga spreads, a stand/keyboard setup, split screen (each app becomes a narrow portrait-like window), comfort. If it returns, start from which of these the user actually does; a two-pane Library only helps long browsing sessions.
 
 2026-09-19 Galaxy Tab feedback after the first portrait UI pass. These are user-reported observations and requested improvements, not independently reproduced defects or confirmed root causes. Keep portrait as the priority; landscape redesign remains later.
 

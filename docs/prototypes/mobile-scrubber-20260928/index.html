@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>태블릿 스크러버 목업</title>
+<style>
+/* Fonts are the app's bundled files, loaded by relative path from the repository (no network). */
+@font-face { font-family:"SUIT"; src:url("../../../_tools/app/src/styles/fonts/SUIT-Variable.woff2") format("woff2"); font-weight:100 900; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Regular.ttf") format("truetype"); font-weight:400; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Medium.ttf") format("truetype"); font-weight:500; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight:600; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens copied from _tools/app/src/styles/tokens.css, global.css and chrome.css. */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-toolbar:#191a1b; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-surface-hover:#2d2e2f; --color-control:#232425; --color-control-hover:#2d2e2f;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-faint:#7d8184; --color-accent:#ddd8ca; --color-on-accent:#202628; --color-accent-hover:#e7e2d5;
+  --color-selection-context:rgba(221,216,202,.16); --color-selection-context-text:#f1eee6; --color-selection-echo:rgba(221,216,202,.4);
+  --selection-echo:3px 3px 0 -1px var(--color-sidebar),3px 3px 0 0 var(--color-selection-echo);
+  --selection-mark-size:7px;
+  --color-section-mark:rgba(221,216,202,.6); --section-label-rule:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06));
+  --color-filter-selected:#383838; --color-filter-text:#e7e7e7; --color-filter-border:#808080;
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-focus:#7db1ff;
+  --color-overlay:rgba(7,10,15,.82);
+  --asset-selection-tint:rgb(36 125 137 / 55%);
+  --inset-light:inset 0 1px 0 rgba(255,255,255,.04);
+  --shadow-floating:0 1px 3px rgba(0,0,0,.24),0 8px 20px rgba(0,0,0,.3);
+  --shadow-dialog:0 3px 10px rgba(0,0,0,.26),0 18px 48px rgba(0,0,0,.38);
+  --font-ui:"Barlow","SUIT","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+  --font-mono:"Cascadia Mono","Consolas",monospace;
+  --ok:#7fb88a; --one:#c9a55e;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.5 var(--font-ui); }
+h1,h2,h3,p { margin:0; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+svg.i { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; }
+.doc { max-width:1700px; margin:0 auto; padding:32px 28px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1250px; margin:8px 0 0; line-height:1.7; }
+.lead b, .notes b { color:var(--color-text); font-weight:600; }
+section.topic { margin-top:44px; border-top:1px solid var(--color-border); padding-top:22px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; min-width:28px; height:28px; padding:0 6px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-ui); }
+.notes { color:var(--color-muted); max-width:1300px; line-height:1.7; margin:8px 0 18px; }
+.notes ul { margin:6px 0 0; padding-left:20px; }
+.row { display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; }
+.cap { color:var(--color-muted); font-size:13px; margin-top:8px; max-width:480px; }
+.scale { width:480px; height:768px; overflow:hidden; border:1px solid var(--color-border); border-radius:14px; }
+.scale > .tab { transform:scale(.6); transform-origin:0 0; }
+body.frame-only { background:var(--color-bg); }
+body.frame-only .doc { display:none; }
+#solo { display:none; } body.frame-only #solo { display:block; }
+
+/* ===== Tablet 800 × 1280 (CSS px) ===== */
+.tab { position:relative; width:800px; height:1280px; background:var(--color-bg); display:flex; flex-direction:column; overflow:hidden; }
+.top { height:64px; flex:none; display:flex; align-items:center; gap:14px; padding:0 24px; border-bottom:1px solid var(--color-border); }
+.top small { display:block; color:var(--color-faint); font-size:12px; }
+.top b { font-size:20px; font-weight:600; } .top .n { color:var(--color-muted); margin-left:6px; font:500 15px var(--font-numeric); }
+.top .sp { flex:1; }
+.chips { display:flex; gap:8px; padding:14px 24px 10px; }
+.chips span { padding:6px 14px; border-radius:6px; color:var(--color-muted); font-size:15px; } .chips span.on { background:var(--color-filter-selected); color:var(--color-text); }
+.grid { flex:1; min-height:0; overflow:hidden; padding:0 16px; display:grid; grid-template-columns:repeat(4,1fr); gap:8px; align-content:start; }
+.grid img { width:100%; height:100%; display:block; object-fit:cover; border-radius:3px; }
+.grid .t { aspect-ratio:3/4; }
+.grid .sec { grid-column:1/-1; display:flex; align-items:baseline; gap:8px; padding:10px 4px 2px; font-weight:600; }
+.grid .sec small { color:var(--color-faint); font:500 13px var(--font-numeric); }
+.nav { flex:none; height:64px; margin-bottom:8px; display:flex; justify-content:center; gap:4px; padding:7px 24px; border-top:1px solid var(--color-border); background:var(--color-sidebar); position:relative; z-index:3; }
+.nav span { display:flex; align-items:center; justify-content:center; gap:10px; width:148px; border-radius:6px; color:var(--color-muted); font-size:14px; }
+.nav span.on { background:var(--color-accent); color:var(--color-on-accent); }
+
+/* ===== Scrubber ===== */
+.scrub { position:absolute; left:0; right:0; bottom:72px; height:56px; z-index:2; pointer-events:none; }
+/* idle: nothing drawn; the 28px band above the nav is still the touch target (dashed only in this doc) */
+.scrub.idle .zone { position:absolute; left:16px; right:16px; bottom:0; height:28px; border:1px dashed rgba(221,216,202,.35); border-radius:6px; }
+.scrub.idle .zone::after { content:'터치 영역 (보이지 않음)'; position:absolute; right:8px; top:4px; font-size:11px; color:rgba(221,216,202,.55); }
+/* hint while flinging: hairline progress */
+.scrub.hint .line { position:absolute; left:24px; right:24px; bottom:6px; height:2px; background:rgba(255,255,255,.08); border-radius:1px; }
+.scrub.hint .line i { position:absolute; top:-2px; height:6px; width:44px; border-radius:3px; background:rgba(221,216,202,.75); }
+/* active */
+.scrub.on { height:84px; }
+.scrub.on .bar { position:absolute; left:12px; right:12px; bottom:4px; height:48px; border-radius:10px; background:rgba(26,27,28,.92); border:1px solid var(--color-border-strong); box-shadow:0 8px 24px rgba(0,0,0,.45); backdrop-filter:blur(8px); }
+.scrub.on .track { position:absolute; left:18px; right:18px; top:20px; height:2px; background:rgba(255,255,255,.12); }
+.scrub.on .fill { position:absolute; left:18px; top:20px; height:2px; background:var(--color-accent); }
+.scrub.on .tick { position:absolute; top:12px; width:1px; height:18px; background:rgba(255,255,255,.18); }
+.scrub.on .tick b { position:absolute; top:20px; left:4px; font:500 12px var(--font-numeric); color:var(--color-muted); white-space:nowrap; }
+.scrub.on .tick.minor { top:16px; height:9px; background:rgba(255,255,255,.1); }
+.scrub.on .thumb { position:absolute; top:7px; width:10px; height:28px; margin-left:-5px; border-radius:5px; background:var(--color-accent); box-shadow:0 0 0 4px rgba(221,216,202,.18); }
+.bubble { position:absolute; bottom:64px; transform:translateX(-50%); padding:10px 16px; border-radius:10px; background:var(--color-surface-elevated); border:1px solid var(--color-border-strong); box-shadow:var(--shadow-dialog); white-space:nowrap; text-align:center; }
+.bubble b { display:block; font-size:22px; font-weight:600; line-height:1.2; }
+.bubble small { color:var(--color-muted); font:500 13px var(--font-numeric); }
+.bubble::after { content:''; position:absolute; left:50%; bottom:-7px; width:12px; height:12px; margin-left:-6px; background:var(--color-surface-elevated); border-right:1px solid var(--color-border-strong); border-bottom:1px solid var(--color-border-strong); transform:rotate(45deg); }
+.finger { position:absolute; width:46px; height:46px; margin:-23px 0 0 -23px; border-radius:50%; background:rgba(255,255,255,.14); border:2px solid rgba(255,255,255,.35); }
+.dim { position:absolute; inset:64px 0 72px; background:rgba(0,0,0,.25); z-index:1; }
+/* B: filmstrip */
+.scrub.film .bar { height:64px; }
+.scrub.film { height:100px; }
+.strip { position:absolute; left:18px; right:18px; top:8px; height:48px; display:flex; gap:2px; overflow:hidden; border-radius:4px; }
+.strip img { flex:1; min-width:0; height:100%; object-fit:cover; opacity:.55; }
+.strip .win { position:absolute; top:-2px; bottom:-2px; width:46px; border:2px solid var(--color-accent); border-radius:5px; box-shadow:0 0 0 999px rgba(0,0,0,.25); }
+</style>
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>태블릿 스크롤바(스크러버) — 목업</h1>
+  <p class="lead">긴 목록(에셋 그리드, 컬렉션, 카탈로그)을 빨리 오가는 <b>가로 스크러버</b>. 하단바 바로 위 가로 띠에 있고, <b>평소에는 보이지 않다가 그 띠를 터치했을 때만</b> 나타납니다. 손가락을 좌우로 움직이면 목록 전체의 그 위치로 바로 이동하고, 말풍선에 지금 위치(날짜·이름·순번)가 뜹니다. 그림은 색 블록.</p>
+</header>
+
+<section class="topic" id="sa">
+  <h2><span class="k">A</span>눈금 스크러버 (추천)</h2>
+  <div class="notes">
+    <ul>
+      <li><b>① 평소</b>: 아무것도 그리지 않습니다. 하단바 위 약 28px 띠만 터치를 받습니다(점선은 설명용). 그리드를 위아래로 스크롤하는 손가락은 방해하지 않도록, 띠 안에서 <b>시작한 좌우 드래그</b>만 스크러버로 씁니다.</li>
+      <li><b>② 빠르게 스크롤할 때</b>: 띠 자리에 얇은 진행선(2px)이 1초 동안 떠서 “여기 있다”는 것만 알려 줍니다.</li>
+      <li><b>③ 터치했을 때</b>: 하단바 위로 반투명 막대가 떠오르고, 정렬 기준에 맞는 눈금이 보입니다 — 날짜순이면 연도(큰 눈금)·월(작은 눈금), 이름순이면 ㄱ·ㄴ·ㄷ·A…, 그 밖엔 10% 간격. 손가락 위 말풍선에 <b>“2025년 3월 · 1,240 / 8,912”</b>. 눈금을 지날 때 짧은 진동. 목록은 살짝 어두워져서 “이동 중”임을 보여 줍니다.</li>
+      <li>손을 떼면 그 위치에 멈추고, 막대는 0.8초 뒤 사라집니다. 아직 안 불러온 구간은 회색 칸으로 먼저 보이고 곧 채워집니다(지금 빠른 스크롤과 같은 방식).</li>
+    </ul></div>
+  <div class="row">
+    <div><div class="scale" id="wa1"></div><div class="cap">① 평소 — 보이지 않음 (점선 = 터치 영역)</div></div>
+    <div><div class="scale" id="wa2"></div><div class="cap">② 빠르게 스크롤할 때 — 얇은 진행선</div></div>
+    <div><div class="scale" id="wa3"></div><div class="cap">③ 터치해서 끄는 중 — 눈금 + 말풍선</div></div>
+  </div>
+</section>
+
+<section class="topic" id="sb">
+  <h2><span class="k">B</span>대안: 미리보기 필름 스트립</h2>
+  <div class="notes">③ 대신, 막대 안에 목록 전체를 일정 간격으로 뽑은 작은 썸네일 줄을 보여 주고 지금 위치를 테두리 창으로 표시합니다. 그림으로 찾을 때는 편하지만, 막대가 더 두껍고 썸네일을 더 불러와야 합니다(목록당 30장 안팎).</div>
+  <div class="row"><div><div class="scale" id="wb"></div><div class="cap">B — 필름 스트립</div></div></div>
+</section>
+</div>
+<div id="solo"></div>
+<script>
+const IC={Home:"m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25",
+Photo:"m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Z",
+Stack:"M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878M3 12v6a2.25 2.25 0 0 0 2.25 2.25h13.5A2.25 2.25 0 0 0 21 18v-6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 12Z",
+Book:"M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25",
+Pencil:"m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z",
+Back:"M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18",Adj:"M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"};
+const I=n=>`<svg class="i" viewBox="0 0 24 24"><path d="${IC[n]}"/></svg>`;
+function hsl(h,s,l){return `hsl(${h} ${s}% ${l}%)`;}
+function rnd(s){let x=Math.sin(s*999.13)*10000;return x-Math.floor(x);}
+function ph(seed,w=60,h=80){const r=k=>rnd(seed*7+k),hh=r(0)*360,bg=hsl(hh,26+r(2)*14,66+r(3)*12),mid=hsl(hh+20,24,50+r(4)*12),dk=hsl(hh-15,22,32+r(5)*10);
+ const cx=w*(.3+r(6)*.4),cy=h*(.28+r(7)*.18),rad=w*(.14+r(8)*.1);
+ return 'data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="${bg}"/><path d="M${cx-w*.34} ${h} Q${cx} ${cy+rad*.6} ${cx+w*.34} ${h} Z" fill="${mid}"/><circle cx="${cx}" cy="${cy}" r="${rad}" fill="${dk}" opacity=".9"/></svg>`);}
+function grid(seed){let h='';const secs=[['2025년 3월','412장'],['2025년 2월','388장']];let k=0;
+ for(const [t,n] of secs){h+=`<div class="sec">${t}<small>${n}</small></div>`;for(let i=0;i<12;i++)h+=`<div class="t"><img src="${ph(seed+k++,120,160)}" alt=""></div>`;}return `<div class="grid">${h}</div>`;}
+const nav=`<div class="nav">${[['Home','홈'],['Photo','에셋'],['Stack','컬렉션'],['Book','카탈로그'],['Pencil','메모']].map(([i,l])=>`<span class="${l==='에셋'?'on':''}">${I(i)}${l}</span>`).join('')}</div>`;
+const shell=(inner,seed=1)=>`<div class="tab"><div class="top">${I('Back')}<div><small>에셋</small><b>모든 에셋</b><span class="n">8,912</span></div><span class="sp"></span>${I('Adj')}</div><div class="chips"><span class="on">날짜순</span><span>이름순</span><span>무작위</span></div>${grid(seed)}${inner}${nav}</div>`;
+const YEARS=[['2021',0],['2022',.12],['2023',.27],['2024',.46],['2025',.7],['2026',.9]];
+function ticks(){let h='';for(const [y,p] of YEARS)h+=`<span class="tick" style="left:calc(18px + (100% - 36px) * ${p})"><b>${y}</b></span>`;
+ for(let i=0;i<60;i++){const p=i/60;if(YEARS.some(([,q])=>Math.abs(q-p)<.01))continue;h+=`<span class="tick minor" style="left:calc(18px + (100% - 36px) * ${p})"></span>`;}return h;}
+function A1(){return shell(`<div class="scrub idle"><div class="zone"></div></div>`);}
+function A2(){return shell(`<div class="scrub hint"><div class="line"><i style="left:61%"></i></div></div>`,40);}
+function A3(){const p=.74,x=12+(800-24-36)*p+18;
+ return shell(`<div class="dim"></div><div class="scrub on"><div class="bar"><div class="track"></div><div class="fill" style="width:calc((100% - 36px) * ${p})"></div>${ticks()}<span class="thumb" style="left:calc(18px + (100% - 36px) * ${p})"></span></div>
+ <div class="bubble" style="left:${x}px"><b>2025년 3월</b><small>1,240 / 8,912</small></div><span class="finger" style="left:${x}px;top:52px"></span></div>`,80);}
+function B(){const p=.62,x=12+(800-24-36)*p+18;let imgs='';for(let i=0;i<24;i++)imgs+=`<img src="${ph(300+i,40,60)}" alt="">`;
+ return shell(`<div class="dim"></div><div class="scrub on film"><div class="bar"><div class="strip">${imgs}<span class="win" style="left:calc(${p*100}% - 23px)"></span></div></div>
+ <div class="bubble" style="left:${x}px;bottom:80px"><b>2024년 11월</b><small>3,410 / 8,912</small></div><span class="finger" style="left:${x}px;top:66px"></span></div>`,120);}
+const BUILD={a1:A1,a2:A2,a3:A3,b:B};
+const f=new URLSearchParams(location.search).get('frame');
+if(f&&BUILD[f]){document.body.classList.add('frame-only');document.getElementById('solo').innerHTML=BUILD[f]();}
+else{[['wa1','a1'],['wa2','a2'],['wa3','a3'],['wb','b']].forEach(([id,k])=>document.getElementById(id).innerHTML=BUILD[k]());}
+</script>
+</body>
+</html>

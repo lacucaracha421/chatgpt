@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>태블릿 홈 최소화 목업</title>
+<style>
+/* Fonts are the app's bundled files, loaded by relative path from the repository (no network). */
+@font-face { font-family:"SUIT"; src:url("../../../_tools/app/src/styles/fonts/SUIT-Variable.woff2") format("woff2"); font-weight:100 900; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Regular.ttf") format("truetype"); font-weight:400; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Medium.ttf") format("truetype"); font-weight:500; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight:600; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens copied from _tools/app/src/styles/tokens.css, global.css and chrome.css. */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-toolbar:#191a1b; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-surface-hover:#2d2e2f; --color-control:#232425; --color-control-hover:#2d2e2f;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-faint:#7d8184; --color-accent:#ddd8ca; --color-on-accent:#202628; --color-accent-hover:#e7e2d5;
+  --color-selection-context:rgba(221,216,202,.16); --color-selection-context-text:#f1eee6; --color-selection-echo:rgba(221,216,202,.4);
+  --selection-echo:3px 3px 0 -1px var(--color-sidebar),3px 3px 0 0 var(--color-selection-echo);
+  --selection-mark-size:7px;
+  --color-section-mark:rgba(221,216,202,.6); --section-label-rule:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06));
+  --color-filter-selected:#383838; --color-filter-text:#e7e7e7; --color-filter-border:#808080;
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-focus:#7db1ff;
+  --color-overlay:rgba(7,10,15,.82);
+  --asset-selection-tint:rgb(36 125 137 / 55%);
+  --inset-light:inset 0 1px 0 rgba(255,255,255,.04);
+  --shadow-floating:0 1px 3px rgba(0,0,0,.24),0 8px 20px rgba(0,0,0,.3);
+  --shadow-dialog:0 3px 10px rgba(0,0,0,.26),0 18px 48px rgba(0,0,0,.38);
+  --font-ui:"Barlow","SUIT","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+  --font-mono:"Cascadia Mono","Consolas",monospace;
+  --ok:#7fb88a; --one:#c9a55e;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.45 var(--font-ui); }
+h1,h2,h3,p { margin:0; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+svg.i { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+.doc { max-width:1700px; margin:0 auto; padding:32px 28px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1250px; margin:8px 0 0; line-height:1.7; }
+.lead b, .notes b { color:var(--color-text); font-weight:600; }
+section.topic { margin-top:44px; border-top:1px solid var(--color-border); padding-top:22px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; min-width:28px; height:28px; padding:0 6px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-ui); }
+.notes { color:var(--color-muted); max-width:1300px; line-height:1.7; margin:8px 0 18px; }
+.notes ul { margin:6px 0 0; padding-left:20px; }
+.row { display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; }
+.cap { color:var(--color-muted); font-size:13px; margin-top:8px; max-width:560px; }
+.scale { width:560px; height:896px; overflow:hidden; border:1px solid var(--color-border); border-radius:14px; }
+.scale > .tab { transform:scale(.7); transform-origin:0 0; }
+body.frame-only { background:var(--color-bg); } body.frame-only .doc { display:none; }
+#solo { display:none; } body.frame-only #solo { display:block; }
+
+/* ===== Tablet 800 × 1280 ===== */
+.tab { position:relative; width:800px; height:1280px; background:var(--color-bg); display:flex; flex-direction:column; overflow:hidden; }
+.top { height:64px; flex:none; display:flex; align-items:center; gap:14px; padding:0 24px; border-bottom:1px solid var(--color-border); }
+.top b { font-size:20px; font-weight:600; } .top .sp { flex:1; }
+.top .badge { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 10px; border-radius:15px; background:rgba(221,216,202,.12); color:var(--color-accent); font:500 13px var(--font-ui); }
+.top .badge b { font:600 15px var(--font-numeric); }
+.body { flex:1; min-height:0; overflow:hidden; padding:16px 24px 18px; display:flex; flex-direction:column; justify-content:space-between; gap:18px; }
+.nav { flex:none; height:64px; margin-bottom:8px; display:flex; justify-content:center; gap:4px; padding:7px 24px; border-top:1px solid var(--color-border); background:var(--color-sidebar); }
+.nav span { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; width:148px; border-radius:6px; color:var(--color-muted); font-size:12px; }
+.nav span.on { color:var(--color-text); }
+
+/* type scale: 3 sizes only */
+.t-title { font-size:15px; font-weight:600; }
+.t-meta { font-size:12px; color:var(--color-faint); }
+.t-num { font:500 24px var(--font-numeric); }
+
+.sh { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.sh .t-title { color:var(--color-muted); font-weight:500; }
+.sh .more { margin-left:auto; color:var(--color-faint); }
+.sh .more svg { width:18px; height:18px; }
+
+/* memo cards */
+.memos { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.card { border:1px solid var(--color-border); border-radius:8px; background:var(--color-surface); padding:14px 16px; min-height:138px; display:flex; flex-direction:column; gap:6px; }
+.card .h { display:flex; align-items:center; gap:8px; }
+.card .h svg { width:18px; height:18px; color:var(--color-muted); }
+.card p { color:var(--color-muted); font-size:13px; line-height:1.55; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.card .money { margin-top:auto; display:flex; align-items:baseline; justify-content:space-between; }
+
+/* release shelf */
+.shelf { display:flex; gap:12px; overflow:hidden; }
+.rel { width:112px; flex:none; display:flex; flex-direction:column; gap:5px; }
+.rel .d { display:flex; align-items:baseline; gap:4px; }
+.rel .d b { font:600 15px var(--font-numeric); } .rel .d span { margin-left:auto; }
+.rel .art { position:relative; width:112px; height:168px; border-radius:4px; overflow:hidden; }
+.rel .art img { width:100%; height:100%; display:block; object-fit:cover; }
+.rel .art .new { position:absolute; left:6px; top:6px; padding:0 6px; border-radius:3px; background:var(--color-accent); color:var(--color-on-accent); font:700 11px/18px var(--font-ui); }
+.rel .nm { font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.plat { display:flex; gap:4px; height:18px; }
+.plat i { width:18px; height:18px; border-radius:4px; display:block; }
+.rel.d0 .d b { color:var(--color-accent); }
+
+/* middle */
+.mid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.av { display:flex; gap:14px; align-items:flex-end; }
+.av .face { width:168px; height:224px; border-radius:6px; overflow:hidden; flex:none; }
+.av .face img { width:100%; height:100%; display:block; object-fit:cover; }
+.av .nm { font-size:20px; font-weight:600; line-height:1.25; }
+.mosaic { display:grid; grid-template-columns:2fr 1fr 1fr; grid-template-rows:1fr 1fr; gap:4px; height:224px; border-radius:6px; overflow:hidden; }
+.mosaic img { width:100%; height:100%; display:block; object-fit:cover; }
+.mosaic img:first-child { grid-row:1/3; }
+.stats { display:flex; gap:0; border-top:1px solid var(--color-border); padding-top:14px; }
+.stats div { flex:1; display:flex; flex-direction:column; }
+.stats div + div { padding-left:18px; border-left:1px solid var(--color-border); }
+.artist { display:flex; gap:4px; height:150px; border-radius:6px; overflow:hidden; }
+.artist img { flex:1; min-width:0; height:100%; object-fit:cover; display:block; }
+
+/* B: no headers */
+.B .sh { display:none; }
+.B .body { gap:18px; }
+.B .memos { grid-template-columns:1fr 1fr 1fr; }
+.B .card { min-height:104px; }
+.B .rel { width:128px; } .B .rel .art { width:128px; height:178px; }
+</style>
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>태블릿 홈 — 글자 줄이고 콘텐츠 위주 (목업)</h1>
+  <p class="lead">피드백 반영: <b>발매 캘린더의 관심(♥) 표시 제거</b>, <b>“발매 예정”·종류 글자 제거</b>, <b>글자 크기 3단계로 통일</b>(제목 15 · 설명 12 · 숫자 24), <b>“확인할 것” 섹션 정리</b>, 설명 문구(“예전에 모은 것”, “14개”, “N편 소장” 등) 제거, 홈으로 올 때 전환 애니메이션. 그림은 색 블록.</p>
+</header>
+
+<section class="topic" id="sa">
+  <h2><span class="k">A</span>작은 섹션 이름만 남기기 (추천)</h2>
+  <div class="notes">
+    <ul>
+      <li>섹션 이름은 작고 흐리게(메모 · 신간 · 오늘 · 기록), 개수·설명·“전체” 글자는 빼고 <b>›</b> 아이콘만.</li>
+      <li><b>신간</b>: 날짜(9.30)와 D-day만, 표지 위 NEW, 아래는 제목 한 줄. 게임은 플랫폼 아이콘만(이식은 아이콘 테두리로). 종류 칩·“발매 예정”·관심 ♥ 없음 — 관심 여부는 표지를 눌렀을 때 뜨는 창에서만.</li>
+      <li><b>확인할 것</b> 섹션을 없애고, 0이 아닌 것만 상단바 오른쪽에 작은 배지로(예: “중복 101”). 모두 0이면 배지도 없음.</li>
+      <li><b>오늘</b>: AV 배우는 얼굴 + 이름만, 옆에 1년 전 오늘 모자이크. <b>기록</b>: 오늘의 작가 이미지 줄과 숫자 네 개(라벨만).</li>
+      <li>전환 애니메이션: 하단바에서 홈으로 올 때 콘텐츠가 8px 아래에서 0.18초 페이드 인(섹션별로 30ms씩 차례로). 이미 불러온 데이터는 다시 그리지 않음.</li>
+    </ul></div>
+  <div class="row"><div><div class="scale" id="wa"></div><div class="cap">A — 섹션 이름 최소</div></div></div>
+</section>
+
+<section class="topic" id="sb">
+  <h2><span class="k">B</span>대안: 섹션 이름도 없음</h2>
+  <div class="notes">섹션 이름을 모두 없애고 콘텐츠 블록만 둡니다. 메모 카드가 세 개로 한 줄, 신간 표지가 조금 더 큽니다. 가장 깔끔하지만 “전체 보기”로 가는 길이 각 블록을 길게 누르거나 끝에서 옆으로 밀어야 해서 덜 드러납니다.</div>
+  <div class="row"><div><div class="scale" id="wb"></div><div class="cap">B — 이름 없는 블록</div></div></div>
+</section>
+</div>
+<div id="solo"></div>
+<script>
+const IC={Home:"m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25",
+Photo:"m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Z",
+Stack:"M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878M3 12v6a2.25 2.25 0 0 0 2.25 2.25h13.5A2.25 2.25 0 0 0 21 18v-6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 12Z",
+Book:"M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25",
+Pencil:"m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z",
+List:"M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z",
+Wallet:"M21 12a2.25 2.25 0 0 0-2.25-2.25H15a3 3 0 1 1-6 0H5.25A2.25 2.25 0 0 0 3 12m18 0v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 9m18 0V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v3",
+Chev:"m8.25 4.5 7.5 7.5-7.5 7.5",Sort:"M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5",Adj:"M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75",
+Mark:"M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z"};
+const I=n=>`<svg class="i" viewBox="0 0 24 24"><path d="${IC[n]}"/></svg>`;
+function hsl(h,s,l){return `hsl(${h} ${s}% ${l}%)`;}
+function rnd(s){let x=Math.sin(s*999.13)*10000;return x-Math.floor(x);}
+function ph(seed,w=60,h=80){const r=k=>rnd(seed*7+k),hh=r(0)*360,bg=hsl(hh,26+r(2)*14,66+r(3)*12),mid=hsl(hh+20,24,50+r(4)*12),dk=hsl(hh-15,22,32+r(5)*10);
+ const cx=w*(.3+r(6)*.4),cy=h*(.28+r(7)*.18),rad=w*(.14+r(8)*.1);
+ return 'data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="${bg}"/><path d="M${cx-w*.34} ${h} Q${cx} ${cy+rad*.6} ${cx+w*.34} ${h} Z" fill="${mid}"/><circle cx="${cx}" cy="${cy}" r="${rad}" fill="${dk}" opacity=".9"/></svg>`);}
+const img=(s,w,h)=>`<img src="${ph(s,w,h)}" alt="">`;
+const topBar=`<div class="top"><svg viewBox="0 0 32 36" width="22" height="26" style="fill:none;stroke:var(--color-accent);stroke-width:1.3"><path d="${IC.Mark}"/></svg><b>홈</b><span class="sp"></span><span class="badge">중복 <b>101</b></span>${I('Sort')}${I('Adj')}</div>`;
+const nav=`<div class="nav">${[['Home','홈'],['Photo','에셋'],['Stack','컬렉션'],['Book','카탈로그'],['Pencil','메모']].map(([i,l])=>`<span class="${l==='홈'?'on':''}">${I(i)}${l}</span>`).join('')}</div>`;
+const sh=(t)=>`<div class="sh"><span class="t-title">${t}</span><span class="more">${I('Chev')}</span></div>`;
+const memos=(three)=>`<div class="memos"><div class="card"><div class="h">${I('List')}<span class="t-title">Todo</span></div><p>작가 정렬, 편집 · 홈 발매 캘린더 관심 표시 지우기 · 글자 크기 일관성 · 에셋 정렬 창 깜빡임 · 썸네일 조정 설정 유지</p></div>
+ <div class="card"><div class="h">${I('Wallet')}<span class="t-title">가계부</span><span class="t-meta" style="margin-left:auto">9월</span></div><div class="money"><span class="t-num">401,780<small style="font-size:14px">원</small></span></div><span class="t-meta">에어팟 5세대 · 215,000원</span></div>
+ ${three?`<div class="card"><div class="h">${I('List')}<span class="t-title">장보기</span></div><p>우유 · 계란 · 커피 원두</p></div>`:''}</div>`;
+const PL={steam:'#1b2838',ps:'#1f4fd1',sw:'#e60012',xb:'#107c10'};
+const REL=[['9.30','D-2',1,[]],['10.1','D-3',2,['sw']],['10.4','D-6',3,[]],['10.8','D-10',4,[]],['10.15','D-17',5,['steam','ps','sw','xb']],['11.5','D-38',6,['sw']]];
+const TITLES=['마법소녀를 동경해서','Warhammer 40,000','학생회에도 구멍은 있다','룩백','Castlevania','The Legend'];
+const shelf=(big)=>`<div class="shelf">${REL.map(([d,dd,s,p],i)=>`<div class="rel${i===0?' d0':''}"><div class="d"><b>${d}</b><span class="t-meta numeric">${dd}</span></div><div class="art">${img(40+s,big?128:112,big?178:156)}${i===0?'<span class="new">NEW</span>':''}</div><span class="nm">${TITLES[i]}</span><span class="plat">${p.map(k=>`<i style="background:${PL[k]}"></i>`).join('')}</span></div>`).join('')}</div>`;
+const mid=`<div class="mid"><div>${''}<div class="av"><span class="face">${img(90,168,224)}</span><span><span class="nm">미노시마 메구리</span></span></div></div><div><div class="mosaic">${[91,92,93,94,95].map(s=>img(s,120,120)).join('')}</div><span class="t-meta" style="display:block;margin-top:6px">1년 전 오늘</span></div></div>`;
+const rec=`<div class="artist">${[101,102,103,104,105,106].map(s=>img(s,110,112)).join('')}</div><span class="t-meta" style="margin-top:-12px">오늘의 작가 · DainiArt</span>
+<div class="stats">${[['28','오늘'],['28','이번 주'],['9,436','전체'],['40','분류 안 됨']].map(([n,l])=>`<div><span class="t-num">${n}</span><span class="t-meta">${l}</span></div>`).join('')}</div>`;
+function A(){return `<div class="tab">${topBar}<div class="body"><div>${sh('메모')}${memos(false)}</div><div>${sh('신간')}${shelf(false)}</div><div>${sh('오늘')}${mid}</div><div style="display:flex;flex-direction:column;gap:12px">${sh('기록')}${rec}</div></div>${nav}</div>`;}
+function B(){return `<div class="tab B">${topBar}<div class="body">${memos(true)}${shelf(true)}${mid}<div style="display:flex;flex-direction:column;gap:12px">${rec}</div></div>${nav}</div>`;}
+const BUILD={a:A,b:B};
+const f=new URLSearchParams(location.search).get('frame');
+if(f&&BUILD[f]){document.body.classList.add('frame-only');document.getElementById('solo').innerHTML=BUILD[f]();}
+else{document.getElementById('wa').innerHTML=A();document.getElementById('wb').innerHTML=B();}
+</script>
+</body>
+</html>

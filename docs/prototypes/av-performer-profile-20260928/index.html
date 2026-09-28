@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>배우 프로필 목업</title>
+<style>
+/* Fonts are the app's bundled files, loaded by relative path from the repository (no network). */
+@font-face { font-family:"SUIT"; src:url("../../../_tools/app/src/styles/fonts/SUIT-Variable.woff2") format("woff2"); font-weight:100 900; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Regular.ttf") format("truetype"); font-weight:400; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-Medium.ttf") format("truetype"); font-weight:500; }
+@font-face { font-family:"Barlow"; src:url("../../../_tools/app/src/styles/fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight:600; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens copied from _tools/app/src/styles/tokens.css, global.css and chrome.css. */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-toolbar:#191a1b; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-surface-hover:#2d2e2f; --color-control:#232425; --color-control-hover:#2d2e2f;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-faint:#7d8184; --color-accent:#ddd8ca; --color-on-accent:#202628; --color-accent-hover:#e7e2d5;
+  --color-selection-context:rgba(221,216,202,.16); --color-selection-context-text:#f1eee6; --color-selection-echo:rgba(221,216,202,.4);
+  --selection-echo:3px 3px 0 -1px var(--color-sidebar),3px 3px 0 0 var(--color-selection-echo);
+  --selection-mark-size:7px;
+  --color-section-mark:rgba(221,216,202,.6); --section-label-rule:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06));
+  --color-filter-selected:#383838; --color-filter-text:#e7e7e7; --color-filter-border:#808080;
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-focus:#7db1ff;
+  --color-overlay:rgba(7,10,15,.82);
+  --asset-selection-tint:rgb(36 125 137 / 55%);
+  --inset-light:inset 0 1px 0 rgba(255,255,255,.04);
+  --shadow-floating:0 1px 3px rgba(0,0,0,.24),0 8px 20px rgba(0,0,0,.3);
+  --shadow-dialog:0 3px 10px rgba(0,0,0,.26),0 18px 48px rgba(0,0,0,.38);
+  --font-ui:"Barlow","SUIT","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+  --font-mono:"Cascadia Mono","Consolas",monospace;
+  --ok:#7fb88a; --one:#c9a55e;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.5 var(--font-ui); }
+h1,h2,h3,h4,p { margin:0; }
+button { font:inherit; color:inherit; }
+svg.i { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+.tag { font:500 12px var(--font-ui); color:var(--color-faint); letter-spacing:.1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* ===== Document chrome (not app UI) ===== */
+.doc { max-width:1500px; margin:0 auto; padding:32px 28px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1250px; margin:8px 0 0; line-height:1.7; }
+.lead b, .notes b { color:var(--color-text); font-weight:600; }
+.jump { display:flex; gap:8px; margin:18px 0 0; align-items:center; color:var(--color-muted); font-size:13px; flex-wrap:wrap; }
+.jump a { background:var(--color-control); border:1px solid var(--color-border); border-radius:4px; padding:6px 12px; color:var(--color-text); text-decoration:none; font-size:13px; }
+section.topic { margin-top:48px; border-top:1px solid var(--color-border); padding-top:24px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; min-width:28px; height:28px; padding:0 6px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-ui); }
+.notes { color:var(--color-muted); max-width:1300px; line-height:1.7; margin:8px 0 18px; }
+.notes ul { margin:6px 0 0; padding-left:20px; }
+body.frame-only { background:var(--color-bg); }
+body.frame-only .doc { display:none; }
+#solo { display:none; }
+body.frame-only #solo { display:block; }
+
+/* ===== PC window 1440 × 900, Chrome 03b shell ===== */
+.win { position:relative; width:1440px; height:900px; display:flex; overflow:hidden; background:var(--color-bg); border:1px solid var(--color-border); }
+body.frame-only .win { border:0; }
+.rail { width:64px; flex:none; display:flex; flex-direction:column; gap:8px; padding:8px 6px; background:var(--color-sidebar); border-right:1px solid var(--color-border); }
+.rail .mk { height:48px; display:grid; place-items:center; color:var(--color-accent); }
+.rail .mk svg { width:24px; height:28px; fill:none; stroke:currentColor; stroke-width:1.3; }
+.ri { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; min-height:56px; color:var(--color-muted); font-size:12px; line-height:14px; border-radius:4px; }
+.ri.on { background:var(--color-selection-context); color:var(--color-selection-context-text); }
+.rail .tail { margin-top:auto; display:flex; flex-direction:column; gap:8px; }
+.index { width:232px; flex:none; display:flex; flex-direction:column; background:var(--color-sidebar); border-right:1px solid var(--color-border); }
+.index-head { height:44px; flex:none; display:flex; align-items:center; gap:6px; padding:0 6px 0 16px; border-bottom:1px solid var(--color-border); font-size:15px; font-weight:500; color:var(--color-muted); }
+.index-body { flex:1; min-height:0; overflow:hidden; padding:12px; display:flex; flex-direction:column; gap:2px; }
+.slabel { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--color-muted); letter-spacing:.3px; white-space:nowrap; }
+.slabel::before { content:''; width:5px; height:5px; background:var(--color-section-mark); flex:none; }
+.slabel::after { content:''; flex:1; height:1px; background:var(--section-label-rule); }
+.index-body .slabel { margin:14px 4px 6px; }
+.index-body .slabel:first-child { margin-top:2px; }
+.irow { position:relative; display:flex; align-items:center; gap:9px; min-height:34px; padding:3px 10px; color:var(--color-text); font-size:14px; }
+.irow svg.i { width:17px; height:17px; color:var(--color-muted); }
+.irow .txt { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.irow .n { font:500 14px var(--font-numeric); color:var(--color-muted); }
+.irow .badge { min-width:18px; height:18px; padding:0 5px; border-radius:9px; background:var(--color-accent); color:var(--color-on-accent); font:600 11px/18px var(--font-numeric); text-align:center; }
+.irow.sel { background:var(--color-accent); color:var(--color-on-accent); box-shadow:var(--selection-echo); margin-right:3px; }
+.irow.sel svg.i, .irow.sel .n { color:var(--color-on-accent); }
+.irow.sel::after { content:''; width:var(--selection-mark-size); height:var(--selection-mark-size); background:var(--color-on-accent); flex:none; }
+.irow.ctx { background:var(--color-selection-context); color:var(--color-selection-context-text); }
+.irow.sub { padding-left:28px; }
+.irow.sub2 { padding-left:46px; }
+.irow .chev { width:13px !important; height:13px !important; }
+.irow.dim .txt { color:var(--color-muted); }
+
+.main { flex:1; min-width:0; display:flex; flex-direction:column; position:relative; }
+.titlebar { height:44px; flex:none; display:flex; align-items:center; gap:10px; padding-left:10px; border-bottom:1px solid var(--color-border); background:var(--color-toolbar); }
+.titlebar h2 { font-size:15px; font-weight:600; white-space:nowrap; display:flex; align-items:center; gap:6px; }
+.titlebar h2 .crumb { color:var(--color-muted); font-weight:500; }
+.titlebar h2 svg.i { width:14px; height:14px; color:var(--color-faint); }
+.titlebar .st2 { font-size:13px; color:var(--color-muted); }
+.titlebar .space { flex:1; }
+.titlebar .ib { width:28px; height:28px; display:grid; place-items:center; color:var(--color-muted); }
+.titlebar .ib svg.i { width:18px; height:18px; }
+.winctl { display:flex; height:100%; }
+.winctl span { width:40px; height:100%; display:grid; place-items:center; color:var(--color-muted); }
+.winctl svg.i { width:14px; height:14px; stroke-width:1.3; }
+.mbody { flex:1; min-height:0; overflow:hidden; position:relative; }
+
+/* ===== Buttons, fields, segments (global.css) ===== */
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:28px; padding:0 12px; border:1px solid transparent; border-radius:4px; background:transparent; color:var(--color-text); font-size:14px; line-height:20px; white-space:nowrap; cursor:pointer; }
+.btn svg.i { width:16px; height:16px; }
+.btn.sec { background:var(--color-control); border-color:var(--color-border); box-shadow:var(--inset-light); }
+.btn.sec:hover { background:var(--color-control-hover); border-color:var(--color-border-strong); }
+.btn.pri { background:var(--color-accent); border-color:var(--color-accent); color:var(--color-on-accent); font-weight:500; }
+.btn.pri:hover { background:var(--color-accent-hover); }
+.btn.ghost { color:var(--color-muted); }
+.btn.ghost:hover { background:var(--color-surface-hover); color:var(--color-text); }
+.btn.icon { width:28px; padding:0; }
+.btn.sm { min-height:26px; padding:0 9px; font-size:13px; }
+.btn.sm.icon { width:26px; padding:0; }
+.btn:focus-visible, .seg button:focus-visible, input:focus-visible, select:focus-visible { outline:2px solid var(--color-focus); outline-offset:1px; }
+.field { display:flex; flex-direction:column; gap:5px; font-size:13px; color:var(--color-muted); }
+.field input, .field .selbox { min-height:34px; padding:0 10px; color:var(--color-text); background:var(--color-bg); border:1px solid var(--color-border); border-radius:4px; font:inherit; font-size:15px; }
+.field .selbox { display:flex; align-items:center; gap:8px; }
+.field .selbox .sp { flex:1; }
+.field .selbox svg.i { width:15px; height:15px; color:var(--color-muted); }
+.field .help { font-size:12.5px; color:var(--color-faint); line-height:1.5; }
+.seg { display:inline-flex; border:1px solid var(--color-border); border-radius:4px; overflow:hidden; }
+.seg button { min-height:26px; padding:0 10px; border:0; border-left:1px solid var(--color-border); background:transparent; color:var(--color-muted); font-size:13px; cursor:pointer; white-space:nowrap; }
+.seg button:first-child { border-left:0; }
+.seg button[aria-pressed="true"] { background:var(--color-filter-selected); color:var(--color-filter-text); box-shadow:inset 0 0 0 1px var(--color-filter-border); }
+.seg button .numeric { font-size:14px; margin-left:3px; }
+input[type=checkbox] { appearance:none; width:16px; height:16px; margin:0; border:1px solid var(--color-border-strong); border-radius:2px; background:var(--color-bg); display:grid; place-items:center; cursor:pointer; flex:none; }
+input[type=checkbox]:checked { background:var(--color-accent); border-color:var(--color-accent); }
+input[type=checkbox]:checked::after { content:''; width:8px; height:4px; border-left:2px solid var(--color-on-accent); border-bottom:2px solid var(--color-on-accent); transform:translateY(-1px) rotate(-45deg); }
+.ck { display:inline-flex; align-items:center; gap:7px; font-size:13px; color:var(--color-muted); white-space:nowrap; cursor:pointer; }
+.ck.on { color:var(--color-text); }
+.minsel { display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 8px; border:1px solid var(--color-border); border-radius:4px; font-size:13px; color:var(--color-text); background:var(--color-control); white-space:nowrap; }
+.minsel svg.i { width:13px; height:13px; color:var(--color-muted); }
+
+
+/* ===== AV performer page (avPerformerPage.css) ===== */
+.pp { height:100%; overflow:hidden; padding:24px 40px; background:radial-gradient(48% 55% at 16% 12%, rgb(139 93 77 / 18%), transparent 72%), var(--color-bg); }
+.pp-top { display:flex; align-items:center; gap:12px; margin-bottom:20px; color:var(--color-faint); font-size:12px; }
+.pp-layout { display:grid; grid-template-columns:300px minmax(0,1fr); gap:40px; }
+.pp-portrait { width:300px; height:400px; overflow:hidden; border-radius:4px; box-shadow:0 10px 28px rgb(0 0 0 / 45%); }
+.pp-portrait img { width:100%; height:100%; display:block; object-fit:cover; }
+.pp-src { display:flex; align-items:center; gap:8px; min-height:28px; color:var(--color-faint); font-size:12px; }
+.pp-src .lk { color:var(--color-muted); display:inline-flex; gap:3px; align-items:center; }
+.pp-src svg.i { width:13px; height:13px; }
+.pp h1 { margin:18px 0 0; font-size:28px; font-weight:600; line-height:1.2; }
+.pp .ja { color:var(--color-muted); font-size:15px; }
+.pp .alias { color:var(--color-faint); font-size:12px; margin-top:2px; }
+.pp-stats { display:grid; grid-template-columns:repeat(3,auto); gap:8px 20px; margin-top:16px; }
+.pp-stats div { display:flex; flex-direction:column; }
+.pp-stats b { font:500 22px var(--font-numeric); white-space:nowrap; }
+.pp-stats span { color:var(--color-faint); font-size:12px; }
+
+/* Profile block (new) */
+.prof { margin-top:18px; padding-top:14px; border-top:1px solid var(--color-border); }
+.prof dl { display:grid; grid-template-columns:64px 1fr; gap:7px 12px; margin:0; font-size:14px; }
+.prof dt { color:var(--color-faint); font-size:13px; }
+.prof dd { margin:0; color:var(--color-text); }
+.prof dd small { color:var(--color-muted); font-size:13px; margin-left:4px; }
+.prof dd .numeric { font-size:16px; }
+.pill2 { display:inline-flex; align-items:center; height:20px; padding:0 7px; border:1px solid var(--color-border-strong); border-radius:10px; font-size:12px; color:var(--color-muted); margin-left:6px; vertical-align:1px; }
+.pill2.on { border-color:rgba(221,216,202,.45); color:var(--color-accent); }
+.links { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+.links a { display:inline-flex; align-items:center; gap:5px; height:26px; padding:0 9px; border:1px solid var(--color-border); border-radius:4px; background:var(--color-control); color:var(--color-text); font-size:13px; text-decoration:none; }
+.links a .dot { width:14px; height:14px; border-radius:3px; display:grid; place-items:center; font:700 9px var(--font-ui); color:#fff; }
+.links a.more { color:var(--color-muted); background:transparent; }
+.upd { margin-top:10px; color:var(--color-faint); font-size:12px; display:flex; align-items:center; gap:6px; }
+.upd svg.i { width:13px; height:13px; }
+
+/* Right column */
+.sec { margin-bottom:22px; }
+.sec-head { display:flex; align-items:baseline; gap:8px; margin-bottom:12px; border-bottom:1px solid var(--color-border); }
+.sec-head h2 { font-size:16px; font-weight:600; }
+.sec-head > span { color:var(--color-muted); }
+.sec-head .seg { margin-left:auto; border-bottom:0; border-radius:4px 4px 0 0; }
+.works { display:grid; grid-template-columns:repeat(5,minmax(100px,1fr)); gap:18px 12px; }
+.work { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.case { align-self:center; width:124px; height:176px; border-radius:2px; overflow:hidden; box-shadow:0 4px 12px rgb(0 0 0 / 40%), inset 0 0 0 1px rgb(255 255 255 / 6%); position:relative; }
+.case img { width:100%; height:100%; display:block; }
+.case::before { content:''; position:absolute; left:0; top:0; bottom:0; width:8px; background:rgb(0 0 0 / 28%); }
+.work b { font:500 14px var(--font-numeric); letter-spacing:.4px; margin-top:4px; }
+.work span { color:var(--color-muted); font-size:12px; }
+.co { display:flex; gap:8px; flex-wrap:wrap; }
+.co-card { display:flex; align-items:center; gap:8px; padding:4px 8px 4px 4px; }
+.co-card img { width:48px; height:48px; border-radius:4px; display:block; }
+.co-card span { display:grid; } .co-card small { color:var(--color-muted); font-size:12px; }
+
+/* B: header strip */
+.hb { display:grid; grid-template-columns:150px 1fr auto; gap:24px; align-items:start; padding-bottom:18px; margin-bottom:18px; border-bottom:1px solid var(--color-border); }
+.hb .pp-portrait { width:150px; height:200px; }
+.hb h1 { margin:4px 0 0; }
+.facts { display:flex; gap:0; margin-top:14px; }
+.facts div { display:flex; flex-direction:column; padding:0 18px; border-left:1px solid var(--color-border); }
+.facts div:first-child { padding-left:0; border-left:0; }
+.facts b { font:500 22px var(--font-numeric); white-space:nowrap; }
+.facts b small { font:500 14px var(--font-ui); color:var(--color-muted); margin-left:3px; }
+.facts span { color:var(--color-faint); font-size:12px; white-space:nowrap; }
+.hb .side { display:flex; flex-direction:column; align-items:flex-end; gap:10px; }
+.hb .links { justify-content:flex-end; max-width:330px; margin-top:0; }
+
+/* C: portrait picker dialog */
+.scrim { position:absolute; inset:0; background:var(--color-overlay); display:grid; place-items:center; }
+.dlg { width:900px; height:640px; background:var(--color-surface-elevated); border:1px solid var(--color-border); border-radius:6px; box-shadow:var(--shadow-dialog); display:flex; flex-direction:column; }
+.dlg-head { display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid var(--color-border); }
+.dlg-head h3 { font-size:16px; font-weight:600; }
+.dlg-body { flex:1; min-height:0; display:grid; grid-template-columns:1fr 220px; }
+.pick { padding:16px 18px; overflow:hidden; }
+.pick .grid5 { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-top:12px; }
+.pick .cell { position:relative; aspect-ratio:3/4; border-radius:3px; overflow:hidden; outline:1px solid var(--color-border); }
+.pick .cell img { width:100%; height:100%; display:block; object-fit:cover; }
+.pick .cell .sz { position:absolute; left:4px; bottom:4px; padding:0 5px; border-radius:3px; background:rgb(0 0 0 / 60%); color:#eee; font:500 11px/16px var(--font-numeric); }
+.pick .cell.sel { outline:2px solid var(--color-accent); outline-offset:1px; }
+.pick .cell.sel::after { content:''; position:absolute; right:6px; top:6px; width:9px; height:9px; background:var(--color-accent); }
+.prev { border-left:1px solid var(--color-border); padding:16px; display:flex; flex-direction:column; gap:10px; color:var(--color-muted); font-size:13px; }
+.prev .box { width:150px; height:200px; align-self:center; border-radius:4px; overflow:hidden; }
+.prev .box img { width:100%; height:100%; display:block; }
+.dlg-foot { display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; border-top:1px solid var(--color-border); }
+</style>
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>AV 배우 프로필 (StashDB) — 목업</h1>
+  <p class="lead">컬렉션 › AV › 배우 화면에 <b>StashDB 프로필</b>을 붙입니다. 사용자가 고른 항목만 넣었습니다: <b>이름</b>(한국어·일본어·다른 이름), <b>생년월일과 나이</b>, <b>키</b>, <b>신체 사이즈</b>(B·W·H, cm로 바꿔 표시), <b>가슴 유형</b>(자연 / 보형), <b>활동 기간</b>, <b>링크</b>. 국적·인종·눈/머리색 등 나머지 StashDB 항목은 넣지 않습니다. 대표 이미지는 StashDB 사진에서도 고를 수 있게 합니다(C). 사진은 색 블록으로 대신했고, 배우 이름과 수치는 지어낸 예시입니다.</p>
+  <div class="jump">바로가기
+    <a href="#sa">A · 왼쪽 열에 프로필 (추천)</a><a href="#sb">B · 위쪽 가로 띠</a><a href="#sc">C · 대표 이미지 고르기</a>
+  </div>
+</header>
+
+<section class="topic" id="sa">
+  <h2><span class="k">A</span>지금 화면 그대로, 왼쪽 열에 “프로필” 칸 추가 (추천)</h2>
+  <div class="notes">지금 배우 화면의 왼쪽 열(사진 · 이름 · 내 라이브러리 숫자) 아래에 <b>프로필</b> 칸을 넣습니다. 오른쪽 작품 목록은 그대로라 작품 칸이 줄지 않습니다.
+    <ul><li>나이는 생년월일에서 오늘 기준으로 계산(만 나이). 은퇴한 배우는 활동 칸이 “2010 – 2023 · 은퇴”.</li>
+    <li>사이즈는 StashDB의 인치 값을 cm로 바꿔 “B86 (E) · W58 · H84”. 값이 없는 줄은 통째로 숨깁니다.</li>
+    <li>링크는 자주 쓰는 것만 앞에 (X, Instagram, FANZA, 공식 프로필, 위키) 나머지는 “+9”를 누르면 펼쳐짐. 누르면 브라우저로 엽니다.</li>
+    <li>맨 아래 “StashDB · 3일 전 확인”과 새로고침. 배우를 처음 열 때 자동으로 찾아오고, 이름이 여러 명과 맞으면 고르는 창이 뜹니다.</li></ul></div>
+  <div id="wa"></div>
+</section>
+
+<section class="topic" id="sb">
+  <h2><span class="k">B</span>대안: 위쪽 가로 띠에 핵심 숫자</h2>
+  <div class="notes">사진을 작게 줄이고, 이름 옆에 나이 · 키 · 사이즈 · 가슴 · 활동을 큰 숫자로 한 줄에 늘어놓습니다. 링크는 오른쪽 위. 아래는 작품 목록이 화면 전체 폭을 씁니다. 한눈에 보기 좋지만, 사진이 작아지고 지금 화면 구조가 많이 바뀝니다.</div>
+  <div id="wb"></div>
+</section>
+
+<section class="topic" id="sc">
+  <h2><span class="k">C</span>대표 이미지 바꾸기에 StashDB 사진</h2>
+  <div class="notes">기존 “대표 이미지 바꾸기” 창에 <b>StashDB</b> 탭이 생깁니다(기존: 표지에서 자르기, Wikimedia Commons). 사진마다 원본 크기를 표시하고, 고르면 라이브러리에 저장해 두어 인터넷 없이도 보입니다(태블릿에도 같이 표시). 출처 줄은 “StashDB · 원본”.</div>
+  <div id="wc"></div>
+</section>
+</div>
+<div id="solo"></div>
+<script>
+/* Heroicons outline paths (MIT), subset. */
+const IC={
+  Home:["m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"],
+  RectangleStack:["M6 6.878V6a2.25 2.25 0 0 1 2.25-2.25h7.5A2.25 2.25 0 0 1 18 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 0 0 4.5 9v.878m13.5-3A2.25 2.25 0 0 1 19.5 9v.878m0 0a2.246 2.246 0 0 0-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0 1 21 12v6a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 18v-6c0-.98.626-1.813 1.5-2.122"],
+  BookOpen:["M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"],
+  Photo:["m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"],
+  PencilSquare:["m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"],
+  Pencil:["m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125"],
+  ArrowsUpDown:["M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"],
+  MagnifyingGlass:["m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"],
+  EllipsisHorizontal:["M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"],
+  Minus:["M5 12h14"],
+  Square:["M5.25 7.5A2.25 2.25 0 0 1 7.5 5.25h9a2.25 2.25 0 0 1 2.25 2.25v9a2.25 2.25 0 0 1-2.25 2.25h-9a2.25 2.25 0 0 1-2.25-2.25v-9Z"],
+  XMark:["M6 18 18 6M6 6l12 12"],
+  ChevronLeft:["M15.75 19.5 8.25 12l7.5-7.5"],
+  ChevronRight:["m8.25 4.5 7.5 7.5-7.5 7.5"],
+  ChevronDown:["m19.5 8.25-7.5 7.5-7.5-7.5"],
+  ChevronUp:["m4.5 15.75 7.5-7.5 7.5 7.5"],
+  Folder:["M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"],
+  Inbox:["M2.25 13.5h3.86a2.25 2.25 0 0 1 2.012 1.244l.256.512a2.25 2.25 0 0 0 2.013 1.244h3.218a2.25 2.25 0 0 0 2.013-1.244l.256-.512a2.25 2.25 0 0 1 2.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 0 0-2.15-1.588H6.911a2.25 2.25 0 0 0-2.15 1.588L2.35 13.177a2.25 2.25 0 0 0-.1.661Z"],
+  User:["M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"],
+  UserPlus:["M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.374 21c-2.331 0-4.512-.645-6.374-1.766Z"],
+  Link:["M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"],
+  EyeSlash:["M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88"],
+  Clock:["M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"],
+  Tag:["M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z","M6 6h.008v.008H6V6Z"],
+  Sparkles:["M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z"],
+  AdjustmentsHorizontal:["M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"],
+  Plus:["M12 4.5v15m7.5-7.5h-15"],
+};
+const I=(n,cls='')=>`<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${(IC[n]||[]).map(d=>`<path d="${d}"/>`).join('')}</svg>`;
+const MARK='<svg viewBox="0 0 32 36" aria-hidden="true"><path d="M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z"/></svg>';
+const chev=()=>I('ChevronRight','chev');
+const n=v=>`<span class="numeric">${v.toLocaleString()}</span>`;
+
+/* ===== Neutral placeholder "images": soft colour fields with simple shapes, no figures. ===== */
+function hsl(h,s,l){return `hsl(${h} ${s}% ${l}%)`;}
+function rnd(seed){let x=Math.sin(seed*999.13)*10000;return x-Math.floor(x);}
+function ph(seed,hue,w=60,h=80){
+  const r=k=>rnd(seed*7+k);
+  const hh=hue+(r(1)-.5)*26, bg=hsl(hh,26+r(2)*14,70+r(3)*10), mid=hsl(hh+20,24,52+r(4)*12), dk=hsl(hh-15,22,34+r(5)*10), lt=hsl(hh+40,30,86);
+  const cx=w*(.3+r(6)*.4), cy=h*(.28+r(7)*.18), rad=w*(.14+r(8)*.1);
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" fill="${bg}"/>`+
+    `<rect x="0" y="${h*(.55+r(9)*.15)}" width="${w}" height="${h}" fill="${lt}" opacity=".55"/>`+
+    `<path d="M${cx-w*.34} ${h} Q${cx} ${cy+rad*.6} ${cx+w*.34} ${h} Z" fill="${mid}"/>`+
+    `<circle cx="${cx}" cy="${cy}" r="${rad}" fill="${dk}" opacity=".9"/>`+
+    `<rect x="${w*r(10)*.6}" y="${h*r(11)*.2}" width="${w*.28}" height="${h*.05}" fill="${dk}" opacity=".25"/></svg>`;
+  return 'data:image/svg+xml,'+encodeURIComponent(svg);}
+function banner(hue){const w=1100,h=130;
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" fill="${hsl(hue,22,34)}"/><circle cx="820" cy="40" r="120" fill="${hsl(hue+20,26,48)}" opacity=".7"/><path d="M0 110 L240 60 L480 100 L760 50 L1100 90 V130 H0Z" fill="${hsl(hue-10,20,24)}"/></svg>`;
+  return 'data:image/svg+xml,'+encodeURIComponent(svg);}
+const img=(seed,hue,w,h)=>`<img src="${ph(seed,hue,w,h)}" alt="">`;
+
+/* ===== Shell ===== */
+function rail(on){const items=[['Home','홈'],['RectangleStack','에셋'],['BookOpen','컬렉션'],['Photo','망가'],['PencilSquare','메모'],['ArrowsUpDown','전송']];
+  return `<nav class="rail"><div class="mk">${MARK}</div>${items.map(([ic,l])=>`<div class="ri ${l===on?'on':''}">${I(ic)}<span>${l}</span></div>`).join('')}
+  <div class="tail"><div class="ri">${I('MagnifyingGlass')}<span>찾기</span></div><div class="ri">${I('EllipsisHorizontal')}<span>더보기</span></div></div></nav>`;}
+function titlebar(title,st='',extra='',lead=''){return `<div class="titlebar">${lead}<h2>${title}</h2>${st?`<span class="st2">${st}</span>`:''}<span class="space"></span>${extra}<span class="ib">${I('MagnifyingGlass')}</span><div class="winctl"><span>${I('Minus')}</span><span>${I('Square')}</span><span>${I('XMark')}</span></div></div>`;}
+
+
+Object.assign(IC,{
+  ArrowTopRightOnSquare:["M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"],
+  ArrowPath:["M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"],
+  Pencil:["m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125"],
+});
+
+/* ===== Sample (fictional) performer ===== */
+const P={ko:'하나노 미오', ja:'花野みお', alias:'Mio Hanano · はなのみお', birth:'2001.12.08', age:24, height:156, b:86, cup:'E', w:58, h:84, breast:'자연', career:'2021 – 현역', years:'5년차',
+  works:37, range:'2021.03–2026.08', score:'4.2'};
+const LINKS=[['X','#1d1d1f','X'],['IG','#c13584','Instagram'],['FZ','#b3262d','FANZA'],['公','#5b6b7a','공식 프로필'],['W','#666','위키 (일본어)']];
+const links=(more=true)=>`<div class="links">${LINKS.map(([m,c,l])=>`<a><span class="dot" style="background:${c}">${m}</span>${l}</a>`).join('')}${more?'<a class="more">+9</a>':''}</div>`;
+const case_=(i)=>`<div class="case"><img src="${ph(700+i,(i*47)%360,124,176)}" alt=""></div>`;
+const WORKS=['MIO-201','SSIS-982','SONE-114','SONE-307','OFJE-455','SONE-512','SNOS-021','SONE-688','SONE-790','SNOS-133'];
+const DATES=['2026.08.12','2026.05.20','2025.12.09','2025.09.16','2025.07.01','2025.04.08','2025.01.14','2024.10.08','2024.07.09','2024.04.16'];
+const works=(k=10)=>`<div class="works">${WORKS.slice(0,k).map((c,i)=>`<div class="work">${case_(i)}<b>${c}</b><span class="numeric">${DATES[i]}</span></div>`).join('')}</div>`;
+const worksHead=`<div class="sec-head"><h2>작품</h2><span class="numeric">${P.works}</span><div class="seg"><button aria-pressed="true">전체</button><button>단독</button><button>공동 출연</button></div><button class="btn ghost sm" style="color:var(--color-faint)">발매일 최신순</button></div>`;
+const co=`<div class="sec"><div class="sec-head"><h2>자주 함께 나온 배우</h2></div><div class="co">${['츠키노 레이','아마네 유이','사쿠라 린'].map((n,i)=>`<div class="co-card"><img src="${ph(800+i,30+i*60,48,48)}" alt=""><span><b>${n}</b><small>${3-i}편</small></span></div>`).join('')}</div></div>`;
+const stats=`<div class="pp-stats"><div><b>${P.works}</b><span>내 라이브러리 작품</span></div><div><b>${P.range}</b><span>발매 기간</span></div><div><b>${P.score}</b><span>내 별점 평균</span></div></div>`;
+const shell=(inner,extra='')=>`<div class="win">${rail('컬렉션')}<div class="main">${titlebar('<span class="crumb">컬렉션 › AV ›</span> 배우')}<div class="mbody"><div class="pp">${inner}</div>${extra}</div></div></div>`;
+const topLine=`<div class="pp-top"><button class="btn ghost sm">${I('ChevronLeft')} 작품으로 돌아가기</button><span class="numeric">컬렉션 › AV › 배우</span></div>`;
+
+function winA(){
+  return shell(`${topLine}<div class="pp-layout"><section>
+    <div class="pp-portrait" style="width:225px;height:300px"><img src="${ph(4242,12,225,300)}" alt=""></div>
+    <div class="pp-src">StashDB · 34장 중 1 <span class="lk">${I('ArrowTopRightOnSquare')}원본</span><span class="lk" style="margin-left:auto">${I('Pencil')}바꾸기</span></div>
+    <h1 style="margin-top:10px">${P.ko}</h1><div class="ja" lang="ja">${P.ja}</div><div class="alias">${P.alias}</div>
+    <div class="prof"><dl>
+      <dt>생년월일</dt><dd><span class="numeric">${P.birth}</span><small>만 ${P.age}세</small></dd>
+      <dt>키</dt><dd><span class="numeric">${P.height}</span> cm</dd>
+      <dt>사이즈</dt><dd>B<span class="numeric">${P.b}</span> <small style="margin:0 6px 0 0">(${P.cup})</small>W<span class="numeric">${P.w}</span> &nbsp;H<span class="numeric">${P.h}</span></dd>
+      <dt>가슴</dt><dd>${P.cup}컵<span class="pill2 on">${P.breast}</span></dd>
+      <dt>활동</dt><dd><span class="numeric">${P.career}</span><small>${P.years}</small></dd>
+    </dl>${links()}
+    <div class="upd">StashDB · 3일 전 확인 <button class="btn ghost sm icon" aria-label="새로고침">${I('ArrowPath')}</button></div></div>
+    <div class="prof" style="margin-top:8px"><div class="pp-stats" style="margin-top:0"><div><b>${P.works}</b><span>내 작품</span></div><div><b>${P.range}</b><span>발매 기간</span></div><div><b>${P.score}</b><span>별점 평균</span></div></div></div>
+  </section>
+  <div><div class="sec">${worksHead}${works(10)}</div>${co}</div></div>`);}
+
+function winB(){
+  return shell(`${topLine}<div class="hb">
+    <div class="pp-portrait"><img src="${ph(4242,12,150,200)}" alt=""></div>
+    <div><h1>${P.ko} <span class="ja" lang="ja" style="font-weight:400">${P.ja}</span></h1><div class="alias">${P.alias}</div>
+      <div class="facts">
+        <div><b>${P.age}<small>세</small></b><span class="numeric">${P.birth}</span></div>
+        <div><b>${P.height}<small>cm</small></b><span>키</span></div>
+        <div><b>${P.b}·${P.w}·${P.h}</b><span>B·W·H (cm)</span></div>
+        <div><b>${P.cup}<small>컵 · ${P.breast}</small></b><span>가슴</span></div>
+        <div><b>2021–</b><span>활동 · ${P.years}</span></div>
+      </div>
+      <div class="facts" style="margin-top:12px"><div><b style="font-size:17px">${P.works}</b><span>내 라이브러리 작품</span></div><div><b style="font-size:17px">${P.range}</b><span>발매 기간</span></div><div><b style="font-size:17px">${P.score}</b><span>내 별점 평균</span></div></div></div>
+    <div class="side">${links()}<div class="upd">StashDB · 3일 전 확인 ${I('ArrowPath')}</div><button class="btn sec sm">대표 이미지 바꾸기</button></div>
+  </div>
+  <div class="sec">${worksHead.replace('<div class="works">','')}<div class="works" style="grid-template-columns:repeat(7,minmax(100px,1fr))">${WORKS.concat(WORKS.slice(0,4)).map((c,i)=>`<div class="work">${case_(i)}<b>${c}</b><span class="numeric">${DATES[i%10]}</span></div>`).join('')}</div></div>`);}
+
+function winC(){
+  const sizes=['3000×4500','1280×1920','2000×3000','800×1200','1600×2400','4000×6000','1200×1800','1000×1500','2400×3600','720×1080'];
+  const cells=sizes.map((s,i)=>`<div class="cell${i===2?' sel':''}"><img src="${ph(900+i,(i*31)%360,150,200)}" alt=""><span class="sz">${s}</span></div>`).join('');
+  return shell(`${topLine}<div class="pp-layout"><section><div class="pp-portrait"><img src="${ph(4242,12,300,400)}" alt=""></div></section><div></div></div>`,
+  `<div class="scrim"><div class="dlg"><div class="dlg-head"><h3>대표 이미지 바꾸기 — ${P.ko}</h3><span class="space" style="flex:1"></span><button class="btn ghost sm icon">${I('XMark')}</button></div>
+  <div class="dlg-body"><div class="pick"><div class="seg"><button>표지에서 자르기</button><button>Wikimedia Commons</button><button aria-pressed="true">StashDB <span class="numeric">34</span></button></div>
+  <div class="grid5">${cells}</div><div style="margin-top:10px;color:var(--color-faint);font-size:12px">34장 중 10장 · 스크롤해서 더 보기</div></div>
+  <div class="prev"><span>미리보기</span><div class="box"><img src="${ph(902,62,150,200)}" alt=""></div><span class="numeric">2000 × 3000</span><span>출처: StashDB</span><span style="color:var(--color-faint);font-size:12px">고르면 라이브러리에 저장해서 인터넷 없이도 보이고, 태블릿에도 같이 나옵니다.</span></div></div>
+  <div class="dlg-foot"><button class="btn ghost">취소</button><button class="btn pri">이 사진으로</button></div></div></div>`);}
+
+const BUILD={a:winA,b:winB,c:winC};
+const frame=new URLSearchParams(location.search).get('frame');
+if(frame&&BUILD[frame]){document.body.classList.add('frame-only');document.getElementById('solo').innerHTML=BUILD[frame]();}
+else{[['wa','a'],['wb','b'],['wc','c']].forEach(([id,k])=>document.getElementById(id).innerHTML=BUILD[k]());}
+</script>
+</body>
+</html>
