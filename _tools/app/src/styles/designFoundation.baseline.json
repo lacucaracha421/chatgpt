@@ -1,0 +1,396 @@
+{
+  "desktop": {
+    "_tools/app/src/artists/artists.css": {
+      "offScaleSpacing": 24,
+      "offRoleFontSize": 1,
+      "pillRadius": 0,
+      "legacyToken": 23
+    },
+    "_tools/app/src/autotags/autoTags.css": {
+      "offScaleSpacing": 7,
+      "offRoleFontSize": 4,
+      "pillRadius": 0,
+      "legacyToken": 10
+    },
+    "_tools/app/src/characters/CharacterManagement.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 1,
+      "pillRadius": 0,
+      "legacyToken": 7
+    },
+    "_tools/app/src/characters/SeriesBrowser.css": {
+      "offScaleSpacing": 3,
+      "offRoleFontSize": 3,
+      "pillRadius": 0,
+      "legacyToken": 25
+    },
+    "_tools/app/src/characters/ShadowReview.css": {
+      "offScaleSpacing": 2,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 7
+    },
+    "_tools/app/src/characters/TaggerReview.css": {
+      "offScaleSpacing": 14,
+      "offRoleFontSize": 6,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/characters/suggestions/CharacterSuggestions.css": {
+      "offScaleSpacing": 5,
+      "offRoleFontSize": 12,
+      "pillRadius": 0,
+      "legacyToken": 1
+    },
+    "_tools/app/src/collections/CollectionBrowser.css": {
+      "offScaleSpacing": 2,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 3
+    },
+    "_tools/app/src/collections/SeriesSeasons.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 1
+    },
+    "_tools/app/src/collections/av/avPerformerPage.css": {
+      "offScaleSpacing": 3,
+      "offRoleFontSize": 2,
+      "pillRadius": 0,
+      "legacyToken": 9
+    },
+    "_tools/app/src/collections/av/avPortrait.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/collections/av/avPortraitPicker.css": {
+      "offScaleSpacing": 1,
+      "offRoleFontSize": 1,
+      "pillRadius": 0,
+      "legacyToken": 4
+    },
+    "_tools/app/src/collections/av/avViewer.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/collections/av/dvdCase.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/collections/avCollections.css": {
+      "offScaleSpacing": 13,
+      "offRoleFontSize": 1,
+      "pillRadius": 0,
+      "legacyToken": 22
+    },
+    "_tools/app/src/collections/avLink.css": {
+      "offScaleSpacing": 6,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 11
+    },
+    "_tools/app/src/collections/collectionReleases.css": {
+      "offScaleSpacing": 5,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 8
+    },
+    "_tools/app/src/collections/mangaConnections.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 3
+    },
+    "_tools/app/src/collections/physical/physicalCollections.css": {
+      "offScaleSpacing": 3,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 1
+    },
+    "_tools/app/src/collections/platformBadges.css": {
+      "offScaleSpacing": 1,
+      "offRoleFontSize": 0,
+      "pillRadius": 1,
+      "legacyToken": 0
+    },
+    "_tools/app/src/collections/releaseCalendar.css": {
+      "offScaleSpacing": 2,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 9
+    },
+    "_tools/app/src/exchange/exchange.css": {
+      "offScaleSpacing": 20,
+      "offRoleFontSize": 3,
+      "pillRadius": 0,
+      "legacyToken": 14
+    },
+    "_tools/app/src/external-vault/externalVault.css": {
+      "offScaleSpacing": 4,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 10
+    },
+    "_tools/app/src/games/FaultGame.css": {
+      "offScaleSpacing": 1,
+      "offRoleFontSize": 1,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/home/characterReview.css": {
+      "offScaleSpacing": 11,
+      "offRoleFontSize": 10,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/home/home.css": {
+      "offScaleSpacing": 68,
+      "offRoleFontSize": 61,
+      "pillRadius": 0,
+      "legacyToken": 1
+    },
+    "_tools/app/src/layout/PublicationStatus.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/layout/StatusCenter.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 7
+    },
+    "_tools/app/src/layout/windowResizeHandles.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/manga/CatalogEditionsDialog.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/manga/CatalogReviewDialog.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/notes/ledger/ledger.css": {
+      "offScaleSpacing": 32,
+      "offRoleFontSize": 5,
+      "pillRadius": 0,
+      "legacyToken": 24
+    },
+    "_tools/app/src/notes/notes.css": {
+      "offScaleSpacing": 54,
+      "offRoleFontSize": 0,
+      "pillRadius": 3,
+      "legacyToken": 13
+    },
+    "_tools/app/src/shared/markdown/markdown.css": {
+      "offScaleSpacing": 1,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 3
+    },
+    "_tools/app/src/shared/markdown/markdownHelp.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 5
+    },
+    "_tools/app/src/similarity/video/VideoSimilarity.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 2
+    },
+    "_tools/app/src/statistics/statistics.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 7
+    },
+    "_tools/app/src/styles/chrome.css": {
+      "offScaleSpacing": 9,
+      "offRoleFontSize": 2,
+      "pillRadius": 0,
+      "legacyToken": 22
+    },
+    "_tools/app/src/styles/controls.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/styles/fonts.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/styles/global.css": {
+      "offScaleSpacing": 13,
+      "offRoleFontSize": 0,
+      "pillRadius": 3,
+      "legacyToken": 106
+    },
+    "_tools/app/src/styles/tokens.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    }
+  },
+  "tablet": {
+    "_tools/app/mobile-client/Catalog.css": {
+      "offScaleSpacing": 24,
+      "offRoleFontSize": 21,
+      "pillRadius": 1,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/CatalogReader.css": {
+      "offScaleSpacing": 4,
+      "offRoleFontSize": 3,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/Collections.css": {
+      "offScaleSpacing": 58,
+      "offRoleFontSize": 34,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/PrivateVault.css": {
+      "offScaleSpacing": 2,
+      "offRoleFontSize": 2,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/Settings.css": {
+      "offScaleSpacing": 3,
+      "offRoleFontSize": 3,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/Viewer.css": {
+      "offScaleSpacing": 10,
+      "offRoleFontSize": 5,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/artists.css": {
+      "offScaleSpacing": 24,
+      "offRoleFontSize": 22,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/avCollections.css": {
+      "offScaleSpacing": 33,
+      "offRoleFontSize": 24,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/catalogDuplicates.css": {
+      "offScaleSpacing": 3,
+      "offRoleFontSize": 3,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/characterReview.css": {
+      "offScaleSpacing": 21,
+      "offRoleFontSize": 9,
+      "pillRadius": 1,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/characters.css": {
+      "offScaleSpacing": 5,
+      "offRoleFontSize": 4,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/collectionBindings.css": {
+      "offScaleSpacing": 18,
+      "offRoleFontSize": 11,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/exchange.css": {
+      "offScaleSpacing": 30,
+      "offRoleFontSize": 19,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/fault.css": {
+      "offScaleSpacing": 1,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/home.css": {
+      "offScaleSpacing": 24,
+      "offRoleFontSize": 30,
+      "pillRadius": 1,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/ledger.css": {
+      "offScaleSpacing": 34,
+      "offRoleFontSize": 38,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/library.css": {
+      "offScaleSpacing": 20,
+      "offRoleFontSize": 9,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/libraryTrash.css": {
+      "offScaleSpacing": 9,
+      "offRoleFontSize": 3,
+      "pillRadius": 1,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/mobile.css": {
+      "offScaleSpacing": 90,
+      "offRoleFontSize": 61,
+      "pillRadius": 2,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/notes.css": {
+      "offScaleSpacing": 39,
+      "offRoleFontSize": 27,
+      "pillRadius": 4,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/releaseCalendar.css": {
+      "offScaleSpacing": 16,
+      "offRoleFontSize": 10,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/scrubber.css": {
+      "offScaleSpacing": 3,
+      "offRoleFontSize": 1,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/similarityReview.css": {
+      "offScaleSpacing": 11,
+      "offRoleFontSize": 4,
+      "pillRadius": 1,
+      "legacyToken": 0
+    }
+  }
+}

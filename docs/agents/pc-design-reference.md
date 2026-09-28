@@ -17,7 +17,7 @@ Lakomics is a **media-first personal archive**, not a dashboard, launcher, strea
 
 The visual system is dark-neutral, square/rectilinear, low-radius, line-icon heavy, and border-led rather than card-led.
 
-Typography (user-approved 2026-09-06): SUIT for Korean UI, Barlow for Latin UI and creator names, Rajdhani Medium for date headings, caption times and sidebar counts. Keep Barlow digits inside creator names and the Japanese fallback. Numeric roles use tabular figures; caption times use the small-text size. Fonts and OFL notices are bundled for offline use (`styles/fonts.css`, `--font-ui`, `--font-numeric`).
+Typography (user-approved 2026-09-28, replaces the 2026-09-06 SUIT + Barlow pairing): Pretendard for Korean and Latin UI, including creator names; Rajdhani Medium only for large standalone numbers (the `number` role in `DESIGN.md` section 12). Inline numbers (sidebar counts, caption times) use Pretendard tabular figures as their screens migrate. Keep the Japanese fallback. Numeric roles use tabular figures; caption times use the meta size. Fonts and OFL notices are bundled for offline use (`styles/fonts.css`, `--font-ui`, `--font-numeric`).
 
 ## 3. Chrome 03b shell
 

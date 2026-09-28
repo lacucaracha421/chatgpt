@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lakomics 디자인 기초 2</title>
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
+<style>
+  /* Foundation part 1 (decided): Pretendard, 4-32 spacing, PC 20/15/12/24, tablet 22/17/13/28, square badges, square-mark checkbox. */
+  :root {
+    --font: "Pretendard Variable", "Pretendard", sans-serif;
+    --type-title: 20px; --type-body: 15px; --type-meta: 12px; --type-number: 24px;
+    --badge-height: 20px; --cb: 16px; --icon: 20px;
+    --control: 32px; --control-compact: 28px; --row-1: 32px; --row-2: 48px;
+    --r-tile: 2px; --r-control: 4px; --r-float: 4px; --r-dialog: 8px;
+    --color-success: #7fb88a;
+  }
+  .tablet { --type-title: 22px; --type-body: 17px; --type-meta: 13px; --type-number: 28px;
+    --badge-height: 24px; --cb: 20px; --icon: 24px; --control: 44px; --control-compact: 36px; --row-1: 48px; --row-2: 64px; }
+  .c28 { --control: 28px; --control-compact: 24px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--color-bg); color: var(--color-text); font: 15px/1.5 var(--font); padding: 32px 16px 48px; }
+  main { max-width: 1120px; margin: 0 auto; }
+  h1 { font-size: 24px; font-weight: 600; margin: 0 0 4px; }
+  .lead { color: var(--color-muted); margin: 0 0 24px; }
+  section { border-top: 1px solid var(--color-border); padding: 24px 0 32px; }
+  h2 { font-size: 18px; font-weight: 600; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+  h2::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); }
+  .why { color: var(--color-muted); font-size: 13px; margin: 0 0 16px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .cols3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 860px) { .cols, .cols3 { grid-template-columns: 1fr; } }
+  .panel { background: var(--color-sidebar); border: 1px solid var(--color-border); padding: 16px; min-width: 0; }
+  .panel h3 { margin: 0 0 12px; font-size: 12px; font-weight: 500; color: var(--color-faint); display: flex; justify-content: space-between; gap: 8px; }
+  .panel h3 span { color: var(--color-muted); font-weight: 400; text-align: right; }
+  .bad h3 { color: #d9a07a; }
+  .lbl { font-size: 12px; color: var(--color-faint); margin: 12px 0 8px; }
+  .lbl:first-of-type { margin-top: 0; }
+  .line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .note { font-size: 13px; color: var(--color-muted); margin: 12px 0 0; }
+  ul.rules { margin: 0; padding-left: 18px; font-size: 13px; color: var(--color-muted); display: grid; gap: 4px; }
+  ul.rules b { color: var(--color-text); font-weight: 500; }
+  svg.i { width: var(--icon); height: var(--icon); fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+  /* Buttons */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: var(--control); padding: 0 12px;
+    border: 1px solid transparent; border-radius: var(--r-control); background: transparent; color: var(--color-text);
+    font: 500 var(--type-body)/1 var(--font); cursor: pointer; white-space: nowrap; }
+  .tablet .btn { padding: 0 16px; }
+  .btn svg.i { --icon: 16px; }
+  .tablet .btn svg.i { --icon: 20px; }
+  .btn--primary { background: var(--color-accent); color: var(--color-on-accent); border-color: var(--color-accent); }
+  .btn--primary:hover { background: var(--color-accent-hover); }
+  .btn--secondary { background: var(--color-control); border-color: var(--color-border); }
+  .btn--secondary:hover { background: var(--color-control-hover); border-color: var(--color-border-strong); }
+  .btn--ghost { color: var(--color-muted); }
+  .btn--ghost:hover { background: var(--color-surface-hover); color: var(--color-text); }
+  .btn--danger { color: var(--color-danger); border-color: color-mix(in srgb, var(--color-danger) 40%, transparent); }
+  .btn--icon { width: var(--control); padding: 0; color: var(--color-muted); }
+  .btn--icon:hover { background: var(--color-surface-hover); color: var(--color-text); }
+  .btn--compact { height: var(--control-compact); }
+  .btn:disabled { opacity: .4; cursor: default; }
+
+  /* Inputs */
+  .field { display: grid; gap: 4px; min-width: 0; }
+  .field > span { font-size: var(--type-meta); color: var(--color-muted); }
+  .input { display: flex; align-items: center; gap: 8px; height: var(--control); padding: 0 12px; background: var(--color-control);
+    border: 1px solid var(--color-border); border-radius: var(--r-control); color: var(--color-text); font: var(--type-body) var(--font); min-width: 0; }
+  .input input { all: unset; flex: 1; min-width: 0; font: inherit; }
+  .input input::placeholder { color: var(--color-faint); }
+  .input svg.i { --icon: 16px; color: var(--color-faint); }
+  .tablet .input svg.i { --icon: 20px; }
+  .input:hover { border-color: var(--color-border-strong); }
+  .input:focus-within, .input.is-focus { outline: 2px solid var(--color-focus); outline-offset: -1px; border-color: transparent; }
+  .input.is-error { border-color: var(--color-danger); }
+  .input.is-disabled { opacity: .4; }
+  .err { font-size: var(--type-meta); color: var(--color-danger); }
+  .select { justify-content: space-between; cursor: pointer; }
+
+  /* Switch */
+  .sw { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: var(--row-1); padding: 4px 0; font-size: var(--type-body); cursor: pointer; }
+  .sw input { position: absolute; opacity: 0; pointer-events: none; }
+  .sw i { position: relative; flex: none; width: 32px; height: 18px; background: var(--color-control); border: 1.5px solid var(--color-border-strong); transition: background 90ms, border-color 90ms; }
+  .tablet .sw i { width: 40px; height: 22px; }
+  .sw i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; background: var(--color-muted); transition: transform 140ms var(--ease-standard), background 90ms; }
+  .tablet .sw i::after { width: 15px; height: 15px; }
+  .sw input:checked + i { background: var(--color-accent); border-color: var(--color-accent); }
+  .sw input:checked + i::after { background: var(--color-on-accent); transform: translateX(14px); }
+  .tablet .sw input:checked + i::after { transform: translateX(18px); }
+  .sw-sq i, .sw-sq i::after { border-radius: 2px; }
+  .sw-rd i, .sw-rd i::after { border-radius: 999px; }
+  .sw small { display: block; font-size: var(--type-meta); color: var(--color-muted); }
+
+  /* Checkbox (decided: square mark) */
+  .cb { display: flex; align-items: center; gap: 8px; min-height: var(--row-1); font-size: var(--type-body); cursor: pointer; }
+  .cb input { position: absolute; opacity: 0; pointer-events: none; }
+  .cb i { width: var(--cb); height: var(--cb); flex: none; position: relative; border: 1.5px solid var(--color-border-strong); border-radius: 2px; background: var(--color-control); }
+  .cb input:checked + i { border-color: var(--color-accent); }
+  .cb input:checked + i::after { content: ""; position: absolute; inset: 3px; background: var(--color-accent); }
+  .tablet .cb input:checked + i::after { inset: 4px; }
+
+  /* Segmented + tabs */
+  .seg { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--r-control); overflow: hidden; }
+  .seg button { all: unset; display: inline-flex; align-items: center; height: calc(var(--control) - 2px); padding: 0 12px; font: 500 var(--type-body) var(--font); color: var(--color-muted); background: var(--color-control); cursor: pointer; }
+  .tablet .seg button { padding: 0 16px; }
+  .seg button + button { border-left: 1px solid var(--color-border); }
+  .seg button[aria-pressed=true] { background: var(--color-filter-selected); color: var(--color-text); }
+  .tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--color-border); }
+  .tabs button { all: unset; position: relative; display: inline-flex; align-items: center; height: var(--control); font: 500 var(--type-body) var(--font); color: var(--color-muted); cursor: pointer; }
+  .tabs button[aria-selected=true] { color: var(--color-text); }
+  .tabs button[aria-selected=true]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--color-accent); }
+  .tabs .n { font: 500 var(--type-meta) var(--font); color: var(--color-faint); margin-left: 4px; }
+
+  /* Radius */
+  .rad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  @media (max-width: 860px) { .rad { grid-template-columns: repeat(2, 1fr); } }
+  .rad div { display: grid; gap: 8px; font-size: 13px; color: var(--color-muted); }
+  .rad b { font: 500 22px var(--font); color: var(--color-text); }
+  .rad .sample { height: 72px; background: var(--color-surface-elevated); border: 1px solid var(--color-border-strong); }
+
+  /* Icons */
+  .icons { display: grid; grid-template-columns: 200px 1fr; gap: 12px 16px; align-items: center; }
+  .icons small { font-size: 12px; color: var(--color-faint); }
+  .icons .line { color: var(--color-muted); }
+  .icons .line svg.i:first-child { color: var(--color-text); }
+
+  /* Colors */
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+  .sw8 { display: flex; gap: 8px; align-items: center; padding: 8px; background: var(--color-surface); min-width: 0; }
+  .sw8 i { width: 32px; height: 32px; flex: none; border: 1px solid var(--color-border-strong); }
+  .sw8 b { display: block; font-size: 13px; font-weight: 600; }
+  .sw8 span { display: block; font-size: 12px; color: var(--color-muted); line-height: 1.4; }
+  .sw8.new b::after { content: " 추가"; color: #8fc79b; font-weight: 400; font-size: 12px; }
+
+  /* Rows */
+  .rows { display: grid; }
+  .r { display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--color-surface); min-width: 0; }
+  .r + .r { border-top: 1px solid var(--color-border); }
+  .r1 { height: var(--row-1); }
+  .r2 { height: var(--row-2); }
+  .r .t { flex: 1; min-width: 0; font-size: var(--type-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .r .t small { display: block; font-size: var(--type-meta); color: var(--color-muted); }
+  .r .m { font-size: var(--type-meta); color: var(--color-muted); }
+  .r .cover { width: 28px; height: 38px; background: #5a4a3a; flex: none; border-radius: var(--r-tile); }
+  .tablet .r .cover { width: 36px; height: 50px; }
+  .r svg.i { color: var(--color-muted); }
+  .hmark { font: 500 11px var(--font); color: #7db1ff; width: 28px; text-align: right; flex: none; }
+
+
+  /* Compact tablet button variants */
+  .cmp { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  @media (max-width: 860px) { .cmp { grid-template-columns: 1fr 1fr; } }
+  .ctx { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--color-border); }
+  .ctx .h { flex: 1; font-size: var(--type-body); font-weight: 600; }
+  .btn--c1 { height: 36px; font-weight: 400; background: var(--color-surface-elevated); border-color: transparent; padding: 0 12px; }
+  .btn--c2 { height: 36px; font-weight: 400; color: var(--color-muted); padding: 0 8px; gap: 4px; }
+  .btn--c2 svg.i { --icon: 16px !important; }
+  .btn--c2:hover { color: var(--color-text); background: var(--color-surface-hover); }
+  .btn--c3 { height: 36px; font-weight: 400; background: transparent; border-color: var(--color-border); padding: 0 12px; gap: 4px; }
+  .btn--c3 svg.i { --icon: 16px !important; color: var(--color-muted); }
+
+  /* Input variants: thin elements use one cue (face or line), not both. */
+  .iv { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  @media (max-width: 860px) { .iv { grid-template-columns: 1fr; } }
+  .iv .panel > div { display: grid; gap: 12px; }
+  .in-b .input { border-color: transparent; background: var(--color-surface); }
+  .in-b .input:hover { background: var(--color-surface-hover); border-color: transparent; }
+  .in-c .input { background: transparent; border-color: transparent; border-bottom-color: var(--color-border-strong); border-radius: 0; padding: 0 4px; }
+  .in-c .input:hover { border-bottom-color: var(--color-muted); }
+  .in-c .input:focus-within, .in-c .input.is-focus { outline: none; border-bottom: 2px solid var(--color-focus); }
+  .in-d .input { background: transparent; }
+  .in-b .input:focus-within, .in-b .input.is-focus { outline: none; box-shadow: inset 0 -2px 0 var(--color-focus); }
+  .in-e .input { border-color: transparent; background: var(--color-surface); border-radius: 4px; }
+  .in-e .input:hover { background: var(--color-surface-hover); border-color: transparent; }
+  .in-e .input:focus-within, .in-e .input.is-focus { outline: none; border-radius: 4px 4px 0 0; border-bottom: 2px solid var(--color-focus); }
+
+  /* Square toggle alternatives */
+  .tg-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 860px) { .tg-grid { grid-template-columns: 1fr; } }
+  .tg { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: var(--row-1); padding: 4px 0; font-size: var(--type-body); cursor: pointer; }
+  .tg input { position: absolute; opacity: 0; pointer-events: none; }
+  .tg i { position: relative; flex: none; display: block; }
+  .tg i, .tg i::before, .tg i::after { transition: transform 140ms var(--ease-standard), background 90ms, color 90ms, border-color 90ms; }
+  .tablet .tg { --k: 1.25; }
+  /* 1 rail: thin line + square knob */
+  .t1 i { width: calc(32px * var(--k,1)); height: calc(14px * var(--k,1)); }
+  .t1 i::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px; background: var(--color-border-strong); }
+  .t1 i::after { content: ""; position: absolute; left: 0; top: 0; width: calc(14px * var(--k,1)); height: calc(14px * var(--k,1)); background: var(--color-muted); }
+  .t1 input:checked + i::before { background: color-mix(in srgb, var(--color-accent) 55%, transparent); }
+  .t1 input:checked + i::after { background: var(--color-accent); transform: translateX(calc(18px * var(--k,1))); }
+  /* 2 face only: flat slot, knob inside */
+  .t2 i { width: calc(36px * var(--k,1)); height: calc(20px * var(--k,1)); background: var(--color-surface-elevated); }
+  .t2 i::after { content: ""; position: absolute; top: calc(4px * var(--k,1)); left: calc(4px * var(--k,1)); width: calc(12px * var(--k,1)); height: calc(12px * var(--k,1)); background: var(--color-faint); }
+  .t2 input:checked + i { background: color-mix(in srgb, var(--color-accent) 22%, var(--color-surface)); }
+  .t2 input:checked + i::after { background: var(--color-accent); transform: translateX(calc(16px * var(--k,1))); }
+  /* 3 half block: the filled half moves */
+  .t3 i { width: calc(32px * var(--k,1)); height: calc(16px * var(--k,1)); background: var(--color-surface-elevated); }
+  .t3 i::after { content: ""; position: absolute; inset: 0 50% 0 0; background: var(--color-faint); }
+  .t3 input:checked + i::after { background: var(--color-accent); transform: translateX(100%); }
+  /* 4 mini segment 끔 | 켬 */
+  .t4 i { display: flex; font: 600 var(--type-meta)/1 var(--font); font-style: normal; background: var(--color-surface-elevated); }
+  .t4 i b, .t4 i em { font: inherit; display: grid; place-items: center; width: calc(28px * var(--k,1)); height: calc(22px * var(--k,1)); color: var(--color-faint); }
+  .t4 input:not(:checked) + i b { background: var(--color-filter-selected); color: var(--color-text); }
+  .t4 input:checked + i em { background: var(--color-accent); color: var(--color-on-accent); }
+  /* 5 two cells (NieR mark) */
+  .t5 i { display: flex; gap: calc(3px * var(--k,1)); }
+  .t5 i b, .t5 i em { display: block; width: calc(10px * var(--k,1)); height: calc(10px * var(--k,1)); border: 1.5px solid var(--color-border-strong); }
+  .t5 input:not(:checked) + i b { background: var(--color-muted); border-color: var(--color-muted); }
+  .t5 input:checked + i em { background: var(--color-accent); border-color: var(--color-accent); }
+  /* 6 state word + square mark */
+  .t6 i { display: flex; align-items: center; gap: 8px; font: var(--type-meta) var(--font); font-style: normal; color: var(--color-faint); }
+  .t6 i::after { content: ""; width: calc(12px * var(--k,1)); height: calc(12px * var(--k,1)); border: 1.5px solid var(--color-border-strong); box-sizing: border-box; }
+  .t6 i::before { content: "끔"; }
+  .t6 input:checked + i { color: var(--color-accent); }
+  .t6 input:checked + i::before { content: "켬"; }
+  .t6 input:checked + i::after { background: var(--color-accent); border-color: var(--color-accent); }
+  /* Combined */
+  .shot { background: var(--color-bg); border: 1px solid var(--color-border); font-family: var(--font); }
+  .shot .bar { display: flex; align-items: center; gap: 8px; padding: 0 16px; height: 48px; border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+  .tablet.shot .bar { height: 64px; padding: 0 24px; }
+  .shot .bar b { flex: 1; font-size: var(--type-title); font-weight: 600; }
+  .shot .body { padding: 16px; display: grid; gap: 24px; }
+  .tablet.shot .body { padding: 24px; }
+  .shot .grp { display: grid; gap: 8px; }
+  .shot .gl { font-size: var(--type-meta); color: var(--color-faint); display: flex; align-items: center; gap: 8px; }
+  .shot .gl::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); }
+  .shot .card { background: var(--color-surface); padding: 0 16px; }
+  .shot .card > * + * { border-top: 1px solid var(--color-border); }
+  .shot .foot { display: flex; justify-content: flex-end; gap: 8px; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; height: var(--badge-height); padding: 0 8px; border-radius: 2px; background: var(--color-surface-elevated); color: var(--color-muted); font: 600 var(--type-meta)/1 var(--font); }
+  .badge--accent { background: var(--color-accent); color: var(--color-on-accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>디자인 기초 2 — 버튼 · 입력 · 토글 · 탭 · 아이콘 · 반경 · 색 · 행</h1>
+  <p class="lead">1차 결정(Pretendard, 간격 4~32, PC 15/12 · 태블릿 17/13, 사각 배지, 사각 표식 체크박스)을 그대로 쓴 상태입니다. 모든 조작은 실제로 눌러 볼 수 있습니다.</p>
+
+  <!-- Radius -->
+  <section>
+    <h2>모서리 반경은 네 단계</h2>
+    <p class="why">사각 언어를 유지하되, 떠 있는 정도에 따라 조금씩 둥글어집니다. 지금은 0 · 1 · 2 · 3 · 4 · 8 · 50% · 999가 섞여 있습니다.</p>
+    <div class="rad">
+      <div><div class="sample" style="border-radius:0"></div><b>0</b>이미지·영상 타일, 화면 가장자리에 붙은 면</div>
+      <div><div class="sample" style="border-radius:2px"></div><b>2</b>배지, 체크박스, 토글, 선택 표식, 표지</div>
+      <div><div class="sample" style="border-radius:4px"></div><b>4</b>버튼, 입력창, 행 카드, 메뉴·팝오버</div>
+      <div><div class="sample" style="border-radius:8px"></div><b>8</b>대화상자, 태블릿 하단 시트 (위쪽 모서리만)</div>
+    </div>
+    <p class="note">원형(50%)은 인물 얼굴 사진처럼 내용 자체가 둥근 경우만. 알약(999)은 쓰지 않습니다.</p>
+  </section>
+
+  <!-- Buttons -->
+  <section>
+    <h2>버튼은 네 종류, 높이는 기기별 두 가지</h2>
+    <p class="why">주 버튼(아이보리)은 화면·대화상자당 하나. 나머지는 보조(면+테두리), 조용한(글자만), 위험(빨간 글자+옅은 테두리). 아이콘 버튼은 정사각형.</p>
+    <div class="cols">
+      <div class="panel c28">
+        <h3>A · PC 28 <span>지금과 같음, 촘촘함</span></h3>
+        <div class="line"><button class="btn btn--primary">저장</button><button class="btn btn--secondary">취소</button><button class="btn btn--ghost">건너뛰기</button><button class="btn btn--danger">삭제</button><button class="btn btn--icon" aria-label="검색"><svg class="i" viewBox="0 0 24 24"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg></button></div>
+        <div class="lbl" style="margin-top:12px">아이콘 + 글자 · 비활성</div>
+        <div class="line"><button class="btn btn--secondary"><svg class="i" viewBox="0 0 24 24"><path d="M12 4.5v15m7.5-7.5h-15"/></svg>앨범 추가</button><button class="btn btn--primary" disabled>저장</button></div>
+      </div>
+      <div class="panel">
+        <h3>B · PC 32 · 도구줄만 28 <span>15px 글자에 여유, 누르기 쉬움 (추천)</span></h3>
+        <div class="line"><button class="btn btn--primary">저장</button><button class="btn btn--secondary">취소</button><button class="btn btn--ghost">건너뛰기</button><button class="btn btn--danger">삭제</button><button class="btn btn--icon" aria-label="검색"><svg class="i" viewBox="0 0 24 24"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg></button></div>
+        <div class="lbl" style="margin-top:12px">아이콘 + 글자 · 비활성 · 도구줄(28)</div>
+        <div class="line"><button class="btn btn--secondary"><svg class="i" viewBox="0 0 24 24"><path d="M12 4.5v15m7.5-7.5h-15"/></svg>앨범 추가</button><button class="btn btn--primary" disabled>저장</button><button class="btn btn--ghost btn--compact">정렬</button><button class="btn btn--icon btn--compact" style="width:28px" aria-label="닫기"><svg class="i" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6l12 12"/></svg></button></div>
+      </div>
+    </div>
+    <div class="panel tablet" style="margin-top:16px">
+      <h3>태블릿 44 · 좁은 곳 36 (누르는 영역은 44 유지) <span>지금 40 → Apple 기준 44</span></h3>
+      <div class="line"><button class="btn btn--primary">저장</button><button class="btn btn--secondary">취소</button><button class="btn btn--ghost">건너뛰기</button><button class="btn btn--danger">삭제</button><button class="btn btn--icon" aria-label="검색"><svg class="i" viewBox="0 0 24 24"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg></button><button class="btn btn--c2"><svg class="i" viewBox="0 0 24 24"><path d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"/></svg>좁은 곳 36</button></div>
+    </div>
+  </section>
+
+
+  <!-- Compact tablet button -->
+  <section>
+    <h2>태블릿 좁은 곳 버튼 다시 그리기</h2>
+    <p class="why">목록 머리 같은 좁은 곳에 들어가는 36 버튼. 보이는 높이는 36, 누르는 영역은 44 그대로입니다. 글자 굵기를 보통(400)으로 낮추고 테두리·면을 줄였습니다.</p>
+    <div class="cmp tablet">
+      <div class="panel bad"><h3>지금 <span>보조 버튼 축소판</span></h3>
+        <div class="ctx"><span class="h">체인소맨</span><button class="btn btn--secondary btn--compact">정렬</button><button class="btn btn--secondary btn--compact">편집</button></div></div>
+      <div class="panel"><h3>A · 면만 <span>테두리 없이 옅은 면</span></h3>
+        <div class="ctx"><span class="h">체인소맨</span><button class="btn btn--c1">정렬</button><button class="btn btn--c1">편집</button></div></div>
+      <div class="panel"><h3>B · 글자 + 아이콘 <span>면 없이 조용하게 (추천)</span></h3>
+        <div class="ctx"><span class="h">체인소맨</span><button class="btn btn--c2"><svg class="i" viewBox="0 0 24 24"><path d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"/></svg>정렬</button><button class="btn btn--c2">편집</button></div></div>
+      <div class="panel"><h3>C · 얇은 테두리 <span>면 없이 선만, 펼침 표시</span></h3>
+        <div class="ctx"><span class="h">체인소맨</span><button class="btn btn--c3">최신순<svg class="i" viewBox="0 0 24 24"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button><button class="btn btn--c3">편집</button></div></div>
+    </div>
+    <p class="note">PC 도구줄(28)도 같은 모양을 씁니다. 크기만 작아집니다.</p>
+  </section>
+
+  <!-- Inputs -->
+  <section>
+    <h2>입력창 · 검색 · 선택</h2>
+    <p class="why">버튼과 같은 높이·반경. 라벨은 위에 보조 크기로. 포커스는 파란 2px 테두리(키보드·입력 중만), 오류는 빨간 테두리 + 아래 한 줄.</p>
+    <div class="cols">
+      <div class="panel">
+        <h3>PC <span>높이 32</span></h3>
+        <div style="display:grid;gap:12px">
+          <label class="field"><span>앨범 이름</span><div class="input"><input placeholder="예: 2026 여름"></div></label>
+          <div class="field"><span>검색 (포커스 상태)</span><div class="input is-focus"><svg class="i" viewBox="0 0 24 24"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg><input value="체인소맨"></div></div>
+          <div class="field"><span>정렬</span><div class="input select"><span>수집일 최신순</span><svg class="i" viewBox="0 0 24 24"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></div></div>
+          <div class="field"><span>StashDB 키 (오류)</span><div class="input is-error"><input value="abc-123"></div><span class="err">키 형식이 맞지 않습니다</span></div>
+        </div>
+      </div>
+      <div class="panel tablet">
+        <h3>태블릿 <span>높이 44</span></h3>
+        <div style="display:grid;gap:12px">
+          <label class="field"><span>앨범 이름</span><div class="input"><input placeholder="예: 2026 여름"></div></label>
+          <div class="field"><span>검색</span><div class="input"><svg class="i" viewBox="0 0 24 24"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg><input placeholder="작품, 작가, 태그"></div></div>
+          <div class="field"><span>정렬</span><div class="input select"><span>수집일 최신순</span><svg class="i" viewBox="0 0 24 24"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></div></div>
+          <div class="field"><span>비활성</span><div class="input is-disabled"><input value="편집할 수 없음" disabled></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- Input variants -->
+  <section>
+    <h2>가는 블록 다시 그리기 — 입력창</h2>
+    <p class="why">큰 블록은 면+테두리 둘 다 써도 되지만, 가늘고 작은 요소는 <b style="color:var(--color-text);font-weight:500">면이나 선 중 하나만</b> 쓰는 규칙으로 바꿔 봤습니다. 태블릿 크기, 아래 검색창은 입력 중(포커스) 상태. 직접 눌러 입력해 볼 수 있습니다.</p>
+    <div class="iv tablet">
+      <div class="panel bad"><h3>지금 <span>면 + 테두리</span></h3><div><label class="field"><span>앨범 이름</span><div class="input"><input placeholder="예: 2026 여름"></div></label>
+          <div class="field"><span>검색</span><div class="input is-focus"><svg class="i" viewBox="0 0 24 24"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg><input value="체인소맨"></div></div></div></div>
+      <div class="panel in-b"><h3>A · 면만 <span>테두리 없이 옅은 면, 입력 중엔 아래 파란 선</span></h3><div><label class="field"><span>앨범 이름</span><div class="input"><input placeholder="예: 2026 여름"></div></label>
+          <div class="field"><span>검색</span><div class="input is-focus"><svg class="i" viewBox="0 0 24 24"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg><input value="체인소맨"></div></div></div></div>
+      <div class="panel in-c"><h3>B · 밑줄만 <span>가장 가벼움, 입력 중엔 파란 밑줄</span></h3><div><label class="field"><span>앨범 이름</span><div class="input"><input placeholder="예: 2026 여름"></div></label>
+          <div class="field"><span>검색</span><div class="input is-focus"><svg class="i" viewBox="0 0 24 24"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg><input value="체인소맨"></div></div></div></div>
+      <div class="panel in-d"><h3>C · 테두리만 <span>면 없이 선만</span></h3><div><label class="field"><span>앨범 이름</span><div class="input"><input placeholder="예: 2026 여름"></div></label>
+          <div class="field"><span>검색</span><div class="input is-focus"><svg class="i" viewBox="0 0 24 24"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg><input value="체인소맨"></div></div></div></div>
+    </div>
+    <div class="iv" style="margin-top:16px">
+      <div class="panel in-e tablet"><h3>D · 면 + 입력 중 밑줄 · 태블릿 <span>평소엔 면만, 입력 중엔 파란 밑줄 2px (결정)</span></h3><div><label class="field"><span>앨범 이름</span><div class="input"><input placeholder="예: 2026 여름"></div></label>
+          <div class="field"><span>검색</span><div class="input is-focus"><svg class="i" viewBox="0 0 24 24"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg><input value="체인소맨"></div></div></div></div>
+      <div class="panel in-e"><h3>D · 면 + 입력 중 밑줄 · PC <span>높이 32</span></h3><div><label class="field"><span>앨범 이름</span><div class="input"><input placeholder="예: 2026 여름"></div></label>
+          <div class="field"><span>검색</span><div class="input is-focus"><svg class="i" viewBox="0 0 24 24"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg><input value="체인소맨"></div></div></div></div>
+    </div>
+    <p class="note">같은 원칙을 좁은 곳 버튼(위 B · 글자+아이콘)과 세그먼트에도 적용합니다. 면+테두리를 함께 쓰는 건 카드·대화상자·주 버튼 같은 큰 블록만.</p>
+  </section>
+
+  <!-- Switch vs checkbox -->
+  <section>
+    <h2>토글 스위치와 체크박스 나눠 쓰기</h2>
+    <p class="why">토글 = 누르는 즉시 적용되는 설정 하나. 체크박스 = 여러 개를 고른 뒤 버튼으로 적용하는 선택. 토글 모양을 골라 주세요.</p>
+    <div class="cols3">
+      <div class="panel">
+        <h3>A · 사각 토글 <span>사각 배지·체크박스와 같은 언어 (추천)</span></h3>
+        <label class="sw sw-sq"><span>숨김 폴더 보기<small>바로 적용</small></span><input type="checkbox" checked><i></i></label>
+        <label class="sw sw-sq"><span>자동 태그</span><input type="checkbox"><i></i></label>
+        <div class="tablet"><label class="sw sw-sq"><span>태블릿 크기</span><input type="checkbox" checked><i></i></label></div>
+      </div>
+      <div class="panel">
+        <h3>B · 둥근 토글 <span>iOS식, 가장 익숙함</span></h3>
+        <label class="sw sw-rd"><span>숨김 폴더 보기<small>바로 적용</small></span><input type="checkbox" checked><i></i></label>
+        <label class="sw sw-rd"><span>자동 태그</span><input type="checkbox"><i></i></label>
+        <div class="tablet"><label class="sw sw-rd"><span>태블릿 크기</span><input type="checkbox" checked><i></i></label></div>
+      </div>
+      <div class="panel">
+        <h3>체크박스 (결정됨) <span>여러 개 고르고 적용</span></h3>
+        <label class="cb"><input type="checkbox" checked><i></i>체인소맨</label>
+        <label class="cb"><input type="checkbox" checked><i></i>귀멸의 칼날</label>
+        <label class="cb"><input type="checkbox"><i></i>주술회전</label>
+        <div class="line" style="margin-top:8px"><button class="btn btn--primary">2개 삭제</button></div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- Square toggle alternatives -->
+  <section>
+    <h2>사각 토글 다른 모양들</h2>
+    <p class="why">모서리는 모두 사각. 눌러서 켜고 꺼 볼 수 있습니다. 위 두 줄은 PC, 아래 두 줄은 태블릿 크기.</p>
+    <div class="tg-grid">
+      <div class="panel"><h3>1 · 레일 <span>가는 선 위를 사각 손잡이가 이동</span></h3><label class="tg t1"><span>숨김 폴더 보기</span><input type="checkbox" checked><i></i></label><label class="tg t1"><span>자동 태그</span><input type="checkbox"><i></i></label><div class="tablet"><label class="tg t1"><span>태블릿 크기</span><input type="checkbox" checked><i></i></label><label class="tg t1"><span>태블릿 꺼짐</span><input type="checkbox"><i></i></label></div></div><div class="panel"><h3>2 · 면만 <span>테두리 없는 홈, 안쪽 사각이 이동 (가는 요소 원칙)</span></h3><label class="tg t2"><span>숨김 폴더 보기</span><input type="checkbox" checked><i></i></label><label class="tg t2"><span>자동 태그</span><input type="checkbox"><i></i></label><div class="tablet"><label class="tg t2"><span>태블릿 크기</span><input type="checkbox" checked><i></i></label><label class="tg t2"><span>태블릿 꺼짐</span><input type="checkbox"><i></i></label></div></div><div class="panel"><h3>3 · 반쪽 블록 <span>채워진 반 칸이 좌우로 이동</span></h3><label class="tg t3"><span>숨김 폴더 보기</span><input type="checkbox" checked><i></i></label><label class="tg t3"><span>자동 태그</span><input type="checkbox"><i></i></label><div class="tablet"><label class="tg t3"><span>태블릿 크기</span><input type="checkbox" checked><i></i></label><label class="tg t3"><span>태블릿 꺼짐</span><input type="checkbox"><i></i></label></div></div><div class="panel"><h3>4 · 끔 | 켬 <span>작은 세그먼트, 상태를 글자로</span></h3><label class="tg t4"><span>숨김 폴더 보기</span><input type="checkbox" checked><i><b>끔</b><em>켬</em></i></label><label class="tg t4"><span>자동 태그</span><input type="checkbox"><i><b>끔</b><em>켬</em></i></label><div class="tablet"><label class="tg t4"><span>태블릿 크기</span><input type="checkbox" checked><i><b>끔</b><em>켬</em></i></label><label class="tg t4"><span>태블릿 꺼짐</span><input type="checkbox"><i><b>끔</b><em>켬</em></i></label></div></div><div class="panel"><h3>5 · 두 칸 표식 <span>NieR 표식처럼 켜진 칸만 채움</span></h3><label class="tg t5"><span>숨김 폴더 보기</span><input type="checkbox" checked><i><b></b><em></em></i></label><label class="tg t5"><span>자동 태그</span><input type="checkbox"><i><b></b><em></em></i></label><div class="tablet"><label class="tg t5"><span>태블릿 크기</span><input type="checkbox" checked><i><b></b><em></em></i></label><label class="tg t5"><span>태블릿 꺼짐</span><input type="checkbox"><i><b></b><em></em></i></label></div></div><div class="panel"><h3>6 · 글자 + 표식 <span>상태 글자와 사각 표식</span></h3><label class="tg t6"><span>숨김 폴더 보기</span><input type="checkbox" checked><i></i></label><label class="tg t6"><span>자동 태그</span><input type="checkbox"><i></i></label><div class="tablet"><label class="tg t6"><span>태블릿 크기</span><input type="checkbox" checked><i></i></label><label class="tg t6"><span>태블릿 꺼짐</span><input type="checkbox"><i></i></label></div></div>
+    </div>
+  </section>
+
+  <!-- Segmented and tabs -->
+  <section>
+    <h2>세그먼트와 탭</h2>
+    <p class="why">세그먼트 = 같은 목록을 다르게 거르는 2~4개 선택(붙은 사각). 탭 = 서로 다른 내용으로 넘어가기(글자 + 아이보리 밑줄 2px). 지금은 화면마다 모양이 다릅니다(16가지 이상).</p>
+    <div class="cols">
+      <div class="panel">
+        <h3>PC</h3>
+        <div class="lbl">세그먼트</div>
+        <div class="seg" role="group"><button aria-pressed="true">전체</button><button aria-pressed="false">읽는 중</button><button aria-pressed="false">완결</button></div>
+        <div class="lbl" style="margin-top:16px">탭</div>
+        <div class="tabs" role="tablist"><button role="tab" aria-selected="true">정보<span class="n">12</span></button><button role="tab" aria-selected="false">권 목록<span class="n">17</span></button><button role="tab" aria-selected="false">메모</button></div>
+      </div>
+      <div class="panel tablet">
+        <h3>태블릿</h3>
+        <div class="lbl">세그먼트</div>
+        <div class="seg" role="group"><button aria-pressed="false">전체</button><button aria-pressed="true">읽는 중</button><button aria-pressed="false">완결</button></div>
+        <div class="lbl" style="margin-top:16px">탭</div>
+        <div class="tabs" role="tablist"><button role="tab" aria-selected="false">정보</button><button role="tab" aria-selected="true">권 목록<span class="n">17</span></button><button role="tab" aria-selected="false">메모</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Icons -->
+  <section>
+    <h2>아이콘</h2>
+    <p class="why">지금 쓰는 Heroicons 선 아이콘(선 굵기 1.5)을 유지하고, 크기만 세 단계로 정리합니다. 색은 글자색을 따르고, 평소엔 흐리게 · 누르거나 선택되면 밝게.</p>
+    <div class="icons">
+      <small>16 · 배지·버튼 안</small><div class="line" style="--icon:16px">ICONS</div>
+      <small>20 · PC 기본, 행·도구줄</small><div class="line" style="--icon:20px">ICONS</div>
+      <small>24 · 태블릿 기본, 상단·하단 바</small><div class="line" style="--icon:24px">ICONS</div>
+    </div>
+    <p class="note">채운(solid) 아이콘은 켜짐 상태(하트, 핀)에만. 선 굵기를 바꿔 강조하지 않습니다.</p>
+  </section>
+
+  <!-- Colors -->
+  <section>
+    <h2>색은 역할로만</h2>
+    <p class="why">색 값은 지금 그대로 두고, "어디에 쓰는가"만 정합니다. 아이보리 강조색이 여기저기 쓰이면 선택이 안 보이게 됩니다.</p>
+    <div class="swatches">
+      <div class="sw8"><i style="background:var(--color-bg)"></i><div><b>바탕</b><span>화면 배경</span></div></div>
+      <div class="sw8"><i style="background:var(--color-sidebar)"></i><div><b>사이드바</b><span>인덱스·패널</span></div></div>
+      <div class="sw8"><i style="background:var(--color-surface)"></i><div><b>면</b><span>행 카드, 입력창 주변</span></div></div>
+      <div class="sw8"><i style="background:var(--color-surface-elevated)"></i><div><b>떠 있는 면</b><span>메뉴, 배지</span></div></div>
+      <div class="sw8"><i style="background:var(--color-border)"></i><div><b>선</b><span>구분선, 테두리</span></div></div>
+      <div class="sw8"><i style="background:var(--color-text)"></i><div><b>글자</b><span>본문·제목</span></div></div>
+      <div class="sw8"><i style="background:var(--color-muted)"></i><div><b>흐린 글자</b><span>보조 정보, 아이콘</span></div></div>
+      <div class="sw8"><i style="background:var(--color-faint)"></i><div><b>더 흐린 글자</b><span>구역 이름, 안내</span></div></div>
+      <div class="sw8"><i style="background:var(--color-accent)"></i><div><b>강조 (아이보리)</b><span>선택, 주 버튼, 켜짐, NEW</span></div></div>
+      <div class="sw8"><i style="background:var(--color-focus)"></i><div><b>포커스 (파랑)</b><span>키보드·입력 중에만</span></div></div>
+      <div class="sw8"><i style="background:var(--color-danger)"></i><div><b>위험</b><span>삭제, 실패, 오류</span></div></div>
+      <div class="sw8 new"><i style="background:var(--color-success)"></i><div><b>완료</b><span>동기화 완료 등 (지금은 값이 흩어져 있음)</span></div></div>
+    </div>
+    <ul class="rules" style="margin-top:12px">
+      <li>강조색은 <b>선택 · 주 버튼 · 켜짐 · NEW</b>에만. 장식에 쓰지 않음</li>
+      <li>플랫폼 고유색(PlayStation 파랑 등)은 플랫폼 배지에만, 작품 색은 표지에서만</li>
+    </ul>
+  </section>
+
+  <!-- Rows -->
+  <section>
+    <h2>목록 행 높이</h2>
+    <p class="why">한 줄 · 두 줄 두 가지. PC 32 / 48, 태블릿 48 / 64. 표지가 있는 행은 두 줄 높이를 씁니다.</p>
+    <div class="cols">
+      <div class="panel">
+        <h3>PC <span>32 · 48</span></h3>
+        <div class="rows">
+          <div class="r r1"><svg class="i" viewBox="0 0 24 24"><path d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg><span class="t">미분류</span><span class="m">1,284</span></div>
+          <div class="r r1"><svg class="i" viewBox="0 0 24 24"><path d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg><span class="t">ASK (Askzy)</span><span class="m">312</span></div>
+          <div class="r r2"><span class="cover"></span><span class="t">체인소맨 17권<small>10월 4일 · D-6</small></span><span class="badge badge--accent">NEW</span></div>
+        </div>
+      </div>
+      <div class="panel tablet">
+        <h3>태블릿 <span>48 · 64</span></h3>
+        <div class="rows">
+          <div class="r r1"><svg class="i" viewBox="0 0 24 24"><path d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg><span class="t">미분류</span><span class="m">1,284</span></div>
+          <div class="r r2"><span class="cover"></span><span class="t">체인소맨 17권<small>10월 4일 · D-6</small></span><span class="badge badge--accent">NEW</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Combined -->
+  <section>
+    <h2>합쳐 보기 — 설정 화면 한 조각</h2>
+    <p class="why">1차 + 2차 규칙을 모두 적용한 모습. 규칙만 지켜도 두 기기가 같은 앱으로 보이는지 확인용입니다.</p>
+    <div class="cols">
+      <div class="shot">
+        <div class="bar"><b>설정</b><button class="btn btn--icon" aria-label="닫기"><svg class="i" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6l12 12"/></svg></button></div>
+        <div class="body">
+          <div class="tabs"><button aria-selected="true">일반</button><button aria-selected="false">라이브러리</button><button aria-selected="false">연결</button></div>
+          <div class="grp"><div class="gl">보기</div>
+            <div class="card"><label class="sw sw-sq"><span>숨김 폴더 보기</span><input type="checkbox" checked><i></i></label><label class="sw sw-sq"><span>자동 태그 제안<small>수신함 폴더에서 새 이미지를 읽습니다</small></span><input type="checkbox"><i></i></label><div class="sw"><span>앱 배율</span><div class="seg"><button aria-pressed="false">90</button><button aria-pressed="true">100</button><button aria-pressed="false">110</button></div></div></div></div>
+          <div class="grp"><div class="gl">StashDB</div>
+            <label class="field"><span>API 키</span><div class="input"><input placeholder="키 붙여넣기"></div></label></div>
+          <div class="foot"><button class="btn btn--ghost">기본값으로</button><button class="btn btn--primary">저장</button></div>
+        </div>
+      </div>
+      <div class="shot tablet">
+        <div class="bar"><b>설정</b><button class="btn btn--icon" aria-label="닫기"><svg class="i" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6l12 12"/></svg></button></div>
+        <div class="body">
+          <div class="grp"><div class="gl">보기</div>
+            <div class="card"><label class="sw sw-sq"><span>숨김 폴더 보기</span><input type="checkbox" checked><i></i></label><label class="sw sw-sq"><span>썸네일 미리 받기<small>Wi-Fi에서만</small></span><input type="checkbox"><i></i></label></div></div>
+          <div class="grp"><div class="gl">서버</div>
+            <label class="field"><span>주소</span><div class="input"><input value="lakomics.tail" ></div></label></div>
+          <div class="foot"><button class="btn btn--primary">저장</button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+  // Inline the same Heroicons (outline) into each size row.
+  const paths = [
+    'm21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z',
+    'M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z',
+    'M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z',
+    'M12 4.5v15m7.5-7.5h-15', 'M6 18 18 6M6 6l12 12', 'm8.25 4.5 7.5 7.5-7.5 7.5',
+  ];
+  const svg = paths.map(d => `<svg class="i" viewBox="0 0 24 24"><path d="${d}"/></svg>`).join('');
+  document.querySelectorAll('.icons .line').forEach(el => { el.innerHTML = svg; });
+  // Make segmented controls and tabs clickable.
+  document.querySelectorAll('.seg, .tabs').forEach(g => g.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const attr = g.classList.contains('seg') ? 'aria-pressed' : 'aria-selected';
+    g.querySelectorAll('button').forEach(x => x.setAttribute(attr, String(x === b)));
+  }));
+</script>
+</body>
+</html>

@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 export default defineConfig({
   root: 'mobile-client', base: './', plugins: [react(), {
     name: 'bundled-font-licenses', generateBundle() {
-      for (const name of ['Barlow-OFL.txt', 'Rajdhani-OFL.txt', 'SUIT-OFL.txt']) {
+      for (const name of ['Pretendard-OFL.txt', 'Rajdhani-OFL.txt']) {
         this.emitFile({type:'asset',fileName:`licenses/${name}`,source:readFileSync(new URL(`./src/styles/fonts/${name}`,import.meta.url),'utf8')});
       }
     },
