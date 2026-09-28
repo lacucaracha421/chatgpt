@@ -113,6 +113,12 @@ describe('catalog cover retention',()=>{
 });
 
 describe('mobile catalog reads',()=>{
+  it('does not show the edition count on a catalog cover',async()=>{
+    render(<Catalog active paused={false} backRef={{current:null}}/>);
+    const title=await screen.findByText('밤의 도서관');
+    const card=title.closest('button')!;
+    expect(card.querySelector('.catalog-cover')?.textContent).not.toContain('판본 2');
+  });
   it('ignores a reader response after the catalog becomes inactive even if transport ignores abort',async()=>{
     const original=mocks.api.getMockImplementation()!;
     const deferred=Promise.withResolvers<unknown>();

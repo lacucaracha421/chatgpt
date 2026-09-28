@@ -53,7 +53,7 @@ export type HomeCover = {url?: string | null; sha256?: string | null; sizeBytes?
 export type UpcomingHomeEntry = {
   id: string; kind: 'game' | 'movie' | 'anime'; title: string; originalTitle?: string | null;
   date?: string | null; precision?: string | null; region?: string | null; platforms?: string[];
-  releaseType?: string | null; cover?: HomeCover | null; description?: string | null;
+  releaseType?: string | null; cover?: HomeCover | null; description?: string | null; port?: boolean;
 };
 export type UpcomingHomeReply = {version?: number; revision?: string | number | null; entries?: UpcomingHomeEntry[]; wishlist?: UpcomingHomeEntry[]; pending?: {itemId?: string; action?: string}[]};
 export type AvPick = {date?: string; personId: string; name: string; aliases?: string[]; workCount?: number; latestWork?: {code?: string; label?: string; series?: string | null; title?: string; date?: string; collectionId?: string | null; cover?: HomeCover | null} | null; cover?: HomeCover | null};
@@ -252,6 +252,7 @@ export function memoRows(notes: Note[], today = localToday()): MemoRow[] {
     .map((note): MemoRow => {
       const base = {id: note.id, title: note.title.trim(), color: noteColorValue(note.color)};
       if (note.type === 'secret') return {...base, kind: 'secret'};
+      if (note.concealed && note.type !== LEDGER) return {...base, kind: 'text', snippet: '숨긴 메모'};
       if (note.type === LEDGER) {
         const summary = monthSummary(note, monthNotesOf(notes, note.id), today.slice(0, 7), today);
         const entries = summary.entries.filter(entry => !entry.in);

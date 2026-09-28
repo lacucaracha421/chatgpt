@@ -19,6 +19,8 @@ export type ReleaseCalendarEntry = {
   platforms: string[];
   releaseType: string | null;
   cover: ReleaseCover | null;
+  /** A new platform version of a game already released elsewhere (the PC marks it). */
+  port: boolean;
 };
 
 export type UpcomingIntent = {itemId?: string; action?: string};
@@ -79,6 +81,7 @@ function entryOf(value: unknown): ReleaseCalendarEntry | null {
     platforms: Array.isArray(row.platforms) ? row.platforms.filter((item): item is string => typeof item === 'string' && !!item) : [],
     releaseType: stringOrNull(row.releaseType),
     cover: coverOf(row.cover),
+    port: row.port === true,
   };
 }
 

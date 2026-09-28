@@ -105,7 +105,8 @@ it('converts between text and checklist with one tap, colours with a circle and 
  expect(await screen.findByRole('button',{name:'메모로 바꾸기'})).toBeTruthy();
  expect(screen.getByRole('button',{name:'완료 1'})).toBeTruthy();
  fireEvent.click(screen.getByRole('button',{name:'메모로 바꾸기'}));
- await waitFor(()=>expect(saves().some(s=>s.type==='text'&&s.body==='- [ ] 빵\n- [x] 우유')).toBe(true));
+ await waitFor(()=>expect(saves().some(s=>s.type==='text'&&s.body==='빵\n\n우유')).toBe(true));
+ expect(saves().find(s=>s.type==='text'&&s.body==='빵\n\n우유')?.body).not.toContain('- [');
  fireEvent.click(screen.getByRole('button',{name:'메모 색상'}));
  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('radio',{name:'청록'}));
  await waitFor(()=>expect(saves().some(s=>s.color==='teal')).toBe(true));
@@ -136,6 +137,26 @@ it('filters by label chips and searches secret notes by title only',async()=>{
  expect(screen.getByText('여행')).toBeTruthy();expect(screen.queryByText('서버 계정')).toBeNull();
  fireEvent.change(screen.getByRole('textbox',{name:'메모 검색'}),{target:{value:'섭'}});
  expect(screen.getByText('서버 계정')).toBeTruthy();expect(screen.queryByText('여행')).toBeNull();
+});
+it('hides text note cards, saves the concealment choice and searches hidden notes by title only',async()=>{
+ const visible:MobileNote={...note,id:'e'.repeat(32),title:'숨은 제목',body:'숨겨진 본문 단어'};
+ mock.native.mockImplementation(state([visible]));
+ render(<Notes active backRef={{current:null}}/>);
+ const card=await screen.findByText('숨은 제목');
+ fireEvent.click(card);
+ fireEvent.click(await screen.findByRole('button',{name:'메모 더보기'}));
+ fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'목록에서 내용 숨기기'}));
+ await waitFor(()=>expect(saves().some(s=>s.id===visible.id&&s.concealed===true)).toBe(true));
+
+ fireEvent.click(screen.getByRole('button',{name:'메모 목록'}));
+ const noteCard=screen.getByText('숨은 제목').closest('button')!;
+ expect(within(noteCard).getByText('숨긴 메모 · 열어서 보기')).toBeTruthy();
+ expect(noteCard.textContent).not.toContain('숨겨진 본문 단어');
+ const search=screen.getByRole('textbox',{name:'메모 검색'});
+ fireEvent.change(search,{target:{value:'숨겨진 본문 단어'}});
+ expect(screen.queryByText('숨은 제목')).toBeNull();
+ fireEvent.change(search,{target:{value:'숨은 제목'}});
+ expect(screen.getByText('숨은 제목')).toBeTruthy();
 });
 it('opens a secret note with the PIN, copies natively and drops its content when the app goes to the background',async()=>{
  const locked:MobileNote={...note,id:'d'.repeat(32),type:'secret',schema:2,title:'서버 계정',body:'',redacted:true};

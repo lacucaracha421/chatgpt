@@ -13,6 +13,7 @@ import {api} from './transport';
 import {BottomSheet} from './BottomSheet';
 import {usePrivacyMode} from './privacyMode';
 import type {Asset} from './types';
+import {PlatformBadges} from '../src/collections/PlatformBadges';
 import './home.css';
 
 export interface HomeProps {
@@ -68,7 +69,8 @@ function ShelfExternal({entry, today, interested, privacy, onOpen}: {entry: Upco
   const date = entry.date && /^\d{4}-\d{2}-\d{2}$/.test(entry.date) ? entry.date : null;
   const days = date ? daysAfter(date, today) : null;
   const block = date ? dateBlock(date, today) : null;
-  return <button className="home-shelf-item home-external-item" onClick={onOpen} aria-label={`${entry.title}${date ? ` · ${days === 0 ? '오늘' : `D-${days}`}` : ''}`}><span className="home-rail"><span className="home-rail-d">{block?.day ?? '발매 예정'}</span>{block && <><span className="home-rail-w">{block.weekday.slice(0, 1)}</span><span className="home-rail-dd numeric">{days === 0 ? '오늘' : days !== null && days > 0 ? `D-${days}` : '일정 미정'}</span></>}</span><span className="home-shelf-art"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} /><span className="home-interest" aria-label={interested ? '관심 목록에 있음' : '관심 목록에 없음'}>{interested ? '♥' : '♡'}</span></span><span className="home-shelf-title">{entry.title}</span><span className="home-shelf-sub"><span className="home-kind">{upcomingKind[entry.kind]}</span><span>{entry.platforms?.slice(0, 2).join(' · ') || entry.releaseType || '발매 예정'}</span></span></button>;
+  const hasGamePlatforms = entry.kind === 'game' && !!entry.platforms?.length;
+  return <button className="home-shelf-item home-external-item" onClick={onOpen} aria-label={`${entry.title}${date ? ` · ${days === 0 ? '오늘' : `D-${days}`}` : ''}`}><span className="home-rail"><span className="home-rail-d">{block?.day ?? '발매 예정'}</span>{block && <><span className="home-rail-w">{block.weekday.slice(0, 1)}</span><span className="home-rail-dd numeric">{days === 0 ? '오늘' : days !== null && days > 0 ? `D-${days}` : '일정 미정'}</span></>}</span><span className="home-shelf-art"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} /><span className="home-interest" aria-label={interested ? '관심 목록에 있음' : '관심 목록에 없음'}>{interested ? '♥' : '♡'}</span></span><span className="home-shelf-title">{entry.title}</span><span className="home-shelf-sub">{hasGamePlatforms ? <PlatformBadges platforms={entry.platforms!} port={entry.port === true} /> : <><span className="home-kind">{upcomingKind[entry.kind]}</span><span>{entry.platforms?.slice(0, 2).join(' · ') || entry.releaseType || '발매 예정'}</span></>}</span></button>;
 }
 
 function ExchangeThumb({transferId, enabled, privacy, name}: {transferId: string; enabled: boolean; privacy: boolean; name: string}) {

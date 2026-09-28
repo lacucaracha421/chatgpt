@@ -17,7 +17,7 @@ const reply = {
   publishedAt: '2026-09-27T00:00:00Z',
   rangeStart: '2026-09-27',
   rangeEnd: '2027-03-27',
-  entries: [entry('game-one', 'game', '2026-10-01', 'exact'), entry('movie-one', 'movie', '2026-10-01', 'month'), entry('anime-one', 'anime', '2026-12-01', 'quarter'), entry('year-one', 'movie', '2027-01-01', 'year'), entry('unknown-one', 'game', null, 'tbd')],
+  entries: [entry('game-one', 'game', '2026-10-01', 'exact', {platforms: ['PC', 'PS5'], port: true}), entry('movie-one', 'movie', '2026-10-01', 'month'), entry('anime-one', 'anime', '2026-12-01', 'quarter'), entry('year-one', 'movie', '2027-01-01', 'year'), entry('unknown-one', 'game', null, 'tbd')],
   wishlist: [entry('movie-one', 'movie', '2026-10-01', 'month')],
   pending: [],
 };
@@ -53,9 +53,15 @@ describe('ReleaseCalendar', () => {
   it('filters by kind and then by the counted interest list', async () => {
     render(<ReleaseCalendar onClose={vi.fn()} />);
     expect(await screen.findByRole('heading', {name: '2026년 10월'})).toBeTruthy();
-    expect(screen.getAllByText('PC').length).toBe(2);
+    const game = screen.getByText('game-one').closest('li')!;
+    expect(within(game).getByRole('img', {name: 'PC'})).toBeTruthy();
+    expect(within(game).getByRole('img', {name: 'PS5'})).toBeTruthy();
+    expect(within(game).getByText('이식')).toBeTruthy();
+    expect(screen.getAllByRole('img', {name: 'PC'}).length).toBe(2);
     expect(screen.getAllByText('국내 개봉').length).toBe(2);
     expect(screen.getByText('일본 방영')).toBeTruthy();
+    const movie = screen.getByText('movie-one').closest('li')!;
+    expect(movie.querySelector('.release-calendar-kind')?.textContent).toBe('영화');
     expect(screen.getAllByText('미정').length).toBe(2);
     fireEvent.click(screen.getByRole('radio', {name: '게임'}));
     expect(screen.getByText('game-one')).toBeTruthy();

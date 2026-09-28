@@ -2,7 +2,7 @@ import {useVisibleInterval} from './useVisibleInterval';
 import {SIGNAL_FALLBACK_MS,useSyncSignal} from './syncSignals';
 import {TopBar} from './TopBar';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type CSSProperties,type MouseEvent,type MutableRefObject,type ReactNode} from 'react';
-import {ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,DocumentTextIcon,EllipsisHorizontalIcon,KeyIcon,ListBulletIcon,LockClosedIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
+import {ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,DocumentTextIcon,EllipsisHorizontalIcon,EyeIcon,EyeSlashIcon,KeyIcon,ListBulletIcon,LockClosedIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {PinIcon} from './PinIcon';
 import {Button,IconButton} from './ui';
 import {BottomSheet} from './BottomSheet';
@@ -12,7 +12,7 @@ import {useLevelMotion} from './motion';
 import {MarkdownView} from '../src/shared/markdown/MarkdownView';
 import {toggleMarkdownTask} from '../src/shared/markdown/markdown';
 import {MarkdownHelpButton} from './MarkdownHelp';
-import {byOrder,checklistMarkdown,labelKey,NOTE_COLORS,NOTE_LIMITS,noteColorValue,noteLimitProblem,normalizeLabel,stripMarkdown,textToItems,type NoteKind} from '../src/notes/model';
+import {byOrder,checklistText,labelKey,NOTE_COLORS,NOTE_LIMITS,noteColorValue,noteLimitProblem,normalizeLabel,stripMarkdown,textToItems,type NoteKind} from '../src/notes/model';
 import {isSecret,noteKind,NotesStore,PIN_REQUIRED_TEXT,type Note} from '../src/notes/store';
 import {genericView,isLedgerKind,LEDGER,LEDGER_MONTH} from '../src/notes/ledger/model';
 import {LedgerCard,NoteLedger} from './NoteLedger';
@@ -47,12 +47,14 @@ const tint=(color:string|null|undefined)=>{const value=noteColorValue(color);ret
 export function noteMatches(note:Note,query:string) {
   if(!query)return true;
   // A ledger matches by title only; its entries are searched inside the ledger.
-  const text=isSecret(note)||isLedgerKind(note)?note.title:[note.title,note.body,...(note.items??[]).map(item=>item.text),...(note.labels??[])].join('\n');
+  // Hidden notes match by title only, so a search never reveals them (PC 2026-09-28).
+  const text=isSecret(note)||isLedgerKind(note)||note.concealed?note.title:[note.title,note.body,...(note.items??[]).map(item=>item.text),...(note.labels??[])].join('\n');
   return matchesKoreanSearch(text,query);
 }
 const CARD_CHECKS=8,CARD_FIELDS=4;
 /** A sticky note's content: text, a checklist with its progress, or a secret note's masked fields. */
 function NoteCardBody({note}:{note:Note}) {
+  if(note.concealed&&!isSecret(note)&&!isLedgerKind(note))return <span className="note-card__concealed"><EyeSlashIcon aria-hidden="true"/>숨긴 메모 · 열어서 보기</span>;
   if(isSecret(note)){
     // Values never reach the list: only the field names of an open session, masked.
     const fields=note.redacted?[]:[...(note.fields??[])].sort(byOrder).slice(0,CARD_FIELDS);
@@ -218,7 +220,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   const canConvert=!!note&&editable&&!isSecret(note);
   function convert(){
     if(!note||!canConvert)return;
-    if(kind==='checklist')edit({type:'text',body:checklistMarkdown(note.items??[]),items:undefined});
+    if(kind==='checklist')edit({type:'text',body:checklistText(note.items??[]),items:undefined});
     else{setEditingBody(false);edit({type:'checklist',items:textToItems(note.body)});}
   }
   function startBodyEdit(event?:MouseEvent){
@@ -341,6 +343,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
     </div></BottomSheet>}
     {sheet==='more'&&note&&<BottomSheet title="메모 더보기" onClose={()=>setSheet(null)}>
       {/* Archive sits here next to 휴지통, away from the everyday actions. */}
+      {(kind==='text'||kind==='checklist')&&editable&&<button className="sheet-option" onClick={()=>{edit({concealed:!note.concealed});setSheet(null);}}>{note.concealed?<EyeIcon aria-hidden="true"/>:<EyeSlashIcon aria-hidden="true"/>}{note.concealed?'목록에서 내용 보이기':'목록에서 내용 숨기기'}</button>}
       <button className="sheet-option" onClick={()=>{edit({archived:!note.archived});setSheet(null);}}><ArchiveBoxIcon aria-hidden="true"/>{note.archived?'보관 해제':'보관함으로 보내기'}</button>
       <button className="sheet-option" onClick={()=>{setSheet(null);trashNote();}}><TrashIcon aria-hidden="true"/>휴지통으로 보내기</button>
     </BottomSheet>}

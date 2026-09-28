@@ -122,6 +122,8 @@ final class NotesModel {
         /** Ledger collections as canonical JSON maps (known keys in order, then unknown keys). */
         List<Map<String, Object>> recurring, planned, entries;
         boolean pinned, deleted, archived;
+        /** Lists show only the title until the note is opened (text and checklist notes). */
+        boolean concealed;
         String createdAt, updatedAt;
         LinkedHashMap<String, Object> extra = new LinkedHashMap<>();
 
@@ -142,7 +144,7 @@ final class NotesModel {
             c.fields = fields == null ? null : copyFields(fields);
             c.ledger = ledger; c.month = month; c.hasIncome = hasIncome; c.income = income; c.incomeDay = incomeDay;
             c.recurring = copyMaps(recurring); c.planned = copyMaps(planned); c.entries = copyMaps(entries);
-            c.pinned = pinned; c.deleted = deleted; c.archived = archived; c.createdAt = createdAt; c.updatedAt = updatedAt;
+            c.pinned = pinned; c.deleted = deleted; c.archived = archived; c.concealed = concealed; c.createdAt = createdAt; c.updatedAt = updatedAt;
             c.extra = new LinkedHashMap<>(extra);
             return c;
         }
@@ -169,6 +171,7 @@ final class NotesModel {
             out.put("pinned", pinned);
             out.put("deleted", deleted);
             if (archived) out.put("archived", true);
+            if (concealed) out.put("concealed", true);
             out.put("createdAt", createdAt);
             out.put("updatedAt", updatedAt);
             for (Map.Entry<String, Object> e : extra.entrySet()) if (!out.containsKey(e.getKey())) out.put(e.getKey(), e.getValue());
@@ -253,7 +256,7 @@ final class NotesModel {
     // ----------------------------------------------------------------------------------
     // Strict parsing (serde semantics of the PC `Content`)
 
-    private static final Set<String> KNOWN = new HashSet<>(Arrays.asList("schema", "type", "title", "body", "memo", "color", "labels", "items", "fields", "ledger", "month", "income", "incomeDay", "recurring", "planned", "entries", "pinned", "deleted", "archived", "createdAt", "updatedAt"));
+    private static final Set<String> KNOWN = new HashSet<>(Arrays.asList("schema", "type", "title", "body", "memo", "color", "labels", "items", "fields", "ledger", "month", "income", "incomeDay", "recurring", "planned", "entries", "pinned", "deleted", "archived", "concealed", "createdAt", "updatedAt"));
 
     @SuppressWarnings("unchecked")
     static Map<String, Object> object(Object value, String key) throws Shape {
@@ -344,6 +347,7 @@ final class NotesModel {
         c.pinned = bool(map, "pinned");
         c.deleted = bool(map, "deleted");
         c.archived = defaultBool(map, "archived");
+        c.concealed = defaultBool(map, "concealed");
         c.createdAt = string(map, "createdAt");
         c.updatedAt = string(map, "updatedAt");
         for (Map.Entry<String, Object> e : map.entrySet()) if (!KNOWN.contains(e.getKey())) c.extra.put(e.getKey(), e.getValue());
@@ -395,6 +399,7 @@ final class NotesModel {
             c.pinned = Boolean.TRUE.equals(map.get("pinned"));
             c.deleted = Boolean.TRUE.equals(map.get("deleted"));
             c.archived = Boolean.TRUE.equals(map.get("archived"));
+            c.concealed = Boolean.TRUE.equals(map.get("concealed"));
             c.createdAt = map.get("createdAt") instanceof String ? (String) map.get("createdAt") : "";
             c.updatedAt = map.get("updatedAt") instanceof String ? (String) map.get("updatedAt") : "";
             return c;
@@ -450,7 +455,7 @@ final class NotesModel {
         String id;
         long expectedRevision;
         String title, body, kind, memo;
-        Boolean pinned, deleted, archived;
+        Boolean pinned, deleted, archived, concealed;
         boolean colorPresent;
         String color;
         List<String> labels;
@@ -479,6 +484,7 @@ final class NotesModel {
         d.pinned = optBool(map, "pinned");
         d.deleted = optBool(map, "deleted");
         d.archived = optBool(map, "archived");
+        d.concealed = optBool(map, "concealed");
         if (map.containsKey("color")) { d.colorPresent = true; d.color = optString(map, "color"); }
         d.labels = map.get("labels") == null ? null : strings(map.get("labels"), "labels");
         d.items = items(map.get("items"));
@@ -512,6 +518,7 @@ final class NotesModel {
         if (draft.pinned != null) content.pinned = draft.pinned;
         if (draft.deleted != null) content.deleted = draft.deleted;
         if (draft.archived != null) content.archived = draft.archived;
+        if (draft.concealed != null) content.concealed = draft.concealed;
         content.updatedAt = now;
         if (!content.supported()) return content;
         if (draft.kind != null) {
@@ -751,6 +758,7 @@ final class NotesModel {
         m.pinned = (Boolean) threeOr(base.pinned, local.pinned, remote.pinned, remote.pinned);
         m.deleted = (Boolean) threeOr(base.deleted, local.deleted, remote.deleted, false);
         m.archived = (Boolean) threeOr(base.archived, local.archived, remote.archived, false);
+        m.concealed = (Boolean) threeOr(base.concealed, local.concealed, remote.concealed, true);
         m.createdAt = (String) threeOr(base.createdAt, local.createdAt, remote.createdAt, remote.createdAt);
         m.updatedAt = local.updatedAt.compareTo(remote.updatedAt) >= 0 ? local.updatedAt : remote.updatedAt;
         m.extra = mergeExtra(base.extra, local.extra, remote.extra);
@@ -1225,6 +1233,7 @@ final class NotesModel {
         m.pinned = (Boolean) threeOr(base.pinned, local.pinned, remote.pinned, remote.pinned);
         m.deleted = (Boolean) threeOr(base.deleted, local.deleted, remote.deleted, false);
         m.archived = (Boolean) threeOr(base.archived, local.archived, remote.archived, false);
+        m.concealed = (Boolean) threeOr(base.concealed, local.concealed, remote.concealed, true);
         m.createdAt = (String) threeOr(base.createdAt, local.createdAt, remote.createdAt, remote.createdAt);
         m.updatedAt = local.updatedAt.compareTo(remote.updatedAt) >= 0 ? local.updatedAt : remote.updatedAt;
         m.extra = mergeExtra(base.extra, local.extra, remote.extra);

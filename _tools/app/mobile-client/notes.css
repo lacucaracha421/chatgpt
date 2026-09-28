@@ -45,6 +45,9 @@
 .note-card__checks>span.is-more{padding-left:21px;font-size:12px;color:var(--color-muted)}
 .note-card__checks>span.is-more::before{display:none}
 .note-card__secret{display:flex;flex-direction:column;gap:7px;margin-top:10px}
+/* A hidden note shows only its title until opened (PC and tablet, 2026-09-28). */
+.note-card__concealed{display:flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;color:var(--color-muted)}
+.note-card__concealed svg{width:16px;height:16px;flex:none}
 .note-card__secret>span{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.07);font-size:12px;color:var(--color-muted)}
 .note-card__secret>span>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .note-card__secret>span>span:last-child{flex:none;letter-spacing:2px;color:color-mix(in srgb,var(--color-muted) 80%,var(--color-bg))}

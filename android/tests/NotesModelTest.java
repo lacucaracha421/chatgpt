@@ -121,6 +121,13 @@ public final class NotesModelTest {
   check("teal".equals(coloured.color)&&Long.valueOf(2).equals(coloured.schema),"colour marks schema 2");
   check(NotesModel.applyDraft(coloured,draft("{\"id\":\"x\",\"expectedRevision\":3,\"color\":null}"),now,open).color==null,"null clears colour");
   check("teal".equals(NotesModel.applyDraft(coloured,draft("{\"id\":\"x\",\"expectedRevision\":3,\"title\":\"z\"}"),now,open).color),"absent keeps colour");
+  // Hidden notes (PC 2026-09-28): the flag is a known key, kept by edits that do not send it.
+  NotesModel.Content hidden=NotesModel.applyDraft(saved,draft("{\"id\":\"x\",\"expectedRevision\":2,\"concealed\":true}"),now,open);
+  check(hidden.concealed&&!hidden.extra.containsKey("concealed")&&Boolean.TRUE.equals(hidden.toMap().get("concealed")),"concealed is saved as a known key");
+  check(NotesModel.applyDraft(hidden,draft("{\"id\":\"x\",\"expectedRevision\":3,\"body\":\"new\"}"),now,open).concealed,"a body edit keeps concealed");
+  NotesModel.Content shown=NotesModel.applyDraft(hidden,draft("{\"id\":\"x\",\"expectedRevision\":3,\"concealed\":false}"),now,open);
+  check(!shown.concealed&&!shown.toMap().containsKey("concealed"),"concealed false leaves the key out");
+  check(NotesModel.parse(Json.parse(hidden.toJson())).concealed,"concealed survives a round trip");
   NotesModel.Content checklist=NotesModel.parse(Json.parse("{\"schema\":2,\"type\":\"checklist\",\"title\":\"c\",\"body\":\"- [ ] a\",\"items\":[{\"id\":\"i1\",\"text\":\"a\",\"checked\":false,\"order\":\"V\",\"due\":\"x\"}],\"pinned\":false,\"deleted\":false,\"createdAt\":\"a\",\"updatedAt\":\"b\"}"));
   NotesModel.Content checked=NotesModel.applyDraft(checklist,draft("{\"id\":\"x\",\"expectedRevision\":1,\"items\":[{\"id\":\"i1\",\"text\":\"a\",\"checked\":true,\"order\":\"V\"}]}"),now,open);
   check("x".equals(checked.items.get(0).extra.get("due"))&&checked.body.equals("- [x] a"),"item extras restored by id and fallback rebuilt");

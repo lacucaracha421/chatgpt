@@ -92,6 +92,22 @@ describe('Home C', () => {
     expect(within(region('메모')).getByText('마트')).toBeTruthy();
     expect(within(region('확인할 것')).getAllByRole('button')).toHaveLength(3);
   });
+  it('masks hidden pinned memo content and uses platform badges for game shelf entries', async () => {
+    const game = {...upcomingEntry, platforms: ['PC', 'PS5'], port: true};
+    server.upcoming = {version: 1, revision: 2, entries: [game], wishlist: [game], pending: []};
+    notes = [note('hidden', {type: 'text', title: '숨은 메모 제목', body: '홈에 보이면 안 되는 본문', concealed: true})];
+    render(<Home {...props()}/>);
+
+    const shelf = await screen.findByRole('region', {name: '신간 · 발매 예정'});
+    const gameCard = within(shelf).getByRole('button', {name: /Hades II/});
+    expect(within(gameCard).getByRole('img', {name: 'PC'})).toBeTruthy();
+    expect(within(gameCard).getByRole('img', {name: 'PS5'})).toBeTruthy();
+    expect(within(gameCard).getByText('이식')).toBeTruthy();
+
+    const memoCard = within(region('메모')).getByRole('button', {name: /숨은 메모 제목/});
+    expect(memoCard.textContent).toContain('숨긴 메모');
+    expect(memoCard.textContent).not.toContain('홈에 보이면 안 되는 본문');
+  });
   it('handles an empty or 404 upcoming publication without dropping manga', async () => {
     server.upcoming = 404;
     render(<Home {...props()}/>);

@@ -94,7 +94,8 @@
 .home-shelf-art { position:relative; display:block; overflow:hidden; border-radius:var(--radius-tile); background:var(--color-surface-elevated); }
 .home-newmark { position:absolute; left:0; top:0; padding:0 6px; background:var(--color-accent); font:600 11.5px/20px var(--font-ui); color:var(--color-on-accent); }
 .home-shelf-title { margin-top:7px; overflow:hidden; font-size:14px; font-weight:500; line-height:1.3; white-space:nowrap; text-overflow:ellipsis; }
-.home-shelf-sub { display:flex; align-items:center; overflow:hidden; font-size:12.5px; line-height:1.45; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
+.home-shelf-sub { display:flex; flex-wrap:nowrap; align-items:center; overflow:hidden; font-size:12.5px; line-height:1.45; color:var(--color-muted); white-space:nowrap; text-overflow:ellipsis; }
+.home-shelf-sub .platform-badges { flex-wrap:nowrap; overflow:hidden; }
 .home-shelf-sub .numeric { font-size:14px; color:var(--color-muted); }
 .home-kind { display:inline-block; flex:none; margin-right:5px; padding:0 4px; border:1px solid var(--color-border-strong); border-radius:2px; font-size:11px; font-weight:500; line-height:15px; color:var(--color-muted); }
 
@@ -250,3 +251,15 @@
 
 /* A long AV title stays within two lines so the card keeps Home C's one-screen height. */
 .home-av-work strong { display:-webkit-box; overflow:hidden; -webkit-line-clamp:2; -webkit-box-orient:vertical; white-space:normal; }
+
+/* Fit the whole Home on one Galaxy Tab S11 screen (≈674 × 950 CSS px of content, 2026-09-28):
+   each block gives up a little height instead of the page scrolling. */
+.home-c { gap:11px; }
+.home-c .home-sh { min-height:28px; margin-bottom:4px; }
+.home-c .home-transfer-grid, .home-c .home-memo-grid { height:160px; }
+.home-c .home-shelf-item { width:104px; }
+.home-c .home-shelf-art { height:122px; }
+.home-c .home-av-card { min-height:150px; gap:8px; }
+.home-c .home-todo-cards { height:150px; }
+.home-c .home-revisit-pics { height:140px; }
+.home-c .home-asset-grid { height:172px; }

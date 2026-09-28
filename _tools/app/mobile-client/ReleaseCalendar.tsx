@@ -5,6 +5,7 @@ import {TopBar} from './TopBar';
 import {api, ApiError, errorText} from './transport';
 import {usePrivacyMode} from './privacyMode';
 import {commitUpcomingWishlist, flushUpcomingWishlist, readUpcomingWishlistIntents, reconcileUpcomingWishlist, visibleUpcomingWishlist} from './upcomingWishlistOutbox';
+import {PlatformBadges} from '../src/collections/PlatformBadges';
 import {detailLabel, filterReleaseEntries, groupReleaseEntries, kindLabel, normalizeReleaseCalendarReply, releaseDateLabel, visibleWishlistIds, wishlistIds, type KindFilter, type ReleaseCalendarEntry, type ReleaseCalendarReply} from './releaseCalendarModel';
 import './releaseCalendar.css';
 
@@ -46,7 +47,9 @@ function ReleaseCard({entry, watched, pending, privacy, referenceYear, onToggle}
       <strong>{entry.title}</strong>
       {entry.originalTitle && entry.originalTitle !== entry.title && <span className="release-calendar-original">{entry.originalTitle}</span>}
       <span className="release-calendar-date">{releaseDateLabel(entry.date, entry.precision, referenceYear)}</span>
-      <span className="release-calendar-detail"><span className="release-calendar-kind">{kindLabel(entry.kind)}</span><span>{detailLabel(entry)}</span></span>
+      {entry.kind === 'game' && entry.platforms.length > 0
+        ? <span className="release-calendar-detail"><PlatformBadges platforms={entry.platforms} port={entry.port} /></span>
+        : <span className="release-calendar-detail"><span className="release-calendar-kind">{kindLabel(entry.kind)}</span><span>{detailLabel(entry)}</span></span>}
       {pending && <span className="release-calendar-pending" role="status">동기화 대기</span>}
     </div>
   </li>;
