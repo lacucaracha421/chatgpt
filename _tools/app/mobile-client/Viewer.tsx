@@ -153,7 +153,8 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   useEffect(() => {setTransform({scale:1,x:0,y:0});}, [asset.id,asset.pending]);
   useEffect(() => {
     if(vault)return;
-    const neighbours=imageNeighbours(items,index).reverse().filter(item=>(item.size_bytes==null||item.size_bytes<=8*1024*1024)).slice(0,2);
+    // Skip prefetching neighbours whose decode alone would take hundreds of MB (e.g. very tall pages); they still open on demand.
+    const neighbours=imageNeighbours(items,index).reverse().filter(item=>(item.size_bytes==null||item.size_bytes<=8*1024*1024)&&(!item.width||!item.height||item.width*item.height<=MAX_PREFETCH_PIXELS)).slice(0,2);
     const retained=new Set([asset.id,...neighbours.map(item=>item.id)]);
     for(const [id,work] of prefetches.current)if(!retained.has(id)){work.controller.abort();prefetches.current.delete(id);}
     if(!original)return;
@@ -297,6 +298,8 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
 
 /** How long a library video may go from loadstart to loadedmetadata before it is renewed. */
 const PROGRESS_MS = 8000;
+// About 96 MB once decoded as RGBA; larger neighbours are not prefetched.
+const MAX_PREFETCH_PIXELS = 24_000_000;
 
 /**
  * The media element's own error class for a vault video, e.g. ` (오류 2 · PIPELINE_ERROR_READ)`.

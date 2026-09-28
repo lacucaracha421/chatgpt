@@ -34,6 +34,17 @@ describe('progressive viewer',()=>{
     await waitFor(()=>expect(events.some(p=>p.event==='commit'&&p.id==='b'&&p.prepared===true&&p.source==='prepared')).toBe(true));
     expect(mocks.ticket).toHaveBeenCalledTimes(requests);
   });
+  it('does not prefetch a neighbour whose decode would be very large',async()=>{
+    const tall:Asset[]=[items[0],{...items[1],width:2000,height:20000},{id:'c',kind:'image',preview:'https://test.invalid/thumb-c',creator_name:'C',width:1600,height:2400}];
+    mocks.decode.mockResolvedValue(undefined);
+    render(<Viewer items={tall} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
+    await waitFor(()=>expect(mocks.ticket.mock.calls.some(([asset])=>(asset as Asset).id==='b')).toBe(true));
+    const wide:Asset[]=[items[0],items[1],{id:'c',kind:'image',preview:'https://test.invalid/thumb-c',creator_name:'C',width:2000,height:20000}];
+    cleanup();mocks.ticket.mockClear();
+    render(<Viewer items={wide} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
+    await waitFor(()=>expect(mocks.ticket.mock.calls.some(([asset])=>(asset as Asset).id==='a')).toBe(true));
+    expect(mocks.ticket.mock.calls.some(([asset])=>(asset as Asset).id==='c')).toBe(false);
+  });
   it('keeps one native media operation across a page append and a swipe onto a prefetch',async()=>{
     const real=await vi.importActual<typeof import('./media')>('./media');real.clearMediaCache();
     mocks.ticket.mockImplementation(real.mediaTicket);mocks.decode.mockResolvedValue(undefined);
