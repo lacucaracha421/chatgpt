@@ -1,3 +1,4 @@
+import { ConnectionStatusBlock } from "../layout/ConnectionStatusBlock";
 import { useWorkloadProfile } from "./workloadProfile";
 import {ASSET_LIFECYCLE_CHANGED_EVENT, useAssetAuthoritySync} from './useAssetAuthoritySync';
 import {useMobilePublications} from './useMobilePublications';
@@ -539,7 +540,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     setPreferences((current) => ({ ...current, ...update }));
   }
 
-  function navigateView(next: AssetView) {
+  /** Set when Home opened another tab: back (mouse, Escape) from that tab's first screen returns to Home. */
+  const homeReturnRef = useRef(false);
+  function navigateView(next: AssetView, options: { fromHome?: boolean } = {}) {
     // A vault recovery key shown once in Settings is lost if Settings closes (asks first).
     if (view.kind === "settings" && !confirmLeaveVaultRecovery()) return;
     // Re-opening a settings section must switch to it even when the view object is unchanged.
@@ -549,13 +552,21 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     if (next.kind === "collections") updatePreferences({ collectionType: next.typeFilter });
     if (JSON.stringify(next) === JSON.stringify(view)) return;
     if (backNavigationTab(next) === backNavigationTab(view)) viewHistoryRef.current.push(view);
-    else viewHistoryRef.current = [];
+    else {
+      viewHistoryRef.current = [];
+      homeReturnRef.current = Boolean(options.fromHome) && view.kind === "home";
+    }
     setView(next);
   }
 
   function navigateBack(fallback?: AssetView) {
     const previous = viewHistoryRef.current.pop() ?? fallback;
-    if (!previous || backNavigationTab(previous) !== backNavigationTab(view)) return false;
+    if (!previous || backNavigationTab(previous) !== backNavigationTab(view)) {
+      if (!homeReturnRef.current || view.kind === "home") return false;
+      homeReturnRef.current = false;
+      setView({ kind: "home" });
+      return true;
+    }
     setView(previous);
     return true;
   }
@@ -637,10 +648,10 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     dropState.dismissWork(workId);
   }
 
-  async function openExisting(assetId: string) {
+  async function openExisting(assetId: string, options: { fromHome?: boolean } = {}) {
     try {
       const asset = await gateway.getAsset(assetId);
-      navigateView({ kind: "classification", classificationId: null });
+      navigateView({ kind: "classification", classificationId: null }, options);
       setRequestedAsset(asset);
     } catch (error) {
       setMessage(commandErrorMessage(error, "기존 자산을 열지 못했습니다."));
@@ -832,7 +843,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     : <DeferredViewFallback />
                 ) : view.kind === "home" ? (
                   <HomeView collections={collections} reviewCount={reviewCount} unsortedCount={unsortedCount} trashCount={trashCount}
-                    refreshVersion={assetRefresh} onNavigate={navigateView} onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}
+                    refreshVersion={assetRefresh} onNavigate={(next) => navigateView(next, { fromHome: true })} onOpenAsset={(assetId) => void openExisting(assetId, { fromHome: true })} onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}
                     characters={characterHub.targets} classifications={entries} />
                 ) : view.kind === "notes" ? <NotesView noteId={view.noteId} /> : view.kind === "exchange" ? <ExchangeView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
                   <SettingsView
@@ -951,7 +962,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
 // Owns the cloud snapshot so each progress event re-renders only the status indicator, not the workspace.
 function CloudStatusCenter({ gateway, libraryRoot, onOpenChange, ...props }: Omit<StatusCenterProps, "cloud" | "authorityHealth"> & { gateway: LibraryGateway; libraryRoot: string }) {
   const authority = useAuthoritySyncHealth(gateway, libraryRoot);
-  return <StatusCenter {...props} cloud={useCloudSyncStatus(gateway, libraryRoot)} authorityHealth={authority.health}
+  const cloud = useCloudSyncStatus(gateway, libraryRoot);
+  return <StatusCenter {...props} cloud={cloud} authorityHealth={authority.health}
+    connections={(go) => <ConnectionStatusBlock gateway={gateway} cloud={cloud} authorityHealth={authority.health} onNavigate={go} />}
     onOpenChange={(open) => { if (open) authority.refresh(); onOpenChange?.(open); }} />;
 }
 

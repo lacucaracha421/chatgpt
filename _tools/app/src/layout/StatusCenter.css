@@ -113,3 +113,16 @@
 .lightweight-toggle > .ui-button { justify-self: start; }
 
 @media (prefers-reduced-motion: reduce) { .status-center__spinner { animation: none; } }
+
+/* 연결 rows (moved from the Home index): dot, name, state, time. */
+.status-center__connection { display: flex; width: 100%; align-items: center; gap: var(--space-2); min-height: 30px; padding: 0 var(--space-2); color: var(--color-text); font-size: var(--text-sm); text-align: left; background: transparent; border: 0; border-radius: var(--radius-sm, 4px); cursor: pointer; }
+.status-center__connection:hover { background: var(--color-surface-hover); }
+.status-center__connection:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 1px; }
+.status-center__connection-label { width: 76px; flex: none; }
+.status-center__connection-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted); }
+.status-center__connection-value small { font-size: inherit; }
+.status-center__connection .status-center__dot { background: #7fb88a; }
+.status-center__connection[data-tone="busy"] .status-center__dot { background: #d8c07a; }
+.status-center__connection[data-tone="idle"] .status-center__dot { background: var(--color-muted); }
+.status-center__connection[data-tone="off"] .status-center__dot { background: var(--color-danger); }
+.status-center__connection[data-tone="off"] .status-center__connection-value { color: var(--color-danger); }

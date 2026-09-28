@@ -307,7 +307,7 @@ describe("App", () => {
     await userEvent.click(await screen.findByRole("button", { name: "다른 저장소 열기" }));
 
     // The new library's workspace starts over on Home.
-    expect(await screen.findByRole("region", { name: "확인할 것" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "검토" }, { timeout: 5000 })).toBeInTheDocument();
     await openAssets();
     expect(await screen.findByRole("treeitem", { name: "New library" })).toBeVisible();
     expect(screen.queryByRole("treeitem", { name: "Old library" })).not.toBeInTheDocument();
@@ -377,7 +377,7 @@ describe("App", () => {
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     const rail = await screen.findByRole("navigation", { name: "주요 영역" });
-    expect(await screen.findByRole("region", { name: "확인할 것" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "검토" }, { timeout: 5000 })).toBeInTheDocument();
     expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("toolbar", { name: "자산 도구" })).not.toBeInTheDocument();
 
@@ -385,7 +385,7 @@ describe("App", () => {
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({ classificationId: null, unclassifiedOnly: false })));
     expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
     await userEvent.click(within(rail).getByRole("button", { name: "홈" }));
-    expect(await screen.findByRole("region", { name: "확인할 것" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "검토" })).toBeInTheDocument();
   });
 
   it("opens Home from the rail and leaves it for the screen a row owns", async () => {
@@ -395,9 +395,9 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     const rail = await screen.findByRole("navigation", { name: "주요 영역" });
     await userEvent.click(within(rail).getByRole("button", { name: "홈" }));
-    expect(await screen.findByRole("region", { name: "확인할 것" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "검토" }, { timeout: 5000 })).toBeInTheDocument();
     expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page");
-    await userEvent.click(screen.getByRole("button", { name: "전송 열기" }));
+    await userEvent.click(screen.getByRole("button", { name: /^받은 파일/ }));
     await waitFor(() => expect(within(rail).getByRole("button", { name: "전송" })).toHaveAttribute("aria-current", "page"));
   });
 
@@ -624,6 +624,22 @@ describe("App", () => {
       await user.keyboard("{Escape}");
       expect(screen.getByRole("button", { name: currentName })).toHaveAttribute("aria-current", "page");
     }
+  });
+
+  it("returns to Home with back from a screen Home opened, but not after a rail switch", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    const libraryGateway = gateway();
+    const user = userEvent.setup();
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    const rail = await screen.findByRole("navigation", { name: "주요 영역" });
+    expect(await screen.findByRole("region", { name: "검토" }, { timeout: 5000 })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^받은 파일/ }));
+    await waitFor(() => expect(within(rail).getByRole("button", { name: "전송" })).toHaveAttribute("aria-current", "page"));
+    fireEvent.mouseUp(window, { button: 3 });
+    await waitFor(() => expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page"));
+    await user.click(within(rail).getByRole("button", { name: "전송" }));
+    fireEvent.mouseUp(window, { button: 3 });
+    expect(within(rail).getByRole("button", { name: "전송" })).toHaveAttribute("aria-current", "page");
   });
 
   it("opens the 찾기 palette with Ctrl+K and keeps the existing quick-view shortcuts", async () => {

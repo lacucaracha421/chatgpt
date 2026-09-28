@@ -90,7 +90,7 @@ export function watchedMangaCount(board: Map<string, ReleaseBoardEntry>) {
 }
 
 /* ---- 발매 예정 · 나올 권 ---- */
-export type UpcomingRow = { key: string; kind: ReleaseKind; date: string; name: string; detail: string; watch: boolean; volume?: number; collectionId?: string };
+export type UpcomingRow = { key: string; kind: ReleaseKind; date: string; name: string; detail: string; watch: boolean; volume?: number; collectionId?: string; platforms?: string[]; moved?: boolean };
 export const UPCOMING_DAYS = 60;
 
 /**
@@ -105,8 +105,10 @@ export function upcomingRows(collections: CollectionSummary[], board: Map<string
     .filter((item) => !item.released && item.precision === "exact" && item.date && item.date >= today)
     .map((item): UpcomingRow => {
       const moved = item.unread.some((event) => event.kind === "date_changed");
-      const where = item.kind === "game" ? item.platforms.slice(0, 3).join(" · ") : item.kind === "anime" ? "일본 방영" : "극장 개봉";
-      return { key: `title:${item.id}`, kind: item.kind, date: item.date!, name: item.title, detail: [where, moved ? "날짜 바뀜" : ""].filter(Boolean).join(" · "), watch: true };
+      // Movies and anime show only their kind chip on Home (user, 2026-09-28).
+      const where = item.kind === "game" ? item.platforms.slice(0, 3).join(" · ") : "";
+      return { key: `title:${item.id}`, kind: item.kind, date: item.date!, name: item.title, detail: [where, moved ? "날짜 바뀜" : ""].filter(Boolean).join(" · "), watch: true,
+        platforms: item.kind === "game" ? item.platforms : undefined, moved };
     });
   return [...manga, ...titles].sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name, "ko") || a.key.localeCompare(b.key));
 }

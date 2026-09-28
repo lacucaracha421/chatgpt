@@ -81,7 +81,8 @@ impl Library {
             .prepare(
                 "SELECT p.id,p.display_name,NULLIF(TRIM(p.name_ja),''),
                         COUNT(DISTINCT r.collection_id),
-                        COUNT(DISTINCT CASE WHEN c.type='av' THEN r.collection_id END)
+                        COUNT(DISTINCT CASE WHEN c.type='av' THEN r.collection_id END),
+                        EXISTS(SELECT 1 FROM collection_person_portraits pp WHERE pp.person_id=p.id)
                  FROM collection_people p
                  JOIN collection_person_relations r ON r.person_id=p.id AND r.role='performer'
                  JOIN collections c ON c.id=r.collection_id
@@ -95,9 +96,15 @@ impl Library {
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, i64>(4)?,
+                    row.get::<_, bool>(5)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
+        // Performers with a chosen portrait come first: once any exist, the daily pick rotates
+        // through them only (user, 2026-09-28).
+        if people.iter().any(|person| person.5) {
+            people.retain(|person| person.5);
+        }
         if people.is_empty() {
             return Ok(None);
         }
@@ -111,7 +118,8 @@ impl Library {
             .signed_duration_since(epoch)
             .num_days()
             .rem_euclid(people.len() as i64) as usize;
-        let (id, display_name, original_name, known_works, owned_works) = people.swap_remove(index);
+        let (id, display_name, original_name, known_works, owned_works, _) =
+            people.swap_remove(index);
         let recent_owned_works = connection
             .prepare(
                 "SELECT c.id,NULLIF(TRIM(d.product_code),''),

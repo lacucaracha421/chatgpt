@@ -42,6 +42,8 @@ export type StatusCenterProps = {
   unsortedCount?: number | null;
   onOpenChange?: (open: boolean) => void;
   onNavigate: (view: AssetView) => void;
+  /** The 연결 block; `go` closes the panel and navigates. */
+  connections?: (go: (view: AssetView) => void) => ReactNode;
 };
 
 const noop = () => undefined;
@@ -66,6 +68,7 @@ export function StatusCenter({
   unsortedCount = null,
   onOpenChange,
   onNavigate,
+  connections,
 }: StatusCenterProps) {
   const [open, setOpenState] = useState(false);
   const setOpen = (next: boolean) => { setOpenState(next); onOpenChange?.(next); };
@@ -145,6 +148,7 @@ export function StatusCenter({
         <div className="ui-anchored-panel__body status-center__body">
           {cloud && <SyncBlock cloud={cloud} onOpenSettings={() => go({ kind: "settings", section: "cloud" })} />}
           <AuthoritySyncBlock summary={authority} />
+          {connections?.(go)}
           <StatusBlock title="작업">
             <div className="status-center__list">
               {workCount === 0

@@ -221,4 +221,22 @@ fn home_pick_rotates_without_repeats_and_requires_an_owned_av_work() {
             .id,
         picks[0].id,
     );
+
+    // Once a performer has a portrait, the daily pick rotates through portrait holders only.
+    let chosen = picks[1].id.clone();
+    library.connection().unwrap().execute(
+        "INSERT INTO collection_person_portraits(person_id,kind,image_bytes,mime,width,height,file_name,source_url,updated_at)
+         VALUES(?1,'commons',x'00','image/png',1,1,'p.png','https://example.test/p','t')",
+        [&chosen],
+    ).unwrap();
+    for offset in 0..3 {
+        assert_eq!(
+            library
+                .home_av_performer(start + chrono::Duration::days(offset))
+                .unwrap()
+                .unwrap()
+                .id,
+            chosen
+        );
+    }
 }
