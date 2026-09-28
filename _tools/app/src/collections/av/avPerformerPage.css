@@ -3,7 +3,7 @@
 .av-performer-page__topline svg { width: 16px; height: 16px; }
 .av-performer-page__layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: clamp(var(--space-6), 4vw, 40px); }
 .av-performer-page__identity { min-width: 0; }
-.av-performer-page__portrait { width: 300px; height: 400px; overflow: hidden; box-shadow: 0 10px 28px rgb(0 0 0 / 45%); }
+.av-performer-page__portrait { width: 225px; height: 300px; overflow: hidden; box-shadow: 0 10px 28px rgb(0 0 0 / 45%); }
 .av-performer-page__portrait .av-portrait { width: 100%; height: 100%; border-radius: var(--radius-tile); }
 .av-performer-page__source-line { display: flex; align-items: center; gap: var(--space-2); min-height: 28px; color: var(--color-faint); font-size: var(--text-xs); }
 .av-performer-page__source-line button { display: inline-flex; align-items: center; gap: 3px; padding: 0; color: var(--color-muted); background: none; border: 0; cursor: pointer; font: inherit; }.av-performer-page__source-line svg { width: 13px; height: 13px; }
@@ -25,3 +25,30 @@
 .av-performer-page__memo p { margin: 0; color: var(--color-muted); font-size: var(--text-sm); white-space: pre-wrap; }.av-performer-page__memo textarea { width: 100%; min-height: 100px; box-sizing: border-box; resize: vertical; color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); }.av-performer-page__memo > div:last-child { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
 @media (max-width: 1000px) { .av-performer-page__works { grid-template-columns: repeat(4, minmax(100px, 1fr)); } }
 @media (max-width: 760px) { .av-performer-page__layout { grid-template-columns: 1fr; }.av-performer-page__identity { max-width: 300px; }.av-performer-page__works { grid-template-columns: repeat(3, minmax(100px, 1fr)); } }
+
+.av-performer-page__source-line .av-performer-page__change-portrait { margin-left: auto; }
+.av-profile { color: var(--color-text); font-size: var(--text-sm); }
+.av-profile__aliases { margin: var(--space-1) 0 var(--space-4); color: var(--color-faint); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.av-profile__rows { display: grid; gap: var(--space-2); margin: var(--space-4) 0 var(--space-3); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+.av-profile__rows > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--space-3); }
+.av-profile__rows dt, .av-profile__rows small { color: var(--color-faint); font-size: var(--text-xs); }
+.av-profile__rows dd { margin: 0; font-family: var(--font-numeric); }
+.av-profile__pill { display: inline-block; padding: 0 var(--space-1); border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); color: var(--color-muted); font-size: var(--text-xs); }
+.av-profile__links { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.av-profile__links button { padding: var(--space-1) var(--space-2); color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-sm); font: inherit; cursor: pointer; }
+.av-profile__links button:hover { background: var(--color-surface-hover); }
+.av-profile__footer { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); color: var(--color-faint); font-size: var(--text-xs); }
+.av-profile__quiet { margin: var(--space-3) 0; color: var(--color-faint); font-size: var(--text-xs); }
+.av-profile__quiet button, .av-profile__footer button, .av-profile__change { padding: 0; background: none; border: 0; color: var(--color-muted); font: inherit; cursor: pointer; }
+.av-profile__footer svg { display: block; width: 14px; height: 14px; }
+.av-profile__change { margin-top: var(--space-2); font-size: var(--text-xs); }
+.av-profile button:disabled { opacity: .5; cursor: default; }
+.av-profile__candidates { display: grid; gap: var(--space-3); }
+.av-profile__candidate { display: flex; align-items: center; gap: var(--space-3); }
+.av-profile__candidate > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.av-profile__candidate img { width: 48px; height: 64px; object-fit: cover; border-radius: var(--radius-sm); }
+.av-profile__candidate p { margin: var(--space-1) 0; color: var(--color-muted); font-size: var(--text-xs); }
+.av-profile__candidate small { color: var(--color-faint); }
+.av-profile__spinning { animation: av-profile-spin 1s linear infinite; }
+@keyframes av-profile-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .av-profile__spinning { animation: none; } }

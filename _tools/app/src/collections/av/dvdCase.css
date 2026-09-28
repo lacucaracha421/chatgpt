@@ -3,6 +3,7 @@
   display: grid;
   place-items: center;
   perspective: 1500px;
+  isolation: isolate;
   user-select: none;
   touch-action: none;
 }
@@ -14,6 +15,7 @@
   width: calc(var(--dvd-width, 220px) * 1.25);
   height: 22px;
   content: "";
+  z-index: 0;
   transform: translateX(-50%);
   background: radial-gradient(closest-side, rgb(0 0 0 / 55%), transparent);
   pointer-events: none;
@@ -25,6 +27,7 @@
 
 .dvd-case {
   position: relative;
+  z-index: 1;
   width: var(--dvd-width);
   height: var(--dvd-height);
   transform: rotateX(var(--dvd-pitch)) rotateY(calc(var(--dvd-yaw) + var(--dvd-rest)));

@@ -4,8 +4,9 @@ use tauri::State;
 
 use super::{background_task_error, current_required, AppState, CommandError};
 use crate::library::artists::{
-    ArtistCaptionLabels, ArtistDetail, ArtistListPage, ArtistListQuery, ArtistMergeSuggestion,
-    ArtistOverview, ArtistSettings, ArtistTodayRow, SourceFillPreview, SourceFillResult,
+    ArtistCaptionLabels, ArtistDetail, ArtistExcludedFolder, ArtistListPage, ArtistListQuery,
+    ArtistMergeSuggestion, ArtistOverview, ArtistSettings, ArtistTodayRow, SourceFillPreview,
+    SourceFillResult,
 };
 use crate::library::Library;
 
@@ -109,10 +110,11 @@ pub async fn set_artist_flags(
     artist_id: String,
     pinned: Option<bool>,
     hidden: Option<bool>,
+    reposter: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<String, CommandError> {
     run(state, move |library| {
-        library.set_artist_flags(&artist_id, pinned, hidden)
+        library.set_artist_flags(&artist_id, pinned, hidden, reposter)
     })
     .await
 }
@@ -187,4 +189,75 @@ pub async fn set_artist_settings(
     state: State<'_, AppState>,
 ) -> Result<ArtistSettings, CommandError> {
     run(state, move |library| library.set_artist_settings(settings)).await
+}
+
+#[tauri::command]
+pub async fn list_artist_excluded_folders(
+    state: State<'_, AppState>,
+) -> Result<Vec<ArtistExcludedFolder>, CommandError> {
+    run(state, |library| library.list_artist_excluded_folders()).await
+}
+
+#[tauri::command]
+pub async fn set_artist_excluded_folders(
+    ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    run(state, move |library| {
+        library.set_artist_excluded_folders(&ids)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn list_artist_style_suggestions(
+    offset: u32,
+    limit: u32,
+    state: State<'_, AppState>,
+) -> Result<crate::library::artist_style::Page, CommandError> {
+    run(state, move |library| {
+        library.list_artist_style_suggestions(offset, limit)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn artist_style_suggestion(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::library::artist_style::Suggestion>, CommandError> {
+    run(state, move |library| {
+        library.artist_style_suggestion(&asset_id)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn dismiss_artist_style_suggestion(
+    asset_ids: Vec<String>,
+    artist_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    run(state, move |library| {
+        library.dismiss_artist_style_suggestion(&asset_ids, &artist_id)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn import_artist_style_features(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::artist_style::ImportResult, CommandError> {
+    run(state, move |library| {
+        library.import_artist_style_from_inbox_gate(std::path::Path::new(&path))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn artist_style_status(
+    state: State<'_, AppState>,
+) -> Result<crate::library::artist_style::Status, CommandError> {
+    run(state, move |library| library.artist_style_status()).await
 }

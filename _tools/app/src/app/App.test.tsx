@@ -122,6 +122,9 @@ function gateway(): LibraryGateway {
     refreshIgdbGame: vi.fn(),
     getIgdbConnection: vi.fn().mockResolvedValue(null),
     replaceIgdbGameArtwork: vi.fn(),
+    getStashdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
+    setStashdbCredentials: vi.fn(),
+    deleteStashdbCredentials: vi.fn(),
     getTmdbCredentialStatus: vi.fn(),
     setTmdbToken: vi.fn(),
     deleteTmdbToken: vi.fn(),
@@ -666,7 +669,8 @@ describe("App", () => {
     await user.keyboard("{Control>}k{/Control}");
     await user.type(within(await screen.findByRole("dialog", { name: "찾기" })).getByRole("combobox"), "고급");
     await user.keyboard("{Enter}");
-    expect(await screen.findByText("설정 · 고급")).toBeInTheDocument();
+    // The workspace toolbar titles the section alone ("고급"); the full "설정 · 고급" is its description.
+    expect((await screen.findAllByRole("heading", { name: "고급" })).length).toBeGreaterThan(0);
   });
 
   it("opens 메모 from the rail and marks it current", async () => {
@@ -1706,10 +1710,10 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
     await user.click(await screen.findByRole("button", { name: /쇼케이스/, expanded: false }));
     await user.click(await screen.findByRole("button", { name: "전체 보기" }));
-    expect(await screen.findByRole("heading", { name: "쇼케이스" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "게임 쇼케이스" })).toBeInTheDocument();
     await user.click(await screen.findByText("Showcase Game"));
     await user.click(await screen.findByRole("button", { name: "컬렉션으로 돌아가기" }));
-    expect(await screen.findByRole("heading", { name: "쇼케이스" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "게임 쇼케이스" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "게임" })).toHaveAttribute("aria-current", "page");
   });
 

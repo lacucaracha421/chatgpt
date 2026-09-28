@@ -54,6 +54,14 @@ impl Default for ArtistSettings {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ArtistExcludedFolder {
+    pub id: String,
+    pub breadcrumb: String,
+    pub image_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ArtistSummary {
     /// `artist:<id>` or the bare creator key of an implicit artist.
     pub id: String,
@@ -72,6 +80,7 @@ pub struct ArtistSummary {
     pub last_opened_at: Option<String>,
     pub pinned: bool,
     pub hidden: bool,
+    pub reposter: bool,
     /// 주요 작가 by the tier rule (pins and hiding do not change it).
     pub main: bool,
     /// Newest first.
@@ -89,6 +98,8 @@ pub struct ArtistOverview {
     pub two_to_four: u32,
     pub single: u32,
     pub hidden: u32,
+    pub reposter: u32,
+    pub style_suggestion_count: u32,
     pub unknown_none: u32,
     pub unknown_source: u32,
     pub merge_suggestions: u32,
@@ -109,6 +120,7 @@ pub enum ArtistBucket {
     TwoToFour,
     Single,
     Hidden,
+    Reposter,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -317,6 +329,7 @@ struct ArtistRow {
     display_name: Option<String>,
     pinned: bool,
     hidden: bool,
+    reposter: bool,
 }
 
 struct Assignment {
@@ -356,7 +369,7 @@ impl Snapshot {
     fn load(connection: &Connection) -> Result<Self, LibraryError> {
         let settings = load_settings(connection)?;
         let artists = connection
-            .prepare("SELECT id, display_name, pinned, hidden FROM artists")?
+            .prepare("SELECT id, display_name, pinned, hidden, reposter FROM artists")?
             .query_map([], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -364,6 +377,7 @@ impl Snapshot {
                         display_name: row.get(1)?,
                         pinned: row.get(2)?,
                         hidden: row.get(3)?,
+                        reposter: row.get(4)?,
                     },
                 ))
             })?
@@ -392,7 +406,9 @@ impl Snapshot {
         let assets = connection
             .prepare(
                 "SELECT id, creator_name, COALESCE(creator_handle, creator_url), creator_url, source_url, collected_at
-                 FROM assets WHERE status = 'normal' ORDER BY collected_at DESC, id DESC",
+                 FROM assets
+                 JOIN asset_artist_scope AS artist_scope ON artist_scope.asset_id = assets.id
+                 WHERE status = 'normal' ORDER BY collected_at DESC, id DESC",
             )?
             .query_map([], |row| {
                 Ok(AssetRow {
@@ -540,6 +556,7 @@ impl Snapshot {
             last_opened_at,
             pinned: row.is_some_and(|row| row.pinned),
             hidden: row.is_some_and(|row| row.hidden),
+            reposter: row.is_some_and(|row| row.reposter),
             main: asset_count >= self.settings.main_min_count
                 || recent_count >= self.settings.recent_min_count,
             cover_asset_ids: group
@@ -662,16 +679,18 @@ pub(crate) fn overview(
     let now = parse_utc_timestamp(now_utc)?;
     let snapshot = Snapshot::load(connection)?;
     let summaries = snapshot.summaries(&now);
-    let visible = summaries.iter().filter(|artist| !artist.hidden);
+    let visible = summaries
+        .iter()
+        .filter(|artist| !artist.hidden && !artist.reposter);
     let listed = || {
         summaries
             .iter()
-            .filter(|artist| !artist.hidden && !artist.pinned)
+            .filter(|artist| !artist.hidden && !artist.reposter && !artist.pinned)
     };
     let (unknown_none, unknown_source) = snapshot.unknown_counts();
     let mut pinned: Vec<ArtistSummary> = summaries
         .iter()
-        .filter(|artist| artist.pinned && !artist.hidden)
+        .filter(|artist| artist.pinned && !artist.hidden && !artist.reposter)
         .cloned()
         .collect();
     sort_summaries(&mut pinned, ArtistSort::Count);
@@ -687,6 +706,8 @@ pub(crate) fn overview(
             .filter(|artist| !artist.main && artist.asset_count == 1)
             .count() as u32,
         hidden: summaries.iter().filter(|artist| artist.hidden).count() as u32,
+        reposter: summaries.iter().filter(|artist| artist.reposter).count() as u32,
+        style_suggestion_count: 0,
         unknown_none,
         unknown_source,
         merge_suggestions: merge_suggestions_from(&snapshot, &now).len() as u32,
@@ -728,20 +749,30 @@ pub(crate) fn list(
         .iter()
         .map(|(scope, group)| (snapshot.summary(scope, group, &now), group))
         .filter(|(artist, _)| match query.bucket {
-            ArtistBucket::All => !artist.hidden,
-            ArtistBucket::Pinned => artist.pinned && !artist.hidden,
-            ArtistBucket::Main => artist.main && !artist.pinned && !artist.hidden,
-            ArtistBucket::Other => !artist.main && !artist.pinned && !artist.hidden,
+            ArtistBucket::All => !artist.hidden && !artist.reposter,
+            ArtistBucket::Pinned => artist.pinned && !artist.hidden && !artist.reposter,
+            ArtistBucket::Main => {
+                artist.main && !artist.pinned && !artist.hidden && !artist.reposter
+            }
+            ArtistBucket::Other => {
+                !artist.main && !artist.pinned && !artist.hidden && !artist.reposter
+            }
             ArtistBucket::TwoToFour => {
                 !artist.main
                     && !artist.pinned
                     && !artist.hidden
+                    && !artist.reposter
                     && (2..=4).contains(&artist.asset_count)
             }
             ArtistBucket::Single => {
-                !artist.main && !artist.pinned && !artist.hidden && artist.asset_count == 1
+                !artist.main
+                    && !artist.pinned
+                    && !artist.hidden
+                    && !artist.reposter
+                    && artist.asset_count == 1
             }
             ArtistBucket::Hidden => artist.hidden,
+            ArtistBucket::Reposter => artist.reposter,
         })
         .filter(|(artist, group)| {
             search.is_none_or(|search| matches_search(&snapshot.search_text(artist, group), search))
@@ -1549,7 +1580,11 @@ fn new_artist(
 }
 
 /// The artist row behind an id, creating one for an implicit (bare key) artist.
-fn materialize(connection: &Connection, id: &str, now_utc: &str) -> Result<String, LibraryError> {
+pub(super) fn materialize(
+    connection: &Connection,
+    id: &str,
+    now_utc: &str,
+) -> Result<String, LibraryError> {
     if let Some(artist_id) = id.strip_prefix(ARTIST_PREFIX) {
         let exists = connection
             .query_row("SELECT 1 FROM artists WHERE id = ?1", [artist_id], |_| {
@@ -1598,8 +1633,9 @@ fn materialize(connection: &Connection, id: &str, now_utc: &str) -> Result<Strin
 fn collect_empty_artists(connection: &Connection) -> Result<(), LibraryError> {
     connection.execute(
         "DELETE FROM artists WHERE NOT EXISTS (SELECT 1 FROM asset_artist_assignments AS assignment WHERE assignment.artist_id = artists.id)
+         AND NOT EXISTS (SELECT 1 FROM artist_style_dismissals WHERE artist_id = 'artist:' || artists.id)
          AND ((SELECT COUNT(*) FROM artist_members AS member WHERE member.artist_id = artists.id) = 0
-              OR (display_name IS NULL AND pinned = 0 AND hidden = 0
+              OR (display_name IS NULL AND pinned = 0 AND hidden = 0 AND reposter = 0
                   AND (SELECT COUNT(*) FROM artist_members AS member WHERE member.artist_id = artists.id) <= 1))",
         [],
     )?;
@@ -1686,14 +1722,15 @@ pub(crate) fn set_flags(
     id: &str,
     pinned: Option<bool>,
     hidden: Option<bool>,
+    reposter: Option<bool>,
     now_utc: &str,
 ) -> Result<String, LibraryError> {
     parse_utc_timestamp(now_utc)?;
     let transaction = connection.unchecked_transaction()?;
     let artist_id = materialize(&transaction, id, now_utc)?;
     transaction.execute(
-        "UPDATE artists SET pinned = COALESCE(?2, pinned), hidden = COALESCE(?3, hidden), updated_at = ?4 WHERE id = ?1",
-        params![artist_id, pinned, hidden, now_utc],
+        "UPDATE artists SET pinned = COALESCE(?2, pinned), hidden = COALESCE(?3, hidden), reposter = COALESCE(?4, reposter), updated_at = ?5 WHERE id = ?1",
+        params![artist_id, pinned, hidden, reposter, now_utc],
     )?;
     let keys = member_keys(&transaction, &artist_id)?;
     collect_empty_artists(&transaction)?;
@@ -1754,6 +1791,14 @@ pub(crate) fn merge(
                 transaction.execute(
                     "UPDATE artists SET display_name = COALESCE(display_name, ?2), pinned = MAX(pinned, ?3), updated_at = ?4 WHERE id = ?1",
                     params![target_id, source_name, source_pinned, now_utc],
+                )?;
+                transaction.execute(
+                    "INSERT OR IGNORE INTO artist_style_dismissals SELECT asset_id, 'artist:' || ?2, dismissed_at FROM artist_style_dismissals WHERE artist_id = 'artist:' || ?1",
+                    params![source_id, target_id],
+                )?;
+                transaction.execute(
+                    "DELETE FROM artist_style_dismissals WHERE artist_id = 'artist:' || ?1",
+                    [&source_id],
                 )?;
                 transaction.execute("DELETE FROM artists WHERE id = ?1", [&source_id])?;
             }
@@ -1945,6 +1990,113 @@ pub(crate) fn set_settings(
     load_settings(connection)
 }
 
+fn list_excluded_folders(
+    connection: &Connection,
+) -> Result<Vec<ArtistExcludedFolder>, LibraryError> {
+    let entries: HashMap<String, (String, Option<String>)> = connection
+        .prepare("SELECT id, name, parent_id FROM classification_entries")?
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                (row.get(1)?, row.get(2)?),
+            ))
+        })?
+        .collect::<Result<_, _>>()?;
+    let rows = connection
+        .prepare(
+            "WITH RECURSIVE descendants(root_id, id) AS (
+                 SELECT classification_id, classification_id
+                 FROM artist_excluded_classifications
+                 UNION
+                 SELECT descendants.root_id, child.id
+                 FROM classification_entries AS child
+                 JOIN descendants ON child.parent_id = descendants.id
+             ), image_counts AS (
+                 SELECT descendants.root_id, COUNT(DISTINCT asset.id) AS image_count
+                 FROM descendants
+                 JOIN asset_classifications AS link ON link.classification_id = descendants.id
+                 JOIN assets AS asset ON asset.id = link.asset_id
+                 WHERE asset.status = 'normal' AND asset.media_kind IN ('image', 'gif')
+                 GROUP BY descendants.root_id
+             )
+             SELECT excluded.classification_id, entry.name,
+                    COALESCE(image_counts.image_count, 0)
+             FROM artist_excluded_classifications AS excluded
+             JOIN classification_entries AS entry ON entry.id = excluded.classification_id
+             LEFT JOIN image_counts ON image_counts.root_id = excluded.classification_id
+             ORDER BY entry.name COLLATE NOCASE, entry.id",
+        )?
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)? as u64,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, name, image_count)| ArtistExcludedFolder {
+            breadcrumb: classification_breadcrumb(&entries, &id, &name),
+            id,
+            image_count,
+        })
+        .collect())
+}
+
+fn classification_breadcrumb(
+    entries: &HashMap<String, (String, Option<String>)>,
+    id: &str,
+    fallback_name: &str,
+) -> String {
+    let mut names = Vec::new();
+    let mut current = Some(id.to_owned());
+    let mut seen = HashSet::new();
+    while let Some(current_id) = current {
+        if !seen.insert(current_id.clone()) {
+            break;
+        }
+        let Some((name, parent_id)) = entries.get(&current_id) else {
+            if names.is_empty() {
+                names.push(fallback_name.to_owned());
+            }
+            break;
+        };
+        names.push(name.clone());
+        current = parent_id.clone();
+    }
+    names.reverse();
+    names.join(" › ")
+}
+
+pub(crate) fn set_excluded_folders(
+    connection: &Connection,
+    ids: &[String],
+) -> Result<(), LibraryError> {
+    let ids: BTreeSet<String> = ids.iter().cloned().collect();
+    let transaction = connection.unchecked_transaction()?;
+    for id in &ids {
+        let exists: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM classification_entries WHERE id = ?1)",
+            [id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Err(LibraryError::ClassificationNotFound);
+        }
+    }
+    transaction.execute("DELETE FROM artist_excluded_classifications", [])?;
+    let added_at = now_utc();
+    for id in ids {
+        transaction.execute(
+            "INSERT INTO artist_excluded_classifications (classification_id, added_at) VALUES (?1, ?2)",
+            params![id, added_at],
+        )?;
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------------------
 // Library facade
 // ---------------------------------------------------------------------------------------
@@ -1955,7 +2107,9 @@ fn now_utc() -> String {
 
 impl super::Library {
     pub fn artist_overview(&self) -> Result<ArtistOverview, LibraryError> {
-        overview(&*self.connection()?, &now_utc())
+        let mut result = overview(&*self.connection()?, &now_utc())?;
+        result.style_suggestion_count = self.artist_style_suggestion_count()?;
+        Ok(result)
     }
 
     pub fn list_artists(&self, query: &ArtistListQuery) -> Result<ArtistListPage, LibraryError> {
@@ -2023,8 +2177,16 @@ impl super::Library {
         id: &str,
         pinned: Option<bool>,
         hidden: Option<bool>,
+        reposter: Option<bool>,
     ) -> Result<String, LibraryError> {
-        set_flags(&*self.connection()?, id, pinned, hidden, &now_utc())
+        set_flags(
+            &*self.connection()?,
+            id,
+            pinned,
+            hidden,
+            reposter,
+            &now_utc(),
+        )
     }
 
     pub fn merge_artists(
@@ -2078,6 +2240,14 @@ impl super::Library {
         settings: ArtistSettings,
     ) -> Result<ArtistSettings, LibraryError> {
         set_settings(&*self.connection()?, settings)
+    }
+
+    pub fn list_artist_excluded_folders(&self) -> Result<Vec<ArtistExcludedFolder>, LibraryError> {
+        list_excluded_folders(&*self.connection()?)
+    }
+
+    pub fn set_artist_excluded_folders(&self, ids: &[String]) -> Result<(), LibraryError> {
+        set_excluded_folders(&*self.connection()?, ids)
     }
 }
 
@@ -2157,9 +2327,24 @@ pub(crate) fn home_publication(
     {
         return Err(LibraryError::InvalidCloudResponse);
     }
+    // Version 1 is also consumed by the cloud/tablet strict schema. Style flags are
+    // PC-only until that publication contract is explicitly extended.
+    let published: Vec<_> = artists
+        .into_iter()
+        .map(|artist| {
+            let mut value = serde_json::json!(artist);
+            value.as_object_mut().unwrap().remove("reposter");
+            value
+        })
+        .collect();
     let (none, source) = snapshot.unknown_counts();
     Ok(
         serde_json::json!({"version": 1, "settings": snapshot.settings,
-        "unknown": {"none": none, "source": source}, "artists": artists, "assignments": assignments}),
+        "unknown": {"none": none, "source": source}, "artists": published, "assignments": assignments}),
     )
+}
+
+/// Shared hub summaries, including hidden/reposter artists, for the style contract.
+pub(super) fn style_summaries(connection: &Connection) -> Result<Vec<ArtistSummary>, LibraryError> {
+    Ok(Snapshot::load(connection)?.summaries(&Utc::now()))
 }

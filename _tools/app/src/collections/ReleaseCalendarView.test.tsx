@@ -167,5 +167,6 @@ it("preserves anime kind and Japanese broadcast wording in Home rows", () => {
   };
   const rows = upcomingRows([], new Map(), new Map(), [watched], "2026-09-27");
   expect(rows).toHaveLength(1);
-  expect(rows[0]).toMatchObject({ kind: "anime", detail: "일본 방영", name: "애니 · 시즌 2" });
+  // Home shows only the kind chip for movies and anime (2026-09-28), no "일본 방영" text.
+  expect(rows[0]).toMatchObject({ kind: "anime", detail: "", name: "애니 · 시즌 2" });
 });

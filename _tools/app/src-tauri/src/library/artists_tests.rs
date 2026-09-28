@@ -206,8 +206,8 @@ fn tiers_split_main_and_other_by_count_or_recent_saves() {
 
     artists::set_settings(&connection, ArtistSettings::default()).unwrap();
     // Pinned artists leave the tier lists; hidden artists leave everything but 숨긴 작가.
-    artists::set_flags(&connection, "big", Some(true), None, NOW).unwrap();
-    artists::set_flags(&connection, "one", None, Some(true), NOW).unwrap();
+    artists::set_flags(&connection, "big", Some(true), None, None, NOW).unwrap();
+    artists::set_flags(&connection, "one", None, Some(true), None, NOW).unwrap();
     let overview = artists::overview(&connection, NOW).unwrap();
     assert_eq!(
         overview
@@ -391,7 +391,7 @@ fn merge_and_split_move_keys_and_the_asset_filter_follows() {
 
     // Merging two explicit artists folds names, pins and rows into the target.
     let connection = library.connection().unwrap();
-    let other = artists::set_flags(&connection, "other", Some(true), None, NOW).unwrap();
+    let other = artists::set_flags(&connection, "other", Some(true), None, None, NOW).unwrap();
     let result = artists::merge(&connection, &merged, &[other], None, NOW).unwrap();
     let summary = artists::list(&connection, &ArtistListQuery::default(), NOW)
         .unwrap()
@@ -756,6 +756,57 @@ fn today_and_the_artist_page_rediscover_by_date_and_long_unseen() {
     );
     let rows = artists::today(&connection, "2026-09-26", 540, NOW, 0, &["old".into()]).unwrap();
     assert!(rows.iter().all(|row| row.artist.id != "old"));
+}
+
+#[test]
+fn excluded_folders_round_trip_and_remove_their_subtree_from_artist_reads() {
+    let (_temp, library) = fixture();
+    let connection = library.connection().unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO classification_entries(id,kind,name,parent_id,created_at) VALUES
+                ('other-root','root','기타',NULL,'t'),
+                ('ai-folder','tag','ai','other-root','t'),
+                ('kept-root','root','보관',NULL,'t');",
+        )
+        .unwrap();
+    insert(&connection, Asset::new("excluded-artist").by("AI", "ai-author"));
+    insert(&connection, Asset::new("excluded-unknown"));
+    insert(&connection, Asset::new("kept-artist").by("Kept", "kept-author"));
+    connection
+        .execute_batch(
+            "INSERT INTO asset_classifications(asset_id,classification_id) VALUES
+                ('excluded-artist','other-root'),
+                ('excluded-unknown','ai-folder'),
+                ('kept-artist','kept-root');",
+        )
+        .unwrap();
+
+    drop(connection);
+    assert!(library.list_artist_excluded_folders().unwrap().is_empty());
+    library
+        .set_artist_excluded_folders(&["other-root".into()])
+        .unwrap();
+    let excluded = library.list_artist_excluded_folders().unwrap();
+    assert_eq!(
+        excluded
+            .iter()
+            .map(|folder| (folder.id.as_str(), folder.breadcrumb.as_str(), folder.image_count))
+            .collect::<Vec<_>>(),
+        vec![("other-root", "기타", 2)]
+    );
+    let overview = library.artist_overview().unwrap();
+    assert_eq!((overview.total, overview.unknown_none), (1, 0));
+    let connection = library.connection().unwrap();
+    assert_eq!(list(&connection, ArtistBucket::All, None), vec![("Kept".into(), 1)]);
+    drop(connection);
+    assert!(scoped_ids(&library, "ai-author").is_empty());
+    assert_eq!(scoped_ids(&library, "kept-author"), vec!["kept-artist".to_string()]);
+
+    library.set_artist_excluded_folders(&[]).unwrap();
+    assert!(library.list_artist_excluded_folders().unwrap().is_empty());
+    let overview = library.artist_overview().unwrap();
+    assert_eq!((overview.total, overview.unknown_none), (2, 1));
 }
 
 #[test]

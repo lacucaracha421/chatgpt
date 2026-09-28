@@ -27,6 +27,98 @@ const CLOUD_PUBLISHER_TARGET: &str = "Lakomics/CloudPublisher";
 const EXCHANGE_TARGET: &str = "Lakomics/FileExchange";
 const IGDB_TARGET: &str = "Lakomics/Igdb";
 const TMDB_TARGET: &str = "Lakomics/Tmdb";
+const STASHDB_TARGET: &str = "Lakomics/StashDb";
+
+#[derive(Debug, serde::Serialize)]
+pub struct StashdbCredentialStatus {
+    pub configured: bool,
+}
+
+// This secret cannot be serialized or returned by a command.
+pub(crate) struct StashdbCredentials {
+    pub api_key: String,
+}
+impl fmt::Debug for StashdbCredentials {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("StashdbCredentials(<redacted>)")
+    }
+}
+impl Drop for StashdbCredentials {
+    fn drop(&mut self) {
+        self.api_key.zeroize();
+    }
+}
+fn validate_stashdb_key(value: &str) -> Result<StashdbCredentials, LibraryError> {
+    let key = value.trim();
+    if key.is_empty() || key.len() > 4096 || !key.bytes().all(|b| (33..=126).contains(&b)) {
+        return Err(LibraryError::InvalidStashdbCredentialValue);
+    }
+    Ok(StashdbCredentials {
+        api_key: key.to_owned(),
+    })
+}
+fn read_stashdb_key<B: CredentialBackend>(
+    backend: &B,
+) -> Result<Option<StashdbCredentials>, LibraryError> {
+    backend
+        .read(STASHDB_TARGET)
+        .map_err(map_backend_error)?
+        .map(|bytes| {
+            let value = String::from_utf8(bytes)
+                .map_err(|_| LibraryError::InvalidStashdbCredentialValue)?;
+            validate_stashdb_key(&value)
+        })
+        .transpose()
+}
+fn set_stashdb_key<B: CredentialBackend>(
+    backend: &B,
+    key: &str,
+) -> Result<StashdbCredentialStatus, LibraryError> {
+    let key = validate_stashdb_key(key)?;
+    backend
+        .write(STASHDB_TARGET, key.api_key.as_bytes())
+        .map_err(map_backend_error)?;
+    Ok(StashdbCredentialStatus { configured: true })
+}
+fn delete_stashdb_key<B: CredentialBackend>(
+    backend: &B,
+) -> Result<StashdbCredentialStatus, LibraryError> {
+    backend.delete(STASHDB_TARGET).map_err(map_backend_error)?;
+    Ok(StashdbCredentialStatus { configured: false })
+}
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn read_stashdb_key_os() -> Result<Option<StashdbCredentials>, LibraryError> {
+    read_stashdb_key(&OsCredentialBackend)
+}
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn read_stashdb_key_os() -> Result<Option<StashdbCredentials>, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+pub(crate) fn stashdb_credential_status() -> Result<StashdbCredentialStatus, LibraryError> {
+    Ok(StashdbCredentialStatus {
+        configured: read_stashdb_key_os()?.is_some(),
+    })
+}
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn set_stashdb_credentials_os(
+    key: &str,
+) -> Result<StashdbCredentialStatus, LibraryError> {
+    set_stashdb_key(&OsCredentialBackend, key)
+}
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn set_stashdb_credentials_os(
+    _key: &str,
+) -> Result<StashdbCredentialStatus, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn delete_stashdb_credentials_os() -> Result<StashdbCredentialStatus, LibraryError> {
+    delete_stashdb_key(&OsCredentialBackend)
+}
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn delete_stashdb_credentials_os() -> Result<StashdbCredentialStatus, LibraryError> {
+    Err(LibraryError::CredentialStoreUnavailable)
+}
 
 /// Which cloud secret a worker needs.
 ///
@@ -635,6 +727,32 @@ mod tests {
         CLOUD_PUBLISHER_TARGET, TMDB_TARGET,
     };
     use crate::library::error::LibraryError;
+
+    #[test]
+    fn stashdb_credential_isolated_redacted_and_deleted() {
+        let backend = FakeBackend::default();
+        assert!(super::read_stashdb_key(&backend).unwrap().is_none());
+        super::set_tmdb_token(&backend, "other-token").unwrap();
+        let status = super::set_stashdb_key(&backend, "  stash-secret  ").unwrap();
+        assert_eq!(
+            serde_json::to_value(status).unwrap(),
+            serde_json::json!({"configured":true})
+        );
+        let secret = super::read_stashdb_key(&backend).unwrap().unwrap();
+        assert_eq!(secret.api_key, "stash-secret");
+        assert!(!format!("{secret:?}").contains("stash-secret"));
+        for key in ["", " ", "secret\r\nHeader"] {
+            let err = super::set_stashdb_key(&backend, key).unwrap_err();
+            assert!(!format!("{err:?} {err}").contains("secret"));
+        }
+        assert!(!super::delete_stashdb_key(&backend).unwrap().configured);
+        assert!(super::read_stashdb_key(&backend).unwrap().is_none());
+        assert_eq!(
+            super::read_tmdb_token(&backend).unwrap().read_access_token,
+            "other-token"
+        );
+        assert!(super::read_stashdb_key_os().unwrap().is_none());
+    }
 
     #[derive(Default)]
     struct FakeBackend {

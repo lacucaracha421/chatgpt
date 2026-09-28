@@ -128,6 +128,23 @@ fn crop_requires_selected_av_cover_bytes_in_the_complete_snapshot() {
 }
 
 #[test]
+fn av_stashdb_profiles_and_portraits_stay_private() {
+    let (_temp, library) = fixture();
+    library.connection().unwrap().execute_batch(
+        "INSERT INTO collection_person_profiles(person_id,source,status,name,fetched_at)
+         VALUES('person','stashdb','none','Private profile marker','t');
+         INSERT INTO collection_person_portraits(person_id,kind,image_bytes,mime,width,height,file_name,source_url,updated_at)
+         VALUES('person','stashdb',X'010203','image/jpeg',10,20,'secret.jpg','https://stashdb.org/images/private','t');"
+    ).unwrap();
+    let result = snapshot(&library);
+    assert!(av_row(&result)["av"]["people"][0]["portraitCrop"].is_null());
+    assert!(result.files.is_empty());
+    let text = serde_json::to_string(&result.replica).unwrap();
+    assert!(!text.contains("Private profile marker"));
+    assert!(!text.contains("stashdb.org"));
+}
+
+#[test]
 fn commons_portraits_stay_private_and_missing_details_are_optional() {
     let (_temp, library) = fixture();
     library.connection().unwrap().execute_batch(

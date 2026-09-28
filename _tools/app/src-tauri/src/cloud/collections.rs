@@ -13,6 +13,7 @@ use crate::library::{
     collection::{collection_from_row, COLLECTION_SUMMARY_SQL},
     collection_source::{collection_source_root, resolve_collection_dir, source_preview_path, source_volume_images, write_collection_thumbnail},
     collection_personal_edits::PersonalEditFeature,
+    collection_volume_range::load as load_volume_range,
     credential,
     error::LibraryError,
     models::{CollectionSummary, CollectionVolume},
@@ -406,6 +407,8 @@ fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite:
             if let (Some(configured), Some(source)) = (source_root.as_deref(), source_path.as_deref()) {
                 supplement_source_covers(root, configured, source, &mut summary, &mut volumes, &mut artworks, &mut files, &mut total_bytes)?;
             }
+            let volume_range = load_volume_range(&transaction, &summary.id)?;
+            volumes.retain(|volume| volume_range.contains(volume.volume_number));
             let series = committed_series(&transaction, &summary.id)?;
             let film = committed_film(&transaction, &summary.id)?;
             let (release_watch, owned_volumes, release_schedule) = if tracking && summary.collection_type == crate::library::models::CollectionType::Manga {
@@ -1109,6 +1112,74 @@ mod tests {
     }
 
     #[test]
+    fn volume_range_filters_collection_replica_and_release_schedule() {
+        let (_temp, library) = personal_edit_fixture();
+        library.connection().unwrap().execute_batch(
+            "INSERT INTO collection_external_bindings(collection_id,provider,external_id,provider_data_json,last_synced_at,created_at,updated_at) VALUES
+                ('c','kakao','k','{}','2026-09-20T00:00:00+00:00','t','t'),
+                ('c','mangadex','md','{}','2026-09-20T00:00:00+00:00','t','t');
+             INSERT INTO collection_volume_sources(collection_id,volume_number,provider,provider_item_id,title,publication_date,provider_data_json,created_at,updated_at) VALUES
+                ('c',1,'kakao','k1','1','2026-09-01','{}','t','t'),
+                ('c',3,'kakao','k3','3','2026-09-16','{}','t','t'),
+                ('c',6,'kakao','k6','6','2026-10-10','{}','t','t');
+             INSERT INTO collection_volumes(id,collection_id,volume_number,edition_index,sort_order,created_at,updated_at) VALUES
+                ('v1','c',1,0,1,'t','t'),('v3','c',3,0,3,'t','t'),('v6','c',6,0,6,'t','t');
+             INSERT INTO collection_mangadex_baselines(collection_id,manga_id) VALUES ('c','md');
+             INSERT INTO collection_mangadex_seen_volumes(collection_id,volume_number,edition_index) VALUES
+                ('c',1,0),('c',3,0),('c',6,0);
+             INSERT INTO collection_ownership_tracking(collection_id,edition_index) VALUES ('c',0);
+             INSERT INTO collection_volume_ownership(collection_id,volume_number,edition_index,physical,digital) VALUES
+                ('c',1,0,1,0),('c',3,0,1,0),('c',6,0,0,1);",
+        ).unwrap();
+        library
+            .set_collection_volume_range("c", Some(3), Some(6), false)
+            .unwrap();
+        let endpoint = "https://sync.example.test";
+        let library_id = library.library_id().unwrap();
+        library
+            .adopt_collection_personal_edit_library(endpoint, &library_id)
+            .unwrap();
+        let feature = PersonalEditFeature {
+            endpoint: endpoint.into(),
+            library_id,
+            edit_version: 2,
+        };
+        let value = serde_json::to_value(
+            &library
+                .cloud_collections_snapshot_with_feature(None, Some(&feature), false, &|_| {})
+                .unwrap()
+                .replica,
+        )
+        .unwrap();
+        let item = value["collections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == "c")
+            .unwrap();
+        assert_eq!(
+            item["volumes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|volume| volume["volumeNumber"].as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![3, 6]
+        );
+        assert_eq!(
+            item["releaseSchedule"]["kakao"]["volumes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|volume| volume["volumeNumber"].as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![3, 6]
+        );
+        assert_eq!(item["releaseSchedule"]["mangadex"]["latestVolume"], 6);
+        assert_eq!(item["ownedVolumes"], json!([{"editionIndex": 0, "count": 2}]));
+    }
+
+    #[test]
     fn publication_receives_edits_before_the_revision_and_sends_the_handshake_as_publisher() {
         use crate::library::collection_personal_edits::tests::{configure, entry, scripted};
         let (_temp, library) = personal_edit_fixture();
@@ -1247,6 +1318,7 @@ mod tests {
 // Only committed presentation metadata crosses the boundary, never provider URLs or credentials.
 /// One manga Collection's 신간 알림 state and owned-volume counts per tracked edition.
 fn committed_tracking(db: &rusqlite::Connection, id: &str) -> Result<(ReleaseWatchPayload, Vec<OwnedVolumesPayload>), LibraryError> {
+    let volume_range = load_volume_range(db, id)?;
     let watch = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM release_watch_subscriptions WHERE collection_id=?1 AND provider IN ('aladin','kakao')),
                 EXISTS(SELECT 1 FROM collection_external_bindings WHERE collection_id=?1 AND provider IN ('aladin','kakao'))",
@@ -1260,9 +1332,14 @@ fn committed_tracking(db: &rusqlite::Connection, id: &str) -> Result<(ReleaseWat
                  UNION ALL
                  SELECT edition_index, volume_number FROM collection_volume_ownership
                  WHERE collection_id=?1 AND (physical<>0 OR digital<>0)
+                   AND (?2 IS NULL OR volume_number >= ?2)
+                   AND (?3 IS NULL OR volume_number <= ?3)
              ) WHERE edition_index BETWEEN 0 AND 3 GROUP BY edition_index ORDER BY edition_index",
         )?
-        .query_map([id], |row| Ok(OwnedVolumesPayload { edition_index: row.get(0)?, count: row.get(1)? }))?
+        .query_map(
+            rusqlite::params![id, volume_range.min_volume, volume_range.max_volume],
+            |row| Ok(OwnedVolumesPayload { edition_index: row.get(0)?, count: row.get(1)? }),
+        )?
         .collect::<Result<Vec<_>, _>>()?;
     Ok((watch, owned))
 }
@@ -1306,6 +1383,7 @@ fn checked_at(value: Option<String>) -> Option<String> {
 /// transaction, so the 0074 `collection_external_bindings` triggers mark the publication dirty.
 fn committed_release_schedule(db: &rusqlite::Connection, id: &str) -> Result<ReleaseSchedulePayload, LibraryError> {
     use rusqlite::OptionalExtension;
+    let volume_range = load_volume_range(db, id)?;
     let binding = |provider: &str| {
         db.query_row(
             "SELECT last_synced_at FROM collection_external_bindings WHERE collection_id=?1 AND provider=?2",
@@ -1322,9 +1400,11 @@ fn committed_release_schedule(db: &rusqlite::Connection, id: &str) -> Result<Rel
                 .prepare(
                     "SELECT volume_number, publication_date FROM collection_volume_sources
                      WHERE collection_id=?1 AND provider='kakao' AND volume_number BETWEEN 1 AND ?2
+                       AND (?3 IS NULL OR volume_number >= ?3)
+                       AND (?4 IS NULL OR volume_number <= ?4)
                      ORDER BY volume_number",
                 )?
-                .query_map(rusqlite::params![id, MAX_SCHEDULE_VOLUME], |row| {
+                .query_map(rusqlite::params![id, MAX_SCHEDULE_VOLUME, volume_range.min_volume, volume_range.max_volume], |row| {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
                 })?
                 .map(|row| {
@@ -1352,9 +1432,11 @@ fn committed_release_schedule(db: &rusqlite::Connection, id: &str) -> Result<Rel
                 .prepare(
                     "SELECT volume_number, edition_index FROM collection_mangadex_seen_volumes
                      WHERE collection_id=?1 AND volume_number BETWEEN 1 AND ?2 AND edition_index BETWEEN 0 AND 3
+                       AND (?3 IS NULL OR volume_number >= ?3)
+                       AND (?4 IS NULL OR volume_number <= ?4)
                      ORDER BY volume_number, edition_index LIMIT ?2",
                 )?
-                .query_map(rusqlite::params![id, MAX_SCHEDULE_VOLUME], |row| {
+                .query_map(rusqlite::params![id, MAX_SCHEDULE_VOLUME, volume_range.min_volume, volume_range.max_volume], |row| {
                     Ok(MangaDexScheduleVolume { volume_number: row.get(0)?, edition_index: Some(row.get(1)?) })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;

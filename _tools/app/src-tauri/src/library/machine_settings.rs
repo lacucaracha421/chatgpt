@@ -35,6 +35,8 @@ struct MachineSettingsFile {
 pub(crate) struct LibraryEntry {
     #[serde(default)]
     pub(crate) manga_root: Option<String>,
+    #[serde(default)]
+    pub(crate) auto_tag_inbox: super::auto_tag_inbox::Settings,
 }
 
 fn error(path: &Path, source: io::Error) -> LibraryError {
@@ -70,6 +72,10 @@ pub(crate) fn set_entry(
 ) -> Result<(), LibraryError> {
     let _guard = FILE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut file = read_file(path)?;
+    let mut value = value;
+    if let Some(previous) = file.libraries.get(library_id) {
+        value.auto_tag_inbox = previous.auto_tag_inbox.clone();
+    }
     file.libraries.insert(library_id.to_owned(), value);
     write_file(path, &file)
 }
@@ -118,10 +124,11 @@ mod tests {
             "lib-a",
             LibraryEntry {
                 manga_root: Some("/manga/a".into()),
+                ..Default::default()
             },
         )
         .unwrap();
-        set_entry(&path, "lib-b", LibraryEntry { manga_root: None }).unwrap();
+        set_entry(&path, "lib-b", LibraryEntry { manga_root: None, ..Default::default() }).unwrap();
         assert_eq!(
             entry(&path, "lib-a")
                 .unwrap()
@@ -132,7 +139,7 @@ mod tests {
         );
         assert_eq!(
             entry(&path, "lib-b").unwrap(),
-            Some(LibraryEntry { manga_root: None })
+            Some(LibraryEntry { manga_root: None, ..Default::default() })
         );
     }
 
@@ -192,11 +199,23 @@ mod workload_tests {
         let settings = crate::workload::Settings { lightweight: true, auto_enter_minutes: Some(15), close_to_tray: false };
         set_workload(&path, settings.clone()).unwrap();
         set_new_ingests(&path, "library", BTreeSet::from(["asset".into()])).unwrap();
-        set_entry(&path, "library", LibraryEntry { manga_root: None }).unwrap();
+        set_entry(&path, "library", LibraryEntry { manga_root: None, ..Default::default() }).unwrap();
         assert_eq!(workload(&path).unwrap(), settings);
         assert_eq!(new_ingests(&path, "library").unwrap(), BTreeSet::from(["asset".into()]));
         fs::write(&path, b"invalid").unwrap();
         assert!(set_workload(&path, crate::workload::Settings::default()).is_err());
         assert_eq!(fs::read(&path).unwrap(), b"invalid");
     }
+}
+
+/// Update only the inbox under the same file lock as all other machine settings.
+pub(crate) fn set_auto_tag_inbox(
+    path: &Path,
+    library_id: &str,
+    value: super::auto_tag_inbox::Settings,
+) -> Result<(), LibraryError> {
+    let _guard = FILE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut file = read_file(path)?;
+    file.libraries.entry(library_id.to_owned()).or_default().auto_tag_inbox = value;
+    write_file(path, &file)
 }

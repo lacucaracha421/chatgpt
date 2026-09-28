@@ -891,6 +891,9 @@ pub struct CollectionSummary {
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_path: Option<String>,
+    pub min_volume: Option<i64>,
+    pub max_volume: Option<i64>,
+    pub hide_connection_prompt: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1724,6 +1727,9 @@ mod tests {
             created_at: "2026-08-20T00:00:00Z".into(),
             updated_at: "2026-08-20T00:00:00Z".into(),
             source_path: None,
+            min_volume: None,
+            max_volume: None,
+            hide_connection_prompt: false,
         })
         .unwrap();
 

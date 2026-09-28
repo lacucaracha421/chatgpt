@@ -1,3 +1,5 @@
+import { useAutoTagInboxStatus } from "../autotags/useAutoTagInboxStatus";
+import { Button } from "../shared/ui/Button";
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { ChevronRightIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useState, type ReactNode } from "react";
@@ -74,6 +76,7 @@ export function StatusCenter({
   const setOpen = (next: boolean) => { setOpenState(next); onOpenChange?.(next); };
   useBackHandler(() => setOpen(false), 90, open);
   const publicationJobs = Object.values(usePublicationJobs()).filter(Boolean);
+  const inbox = useAutoTagInboxStatus();
   const vaultImport = useVaultImportJob().job;
   const vaultExport = useVaultExportJob();
 
@@ -99,7 +102,7 @@ export function StatusCenter({
     + Number(libraryProgress !== null)
     + Number(Boolean(similarityIndex?.running))
     + visibleWorks.filter((work) => work.status === "running").length;
-  const problemCount = publicationJobs.filter((job) => job.error).length
+  const problemCount = Number(Boolean(inbox.status?.error)) + publicationJobs.filter((job) => job.error).length
     + Number(Boolean(vaultImport?.error))
     + Number(Boolean(vaultExport?.error))
     + Number(Boolean(characterAutomation.persistentError))
@@ -108,7 +111,7 @@ export function StatusCenter({
     + visibleWorks.filter((work) => work.status === "failed" || (work.status === "completed" && work.failures.length > 0)).length
     + cloudProblems
     + authority.problemCount;
-  const workCount = publicationJobs.length + Number(Boolean(vaultImport)) + Number(Boolean(vaultExport))
+  const workCount = Number(Boolean(inbox.status)) + publicationJobs.length + Number(Boolean(vaultImport)) + Number(Boolean(vaultExport))
     + Number(characterVisible) + Number(libraryVisible) + visibleWorks.length;
 
   const state = problemCount > 0 ? "attention" : activeCount > 0 ? "active" : workCount > 0 ? "available" : reviewCount > 0 ? "queue" : "idle";
@@ -157,6 +160,10 @@ export function StatusCenter({
                   <WorkTray works={works} retryFailed={retryWork} dismissWork={dismissWork}
                     openReview={() => go({ kind: "similarity_review" })} openExisting={(assetId) => { setOpen(false); openExisting(assetId); }} />
                   <PublicationStatus />
+                  {inbox.status && <div className="status-bar publication-status" role={inbox.status.error ? "alert" : "status"} aria-label="매일 자동 가져오기">
+                    <span>매일 자동 가져오기 · {inbox.status.message}</span>
+                    <Button size="sm" onClick={inbox.dismiss}>닫기</Button>
+                  </div>}
                   <VaultImportStatus />
                   <VaultExportStatus />
                   <CharacterAutomationStatus state={characterAutomation} />

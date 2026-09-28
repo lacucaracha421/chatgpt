@@ -12,6 +12,7 @@ pub(super) const MAX_JACKET_BYTES: usize = 8 * 1024 * 1024;
 pub(super) const MAX_JSON_BYTES: usize = 1024 * 1024;
 const USER_AGENT: &str = "Lakomics/0.2 (personal media library; personal use)";
 static LIBREDMM: Mutex<Option<Instant>> = Mutex::new(None);
+static STASHDB: Mutex<Option<Instant>> = Mutex::new(None);
 static WIKIDATA: Mutex<Option<Instant>> = Mutex::new(None);
 
 pub(crate) struct HttpResponse {
@@ -27,6 +28,15 @@ pub(crate) trait HttpClient {
         token: Option<&str>,
         limit: usize,
     ) -> Result<HttpResponse, LibraryError>;
+    fn post_json(
+        &self,
+        _url: &str,
+        _api_key: &str,
+        _body: &[u8],
+        _limit: usize,
+    ) -> Result<HttpResponse, LibraryError> {
+        Err(LibraryError::CloudRequestUnavailable)
+    }
 }
 pub(crate) struct NetworkClient {
     agent: ureq::Agent,
@@ -53,7 +63,56 @@ fn pace(lock: &Mutex<Option<Instant>>, seconds: u64) {
     }
     *previous = Some(Instant::now());
 }
+fn pace_stashdb() {
+    // Reserve a request start time, then release the pacing mutex before sleeping/HTTP.
+    let start = {
+        let mut previous = STASHDB
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = Instant::now();
+        let next = previous
+            .map(|last| (last + Duration::from_secs(1)).max(now))
+            .unwrap_or(now);
+        *previous = Some(next);
+        next
+    };
+    std::thread::sleep(start.saturating_duration_since(Instant::now()));
+}
 impl HttpClient for NetworkClient {
+    fn post_json(
+        &self,
+        url: &str,
+        api_key: &str,
+        body: &[u8],
+        limit: usize,
+    ) -> Result<HttpResponse, LibraryError> {
+        pace_stashdb();
+        // Never stringify transport errors: they may contain headers or response bodies.
+        let mut response = self
+            .agent
+            .post(url)
+            .header("User-Agent", USER_AGENT)
+            .header("Content-Type", "application/json")
+            .header("ApiKey", api_key)
+            .send(body)
+            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        let status = response.status().as_u16();
+        let mut bytes = Vec::new();
+        response
+            .body_mut()
+            .as_reader()
+            .take(limit as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| LibraryError::CloudRequestUnavailable)?;
+        if bytes.len() > limit {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        Ok(HttpResponse {
+            status,
+            bytes,
+            content_type: None,
+        })
+    }
     fn get(
         &self,
         url: &str,
@@ -66,6 +125,9 @@ impl HttpClient for NetworkClient {
         }
         if host.host_str() == Some("query.wikidata.org") {
             pace(&WIKIDATA, 1);
+        }
+        if host.host_str() == Some("stashdb.org") {
+            pace_stashdb();
         }
         let mut request = self.agent.get(url).header("User-Agent", USER_AGENT);
         if let Some(token) = token {

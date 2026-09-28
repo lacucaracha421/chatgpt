@@ -1,8 +1,9 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { AssetSummary, CollectionSummary, LibraryGateway } from "../library/types";
+import type { ArtistGateway, ArtistStyleSuggestion } from "../artists/types";
 import { AssetInspector } from "./AssetInspector";
 
 const openUrl = vi.fn().mockResolvedValue(undefined);
@@ -146,6 +147,51 @@ it("shows source and provenance details with quiet external links", async () => 
   expect(openUrl).toHaveBeenCalledWith("https://x.com/example");
 });
 
+it("shows a style suggestion in the inspector and assigns it", async () => {
+  const user = userEvent.setup();
+  const styleSuggestion: ArtistStyleSuggestion = {
+    artist: {
+      id: "artist:tunoboku", label: "tunoboku", displayName: null, sourceName: "tunoboku", keys: ["tunoboku"], assetCount: 38, recentCount: 0,
+      firstSavedAt: null, lastSavedAt: null, lastOpenedAt: null, pinned: false, hidden: false, reposter: false, main: true, coverAssetIds: ["avatar"],
+    },
+    score: 0.63,
+    referenceAssetIds: ["ref-1", "ref-2", "ref-3"],
+    runnerUp: { artist: { id: "artist:ran", label: "ranzu_art", displayName: null, sourceName: "ranzu_art", keys: ["ranzu_art"], assetCount: 54, recentCount: 0, firstSavedAt: null, lastSavedAt: null, lastOpenedAt: null, pinned: false, hidden: false, reposter: false, main: true, coverAssetIds: [] }, score: 0.57 },
+  };
+  const assignAssets = vi.fn().mockResolvedValue("artist:tunoboku");
+  const artists = { styleSuggestion: vi.fn().mockResolvedValue(styleSuggestion), assignAssets } as unknown as ArtistGateway;
+  render(
+    <LibraryProvider gateway={createGateway(undefined, undefined, artists)}>
+      <AssetInspector assets={[asset("unknown")]} open onOpenChange={vi.fn()} />
+    </LibraryProvider>,
+  );
+
+  const box = await screen.findByRole("region", { name: "닮은 작가" });
+  expect(within(box).getByText("닮은 작가 · 유사도 0.63")).toBeVisible();
+  expect(within(box).getByText("tunoboku")).toBeVisible();
+  expect(within(box).getByText("다음 후보: ranzu_art 0.57")).toBeVisible();
+  await user.click(within(box).getByRole("button", { name: "tunoboku로 지정" }));
+  expect(assignAssets).toHaveBeenCalledWith(["unknown"], { artistId: "artist:tunoboku" });
+});
+
+it("dismisses a style suggestion and leaves no box when the gateway returns null", async () => {
+  const user = userEvent.setup();
+  const dismissStyleSuggestion = vi.fn().mockResolvedValue(undefined);
+  const artists = { styleSuggestion: vi.fn().mockResolvedValue({
+    artist: { id: "artist:tunoboku", label: "tunoboku", displayName: null, sourceName: "tunoboku", keys: ["tunoboku"], assetCount: 38, recentCount: 0, firstSavedAt: null, lastSavedAt: null, lastOpenedAt: null, pinned: false, hidden: false, reposter: false, main: true, coverAssetIds: [] },
+    score: 0.63, referenceAssetIds: [], runnerUp: null,
+  } satisfies ArtistStyleSuggestion), dismissStyleSuggestion } as unknown as ArtistGateway;
+  const gateway = createGateway(undefined, undefined, artists);
+  const { rerender } = render(<LibraryProvider gateway={gateway}><AssetInspector assets={[asset("unknown")]} open onOpenChange={vi.fn()} /></LibraryProvider>);
+  const box = await screen.findByRole("region", { name: "닮은 작가" });
+  await user.click(within(box).getByRole("button", { name: "아님" }));
+  expect(dismissStyleSuggestion).toHaveBeenCalledWith(["unknown"], "artist:tunoboku");
+
+  artists.styleSuggestion = vi.fn().mockResolvedValue(null);
+  rerender(<LibraryProvider gateway={gateway}><AssetInspector assets={[asset("none")]} open onOpenChange={vi.fn()} /></LibraryProvider>);
+  await waitFor(() => expect(screen.queryByRole("region", { name: "닮은 작가" })).not.toBeInTheDocument());
+});
+
 it("edits source metadata, normalizes blank values, and returns the updated asset", async () => {
   const user = userEvent.setup();
   const updated = { ...completeAsset(), creatorName: "Updated Artist", creatorHandle: null };
@@ -250,10 +296,12 @@ it("hides collection metadata when more than one asset is selected", () => {
 function createGateway(
   updateAssetMetadata = vi.fn(),
   listSourceGroupAssets = vi.fn().mockResolvedValue([]),
+  artists?: ArtistGateway,
 ): LibraryGateway {
   return {
     updateAssetMetadata,
     listSourceGroupAssets,
+    artists,
   } as unknown as LibraryGateway;
 }
 

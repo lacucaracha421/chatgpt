@@ -21,7 +21,7 @@ it("renders the 1A identity and non-empty shelves, then opens a performer page",
   const performer = { person: { id: "person", displayName: "배우", nameJa: "俳優", wikidataId: "Q1", fanzaActressId: "F1", memo: null, portrait: null }, stats: { workCount: 2, firstRelease: "2023-01-01", lastRelease: "2024-01-02", averageScore: 4 }, works: [], coPerformers: [], labels: [] };
   const api = {
     getDetails: vi.fn().mockResolvedValue(detail), getCoverSet: vi.fn().mockResolvedValue({ frontId: "front", spineId: "spine", backId: "back", revision: "r1" }),
-    getRelated: vi.fn().mockResolvedValue(related), getPerformer: vi.fn().mockResolvedValue(performer),
+    getRelated: vi.fn().mockResolvedValue(related), getStashdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }), getPerformerProfile: vi.fn().mockResolvedValue(null), getPerformer: vi.fn().mockResolvedValue(performer),
   } as unknown as AvGateway;
   const ratedCollection = { ...collection, description: "개인 메모", myScore: 4, runtimeMinutes: 120, releaseDate: "2024-01-02" };
   render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvCollectionDetail collection={ratedCollection} scope="fixture" api={api} onChanged={vi.fn().mockResolvedValue(undefined)} onEdit={vi.fn()} onToggleShowcase={vi.fn()} onDelete={vi.fn()} /></PrivacyProvider>);

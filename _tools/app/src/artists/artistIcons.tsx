@@ -2,7 +2,7 @@ import type { SVGProps } from "react";
 
 export {
   ArrowPathIcon, ArrowsPointingInIcon as MergeIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, Cog6ToothIcon, EyeSlashIcon,
-  LinkIcon, MagnifyingGlassIcon, PencilIcon, PlayIcon, PlusIcon, QuestionMarkCircleIcon as QuestionIcon, Squares2X2Icon as MosaicIcon,
+  LinkIcon, MagnifyingGlassIcon, PencilIcon, PlayIcon, PlusIcon, QuestionMarkCircleIcon as QuestionIcon, SparklesIcon, Squares2X2Icon as MosaicIcon,
   StarIcon, UserGroupIcon as PeopleIcon, UserPlusIcon, XMarkIcon,
 } from "@heroicons/react/24/outline";
 

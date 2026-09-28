@@ -13,8 +13,11 @@ import type {
   AssetSummary,
   CollectionSummary,
 } from "../library/types";
+import { invalidateArtists } from "../artists/artistStore";
+import type { ArtistStyleSuggestion } from "../artists/types";
 import { Button } from "../shared/ui/Button";
 import { TextField } from "../shared/ui/TextField";
+import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import {
@@ -26,7 +29,7 @@ import {
   localDateTime,
   sourceLabel,
 } from "./assetMetadata";
-import { assetThumbnailUrl } from "./mediaUrl";
+import { assetThumbnailUrl, thumbnailUrl } from "./mediaUrl";
 import { AutoTagHighlights, AutoTagList, useAssetAutoTags } from "../autotags/AutoTagSections";
 
 type Props = {
@@ -36,6 +39,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   onOpenAsset?: (asset: AssetSummary) => void;
   onAssetUpdated?: (asset: AssetSummary) => void;
+  privacyMode?: boolean;
   /** After a 자동 태그 chip applied its tag as an 에셋 filter, e.g. to open the 에셋 screen. */
   onAutoTagFilterApplied?: () => void;
 };
@@ -53,6 +57,7 @@ export function AssetInspector({
   onOpenChange,
   onOpenAsset,
   onAssetUpdated = () => undefined,
+  privacyMode = false,
   onAutoTagFilterApplied,
 }: Props) {
   const { gateway } = useLibrary();
@@ -64,6 +69,10 @@ export function AssetInspector({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [draft, setDraft] = useState<MetadataDraft | null>(null);
   const [sourceGroup, setSourceGroup] = useState<AssetSummary[]>([]);
+  const [styleSuggestion, setStyleSuggestion] = useState<ArtistStyleSuggestion | null>(null);
+  const [styleSuggestionHidden, setStyleSuggestionHidden] = useState(false);
+  const [styleSuggestionPending, setStyleSuggestionPending] = useState(false);
+  const [styleSuggestionError, setStyleSuggestionError] = useState<string | null>(null);
   const inspectorRef = useRef<HTMLElement>(null);
   const restoreEditFocusRef = useRef(false);
   const assetIds = assets.map((asset) => asset.id).join(",");
@@ -75,6 +84,10 @@ export function AssetInspector({
     setDraft(null);
     setSaveError(null);
     setCopyError(null);
+    setStyleSuggestion(null);
+    setStyleSuggestionHidden(false);
+    setStyleSuggestionError(null);
+    setStyleSuggestionPending(false);
   }, [assetIds]);
 
   useEffect(() => {
@@ -101,6 +114,21 @@ export function AssetInspector({
     });
     return () => { active = false; };
   }, [asset?.id, gateway, open]);
+
+  useEffect(() => {
+    let active = true;
+    const styleGateway = gateway.artists;
+    if (!open || !asset || !styleGateway) {
+      setStyleSuggestion(null);
+      return () => { active = false; };
+    }
+    void styleGateway.styleSuggestion(asset.id).then((suggestion) => {
+      if (active) setStyleSuggestion(suggestion);
+    }).catch(() => {
+      if (active) setStyleSuggestion(null);
+    });
+    return () => { active = false; };
+  }, [asset?.id, gateway.artists, open]);
 
   if (!open) return null;
 
@@ -203,7 +231,7 @@ export function AssetInspector({
             aria-label={`${asset.title || asset.originalName} 감상 화면으로 열기`}
             onClick={() => onOpenAsset?.(asset)}
           >
-            <img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" draggable={false} />
+            {privacyMode ? <span className="asset-inspector__preview-placeholder"><Skeleton className="privacy-mask" label="비공개 모드" /></span> : <img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" draggable={false} />}
           </button>
           {sourceGroup.length > 1 && (
             <section className="asset-inspector__section asset-inspector__source-group" aria-label="같은 게시물">
@@ -221,7 +249,7 @@ export function AssetInspector({
                     aria-current={sibling.id === asset.id ? "true" : undefined}
                     onClick={() => onOpenAsset?.(sibling)}
                   >
-                    <img src={assetThumbnailUrl(sibling)} alt="" loading="lazy" decoding="async" draggable={false} />
+                    {!privacyMode && <img src={assetThumbnailUrl(sibling)} alt="" loading="lazy" decoding="async" draggable={false} />}
                   </button>
                 ))}
               </div>
@@ -250,6 +278,32 @@ export function AssetInspector({
               </div>
             </dl>
           </section>
+          {styleSuggestion && !styleSuggestionHidden && <AssetStyleSuggestionBox suggestion={styleSuggestion} privacyMode={privacyMode} pending={styleSuggestionPending} error={styleSuggestionError}
+            onOpen={(assetId) => {
+              void gateway.getAsset(assetId).then((item) => onOpenAsset?.(item), () => undefined);
+            }}
+            onAssign={() => void (async () => {
+              if (!gateway.artists || styleSuggestionPending) return;
+              setStyleSuggestionPending(true); setStyleSuggestionError(null);
+              try {
+                await gateway.artists.assignAssets([asset.id], { artistId: styleSuggestion.artist.id });
+                setStyleSuggestionHidden(true);
+                invalidateArtists();
+              } catch (cause) {
+                setStyleSuggestionError(commandErrorMessage(cause, "작가를 지정하지 못했습니다."));
+              } finally { setStyleSuggestionPending(false); }
+            })()}
+            onDismiss={() => void (async () => {
+              if (!gateway.artists || styleSuggestionPending) return;
+              setStyleSuggestionPending(true); setStyleSuggestionError(null);
+              try {
+                await gateway.artists.dismissStyleSuggestion([asset.id], styleSuggestion.artist.id);
+                setStyleSuggestionHidden(true);
+                invalidateArtists();
+              } catch (cause) {
+                setStyleSuggestionError(commandErrorMessage(cause, "추천을 제외하지 못했습니다."));
+              } finally { setStyleSuggestionPending(false); }
+            })()} />}
           <AutoTagList state={autoTags.state} />
           <section className="asset-inspector__section">
             <h3>파일</h3>
@@ -315,6 +369,38 @@ export function AssetInspector({
       {autoTags.notices}
     </aside>
   );
+}
+
+function AssetStyleSuggestionBox({ suggestion, privacyMode, pending, error, onOpen, onAssign, onDismiss }: {
+  suggestion: ArtistStyleSuggestion;
+  privacyMode: boolean;
+  pending: boolean;
+  error: string | null;
+  onOpen: (assetId: string) => void;
+  onAssign: () => void;
+  onDismiss: () => void;
+}) {
+  return <section className="asset-inspector__style-suggestion" aria-label="닮은 작가">
+    <div className="asset-inspector__style-heading">
+      <span className="asset-inspector__style-avatar">{!privacyMode && suggestion.artist.coverAssetIds[0] && <img src={thumbnailUrl(suggestion.artist.coverAssetIds[0])} alt="" loading="lazy" decoding="async" draggable={false} />}</span>
+      <span className="asset-inspector__style-copy">
+        <span className="asset-inspector__style-kicker">닮은 작가 · 유사도 {suggestion.score.toFixed(2)}</span>
+        <strong className="artist-name">{suggestion.artist.label}</strong>
+      </span>
+    </div>
+    <p className="asset-inspector__style-reference-label">이 작가의 가장 비슷한 그림</p>
+    <div className="asset-inspector__style-references">
+      {suggestion.referenceAssetIds.slice(0, 3).map((assetId, index) => <button key={assetId} type="button" aria-label={`${suggestion.artist.label} 참고 이미지 ${index + 1} 열기`} onClick={() => onOpen(assetId)}>
+        {!privacyMode && <img src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}
+      </button>)}
+    </div>
+    <div className="asset-inspector__style-actions">
+      <Button size="sm" variant="primary" disabled={pending} onClick={onAssign}>{suggestion.artist.label}로 지정</Button>
+      <Button size="sm" disabled={pending} onClick={onDismiss}>아님</Button>
+    </div>
+    {suggestion.runnerUp && <p className="asset-inspector__style-runner">다음 후보: {suggestion.runnerUp.artist.label} {suggestion.runnerUp.score.toFixed(2)}</p>}
+    {error && <p className="asset-inspector__save-error" role="alert">{error}</p>}
+  </section>;
 }
 
 function nullable(value: string): string | null {

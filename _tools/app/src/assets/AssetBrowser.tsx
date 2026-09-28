@@ -12,9 +12,10 @@ import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import type { InternalDragPayload } from "../shared/interaction/pointerDrag";
-import { useArtistCaptionLabel } from "../artists/artistStore";
+import { useArtistCaptionLabel, useArtistGateway, useArtistRevision } from "../artists/artistStore";
 import { AssignArtistDialog } from "../artists/AssignArtistDialog";
 import { useArtistScopeChrome } from "../artists/ArtistPage";
+import { isUnknownArtist } from "../artists/types";
 import { FaultPlayButton, faultSelectionItem, useFaultGame, useFaultQueryScope } from "../games/FaultGame";
 import { AutoTagFilterBadges } from "../autotags/AutoTagFilterBadges";
 import { clearAutoTagFilter, hasAutoTagFilter, useAutoTagFilter } from "../autotags/autoTagFilter";
@@ -36,6 +37,42 @@ const ALL_DATE_BUCKETS = {
   endUtc: "9999-12-31T23:59:59.999Z",
   offsetMinutes: -new Date().getTimezoneOffset(),
 };
+
+function useStyleSuggestionAssetIds(enabled: boolean) {
+  const gateway = useArtistGateway();
+  const revision = useArtistRevision();
+  const [result, setResult] = useState<{ ids: Set<string>; totalImages: number } | null>(null);
+  useEffect(() => {
+    if (!enabled || !gateway) { setResult(null); return; }
+    let active = true;
+    let timer: number | undefined;
+    const load = async () => {
+      try {
+        const status = await gateway.styleStatus();
+        const ids: string[] = [];
+        let offset = 0;
+        let totalImages = 0;
+        for (;;) {
+          const page = await gateway.styleSuggestions(offset, 100);
+          totalImages = page.totalImages;
+          ids.push(...page.groups.flatMap((group) => group.candidates.map((candidate) => candidate.assetId)));
+          offset += page.groups.length;
+          if (page.groups.length === 0 || offset >= page.totalArtists) break;
+        }
+        if (active) setResult({ ids: new Set(ids), totalImages });
+        if (active && status.computing) timer = window.setTimeout(() => { void load(); }, 1500);
+      } catch {
+        if (active) setResult({ ids: new Set(), totalImages: 0 });
+      }
+    };
+    void load();
+    return () => {
+      active = false;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [enabled, gateway, revision]);
+  return result;
+}
 
 
 export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout = "masonry", onGalleryLayoutChange, view, onViewChange, classifications, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, clearSelectionRequest = 0, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
@@ -79,14 +116,19 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   useEffect(() => { if (sort !== "random") randomPivotRef.current = null; }, [sort]);
   useEffect(() => { if (view.kind !== "classification") setDirectOnly(false); }, [view.kind]);
   const creatorKey = view.kind === "creator" ? view.creatorKey : null;
+  const styleSuggestionsOnly = view.kind === "creator" && isUnknownArtist(view.creatorKey) && view.styleSuggestionsOnly === true;
+  const styleSuggestionAssets = useStyleSuggestionAssetIds(styleSuggestionsOnly);
   const autoTagFilter = useAutoTagFilter();
   const autoTagFiltered = hasAutoTagFilter(autoTagFilter);
   const queryBase = useMemo<Omit<AssetQuery, "after">>(() => ({ classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, collectionId: view.kind === "collection" ? view.collectionId : null, creatorKey, directOnly: view.kind === "classification" ? directOnly : false, unclassifiedOnly: view.kind === "unsorted", mediaKind: filterable && mediaFilter !== "all" ? mediaFilter : null, aspectRatio: filterable && aspectFilter !== "all" ? aspectFilter : null, sort, randomPivot: sort === "random" ? randomPivotRef.current : null, collectedRange: null, ...(autoTagFiltered ? { autoTags: autoTagFilter } : {}), limit: ASSET_PAGE_SIZE }), [aspectFilter, autoTagFilter, autoTagFiltered, creatorKey, directOnly, sort, filterable, mediaFilter, randomVersion, view]);
   const queryKey = JSON.stringify(queryBase);
   useEffect(() => setNewAssetsAvailable(false), [queryKey]);
-  const viewKey = view.kind === "classification" ? `classification:${view.classificationId}` : view.kind === "album" ? `album:${view.albumId}` : view.kind === "collection" ? `collection:${view.collectionId}` : view.kind === "creator" ? `creator:${view.creatorKey}` : view.kind;
+  const viewKey = view.kind === "classification" ? `classification:${view.classificationId}` : view.kind === "album" ? `album:${view.albumId}` : view.kind === "collection" ? `collection:${view.collectionId}` : view.kind === "creator" ? `creator:${view.creatorKey}:${view.styleSuggestionsOnly ? "suggested" : "all"}` : view.kind;
   const activePage = page?.queryKey === queryKey ? page : null;
-  const items = activePage?.items ?? EMPTY_ASSETS;
+  const rawItems = activePage?.items ?? EMPTY_ASSETS;
+  const items = styleSuggestionsOnly
+    ? styleSuggestionAssets ? rawItems.filter((asset) => styleSuggestionAssets.ids.has(asset.id)) : EMPTY_ASSETS
+    : rawItems;
   const itemIds = useMemo(() => items.map((asset) => asset.id), [items]);
   const pageRef = useRef(activePage);
   pageRef.current = activePage;
@@ -190,6 +232,10 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     const generation = generationRef.current; const cursor = headCursor; prevLoadingRef.current = true; setPrevLoading(true); setPrevError(null);
     void gateway.listAssets({ ...queryBase, after: null, before: cursor, aroundDate: null }).then((result) => { if (generation !== generationRef.current) return; setPage((current) => { if (current?.queryKey !== queryKey) return current; const existing = new Set(current.items.map((asset) => asset.id)); const fresh = result.items.filter((asset) => !existing.has(asset.id)); if (fresh.length === 0) return current; return { sort: queryBase.sort, queryKey, items: [...fresh, ...current.items], headCursor: result.previousCursor ?? null, tailCursor: current.tailCursor, totalCount: result.totalCount ?? current.totalCount }; }); }).catch((error: unknown) => { if (generation === generationRef.current) setPrevError({ queryKey, message: commandErrorMessage(error, "이전 자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) { prevLoadingRef.current = false; setPrevLoading(false); } });
   }, [activePage, currentPrevError, gateway, queryBase, queryKey, headCursor]);
+  useEffect(() => {
+    if (!styleSuggestionsOnly || !styleSuggestionAssets || !activePage || items.length > 0 || !tailCursor || nextLoadingRef.current) return;
+    loadNextPage();
+  }, [activePage, items.length, loadNextPage, styleSuggestionAssets, styleSuggestionsOnly, tailCursor]);
   const reshuffle = () => { randomPivotRef.current = createRandomPivot(); setRandomVersion((value) => value + 1); };
   const selectWithGesture = (asset: AssetSummary, gesture: SelectionGesture) => {
     const next = applySelectionGesture(selection, itemIds, asset.id, gesture);
@@ -328,8 +374,14 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   })();
   const hasActiveFilters = filterable && (mediaFilter !== "all" || aspectFilter !== "all");
   const resetFilters = () => { changeMediaFilter("all"); changeAspectFilter("all"); };
+  const resetStyleSuggestionFilter = () => {
+    if (view.kind === "creator") onViewChange?.({ kind: "creator", creatorKey: view.creatorKey });
+  };
   const visiblePage = activePage ?? (!currentFirstError ? navigationMemory?.get(queryKey) ?? page : null);
-  const visibleItems = visiblePage?.items ?? [];
+  const rawVisibleItems = visiblePage?.items ?? [];
+  const visibleItems = styleSuggestionsOnly
+    ? styleSuggestionAssets ? rawVisibleItems.filter((asset) => styleSuggestionAssets.ids.has(asset.id)) : EMPTY_ASSETS
+    : rawVisibleItems;
   const captionLabel = useArtistCaptionLabel();
   const artistScope = useArtistScopeChrome(view, { onNavigate: onViewChange, privacyMode, onPlay: () => {
     const first = visibleItems[0];
@@ -362,8 +414,8 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     ? <Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" />
     : currentFirstError && !activePage
       ? <EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState>
-      : visibleItems.length === 0 && (hasActiveFilters || autoTagFiltered)
-        ? <EmptyState title="조건에 맞는 자산이 없습니다."><Button onClick={() => { resetFilters(); clearAutoTagFilter(); }}>필터 초기화</Button></EmptyState>
+      : visibleItems.length === 0 && (hasActiveFilters || autoTagFiltered || styleSuggestionsOnly)
+        ? <EmptyState title={styleSuggestionsOnly ? "추천이 있는 자산이 없습니다." : "조건에 맞는 자산이 없습니다."}><Button onClick={() => { resetFilters(); clearAutoTagFilter(); resetStyleSuggestionFilter(); }}>필터 초기화</Button></EmptyState>
       : visibleItems.length === 0
         ? <EmptyState title={view.kind === "album" ? "이 앨범에 자산이 없습니다." : view.kind === "collection" ? "이 컬렉션에 자산이 없습니다." : "자산이 없습니다"}>{view.kind === "album" ? "원하는 자산을 이 앨범에 추가하세요." : view.kind === "collection" ? "원하는 자산을 이 컬렉션에 추가하세요." : "여기에 이미지와 영상 파일을 놓아 추가하세요."}</EmptyState>
          : <ContextMenu items={contextItems}><div onContextMenu={(event) => {
@@ -371,7 +423,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
           const target = items.find((item) => item.id === id);
           if (!target || (batchPending && !selection.ids.has(target.id))) { event.preventDefault(); return; }
           if (!selection.ids.has(target.id)) selectWithGesture(target, { toggle: false, range: false });
-        }} className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery layout={galleryLayout} intro={artistScope?.intro} captionLabel={captionLabel} groupDates={visiblePage?.sort === "newest" || visiblePage?.sort === "oldest"} items={visibleItems} scopeKey={visiblePage?.queryKey} totalCount={visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
+        }} className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery layout={galleryLayout} intro={artistScope?.intro} captionLabel={captionLabel} groupDates={visiblePage?.sort === "newest" || visiblePage?.sort === "oldest"} items={visibleItems} scopeKey={visiblePage?.queryKey} totalCount={styleSuggestionsOnly ? styleSuggestionAssets?.totalImages ?? null : visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
   return <section className="asset-browser" aria-label="저장소">
     {newAssetsAvailable && <div role="status">새 자료가 있습니다. <Button size="sm" onClick={showNewest}>처음부터 보기</Button></div>}
     {<AssetToolbar title={artistScope?.title} titleAccessory={<>{artistScope?.accessory}<AutoTagFilterBadges resultCount={activePage?.totalCount ?? null} /></>} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} directOnly={directOnly} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onDirectOnlyChange={setDirectOnly} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} playAction={<FaultPlayButton scope={faultScope} />} />}
@@ -390,7 +442,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
         {currentNextError && <div className="asset-browser__next-error"><Toast tone="error">{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
         {currentPrevError && <div className="asset-browser__next-error"><Toast tone="error">{currentPrevError}</Toast><Button onClick={() => loadPrevPage(true)}>다시 시도</Button></div>}
       </div>
-      <AssetInspector assets={selectedAssets} currentCollection={view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId) ?? null : null} open={inspectorOpen} onOpenChange={setInspectorOpen} onOpenAsset={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onAssetUpdated={updateAssetSummary} />
+      <AssetInspector assets={selectedAssets} currentCollection={view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId) ?? null : null} open={inspectorOpen} onOpenChange={setInspectorOpen} onOpenAsset={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onAssetUpdated={updateAssetSummary} privacyMode={privacyMode} />
     </div>
     {assignOpen && selectedIds.length > 0 && <AssignArtistDialog assetIds={[...selectedIds]} privacyMode={privacyMode} onClose={() => setAssignOpen(false)}
       onAssigned={(_artistId, label) => { setAssignOpen(false); setUndoAssetIds(null); setMessage(`${selectedIds.length.toLocaleString("ko-KR")}장을 ${label}에 붙였어요`); clearSelection(); refresh(); }} />}

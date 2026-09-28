@@ -611,6 +611,10 @@ impl super::Library {
     }
 
     pub fn import_auto_tags(&self, path: &Path) -> Result<AutoTagImportSummary, LibraryError> {
+        let _guard = self
+            .ingestion_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         import_file(&*self.connection()?, path, &now_utc())
     }
 }

@@ -21,12 +21,12 @@ function initials(name: string) {
 
 export function AvPortrait({ portrait, name, size = "detail", className = "" }: AvPortraitProps) {
   const { privacyMode } = usePrivacy();
-  const dimension = typeof size === "number" ? size : size === "performer" ? 300 : size === "home" ? 112 : 84;
-  const height = size === "performer" ? 400 : size === "home" ? 150 : dimension;
+  const dimension = typeof size === "number" ? size : size === "performer" ? 225 : size === "home" ? 112 : 84;
+  const height = size === "performer" ? 300 : size === "home" ? 150 : dimension;
   const classNames = `av-portrait av-portrait--${typeof size === "string" ? size : "custom"}${className ? ` ${className}` : ""}`;
   const style = { "--portrait-width": `${dimension}px`, "--portrait-height": `${height}px` } as CSSProperties;
   if (privacyMode || !portrait) return <span className={classNames} style={style} aria-label={`${name} 이니셜`}>{initials(name)}</span>;
-  if (portrait.kind === "commons") return <span className={classNames} style={style}><img src={portrait.dataUrl} alt={`${name} 대표 이미지`} draggable={false} /></span>;
+  if ((portrait.kind === "commons" || portrait.kind === "stashdb")) return <span className={classNames} style={style}><img src={portrait.dataUrl} alt={`${name} 대표 이미지`} draggable={false} /></span>;
 
   const rect = portrait.rect;
   const backgroundSize = `${100 / rect.w}% ${100 / rect.h}%`;

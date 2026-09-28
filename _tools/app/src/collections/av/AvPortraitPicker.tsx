@@ -4,11 +4,12 @@ import { Dialog } from "../../shared/ui/Dialog";
 import { Button } from "../../shared/ui/Button";
 import { usePrivacy } from "../../privacy/PrivacyContext";
 import { avError } from "../avClient";
-import type { AvCommonsPreview, AvGateway, AvPortrait, AvPortraitSource, PortraitRect } from "../avTypes";
+import type { AvCommonsPreview, AvStashdbPreview, AvPerformerProfile, AvGateway, AvPortrait, AvPortraitSource, PortraitRect } from "../avTypes";
+import { safeProfileUrl } from "./AvPerformerProfile";
 import { AvPortrait as Portrait } from "./AvPortrait";
 import "./avPortraitPicker.css";
 
-type PortraitSourceKind = "crop" | "commons" | "none";
+type PortraitSourceKind = "crop" | "commons" | "stashdb" | "none";
 
 function clamp(value: number, min: number, max: number) { return Math.max(min, Math.min(max, value)); }
 
@@ -41,6 +42,12 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, api,
   const [rect, setRect] = useState<PortraitRect>(() => initialRect(null));
   const [baseRect, setBaseRect] = useState<PortraitRect>(() => initialRect(null));
   const [zoom, setZoom] = useState(1);
+  const [stashdbConfigured, setStashdbConfigured] = useState<boolean | null>(null);
+  const [profile, setProfile] = useState<AvPerformerProfile | null>(null);
+  const [stashdb, setStashdb] = useState<AvStashdbPreview | null>(null);
+  const [stashdbId, setStashdbId] = useState<string | null>(null);
+  const [stashdbRequest, setStashdbRequest] = useState(0);
+  const [stashdbLoading, setStashdbLoading] = useState(false);
   const [commons, setCommons] = useState<AvCommonsPreview | null>(null);
   const [commonsLoading, setCommonsLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -51,7 +58,11 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, api,
 
   useEffect(() => {
     let active = true;
-    setError(null);
+    setError(null); setProfile(null); setStashdb(null); setStashdbId(null);
+    setStashdbConfigured(null);
+    void Promise.all([api.getPerformerProfile(personId), api.getStashdbCredentialStatus()]).then(([value, status]) => {
+      if (active) { setStashdbConfigured(status.configured); setProfile(status.configured ? value : null); }
+    }, () => { if (active) setError("StashDB 사진 목록을 불러오지 못했습니다."); });
     void api.listPortraitSources(personId).then(value => {
       if (!active) return;
       const ordered = [...(value ?? [])].sort((a, b) => Number(b.solo) - Number(a.solo));
@@ -71,6 +82,15 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, api,
       .finally(() => { if (active) setCommonsLoading(false); });
     return () => { active = false; };
   }, [api, personId, sourceKind]);
+
+  useEffect(() => {
+    if (sourceKind !== "stashdb" || !stashdbId) { setStashdb(null); setStashdbLoading(false); return; }
+    let active = true;
+    setStashdb(null); setStashdbLoading(true); setError(null);
+    void api.previewStashdbPortrait(personId, stashdbId).then(value => { if (active) setStashdb(value); }, () => { if (active) setError("사진을 불러오지 못했습니다. 다시 선택해 주세요."); })
+      .finally(() => { if (active) setStashdbLoading(false); });
+    return () => { active = false; };
+  }, [api, personId, sourceKind, stashdbId, stashdbRequest]);
 
   function selectCover(source: AvPortraitSource) {
     setSelectedId(source.artworkId);
@@ -103,22 +123,22 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, api,
         await api.clearPortrait(personId);
         onSaved(null); onClose(); return;
       }
-      const portrait = sourceKind === "commons" ? await api.useCommonsPortrait(personId) : selected ? await api.setPortraitCrop(personId, selected.artworkId, rect) : null;
+      const portrait = sourceKind === "stashdb" ? await api.useStashdbPortrait(personId) : sourceKind === "commons" ? await api.useCommonsPortrait(personId) : selected ? await api.setPortraitCrop(personId, selected.artworkId, rect) : null;
       if (!portrait) { setError("표지에서 자를 앞표지를 먼저 선택해 주세요."); return; }
       onSaved(portrait); onClose();
     } catch (reason) { setError(avError(reason)); }
     finally { setBusy(false); }
   }
 
-  const previewPortrait: AvPortrait | null = sourceKind === "crop" && selected ? { kind: "crop", artworkId: selected.artworkId, revision: selected.revision, rect } : sourceKind === "commons" && commons ? { kind: "commons", ...commons } : null;
+  const previewPortrait: AvPortrait | null = sourceKind === "crop" && selected ? { kind: "crop", artworkId: selected.artworkId, revision: selected.revision, rect } : sourceKind === "stashdb" && stashdb ? { kind: "stashdb", ...stashdb } : sourceKind === "commons" && commons ? { kind: "commons", ...commons } : null;
   return <Dialog open title={`${personName} 대표 이미지`} variant="wide" onClose={() => { if (!busy) onClose(); }}>
     <div className="av-portrait-picker">
       <nav className="av-portrait-picker__sources" aria-label="대표 이미지 출처">
-        <p className="av-portrait-picker__section-label">출처</p>
-        <SourceButton active={sourceKind === "crop"} onClick={() => setSourceKind("crop")} title="표지에서 자르기" detail={`앞표지 ${sources.length}장`} />
-        <SourceButton active={sourceKind === "commons"} onClick={() => setSourceKind("commons")} title="위키미디어 공용" detail="Wikidata 대표 사진" />
-        <SourceButton active={sourceKind === "none"} onClick={() => setSourceKind("none")} title="사진 없이" detail="이니셜 모노그램" />
-        <p className="av-portrait-picker__note">대표 이미지는 사용자가 고른 표지 자르기, 공용 사진, 이니셜 순서로 표시합니다.</p>
+        <SourceButton disabled={busy} active={sourceKind === "crop"} onClick={() => setSourceKind("crop")} title="표지에서 자르기" detail={`앞표지 ${sources.length}장`} />
+        <SourceButton disabled={busy} active={sourceKind === "commons"} onClick={() => setSourceKind("commons")} title="위키미디어 공용" detail="Wikidata 대표 사진" />
+        <SourceButton disabled={busy} active={sourceKind === "stashdb"} onClick={() => setSourceKind("stashdb")} title="StashDB" detail={profile?.status === "matched" ? `${profile.images.length}장` : "프로필 사진"} />
+        <SourceButton disabled={busy} active={sourceKind === "none"} onClick={() => setSourceKind("none")} title="사진 없이" detail="이니셜 모노그램" />
+
       </nav>
       <div className="av-portrait-picker__work">
         {sourceKind === "crop" && <>
@@ -136,6 +156,16 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, api,
           </div> : <p className="av-portrait-picker__empty">자를 수 있는 앞표지가 없습니다.</p>}
           <div className="av-portrait-picker__crop-controls"><label htmlFor="av-portrait-zoom">확대</label><input id="av-portrait-zoom" type="range" min="1" max="3" step=".1" value={zoom} onChange={event => changeZoom(Number(event.target.value))} /><Button size="sm" onClick={resetCrop}>처음 위치</Button><span>틀을 끌어 얼굴에 맞추세요 · 3:4 고정</span></div>
         </>}
+        {sourceKind === "stashdb" && <>
+          {profile?.status === "matched" ? <div className="av-portrait-picker__stashdb-grid" aria-label="StashDB 사진 목록">
+            {profile.images.filter(image => safeProfileUrl(image.url)).map(image => <button key={image.id} type="button" disabled={busy} className={image.id === stashdbId ? "is-selected" : ""} aria-pressed={image.id === stashdbId} aria-label={`StashDB 사진 ${image.width}×${image.height} ${image.id}`} onClick={() => { setStashdb(null); setStashdbLoading(true); setStashdbId(image.id); setStashdbRequest(value => value + 1); }}>
+              {!privacyMode ? <img src={image.url} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span>비공개</span>}
+              <small>{image.width}×{image.height}</small>
+            </button>)}
+            {profile.images.length === 0 && <p>등록된 사진이 없어요.</p>}
+          </div> : <p className="av-portrait-picker__empty">{stashdbConfigured === false ? "StashDB 키가 없어요. 설정에서 키를 등록해 주세요." : "StashDB 프로필이 연결되면 사진을 고를 수 있어요"}</p>}
+          {stashdbLoading && <p role="status">사진을 불러오는 중…</p>}
+        </>}
         {sourceKind === "commons" && <div className="av-portrait-picker__commons">
           {commonsLoading && <p role="status">위키미디어 공용 사진을 불러오는 중…</p>}
           {!commonsLoading && !commons && <p role="status">위키미디어 공용 사진이 없습니다</p>}
@@ -149,18 +179,22 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, api,
       </div>
       <aside className="av-portrait-picker__previews" aria-label="대표 이미지 미리보기">
         <p className="av-portrait-picker__section-label">미리보기</p>
-        <span>상세 · 출연</span><div className="av-portrait-picker__avatar-row"><PreviewPortrait portrait={previewPortrait} name={personName} size={84} /><PreviewPortrait portrait={previewPortrait} name={personName} size={40} /><PreviewPortrait portrait={previewPortrait} name={personName} size={24} /></div>
+        {sourceKind === "stashdb" ? <>
+          <div className="av-portrait-picker__performer-preview"><PreviewPortrait portrait={previewPortrait} name={personName} size="performer" /></div>
+          {stashdb && <span>{stashdb.width}×{stashdb.height} · StashDB</span>}
+          <p className="av-portrait-picker__note">고른 사진은 이 PC에 저장되어 인터넷 없이도 보여요.</p>
+        </> : <><span>상세 · 출연</span><div className="av-portrait-picker__avatar-row"><PreviewPortrait portrait={previewPortrait} name={personName} size={84} /><PreviewPortrait portrait={previewPortrait} name={personName} size={40} /><PreviewPortrait portrait={previewPortrait} name={personName} size={24} /></div>
         <span>배우 페이지</span><div className="av-portrait-picker__performer-preview"><PreviewPortrait portrait={previewPortrait} name={personName} size="performer" /></div>
-        <span>홈 · 오늘의 AV 배우</span><div className="av-portrait-picker__home-preview"><PreviewPortrait portrait={previewPortrait} name={personName} size="home" /><b>{personName}</b></div>
+        <span>홈 · 오늘의 AV 배우</span><div className="av-portrait-picker__home-preview"><PreviewPortrait portrait={previewPortrait} name={personName} size="home" /><b>{personName}</b></div></>}
       </aside>
     </div>
     {error && <p role="alert">{error}</p>}
-    <div className="ui-dialog__actions"><Button disabled={busy} onClick={onClose}>취소</Button><Button variant="primary" disabled={busy || (sourceKind === "commons" && (!commons || commonsLoading))} onClick={() => void save()}>대표 이미지로 쓰기</Button></div>
+    <div className="ui-dialog__actions"><Button disabled={busy} onClick={onClose}>취소</Button><Button variant="primary" disabled={busy || (sourceKind === "commons" && (!commons || commonsLoading)) || (sourceKind === "stashdb" && (!stashdb || stashdbLoading)) || (sourceKind === "crop" && !selected)} onClick={() => void save()}>{sourceKind === "stashdb" ? "이 사진으로" : "대표 이미지로 쓰기"}</Button></div>
   </Dialog>;
 }
 
-function SourceButton({ active, onClick, title, detail }: { active: boolean; onClick(): void; title: string; detail: string }) {
-  return <button type="button" className={`av-portrait-picker__source${active ? " is-selected" : ""}`} aria-pressed={active} onClick={onClick}><b>{title}</b><span>{detail}</span></button>;
+function SourceButton({ active, onClick, title, detail, disabled }: { disabled?: boolean; active: boolean; onClick(): void; title: string; detail: string }) {
+  return <button type="button" disabled={disabled} aria-label={`${title} ${detail}`} className={`av-portrait-picker__source${active ? " is-selected" : ""}`} aria-pressed={active} onClick={onClick}><b>{title}</b><span>{detail}</span></button>;
 }
 
 function PreviewPortrait({ portrait, name, size }: { portrait: AvPortrait | null; name: string; size: number | "performer" | "home" }) {

@@ -368,7 +368,7 @@ export type AssetView =
   /** The 작가 hub; `section` defaults to 주요 작가 with the 오늘 strip. */
   | { kind: "artists"; section?: ArtistHubSection }
   /** One artist's page (`creatorKey` is an artist id, see `artists/types.ts`), or 작가 미상 for `unknown:*`. `edit` opens 작가 편집. */
-  | { kind: "creator"; creatorKey: string; edit?: boolean }
+  | { kind: "creator"; creatorKey: string; edit?: boolean; styleSuggestionsOnly?: boolean }
   | { kind: "similarity_review" }
   | { kind: "trash" }
   | { kind: "statistics" }
@@ -383,7 +383,7 @@ export type AssetView =
   | { kind: "collections"; typeFilter: CollectionType; showcase: boolean; releaseProvider?: CollectionUpdateProvider; releaseCalendar?: boolean }
   | { kind: "collection"; collectionId: string; tmdbSearch?: { query: string; mediaType: "movie" | "tv" } };
 
-export type ArtistHubSection = "main" | "others" | "singles" | "hidden" | "merge" | "source-fill";
+export type ArtistHubSection = "main" | "others" | "singles" | "hidden" | "merge" | "source-fill" | "reposter";
 
 export type ClassificationEntry = {
   id: string;
@@ -444,6 +444,15 @@ export type CollectionSummary = {
   createdAt: string;
   updatedAt: string;
   sourcePath?: string | null;
+  minVolume?: number | null;
+  maxVolume?: number | null;
+  hideConnectionPrompt?: boolean;
+};
+
+export type CollectionVolumeRangeInput = {
+  minVolume: number | null;
+  maxVolume: number | null;
+  hideConnectionPrompt: boolean;
 };
 
 export type CreateCollection = {
@@ -1436,6 +1445,9 @@ export interface LibraryGateway {
   refreshIgdbGame(collectionId: string): Promise<CollectionSummary>;
   getIgdbConnection(collectionId: string): Promise<IgdbConnection | null>;
   replaceIgdbGameArtwork(request: IgdbArtworkReplaceRequest): Promise<CollectionSummary>;
+  getStashdbCredentialStatus(): Promise<{ configured: boolean }>;
+  setStashdbCredentials(apiKey: string): Promise<{ configured: boolean }>;
+  deleteStashdbCredentials(): Promise<{ configured: boolean }>;
   getTmdbCredentialStatus(): Promise<TmdbCredentialStatus>;
   setTmdbToken(token: string): Promise<TmdbCredentialStatus>;
   deleteTmdbToken(): Promise<TmdbCredentialStatus>;
@@ -1458,6 +1470,7 @@ export interface LibraryGateway {
   deleteCollection(id: string): Promise<void>;
   setCollectionCover(collectionId: string, assetId: string | null): Promise<CollectionSummary>;
   setCollectionShowcase(collectionId: string, showcase: boolean): Promise<CollectionSummary>;
+  setCollectionVolumeRange?(collectionId: string, input: CollectionVolumeRangeInput): Promise<CollectionSummary>;
   getAssetCollections(assetId: string): Promise<string[]>;
   patchAssetCollections(patch: AssetCollectionPatch): Promise<void>;
   getEncryptedVaultStatus?(): Promise<EncryptedVaultStatus>;

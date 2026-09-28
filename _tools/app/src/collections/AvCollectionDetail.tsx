@@ -24,7 +24,8 @@ const JUMPS = [
   ["av-detail-series", "같은 시리즈"], ["av-detail-label", "같은 레이블"], ["av-detail-more", "자세한 정보"],
 ] as const;
 
-export function AvCollectionDetail({ collection, scope: _scope, api = avGateway, onChanged, onEdit, onToggleShowcase, onDelete, onOpenCollection }: {
+export function AvCollectionDetail({ collection, scope: _scope, api = avGateway, onChanged, onEdit, onToggleShowcase, onDelete, onOpenCollection, onOpenSettings }: {
+  onOpenSettings?: () => void;
   collection: CollectionSummary; scope: string; api?: AvGateway; onChanged(): Promise<void>;
   onEdit(): void; onToggleShowcase(): void; onDelete(): void; onOpenCollection?: (collectionId: string) => void;
 }) {
@@ -92,7 +93,7 @@ export function AvCollectionDetail({ collection, scope: _scope, api = avGateway,
     <CollectionSidebarSection actions>{menu}</CollectionSidebarSection>
     {error && <p className="av-collection-detail__error" role="alert">{error} <Button size="sm" onClick={() => setReload(value => value + 1)}>다시 불러오기</Button></p>}
     {!details && !error && <p role="status">불러오는 중…</p>}
-    {details && performerId ? <AvPerformerPage key={performerId} personId={performerId} currentCollectionId={collection.id} api={api} onBack={() => setPerformerId(null)} onOpenCollection={onOpenCollection} onOpenPerformer={setPerformerId} /> : details && covers && <>
+    {details && performerId ? <AvPerformerPage key={performerId} personId={performerId} currentCollectionId={collection.id} api={api} onOpenSettings={onOpenSettings} onBack={() => setPerformerId(null)} onOpenCollection={onOpenCollection} onOpenPerformer={setPerformerId} /> : details && covers && <>
       <AvHero id="av-detail-work" collection={collection} details={details} covers={covers} title={title} pose={pose} privacyMode={privacyMode} onPoseChange={setPose} onViewer={() => setPanel("viewer")} onEditInfo={() => setPanel("info")} onEdit={onEdit} onCopy={() => void copyText(details.productCode)} />
       <CastSection id="av-detail-cast" people={performers} directors={directors} privacyMode={privacyMode} onOpenPerson={setPerformerId} />
       <RelatedSections related={related} activePerformer={activePerformer} hasMultiplePerformers={performers.length > 1} onSelectPerformer={setSelectedPerformerId} onOpenPerformer={setPerformerId} onOpenCollection={onOpenCollection} />

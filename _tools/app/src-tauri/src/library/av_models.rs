@@ -162,6 +162,10 @@ pub enum AvPortrait {
         revision: String,
         rect: AvPortraitRect,
     },
+    Stashdb {
+        #[serde(flatten)]
+        preview: AvStashdbPreview,
+    },
     Commons {
         #[serde(flatten)]
         preview: AvCommonsPreview,
@@ -286,4 +290,13 @@ pub struct AvPortraitSource {
     pub solo: bool,
     pub width: u32,
     pub height: u32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AvStashdbPreview {
+    pub data_url: String,
+    pub width: u32,
+    pub height: u32,
+    pub source_url: String,
 }

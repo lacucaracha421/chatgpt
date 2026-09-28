@@ -18,6 +18,7 @@ pub(crate) mod av_collection;
 mod av_detail;
 pub(crate) mod av_models;
 pub(crate) mod av_portrait;
+pub(crate) mod av_stashdb;
 mod backup;
 pub mod book_migration;
 pub(crate) mod bookmark_outbox;
@@ -95,6 +96,7 @@ pub(crate) mod collection_personal_edits;
 pub(crate) mod collection_binding_sync;
 pub(crate) mod collection_release_sync;
 pub(crate) mod collection_source;
+pub(crate) mod collection_volume_range;
 mod collection_volume;
 pub(crate) mod credential;
 pub(crate) mod credential_broker;
@@ -123,6 +125,7 @@ pub mod legacy_migration;
 pub mod legacy_package_migration;
 mod lock;
 pub(crate) mod machine_settings;
+pub(crate) mod auto_tag_inbox;
 mod manga;
 pub(crate) mod mangadex;
 mod mangadex_flow;
@@ -137,6 +140,7 @@ mod query;
 mod release_watch;
 pub(crate) mod release_calendar;
 pub(crate) mod artists;
+pub(crate) mod artist_style;
 #[cfg(test)]
 mod artists_tests;
 pub(crate) mod auto_tags;
@@ -269,6 +273,7 @@ pub struct Library {
     collection_artwork_scan_cache: Arc<Mutex<HashMap<String, u128>>>,
     revisit_color_cache: Arc<Mutex<revisit_color::ColorCache>>,
     revisit_color_lock: Arc<Mutex<()>>,
+    artist_style_runtime: Arc<artist_style::Runtime>,
     character_scan: Arc<Mutex<character_scan::ScanState>>,
     character_incremental: Arc<Mutex<character_incremental::Engine>>,
     character_wake: Arc<character_incremental::Wake>,
@@ -381,6 +386,7 @@ impl Library {
             collection_artwork_scan_cache: Arc::new(Mutex::new(HashMap::new())),
             revisit_color_cache: Arc::default(),
             revisit_color_lock: Arc::default(),
+            artist_style_runtime: Arc::default(),
             character_scan: Arc::default(),
             character_incremental: Arc::default(),
             character_wake: Arc::default(),

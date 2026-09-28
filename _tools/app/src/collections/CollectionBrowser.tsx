@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AssetView, CollectionSummary, CollectionType, CollectionUpdateProvider, CreateCollection, UpdateCollection } from "../library/types";
+import type { AssetView, CollectionSummary, CollectionType, CollectionUpdateProvider, CollectionVolumeRangeInput, CreateCollection, UpdateCollection } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { Button } from "../shared/ui/Button";
@@ -180,6 +180,13 @@ export function CollectionBrowser({
     await onChanged();
   }
 
+  async function handleMangaSettings(input: CollectionVolumeRangeInput) {
+    if (editMode?.kind !== "edit" || editMode.collection.type !== "manga") return;
+    if (!gateway.setCollectionVolumeRange) return;
+    await gateway.setCollectionVolumeRange(editMode.collection.id, input);
+    await onChanged();
+  }
+
   async function toggleShowcase(collection: CollectionSummary) {
     try {
       await gateway.setCollectionShowcase(collection.id, !collection.showcase);
@@ -352,6 +359,7 @@ export function CollectionBrowser({
           mode={editMode}
           onClose={() => setEditMode(null)}
           onSubmit={handleSubmit}
+          onSubmitMangaSettings={editMode.kind === "edit" && editMode.collection.type === "manga" ? handleMangaSettings : undefined}
         />
       )}
       {mangaDexOpen && (

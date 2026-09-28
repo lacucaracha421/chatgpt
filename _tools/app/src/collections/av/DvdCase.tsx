@@ -169,7 +169,7 @@ export function DvdCase({
     <div
       ref={caseRef}
       className={`dvd-case__stage${interactive ? " dvd-case__stage--interactive" : ""}`}
-      style={{ width: width + depth + 18, height: size + 22 }}
+      style={{ width: width + depth + 18, height: size + 22, "--dvd-width": `${width}px` } as CSSProperties}
       tabIndex={interactive ? 0 : undefined}
       role="img"
       aria-label={alt}

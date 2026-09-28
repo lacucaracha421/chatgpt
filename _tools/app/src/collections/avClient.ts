@@ -2,6 +2,15 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AvCommonsPreview, AvGateway, LocalArtworkPreview, PortraitRect } from "./avTypes";
 
 export const avGateway: AvGateway = {
+  getStashdbCredentialStatus: () => invoke("get_stashdb_credential_status"),
+  getPerformerProfile: personId => invoke("get_av_performer_profile", { personId }),
+  refreshPerformerProfile: (personId, force) => invoke("refresh_av_performer_profile", { personId, force }),
+  searchPerformerProfile: personId => invoke("search_av_performer_profile", { personId }),
+  choosePerformerProfile: (personId, stashdbId) => invoke("choose_av_performer_profile", { personId, stashdbId }),
+  dismissPerformerProfile: personId => invoke("dismiss_av_performer_profile", { personId }),
+  clearPerformerProfile: personId => invoke("clear_av_performer_profile", { personId }),
+  previewStashdbPortrait: (personId, imageId) => invoke("preview_av_stashdb_portrait", { personId, imageId }),
+  useStashdbPortrait: personId => invoke("use_av_stashdb_portrait", { personId }),
   getDetails: collectionId => invoke("get_av_details", { collectionId }),
   saveDetails: (collectionId, input) => invoke("save_av_details", { collectionId, input }),
   searchPeople: query => invoke("search_av_people", { query }),

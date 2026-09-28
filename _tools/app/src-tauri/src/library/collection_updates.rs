@@ -1,5 +1,7 @@
 use super::{
+    collection_volume_range::load_transaction,
     error::LibraryError,
+    mangadex,
     models::{MangaDexCoverCandidate, ReleaseWatchRunStopReason},
     provider_requests, Library,
 };
@@ -111,7 +113,9 @@ impl Library {
         key: Result<String, LibraryError>,
     ) -> Result<CollectionUpdateStatus, LibraryError> {
         let provider = valid_provider(provider)?;
-        if crate::workload::is_restricted() { return self.collection_update_status(provider); }
+        if crate::workload::is_restricted() {
+            return self.collection_update_status(provider);
+        }
         self.run_collection_updates_with(provider, |id| {
             if provider == "mangadex" {
                 self.refresh_mangadex(id)?;
@@ -132,8 +136,25 @@ impl Library {
     fn run_collection_updates_with(
         &self,
         provider: &'static str,
-        mut refresh: impl FnMut(&str) -> Result<(), LibraryError>,
+        refresh: impl FnMut(&str) -> Result<(), LibraryError>,
     ) -> Result<CollectionUpdateStatus, LibraryError> {
+        self.run_collection_updates_with_cover_downloader(
+            provider,
+            refresh,
+            |manga_id, file_name| mangadex::download_cover(manga_id, file_name),
+        )
+    }
+
+    fn run_collection_updates_with_cover_downloader<R, D>(
+        &self,
+        provider: &'static str,
+        mut refresh: R,
+        mut download: D,
+    ) -> Result<CollectionUpdateStatus, LibraryError>
+    where
+        R: FnMut(&str) -> Result<(), LibraryError>,
+        D: FnMut(&str, &str) -> Result<Vec<u8>, LibraryError>,
+    {
         // A manual check and the startup/hourly loop share this lock. Don't queue
         // another long job when one is already running.
         let _guard = match self.release_watch_lock.try_lock() {
@@ -174,10 +195,17 @@ impl Library {
         let started = Instant::now();
         let metrics = provider_requests::metrics();
         for id in pending.iter().take(BATCH_SIZE) {
-            if crate::workload::is_restricted() { break; }
+            if crate::workload::is_restricted() {
+                break;
+            }
             if started.elapsed().as_secs() >= BATCH_SECONDS {
                 break;
             }
+            let previous_mangadex_slots = if provider == "mangadex" {
+                Some(mangadex_seen_slots(self, id)?)
+            } else {
+                None
+            };
             let before = self.connection()?.query_row(
                 "SELECT COUNT(*) FROM release_watch_events WHERE collection_id=?1 AND provider=?2",
                 params![id, provider],
@@ -195,9 +223,32 @@ impl Library {
                         status.last_failure = None;
                     }
                     status.checked += 1;
-                    let connection = self.connection()?;
-                    connection.execute("DELETE FROM collection_update_attempts WHERE collection_id=?1 AND provider=?2",params![id,provider])?;
-                    let after=connection.query_row("SELECT COUNT(*) FROM release_watch_events WHERE collection_id=?1 AND provider=?2",params![id,provider],|row|row.get::<_,i64>(0))?;
+                    let after = {
+                        let connection = self.connection()?;
+                        connection.execute("DELETE FROM collection_update_attempts WHERE collection_id=?1 AND provider=?2",params![id,provider])?;
+                        connection.query_row("SELECT COUNT(*) FROM release_watch_events WHERE collection_id=?1 AND provider=?2",params![id,provider],|row|row.get::<_,i64>(0))?
+                    };
+                    if let Some(previous) = previous_mangadex_slots {
+                        if after > before {
+                            let current = mangadex_seen_slots(self, id)?;
+                            let newly_detected = current
+                                .difference(&previous)
+                                .copied()
+                                .filter(|(volume, _)| *volume <= 999)
+                                .collect::<BTreeSet<_>>();
+                            if !newly_detected.is_empty() {
+                                // Cover failures are deliberately best effort. The refresh
+                                // transaction has committed, and a later overlay open can
+                                // retry any slot that remains empty.
+                                let _ = self.sync_mangadex_volume_covers_with(
+                                    id,
+                                    Some(&newly_detected),
+                                    &mut download,
+                                );
+                                provider_requests::take_failure();
+                            }
+                        }
+                    }
                     if after > before {
                         status.changed_collections += 1;
                     }
@@ -297,6 +348,24 @@ fn stop_reason(error: &LibraryError) -> Option<ReleaseWatchRunStopReason> {
     })
 }
 
+fn mangadex_seen_slots(
+    library: &Library,
+    collection_id: &str,
+) -> Result<BTreeSet<(i64, u8)>, LibraryError> {
+    let connection = library.connection()?;
+    let mut statement = connection.prepare(
+        "SELECT volume_number, edition_index
+         FROM collection_mangadex_seen_volumes
+         WHERE collection_id = ?1",
+    )?;
+    let slots = statement
+        .query_map([collection_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, u8>(1)?))
+        })?
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    Ok(slots)
+}
+
 // Keep a monotonic set: temporary cover removal/reappearance and changing cover
 // artwork must not generate another new-volume event. Kakao volume rows are not
 // used as the MangaDex baseline, since both providers share a volume shelf.
@@ -305,7 +374,7 @@ pub(super) fn reconcile_mangadex_volumes(
     id: &str,
     manga_id: &str,
     covers: &[MangaDexCoverCandidate],
-) -> Result<(), LibraryError> {
+) -> Result<BTreeSet<(i64, u8)>, LibraryError> {
     let previous = transaction
         .query_row(
             "SELECT manga_id FROM collection_mangadex_baselines WHERE collection_id=?1",
@@ -333,13 +402,17 @@ pub(super) fn reconcile_mangadex_volumes(
                 .and_then(super::collection_volume::parse_volume_slot)
         })
         .collect::<BTreeSet<_>>();
+    let volume_range = load_transaction(transaction, id)?;
+    let mut newly_detected = BTreeSet::new();
     for (volume, edition) in slots {
         let inserted=transaction.execute("INSERT OR IGNORE INTO collection_mangadex_seen_volumes(collection_id,volume_number,edition_index) VALUES(?1,?2,?3)",params![id,volume,edition])?;
-        if initialized && inserted > 0 && volume <= 999 {
+        if initialized && inserted > 0 && volume <= 999 && volume_range.contains(volume) {
             transaction.execute("INSERT INTO release_watch_events(id,collection_id,event_kind,volume_number,detected_at,provider) VALUES(?1,?2,'new_volume',?3,?4,'mangadex')",params![uuid::Uuid::new_v4().to_string(),id,volume,chrono::Utc::now().to_rfc3339()])?;
+            newly_detected.insert((volume, edition));
         }
     }
-    super::collection_volume::materialize_mangadex_volumes(transaction, id, covers, None)
+    super::collection_volume::materialize_mangadex_volumes(transaction, id, covers, None)?;
+    Ok(newly_detected)
 }
 
 #[cfg(test)]

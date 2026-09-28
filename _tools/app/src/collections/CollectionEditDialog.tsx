@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CollectionSummary, CollectionType, CreateCollection, UpdateCollection } from "../library/types";
+import type { CollectionSummary, CollectionType, CollectionVolumeRangeInput, CreateCollection, UpdateCollection } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Select } from "../shared/ui/Select";
@@ -14,11 +14,13 @@ export function CollectionEditDialog({
   mode,
   onClose,
   onSubmit,
+  onSubmitMangaSettings,
 }: {
   open: boolean;
   mode: CollectionEditMode;
   onClose: () => void;
   onSubmit: (input: CreateCollection | UpdateCollection, mediaType?: "movie" | "tv") => Promise<void>;
+  onSubmitMangaSettings?: (input: CollectionVolumeRangeInput) => Promise<void>;
 }) {
   const existing = mode.kind === "edit" ? mode.collection : null;
   const [name, setName] = useState(existing?.name ?? "");
@@ -37,6 +39,9 @@ export function CollectionEditDialog({
   const [director, setDirector] = useState(existing?.director ?? "");
   const [externalScore, setExternalScore] = useState<number | null>(existing?.externalScore ?? null);
   const [myScore, setMyScore] = useState<number | null>(existing?.myScore ?? null);
+  const [minVolume, setMinVolume] = useState<number | null>(existing?.minVolume ?? null);
+  const [maxVolume, setMaxVolume] = useState<number | null>(existing?.maxVolume ?? null);
+  const [hideConnectionPrompt, setHideConnectionPrompt] = useState(existing?.hideConnectionPrompt ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,6 +62,9 @@ export function CollectionEditDialog({
     setDirector(existing?.director ?? "");
     setExternalScore(existing?.externalScore ?? null);
     setMyScore(existing?.myScore ?? null);
+    setMinVolume(existing?.minVolume ?? null);
+    setMaxVolume(existing?.maxVolume ?? null);
+    setHideConnectionPrompt(existing?.hideConnectionPrompt ?? false);
     setSaving(false);
     setError(null);
   }, [existing, mode]);
@@ -69,6 +77,17 @@ export function CollectionEditDialog({
     }
     if (runtimeMinutes !== null && (!Number.isInteger(runtimeMinutes) || runtimeMinutes <= 0)) {
       setError("상영 시간은 1분 이상이어야 합니다.");
+      return;
+    }
+    if (type === "manga" && (
+      (minVolume !== null && (!Number.isInteger(minVolume) || minVolume < 0 || minVolume > 9999))
+      || (maxVolume !== null && (!Number.isInteger(maxVolume) || maxVolume < 0 || maxVolume > 9999))
+    )) {
+      setError("권 범위는 0부터 9999까지 입력할 수 있습니다.");
+      return;
+    }
+    if (type === "manga" && minVolume !== null && maxVolume !== null && minVolume > maxVolume) {
+      setError("처음 권은 마지막 권보다 클 수 없습니다.");
       return;
     }
     const base: UpdateCollection = {
@@ -98,7 +117,12 @@ export function CollectionEditDialog({
         const input = { name: base.name, description: base.description, type: base.type };
         if (type === "movie") await onSubmit(input, series ? "tv" : "movie");
         else await onSubmit(input);
-      } else await onSubmit(base);
+      } else {
+        await onSubmit(base);
+        if (type === "manga" && onSubmitMangaSettings) {
+          await onSubmitMangaSettings({ minVolume, maxVolume, hideConnectionPrompt });
+        }
+      }
       onClose();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "저장하지 못했습니다.");
@@ -129,6 +153,20 @@ export function CollectionEditDialog({
           <>
             <TextField label="작가" value={author} onChange={(event) => setAuthor(event.target.value)} />
             <TextField label="출간 연도" inputMode="numeric" value={year?.toString() ?? ""} onChange={(event) => setYear(event.target.value ? Number(event.target.value) : null)} />
+            <fieldset className="collection-edit-dialog__volume-range">
+              <legend>권 범위</legend>
+              <div className="collection-edit-dialog__volume-range-fields">
+                <TextField label="처음 권" type="number" min="0" max="9999" step="1" placeholder="처음" value={minVolume?.toString() ?? ""}
+                  onChange={(event) => { setMinVolume(event.target.value === "" ? null : Number(event.target.value)); setError(null); }} />
+                <TextField label="마지막 권" type="number" min="0" max="9999" step="1" placeholder="끝" value={maxVolume?.toString() ?? ""}
+                  onChange={(event) => { setMaxVolume(event.target.value === "" ? null : Number(event.target.value)); setError(null); }} />
+              </div>
+              <p className="collection-edit-dialog__volume-range-help">이 범위 밖의 권은 PC와 태블릿에서 모두 숨겨요. 같은 시리즈를 1부·2부로 나눠 둘 때 써요.</p>
+              <label className="collection-edit-dialog__volume-range-check">
+                <input type="checkbox" checked={hideConnectionPrompt} onChange={(event) => setHideConnectionPrompt(event.target.checked)} />
+                카카오 연결 안내 숨기기
+              </label>
+            </fieldset>
           </>
         )}
         {mode.kind === "edit" && type === "game" && (

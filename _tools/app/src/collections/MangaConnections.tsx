@@ -14,6 +14,7 @@ type Props = {
   onRefreshMangaDex: () => void;
   onConnectKakao: () => void;
   onRefreshKakao: () => void;
+  hideConnectionPrompt?: boolean;
 };
 
 const GAINS = { mangadex: "일본판 권 목록 · 표지 · 원제", kakao: "국내 출판 권 목록 · 발매일 · 신간 알림" } as const;
@@ -23,12 +24,34 @@ const GAINS = { mangadex: "일본판 권 목록 · 표지 · 원제", kakao: "�
  * row, "연결 ✓MangaDex · ✓카카오", that opens to per-provider rows (새로고침, 다시 연결). Otherwise
  * it is a 작품 연결 panel with a choice per provider, Kakao (which brings 신간 알림) primary.
  */
-export function MangaConnections({ mangaDex, kakao, mangaDexBusy, kakaoBusy, onConnectMangaDex, onRefreshMangaDex, onConnectKakao, onRefreshKakao }: Props) {
+export function MangaConnections({ mangaDex, kakao, mangaDexBusy, kakaoBusy, onConnectMangaDex, onRefreshMangaDex, onConnectKakao, onRefreshKakao, hideConnectionPrompt = false }: Props) {
   const [open, setOpen] = useState(false);
   if (mangaDex === undefined || kakao === undefined) return null;
   const aladin = kakao?.provider === "aladin";
   const kakaoConnected = Boolean(kakao) && !aladin;
   const synced = (value: string | null | undefined) => value ? `마지막 갱신 ${new Date(value).toLocaleDateString("ko-KR")}` : "아직 갱신 전";
+
+  if (hideConnectionPrompt && !kakaoConnected) return <section className="manga-connections is-folded" aria-label="연결">
+    <button type="button" className="manga-connections__fold" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+      <LinkIcon aria-hidden="true" /><span>연결</span>
+      {mangaDex ? <span className="manga-connections__ok"><CheckIcon aria-label="연결됨" />MangaDex</span> : <span className="manga-connections__state">MangaDex 미연결</span>}
+      <span className="manga-connections__sep" aria-hidden="true" />
+      <span className="manga-connections__state">카카오 미연결</span>
+      <ChevronDownIcon className="manga-connections__chevron" aria-hidden="true" />
+    </button>
+    {open && <div className="manga-connections__rows">
+      <div className="manga-connections__row">
+        <span className="manga-connections__name">MangaDex</span>
+        <span className="manga-connections__state">{mangaDex ? <>연결됨<small>{synced(mangaDex.lastSyncedAt)}</small></> : "미연결"}</span>
+        {mangaDex ? <Button size="sm" variant="ghost" aria-label="MangaDex 새로고침" disabled={mangaDexBusy} onClick={onRefreshMangaDex}>{mangaDexBusy ? "새로고침 중…" : "새로고침"}</Button> : <Button size="sm" variant="ghost" aria-label="MangaDex 연결" disabled={mangaDexBusy} onClick={onConnectMangaDex}>연결</Button>}
+      </div>
+      <div className="manga-connections__row">
+        <span className="manga-connections__name">카카오</span>
+        <span className="manga-connections__state">{aladin ? "알라딘 연결" : "미연결"}</span>
+        <Button size="sm" variant="ghost" aria-label={aladin ? "카카오로 재연결" : "카카오 연결"} disabled={kakaoBusy} onClick={onConnectKakao}>{aladin ? "카카오로 재연결" : "카카오 연결"}</Button>
+      </div>
+    </div>}
+  </section>;
 
   if (mangaDex && kakaoConnected) return <section className="manga-connections is-folded" aria-label="연결">
     <button type="button" className="manga-connections__fold" aria-expanded={open} onClick={() => setOpen(value => !value)}>

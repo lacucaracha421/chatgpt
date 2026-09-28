@@ -67,3 +67,85 @@ pub async fn import_auto_tags(
     })
     .await
 }
+
+#[tauri::command]
+pub async fn get_auto_tag_inbox(
+    state: State<'_, AppState>,
+) -> Result<crate::library::auto_tag_inbox::Settings, CommandError> {
+    run(state, |library| library.auto_tag_inbox()).await
+}
+
+#[tauri::command]
+pub async fn set_auto_tag_inbox(
+    folder: Option<String>,
+    apply_tagger_review: bool,
+    state: State<'_, AppState>,
+) -> Result<crate::library::auto_tag_inbox::Settings, CommandError> {
+    run(state, move |library| {
+        library.set_auto_tag_inbox(folder, apply_tagger_review)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn run_auto_tag_inbox_now(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::library::auto_tag_inbox::RunResult, CommandError> {
+    run(state, move |library| run_inbox_and_report(&app, &library)).await
+}
+
+/// Native timer and manual trigger report through the same status event.
+pub(crate) fn run_inbox_and_report(
+    app: &tauri::AppHandle,
+    library: &Library,
+) -> Result<crate::library::auto_tag_inbox::RunResult, crate::library::error::LibraryError> {
+    use tauri::Emitter;
+    let result = library.run_auto_tag_inbox();
+    let report = match &result {
+        Ok(result) if !result.processed.is_empty() => {
+            let last = result
+                .settings
+                .last
+                .as_ref()
+                .expect("processed inbox has a result");
+            let mut parts = Vec::new();
+            let mut failed = false;
+            for name in &result.processed {
+                let entry = &last[name];
+                let label = if name == crate::library::auto_tag_inbox::FILES[0] {
+                    "자동 태그"
+                } else {
+                    "그림체"
+                };
+                if let Some(error) = &entry.error {
+                    failed = true;
+                    parts.push(format!("{label} 가져오기 실패: {error}"));
+                } else if label == "자동 태그" {
+                    parts.push("자동 태그 가져옴".into());
+                    if let Some(tagger) = &entry.tagger {
+                        parts.push(format!(
+                            "태거 판정 {}건 반영",
+                            tagger.veto + tagger.recommend
+                        ));
+                    }
+                } else {
+                    parts.push(format!(
+                        "그림체 {}장",
+                        entry.imported.get("imported").copied().unwrap_or(0)
+                    ));
+                }
+            }
+            Some((parts.join(" · "), failed))
+        }
+        Err(error) => Some((format!("매일 자동 가져오기 실패: {error}"), true)),
+        _ => None,
+    };
+    if let Some((message, error)) = report {
+        let _ = app.emit(
+            "library://auto-tag-inbox",
+            serde_json::json!({ "message": message, "error": error }),
+        );
+    }
+    result
+}

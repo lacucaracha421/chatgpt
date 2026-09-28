@@ -461,7 +461,7 @@ function ShelfScroller({ children }: { children: ReactNode }) {
     if (!state || !node) return;
     const dx = event.clientX - state.x;
     if (!state.moved && Math.abs(dx) < 4) return;
-    if (!state.moved) { state.moved = true; setDragging(true); node.setPointerCapture(event.pointerId); }
+    if (!state.moved) { state.moved = true; setDragging(true); node.setPointerCapture?.(event.pointerId); }
     const dt = Math.max(1, event.timeStamp - state.lastT);
     state.velocity = 0.8 * ((event.clientX - state.lastX) / dt) + 0.2 * state.velocity;
     state.lastX = event.clientX; state.lastT = event.timeStamp;
@@ -470,7 +470,7 @@ function ShelfScroller({ children }: { children: ReactNode }) {
   const pointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
     const node = track.current;
     const state = drag.current;
-    if (node?.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId);
+    if (node?.hasPointerCapture?.(event.pointerId)) node.releasePointerCapture(event.pointerId);
     if (!state?.moved) { drag.current = null; return; }
     if (node && Math.abs(state.velocity) > 0.2) easeTo(node.scrollLeft - state.velocity * 260);
     window.setTimeout(() => { setDragging(false); drag.current = null; }, 0);

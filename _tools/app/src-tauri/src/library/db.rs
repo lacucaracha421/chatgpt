@@ -4,14 +4,32 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 109;
+pub(crate) const SCHEMA_VERSION: i64 = 113;
 
-/// Test helper: undoes migrations 0103 through 0109 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0113 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP TABLE collection_volume_ranges;
+    DROP VIEW asset_artist_scope;
+    DROP TABLE artist_excluded_classifications;
+    CREATE VIEW asset_artist_scope AS
+    SELECT asset.id AS asset_id,
+     CASE
+      WHEN assignment.artist_id IS NOT NULL THEN 'artist:' || assignment.artist_id
+      WHEN COALESCE(asset.creator_handle, asset.creator_url) IS NULL THEN
+       CASE WHEN asset.source_url IS NULL OR trim(asset.source_url) = '' THEN 'unknown:none' ELSE 'unknown:source' END
+      WHEN member.artist_id IS NOT NULL THEN 'artist:' || member.artist_id
+      ELSE COALESCE(asset.creator_handle, asset.creator_url)
+     END AS scope_ref
+    FROM assets AS asset
+    LEFT JOIN asset_artist_assignments AS assignment ON assignment.asset_id = asset.id
+    LEFT JOIN artist_members AS member ON member.creator_key = COALESCE(asset.creator_handle, asset.creator_url);
+    DROP TABLE artist_style_dismissals;
+    ALTER TABLE artists DROP COLUMN reposter;
     DROP TABLE home_publication_state;
+    DROP TABLE collection_person_profiles;
     DROP TABLE collection_person_portraits;
     ALTER TABLE collection_people DROP COLUMN memo;
     DROP TABLE character_suggestion_ignored_tags;
@@ -640,6 +658,22 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 108 {
             transaction.execute_batch(include_str!("../../migrations/0109_home_publications.sql"))?;
         }
+        if version <= 109 {
+            transaction.execute_batch(include_str!("../../migrations/0110_artist_style.sql"))?;
+        }
+        if version <= 110 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0111_artist_exclusions.sql"
+            ))?;
+        }
+        if version <= 111 {
+            transaction.execute_batch(include_str!("../../migrations/0112_av_performer_profiles.sql"))?;
+        }
+        if version <= 112 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0113_collection_volume_range.sql"
+            ))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -715,6 +749,54 @@ mod release_calendar_migration_tests;
 mod tests {
     use super::*;
 
+    #[test]
+    fn artist_exclusions_v111_upgrade_and_fresh_schema() {
+        for version in [0, 109, 110] {
+            let temp = tempfile::tempdir().unwrap();
+            let mut connection = open_database(&temp.path().join("library.sqlite")).unwrap();
+            if version != 0 {
+                historical_schema(&mut connection, version);
+                connection.execute("INSERT INTO artists(id,created_at,updated_at) VALUES('existing','t','t')", []).unwrap();
+            }
+            migrate_to_latest(&mut connection, version as i64).unwrap();
+            assert_eq!(connection.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),SCHEMA_VERSION);
+            connection.execute("INSERT INTO artists(id,created_at,updated_at,reposter) VALUES('new','t','t',1)", []).unwrap();
+            assert!(connection.execute("UPDATE artists SET reposter=2", []).is_err());
+            if version != 0 {
+                assert_eq!(connection.query_row("SELECT reposter FROM artists WHERE id='existing'", [], |r|r.get::<_,i64>(0)).unwrap(),0);
+            }
+            connection.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at) VALUES('a','a','image','a','a','a',1,1,1,'t')", []).unwrap();
+            connection.execute("INSERT INTO artist_style_dismissals VALUES('a','artist:new','t')", []).unwrap();
+            assert!(connection.execute("INSERT INTO artist_style_dismissals VALUES('a','artist:new','t')", []).is_err());
+            connection.execute("DELETE FROM assets WHERE id='a'", []).unwrap();
+            assert_eq!(connection.query_row("SELECT count(*) FROM artist_style_dismissals", [], |r|r.get::<_,i64>(0)).unwrap(),0);
+
+            connection.execute_batch("\
+                INSERT INTO classification_entries(id,kind,name,parent_id,created_at) VALUES
+                    ('excluded-root','root','기타',NULL,'t'),
+                    ('excluded-child','tag','ai','excluded-root','t'),
+                    ('kept-root','root','보관',NULL,'t');
+                INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,creator_handle) VALUES
+                    ('excluded-direct','excluded-direct','image','excluded-direct','assets/excluded-direct','thumbnails/excluded-direct',1,1,1,'t','excluded'),
+                    ('excluded-child-asset','excluded-child-asset','image','excluded-child-asset','assets/excluded-child-asset','thumbnails/excluded-child-asset',1,1,1,'t','excluded-child'),
+                    ('kept-asset','kept-asset','image','kept-asset','assets/kept-asset','thumbnails/kept-asset',1,1,1,'t','kept');
+                INSERT INTO asset_classifications(asset_id,classification_id) VALUES
+                    ('excluded-direct','excluded-root'),
+                    ('excluded-child-asset','excluded-child'),
+                    ('kept-asset','kept-root');
+                INSERT INTO artist_excluded_classifications(classification_id,added_at) VALUES('excluded-root','t');")
+                .unwrap();
+            let scopes: Vec<(String, String)> = connection
+                .prepare("SELECT asset_id, scope_ref FROM asset_artist_scope ORDER BY asset_id")
+                .unwrap()
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(scopes, vec![("kept-asset".into(), "kept".into())]);
+        }
+    }
+
     // Build the actual historical schema; downgrading user_version on today's
     // schema leaves later tables behind and cannot exercise an upgrade faithfully.
     pub(super) fn historical_schema(connection: &mut Connection, version: usize) {
@@ -743,6 +825,80 @@ mod tests {
         connection
             .pragma_update(None, "foreign_keys", "ON")
             .unwrap();
+    }
+
+    #[test]
+    fn av_profiles_migration_from_111_preserves_portraits_and_people() {
+        let mut c = Connection::open_in_memory().unwrap();
+        historical_schema(&mut c, 111);
+        c.execute_batch("INSERT INTO collection_people(id,display_name,memo,created_at,updated_at) VALUES('p','Person','memo','t','t'),('q','Other',NULL,'t','t');
+            INSERT INTO collections(id,name,type,created_at,updated_at) VALUES('av','Work','av','t','t');
+            INSERT INTO collection_work_artworks(id,collection_id,provider,provider_image_id,kind,relative_path,mime_type,width,height,selected,created_at,updated_at) VALUES('cover','av','local-manual','cover','cover','cover.png','image/png',10,20,1,'t','t');
+            INSERT INTO collection_person_portraits(person_id,kind,image_bytes,mime,width,height,file_name,author,license,source_url,updated_at) VALUES('p','commons',X'1234','image/png',1,2,'old.png','Author','License','https://commons.wikimedia.org/old','t');
+            INSERT INTO collection_person_portraits(person_id,kind,artwork_id,x,y,w,h,updated_at) VALUES('q','crop','cover',0.1,0.2,0.5,0.6,'t');").unwrap();
+        migrate_to_latest(&mut c,111).unwrap();
+        assert_eq!(c.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),SCHEMA_VERSION);
+        assert_eq!(c.query_row("SELECT display_name,memo FROM collection_people WHERE id='p'",[],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).unwrap(),("Person".into(),"memo".into()));
+        assert_eq!(c.query_row("SELECT hex(image_bytes),author,license FROM collection_person_portraits WHERE person_id='p'",[],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))).unwrap(),("1234".into(),"Author".into(),"License".into()));
+        assert_eq!(c.query_row("SELECT artwork_id,x,y,w,h FROM collection_person_portraits WHERE person_id='q'",[],|r|Ok((r.get::<_,String>(0)?,r.get::<_,f64>(1)?,r.get::<_,f64>(2)?,r.get::<_,f64>(3)?,r.get::<_,f64>(4)?))).unwrap(),("cover".into(),0.1,0.2,0.5,0.6));
+        c.execute("UPDATE collection_person_portraits SET kind='stashdb',author=NULL,license=NULL WHERE person_id='p'",[]).unwrap();
+        c.execute("INSERT INTO collection_person_profiles(person_id,source,status,fetched_at) VALUES('p','stashdb','none','t')",[]).unwrap();
+        assert!(c.execute("UPDATE collection_person_profiles SET status='invalid'",[]).is_err());
+        assert!(c.execute("UPDATE collection_person_profiles SET images_json='{}'",[]).is_err());
+        assert!(c.execute("UPDATE collection_person_profiles SET candidates_json='[1,2,3,4,5,6]'",[]).is_err());
+        c.execute("DELETE FROM collection_people WHERE id='p'",[]).unwrap();
+        assert_eq!(c.query_row("SELECT count(*) FROM collection_person_profiles",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+        assert_eq!(c.query_row("SELECT count(*) FROM collection_person_portraits",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+        assert_eq!(c.query_row("PRAGMA quick_check",[],|r|r.get::<_,String>(0)).unwrap(),"ok");
+    }
+
+    #[test]
+    fn collection_volume_range_migration_from_112_creates_the_pc_local_table() {
+        let mut c = Connection::open_in_memory().unwrap();
+        historical_schema(&mut c, 112);
+        migrate_to_latest(&mut c, 112).unwrap();
+        assert_eq!(
+            c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        c.execute(
+            "INSERT INTO collections(id,name,type,created_at,updated_at)
+             VALUES('m','Manga','manga','t','t'),('bad','Manga 2','manga','t','t')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO collection_volume_ranges(
+                collection_id,min_volume,max_volume,hide_connection_prompt,updated_at
+             ) VALUES('m',1,11,1,'t')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            c.query_row(
+                "SELECT min_volume,max_volume,hide_connection_prompt
+                 FROM collection_volume_ranges WHERE collection_id='m'",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<i64>>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .unwrap(),
+            (Some(1), Some(11), 1)
+        );
+        assert!(c
+            .execute(
+                "INSERT INTO collection_volume_ranges(
+                collection_id,min_volume,max_volume,hide_connection_prompt,updated_at
+             ) VALUES('bad',12,11,0,'t')",
+                [],
+            )
+            .is_err());
     }
 
     #[test]

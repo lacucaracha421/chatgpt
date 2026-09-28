@@ -573,9 +573,28 @@ fn av_cloud_snapshot_excludes_portraits_and_retains_shared_people() {
     lib.preview_av_commons_portrait_with("p", &state, &http)
         .unwrap();
     lib.use_av_commons_portrait("p", &state).unwrap();
+    lib.connection().unwrap().execute("INSERT INTO collection_person_profiles(person_id,source,status,name,fetched_at) VALUES('p','stashdb','none','Private StashDB profile marker','t')", []).unwrap();
     let snapshot = dir.path().join("cloud-snapshot.sqlite");
     lib.create_cloud_metadata_snapshot(&snapshot).unwrap();
     let c = Connection::open(&snapshot).unwrap();
+    assert_eq!(
+        c.query_row("SELECT count(*) FROM collection_person_profiles", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        lib.connection()
+            .unwrap()
+            .query_row("SELECT count(*) FROM collection_person_profiles", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert!(!std::fs::read(&snapshot)
+        .unwrap()
+        .windows(b"Private StashDB profile marker".len())
+        .any(|w| w == b"Private StashDB profile marker"));
     assert_eq!(
         c.query_row(
             "SELECT COUNT(*) FROM collection_person_portraits",

@@ -409,6 +409,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::IgdbInvalidImageId => "igdb_invalid_image_id",
             LibraryError::InvalidIgdbIdentity => "invalid_igdb_identity",
             LibraryError::TmdbCredentialNotConfigured => "tmdb_credential_not_configured",
+            LibraryError::InvalidStashdbCredentialValue => "invalid_stashdb_credential_value",
             LibraryError::InvalidTmdbCredentialValue => "invalid_tmdb_credential_value",
             LibraryError::TmdbUnauthorized => "tmdb_unauthorized",
             LibraryError::TmdbRateLimited => "tmdb_rate_limited",
@@ -1256,6 +1257,19 @@ pub async fn replace_igdb_game_artwork(
 }
 
 #[tauri::command]
+pub async fn get_stashdb_credential_status() -> Result<credential::StashdbCredentialStatus, CommandError> {
+    off_ui_thread(|| credential::stashdb_credential_status().map_err(CommandError::from)).await
+}
+#[tauri::command]
+pub async fn set_stashdb_credentials(api_key: String) -> Result<credential::StashdbCredentialStatus, CommandError> {
+    off_ui_thread(move || credential::set_stashdb_credentials_os(&api_key).map_err(CommandError::from)).await
+}
+#[tauri::command]
+pub async fn delete_stashdb_credentials() -> Result<credential::StashdbCredentialStatus, CommandError> {
+    off_ui_thread(|| credential::delete_stashdb_credentials_os().map_err(CommandError::from)).await
+}
+
+#[tauri::command]
 pub async fn get_tmdb_credential_status() -> Result<TmdbCredentialStatus, CommandError> {
     off_ui_thread(|| credential::tmdb_credential_status().map_err(CommandError::from)).await
 }
@@ -1781,6 +1795,24 @@ pub fn set_collection_showcase(
 ) -> Result<CollectionSummary, CommandError> {
     current_required(state)?
         .set_collection_showcase(&collection_id, showcase)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn set_collection_volume_range(
+    collection_id: String,
+    min_volume: Option<i64>,
+    max_volume: Option<i64>,
+    hide_connection_prompt: bool,
+    state: State<'_, AppState>,
+) -> Result<CollectionSummary, CommandError> {
+    current_required(state)?
+        .set_collection_volume_range(
+            &collection_id,
+            min_volume,
+            max_volume,
+            hide_connection_prompt,
+        )
         .map_err(CommandError::from)
 }
 

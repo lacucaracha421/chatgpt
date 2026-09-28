@@ -847,6 +847,41 @@ it("stores and removes a TMDB token without reading it back", async () => {
   expect(within(statusRow!).getByLabelText("TMDB API Read Access Token")).toHaveAttribute("placeholder", "설정되지 않음");
 });
 
+it("stores and removes a StashDB key without reading it back", async () => {
+  const user = userEvent.setup();
+  const gateway = createGateway();
+  vi.mocked(gateway.getStashdbCredentialStatus).mockResolvedValue({ configured: false });
+  vi.mocked(gateway.setStashdbCredentials).mockResolvedValue({ configured: true });
+  vi.mocked(gateway.deleteStashdbCredentials).mockResolvedValue({ configured: false });
+  render(
+    <LibraryProvider gateway={gateway}>
+      <SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} initialSection="external_services" />
+    </LibraryProvider>,
+  );
+
+  const statusRow = (await screen.findByText("StashDB")).parentElement;
+  expect(statusRow).not.toBeNull();
+  const token = screen.getByLabelText("StashDB API 키");
+  expect(within(statusRow!).getByLabelText("StashDB API 키")).toHaveAttribute("placeholder", "설정되지 않음");
+  expect(token).toHaveAttribute("type", "password");
+  expect(token).toHaveValue("");
+  await user.type(token, "  stashdb-secret  ");
+  await user.click(screen.getByRole("button", { name: "StashDB 저장" }));
+
+  expect(gateway.setStashdbCredentials).toHaveBeenCalledWith("stashdb-secret");
+  expect(token).toHaveValue("");
+  expect(within(statusRow!).getByLabelText("StashDB API 키")).toHaveAttribute("placeholder", "설정됨");
+  expect(screen.queryByDisplayValue("stashdb-secret")).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "StashDB 키 삭제" }));
+  expect(gateway.deleteStashdbCredentials).not.toHaveBeenCalled();
+  expect(screen.getByText("저장된 StashDB API 키를 삭제할까요?")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "StashDB 삭제 확인" }));
+
+  expect(gateway.deleteStashdbCredentials).toHaveBeenCalledOnce();
+  expect(within(statusRow!).getByLabelText("StashDB API 키")).toHaveAttribute("placeholder", "설정되지 않음");
+});
+
 it("changes online catalog automatic update settings", async () => {
   const user = userEvent.setup();
   const gateway = createGateway();
@@ -1192,6 +1227,9 @@ function createGateway(): LibraryGateway {
     refreshIgdbGame: vi.fn(),
     getIgdbConnection: vi.fn(),
     replaceIgdbGameArtwork: vi.fn(),
+    getStashdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
+    setStashdbCredentials: vi.fn(),
+    deleteStashdbCredentials: vi.fn(),
     getTmdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
     setTmdbToken: vi.fn(),
     deleteTmdbToken: vi.fn(),

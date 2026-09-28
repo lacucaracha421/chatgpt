@@ -478,6 +478,7 @@ fn start_timers(app: tauri::AppHandle) {
         let authority = std::sync::Arc::new(Mutex::new(AuthoritySchedule::new(Instant::now())));
         // The `/v1/sync/status` long-poll watcher for the open library's endpoint.
         let mut watcher = crate::cloud::status_watch::Supervisor::default();
+        let mut inbox = crate::library::auto_tag_inbox::Schedule::default();
         let mut was_focused = false;
         let mut authority_root: Option<PathBuf> = None;
         loop {
@@ -535,6 +536,14 @@ fn start_timers(app: tauri::AppHandle) {
             }
             let current = app.state::<crate::commands::AppState>().current_library();
             watcher.tick(current.as_ref(), Instant::now());
+            if inbox.tick(current.as_ref(), profile.restricted, Instant::now()) {
+                if let Some(library) = current.clone() {
+                    let handle = app.clone();
+                    std::thread::spawn(move || {
+                        let _ = crate::commands::auto_tags::run_inbox_and_report(&handle, &library);
+                    });
+                }
+            }
             let Some(library) = current else {
                 continue;
             };

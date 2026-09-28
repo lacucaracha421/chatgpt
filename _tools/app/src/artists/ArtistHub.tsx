@@ -2,7 +2,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { commandErrorMessage } from "../library/errorMessage";
+import { useOptionalLibrary } from "../library/LibraryContext";
 import type { ArtistHubSection, AssetView } from "../library/types";
+import type { ClassificationEntry } from "../library/types";
 import { displayDate } from "../shared/displayDate";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu } from "../shared/ui/ContextMenu";
@@ -16,7 +18,7 @@ import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { ArtistCollage } from "./ArtistCollage";
 import { ArrowPathIcon, CheckIcon, ChevronRightIcon, Cog6ToothIcon, MagnifyingGlassIcon, MergeIcon, PinIcon, XMarkIcon } from "./artistIcons";
 import { invalidateArtists, localDateAndOffset, useArtistGateway, useArtistOverview, useArtistRead } from "./artistStore";
-import { UNKNOWN_SOURCE, type ArtistBucket, type ArtistMergeSuggestion, type ArtistSettings, type ArtistSort, type ArtistSummary } from "./types";
+import { UNKNOWN_SOURCE, type ArtistBucket, type ArtistExcludedFolder, type ArtistMergeSuggestion, type ArtistSettings, type ArtistSort, type ArtistSummary } from "./types";
 import "./artists.css";
 
 type Navigate = (view: AssetView) => void;
@@ -64,7 +66,7 @@ export function ArtistHub({ view, onNavigate, privacyMode }: { view: Extract<Ass
   const overview = useArtistOverview();
   const [ruleOpen, setRuleOpen] = useState(false);
   const titles: Record<ArtistHubSection, string> = {
-    main: "주요 작가", others: "그 외 작가", singles: "한 장뿐인 작가들", hidden: "숨긴 작가", merge: "같은 작가일 수 있어요", "source-fill": "출처에서 작가 채우기",
+    main: "주요 작가", others: "그 외 작가", singles: "한 장뿐인 작가들", hidden: "숨긴 작가", merge: "같은 작가일 수 있어요", "source-fill": "출처에서 작가 채우기", reposter: "퍼온 계정",
   };
   const rule = overview?.settings;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -81,7 +83,7 @@ export function ArtistHub({ view, onNavigate, privacyMode }: { view: Extract<Ass
     }} />
     <div className="artist-hub__scroll" ref={scrollRef} onScroll={(event) => { hubScroll.set(section, event.currentTarget.scrollTop); }}>
       {section === "main" && <MainSection onNavigate={onNavigate} privacyMode={privacyMode} />}
-      {(section === "others" || section === "hidden") && <OthersList key={section} initialBucket={section === "hidden" ? "hidden" : "other"} onNavigate={onNavigate} privacyMode={privacyMode} />}
+      {(section === "others" || section === "hidden" || section === "reposter") && <OthersList key={section} initialBucket={section === "hidden" ? "hidden" : section === "reposter" ? "reposter" : "other"} onNavigate={onNavigate} privacyMode={privacyMode} />}
       {section === "singles" && <SinglesMosaic onNavigate={onNavigate} privacyMode={privacyMode} />}
       {section === "merge" && <MergeReview privacyMode={privacyMode} onNavigate={onNavigate} />}
       {section === "source-fill" && <SourceFill onNavigate={onNavigate} privacyMode={privacyMode} />}
@@ -92,6 +94,93 @@ export function ArtistHub({ view, onNavigate, privacyMode }: { view: Extract<Ass
 
 export function ruleText(rule: ArtistSettings) {
   return `${rule.mainMinCount}장 이상 · ${rule.recentDays}일 안에 ${rule.recentMinCount}장 이상`;
+}
+
+function folderBreadcrumb(entries: ClassificationEntry[], entry: ClassificationEntry) {
+  const byId = new Map(entries.map((candidate) => [candidate.id, candidate]));
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let current: ClassificationEntry | undefined = entry;
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    names.push(current.name);
+    current = current.parentId ? byId.get(current.parentId) : undefined;
+  }
+  return names.reverse().join(" › ");
+}
+
+function ArtistExclusionSettings() {
+  const library = useOptionalLibrary();
+  const gateway = useArtistGateway();
+  const excluded = useArtistRead((artists) => artists.listExcludedFolders(), "excluded-folders").data;
+  const [folders, setFolders] = useState<ClassificationEntry[] | null>(null);
+  const [search, setSearch] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!library) return;
+    let active = true;
+    void library.gateway.listClassifications().then(
+      (entries) => { if (active) setFolders(entries); },
+      (cause) => { if (active) { setFolders([]); setError(commandErrorMessage(cause, "폴더를 불러오지 못했습니다.")); } },
+    );
+    return () => { active = false; };
+  }, [library?.gateway]);
+
+  const selected = new Set(excluded?.map((folder) => folder.id));
+  const options = useMemo(() => {
+    const needle = search.trim().toLocaleLowerCase();
+    return (folders ?? [])
+      .filter((entry) => !selected.has(entry.id))
+      .map((entry) => ({ entry, breadcrumb: folderBreadcrumb(folders ?? [], entry) }))
+      .filter(({ breadcrumb }) => !needle || breadcrumb.toLocaleLowerCase().includes(needle))
+      .slice(0, 100);
+  }, [folders, search, excluded]);
+
+  const update = async (ids: string[]) => {
+    if (!gateway) return;
+    setPending(true);
+    setError(null);
+    try {
+      await gateway.setExcludedFolders(ids);
+      invalidateArtists();
+    } catch (cause) {
+      setError(commandErrorMessage(cause, "작가 제외 폴더를 저장하지 못했습니다."));
+    } finally {
+      setPending(false);
+    }
+  };
+  const add = (id: string) => {
+    if (!excluded) return;
+    setSearch("");
+    void update([...excluded.map((folder) => folder.id), id]);
+  };
+  const remove = (id: string) => {
+    if (!excluded) return;
+    void update(excluded.filter((folder) => folder.id !== id).map((folder) => folder.id));
+  };
+
+  return <section className="artist-exclusion" aria-labelledby="artist-exclusion-title">
+    <div className="artist-exclusion__head">
+      <h3 id="artist-exclusion-title">작가에서 제외할 폴더</h3>
+      <Button size="sm" variant="ghost" disabled={pending} onClick={() => setAddOpen((open) => !open)}>{addOpen ? "닫기" : "폴더 추가"}</Button>
+    </div>
+    <p className="artist-muted">이 폴더의 이미지는 작가 목록·작가 미상·추천에서 빠집니다. 이미지와 폴더는 그대로입니다.</p>
+    {excluded === null ? <p className="artist-muted">선택한 폴더를 불러오는 중…</p> : excluded.length === 0 ? <p className="artist-muted">선택한 폴더가 없습니다.</p> : <ul className="artist-exclusion__list">
+      {excluded.map((folder: ArtistExcludedFolder) => <li key={folder.id} className="artist-exclusion__row">
+        <span className="artist-exclusion__copy"><span>{folder.breadcrumb}</span><small>{formatCount(folder.imageCount)}장</small></span>
+        <Button size="icon" variant="ghost" aria-label={`${folder.breadcrumb} 제외 해제`} disabled={pending} onClick={() => void remove(folder.id)}><XMarkIcon aria-hidden="true" /></Button>
+      </li>)}
+    </ul>}
+    {addOpen && <div className="artist-exclusion__picker">
+      <label className="artist-search artist-exclusion__search"><MagnifyingGlassIcon aria-hidden="true" /><span className="artist-sr-only">제외 폴더 검색</span><input type="search" value={search} placeholder="폴더 경로 검색" onChange={(event) => setSearch(event.target.value)} /></label>
+      {folders === null ? <p className="artist-muted">폴더를 불러오는 중…</p> : options.length === 0 ? <p className="artist-muted">추가할 폴더가 없습니다.</p> : <ul className="artist-exclusion__options" role="listbox" aria-label="제외할 폴더 선택">
+        {options.map(({ entry, breadcrumb }) => <li key={entry.id}><button type="button" role="option" className="artist-exclusion__option" disabled={pending} onClick={() => add(entry.id)}><span>{breadcrumb}</span><small>{formatCount(entry.totalAssetCount ?? entry.assetCount ?? 0)}장</small></button></li>)}
+      </ul>}
+    </div>}
+    {error && <p role="alert" className="artist-error">{error}</p>}
+  </section>;
 }
 
 function TierRuleDialog({ settings, mainCount, onClose }: { settings: ArtistSettings; mainCount: number; onClose: () => void }) {
@@ -111,6 +200,7 @@ function TierRuleDialog({ settings, mainCount, onClose }: { settings: ArtistSett
       <p className="artist-muted">지금 기준으로 {formatCount(mainCount)}명. 고정한 작가는 기준과 상관없이 맨 위에 둡니다.</p>
       {error && <p role="alert">{error}</p>}
     </div>
+    <ArtistExclusionSettings />
     <div className="ui-dialog__actions">
       <Button variant="ghost" onClick={onClose}>취소</Button>
       <Button variant="primary" onClick={() => void save()}>저장</Button>

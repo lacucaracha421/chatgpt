@@ -74,6 +74,35 @@ it("submits only fields owned by ordinary collection editing", async () => {
   });
 });
 
+it("saves the manga volume range and connection prompt setting", async () => {
+  const user = userEvent.setup();
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  const onSubmitMangaSettings = vi.fn().mockResolvedValue(undefined);
+  render(<CollectionEditDialog open mode={{ kind: "edit", collection: collectionFixture }} onClose={vi.fn()} onSubmit={onSubmit} onSubmitMangaSettings={onSubmitMangaSettings} />);
+
+  await user.type(screen.getByRole("spinbutton", { name: "처음 권" }), "1");
+  await user.type(screen.getByRole("spinbutton", { name: "마지막 권" }), "11");
+  await user.click(screen.getByRole("checkbox", { name: "카카오 연결 안내 숨기기" }));
+  await user.click(screen.getByRole("button", { name: "저장" }));
+
+  expect(onSubmitMangaSettings).toHaveBeenCalledWith({ minVolume: 1, maxVolume: 11, hideConnectionPrompt: true });
+});
+
+it("rejects a reversed manga volume range before saving", async () => {
+  const user = userEvent.setup();
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  const onSubmitMangaSettings = vi.fn().mockResolvedValue(undefined);
+  render(<CollectionEditDialog open mode={{ kind: "edit", collection: collectionFixture }} onClose={vi.fn()} onSubmit={onSubmit} onSubmitMangaSettings={onSubmitMangaSettings} />);
+
+  await user.type(screen.getByRole("spinbutton", { name: "처음 권" }), "12");
+  await user.type(screen.getByRole("spinbutton", { name: "마지막 권" }), "11");
+  await user.click(screen.getByRole("button", { name: "저장" }));
+
+  expect(screen.getByRole("alert")).toHaveTextContent("처음 권은 마지막 권보다 클 수 없습니다.");
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(onSubmitMangaSettings).not.toHaveBeenCalled();
+});
+
 it("submits game developer and a half-star personal rating", async () => {
   const user = userEvent.setup();
   const onSubmit = vi.fn().mockResolvedValue(undefined);

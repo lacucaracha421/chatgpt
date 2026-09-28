@@ -16,6 +16,8 @@
 .workspace-index-link[aria-current=page] .artist-index__icon { color: inherit; }
 .artist-index__thumb { width: 22px; height: 22px; flex: none; overflow: hidden; border-radius: var(--radius-tile); background: var(--color-surface-raised); }
 .artist-index__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.artist-index__suggestion-badge { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; padding: 1px 5px; color: var(--color-text); background: var(--color-surface-raised); border: 1px solid var(--color-border-strong); border-radius: var(--radius-tile); font-family: var(--font-numeric); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.artist-index__suggestion-badge svg { width: 12px; height: 12px; }
 
 /* Hub frame */
 .artist-hub { display: flex; flex-direction: column; height: 100%; min-height: 0; }
@@ -29,6 +31,22 @@
 .artist-rule-form { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-2) 0; }
 .artist-rule-form label { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-md); }
 .artist-rule-form input { width: 64px; height: var(--control-height-sm); padding: 0 var(--space-2); color: var(--color-text); background: var(--color-bg); border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); font: inherit; font-variant-numeric: tabular-nums; }
+.artist-exclusion { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) 0 0; border-top: 1px solid var(--color-border); }
+.artist-exclusion__head { display: flex; align-items: center; gap: var(--space-2); }
+.artist-exclusion__head h3 { flex: 1; margin: 0; font-size: var(--text-md); font-weight: 600; }
+.artist-exclusion > p { margin: 0; line-height: 1.5; }
+.artist-exclusion__list, .artist-exclusion__options { list-style: none; margin: 0; padding: 0; }
+.artist-exclusion__row { display: flex; align-items: center; gap: var(--space-2); min-height: 40px; border-bottom: 1px solid var(--color-border); }
+.artist-exclusion__copy { display: flex; flex-direction: column; min-width: 0; flex: 1; font-size: var(--text-sm); }
+.artist-exclusion__copy span, .artist-exclusion__option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artist-exclusion__copy small, .artist-exclusion__option small { color: var(--color-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.artist-exclusion__row .ui-button--icon { width: 28px; min-height: 28px; }
+.artist-exclusion__row .ui-button--icon svg { width: 16px; height: 16px; }
+.artist-exclusion__picker { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-1); }
+.artist-exclusion__search { max-width: none; }
+.artist-exclusion__options { max-height: 220px; overflow: auto; border: 1px solid var(--color-border); }
+.artist-exclusion__option { display: flex; flex-direction: column; align-items: flex-start; width: 100%; min-height: 42px; padding: var(--space-1) var(--space-2); border: 0; border-bottom: 1px solid var(--color-border); background: transparent; color: var(--color-text); text-align: left; font: inherit; }
+.artist-exclusion__option:hover, .artist-exclusion__option:focus-visible { background: var(--color-surface-hover); }
 .artist-section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin: var(--space-4) 0 var(--space-2); }
 .artist-section-head:first-child { margin-top: 0; }
 .artist-section-head .workspace-section-label { flex: 1; }
@@ -191,6 +209,7 @@ button.artist-strip__item:focus-visible { outline: 2px solid var(--color-focus);
 .artist-intro { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3) 0 var(--space-4); }
 .artist-intro--unknown { gap: var(--space-2); }
 .artist-intro--unknown .artist-muted { margin: 0; }
+.artist-badge--reposter { color: var(--color-text); border-color: var(--color-section-mark); }
 .artist-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 880px; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
 .artist-stat { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-3); min-width: 0; }
 .artist-stat + .artist-stat { border-left: 1px solid var(--color-border); }
@@ -202,6 +221,36 @@ button.artist-strip__item:focus-visible { outline: 2px solid var(--color-focus);
 .artist-rediscovery { display: flex; flex-direction: column; gap: var(--space-2); }
 .artist-rediscovery__row p { margin: 0 0 var(--space-1); font-size: var(--text-sm); }
 .artist-rediscovery__row .artist-strip { height: 96px; }
+
+/* 닮은 작가 추천 */
+.artist-style-suggestions { border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+.artist-style-suggestions__summary { display: flex; align-items: center; gap: var(--space-3); min-height: 36px; cursor: pointer; }
+.artist-style-suggestions__summary .workspace-section-label { display: inline-flex; align-items: center; gap: var(--space-1); flex: 1; }
+.artist-style-suggestions__summary .workspace-section-label svg { width: 16px; height: 16px; }
+.artist-style-suggestions__count { color: var(--color-muted); font-family: var(--font-numeric); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.artist-style-suggestions__body { display: flex; flex-direction: column; }
+.artist-style-suggestions__status { margin: 0; padding: var(--space-2) 0; }
+.artist-style-row { display: grid; grid-template-columns: minmax(180px, 230px) minmax(0, 1fr); grid-template-areas: "artist candidates" "artist actions"; gap: var(--space-3) var(--space-4); padding: var(--space-3) 0; border-top: 1px solid var(--color-border); }
+.artist-style-row__artist { grid-area: artist; display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.artist-style-row__artist-button { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 0; border: 0; background: transparent; color: var(--color-text); text-align: left; font: inherit; }
+.artist-style-row__artist-button:hover { color: var(--color-accent); }
+.artist-style-row__artist-copy { display: flex; flex-direction: column; min-width: 0; }
+.artist-style-row__artist-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-md); }
+.artist-style-row__artist-copy small { color: var(--color-muted); font-size: var(--text-xs); }
+.artist-style-row__artist .artist-strip { height: 44px; }
+.artist-thumb--medium { width: 48px; height: 48px; }
+.artist-style-row__candidates { grid-area: candidates; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; min-width: 0; }
+.artist-style-candidate { position: relative; width: 78px; height: 112px; flex: none; }
+.artist-style-candidate > input { position: absolute; z-index: 1; top: 5px; left: 5px; width: 16px; height: 16px; margin: 0; accent-color: var(--color-accent); }
+.artist-style-candidate__open { display: block; width: 100%; height: 100%; padding: 0; border: 1px solid var(--color-border-strong); border-radius: var(--radius-tile); overflow: hidden; background: var(--color-surface-raised); cursor: zoom-in; }
+.artist-style-candidate__open:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.artist-style-candidate__media { display: block; width: 100%; height: 100%; }
+.artist-style-candidate__media img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.artist-style-candidate__score { position: absolute; bottom: 4px; left: 4px; padding: 1px 4px; color: var(--color-on-accent); background: var(--color-accent); font-family: var(--font-numeric); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.artist-style-row__actions { grid-area: actions; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.artist-style-row__actions .ui-button svg { width: 15px; height: 15px; }
+.artist-style-row__actions + .artist-error { grid-column: 2; margin: 0; }
+.artist-style-suggestions__more { display: flex; justify-content: center; padding: var(--space-2) 0; border-top: 1px solid var(--color-border); }
 
 /* 작가 편집: floats over the gallery's right edge so opening it never reflows images. */
 .artist-edit { position: absolute; z-index: 35; top: 0; right: 0; bottom: 0; width: min(380px, 100%); display: flex; flex-direction: column; background: var(--color-surface-elevated); border-left: 1px solid var(--color-border-strong); box-shadow: var(--shadow-floating); }
@@ -217,6 +266,8 @@ button.artist-strip__item:focus-visible { outline: 2px solid var(--color-focus);
 .artist-edit__copy { display: flex; flex-direction: column; flex: 1; min-width: 0; font-size: var(--text-sm); }
 .artist-edit__copy small { color: var(--color-muted); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artist-edit__flags { display: flex; gap: var(--space-4); margin-top: var(--space-2); }
+.artist-edit__reposter { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-2); padding: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+.artist-edit__reposter p { margin: 0; line-height: 1.5; }
 .artist-edit__foot { display: flex; justify-content: flex-end; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--color-border); }
 
 /* 작가 지정 */
@@ -244,6 +295,8 @@ button.artist-strip__item:focus-visible { outline: 2px solid var(--color-focus);
   .artist-merge-grid { grid-template-columns: minmax(0, 1fr); }
   .artist-fill--open { grid-template-columns: minmax(0, 1fr); }
   .artist-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .artist-style-row { grid-template-columns: minmax(0, 1fr); grid-template-areas: "artist" "candidates" "actions"; }
+  .artist-style-row__actions + .artist-error { grid-column: auto; }
 }
 
 @container artist-hub (max-width: 680px) {

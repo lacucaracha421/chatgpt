@@ -1,4 +1,5 @@
-//! Explicit dual-tagger preview/apply. No startup hook and no inference jobs.
+//! Dual-tagger preview/apply, also used after an enabled machine-local inbox import.
+//! No inference jobs run here.
 //! Vetoes append an automatic `cleared` decision; the existing B36 and S36
 //! decision guards treat that as a durable stop, even after a later import.
 //! Recommendations block automatic publication while awaiting a manual judgment.
@@ -512,6 +513,14 @@ impl Library {
 
     pub fn apply_tagger_review(&self, expected_preview_token: &str) -> Result<Preview> {
         let mut c = self.connection()?;
+        self.apply_tagger_review_on(&mut c, expected_preview_token)
+    }
+
+    pub(super) fn apply_tagger_review_on(
+        &self,
+        c: &mut Connection,
+        expected_preview_token: &str,
+    ) -> Result<Preview> {
         let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let (preview, veto, recommend) = preview_in(&tx)?;
         if preview.preview_token != expected_preview_token {
@@ -578,3 +587,7 @@ pub(super) mod tests;
 #[cfg(test)]
 #[path = "tagger_import_tests.rs"]
 mod import_tests;
+
+pub(super) fn preview_on(connection: &Connection) -> Result<Preview> {
+    Ok(preview_in(connection)?.0)
+}

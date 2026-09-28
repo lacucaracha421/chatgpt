@@ -200,3 +200,158 @@ pub async fn clear_av_portrait(
     .map_err(|_| super::background_task_error())?
     .map_err(Into::into)
 }
+
+#[tauri::command]
+pub async fn get_av_performer_profile(
+    person_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::library::av_stashdb::AvPerformerProfile>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.get_av_performer_profile(&person_id))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn refresh_av_performer_profile(
+    person_id: String,
+    force: bool,
+    state: State<'_, AppState>,
+    profiles: State<'_, crate::library::av_stashdb::AvProfileState>,
+) -> Result<Option<crate::library::av_stashdb::AvPerformerProfile>, CommandError> {
+    let library = current_required(state)?;
+    let profiles = profiles.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = crate::library::credential::read_stashdb_key_os()?;
+        let http = crate::library::av_link::provider::NetworkClient::new();
+        library.refresh_av_performer_profile_with(
+            &person_id,
+            force,
+            &profiles,
+            &http,
+            key.as_ref().map(|k| k.api_key.as_str()),
+        )
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn choose_av_performer_profile(
+    person_id: String,
+    stashdb_id: String,
+    state: State<'_, AppState>,
+    profiles: State<'_, crate::library::av_stashdb::AvProfileState>,
+) -> Result<crate::library::av_stashdb::AvPerformerProfile, CommandError> {
+    let library = current_required(state)?;
+    let profiles = profiles.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = crate::library::credential::read_stashdb_key_os()?;
+        let http = crate::library::av_link::provider::NetworkClient::new();
+        library.choose_av_performer_profile_with(
+            &person_id,
+            &stashdb_id,
+            &profiles,
+            &http,
+            key.as_ref().map(|k| k.api_key.as_str()),
+        )
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn search_av_performer_profile(
+    person_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::av_stashdb::AvPerformerProfile, CommandError> {
+    let library = current_required(state)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = crate::library::credential::read_stashdb_key_os()?;
+        let http = crate::library::av_link::provider::NetworkClient::new();
+        library.search_av_performer_profile_with(
+            &person_id,
+            &http,
+            key.as_ref().map(|k| k.api_key.as_str()),
+        )
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn dismiss_av_performer_profile(
+    person_id: String,
+    state: State<'_, AppState>,
+    profiles: State<'_, crate::library::av_stashdb::AvProfileState>,
+) -> Result<crate::library::av_stashdb::AvPerformerProfile, CommandError> {
+    let library = current_required(state)?;
+    let profiles = profiles.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        library.dismiss_av_performer_profile(&person_id, &profiles)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn clear_av_performer_profile(
+    person_id: String,
+    state: State<'_, AppState>,
+    profiles: State<'_, crate::library::av_stashdb::AvProfileState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    let profiles = profiles.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        library.clear_av_performer_profile(&person_id, &profiles)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn preview_av_stashdb_portrait(
+    person_id: String,
+    image_id: String,
+    state: State<'_, AppState>,
+    portraits: State<'_, AvPortraitState>,
+) -> Result<AvStashdbPreview, CommandError> {
+    let library = current_required(state)?;
+    let portraits = portraits.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if crate::library::credential::read_stashdb_key_os()?.is_none() {
+            return Err(AvError::Invalid);
+        }
+        library.preview_av_stashdb_portrait_with(
+            &person_id,
+            &image_id,
+            &portraits,
+            &crate::library::av_link::provider::NetworkClient::new(),
+        )
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn use_av_stashdb_portrait(
+    person_id: String,
+    state: State<'_, AppState>,
+    portraits: State<'_, AvPortraitState>,
+) -> Result<AvPortrait, CommandError> {
+    let library = current_required(state)?;
+    let portraits = portraits.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        library.use_av_stashdb_portrait(&person_id, &portraits)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}

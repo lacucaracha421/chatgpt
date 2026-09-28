@@ -47,10 +47,24 @@ impl Library {
     pub fn list_volume_ownership(&self, collection_id: &str) -> Result<Vec<VolumeOwnership>, LibraryError> {
         let connection = self.connection()?;
         super::collection::require_collection(&connection, collection_id)?;
-        let mut statement = connection.prepare("SELECT volume_number, edition_index, physical, digital FROM collection_volume_ownership WHERE collection_id=?1 ORDER BY edition_index,volume_number")?;
-        let result = statement.query_map([collection_id], |row| Ok(VolumeOwnership {
-            volume_number: row.get(0)?, edition_index: row.get(1)?, physical: row.get(2)?, digital: row.get(3)?,
-        }))?.collect::<Result<Vec<_>, _>>()?;
+        let volume_range = super::collection_volume_range::load(&connection, collection_id)?;
+        let mut statement = connection.prepare(
+            "SELECT volume_number, edition_index, physical, digital
+             FROM collection_volume_ownership
+             WHERE collection_id=?1
+               AND (?2 IS NULL OR volume_number >= ?2)
+               AND (?3 IS NULL OR volume_number <= ?3)
+             ORDER BY edition_index,volume_number",
+        )?;
+        let result = statement.query_map(
+            rusqlite::params![collection_id, volume_range.min_volume, volume_range.max_volume],
+            |row| Ok(VolumeOwnership {
+                volume_number: row.get(0)?,
+                edition_index: row.get(1)?,
+                physical: row.get(2)?,
+                digital: row.get(3)?,
+            }),
+        )?.collect::<Result<Vec<_>, _>>()?;
         Ok(result)
     }
 

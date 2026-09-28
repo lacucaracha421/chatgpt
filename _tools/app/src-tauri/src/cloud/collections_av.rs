@@ -1,4 +1,4 @@
-//! AV's mobile projection contains text and cover crops only, never Commons portraits.
+//! AV's mobile projection contains text and cover crops only, never downloaded portraits or StashDB profiles.
 use super::ReplicaCollection;
 use crate::library::{error::LibraryError, models::CollectionType};
 use rusqlite::{Connection, OptionalExtension};

@@ -118,6 +118,11 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [tmdbBusy, setTmdbBusy] = useState(false);
   const [tmdbConfirmingDelete, setTmdbConfirmingDelete] = useState(false);
   const [tmdbError, setTmdbError] = useState<string | null>(null);
+  const [stashdbConfigured, setStashdbConfigured] = useState<boolean | null>(null);
+  const [stashdbKey, setStashdbKey] = useState("");
+  const [stashdbBusy, setStashdbBusy] = useState(false);
+  const [stashdbConfirmingDelete, setStashdbConfirmingDelete] = useState(false);
+  const [stashdbError, setStashdbError] = useState<string | null>(null);
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus | null>(null);
   const [catalogBusy, setCatalogBusy] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -137,7 +142,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [extensionPairingQr, setExtensionPairingQr] = useState<ExtensionPairingLink | null>(null);
   useAutoDismiss(catalogCacheMessage, setCatalogCacheMessage);
   useAutoDismiss(cloudMessage, setCloudMessage);
-  const pending = restoring || submitting || kakaoBusy || igdbBusy || tmdbBusy || cloudBusy || catalogBusy || catalogRestoreBusy || catalogCacheBusy || legacyBusy || bookImportRunning || switchingLibrary || characterAutomationBusy || characterAugmentationBusy;
+  const pending = restoring || submitting || kakaoBusy || igdbBusy || tmdbBusy || stashdbBusy || cloudBusy || catalogBusy || catalogRestoreBusy || catalogCacheBusy || legacyBusy || bookImportRunning || switchingLibrary || characterAutomationBusy || characterAugmentationBusy;
 
   useEffect(() => {
     let active = true;
@@ -177,6 +182,8 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     setIgdbError(null);
     setTmdbConfigured(null);
     setTmdbError(null);
+    setStashdbConfigured(null); setStashdbError(null);
+    void gateway.getStashdbCredentialStatus().then(status => { if (active) setStashdbConfigured(status.configured); }).catch(() => { if (active) setStashdbError("StashDB 설정을 확인하지 못했습니다."); });
     void gateway.getKakaoCredentialStatus().then((status) => {
       if (active) setKakaoConfigured(status.configured);
     }).catch((loadError: unknown) => {
@@ -532,6 +539,40 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }
   }
 
+  async function saveStashdbKey() {
+    const token = stashdbKey.trim();
+    if (!token || stashdbBusy) return;
+    setStashdbBusy(true);
+    setStashdbError(null);
+    try {
+      const status = await gateway.setStashdbCredentials(token);
+      setStashdbConfigured(status.configured);
+      setStashdbKey("");
+      setSaved("StashDB 설정을 저장했습니다");
+    } catch {
+      setStashdbError("StashDB 키를 저장하지 못했습니다.");
+    } finally {
+      setStashdbBusy(false);
+    }
+  }
+
+  async function deleteStashdbCredentials() {
+    if (stashdbBusy) return;
+    setStashdbBusy(true);
+    setStashdbError(null);
+    try {
+      const status = await gateway.deleteStashdbCredentials();
+      setStashdbConfigured(status.configured);
+      setStashdbConfirmingDelete(false);
+      setStashdbKey("");
+      setSaved("StashDB 설정을 저장했습니다");
+    } catch {
+      setStashdbError("StashDB 키를 삭제하지 못했습니다.");
+    } finally {
+      setStashdbBusy(false);
+    }
+  }
+
   async function saveCloudSettings(enabled = cloudSettings?.enabled ?? false, captureEnabled = cloudSettings?.captureEnabled ?? cloudSettings?.enabled ?? false, saveAddress = false) {
     if (!cloudSettings || cloudBusy) return;
     const apiBaseUrl = saveAddress ? cloudApiBaseUrl.trim() || null : cloudSettings.apiBaseUrl;
@@ -840,6 +881,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         <header className="settings-view__header"><h2>연결</h2></header>
         {kakaoError && <Toast tone="error" onDismiss={() => setKakaoError(null)}>{kakaoError}</Toast>}
         {igdbError && <Toast tone="error" onDismiss={() => setIgdbError(null)}>{igdbError}</Toast>}
+        {stashdbError && <Toast tone="error" onDismiss={() => setStashdbError(null)}>{stashdbError}</Toast>}
         {tmdbError && <Toast tone="error" onDismiss={() => setTmdbError(null)}>{tmdbError}</Toast>}
         <h3 className="settings-view__group-title">브라우저 확장</h3>
         {extensionError && <Toast tone="error" onDismiss={() => setExtensionError(null)}>{extensionError}</Toast>}
@@ -963,6 +1005,33 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             <div className="settings-view__credential-actions">
               <Button size="sm" disabled={tmdbBusy} onClick={() => setTmdbConfirmingDelete(false)}>취소</Button>
               <Button size="sm" variant="danger" disabled={tmdbBusy} onClick={() => void deleteTmdbToken()}>TMDB 삭제 확인</Button>
+            </div>
+          </div>
+        )}
+        <dl className="settings-view__property settings-view__property--credential">
+          <dt>StashDB</dt>
+          <dd>
+            <span className="settings-view__token-row">
+              <input
+                className="settings-view__token"
+                aria-label="StashDB API 키"
+                type="password"
+                autoComplete="off"
+                placeholder={stashdbConfigured === null ? "확인 중…" : stashdbConfigured ? "설정됨" : "설정되지 않음"}
+                value={stashdbKey}
+                onChange={(event) => { setStashdbKey(event.target.value); setSaved(null); }}
+              />
+              <Button size="sm" disabled={stashdbBusy || !stashdbKey.trim()} onClick={() => void saveStashdbKey()}>{stashdbBusy ? "처리 중…" : "StashDB 저장"}</Button>
+            </span>
+          </dd>
+          {stashdbConfigured && !stashdbConfirmingDelete && <Button size="sm" variant="danger" disabled={stashdbBusy} onClick={() => setStashdbConfirmingDelete(true)}>StashDB 키 삭제</Button>}
+        </dl>
+        {stashdbConfirmingDelete && (
+          <div className="settings-view__credential-confirm">
+            <p>저장된 StashDB API 키를 삭제할까요?</p>
+            <div className="settings-view__credential-actions">
+              <Button size="sm" disabled={stashdbBusy} onClick={() => setStashdbConfirmingDelete(false)}>취소</Button>
+              <Button size="sm" variant="danger" disabled={stashdbBusy} onClick={() => void deleteStashdbCredentials()}>StashDB 삭제 확인</Button>
             </div>
           </div>
         )}

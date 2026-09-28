@@ -2,6 +2,7 @@ export type AvPersonRole = "performer" | "director";
 export type AvPerson = { id: string; displayName: string };
 export type AvPortrait =
   | { kind: "crop"; artworkId: string; revision: string; rect: { x: number; y: number; w: number; h: number } }
+  | ({ kind: "stashdb" } & AvStashdbPreview)
   | { kind: "commons"; dataUrl: string; fileName: string; author: string | null; license: string | null; licenseUrl: string | null; sourceUrl: string };
 export type AvPersonCredit = AvPerson & {
   role: AvPersonRole; order: number; creditName: string | null; nameJa: string | null; workCount: number; portrait: AvPortrait | null;
@@ -48,7 +49,28 @@ export type AvPerformerPage = {
 export type AvPortraitSource = { collectionId: string; name: string; productCode: string | null; artworkId: string; revision: string; solo: boolean; width: number; height: number };
 export type AvCommonsPreview = { dataUrl: string; fileName: string; author: string | null; license: string | null; licenseUrl: string | null; sourceUrl: string };
 export type PortraitRect = { x: number; y: number; w: number; h: number };
+export type AvStashdbPreview = { dataUrl: string; width: number; height: number; sourceUrl: string };
+export type AvProfileImage = { id: string; url: string; width: number; height: number };
+export type AvProfileCandidate = { stashdbId: string; name: string; aliases: string[]; birthDate: string | null; imageUrl: string | null };
+export type AvPerformerProfile = {
+  personId: string; source: "stashdb"; status: "matched" | "none" | "ambiguous";
+  stashdbId: string | null; name: string | null; aliases: string[]; birthDate: string | null;
+  heightCm: number | null; bandIn: number | null; waistIn: number | null; hipIn: number | null;
+  cup: string | null; breastType: "NATURAL" | "FAKE" | "NA" | null;
+  careerStart: number | null; careerEnd: number | null;
+  urls: { url: string; site: { name: string } }[]; images: AvProfileImage[];
+  candidates: AvProfileCandidate[]; fetchedAt: string;
+};
 export interface AvGateway {
+  getStashdbCredentialStatus(): Promise<{ configured: boolean }>;
+  getPerformerProfile(personId: string): Promise<AvPerformerProfile | null>;
+  refreshPerformerProfile(personId: string, force: boolean): Promise<AvPerformerProfile | null>;
+  searchPerformerProfile(personId: string): Promise<AvPerformerProfile>;
+  choosePerformerProfile(personId: string, stashdbId: string): Promise<AvPerformerProfile>;
+  dismissPerformerProfile(personId: string): Promise<AvPerformerProfile>;
+  clearPerformerProfile(personId: string): Promise<void>;
+  previewStashdbPortrait(personId: string, imageId: string): Promise<AvStashdbPreview>;
+  useStashdbPortrait(personId: string): Promise<AvPortrait>;
   getDetails(collectionId: string): Promise<AvDetails>;
   saveDetails(collectionId: string, input: SaveAvDetails): Promise<AvDetails>;
   searchPeople(query: string): Promise<AvPerson[]>;

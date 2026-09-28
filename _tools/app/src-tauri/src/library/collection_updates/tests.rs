@@ -1,4 +1,10 @@
 use super::*;
+use std::io::Cursor;
+
+use image::{DynamicImage, ImageFormat};
+
+const TEST_MANGA_ID: &str = "d1a9fdeb-f713-407f-960c-8326b586e6fd";
+
 fn library() -> (tempfile::TempDir, Library) {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
@@ -11,6 +17,41 @@ fn binding(library: &Library, id: &str, provider: &str) {
 fn synced(library: &Library, id: &str, provider: &str) -> Result<(), LibraryError> {
     library.connection()?.execute("UPDATE collection_external_bindings SET last_synced_at=?3 WHERE collection_id=?1 AND provider=?2",params![id,provider,chrono::Utc::now().to_rfc3339()])?;
     Ok(())
+}
+
+fn make_due(library: &Library, id: &str) {
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE collection_external_bindings
+             SET last_synced_at='2000-01-01T00:00:00Z'
+             WHERE collection_id=?1 AND provider='mangadex'",
+            [id],
+        )
+        .unwrap();
+}
+
+fn cover_bytes() -> Vec<u8> {
+    let mut bytes = Cursor::new(Vec::new());
+    DynamicImage::new_rgb8(120, 180)
+        .write_to(&mut bytes, ImageFormat::Png)
+        .unwrap();
+    bytes.into_inner()
+}
+
+fn refresh_mangadex_covers(
+    library: &Library,
+    collection_id: &str,
+    covers: &[MangaDexCoverCandidate],
+) -> Result<(), LibraryError> {
+    {
+        let mut connection = library.connection()?;
+        let transaction = connection.transaction()?;
+        reconcile_mangadex_volumes(&transaction, collection_id, TEST_MANGA_ID, covers)?;
+        transaction.commit()?;
+    }
+    synced(library, collection_id, "mangadex")
 }
 #[test]
 fn daily_batches_update_unwatched_works_and_resume_without_rechecking() {
@@ -161,6 +202,230 @@ fn mangadex_baseline_is_quiet_and_new_volumes_are_provider_specific_and_monotoni
     assert_eq!(inbox[0].provider, "mangadex");
     assert_eq!(inbox[0].event.volume_number, 2);
 }
+
+#[test]
+fn mangadex_update_records_hidden_volumes_without_notifying_until_they_are_visible() {
+    let (_temp, library) = library();
+    binding(&library, "m", "mangadex");
+    library
+        .set_collection_volume_range("m", Some(1), Some(11), false)
+        .unwrap();
+    let mut connection = library.connection().unwrap();
+    let tx = connection.transaction().unwrap();
+    reconcile_mangadex_volumes(&tx, "m", "md", &[cover("1"), cover("12")]).unwrap();
+    tx.commit().unwrap();
+    let tx = connection.transaction().unwrap();
+    reconcile_mangadex_volumes(
+        &tx,
+        "m",
+        "md",
+        &[cover("1"), cover("2"), cover("12"), cover("13")],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+    drop(connection);
+    assert_eq!(
+        library
+            .list_release_inbox()
+            .unwrap()
+            .iter()
+            .map(|item| item.event.volume_number)
+            .collect::<Vec<_>>(),
+        vec![2]
+    );
+    assert_eq!(
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM collection_mangadex_seen_volumes WHERE collection_id='m'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        4
+    );
+
+    library
+        .set_collection_volume_range("m", None, None, false)
+        .unwrap();
+    let mut connection = library.connection().unwrap();
+    let tx = connection.transaction().unwrap();
+    reconcile_mangadex_volumes(
+        &tx,
+        "m",
+        "md",
+        &[
+            cover("1"),
+            cover("2"),
+            cover("12"),
+            cover("13"),
+            cover("14"),
+        ],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+    drop(connection);
+    assert_eq!(
+        library
+            .list_release_inbox()
+            .unwrap()
+            .iter()
+            .map(|item| item.event.volume_number)
+            .collect::<Vec<_>>(),
+        vec![14, 2]
+    );
+}
+
+#[test]
+fn new_mangadex_volume_syncs_only_its_cover_after_baseline() {
+    let (_temp, library) = library();
+    let work = library
+        .create_collection(crate::library::models::CreateCollection {
+            name: "Work".into(),
+            description: None,
+            collection_type: crate::library::models::CollectionType::Manga,
+        })
+        .unwrap();
+    binding(&library, &work.id, "mangadex");
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE collection_external_bindings SET external_id=?1
+             WHERE collection_id=?2 AND provider='mangadex'",
+            params![TEST_MANGA_ID, work.id],
+        )
+        .unwrap();
+
+    let baseline_covers = vec![cover("1")];
+    let mut baseline_calls = Vec::new();
+    let baseline = library
+        .run_collection_updates_with_cover_downloader(
+            "mangadex",
+            |id| refresh_mangadex_covers(&library, id, &baseline_covers),
+            |manga_id, file_name| {
+                baseline_calls.push((manga_id.to_owned(), file_name.to_owned()));
+                Ok(cover_bytes())
+            },
+        )
+        .unwrap();
+    assert_eq!(baseline.changed_collections, 0);
+    assert!(baseline_calls.is_empty());
+
+    make_due(&library, &work.id);
+    let all_covers = vec![cover("1"), cover("2")];
+    let mut calls = Vec::new();
+    let second = library
+        .run_collection_updates_with_cover_downloader(
+            "mangadex",
+            |id| refresh_mangadex_covers(&library, id, &all_covers),
+            |manga_id, file_name| {
+                calls.push((manga_id.to_owned(), file_name.to_owned()));
+                Ok(cover_bytes())
+            },
+        )
+        .unwrap();
+
+    assert_eq!(calls, vec![(TEST_MANGA_ID.to_owned(), "2.jpg".to_owned())]);
+    assert_eq!(second.changed_collections, 1);
+    assert_eq!(second.failed, 0);
+    assert_eq!(second.stop_reason, None);
+    let connection = library.connection().unwrap();
+    let covers: Vec<(i64, Option<String>)> = connection
+        .prepare(
+            "SELECT volume_number, cover_artwork_id FROM collection_volumes
+             WHERE collection_id=?1 ORDER BY volume_number",
+        )
+        .unwrap()
+        .query_map([&work.id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(covers.len(), 2);
+    assert!(
+        covers[0].1.is_none(),
+        "old missing cover must stay untouched"
+    );
+    assert!(covers[1].1.is_some(), "the new cover must be attached");
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM release_watch_events
+                 WHERE collection_id=?1 AND provider='mangadex'",
+                [&work.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn failed_new_mangadex_cover_does_not_fail_update_or_lose_event() {
+    let (_temp, library) = library();
+    let work = library
+        .create_collection(crate::library::models::CreateCollection {
+            name: "Work".into(),
+            description: None,
+            collection_type: crate::library::models::CollectionType::Manga,
+        })
+        .unwrap();
+    binding(&library, &work.id, "mangadex");
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE collection_external_bindings SET external_id=?1
+             WHERE collection_id=?2 AND provider='mangadex'",
+            params![TEST_MANGA_ID, work.id],
+        )
+        .unwrap();
+
+    let baseline_covers = vec![cover("1")];
+    library
+        .run_collection_updates_with_cover_downloader(
+            "mangadex",
+            |id| refresh_mangadex_covers(&library, id, &baseline_covers),
+            |_, _| Ok(cover_bytes()),
+        )
+        .unwrap();
+    make_due(&library, &work.id);
+
+    let all_covers = vec![cover("1"), cover("2")];
+    let second = library
+        .run_collection_updates_with_cover_downloader(
+            "mangadex",
+            |id| refresh_mangadex_covers(&library, id, &all_covers),
+            |_, _| Err(LibraryError::MangaDexUnavailable),
+        )
+        .unwrap();
+
+    assert_eq!(second.failed, 0);
+    assert_eq!(second.stop_reason, None);
+    let connection = library.connection().unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM release_watch_events
+                 WHERE collection_id=?1 AND provider='mangadex'",
+                [&work.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        1
+    );
+    let new_volume_cover: Option<String> = connection
+        .query_row(
+            "SELECT cover_artwork_id FROM collection_volumes
+             WHERE collection_id=?1 AND volume_number=2 AND edition_index=0",
+            [&work.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(new_volume_cover.is_none());
+}
+
 #[test]
 fn explicit_zero_is_distinct_from_never_entered() {
     let (_temp, library) = library();

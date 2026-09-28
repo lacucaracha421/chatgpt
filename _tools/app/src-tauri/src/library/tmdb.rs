@@ -224,9 +224,6 @@ impl TmdbClient {
             .map_err(map_ureq_error)?;
         let status = response.status().as_u16();
         if status >= 400 {
-            // Diagnostic for the dev terminal: TMDB explains a rejected request in its body.
-            let body = read_body(&mut response).unwrap_or_default();
-            eprintln!("[tmdb] HTTP {status} for {}: {}", url.path(), body.chars().take(300).collect::<String>());
             return Err(map_http_status(status));
         }
         read_body(&mut response)

@@ -1,3 +1,4 @@
+import { AutoTagInboxSettings } from "./AutoTagInboxSettings";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
@@ -50,11 +51,11 @@ export function AutoTagSettings({ disabled }: { disabled: boolean }) {
     }
   }
 
-  return <dl className="settings-view__property">
+  return <><AutoTagInboxSettings disabled={disabled || busy} /><dl className="settings-view__property">
     <dt>자동 태그</dt>
     <dd className="settings-view__row-note">태거가 만든 자동 태그 파일을 가져옵니다. 이전 자동 태그를 바꾸고, 에셋에서 빼거나 직접 붙인 태그는 그대로 둡니다. 이 PC에만 저장합니다.</dd>
     <dd className="settings-view__path">{summary === undefined ? "확인 중…" : summary ? summaryText(summary) : "아직 가져오지 않음"}</dd>
     <Button size="sm" disabled={busy || disabled} onClick={() => void importFile()}>{busy ? "가져오는 중…" : "파일 가져오기"}</Button>
     {message && <dd className="settings-view__row-message" role={message.error ? "alert" : "status"}>{message.text}</dd>}
-  </dl>;
+  </dl></>;
 }

@@ -54,6 +54,12 @@ pub(crate) const COLLECTION_SUMMARY_SQL: &str = "SELECT
             FROM collection_volumes AS volume
             JOIN collection_work_artworks AS artwork ON artwork.id = volume.cover_artwork_id
             WHERE volume.collection_id = collection.id
+              AND NOT EXISTS (
+                  SELECT 1 FROM collection_volume_ranges AS volume_range
+                  WHERE volume_range.collection_id = collection.id
+                    AND (volume_range.min_volume IS NOT NULL AND volume.volume_number < volume_range.min_volume
+                         OR volume_range.max_volume IS NOT NULL AND volume.volume_number > volume_range.max_volume)
+              )
             ORDER BY volume.edition_index, volume.sort_order, volume.volume_number, artwork.id
             LIMIT 1
         )
@@ -110,7 +116,10 @@ pub(crate) const COLLECTION_SUMMARY_SQL: &str = "SELECT
      FROM collection_external_bindings binding,
           json_each(CASE WHEN json_valid(binding.provider_data_json) THEN binding.provider_data_json ELSE '{}' END, '$.series.seasons') season
      WHERE binding.collection_id = collection.id AND binding.provider = 'tmdb'
-       AND binding.external_id LIKE 'tv:%' AND json_extract(season.value, '$.seasonNumber') > 0)
+       AND binding.external_id LIKE 'tv:%' AND json_extract(season.value, '$.seasonNumber') > 0),
+    (SELECT min_volume FROM collection_volume_ranges WHERE collection_id = collection.id),
+    (SELECT max_volume FROM collection_volume_ranges WHERE collection_id = collection.id),
+    (SELECT hide_connection_prompt FROM collection_volume_ranges WHERE collection_id = collection.id)
 FROM collections AS collection";
 
 impl Library {
@@ -567,6 +576,9 @@ pub(crate) fn collection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<C
         created_at: row.get(25)?,
         updated_at: row.get(26)?,
         source_path: row.get(28)?,
+        min_volume: row.get(30)?,
+        max_volume: row.get(31)?,
+        hide_connection_prompt: row.get::<_, Option<i64>>(32)?.unwrap_or(0) != 0,
     })
 }
 
@@ -1350,6 +1362,18 @@ mod tests {
                 .selected_work_artwork_id
                 .as_deref(),
             Some("volume-1-art")
+        );
+
+        library
+            .set_collection_volume_range(&collection.id, Some(2), None, false)
+            .unwrap();
+        assert_eq!(
+            library
+                .get_collection(&collection.id)
+                .unwrap()
+                .selected_work_artwork_id
+                .as_deref(),
+            Some("volume-2-art")
         );
 
         library

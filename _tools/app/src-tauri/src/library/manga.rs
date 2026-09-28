@@ -38,6 +38,7 @@ pub(crate) fn manga_root(
                 &library_id,
                 LibraryEntry {
                     manga_root: Some(root.clone()),
+                    ..Default::default()
                 },
             )?;
             Ok(Some(root))
@@ -89,6 +90,7 @@ pub(crate) fn set_manga_root(
             &library_id,
             LibraryEntry {
                 manga_root: path.map(str::to_owned),
+                ..Default::default()
             },
         );
     }

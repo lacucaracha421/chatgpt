@@ -31,6 +31,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(app_state.clone())
         .manage(library::av_portrait::AvPortraitState::default())
+        .manage(library::av_stashdb::AvProfileState::default())
         .manage(extension_runtime.clone())
         .manage(catalog_transport::CatalogTransport::default())
         .manage(library::catalog_update::CatalogUpdateState::default())
@@ -210,6 +211,9 @@ pub fn run() {
             commands::auto_tags::edit_asset_auto_tag,
             commands::auto_tags::get_auto_tag_import_summary,
             commands::auto_tags::import_auto_tags,
+            commands::auto_tags::get_auto_tag_inbox,
+            commands::auto_tags::set_auto_tag_inbox,
+            commands::auto_tags::run_auto_tag_inbox_now,
             commands::tagger_review::tagger_review_items,
             commands::character_suggestions::character_suggestions,
             commands::character_suggestions::character_suggestion_detail,
@@ -219,6 +223,11 @@ pub fn run() {
             commands::character_suggestions::merge_character_suggestion,
             commands::tagger_review::preview_tagger_review,
             commands::tagger_review::apply_tagger_review,
+            commands::artists::list_artist_style_suggestions,
+            commands::artists::artist_style_suggestion,
+            commands::artists::dismiss_artist_style_suggestion,
+            commands::artists::import_artist_style_features,
+            commands::artists::artist_style_status,
             commands::artists::get_artist_overview,
             commands::artists::list_artists,
             commands::artists::get_artist,
@@ -235,6 +244,8 @@ pub fn run() {
             commands::artists::dismiss_artist_merge_suggestion,
             commands::artists::assign_assets_to_artist,
             commands::artists::set_artist_settings,
+            commands::artists::list_artist_excluded_folders,
+            commands::artists::set_artist_excluded_folders,
             commands::open_library,
             commands::get_extension_connection,
             commands::get_internal_playback_url,
@@ -273,6 +284,9 @@ pub fn run() {
             commands::refresh_igdb_game,
             commands::get_igdb_connection,
             commands::replace_igdb_game_artwork,
+            commands::get_stashdb_credential_status,
+            commands::set_stashdb_credentials,
+            commands::delete_stashdb_credentials,
             commands::get_tmdb_credential_status,
             commands::set_tmdb_token,
             commands::delete_tmdb_token,
@@ -311,6 +325,7 @@ pub fn run() {
             commands::get_asset_collections,
             commands::patch_asset_collections,
             commands::set_collection_showcase,
+            commands::set_collection_volume_range,
             commands::get_asset_classifications,
             commands::list_assets,
             commands::refresh_assets,
@@ -427,6 +442,14 @@ pub fn run() {
             commands::av::get_av_details,
             commands::av::get_av_related,
             commands::av::get_av_performer,
+            commands::av::get_av_performer_profile,
+            commands::av::refresh_av_performer_profile,
+            commands::av::choose_av_performer_profile,
+            commands::av::search_av_performer_profile,
+            commands::av::dismiss_av_performer_profile,
+            commands::av::clear_av_performer_profile,
+            commands::av::preview_av_stashdb_portrait,
+            commands::av::use_av_stashdb_portrait,
             commands::av::save_av_person_memo,
             commands::av::list_av_portrait_sources,
             commands::av::set_av_portrait_crop,

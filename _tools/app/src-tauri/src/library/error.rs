@@ -545,6 +545,8 @@ pub enum LibraryError {
     TmdbCredentialNotConfigured,
     #[error("TMDB API Read Access Token이 올바르지 않습니다")]
     InvalidTmdbCredentialValue,
+    #[error("StashDB API 키가 올바르지 않습니다")]
+    InvalidStashdbCredentialValue,
     #[error("TMDB 인증이 거부됐습니다")]
     TmdbUnauthorized,
     #[error("TMDB 요청 한도를 초과했습니다")]

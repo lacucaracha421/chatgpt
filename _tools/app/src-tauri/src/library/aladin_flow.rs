@@ -8,6 +8,7 @@ use super::{
     aladin::{self, AladinItem},
     collection::require_collection,
     collection_binding_sync::CommitCheck,
+    collection_volume_range::load_transaction,
     error::LibraryError,
     models::{
         AladinApplyRequest, AladinConnection, AladinSeriesCandidate, AladinSyncResult,
@@ -580,6 +581,7 @@ impl BookFlow<'_> {
                 "SELECT EXISTS(SELECT 1 FROM collection_ownership_tracking WHERE collection_id=?1)",
                 [collection_id], |row| row.get::<_, bool>(0),
             )?;
+        let volume_range = load_transaction(&transaction, collection_id)?;
         for item in merged.values() {
             let existing = reconcile_source(
                 self.provider,
@@ -596,6 +598,9 @@ impl BookFlow<'_> {
                     previous_checked_at.as_deref(),
                     checked_at,
                 ) {
+                    if !volume_range.contains(change.volume_number) {
+                        continue;
+                    }
                     transaction.execute(
                         "INSERT INTO release_watch_events (
                             id, collection_id, event_kind, volume_number,
@@ -1213,6 +1218,9 @@ mod tests {
             .unwrap();
         library.set_release_watch_enabled(&work_id, true).unwrap();
         library
+            .set_collection_volume_range(&work_id, Some(1), Some(1), false)
+            .unwrap();
+        library
             .connection()
             .unwrap()
             .execute(
@@ -1245,18 +1253,17 @@ mod tests {
             .book_flow("aladin")
             .refresh_aladin_items_at(&work_id, refreshed.clone(), "2026-08-22T00:00:00Z")
             .unwrap();
-        assert_eq!(first.release_event_count, 3);
+        assert_eq!(first.release_event_count, 2);
         assert_eq!(
             library
                 .take_unread_release_changes(&work_id)
                 .unwrap()
-                .iter()
-                .map(|event| event.kind)
-                .collect::<Vec<_>>(),
+            .iter()
+            .map(|event| event.kind)
+            .collect::<Vec<_>>(),
             vec![
                 ReleaseWatchEventKind::ReleaseDateChanged,
                 ReleaseWatchEventKind::ReleaseStatusChanged,
-                ReleaseWatchEventKind::NewVolume,
             ]
         );
 

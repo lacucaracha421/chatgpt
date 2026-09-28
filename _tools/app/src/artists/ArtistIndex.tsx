@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import type { ArtistHubSection, AssetView } from "../library/types";
-import { EyeSlashIcon, LinkIcon, MergeIcon, MosaicIcon, PeopleIcon, QuestionIcon, StarIcon } from "./artistIcons";
+import { EyeSlashIcon, LinkIcon, MergeIcon, MosaicIcon, PeopleIcon, QuestionIcon, SparklesIcon, StarIcon } from "./artistIcons";
 import { useArtistOverview } from "./artistStore";
 import { UNKNOWN_NONE, isUnknownArtist } from "./types";
 import "./artists.css";
@@ -19,6 +19,7 @@ export function ArtistIndexCount() {
 /** The 작가 index: 고정, then 모음 (tiers and 작가 미상), then 정리. PC only. */
 export function ArtistIndex({ view, onNavigate }: { view: AssetView; onNavigate: (view: AssetView) => void }) {
   const overview = useArtistOverview();
+  const styleSuggestionCount = overview?.styleSuggestionCount ?? 0;
   const section = view.kind === "artists" ? view.section ?? "main" : null;
   const creator = view.kind === "creator" ? view.creatorKey : null;
   const link = (label: string, icon: ReactNode, value: number | undefined, current: boolean, next: AssetView) => (
@@ -47,13 +48,22 @@ export function ArtistIndex({ view, onNavigate }: { view: AssetView; onNavigate:
       {sectionLink("main", "주요 작가", <StarIcon />, overview?.main)}
       {sectionLink("others", "그 외 작가", <PeopleIcon />, overview?.other)}
       {sectionLink("singles", "한 장뿐인 작가들", <MosaicIcon />, overview?.single)}
-      {link("작가 미상", <QuestionIcon />, overview?.unknownNone, creator !== null && isUnknownArtist(creator), { kind: "creator", creatorKey: UNKNOWN_NONE })}
+      <button type="button" className="workspace-index-link artist-index__link" aria-current={creator !== null && isUnknownArtist(creator) ? "page" : undefined}
+        aria-label={`작가 미상 ${count(overview?.unknownNone)}`} onClick={() => onNavigate({ kind: "creator", creatorKey: UNKNOWN_NONE })}>
+        <span className="artist-index__icon" aria-hidden="true"><QuestionIcon /></span>
+        <span className="more-panel__label">작가 미상</span>
+        {overview?.unknownNone !== undefined && <span className="more-panel__count">{count(overview.unknownNone)}</span>}
+        {styleSuggestionCount > 0 && <span className="artist-index__suggestion-badge" aria-label={`추천 ${count(styleSuggestionCount)}`}>
+          <SparklesIcon aria-hidden="true" />{count(styleSuggestionCount)}
+        </span>}
+      </button>
     </div>
     <div className="artist-index__group">
       <span className="workspace-section-label">정리</span>
       {sectionLink("merge", "같은 작가일 수 있어요", <MergeIcon />, overview?.mergeSuggestions)}
       {sectionLink("source-fill", "출처에서 작가 채우기", <LinkIcon />, overview?.sourceFillable)}
       {sectionLink("hidden", "숨긴 작가", <EyeSlashIcon />, overview?.hidden)}
+      {sectionLink("reposter", "퍼온 계정", <EyeSlashIcon />, overview?.reposter)}
     </div>
   </nav>;
 }

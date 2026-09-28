@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { assetUrl, collectionCoverUrl, collectionSourcePreviewUrl, workArtworkUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { BookConnection, CollectionCover, CollectionSummary, CollectionVolume, CreateCollection, IgdbConnection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, TmdbConnection, UpdateCollection, VolumeImportProgress, WorkArtworkSummary } from "../library/types";
+import type { BookConnection, CollectionCover, CollectionSummary, CollectionVolume, CollectionVolumeRangeInput, CreateCollection, IgdbConnection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, TmdbConnection, UpdateCollection, VolumeImportProgress, WorkArtworkSummary } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { CollectionSidebarSection } from "./CollectionSidebarSection";
@@ -363,6 +363,18 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
     await onChanged();
   }
 
+  async function submitMangaSettings(input: CollectionVolumeRangeInput) {
+    if (editMode?.kind !== "edit" || editMode.collection.type !== "manga") return;
+    if (!gateway.setCollectionVolumeRange) return;
+    await gateway.setCollectionVolumeRange(collectionId, input);
+    await onChanged();
+    const refreshed = await gateway.listCollectionVolumes(collectionId);
+    setVolumes(refreshed);
+    setSelectedVolumeId((current) => current && refreshed.some((volume) => volume.id === current)
+      ? current
+      : firstVolumeId(refreshed, editionIndex));
+  }
+
   async function toggleShowcase() {
     if (!collection) return;
     try {
@@ -541,7 +553,7 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
         } catch (error) { setMessage(commandErrorMessage(error, "신간 알림을 확인 처리하지 못했습니다.")); }
         finally { setReleaseWatchSaving(false); }
       }}>표시된 신간 알림 확인</Button>}
-      {isAv && collection ? <AvCollectionDetail key={collection.id} collection={collection} scope={library?.root ?? ""} onChanged={onChanged} onOpenCollection={onOpenCollection}
+      {isAv && collection ? <AvCollectionDetail key={collection.id} collection={collection} scope={library?.root ?? ""} onChanged={onChanged} onOpenCollection={onOpenCollection} onOpenSettings={onOpenSettings}
         onEdit={() => setEditMode({ kind: "edit", collection })} onToggleShowcase={() => void toggleShowcase()} onDelete={() => setDeleteOpen(true)} /> : isGame && collection ? (
         <GameCollectionDetail
           collection={collection}
@@ -584,7 +596,8 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
               <MangaConnections mangaDex={mangaDexConnection} kakao={kakaoConnection}
                 mangaDexBusy={mangaDexConnection === undefined || refreshing} kakaoBusy={kakaoConnection === undefined || kakaoRefreshing}
                 onConnectMangaDex={() => setImportOpen(true)} onRefreshMangaDex={() => void refresh()}
-                onConnectKakao={() => setKakaoOpen(true)} onRefreshKakao={() => void refreshKakao()} />
+                onConnectKakao={() => setKakaoOpen(true)} onRefreshKakao={() => void refreshKakao()}
+                hideConnectionPrompt={collection.hideConnectionPrompt} />
               {volumes !== null ? (
                 <CollectionVolumeGrid
                   volumes={volumes}
@@ -730,6 +743,7 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
           mode={editMode}
           onClose={() => setEditMode(null)}
           onSubmit={submitEdit}
+          onSubmitMangaSettings={editMode.kind === "edit" && editMode.collection.type === "manga" ? submitMangaSettings : undefined}
         />
       )}
       {deleteOpen && collection && (

@@ -7,6 +7,7 @@ import { usePrivacy } from "../../privacy/PrivacyContext";
 import { avError } from "../avClient";
 import type { AvGateway, AvPerformerPage as PerformerData, AvWorkCard } from "../avTypes";
 import { AvPortrait } from "./AvPortrait";
+import { AvPerformerProfile, safeProfileUrl } from "./AvPerformerProfile";
 import { AvPortraitPicker } from "./AvPortraitPicker";
 import { DvdCase } from "./DvdCase";
 import "./avPerformerPage.css";
@@ -14,7 +15,8 @@ import "./avPerformerPage.css";
 type WorkFilter = "all" | "solo" | "joint";
 type WorkSort = "newest" | "oldest";
 
-export function AvPerformerPage({ personId, currentCollectionId, api, onBack, onOpenCollection, onOpenPerformer }: {
+export function AvPerformerPage({ personId, currentCollectionId, api, onBack, onOpenCollection, onOpenPerformer, onOpenSettings }: {
+  onOpenSettings?: () => void;
   personId: string; currentCollectionId?: string; api: AvGateway; onBack(): void; onOpenCollection?: (collectionId: string) => void; onOpenPerformer?: (personId: string) => void;
 }) {
   const { privacyMode } = usePrivacy();
@@ -25,11 +27,12 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
   const [memoEditing, setMemoEditing] = useState(false);
   const [memo, setMemo] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sourceError, setSourceError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
-    setPage(null); setError(null); setMemoEditing(false);
+    setPage(null); setError(null); setMemoEditing(false); setPickerOpen(false); setSourceError(null);
     void api.getPerformer(personId).then(value => { if (active) { setPage(value); setMemo(value.person.memo ?? ""); } }, reason => { if (active) setError(avError(reason)); });
     return () => { active = false; };
   }, [api, personId]);
@@ -60,12 +63,14 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
         <div className="av-performer-page__portrait"><AvPortrait portrait={page.person.portrait} name={page.person.displayName} size="performer" /></div>
         <div className="av-performer-page__source-line">
           {source.label}
-          {source.url && <button type="button" onClick={() => void openUrl(source.url!)} aria-label="대표 이미지 출처 열기"><ArrowTopRightOnSquareIcon aria-hidden="true" />원본</button>}
+          {source.url && safeProfileUrl(source.url) && <button type="button" onClick={() => void openUrl(source.url!).catch(() => setSourceError("원본 링크를 열지 못했습니다."))} aria-label="대표 이미지 출처 열기"><ArrowTopRightOnSquareIcon aria-hidden="true" />원본</button>}
+          <button type="button" className="av-performer-page__change-portrait" onClick={() => setPickerOpen(true)}><PencilIcon aria-hidden="true" />바꾸기</button>
         </div>
-        <Button size="sm" onClick={() => setPickerOpen(true)}>대표 이미지 바꾸기</Button>
+        {sourceError && <p className="av-profile__quiet" role="status">{sourceError}</p>}
         <h1>{page.person.displayName}</h1>
         {page.person.nameJa && <p className="av-performer-page__name-ja" lang="ja">{page.person.nameJa}</p>}
-        <div className="av-performer-page__stats"><Stat value={page.stats.workCount.toLocaleString()} label="내 라이브러리 작품" /><Stat value={releaseRange(page.stats.firstRelease, page.stats.lastRelease)} label="발매 기간" /><Stat value={page.stats.averageScore === null ? "—" : page.stats.averageScore.toFixed(1)} label="내 별점 평균" /></div>
+        <AvPerformerProfile key={personId} displayName={page.person.displayName} nameJa={page.person.nameJa} personId={personId} api={api} onOpenSettings={onOpenSettings} />
+        <div className="av-performer-page__stats"><Stat value={page.stats.workCount.toLocaleString()} label="내 작품" /><Stat value={releaseRange(page.stats.firstRelease, page.stats.lastRelease)} label="발매 기간" /><Stat value={page.stats.averageScore === null ? "—" : page.stats.averageScore.toFixed(1)} label="별점 평균" /></div>
         <div className="av-performer-page__ids">{page.person.fanzaActressId && <span>FANZA <b className="numeric">{page.person.fanzaActressId}</b></span>}{page.person.wikidataId && <span>Wikidata <b className="numeric">{page.person.wikidataId}</b></span>}</div>
       </section>
       <div className="av-performer-page__content">
@@ -107,6 +112,7 @@ function WorkTile({ work, current, privacyMode, onOpenCollection }: { work: AvWo
 function portraitSource(page: PerformerData, works: PerformerData["works"]) {
   const portrait = page.person.portrait;
   if (!portrait) return { label: "대표 이미지 없음", url: null as string | null };
+  if (portrait.kind === "stashdb") return { label: "StashDB", url: portrait.sourceUrl };
   if (portrait.kind === "commons") return { label: `Wikimedia Commons · ${portrait.author ?? "저작자 미상"} · ${portrait.license ?? "라이선스 미상"}`, url: portrait.sourceUrl };
   const work = works.find(candidate => candidate.frontArtworkId === portrait.artworkId);
   return { label: `표지에서 자름 · ${work?.productCode ?? work?.name ?? "앞표지"}`, url: null };

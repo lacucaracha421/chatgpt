@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, io::Read};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::Read,
+};
 
 use rusqlite::{params, OptionalExtension, Transaction};
 
@@ -100,7 +103,7 @@ impl Library {
         collection_id: &str,
         mut on_progress: Option<&mut dyn FnMut(u32, u32)>,
     ) -> Result<Vec<CollectionVolume>, LibraryError> {
-        let binding = {
+        let (binding, volume_range) = {
             let connection = self.connection()?;
             let collection_type: Option<String> = connection
                 .query_row(
@@ -114,7 +117,8 @@ impl Library {
                 Some(_) => return Err(LibraryError::InvalidCollectionType),
                 None => return Err(LibraryError::CollectionNotFound),
             }
-            connection
+            let volume_range = super::collection_volume_range::load(&connection, collection_id)?;
+            let binding = connection
                 .query_row(
                     "SELECT external_id, provider_data_json
                      FROM collection_external_bindings
@@ -122,7 +126,8 @@ impl Library {
                     [collection_id],
                     |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
                 )
-                .optional()?
+                .optional()?;
+            (binding, volume_range)
         };
 
         if let Some((manga_id, Some(snapshot))) = binding {
@@ -153,6 +158,7 @@ impl Library {
                 .volume_label
                 .strip_prefix("vol.")
                 .and_then(parse_volume_slot)
+                .filter(|(volume_number, _)| volume_range.contains(*volume_number))
             {
                 local_slots.entry(slot).or_insert(cover.file_name);
             }
@@ -186,13 +192,12 @@ impl Library {
                         return Err(LibraryError::InvalidWorkArtwork);
                     }
                     let mut bytes = Vec::with_capacity(media.length as usize);
-                    media
-                        .file
-                        .read_to_end(&mut bytes)
-                        .map_err(|source| LibraryError::ReadMedia {
+                    media.file.read_to_end(&mut bytes).map_err(|source| {
+                        LibraryError::ReadMedia {
                             path: std::path::PathBuf::from(&file_name),
                             source,
-                        })?;
+                        }
+                    })?;
                     let prepared = self.prepare_work_artwork(collection_id, &bytes)?;
                     let artwork_id = {
                         let mut connection = self.connection()?;
@@ -260,35 +265,44 @@ impl Library {
                   ORDER BY CASE candidate.provider WHEN 'kakao' THEN 0 ELSE 1 END LIMIT 1
               )
              WHERE volume.collection_id = ?1
+               AND (?2 IS NULL OR volume.volume_number >= ?2)
+               AND (?3 IS NULL OR volume.volume_number <= ?3)
              ORDER BY volume.edition_index, volume.sort_order, volume.volume_number",
         )?;
         let volumes = statement
-            .query_map([collection_id], |row| {
-                let volume_number = row.get(1)?;
-                let edition_index = row.get(2)?;
-                let local_release_date: Option<String> = row.get(4)?;
-                let release_status = local_release_date.as_deref().and_then(|value| {
-                    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
-                        .ok()
-                        .map(|date| {
-                            if date > chrono::Utc::now().date_naive() {
-                                "upcoming".to_owned()
-                            } else {
-                                "released".to_owned()
-                            }
-                        })
-                });
-                Ok(CollectionVolume {
-                    id: row.get(0)?,
-                    volume_number,
-                    edition_index,
-                    display_label: display_label(volume_number, edition_index),
-                    cover_artwork_id: row.get(3)?,
-                    local_release_date,
-                    isbn13: row.get(5)?,
-                    release_status,
-                })
-            })?
+            .query_map(
+                params![
+                    collection_id,
+                    volume_range.min_volume,
+                    volume_range.max_volume
+                ],
+                |row| {
+                    let volume_number = row.get(1)?;
+                    let edition_index = row.get(2)?;
+                    let local_release_date: Option<String> = row.get(4)?;
+                    let release_status = local_release_date.as_deref().and_then(|value| {
+                        chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                            .ok()
+                            .map(|date| {
+                                if date > chrono::Utc::now().date_naive() {
+                                    "upcoming".to_owned()
+                                } else {
+                                    "released".to_owned()
+                                }
+                            })
+                    });
+                    Ok(CollectionVolume {
+                        id: row.get(0)?,
+                        volume_number,
+                        edition_index,
+                        display_label: display_label(volume_number, edition_index),
+                        cover_artwork_id: row.get(3)?,
+                        local_release_date,
+                        isbn13: row.get(5)?,
+                        release_status,
+                    })
+                },
+            )?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(volumes)
     }
@@ -297,14 +311,15 @@ impl Library {
         &self,
         collection_id: &str,
     ) -> Result<MangaDexVolumeSyncResult, LibraryError> {
-        self.sync_mangadex_volume_covers_with(collection_id, |manga_id, file_name| {
+        self.sync_mangadex_volume_covers_with(collection_id, None, |manga_id, file_name| {
             mangadex::download_cover(manga_id, file_name)
         })
     }
 
-    fn sync_mangadex_volume_covers_with<F>(
+    pub(super) fn sync_mangadex_volume_covers_with<F>(
         &self,
         collection_id: &str,
+        slot_filter: Option<&BTreeSet<(i64, u8)>>,
         mut download: F,
     ) -> Result<MangaDexVolumeSyncResult, LibraryError>
     where
@@ -327,24 +342,39 @@ impl Library {
             return Err(LibraryError::InvalidCollectionType);
         }
         let manga_id = manga_id.ok_or(LibraryError::InvalidMangaDexIdentity)?;
+        // Scoped: the connection guard is not reentrant, and the rows query below takes it again.
+        let volume_range =
+            super::collection_volume_range::load(&*self.connection()?, collection_id)?;
         let rows = {
             let connection = self.connection()?;
             let mut statement = connection.prepare(
-                "SELECT id, source_provider, source_cover_id, source_file_name, cover_artwork_id
+                "SELECT id, volume_number, edition_index, source_provider, source_cover_id,
+                        source_file_name, cover_artwork_id
                  FROM collection_volumes
                  WHERE collection_id = ?1
+                   AND (?2 IS NULL OR volume_number >= ?2)
+                   AND (?3 IS NULL OR volume_number <= ?3)
                  ORDER BY volume_number, edition_index",
             )?;
             let rows = statement
-                .query_map([collection_id], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                    ))
-                })?
+                .query_map(
+                    params![
+                        collection_id,
+                        volume_range.min_volume,
+                        volume_range.max_volume
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, u8>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, Option<String>>(4)?,
+                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, Option<String>>(6)?,
+                        ))
+                    },
+                )?
                 .collect::<Result<Vec<_>, _>>()?;
             rows
         };
@@ -354,7 +384,20 @@ impl Library {
             failed: 0,
         };
 
-        for (volume_id, source_provider, source_cover_id, source_file_name, artwork_id) in rows {
+        for (
+            volume_id,
+            volume_number,
+            edition_index,
+            source_provider,
+            source_cover_id,
+            source_file_name,
+            artwork_id,
+        ) in rows
+        {
+            if slot_filter.is_some_and(|slots| !slots.contains(&(volume_number, edition_index))) {
+                result.skipped += 1;
+                continue;
+            }
             if source_provider.as_deref() != Some("mangadex") || artwork_id.is_some() {
                 result.skipped += 1;
                 continue;
@@ -752,9 +795,12 @@ mod tests {
 
         let mut progress = Vec::new();
         library
-            .list_collection_volumes_with(&work.id, Some(&mut |imported, total| {
-                progress.push((imported, total));
-            }))
+            .list_collection_volumes_with(
+                &work.id,
+                Some(&mut |imported, total| {
+                    progress.push((imported, total));
+                }),
+            )
             .unwrap();
 
         assert_eq!(progress, vec![(1, 3), (2, 3), (3, 3)]);
@@ -762,9 +808,12 @@ mod tests {
         // 이미 등록된 컬렉션은 import가 없으므로 진행 이벤트도 없다.
         let mut replay = Vec::new();
         library
-            .list_collection_volumes_with(&work.id, Some(&mut |imported, total| {
-                replay.push((imported, total));
-            }))
+            .list_collection_volumes_with(
+                &work.id,
+                Some(&mut |imported, total| {
+                    replay.push((imported, total));
+                }),
+            )
             .unwrap();
         assert!(replay.is_empty());
     }
@@ -948,7 +997,7 @@ mod tests {
         let mut first_calls = Vec::new();
 
         let first = library
-            .sync_mangadex_volume_covers_with(&work.id, |manga_id, file_name| {
+            .sync_mangadex_volume_covers_with(&work.id, None, |manga_id, file_name| {
                 first_calls.push((manga_id.to_owned(), file_name.to_owned()));
                 if file_name == "two.jpg" {
                     Err(crate::library::error::LibraryError::MangaDexUnavailable)
@@ -976,7 +1025,7 @@ mod tests {
         let mut second_calls = Vec::new();
 
         let second = library
-            .sync_mangadex_volume_covers_with(&work.id, |manga_id, file_name| {
+            .sync_mangadex_volume_covers_with(&work.id, None, |manga_id, file_name| {
                 second_calls.push((manga_id.to_owned(), file_name.to_owned()));
                 Ok(cover_bytes())
             })

@@ -9,7 +9,8 @@ import type { AssetSummary, AssetView, LibraryGateway } from "../library/types";
 import { ArtistCollage } from "./ArtistCollage";
 import { ArtistHub } from "./ArtistHub";
 import { ArtistIndex } from "./ArtistIndex";
-import type { ArtistDetail, ArtistGateway, ArtistMergeSuggestion, ArtistOverview, ArtistSummary, SourceFillPreview } from "./types";
+import { UnknownStyleSuggestions, useArtistScopeChrome } from "./ArtistPage";
+import type { ArtistDetail, ArtistExcludedFolder, ArtistGateway, ArtistMergeSuggestion, ArtistOverview, ArtistStyleGroup, ArtistSummary, SourceFillPreview } from "./types";
 
 afterEach(() => { vi.useRealTimers(); cleanup(); });
 beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
@@ -22,12 +23,12 @@ beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
 const artist = (id: string, label: string, overrides: Partial<ArtistSummary> = {}): ArtistSummary => ({
   id, label, displayName: null, sourceName: label, keys: [id.replace(/^artist:/, "")], assetCount: 12, recentCount: 0,
   firstSavedAt: "2024-01-01T00:00:00Z", lastSavedAt: "2026-09-12T00:00:00Z", lastOpenedAt: null,
-  pinned: false, hidden: false, main: true, coverAssetIds: ["a1", "a2"], ...overrides,
+  pinned: false, hidden: false, reposter: false, main: true, coverAssetIds: ["a1", "a2"], ...overrides,
 });
 
 const overview: ArtistOverview = {
   settings: { mainMinCount: 5, recentMinCount: 2, recentDays: 30 },
-  total: 4, main: 2, other: 2, twoToFour: 1, single: 1, hidden: 0, unknownNone: 7, unknownSource: 3,
+  total: 4, main: 2, other: 2, twoToFour: 1, single: 1, hidden: 0, reposter: 0, styleSuggestionCount: 0, unknownNone: 7, unknownSource: 3,
   mergeSuggestions: 1, sourceFillable: 2, pinned: [artist("artist:moon", "달그림자", { pinned: true })],
 };
 
@@ -42,6 +43,12 @@ const fill: SourceFillPreview = {
   groups: [{ handle: "kiri_draws", assetCount: 1, sampleAssetIds: ["s1"], targetId: "kiri_draws", targetLabel: "Kiri" }, { handle: "glass_owl", assetCount: 1, sampleAssetIds: ["s2"], targetId: null, targetLabel: null }],
 };
 
+const styleGroup: ArtistStyleGroup = {
+  artist: artist("artist:tunoboku", "tunoboku", { assetCount: 38, coverAssetIds: ["ref-avatar"] }),
+  candidates: [{ assetId: "candidate-1", score: 0.71 }, { assetId: "candidate-2", score: 0.63 }],
+  referenceAssetIds: ["ref-1", "ref-2", "ref-3", "ref-4"],
+};
+
 const detail: ArtistDetail = {
   summary: artist("artist:moon", "달그림자", { displayName: "달그림자", sourceName: "Moonshade", keys: ["moonshade_art", "48213377"], assetCount: 486, pinned: true }),
   members: [{ key: "moonshade_art", name: "Moonshade", host: "x.com", assetCount: 402 }, { key: "48213377", name: "月影", host: "pixiv", assetCount: 72 }],
@@ -52,9 +59,15 @@ const detail: ArtistDetail = {
   mergeSuggestions: [],
 };
 
-function artistGateway(): ArtistGateway {
+function artistGateway(initialExcluded: ArtistExcludedFolder[] = []): ArtistGateway {
+  let excluded = initialExcluded;
   return {
     overview: vi.fn().mockResolvedValue(overview),
+    styleSuggestions: vi.fn().mockResolvedValue({ totalImages: 0, totalArtists: 0, groups: [] }),
+    styleSuggestion: vi.fn().mockResolvedValue(null),
+    dismissStyleSuggestion: vi.fn().mockResolvedValue(undefined),
+    importStyleFeatures: vi.fn().mockResolvedValue({ imported: 0, skipped: 0 }),
+    styleStatus: vi.fn().mockResolvedValue({ features: 0, model: null, suggestions: 0, computing: false }),
     list: vi.fn().mockImplementation(async (query) => ({ total: 2, artists: query.bucket === "main" ? [artist("rin", "Rin Kagura"), artist("sky", "하늘고래", { recentCount: 3 })] : [artist("seori", "서리", { main: false, assetCount: 4 })] })),
     detail: vi.fn().mockResolvedValue(detail),
     today: vi.fn().mockResolvedValue([{ artist: artist("yun", "윤슬"), kind: "anniversary", reason: "3년 전 오늘 저장", assetIds: ["t1", "t2", "t3", "t4", "t5", "t6"] }]),
@@ -70,6 +83,10 @@ function artistGateway(): ArtistGateway {
     dismissSuggestion: vi.fn().mockResolvedValue(undefined),
     assignAssets: vi.fn().mockResolvedValue("artist:new"),
     setSettings: vi.fn().mockImplementation(async (settings) => settings),
+    listExcludedFolders: vi.fn().mockImplementation(async () => excluded),
+    setExcludedFolders: vi.fn().mockImplementation(async (ids: string[]) => {
+      excluded = ids.map((id) => ({ id, breadcrumb: id === "ai" ? "기타 › ai" : id, imageCount: 3 }));
+    }),
   };
 }
 
@@ -87,6 +104,10 @@ function libraryGateway(artists: ArtistGateway, items: AssetSummary[] = []): Lib
     listAssets: vi.fn().mockResolvedValue({ items, nextCursor: null, totalCount: items.length }),
     listAssetDateBuckets: vi.fn().mockResolvedValue([]),
     getAsset: vi.fn().mockImplementation(async (id: string) => asset(Number(id.replace(/\D/g, "")) || 0)),
+    listClassifications: vi.fn().mockResolvedValue([
+      { id: "other", kind: "root", name: "기타", parentId: null, iconKey: null, colorKey: null, totalAssetCount: 4 },
+      { id: "ai", kind: "tag", name: "ai", parentId: "other", iconKey: null, colorKey: null, totalAssetCount: 3 },
+    ]),
   };
   return new Proxy(known, { get: (target, key: string) => (key in target ? target[key] : (target[key] = vi.fn().mockResolvedValue([]))) }) as unknown as LibraryGateway;
 }
@@ -97,6 +118,10 @@ function chrome(child: ReactNode) {
     <div data-testid="titlebar"><ChromeTarget name="header" /></div>
     {child}
   </WorkspaceChromeProvider>;
+}
+
+function ArtistScopeIntro({ view, onNavigate }: { view: AssetView; onNavigate: (view: AssetView) => void }) {
+  return <>{useArtistScopeChrome(view, { onNavigate, onPlay: vi.fn(), privacyMode: false })?.intro}</>;
 }
 
 describe("ArtistIndex", () => {
@@ -111,6 +136,65 @@ describe("ArtistIndex", () => {
     expect(onNavigate).toHaveBeenLastCalledWith({ kind: "artists", section: "merge" });
     await userEvent.click(screen.getByRole("button", { name: "작가 미상 7" }));
     expect(onNavigate).toHaveBeenLastCalledWith({ kind: "creator", creatorKey: "unknown:none" });
+  });
+
+  it("shows the style recommendation badge and the reposter cleanup row", async () => {
+    const gateway = artistGateway();
+    gateway.overview = vi.fn().mockResolvedValue({ ...overview, styleSuggestionCount: 4, reposter: 3 });
+    const onNavigate = vi.fn();
+    render(<LibraryProvider gateway={libraryGateway(gateway)}><ArtistIndex view={{ kind: "artists", section: "reposter" }} onNavigate={onNavigate} /></LibraryProvider>);
+
+    expect(await screen.findByLabelText("추천 4")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "퍼온 계정 3" }));
+    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "artists", section: "reposter" });
+  });
+});
+
+describe("style recommendation rows", () => {
+  const renderSuggestions = (gateway = artistGateway()) => {
+    const onNavigate = vi.fn();
+    gateway.styleSuggestions = vi.fn().mockResolvedValue({ totalImages: 2, totalArtists: 1, groups: [styleGroup] });
+    render(<LibraryProvider gateway={libraryGateway(gateway)}><UnknownStyleSuggestions privacyMode={false} onNavigate={onNavigate} /></LibraryProvider>);
+    return gateway;
+  };
+
+  it("assigns only checked candidate images", async () => {
+    const user = userEvent.setup();
+    const gateway = renderSuggestions();
+    await screen.findByRole("article", { name: "tunoboku 닮은 작가 추천" });
+    await user.click(screen.getByRole("checkbox", { name: "tunoboku 0.71 이미지 지정" }));
+    await user.click(screen.getByRole("button", { name: "선택한 이미지 지정 1" }));
+    expect(gateway.assignAssets).toHaveBeenCalledWith(["candidate-2"], { artistId: "artist:tunoboku" });
+  });
+
+  it("dismisses the checked candidate images for an artist", async () => {
+    const user = userEvent.setup();
+    const gateway = renderSuggestions();
+    await screen.findByRole("article", { name: "tunoboku 닮은 작가 추천" });
+    await user.click(screen.getByRole("checkbox", { name: "tunoboku 0.63 이미지 지정" }));
+    await user.click(screen.getByRole("button", { name: "이 작가 아님" }));
+    expect(gateway.dismissStyleSuggestion).toHaveBeenCalledWith(["candidate-1"], "artist:tunoboku");
+  });
+
+  it("confirms before marking an artist as a reposter", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const gateway = renderSuggestions();
+    await screen.findByRole("article", { name: "tunoboku 닮은 작가 추천" });
+    await user.click(screen.getByRole("button", { name: "퍼온 계정으로 표시" }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("모든 추천 대상"));
+    expect(gateway.setFlags).toHaveBeenCalledWith("artist:tunoboku", { reposter: true });
+    confirm.mockRestore();
+  });
+
+  it("navigates the third unknown-artist chip to the suggested-only view", async () => {
+    const user = userEvent.setup();
+    const gateway = artistGateway();
+    gateway.overview = vi.fn().mockResolvedValue({ ...overview, styleSuggestionCount: 2 });
+    const onNavigate = vi.fn();
+    render(<LibraryProvider gateway={libraryGateway(gateway)}><ArtistScopeIntro view={{ kind: "creator", creatorKey: "unknown:none" }} onNavigate={onNavigate} /></LibraryProvider>);
+    await user.click(await screen.findByRole("button", { name: "추천 있음 2" }));
+    expect(onNavigate).toHaveBeenCalledWith({ kind: "creator", creatorKey: "unknown:none", styleSuggestionsOnly: true });
   });
 });
 
@@ -143,6 +227,20 @@ describe("ArtistHub", () => {
 
     await user.click(screen.getByRole("button", { name: "다시 고르기" }));
     await waitFor(() => expect(gateway.today).toHaveBeenLastCalledWith(expect.any(String), expect.any(Number), 1, []));
+  });
+
+  it("adds and removes an artist excluded folder from the rule settings", async () => {
+    const user = userEvent.setup();
+    const { gateway } = renderHub({ kind: "artists" });
+    await screen.findByRole("list", { name: "주요 작가" });
+    await user.click(screen.getByRole("button", { name: /^주요 작가 기준 바꾸기/ }));
+    const dialog = await screen.findByRole("dialog", { name: "주요 작가 기준" });
+    await user.click(within(dialog).getByRole("button", { name: "폴더 추가" }));
+    await user.click(within(dialog).getByRole("option", { name: /기타 › ai/ }));
+    await waitFor(() => expect(gateway.setExcludedFolders).toHaveBeenLastCalledWith(["ai"]));
+    expect(within(dialog).getByText("기타 › ai")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "기타 › ai 제외 해제" }));
+    await waitFor(() => expect(gateway.setExcludedFolders).toHaveBeenLastCalledWith([]));
   });
 
   it("swaps the hero to another today artist without refetching today", async () => {
@@ -275,5 +373,16 @@ describe("artist pages in the gallery", () => {
     expect(artists.assignAssets).toHaveBeenCalledWith(["asset-0", "asset-1"], { newName: "하늘빛" });
     expect(await screen.findByText("2장을 하늘빛에 붙였어요")).toBeInTheDocument();
     expect(gateway.updateAssetMetadata).not.toHaveBeenCalled();
+  });
+
+  it("saves the reposter flag from the artist edit panel", async () => {
+    const user = userEvent.setup();
+    const artists = artistGateway();
+    renderPage({ kind: "creator", creatorKey: "artist:moon" }, libraryGateway(artists, [asset(0)]));
+    await user.click(await screen.findByRole("button", { name: "작가 편집" }));
+    const panel = screen.getByRole("complementary", { name: "작가 편집" });
+    await user.click(within(panel).getByRole("checkbox", { name: "퍼온 계정 — 작가가 아님" }));
+    await user.click(within(panel).getByRole("button", { name: "저장" }));
+    expect(artists.setFlags).toHaveBeenCalledWith("artist:moon", { reposter: true });
   });
 });

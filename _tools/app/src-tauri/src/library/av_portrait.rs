@@ -24,9 +24,18 @@ struct CommonsImage {
     width: u32,
     height: u32,
 }
+enum PendingImage {
+    Commons(CommonsImage),
+    Stashdb(StashdbImage),
+}
+struct StashdbImage {
+    preview: AvStashdbPreview,
+    bytes: Vec<u8>,
+    image_id: String,
+}
 struct Pending {
     generation: uuid::Uuid,
-    image: Option<CommonsImage>,
+    image: Option<PendingImage>,
 }
 /// Library-qualified keys prevent a preview from being used after switching libraries.
 #[derive(Clone, Default)]
@@ -86,6 +95,10 @@ pub(super) fn portrait(c: &Connection, person: &str) -> Result<Option<AvPortrait
             let crop=c.query_row("SELECT a.id,a.collection_id,p.x,p.y,p.w,p.h FROM collection_person_portraits p JOIN collection_work_artworks a ON a.id=p.artwork_id AND a.selected=1 AND a.kind='cover' JOIN collections c ON c.id=a.collection_id AND c.type='av' WHERE p.person_id=?1",[person],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,AvPortraitRect{x:r.get(2)?,y:r.get(3)?,w:r.get(4)?,h:r.get(5)?}))).optional()?;
             crop.map(|(artwork_id,collection,rect)| Ok(AvPortrait::Crop{artwork_id,revision:cover_set(c,&collection)?.revision,rect})).transpose()
         }
+        Some("stashdb") => Ok(Some(AvPortrait::Stashdb { preview: c.query_row(
+            "SELECT image_bytes,width,height,source_url FROM collection_person_portraits WHERE person_id=?1", [person],
+            |r| Ok(AvStashdbPreview { data_url: data_url("image/jpeg", &r.get::<_, Vec<u8>>(0)?), width: r.get(1)?, height: r.get(2)?, source_url: r.get(3)? })
+        )? })),
         Some("commons") => Ok(Some(AvPortrait::Commons {preview:c.query_row("SELECT image_bytes,mime,file_name,author,license,license_url,source_url FROM collection_person_portraits WHERE person_id=?1",[person],|r|Ok(AvCommonsPreview{data_url:data_url(&r.get::<_,String>(1)?,&r.get::<_,Vec<u8>>(0)?),file_name:r.get(2)?,author:r.get(3)?,license:r.get(4)?,license_url:r.get(5)?,source_url:r.get(6)?}))?})),
         _ => Ok(None),
     }
@@ -189,7 +202,7 @@ impl Library {
         match result {
             Ok(Some(image)) => {
                 let preview = image.preview.clone();
-                pending.get_mut(&key).unwrap().image = Some(image);
+                pending.get_mut(&key).unwrap().image = Some(PendingImage::Commons(image));
                 Ok(Some(preview))
             }
             Ok(None) => {
@@ -215,10 +228,10 @@ impl Library {
         let tx = c.transaction()?;
         require_person(&tx, person)?;
         let key = (self.root().to_path_buf(), person.to_owned());
-        let image = pending
-            .get(&key)
-            .and_then(|p| p.image.as_ref())
-            .ok_or(AvError::Invalid)?;
+        let Some(PendingImage::Commons(image)) = pending.get(&key).and_then(|p| p.image.as_ref())
+        else {
+            return Err(AvError::Invalid);
+        };
         tx.execute(
             "DELETE FROM collection_person_portraits WHERE person_id=?1",
             [person],
@@ -232,6 +245,153 @@ impl Library {
         Ok(result)
     }
 }
+impl Library {
+    pub(crate) fn preview_av_stashdb_portrait_with(
+        &self,
+        person: &str,
+        image_id: &str,
+        state: &AvPortraitState,
+        http: &impl HttpClient,
+    ) -> Result<AvStashdbPreview, AvError> {
+        let key = (self.root().to_path_buf(), person.to_owned());
+        let generation = uuid::Uuid::new_v4();
+        state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                key.clone(),
+                Pending {
+                    generation,
+                    image: None,
+                },
+            );
+        let result = (|| {
+            let profile = self
+                .get_av_performer_profile(person)?
+                .filter(|p| p.status == "matched")
+                .ok_or(AvError::Invalid)?;
+            let image = profile
+                .images
+                .into_iter()
+                .find(|i| i.id == image_id)
+                .ok_or(AvError::Invalid)?;
+            let url = url::Url::parse(&image.url).map_err(|_| AvError::Image)?;
+            // StashDB serves its uploaded images itself. Do not turn metadata into arbitrary HTTP access.
+            if url.scheme() != "https"
+                || url.host_str() != Some("stashdb.org")
+                || url.port().is_some()
+                || !url.username().is_empty()
+                || url.password().is_some()
+            {
+                return Err(AvError::Image);
+            }
+            const LIMIT: usize = 15 * 1024 * 1024;
+            // No connection or state guard is live during this unauthenticated download.
+            let response = http
+                .get(url.as_str(), None, LIMIT)
+                .map_err(|_| AvError::Image)?;
+            if response.status != 200 || response.bytes.is_empty() || response.bytes.len() > LIMIT {
+                return Err(AvError::Image);
+            }
+            let format = image::guess_format(&response.bytes).map_err(|_| AvError::Image)?;
+            if !matches!(
+                format,
+                image::ImageFormat::Jpeg | image::ImageFormat::Png | image::ImageFormat::WebP
+            ) {
+                return Err(AvError::Image);
+            }
+            let (w, h) = image::ImageReader::with_format(Cursor::new(&response.bytes), format)
+                .into_dimensions()
+                .map_err(|_| AvError::Image)?;
+            if w == 0 || h == 0 || u64::from(w) * u64::from(h) > 32_000_000 {
+                return Err(AvError::Image);
+            }
+            let decoded = image::load_from_memory_with_format(&response.bytes, format)
+                .map_err(|_| AvError::Image)?;
+            let resized = if w > 1600 || h > 1600 {
+                decoded.resize(1600, 1600, image::imageops::FilterType::Lanczos3)
+            } else {
+                decoded
+            };
+            let rgb = resized.to_rgb8();
+            let mut bytes = Vec::new();
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 88)
+                .encode_image(&rgb)
+                .map_err(|_| AvError::Image)?;
+            let preview = AvStashdbPreview {
+                data_url: data_url("image/jpeg", &bytes),
+                width: rgb.width(),
+                height: rgb.height(),
+                source_url: image.url,
+            };
+            Ok(StashdbImage {
+                preview,
+                bytes,
+                image_id: image_id.into(),
+            })
+        })();
+        let mut pending = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pending.get(&key).is_none_or(|p| p.generation != generation) {
+            return Err(AvError::Stale);
+        }
+        match result {
+            Ok(image) => {
+                let preview = image.preview.clone();
+                pending.get_mut(&key).unwrap().image = Some(PendingImage::Stashdb(image));
+                Ok(preview)
+            }
+            Err(error) => {
+                pending.remove(&key);
+                Err(error)
+            }
+        }
+    }
+    pub(crate) fn use_av_stashdb_portrait(
+        &self,
+        person: &str,
+        state: &AvPortraitState,
+    ) -> Result<AvPortrait, AvError> {
+        let mut pending = state
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let key = (self.root().to_path_buf(), person.to_owned());
+        let Some(PendingImage::Stashdb(image)) = pending.get(&key).and_then(|p| p.image.as_ref())
+        else {
+            return Err(AvError::Invalid);
+        };
+        let profile = self
+            .get_av_performer_profile(person)?
+            .ok_or(AvError::Stale)?;
+        if profile.status != "matched"
+            || !profile
+                .images
+                .iter()
+                .any(|i| i.id == image.image_id && i.url == image.preview.source_url)
+        {
+            return Err(AvError::Stale);
+        }
+        let mut c = self.connection()?;
+        let tx = c.transaction()?;
+        require_person(&tx, person)?;
+        tx.execute(
+            "DELETE FROM collection_person_portraits WHERE person_id=?1",
+            [person],
+        )?;
+        tx.execute("INSERT INTO collection_person_portraits(person_id,kind,image_bytes,mime,width,height,file_name,source_url,updated_at) VALUES(?1,'stashdb',?2,'image/jpeg',?3,?4,?5,?6,?7)", params![person,image.bytes,image.preview.width,image.preview.height,image.image_id,image.preview.source_url,chrono::Utc::now().to_rfc3339()])?;
+        let result = AvPortrait::Stashdb {
+            preview: image.preview.clone(),
+        };
+        tx.commit()?;
+        pending.remove(&key);
+        Ok(result)
+    }
+}
+
 fn fetch_json(http: &impl HttpClient, url: &str) -> Result<Value, AvError> {
     let response = http.get(url, None, MAX_JSON_BYTES)?;
     if response.status != 200 || response.bytes.len() > MAX_JSON_BYTES {

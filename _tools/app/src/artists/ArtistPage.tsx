@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { AssetViewer } from "../assets/AssetViewer";
+import { thumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { AssetSummary, AssetView } from "../library/types";
@@ -7,14 +8,16 @@ import { displayDate } from "../shared/displayDate";
 import { Button } from "../shared/ui/Button";
 import { Toggle } from "../shared/ui/Toggle";
 import { artistHandle, ArtistThumb, ThumbStrip } from "./ArtistHub";
-import { MagnifyingGlassIcon, MergeIcon, PencilIcon, PinIcon, PlayIcon, XMarkIcon } from "./artistIcons";
-import { invalidateArtists, localDateAndOffset, useArtistGateway, useArtistOverview, useArtistRead } from "./artistStore";
-import { UNKNOWN_NONE, UNKNOWN_SOURCE, isUnknownArtist, type ArtistDetail } from "./types";
+import { CheckIcon, MagnifyingGlassIcon, MergeIcon, PencilIcon, PinIcon, PlayIcon, SparklesIcon, XMarkIcon } from "./artistIcons";
+import { invalidateArtists, localDateAndOffset, useArtistGateway, useArtistOverview, useArtistRead, useArtistRevision } from "./artistStore";
+import { UNKNOWN_NONE, UNKNOWN_SOURCE, isUnknownArtist, type ArtistDetail, type ArtistStyleGroup, type ArtistStylePage, type ArtistStyleStatus } from "./types";
 import "./artists.css";
 
 type Navigate = (view: AssetView) => void;
 const formatCount = (value: number) => value.toLocaleString("ko-KR");
 const SITE_LABEL: Record<string, string> = { "x.com": "x", pixiv: "Pixiv", manual: "지정", "arca.live": "arca", dcinside: "dc" };
+const STYLE_PAGE_SIZE = 5;
+const REPOSTER_EXPLANATION = "공식 이미지·스크린샷·스틸컷을 다시 올리는 계정입니다. 켜면 '닮은 작가' 추천 대상에서 빠지고, 작가 목록에서는 '정리' › '퍼온 계정'으로 모입니다. 이미 붙은 이미지는 그대로 둡니다.";
 
 export type ArtistScopeChrome = { title: string; accessory: ReactNode; intro: ReactNode; panel: ReactNode };
 
@@ -39,6 +42,7 @@ export function useArtistScopeChrome(view: AssetView, { onNavigate, onPlay, priv
   if (!artistId) {
     const chip = (target: string, label: string, count: number | undefined) => <button type="button" className="artist-filter" aria-pressed={id === target}
       onClick={() => navigate({ kind: "creator", creatorKey: target })}>{label}{count !== undefined && <> <span>{formatCount(count)}</span></>}</button>;
+    const suggestionsOnly = view.kind === "creator" && view.styleSuggestionsOnly === true;
     return {
       title: "작가 미상",
       accessory: null,
@@ -46,8 +50,13 @@ export function useArtistScopeChrome(view: AssetView, { onNavigate, onPlay, priv
         <div className="artist-others__filters" role="group" aria-label="작가 미상 거르기">
           {chip(UNKNOWN_NONE, "출처 없음", overview?.unknownNone)}
           {chip(UNKNOWN_SOURCE, "출처만 있음", overview?.unknownSource)}
+          {overview?.styleSuggestionCount ? <button type="button" className="artist-filter" aria-pressed={suggestionsOnly}
+            onClick={() => navigate({ kind: "creator", creatorKey: id, ...(suggestionsOnly ? {} : { styleSuggestionsOnly: true }) })}>
+            추천 있음 <span>{formatCount(overview.styleSuggestionCount)}</span>
+          </button> : null}
         </div>
         <p className="artist-muted">{id === UNKNOWN_NONE ? "작가도 출처도 없는 이미지" : "출처 주소는 있지만 작가가 없는 이미지"} · 골라서 작가 지정으로 붙일 수 있어요. 원본 파일과 출처 정보는 바뀌지 않습니다.</p>
+        <UnknownStyleSuggestions privacyMode={privacyMode} onNavigate={navigate} />
       </div>,
       panel: null,
     };
@@ -64,6 +73,7 @@ export function useArtistScopeChrome(view: AssetView, { onNavigate, onPlay, priv
   return {
     title: summary?.label ?? (error ? "작가" : "…"),
     accessory: summary ? <>
+      {summary.reposter && <span className="artist-badge artist-badge--reposter">퍼온 계정</span>}
       <span className="artist-page__subtitle">{[otherNames[0], otherNames.length > 1 ? `외 ${otherNames.length - 1}` : null].filter(Boolean).join(" ")}{otherNames.length ? " · " : ""}{formatCount(summary.assetCount)}장</span>
       <Button size="icon" variant={summary.pinned ? "secondary" : "ghost"} aria-label={summary.pinned ? "고정 해제" : "고정"} aria-pressed={summary.pinned} onClick={() => void togglePin()}><PinIcon aria-hidden="true" /></Button>
       <Button size="icon" variant={editOpen ? "secondary" : "ghost"} aria-label="작가 편집" aria-expanded={editOpen} onClick={() => setEditOpen((open) => !open)}><PencilIcon aria-hidden="true" /></Button>
@@ -72,6 +82,140 @@ export function useArtistScopeChrome(view: AssetView, { onNavigate, onPlay, priv
     intro: detail ? <ArtistIntro detail={detail} privacyMode={privacyMode} /> : error ? <p role="alert" className="artist-error artist-intro">{commandErrorMessage(error, "작가를 불러오지 못했습니다.")}</p> : null,
     panel: detail && editOpen ? <ArtistEditPanel key={detail.summary.id} detail={detail} privacyMode={privacyMode} onClose={() => setEditOpen(false)} onNavigate={navigate} /> : null,
   };
+}
+
+function useArtistStyleSuggestionPages() {
+  const gateway = useArtistGateway();
+  const revision = useArtistRevision();
+  const [page, setPage] = useState<ArtistStylePage | null>(null);
+  const [status, setStatus] = useState<ArtistStyleStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [moreLoading, setMoreLoading] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  useEffect(() => {
+    if (!gateway) { setPage(null); setStatus(null); setLoading(false); return; }
+    let active = true;
+    let timer: number | undefined;
+    // The list answers from the last ranking right away; while that ranking is behind the
+    // library (e.g. just after assigning images) it re-ranks in the background, so poll quietly.
+    const load = async (quiet = false) => {
+      if (!quiet) setLoading(true);
+      try {
+        const [nextStatus, nextPage] = await Promise.all([gateway.styleStatus(), gateway.styleSuggestions(0, STYLE_PAGE_SIZE)]);
+        if (!active) return;
+        setStatus(nextStatus);
+        setPage(nextPage);
+        setError(null);
+        if (nextStatus.computing || nextPage.upToDate === false) timer = window.setTimeout(() => { void load(true); }, 1500);
+      } catch (cause) {
+        if (active) setError(cause);
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      active = false;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [gateway, revision]);
+
+  const loadMore = async () => {
+    if (!gateway || !page || moreLoading || page.groups.length >= page.totalArtists) return;
+    setMoreLoading(true);
+    try {
+      const next = await gateway.styleSuggestions(page.groups.length, STYLE_PAGE_SIZE);
+      setPage((current) => current ? { ...current, groups: [...current.groups, ...next.groups], totalImages: next.totalImages, totalArtists: next.totalArtists } : next);
+      setError(null);
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setMoreLoading(false);
+    }
+  };
+  return { page, status, loading, moreLoading, error, loadMore };
+}
+
+export function UnknownStyleSuggestions({ privacyMode, onNavigate }: { privacyMode: boolean; onNavigate: Navigate }) {
+  const { gateway } = useLibrary();
+  const { page, status, loading, moreLoading, error, loadMore } = useArtistStyleSuggestionPages();
+  const [viewer, setViewer] = useState<{ items: AssetSummary[]; activeId: string } | null>(null);
+  const groups = page?.groups ?? [];
+  if (!loading && !status?.computing && groups.length === 0 && !error) return null;
+  const open = (assetIds: string[]) => (assetId: string) => {
+    const unique = [...new Set(assetIds)];
+    void Promise.all(unique.map((id) => gateway.getAsset(id))).then((items) => setViewer({ items, activeId: assetId }), () => undefined);
+  };
+  const remaining = Math.max(0, (page?.totalArtists ?? 0) - groups.length);
+  return <details className="artist-style-suggestions" open>
+    <summary className="artist-style-suggestions__summary">
+      <span className="workspace-section-label"><SparklesIcon aria-hidden="true" />닮은 작가 추천</span>
+      {page && <span className="artist-style-suggestions__count">{formatCount(page.totalImages)}장 · {formatCount(page.totalArtists)}명</span>}
+    </summary>
+    <div className="artist-style-suggestions__body">
+      {((loading && !page) || (status?.computing && groups.length === 0)) && <p className="artist-muted artist-style-suggestions__status" role="status">{status?.computing ? "라이브러리 변경 뒤 닮은 작가를 계산하는 중입니다…" : "닮은 작가 추천을 불러오는 중입니다…"}</p>}
+      {Boolean(error) && <p className="artist-error artist-style-suggestions__status" role="alert">추천을 불러오지 못했습니다.</p>}
+      {groups.map((group) => <ArtistStyleSuggestionRow key={group.artist.id} group={group} privacyMode={privacyMode} onNavigate={onNavigate} onOpen={open} />)}
+      {remaining > 0 && <div className="artist-style-suggestions__more"><Button variant="ghost" disabled={moreLoading} onClick={() => void loadMore()}>작가 {STYLE_PAGE_SIZE}명 더 보기 · 남은 {formatCount(remaining)}명</Button></div>}
+    </div>
+    {viewer && <AssetViewer items={viewer.items} activeId={viewer.activeId} onActiveIdChange={(activeId) => setViewer((current) => current && { ...current, activeId })}
+      onClose={() => setViewer(null)} onAssetOpened={(asset) => gateway.recordAssetOpened(asset.id, new Date().toISOString())} privacyMode={privacyMode} />}
+  </details>;
+}
+
+function ArtistStyleSuggestionRow({ group, privacyMode, onNavigate, onOpen }: { group: ArtistStyleGroup; privacyMode: boolean; onNavigate: Navigate; onOpen: (assetIds: string[]) => (assetId: string) => void }) {
+  const gateway = useArtistGateway();
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => group.candidates.map((candidate) => candidate.assetId));
+  const [pending, setPending] = useState<"assign" | "dismiss" | "reposter" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const candidateKey = group.candidates.map((candidate) => candidate.assetId).join(",");
+  useEffect(() => { setSelectedIds(group.candidates.map((candidate) => candidate.assetId)); }, [candidateKey]);
+  const run = async (action: () => Promise<unknown>, kind: "assign" | "dismiss" | "reposter", requiresSelection = true) => {
+    if (!gateway || (requiresSelection && selectedIds.length === 0)) return;
+    setPending(kind); setError(null);
+    try {
+      await action();
+      invalidateArtists();
+    } catch (cause) {
+      setError(commandErrorMessage(cause, "추천을 처리하지 못했습니다."));
+    } finally {
+      setPending(null);
+    }
+  };
+  const setSelected = (assetId: string, checked: boolean) => setSelectedIds((current) => checked ? [...current, assetId] : current.filter((id) => id !== assetId));
+  const candidateIds = group.candidates.map((candidate) => candidate.assetId);
+  const setArtist = () => run(() => gateway!.assignAssets(selectedIds, { artistId: group.artist.id }), "assign");
+  const dismiss = () => run(() => gateway!.dismissStyleSuggestion(selectedIds, group.artist.id), "dismiss");
+  const reposter = () => {
+    if (!gateway || !window.confirm(`${group.artist.label}을 퍼온 계정으로 표시할까요? 이 계정의 모든 추천 대상에 영향을 줍니다.`)) return;
+    return run(() => gateway.setFlags(group.artist.id, { reposter: true }), "reposter", false);
+  };
+  return <article className="artist-style-row" aria-label={`${group.artist.label} 닮은 작가 추천`}>
+    <div className="artist-style-row__artist">
+      <button type="button" className="artist-style-row__artist-button" onClick={() => onNavigate({ kind: "creator", creatorKey: group.artist.id })}>
+        <ArtistThumb assetId={group.artist.coverAssetIds[0]} privacyMode={privacyMode} className="artist-thumb artist-thumb--medium" />
+        <span className="artist-style-row__artist-copy"><strong className="artist-name">{group.artist.label}</strong><small>라이브러리 {formatCount(group.artist.assetCount)}장 · 추천 {formatCount(group.candidates.length)}장</small></span>
+      </button>
+      <ThumbStrip assetIds={group.referenceAssetIds.slice(0, 4)} privacyMode={privacyMode} label={`${group.artist.label} 참고 이미지`} />
+    </div>
+    <div className="artist-style-row__candidates">
+      {group.candidates.map((candidate) => <div className="artist-style-candidate" key={candidate.assetId}>
+        <input type="checkbox" checked={selectedIds.includes(candidate.assetId)} aria-label={`${group.artist.label} ${candidate.score.toFixed(2)} 이미지 지정`} onChange={(event) => setSelected(candidate.assetId, event.target.checked)} />
+        <button type="button" className="artist-style-candidate__open" aria-label={`${group.artist.label} ${candidate.score.toFixed(2)} 이미지 열기`} onClick={() => onOpen(candidateIds)(candidate.assetId)}>
+          <span className="artist-style-candidate__media">{!privacyMode && <img src={thumbnailUrl(candidate.assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}</span>
+          <span className="artist-style-candidate__score">{candidate.score.toFixed(2)}</span>
+        </button>
+      </div>)}
+      {group.candidates.length === 0 && <span className="artist-muted">추천 이미지가 없습니다.</span>}
+    </div>
+    <div className="artist-style-row__actions">
+      <Button variant="primary" disabled={pending !== null || selectedIds.length === 0} onClick={() => void setArtist()}><CheckIcon aria-hidden="true" />선택한 이미지 지정 {formatCount(selectedIds.length)}</Button>
+      <Button disabled={pending !== null || selectedIds.length === 0} onClick={() => void dismiss()}><XMarkIcon aria-hidden="true" />이 작가 아님</Button>
+      <Button variant="ghost" disabled={pending !== null} onClick={() => void reposter()}><span aria-hidden="true">⊘</span>퍼온 계정으로 표시</Button>
+    </div>
+    {error && <p className="artist-error" role="alert">{error}</p>}
+  </article>;
 }
 
 function ArtistIntro({ detail, privacyMode }: { detail: ArtistDetail; privacyMode: boolean }) {
@@ -122,6 +266,7 @@ export function ArtistEditPanel({ detail, privacyMode, onClose, onNavigate }: { 
   const [name, setName] = useState(summary.displayName ?? "");
   const [pinned, setPinned] = useState(summary.pinned);
   const [hidden, setHidden] = useState(summary.hidden);
+  const [reposter, setReposter] = useState(summary.reposter);
   const [search, setSearch] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -143,7 +288,11 @@ export function ArtistEditPanel({ detail, privacyMode, onClose, onNavigate }: { 
     let id = summary.id;
     const nextName = name.trim() || null;
     if (nextName !== summary.displayName) id = await gateway.setDisplayName(id, nextName);
-    if (pinned !== summary.pinned || hidden !== summary.hidden) id = await gateway.setFlags(id, { pinned, hidden });
+    if (pinned !== summary.pinned || hidden !== summary.hidden || reposter !== summary.reposter) id = await gateway.setFlags(id, {
+      ...(pinned !== summary.pinned ? { pinned } : {}),
+      ...(hidden !== summary.hidden ? { hidden } : {}),
+      ...(reposter !== summary.reposter ? { reposter } : {}),
+    });
     return id;
   }, true);
   const explicit = summary.id.startsWith("artist:");
@@ -199,6 +348,10 @@ export function ArtistEditPanel({ detail, privacyMode, onClose, onNavigate }: { 
       <div className="artist-edit__flags">
         <Toggle checked={pinned} onChange={(event) => setPinned(event.target.checked)}>고정</Toggle>
         <Toggle checked={hidden} onChange={(event) => setHidden(event.target.checked)}>숨기기</Toggle>
+      </div>
+      <div className="artist-edit__reposter">
+        <Toggle checked={reposter} onChange={(event) => setReposter(event.target.checked)}>퍼온 계정 — 작가가 아님</Toggle>
+        <p className="artist-muted">{REPOSTER_EXPLANATION}</p>
       </div>
       {error && <p role="alert" className="artist-error">{error}</p>}
     </div>

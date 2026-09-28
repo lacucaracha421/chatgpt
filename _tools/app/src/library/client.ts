@@ -190,6 +190,11 @@ export const libraryGateway: LibraryGateway = {
   recordCollectionOpened: (collectionId, openedAt) => invoke("record_collection_opened", { collectionId, openedAt }),
   artists: {
     overview: () => invoke("get_artist_overview"),
+    styleSuggestions: (offset, limit) => invoke("list_artist_style_suggestions", { offset, limit }),
+    styleSuggestion: (assetId) => invoke("artist_style_suggestion", { assetId }),
+    dismissStyleSuggestion: (assetIds, artistId) => invoke("dismiss_artist_style_suggestion", { assetIds, artistId }),
+    importStyleFeatures: (path) => invoke("import_artist_style_features", { path }),
+    styleStatus: () => invoke("artist_style_status"),
     list: (query) => invoke("list_artists", { query }),
     detail: (artistId, localDate, offsetMinutes) => invoke("get_artist", { artistId, localDate, offsetMinutes }),
     today: (localDate, offsetMinutes, seed, excluded) => invoke("get_artist_today", { localDate, offsetMinutes, seed, excluded }),
@@ -198,7 +203,7 @@ export const libraryGateway: LibraryGateway = {
     applySourceFill: () => invoke("apply_artist_source_fill"),
     captionLabels: () => invoke("get_artist_caption_labels"),
     setDisplayName: (artistId, displayName) => invoke("set_artist_display_name", { artistId, displayName }),
-    setFlags: (artistId, flags) => invoke("set_artist_flags", { artistId, pinned: flags.pinned ?? null, hidden: flags.hidden ?? null }),
+    setFlags: (artistId, flags) => invoke("set_artist_flags", { artistId, pinned: flags.pinned ?? null, hidden: flags.hidden ?? null, reposter: flags.reposter ?? null }),
     merge: (targetId, sourceIds, displayName) => invoke("merge_artists", { targetId, sourceIds, displayName }),
     detachMember: (artistId, creatorKey) => invoke("detach_artist_member", { artistId, creatorKey }),
     detachAssignments: (artistId, source) => invoke("detach_artist_assignments", { artistId, source }),
@@ -207,6 +212,8 @@ export const libraryGateway: LibraryGateway = {
       ? { assetIds, artistId: target.artistId, newName: null }
       : { assetIds, artistId: null, newName: target.newName }),
     setSettings: (settings) => invoke("set_artist_settings", { settings }),
+    listExcludedFolders: () => invoke("list_artist_excluded_folders"),
+    setExcludedFolders: (ids) => invoke("set_artist_excluded_folders", { ids }),
   },
   autoTags: {
     assetTags: (assetId) => invoke("get_asset_auto_tags", { assetId }),
@@ -485,6 +492,9 @@ export const libraryGateway: LibraryGateway = {
     invoke<IgdbConnection | null>("get_igdb_connection", { collectionId }),
   replaceIgdbGameArtwork: (request: IgdbArtworkReplaceRequest) =>
     invoke<CollectionSummary>("replace_igdb_game_artwork", { request }),
+  getStashdbCredentialStatus: () => invoke<{ configured: boolean }>("get_stashdb_credential_status"),
+  setStashdbCredentials: (apiKey) => invoke<{ configured: boolean }>("set_stashdb_credentials", { apiKey }),
+  deleteStashdbCredentials: () => invoke<{ configured: boolean }>("delete_stashdb_credentials"),
   getTmdbCredentialStatus: () =>
     invoke<TmdbCredentialStatus>("get_tmdb_credential_status"),
   setTmdbToken: (token) =>
@@ -536,6 +546,8 @@ export const libraryGateway: LibraryGateway = {
     invoke<CollectionSummary>("set_collection_cover", { collectionId, assetId }),
   setCollectionShowcase: (collectionId, showcase) =>
     invoke<CollectionSummary>("set_collection_showcase", { collectionId, showcase }),
+  setCollectionVolumeRange: (collectionId, input) =>
+    invoke<CollectionSummary>("set_collection_volume_range", { collectionId, ...input }),
   getAssetCollections: (assetId) =>
     invoke<string[]>("get_asset_collections", { assetId }),
   patchAssetCollections: (patch: AssetCollectionPatch) =>

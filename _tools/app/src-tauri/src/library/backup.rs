@@ -137,11 +137,11 @@ impl Library {
         }
         let connection = self.connection()?;
         create_verified_snapshot_released(connection, destination)?;
-        // Portraits are PC-only, including in full cloud recovery snapshots. Secure
+        // Profiles and portraits are PC-only, including in cloud recovery snapshots. Secure
         // deletion also removes BLOB payloads from free pages in the upload file.
         let snapshot = Connection::open(destination)?;
         snapshot.execute_batch(
-            "PRAGMA secure_delete=ON; DELETE FROM collection_person_portraits; VACUUM;",
+            "PRAGMA secure_delete=ON; DELETE FROM collection_person_portraits; DELETE FROM collection_person_profiles; VACUUM;",
         )?;
         drop(snapshot);
         verify_snapshot(destination)?;

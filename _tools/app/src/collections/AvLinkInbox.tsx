@@ -23,7 +23,7 @@ export function useAvLinkInbox({ enabled = true, poll = false, refreshKey = "", 
     if (!enabled) return;
     try {
       const next = await api.listInbox();
-      setItems(next);
+      setItems(Array.isArray(next) ? next : []);
       setError(null);
     } catch (reason) {
       setError(errorMessage(reason, "받은 품번을 불러오지 못했습니다."));

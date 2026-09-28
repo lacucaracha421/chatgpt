@@ -274,6 +274,33 @@ mod tests {
     }
 
     #[test]
+    fn creators_ignore_assets_in_excluded_artist_folders() {
+        let (_directory, library) = fixture();
+        {
+            let guard = library.connection().unwrap();
+            let connection: &Connection = &guard;
+            asset(connection, "kept", "normal");
+            asset(connection, "excluded", "normal");
+            connection
+                .execute(
+                    "INSERT INTO classification_entries(id,kind,name,parent_id,created_at) VALUES ('ai','root','ai',NULL,'2026-01-01')",
+                    [],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO asset_classifications(asset_id,classification_id) VALUES ('excluded','ai')",
+                    [],
+                )
+                .unwrap();
+        }
+        library.set_artist_excluded_folders(&["ai".into()]).unwrap();
+        let creators = library.get_library_statistics().unwrap().creators;
+        assert_eq!(creators.len(), 1);
+        assert_eq!((creators[0].label.as_str(), creators[0].count), ("Creator", 1));
+    }
+
+    #[test]
     fn collection_recording_validates_input_and_daily_rollups_ignore_exposure() {
         let (_directory, library) = fixture();
         {
