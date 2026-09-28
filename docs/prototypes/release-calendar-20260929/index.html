@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC 발매 캘린더 목업</title>
+<style>
+@font-face { font-family:"Pretendard Variable"; src:url("../../../_tools/app/src/styles/fonts/PretendardVariable.woff2") format("woff2-variations"); font-weight:45 920; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-toolbar:#191a1b; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-surface-hover:#2d2e2f; --color-surface-pressed:#343536;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-faint:#7d8184; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-selection-echo:rgba(221,216,202,.4); --color-section-mark:rgba(221,216,202,.6);
+  --section-label-rule:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06));
+  --color-filter-selected:#383838;
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-success:#7fb88a;
+  --type-title:20px; --type-body:15px; --type-meta:12px; --type-number:24px;
+  --font-ui:"Pretendard Variable","Pretendard","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.45 var(--font-ui); }
+h1,h2,h3,p { margin:0; }
+button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; text-align:left; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+svg.i { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+svg.i.s { width:16px; height:16px; } svg.i.f { fill:currentColor; stroke:none; }
+
+.doc { max-width:1540px; margin:0 auto; padding:32px 24px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1200px; margin:8px 0 0; line-height:1.7; }
+.lead b, .notes b { color:var(--color-text); font-weight:600; }
+section.topic { margin-top:48px; border-top:1px solid var(--color-border); padding-top:24px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; min-width:28px; height:28px; padding:0 6px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-ui); }
+.notes { color:var(--color-muted); max-width:1300px; line-height:1.7; margin:8px 0 16px; }
+.frame { width:1440px; height:900px; overflow:hidden; border:1px solid var(--color-border); }
+body.frame-only { background:var(--color-bg); } body.frame-only .doc { display:none; }
+#solo { display:none; } body.frame-only #solo { display:block; } body.frame-only .frame { border:0; }
+
+.pc { position:relative; width:1440px; height:900px; background:var(--color-bg); display:grid; grid-template-columns:64px 240px 1fr; overflow:hidden; }
+.rail { background:var(--color-sidebar); border-right:1px solid var(--color-border); display:flex; flex-direction:column; align-items:center; padding:12px 0; gap:4px; }
+.rail .logo { width:28px; height:28px; margin-bottom:12px; color:var(--color-muted); }
+.rail a { width:52px; height:52px; display:grid; place-items:center; align-content:center; gap:4px; color:var(--color-muted); font-size:11px; }
+.rail a.on { background:var(--color-accent); color:var(--color-on-accent); box-shadow:3px 3px 0 -1px var(--color-sidebar),3px 3px 0 0 var(--color-selection-echo); }
+.rail .sp { flex:1; }
+.index { background:var(--color-sidebar); border-right:1px solid var(--color-border); }
+.index-head { height:44px; display:flex; align-items:center; padding:0 16px; font-size:var(--type-meta); color:var(--color-faint); border-bottom:1px solid var(--color-border); }
+.index-body { padding:16px 8px; display:flex; flex-direction:column; gap:24px; }
+.ilabel { display:flex; align-items:center; gap:8px; height:20px; padding:0 8px; color:var(--color-faint); font-size:var(--type-meta); margin-bottom:4px; }
+.ilabel::before { content:""; width:5px; height:5px; background:var(--color-section-mark); }
+.ilabel::after { content:""; flex:1; height:1px; background:var(--section-label-rule); }
+.nav { width:100%; height:32px; display:flex; align-items:center; gap:8px; padding:0 8px; font-size:var(--type-body); color:var(--color-muted); position:relative; }
+.nav:hover { background:var(--color-surface-hover); color:var(--color-text); }
+.nav em { margin-left:auto; font-style:normal; font:500 14px var(--font-numeric); color:var(--color-faint); }
+.nav.on { background:var(--color-accent); color:var(--color-on-accent); font-weight:600; box-shadow:3px 3px 0 -1px var(--color-sidebar),3px 3px 0 0 var(--color-selection-echo); }
+.nav.on em { color:var(--color-on-accent); margin-right:12px; }
+.nav.on::after { content:""; position:absolute; right:8px; top:50%; width:5px; height:5px; margin-top:-2.5px; background:var(--color-on-accent); }
+.main { display:flex; flex-direction:column; min-width:0; min-height:0; }
+.toolbar { height:44px; flex:none; display:flex; align-items:center; gap:8px; padding:0 16px; border-bottom:1px solid var(--color-border); background:var(--color-toolbar); }
+.toolbar h1 { font-size:var(--type-title); font-weight:600; }
+.toolbar .sp { flex:1; } .toolbar .win { color:var(--color-faint); margin-left:16px; }
+.bar { height:44px; flex:none; display:flex; align-items:center; gap:8px; padding:0 16px; border-bottom:1px solid var(--color-border); }
+.bar .sp { flex:1; }
+.seg { display:inline-flex; border:1px solid var(--color-border); border-radius:4px; overflow:hidden; }
+.seg span { height:30px; display:inline-flex; align-items:center; gap:4px; padding:0 12px; font-size:var(--type-body); color:var(--color-muted); }
+.seg span + span { border-left:1px solid var(--color-border); }
+.seg span.on { background:var(--color-filter-selected); color:var(--color-text); font-weight:600; }
+.seg span em { font-style:normal; font:500 13px var(--font-numeric); color:var(--color-faint); }
+.quiet { height:28px; display:inline-flex; align-items:center; gap:4px; padding:0 8px; border-radius:4px; color:var(--color-muted); font-size:var(--type-body); }
+.quiet:hover { background:var(--color-surface-hover); color:var(--color-text); }
+.quiet.on { background:var(--color-filter-selected); color:var(--color-text); font-weight:600; }
+.quiet em { font-style:normal; font:500 14px var(--font-numeric); color:var(--color-faint); }
+.meta { font-size:var(--type-meta); color:var(--color-faint); }
+.new { height:20px; display:inline-flex; align-items:center; padding:0 8px; border-radius:2px; background:var(--color-accent); color:var(--color-on-accent); font-size:var(--type-meta); font-weight:600; }
+.body { flex:1; min-height:0; overflow:hidden; padding:16px 16px 32px; display:flex; flex-direction:column; gap:24px; }
+
+.label { display:flex; align-items:center; gap:8px; height:20px; color:var(--color-faint); font-size:var(--type-meta); margin-bottom:12px; }
+.label::before { content:""; width:5px; height:5px; background:var(--color-section-mark); flex:none; }
+.label b { font-weight:600; color:var(--color-muted); }
+.label .rule { flex:1; height:1px; background:var(--section-label-rule); }
+
+.art { position:relative; overflow:hidden; background:var(--c1); display:block; }
+.art::before { content:""; position:absolute; left:50%; top:26%; width:38%; aspect-ratio:1; border-radius:50%; background:var(--c2); transform:translateX(-50%); opacity:.85; }
+.art::after { content:""; position:absolute; left:18%; right:18%; bottom:-22%; height:52%; border-radius:50% 50% 0 0; background:var(--c3); opacity:.8; }
+.plat { display:flex; gap:4px; height:20px; }
+.plat i { width:20px; height:20px; border-radius:2px; background:var(--p); display:inline-grid; place-items:center; }
+.plat i::after { content:""; width:10px; height:10px; border:1.5px solid rgba(255,255,255,.85); border-radius:2px; }
+.mark { color:var(--color-faint); display:inline-grid; place-items:center; width:20px; height:20px; border-radius:2px; }
+.mark:hover { color:var(--color-text); background:var(--color-surface-hover); }
+.mark.on { color:var(--color-accent); }
+
+/* A: grid */
+.grid { display:grid; grid-template-columns:repeat(8, 1fr); gap:24px 16px; }
+.tile { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.tile .d { display:flex; align-items:center; gap:8px; }
+.tile .d b { font:500 15px var(--font-numeric); }
+.tile .d .dd { font:500 12px var(--font-numeric); color:var(--color-faint); }
+.tile .d .mark { margin-left:auto; }
+.tile .art { aspect-ratio:2/3; border-radius:2px; margin-top:4px; }
+.tile .art .new { position:absolute; left:8px; top:8px; z-index:1; }
+.tile .t { font-size:var(--type-body); margin-top:8px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.35; }
+.tile .ev { font-size:var(--type-meta); color:var(--color-text); display:flex; align-items:center; gap:8px; }
+.tile .ev button { color:var(--color-faint); } .tile .ev button:hover { color:var(--color-text); }
+
+/* B: timeline list */
+.cols { flex:1; min-height:0; display:grid; grid-template-columns:repeat(2, 1fr); gap:32px; }
+.week { display:flex; flex-direction:column; }
+.rowx { height:64px; display:grid; grid-template-columns:56px 40px 1fr auto 20px; align-items:center; gap:12px; border-bottom:1px solid var(--color-border); padding:0 8px; }
+.rowx:hover { background:var(--color-surface-hover); }
+.rowx .dt { display:flex; flex-direction:column; }
+.rowx .dt b { font:500 17px var(--font-numeric); line-height:1.1; }
+.rowx .dt small { font-size:var(--type-meta); color:var(--color-faint); }
+.rowx .art { width:40px; height:56px; border-radius:2px; }
+.rowx .t { min-width:0; display:flex; flex-direction:column; gap:4px; }
+.rowx .t b { font-weight:400; font-size:var(--type-body); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:8px; }
+.rowx .t small { font-size:var(--type-meta); color:var(--color-text); }
+.rowx .dd { font:500 13px var(--font-numeric); color:var(--color-faint); text-align:right; }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>PC 발매 캘린더 — 새 기준 적용 (2026-09-29)</h1>
+    <p class="lead">디자인 토대 순서의 세 번째 화면입니다. 공통: <b>설명 글 없음</b>(종류 글자 · “일본 방영” · 긴 빈 화면 안내 삭제), 상단 한 줄 = 종류 선택(전체 · 게임 · 영화 · 애니, 개수) + <b>관심</b> 버튼(누르면 관심 목록만, 새 소식이 있으면 NEW 개수) + 오른쪽 “갱신 03:12” · 새로 고침.
+    <b>관심 표시(책갈피)는 표지 밖</b> 날짜 줄 오른쪽으로(태블릿 요청과 같음, 켜지면 아이보리). 날짜 + D-day는 홈 선반과 같은 모양, 게임은 플랫폼 아이콘만. 날짜 바뀜 · 발매 같은 새 소식은 표지의 NEW와 제목 아래 한 줄 + 확인(✓). 월 이름은 섹션 표식 “10월 · 24”.</p>
+  </header>
+
+  <section class="topic">
+    <h2><span class="k">A</span>추천 — 지금처럼 표지 격자, 정돈만</h2>
+    <p class="notes">월별 표지 격자(한 줄 8개). 표지가 크게 보여 둘러보기 좋고, 지금 화면과 가장 가깝습니다.</p>
+    <div class="frame" data-frame="a"></div>
+  </section>
+
+  <section class="topic">
+    <h2><span class="k">B</span>대안 — 날짜 순 목록 (두 칸)</h2>
+    <p class="notes">한 줄 64px에 날짜 · 작은 표지 · 제목 · 플랫폼 · D-day · 책갈피. 한 화면에 두 달치가 들어가 날짜 훑기에 좋지만 표지는 작아집니다.</p>
+    <div class="frame" data-frame="b"></div>
+  </section>
+</div>
+<div id="solo"></div>
+<script>
+const ICON = {
+  logo:'<path d="M6 4v16M10 7v10M14 7v10M18 4v16"/>', home:'<path d="m3 11 9-7 9 7M5 10v10h14V10"/>',
+  photo:'<rect x="3" y="5" width="18" height="14" rx="1"/><path d="m3 16 5-5 5 5 3-3 5 5"/>', stack:'<path d="M4 9h16v10H4zM6 6h12M8 3h8"/>',
+  book:'<path d="M12 6c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V4c-3 0-6 .5-8 2zM12 6v14"/>', pencil:'<path d="m4 20 4-1 11-11-3-3L5 16l-1 4z"/>',
+  arrows:'<path d="M7 20V4M3 8l4-4 4 4M17 4v16M13 16l4 4 4-4"/>', search:'<circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/>', dots:'<path d="M5 12h.01M12 12h.01M19 12h.01"/>',
+  bm:'<path d="M7 4h10v16l-5-4-5 4z"/>', refresh:'<path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/>', check:'<path d="m5 12 4 4 10-10"/>',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24">${ICON[n]}</svg>`;
+const bm = (on) => `<button class="mark${on ? ' on' : ''}" aria-label="관심">${on ? `<svg class="i s f" viewBox="0 0 24 24">${ICON.bm}</svg>` : ic('bm','s')}</button>`;
+const PAL = [['#a79bcf','#4f4a78','#8e6fae'],['#cf9f98','#7a4b4d','#b39a82'],['#b6d6cf','#4f7a66','#5f9ea5'],['#d8a3a7','#7a4f5c','#a88a79'],['#d6c99c','#7a6650','#a6aa74'],
+  ['#c2d0a3','#6c6b4a','#88a86c'],['#aedcc0','#557f58','#5e9a86'],['#9fc7c1','#4f7f6f','#78a8b4'],['#dcbab4','#7f5058','#a0806a'],['#9d94c9','#56578a','#8067a3'],['#c99bd6','#634774','#a871a8'],['#a9b7d4','#4b5d74','#7b7cb4']];
+const art = (i, inner = '') => { const p = PAL[i % PAL.length]; return `<span class="art" style="--c1:${p[0]};--c2:${p[1]};--c3:${p[2]}">${inner}</span>`; };
+const P = { sw:'#e60012', ps:'#1f4fcf', xb:'#107c10', pc:'#2a475e' };
+const plat = (ks = []) => ks.length ? `<span class="plat">${ks.map((k) => `<i style="--p:${P[k]}"></i>`).join('')}</span>` : '';
+const OCT = [
+  ['10.1','수','D-2','Warhammer 40,000: Dawn of War IV',['pc'],true,null],['10.3','금','D-4','체인소 맨 레제편',[],false,null],['10.4','토','D-5','록맨 스타포스 컬렉션',['sw','ps','pc'],false,null],
+  ['10.8','수','D-9','던전밥 2기',[],true,'날짜 바뀜 10.15 → 10.8'],['10.10','금','D-11','Ninja Gaiden 4',['xb','pc'],false,null],['10.15','수','D-16','Castlevania Rondo',['pc','ps','sw','xb'],false,null],
+  ['10.17','금','D-18','귀멸의 칼날 무한성',[],false,null],['10.24','금','D-25','Ghost of Yōtei',['ps'],true,null],
+];
+const NOV = [['11.5','수','D-37','The Legend of Zelda',['sw'],true,null],['11.12','수','D-44','Metaphor: ReFantazio',['ps','xb','pc'],false,null],['11.14','금','D-46','주술회전 사멸회유',[],false,null],
+  ['11.20','목','D-52','Octopath Traveler 0',['sw','ps','pc'],false,null],['11.21','금','D-53','위키드: 포 굿',[],false,null],['11.27','목','D-59','Kirby Air Riders',['sw'],false,null],
+  ['11.28','금','D-60','주토피아 2',[],false,null],['11.30','일','D-62','스파이 패밀리 3기',[],false,null]];
+
+const rail = `<nav class="rail">${ic('logo','logo')}<a>${ic('home')}홈</a><a>${ic('photo')}에셋</a><a class="on">${ic('stack')}컬렉션</a><a>${ic('book')}망가</a><a>${ic('pencil')}메모</a><a>${ic('arrows')}전송</a><span class="sp"></span><a>${ic('search')}찾기</a><a>${ic('dots')}더보기</a></nav>`;
+const index = `<aside class="index"><div class="index-head">컬렉션</div><div class="index-body">
+  <div><div class="ilabel">작품 유형</div><button class="nav">게임</button><button class="nav">만화</button><button class="nav">영화</button><button class="nav">AV</button></div>
+  <div><div class="ilabel">소식</div><button class="nav">신간<em>2</em></button><button class="nav on">발매 캘린더<em>1</em></button></div>
+</div></aside>`;
+const bar = `<div class="bar"><span class="seg"><span class="on">전체 <em>64</em></span><span>게임 <em>31</em></span><span>영화 <em>14</em></span><span>애니 <em>19</em></span></span>
+  <button class="quiet">${ic('bm','s')}관심 <em>12</em></button><span class="new">NEW 1</span><span class="sp"></span>
+  <span class="meta">갱신 <span class="numeric">03:12</span></span><button class="quiet">${ic('refresh','s')}새로 고침</button></div>`;
+const shell = (body) => `<div class="pc">${rail}${index}<main class="main"><div class="toolbar"><h1>발매 캘린더</h1><span class="sp"></span><span class="win">— ▢ ✕</span></div>${bar}<div class="body">${body}</div></main></div>`;
+
+const tile = ([d, w, dd, t, pl, on, ev], i) => `<div class="tile"><span class="d"><b>${d}</b><span class="dd">${dd}</span>${bm(on)}</span>
+  ${art(i, ev ? '<span class="new">NEW</span>' : '')}<span class="t">${t}</span>${plat(pl)}
+  ${ev ? `<span class="ev">${ev}<button aria-label="확인">${ic('check','s')}</button></span>` : ''}</div>`;
+function frameA() {
+  return shell(`<section><div class="label"><b>10월</b><span class="numeric">24</span><span class="rule"></span></div><div class="grid">${OCT.map(tile).join('')}</div></section>
+    <section><div class="label"><b>11월</b><span class="numeric">18</span><span class="rule"></span></div><div class="grid">${NOV.map((r, i) => tile(r, i + 8)).join('')}</div></section>`);
+}
+const row = ([d, w, dd, t, pl, on, ev], i) => `<div class="rowx"><span class="dt"><b>${d}</b><small>${w}</small></span>${art(i)}
+  <span class="t"><b>${t}${ev ? '<span class="new">NEW</span>' : ''}</b>${ev ? `<small>${ev}</small>` : plat(pl)}</span><span class="dd">${dd}</span>${bm(on)}</div>`;
+function frameB() {
+  return shell(`<div class="cols"><section class="week"><div class="label"><b>10월</b><span class="numeric">24</span><span class="rule"></span></div>${OCT.map(row).join('')}</section>
+    <section class="week"><div class="label"><b>11월</b><span class="numeric">18</span><span class="rule"></span></div>${NOV.map((r, i) => row(r, i + 8)).join('')}</section></div>`);
+}
+const FRAMES = { a: frameA, b: frameB };
+document.querySelectorAll('[data-frame]').forEach((el) => { el.innerHTML = FRAMES[el.dataset.frame](); });
+const solo = new URLSearchParams(location.search).get('frame');
+if (solo && FRAMES[solo]) { document.body.classList.add('frame-only'); document.getElementById('solo').innerHTML = `<div class="frame">${FRAMES[solo]()}</div>`; }
+</script>
+</body>
+</html>
