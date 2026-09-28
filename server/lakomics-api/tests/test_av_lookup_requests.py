@@ -36,7 +36,8 @@ class AvLookupTests(unittest.TestCase):
         self.reader = {"Authorization": f"Bearer {reader}"}
         app = FastAPI()
         setup = av.register(app, api_app.get_db, api_app.require_admin_or_extension,
-                            api_auth.publisher_guard(api_app.get_db))
+                            api_auth.publisher_guard(api_app.get_db),
+                            api_auth.client_guard(api_app.get_db, api_app.API_TOKEN))
         setup()
         setup()  # Startup is idempotent.
         self.client = TestClient(app)
@@ -94,8 +95,12 @@ class AvLookupTests(unittest.TestCase):
     def test_auth_matches_capture_and_publisher_boundary(self):
         self.assertEqual(self.post().status_code, 200)
         self.assertEqual(self.post(headers=self.admin).status_code, 200)
-        for headers in ({}, self.reader, self.publisher):
-            self.assertEqual(self.post(headers=headers).status_code, 401)
+        tablet_body = self.body()
+        first = self.post(tablet_body, self.reader)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(self.post(tablet_body, self.reader).json(), first.json())
+        self.assertEqual(self.post(headers=self.publisher).status_code, 200)
+        self.assertEqual(self.post(headers={}).status_code, 401)
         for headers in ({}, self.auth, self.admin, self.reader):
             self.assertEqual(self.client.get("/v1/av-lookups", headers=headers).status_code, 401)
         self.assertEqual(self.get().status_code, 200)

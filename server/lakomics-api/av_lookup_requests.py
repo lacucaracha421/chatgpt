@@ -114,8 +114,19 @@ def insert(get_db, body):
         return {"requestId": body.requestId, "sequence": cursor.lastrowid, "receivedAt": now.isoformat()}
 
 
-def register(app, get_db, require_capture_client, require_publisher):
+def register(app, get_db, require_capture_client, require_publisher, require_client=None):
     limiter = RateLimiter()
+
+    def require_av_lookup_client(authorization):
+        try:
+            return require_capture_client(authorization)
+        except HTTPException as capture_failure:
+            if require_client is None:
+                raise
+            try:
+                return require_client(authorization)
+            except HTTPException:
+                raise capture_failure
 
     def setup():
         startup(get_db)
@@ -124,7 +135,7 @@ def register(app, get_db, require_capture_client, require_publisher):
 
     @app.post("/v1/av-lookups")
     async def create(request: Request, authorization: str | None = Header(default=None)):
-        principal = await run_in_threadpool(require_capture_client, authorization)
+        principal = await run_in_threadpool(require_av_lookup_client, authorization)
         limiter.check(principal)
         raw = bytearray()
         async for chunk in request.stream():

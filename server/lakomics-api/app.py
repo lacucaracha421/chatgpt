@@ -3374,7 +3374,7 @@ require_publisher = publisher_guard(get_db)
 import av_lookup_requests
 
 startup_av_lookup_requests = av_lookup_requests.register(
-    app, get_db, require_admin_or_extension, require_publisher)
+    app, get_db, require_admin_or_extension, require_publisher, require_client=require_client)
 
 startup_mobile_catalog = register_mobile_catalog(
     app, get_db, require_auth, lambda: DB_PATH.parent / "mobile-catalog", lambda: API_TOKEN,
