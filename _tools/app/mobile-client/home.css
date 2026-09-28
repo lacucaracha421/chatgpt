@@ -263,3 +263,27 @@
 .home-c .home-todo-cards { height:150px; }
 .home-c .home-revisit-pics { height:140px; }
 .home-c .home-asset-grid { height:172px; }
+
+/* 오늘의 AV 배우: face | name + covers (2026-09-28). */
+.home-c .home-av-split { display:grid; grid-template-columns:96px minmax(0,1fr); gap:12px; min-height:0; padding:10px; }
+.home-av-face { position:relative; display:flex; align-items:center; justify-content:center; height:100%; min-height:112px; overflow:hidden; border-radius:2px; background:var(--color-surface-elevated); }
+.home-av-face > .home-home-image, .home-av-face > .home-cover-placeholder { width:100%; height:100%; }
+/* A DVD jacket is back | spine | front: the performer is on the right half. */
+.home-av-face > .home-home-image { object-position:100% 25%; }
+.home-av-face b { font-size:22px; font-weight:500; }
+.home-av-side { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.home-av-side strong { overflow:hidden; font-size:17px; font-weight:600; white-space:nowrap; text-overflow:ellipsis; }
+.home-av-side em { overflow:hidden; color:var(--color-muted); font-size:11.5px; font-style:normal; white-space:nowrap; text-overflow:ellipsis; }
+.home-av-covers { display:flex; gap:6px; margin-top:auto; }
+.home-av-cover { display:block; width:auto; height:64px; aspect-ratio:1.42; overflow:hidden; border-radius:2px; background:var(--color-surface-elevated); }
+.home-av-cover > .home-home-image, .home-av-cover > .home-cover-placeholder { width:100%; height:100%; }
+
+/* The middle row gives up height; 신간 · 발매 예정 gets it back as breathing room. */
+.home-c .home-todo-cards { height:132px; }
+.home-c .home-todo-tile { padding:5px 11px; }
+.home-c .home-shelf-item { width:110px; }
+.home-c .home-shelf-art { height:134px; }
+.home-c .home-rail { margin-bottom:7px; }
+.home-c .home-shelf-title { margin-top:7px; }
+.home-c .home-shelf-sub { margin-top:4px; min-height:20px; }
+.home-c .home-shelf-sub .platform-badges { gap:4px; }

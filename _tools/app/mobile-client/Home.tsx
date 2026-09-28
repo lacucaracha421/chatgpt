@@ -111,9 +111,22 @@ function TodoTile({keyName, value, stale, onOpen}: {keyName: Exclude<TodoKey, 'c
 
 function AssetTile({value, title, unit, onOpen, label}: {value: string; title: string; unit: string; onOpen(): void; label: string}) { return <button className="home-asset-tile" onClick={onOpen} aria-label={label}><strong className="numeric">{value}<small>{unit}</small></strong><span>{title}</span></button>; }
 
+/**
+ * 오늘의 AV 배우 as two columns (2026-09-28): the performer's face on the left — cropped from the
+ * right half of the latest front cover, where the jacket shows her — and on the right the name
+ * with the owned covers under it. No work titles.
+ */
 function AvCard({pick, privacy}: {pick: NonNullable<ReturnType<typeof useHomeAvPick>>; privacy: boolean}) {
+  const cover = pick.latestWork?.cover ?? pick.cover ?? null;
   const initials = Array.from(pick.name.replace(/\s+/g, '')).slice(0, 2).join('') || 'AV';
-  return <article className="home-av-card"><div className="home-av-head"><span className="home-av-portrait"><b>{initials}</b></span><span><small>오늘의 AV 배우</small><strong>{pick.name}</strong><em>{pick.workCount ? `작품 ${count(pick.workCount)}개` : '최근 기록'}</em></span></div>{pick.latestWork && <div className="home-av-work"><span className="home-av-mini"><HomeCoverImage cover={pick.latestWork.cover ?? pick.cover} alt={pick.latestWork.title ?? pick.latestWork.code ?? '최근 작품'} privacy={privacy} /></span><span><small>최근 작품</small><strong>{pick.latestWork.title ?? pick.latestWork.label ?? pick.latestWork.code ?? '작품 정보 없음'}</strong><em>{[pick.latestWork.series, pick.latestWork.date].filter(Boolean).join(' · ')}</em></span></div>}</article>;
+  return <article className="home-av-card home-av-split">
+    <span className="home-av-face">{cover ? <HomeCoverImage cover={cover} alt={pick.name} privacy={privacy} /> : <b>{initials}</b>}</span>
+    <span className="home-av-side">
+      <strong>{pick.name}</strong>
+      {pick.aliases?.[0] && <em>{pick.aliases[0]}</em>}
+      {cover && <span className="home-av-covers"><span className="home-av-cover"><HomeCoverImage cover={cover} alt={pick.latestWork?.code ?? '최근 작품'} privacy={privacy} /></span></span>}
+    </span>
+  </article>;
 }
 
 function UpcomingDetailSheet({entry, interested, privacy, onToggle, onClose}: {entry: UpcomingHomeEntry; interested: boolean; privacy: boolean; onToggle(): void; onClose(): void}) {
