@@ -1,13 +1,14 @@
-import {BookmarkIcon as BookmarkOutlineIcon} from '@heroicons/react/24/outline';
-import {BookmarkIcon} from '@heroicons/react/24/solid';
+import {BookmarkIcon as BookmarkOutlineIcon, CalendarDaysIcon, CheckIcon} from '@heroicons/react/24/outline';
+import {BookmarkIcon as BookmarkSolidIcon} from '@heroicons/react/24/solid';
 import {useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {TopBar} from './TopBar';
+import {Badge, Button, SegmentedControl} from './ui';
 import {api, ApiError, errorText, native} from './transport';
 import {usePrivacyMode} from './privacyMode';
 import {commitUpcomingWishlist, flushUpcomingWishlist, readUpcomingWishlistIntents, reconcileUpcomingWishlist, visibleUpcomingWishlist} from './upcomingWishlistOutbox';
 import {PlatformBadges} from '../src/collections/PlatformBadges';
 import type {Ticket} from './types';
-import {detailLabel, filterReleaseEntries, groupReleaseEntries, kindLabel, normalizeReleaseCalendarReply, releaseDateLabel, visibleWishlistIds, wishlistIds, type KindFilter, type ReleaseCalendarEntry, type ReleaseCalendarReply} from './releaseCalendarModel';
+import {filterReleaseEntries, groupReleaseEntries, normalizeReleaseCalendarReply, releaseDateLabel, releaseDaysUntil, releaseEventLine, visibleWishlistIds, wishlistIds, type KindFilter, type ReleaseCalendarEntry, type ReleaseCalendarEvent, type ReleaseCalendarReply} from './releaseCalendarModel';
 import {Scrubber} from './Scrubber';
 import './releaseCalendar.css';
 
@@ -36,50 +37,54 @@ function HomeCoverImage({cover, alt, privacy}: {cover: ReleaseCalendarEntry['cov
   return url ? <img src={url} alt="" loading="lazy" decoding="async" draggable={false} /> : <span className="release-calendar-cover-placeholder" aria-label={`${alt} 표지 준비 중`} />;
 }
 function EmptyCalendar({wishlistOnly}: {wishlistOnly: boolean}) {
+  const Icon = wishlistOnly ? BookmarkOutlineIcon : CalendarDaysIcon;
   return <div className="release-calendar-empty" role="status">
-    <span className="release-calendar-empty-mark" aria-hidden="true">—</span>
-    <h2>{wishlistOnly ? '관심 목록이 비어 있습니다' : 'PC 앱이 발매 캘린더를 아직 보내지 않았습니다'}</h2>
-    <p>{wishlistOnly ? '캘린더에서 책갈피를 눌러 기다리는 작품을 모아 보세요.' : 'PC 앱에서 발매 캘린더를 게시하면 이곳에 표시됩니다.'}</p>
+    <Icon aria-hidden="true" />
+    <p>{wishlistOnly ? '관심 목록 비어 있음' : '6개월 안의 발매 정보 없음'}</p>
   </div>;
 }
 
-function ReleaseCard({entry, watched, pending, privacy, referenceYear, onToggle}: {entry: ReleaseCalendarEntry; watched: boolean; pending: boolean; privacy: boolean; referenceYear: number; onToggle(): void}) {
+function ReleaseCard({entry, watched, pending, privacy, referenceYear, acknowledging, onToggle, onAcknowledge}: {entry: ReleaseCalendarEntry; watched: boolean; pending: boolean; privacy: boolean; referenceYear: number; acknowledging: string | null; onToggle(): void; onAcknowledge(event: ReleaseCalendarEvent): void}) {
+  const days = releaseDaysUntil(entry.date);
   return <li className={`release-calendar-card${watched ? ' is-watched' : ''}${pending ? ' is-pending' : ''}`}>
-    <div className={`release-calendar-cover release-calendar-cover--${entry.kind}`}>
+    <div className="release-calendar-date-row">
+      <span className="release-calendar-date numeric">{releaseDateLabel(entry.date, entry.precision, referenceYear)}</span>
+      {days !== null && days > 0 && <span className="release-calendar-dday numeric">D-{days}</span>}
+      <Button type="button" size="icon" variant="quiet" className="release-calendar-watch" aria-pressed={watched} aria-busy={pending} disabled={pending} aria-label={watched ? `${entry.title} 관심 목록에서 빼기${pending ? ' · 동기화 대기' : ''}` : `${entry.title} 관심 목록에 추가${pending ? ' · 동기화 대기' : ''}`} onClick={onToggle}>
+        {watched ? <BookmarkSolidIcon aria-hidden="true" /> : <BookmarkOutlineIcon aria-hidden="true" />}
+      </Button>
+    </div>
+    <div className="release-calendar-cover">
       <HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} />
-      <button type="button" className="release-calendar-watch" aria-pressed={watched} aria-busy={pending} aria-label={watched ? `${entry.title} 관심 목록에서 빼기${pending ? ' · 동기화 대기' : ''}` : `${entry.title} 관심 목록에 추가${pending ? ' · 동기화 대기' : ''}`} onClick={onToggle}>
-        {watched ? <BookmarkIcon aria-hidden="true" /> : <BookmarkOutlineIcon aria-hidden="true" />}
-      </button>
+      {entry.unread.length > 0 && <Badge className="release-calendar-new-badge" variant="accent">NEW</Badge>}
     </div>
-    <div className="release-calendar-card-meta">
-      <strong>{entry.title}</strong>
-      {entry.originalTitle && entry.originalTitle !== entry.title && <span className="release-calendar-original">{entry.originalTitle}</span>}
-      <span className="release-calendar-date">{releaseDateLabel(entry.date, entry.precision, referenceYear)}</span>
-      {entry.kind === 'game' && entry.platforms.length > 0
-        ? <span className="release-calendar-detail"><PlatformBadges platforms={entry.platforms} port={entry.port} /></span>
-        : <span className="release-calendar-detail"><span className="release-calendar-kind">{kindLabel(entry.kind)}</span><span>{detailLabel(entry)}</span></span>}
-      {pending && <span className="release-calendar-pending" role="status">동기화 대기</span>}
-    </div>
+    <strong className="release-calendar-title">{entry.title}</strong>
+    {entry.kind === 'game' && entry.platforms.length > 0 && <PlatformBadges platforms={entry.platforms} port={entry.port} />}
+    {pending && <span className="release-calendar-pending" role="status">동기화 대기</span>}
+    {entry.unread.length > 0 && <div className="release-calendar-events">
+      {entry.unread.map(event => <div key={event.id} className="release-calendar-event">
+        <span>{releaseEventLine(event, referenceYear)}</span>
+        <Button type="button" size="icon" variant="quiet" className="release-calendar-confirm" disabled={acknowledging !== null} aria-busy={acknowledging === event.id} aria-label={`${entry.title} 알림 확인`} onClick={() => onAcknowledge(event)}><CheckIcon aria-hidden="true" /></Button>
+      </div>)}
+    </div>}
   </li>;
 }
 
-function CalendarBody({reply, kind, wishlistOnly, visibleIds, privacy, referenceYear, onToggle}: {reply: ReleaseCalendarReply; kind: KindFilter; wishlistOnly: boolean; visibleIds: Set<string>; privacy: boolean; referenceYear: number; onToggle(entry: ReleaseCalendarEntry): void}) {
+function CalendarBody({reply, kind, wishlistOnly, visibleIds, privacy, referenceYear, acknowledging, onToggle, onAcknowledge}: {reply: ReleaseCalendarReply; kind: KindFilter; wishlistOnly: boolean; visibleIds: Set<string>; privacy: boolean; referenceYear: number; acknowledging: string | null; onToggle(entry: ReleaseCalendarEntry): void; onAcknowledge(entry: ReleaseCalendarEntry, event: ReleaseCalendarEvent): void}) {
   const source = wishlistOnly ? reply.wishlist : reply.entries;
-  const entries = filterReleaseEntries(source, kind, wishlistOnly, visibleIds);
+  const wishlistById = new Map(reply.wishlist.map(entry => [entry.id, entry]));
+  const entries = filterReleaseEntries(source, kind, wishlistOnly, visibleIds).map(entry => ({...entry, unread: wishlistById.get(entry.id)?.unread ?? entry.unread}));
   const groups = groupReleaseEntries(entries);
   if (!entries.length) return <EmptyCalendar wishlistOnly={wishlistOnly} />;
   return <div className="release-calendar-groups">
     {groups.map(month => <section key={month.key} className="release-calendar-month" aria-label={month.label}>
       <div className="release-calendar-month-heading"><h2>{month.label}</h2><span className="numeric">{month.items.toLocaleString('ko-KR')}</span></div>
-      {month.days.map(day => <section key={day.key} className="release-calendar-day" aria-label={day.label}>
-        <h3>{day.label}</h3>
-        <ul className="release-calendar-card-grid">
-          {day.items.map(entry => {
-            const visible = visibleUpcomingWishlist(entry.id, visibleIds.has(entry.id));
-            return <ReleaseCard key={entry.id} entry={entry} watched={visible.value} pending={visible.pending} privacy={privacy} referenceYear={referenceYear} onToggle={() => onToggle(entry)} />;
-          })}
-        </ul>
-      </section>)}
+      <ul className="release-calendar-card-grid">
+        {month.days.flatMap(day => day.items).map(entry => {
+          const visible = visibleUpcomingWishlist(entry.id, visibleIds.has(entry.id));
+          return <ReleaseCard key={entry.id} entry={entry} watched={visible.value} pending={visible.pending} privacy={privacy} referenceYear={referenceYear} acknowledging={acknowledging} onToggle={() => onToggle(entry)} onAcknowledge={event => onAcknowledge(entry, event)} />;
+        })}
+      </ul>
     </section>)}
   </div>;
 }
@@ -87,18 +92,22 @@ function CalendarBody({reply, kind, wishlistOnly, visibleIds, privacy, reference
 export type ReleaseCalendarProps = {
   onClose: () => void;
   backRef?: MutableRefObject<(() => boolean) | null>;
+  initialKind?: Extract<KindFilter, 'game' | 'movie'>;
 };
 
-export function ReleaseCalendar({onClose, backRef}: ReleaseCalendarProps) {
+export function ReleaseCalendar({onClose, backRef, initialKind}: ReleaseCalendarProps) {
   const [privateMode] = usePrivacyMode();
   const [reply, setReply] = useState<ReleaseCalendarReply | null>(null);
   const [state, setState] = useState<ScreenState>('loading');
   const [error, setError] = useState('');
-  const [kind, setKind] = useState<KindFilter>('all');
+  const [kind, setKind] = useState<KindFilter>(initialKind ?? 'all');
   const [wishlistOnly, setWishlistOnly] = useState(false);
   const [tick, setTick] = useState(0);
   const [retry, setRetry] = useState(0);
+  const [acknowledging, setAcknowledging] = useState<string | null>(null);
   const referenceYear = new Date().getFullYear();
+
+  useEffect(() => { setKind(initialKind ?? 'all'); }, [initialKind]);
 
   useEffect(() => {
     if (!backRef) return;
@@ -146,20 +155,60 @@ export function ReleaseCalendar({onClose, backRef}: ReleaseCalendarProps) {
     void flushUpcomingWishlist(controller.signal).finally(() => controller.abort());
   }
 
+  async function acknowledge(entry: ReleaseCalendarEntry, event: ReleaseCalendarEvent) {
+    if (acknowledging) return;
+    setAcknowledging(event.id);
+    setError('');
+    const controller = new AbortController();
+    try {
+      await api('/v1/home/upcoming/wishlist', controller.signal, {
+        version: 1,
+        operationId: crypto.randomUUID(),
+        action: 'acknowledge',
+        itemId: entry.id,
+        eventIds: [event.id],
+      }, 'POST');
+      setReply(current => current ? {
+        ...current,
+        wishlist: current.wishlist.map(item => item.id === entry.id ? {...item, unread: item.unread.filter(candidate => candidate.id !== event.id)} : item),
+        entries: current.entries.map(item => item.id === entry.id ? {...item, unread: item.unread.filter(candidate => candidate.id !== event.id)} : item),
+      } : current);
+    } catch (reason) {
+      setError(errorText(reason) || '알림을 확인 처리하지 못했습니다.');
+    } finally {
+      controller.abort();
+      setAcknowledging(null);
+    }
+  }
+
+  const kindOptions = ([
+    {value: 'all', label: '전체'},
+    {value: 'game', label: '게임'},
+    {value: 'movie', label: '영화'},
+    {value: 'anime', label: '애니'},
+  ] as const);
+  const kindCounts = useMemo(() => {
+    const entries = reply?.entries ?? [];
+    return {all: entries.length, game: entries.filter(entry => entry.kind === 'game').length, movie: entries.filter(entry => entry.kind === 'movie').length, anime: entries.filter(entry => entry.kind === 'anime').length};
+  }, [reply]);
+  const unreadTotal = reply?.wishlist.reduce((sum, entry) => sum + entry.unread.length, 0) ?? 0;
+
   const header = <TopBar back={{label: '홈으로', onClick: onClose}} crumbs={<span className="top-bar__crumbs">홈 ›</span>} title="발매 캘린더" count={reply && reply.entries.length ? reply.entries.length.toLocaleString('ko-KR') : undefined} />;
   return <div className="release-calendar-screen">
     {header}
     <div className="release-calendar-controls">
-      <div className="release-calendar-segments" role="radiogroup" aria-label="종류">
-        {([['all', '전체'], ['game', '게임'], ['movie', '영화'], ['anime', '애니']] as const).map(([value, label]) => <button key={value} type="button" role="radio" aria-checked={kind === value} onClick={() => setKind(value)}>{label}</button>)}
+      <div className="release-calendar-segments-frame">
+        <SegmentedControl className="release-calendar-segments" label="종류" options={kindOptions} value={kind} onChange={setKind} />
+        <div className="release-calendar-segment-counts" aria-hidden="true">{kindOptions.map(option => <span key={option.value}>{kindCounts[option.value].toLocaleString('ko-KR')}</span>)}</div>
       </div>
-      <button type="button" className="release-calendar-interest" aria-pressed={wishlistOnly} onClick={() => setWishlistOnly(value => !value)}><BookmarkIcon aria-hidden="true" />관심 목록 <span className="numeric">{count.toLocaleString('ko-KR')}</span></button>
+      <Button type="button" size="sm" variant="quiet" className={`release-calendar-interest${wishlistOnly ? ' is-selected' : ''}`} aria-label={`관심 목록 ${count.toLocaleString('ko-KR')}`} aria-pressed={wishlistOnly} onClick={() => setWishlistOnly(value => !value)}><BookmarkOutlineIcon aria-hidden="true" />관심 <span className="numeric">{count.toLocaleString('ko-KR')}</span></Button>
+      {unreadTotal > 0 && <Badge variant="accent">NEW {unreadTotal.toLocaleString('ko-KR')}</Badge>}
     </div>
     {error && <div className="release-calendar-error" role="alert"><span>{error}</span><button type="button" onClick={() => setRetry(value => value + 1)}>다시 시도</button></div>}
     <main ref={scroller} className="release-calendar-scroll" aria-label="발매 캘린더 목록">
       {state === 'loading' && <div className="release-calendar-loading" role="status">발매 캘린더를 불러오는 중입니다</div>}
-      {state === 'empty' && <EmptyCalendar wishlistOnly={false} />}
-      {state === 'ready' && reply && <CalendarBody reply={reply} kind={kind} wishlistOnly={wishlistOnly} visibleIds={visibleIds} privacy={privateMode} referenceYear={referenceYear} onToggle={toggle} />}
+      {state === 'empty' && <EmptyCalendar wishlistOnly={wishlistOnly} />}
+      {state === 'ready' && reply && <CalendarBody reply={reply} kind={kind} wishlistOnly={wishlistOnly} visibleIds={visibleIds} privacy={privateMode} referenceYear={referenceYear} acknowledging={acknowledging} onToggle={toggle} onAcknowledge={acknowledge} />}
       <Scrubber scrollRef={scroller} total={calendarEntries.length} sort={scrubberSort} hidden={state!=='ready'} />
     </main>
   </div>;

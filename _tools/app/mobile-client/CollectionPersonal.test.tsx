@@ -171,7 +171,7 @@ it('does not show an edit the device could not store as queued',async()=>{
 });
 
 describe('artwork across a confirmed Showcase edit',()=>{
-  const artwork=()=>[...document.querySelectorAll<HTMLImageElement>('.collection-art img')];
+  const artwork=()=>[...document.querySelectorAll<HTMLImageElement>('.collection-grid:not(.collection-showcase) .collection-art img, .collection-detail .collection-art img')];
   const detailCalls=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/w');
   const artworkCalls=()=>mocks.native.mock.calls.filter(([op])=>op==='collectionArtwork');
   /** The list card loads before the detail opens (a hidden list does not load artwork). */

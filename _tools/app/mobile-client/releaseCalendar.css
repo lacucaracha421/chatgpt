@@ -1,54 +1,51 @@
 .release-calendar-screen { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; background:var(--color-bg); }
-.release-calendar-controls { display:flex; align-items:center; gap:10px; min-height:58px; padding:8px 16px; border-bottom:1px solid var(--color-border); overflow-x:auto; }
-.release-calendar-segments { display:flex; flex:none; overflow:hidden; border:1px solid var(--color-border); border-radius:3px; background:var(--color-surface); }
-.release-calendar-segments button, .release-calendar-interest { min-height:40px; border:0; background:transparent; color:var(--color-muted); font-size:13px; white-space:nowrap; }
-.release-calendar-segments button { min-width:54px; padding:0 12px; }
-.release-calendar-segments button + button { border-left:1px solid var(--color-border); }
-.release-calendar-segments button[aria-checked=true], .release-calendar-interest[aria-pressed=true] { background:var(--color-selected); color:var(--color-text); font-weight:600; }
-.release-calendar-segments button:active, .release-calendar-interest:active { background:var(--color-control-pressed); }
-.release-calendar-interest { display:inline-flex; align-items:center; gap:6px; flex:none; padding:0 11px; border:1px solid var(--color-border); border-radius:3px; }
-.release-calendar-interest svg { width:17px; height:17px; }
-.release-calendar-interest .numeric { color:inherit; }
-.release-calendar-error { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 16px; border-bottom:1px solid var(--color-border); color:var(--color-danger); font-size:12px; }
-.release-calendar-error button { min-height:36px; padding:0 10px; border:1px solid var(--color-border-strong); border-radius:3px; background:transparent; color:var(--color-text); font-size:12px; }
-.release-calendar-scroll { flex:1; min-height:0; overflow:auto; padding:0 16px 32px; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:var(--color-border) transparent; }
-.release-calendar-loading, .release-calendar-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:280px; padding:32px; text-align:center; }
-.release-calendar-loading { color:var(--color-muted); font-size:13px; }
-.release-calendar-empty { gap:10px; }
-.release-calendar-empty-mark { color:var(--color-accent); font:500 28px/1 var(--font-numeric); }
-.release-calendar-empty h2 { font-size:18px; font-weight:500; }
-.release-calendar-empty p { max-width:360px; color:var(--color-muted); font-size:13px; }
-.release-calendar-month { padding-top:16px; }
-.release-calendar-month-heading { display:flex; align-items:baseline; gap:8px; padding-bottom:7px; border-bottom:1px solid var(--color-border-strong); }
-.release-calendar-month-heading h2 { font-size:17px; font-weight:600; }
-.release-calendar-month-heading span { color:var(--color-muted); font-size:12px; }
-.release-calendar-day { padding-top:10px; }
-.release-calendar-day h3 { display:flex; align-items:center; gap:6px; margin-bottom:7px; color:var(--color-muted); font-size:12px; font-weight:500; }
-.release-calendar-day h3::before { content:''; width:5px; height:5px; flex:none; background:var(--color-accent); }
-.release-calendar-card-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; list-style:none; margin:0; padding:0; }
-.release-calendar-card { display:grid; grid-template-columns:88px minmax(0,1fr); gap:10px; min-width:0; min-height:132px; padding:6px; border:1px solid var(--color-border); border-radius:3px; background:var(--color-surface); }
-.release-calendar-card.is-pending { border-color:var(--color-accent); }
-.release-calendar-cover { position:relative; width:88px; height:120px; overflow:hidden; border-radius:2px; background:var(--color-surface-elevated); }
+.release-calendar-controls { display:flex; align-items:center; gap:var(--space-2); min-height:var(--control-height); padding:0 var(--space-6); border-bottom:1px solid var(--color-border); overflow-x:auto; }
+.release-calendar-segments-frame { position:relative; flex:none; }
+.release-calendar-segments .ui-segmented__cell { min-width:var(--space-8); padding-right:var(--space-8); }
+.release-calendar-segment-counts { position:absolute; inset:0; display:grid; grid-template-columns:repeat(4,1fr); pointer-events:none; }
+.release-calendar-segment-counts span { padding-right:var(--space-2); color:var(--color-faint); font:500 var(--type-meta) / 1 var(--font-numeric); text-align:right; }
+.release-calendar-interest.ui-button--quiet { flex:none; }
+.release-calendar-interest.is-selected { background:var(--color-filter-selected); color:var(--color-text); font-weight:600; }
+.release-calendar-interest .numeric { color:var(--color-faint); font:500 var(--type-meta) / 1 var(--font-numeric); }
+.release-calendar-interest.is-selected .numeric { color:inherit; }
+.release-calendar-error { display:flex; align-items:center; justify-content:space-between; gap:var(--space-3); padding:var(--space-2) var(--space-6); border-bottom:1px solid var(--color-border); color:var(--color-danger); font-size:var(--type-meta); }
+.release-calendar-error button { min-height:var(--control-height-compact); padding:0 var(--space-2); border:0; border-radius:var(--radius-control); background:transparent; color:var(--color-text); font-size:var(--type-meta); }
+.release-calendar-scroll { flex:1; min-height:0; overflow:auto; padding:0 var(--space-6) var(--space-8); overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:var(--color-border) transparent; }
+.release-calendar-loading, .release-calendar-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:280px; gap:var(--space-2); padding:var(--space-8) var(--space-6); color:var(--color-faint); text-align:center; }
+.release-calendar-loading { color:var(--color-muted); font-size:var(--type-meta); }
+.release-calendar-empty svg { width:32px; height:32px; }
+.release-calendar-empty p { color:var(--color-muted); font-size:var(--type-body); }
+.release-calendar-month { padding-top:var(--space-6); }
+.release-calendar-month-heading { display:flex; align-items:center; gap:var(--space-2); min-width:0; margin:0 0 var(--space-3); color:var(--color-muted); }
+.release-calendar-month-heading::before { content:''; width:5px; height:5px; flex:none; background:var(--color-section-mark,var(--color-accent)); }
+.release-calendar-month-heading h2 { color:var(--color-muted); font-size:var(--type-meta); font-weight:600; white-space:nowrap; }
+.release-calendar-month-heading span { color:var(--color-faint); font:500 var(--type-meta) / 1 var(--font-numeric); white-space:nowrap; }
+.release-calendar-month-heading::after { content:''; flex:1; height:1px; background:var(--section-label-rule,var(--color-border)); }
+.release-calendar-card-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:var(--space-6) var(--space-4); list-style:none; margin:0; padding:0; }
+.release-calendar-card { display:flex; flex-direction:column; min-width:0; gap:var(--space-1); }
+.release-calendar-card.is-pending { opacity:.82; }
+.release-calendar-date-row { display:flex; align-items:center; gap:var(--space-2); min-width:0; min-height:var(--touch-target); }
+.release-calendar-date { overflow:hidden; color:var(--color-text); font-size:var(--type-body); white-space:nowrap; text-overflow:ellipsis; }
+.release-calendar-dday { color:var(--color-faint); font-size:var(--type-meta); white-space:nowrap; }
+.release-calendar-watch.ui-button--icon { width:var(--touch-target); height:var(--touch-target); min-height:var(--touch-target); margin-left:auto; padding:0; border:0; border-radius:var(--radius-control); background:transparent; color:var(--color-faint); }
+.release-calendar-watch.ui-button--icon:hover:not(:disabled), .release-calendar-watch.ui-button--icon:active:not(:disabled) { background:var(--color-surface-pressed,var(--color-control-pressed)); color:var(--color-text); filter:none; }
+.release-calendar-watch.ui-button--icon[aria-pressed=true] { color:var(--color-accent); }
+.release-calendar-watch.ui-button--icon > svg { width:20px; height:20px; }
+.release-calendar-cover { position:relative; width:100%; aspect-ratio:2 / 3; overflow:hidden; border-radius:var(--radius-mark); background:var(--color-surface-elevated); }
 .release-calendar-cover img, .release-calendar-cover-placeholder { display:block; width:100%; height:100%; }
 .release-calendar-cover img { object-fit:cover; }
-.release-calendar-cover-placeholder { display:grid; place-items:center; background:var(--color-surface-elevated); color:var(--color-muted); font-size:11px; }
+.release-calendar-cover-placeholder { background:var(--color-surface-elevated); }
 .release-calendar-cover-placeholder.is-private { background:#17191b; }
-.release-calendar-watch { position:absolute; right:4px; bottom:4px; display:grid; place-items:center; width:40px; height:40px; padding:0; border:1px solid #1119; border-radius:3px; background:#111c; color:var(--color-text); }
-.release-calendar-watch[aria-pressed=true] { background:var(--color-accent); color:var(--color-on-accent); }
-.release-calendar-watch svg { width:19px; height:19px; }
-.release-calendar-card-meta { display:flex; flex-direction:column; align-items:flex-start; min-width:0; padding:3px 3px 3px 0; }
-.release-calendar-card-meta strong { display:-webkit-box; overflow:hidden; margin-bottom:3px; color:var(--color-text); font-size:14px; font-weight:600; line-height:1.35; -webkit-box-orient:vertical; -webkit-line-clamp:3; }
-.release-calendar-original { overflow:hidden; max-width:100%; color:var(--color-muted); font-size:11px; line-height:1.35; white-space:nowrap; text-overflow:ellipsis; }
-.release-calendar-date { margin-top:auto; color:var(--color-text); font-size:13px; font-variant-numeric:tabular-nums; }
-.release-calendar-detail { display:flex; align-items:center; gap:5px; max-width:100%; overflow:hidden; color:var(--color-muted); font-size:11px; white-space:nowrap; text-overflow:ellipsis; }
-.release-calendar-detail > span:last-child { overflow:hidden; text-overflow:ellipsis; }
-.release-calendar-kind { flex:none; padding:0 4px; border:1px solid var(--color-border-strong); border-radius:2px; line-height:1.5; }
-.release-calendar-pending { margin-top:4px; color:var(--color-accent); font-size:11px; }
-@media(max-width:560px) {
-  .release-calendar-card-grid { grid-template-columns:1fr; }
-  .release-calendar-card { grid-template-columns:92px minmax(0,1fr); }
-  .release-calendar-cover { width:92px; height:124px; }
-}
+.release-calendar-new-badge { position:absolute; top:var(--space-2); left:var(--space-2); z-index:1; }
+.release-calendar-title { display:-webkit-box; overflow:hidden; min-width:0; color:var(--color-text); font:400 var(--type-body) / 1.35 var(--font-ui); -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.release-calendar-card > .platform-badges { margin-top:var(--space-1); }
+.release-calendar-pending { color:var(--color-accent); font-size:var(--type-meta); }
+.release-calendar-events { display:flex; flex-direction:column; gap:var(--space-1); margin-top:var(--space-1); }
+.release-calendar-event { display:flex; align-items:center; gap:var(--space-1); min-width:0; color:var(--color-muted); font:400 var(--type-meta) / 1.35 var(--font-ui); }
+.release-calendar-event > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.release-calendar-confirm.ui-button--icon { width:var(--touch-target); height:var(--touch-target); min-height:var(--touch-target); flex:none; margin:calc(-1 * var(--space-2)) 0; padding:0; border-radius:var(--radius-control); color:var(--color-faint); }
+.release-calendar-confirm.ui-button--icon:hover:not(:disabled), .release-calendar-confirm.ui-button--icon:active:not(:disabled) { background:var(--color-surface-pressed,var(--color-control-pressed)); color:var(--color-text); filter:none; }
+.release-calendar-confirm.ui-button--icon > svg { width:20px; height:20px; }
 @media(prefers-reduced-motion:reduce) { .release-calendar-scroll { scroll-behavior:auto; } }
 /* Opened over any tab (Home shelf or the Collections chip); the screen owns its own top bar. */
 .release-calendar-layer { position:fixed; inset:0; z-index:40; display:flex; flex-direction:column; background:var(--color-bg); padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom); }

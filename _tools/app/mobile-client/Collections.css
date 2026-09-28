@@ -176,11 +176,8 @@
 .collection-personal-pending.is-slot{display:inline-block;min-width:4.5em;text-align:right}
 .collection-personal-switch{transition:background-color .15s var(--ease-standard),border-color .15s var(--ease-standard)}
 .collection-personal-switch::after{transition:transform .15s var(--ease-standard),background-color .15s var(--ease-standard)}
-/* 신간 알림: a quiet chip in the bar, a line under a card's title, and the inbox level. */
-.collection-release-chip{display:inline-flex;align-items:center;gap:6px;min-height:36px;margin:0 4px;padding:0 10px;background:transparent;border:1px solid var(--color-border);border-radius:var(--radius-sm);color:var(--color-text);font:inherit;font-size:13px;white-space:nowrap}
 .collection-release-count{min-width:18px;padding:1px 5px;color:var(--color-bg);background:var(--color-accent);border-radius:var(--radius-sm);font-size:11px;font-weight:600;line-height:1.4;text-align:center}
 .collection-segments .collection-release-count{margin-left:6px}
-.collection-release-chip:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
 .collection-tile{position:relative}
 /* The 신간 marker after the stars: an ivory square and 신간 for unread news, plain muted 신간 for
    Korean volumes out but not owned, a hollow square and 예약 for the next pre-registered one.
@@ -257,28 +254,53 @@
 .collection-bar-pending{position:absolute;top:9px;right:9px;width:6px;height:6px;border-radius:50%;background:transparent;pointer-events:none}
 .collection-bar-action.is-pending .collection-bar-pending{background:var(--color-text)}
 .collection-toast{position:fixed;z-index:190;left:50%;transform:translateX(-50%);bottom:calc(72px + env(safe-area-inset-bottom));width:max-content;max-width:calc(100vw - 2*var(--mobile-gutter,16px));margin:0;padding:10px 14px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-sidebar);color:var(--color-text);box-shadow:var(--shadow-dialog);font-size:13px}
-/* 게임 / 만화 / 영화 / AV: text tabs centred in the list bar, the selected one white with an
-   ivory underline on the bar's bottom edge (user choice B, 2026-09-26). The tabs fill the bar's
-   height, so each keeps a 56px hit area. While searching they sit small at the right end. */
-.collection-type-tabs{position:relative;display:flex;flex-shrink:0;--tab-inset:14px}
-/* One underline for the whole switch, placed and glided by transform (useTabIndicator). */
-.collection-type-indicator{position:absolute;left:0;bottom:0;width:1px;height:2px;background:var(--color-accent);transform-origin:0 0;pointer-events:none}
-.top-bar .collection-type-tabs{position:absolute;left:50%;top:0;bottom:-1px;transform:translateX(-50%);z-index:1}
-.collection-type-tabs button{position:relative;display:flex;align-items:center;height:100%;padding:0 20px;border:0;background:transparent;color:var(--color-muted);font:inherit;font-size:16px;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.collection-type-tabs button>span{display:inline-flex;flex-direction:column;align-items:center}
-.collection-type-tabs button>span::after{content:attr(data-label);height:0;overflow:hidden;visibility:hidden;font-weight:600}
-.collection-type-tabs button[aria-selected=true]{color:var(--color-text);font-weight:600}
-.collection-type-tabs button+button::before{content:'';position:absolute;left:0;top:calc(50% - 6px);width:1px;height:12px;background:var(--color-border)}
-.collection-type-tabs button:active:not([aria-selected=true]){color:var(--color-text)}
-.collection-type-tabs button:focus-visible{outline:2px solid var(--color-focus);outline-offset:-8px}
-.top-bar.is-search .collection-type-tabs{--tab-inset:8px;position:relative;left:auto;top:auto;bottom:auto;transform:none;align-self:stretch;margin:0 0 -1px 4px}
-.top-bar.is-search .collection-type-tabs button{padding:0 12px;font-size:14px}
-.top-bar.is-search:has(>.collection-type-tabs){padding-right:6px}
-/* Narrow phones: the tabs join the actions in the row; while searching the field keeps the room. */
-@media(max-width:600px){
-  .top-bar .collection-type-tabs{position:relative;left:auto;top:auto;bottom:auto;transform:none;align-self:stretch;margin:0 4px -1px 0}
-  .collection-type-tabs button{padding:0 8px;font-size:14px}
-  .collection-type-tabs{--tab-inset:6px}
-  .top-bar.is-search .collection-type-tabs{display:none}
-}
 .collection-list{padding-top:6px}
+
+/* Tablet collections A: the type switch is below the bar and the page reads as sections. */
+.mobile-collections>.collection-type-switch{flex-shrink:0;padding:16px 24px 0}
+.mobile-collections>.collection-type-switch .ui-segmented{min-height:44px}
+.mobile-collections>.collection-list{padding-inline:24px}
+.collection-section-label-row{display:flex;align-items:center;gap:8px;min-height:44px;margin-top:16px}
+.collection-section-label{display:flex;align-items:center;gap:8px;flex:1;min-width:0;min-height:44px;padding:0;background:transparent;border:0;color:inherit;font:inherit;text-align:left}
+.collection-section-label:active,.collection-section-label__more:active,.collection-news-block:active,.collection-news-empty:active{background:var(--color-surface-pressed)}
+.collection-section-label__name{display:inline-flex;align-items:center;gap:8px;flex-shrink:0;color:var(--color-faint);font-size:var(--type-meta);font-weight:500}
+.collection-section-label__mark{width:5px;height:5px;flex:none;background:var(--color-accent)}
+.collection-section-label__count,.collection-type-label__count{color:var(--color-muted);font-weight:500}
+.collection-section-label__line{height:1px;min-width:12px;flex:1;background:var(--color-border)}
+.collection-section-label>svg{width:20px;height:20px;flex:none;color:var(--color-muted);transition:transform 140ms var(--ease-standard)}
+.collection-section-label>svg.is-open{transform:rotate(90deg)}
+.collection-section-label__more{display:inline-flex;align-items:center;gap:2px;min-width:44px;min-height:44px;padding:0 0 0 4px;background:transparent;border:0;color:var(--color-muted);font:500 var(--type-meta) var(--font-ui)}
+.collection-section-label__more svg{width:18px;height:18px}
+.collection-shelf{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 32px)/5);gap:8px;overflow-x:auto;margin:8px 0 8px;padding:0 0 4px;scrollbar-width:none}
+.collection-shelf::-webkit-scrollbar{display:none}
+.collection-shelf>.collection-showcase-tile{width:auto;min-width:0}
+.collection-shelf>p[role=status]{min-height:0;margin:8px 0}
+.collection-showcase-tile{display:block;min-width:0;padding:0;background:transparent;border:0;color:inherit;text-align:left}
+.collection-showcase-tile .collection-art{aspect-ratio:2/3;border-radius:var(--radius-mark)}
+.collection-showcase-tile:focus-visible,.collection-news-cover:focus-visible,.collection-calendar-cover:focus-visible{outline:2px solid var(--color-focus);outline-offset:3px}
+.collection-news-section{margin-top:16px}
+.collection-news-block-wrap{margin-top:8px;padding:8px 16px 16px;background:var(--color-surface);border-radius:var(--radius-tile)}
+.collection-news-block{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;padding:0;background:transparent;border:0;color:inherit;font:600 var(--type-body) var(--font-ui);text-align:left}
+.collection-news-block>svg:first-child{width:20px;height:20px;color:var(--color-muted)}
+.collection-news-block>svg:last-child{width:20px;height:20px;margin-left:auto;color:var(--color-muted)}
+.collection-news-count{width:24px;min-width:24px;height:24px;padding:0;border-radius:var(--radius-mark)}
+.collection-news-hint{min-width:0;overflow:hidden;color:var(--color-faint);font-size:var(--type-meta);font-weight:400;text-overflow:ellipsis;white-space:nowrap}
+.collection-news-covers,.collection-calendar-covers{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-top:4px}
+.collection-news-cover,.collection-calendar-cover{min-width:0;padding:0;background:transparent;border:0;color:inherit;text-align:left;font:inherit}
+.collection-news-cover>span,.collection-calendar-cover{position:relative;display:block}
+.collection-news-cover .collection-art,.collection-calendar-art{aspect-ratio:2/3;border-radius:var(--radius-mark)}
+.collection-news-new{position:absolute;top:6px;left:6px;height:24px;padding:0 6px;border-radius:var(--radius-mark);font-size:var(--type-meta)}
+.collection-news-empty{display:flex;align-items:center;width:100%;min-height:44px;margin-top:4px;padding:0;background:transparent;border:0;color:var(--color-faint);font:var(--type-meta) var(--font-ui);text-align:left}
+.collection-calendar-cover{display:flex;flex-direction:column;gap:4px}
+.collection-calendar-date{display:block;min-height:20px;color:var(--color-muted);font-size:var(--type-meta);white-space:nowrap}
+.collection-calendar-date small{color:var(--color-faint);font-size:var(--type-meta)}
+.collection-calendar-art{display:block;overflow:hidden;background:var(--color-bg);border-radius:var(--radius-mark)}
+.collection-calendar-art>img,.collection-calendar-art>span{display:block;width:100%;height:100%;object-fit:cover}
+.collection-news-cover-placeholder{background:var(--color-bg)}
+.collection-type-header{display:flex;align-items:center;gap:12px;width:100%}
+.collection-type-label{display:flex;align-items:center;gap:8px;flex:1;min-width:0;min-height:44px}
+.collection-type-label h2{margin:0;color:var(--color-faint);font-size:var(--type-meta);font-weight:500;white-space:nowrap}
+.collection-type-label__count{font-weight:500}
+.collection-type-header .collection-chips{flex:none}
+.mobile-collections .av-showcase{display:none}
+@media(orientation:landscape){.collection-shelf{grid-auto-columns:calc((100% - 48px)/7)}}

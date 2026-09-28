@@ -253,6 +253,17 @@ describe('Home A', () => {
     expect(memoCard.textContent).toContain('숨긴 메모');
     expect(memoCard.textContent).not.toContain('홈에 보이면 안 되는 본문');
   });
+  it('keeps the release shelf date rail, D-day and single title line together', async () => {
+    const longGame = {...upcomingEntry, title: '아주 긴 발매 캘린더 제목도 한 줄에서 잘려야 하는 게임', platforms: ['PC']};
+    server.upcoming = {version: 1, revision: 2, entries: [longGame], wishlist: [longGame], pending: []};
+    render(<Home {...props()} />);
+    const shelf = await screen.findByRole('region', {name: '신간'});
+    const card = within(shelf).getByRole('button', {name: /아주 긴 발매/});
+    expect(card.querySelector('.home-rail-d')).toBeTruthy();
+    expect(card.querySelector('.home-rail-dd')?.textContent).toBe('D-6');
+    expect(card.querySelector('.home-shelf-title')?.textContent).toBe(longGame.title);
+    expect(card.querySelector('.home-kind')).toBeNull();
+  });
   it('handles an empty or 404 upcoming publication without dropping manga', async () => {
     server.upcoming = 404;
     render(<Home {...props()}/>);

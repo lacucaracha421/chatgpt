@@ -19,6 +19,7 @@ const avB:CollectionSummary={...avA,id:'av-b',name:'다른 오후',selectedWorkA
 const detail:CollectionDetail={...avA,type:'av',volumes:[],artworks:[coverArtwork,spineArtwork,backArtwork],artworkVersions:{'cover-a':{thumbnail:'thumb-a',original:'original-a'},'spine-a':{thumbnail:'spine-thumb',original:'spine-original'},'back-a':{thumbnail:'back-thumb',original:'back-original'}}};
 const page=(items:CollectionSummary[]):CollectionPage=>({ready:true,filterVersion:1,revision:'r1',publishedAt:null,totalCount:items.length,items,nextCursor:null});
 const props={active:true,paused:false,backRef:{current:null}};
+const openAv=async()=>fireEvent.click(await screen.findByRole('radio',{name:'AV'}));
 
 beforeEach(()=>{
     localStorage.clear();mocks.api.mockReset();mocks.native.mockReset();
@@ -36,7 +37,7 @@ afterEach(()=>{cleanup();vi.restoreAllMocks();});
 describe('tablet AV collections',()=>{
   it('renders the 작품 grid and the 배우별 shelves from the same fixture',async()=>{
     render(<Collections {...props}/>);
-    fireEvent.click(await screen.findByRole('tab',{name:'AV'}));
+    await openAv();
     expect(await screen.findByText('LMNS-123')).toBeTruthy();
     expect(document.querySelector('.av-grid')).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'배우'}));
@@ -54,7 +55,7 @@ describe('tablet AV collections',()=>{
       return base(path);
     });
     render(<Collections {...props}/>);
-    fireEvent.click(await screen.findByRole('tab',{name:'AV'}));
+    await openAv();
     const input=await screen.findByRole('textbox',{name:'품번'});
     fireEvent.change(input,{target:{value:'ssis123'}});
     expect(screen.getByText('SSIS-123',{selector:'strong'})).toBeTruthy();
@@ -77,7 +78,7 @@ describe('tablet AV collections',()=>{
       return base(path);
     });
     render(<Collections {...props}/>);
-    fireEvent.click(await screen.findByRole('tab',{name:'AV'}));
+    await openAv();
     const input=await screen.findByRole('textbox',{name:'품번'});
     fireEvent.change(input,{target:{value:'SSIS-001'}});
     fireEvent.click(screen.getByRole('button',{name:'보내기'}));
@@ -100,7 +101,7 @@ describe('tablet AV collections',()=>{
       return base(path);
     });
     render(<Collections {...props}/>);
-    fireEvent.click(await screen.findByRole('tab',{name:'AV'}));
+    await openAv();
     const input=await screen.findByRole('textbox',{name:'품번'});
     fireEvent.change(input,{target:{value:'SSIS-001'}});
     fireEvent.click(screen.getByRole('button',{name:'보내기'}));
@@ -111,7 +112,7 @@ describe('tablet AV collections',()=>{
     const base=mocks.api.getMockImplementation()!;
     mocks.api.mockImplementation(async(path:string)=>path==='/v1/av-lookups'?{}:base(path));
     render(<Collections {...props}/>);
-    fireEvent.click(await screen.findByRole('tab',{name:'AV'}));
+    await openAv();
     const input=await screen.findByRole('textbox',{name:'품번'});
     for(let number=1;number<=6;number++){
       const code=`SSIS-${String(number).padStart(3,'0')}`;
@@ -127,13 +128,13 @@ describe('tablet AV collections',()=>{
 
   it('persists the last-used 작품 · 배우별 view',async()=>{
     const first=render(<Collections {...props}/>);
-    fireEvent.click(await screen.findByRole('tab',{name:'AV'}));
+    await openAv();
     await screen.findByText('LMNS-123');
     fireEvent.click(screen.getByRole('tab',{name:'배우별'}));
     expect(localStorage.getItem('lakomics.mobile.avListView')).toBe('performers');
     first.unmount();
     render(<Collections {...props}/>);
-    fireEvent.click(await screen.findByRole('tab',{name:'AV'}));
+    await openAv();
     await waitFor(()=>expect(screen.getByRole('tab',{name:'배우별'})).toBeTruthy());
     expect(screen.getByRole('tab',{name:'배우별'}).getAttribute('aria-selected')).toBe('true');
   });
@@ -141,7 +142,7 @@ describe('tablet AV collections',()=>{
   it('shows the calm pre-publication empty state',async()=>{
     mocks.api.mockImplementation(async(path:string)=>path==='/v1/collections/status'?{revision:'r1'}:path.startsWith('/v1/collections?type=av')?page([]):{revision:1,counts:{unread:0,collections:[]},items:[],nextCursor:null,hasMore:false});
     render(<Collections {...props}/>);
-    fireEvent.click(await screen.findByRole('tab',{name:'AV'}));
+    await openAv();
     expect(await screen.findByText('PC 앱이 AV 작품을 아직 보내지 않았습니다')).toBeTruthy();
   });
 
@@ -154,7 +155,7 @@ describe('tablet AV collections',()=>{
       return {revision:1,counts:{unread:0,collections:[]},items:[],nextCursor:null,hasMore:false};
     });
     render(<Collections {...props}/>);
-    fireEvent.click(await screen.findByRole('tab',{name:'AV'}));
+    await openAv();
     fireEvent.click(await screen.findByText('LMNS-123'));
     expect(await screen.findByRole('heading',{name:'午後の窓辺と、ひとりの時間'})).toBeTruthy();
     expect(screen.queryByLabelText('같은 배우의 다른 작품')).toBeNull();
@@ -171,7 +172,7 @@ describe('tablet AV collections',()=>{
   it('removes AV from the type tabs while privacy mode is enabled',async()=>{
     localStorage.setItem('lakomics.mobile.privacyMode','1');
     render(<Collections {...props}/>);
-    await waitFor(()=>expect(screen.queryByRole('tab',{name:'AV'})).toBeNull());
-    expect(screen.getByRole('tab',{name:'게임'})).toBeTruthy();
+    await waitFor(()=>expect(screen.queryByRole('radio',{name:'AV'})).toBeNull());
+    expect(screen.getByRole('radio',{name:'게임'})).toBeTruthy();
   });
 });

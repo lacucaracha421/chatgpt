@@ -112,7 +112,7 @@ export function App() {
   // 보내기/받기: a utility screen opened from the Home header or an arrival toast.
   const [exchangeOpen,setExchangeOpen]=useState(false);
   const exchangeBack=useRef<(()=>boolean)|null>(null);
-  const [artistsOpen,setArtistsOpen]=useState(false),[calendarOpen,setCalendarOpen]=useState(false);
+  const [artistsOpen,setArtistsOpen]=useState(false),[calendarOpen,setCalendarOpen]=useState(false),[calendarKind,setCalendarKind]=useState<'game'|'movie'|undefined>();
   const calendarBack=useRef<(()=>boolean)|null>(null);
   const artistsBack=useRef<(()=>boolean)|null>(null);
   const vaultBack=useRef<(()=>boolean)|null>(null);
@@ -603,6 +603,8 @@ export function App() {
     setCollectionsVisited(true); setArea('collections');
     setCollectionRequest(current => ({...place,key:(current?.key ?? 0)+1}));
   };
+  const openCalendar = useCallback((kind?: 'game'|'movie') => { setCalendarKind(kind); setCalendarOpen(true); }, []);
+  const closeCalendar = useCallback(() => { setCalendarKind(undefined); setCalendarOpen(false); }, []);
   const openHome = () => {
     setHomeOrigin(null); homeRestore.current = null;
     setArea('assets');
@@ -714,7 +716,7 @@ export function App() {
           onPending={() => {if (captures?.length) setViewer({items:captures,index:0,pending:true});}}
           onReview={() => {}} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
           onDuplicates={() => {setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
-          onReleases={() => setCalendarOpen(true)} onWork={id => {setHomeOrigin({area:'collections'});openCollections({kind:'work',id});}}/> : <>
+          onReleases={() => openCalendar()} onWork={id => {setHomeOrigin({area:'collections'});openCollections({kind:'work',id});}}/> : <>
         <Gallery items={visibleItems} intro={intro} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings || !!filtersOpen}/>
         <LoadingLine label={loadingMore&&'다음 자산을 불러오는 중'} className="is-bottom"/>
         </>}
@@ -726,9 +728,9 @@ export function App() {
           {moreError && !page.view.root && !page.view.characters && page.view.tab!=='home' && <div className="inline-error" role="alert"><span>{moreError}</span><Button variant="ghost" disabled={busy || loadingMore} onClick={() => {void append();}}>다시 시도</Button></div>}
         </div>
       </main>
-      {calendarOpen && <div className="release-calendar-layer"><ReleaseCalendar onClose={() => setCalendarOpen(false)} backRef={calendarBack}/></div>}
+      {calendarOpen && <div className="release-calendar-layer"><ReleaseCalendar onClose={closeCalendar} initialKind={calendarKind} backRef={calendarBack}/></div>}
       {artistsOpen && <Artists endpoint={status.endpoint} backRef={artistsBack} paused={settings||!!viewer} onOpenViewer={(items,index) => setViewer({items,index})}/>}
-      {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest} onCalendar={() => setCalendarOpen(true)} onReturnHome={homeOrigin?.area==='collections'?returnHome:undefined}/>}
+      {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest} onCalendar={openCalendar} onReturnHome={homeOrigin?.area==='collections'?returnHome:undefined}/>}
       {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack} request={noteRequest} onReturnHome={homeOrigin?.area==='notes'?returnHome:undefined} onHomeEntryGone={homeOrigin?.area==='notes'?forgetHome:undefined}/>}
       {catalogVisited && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} paused={settings || !!viewer} backRef={catalogBack} openDuplicates={duplicateRequest} onReturnHome={homeOrigin?.area==='catalog'?returnHome:undefined}/>}
     </div> : <main className="welcome"><Mark/><span className="eyebrow">YOUR ARCHIVE, WITH YOU</span><h1>어디서든,<br/>나의 라이브러리.</h1><p>보관한 이미지와 영상을 감상하고,<br/>다른 앱에 첨부할 때도 바로 찾아보세요.</p><Button variant="primary" disabled={checking} onClick={() => setSettings(true)}>{checking ? '연결 확인 중' : '라이브러리 연결'}<ChevronRightIcon/></Button>{error && <p className="error-message" role="alert">{error}</p>}<span className="welcome-footer">LAKOMICS <span>／</span> MOBILE</span></main>}

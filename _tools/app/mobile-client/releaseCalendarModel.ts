@@ -8,6 +8,16 @@ export type ReleaseCover = {
   contentType?: string | null;
 };
 
+export type ReleaseCalendarEvent = {
+  id: string;
+  itemId: string;
+  kind: 'date_set' | 'date_changed' | 'released';
+  previousValue: string | null;
+  currentValue: string | null;
+  detectedAt: string | null;
+  readAt: string | null;
+};
+
 export type ReleaseCalendarEntry = {
   id: string;
   kind: ReleaseKind;
@@ -21,6 +31,7 @@ export type ReleaseCalendarEntry = {
   cover: ReleaseCover | null;
   /** A new platform version of a game already released elsewhere (the PC marks it). */
   port: boolean;
+  unread: ReleaseCalendarEvent[];
 };
 
 export type UpcomingIntent = {itemId?: string; action?: string};
@@ -62,6 +73,21 @@ function coverOf(value: unknown): ReleaseCover | null {
   return Object.keys(cover).length ? cover : null;
 }
 
+function eventOf(value: unknown, itemId: string): ReleaseCalendarEvent | null {
+  const row = record(value);
+  if (!row || typeof row.id !== 'string' || !row.id) return null;
+  if (row.kind !== 'date_set' && row.kind !== 'date_changed' && row.kind !== 'released') return null;
+  return {
+    id: row.id,
+    itemId: typeof row.itemId === 'string' && row.itemId ? row.itemId : itemId,
+    kind: row.kind,
+    previousValue: stringOrNull(row.previousValue),
+    currentValue: stringOrNull(row.currentValue),
+    detectedAt: stringOrNull(row.detectedAt),
+    readAt: stringOrNull(row.readAt),
+  };
+}
+
 function entryOf(value: unknown): ReleaseCalendarEntry | null {
   const row = record(value);
   if (!row || typeof row.id !== 'string' || !row.id || typeof row.title !== 'string' || !row.title) return null;
@@ -70,6 +96,10 @@ function entryOf(value: unknown): ReleaseCalendarEntry | null {
   const precision = PRECISIONS.includes(row.precision as ReleasePrecision)
     ? row.precision as ReleasePrecision
     : date ? 'exact' : 'tbd';
+  const eventValues = Array.isArray(row.events) ? row.events : Array.isArray(row.unread) ? row.unread : [];
+  const unread = eventValues
+    .map(event => eventOf(event, row.id as string))
+    .filter((event): event is ReleaseCalendarEvent => !!event && !event.readAt);
   return {
     id: row.id,
     kind: row.kind,
@@ -82,6 +112,7 @@ function entryOf(value: unknown): ReleaseCalendarEntry | null {
     releaseType: stringOrNull(row.releaseType),
     cover: coverOf(row.cover),
     port: row.port === true,
+    unread,
   };
 }
 
@@ -115,14 +146,32 @@ export function visibleWishlistIds(authoritative: Set<string>, intents: Record<s
   return ids;
 }
 
-export function kindLabel(kind: ReleaseKind): string {
-  return kind === 'game' ? '게임' : kind === 'movie' ? '영화' : '애니';
+function releaseTokenLabel(token: string | null, referenceYear: number): string {
+  if (!token || token === 'tbd') return '미정';
+  const day = DATE_RE.test(token) ? token : null;
+  if (day) return releaseDateLabel(day, 'exact', referenceYear);
+  const month = /^(\d{4})-(\d{2})$/.exec(token);
+  if (month) return releaseDateLabel(`${token}-01`, 'month', referenceYear);
+  const quarter = /^(\d{4})-Q([1-4])$/.exec(token);
+  if (quarter) return `${quarter[1]} Q${quarter[2]}`;
+  if (/^\d{4}$/.test(token)) return `${token}년 중`;
+  return token;
 }
 
-export function detailLabel(entry: Pick<ReleaseCalendarEntry, 'kind' | 'platforms' | 'region'>): string {
-  if (entry.kind === 'game') return entry.platforms.join(' · ') || '게임';
-  if (entry.kind === 'anime') return '일본 방영';
-  return entry.region === 'korea' ? '국내 개봉' : '개봉 (해외 기준)';
+export function releaseEventLine(event: Pick<ReleaseCalendarEvent, 'kind' | 'previousValue' | 'currentValue'>, referenceYear = new Date().getFullYear()): string {
+  const current = releaseTokenLabel(event.currentValue, referenceYear);
+  switch (event.kind) {
+    case 'date_set': return `발매일 공개 · ${current}`;
+    case 'date_changed': return `발매일 변경 · ${releaseTokenLabel(event.previousValue, referenceYear)} → ${current}`;
+    case 'released': return current;
+  }
+}
+
+export function releaseDaysUntil(date: string | null, today = new Date()): number | null {
+  if (!date || !DATE_RE.test(date)) return null;
+  const [year, month, day] = date.split('-').map(Number);
+  const start = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  return Math.round((Date.UTC(year, month - 1, day) - start) / 86_400_000);
 }
 
 /** Precision-aware wording shared with the PC calendar: exact, month, quarter, year, TBD. */

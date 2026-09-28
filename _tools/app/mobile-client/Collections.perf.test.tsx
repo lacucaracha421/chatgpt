@@ -38,9 +38,13 @@ beforeEach(()=>{
   vi.useFakeTimers();
   vi.stubGlobal('IntersectionObserver',FirstScreenObserver);
   mocks.api.mockReset();mocks.native.mockReset();
-  mocks.api.mockImplementation(async(path:string)=>path.startsWith('/v1/collections?')?page
-    :path.startsWith('/v1/collections/status')?{revision:'r1'}
-    :path.startsWith('/v1/collections/releases')?{items:[],unreadCount:0,revision:'x'}:{});
+  mocks.api.mockImplementation(async(path:string)=>{
+    if(path.startsWith('/v1/collections?')&&path.includes('showcase=true'))return {...page,items:[],totalCount:0};
+    if(path.startsWith('/v1/collections?'))return page;
+    if(path.startsWith('/v1/collections/status'))return {revision:'r1'};
+    if(path.startsWith('/v1/collections/releases'))return {items:[],unreadCount:0,revision:'x'};
+    return {};
+  });
 });
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();});
 
