@@ -1,0 +1,2 @@
+.asset-selection-bar__character { position: relative; }
+.asset-selection-bar__character > .ui-button kbd { margin-left: var(--space-1); color: var(--color-faint); font: inherit; font-size: var(--type-meta); }

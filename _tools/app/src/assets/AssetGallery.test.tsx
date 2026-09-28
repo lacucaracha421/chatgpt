@@ -75,6 +75,16 @@ describe("AssetGallery", () => {
     fireEvent.keyDown(await screen.findByRole("option", { name: "asset-0.png" }), { key: " " });
     expect(select).toHaveBeenCalledWith(expect.objectContaining({ id: "asset-0" }), { toggle: true, range: false });
   });
+  it("opens character assignment with C only when the gallery has a selection", async () => {
+    const open = vi.fn();
+    const { rerender } = render(<AssetGallery layout="masonry" items={[asset(0)]} selectedAssetIds={new Set(["asset-0"])} onAssignCharacter={open} />);
+    const tile = await screen.findByRole("option", { name: "asset-0.png" });
+    fireEvent.keyDown(tile, { key: "c" });
+    expect(open).toHaveBeenCalledOnce();
+    rerender(<AssetGallery layout="masonry" items={[asset(0)]} selectedAssetIds={new Set()} onAssignCharacter={open} />);
+    fireEvent.keyDown(tile, { key: "c" });
+    expect(open).toHaveBeenCalledOnce();
+  });
   it("bounds masonry DOM and loads the next page only near the displayed end", async () => {
     const next = vi.fn();
     const { container } = render(<AssetGallery layout="masonry" metadataVisible items={Array.from({ length: 50_000 }, (_, index) => asset(index))} hasNextPage onLoadNextPage={next} />);

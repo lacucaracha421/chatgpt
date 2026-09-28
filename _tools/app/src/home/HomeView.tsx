@@ -17,7 +17,7 @@ import { taggerDecisionApi, taggerReviewSource, type TaggerDecisionApi, type Tag
 import { notesStore, type NotesStore } from "../notes/store";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { AvPortrait } from "../collections/av/AvPortrait";
-import { shadowReviewApi, type ShadowReviewApi, type ShadowReviewItem } from "../characters/shadowReviewApi";
+import { shadowReviewApi, type ShadowReviewApi, type ShadowReviewPendingTarget } from "../characters/shadowReviewApi";
 import { localDateAndOffset, useArtistGateway, useArtistRead } from "../artists/artistStore";
 import { avProfileLines, clockLabel, dateBlock, daysAfter, localBoundaries, memoRows, releaseRows, serverOutage, UPCOMING_DAYS, weekdayLabel, upcomingRows, type MemoRow, type ReleaseRow, type UpcomingRow } from "./homeModel";
 import { HomeArtist, HomeRevisit } from "./HomeRevisit";
@@ -34,9 +34,9 @@ const CatalogReviewDialog = lazy(() => import("../manga/CatalogReviewDialog").th
 const native = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 type Dialog = ({ kind: "character" } & CharacterReviewScope) | { kind: "duplicates" };
 type HomeShelfRow = { source: "release"; row: ReleaseRow } | { source: "upcoming"; row: UpcomingRow };
-/** Home reads one page of S36 candidates: the exact total from the page summary. */
+/** Compatibility fallback for injected clients that do not expose the narrow summary yet. */
 const CHARACTER_PAGE = 200;
-type CharacterQueue = { total: number; items: Pick<ShadowReviewItem, "targetId" | "targetName" | "verdict">[] };
+type CharacterQueue = { total: number; targets: ShadowReviewPendingTarget[] };
 
 export type HomeViewProps = {
   collections: CollectionSummary[];
@@ -52,7 +52,7 @@ export type HomeViewProps = {
   onNavigate: (view: AssetView) => void;
   onQueuesRequested?: () => void;
   notes?: NotesStore;
-  shadowApi?: Pick<ShadowReviewApi, "page">;
+  shadowApi?: Pick<ShadowReviewApi, "page"> & Partial<Pick<ShadowReviewApi, "summary">>;
   /** Exact per-character counts for the 캐릭터 검토 overview; defaults to reading the whole S36 list. */
   characterSource?: CharacterReviewSource;
   /** Exact tagger queue read; injectable for browser tests. */
@@ -123,22 +123,25 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
   const [taggerLoading, setTaggerLoading] = useState(false);
   const [duplicateCount, setDuplicateCount] = useState(0);
   const shadowQueueApi = shadowApi ?? (native() ? shadowReviewApi : null);
-  // Lightweight mode skips the S36 candidate read (it scans the whole shadow list); the row
-  // stays hidden until the mode ends, then the list is read once.
+  // Lightweight mode skips the S36 pending summary; the row stays hidden until the mode ends,
+  // then the summary is read once.
   const { restricted } = useWorkloadProfile();
   useEffect(() => {
     if (!shadowQueueApi || restricted) { setCharacterQueue(null); return; }
     let live = true;
-    void shadowQueueApi.page({ offset: 0, limit: CHARACTER_PAGE }).then((page) => {
-      if (!live || !page) return;
-      const items = page.items ?? [];
-      const total = page.summary ? page.summary.automatic.pending + page.summary.recommended.pending : 0;
-      setCharacterQueue({ total: page.nextOffset === null ? Math.max(total, items.length) : total, items });
+    const read = shadowQueueApi.summary
+      ? shadowQueueApi.summary().then((summary) => ({ total: summary.automatic + summary.recommended, targets: summary.targets ?? [] }))
+      : shadowQueueApi.page({ offset: 0, limit: CHARACTER_PAGE }).then((page) => {
+        const total = page.summary ? page.summary.automatic.pending + page.summary.recommended.pending : 0;
+        return { total: page.nextOffset === null ? Math.max(total, page.items?.length ?? 0) : total, targets: [] };
+      });
+    void read.then((queue) => {
+      if (!live || !queue) return;
+      setCharacterQueue(queue);
     }, () => undefined);
     return () => { live = false; };
   }, [shadowQueueApi, restricted, queueRead]);
-  // The read takes seconds on a real library, so it restarts only when the set of series changes
-  // (not on every render) or after a review closes; the last result stays visible meanwhile.
+  // Refresh only when the series set changes or a review closes; keep the last result meanwhile.
   const taggerSeriesKey = characters.map((target) => `${target.id}:${target.seriesClassificationId ?? ""}`).join("|");
   const charactersRef = useRef(characters);
   charactersRef.current = characters;

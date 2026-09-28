@@ -11,7 +11,6 @@ import type {
 } from "../library/types";
 import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
 import * as characters from "../characters/api";
-import { characterHubApi } from "../characters/hubApi";
 import { fixtureTarget } from "../characters/characterFixtures";
 import { App, type ExtensionIngestListener } from "./App";
 import { ALBUM_AUTHORITY_CHANGED_EVENT } from "./useAlbumAuthoritySync";
@@ -1213,8 +1212,7 @@ describe("App", () => {
     expect(libraryGateway.listClassifications).toHaveBeenCalledTimes(2);
   });
 
-  // Character rows left the sidebar (2026-09-29); drop target to be redesigned.
-  it.skip("moves assets through the atomic character command when dropped on a character", async () => {
+  it("assigns a gallery selection through the character picker and offers to open it", async () => {
     Object.defineProperties(HTMLElement.prototype, {
       offsetWidth: { configurable: true, get: () => 900 },
       clientWidth: { configurable: true, get: () => 840 },
@@ -1224,32 +1222,33 @@ describe("App", () => {
     localStorage.setItem("lakomics.libraryPath", summary.root);
     const character = { ...fixtureTarget("marcus", "마커스"), seriesClassificationId: games.id };
     const targets = vi.spyOn(characters.characterApi, "targets").mockResolvedValue([character]);
-    const series = vi.spyOn(characterHubApi, "series").mockResolvedValue([]);
-    const move = vi.spyOn(characters, "moveAssetsToCharacter").mockResolvedValue(1);
+    const suggestions = vi.spyOn(characters, "characterAssignSuggestions").mockResolvedValue([{ targetId: character.id, matched: 1, total: 1 }]);
+    const move = vi.spyOn(characters, "moveAssetsToCharacters").mockResolvedValue(1);
     try {
       const libraryGateway = gateway();
       vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
       vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
+      libraryGateway.characterSidebarCounts = vi.fn().mockResolvedValue({ targets: { [character.id]: 12 }, groups: {} });
       render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
       await openAssets();
       const tile = await screen.findByRole("option", { name: "arona.png" });
-      await userEvent.click(await screen.findByRole("button", { name: "게임 펼치기" }));
-      const target = await screen.findByRole("treeitem", { name: "마커스" });
-      Object.defineProperties(tile, {
-        setPointerCapture: { configurable: true, value: vi.fn() },
-        releasePointerCapture: { configurable: true, value: vi.fn() },
-      });
-      Object.defineProperty(document, "elementFromPoint", { configurable: true, value: vi.fn().mockReturnValue(target) });
-      fireEvent.pointerDown(tile, { button: 0, pointerId: 3, clientX: 10, clientY: 10 });
-      fireEvent.pointerMove(tile, { pointerId: 3, clientX: 20, clientY: 1 });
-      expect(target).toHaveAttribute("data-drop-state", "valid");
-      fireEvent.pointerUp(tile, { pointerId: 3, clientX: 20, clientY: 1 });
-      await waitFor(() => expect(move).toHaveBeenCalledWith(character.id, character.fingerprint, [asset.id]));
-      expect(await screen.findByText("1개 자산을 마커스 캐릭터 폴더로 이동했습니다.")).toBeVisible();
+      await userEvent.click(tile);
+      await userEvent.click(screen.getByRole("button", { name: /캐릭터/ }));
+      await userEvent.click(
+        await screen.findByRole("option", { name: "마커스 · 게임 · 1장 중 1장" }),
+      );
+      await waitFor(() => expect(move).toHaveBeenCalledWith([{ targetId: character.id, expectedFingerprint: character.fingerprint }], [asset.id]));
+      expect(await screen.findByText((_content, element) =>
+        element?.classList.contains("character-assign-notice") === true
+        && element.textContent === "1장 → 마커스",
+      )).toBeVisible();
+      expect(document.querySelector(".asset-gallery__character-assigned")).toHaveTextContent("✓ 마커스");
+      expect(screen.getByRole("button", { name: "열기" })).toBeVisible();
+      expect(screen.queryByRole("button", { name: "되돌리기" })).not.toBeInTheDocument();
       expect(libraryGateway.setAssetClassification).not.toHaveBeenCalled();
     } finally {
       cleanup();
-      targets.mockRestore(); series.mockRestore(); move.mockRestore();
+      targets.mockRestore(); suggestions.mockRestore(); move.mockRestore();
     }
   });
 

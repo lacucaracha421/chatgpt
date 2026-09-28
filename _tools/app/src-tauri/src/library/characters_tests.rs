@@ -9,25 +9,61 @@ use std::{fs, path::Path};
 fn unified_references_survive_trash_restore_and_settings_save() {
     let f = Fixture::new();
     let target = f.ready("Unified");
-    f.decide(&target, &["asset-5"], DecisionKind::Accepted).unwrap();
-    let target = f.library.add_character_learned_references(
-        &target.id, target.revision, &["asset-5".into()],
-    ).unwrap();
-    let original_fingerprint = crate::library::character_reference_candidates::reference_set_hash(&target).unwrap();
+    f.decide(&target, &["asset-5"], DecisionKind::Accepted)
+        .unwrap();
+    let target = f
+        .library
+        .add_character_learned_references(&target.id, target.revision, &["asset-5".into()])
+        .unwrap();
+    let original_fingerprint =
+        crate::library::character_reference_candidates::reference_set_hash(&target).unwrap();
     for asset_id in ["asset-0", "asset-5"] {
         f.library.trash_assets(&[asset_id.into()]).unwrap();
         let remaining = f.library.get_character_target(&target.id).unwrap();
-        assert!(remaining.ready, "either kind of reference can be trashed without blocking five remaining references");
-        assert_ne!(crate::library::character_reference_candidates::reference_set_hash(&remaining).unwrap(), original_fingerprint);
-        let ids = remaining.references.iter().chain(&remaining.learned_references)
-            .filter(|r| r.status == "ready").filter_map(|r| r.asset_id.clone()).collect::<Vec<_>>();
-        f.library.replace_character_references(&target.id, remaining.revision, &ids).unwrap();
+        assert!(
+            remaining.ready,
+            "either kind of reference can be trashed without blocking five remaining references"
+        );
+        assert_ne!(
+            crate::library::character_reference_candidates::reference_set_hash(&remaining).unwrap(),
+            original_fingerprint
+        );
+        let ids = remaining
+            .references
+            .iter()
+            .chain(&remaining.learned_references)
+            .filter(|r| r.status == "ready")
+            .filter_map(|r| r.asset_id.clone())
+            .collect::<Vec<_>>();
+        f.library
+            .replace_character_references(&target.id, remaining.revision, &ids)
+            .unwrap();
         f.library.restore_assets(&[asset_id.into()]).unwrap();
         let restored = f.library.get_character_target(&target.id).unwrap();
-        assert_eq!(restored.references.iter().chain(&restored.learned_references).filter(|r| r.status == "ready").count(), 6);
+        assert_eq!(
+            restored
+                .references
+                .iter()
+                .chain(&restored.learned_references)
+                .filter(|r| r.status == "ready")
+                .count(),
+            6
+        );
     }
-    let refreshes: i64 = f.library.connection().unwrap().query_row("SELECT COUNT(*) FROM character_reference_refreshes", [], |r| r.get(0)).unwrap();
-    assert_eq!(refreshes, 0, "reference edits must not enqueue historical analysis");
+    let refreshes: i64 = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM character_reference_refreshes",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        refreshes, 0,
+        "reference edits must not enqueue historical analysis"
+    );
 }
 
 #[test]
@@ -35,31 +71,425 @@ fn unified_reference_selection_accepts_six_and_removes_either_kind() {
     let f = Fixture::new();
     let target = f.target("Unified");
     let ids = (0..6).map(|i| format!("asset-{i}")).collect::<Vec<_>>();
-    let target = f.library.replace_character_references(&target.id, target.revision, &ids).unwrap();
+    let target = f
+        .library
+        .replace_character_references(&target.id, target.revision, &ids)
+        .unwrap();
     assert!(target.ready);
-    f.decide(&target, &["asset-0", "asset-5"], DecisionKind::Accepted).unwrap();
-    let target = f.library.exclude_character_reference(&target.id, target.revision, "asset-0").unwrap();
+    f.decide(&target, &["asset-0", "asset-5"], DecisionKind::Accepted)
+        .unwrap();
+    let target = f
+        .library
+        .exclude_character_reference(&target.id, target.revision, "asset-0")
+        .unwrap();
     assert!(target.ready);
-    let target = f.library.exclude_character_reference(&target.id, target.revision, "asset-5").unwrap();
+    let target = f
+        .library
+        .exclude_character_reference(&target.id, target.revision, "asset-5")
+        .unwrap();
     assert!(!target.ready);
-    assert_eq!(target.references.iter().chain(&target.learned_references).count(), 4);
-    let excluded: i64 = f.library.connection().unwrap().query_row(
-        "SELECT COUNT(*) FROM character_reference_exclusions WHERE target_id=?1", [&target.id], |r| r.get(0),
-    ).unwrap();
+    assert_eq!(
+        target
+            .references
+            .iter()
+            .chain(&target.learned_references)
+            .count(),
+        4
+    );
+    let excluded: i64 = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM character_reference_exclusions WHERE target_id=?1",
+            [&target.id],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(excluded, 2);
-    assert_eq!(f.library.character_relations_for_asset("asset-0").unwrap(), vec![target.id.clone()]);
-    assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap(), vec![target.id.clone()]);
+    assert_eq!(
+        f.library.character_relations_for_asset("asset-0").unwrap(),
+        vec![target.id.clone()]
+    );
+    assert_eq!(
+        f.library.character_relations_for_asset("asset-5").unwrap(),
+        vec![target.id.clone()]
+    );
+}
+
+#[test]
+fn character_move_accepts_an_asset_from_an_unrelated_folder() {
+    let f = Fixture::new();
+    let target = f.target("Manual target");
+
+    assert_eq!(
+        f.library
+            .move_assets_to_character(
+                target.id.clone(),
+                target.fingerprint.clone(),
+                vec!["asset-6".into()],
+            )
+            .unwrap(),
+        1
+    );
+
+    let connection = f.library.connection().unwrap();
+    let folder: String = connection
+        .query_row(
+            "SELECT classification_id FROM asset_classifications WHERE asset_id='asset-6'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(folder, f.series);
+    drop(connection);
+    assert_eq!(
+        f.library.character_relations_for_asset("asset-6").unwrap(),
+        vec![target.id]
+    );
+}
+
+#[test]
+fn character_move_uses_the_first_series_and_accepts_cross_series_targets() {
+    let f = Fixture::new();
+    let first = f.target("First series target");
+    let second_series = folder(&f.library, "Second series", None);
+    let second = f
+        .library
+        .save_character_target(TargetDraft {
+            id: None,
+            expected_revision: None,
+            series_classification_id: Some(second_series),
+            linked_classification_id: None,
+            display_name: "Second series target".into(),
+            description: String::new(),
+            thumbnail_asset_id: None,
+            enabled: true,
+        })
+        .unwrap();
+
+    assert_eq!(
+        f.library
+            .move_assets_to_characters(
+                vec![
+                    CharacterMoveTarget {
+                        target_id: first.id.clone(),
+                        expected_fingerprint: first.fingerprint.clone(),
+                    },
+                    CharacterMoveTarget {
+                        target_id: second.id.clone(),
+                        expected_fingerprint: second.fingerprint.clone(),
+                    },
+                ],
+                vec!["asset-6".into()],
+            )
+            .unwrap(),
+        1
+    );
+
+    let connection = f.library.connection().unwrap();
+    let folder: String = connection
+        .query_row(
+            "SELECT classification_id FROM asset_classifications WHERE asset_id='asset-6'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(folder, f.series);
+    drop(connection);
+    let relations = f.library.character_relations_for_asset("asset-6").unwrap();
+    assert_eq!(relations.len(), 2);
+    assert!(relations.contains(&first.id));
+    assert!(relations.contains(&second.id));
+}
+
+#[test]
+fn character_move_consumes_tagger_candidates_for_every_accepted_pair() {
+    let f = Fixture::new();
+    let first = f.target("First pending target");
+    let second = f.target("Second pending target");
+    let connection = f.library.connection().unwrap();
+    let hash: String = connection
+        .query_row(
+            "SELECT content_hash FROM assets WHERE id='asset-6'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    for target in [&first, &second] {
+        connection
+            .execute(
+                "INSERT INTO character_tagger_candidates
+                 (target_id,asset_id,asset_hash,reason,pixai_score,canary_score,created_at)
+                 VALUES(?1,'asset-6',?2,'recommendation',0.91,0.0,'now')",
+                params![target.id, hash],
+            )
+            .unwrap();
+    }
+    drop(connection);
+
+    f.library
+        .move_assets_to_characters(
+            vec![
+                CharacterMoveTarget {
+                    target_id: first.id,
+                    expected_fingerprint: first.fingerprint,
+                },
+                CharacterMoveTarget {
+                    target_id: second.id,
+                    expected_fingerprint: second.fingerprint,
+                },
+            ],
+            vec!["asset-6".into()],
+        )
+        .unwrap();
+
+    assert_eq!(
+        f.library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM character_tagger_candidates WHERE asset_id='asset-6'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn character_move_names_the_target_when_an_exclusion_blocks_acceptance() {
+    let f = Fixture::new();
+    let target = f.target("제외 대상");
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO character_series_asset_exclusions(series_id,asset_id,created_at)
+             VALUES(?1,'asset-6','now')",
+            [&f.series],
+        )
+        .unwrap();
+
+    let error = f
+        .library
+        .move_assets_to_character(target.id, target.fingerprint, vec!["asset-6".into()])
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "제외 대상: 캐릭터 분류에서 제외된 자산입니다. 먼저 제외를 해제해 주세요."
+    );
+    assert_eq!(
+        f.library.get_asset_classifications("asset-6").unwrap()[0].id,
+        f.outside
+    );
+}
+
+#[test]
+fn character_move_preserves_originals_and_excluded_source_folders() {
+    let f = Fixture::new();
+    let target = f.target("보호 대상");
+    let originals: String = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT classification_id FROM classification_roles WHERE role='originals'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    f.library
+        .set_asset_classification(SetAssetClassification {
+            asset_ids: vec!["asset-6".into()],
+            classification_id: Some(originals.clone()),
+        })
+        .unwrap();
+
+    let error = f
+        .library
+        .move_assets_to_character(
+            target.id.clone(),
+            target.fingerprint.clone(),
+            vec!["asset-6".into()],
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "보호 대상: 오리지널 보관 영역의 자산은 이동할 수 없습니다."
+    );
+    assert_eq!(
+        f.library.get_asset_classifications("asset-6").unwrap()[0].id,
+        originals
+    );
+
+    let excluded_folder = folder(&f.library, "Excluded source", Some(f.series.clone()));
+    f.library
+        .set_character_folder_excluded(crate::library::character_folders::FolderExclusionRequest {
+            classification_id: excluded_folder.clone(),
+            excluded: true,
+        })
+        .unwrap();
+    f.library
+        .set_asset_classification(SetAssetClassification {
+            asset_ids: vec!["asset-6".into()],
+            classification_id: Some(excluded_folder.clone()),
+        })
+        .unwrap();
+
+    let error = f
+        .library
+        .move_assets_to_character(target.id, target.fingerprint, vec!["asset-6".into()])
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "보호 대상: 캐릭터 분류에서 제외된 폴더의 자산입니다."
+    );
+    assert_eq!(
+        f.library.get_asset_classifications("asset-6").unwrap()[0].id,
+        excluded_folder
+    );
+}
+
+#[test]
+fn character_assign_suggestions_only_include_eligible_undecided_pairs() {
+    let f = Fixture::new();
+    let eligible = f.target("Eligible");
+    let disabled = f.target("Disabled");
+    let accepted = f.target("Accepted");
+    let rejected = f.target("Rejected");
+    let excluded_series = folder(&f.library, "Excluded series", None);
+    let series_excluded = f
+        .library
+        .save_character_target(TargetDraft {
+            id: None,
+            expected_revision: None,
+            series_classification_id: Some(excluded_series.clone()),
+            linked_classification_id: None,
+            display_name: "Series excluded".into(),
+            description: String::new(),
+            thumbnail_asset_id: None,
+            enabled: true,
+        })
+        .unwrap();
+    let folder_excluded = f.target("Folder excluded");
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE character_targets SET enabled=0 WHERE id=?1",
+            [&disabled.id],
+        )
+        .unwrap();
+    f.decide(&accepted, &["asset-5"], DecisionKind::Accepted)
+        .unwrap();
+    f.decide(&rejected, &["asset-5"], DecisionKind::Rejected)
+        .unwrap();
+    let excluded_folder = folder(&f.library, "Excluded", Some(f.series.clone()));
+    f.library
+        .set_character_folder_excluded(crate::library::character_folders::FolderExclusionRequest {
+            classification_id: excluded_folder.clone(),
+            excluded: true,
+        })
+        .unwrap();
+    f.library
+        .set_asset_classification(SetAssetClassification {
+            asset_ids: vec!["asset-6".into()],
+            classification_id: Some(excluded_folder),
+        })
+        .unwrap();
+
+    let connection = f.library.connection().unwrap();
+    connection
+        .execute(
+            "INSERT INTO character_series_asset_exclusions(series_id,asset_id,created_at)
+             VALUES(?1,'asset-5','now')",
+            [&excluded_series],
+        )
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO tagger_character_vocabulary(source,tag) VALUES
+                ('pixai','eligible'),('canary','eligible'),('pixai','disabled'),
+                ('pixai','accepted'),('pixai','rejected'),
+                ('pixai','series-excluded'),('pixai','folder-excluded');
+             INSERT INTO asset_tagger_coverage(asset_id,source) VALUES
+                ('asset-5','pixai'),('asset-5','canary'),('asset-6','pixai');",
+        )
+        .unwrap();
+    for (target, tag) in [
+        (&eligible, "eligible"),
+        (&disabled, "disabled"),
+        (&accepted, "accepted"),
+        (&rejected, "rejected"),
+        (&series_excluded, "series-excluded"),
+        (&folder_excluded, "folder-excluded"),
+    ] {
+        connection
+            .execute(
+                "INSERT INTO character_target_tagger_tags(target_id,tag) VALUES(?1,?2)",
+                params![target.id, tag],
+            )
+            .unwrap();
+    }
+    connection
+        .execute_batch(
+            "INSERT INTO asset_tagger_character_scores VALUES
+                ('asset-5','pixai','eligible',0.91),
+                ('asset-5','canary','eligible',0.92),
+                ('asset-5','pixai','disabled',0.93),
+                ('asset-5','pixai','accepted',0.94),
+                ('asset-5','pixai','rejected',0.95),
+                ('asset-5','pixai','series-excluded',0.96),
+                ('asset-6','pixai','folder-excluded',0.97);",
+        )
+        .unwrap();
+    drop(connection);
+
+    let duplicated_selection = std::iter::repeat_n("asset-5".to_string(), 201)
+        .chain(std::iter::once("asset-6".to_string()))
+        .collect();
+    let suggestions = f
+        .library
+        .character_assign_suggestions(duplicated_selection)
+        .unwrap();
+
+    assert_eq!(
+        suggestions,
+        vec![CharacterAssignSuggestion {
+            target_id: eligible.id,
+            matched: 1,
+            total: 2,
+        }]
+    );
 }
 
 #[test]
 fn unified_settings_reject_stale_edits_after_explicit_reference_changes() {
     let f = Fixture::new();
     let before = f.ready("Unified");
-    f.decide(&before, &["asset-5"], DecisionKind::Accepted).unwrap();
-    let added = f.library.add_character_learned_references(&before.id, before.revision, &["asset-5".into()]).unwrap();
-    assert!(matches!(f.library.replace_character_references(&before.id, before.revision, &f.refs), Err(Error::Stale)));
-    let removed = f.library.exclude_character_reference(&added.id, added.revision, "asset-5").unwrap();
-    assert!(matches!(f.library.replace_character_references(&added.id, added.revision, &f.refs), Err(Error::Stale)));
+    f.decide(&before, &["asset-5"], DecisionKind::Accepted)
+        .unwrap();
+    let added = f
+        .library
+        .add_character_learned_references(&before.id, before.revision, &["asset-5".into()])
+        .unwrap();
+    assert!(matches!(
+        f.library
+            .replace_character_references(&before.id, before.revision, &f.refs),
+        Err(Error::Stale)
+    ));
+    let removed = f
+        .library
+        .exclude_character_reference(&added.id, added.revision, "asset-5")
+        .unwrap();
+    assert!(matches!(
+        f.library
+            .replace_character_references(&added.id, added.revision, &f.refs),
+        Err(Error::Stale)
+    ));
     assert_eq!(removed.usable_references().count(), 5);
 }
 
@@ -72,14 +502,27 @@ fn unified_pool_keeps_all_twenty_five_after_legacy_anchor_removal() {
         let id = format!("extra-{index}");
         let path = format!("assets/{id}.png");
         let thumbnail = format!("thumbnails/{id}.webp");
-        let hash: String = Sha256::digest(id.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect();
+        let hash: String = Sha256::digest(id.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
         fs::write(f.temp.path().join(&path), id.as_bytes()).unwrap();
         fs::write(f.temp.path().join(&thumbnail), id.as_bytes()).unwrap();
         connection.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,status) VALUES(?1,?2,'image',?1,?3,?4,7,1,1,'2026-09-12','normal')", params![id,hash,path,thumbnail]).unwrap();
-        connection.execute("INSERT INTO asset_classifications VALUES(?1,?2)", params![id,f.series]).unwrap();
+        connection
+            .execute(
+                "INSERT INTO asset_classifications VALUES(?1,?2)",
+                params![id, f.series],
+            )
+            .unwrap();
         connection.execute("INSERT INTO character_learned_references(target_id,asset_id,asset_hash,created_at) VALUES(?1,?2,?3,'2026-09-12')", params![target.id,id,hash]).unwrap();
     }
-    connection.execute("DELETE FROM character_references WHERE target_id=?1 AND slot=0", [&target.id]).unwrap();
+    connection
+        .execute(
+            "DELETE FROM character_references WHERE target_id=?1 AND slot=0",
+            [&target.id],
+        )
+        .unwrap();
     drop(connection);
     let current = f.library.get_character_target(&target.id).unwrap();
     assert!(current.ready);
@@ -90,10 +533,23 @@ fn unified_pool_keeps_all_twenty_five_after_legacy_anchor_removal() {
 fn unified_reference_reselection_updates_changed_content_without_excluding_the_image() {
     let f = Fixture::new();
     let target = f.ready("Unified");
-    let hash: String = Sha256::digest(b"changed").iter().map(|byte| format!("{byte:02x}")).collect();
+    let hash: String = Sha256::digest(b"changed")
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     fs::write(f.temp.path().join("assets/asset-0.png"), b"changed").unwrap();
-    f.library.connection().unwrap().execute("UPDATE assets SET content_hash=?1 WHERE id='asset-0'", [&hash]).unwrap();
-    let saved = f.library.replace_character_references(&target.id, target.revision, &f.refs).unwrap();
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE assets SET content_hash=?1 WHERE id='asset-0'",
+            [&hash],
+        )
+        .unwrap();
+    let saved = f
+        .library
+        .replace_character_references(&target.id, target.revision, &f.refs)
+        .unwrap();
     assert!(saved.ready);
     assert_eq!(saved.references[0].asset_hash, hash);
     let excluded: bool = f.library.connection().unwrap().query_row(
@@ -250,36 +706,51 @@ pub(in crate::library) fn historical_character_library(
     files.sort();
     let transaction = connection.transaction().unwrap();
     for file in files.iter().take(version) {
-        transaction.execute_batch(&fs::read_to_string(file).unwrap()).unwrap();
+        transaction
+            .execute_batch(&fs::read_to_string(file).unwrap())
+            .unwrap();
     }
     transaction.commit().unwrap();
     assert_eq!(
-        connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(),
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
         version as i64
     );
-    connection.pragma_update(None, "foreign_keys", "ON").unwrap();
-    connection.execute_batch(
-        "INSERT INTO classification_entries(id,kind,name,parent_id,created_at) VALUES
+    connection
+        .pragma_update(None, "foreign_keys", "ON")
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO classification_entries(id,kind,name,parent_id,created_at) VALUES
          ('series','root','Series',NULL,'2026-09-08'),
          ('character','tag','Character','series','2026-09-08');
          INSERT INTO character_series(classification_id) VALUES('series');
          INSERT INTO character_targets(id,series_classification_id,linked_classification_id,
              display_name,enabled,revision,created_at,updated_at)
-         VALUES('target','series','character','Pilot',1,3,'2026-09-08','2026-09-08');"
-    ).unwrap();
+         VALUES('target','series','character','Pilot',1,3,'2026-09-08','2026-09-08');",
+        )
+        .unwrap();
     fs::create_dir(temp.path().join("assets")).unwrap();
     for slot in 0..5 {
         let id = format!("reference-{slot}");
         let hash = format!("hash-{slot}");
         let path = format!("assets/{id}.png");
         fs::write(temp.path().join(&path), id.as_bytes()).unwrap();
-        connection.execute(
-            "INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,
+        connection
+            .execute(
+                "INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,
                 thumbnail_relative_path,byte_size,width,height,collected_at)
              VALUES(?1,?2,'image',?1,?3,?3,1,1,1,'2026-09-08')",
-            params![id, hash, path],
-        ).unwrap();
-        connection.execute("INSERT INTO asset_classifications VALUES(?1,'character')", [&id]).unwrap();
+                params![id, hash, path],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO asset_classifications VALUES(?1,'character')",
+                [&id],
+            )
+            .unwrap();
         connection.execute(
             "INSERT INTO character_references(target_id,slot,asset_id,asset_hash) VALUES('target',?1,?2,?3)",
             params![slot, id, hash],
@@ -1004,7 +1475,8 @@ fn explicit_learning_changes_do_not_schedule_history_and_remain_idempotent() {
     };
 
     clear();
-    let target = f.library
+    let target = f
+        .library
         .add_character_learned_references(&target.id, target.revision, &["asset-5".into()])
         .unwrap();
     assert_eq!(count(), 0);
@@ -1014,7 +1486,8 @@ fn explicit_learning_changes_do_not_schedule_history_and_remain_idempotent() {
         .unwrap();
     assert_eq!(count(), 0);
 
-    let target = f.library
+    let target = f
+        .library
         .exclude_character_reference(&target.id, target.revision, "asset-5")
         .unwrap();
     assert_eq!(count(), 0);
@@ -1320,7 +1793,8 @@ fn removing_explicit_learning_preserves_character_membership() {
     let target = f.ready("Towa");
     f.decide(&target, &["asset-5"], DecisionKind::Accepted)
         .unwrap();
-    let target = f.library
+    let target = f
+        .library
         .add_character_learned_references(&target.id, target.revision, &["asset-5".into()])
         .unwrap();
     let result = f
@@ -1639,9 +2113,17 @@ fn character_drop_moves_video_and_gif_out_of_original_folder() {
 }
 
 #[test]
-fn character_drop_rejects_other_series_atomically() {
+fn character_move_rejects_multiple_classifications_atomically() {
     let f = Fixture::new();
     let target = f.target("Marcus");
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO asset_classifications(asset_id,classification_id) VALUES('asset-6',?1)",
+            [&f.child],
+        )
+        .unwrap();
     assert!(f
         .library
         .move_assets_to_character(
@@ -1727,27 +2209,59 @@ fn moved_reference_is_excluded_without_blocking_remaining_references_or_competit
     );
 }
 
-
 #[test]
 fn reference_region_settings_persist_and_reject_stale_content_atomically() {
     let f = Fixture::new();
     let target = f.ready("Region");
-    f.library.connection().unwrap().execute("UPDATE assets SET width=200,height=200", []).unwrap();
+    f.library
+        .connection()
+        .unwrap()
+        .execute("UPDATE assets SET width=200,height=200", [])
+        .unwrap();
     let region = serde_json::json!({"contentHash":target.references[0].asset_hash,
         "baselineFingerprint":crate::library::character_worker::BASELINE,"bounds":[0,0,80,100]});
-    let draft = |revision, hash: &str| serde_json::from_value::<CharacterSettingsDraft>(serde_json::json!({
+    let draft = |revision, hash: &str| {
+        serde_json::from_value::<CharacterSettingsDraft>(serde_json::json!({
         "id":target.id,"expectedRevision":revision,"seriesClassificationId":f.series,
         "linkedClassificationId":f.child,"displayName":"Region","description":"kept",
         "thumbnailAssetId":null,"enabled":true,"referenceIds":f.refs,
         "referenceRegions":{"asset-0":{"contentHash":hash,
             "baselineFingerprint":crate::library::character_worker::BASELINE,"bounds":[0,0,80,100]}}
-    })).unwrap();
-    let saved = f.library.save_character_settings(draft(target.revision, &target.references[0].asset_hash), true).unwrap();
-    assert_eq!(serde_json::to_value(&saved.references[0]).unwrap()["region"], region);
+    })).unwrap()
+    };
+    let saved = f
+        .library
+        .save_character_settings(
+            draft(target.revision, &target.references[0].asset_hash),
+            true,
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&saved.references[0]).unwrap()["region"],
+        region
+    );
     assert_ne!(target.fingerprint, saved.fingerprint);
-    assert!(matches!(f.library.save_character_settings(draft(saved.revision, &"f".repeat(64)), true), Err(Error::Stale)));
+    assert!(matches!(
+        f.library
+            .save_character_settings(draft(saved.revision, &"f".repeat(64)), true),
+        Err(Error::Stale)
+    ));
     let after = f.library.get_character_target(&target.id).unwrap();
     assert_eq!(after.revision, saved.revision);
-    assert_eq!(serde_json::to_value(&after.references[0]).unwrap()["region"], region);
-    assert_eq!(f.library.connection().unwrap().query_row("SELECT COUNT(*) FROM character_reference_refreshes", [], |r|r.get::<_,i64>(0)).unwrap(), 0);
+    assert_eq!(
+        serde_json::to_value(&after.references[0]).unwrap()["region"],
+        region
+    );
+    assert_eq!(
+        f.library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM character_reference_refreshes",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
 }

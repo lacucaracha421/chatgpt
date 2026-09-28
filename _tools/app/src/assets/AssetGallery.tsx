@@ -47,6 +47,7 @@ type AssetGalleryProps = {
   onSelectAll?: () => void;
   onDeleteSelection?: () => void;
   onClearSelection?: () => void;
+  onAssignCharacter?: () => void;
   onMoveFocus?: (delta: number, extend: boolean) => void;
   onOpen?: (asset: AssetSummary) => void;
   onRetryVideo?: (asset: AssetSummary) => void;
@@ -55,7 +56,7 @@ type AssetGalleryProps = {
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
-export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, totalCount = null, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, totalCount = null, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const introRef = useRef<HTMLDivElement>(null);
   const [introHeight, setIntroHeight] = useState(0);
@@ -285,7 +286,10 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
         if (!target.closest(".asset-gallery__asset, button, a, input, select, textarea, [contenteditable='true']")) onClearSelection?.();
       }}
       onKeyDown={(event) => {
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+        if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "c" && selectedAssetIds.size > 0 && !isTextEditingTarget(event.target)) {
+          event.preventDefault();
+          onAssignCharacter?.();
+        } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
           event.preventDefault();
           onSelectAll?.();
         } else if (event.key === "Delete") {
@@ -325,6 +329,10 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
     {quickPreview && !privacyMode && <div className="asset-gallery__quick-preview" style={quickPreviewLayout(quickPreview)}><img src={mediaSource === "vault" ? vaultAssetUrl(quickPreview.asset.id) : assetUrl(quickPreview.asset.id)} alt={`${quickPreview.asset.title || quickPreview.asset.originalName} 빠른 미리보기`} draggable={false} onError={cancelQuickPreview} /></div>}
     <AssetGalleryScrollbar scrollRef={scrollRef} totalHeight={reservedTotal + introHeight} />
   </div>;
+}
+
+function isTextEditingTarget(target: EventTarget | null) {
+  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
 function AssetTile({ asset, height, captionBelow = false, selected, selectedAssetIds, focused, metadataVisible, captionLabel, privacyMode, thumbnailCacheKey, mediaSource, activePreview, onRequestPreview, onReleasePreview, onRequestQuickPreview, onCancelQuickPreview, onRetryVideo, onSelectionGesture, onOpen, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: { asset: AssetSummary; height: number; captionBelow?: boolean; selected: boolean; selectedAssetIds: ReadonlySet<string>; focused: boolean; metadataVisible: boolean; captionLabel?: string | null; privacyMode: boolean; thumbnailCacheKey?: string | number; mediaSource: "library" | "vault"; activePreview: boolean; onRequestPreview(): void; onReleasePreview(): void; onRequestQuickPreview(asset: AssetSummary, trigger: HTMLElement): void; onCancelQuickPreview(): void; onRetryVideo?: AssetGalleryProps["onRetryVideo"]; onSelectionGesture?: (asset: AssetSummary, gesture: SelectionGesture) => void; onOpen?: (asset: AssetSummary) => void; onPointerDragStart?: AssetGalleryProps["onPointerDragStart"]; onPointerDragMove?: AssetGalleryProps["onPointerDragMove"]; onPointerDragEnd?: AssetGalleryProps["onPointerDragEnd"]; onPointerDragCancel?: AssetGalleryProps["onPointerDragCancel"] }) {

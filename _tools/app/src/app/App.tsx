@@ -8,7 +8,6 @@ import {
   CLASSIFICATION_AUTHORITY_CHANGED_EVENT,
   useClassificationAuthoritySync,
 } from './useClassificationAuthoritySync';
-import { characterApi, moveAssetsToCharacter } from "../characters/api";
 import { useCharacterAutomation } from "../characters/useCharacterAutomation";
 import { useCharacterHub } from "../characters/useCharacterHub";
 import { CharacterFolderContent } from "../characters/CharacterFolderContent";
@@ -34,7 +33,7 @@ import { executeMetadataImport, type MetadataImportWork } from "../ingestion/met
 import { AppShell } from "../layout/AppShell";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { WorkspaceNavigation } from "../layout/WorkspaceNavigation";
-import { WindowControls } from "../layout/WindowControls";
+import { LightweightModeIndicator, WindowControls } from "../layout/WindowControls";
 import { StatusCenter, type StatusCenterProps } from "../layout/StatusCenter";
 import { libraryGateway } from "../library/client";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -151,6 +150,8 @@ function LibraryScreen({
     : <LibrarySetup selectFolder={selectFolder} />;
 }
 
+type SidebarDropTarget = Exclude<ClassificationDropTarget, { kind: "character" }>;
+
 function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscribeExtensionIngest }: { libraryRoot: string; subscribeDrops: DropSubscriber; startAssetDrag: StartAssetDrag; subscribeExtensionIngest: ExtensionIngestListener }) {
   const { gateway } = useLibrary();
   const workload = useWorkloadProfile();
@@ -206,7 +207,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   });
   const [dragState, setDragState] = useState<PointerDragState>({ phase: "idle" });
   const dragStateRef = useRef<PointerDragState>({ phase: "idle" });
-  const [dragTarget, setDragTarget] = useState<ClassificationDropTarget | null>(null);
+  const [dragTarget, setDragTarget] = useState<SidebarDropTarget | null>(null);
   const nativeDragStartedRef = useRef(false);
   const activeNativeDragAssetIdsRef = useRef<string[] | null>(null);
   const nativeDragAssetsRef = useRef(new Map<string, string[]>());
@@ -679,7 +680,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }
 
   useEffect(() => {
-    if (dragState.phase !== "dragging" || dragTarget?.position !== "inside" || !dragTarget.valid || dragTarget.kind === "character") return;
+    if (dragState.phase !== "dragging" || dragTarget?.position !== "inside" || !dragTarget.valid) return;
     const target = dragTarget;
     const timer = window.setTimeout(() => setPreferences((current) => {
       const key = target.kind === "album" ? "expandedAlbumIds" : "expandedClassificationIds";
@@ -706,18 +707,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     return () => window.clearInterval(timer);
   }, [dragState.phase, entries, albums]);
 
-  async function performInternalDrop(payload: InternalDragPayload, target: ClassificationDropTarget) {
+  async function performInternalDrop(payload: InternalDragPayload, target: SidebarDropTarget) {
     try {
       if (payload.kind === "assets") {
-        if (target.kind === "character") {
-          const character = (await characterApi.targets()).find(entry => entry.id === target.entryId && entry.enabled);
-          if (!character) throw new Error("캐릭터를 다시 확인해 주세요.");
-          await moveAssetsToCharacter(character.id, character.fingerprint, payload.assetIds);
-          refreshCharacterViews();
-          setAssetRefresh(value => value + 1);
-          setMessage(`${payload.assetIds.length}개 자산을 ${character.displayName} 캐릭터 폴더로 이동했습니다.`);
-          return;
-        }
         if (target.kind === "album") {
           await gateway.patchAssetAlbums({ assetIds: payload.assetIds, addAlbumIds: [target.entryId], removeAlbumIds: [] });
         } else {
@@ -728,7 +720,6 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
         setMessage(`${payload.assetIds.length}개 자산을 ${target.kind === "album" ? "앨범에 추가" : "폴더로 이동"}했습니다.`);
         return;
       }
-      if (target.kind === "character") return;
       const destination = entries.find((entry) => entry.id === target.entryId);
       const parentId = target.position === "inside" ? target.entryId : destination?.parentId ?? null;
       if (payload.kind === "album") await gateway.moveAlbum(payload.entryId, target.entryId);
@@ -828,6 +819,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
           content={
             <div className="workspace-content">
               <div className="workspace-titlebar" data-tauri-drag-region="deep"><ChromeTarget name="header" className="workspace-titlebar__context" />
+                <LightweightModeIndicator />
                 <CloudStatusCenter gateway={gateway} libraryRoot={libraryRoot} characterAutomation={characterAutomation} progress={dropState.progress} similarityIndex={similarityIndex}
                   browserStatus={browserStatus} dropEnabled={dropEnabled}
                   works={[...dropState.works, ...nativeDragWorks, ...metadataImportWorks, ...(videoPreparation.work ? [videoPreparation.work] : [])]}
@@ -921,6 +913,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onViewChange={navigateView}
                     onReviewVideos={(assetIds) => { setVideoReviewAssetIds(assetIds); navigateView({ kind: "similarity_review" }); }}
                     classifications={entries}
+                    characterTargets={characterHub.targets}
+                    characterGroups={characterHub.groups}
+                    onCharactersChanged={() => { setAssetRefresh(value => value + 1); refreshCharacterViews(); }}
                     albums={albums}
                     collections={collections}
                     onCollectionsChanged={() => void refreshCollections()}
@@ -977,10 +972,8 @@ function DeferredViewFallback() {
   return <div className="library-content__deferred" role="status" aria-label="화면 불러오는 중" />;
 }
 
-function sidebarTargetAt(x: number, y: number, payload: InternalDragPayload, entries: ClassificationEntry[], albums: AlbumEntry[]): ClassificationDropTarget | null {
-  const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-classification-id], [data-album-id], [data-character-id], [data-character-group-id]");
-  if (element?.dataset.characterGroupId) return null;
-  if (element?.dataset.characterId) return { kind: "character", entryId: element.dataset.characterId, position: "inside", valid: payload.kind === "assets" && payload.assetIds.length <= 200 };
+function sidebarTargetAt(x: number, y: number, payload: InternalDragPayload, entries: ClassificationEntry[], albums: AlbumEntry[]): SidebarDropTarget | null {
+  const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-classification-id], [data-album-id]");
   const kind = element?.dataset.albumId ? "album" : "classification";
   const entryId = kind === "album" ? element?.dataset.albumId : element?.dataset.classificationId;
   if (!element || !entryId) return null;
@@ -997,7 +990,7 @@ function sidebarTargetAt(x: number, y: number, payload: InternalDragPayload, ent
   return { ...target, valid };
 }
 
-function validClassificationDrop(entryId: string, target: ClassificationDropTarget, entries: ClassificationEntry[]) {
+function validClassificationDrop(entryId: string, target: SidebarDropTarget, entries: ClassificationEntry[]) {
   const entry = entries.find((candidate) => candidate.id === entryId);
   const destination = entries.find((candidate) => candidate.id === target.entryId);
   if (!entry || !destination || entry.id === destination.id) return false;

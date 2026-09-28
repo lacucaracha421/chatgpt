@@ -1,7 +1,7 @@
 //! Character identity is separate from the asset's single direct folder.
 use std::collections::BTreeSet;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -26,6 +26,8 @@ pub enum Error {
     Stale,
     #[error("{0}")]
     Invalid(&'static str),
+    #[error("{0}")]
+    InvalidMessage(String),
     /// The inbound mobile rejection does not apply to this library any more.
     ///
     /// These are deliberately *typed* rather than `Invalid(&str)`: the receive pass must
@@ -39,9 +41,9 @@ pub enum Error {
     InboundProtectedReference,
 }
 
-
 const REFERENCE_COUNT: usize = 5;
 pub(super) const MAX_REFERENCES: usize = 25;
+const CHARACTER_ASSIGN_SCORE: f64 = 0.85;
 const SCOPED_IMAGE: &str = "WITH RECURSIVE scope(id) AS (
     SELECT id FROM classification_entries WHERE id = ?1
     UNION SELECT child.id FROM classification_entries child JOIN scope ON child.parent_id = scope.id
@@ -108,6 +110,21 @@ pub struct FolderRegistrationResult {
     pub source_folder_removed: bool,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CharacterMoveTarget {
+    pub target_id: String,
+    pub expected_fingerprint: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CharacterAssignSuggestion {
+    pub target_id: String,
+    pub matched: u64,
+    pub total: u64,
+}
+
 impl std::ops::Deref for FolderRegistrationResult {
     type Target = Target;
     fn deref(&self) -> &Self::Target {
@@ -151,7 +168,9 @@ pub struct Target {
 impl Target {
     /// The two tables are legacy storage only; every valid reference has equal weight.
     pub(super) fn usable_references(&self) -> impl Iterator<Item = &Reference> {
-        self.references.iter().chain(&self.learned_references)
+        self.references
+            .iter()
+            .chain(&self.learned_references)
             .filter(|reference| reference.status == "ready")
     }
 
@@ -160,7 +179,6 @@ impl Target {
             .iter()
             .filter(|reference| reference.status == "ready")
     }
-
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -453,7 +471,12 @@ impl Library {
             strict,
             manual_on_create,
         )?;
-        let regions_changed = super::character_reference_regions::apply_regions(&transaction, &saved, &request.reference_ids, &request.reference_regions)?;
+        let regions_changed = super::character_reference_regions::apply_regions(
+            &transaction,
+            &saved,
+            &request.reference_ids,
+            &request.reference_regions,
+        )?;
         let result = self.replace_character_references_selection_in(
             &transaction,
             &saved.id,
@@ -462,7 +485,10 @@ impl Library {
             strict,
         )?;
         if regions_changed {
-            transaction.execute("UPDATE character_targets SET revision=revision+1 WHERE id=?1", [&saved.id])?;
+            transaction.execute(
+                "UPDATE character_targets SET revision=revision+1 WHERE id=?1",
+                [&saved.id],
+            )?;
         }
         let result = self.read_character_target(&transaction, &result.id)?;
         transaction.commit()?;
@@ -653,7 +679,9 @@ impl Library {
             additions.push((asset_id.clone(), hash));
         }
         if target.references.len() + existing as usize + additions.len() > MAX_REFERENCES {
-            return Err(Error::Invalid("레퍼런스는 휴지통 보관분을 포함해 최대 25장입니다."));
+            return Err(Error::Invalid(
+                "레퍼런스는 휴지통 보관분을 포함해 최대 25장입니다.",
+            ));
         }
         let now = chrono::Utc::now().to_rfc3339();
         let changed = !additions.is_empty() || protected > 0;
@@ -665,10 +693,25 @@ impl Library {
             transaction.execute("INSERT INTO character_learned_references(target_id,asset_id,asset_hash,created_at,provenance) VALUES(?1,?2,?3,?4,'user') ON CONFLICT(target_id,asset_id) DO UPDATE SET asset_hash=excluded.asset_hash,created_at=excluded.created_at,provenance='user'", params![id,asset_id,hash,now])?;
         }
         if changed {
-            transaction.execute("UPDATE character_targets SET revision=revision+1,updated_at=?2 WHERE id=?1", params![id,now])?;
-            if target.manual_only && self.read_character_target(transaction, id)?.usable_references().count() >= REFERENCE_COUNT {
-                transaction.execute("UPDATE character_targets SET manual_only=0 WHERE id=?1", [id])?;
-                transaction.execute("DELETE FROM character_manual_targets WHERE target_id=?1", [id])?;
+            transaction.execute(
+                "UPDATE character_targets SET revision=revision+1,updated_at=?2 WHERE id=?1",
+                params![id, now],
+            )?;
+            if target.manual_only
+                && self
+                    .read_character_target(transaction, id)?
+                    .usable_references()
+                    .count()
+                    >= REFERENCE_COUNT
+            {
+                transaction.execute(
+                    "UPDATE character_targets SET manual_only=0 WHERE id=?1",
+                    [id],
+                )?;
+                transaction.execute(
+                    "DELETE FROM character_manual_targets WHERE target_id=?1",
+                    [id],
+                )?;
             }
         }
         self.read_character_target(transaction, id)
@@ -695,7 +738,10 @@ impl Library {
         )?;
         if removed > 0 {
             transaction.execute("INSERT OR IGNORE INTO character_reference_exclusions(target_id,asset_id,created_at) VALUES(?1,?2,?3)", params![id,asset_id,chrono::Utc::now().to_rfc3339()])?;
-            transaction.execute("UPDATE character_targets SET revision=revision+1,updated_at=?2 WHERE id=?1", params![id,chrono::Utc::now().to_rfc3339()])?;
+            transaction.execute(
+                "UPDATE character_targets SET revision=revision+1,updated_at=?2 WHERE id=?1",
+                params![id, chrono::Utc::now().to_rfc3339()],
+            )?;
         } else {
             let known: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM character_reference_exclusions WHERE target_id=?1 AND asset_id=?2)", params![id,asset_id], |row| row.get(0))?;
             if !known {
@@ -784,19 +830,30 @@ impl Library {
         let promote_manual = previous.manual_only && values.len() >= REFERENCE_COUNT;
         // Hidden trash references retain their link for restore. Other unavailable
         // rows can be removed explicitly, but an ordinary settings save preserves them.
-        for reference in previous.references.iter().chain(&previous.learned_references) {
+        for reference in previous
+            .references
+            .iter()
+            .chain(&previous.learned_references)
+        {
             if reference.status != "ready" {
                 if let Some(asset_id) = &reference.asset_id {
-                    if !values.iter().any(|(id, _)| id == asset_id) && hashes.insert(reference.asset_hash.clone()) {
+                    if !values.iter().any(|(id, _)| id == asset_id)
+                        && hashes.insert(reference.asset_hash.clone())
+                    {
                         values.push((asset_id.clone(), reference.asset_hash.clone()));
                     }
                 }
             }
         }
         if values.len() > MAX_REFERENCES {
-            return Err(Error::Invalid("레퍼런스는 휴지통 보관분을 포함해 최대 25장입니다."));
+            return Err(Error::Invalid(
+                "레퍼런스는 휴지통 보관분을 포함해 최대 25장입니다.",
+            ));
         }
-        let previous_values = previous.references.iter().chain(&previous.learned_references)
+        let previous_values = previous
+            .references
+            .iter()
+            .chain(&previous.learned_references)
             .filter_map(|r| r.asset_id.clone().map(|id| (id, r.asset_hash.clone())))
             .collect::<BTreeSet<_>>();
         let unchanged = previous_values == values.iter().cloned().collect::<BTreeSet<_>>();
@@ -810,17 +867,24 @@ impl Library {
         )?;
         if !unchanged {
             transaction.execute("DELETE FROM character_references WHERE target_id=?1", [id])?;
-            transaction.execute("DELETE FROM character_learned_references WHERE target_id=?1", [id])?;
+            transaction.execute(
+                "DELETE FROM character_learned_references WHERE target_id=?1",
+                [id],
+            )?;
             let reference_time = chrono::Utc::now();
             let now = reference_time.to_rfc3339();
             for (slot, (asset_id, hash)) in values.iter().enumerate() {
                 if slot < REFERENCE_COUNT {
                     transaction.execute("INSERT INTO character_references(target_id,slot,asset_id,asset_hash) VALUES(?1,?2,?3,?4)", params![id,slot as i64,asset_id,hash])?;
                 } else {
-                    let created_at = (reference_time + chrono::Duration::microseconds(slot as i64)).to_rfc3339();
+                    let created_at =
+                        (reference_time + chrono::Duration::microseconds(slot as i64)).to_rfc3339();
                     transaction.execute("INSERT INTO character_learned_references(target_id,asset_id,asset_hash,created_at) VALUES(?1,?2,?3,?4)", params![id,asset_id,hash,created_at])?;
                 }
-                transaction.execute("DELETE FROM character_reference_exclusions WHERE target_id=?1 AND asset_id=?2", params![id,asset_id])?;
+                transaction.execute(
+                    "DELETE FROM character_reference_exclusions WHERE target_id=?1 AND asset_id=?2",
+                    params![id, asset_id],
+                )?;
             }
             for (removed_id, _) in previous_values.difference(&values.iter().cloned().collect()) {
                 if !values.iter().any(|(asset_id, _)| asset_id == removed_id) {
@@ -847,50 +911,210 @@ impl Library {
         self.read_character_target(transaction, id)
     }
 
-    /// Move within a series and assign the character as one atomic operation.
+    /// Move into a character's series and accept the selection atomically.
     pub fn move_assets_to_character(
         &self,
         target_id: String,
         expected_fingerprint: String,
         asset_ids: Vec<String>,
     ) -> Result<u64> {
-        let mut connection = self.connection()?;
-        let transaction = connection.transaction()?;
-        let target = self.read_character_target(&transaction, &target_id)?;
-        let series_id = target
-            .series_classification_id
-            .clone()
-            .ok_or(Error::Invalid("시리즈 폴더를 다시 연결해 주세요."))?;
-        // A tagger candidate can be outside the series. This explicitly requested
-        // move-and-accept action places it first; plain accept never moves folders.
-        for id in &asset_ids {
-            let pending: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM character_tagger_pending WHERE target_id=?1 AND asset_id=?2)", params![target.id,id], |r| r.get(0))?;
-            if pending {
-                Self::set_asset_classification_in(&transaction, &super::models::SetAssetClassification {
-                    asset_ids: vec![id.clone()], classification_id: Some(series_id.clone()),
-                })?;
-            }
-        }
-        self.write_character_decisions(
-            &transaction,
-            DecisionRequest {
+        self.move_assets_to_characters(
+            vec![CharacterMoveTarget {
                 target_id,
                 expected_fingerprint,
-                asset_ids: asset_ids.clone(),
-                decision: DecisionKind::Accepted,
-                baseline_fingerprint: None,
-                scan_id: None,
-            },
-        )?;
+            }],
+            asset_ids,
+        )
+    }
+
+    /// Assign one selection to one or more characters. The first character owns the
+    /// final folder even when later characters belong to other series.
+    pub fn move_assets_to_characters(
+        &self,
+        targets: Vec<CharacterMoveTarget>,
+        asset_ids: Vec<String>,
+    ) -> Result<u64> {
+        let asset_ids = asset_ids.into_iter().collect::<BTreeSet<_>>();
+        let target_ids = targets
+            .iter()
+            .map(|target| target.target_id.as_str())
+            .collect::<BTreeSet<_>>();
+        if asset_ids.is_empty()
+            || targets.is_empty()
+            || target_ids.len() != targets.len()
+            || asset_ids.len().saturating_mul(targets.len()) > 200
+        {
+            return Err(Error::Invalid(
+                "이미지 수 × 캐릭터 수는 한 번에 200개까지 지정할 수 있습니다.",
+            ));
+        }
+        let asset_ids = asset_ids.into_iter().collect::<Vec<_>>();
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let mut resolved = Vec::with_capacity(targets.len());
+        for request in &targets {
+            let target = self.read_character_target(&transaction, &request.target_id)?;
+            if target.fingerprint != request.expected_fingerprint {
+                return Err(Error::Stale);
+            }
+            let series_id = target.series_classification_id.clone().ok_or_else(|| {
+                Error::InvalidMessage(format!(
+                    "{}: 시리즈 폴더를 다시 연결해 주세요.",
+                    target.display_name
+                ))
+            })?;
+            resolved.push((request, target, series_id));
+        }
+        let destination_series_id = resolved[0].2.clone();
+        let destination_target = &resolved[0].1;
+        for asset_id in &asset_ids {
+            let classifications = transaction
+                .prepare("SELECT classification_id FROM asset_classifications WHERE asset_id=?1 ORDER BY classification_id")?
+                .query_map([asset_id], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            if classifications.len() > 1 {
+                return Err(Error::Invalid("자산의 폴더 정보를 다시 확인해 주세요."));
+            }
+            let supported: bool = transaction.query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM assets
+                    WHERE id=?1 AND status='normal' AND media_kind IN ('image','video','gif')
+                 )",
+                [asset_id],
+                |row| row.get(0),
+            )?;
+            if !supported {
+                return Err(Error::InvalidMessage(format!(
+                    "{}: 이동할 수 없는 자산입니다. 정상 상태의 이미지나 영상을 선택해 주세요.",
+                    destination_target.display_name
+                )));
+            }
+            if let Some(classification_id) = classifications.first() {
+                if super::classification::classification_in_role_scope(
+                    &transaction,
+                    classification_id,
+                    "originals",
+                )? {
+                    return Err(Error::InvalidMessage(format!(
+                        "{}: 오리지널 보관 영역의 자산은 이동할 수 없습니다.",
+                        destination_target.display_name
+                    )));
+                }
+                let folder_excluded: bool = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM character_excluded_folders WHERE id=?1)",
+                    [classification_id],
+                    |row| row.get(0),
+                )?;
+                if folder_excluded {
+                    return Err(Error::InvalidMessage(format!(
+                        "{}: 캐릭터 분류에서 제외된 폴더의 자산입니다.",
+                        destination_target.display_name
+                    )));
+                }
+            }
+        }
+        for (_, target, series_id) in &resolved {
+            if super::classification::classification_in_role_scope(
+                &transaction,
+                series_id,
+                "originals",
+            )? {
+                return Err(Error::InvalidMessage(format!(
+                    "{}: 오리지널 보관 영역에서는 캐릭터 분류를 사용할 수 없습니다.",
+                    target.display_name
+                )));
+            }
+            for asset_id in &asset_ids {
+                if super::character_hub::series_asset_excluded(&transaction, series_id, asset_id)? {
+                    return Err(Error::InvalidMessage(format!(
+                        "{}: 캐릭터 분류에서 제외된 자산입니다. 먼저 제외를 해제해 주세요.",
+                        target.display_name
+                    )));
+                }
+            }
+        }
         Self::set_asset_classification_in(
             &transaction,
             &super::models::SetAssetClassification {
                 asset_ids: asset_ids.clone(),
-                classification_id: Some(series_id),
+                classification_id: Some(destination_series_id.clone()),
             },
         )?;
+        for (request, target, _) in &resolved {
+            self.write_character_decisions_in(
+                &transaction,
+                DecisionRequest {
+                    target_id: target.id.clone(),
+                    expected_fingerprint: request.expected_fingerprint.clone(),
+                    asset_ids: asset_ids.clone(),
+                    decision: DecisionKind::Accepted,
+                    baseline_fingerprint: None,
+                    scan_id: None,
+                },
+                Some(&destination_series_id),
+            )?;
+        }
+        let moved = asset_ids.len() as u64;
         transaction.commit()?;
-        Ok(asset_ids.into_iter().collect::<BTreeSet<_>>().len() as u64)
+        Ok(moved)
+    }
+
+    pub fn character_assign_suggestions(
+        &self,
+        asset_ids: Vec<String>,
+    ) -> Result<Vec<CharacterAssignSuggestion>> {
+        let asset_ids = asset_ids.into_iter().collect::<BTreeSet<_>>();
+        if asset_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        if asset_ids.len() > 200 {
+            return Err(Error::Invalid("한 번에 1~200개 자산을 선택해 주세요."));
+        }
+        let total = asset_ids.len() as u64;
+        let selected_rows = std::iter::repeat_n("(?)", asset_ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let query = format!(
+            "WITH selected(asset_id) AS (VALUES {selected_rows})
+             SELECT t.id,COUNT(DISTINCT selected.asset_id)
+             FROM selected
+             JOIN assets asset ON asset.id=selected.asset_id AND asset.status='normal'
+             JOIN asset_tagger_character_scores score ON score.asset_id=selected.asset_id
+             JOIN character_target_tagger_tags mapping ON mapping.tag=score.tag
+             JOIN character_targets t ON t.id=mapping.target_id
+             WHERE t.enabled=1 AND t.series_classification_id IS NOT NULL
+               AND score.score>={CHARACTER_ASSIGN_SCORE}
+               AND NOT EXISTS(
+                   SELECT 1 FROM asset_classifications ac
+                   JOIN character_excluded_folders excluded ON excluded.id=ac.classification_id
+                   WHERE ac.asset_id=selected.asset_id
+               )
+               AND NOT EXISTS(
+                   SELECT 1 FROM character_series_asset_exclusions excluded
+                   WHERE excluded.series_id=t.series_classification_id
+                     AND excluded.asset_id=selected.asset_id
+               )
+               AND COALESCE((
+                   SELECT decision FROM character_decisions decision
+                   WHERE decision.target_id=t.id
+                     AND decision.source_asset_id=selected.asset_id
+                   ORDER BY decision.sequence DESC LIMIT 1
+               ),'') NOT IN ('accepted','rejected')
+             GROUP BY t.id ORDER BY COUNT(DISTINCT selected.asset_id) DESC,t.id"
+        );
+        let values = asset_ids.into_iter().collect::<Vec<_>>();
+        let connection = self.connection()?;
+        let suggestions = connection
+            .prepare(&query)?
+            .query_map(params_from_iter(values), |row| {
+                Ok(CharacterAssignSuggestion {
+                    target_id: row.get(0)?,
+                    matched: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+                    total,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(suggestions)
     }
 
     pub fn record_character_decisions(&self, request: DecisionRequest) -> Result<u64> {
@@ -927,6 +1151,15 @@ impl Library {
         &self,
         transaction: &Connection,
         request: DecisionRequest,
+    ) -> Result<u64> {
+        self.write_character_decisions_in(transaction, request, None)
+    }
+
+    fn write_character_decisions_in(
+        &self,
+        transaction: &Connection,
+        request: DecisionRequest,
+        manual_move_destination: Option<&str>,
     ) -> Result<u64> {
         let ids: BTreeSet<_> = request.asset_ids.iter().collect();
         if ids.is_empty() || ids.len() > 200 {
@@ -968,6 +1201,8 @@ impl Library {
                     [asset_id],
                     |r| r.get::<_, String>(0),
                 )?
+            } else if let Some(destination) = manual_move_destination {
+                manual_move_asset_hash(transaction, destination, &target, asset_id)?
             } else {
                 let series = target
                     .series_classification_id
@@ -1288,6 +1523,40 @@ impl Library {
         .collect();
         Ok(target)
     }
+}
+
+fn manual_move_asset_hash(
+    connection: &Connection,
+    destination_series_id: &str,
+    target: &Target,
+    asset_id: &str,
+) -> Result<String> {
+    connection
+        .query_row(
+            "WITH RECURSIVE destination(id) AS (
+                SELECT id FROM classification_entries WHERE id=?1
+                UNION ALL
+                SELECT child.id FROM classification_entries child
+                JOIN destination parent ON child.parent_id=parent.id
+             )
+             SELECT asset.content_hash FROM assets asset
+             WHERE asset.id=?2 AND asset.status='normal'
+               AND asset.media_kind IN ('image','video','gif')
+               AND EXISTS(
+                   SELECT 1 FROM asset_classifications classification
+                   WHERE classification.asset_id=asset.id
+                     AND classification.classification_id IN (SELECT id FROM destination)
+               )",
+            params![destination_series_id, asset_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| {
+            Error::InvalidMessage(format!(
+                "{}: 이동할 수 없는 자산입니다. 정상 상태의 이미지나 영상을 선택해 주세요.",
+                target.display_name
+            ))
+        })
 }
 
 pub(super) fn asset_set_fingerprint(connection: &Connection, ids: &[String]) -> Result<String> {

@@ -214,6 +214,22 @@ describe("HomeView 캐릭터 검토", () => {
   }
   const flat = (element: HTMLElement) => element.textContent?.replace(/\s+/g, "");
 
+  it("uses the narrow pending summary for the Home count", async () => {
+    const shadowApi = {
+      page: vi.fn(),
+      summary: vi.fn().mockResolvedValue({
+        automatic: 310,
+        recommended: 160,
+        targets: [{ targetId: "lala", targetName: "라라", automatic: 180, recommended: 20 }],
+      }),
+    };
+    renderHome({ props: { characters: targets, classifications, shadowApi } });
+    const cell = await within(section("검토")).findByRole("button", { name: /캐릭터/ });
+    await waitFor(() => expect(flat(cell)).toBe("캐릭터470"));
+    expect(shadowApi.summary).toHaveBeenCalledOnce();
+    expect(shadowApi.page).not.toHaveBeenCalled();
+  });
+
   it("shows the exact total on Home and opens an overview read in full", async () => {
     const items = [...repeat("mari", "마리", 150), ...repeat("geum", "금희", 120, "recommended"), ...repeat("lala", "라라", 180), ...repeat("lala", "라라", 20, "recommended")];
     const shadowApi = pagedApi(items);

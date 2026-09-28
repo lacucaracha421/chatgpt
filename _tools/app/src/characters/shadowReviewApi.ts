@@ -22,6 +22,8 @@ export type ShadowTierCounts = { automatic: ShadowVerdictCounts; recommended: Sh
 export type ShadowReviewSummary = ShadowTierCounts & { byOrigin: Record<"live" | "backfill", ShadowTierCounts>; doubtful?: ShadowVerdictCounts };
 export type ShadowBackfillStatus = { running: boolean; preparing: boolean; total: number; scored: number; skipped: number; cancelled: boolean; error: string | null };
 export type ShadowReviewPage = { items: ShadowReviewItem[]; nextOffset: number | null; policyVersion: string | null; summary: ShadowReviewSummary };
+export type ShadowReviewPendingTarget = { targetId: string; targetName: string; automatic: number; recommended: number };
+export type ShadowReviewPendingSummary = { automatic: number; recommended: number; targets: ShadowReviewPendingTarget[] };
 /** `doubtful`: existing automatic acceptances that S36 does not support. */
 export type ShadowReviewMode = "candidates" | "doubtful";
 /** `seriesId`: only that series' characters, items and counts alike; omitted = all series. */
@@ -29,6 +31,7 @@ export type ShadowReviewQuery = { offset: number; limit: number; mode?: ShadowRe
 
 export interface ShadowReviewApi {
   page(query: ShadowReviewQuery): Promise<ShadowReviewPage>;
+  summary?(): Promise<ShadowReviewPendingSummary>;
   start(): Promise<ShadowBackfillStatus>;
   status(): Promise<ShadowBackfillStatus>;
   cancel(): Promise<ShadowBackfillStatus>;
@@ -40,6 +43,7 @@ export type ShadowInboundStatus = { applied: number };
 /** Native shadow review and explicit cached history scoring; judgments use characterApi.decide. */
 export const shadowReviewApi: ShadowReviewApi = {
   page: query => invoke("character_shadow_review_page", { query }),
+  summary: () => invoke("character_shadow_review_summary"),
   start: () => invoke("character_shadow_backfill_start"),
   status: () => invoke("character_shadow_backfill_status"),
   cancel: () => invoke("character_shadow_backfill_cancel"),

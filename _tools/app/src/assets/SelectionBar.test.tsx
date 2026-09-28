@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { AssetView } from "../library/types";
@@ -38,6 +38,14 @@ it("shows the selection size and keeps browsing commands keyboard reachable", as
   await user.click(screen.getByRole("button", { name: "선택 해제" }));
   expect(onClearSelection).toHaveBeenCalledOnce();
   expect(screen.getByRole("button", { name: "휴지통으로 이동" })).toBeVisible();
+});
+
+it("places the character picker action first and exposes its C shortcut", () => {
+  render(<SelectionBar {...baseProps} onCharacterToggle={vi.fn()} />);
+  const toolbar = screen.getByRole("toolbar", { name: "선택 작업" });
+  const buttons = within(toolbar).getAllByRole("button");
+  expect(buttons[0]).toHaveTextContent("캐릭터");
+  expect(buttons[0]).toHaveTextContent("C");
 });
 
 it("keeps collection actions inside a collection detail view", async () => {

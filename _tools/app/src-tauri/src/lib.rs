@@ -4,11 +4,11 @@ mod cloud;
 mod collectible_cors;
 mod commands;
 mod exchange;
+mod extension_api;
 mod http_agent;
+pub mod library;
 mod window_size;
 mod workload;
-mod extension_api;
-pub mod library;
 pub use cloud::backfill::BackfillControlState;
 pub use cloud::thumbnail_refresh::{
     refresh_cloud_thumbnails, CloudThumbnailRefreshOptions, CloudThumbnailRefreshReport,
@@ -95,11 +95,8 @@ pub fn run() {
             // Mobile personal Collection edits applied in the background refresh the UI.
             let collections_handle = app.handle().clone();
             library::collection_personal_edits::set_collections_changed_listener(move || {
-                let _ = tauri::Emitter::emit(
-                    &collections_handle,
-                    "library://collections-changed",
-                    (),
-                );
+                let _ =
+                    tauri::Emitter::emit(&collections_handle, "library://collections-changed", ());
             });
             extension_api::start(
                 app.handle().clone(),
@@ -126,14 +123,20 @@ pub fn run() {
                         if let Some(main) = window.app_handle().get_webview_window("main") {
                             window_size::remember(&main, true);
                         }
-                        if workload::close_to_tray(window.app_handle()) { api.prevent_close(); }
+                        if workload::close_to_tray(window.app_handle()) {
+                            api.prevent_close();
+                        }
                     }
                     tauri::WindowEvent::Resized(_) => {
                         if let Some(main) = window.app_handle().get_webview_window("main") {
                             window_size::remember(&main, false);
                         }
                     }
-                    tauri::WindowEvent::Focused(focused) => workload::activity(window.app_handle(), !window.is_visible().unwrap_or(true), *focused),
+                    tauri::WindowEvent::Focused(focused) => workload::activity(
+                        window.app_handle(),
+                        !window.is_visible().unwrap_or(true),
+                        *focused,
+                    ),
                     _ => {}
                 }
             }
@@ -183,7 +186,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             workload::workload_profile,
-            workload::workload_quit, workload::workload_close_window,
+            workload::workload_quit,
+            workload::workload_close_window,
             workload::workload_cancel_scans,
             exchange::exchange_snapshot,
             exchange::exchange_send,
@@ -396,6 +400,8 @@ pub fn run() {
             commands::characters::convert_character_to_folder,
             commands::characters::record_character_decisions,
             commands::characters::move_assets_to_character,
+            commands::characters::move_assets_to_characters,
+            commands::characters::character_assign_suggestions,
             commands::characters::record_character_decision_batch,
             commands::characters::register_character_folder,
             commands::characters::character_folder_image_count,
@@ -419,6 +425,7 @@ pub fn run() {
             commands::characters::character_review_pending,
             commands::characters::character_review_pending_map,
             commands::characters::character_shadow_review_page,
+            commands::characters::character_shadow_review_summary,
             commands::characters::character_shadow_backfill_start,
             commands::characters::character_shadow_backfill_status,
             commands::characters::character_shadow_backfill_cancel,

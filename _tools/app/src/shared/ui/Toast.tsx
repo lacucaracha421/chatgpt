@@ -8,11 +8,13 @@ type ToastProps = PropsWithChildren<{
   actionLabel?: string;
   onAction?: () => void;
   actionDisabled?: boolean;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: () => void;
   onDismiss?: () => void;
   tone?: "status" | "error";
 }>;
 
-export function Toast({ children, actionLabel, onAction, actionDisabled = false, onDismiss, tone = "status" }: ToastProps) {
+export function Toast({ children, actionLabel, onAction, actionDisabled = false, secondaryActionLabel, onSecondaryAction, onDismiss, tone = "status" }: ToastProps) {
   const fullMessage = typeof children === "string" ? children : undefined;
   const pause = () => window.dispatchEvent(new Event(TOAST_PAUSE_EVENT));
   const resume = () => window.dispatchEvent(new Event(TOAST_RESUME_EVENT));
@@ -32,6 +34,7 @@ export function Toast({ children, actionLabel, onAction, actionDisabled = false,
     >
       <span className="ui-toast__message" aria-description={fullMessage}>{children}</span>
       {actionLabel && onAction && <Button disabled={actionDisabled} onClick={onAction}>{actionLabel}</Button>}
+      {secondaryActionLabel && onSecondaryAction && <Button variant="ghost" disabled={actionDisabled} onClick={onSecondaryAction}>{secondaryActionLabel}</Button>}
       {onDismiss && <Button size="icon" variant="ghost" aria-label="알림 닫기" onClick={onDismiss}><XMarkIcon aria-hidden="true" /></Button>}
     </div>,
     toastRegion(),

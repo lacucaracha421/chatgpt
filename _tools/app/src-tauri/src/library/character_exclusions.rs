@@ -473,8 +473,11 @@ fn map_character_exclusion_error(error: super::characters::Error) -> LibraryErro
         }
         Error::Library(error) => error,
         Error::Db(error) => LibraryError::Database(error),
-        Error::Json(_) | Error::Io(_) | Error::Invalid(_) | Error::Stale | Error::Worker(_) => {
-            LibraryError::InvalidCloudResponse
-        }
+        Error::Json(_)
+        | Error::Io(_)
+        | Error::Invalid(_)
+        | Error::InvalidMessage(_)
+        | Error::Stale
+        | Error::Worker(_) => LibraryError::InvalidCloudResponse,
     }
 }

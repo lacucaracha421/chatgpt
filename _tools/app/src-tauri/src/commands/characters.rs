@@ -3,7 +3,8 @@ use tauri::State;
 use super::{current_required, AppState, CommandError};
 use crate::library::character_reference_regions::{ReferenceInspection, RegionBindings};
 use crate::library::characters::{
-    CharacterSettingsDraft, Decision, DecisionRequest, Error, Target, TargetDraft,
+    CharacterAssignSuggestion, CharacterMoveTarget, CharacterSettingsDraft, Decision,
+    DecisionRequest, Error, Target, TargetDraft,
 };
 
 #[tauri::command]
@@ -321,7 +322,9 @@ pub async fn character_shadow_backfill_start(
 ) -> Result<crate::library::character_shadow_backfill::Status, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.character_shadow_backfill_start())
-        .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
 }
 
 #[tauri::command]
@@ -346,6 +349,17 @@ pub async fn character_shadow_review_page(
 ) -> Result<crate::library::character_shadow_review::ShadowReviewPage, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.character_shadow_review_page(query))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn character_shadow_review_summary(
+    state: State<'_, AppState>,
+) -> Result<crate::library::character_shadow_review::ShadowReviewPendingSummary, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_shadow_review_summary())
         .await
         .map_err(|_| super::background_task_error())?
         .map_err(Into::into)
@@ -430,7 +444,7 @@ impl From<Error> for CommandError {
         let code = match &error {
             Error::Stale => "character_stale",
             Error::NotFound => "character_not_found",
-            Error::Invalid(_) => "invalid_character_request",
+            Error::Invalid(_) | Error::InvalidMessage(_) => "invalid_character_request",
             Error::Worker(_) => "character_runtime_failed",
             Error::InboundTargetNotFound => "character_inbound_exclusion_target_missing",
             Error::InboundAssetChanged => "character_inbound_exclusion_asset_changed",
@@ -669,6 +683,33 @@ pub async fn move_assets_to_character(
     .await
     .map_err(|_| super::background_task_error())?
     .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn move_assets_to_characters(
+    targets: Vec<CharacterMoveTarget>,
+    asset_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<u64, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.move_assets_to_characters(targets, asset_ids)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn character_assign_suggestions(
+    asset_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<CharacterAssignSuggestion>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.character_assign_suggestions(asset_ids))
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
 }
 
 #[tauri::command]
@@ -1054,22 +1095,36 @@ pub async fn retry_failed_character_assets(
 }
 
 #[tauri::command]
-pub async fn character_folder_exclusions(state: State<'_, AppState>) -> Result<Vec<String>, CommandError> {
+pub async fn character_folder_exclusions(
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.character_folder_exclusions())
-        .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
 }
 
 #[tauri::command]
-pub async fn character_series_folders(series_id: String, state: State<'_, AppState>) -> Result<Vec<crate::library::character_folders::SeriesFolder>, CommandError> {
+pub async fn character_series_folders(
+    series_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::library::character_folders::SeriesFolder>, CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.character_series_folders(&series_id))
-        .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
 }
 
 #[tauri::command]
-pub async fn set_character_folder_excluded(request: crate::library::character_folders::FolderExclusionRequest, state: State<'_, AppState>) -> Result<(), CommandError> {
+pub async fn set_character_folder_excluded(
+    request: crate::library::character_folders::FolderExclusionRequest,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || library.set_character_folder_excluded(request))
-        .await.map_err(|_| super::background_task_error())?.map_err(Into::into)
+        .await
+        .map_err(|_| super::background_task_error())?
+        .map_err(Into::into)
 }

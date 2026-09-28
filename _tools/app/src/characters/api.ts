@@ -85,6 +85,8 @@ export type ReviewQuery = { seriesId: string; targetId: string | null; filter: R
 export type DecisionKind = "accepted" | "rejected" | "cleared";
 export type DecisionRequest = { targetId: string; expectedFingerprint: string; assetIds: string[]; decision: DecisionKind; baselineFingerprint: string | null; scanId: string | null };
 export type Decision = { origin?: "manual" | "automatic"; sequence: number; assetId: string | null; sourceAssetId: string; decision: DecisionKind; createdAt: string; referenceSnapshot: string; targetFingerprint: string; baselineFingerprint: string | null };
+export type CharacterMoveTarget = { targetId: string; expectedFingerprint: string };
+export type CharacterAssignSuggestion = { targetId: string; matched: number; total: number };
 
 export interface CharacterApi {
   /** Optional so tests and older hosts can skip inspection entirely. */
@@ -138,4 +140,12 @@ export function predictionRequest(prediction: Prediction, assetIds: string[], de
 
 export function moveAssetsToCharacter(targetId: string, expectedFingerprint: string, assetIds: string[]): Promise<number> {
   return invoke("move_assets_to_character", { targetId, expectedFingerprint, assetIds });
+}
+
+export function moveAssetsToCharacters(targets: CharacterMoveTarget[], assetIds: string[]): Promise<number> {
+  return invoke("move_assets_to_characters", { targets, assetIds });
+}
+
+export function characterAssignSuggestions(assetIds: string[]): Promise<CharacterAssignSuggestion[]> {
+  return invoke("character_assign_suggestions", { assetIds });
 }
