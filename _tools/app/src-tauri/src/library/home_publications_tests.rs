@@ -142,7 +142,7 @@ fn upcoming_serializer_matches_server_title_example_and_includes_anime() {
         body["entries"][0],
         json!({"id":"igdb:1942","kind":"game","title":"젤다","originalTitle":null,
         "date":"2026-11-14","precision":"exact","region":"KR","platforms":["Switch"],"releaseType":null,
-        "cover":{"url":"https://images.igdb.com/igdb/image/upload/t_cover_big/co1.jpg"},"popularity":12.5})
+        "cover":{"url":"https://images.igdb.com/igdb/image/upload/t_cover_big/co1.jpg"},"popularity":12.5,"port":false})
     );
     // tests/test_home_upcoming.py accepts `tmdb:tv:<show>:s<season>` as kind anime.
     assert_eq!(body["entries"].as_array().unwrap().len(), 2);

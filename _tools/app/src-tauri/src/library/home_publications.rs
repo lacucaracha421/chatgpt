@@ -142,7 +142,9 @@ fn title(value: &ReleaseTitle) -> Value {
         "region":optional(value.region.as_deref(),16),
         "platforms":value.platforms.iter().filter_map(|p| optional(Some(p),100)).take(32).collect::<Vec<_>>(),
         "releaseType":null,"cover":cover(value.kind,value.cover.as_deref()),
-        "popularity":if value.popularity.is_finite() && value.popularity >= 0.0 {Some(value.popularity)} else {None}})
+        "popularity":if value.popularity.is_finite() && value.popularity >= 0.0 {Some(value.popularity)} else {None},
+        // Needs the server from 2026-09-28 (dcdf9210); older servers reject unknown keys.
+        "port":value.port})
 }
 
 impl Library {
