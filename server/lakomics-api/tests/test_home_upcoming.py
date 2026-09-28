@@ -199,6 +199,16 @@ class UpcomingRoutes(HomeFixture):
         self.assertEqual(reply.status_code, 200)
         self.assertEqual(([e["id"] for e in reply.json()["entries"]], reply.json()["wishlist"]), (["igdb:7"], []))
 
+    def test_port_is_optional_preserved_and_strictly_boolean(self):
+        self.ok(self.put(snapshot(entries=[title(port=True)], wishlist=[])))
+        self.assertIs(self.ok(self.get())["entries"][0]["port"], True)
+
+        self.ok(self.put(snapshot(entries=[title("igdb:7")], wishlist=[])))
+        self.assertIs(self.ok(self.get())["entries"][0]["port"], False)
+
+        reply = self.put(snapshot(entries=[title(port="yes")], wishlist=[]))
+        self.assertEqual((reply.status_code, self.code(reply)), (422, "invalidUpcomingUpload"))
+
     def test_intents_are_idempotent_and_pending_until_acknowledged(self):
         self.ok(self.put(snapshot()))
         operation = str(uuid.uuid4())

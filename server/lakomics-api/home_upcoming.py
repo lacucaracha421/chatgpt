@@ -16,7 +16,7 @@ Title (calendar entry)
 ``{"id": "igdb:1942" | "tmdb:12345" | "tmdb:tv:123:s2", "kind": "game"|"movie"|"anime", "title", "originalTitle"|null,
 "date": "YYYY-MM-DD"|null, "precision": "exact"|"month"|"quarter"|"year"|"tbd",
 "region": str|null, "platforms": [str], "releaseType": str|null, "cover": Cover|null,
-"popularity": number|null}``
+"popularity": number|null, "port": bool (optional, default false)}``
 
 * ``id`` is the PC's stable ``provider:external_id`` (``[A-Za-z0-9_-]{1,64}`` after the colon,
   or ``tv:<show>:s<season>`` for an anime season); ``igdb`` <=> ``game``, ``tmdb:tv:`` <=> ``anime``,
@@ -137,6 +137,7 @@ class Title(Strict):
     releaseType: text(40) | None = None
     cover: Cover | None = None
     popularity: int | float | None = Field(default=None, ge=0)
+    port: bool = False
 
     @model_validator(mode="after")
     def _consistent(self):
