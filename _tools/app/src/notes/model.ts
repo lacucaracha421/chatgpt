@@ -110,6 +110,17 @@ export function checklistMarkdown(items: ChecklistItem[]): string {
   return sorted.map((item) => `- [${item.checked ? "x" : " "}] ${oneLine(item.text)}`).join("\n");
 }
 
+/**
+ * Checklist → text note: one plain line per item (open items first). Lines that Markdown would
+ * read as a list, task or heading are escaped, so the text note has no checkboxes left.
+ */
+export function checklistText(items: ChecklistItem[]): string {
+  const sorted = [...items].sort((a, b) => Number(a.checked) - Number(b.checked) || byOrder(a, b));
+  return sorted.map((item) => oneLine(item.text)
+    .replace(/^(\s*)([-*+#>])/, "$1\\$2")
+    .replace(/^(\s*\d{1,9})([.)])/, "$1\\$2")).join("\n\n");
+}
+
 /** Text → checklist: task lines keep their state; other non-empty lines become open items. */
 export function textToItems(body: string): ChecklistItem[] {
   const lines = body.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, NOTE_LIMITS.items);

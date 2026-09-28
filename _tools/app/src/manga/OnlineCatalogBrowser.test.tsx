@@ -826,11 +826,20 @@ function resolvedGallery(): ResolvedGallery {
   };
 }
 
+/** Editions open from the work's detail dialog (the card no longer shows the count). */
+async function openEditions(title: string, count: number) {
+  await userEvent.click(await screen.findByRole("button", { name: `${title} 상세 보기` }));
+  await userEvent.click(await screen.findByRole("button", { name: `판본 ${count}개 보기` }));
+}
+
 it("hides editions for a single-edition work and keeps its bookmark action", async () => {
   const gateway = createGateway(true);
   renderBrowser(gateway);
   expect(await screen.findByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
-  expect(screen.queryByRole("button", { name: "1개 판본" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: `${work.title} 상세 보기` }));
+  await screen.findByRole("dialog");
+  expect(screen.queryByRole("button", { name: /^판본 \d+개 보기$/ })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "닫기" }));
   expect(screen.getByRole("button", { name: `${work.title} 북마크` })).toBeVisible();
 });
 
@@ -875,7 +884,7 @@ it("loads editions only on request in bounded pages and persists manual and auto
   renderBrowser(gateway);
   await screen.findByRole("button", { name: `${work.title} 상세 보기` });
   expect(gateway.getCatalogGroupEditions).not.toHaveBeenCalled();
-  await userEvent.click(screen.getByRole("button", { name: "104개 판본" }));
+  await openEditions(work.title, 104);
   expect(await screen.findByRole("button", { name: "판본 0 열기" })).toBeVisible();
   expect(gateway.getCatalogGroupEditions).toHaveBeenLastCalledWith({ provider: "kHentai", groupId: "uuid", language: "korean", revealBlocked: false, page: 0, pageSize: 40 });
   await userEvent.click(screen.getByRole("button", { name: "판본 더 보기" }));
@@ -888,7 +897,7 @@ it("loads editions only on request in bounded pages and persists manual and auto
   await userEvent.click(screen.getByRole("button", { name: "판본 0 대표로 지정" }));
   expect(gateway.setCatalogGroupRepresentative).toHaveBeenLastCalledWith({ provider: "kHentai", groupId: "uuid", selectedProviderWorkId: "10" });
   await userEvent.click(screen.getByRole("button", { name: "닫기" }));
-  await userEvent.click(screen.getByRole("button", { name: "104개 판본" }));
+  await openEditions(work.title, 104);
   expect(await screen.findByRole("button", { name: "판본 0 대표로 지정" })).toHaveAttribute("aria-pressed", "true");
   await userEvent.click(screen.getByRole("button", { name: "자동 선택" }));
   expect(gateway.setCatalogGroupRepresentative).toHaveBeenLastCalledWith({ provider: "kHentai", groupId: "uuid", selectedProviderWorkId: null });
@@ -938,7 +947,7 @@ it("refreshes the grouped card when a representative save finishes after closing
   gateway.getCatalogGroupEditions = vi.fn().mockResolvedValue({ groupId: "uuid", works: [{ ...work, title: "새 대표 판본" }], totalCount: 1, page: 0, pageSize: 40, selectedProviderWorkId: null });
   gateway.setCatalogGroupRepresentative = vi.fn().mockReturnValue(save.promise);
   renderBrowser(gateway);
-  await userEvent.click(await screen.findByRole("button", { name: "2개 판본" }));
+  await openEditions(work.title, 2);
   await userEvent.click(await screen.findByRole("button", { name: "새 대표 판본 대표로 지정" }));
   await userEvent.click(screen.getByRole("button", { name: "닫기" }));
   title = "새 대표 판본";

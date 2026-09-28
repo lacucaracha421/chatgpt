@@ -11,7 +11,7 @@ import { MarkdownHelpButton } from "../shared/markdown/MarkdownHelp";
 import { toggleMarkdownTask } from "../shared/markdown/markdown";
 import { ChecklistEditor } from "./ChecklistEditor";
 import { SecretEditor, SecretGate } from "./SecretNote";
-import { checklistMarkdown, labelKey, NOTE_COLORS, NOTE_LIMITS, noteColorValue, noteLimitProblem, normalizeLabel, textToItems, type NoteKind } from "./model";
+import { checklistText, labelKey, NOTE_COLORS, NOTE_LIMITS, noteColorValue, noteLimitProblem, normalizeLabel, textToItems, type NoteKind } from "./model";
 import { isSecret, NOTES_REFRESH_INTERVAL, noteKind, notesStore, PIN_REQUIRED_TEXT, type Note, type NotesStore } from "./store";
 import { genericView, isLedgerKind, LEDGER } from "./ledger/model";
 import { hiddenLedgerMonths, LedgerView } from "./ledger/LedgerView";
@@ -58,7 +58,8 @@ const tint = (color: string | null | undefined) => { const value = noteColorValu
 /** Search: title, body, checklist items and labels in memory; secret and ledger notes by title only. */
 export function noteMatches(note: Note, query: string) {
   if (!query) return true;
-  const text = isSecret(note) || isLedgerKind(note) ? note.title : [note.title, note.body, ...(note.items ?? []).map((item) => item.text), ...(note.labels ?? [])].join("\n");
+  // Hidden notes, like secret and ledger notes, match by title only, so a search never reveals them.
+  const text = isSecret(note) || isLedgerKind(note) || note.concealed ? note.title : [note.title, note.body, ...(note.items ?? []).map((item) => item.text), ...(note.labels ?? [])].join("\n");
   return matchesKoreanSearch(text, query);
 }
 function LabelEditor({ labels, suggestions, onChange }: { labels: string[]; suggestions: string[]; onChange: (labels: string[]) => void }) {
@@ -165,7 +166,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   function edit(change:Partial<Note>){if(note){const problem=noteLimitProblem({...note,...change});setLimitError(problem);if(problem)return;setEditing(true);clearTimeout(editTimer.current);editTimer.current=setTimeout(()=>setEditing(false),1200);store.edit({...note,...change});}}
   function convert(){
     if(!note||note.readOnly||note.redacted||isSecret(note)||isLedgerKind(note)||trash)return;
-    if(noteKind(note)==="checklist")edit({type:"text",body:checklistMarkdown(note.items??[]),items:undefined});
+    if(noteKind(note)==="checklist")edit({type:"text",body:checklistText(note.items??[]),items:undefined});
     else edit({type:"checklist",items:textToItems(note.body)});
   }
   function startBodyEdit(event?:MouseEvent){
@@ -184,7 +185,9 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   const editable=!!note&&!trash&&!note.readOnly&&!note.redacted;
   const colorItems:MenuItem[]=note?[{id:"none",label:"기본",group:"color",selected:!noteColorValue(note.color),onSelect:()=>edit({color:null})},...NOTE_COLORS.map(c=>({id:c.key,label:c.label,group:"color",selected:note.color===c.key,icon:<span className="notes-swatch" style={{background:c.value}} aria-hidden="true"/>,onSelect:()=>edit({color:c.key})}))]:[];
   // Archive sits in the ⋯ menu next to 휴지통, away from the everyday actions.
-  const moreItems:MenuItem[]=note&&!trash?[{id:"archive",label:note.archived?"보관 해제":"보관함으로 보내기",onSelect:()=>edit({archived:!note.archived})}]:[];
+  const moreItems:MenuItem[]=note&&!trash?[
+    ...((kind==="text"||kind==="checklist")&&!note.readOnly?[{id:"conceal",label:note.concealed?"목록에서 내용 보이기":"목록에서 내용 숨기기",onSelect:()=>edit({concealed:!note.concealed})}]:[]),
+    {id:"archive",label:note.archived?"보관 해제":"보관함으로 보내기",onSelect:()=>edit({archived:!note.archived})}]:[];
   const canConvert=!!note&&editable&&!isSecret(note);
   const convertLabel=kind==="checklist"?"메모로 바꾸기":"체크리스트로 바꾸기";
   const colorValue=note?noteColorValue(note.color):null;

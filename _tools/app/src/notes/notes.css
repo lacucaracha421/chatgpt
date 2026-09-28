@@ -172,3 +172,7 @@
 .notes-card__label { flex: none; padding: 0 7px; border: 1px solid color-mix(in srgb, var(--color-text) 16%, transparent); border-radius: 999px; line-height: 18px; white-space: nowrap; }
 .notes-card__foot time { display: inline-flex; align-items: center; gap: 5px; flex: none; font-family: var(--font-numeric); font-variant-numeric: tabular-nums; }
 .notes-card__pending { width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); }
+
+/* A hidden note's card shows only its title; the content appears once the note is opened. */
+.notes-card__concealed { display: flex; align-items: center; gap: 6px; padding: 10px 0; color: var(--color-muted); font-size: var(--text-sm); }
+.notes-card__concealed svg { width: 16px; height: 16px; flex: none; }

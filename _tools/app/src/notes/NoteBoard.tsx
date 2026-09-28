@@ -6,7 +6,7 @@
  * the fold on a long list).
  */
 import { memo, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { LockClosedIcon, WalletIcon } from "@heroicons/react/24/outline";
+import { LockClosedIcon, WalletIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
 import { BookmarkIcon } from "../shared/ui/ArchiveIcons";
 import { byOrder, noteColorValue, stripMarkdown } from "./model";
 import { isSecret, noteKind, type Note } from "./store";
@@ -14,6 +14,7 @@ import { LEDGER } from "./ledger/model";
 import { ledgerCard } from "./ledger/LedgerView";
 
 export const CARD_MIN_WIDTH = 240;
+const CARD_MAX_WIDTH = 300;
 export const CARD_GAP = 12;
 const CHECKLIST_ROWS = 8;
 const BODY_LINES = 12;
@@ -22,7 +23,9 @@ const BODY_LINES = 12;
 export function boardColumns(width: number, minWidth = CARD_MIN_WIDTH, gap = CARD_GAP) {
   if (width <= 0) return { columns: 0, cardWidth: 0 };
   const columns = Math.max(1, Math.floor((width + gap) / (minWidth + gap)));
-  return { columns, cardWidth: (width - gap * (columns - 1)) / columns };
+  // Cards stop growing at CARD_MAX_WIDTH, so opening or closing the editor pane keeps their
+  // width; spare room stays empty on the right (2026-09-28).
+  return { columns, cardWidth: Math.min(CARD_MAX_WIDTH, (width - gap * (columns - 1)) / columns) };
 }
 
 /** Places cards in order into the shortest column (leftmost on ties). */
@@ -61,6 +64,9 @@ function cardDate(value: string, now = new Date()) {
 }
 
 function CardBody({ note, notes }: { note: Note; notes: Note[] }) {
+  if (note.concealed && !isSecret(note)) {
+    return <span className="notes-card__concealed"><EyeSlashIcon aria-hidden="true" />숨긴 메모 · 열어서 보기</span>;
+  }
   if (isSecret(note)) {
     // Values are always masked on the board; field names only exist while a PIN session is open.
     const fields = note.redacted ? [] : [...(note.fields ?? [])].sort(byOrder).slice(0, 4);

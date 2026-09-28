@@ -91,6 +91,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
   const [updating, setUpdating] = useState(false);
   const [openingWorkKey, setOpeningWorkKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<CatalogWorkDetail | null>(null);
+  const [detailGroup, setDetailGroup] = useState<CatalogGroupedWork | null>(null);
   const [detailProgress, setDetailProgress] = useState<RemoteReadingProgress | null>(null);
   const [bookmarkPendingKeys, setBookmarkPendingKeys] = useState<Set<string>>(() => new Set());
   const [reading, setReading] = useState(false);
@@ -292,8 +293,10 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
     void search(query.trim());
   }
 
-  async function openDetail(work: CatalogWork) {
+  /** `group` is the search result the work came from; its edition count shows in the detail. */
+  async function openDetail(work: CatalogWork, group: CatalogGroupedWork | null = null) {
     const request = ++detailRequest.current;
+    setDetailGroup(group);
     const identity = catalogIdentityOf(work);
     setOpeningWorkKey(catalogIdentityKey(identity));
     try {
@@ -567,8 +570,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
             work={work}
             opening={openingWorkKey === catalogIdentityKey(work)}
             bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(work))}
-            onEditions={setEditions}
-            onOpen={(selected) => void openDetail(selected)}
+            onOpen={(selected) => void openDetail(selected, work)}
             onBookmark={(identity, bookmarked) => void bookmarkWork(identity, bookmarked)}
           />)}
         </div>}
@@ -581,7 +583,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
       </div>
     </footer>}
     {editions && <CatalogEditionsDialog work={editions} language={language} revealBlocked={revealBlocked}
-      onClose={() => setEditions(null)} onOpen={(work) => { setEditions(null); void openDetail(work); }}
+      onClose={() => setEditions(null)} onOpen={(work) => { const group = editions; setEditions(null); void openDetail(work, group); }}
       onRepresentativeChange={() => refreshSearch.current()} />}
     {detail && <OnlineCatalogDetailDialog
       detail={detail}
@@ -591,6 +593,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all" }: On
       onBookmark={(bookmarked) => void bookmarkDetail(bookmarked)}
       onTagSearch={searchTag}
       onRead={() => void readDetail()}
+      editionCount={detailGroup?.versionCount ?? 0}
+      onEditions={() => { const group = detailGroup; closeDetail(); if (group) setEditions(group); }}
       onClose={closeDetail}
     />}
     {viewer && <PageViewer

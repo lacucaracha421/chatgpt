@@ -11,7 +11,10 @@
 
 /* Month row and headline */
 .ledger-monthrow { display: flex; align-items: center; gap: 4px; height: 60px; }
-.ledger-monthrow h2 { margin: 0; padding: 0 4px; font-size: var(--text-section); font-weight: 600; }
+.ledger-monthrow h2 { flex: none; margin: 0; padding: 0 4px; font-size: var(--text-section); font-weight: 600; white-space: nowrap; }
+/* Month, 이번 달로 and the income button never wrap mid-word; the income button shortens instead. */
+.ledger-monthrow > .ui-button { flex: none; white-space: nowrap; }
+.ledger-monthrow > .ui-button:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ledger-monthrow svg, .ledger-toolbar svg { width: 18px; height: 18px; }
 .ledger-hero__k { margin: 4px 0 0; font-size: var(--text-sm); color: var(--color-muted); }
 .ledger-hero__big { margin: 4px 0 0; font-size: 46px; font-weight: 500; line-height: 1.1; letter-spacing: .5px; display: flex; align-items: baseline; gap: 6px; }

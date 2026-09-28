@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { byOrder, checklistMarkdown, keyBetween, labelKey, noteColorValue, normalizeLabel, placeInGroup, sequentialKeys, stripMarkdown, textToItems } from "./model";
+import { byOrder, checklistMarkdown, checklistText, keyBetween, labelKey, noteColorValue, normalizeLabel, placeInGroup, sequentialKeys, stripMarkdown, textToItems } from "./model";
 
 const valid = (key: string) => /^[0-9A-Za-z]{1,48}$/.test(key) && !key.endsWith("0");
 
@@ -33,6 +33,9 @@ it("converts between text and checklists and builds the same fallback as the bac
   expect(items.map((i) => [i.text, i.checked])).toEqual([["# 제목", false], ["우유", true], ["빵", false], ["달걀", false], ["그냥 줄", false]]);
   expect(checklistMarkdown(items)).toBe("- [ ] # 제목\n- [ ] 빵\n- [ ] 달걀\n- [ ] 그냥 줄\n- [x] 우유");
   expect(checklistMarkdown([{ id: "a", text: "두\n줄", checked: false, order: "V" }])).toBe("- [ ] 두 줄");
+  // Back to a text note: plain paragraphs, no task syntax, so no checkboxes remain.
+  expect(checklistText(items)).toBe("\\# 제목\n\n빵\n\n달걀\n\n그냥 줄\n\n우유");
+  expect(checklistText([{ id: "a", text: "- [ ] 할 일", checked: false, order: "V" }, { id: "b", text: "1. 첫째", checked: false, order: "W" }])).toBe("\\- [ ] 할 일\n\n1\\. 첫째");
 });
 
 it("previews, labels and colours", () => {

@@ -188,6 +188,22 @@ it("asks to unlock a locked keyring once when Notes opens", async () => {
   expect(fake.calls.filter((c) => c.op === "unlockKeyring")).toHaveLength(1);
 });
 
+it("hides a note's content on the board from the 더보기 menu and shows it again", async () => {
+  const fake = backend([base("API", { body: "sk-secret-value" })]);
+  const store = new NotesStore(fake.request); surface(store);
+  await userEvent.click(await screen.findByRole("button", { name: /API/ }));
+  await userEvent.click(screen.getAllByRole("button", { name: "메모 더보기" })[0]!);
+  await userEvent.click(await screen.findByRole("menuitem", { name: "목록에서 내용 숨기기" }));
+  await settle(store);
+  expect(last(fake.saves())).toMatchObject({ id: "API", concealed: true });
+  await waitFor(() => expect(document.querySelector('[data-note-id="API"]')).toHaveTextContent("숨긴 메모 · 열어서 보기"));
+  expect(document.querySelector('[data-note-id="API"]')).not.toHaveTextContent("sk-secret-value");
+  await userEvent.click(screen.getAllByRole("button", { name: "메모 더보기" })[0]!);
+  await userEvent.click(await screen.findByRole("menuitem", { name: "목록에서 내용 보이기" }));
+  await settle(store);
+  expect(last(fake.saves())).toMatchObject({ id: "API", concealed: false });
+});
+
 it("the convert button turns a text note into a checklist and back, and the colour button shows the colour", async () => {
   const fake = backend([base("할 일", { body: "- [ ] 우유\n- [x] 빵\n달걀", color: "blue" })]);
   const store = new NotesStore(fake.request); surface(store);
@@ -204,7 +220,7 @@ it("the convert button turns a text note into a checklist and back, and the colo
   expect(screen.getByRole("list", { name: "할 일" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "메모로 바꾸기" }));
   await settle(store);
-  expect(last(fake.saves())).toMatchObject({ type: "text", body: "- [ ] 우유\n- [ ] 달걀\n- [x] 빵" });
+  expect(last(fake.saves())).toMatchObject({ type: "text", body: "우유\n\n달걀\n\n빵" });
   // Sync is an icon button at the bottom; the old footer texts are gone.
   expect(screen.getByRole("button", { name: "동기화" })).toBeInTheDocument();
   expect(screen.queryByText(/자동 저장/)).not.toBeInTheDocument();

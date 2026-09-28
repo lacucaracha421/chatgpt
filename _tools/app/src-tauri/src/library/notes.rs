@@ -118,6 +118,8 @@ pub struct Draft {
     pub deleted: Option<bool>,
     #[serde(default)]
     pub archived: Option<bool>,
+    #[serde(default)]
+    pub concealed: Option<bool>,
     #[serde(default, rename = "type")]
     pub kind: Option<String>,
     /// `Some(None)` clears the colour; absent keeps it.
@@ -373,6 +375,9 @@ fn apply_draft(
     }
     if let Some(value) = draft.archived {
         content.archived = value;
+    }
+    if let Some(value) = draft.concealed {
+        content.concealed = value;
     }
     content.updated_at = now.into();
     if !content.supported() {
@@ -1570,6 +1575,25 @@ mod review_tests {
             .into_iter()
             .find(|n| n.id == id)
             .unwrap()
+    }
+
+    #[test]
+    fn concealment_is_saved_and_survives_an_edit_from_a_client_that_does_not_send_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let lib = Library::open(temp.path()).unwrap();
+        let key = [37; 32];
+        let id = uuid::Uuid::new_v4().to_string();
+        let created = save(&lib, &key, json!({"id":id,"expectedRevision":0,"title":"API","body":"sk-secret"}));
+        assert!(!created.content.concealed);
+        let hidden = save(&lib, &key, json!({"id":id,"expectedRevision":created.local_revision,"concealed":true}));
+        assert!(hidden.content.concealed);
+        // A body edit that does not mention the flag keeps it.
+        let edited = save(&lib, &key, json!({"id":id,"expectedRevision":hidden.local_revision,"body":"sk-new"}));
+        assert!(edited.content.concealed && edited.content.body == "sk-new");
+        let shown = save(&lib, &key, json!({"id":id,"expectedRevision":edited.local_revision,"concealed":false}));
+        assert!(!shown.content.concealed);
+        // Stored as an ordinary key: absent when false, so older payloads keep their shape.
+        assert!(serde_json::to_value(&shown.content).unwrap().get("concealed").is_none());
     }
 
     #[test]

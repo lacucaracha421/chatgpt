@@ -25,6 +25,9 @@ type Props = {
   onTagSearch: (query: string) => void;
   onRead: () => void;
   onClose: () => void;
+  /** Editions in the work's group (2 or more shows a 판본 line that opens them). */
+  editionCount?: number;
+  onEditions?: () => void;
 };
 
 const dateFormatter = new Intl.DateTimeFormat("ko-KR", {
@@ -44,6 +47,8 @@ export function OnlineCatalogDetailDialog({
   onTagSearch,
   onRead,
   onClose,
+  editionCount = 0,
+  onEditions,
 }: Props) {
   const canResume = progress !== null
     && progress.pageCount === detail.fileCount
@@ -71,7 +76,8 @@ export function OnlineCatalogDetailDialog({
         />
         <div className="online-catalog-detail__info">
         <div className="online-catalog-detail__facts">
-          <p className="online-catalog-detail__essentials"><strong>{detail.fileCount.toLocaleString()}페이지</strong>{category && <span>{category}</span>}</p>
+          <p className="online-catalog-detail__essentials"><strong>{detail.fileCount.toLocaleString()}페이지</strong>{category && <span>{category}</span>}
+            {editionCount >= 2 && onEditions && <button type="button" className="online-catalog-detail__editions" onClick={onEditions}>판본 {editionCount.toLocaleString()}개 보기</button>}</p>
           <div className="online-catalog-detail__tags online-catalog-detail__identity">{summaryGroups.map(renderGroup)}</div>
           {canResume && <p className="online-catalog-detail__progress">{progress.lastPage.toLocaleString()}페이지까지 읽음</p>}
         </div>

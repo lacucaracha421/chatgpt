@@ -6,7 +6,6 @@ import { CatalogThumbnail } from "./CatalogThumbnail";
 
 type OnlineCatalogCardProps = {
   work: CatalogGroupedWork;
-  onEditions: (work: CatalogGroupedWork) => void;
   opening: boolean;
   bookmarkPending: boolean;
   onOpen: (work: CatalogWork) => void;
@@ -15,9 +14,10 @@ type OnlineCatalogCardProps = {
 
 /**
  * Cover-led tile matching the mobile catalog: cover, title and artist. Views, series and tags
- * live in the detail dialog; the page count, editions and bookmark sit quietly on the cover.
+ * live in the detail dialog, which also lists the editions; the page count and bookmark sit
+ * quietly on the cover.
  */
-export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBookmark, onEditions }: OnlineCatalogCardProps) {
+export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBookmark }: OnlineCatalogCardProps) {
   const artists = work.artists.join(" · ") || "작가 정보 없음";
   const displayTitle = catalogDisplayTitle(work.title);
   const savedEdition = work.hasBookmarkedVersion && !work.bookmarked;
@@ -43,7 +43,6 @@ export function OnlineCatalogCard({ work, opening, bookmarkPending, onOpen, onBo
       <span className="online-catalog-card__byline">{artists}</span>
     </button>
     <div className="online-catalog-card__overlay">
-      {work.versionCount >= 2 && <button type="button" className="online-catalog-card__editions" aria-label={`${work.versionCount}개 판본`} onClick={() => onEditions(work)}>판본 {work.versionCount}</button>}
       <button
         type="button"
         className="online-catalog-card__bookmark"

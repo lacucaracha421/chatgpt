@@ -4,7 +4,8 @@ import { LEDGER, LEDGER_MONTH, monthTitle, type LedgerEntry, type Planned, type 
 
 /** A decrypted note as the PC backend returns it (Notes v2 fields are optional: v1 notes lack them). */
 export type Note = {id:string; title:string; body:string; pinned:boolean; deleted:boolean; createdAt:string; updatedAt:string; localRevision:number; pending:boolean; conflict:boolean;
-  schema?:number; type?:string; color?:string|null; labels?:string[]; archived?:boolean; items?:ChecklistItem[]; fields?:SecretField[]; memo?:string;
+  schema?:number; type?:string; color?:string|null; labels?:string[]; archived?:boolean;
+  /** Lists (the board, Home, search) show only the title until the note is opened. */ concealed?:boolean; items?:ChecklistItem[]; fields?:SecretField[]; memo?:string;
   /** Ledger (가계부) and its hidden month notes; see ./ledger. */ income?:number|null; /** Ledger only: day of the month income arrives (1–31), absent or null = not set. */ incomeDay?:number|null; recurring?:Recurring[]; planned?:Planned[]; ledger?:string; month?:string; entries?:LedgerEntry[];
   /** Local copy kept when an edit collision could not merge. */ conflictCopy?:boolean;
   /** Newer schema or unknown type: only pin/trash/archive/restore. */ readOnly?:boolean;
@@ -15,7 +16,7 @@ export type NotesState = {unlocked:boolean; keyringLocked?:boolean; unreadable?:
 export const SECRET_LOCKED_TEXT="암호 메모 잠금을 해제해 주세요.";
 export const PIN_REQUIRED_TEXT="복구키를 보려면 암호 메모 PIN을 먼저 입력해 주세요.";
 /** Fields a draft carries; used to rebase a newer queued draft onto a merged save. */
-const DRAFT_KEYS=["title","body","pinned","deleted","archived","type","color","labels","items","fields","memo","income","incomeDay","recurring","planned","entries"] as const;
+const DRAFT_KEYS=["title","body","pinned","deleted","archived","concealed","type","color","labels","items","fields","memo","income","incomeDay","recurring","planned","entries"] as const;
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 /** Keyed lists rebase per id, so a newer draft never drops what a merged save added. */
 const LIST_KEYS=new Set<string>(["items","fields","recurring","planned","entries"]);
@@ -42,7 +43,9 @@ function draftOf(note:Note,expectedRevision:number){
   const content=kind==="checklist"?{items:note.items??[]}:kind==="secret"?{fields:note.fields??[],memo:note.memo??""}
     :kind===LEDGER?{income:note.income??null,...(note.incomeDay!==undefined?{incomeDay:note.incomeDay}:{}),recurring:note.recurring??[],planned:note.planned??[]}
     :kind===LEDGER_MONTH?{ledger:note.ledger,month:note.month,income:note.income??null,entries:note.entries??[]}:{body:note.body};
-  return {...base,type:kind,title:note.title,color:note.color??null,labels:note.labels??[],...content};
+  // Hiding applies to text and checklist notes only (secret and ledger notes have their own cards).
+  const concealment=kind==="text"||kind==="checklist"?{concealed:!!note.concealed}:{};
+  return {...base,type:kind,title:note.title,color:note.color??null,labels:note.labels??[],...concealment,...content};
 }
 export type Snapshot = NotesState & {ready:boolean; saving:boolean; syncing:boolean; error:string|null;
   /** A secret-note save waits for the PIN; the draft stays queued. */ secretLocked?:boolean;

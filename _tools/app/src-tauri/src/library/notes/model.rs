@@ -112,6 +112,10 @@ pub struct Content {
     pub deleted: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub archived: bool,
+    /// Lists show only the title until the note is opened (e.g. API keys). Older clients keep
+    /// the key untouched in `extra`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub concealed: bool,
     pub created_at: String,
     pub updated_at: String,
     #[serde(flatten)]
@@ -140,6 +144,7 @@ impl Content {
             pinned: false,
             deleted: false,
             archived: false,
+            concealed: false,
             created_at: now.into(),
             updated_at: now.into(),
             extra: Map::new(),
@@ -560,6 +565,7 @@ pub fn merge(base: &Content, local: &Content, remote: &Content) -> Option<Conten
         pinned: three_or(&base.pinned, &local.pinned, &remote.pinned, remote.pinned),
         deleted: three_or(&base.deleted, &local.deleted, &remote.deleted, false),
         archived: three_or(&base.archived, &local.archived, &remote.archived, false),
+        concealed: three_or(&base.concealed, &local.concealed, &remote.concealed, true),
         created_at: three_or(
             &base.created_at,
             &local.created_at,

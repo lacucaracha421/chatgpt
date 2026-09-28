@@ -142,6 +142,7 @@ export function memoRows(notes: Note[], today: string): MemoRow[] {
     .map((note): MemoRow => {
       const base = { id: note.id, title: note.title.trim(), color: noteColorValue(note.color) };
       if (note.type === "secret") return { ...base, kind: "secret" };
+      if (note.concealed && note.type !== LEDGER) return { ...base, kind: "text", snippet: "숨긴 메모" };
       if (note.type === LEDGER) {
         const summary = monthSummary(note, monthNotesOf(notes, note.id), today.slice(0, 7), today);
         return { ...base, title: base.title || "가계부", kind: "ledger", month: Number(today.slice(5, 7)),

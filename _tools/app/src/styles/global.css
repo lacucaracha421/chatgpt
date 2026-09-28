@@ -2874,7 +2874,10 @@ textarea:focus-visible {
   flex: 1;
   min-height: 0;
   padding: var(--space-3);
-  overflow: auto;
+  /* Vertical only, with a reserved gutter: a hover effect on a cover must never toggle a
+     scrollbar and shift the grid (2026-09-28). */
+  overflow: hidden auto;
+  scrollbar-gutter: stable;
 }
 
 .manga-browser__recovery {
@@ -3235,9 +3238,11 @@ textarea:focus-visible {
   aspect-ratio: 2 / 3;
   object-fit: cover;
   background: var(--color-surface);
-  transition: filter var(--motion-standard) var(--ease-standard);
 }
-.online-catalog-card__body:hover:not(:disabled) .online-catalog-card__cover { filter: brightness(1.08); }
+/* Hover lightens the cover with an overlay, not a CSS filter: a filter makes WebKitGTK composite
+   the cover as its own layer, which briefly changed the grid's scroll size. */
+.online-catalog-card__frame::after { content: ""; position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity var(--motion-standard) var(--ease-standard); }
+.online-catalog-card__body:hover:not(:disabled) .online-catalog-card__frame::after { opacity: .07; }
 
 .catalog-thumbnail { position: relative; overflow: hidden; }
 .catalog-thumbnail__image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: inherit; }
@@ -3258,8 +3263,7 @@ textarea:focus-visible {
 
 .catalog-thumbnail__fallback span { font-size: var(--text-xs); }
 
-.online-catalog-card__pages,
-.online-catalog-card__editions {
+.online-catalog-card__pages {
   position: absolute;
   bottom: 6px;
   padding: 1px 6px;
@@ -3297,9 +3301,6 @@ textarea:focus-visible {
 /* Interactive cover accessories sit over the cover without nesting buttons. */
 .online-catalog-card__overlay { position: absolute; inset: 0 0 auto; aspect-ratio: 2 / 3; pointer-events: none; }
 .online-catalog-card__overlay > * { pointer-events: auto; }
-.online-catalog-card__editions { left: 6px; border: 0; color: var(--color-accent); cursor: pointer; }
-.online-catalog-card__editions:hover { color: var(--color-text); }
-.online-catalog-card__editions:focus-visible,
 .online-catalog-card__bookmark:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 1px; }
 .online-catalog-card__bookmark {
   position: absolute;
@@ -3379,6 +3380,9 @@ textarea:focus-visible {
 .online-catalog-detail__facts { min-width: 0; }
 .online-catalog-detail__essentials { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-3); margin: 0 0 var(--space-4); }
 .online-catalog-detail__essentials strong { font-family: var(--font-numeric); font-size: 1.5rem; font-weight: 500; }
+.online-catalog-detail__editions { padding: 2px 10px; color: var(--color-accent); font-size: var(--text-sm); background: transparent; border: 1px solid var(--color-border-strong); border-radius: 999px; cursor: pointer; }
+.online-catalog-detail__editions:hover { color: var(--color-text); border-color: var(--color-accent); }
+.online-catalog-detail__editions:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 1px; }
 .online-catalog-detail__essentials span,
 .online-catalog-detail__progress { color: var(--color-muted); font-size: var(--text-sm); }
 .online-catalog-detail__extra { border-top: var(--border-width) solid var(--color-border); padding-top: var(--space-3); }

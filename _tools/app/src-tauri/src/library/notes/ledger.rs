@@ -808,6 +808,7 @@ pub fn merge(base: &Content, local: &Content, remote: &Content) -> Option<Conten
         pinned: model::three_or(&base.pinned, &local.pinned, &remote.pinned, remote.pinned),
         deleted: model::three_or(&base.deleted, &local.deleted, &remote.deleted, false),
         archived: model::three_or(&base.archived, &local.archived, &remote.archived, false),
+        concealed: model::three_or(&base.concealed, &local.concealed, &remote.concealed, true),
         created_at: model::three_or(
             &base.created_at,
             &local.created_at,
