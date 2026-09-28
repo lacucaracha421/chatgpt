@@ -5,6 +5,7 @@ mod collectible_cors;
 mod commands;
 mod exchange;
 mod http_agent;
+mod window_size;
 mod workload;
 mod extension_api;
 pub mod library;
@@ -35,6 +36,9 @@ pub fn run() {
         .manage(library::catalog_update::CatalogUpdateState::default())
         .setup(move |app| {
             workload::setup(app.handle())?;
+            if let Some(window) = app.get_webview_window("main") {
+                window_size::restore(&window);
+            }
             #[cfg(target_os = "linux")]
             if let Some(window) = app.get_webview_window("main") {
                 window.with_webview(|webview| {
@@ -118,7 +122,15 @@ pub fn run() {
             if window.label() == "main" {
                 match event {
                     tauri::WindowEvent::CloseRequested { api, .. } => {
+                        if let Some(main) = window.app_handle().get_webview_window("main") {
+                            window_size::remember(&main, true);
+                        }
                         if workload::close_to_tray(window.app_handle()) { api.prevent_close(); }
+                    }
+                    tauri::WindowEvent::Resized(_) => {
+                        if let Some(main) = window.app_handle().get_webview_window("main") {
+                            window_size::remember(&main, false);
+                        }
                     }
                     tauri::WindowEvent::Focused(focused) => workload::activity(window.app_handle(), !window.is_visible().unwrap_or(true), *focused),
                     _ => {}
