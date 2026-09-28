@@ -8,25 +8,26 @@ Updated 2026-09-23 (evening): the Android 0.7 browse-first redesign, thumbnail l
 
 Updated 2026-09-24: `CHAR-AUTO-007` stage 3 (per-series S36 publication) is implemented; `DEV-TEST-001` is archived in the [2026-09-24 checkpoint](lakomics-completed.md#closure-checkpoint--2026-09-24--rust-test-runtime).
 
-Updated 2026-09-26: Manga Catalog duplicate editions, the Notes household ledger, Collections release notifications with the tablet 신간 screen, tablet manga detail / MangaDex–Kakao connect / 원제, the delivered USER-REQ-20260924 items, and the already-done `MOBILE-BUG-002`, `MOBILE-PARITY-001` and `PC-POLL-001` are archived in the [2026-09-26 checkpoint](lakomics-completed.md#closure-checkpoint--2026-09-26--catalog-editions-notes-ledger-collections-releases-and-tablet-manga-tools). Production Linux library: schema v97 (migration 0097, 2026-09-25); Windows PC pending (`WIN-SYNC-001`). Android 0.8.26 on the tablet.
+Updated 2026-09-28: the 2026-09-27/28 Home, artist, release-calendar, notes and tablet-parity implementation slices are reconciled in the [2026-09-28 checkpoint](lakomics-completed.md#closure-checkpoint--2026-09-28--home-artist-release-calendar-and-tablet-parity). Production Linux library: schema v109 (migrations 0107–0109, with the recorded pre-migration backup); Windows PC remains pending (`WIN-SYNC-001`). Android 0.8.61 is installed on the tablet. This records source and history alignment, not a new Windows or full native audit.
 
 ## Current priority
 
-Updated 2026-09-26 (evening) with the user: PERF-ALL-001 batches landed (see its entry); the user checked the PC and tablet results (collections list, thumbnails, character engine, vault detection, request volume, bind pickup) except on Windows.
+Updated 2026-09-28 from the current source and `main` history. The recent feature batch is implemented, while the following acceptance and residual work remains open:
 
-1. **PERF-ALL-001** — 2026-09-26 (third batch): character sidebar counts 155 → 24 ms release and one asset's classifications 3.96 → 2.23 ms (CROSS JOIN, identical rows on the real library); tablet connectivity/power callbacks (0.8.33); one request per tablet Library page (server deployed, 0.8.33). `PRAGMA optimize` measured and left out: its STAT4 samples add ~3 ms to every new connection and slow the grid (page 1 2.95 → 9.9 ms), while stat1 alone would speed character review pages (172 → 23 ms) — next step is to force that join order with CROSS JOIN instead. Character review page fixed the same way (target pages 207 → 23 ms, series recommended 719 → 295 ms release; identical rows on the snapshot); the rest of series-recommended is result_json volume, a structural change. Remaining: moving PC sync state kept in `notes_state` into a table at the next migration, deferred transfer-review items (TRANSFER-REVIEW-001 below).
-2. **NET-R2-001** — `DONE` 2026-09-26: the R2 hostname resolves to 172.64.190.1 and 172.64.66.1, and 172.64.66.1 is unreachable from the user's home network. Tablet fixed in 0.8.32 (native video proxy `b8517ee`, 3 s connect timeout `cd09e31`); PC fixed by the shared connector with short per-address connect and failed-address memory (`25dbcc0`). The user confirmed both. Nothing to change at Cloudflare.
-3. **CHAR-AUTO-007** — S36 is enabled for the 백합 series on the user's PC (2026-09-26); watch its automatic results.
-4. **USER-REQ-20260926B** — new mobile/PC UI and creation requests (entry below). The server review judgment calls 1, 2, 4 and 7 were already fixed in `39d9ed02` (2026-09-24, deployed); the rest are in `SERVER-REVIEW-20260924` (low priority). Catalog artifact pruning is running (hourly auto-prune, catalog tokens 2 h / retention 3 h; server disk 53% after `6bc2d05`).
-5. **WIN-SYNC-001 / VAULT-ENC-001 (Windows) / PC-DECLUTTER-001 (Windows)** — when the Windows PC is available.
-6. **PC-REVIEW-001** — remaining medium/low findings and recorded follow-ups.
-7. **CLOUD-POST-001** — remaining publication/compatibility cleanup only.
+1. **TABLET-PARITY-001** — tablet 0.8.62 (top-bar 전송 icon with badge, three memo cards, face + name AV card) accepted by the user 2026-09-28; the dated-game fix and 이식 are visible on the tablet. Open: performer portraits are not published to the tablet (AV card crops the latest cover); decide whether the one-off TMDB diagnostics stay.
+2. **USER-REQ-20260927 / HOME-DASH-001** — run the current PC build for native acceptance of the shipped Home, artist, AV detail and release-calendar surfaces; keep the release calendar PC-sourced.
+3. **USER-REQ-20260926B** — tablet Collection creation remains open behind the Collection authority contract. Tablet character creation is dropped by the user's 2026-09-27 PC-only decision.
+4. **WIN-SYNC-001 / VAULT-ENC-001 (Windows) / PC-DECLUTTER-001 (Windows)** — when the Windows PC is available; the current library target is schema v109.
+5. **PC-REVIEW-001** — residual review findings below remain open or unverified.
+6. **PERF-ALL-001** — move the remaining PC sync state out of `notes_state`; retain only the native or measurement gaps that are not covered by the shipped batches.
+7. **CLOUD-POST-001** — remaining Character/Collection publication and compatibility cleanup only.
+8. **CHAR-AUTO-007** — watch the enabled S36 results on the 백합 series.
 
 `SIMILARITY-004` (existing-library near-duplicate discovery) and mobile tab-switching improvement were closed on 2026-09-23 at the user's confirmation; see the [closure record](lakomics-completed.md#closure-checkpoint--2026-09-23--similarity-discovery-and-mobile-tab-switching).
 
 `MEDIA-R2-001` is closed at the currently satisfactory media-delivery scope; extra variants are not required. `CHAR-AUTO-001` is closed for this improvement pass; future concrete classification mistakes can open bounded follow-up work rather than keeping a permanent accuracy task active.
 
-Later / optional: AV source-and-candidate selection (`LONG-001`), Artist hub (`ARTIST-001`), optional provider work (`CATALOG-002B`). Similar-video calibration stays deferred until representative samples naturally appear.
+Next candidate: style-based artist suggestions (`ARTIST-SUGGEST-001`) — validated and reviewed by the user 2026-09-28 (34/34 correct), mockups `docs/prototypes/artist-style-suggest-20260928/`, user picked A (+ C inspector box, D reposter flag). Later / optional: AV source-and-candidate selection (`LONG-001`), optional provider work (`CATALOG-002B`). Similar-video calibration stays deferred until representative samples naturally appear.
 
 ## Status legend
 
@@ -93,12 +94,6 @@ Current mobile binary caching (`MediaRepository` / `ThumbnailCache`) is useful, 
 
 Acceptance: after one successful sync, relaunching the Android app can show the previous library view without waiting for a full remote page load; later server changes update it incrementally without losing pending local intent.
 
-## MOBILE-008 — Catalog update requests and status
-
-Status: `DONE` (user, 2026-09-27: working; refresh feels somewhat slow — measure if it becomes a problem) — server refresh worker and Android request/status UI exist.
-
-Remaining is bounded live-source/native acceptance and fuller PC/server grouping reconciliation. This is a server operation lane, not an expansion of normal mobile editing. Keep it behind the authority/reconciliation rules proven by the archived `CLOUD-AUTH-001` contract where domains overlap.
-
 ## VAULT-ENC-001 — Lakomics-encrypted Private Vault (ADR-0039)
 
 Status: `VERIFY` — Linux accepted (real USB, 2026-09-24; event-driven detection and the rail entry checked 2026-09-26); Windows acceptance remains (compile + real USB, including same-letter card swaps).
@@ -115,116 +110,65 @@ Also fix the bugs found in the 2026-09-24 audit where they survive the rewrite: 
 
 ## WIN-SYNC-001 — Update the Windows PC after the 2026-09-24 changes
 
-Status: `TODO` — the user's Windows PC is unavailable as of 2026-09-24.
+Status: `TODO` — the user's Windows PC remains unavailable as of 2026-09-28; the Linux library now requires at least schema v109.
 
 Once the Linux PC publishes Collections with the personal-edit handshake, the older Windows build is refused for Collection publication only (other domains and local data are unaffected). On the Windows PC: pull `main` (requires the commits to be pushed first), rebuild, and verify:
 - Collection publication resumes.
 - Private Vault on Windows: Credential Manager remember/auto-unlock, USB detection by drive letter, removal lock, in-app video playback.
 - FAULT game in WebView2 (`http://tauri.localhost` → `http://lakomics.localhost` original-image reads).
 - Collections authority (docs/research/collection-authority-design-20260924.md) may be activated before this update; the old Windows build is then fenced for Collections and its local-only edits are not carried over (the upgrade produces a salvage report).
-- Library schema: the production Linux library is at v97 (migrations 0096 notes base payload and 0097 catalog duplicate sync, 2026-09-25); the Windows build must be at least as new before it opens that library.
+- Library schema: the production Linux library is at v109 (migrations 0107–0109, 2026-09-28, with a pre-migration backup); the Windows build must be at least as new before it opens that library.
 
 ## USER-REQ-20260924 — User requests, 2026-09-24 evening
 
 Status: `PARTIAL` — delivered items (notes sync pickup, keyboard lift, bottom navigation, PC viewer, lightweight mode, release notifications, household ledger, Notes v2, file exchange, reader slider, Collector items) are archived in the [2026-09-26 checkpoint](lakomics-completed.md#user-req-20260924--delivered-items). Remaining:
 
-- Mobile design consistency with the PC app (logo on every tab's top bar, better use of the top bar, PC-like buttons): tracked in `MOBILE-DESIGN-001`; the Home screen waits for the Artist Revisit rebuild (PC and mobile).
+- Mobile design consistency with the PC app is archived as `MOBILE-DESIGN-001`; the Home/artist surfaces are implemented in `HOME-DASH-001` and `TABLET-PARITY-001`.
 - PC: start Collections authority slice 1 (docs/research/collection-authority-design-20260924.md). Only slice 0 exists (`c38a2bc`, server module, inactive); slice 1 is not started.
 - `VERIFY`: lightweight processing mode (`05b18b6`) must be re-checked as features keep being added — part of `PERF-ALL-001`.
 - Battery: reduced in 0.8.6 (`f25ddd8`); further work is part of `PERF-ALL-001`.
 
 NovelAI app items from this batch are in `nai_frontend/docs/BACKLOG.md` (NAI-009).
 
-## USER-REQ-20260926 — User requests, 2026-09-26
-
-Status: `IN PROGRESS` — details clarified by the user 2026-09-26. Implemented 2026-09-26 in Android 0.8.27 (64) and the collector and accepted by the user on the tablet and live X the same day; only the video bug stays open. NovelAI app items are in `nai_frontend/docs/BACKLOG.md` (NAI-011).
-
-Collector (`extension-list/`):
-- `DONE` (accepted live 2026-09-26): the main tweet on its own page is expanded in place (bounded 1.5 s wait, falls back to the visible text) before translating. Translation of long tweets: when the main tweet is truncated, the translation covers only the visible part; the user must press "더 보기" first to get a full translation. Expand the main tweet's full text before translating (main tweet only).
-
-- `DONE` (collector 3.0.0.43–44, 2026-09-27, confirmed by the user in Chrome): the X "새 게시물" (scroll to top + show new posts) button moved from above the account avatar to directly below X's "More (…)" nav item; selecting an AV product code opens a JAVLibrary search tab (right-click menu on PC, floating chip on touch; AVDBS dropped at the user's request) and offers "컬렉션에 보내기" (see LONG-001).
-
-Fault game (`_tools/app/mobile-client/FaultGame.tsx`):
-- `DONE` (0.8.27, accepted): drops halved (every 20th brick + 3.5 %, none from specials), pierce item 4 s and only through one-hit bricks, special balls pierce and bounce at paddle height per level (Lv1 cyan / Lv2 gold / Lv3 red), web-like cracks from the hit point. The Lv2/Lv3 dispatch was already correct; the gauge made a partly filled segment look lit, now fixed.
-- `DONE` (user confirmed resolved 2026-09-27): Item drops are too frequent overall; reduce across the board.
-- `DONE` (user confirmed resolved 2026-09-27): The crack effect looks fake; make it more convincing.
-- `DONE` (user confirmed resolved 2026-09-27): The piercing ball item is far too strong; nerf it.
-- `DONE` (user confirmed resolved 2026-09-27): The special attack (fires a strong ball) is too weak at Lv1; consider moving piercing to the special attack instead of the item.
-- `DONE` (user confirmed resolved 2026-09-27): Bug: using the special attack at Lv2/Lv3 does not seem to fire that level's attack; verify and fix so the current level's attack fires.
-
-Mobile app:
-- `DONE` (0.8.31/0.8.32, accepted by the user 2026-09-26): videos never start — endless loading in the viewer. Root cause NET-R2-001 (one of the two R2 addresses is unreachable from the home network); videos now stream through a native Range proxy. 2026-09-26 findings: the server issues the ticket and R2 serves faststart MP4s with ranges; the same URL plays in tablet Chrome 153 (WebView 152). In a failing session the player showed Chromium's broken-media icon with no app error text. Right after reinstalling, videos played within 1 s, so the failure depends on app state. Video element events (state, MediaError code/name) now go to the `LakomicsPerf` log (`js video=`); capture a failing session to find the cause.
-- `DONE` (0.8.27, accepted): Collections: move the 게임 / 만화 / 영화 / AV type switch into the top bar so it stays reachable after scrolling (the user switches often).
-- `DONE` (0.8.27, accepted; native fix: edge-to-edge on Android 15+ never resized the WebView for the keyboard, now a frame pads the keyboard height below it; the bottom navigation may now show above the keyboard): Notes (text/checklist notes; the ledger is fine): with the keyboard open, content below the visible area cannot be scrolled into view, so the lower part of a long note stays hidden behind the keyboard while editing. Make the editor scroll so every line can be brought above the keyboard.
-- `DONE` (user confirmed resolved 2026-09-27): Collections covers right after app start (possibly only right after installing a new build): missing covers stay blank for a while in the Collections tab; after visiting other screens and coming back, missing covers load fairly quickly. Suspect a cold-start ticket/cache warm-up or an image-request queue stall; measure and fix during PERF-ALL-001.
 
 ## USER-REQ-20260926B — User requests, 2026-09-26 (second batch)
 
-Status: `PARTIAL` — 2026-09-27: the user confirmed the pending native PC checks (Notes board, release captions, Collections, 전송). Earlier: the four mobile UI items (release caption, type tabs, connect row, sticky notes) shipped in 0.8.34 (`a3e4846`) and were accepted on the tablet by the user 2026-09-26; PC Notes board and release captions landed in `a83209c` (native PC check pending). File exchange redesign: chat-style timeline (direction A of docs/prototypes/exchange-redesign-20260926) on PC (`7379d92`) and tablet (0.8.37). Tablet Home rebuilt as dashboard H3 (docs/prototypes/home-dashboard-20260926/round2.html) in 0.8.37, with refined tab/folder motion and a delayed loading line. Remaining: tablet character creation, tablet Collection creation. Follow `MOBILE-DESIGN-001`'s process for visual changes (browser mockups at 800×1280 before the APK).
-
-Mobile app:
-- Collections: show a work's new-release notification (신간 알림) on its tile in the grid, not only on the 신간 screen.
-- Collections top bar: center the 게임 / 만화 / 영화 / AV type switch and restyle it (moved into the top bar in 0.8.27).
-- Manga detail: when MangaDex/Kakao are already connected, shrink the connect section into a small, collapsed row; when not connected, keep it prominent.
-- Notes: replace the long full-width note rows with sticky-note (포스트잇) style cards — roughly square/portrait tiles in a multi-column grid (clarified by the user 2026-09-26).
-- File exchange (전송): a redesigned transfer UI shared by the PC app and mobile.
-- Characters: register character reference images and create characters from the tablet. Characters are PC-owned publication today (`CLOUD-POST-001`); the mobile channel covers only exclusions and review decisions, so this needs a Character write contract first.
-- Collections: create a Collection from the tablet. Needs Collections authority slice 1 (docs/research/collection-authority-design-20260924.md; only the inactive slice 0 exists).
-
-PC app:
-- Notes: rework the Notes UI to match the mobile Notes design (user, 2026-09-26: follow the chosen mobile masonry sticky-note cards).
-- Collections: show new-release notices like the chosen mobile design (caption line under the title instead of a cover badge).
-
-Mobile designs chosen 2026-09-26 from [the mockups](../prototypes/mobile-requests-20260926b/index.html): release notice C (caption line), type switch B (centered underline tabs), manga connect section as proposed (collapsed row when connected), Notes B (masonry sticky notes).
+Status: `PARTIAL` — the mobile UI, PC Notes/release captions and chat-style 전송 redesign are archived in the [2026-09-28 checkpoint](lakomics-completed.md#closure-checkpoint--2026-09-28--home-artist-release-calendar-and-tablet-parity). Tablet character creation was dropped by the user's 2026-09-27 PC-only character decision. Remaining: tablet Collection creation, which still needs the Collections authority slice 1.
 
 ## HOME-DASH-001 — Information dashboard Home (tablet first)
 
-Status: `IN PROGRESS` — 2026-09-27: redesigned as direction A of [home-redesign-20260927](../prototypes/home-redesign-20260927/index.html) (number tiles, one status line, 신간·발매 cover shelf, 다시 보기 from `/v1/library/revisit`, two-column memos) in 0.8.50, accepted on the tablet by the user; game/movie posters still wait for PC calendar publishing. Earlier: phase 1+2 shipped in 0.8.39 (layout R2 of round3.html; 자산 현황 from the new `/v1/library/summary`, deployed `54e835c`); next: 오늘의 AV 배우 and game/movie releases need PC-published data. 2026-09-26 the user rejected the image-centred H3 Home on the device and chose an information-only dashboard (no recent-saves images; small covers only in the 신간 list). Cards: 확인할 것, 신간, 발매 예정, 전송, 라이브러리 현황, 메모, 시스템 상태 (round 3 mockups in `docs/prototypes/home-dashboard-20260926/round3.html`). Decided 2026-09-26: games/movies use a **six-month release calendar** (IGDB upcoming games, TMDB `region=KR` upcoming movies) from which the user picks titles into a wishlist that is then tracked like manga releases (design: [research](../research/home-upcoming-sources-20260926.md)); AV Collection data **may leave the PC** (server/tablet) for 오늘의 AV 배우. User request 2026-09-27: the Home 캐릭터 검토 entry (tablet and PC) should be split by **series and character** (e.g. 백합 › 라라 N, 마리 N) instead of one total, each opening that series/character's review. Related (same day): a bulk "다른 캐릭터로 옮기기" for images confirmed under the wrong character (e.g. 마리 images in 라라 created before 마리 existed) if the current selection tools are awkward. User decision 2026-09-27 (character recognition scope): **turn off** the broad-folder rule (images saved directly in a non-series folder such as 게임 are compared with every registered series below it — 2026-09-12 rule); keep it as a setting (default off) so it can be re-enabled later. Seen: 명조 review showed 10 candidates from the 게임 root. When implementing, decide what happens to already-computed broad-folder candidates (hide from review while off). Later cards requested by the user: 게임 신작 예정, 만화 신간 예정, 영화 신작 예정 (needs game/movie release sources), 오늘의 AV 배우 (from AV Collections), 자산 현황, 캐릭터 검토, 서버 등 상태. PC Home: mockups `docs/prototypes/home-dashboard-20260926/pc.html`; user chose **B (priority ledger, lines instead of card boxes)** 2026-09-26, placed as a new first rail entry "홈" with pinned notes and connection rows in the index; PC adds 미분류, trash count, game/movie upcoming from the release calendar and wishlist events.
+Status: `PARTIAL` — the tablet and PC dashboard slices are implemented and recorded in the 2026-09-28 checkpoint (`7acd7131`, `e8ff919d`, `b5c4eafa`, `3724d430`, `29a618b5`). Remaining: verify the next IGDB refetch, keep the release calendar PC-sourced, and finish the tablet 전송 top-bar icon. The current PC Home also has date-only title text, index tiles, a scrolling 발매 예정 shelf, `1년 전 오늘`, `오늘의 작가`, AV pick, asset totals, memos and status/connection surfaces.
 
 ## USER-REQ-20260927 — PC redesigns and fixes requested 2026-09-27 (evening)
 
-Status: `IN PROGRESS` — mockups approved by the user (recommendations accepted for all). 2026-09-27 evening, uncommitted, tests only (native check pending): AV detail 1A + performer page + portrait picker (migration **0107**), collections index split into 작품 유형 / 소식, top-bar titles, TV anime in the release calendar (migration **0108**). Earlier the same day: PC Home B, artist grid, 새 캐릭터 제안, tagger review speed (532b7cc0).
-- **PC Home** — direction B of `docs/prototypes/pc-home-20260927/` (two columns: 발매 예정 covers + 작가 다시 보기 left, 확인할 것 + 오늘의 AV 배우 right; Home index sidebar = 메모, 연결 (brief), 전송, 자산 현황; privacy variant as mocked).
-- **Artist hub** — A + A of `docs/prototypes/artist-grid-20260927/`: large mosaic "오늘" artist and a 5-column grid of square collage tiles (mobile CoverGroup split).
-- **AV detail** — 1A of `docs/prototypes/av-detail-20260927/`: rotatable 3D DVD case (like game/manga packages), info + genres, performers strip with portraits (user-picked cover crop → Wikimedia Commons with attribution → initials; no 125 px DMM photo), shelves 같은 배우 / 같은 시리즈 / 같은 레이블 (hidden when empty), performer page, portrait picker.
-- **Collections index**: separate the 작품 유형 group (전체·게임·만화·영화·AV) from the 소식 group (신간·발매 캘린더) as distinct sections.
-- **Release calendar: TV animation** — add upcoming Japanese TV anime (new series and new seasons, TMDB TV) next to games (IGDB) and movies (TMDB), with the same wishlist flow; keep the list manageable (anime seasons add many titles at once).
-- **Top bar titles (whole PC app)**: the sidebar keeps the area name (컬렉션, 망가, 에셋…); the content top bar shows the current section or filter (게임, 만화, 신간, 발매 캘린더, 카탈로그, 북마크…) instead of repeating the area name.
-- **새 캐릭터 제안** (AUTO-TAG-001; decisions in the mockup README): 330 unregistered characters with ≥ 5 images from the tagger scores; reviewed Korean names at `~/.cache/lakomics-oss/hfjob/maps/suggest-ko.json`.
-- **Tagger review speed**: the PC reads the tagger queue by paging every series review (~90 s on the real library); add a dedicated backend list/count command.
-Proposed order: (1) artist grid + Home B frontend in parallel (frontend only, hot-reload); (2) one Rust batch — tagger count command, Home asset totals by type, 오늘의 AV 배우 pick, 새 캐릭터 제안 backend — with the dev app closed; (3) AV detail (backend then UI); then collections index sections, TV anime calendar, top-bar titles.
+Status: `VERIFY` — the requested PC Home, artist grid, 새 캐릭터 제안, tagger review speed, AV detail/performer page/portrait picker, Collections sections, TV anime calendar and top-bar titles are implemented in `532b7cc0`, `21b5aea1`, `b5c4eafa` and later commits. Native PC acceptance on the current build is unverified; keep this item only for that check and any concrete regression.
 
 ## TABLET-PARITY-001 — Bring the tablet app up to the 2026-09-27 PC features
 
-Status: `IN PROGRESS` — plan agreed with the user 2026-09-27. **2026-09-27 night (uncommitted, tablet 0.8.57 installed):** Home C, character review hidden, tablet privacy mode, artist screen (from Home), 발매 캘린더 (Collections chip + Home shelf 전체), AV tab (작품 · 배우별), Home header without refresh/transfer and a vault icon while the vault USB is attached, trimmed Settings, app opens on Home, sparse folder covers borrow subfolder assets; PC publishers (upcoming/wishlist intents, AV pick, artists; migration 0109) and AV in the Collections replica; server deployed (anime kind + AV replica, rollback `lakomics-avtab-cy2JdP`). Data appears once the PC app runs the new code (migrations 0107–0109). **2026-09-28 00:30:** production library migrated to v109 (backup `pre-migration-20260927-142830-v106-…`), PC publishing live (upcoming, AV pick, artists, AV in the replica), tablet 0.8.59 installed; fixed the same night: AV pick cover upload used the publisher token (401), PC intent validator rejected anime ids (tablet 관심 stuck), AV detail did not scroll, PC Home chip overlap, tablet Home shelf now 관심-only (PC already was). Release calendar: manual refresh retries a failed provider after 1 minute; IGDB keeps remakes/remasters (`parent_game` set) and PC-only games need ≥ 10 hypes (console ≥ 3) — **verify after the next IGDB refetch (a Zelda remake was missing)**; a one-off TMDB `/discover/tv` HTTP 400 disappeared on retry (cause unknown; `[tmdb]` dev-terminal diagnostics left in `tmdb.rs`/`release_calendar.rs` — remove or keep deliberately). Mockups: [tablet-parity-20260927](../prototypes/tablet-parity-20260927/index.html). **Decided 2026-09-27:** Home **C** (blocks side by side, fits one screen; 메모 block = Todo and 가계부 as two tall cards), poster size as mocked, AV list with a 작품 · 배우별 switch that reopens in the last-used view, 관심 bookmark on every game/movie/anime poster and unmarked titles shown, 캐릭터 자동 태그 % tile dropped, tablet privacy mode = new Settings toggle (hides the AV card and the AV tab), artist screen keeps a short "PC 앱에서 관리" line.
-- Finding (read-only, 2026-09-27): the server already has `/v1/home/upcoming` (+ `/wishlist` intents), `/v1/home/av-pick`, `/v1/library/artists` and `/v1/home/covers/{sha256}/media-ticket` (commit `8194d273`, allowlisted in `NetworkPolicy.java`), but the PC never publishes to them and the tablet never reads them. Production deployment of these modules is unconfirmed.
-- Stage 1 (no UI): PC publishers for upcoming releases + wishlist intents, the AV pick, and artists; `/v1/library/summary` gains image/video and per-type collection counts.
-- Stage 2 (tablet Home, on top of Home A): 발매 예정 shelf with game/movie/anime posters (add to 관심 목록), 오늘의 AV 배우 card (hidden in privacy mode), 작가 다시 보기 from PC artists.
-- Home order (user, 2026-09-27): most-used on top — 전송, 발매 예정, 메모 (incl. 가계부); review (확인할 것), 다시 보기/작가 다시 보기 and 자산 현황 at the bottom.
-- Stage 3: tablet artist grid, read-only, **entered from Home only** (user decision 2026-09-27; the 에셋 tab is unchanged).
-- **User decision 2026-09-27: no character classification on the tablet going forward.** Tagger review, 새 캐릭터 제안 and character registration stay PC-only; the AUTO-TAG-001 tablet feed follow-up is dropped. Refined the same evening (user): on the tablet **hide** the Home 확인할 것 캐릭터 검토 row, the character review screen and its 0.8.49 overview, and the viewer's 캐릭터에 추가 button; **keep** the viewer's "○○에서 제외" (exclusion) and character folder browsing. Similarity review, catalog duplicate-edition review and pending captures stay. Ship with the stage 2 Home APK.
-- Stage 4: **tablet AV tab opens** (user decision 2026-09-27): AV Collections (list + detail) are published to the server/tablet; today `cloud/collections.rs` excludes type `av` from the replica.
-- 자동 태그 stays PC-only.
+Status: `PARTIAL` — Home C, artist screen, 발매 캘린더, AV tab, privacy mode, PC publishers, AV replica and the 0.8.60/0.8.61 tablet refinements are implemented and installed; production library migration v109 and PC publishing are recorded in the 2026-09-28 checkpoint. Remaining: verify the next IGDB refetch after the dated game fix, keep release-calendar authority on the PC, publish tablet performer details beyond face/name, and finish the tablet 전송 top-bar icon. The one-off TMDB 400 has not recurred but its cause and the leftover diagnostics are unverified.
 
 ## AUTO-TAG-001 — Automatic image tags and tagger character signal
 
-Status: `IN PROGRESS` — 2026-09-27. Findings: [tagger-character-signal-20260927](../research/tagger-character-signal-20260927.md). Mockups: `docs/prototypes/auto-tags-20260927/`.
+Status: `PARTIAL` — the tagger import/veto/recommendation review and 새 캐릭터 제안 implementation landed in `b00f3bfe`, `e8e34e5e` and `532b7cc0`. Production import/apply still needs explicit approval, and importing the daily tag output remains manual. Tablet character-classification follow-up is dropped by the 2026-09-27 PC-only decision. Findings: [tagger-character-signal-20260927](../research/tagger-character-signal-20260927.md). Mockups: `docs/prototypes/auto-tags-20260927/`.
 
 - PC phase 1 (in progress): 자동 태그 imported from the PixAI v0.9 backfill (user-triggered import; production import needs approval). Inspector: 주요 태그 row above 출처 = 추정 character only (score ≥ 0.85, no confirmed character; series from the name qualifier or a small map); full tags below 출처 grouped by kind (mockup 1B); sexual tags shown like others. Edit = remove/undo + add (2B). Search = Ctrl+K tag filters with include/exclude (3A). Korean labels only, English on hover (4). PC only; no server/tablet.
 - Character signal: PixAI agrees with 89 % of manual confirmations and only 2 % of rejections (30 of 64 targets); 451 undecided candidates. Next: use as a second signal in character classification (agree → auto, disagree → review, PixAI-only → candidates) after checking a sample of the candidates.
 - Newer taggers: wd-eva02 2026 canary trial done (92 % of manual confirmations on 46 targets, 2.8 % of rejections; table in the research note).
-- 2026-09-27: the user approved a one-off Hugging Face Jobs run (own account, $5 credit, private bucket; 1008 px copies named by index, 22 minor-looking sexual images kept off): PixAI v1.0 + canary over the library (8,899 images) and canary over the Prombot thumbnails for NAI. Trial matched local results. Next: import v1.0 tags, use the two taggers as a character signal, delete the buckets. Afterwards new images are tagged on the laptop with v1.0 (user: < 100 images a day; low priority, one at a time, ~7.5 GB RAM).
+- 2026-09-27: the approved one-off Hugging Face Jobs run completed (own account, private bucket; PixAI v1.0 + canary over 8,899 library images and Prombot thumbnails for NAI). Trial matched local results; buckets were deleted. The active import/veto/recommendation path is committed below, but production apply still needs approval. New images are tagged on the laptop with v1.0 (user: < 100 images a day; low priority, one at a time, ~7.5 GB RAM).
 - 2026-09-27 results: HF Jobs run done (≈ $1.5, buckets deleted; outputs in `~/.cache/lakomics-oss/hfjob/out/`). PixAI v1.0: series tag on 81 % of images, artist tag on 8 %; characters 90 % of manual confirmations, 1.7 % of rejections. Both taggers agreeing: 1.5 % of rejections, 438 new candidates. The user checked 20 automatic acceptances that both taggers reject (73 in total): 19 were wrong → "tagger veto".
-- In progress 2026-09-27 (backend, Astra xhigh): import PixAI v1.0 (+ canary character scores, target → tag mapping) as the active 자동 태그; **tagger veto** (automatic acceptance with both taggers < 0.3 → back to review, not re-accepted automatically; manual decisions untouched) and **tagger recommendations** (both ≥ 0.85, no decision → review candidate badged 태거 추천); preview → apply with explicit approval. Next: review UI badge + bulk accept per character; production import and apply need the user's approval.
-- `DROPPED` 2026-09-27 (no character classification on the tablet, user decision) — tablet follow-up (review finding 2026-09-27): tagger recommendations and vetoed pairs are not in the tablet's decision feed (`character_review_feed.rs` merges only S36/B36/doubtful; the server accepts only those sources). The tablet sees membership changes and the `needs_review` list only; PC review works. Needs a server + feed change.
+- Implemented in `b00f3bfe` (2026-09-27): PixAI v1.0 import, canary scores, target → tag mapping, **tagger veto** and **tagger recommendations**; preview → apply remains explicitly gated. Production import/apply still needs the user's approval.
+- `DROPPED` 2026-09-27 (user decision) — tablet tagger recommendations, vetoed pairs and character registration stay out of the tablet because character classification is PC-only.
 - New images: tagged daily at 03:00 on the Linux laptop with v1.0 then canary (user decision 2026-09-27): systemd user timer `lakomics-daily-tag.timer` → `~/.cache/lakomics-oss/daily/daily.sh` (read-only on the library; output `daily/out/<model>/*.npz`, log `daily/logs/daily.log`). Runs only while the user session is up and the PC is awake; a missed night is not caught up. Importing the daily output into the app is still a manual step (auto_tags_export.py --daily + Settings › 자동 태그); automating that import is open.
-- Approved 2026-09-27 (build after the veto/recommendation backend; decisions in the mockup README), mockups `docs/prototypes/new-character-suggest-20260927/`: **새 캐릭터 제안** — characters the taggers see in a series folder that the user has not registered (register with preselected references, merge into an existing character, ignore).
+- Implemented in `532b7cc0` (migration 0106; mockups `docs/prototypes/new-character-suggest-20260927/`): **새 캐릭터 제안** for unregistered tagger characters with register, merge, ignore and postpone actions.
 - Camie Tagger v2 trial 2026-09-27 (GPL-3.0, ONNX, Danbooru 2024; 2,167 decided images, CPU ≈ 1.4–2 s/image): knows 48 of 74 mapped target tags (missing most 2025 characters). On characters it knows it hits 35 % of manual confirmations vs 83 % for PixAI and canary, and 0 % of rejections (PixAI/canary 1.5 %). Too weak as a third voter; not adopted, run stopped. Scripts `~/.cache/lakomics-oss/camie/`.
 - New taggers appear irregularly (PixAI v0.9 2025-08 → v1.0 2026-09-15; canary a one-off 2026-07-29; WD v3 unchanged since 2024). Check about quarterly; re-run on a rented GPU and compare against the confirmed decisions before switching.
 
 ## ARTIST-SUGGEST-001 — 닮은 작가 후보 (artist suggestions from art style)
 
-Status: `TODO` — direction chosen by the user 2026-09-27 after a read-only trial. Not started.
+Status: `TODO` — direction chosen by the user 2026-09-27 after a read-only trial. No implementation was found in the current code or `main` history; the trial remains research only.
+
+- 2026-09-28 re-evaluation (read-only, `~/.cache/lakomics-oss/kaloscope/scripts/evaluate2.py`): near-duplicates grouped by source post and the app's PDQ rule (min of whole/crop hashes ≤ 20); walk-forward by collected time. No plain threshold reaches 90 %; rule chosen: best-neighbour similarity ≥ 0.55 and a lead ≥ 0.05 over the second artist → about 85 % precision at 8 % coverage; 363 of 5,396 작가 미상 images get a suggestion (175 artists). User review of 40 random suggestions: 34 correct, 0 wrong, 6 unsure (5 were accounts reposting official art/screenshots) → add a "퍼온 계정 — 작가 아님" flag that removes an account from suggestion targets.
+- Mockups: [artist-style-suggest-20260928](../prototypes/artist-style-suggest-20260928/index.html) — A grouped by suggested artist (recommended) vs B grid badges; C inspector box; D reposter flag. Decision 2026-09-28: A (grouped by suggested artist) + C + D.
 
 - Goal: for 작가 미상 images (no creator key, no assignment), suggest "닮은 작가" from the artists already in the library, by art style; the user confirms (작가 지정) or dismisses. Never assign automatically.
 - Model: [Kaloscope 2.0](https://huggingface.co/heathcliff01/Kaloscope2.0) (Apache-2.0, 2025-11, LSNet-XL 448 px, 39,260 Danbooru artists; PyTorch + timm, no ONNX file on the card). Local CPU ≈ 0.4 s/image; checkpoint 2.9 GB. Trial scripts and outputs outside the repo: `~/.cache/lakomics-oss/kaloscope/` (`scripts/infer.py`, `scripts/evaluate.py`, `out/preds.npz` = top-10 classes + 512-d feature per packed image).
@@ -236,71 +180,19 @@ Status: `TODO` — direction chosen by the user 2026-09-27 after a read-only tri
 - Proposed design: store the feature per image (like the character caches, rebuilt by one backfill + daily new images); per unknown image rank artists by their best (or top-3 mean) neighbour similarity; show candidates above a calibrated threshold in the 작가 미상 view and on the image inspector ("닮은 작가: ○○ · 유사도"), grouped per suggested artist for bulk confirmation; dismissals are remembered. Optionally show the Danbooru name as a hint when its confidence is high.
 - Before building: finish the full-library run, exclude near-duplicates (same post / PDQ match) from the evaluation, pick the threshold on walk-forward data, and check the false-suggestion rate on a sample the user reviews. Heavy runs go one at a time on the laptop (see PC load limits) or on a rented GPU.
 
-## PC-CHAR-UI-20260927 — Character folder fixes requested by the user
-
-Status: `IN PROGRESS` — reported 2026-09-27 on the PC app (release build). Both bugs fixed in `e8e34e5` (card images no longer draggable; pencil opens the editor inside group views); folder reorder delegated 2026-09-27.
-- `DONE`: the character folder thumbnail brought up a drag-and-drop (file drop) selection window.
-- `DONE`: pressing the edit (pencil) icon on a character folder did nothing.
-- Feature: reorder character folders (manual order within a series/group, persisted; drag or move up/down).
-- Note: the user will organise small casts (e.g. 초카구야) as a manual-only "기타" character inside the group, per option A discussed 2026-09-27; no group-linked ordinary folder needed for now.
-
-## TEST-BASELINE-20260926 — Full-suite baseline
-
-Status: `DONE` 2026-09-26. Rust `cargo test` 0 failed (lib 1818, foundation_flow 18, others); desktop vitest 1446, mobile vitest 673, server unittest 1494, collector 314 all pass. Fixed: stale classification assertions after the subtree totals (`cc620e7`); the character-exclusion bootstrap test's keyring dependency; a real Trash purge bug (an Asset with an unsafe recorded path lost its record and thumbnail while its original stayed — now reported failed and kept, ADR-0011); flaky warm-up assertions (SimilarityReview, CharacterReview), a slow LedgerView query and a `/proc/<pid>/stat` race in the thumbnail-worker test. Still flaky only under heavy concurrent load: two `mobile-client/Catalog.test.tsx` tests (cover retention, tag budget timeout).
-
 ## PC-DECLUTTER-001 — PC app declutter (concepts A+B+C, staged)
 
-Status: `IN PROGRESS` — stages C and A implemented 2026-09-24/25 (not yet native-accepted on Windows), plus user feedback rounds: 메모 back on the rail; 이동 and search merged into one 찾기 palette (Ctrl+K/Ctrl+F, also jumps to folder/album/character names); larger date headings; series view reduced to one header line + compact character tiles; group view opens on member tiles with 그룹 더보기 › 그룹 편집; character 더보기 panel rebuilt around references and crops; collections 내 별점 select; asset tree shows subtree totals ("N장 · 이 폴더만 M장"), quick views above pins, pins as chips, one expanded character series at a time, groups as single rows with members hidden; simpler person/group glyphs; scrollbars styled only via ::-webkit-scrollbar (standard scrollbar-width/color make WebKitGTK draw outlined native bars); online catalog tiles simplified like mobile, rare actions under 카탈로그 더보기, "N분 전 갱신" next to 망가. Stage B still waits for the Revisit rebuild. Concepts in `docs/prototypes/pc-declutter-20260924/` (README, index.html, PNGs); the user likes all three (2026-09-24). Staged plan combining them:
+Status: `IN PROGRESS` — stages C and A are implemented; the former Revisit dependency for stage B was replaced by the Artist hub (`57a4fa85`, `532b7cc0`) and PC Home (`b5c4eafa`). The remaining scope is native Windows acceptance and any concrete declutter regression. Concepts in `docs/prototypes/pc-declutter-20260924/` remain the design record.
 1. **C — Quiet chrome first** (lowest risk, mostly moving things): one top bar merging title bar and list header; one status indicator ("작업 N") opening a single panel for sync, running jobs, review queues and lightweight mode; selection bar that appears only while selecting; merged release notices; Settings › 일반 trimmed to ~7 items with maintenance/diagnostics under 고급 › 복구·진단; experimental/recovery buttons off the character series header.
-2. **A — Focused navigation**: rail reduced to 에셋 · 컬렉션 · 망가; everything else via a `Ctrl+K` 이동 palette and 더보기, with review-queue counts shown only when non-zero; Revisit folded into the asset index for now.
-3. **B — Task-first Home**: together with the Revisit rebuild (PC and mobile) — 이어 보기 as the hero, 확인할 것 queues that disappear at zero, tools in one row. Needs resume-position data and queue counts first; avoid a dashboard feel (DESIGN.md).
+2. **A — Focused navigation**: rail reduced to 에셋 · 컬렉션 · 망가; everything else via a `Ctrl+K` 이동 palette and 더보기, with review-queue counts shown only when non-zero; Artist/다시 보기는 now separate implemented surfaces.
+3. **B — Task-first Home**: the current PC/tablet Home is implemented as the later information dashboard; native acceptance and any follow-up interaction changes remain in `HOME-DASH-001`.
 Ideas to carry to mobile (MOBILE-DESIGN-001): single status indicator, zero-hiding queues, neutral filters, search icon only where searchable, conclusion-first settings, continue-watching.
-
-## MOBILE-DESIGN-001 — Premium mobile layout pass (Galaxy Tab S11 portrait)
-
-Status: `DONE` — implemented in Android 0.8.12 (49) on 2026-09-25; accepted on the tablet by the user 2026-09-27. Brief given by the user 2026-09-24. Home screen content is out of scope (waits for the Revisit rebuild).
-
-2026-09-26: all listed items are implemented (last: smooth arrival of tiles loaded on scroll, 0.8.43); only Tab S11 device acceptance remains (layout fit, touch feel, tile arrival). Open question: whether appended Collections/Catalog cards should also rise in as whole cards (today only their covers fade in).
-
-Decisions (user, 2026-09-25, from the mockups in [`docs/prototypes/mobile-design-20260925/`](../prototypes/mobile-design-20260925/README.md)):
-1. Top bar brand B: the logo mark plus a larger tab name.
-2. Library root A: three columns whose covers flex so exactly three whole rows fill the first screen (computed from the real viewport at runtime), an end line "아래에 분류 N개 더", and row snapping.
-3. Viewer actions A: icon plus short label; 분류 = folder icon, 앨범 = stacked squares; 휴지통 set apart.
-4. Catalog 필터 chip: saved 회피 태그 alone count as the default (neutral chip); PC grey plus a count only when something differs.
-5. 설정 stays on Home only.
-6. Bottom navigation 60 px.
-7. `확인 N` on the Library bar only; endless grids end in a fade above the navigation.
-Not yet verified on the device: the layout on the real Tab S11 (including the Library root fit), touch feel, and the smoothness of the new-tile entrance.
-
-Goal: a calmer, premium feel ("이제 고급감을 추구할 때").
-- **One screen, one conclusion:** on the S11 in portrait each screen's content must resolve within the viewport — no section header or row that peeks just below the fold (e.g. Library root's '기타' / '오리지널' needing a small scroll to appear). Compose sections so the first screen ends cleanly.
-- **Shared top bar on every tab:** the logo (Home already has it) on all tabs; use the bar's space for actions moved up from the content (e.g. from the Library header); search becomes a small icon in the top bar, common to all tabs; buttons restyled toward the PC app's button feel.
-- **Library tab:** remove the "최근 연 폴더" (recent folders) section.
-- **Showcase:** the filter button is always shown active/white and distracts; make it neutral unless a non-default filter is set (filters are rarely changed).
-- **Loading more assets on scroll:** smooth, Apple-like appearance of newly loaded tiles (no pop-in or layout jump; respect reduced motion; keep virtualization/perf).
-- **Asset viewer top icons:** their meaning is not obvious — make each action recognisable (clearer icons, short labels or a first-use hint; accessible names already exist but are invisible).
-- **Bottom navigation bar:** slightly taller across the app (it was raised 8px in 0.8.2; now increase its height a little too).
-Earlier related request (USER-REQ-20260924): logo on all tabs, better use of the top bar, PC-like buttons.
-Process: show browser-rendered mockups at 800×1280 (S11 portrait) for approval before the APK.
 
 ## PC-REVIEW-001 — Fix findings of the 2026-09-25 PC app review
 
-Status: `IN PROGRESS` — all ten high items and the sync-state UI fixed 2026-09-25 (tests; native checks pending: real USB vault, Windows, live IGDB). Follow-up batch 2026-09-26 (uncommitted at writing; tests only, native checks pending): see "Fixed 2026-09-26" below. Remaining: the items still listed as open and the unlisted medium/low findings. Review done 2026-09-25 (read-only, 8 Opus reviewers); report with all findings: [`docs/research/pc-app-review-2026-09-25.md`](../research/pc-app-review-2026-09-25.md). 10 high (controller-verified), 31 medium, 49 low (medium/low unverified unless marked). Nothing was blocked in the Linux library at review time.
+Status: `IN PROGRESS` — the ten high findings and the 2026-09-26 follow-up fixes are committed; the current residual list below is still open or unverified. The 2026-09-28 Home/calendar work does not close these review items. Native Windows, live-provider and any explicitly marked production checks remain separate. Report: [`docs/research/pc-app-review-2026-09-25.md`](../research/pc-app-review-2026-09-25.md).
 
-Suggested order (high findings; details and file:line in the report):
-1. Asset re-baseline hard-deletes local Assets absent from the new baseline (server DB restore → PC data loss, never re-uploaded). Until fixed, do not roll the server DB back.
-2. Asset lifecycle queue: a head `conflict` row stops trash/restore/purge sync forever.
-3. Album queue: adding a not-yet-uploaded Asset to an Album blocks Album send/receive forever (`invalidAlbumMembership` treated as structural).
-4. Classification queue: an assignment for an Asset trashed/purged or permanently failed before upload blocks Classification forever.
-   - With 1–4: surface blocked/stopped sync state in the UI (errors are currently dropped in `workload.rs`).
-5. One unappliable mobile character exclusion blocks all later exclusions and skips the rest of the character sync.
-6. Private Vault: a session opened from the backup index can save, and the next unlock's orphan cleanup then deletes objects of the lost generation.
-7. Private Vault: the one-time recovery key is lost on Esc/navigation during creation.
-8. Similarity review list fails as a whole when one open review's existing Asset left `normal`.
-9. IGDB import/hero change fails when a screenshot is chosen as the hero.
-10. Viewer stops opening after trashing an asset opened via "open existing".
-
-The follow-ups recorded after the 1–4 and 5–10 fixes (2026-09-25) are resolved or carried into "Still open" below; the keyring-reading test was fixed 2026-09-26 with an injected token.
+The original ten high findings are retained in the linked review report as historical context; the 2026-09-25/26 source fixes are committed. Only the residual or unverified items below are active here.
 
 Fixed 2026-09-26 (Rust/vitest tests; native Tauri, Windows and live-server checks pending):
 - Server authority restore: the Asset replica now re-baselines before the Album/Classification lanes (they wait while it is pending), and those baselines keep a released Asset's relations and queue them again, so a re-uploaded Asset keeps its Albums and Classification.
@@ -311,11 +203,11 @@ Fixed 2026-09-26 (Rust/vitest tests; native Tauri, Windows and live-server check
 - Window focus no longer relays three refresh events in the desktop app (the native pass already wakes on focus and emits real changes).
 - A locked drag-out leftover or orphan artwork file no longer stops the library from opening (and no longer fails a finished Collection delete); Windows empty credential blob no longer reaches `from_raw_parts`; the extension token file is created 0600 on Unix and an empty leftover is regenerated.
 
-Still open: Asset-lane errors while a restore is pending hold the Album/Classification lanes (shown as a sync failure) until the Asset lane recovers; relations of a lost Asset are re-sent only when the relation lane re-baselines (a restore that keeps the Album/Classification cursors ahead is not detected); a content-hash mismatch in the Asset baseline/feed still fails the Asset lane every pass; dropped Asset lifecycle intents are shown only as a count; sync commands outside trash (classification/album CRUD, favorites, metadata) still run on the UI thread; `empty_trash`/purge still hold `trash_lock` across file deletion; the TrashBrowser retention input is still reset by a real lifecycle change; a hero chosen from IGDB screenshots is labelled 아트워크; authority-path purge row delete lacks the `status='trash'` guard (code moved since the review, needs re-review); Aladin/Kakao volume renumbering fails refreshes forever; artwork cleanup can delete an in-flight import's files; long HEVC/ProRes videos hit the 30-minute ffmpeg cap; S36 rollback stops on a trashed auto-accepted image.
+Still open or unverified: Asset-lane restore/error recovery and relation re-baseline edge cases; repeated content-hash mismatch handling; dropped Asset lifecycle intent detail; non-trash sync work on the UI thread; `empty_trash`/purge lock scope; TrashBrowser retention reset; IGDB screenshot hero labeling; the authority-path purge guard re-review; Aladin/Kakao volume-renumbering retry; in-flight artwork cleanup; long HEVC/ProRes ffmpeg limits; and S36 rollback after a trashed automatic acceptance. Each remains open unless a later source or acceptance record proves otherwise.
 
 ## OSS-SCAN-20260926 — Open-source projects worth using (idea)
 
-Status: `IN PROGRESS` — trials 2026-09-26: sqlite-vec later (exact but ~12× slower than NumPy at our size), Chinese Whispers over S36 is the best character-discovery method ([trial report](../research/oss-trial-sqlitevec-ccip-20260926.md)); vPDQ trial running. Surveyed 2026-09-26 at the user's request (read-only web research; stars and licenses read from each GitHub/Hugging Face page that day, activity inferred). Nothing installed or adopted. GPL/AGPL projects are reimplement-only: borrow ideas, never copy code.
+Status: `HOLD` — the 2026-09-26 survey and sqlite-vec, Chinese Whispers, vPDQ, PixAI and Camie trials are recorded; nothing was installed or adopted. Reopen a bounded trial only for a concrete product need. GPL/AGPL projects are reimplement-only: borrow ideas, never copy code.
 
 Suggested order: sqlite-vec → imgutils-style clustering for `CHAR-AUTO-003` → vPDQ for `SIMILARITY-003` → evaluate the PixAI tagger.
 
@@ -335,7 +227,7 @@ Status: `IDEA` — noted 2026-09-26 at the user's request; not started. Jev (Typ
 
 ## TRANSFER-REVIEW-001 — Deferred findings of the 2026-09-26 transfer-path review
 
-Status: `TODO` (low priority; single-user setup makes them unlikely). Fixed the same day: outbox identity (`5b7c5c2`), exchange retries and crash-safe receive (`8443890`), bind recheck at commit and similarity withdrawal across pages (`f4a5672`), tablet thumbnail revision (`5b7c5c2` + server `4209a38`). Fixed 2026-09-26 (second pass; uncommitted, needs the server deploy of `file_exchange.py` + `r2.py`, the next PC build and the next APK):
+Status: `TODO` (low priority; single-user setup makes them unlikely). Fixed: outbox identity (`5b7c5c2`), exchange retries and crash-safe receive (`8443890`), bind recheck at commit and similarity withdrawal across pages (`f4a5672`), tablet thumbnail revision (`5b7c5c2` + server `4209a38`), and the second-pass upload/page/ZIP bounds (`0c2b7118`). Live R2 verification and the remaining design edges below are unverified:
 - Exchange upload bound to the reserved length: the presigned PUT now signs `Content-Length` (the declared size), so storage refuses any other body length; the HEAD size check at completion stays as the backstop. Not yet verified against live R2.
 - Exchange inbox pages: `GET /v1/exchange/inbox?after=<nextCursor>`; every response carries `nextCursor` (`null` on the last page), and a request without `after` still gets the oldest 100, so old clients are unchanged. The PC client and the tablet follow the cursor (up to 20 pages); the PC sweeps orphaned part files only after a complete listing.
 - Desktop ZIP creation enforces the 2 GiB cap per copied chunk, before writing the chunk that would pass it.
@@ -347,8 +239,8 @@ Remaining:
 
 ## SERVER-REVIEW-20260924 — Remaining judgment calls of the Cloud API review
 
-Status: `TODO` (low priority; single-user setup). From [`docs/research/server-review-2026-09-24.md`](../research/server-review-2026-09-24.md) §3; items 1, 2, 4 and 7 were fixed in `39d9ed02` (2026-09-24). Remaining:
-- 3: fixed 2026-09-26 (deployed 2026-09-26 with tablet 0.8.42; needs the server deploy and the next APK for the native blocking rule): a client `trashAsset` of the image a pending similarity decision keeps is refused with 409 `similarityDecisionKeepsAsset` (publisher/PC trashes unaffected; restore unaffected); the tablet outbox blocks that row as 충돌 and the trash browser explains it.
+Status: `TODO` (low priority; single-user setup). From [`docs/research/server-review-2026-09-24.md`](../research/server-review-2026-09-24.md) §3; items 1, 2, 4 and 7 were fixed in `39d9ed02` (2026-09-24), and item 3 is implemented/deployed with the 0.8.42 client path. Remaining:
+- 3: the source and recorded deployment cover the similarity-kept trash refusal; broader native/production re-verification is unverified.
 - 5: a legacy Collection memo over 10,000 characters answers 422 instead of a conflict (unreachable unless legacy data exceeds the old limit).
 - 6: `mobile_collection_edits`, `mobile_collection_edit_noops`, `mobile_character_review_decisions` and `mobile_similarity_review_decisions` have no retention.
 - 8: the shared legacy token can send `trashAsset` / `restoreAsset` (matches the design; noted only).
@@ -356,17 +248,17 @@ Status: `TODO` (low priority; single-user setup). From [`docs/research/server-re
 
 ## PERF-ALL-001 — Whole-app benchmark and optimization pass
 
-Status: `IN PROGRESS` — phase 1 (measure and rank) done 2026-09-26 on Opus after Codex returned 401 on every request: [`docs/research/perf-all-baseline-20260926.md`](../research/perf-all-baseline-20260926.md) (combined top 10, per-area tables, tablet checks). First fix batch 2026-09-26 (Android 0.8.28 installed; PC not yet rebuilt): `list_collections` 340 → 5.6 ms release (sidebar refresh 349 → 15 ms, identical rows on the real library, VM-step gate); desktop idle whole-tree re-renders 28/min → 0 (gate); tablet cover retry with bounded backoff and cancelled media tasks leave the native queue (`media_busy`); tablet idle replica parses ~360/h → ~0, unchanged-library Picker resume 96 → 1 request (manual 앨범 새로고침 still walks), warm-up resumes at the failed page; dev-profile SQLite built with opt-level 3. Second batch 2026-09-26: event-driven Private Vault detection (Linux mountinfo poll, Windows drive mask; `a1cb720`); revisioned immutable desktop thumbnails (`e37da21`); character engine waits on an update-hook wake instead of polling (idle minute 928 → 9 DB connections, `159b0f4`); `/v1/sync/status` publisher log heads, opt-in signals and long-poll deployed (`d84f2a0`, see [design](../research/perf-all-longpoll-design-20260926.md)); desktop pollers folded into status heads + watcher (`7d80251`, model ~22 idle requests/15 min); tablet foreground long-poll (0.8.29, `81795ca`, real 50 s hold verified through Tailscale+socat); incremental tablet thumbnail warm-up (daily 9,393 → 2 native calls, `0294b94`). Survey of further mechanisms: [smarter mechanisms](../research/perf-all-smarter-mechanisms-20260926.md). An independent Codex review found 8 issues; fixes in progress (desktop hub stale document, exchange token after hold, character due-retry, Windows same-letter media, tablet exchange retry, pre-submit media cancel, server cancelled waiters); the immutable-thumbnail-after-trash note was accepted as is (user, 2026-09-26). Still open: native checks on the PC app (vault USB Linux/Windows, thumbnail cache, idle request count), the video endless-loading root cause (WebView requests to the R2 host hang ~2 min while other hosts work), same CROSS JOIN fix for `list_albums`, `PRAGMA optimize` as its own measured change, tablet connectivity/power callbacks, one-request Library pages. Requested 2026-09-24 ("벤치마크 빡세게"). Decided 2026-09-25: start only after the planned features are built; run it on Codex Astra. Existing tools: `src-tauri/src/bin/perf_probe.rs` (backend probe on a DB snapshot, from PERF-001; extend to current features), catalog/navigation/character benchmark tests (`#[ignore]`d), `android/tools/perf_summary.py`, `server/lakomics-api/tools/poll_benchmark.py`. Missing: frontend render/commit counts and native interaction timings; Astra's sandbox likely cannot drive the native window, so native measurement stays with the controller/user.
+Status: `PARTIAL` — the benchmark and optimization batches are implemented; the remaining shared product work is moving PC sync state out of `notes_state` at a future migration. Tablet connectivity callbacks, one-request Library pages, the R2 video path, `list_albums` join, lightweight-mode gates and the dated request reductions are already covered by the recorded commits and later builds. Windows/native checks and fresh render/interaction measurements remain unverified where they are not covered by the user checks.
 
-Lightweight-mode audit 2026-09-27 (code only; the user ran a release build, nothing measured): heavy background work (character autotag/S36/history, similarity index, video media, catalog preparation, collection updates, artwork, release watch, backups, trash purge, cloud backfill, catalog duplicate sync) stops under `workload::is_restricted()`; the new release-calendar due-runner is gated in `useReleaseWatchCheck`; Home, artist hub and exchange thumbnails work only on demand. To do: (1) slow the file-exchange receiver poll (~5 s) in lightweight mode; (2) skip the S36 candidate count on PC Home in lightweight mode (cost on the real library unmeasured).
+Lightweight-mode audit 2026-09-27: the exchange poll and PC Home S36 candidate count are now gated by `bf40389`; the audit was code-only and measured cost remains unverified.
 
 Apply `docs/agents/implementation.md` → "Performance work" across Lakomics, one user-visible path at a time: measure on the real platform first, gate with deterministic metrics (render/commit counts, query counts, bytes, request counts, instruction counts), confirm each metric tracks real latency, then lock wins with tighten-only thresholds. Candidate paths: PC Library open/scroll and viewer, character and similarity screens, Collections/Works; Android Library/viewer (instrumentation `LakomicsPerf` + `android/tools/perf_summary.py` exists), Catalog, cold start; Cloud API hot endpoints (`tools/poll_benchmark.py` exists) and idle request volume per client; Rust indexing/ingest. Start by listing the paths with their current numbers, then pick the worst.
 
-Folded-in scope (2026-09-26):
+Folded-in scope (2026-09-26; completed portions are archived):
 - Battery: further Android reduction after 0.8.6 (`f25ddd8`) — polling, thumbnail warm-up, background work.
-- `PC-POLL-002` (remaining desktop pollers) and `BIND-POLL-001` (tablet connect-request pickup).
-- Re-verify lightweight processing mode (`05b18b6`) against everything added since.
-- Covers load slowly right after the app starts (USER-REQ-20260926); see also `MOBILE-PERF-002`.
+- `PC-POLL-002` (remaining desktop pollers) and `BIND-POLL-001` (tablet connect-request pickup) — archived as done.
+- Re-verify lightweight processing mode (`05b18b6`) against everything added since — source gate is present; measured acceptance is unverified.
+- Covers load slowly right after the app starts (USER-REQ-20260926) — bounded warm-up fix is archived; reopen only for a new measured regression.
 - Move PC sync state kept in `notes_state` (Collections release sync, personal-edit v2 receipts, binding sync) into a proper table at the next planned migration (0098).
 
 # Future-work notes — 2026-09-21
@@ -383,7 +275,7 @@ User-requested notes for later work, not an implementation start or priority cha
 
 ## Shared — Desktop and mobile
 
-- **Artist Revisit on Home (2026-09-24: Revisit will be rebuilt from scratch later, PC and mobile; Home redesign waits for it):** surface artist rediscovery on the Home screen. Coordinate with `ARTIST-001`; this explicitly requests Home placement, not only an Artist hub.
+- **(Implemented 2026-09-28; archived in the [2026-09-28 checkpoint](lakomics-completed.md#closure-checkpoint--2026-09-28--home-artist-release-calendar-and-tablet-parity)) Artist rediscovery on Home:** the PC and tablet now expose `오늘의 작가` / `작가 다시 보기`; future artist improvements stay in `ARTIST-001`.
 - **(Deferred 2026-09-24: hope S36 improves it; revisit later) Competing character candidates in multi-person images:** improve the competing-candidate system when one image contains multiple people. Track as a bounded follow-up to the accepted character-classification pass, not a reopening of all accuracy work.
 
 ## Browser extension
@@ -401,8 +293,7 @@ Recorded at the user's request after the backlog review. This is a recommendatio
 Suggested first sequence:
 
 1. **Extension polish:** refine entrance, roulette and selection effects. (The persistent-semicircle-after-navigation bug was confirmed resolved by the user on 2026-09-23.)
-2. **Home artist Revisit (`ARTIST-001`):** start with a small Home rediscovery module, such as long-unseen or recently collected artists, rather than requiring the complete Artist hub first.
-3. **Mobile multi-select move:** define album-membership changes versus actual folder/file moves before implementation; coordinate the chosen write scope with `MOBILE-WRITE-002`.
+2. **Mobile multi-select move:** define album-membership changes versus actual folder/file moves before implementation; coordinate the chosen write scope with `MOBILE-WRITE-002`.
 
 Mobile tab switching and `SIMILARITY-004` from the original sequence were completed on 2026-09-23. If prioritizing everyday usability, start with extension reliability.
 
@@ -414,7 +305,7 @@ Other follow-up candidates, without a fixed order:
 - **(Done 2026-09-26) Mobile Manga Catalog edition review:** 중복 판본 검토 in Android 0.8.18.
 - **(Closed 2026-09-24) Collection 3D model viewer:** decide supported model formats, touch interaction and device performance limits; this is not the existing physical-cover renderer.
 - **Multi-person character competition:** collect concrete mistakes and improve the affected arbitration cases without reopening the entire accepted classification pass.
-- **Film Collection polish (`WORKS-001`):** implemented on desktop and mobile 2026-09-24; remaining is in-app acceptance.
+- **Film Collection polish (`WORKS-001`):** implemented and accepted; archived in the 2026-09-26 checkpoint.
 - **AV metadata and cover acquisition (`LONG-001`):** fetch candidates and let the user choose artwork without silently replacing manual choices.
 
 Keep larger foundation work separately scoped: durable mobile metadata (`MOBILE-CACHE-001`), additional mobile edit domains (`MOBILE-WRITE-002`), remaining Character/Collection ownership and publication cleanup (`CLOUD-POST-001`), server-owned jobs with PC workers (`CLOUD-WORK-001`), and safe global deletion (`MOBILE-003`). This recommendation does not restart completed authority rollouts or promote deferred architecture work.
@@ -483,7 +374,7 @@ The following initial plan is retained as context; the implementation checkpoint
 
 ## MOBILE-UX-001 — Portrait real-use follow-up
 
-Status: `PARTIAL` — the 0.7 browse-first redesign replaced the PC-style Library drawer and Collections toolbar; the user tried 0.7.3 on the Galaxy Tab and reported it working normally, and 0.7.6 (33) is installed. See the [2026-09-23 evening checkpoint](lakomics-completed.md#closure-checkpoint--2026-09-23-evening--mobile-07-thumbnails-and-dependencies) and `android/README.md`. Remaining: a landscape two-pane Library (later, user 2026-09-27; landscape currently reuses the single-column drill-down); the Catalog and Notes redesign is done (user, 2026-09-27) and the 3-column root card option is dropped (user, 2026-09-27); and the older items below that the redesign did not address (dimension/duplicate-check evaluations, 3D model files, classification capacity). The dated records below are history.
+Status: `PARTIAL` — the browse-first redesign and later Catalog/Notes/Home parity work are shipped through Android 0.8.61; the tablet's current release and acceptance records are in the 2026-09-28 checkpoint and `android/README.md`. Remaining: landscape two-pane Library, older dimension/duplicate-check evaluations, 3D model files and classification-capacity investigation. The 3-column root card option is dropped.
 
 2026-09-19 Galaxy Tab feedback after the first portrait UI pass. These are user-reported observations and requested improvements, not independently reproduced defects or confirmed root causes. Keep portrait as the priority; landscape redesign remains later.
 
@@ -930,7 +821,7 @@ Linear PDQ candidate scanning remains the default. Reopen only if historical dis
 
 Status: `PARTIAL`
 
-Decided 2026-09-27 (user): **LibreDMM** is the source (keyless; tested from Korea: SSIS-001 and ABW-100 return title, date, maker, label, actresses, genres and the `pl` wrap jacket `back | spine | front`, 800×438 for DVD/BD; FC2-PPV answers 202 = queued, retry later). DMM/FANZA affiliate API dropped: the affiliate site is geo-blocked in Korea and registration requires a Japanese address. JavLibrary is only for browsing: collector 3.0.0.43 opens a JavLibrary search tab for a selected product code (right-click menu on PC, floating chip on touch). The user wants the collector linked to AV Collections (send a product code from the browser → PC fetches LibreDMM candidates → user picks front/spine/back). Research: [av-sources-20260926](../research/av-sources-20260926.md). Implemented 2026-09-27 (uncommitted, not deployed): design [av-link-design-20260927](../research/av-link-design-20260927.md), mockups `docs/prototypes/av-link-20260927/` (user accepted the recommendations); server `POST/GET /v1/av-lookups` (9 tests), collector 3.0.0.44 "컬렉션에 보내기" (JAVLibrary work page, selection chip, right-click; 328 tests), PC migration 0104 + LibreDMM/Wikidata candidate worker + chooser UI (Rust 18 tests, frontend 516 tests). Waiting: server deploy approval, PC start (migration with backup), native check. Korean performer names come from Wikidata (6/6 sample names found).
+Decided 2026-09-27 (user): **LibreDMM** is the source (keyless; tested from Korea: SSIS-001 and ABW-100 return title, date, maker, label, actresses, genres and the `pl` wrap jacket `back | spine | front`, 800×438 for DVD/BD; FC2-PPV answers 202 = queued, retry later). DMM/FANZA affiliate API dropped: the affiliate site is geo-blocked in Korea and registration requires a Japanese address. JavLibrary is only for browsing: collector 3.0.0.43 opens a JavLibrary search tab for a selected product code (right-click menu on PC, floating chip on touch). The user wants the collector linked to AV Collections (send a product code from the browser → PC fetches LibreDMM candidates → user picks front/spine/back). Research: [av-sources-20260926](../research/av-sources-20260926.md). Implemented and committed 2026-09-27: design [av-link-design-20260927](../research/av-link-design-20260927.md), mockups `docs/prototypes/av-link-20260927/`, server `POST/GET /v1/av-lookups` (`67e0cd97`), collector 3.0.0.44 (`b9c4f89a`), PC migration 0104 and LibreDMM/Wikidata chooser (`b00f3bfe`). Waiting: server deploy approval, PC start with backup, and native check. Korean performer names come from Wikidata (6/6 sample names found).
 
 Current manual AV Collection, people/roles, front/spine/back surfaces, and focused viewing remain usable. The remaining inconvenience is acquisition, especially manual number entry and manual cover setup.
 
@@ -986,18 +877,7 @@ Inventory and recorded-era activity statistics are implemented. Remaining work i
 
 ## ARTIST-001 — Replace Revisit tab with an Artist hub
 
-Status: `TODO` — low priority / product direction. Mockups 2026-09-26: [three directions](../prototypes/artist-hub-20260926/index.html) (A artist index → artist page, B daily rediscovery feed grouped by artist, C artist wall + continuous viewing); recommended A with B's "오늘" rows on top; awaiting the user's choice. Tablet needs a creator-list route, pin storage, and a substitute for PC-only view history. Library audit 2026-09-26 (read-only): 2,344 creators (1,796 with one image, 453 with 2–4, 89 with 5–19, 6 with 20+); 4,742 of 9,179 normal images have no source URL, and 699 more have a source but no creator (x.com 393, arca.live 176, dcinside 45, pixiv 33). User direction: automatic tiers (main artists by count/recency, long tail collapsed and searchable), pins, hide, alias-merge suggestions, 초성 search, and **user-defined artist names** (a display name/alias the user registers, overriding the source name and usable for merges and for images without creator data). Round 2 mockups: `docs/prototypes/artist-hub-20260926/round2.html`. Decided 2026-09-26: artist management is **PC-authoritative** (tablet read-only later), and creators filled from source URLs are stored as **link records** (assignment/alias tables), never written into the asset's creator fields.
-
-The current Revisit tab is rarely used. Prefer replacing that top-level destination with an `작가` hub rather than adding another navigation item. Preserve useful rediscovery behavior by folding it into the artist experience instead of keeping Revisit as a separate destination.
-
-Initial direction:
-- artist landing view: recently collected artists, most-collected artists, and long-unseen artists;
-- artist home: representative images, library asset count, first/recent collected dates, frequently associated works/series and characters;
-- same-artist continuous browsing / artist radio using existing library data;
-- later, evaluate style-nearby artists using existing CLIP/embedding infrastructure without making similarity metadata mandatory;
-- avoid new required manual metadata where existing artist/source information can be reused.
-
-This is primarily a browsing/rediscovery surface, not a new organization workflow. Reuse any valuable Revisit logic as `오랜만에 보는 작가`, `오늘의 작가`, or similar modules inside the artist hub.
+Status: `PARTIAL` — phase 1 shipped in `57a4fa85`; the later artist grid, PC Home integration and related reads shipped in `532b7cc0` and `b5c4eafa`. The source-fill preview/apply path, conservative merge suggestions, pins/hide, user-defined display names and PC-authoritative link records are present. Tablet read-only entry is tracked in `TABLET-PARITY-001`; style-based 닮은 작가 suggestions remain the separate unimplemented `ARTIST-SUGGEST-001`. Native PC acceptance is unverified.
 
 ## IDEA-002 — Asset date timeline exploration
 
@@ -1006,4 +886,3 @@ Status: `HOLD`
 Keep the timeline idea deferred until there is a concrete browsing need beyond the current date-grouped library and Revisit flows.
 
 # Optional AI / development tooling experiments
-

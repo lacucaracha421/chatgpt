@@ -2,6 +2,38 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Closure checkpoint — 2026-09-28 — Home, artist, release calendar and tablet parity
+
+This checkpoint records implementation slices confirmed in the current `main` history. Native Windows acceptance, the next IGDB refetch and the remaining tablet AV/전송 gaps stay in the living backlog.
+
+### Archived implementation slices
+
+- **`MOBILE-008` — Catalog update requests and status.** The server refresh worker and Android request/status surface are present; the user reported it working on 2026-09-27. The later hourly refresh/view-count adjustment is `b5245df4`.
+- **`USER-REQ-20260926` — 2026-09-26 request batch.** Full-tweet translation, Fault balance, the Collections type switch, keyboard-safe Notes editing, the video Range proxy and fast failed-address selection landed in `535bd1ba`, `b8517ee5`, `cd09e318`, `25dbcc0b` and `03639fcf`; the cold-start thumbnail warm-up is `0294b943`. The recorded tablet/live-X checks accepted this batch.
+- **`NET-R2-001` resolution.** Native Range playback and bounded failed-address selection landed in `b8517ee5`, `cd09e318` and `25dbcc0b`; the user accepted the current media-delivery scope, with no Cloudflare change required.
+- **`USER-REQ-20260926B` delivered slices.** The selected mobile release/type/connect/Notes designs shipped in `a3e48468`; PC Notes and release captions in `a83209cf`; and the chat-style 전송 timeline in `7379d92`. Tablet character creation was dropped by the user's 2026-09-27 PC-only character decision; tablet Collection creation remains active in the backlog.
+- **`PC-CHAR-UI-20260927`.** The two character-folder bugs were fixed in `e8e34e5e`; persisted manual folder order, migration 0103 and scoped move tests shipped in `b00f3bfe`. Small casts remain user-organized as a manual-only 기타 character inside the group; no group-linked ordinary folder was added.
+- **`TEST-BASELINE-20260926`.** The full Rust, desktop, mobile, server and collector baseline was green in `699d0e45`; the documented heavy-load Catalog flakiness remains a test note, not an open product item.
+- **NovelAI cross-reference.** The NovelAI items from the 2026-09-26 batch remain in `nai_frontend/docs/BACKLOG.md` under `NAI-009`.
+- **`MOBILE-DESIGN-001`.** The portrait layout pass, scroll tile arrival and related mobile chrome shipped through `85aa109b` and `04042d15`; the user accepted the current tablet direction. Later Home parity is recorded below.
+
+### Artist and Home delivery
+
+- **`ARTIST-001` phase 1.** The PC-authoritative Artist hub replaced Revisit in `57a4fa85`, including user names, pins/hide, source assignments, source-fill preview/apply and merge suggestions. The mosaic/grid extension and Home artist integration shipped in `532b7cc0` and `b5c4eafa`. `ARTIST-SUGGEST-001` remains separate and unimplemented.
+- **`HOME-DASH-001` delivered slices.** Tablet information Home and the library summary shipped in `54e835ca`, `232ff680` and `7acd7131`; PC Home B and its publisher-backed data shipped in `e8ff919d`, `532b7cc0`, `21b5aea1` and `b5c4eafa`. The current PC Home includes index tiles, a scrolling 발매 예정 shelf, `1년 전 오늘`, `오늘의 작가`, AV pick, asset totals, memos and connection/status surfaces.
+- **Home character and source-scope decisions.** Home review counts split by series/character in `b2d178fd`, `14240a8c`, `c7efc4cc`, `c9b4f1d2` and `31408ba9`; the broad-folder recognition rule is a retained setting with default off in `bf40389b` and `84d532ce`. The tablet keeps character review PC-only by the 2026-09-27 decision.
+- **`USER-REQ-20260927` delivered PC slices.** PC Home, artist grid, fast tagger review and 새 캐릭터 제안 shipped in `532b7cc0`; AV detail, performer page/portraits, TV anime calendar and Home publishers in `21b5aea1`; server anime/AV publication in `77c15338`; and the later calendar/Home corrections in `d7eaa909` and `b5c4eafa`. Native PC acceptance remains a backlog verification item.
+- **Collector slice.** The X 새 게시물 placement and AV product-code search/컬렉션에 보내기 flow shipped in `b9c4f89a`; AV lookup server support is `67e0cd97` and PC chooser/migration support is `b00f3bfe`. Deployment and native acceptance remain under `LONG-001`.
+
+### 2026-09-28 release/calendar, notes and parity corrections
+
+- **Release calendar (`d7eaa909`).** IGDB `YYYYMMDD`/`YYYYMM` dates are parsed instead of dropped; want-to-play requires at least 30 hypes on every platform; ports are headlined by their in-window date and marked 이식; bare-year titles are grouped last and kept off Home; platform brand icon chips were added; Settings › 연결 has 지금 새로 받기 with no limits. The next refetch must still verify the dated game case.
+- **PC Home and window state.** `b5c4eafa` added index 자산 현황/메모/전송 tiles, moved 연결 into the status panel, added the scrolling shelf and 다시 보기 blocks, and makes the AV daily pick prefer performers with portraits. `6c8fd894` remembers size and maximized state. The Home title is date-only.
+- **Notes and Catalog presentation.** `c6ff1373` added concealed note listing, plain-text checklist conversion, the 300 px note-card cap, no-wrap ledger month rows, detail-dialog catalog editions and cover hover overlay. `dcdf9210` (deployed 2026-09-28) and `040c04cd` carry the optional `port` flag through the PC publisher; stage suite 1623 was reported OK.
+- **Tablet 0.8.60/0.8.61.** `304a9d65` and `29a618b5` installed hidden Notes, the checklist fix, catalog/platform presentation, 이식 badges, one-screen Home and two-column 오늘의 AV 배우. Tablet performer portraits are not published yet; that gap stays open.
+- **Mobile design decisions.** The archived portrait pass used the approved logo/top-bar, three-column Library root, compact viewer actions, neutral Catalog filter, 60 px bottom navigation and whole-card arrival rules; current device acceptance is recorded separately from the source implementation.
+- **Operational record.** The production library was migrated to v109 with the recorded pre-migration backup, and PC publishing for upcoming titles, AV pick, artists and the AV replica was live at the 2026-09-28 checkpoint. The release calendar remains PC-sourced by decision. The Luna-first server port-flag and tablet tests/Home badge tasks passed on the first attempt; this is source/task evidence, not a substitute for Windows or native acceptance.
+
 ## PC design reference history (moved 2026-09-26, PC-UI-001 documentation follow-up)
 
 Verification logs and dated notes moved out of `docs/agents/pc-design-reference.md`. They record the state at their dates; current rules live in that reference.
