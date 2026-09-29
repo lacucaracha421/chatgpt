@@ -217,6 +217,25 @@ Collected by the user while using tablet 0.8.64. Grouped for execution; design i
 - **Design rules — foundation done 2026-09-28:** `DESIGN.md` section 12 (PC + tablet: Pretendard, spacing 4–32, type roles, radius, colour roles, buttons/compact buttons/inputs/checkbox/round toggle/badges/segmented/tabs, icons, rows), role tokens in `tokens.css` + tablet overrides in `mobile.css`, opt-in shared classes in `src/styles/controls.css` (`ui-badge`, `ui-checkbox`, `ui-switch`, `ui-text-input`, `ui-field`, `ui-button--quiet`), and the ratchet test `src/styles/designFoundation.test.ts`. Next: apply it in the Home, Settings and calendar redesigns and migrate other screens one by one (tablet 17/13 text needs device checks); tablet memory follow-up: WebView renderer baseline grew 55 → ~170 MB over 1 h 45 min with one 704 MB spike (large image in the viewer?) — check viewer image release and WebView image-cache bounds (HOME-OPT-001).
 - **Decided 2026-09-28 (user):** PC 메모 edits in a full editor that replaces the 메모 area (Esc/back returns to the list); remove the 메모 sidebar and move the kind filters (전체 · 메모 · 체크리스트 · 가계부 · 피드백) to top chips; vanished local manga folders: show a "없어진 폴더 N개" list, delete only the selected ones, automatic backup first; duplicate editions: auto-confirm only certain matches (same title, artist, page count and near-identical cover), keep the rest in review, log auto decisions and allow undo.
 
+## PC-RELEASE-FEEDBACK-20260929 — Release-build use feedback, 2026-09-29 evening
+
+Collected while the user tries the release build of 57cb571c; fix in one batch when the user asks.
+
+1. **정보 panel close animation:** the overlay pauses briefly, then disappears; it should slide/fade out in one continuous motion (`OverlayPanel` exit in the 에셋 grid).
+2. **Sparse days waste space:** when many consecutive days hold one asset each, every day takes a full row. Bring back the earlier behaviour that packs consecutive dates side by side in one row (each keeps its own date label).
+3. **Tile artist caption still shown:** the 에셋 grid still passes the artist caption (`useArtistCaptionLabel` in `AssetBrowser.tsx`); remove it so tiles show no source/artist at all (view-supplied notes such as the vault file name and picker "원본 없음" stay).
+4. **Character folder assign dialog:** the character-assign picker opened inside a character folder still uses the old dialog; switch it to the current picker.
+5. **Character choices limited to the series:** in a series' character folder, the character picker lists only that series' characters.
+   Decided (user, 2026-09-29): the character folder screen has not been redesigned yet; mock it up together with folder D in the 에셋 round and solve items 4–5 inside that design rather than patching the old screen.
+6. **Toolbar clean-up:** remove "5,918장 · 이 폴더만 436장" from the top bar, the count next to the folder name ("게임 5,918"), and the fault (게임 play) icon.
+7. **"현재 분류만" by default:** showing only the current folder (no subfolders) is the default, with a toggle to include subfolders.
+8. **전체 · 이미지 · 영상 switch:** keep the sliding indicator but switch content immediately on click (the content slide feels heavy, though it looks nice).
+9. **비율 merged into 보기:** the aspect filter moves into the 보기 menu, with rectangle/square icons on the left of each option.
+10. **PC 발매 캘린더 spacing:** the gap between the header and the 전체 · 게임 · 영화 · 애니 / 관심 bar feels cramped-yet-low; move the filter bar up and tighten the space around it and the first month label.
+11. **PC 발매 캘린더 caching:** covers and data appear to reload every time the calendar opens; cache them so a revisit shows immediately.
+12. **Artist page top bar breaks:** on an artist's 에셋 page the toolbar is overfull — the artist name truncates ("til83488 …"), the count truncates ("4…"), and "연속 보기" wraps onto two lines next to pin/edit, 전체 · 이미지 · 영상, 정렬, 비율, 보기, 상태. The artist accessories were never fitted into the new 에셋 toolbar; redesign the artist page header (identity and actions in the stats strip or the page head, not the toolbar) together with items 6 and 9. The tiles there also show the artist's own name (item 3).
+13. **주요 작가 sorted by count:** the sidebar 주요 작가 list sorts by saved-image count, most first (today it is unordered by count, e.g. 48, 6, 10, 6, 27 …).
+
 ## HOME-OPT-001 — Home optimisation and debugging pass (PC and tablet)
 
 Status: `TODO` — added by the user 2026-09-28 after the Home redesigns (PC `b5c4eafa` and follow-ups, tablet 0.8.60–0.8.62).

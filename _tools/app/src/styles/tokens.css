@@ -138,7 +138,8 @@
   --shadow-dialog: 0 3px 10px rgba(0, 0, 0, 0.26), 0 18px 48px rgba(0, 0, 0, 0.38);
   --inset-light: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   --font-ui: "Pretendard Variable", "Pretendard", "Yu Gothic UI", "Meiryo", "Segoe UI", "Malgun Gothic", sans-serif;
-  --font-numeric: "Rajdhani Numbers", var(--font-ui);
+  /* Numbers use Pretendard too (user, 2026-09-29); numeric roles keep tabular figures. */
+  --font-numeric: var(--font-ui);
   --font-ja: "Yu Gothic UI", "Meiryo", sans-serif;
   --font-mono: "Cascadia Mono", "Consolas", monospace;
   --bevel-light: #2b2f35;

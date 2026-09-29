@@ -52,7 +52,7 @@ PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 ## 5. Typography와 색
 
 - Font (2026-09-28, replaces SUIT + Barlow): Pretendard for Korean and Latin text on PC and tablet. Japanese keeps Yu Gothic UI/Meiryo as fallback.
-- Rajdhani Medium is only for large standalone numbers (the `number` type role: stats, calendar day numbers, D-day). Numbers inside a line (counts, dates, times) use Pretendard with tabular figures; existing Rajdhani inline numbers move over when their screen is migrated.
+- All numbers use Pretendard (user, 2026-09-29; Rajdhani retired): large standalone numbers take the `number` type role, and every numeric role uses tabular figures.
 - 폰트 파일과 라이선스를 앱에 포함해 오프라인에서도 표시한다. Segoe UI/Malgun Gothic은 폴백으로 유지한다.
 - Type sizes follow the four roles in section 12 (PC title 20 · body 15 · meta 12 · number 24). The 2026-09-08 sizes 13/16/18 are legacy and are removed as screens migrate.
 - 설정 → 일반의 앱 전체 배율은 80·90·100·110·125·150%를 지원하며 기본값은 100%다. WebView 배율로 모든 UI와 미디어를 함께 조절하고, 이 PC의 UI 설정에 저장해 다음 실행에도 적용한다.
@@ -168,7 +168,7 @@ Four roles; emphasis comes from weight (600) and colour, not from another size.
 | title (`--type-title`) | 20 | 22 | screen and detail titles |
 | body (`--type-body`) | 15 | 17 | labels, item titles, buttons, inputs |
 | meta (`--type-meta`) | 12 | 13 | dates, counts, captions, section names, badge text |
-| number (`--type-number`) | 24 | 28 | large standalone numbers, Rajdhani |
+| number (`--type-number`) | 24 | 28 | large standalone numbers, Pretendard tabular |
 
 Section names use meta in `--color-faint`. Only showcase/detail hero titles over artwork may be larger. A screen that shows a size outside its device's four roles breaks the rule.
 
