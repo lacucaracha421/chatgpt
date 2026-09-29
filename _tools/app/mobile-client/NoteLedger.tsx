@@ -37,20 +37,6 @@ function Meter({summary}:{summary:MonthSummary}) {
 }
 const Fork=({onKeep}:{onKeep():void})=><span className="ledger-fork"><span>두 기기에서 다르게 고침</span><Button size="sm" variant="ghost" onClick={event=>{event.stopPropagation();onKeep();}}>이것만 남기기</Button></span>;
 
-/** The ledger card in the Notes list: this month's 쓸 수 있는 돈, a thin bar and the next charge. */
-export function LedgerCard({ledger,notes,onOpen,meta}:{ledger:Note;notes:Note[];onOpen():void;meta:ReactNode}) {
-  const today=localToday(),month=today.slice(0,7);
-  const summary=monthSummary(ledger,monthNotesOf(notes,ledger.id),month,today);
-  const next=upcoming(ledger.recurring??[],[],addDays(today,1),1)[0];
-  return <button className="note-card ledger-card" onClick={onOpen}>
-    <strong className="note-card__title"><WalletIcon aria-hidden="true"/><span>{ledger.title.trim()||'가계부'}</span></strong>
-    {ledger.pinned&&<PinIcon className="note-card__pin" role="img" aria-label="고정됨"/>}
-    <span className="ledger-card__figure">{summary.available!==null?<>{monthOnly(month)} 쓸 수 있는 돈 <b className="numeric">{signedWon(summary.available)}</b></>:<>{monthOnly(month)} 쓴 돈 <b className="numeric">{won(summary.spent)}</b></>}</span>
-    <Meter summary={summary}/>
-    {next&&<span className="ledger-card__next">다음 결제 {longDate(next.date)} {next.recurring.name}</span>}
-    <small className="note-card__foot"><span className="note-card__meta">{meta}</span></small>
-  </button>;
-}
 /** The next `count` open charges on or after `from`, across months (confirmed ones are left out). */
 function upcoming(recurring:Recurring[],entries:LedgerEntry[],from:string,count:number):Charge[] {
   const confirmed=new Set(entries.filter(e=>e.recurring).map(e=>`${e.recurring!.id}\n${e.recurring!.date}`));

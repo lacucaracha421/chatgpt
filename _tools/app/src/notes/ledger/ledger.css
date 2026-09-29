@@ -25,7 +25,7 @@
 .ledger-meter { display: flex; height: 6px; margin-top: 18px; background: var(--color-surface); border-radius: 1px; overflow: hidden; }
 .ledger-meter i { display: block; height: 100%; }
 .ledger-meter__spent { background: var(--color-accent); }
-.ledger-meter__coming { background: repeating-linear-gradient(135deg, rgba(221, 216, 202, .55) 0 3px, rgba(221, 216, 202, .2) 3px 6px); }
+.ledger-meter__coming { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--color-muted) 55%, transparent) 0 3px, color-mix(in srgb, var(--color-muted) 20%, transparent) 3px 6px); }
 .ledger-figs { display: grid; grid-template-columns: repeat(2, 1fr); margin: 14px 0 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
 .ledger-figs > div { padding: 12px 0 12px 14px; }
 .ledger-figs > div:nth-child(odd) { padding-left: 0; }
@@ -72,10 +72,10 @@ select.ledger-input { color-scheme: dark; }
 .ledger-entry-form { padding: 2px 0; }
 .ledger-entry-form__row { display: grid; grid-template-columns: 88px minmax(170px, 1fr) minmax(0, 2fr) auto auto auto; gap: 8px; align-items: center; }
 .ledger-entry-form__caption { font-size: var(--text-sm); color: var(--color-muted); white-space: nowrap; }
-.ledger-kind { flex: none; height: 24px; padding: 0 6px; border: 1px solid var(--color-border); border-radius: 2px; background: transparent; color: var(--color-muted); font: inherit; font-size: var(--text-xs); cursor: pointer; }
+.ledger-kind { flex: none; height: 24px; padding: 0 6px; border: 1px solid var(--color-border); border-radius: var(--radius-mark); background: transparent; color: var(--color-muted); font: inherit; font-size: var(--text-xs); cursor: pointer; }
 .ledger-kind[aria-pressed=true] { color: var(--color-text); border-color: var(--color-border-strong); }
 .ledger-hint { margin: 8px 0 4px; font-size: var(--text-xs); color: var(--color-muted); }
-.ledger-hint kbd { display: inline-block; min-width: 14px; padding: 0 4px; border: 1px solid var(--color-border); border-radius: 2px; font: inherit; font-size: 11px; text-align: center; }
+.ledger-hint kbd { display: inline-block; min-width: 14px; padding: 0 4px; border: 1px solid var(--color-border); border-radius: var(--radius-mark); font: inherit; font-size: 11px; text-align: center; }
 .ledger-link { margin: 6px 0 0; font-size: var(--text-sm); color: var(--color-muted); }
 .ledger-text-button { border: 0; background: transparent; color: var(--color-text); font: inherit; text-decoration: underline; cursor: pointer; padding: 0 4px; }
 .ledger-problem { margin: 6px 0 0; font-size: var(--text-sm); color: var(--color-danger); }

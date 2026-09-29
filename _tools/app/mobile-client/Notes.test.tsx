@@ -295,18 +295,18 @@ it('shows sticky-note cards: pin, checklist progress with done items struck, mas
  const card=(await screen.findByText('장보기')).closest('button')!;
  expect(within(card).getByLabelText('고정됨')).toBeTruthy();
  expect(card.style.getPropertyValue('--note-tint')).not.toBe('');
- expect(card.querySelector('.note-card__progress')!.textContent).toBe('1/3');
+ expect(card.querySelector('.notes-card__progress')!.textContent).toBe('1/3');
  // Open items first, then done ones (struck through).
- expect([...card.querySelectorAll('.note-card__checks>span')].map(el=>[el.textContent,el.className])).toEqual([['우유',''],['대파',''],['두부','is-done']]);
- expect(within(card).getByText('· 동기화 대기',{exact:false}).className).toBe('sr-only');
- expect(card.querySelector('.note-card__pending')).toBeTruthy();
+ expect([...card.querySelectorAll('.notes-card__checklist>.notes-card__check')].map(el=>[el.querySelector('.notes-card__check-text')?.textContent,el.className])).toEqual([['우유','notes-card__check'],['대파','notes-card__check'],['두부','notes-card__check is-done']]);
+ expect(within(card).getByLabelText('동기화 대기')).toBeTruthy();
+ expect(card.querySelector('.notes-card__pending')).toBeTruthy();
  const secretCard=screen.getByText('와이파이').closest('button')!;
  expect(secretCard.textContent).toContain('집••••••');
  expect(secretCard.textContent).not.toContain('hunter2');expect(secretCard.textContent).not.toContain('비밀 메모');
  expect(within(secretCard).queryByLabelText('고정됨')).toBeNull();
- const textCard=screen.getByText('제목 없음').closest('button')!;
- expect(textCard.querySelector('.note-card__body')!.textContent).toBe('택배 보관함');
- expect(textCard.querySelector('.note-card__labels')!.textContent).toBe('작업');
+ const textCard=screen.getByText('제목 없는 메모').closest('button')!;
+ expect(textCard.querySelector('.notes-card__text')!.textContent).toBe('택배 보관함');
+ expect(textCard.querySelector('.notes-card__labels')!.textContent).toBe('작업');
  // Pinned and recent notes keep their own masonry blocks; a tap still opens the note.
  expect(document.querySelectorAll('.notes-grid')).toHaveLength(2);
  fireEvent.click(card);

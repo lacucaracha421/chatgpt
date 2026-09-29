@@ -5,20 +5,16 @@
  * follows the same order (a column-major CSS `columns` flow would bury later columns below
  * the fold on a long list).
  */
-import { memo, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { LockClosedIcon, WalletIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
-import { BookmarkIcon } from "../shared/ui/ArchiveIcons";
-import { byOrder, noteColorValue, stripMarkdown } from "./model";
-import { isSecret, noteKind, type Note } from "./store";
-import { LEDGER } from "./ledger/model";
-import { ledgerCard } from "./ledger/LedgerView";
-import { noteDateLabel } from "./format";
+import { memo, useLayoutEffect, useRef, useState } from "react";
+import type { Note } from "./store";
+import { NoteCard } from "./NoteCard";
+import "./noteCard.css";
+export { CardBody, NoteCard } from "./NoteCard";
+export { previewLines } from "./NoteCard";
 
 export const CARD_MIN_WIDTH = 240;
 const CARD_MAX_WIDTH = 300;
 export const CARD_GAP = 12;
-const CHECKLIST_ROWS = 8;
-const BODY_LINES = 12;
 
 /** Column count and card width for a board `width` px wide (0 = not measured yet). */
 export function boardColumns(width: number, minWidth = CARD_MIN_WIDTH, gap = CARD_GAP) {
@@ -39,82 +35,6 @@ export function placeCards(heights: number[], columns: number, cardWidth: number
     return position;
   });
   return { positions, height: Math.max(0, Math.max(...bottoms) - gap) };
-}
-
-/** Text preview that keeps line breaks but not Markdown syntax; never runs the renderer. */
-export function previewLines(body: string): string {
-  const lines: string[] = [];
-  for (const raw of body.split("\n")) {
-    if (/^\s*```/.test(raw)) continue;
-    const line = stripMarkdown(raw);
-    if (!line && (!lines.length || !lines[lines.length - 1])) continue;
-    lines.push(line);
-    if (lines.length >= BODY_LINES + 1) break;
-  }
-  while (lines.length && !lines[lines.length - 1]) lines.pop();
-  return lines.join("\n");
-}
-
-function CardBody({ note, notes }: { note: Note; notes: Note[] }) {
-  if (note.concealed && !isSecret(note)) {
-    return <span className="notes-card__concealed"><EyeSlashIcon aria-hidden="true" />숨긴 메모 · 열어서 보기</span>;
-  }
-  if (isSecret(note)) {
-    // Values are always masked on the board; field names only exist while a PIN session is open.
-    const fields = note.redacted ? [] : [...(note.fields ?? [])].sort(byOrder).slice(0, 4);
-    return <span className="notes-card__secret">
-      <span className="notes-card__secret-caption">암호 메모{note.redacted ? " · PIN으로 잠김" : ""}</span>
-      {(fields.length ? fields.map((field) => field.label.trim() || "항목") : ["", ""]).map((label, index) =>
-        <span key={index} className="notes-card__secret-row"><span>{label}</span><span aria-hidden="true">••••••</span></span>)}
-    </span>;
-  }
-  if (note.type === LEDGER && !note.readOnly && !note.deleted) {
-    const card = ledgerCard(note, notes);
-    return <span className="notes-card__ledger">
-      <span className="notes-card__ledger-label">{card.label}</span>{" "}
-      <span className={`notes-card__ledger-amount${card.over ? " is-over" : ""}`}>{card.amount}</span>
-      {card.spentRatio !== null && <span className="notes-card__meter" aria-hidden="true"><span style={{ width: `${card.spentRatio * 100}%` }} /></span>}
-      {card.next && <span className="notes-card__ledger-next">{card.next}</span>}
-    </span>;
-  }
-  if (noteKind(note) === "checklist" && !note.readOnly) {
-    const items = [...(note.items ?? [])].sort((a, b) => Number(a.checked) - Number(b.checked) || byOrder(a, b));
-    if (!items.length) return <span className="notes-card__text is-empty">빈 체크리스트</span>;
-    const done = items.filter((item) => item.checked).length;
-    const shown = items.slice(0, CHECKLIST_ROWS);
-    return <>
-      <span className="notes-card__progress"><span className="notes-card__progress-bar" aria-hidden="true"><span style={{ width: `${(done / items.length) * 100}%` }} /></span><span>{done}/{items.length}</span></span>
-      <span className="notes-card__checklist">
-        {shown.map((item) => <span key={item.id} className={`notes-card__check${item.checked ? " is-done" : ""}`}><span className="notes-card__box" aria-hidden="true" /><span className="notes-card__check-text">{item.text.trim() || " "}</span></span>)}
-        {items.length > shown.length && <span className="notes-card__more">외 {items.length - shown.length}개</span>}
-      </span>
-    </>;
-  }
-  const text = previewLines(note.body);
-  return <span className={`notes-card__text${text ? "" : " is-empty"}`}>{text || "내용 없음"}</span>;
-}
-
-type CardProps = { note: Note; notes: Note[]; selected: boolean; onOpen: (id: string) => void; style?: CSSProperties };
-function NoteCard({ note, notes, selected, onOpen, style }: CardProps) {
-  const color = noteColorValue(note.color);
-  const title = note.title.trim();
-  const labels = isSecret(note) ? [] : note.labels ?? [];
-  return <button type="button" data-note-id={note.id} className={`notes-card${selected ? " is-selected" : ""}${color ? " has-tint" : ""}${note.pinned ? " is-pinned" : ""}`}
-    style={{ ...style, ...(color ? { "--note-tint": color } : {}) } as CSSProperties} aria-current={selected ? "true" : undefined} onClick={() => onOpen(note.id)}>
-    <span className={`notes-card__title${title ? "" : " is-untitled"}`}>
-      {isSecret(note) && <LockClosedIcon aria-label="암호 메모" />}
-      {note.type === LEDGER && <WalletIcon aria-hidden="true" />}
-      <span className="notes-card__title-text">{title || "제목 없는 메모"}</span>
-      {note.conflictCopy && <span className="notes-copy-mark">사본</span>}
-      {note.conflict && <span className="notes-conflict-mark" aria-description="충돌 확인 필요">!</span>}
-    </span>{" "}
-    {note.pinned && <BookmarkIcon className="notes-card__pin" aria-label="고정됨" />}
-    <CardBody note={note} notes={notes} />{" "}
-    <span className="notes-card__foot">
-      <span className="notes-card__labels">{labels.map((label) => <span key={label} className="notes-card__label">{label}</span>)}</span>
-      <time dateTime={note.updatedAt}>{note.pending && <span className="notes-card__pending" role="img" aria-label="동기화 대기" />}{noteDateLabel(note.updatedAt)}</time>
-    </span>
-  </button>;
 }
 
 type MasonryProps = { notes: Note[]; all: Note[]; selected: string | null; onOpen: (id: string) => void };

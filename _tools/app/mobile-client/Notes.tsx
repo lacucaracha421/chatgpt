@@ -1,10 +1,10 @@
 import {useVisibleInterval} from './useVisibleInterval';
 import {SIGNAL_FALLBACK_MS,useSyncSignal} from './syncSignals';
 import {TopBar} from './TopBar';
-import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type CSSProperties,type MouseEvent,type MutableRefObject,type ReactNode} from 'react';
-import {ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,ChevronRightIcon,DocumentTextIcon,EllipsisHorizontalIcon,EyeIcon,EyeSlashIcon,KeyIcon,ListBulletIcon,LockClosedIcon,MagnifyingGlassIcon,PencilSquareIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
+import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type CSSProperties,type MouseEvent,type MutableRefObject} from 'react';
+import {TagIcon,ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,ChevronRightIcon,DocumentTextIcon,EllipsisHorizontalIcon,EyeIcon,EyeSlashIcon,KeyIcon,ListBulletIcon,LockClosedIcon,MagnifyingGlassIcon,PencilSquareIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {PinIcon} from './PinIcon';
-import {Button,IconButton} from './ui';
+import {Button,IconButton,SectionLabel,SegmentedControl,TextInput} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {usePullToRefresh} from './usePullToRefresh';
 import {native,errorText} from './transport';
@@ -12,16 +12,19 @@ import {useLevelMotion} from './motion';
 import {MarkdownView} from '../src/shared/markdown/MarkdownView';
 import {toggleMarkdownTask} from '../src/shared/markdown/markdown';
 import {MarkdownHelpButton} from './MarkdownHelp';
-import {byOrder,checklistText,labelKey,NOTE_COLORS,NOTE_LIMITS,noteColorValue,noteLimitProblem,normalizeLabel,stripMarkdown,textToItems,type NoteKind} from '../src/notes/model';
+import {checklistText,labelKey,NOTE_COLORS,NOTE_LIMITS,noteColorValue,noteLimitProblem,normalizeLabel,textToItems,type NoteKind} from '../src/notes/model';
 import {isSecret,noteKind,NotesStore,PIN_REQUIRED_TEXT,type Note} from '../src/notes/store';
-import {genericView,hiddenLedgerMonths,isLedgerKind,LEDGER} from '../src/notes/ledger/model';
+import {genericView,hiddenLedgerMonths,LEDGER} from '../src/notes/ledger/model';
 import {noteMatches,sortNotes} from '../src/notes/noteList';
 import {noteDateLabel} from '../src/notes/format';
-import {LedgerCard,NoteLedger} from './NoteLedger';
+import {NOTE_KIND_DEFINITIONS,type NoteKindFilter} from '../src/notes/noteFilters';
+import {NoteCard} from '../src/notes/NoteCard';
+import {NoteLedger} from './NoteLedger';
 import {NoteChecklist} from './NoteChecklist';
 import {copySecret,SecretEditor,SecretGate} from './NoteSecret';
 import {caretOffsetAtPoint,revealCaret} from './noteCaret';
 import {appendSection,deleteSection,moveSection,renameSection,replaceSectionBody,splitSections,unfixSection,type NoteSection,type Range} from '../src/notes/sections';
+import '../src/notes/noteCard.css';
 import './notes.css';
 import {Scrubber} from './Scrubber';
 
@@ -46,49 +49,11 @@ export function mobileNotesRequest<T>(operation:string,input:unknown={}):Promise
 type Scope='all'|'archive'|'trash';
 type Sheet='new'|'color'|'more'|'list'|'recovery'|'sectionMore'|null;
 const tint=(color:string|null|undefined)=>{const value=noteColorValue(color);return value?({'--note-tint':value} as CSSProperties):undefined;};
-const CARD_CHECKS=8,CARD_FIELDS=4;
 const NOTE_SECTION_FOLDS_KEY='lakomics.notes.sectionFolds.v1';
 type SectionFolds=Record<string,boolean>;
 function readSectionFolds():SectionFolds{try{const value=JSON.parse(localStorage.getItem(NOTE_SECTION_FOLDS_KEY)??'null') as unknown;if(!value||typeof value!=='object')return{};return Object.fromEntries(Object.entries(value).filter(([,folded])=>typeof folded==='boolean')) as SectionFolds;}catch{return{};}}
 function writeSectionFolds(value:SectionFolds){try{localStorage.setItem(NOTE_SECTION_FOLDS_KEY,JSON.stringify(value));}catch{/* Device preferences are optional. */}}
 function sectionFoldKey(noteId:string,section:NoteSection){return `${noteId}:${section.key}`;}
-/** A sticky note's content: text, a checklist with its progress, or a secret note's masked fields. */
-function NoteCardBody({note}:{note:Note}) {
-  if(note.concealed&&!isSecret(note)&&!isLedgerKind(note))return <span className="note-card__concealed"><EyeSlashIcon aria-hidden="true"/>숨긴 메모 · 열어서 보기</span>;
-  if(isSecret(note)){
-    // Values never reach the list: only the field names of an open session, masked.
-    const fields=note.redacted?[]:[...(note.fields??[])].sort(byOrder).slice(0,CARD_FIELDS);
-    const rows=fields.length?fields.map(field=>({key:field.id,label:field.label.trim()||'항목'})):[{key:'locked',label:note.redacted?'잠김':'빈 암호 메모'}];
-    return <span className="note-card__secret">{rows.map(row=><span key={row.key}><span>{row.label}</span><span aria-hidden="true">••••••</span></span>)}</span>;
-  }
-  if(noteKind(note)==='checklist'&&!note.readOnly){
-    const items=[...(note.items??[])].sort(byOrder),ordered=[...items.filter(item=>!item.checked),...items.filter(item=>item.checked)];
-    if(!ordered.length)return <span className="note-card__body is-empty">빈 체크리스트</span>;
-    const done=items.length-items.filter(item=>!item.checked).length,shown=ordered.slice(0,CARD_CHECKS);
-    return <>
-      <span className="note-card__progress"><i aria-hidden="true"><b style={{width:`${done/items.length*100}%`}}/></i><span className="numeric">{done}/{items.length}</span></span>
-      <span className="note-card__checks">{shown.map(item=><span key={item.id} className={item.checked?'is-done':undefined}><span>{item.text.trim()||'\u00a0'}</span></span>)}
-        {ordered.length>shown.length&&<span className="is-more">외 {ordered.length-shown.length}개</span>}</span>
-    </>;
-  }
-  // Markdown is stripped line by line so the note keeps its line breaks (one blank line at most).
-  const text=note.body.split('\n').map(stripMarkdown).join('\n').replace(/\n{3,}/g,'\n\n').trim();
-  return text?<span className="note-card__body">{text.slice(0,600)}</span>:null;
-}
-/**
- * One sticky note: a thin strip of the note colour on top, the title (pinned notes carry a pin),
- * the content at its own height, then labels and the edit time (a dot while it waits to sync).
- */
-function NoteCard({note,meta,onOpen}:{note:Note;meta:ReactNode;onOpen():void}) {
-  const title=note.title.trim(),labels=isSecret(note)?[]:note.labels??[];
-  return <button className={`note-card${noteColorValue(note.color)?' has-tint':''}`} style={tint(note.color)} onClick={onOpen}>
-    <strong className={`note-card__title${title?'':' is-untitled'}`}>{isSecret(note)&&<LockClosedIcon role="img" aria-label="암호 메모"/>}<span>{title||'제목 없음'}</span></strong>
-    {note.pinned&&<PinIcon className="note-card__pin" role="img" aria-label="고정됨"/>}
-    <NoteCardBody note={note}/>
-    <small className="note-card__foot">{labels.length>0&&<em className="note-card__labels">{labels.map(l=><i key={l}>{l}</i>)}</em>}<span className="note-card__meta">{meta}</span></small>
-  </button>;
-}
-
 function LabelEditor({labels,suggestions,readOnly,onChange}:{labels:string[];suggestions:string[];readOnly:boolean;onChange(labels:string[]):void}) {
   const [adding,setAdding]=useState(false),[text,setText]=useState('');
   function commit(close:boolean){
@@ -133,7 +98,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   const [store]=useState(()=>new NotesStore(mobileNotesRequest));
   const state=useSyncExternalStore(store.subscribe,store.snapshot);
   const [key,setKey]=useState('');
-  const [selected,setSelected]=useState<string|null>(null),[scope,setScope]=useState<Scope>('all'),[label,setLabel]=useState<string|null>(null),[query,setQuery]=useState('');
+  const [selected,setSelected]=useState<string|null>(null),[scope,setScope]=useState<Scope>('all'),[label,setLabel]=useState<string|null>(null),[query,setQuery]=useState(''),[kindFilter,setKindFilter]=useState<NoteKindFilter>('all');
   const [editingBody,setEditingBody]=useState(false),[editingSectionKey,setEditingSectionKey]=useState<string|null>(null),[renamingSectionKey,setRenamingSectionKey]=useState<string|null>(null),[sectionActionKey,setSectionActionKey]=useState<string|null>(null),[sectionFolds,setSectionFolds]=useState<SectionFolds>(readSectionFolds),[creatingSecret,setCreatingSecret]=useState(false),[sheet,setSheet]=useState<Sheet>(null),[limitError,setLimitError]=useState<string|null>(null);
   const bodyRef=useRef<HTMLTextAreaElement>(null),sectionBodyRef=useRef<HTMLTextAreaElement>(null),titleRef=useRef<HTMLInputElement>(null),renameRef=useRef<HTMLInputElement>(null),pane=useRef<HTMLDivElement>(null);
   useEffect(()=>{void store.load();},[store]);
@@ -310,7 +275,9 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   useLevelMotion(section,active&&state.ready&&state.unlocked?(editing?'edit':scope!=='all'?scope:'list'):null,(editing?1:0)+(scope!=='all'?1:0));
   // ---- List
   const allLabels=useMemo(()=>{const map=new Map<string,{label:string;count:number}>();for(const n of listed)if(!n.deleted)for(const l of n.labels??[]){const k=labelKey(l);const e=map.get(k);if(e)e.count++;else map.set(k,{label:l,count:1});}return [...map.values()].sort((a,b)=>a.label.localeCompare(b.label,'ko'));},[listed]);
-  const visible=sortNotes(listed.filter(n=>(trash?n.deleted:!n.deleted&&(scope==='archive'?!!n.archived:!n.archived))&&(trash||!label||(n.labels??[]).some(l=>labelKey(l)===labelKey(label)))&&noteMatches(n,trash?'':query)));
+  const filterable=listed.filter(n=>(trash?n.deleted:!n.deleted&&(scope==='archive'?!!n.archived:!n.archived))&&(trash||!label||(n.labels??[]).some(l=>labelKey(l)===labelKey(label)))&&noteMatches(n,trash?'':query));
+  const kindOptions=[{value:'all' as const,label:'전체'},...NOTE_KIND_DEFINITIONS.filter(([value])=>filterable.some(n=>noteKind(n)===value)||kindFilter===value).map(([value,label])=>({value,label}))];
+  const visible=sortNotes(filterable.filter(n=>kindFilter==='all'||noteKind(n)===kindFilter));
   const pinned=scope!=='all'?[]:visible.filter(n=>n.pinned),recent=scope!=='all'?visible:visible.filter(n=>!n.pinned);
   const trashed=listed.filter(n=>n.deleted).length,archived=listed.filter(n=>!n.deleted&&n.archived).length;
   const status=state.error?'확인 필요':state.saving?'저장 중':state.syncing?'동기화 중':pending?'동기화 대기':'동기화됨';
@@ -318,8 +285,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   const scrubberSort=useMemo(()=>({kind:'date' as const,values:visible.map(note=>note.updatedAt)}),[visible]);
   const pull=usePullToRefresh(list,()=>void store.sync(),state.syncing,!active||!state.unlocked||editing);
   // A dot marks a note still waiting to sync; the words are there for screen readers.
-  const meta=(n:Note)=><>{n.pending&&<i className="note-card__pending" aria-hidden="true"/>}{n.conflictCopy&&<><b>사본</b> · </>}{noteDateLabel(n.updatedAt)}{n.pending&&<span className="sr-only"> · 동기화 대기</span>}</>;
-  const card=(n:Note)=>n.type===LEDGER&&!n.readOnly&&!n.deleted?<LedgerCard key={n.id} ledger={n} notes={state.notes} onOpen={()=>openFromList(n.id)} meta={meta(n)}/>:<NoteCard key={n.id} note={n} meta={meta(n)} onOpen={()=>openFromList(n.id)}/>;
+  const card=(n:Note)=><NoteCard key={n.id} note={n} notes={state.notes} onOpen={openFromList}/>;
   const syncButton=<Button type="button" size="icon" variant="ghost" className={`notes-sync${state.syncing?' is-syncing':''}${state.error?' is-error':''}`} aria-label="동기화" aria-busy={state.syncing} disabled={state.syncing} onClick={()=>void store.sync()}><ArrowPathIcon aria-hidden="true"/></Button>;
   // ---- Editor body
   const colorValue=note?noteColorValue(note.color):null;
@@ -373,10 +339,14 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
         :<TopBar title="메모" actions={<><span className="notes-save-state" role="status">{status}</span>{syncButton}<IconButton label="메모 목록 더보기" icon={EllipsisHorizontalIcon} onClick={()=>setSheet('list')}/></>}/>}
       <div ref={list} className="notes-scroll">
         {pull}
-        {trash?<p className="hint notes-trash-hint">열어서 복원할 수 있습니다.</p>:<form className="library-search notes-search" role="search" onSubmit={event=>{event.preventDefault();(document.activeElement as HTMLElement|null)?.blur();}}><MagnifyingGlassIcon aria-hidden="true"/><input aria-label="메모 검색" placeholder="제목, 본문, 라벨 검색" value={query} onChange={event=>setQuery(event.target.value)}/>{query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>setQuery('')}/>}</form>}
-        {!trash&&allLabels.length>0&&<div className="filter-chips notes-label-filter" role="group" aria-label="라벨">{allLabels.map(l=>{const on=!!label&&labelKey(label)===labelKey(l.label);return <button key={labelKey(l.label)} type="button" className={`filter-chip${on?' selected':''}`} aria-pressed={on} onClick={()=>setLabel(on?null:l.label)}>{l.label}<span className="numeric">{l.count}</span></button>;})}</div>}
-        {pinned.length>0&&<><h2 className="notes-label"><PinIcon aria-hidden="true"/>고정됨</h2><div className="notes-grid">{pinned.map(card)}</div></>}
-        {recent.length>0&&<>{pinned.length>0&&<h2 className="notes-label">최근</h2>}<div className="notes-grid">{recent.map(card)}</div></>}
+        {trash?<p className="hint notes-trash-hint">열어서 복원할 수 있습니다.</p>:<form className="notes-search" role="search" onSubmit={event=>{event.preventDefault();(document.activeElement as HTMLElement|null)?.blur();}}><TextInput className="notes-search__input" icon={MagnifyingGlassIcon} aria-label="메모 검색" placeholder="제목, 본문, 라벨 검색" value={query} onChange={event=>setQuery(event.target.value)}/>{query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>setQuery('')}/>}</form>}
+        <div className="notes-filter-bar">
+        <SegmentedControl<NoteKindFilter> label="메모 종류" options={kindOptions} value={kindFilter} onChange={setKindFilter} className="notes-kind-filter" />
+        {/* Labels are the user's own tags, not kinds: they sit on the same row after a divider and a tag mark. */}
+        {!trash&&allLabels.length>0&&<><span className="notes-filter-divider" aria-hidden="true"/><TagIcon className="notes-filter-tag" aria-hidden="true"/><div className="filter-chips notes-label-filter" role="group" aria-label="라벨">{allLabels.map(l=>{const on=!!label&&labelKey(label)===labelKey(l.label);return <button key={labelKey(l.label)} type="button" className={`filter-chip${on?' selected':''}`} aria-pressed={on} onClick={()=>setLabel(on?null:l.label)}>{l.label}<span className="numeric">{l.count}</span></button>;})}</div></>}
+        </div>
+        {pinned.length>0&&<><SectionLabel as="h2" className="notes-board__label" title="고정됨"/><div className="notes-grid">{pinned.map(card)}</div></>}
+        {recent.length>0&&<>{pinned.length>0&&<SectionLabel as="h2" className="notes-board__label" title="최근"/>}<div className="notes-grid">{recent.map(card)}</div></>}
         {!visible.length&&<div className="empty-state"><h2>{trash?'휴지통이 비어 있습니다':scope==='archive'?'보관한 메모가 없습니다':query||label?'찾는 메모가 없습니다':'아직 메모가 없습니다'}</h2>{scope==='all'&&!query&&!label&&<p>아래 버튼으로 첫 메모를 써 보세요.</p>}</div>}
         {!!state.unreadable&&<p className="hint" role="status">읽을 수 없는 메모 {state.unreadable}개는 목록에서 뺐습니다.</p>}
         {scope==='all'&&archived>0&&<div className="notes-links">

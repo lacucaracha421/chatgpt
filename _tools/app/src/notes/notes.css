@@ -47,12 +47,11 @@
 .notes-save-status { display: inline-block; inline-size: 24ch; max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; text-align: end; white-space: nowrap; }
 
 .notes-body:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--space-1); border-radius: var(--radius-sm); }
-.notes-recovery-qr { align-self: flex-start; background: #fff; border-radius: var(--radius-sm, 4px); }
+.notes-recovery-qr { align-self: flex-start; background: var(--color-text); border-radius: var(--radius-sm); }
 
 /* Notes v2: colour tint, rendered text, checklists, labels, secret notes. */
 .notes-editor.has-tint { background: color-mix(in srgb, var(--note-tint) 7%, transparent); }
 .notes-conflict-mark { margin-left: auto; }
-.notes-copy-mark { margin-left: auto; font-size: var(--text-xs); font-weight: 400; opacity: .75; }
 .notes-editor-actions .ui-menu__trigger.notes-menu-trigger, .notes-menu-trigger { display: inline-grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; cursor: pointer; }
 .notes-menu-trigger:hover { background: var(--color-surface-hover); }
 .notes-menu-trigger svg { width: 18px; height: 18px; }
@@ -159,51 +158,6 @@
 .notes-masonry { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; align-items: start; }
 .notes-masonry.is-placed { display: block; position: relative; }
 .notes-masonry.is-placed > .notes-card { position: absolute; top: 0; left: 0; }
-
-.notes-card { --card-bg: var(--color-surface); position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 112px; max-height: 360px; overflow: hidden; box-sizing: border-box; padding: var(--space-4) var(--space-4) var(--space-3); border: 0; border-radius: var(--radius-tile); background: var(--card-bg); color: var(--color-text); font: inherit; text-align: left; cursor: pointer; }
-.notes-card.has-tint { --card-bg: color-mix(in srgb, var(--note-tint) 18%, var(--color-surface)); }
-.notes-card:hover { background: color-mix(in srgb, var(--card-bg) 90%, var(--color-text)); }
-.notes-card.is-selected { outline: 1px solid var(--color-accent); outline-offset: -1px; box-shadow: 3px 3px 0 -1px var(--color-bg), 3px 3px 0 0 var(--color-selection-echo); }
-.notes-card:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
-.notes-card__title { display: flex; align-items: flex-start; gap: 6px; min-width: 0; font-size: var(--text-md); font-weight: 600; line-height: 1.4; }
-.notes-card.is-pinned .notes-card__title { padding-right: 20px; }
-.notes-card__title.is-untitled { color: var(--color-muted); font-weight: 500; }
-.notes-card__title svg { width: 14px; height: 14px; flex: none; margin-top: 3px; color: var(--color-muted); }
-.notes-card__title-text { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
-.notes-card__pin { position: absolute; top: 14px; right: 10px; width: 15px; height: 15px; color: var(--color-accent); }
-.notes-card__text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 10; overflow: hidden; margin-top: 6px; font-size: var(--text-sm); line-height: 1.6; color: color-mix(in srgb, var(--color-text) 78%, var(--color-muted)); white-space: pre-line; overflow-wrap: anywhere; }
-.notes-card__text.is-empty { color: var(--color-muted); }
-.notes-card__progress { display: flex; align-items: center; gap: 8px; margin-top: 8px; font: 500 var(--text-xs) var(--font-numeric); font-variant-numeric: tabular-nums; color: var(--color-muted); }
-.notes-card__progress-bar { flex: 1; height: 3px; background: color-mix(in srgb, var(--color-text) 12%, transparent); }
-.notes-card__progress-bar > span { display: block; height: 100%; background: var(--color-accent); }
-.notes-card__checklist { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: var(--text-sm); line-height: 1.4; }
-.notes-card__check { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.notes-card__check-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.notes-card__box { flex: none; width: 12px; height: 12px; box-sizing: border-box; border: 1.5px solid var(--color-muted); border-radius: 2px; }
-.notes-card__check.is-done { color: var(--color-muted); }
-.notes-card__check.is-done .notes-card__check-text { text-decoration: line-through; }
-.notes-card__check.is-done .notes-card__box { background: var(--color-muted) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23222324' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7'/%3E%3C/svg%3E") center/10px no-repeat; }
-.notes-card__more { padding-left: 20px; color: var(--color-muted); font-size: var(--text-xs); }
-.notes-card__secret { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; font-size: var(--text-xs); color: var(--color-muted); }
-.notes-card__secret-row { display: flex; justify-content: space-between; gap: 8px; min-height: 1.4em; padding-bottom: 5px; border-bottom: 1px solid color-mix(in srgb, var(--color-text) 7%, transparent); }
-.notes-card__secret-row > span:first-child { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.notes-card__secret-row > span:last-child { letter-spacing: 2px; }
-.notes-card__ledger { display: flex; flex-direction: column; margin-top: 8px; }
-.notes-card__ledger-label, .notes-card__ledger-next { font-size: var(--text-xs); color: var(--color-muted); }
-.notes-card__ledger-amount { margin-top: 2px; font: 500 24px/1.15 var(--font-numeric); font-variant-numeric: tabular-nums; }
-.notes-card__ledger-amount.is-over { color: var(--color-danger); }
-.notes-card__meter { height: 3px; margin-top: 10px; background: color-mix(in srgb, var(--color-text) 12%, transparent); }
-.notes-card__meter > span { display: block; height: 100%; background: var(--color-accent); }
-.notes-card__ledger-next { margin-top: 8px; }
-.notes-card__foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 10px; font-size: var(--text-xs); color: var(--color-muted); }
-.notes-card__labels { display: flex; flex: 1; gap: 4px; min-width: 0; overflow: hidden; }
-.notes-card__label { flex: none; padding: 0 var(--space-2); border: 1px solid color-mix(in srgb, var(--color-text) 16%, transparent); border-radius: var(--radius-control); line-height: 18px; white-space: nowrap; }
-.notes-card__foot time { display: inline-flex; align-items: center; gap: 5px; flex: none; font-family: var(--font-numeric); font-variant-numeric: tabular-nums; }
-.notes-card__pending { width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); }
-
-/* A hidden note's card shows only its title; the content appears once the note is opened. */
-.notes-card__concealed { display: flex; align-items: center; gap: 6px; padding: 10px 0; color: var(--color-muted); font-size: var(--text-sm); }
-.notes-card__concealed svg { width: 16px; height: 16px; flex: none; }
 
 .notes-recovery-backdrop { position: fixed; z-index: var(--z-dialog-content); inset: 0; display: grid; place-items: center; padding: var(--space-6); background: color-mix(in srgb, var(--color-overlay) 70%, transparent); }
 .notes-recovery-surface { width: min(480px, 100%); max-height: calc(100% - var(--space-8)); overflow: auto; padding: var(--space-6); color: var(--color-text); background: var(--color-surface-elevated); border: 1px solid var(--color-border-strong); box-shadow: var(--shadow-dialog); }

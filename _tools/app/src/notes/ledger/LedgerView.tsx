@@ -14,6 +14,7 @@ import { forkedIds, keepOnly, LEDGER_LIMITS, ledgerLimitProblem, ledgerSizeProbl
 import { baseIncome, donePlans, ledgerEntries, monthNotesOf, monthSummary, type Charge } from "./summary";
 import { amountText, daysUntil, dotDate, formatAmountInput, parseAmount, parseDay, parseMonth, weekday } from "./input";
 import "./ledger.css";
+export { ledgerCard } from "./card";
 
 type Tab = "entries" | "recurring" | "plans";
 const TABS: [Tab, string][] = [["entries", "기록"], ["recurring", "고정·구독"], ["plans", "계획"]];
@@ -30,18 +31,6 @@ export function ledgerPreview(ledger: Note, notes: Note[], today = localToday())
   return s.available !== null ? `${monthNumber(month)}월 쓸 수 있는 돈 ${signedWon(s.available)}` : `${monthNumber(month)}월 쓴 돈 ${won(s.spent)}`;
 }
 /** Board card of a ledger: this month's headline figure, how much of the income is spent, the next charge. */
-export function ledgerCard(ledger: Note, notes: Note[], today = localToday()) {
-  const month = today.slice(0, 7);
-  const s = monthSummary(ledger, monthNotesOf(notes, ledger.id), month, today);
-  const next = [...s.upcomingCharges].sort((a, b) => a.date.localeCompare(b.date))[0];
-  return {
-    label: s.available !== null ? `${monthNumber(month)}월 쓸 수 있는 돈` : `${monthNumber(month)}월 쓴 돈`,
-    amount: s.available !== null ? signedWon(s.available) : won(s.spent),
-    over: s.available !== null && s.available < 0,
-    spentRatio: s.income > 0 ? Math.min(1, s.spent / s.income) : null,
-    next: next ? `다음 결제 ${Number(next.date.slice(5, 7))}월 ${Number(next.date.slice(8, 10))}일 · ${next.recurring.name}` : null,
-  };
-}
 /** Enter submits (never while an IME is composing), Esc cancels; buttons keep their own Enter. */
 function formKeys(submit: () => void, cancel?: () => void) {
   return (event: KeyboardEvent<HTMLElement>) => {

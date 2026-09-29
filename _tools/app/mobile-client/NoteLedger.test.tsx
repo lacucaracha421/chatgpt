@@ -50,7 +50,7 @@ it('shows the month figures from the fixture on the card and the 이번 달 tab,
   renderNotes();
   const card=await screen.findByRole('button',{name:/^가계부/});
   expect(card.textContent).toContain('9월 쓸 수 있는 돈 ₩562,610');
-  expect(card.textContent).toContain('다음 결제 9월 27일 쿠팡 와우');
+ expect(card.textContent).toContain('다음 결제 9월 27일 · 쿠팡 와우');
   // The archived month note is hidden: no 보관함 link, no card titled after the month.
   expect(screen.queryByText('가계부 2026-09')).toBeNull();
   expect(screen.queryByRole('button',{name:/보관함/})).toBeNull();

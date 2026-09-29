@@ -19,6 +19,7 @@ import { genericView, isLedgerKind, LEDGER } from "./ledger/model";
 import { LedgerView } from "./ledger/LedgerView";
 import { hiddenLedgerMonths } from "./ledger/model";
 import { NoteMasonry } from "./NoteBoard";
+import { NOTE_KIND_DEFINITIONS, type NoteKindFilter } from "./noteFilters";
 import { useNoteUndo, type NoteUndoField, type NoteUndoValue } from "./useNoteUndo";
 import { appendSection, deleteSection, moveSection, renameSection, replaceSectionBody, splitSections, unfixSection, type NoteSection, type Range } from "./sections";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
@@ -60,7 +61,6 @@ function KeySetup({store}:{store:NotesStore}){
 export const SECRET_IDLE_MS = 5 * 60_000;
 export const SECRET_TOUCH_MS = 60_000;
 type Scope = "all" | "pinned" | "archive" | "trash";
-type KindFilter = "all" | NoteKind | typeof LEDGER;
 const tint = (color: string | null | undefined) => { const value = noteColorValue(color); return value ? ({ "--note-tint": value } as CSSProperties) : undefined; };
 
 function LabelEditor({ labels, suggestions, onChange }: { labels: string[]; suggestions: string[]; onChange: (labels: string[]) => void }) {
@@ -122,7 +122,7 @@ function sectionFoldKey(noteId: string, section: NoteSection) {
 export function NotesView({noteId}:{noteId?:string}={}){const {library}=useLibrary();return library?<NotesWorkspace key={library.root} store={notesStore(library.root)} initialNoteId={noteId}/>:null;}
 export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNoteId?:string}){
   const state=useSyncExternalStore(store.subscribe,store.snapshot);
-  const [selected,setSelected]=useState<string|null>(initialNoteId??null);const [query,setQuery]=useState("");const [scope,setScope]=useState<Scope>("all");const [label,setLabel]=useState<string|null>(null);const [kindFilter,setKindFilter]=useState<KindFilter>("all");
+  const [selected,setSelected]=useState<string|null>(initialNoteId??null);const [query,setQuery]=useState("");const [scope,setScope]=useState<Scope>("all");const [label,setLabel]=useState<string|null>(null);const [kindFilter,setKindFilter]=useState<NoteKindFilter>("all");
   const [editingBody,setEditingBody]=useState(false);const [creatingSecret,setCreatingSecret]=useState(false);const [keyringBusy,setKeyringBusy]=useState(false);
   const [editingSectionKey,setEditingSectionKey]=useState<string|null>(null);const [renamingSectionKey,setRenamingSectionKey]=useState<string|null>(null);const [deleteSectionTarget,setDeleteSectionTarget]=useState<NoteSection|null>(null);const [sectionFolds,setSectionFolds]=useState<SectionFolds>(readSectionFolds);
   const bodyRef=useRef<HTMLTextAreaElement>(null);const sectionBodyRef=useRef<HTMLTextAreaElement>(null);const titleRef=useRef<HTMLInputElement>(null);const renameRef=useRef<HTMLInputElement>(null);
@@ -309,8 +309,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   const colorValue=note?noteColorValue(note.color):null;
   const notesSectionTitle=query.trim()?"검색 결과":label??({all:"모든 메모",pinned:"고정",archive:"보관함",trash:"휴지통"} as const)[scope];
   const filterableNotes=useMemo(()=>state.notes.filter(n=>!hiddenMonths.has(n.id)&&(scope==="trash"?n.deleted:!n.deleted&&(scope==="archive"?!!n.archived:!n.archived)&&(scope!=="pinned"||n.pinned))&&(!label||(n.labels??[]).some(l=>labelKey(l)===labelKey(label)))&&noteMatches(n,query)),[state.notes,hiddenMonths,scope,label,query]);
-  const kindDefinitions:[KindFilter,string][]=[["text","메모"],["checklist","체크리스트"],[LEDGER,"가계부"],["secret","암호"]];
-  const kindOptions:SegmentedOption<KindFilter>[]=[{value:"all",label:"전체"},...kindDefinitions.filter(([value])=>filterableNotes.some(n=>noteKind(n)===value)||kindFilter===value).map(([value,label])=>({value,label}))];
+  const kindOptions:SegmentedOption<NoteKindFilter>[]=[{value:"all",label:"전체"},...NOTE_KIND_DEFINITIONS.filter(([value])=>filterableNotes.some(n=>noteKind(n)===value)||kindFilter===value).map(([value,label])=>({value,label}))];
   const scopeCounts={
     all:state.notes.filter(n=>!n.deleted&&!n.archived&&!hiddenMonths.has(n.id)).length,
     pinned:state.notes.filter(n=>!n.deleted&&!n.archived&&!hiddenMonths.has(n.id)&&n.pinned).length,

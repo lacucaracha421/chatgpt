@@ -10,7 +10,7 @@
 .ledger-income.ui-button{gap:8px;color:var(--color-muted);font-size:15px}
 .ledger-income svg{width:18px;height:18px}
 .ledger-income .numeric{color:var(--color-text)}
-.ledger-tabs{display:flex;margin:0 var(--mobile-gutter);border:1px solid var(--color-border);border-radius:4px;overflow:hidden;box-shadow:var(--inset-light);flex-shrink:0}
+.ledger-tabs{display:flex;margin:0 var(--mobile-gutter);border:1px solid var(--color-border);border-radius:var(--radius-control);overflow:hidden;box-shadow:var(--inset-light);flex-shrink:0}
 .ledger-tabs button{flex:1;min-height:44px;border:0;background:var(--color-control);color:var(--color-muted);font:inherit;font-size:14px}
 .ledger-tabs button+button{border-left:1px solid var(--color-border)}
 .ledger-tabs button[aria-selected="true"]{background:var(--color-selection-context);color:var(--color-selection-context-text)}
@@ -29,10 +29,10 @@
 .ledger-hero__sub b{font-weight:500;color:var(--color-text);font-size:15px}
 .ledger-hero__sub.is-link{min-height:36px;text-decoration:underline;text-underline-offset:3px}
 .ledger-hero.is-recurring{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 20px}
-.ledger-meter{display:flex;height:6px;margin-top:18px;background:var(--color-surface);border-radius:1px;overflow:hidden}
+.ledger-meter{display:flex;height:6px;margin-top:18px;background:var(--color-surface);border-radius:var(--radius-mark);overflow:hidden}
 .ledger-meter i{display:block;height:100%}
 .ledger-meter .is-spent,.ledger-figures i.is-spent{background:var(--color-accent)}
-.ledger-meter .is-scheduled,.ledger-figures i.is-scheduled{background:repeating-linear-gradient(135deg,rgba(221,216,202,.55) 0 3px,rgba(221,216,202,.2) 3px 6px)}
+.ledger-meter .is-scheduled,.ledger-figures i.is-scheduled{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--color-accent) 55%,transparent) 0 3px,color-mix(in srgb,var(--color-accent) 20%,transparent) 3px 6px)}
 .ledger-figures{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:14px 0 0;border-top:1px solid var(--color-border);border-bottom:1px solid var(--color-border)}
 .ledger-figures>div{padding:12px 0 12px 14px;min-width:0}
 .ledger-figures>div:first-child{padding-left:0}
@@ -42,7 +42,7 @@
 .ledger-figures i.is-income{box-shadow:inset 0 0 0 1px var(--color-muted)}
 .ledger-figures dd{margin:2px 0 0;font:500 21px/1.3 var(--font-numeric);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(max-width:560px){.ledger-figures{grid-template-columns:repeat(2,minmax(0,1fr))}.ledger-figures>div:nth-child(3){padding-left:0;border-left:0}.ledger-figures>div:nth-child(n+3){border-top:1px solid var(--color-border)}.ledger-hero__big{font-size:42px}}
-.ledger-review{display:block;width:100%;margin:14px 0 0;padding:10px 12px;border:0;border-radius:var(--radius-sm);background:rgba(224,135,123,.12);color:var(--color-danger);font:inherit;font-size:13px;text-align:left}
+.ledger-review{display:block;width:100%;margin:var(--space-3) 0 0;padding:var(--space-2) var(--space-3);border:0;border-radius:var(--radius-control);background:color-mix(in srgb,var(--color-danger) 12%,transparent);color:var(--color-danger);font:inherit;font-size:var(--type-meta);text-align:left}
 /* Sections and rows */
 .ledger-section{margin-top:26px}
 .ledger-section>.ui-section-label{margin:0 0 6px}
@@ -72,7 +72,7 @@
 .ledger-row.is-done .ledger-check{background:var(--color-accent);border-color:var(--color-accent);color:var(--color-on-accent)}
 .ledger-check svg{width:16px;height:16px;stroke-width:2.2}
 .ledger-buy.ui-button{flex:none;min-height:44px}
-.ledger-mono{display:grid;place-items:center;width:40px;height:40px;flex:none;border-radius:3px;background:var(--color-surface-elevated);color:var(--color-muted);font-size:15px;font-weight:600}
+.ledger-mono{display:grid;place-items:center;width:40px;height:40px;flex:none;border-radius:var(--radius-mark);background:var(--color-surface-elevated);color:var(--color-muted);font-size:15px;font-weight:600}
 .ledger-row.is-recurring{min-height:72px}
 .ledger-fork{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:12px;color:var(--color-danger)}
 .ledger-fork .ui-button{min-height:36px;color:var(--color-text)}
@@ -85,17 +85,13 @@
 .is-ended .ledger-row{opacity:.6}
 .ledger-empty{margin:28px 0;font-size:14px;line-height:1.6;color:var(--color-muted)}
 /* Ledger card in the Notes list */
-.ledger-card .ledger-meter{height:4px;margin-top:10px;background:var(--color-surface-pressed)}
-.ledger-card__figure{margin-top:10px;font-size:12px;color:var(--color-muted)}
-.ledger-card__figure b{display:block;margin-top:2px;font-size:28px;font-weight:500;line-height:1.1;color:var(--color-text)}
-.ledger-card__next{margin-top:8px;font-size:12px;color:var(--color-muted)}
 /* Sheets */
 .ledger-sheet{position:relative;display:flex;flex-direction:column;gap:12px}
 .ui-dialog:has(>.ledger-sheet){max-height:92dvh;overflow:auto}
 .ledger-sheet__close{position:absolute;top:-52px;right:-10px}
 .ledger-sheet .hint{margin:0;font-size:13px;line-height:1.5;color:var(--color-muted)}
 .ledger-entry-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-bottom:12px;border-bottom:1px solid var(--color-border-strong)}
-.ledger-segment{display:flex;border:1px solid var(--color-border);border-radius:4px;overflow:hidden;box-shadow:var(--inset-light)}
+.ledger-segment{display:flex;border:1px solid var(--color-border);border-radius:var(--radius-control);overflow:hidden;box-shadow:var(--inset-light)}
 .ledger-segment button{min-height:44px;padding:0 18px;border:0;background:var(--color-control);color:var(--color-muted);font:inherit;font-size:14px;white-space:nowrap}
 .ledger-segment button+button{border-left:1px solid var(--color-border)}
 .ledger-segment button[aria-checked="true"]{background:var(--color-filter-selected);color:var(--color-filter-text)}
@@ -123,7 +119,7 @@
 .ledger-date-chip{cursor:pointer}
 .ledger-date-chip input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
 .ledger-keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.ledger-keypad button{display:grid;place-items:center;min-height:56px;border:1px solid var(--color-border);border-radius:4px;background:var(--color-control);box-shadow:var(--inset-light);color:var(--color-text);font-size:24px;font-weight:500}
+.ledger-keypad button{display:grid;place-items:center;min-height:56px;border:1px solid var(--color-border);border-radius:var(--radius-control);background:var(--color-control);box-shadow:var(--inset-light);color:var(--color-text);font-size:24px;font-weight:500}
 .ledger-keypad button:active{background:var(--color-control-pressed)}
 .ledger-keypad button.is-quiet{font-size:18px;color:var(--color-muted)}
 .ledger-keypad svg{width:26px;height:26px}
@@ -133,7 +129,7 @@
 .ledger-sheet .ui-button.is-danger{color:var(--color-danger)}
 .ledger-form{display:flex;flex-direction:column;gap:12px}
 .ledger-cycle{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
-.ledger-stepper{display:inline-flex;align-items:center;border:1px solid var(--color-border);border-radius:4px;overflow:hidden}
+.ledger-stepper{display:inline-flex;align-items:center;border:1px solid var(--color-border);border-radius:var(--radius-control);overflow:hidden}
 .ledger-stepper button{width:44px;min-height:44px;border:0;background:var(--color-control);color:var(--color-text);font-size:20px}
 .ledger-stepper button:disabled{color:var(--color-border-strong)}
 .ledger-stepper b{min-width:36px;text-align:center;font-size:18px;font-weight:500;color:var(--color-text)}
