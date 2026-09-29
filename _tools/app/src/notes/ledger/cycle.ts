@@ -24,9 +24,7 @@ export const addMonths = (month: string, count: number) => fromMonthIndex(monthI
 export const monthStart = (month: string) => `${month}-01`;
 export const monthEnd = (month: string) => `${month}-${pad(daysInMonth(Number(month.slice(0, 4)), Number(month.slice(5, 7))))}`;
 /** Today as a local calendar date. */
-export function localToday(now = new Date()): string {
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
+export { localDay as localToday } from "../../shared/displayDate";
 
 type Cycle = Pick<Recurring, "every" | "unit" | "start" | "until">;
 /** Pulled payloads are not validated here: a malformed cycle has no charges (never loops). */

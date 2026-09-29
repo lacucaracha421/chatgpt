@@ -117,6 +117,11 @@ export function displayCount(value: number, unit = ""): string {
   return `${new Intl.NumberFormat("ko-KR").format(value)}${unit}`;
 }
 
+/** Today in local time as `YYYY-MM-DD`. */
+export function localDay(now = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
 function localDayNumber(date: Date): number {
   return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000;
 }

@@ -1,7 +1,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import {readFileSync} from 'node:fs';
+// The tablet shows the APK's own version (Settings › 정보), read from the manifest at build time.
+const appVersion = /android:versionName="([^"]+)"/.exec(readFileSync(new URL('../../android/AndroidManifest.xml', import.meta.url), 'utf8'))?.[1] ?? 'dev';
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(appVersion) },
   root: 'mobile-client', base: './', plugins: [react(), {
     name: 'bundled-font-licenses', generateBundle() {
       for (const name of ['Pretendard-OFL.txt', 'Rajdhani-OFL.txt']) {

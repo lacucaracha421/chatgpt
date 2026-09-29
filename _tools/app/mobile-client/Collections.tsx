@@ -34,13 +34,15 @@ import {collectionCardCredit, collectionCardDate, originalTitle, collectionCover
 import type {CollectionDetail, CollectionKind, CollectionPage, CollectionSummary, CollectionFilters as Filters} from './collectionModel';
 import type {Ticket} from './types';
 import {AvCollectionDetail, AvCollectionList, AvLookupSender, type AvListView, AV_LIST_VIEW_KEY} from './AvCollections';
+import {KIND_LABEL} from '../src/collections/collectionFormat';
+import {ddayLabel} from '../src/shared/displayDate';
 import './library.css';
 import './Collections.css';
 
 /** AV is a published collection type; the tablet keeps its list and detail surfaces here. */
 type CollectionTab = CollectionKind | 'av';
-const labels:Record<CollectionTab,string> = {game:'게임',manga:'만화',movie:'영화',av:'AV'};
-const TABS = Object.keys(labels) as CollectionTab[];
+const labels:Record<CollectionTab,string> = KIND_LABEL;
+const TABS:CollectionTab[] = ['game','manga','movie','av'];
 const COLLECTION_SECTIONS_KEY='lakomics.mobile.collectionSections.v1';
 type CollectionSection='showcase'|'news';
 type SectionPreferences=Record<CollectionTab,Record<CollectionSection,boolean>>;
@@ -721,7 +723,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
           <button className="collection-news-block" onClick={()=>onCalendar?.(tab)}>
             <CalendarDaysIcon aria-hidden="true"/><span>발매 캘린더</span><span className="collection-news-hint">{labels[tab]} · 관심 {calendarInterestCount.toLocaleString('ko-KR')}</span><ChevronRightIcon aria-hidden="true"/>
           </button>
-          <div className="collection-calendar-covers">{calendarEntries.map(entry=>{const days=releaseDaysUntil(entry.date);return <button key={entry.id} className="collection-calendar-cover" aria-label={`${entry.title} ${releaseDateLabel(entry.date,entry.precision)}`} onClick={()=>onCalendar?.(tab)}><span className="collection-calendar-date numeric">{releaseDateLabel(entry.date,entry.precision)}{days!==null&&days>=0&&<small className="numeric"> · {days===0?'오늘':`D-${days}`}</small>}</span><span className="collection-calendar-art"><CalendarPreviewCover entry={entry} privacy={privacyMode} active={live}/></span></button>})}</div>
+          <div className="collection-calendar-covers">{calendarEntries.map(entry=>{const days=releaseDaysUntil(entry.date),dday=ddayLabel(days);return <button key={entry.id} className="collection-calendar-cover" aria-label={`${entry.title} ${releaseDateLabel(entry.date,entry.precision)}`} onClick={()=>onCalendar?.(tab)}><span className="collection-calendar-date numeric">{releaseDateLabel(entry.date,entry.precision)}{dday&&<small className="numeric"> · {dday}</small>}</span><span className="collection-calendar-art"><CalendarPreviewCover entry={entry} privacy={privacyMode} active={live}/></span></button>})}</div>
           {calendarError&&<span className="sr-only">발매 캘린더 정보를 불러오지 못했습니다.</span>}
         </div>:<><button className="collection-news-empty" onClick={()=>onCalendar?.(tab)}>다가오는 발매 없음</button>{calendarError&&<span className="sr-only">발매 캘린더 정보를 불러오지 못했습니다.</span>}</>)}
       </section>

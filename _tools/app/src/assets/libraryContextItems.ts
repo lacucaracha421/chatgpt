@@ -1,16 +1,10 @@
 import { commandErrorMessage } from "../library/errorMessage";
 import type { AlbumEntry } from "../library/types";
 import type { ContextMenuItem } from "../shared/ui/ContextMenu";
+import { breadcrumbPath } from "../shared/breadcrumb";
 
 function destinationLabel(entry: AlbumEntry, entries: AlbumEntry[]) {
-  const names = [entry.name], seen = new Set([entry.id]);
-  let parent = entries.find(item => item.id === entry.parentId);
-  while (parent && !seen.has(parent.id)) {
-    seen.add(parent.id); names.unshift(parent.name);
-    const parentId = parent.parentId;
-    parent = entries.find(item => item.id === parentId);
-  }
-  return names.join(" / ");
+  return breadcrumbPath(entry, entries);
 }
 
 /** Ordinary asset actions use the same menu in folder and character galleries. */

@@ -16,14 +16,17 @@ import { SecretEditor, SecretGate } from "./SecretNote";
 import { caretOffset, caretOffsetAtPoint, checklistText, labelKey, NOTE_COLORS, NOTE_LIMITS, noteColorValue, noteLimitProblem, normalizeLabel, textToItems, type ChecklistItem, type NoteKind } from "./model";
 import { isSecret, NOTES_REFRESH_INTERVAL, noteKind, notesStore, PIN_REQUIRED_TEXT, type Note, type NotesStore } from "./store";
 import { genericView, isLedgerKind, LEDGER } from "./ledger/model";
-import { hiddenLedgerMonths, LedgerView } from "./ledger/LedgerView";
+import { LedgerView } from "./ledger/LedgerView";
+import { hiddenLedgerMonths } from "./ledger/model";
 import { NoteMasonry } from "./NoteBoard";
 import { useNoteUndo, type NoteUndoField, type NoteUndoValue } from "./useNoteUndo";
 import { appendSection, deleteSection, moveSection, renameSection, replaceSectionBody, splitSections, unfixSection, type NoteSection, type Range } from "./sections";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
+import { noteMatches, sortNotes } from "./noteList";
 import QRCode from "qrcode";
 import "./notes.css";
-import { matchesKoreanSearch } from "../shared/koreanSearch";
+
+export { noteMatches } from "./noteList";
 
 export function RecoveryKeyReveal({store}:{store:NotesStore}){
   const [key,setKey]=useState<string|null>(null);const [qr,setQr]=useState("");const [error,setError]=useState("");const [needPin,setNeedPin]=useState(false);const [pin,setPin]=useState("");
@@ -60,13 +63,6 @@ type Scope = "all" | "pinned" | "archive" | "trash";
 type KindFilter = "all" | NoteKind | typeof LEDGER;
 const tint = (color: string | null | undefined) => { const value = noteColorValue(color); return value ? ({ "--note-tint": value } as CSSProperties) : undefined; };
 
-/** Search: title, body, checklist items and labels in memory; secret and ledger notes by title only. */
-export function noteMatches(note: Note, query: string) {
-  if (!query) return true;
-  // Hidden notes, like secret and ledger notes, match by title only, so a search never reveals them.
-  const text = isSecret(note) || isLedgerKind(note) || note.concealed ? note.title : [note.title, note.body, ...(note.items ?? []).map((item) => item.text), ...(note.labels ?? [])].join("\n");
-  return matchesKoreanSearch(text, query);
-}
 function LabelEditor({ labels, suggestions, onChange }: { labels: string[]; suggestions: string[]; onChange: (labels: string[]) => void }) {
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState("");
@@ -173,7 +169,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   const allLabels=useMemo(()=>{const map=new Map<string,{label:string;count:number}>();for(const n of state.notes)if(!n.deleted)for(const l of n.labels??[]){const k=labelKey(l);const e=map.get(k);if(e)e.count++;else map.set(k,{label:l,count:1});}return [...map.values()].sort((a,b)=>a.label.localeCompare(b.label,"ko"));},[state.notes]);
   // Ledger month notes are internal to their ledger (design §4.1): never listed, searched or counted.
   const hiddenMonths=useMemo(()=>hiddenLedgerMonths(state.notes),[state.notes]);
-  const notes=useMemo(()=>state.notes.filter(n=>!hiddenMonths.has(n.id)&&(scope==="trash"?n.deleted:!n.deleted&&(scope==="archive"?!!n.archived:!n.archived)&&(scope!=="pinned"||n.pinned))&&(!label||(n.labels??[]).some(l=>labelKey(l)===labelKey(label)))&&(kindFilter==="all"||noteKind(n)===kindFilter)&&noteMatches(n,query)).sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b.updatedAt.localeCompare(a.updatedAt)),[state.notes,hiddenMonths,query,scope,label,kindFilter]);
+  const notes=useMemo(()=>sortNotes(state.notes.filter(n=>!hiddenMonths.has(n.id)&&(scope==="trash"?n.deleted:!n.deleted&&(scope==="archive"?!!n.archived:!n.archived)&&(scope!=="pinned"||n.pinned))&&(!label||(n.labels??[]).some(l=>labelKey(l)===labelKey(label)))&&(kindFilter==="all"||noteKind(n)===kindFilter)&&noteMatches(n,query))),[state.notes,hiddenMonths,query,scope,label,kindFilter]);
   const trash=scope==="trash";
   const found=state.notes.find(n=>n.id===selected && n.deleted===trash)??null;
   // A ledger opens its own screen; in trash, older schemas and orphan month notes it stays read-only.

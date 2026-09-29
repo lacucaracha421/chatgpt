@@ -215,7 +215,7 @@ it("confirms emptying the whole trash using the server totals", async () => {
 
   await screen.findByText("asset-1.png");
   await user.click(screen.getByRole("button", { name: "휴지통 비우기" }));
-  expect(screen.getByRole("dialog")).toHaveTextContent("2개 (3 KB)를 영구 삭제합니다.");
+  expect(screen.getByRole("dialog")).toHaveTextContent("2개 (3.0 KB)를 영구 삭제합니다.");
   await user.click(screen.getByRole("button", { name: "영구 삭제" }));
   expect(gateway.emptyTrash).toHaveBeenCalledOnce();
 });

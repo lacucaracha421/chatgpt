@@ -12,6 +12,7 @@ export {SectionLabel} from '../src/shared/ui/SectionLabel';
 export {Skeleton} from '../src/shared/ui/Skeleton';
 export {Switch} from '../src/shared/ui/Switch';
 export {Tabs} from '../src/shared/ui/Tabs';
+export {SettingsGroup, SettingsRow} from '../src/shared/ui/SettingsRow';
 /**
  * An icon-only action. It is never a submit button: inside a search form (the clear X)
  * it would otherwise become the form's default button, so the keyboard Search/Enter key

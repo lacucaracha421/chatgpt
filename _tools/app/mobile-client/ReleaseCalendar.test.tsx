@@ -2,7 +2,7 @@ import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-libr
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ApiError} from './transport';
 import {ReleaseCalendar} from './ReleaseCalendar';
-import {groupReleaseEntries, releaseDateLabel, type ReleaseCalendarEntry} from './releaseCalendarModel';
+import {groupReleaseEntries, releaseDateLabel, releaseEventLine, type ReleaseCalendarEntry} from './releaseCalendarModel';
 import {setOutboxConnection} from './outboxConnection';
 
 const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn()}));
@@ -44,6 +44,7 @@ describe('release calendar model', () => {
     expect(releaseDateLabel('2026-10-01', 'quarter', 2026)).toBe('2026 Q4');
     expect(releaseDateLabel('2027-01-01', 'year', 2026)).toBe('2027년 중');
     expect(releaseDateLabel(null, 'tbd', 2026)).toBe('미정');
+    expect(releaseEventLine({...movieEvent,kind:'released',previousValue:null,currentValue:'2026-10-15'},2026)).toBe('발매됨 · 10.15');
     const groups = groupReleaseEntries(reply.entries);
     expect(groups[0]).toMatchObject({label: '2026년 10월', items: 2});
     expect(groups[0]?.days.map(day => day.label)).toEqual(['10.1', '10월 중']);

@@ -9,7 +9,8 @@ import {Scrubber} from './Scrubber';
 import {DEFAULT_DENSITY} from './model';
 import type {Asset} from './types';
 import {usePrivacyMode} from './privacyMode';
-import {artistHandles, artistName, assetsFromIds, dateText, daysSince, matchedPositions, matchesArtist, normalizeArtist, normalizeArtists, normalizeAssignments, orderedArtists, profileUrl, todayArtists, type ArtistAssignment, type LibraryArtist} from './artistsModel';
+import {artistHandles, artistName, assetsFromIds, daysSince, matchedPositions, matchesArtist, normalizeArtist, normalizeArtists, normalizeAssignments, orderedArtists, profileUrl, todayArtists, type ArtistAssignment, type LibraryArtist} from './artistsModel';
+import {displayDate} from '../src/shared/displayDate';
 import './artists.css';
 
 type ArtistState = 'loading' | 'ready' | 'empty';
@@ -52,7 +53,7 @@ function ArtistTile({artist, privateMode, query, onOpen}: {artist: LibraryArtist
   const recent = `최근 30일 ${artist.recentCount.toLocaleString('ko-KR')}장 · `;
   return <button className="artist-tile" onClick={onOpen} aria-label={`${artistName(artist)}, ${artist.assetCount.toLocaleString('ko-KR')}장`}>
     <Collage assets={assets} privateMode={privateMode} plus={plus} />
-    <span className="artist-tile-info"><strong className="artist-tile-name"><Highlight value={artistName(artist)} query={query} /></strong><span className="artist-tile-count">{artist.assetCount.toLocaleString('ko-KR')}</span><Handles artist={artist} /><small className="artist-tile-recent">{recent}저장 {dateText(artist.lastSavedAt, false) || '—'}</small></span>
+    <span className="artist-tile-info"><strong className="artist-tile-name"><Highlight value={artistName(artist)} query={query} /></strong><span className="artist-tile-count">{artist.assetCount.toLocaleString('ko-KR')}</span><Handles artist={artist} /><small className="artist-tile-recent">{recent}저장 {displayDate(artist.lastSavedAt) || '—'}</small></span>
   </button>;
 }
 
@@ -64,8 +65,8 @@ function ArtistStats({artist, detail = false}: {artist: LibraryArtist; detail?: 
   const notSeen = daysSince(artist.lastOpenedAt);
   return <div className={`artist-stats${detail ? ' artist-detail-stats' : ''}`}>
     <span className="artist-stat"><strong>{artist.assetCount.toLocaleString('ko-KR')}<small>장</small></strong>모은 그림</span>
-    <span className="artist-stat"><strong>{dateText(artist.firstSavedAt) || '—'}</strong>처음 저장</span>
-    <span className="artist-stat"><strong>{dateText(artist.lastSavedAt, false) || '—'}</strong>최근 저장</span>
+    <span className="artist-stat"><strong>{displayDate(artist.firstSavedAt) || '—'}</strong>처음 저장</span>
+    <span className="artist-stat"><strong>{displayDate(artist.lastSavedAt) || '—'}</strong>최근 저장</span>
     {detail && notSeen !== null && <span className="artist-stat"><strong>{notSeen.toLocaleString('ko-KR')}<small>일</small></strong>동안 안 봄</span>}
   </div>;
 }
@@ -76,7 +77,7 @@ function ArtistToday({artist, privateMode, onOpen}: {artist: LibraryArtist; priv
   const notSeen = daysSince(artist.lastOpenedAt);
   return <button className="artist-today" onClick={onOpen} aria-label={`오늘의 작가 ${artistName(artist)}`}>
     <Collage assets={assets} privateMode={privateMode} plus={plus} />
-    <span className="artist-today-caption"><span className="artist-reason"><strong>{notSeen !== null ? `${notSeen}일 동안 안 봄` : '오늘의 주요 작가'}</strong>{artist.lastOpenedAt && <> · 마지막으로 연 날 <span className="numeric">{dateText(artist.lastOpenedAt)}</span></>}</span><span className="artist-today-who"><strong>{artistName(artist)}</strong><Handles artist={artist} /></span><ArtistStats artist={artist} /></span>
+    <span className="artist-today-caption"><span className="artist-reason"><strong>{notSeen !== null ? `${notSeen}일 동안 안 봄` : '오늘의 주요 작가'}</strong>{artist.lastOpenedAt && <> · 마지막으로 연 날 <span className="numeric">{displayDate(artist.lastOpenedAt)}</span></>}</span><span className="artist-today-who"><strong>{artistName(artist)}</strong><Handles artist={artist} /></span><ArtistStats artist={artist} /></span>
   </button>;
 }
 

@@ -121,12 +121,10 @@ h1,h2,h3,p { margin:0; }
 .dialog-description { font-size:14px; line-height:1.8; color:var(--color-muted); margin:14px 0 24px; }
 .field { display:flex; flex-direction:column; gap:8px; margin:18px 0; font-size:13px; }
 .field input, .classification-search input { color:var(--color-text); background:var(--color-bg); border:1px solid var(--color-border); border-radius:var(--radius-sm); min-height:var(--touch); padding:10px 12px; min-width:0; }
-.check-field { display:flex; align-items:center; gap:10px; min-height:var(--touch); font-size:13px; }
 input[type=checkbox] { accent-color:var(--color-accent); width:20px; height:20px; }
 .hint { color:var(--color-muted); font-size:12px; line-height:1.7; padding:8px 0; }
 .dialog-actions { display:flex; flex-wrap:wrap; gap:10px; padding:20px 0; }
 .settings-note { padding:22px 0; border-top:1px solid var(--color-border); }.settings-note h3 { font-size:14px; margin-bottom:8px; font-weight:500; }.settings-note p { color:var(--color-muted); font-size:13px; line-height:1.8; }
-.settings-foot { display:flex; align-items:center; justify-content:space-between; font-size:12px; color:var(--color-muted); }.settings-foot .ui-button { font-size:12px; }
 .classification-index { min-height:0; display:flex; flex:1; flex-direction:column; }
 .classification-search { display:flex; align-items:center; margin:8px 0 16px; gap:8px; }.classification-search input { width:100%; background:none; border:0; border-bottom:1px solid var(--color-border); border-radius:0; }.classification-search svg { width:18px; color:var(--color-muted); }
 .index-heading { display:flex; align-items:center; justify-content:space-between; padding:18px 10px 8px; color:var(--color-muted); font-size:12px; }
@@ -259,6 +257,7 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
   .bottom-nav button { flex:1 1 0; max-width:122px; min-height:53px; flex-direction:column; gap:3px; font-size:11px; line-height:1.2; position:relative; }
   .bottom-nav button svg { width:22px; height:22px; }
   .bottom-nav button.active { background:transparent; color:var(--color-accent); }
+  .bottom-nav button.active::after { content:none; }
   .gallery-scroll { padding-top:8px; }
   .viewer { display:block; }
   .viewer-surface { width:100%; height:100%; }

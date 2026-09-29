@@ -5,13 +5,14 @@ import { useWorkloadProfile } from "../app/workloadProfile";
 import { igdbImagePreviewUrl, nativeMediaUrl, thumbnailUrl, tmdbImagePreviewUrl, workArtworkThumbnailUrl, mangaCoverUrl } from "../assets/mediaUrl";
 import { collectionCoverUrl } from "../collections/collectionCover";
 import { PlatformBadges } from "../collections/PlatformBadges";
+import { KIND_LABEL } from "../collections/collectionFormat";
 import { useAvLinkPendingCount, type AvLinkApi } from "../collections/AvLinkInbox";
 import { groupInbox, localDay } from "../collections/releaseCaption";
 import { useReleaseData } from "../collections/releaseData";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useLibrary } from "../library/LibraryContext";
 import { ddayLabel } from "../shared/displayDate";
-import type { AssetView, AvFavoritePerformer, ClassificationEntry, CollectionSummary, ContinueItem, HomeOverview, ReleaseCalendar, ReleaseWishlistItem } from "../library/types";
+import type { AssetView, AvFavoritePerformer, ClassificationEntry, CollectionSummary, ContinueItem, HomeOverview, ReleaseBoardEntry, ReleaseCalendar, ReleaseInboxItem, ReleaseWishlistItem } from "../library/types";
 import { characterApi, type CharacterTarget } from "../characters/api";
 import { TaggerReview } from "../characters/TaggerReview";
 import { taggerDecisionApi, taggerReviewSource, type TaggerDecisionApi, type TaggerReviewItem, type TaggerReviewSource } from "../characters/taggerReviewClient";
@@ -21,8 +22,9 @@ import { AvPortrait } from "../collections/av/AvPortrait";
 import { shadowReviewApi, type ShadowReviewApi, type ShadowReviewPendingTarget } from "../characters/shadowReviewApi";
 import { localDateAndOffset, useArtistGateway, useArtistRead } from "../artists/artistStore";
 import { Badge } from "../shared/ui/Badge";
+import { groupedNumber } from "../notes/ledger/model";
 import { SectionLabel } from "../shared/ui/SectionLabel";
-import { avProfileLines, clockLabel, dateBlock, daysAfter, localBoundaries, memoRows, nextInSeriesRows, releaseRows, serverOutage, UPCOMING_DAYS, weekdayLabel, upcomingRows, type MemoRow, type ReleaseRow, type UpcomingRow } from "./homeModel";
+import { avProfileLines, clockLabel, dateBlock, daysAfter, localBoundaries, memoRows, nextInSeriesRows, releaseRows, serverOutage, UPCOMING_DAYS, weekdayLabel, upcomingRows, type MemoRow, type NextInSeriesRow, type ReleaseRow, type UpcomingRow } from "./homeModel";
 import { HomeArtist, HomeRevisit } from "./HomeRevisit";
 import { useConnectionRows, type ConnectionRow } from "../layout/ConnectionStatusBlock";
 import { CharacterReviewOverview, type CharacterReviewScope } from "./CharacterReviewOverview";
@@ -226,7 +228,17 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
   const releases = releaseRows(collections, board, inbox, wishlist, today);
   const upcomingAll = upcomingRows(collections, board, inbox, wishlist, today);
   const upcoming = upcomingAll.filter((row) => daysAfter(row.date, today) <= UPCOMING_DAYS);
-  const seriesRows = useMemo(() => nextInSeriesRows(collections, board, inbox, today), [board, collections, inbox, today]);
+  const seriesRows = useMemo(() => nextInSeriesRows<CollectionSummary, ReleaseInboxItem>(
+    collections.filter((work) => work.type === "manga"),
+    (work, editionIndex) => board.get(work.id)?.ownedVolumes.find((owned: ReleaseBoardEntry["ownedVolumes"][number]) => owned.editionIndex === editionIndex)?.count ?? null,
+    (work) => {
+      const entry = board.get(work.id);
+      return entry?.releaseWatch.enabled ? entry.releaseSchedule.kakao : null;
+    },
+    [...inbox.values()].flat(),
+    (event) => event.collectionId,
+    today,
+  ), [board, collections, inbox, today]);
   const shelfAll: HomeShelfRow[] = [...releases.map((row) => ({ source: "release" as const, row })), ...upcoming.map((row) => ({ source: "upcoming" as const, row }))];
   const shelfRows = shelfAll;
   const openRelease = (row: ReleaseRow) => row.collection ? onNavigate({ kind: "collection", collectionId: row.collection.id }) : onNavigate(calendarView(row.kind === "movie" ? "movie" : "game"));
@@ -515,7 +527,7 @@ function HomeIndex({ memos, locked, overview, trashCount, privacyMode, connectio
         </div>
         <div className="home-assets__collections" style={{ gridTemplateColumns: `repeat(${privacyMode ? 3 : 4}, minmax(0, 1fr))` }}>
           {(["game", "manga", "movie"] as const).map((type) => <button key={type} type="button" onClick={() => onNavigate({ kind: "collections", typeFilter: type, showcase: false })}>
-            <b className="numeric">{overview.collections[type].toLocaleString()}</b><small>{{ game: "게임", manga: "만화", movie: "영화" }[type]}</small>
+            <b className="numeric">{overview.collections[type].toLocaleString()}</b><small>{KIND_LABEL[type]}</small>
           </button>)}
           {!privacyMode && <button type="button" onClick={() => onNavigate({ kind: "collections", typeFilter: "av", showcase: false })}>
             <b className="numeric">{overview.collections.av.toLocaleString()}</b><small>AV</small>
@@ -564,7 +576,7 @@ function HomeContinue({ items, privacyMode, onOpen }: { items: ContinueItem[]; p
   </HomeSection>;
 }
 
-function HomeSeries({ rows, privacyMode, onOpen, onOpenCollection }: { rows: ReturnType<typeof nextInSeriesRows>; privacyMode: boolean; onOpen: () => void; onOpenCollection: (collectionId: string) => void }) {
+function HomeSeries({ rows, privacyMode, onOpen, onOpenCollection }: { rows: NextInSeriesRow<CollectionSummary>[]; privacyMode: boolean; onOpen: () => void; onOpenCollection: (collectionId: string) => void }) {
   return <HomeSection title="이어지는 시리즈" onOpen={onOpen}>
     <div className="home-series-grid">
       {rows.slice(0, 4).map((row) => {
@@ -622,11 +634,11 @@ function MemoTileBody({ memo }: { memo: MemoRow }) {
     {memo.items.map((item, index) => <li key={index} data-checked={item.checked ? "true" : undefined}><span className="home-memo-checklist__mark" aria-hidden="true" /><span>{item.text}</span></li>)}
   </ul>;
   if (memo.kind === "ledger") return <>
-    <span className="home-memo-amount numeric">{memo.amount.toLocaleString()}<small>원</small></span>
+    <span className="home-memo-amount numeric">{groupedNumber(memo.amount)}<small>원</small></span>
     <span className="home-memo-ledger-rows">
-      {memo.available !== null && <span><span>쓴 돈</span><b className="numeric">{memo.spent.toLocaleString()}</b></span>}
-      {memo.scheduled > 0 && <span><span>예정</span><b className="numeric">{memo.scheduled.toLocaleString()}</b></span>}
-      {memo.perDay !== null && <span><span>하루</span><b className="numeric">{memo.perDay.toLocaleString()}</b></span>}
+      {memo.available !== null && <span><span>쓴 돈</span><b className="numeric">{groupedNumber(memo.spent)}</b></span>}
+      {memo.scheduled > 0 && <span><span>예정</span><b className="numeric">{groupedNumber(memo.scheduled)}</b></span>}
+      {memo.perDay !== null && <span><span>하루</span><b className="numeric">{groupedNumber(memo.perDay)}</b></span>}
     </span>
   </>;
   if (memo.kind === "secret") return <span className="home-memo-secret">암호 메모</span>;

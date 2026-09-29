@@ -28,15 +28,11 @@ import { groupInbox, localDay, releaseCaption } from "./releaseCaption";
 import { useReleaseData } from "./releaseData";
 import { deriveCollectionLibrary, type CollectionLibrarySort, type CollectionLibraryState } from "./collectionLibrary";
 import { AvLinkInbox, useAvLinkInbox, type AvLinkApi } from "./AvLinkInbox";
+import { KIND_LABEL } from "./collectionFormat";
 import "./CollectionBrowser.css";
 
-const TYPE_LABEL: Record<CollectionType, string> = {
-  game: "게임",
-  manga: "만화",
-  movie: "영화",
-  av: "AV",
-};
-const TYPES = Object.keys(TYPE_LABEL) as CollectionType[];
+const TYPE_LABEL: Record<CollectionType, string> = KIND_LABEL;
+const TYPES: CollectionType[] = ["game", "manga", "movie", "av"];
 export type CollectionNavigationMemory = Map<string, { scrollTop: number; focusId: string | null; page?: number }>;
 
 type CollectionBrowserProps = {

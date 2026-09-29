@@ -78,13 +78,13 @@ describe('Classification assignment picker',()=>{
 
   it('searches the local tree and reports each match with its ancestry',()=>{
     expect(searchAssignmentTree(classifications,'백합')).toEqual([
-      {classification:byId('yuri'),breadcrumb:'애니 / 백합'},
+      {classification:byId('yuri'),breadcrumb:'애니 › 백합'},
     ]);
     // A substring several names share returns every match, each with its ancestry.
     expect(new Map(searchAssignmentTree(classifications,'아').map(row=>[row.classification.id,row.breadcrumb])))
-      .toEqual(new Map([['nahia','애니 / 나히아']]));
+      .toEqual(new Map([['nahia','애니 › 나히아']]));
     expect(new Map(searchAssignmentTree(classifications,'록').map(row=>[row.classification.id,row.breadcrumb])))
-      .toEqual(new Map([['bochi','애니 / 봇치 더 록']]));
+      .toEqual(new Map([['bochi','애니 › 봇치 더 록']]));
     // Searching a descendant's name does not drag in its ancestors.
     expect(searchAssignmentTree(classifications,'애니').map(row=>row.classification.id)).toEqual(['anime']);
     expect(searchAssignmentTree(classifications,'  ')).toEqual([]);
@@ -149,7 +149,7 @@ describe('Classification assignment picker',()=>{
     fireEvent.change(screen.getByRole('searchbox',{name:'분류 검색'}),{target:{value:'백합'}});
     // A flat result list, so the hierarchy rows are gone and 미분류 is not offered as a match.
     expect(names()).toEqual(['백합']);
-    expect(screen.getByText('애니 / 백합')).toBeTruthy();
+    expect(screen.getByText('애니 › 백합')).toBeTruthy();
     // The result carries its ancestry, and a bare name alone would be ambiguous.
     expect(screen.queryByRole('radio',{name:'미분류'})).toBeNull();
     expect(screen.getByRole('radio',{name:'백합'}).getAttribute('aria-checked')).toBe('true');

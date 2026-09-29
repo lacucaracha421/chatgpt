@@ -385,7 +385,7 @@ describe('asset filters',()=>{
     // rest of the library state, so a later page cannot carry them to another server.
     fireEvent.click(screen.getByRole('button',{name:'홈'}));
     fireEvent.click(await screen.findByRole('button',{name:'연결 및 설정'}));
-    await screen.findByRole('dialog',{name:/설정/});
+    await screen.findByRole('main',{name:'설정 항목'});
     expect(screen.queryByRole('button',{name:'종류'})).toBeNull();
   });
 });

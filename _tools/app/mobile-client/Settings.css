@@ -1,19 +1,74 @@
-/* Compact settings sections reusing the shared dialog/field primitives. */
-.settings-section { padding:16px 0; border-bottom:1px solid var(--color-border); }
-.settings-section-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
-.settings-section-head h3 { font-size:14px; font-weight:500; margin:0; }
-.settings-intro { font-size:13px; line-height:1.7; color:var(--color-muted); margin:10px 0 0; }
-.settings-connection { display:flex; align-items:center; gap:8px; font-size:13px; margin:0; min-width:0; }
-/* Long addresses truncate instead of pushing the status off the row. */
-.settings-connection>.numeric { margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:55%; font-size:12px; }
-.settings-inline-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
-.settings-connection-form { margin-top:4px; }
-.settings-connection-form .field:first-child { margin-top:12px; }
-/* Advanced/recovery detail stays out of the primary surface. */
-.settings-advanced { padding:16px 0; border-bottom:1px solid var(--color-border); }
-.settings-advanced>summary { display:flex; align-items:center; min-height:var(--touch); cursor:pointer; font-size:13px; }
-.settings-advanced p { color:var(--color-muted); font-size:12px; line-height:1.7; margin:6px 0 0; }
-.settings-warm{display:flex;flex-direction:column;gap:4px;margin-top:12px}
-.settings-warm label{display:flex;align-items:center;gap:10px;min-height:44px}
-.settings-warm input{width:20px;height:20px}
-.settings-warm .muted{font-size:13px}
+.settings-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--color-bg);
+}
+
+.settings-screen {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--color-bg);
+}
+
+.settings-screen__scroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  overscroll-behavior-y: contain;
+  padding: var(--space-6) var(--mobile-gutter) var(--space-8);
+}
+
+.settings-screen__content {
+  width: min(760px, 100%);
+  margin: 0 auto;
+}
+
+.settings-screen .settings-view__value {
+  overflow-wrap: anywhere;
+}
+
+.settings-screen__inline-edit {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.settings-screen__form-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.settings-screen__inline-edit .ui-choice--switch {
+  min-height: var(--row-height);
+}
+
+.settings-screen__safety-line,
+.settings-screen__error {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: var(--type-meta);
+  line-height: var(--line-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-screen__error { color: var(--color-danger); }
+
+.settings-screen__form-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+@media (max-width: 640px) {
+  .settings-screen__form-fields { grid-template-columns: minmax(0, 1fr); }
+}

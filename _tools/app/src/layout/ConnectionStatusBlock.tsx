@@ -2,8 +2,9 @@ import { ChevronRightIcon } from "@heroicons/react/24/outline";
 import { useEffect, useState } from "react";
 import type { CloudSyncStatus } from "../app/useCloudProblems";
 import { exchangeStore, useExchangeSnapshot } from "../exchange/exchangeStore";
-import { agoLabel, clockLabel, cloudLine, serverOutage } from "../home/homeModel";
+import { clockLabel, cloudLine, serverOutage } from "../home/homeModel";
 import type { AssetView, AuthoritySyncHealth, CatalogStatus, LibraryGateway, ReleaseCalendar } from "../library/types";
+import { noteDateLabel } from "../notes/format";
 
 type Tone = "ok" | "busy" | "idle" | "off";
 export type ConnectionRow = { key: string; label: string; value: string; time?: string; tone: Tone; view: AssetView };
@@ -40,14 +41,14 @@ export function useConnectionRows({ gateway, cloud, authorityHealth }: {
   const cloudState = cloudLine(cloud?.progress ?? null, cloud?.problemCount ?? 0);
   if (cloudState) rows.push({ key: "cloud", label: "클라우드", value: cloudState.text, tone: outage && cloudState.tone !== "ok" ? "idle" : cloudState.tone, view: { kind: "settings", section: "connection" } });
   if (catalog?.installed) {
-    const time = catalog.lastSuccessAt ? agoLabel(catalog.lastSuccessAt, at) : undefined;
+    const time = catalog.lastSuccessAt ? noteDateLabel(catalog.lastSuccessAt, at) : undefined;
     rows.push({ key: "catalog", label: "카탈로그", value: catalog.lastError ? "갱신 실패" : "갱신 완료", time, tone: catalog.lastError ? "off" : "ok", view: { kind: "settings", section: "catalog" } });
   }
   if (calendar) {
     const fetched = calendar.sources.map((source) => source.fetchedAt).filter((value): value is string => Boolean(value)).sort().reverse()[0];
     const failed = calendar.sources.some((source) => source.errorCode);
     rows.push({ key: "calendar", label: "발매 캘린더", value: failed ? "가져올 수 없음" : "IGDB · TMDB",
-      time: fetched ? (failed ? `${clockLabel(fetched)} 기준` : agoLabel(fetched, at)) : undefined, tone: failed ? "off" : "ok", view: { kind: "settings", section: "connection" } });
+      time: fetched ? `${noteDateLabel(fetched, at)}${failed ? " 기준" : ""}` : undefined, tone: failed ? "off" : "ok", view: { kind: "settings", section: "connection" } });
   }
   return rows;
 }

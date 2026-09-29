@@ -31,6 +31,20 @@ function event(collectionId: string, volumeNumber: number): ReleaseInboxItem {
   };
 }
 
+function seriesRows(collections: CollectionSummary[], board: Map<string, ReleaseBoardEntry>, inbox: Map<string, ReleaseInboxItem[]>) {
+  return nextInSeriesRows(
+    collections.filter((item) => item.type === "manga"),
+    (item, editionIndex) => board.get(item.id)?.ownedVolumes.find((owned) => owned.editionIndex === editionIndex)?.count ?? null,
+    (item) => {
+      const value = board.get(item.id);
+      return value?.releaseWatch.enabled ? value.releaseSchedule.kakao : null;
+    },
+    [...inbox.values()].flat(),
+    (item) => item.collectionId,
+    today,
+  );
+}
+
 describe("nextInSeriesRows", () => {
   it("keeps released unowned manga volumes and reports the first gap", () => {
     const collections = [work("series", "Series"), work("game", "Game", "game")];
@@ -44,7 +58,7 @@ describe("nextInSeriesRows", () => {
       ["game", entry("game", 0, [{ volumeNumber: 1, date: "2026-09-20", status: null }])],
     ]);
 
-    expect(nextInSeriesRows(collections, board, new Map(), today)).toEqual([{
+    expect(seriesRows(collections, board, new Map())).toEqual([{
       work: collections[0],
       ownedCount: 2,
       nextVolume: { number: 3, date: "2026-09-20" },
@@ -66,7 +80,7 @@ describe("nextInSeriesRows", () => {
     ]);
     const inbox = new Map([["fresh", [event("fresh", 1)]]]);
 
-    expect(nextInSeriesRows(collections, board, inbox, today).map((row) => row.work.id))
+    expect(seriesRows(collections, board, inbox).map((row) => row.work.id))
       .toEqual(["fresh", "older", "newer"]);
   });
 
@@ -77,6 +91,13 @@ describe("nextInSeriesRows", () => {
       ["off", entry("off", 0, [{ volumeNumber: 1, date: "2026-09-01", status: null }], false)],
     ]);
 
-    expect(nextInSeriesRows(collections, board, new Map(), today)).toEqual([]);
+    expect(seriesRows(collections, board, new Map())).toEqual([]);
+  });
+
+  it("excludes a work whose owned count is unknown", () => {
+    const collections = [work("unknown", "Unknown")];
+    const value = entry("unknown", 0, [{ volumeNumber: 1, date: "2026-09-01", status: "released" }]);
+    value.ownedVolumes = [];
+    expect(seriesRows(collections, new Map([["unknown", value]]), new Map())).toEqual([]);
   });
 });

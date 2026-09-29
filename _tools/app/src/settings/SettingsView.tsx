@@ -1,14 +1,12 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
-import { InformationCircleIcon, StarIcon, ComputerDesktopIcon, FolderIcon, LinkIcon, GlobeAltIcon, LockClosedIcon, WrenchIcon } from "@heroicons/react/24/outline";
+import { StarIcon, ComputerDesktopIcon, FolderIcon, LinkIcon, GlobeAltIcon, LockClosedIcon, WrenchIcon } from "@heroicons/react/24/outline";
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
-import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
 import { SegmentedControl } from "../shared/ui/SegmentedControl";
 import { Select } from "../shared/ui/Select";
 import { Skeleton } from "../shared/ui/Skeleton";
-import { SectionLabel } from "../shared/ui/SectionLabel";
 import { Switch } from "../shared/ui/Switch";
 import { TextInput } from "../shared/ui/TextInput";
 import { Toast } from "../shared/ui/Toast";
@@ -40,6 +38,7 @@ import { useReleaseCalendarRefresh } from "./ReleaseCalendarRefreshSettings";
 import { useConnectionRows } from "../layout/ConnectionStatusBlock";
 import { updateWorkloadSettings, useWorkloadProfile } from "../app/workloadProfile";
 import { APP_ZOOM_LEVELS } from "../preferences/uiPreferences";
+import { SettingsGroup, SettingsRow } from "../shared/ui/SettingsRow";
 
 type SettingsViewProps = {
   restoring: boolean;
@@ -583,21 +582,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   </section>;
 }
 
-function SettingsGroup({ title, help, children }: { title: string; help?: string; children: ReactNode }) {
-  return <section className="settings-view__group" aria-labelledby={`settings-group-${title}`}>
-    <SectionLabel as="h3" id={`settings-group-${title}`} title={title} actions={help ? <HelpButton title={title} text={help} /> : undefined} />
-    {children}
-  </section>;
-}
-
-function HelpButton({ title, text }: { title: string; text: string }) {
-  const [open, setOpen] = useState(false);
-  return <AnchoredPanel open={open} onOpenChange={setOpen} title={title} trigger={<Button size="icon" variant="ghost" aria-label={`${title} 도움말`}><InformationCircleIcon aria-hidden="true" /></Button>}><p>{text}</p></AnchoredPanel>;
-}
-
-function SimpleRow({ name, value, status, statusClassName, tone, control, className }: { name: string; value?: ReactNode; status?: string; statusClassName?: string; tone?: string; control?: ReactNode; className?: string }) {
-  return <dl className={`settings-view__property${className ? ` ${className}` : ""}`}><dt><span>{name}</span>{value && <strong className="settings-view__value">{value}</strong>}</dt>{status && <dd className={`settings-view__status${statusClassName ? ` ${statusClassName}` : ""}`} data-tone={tone}>{status}</dd>}{control && <dd className="settings-view__inline-controls">{control}</dd>}</dl>;
-}
+const SimpleRow = SettingsRow;
 
 function InlineEdit({ children }: { children: ReactNode }) { return <div className="settings-view__inline-edit">{children}</div>; }
 

@@ -4,6 +4,7 @@ import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Select } from "../shared/ui/Select";
 import { TextField } from "../shared/ui/TextField";
+import { KIND_LABEL } from "./collectionFormat";
 
 export type CollectionEditMode =
   | { kind: "create"; type: CollectionType }
@@ -140,7 +141,7 @@ export function CollectionEditDialog({
             <Button key={value} type="button" aria-pressed={value === "tv" ? type === "movie" && series : type === value && !series}
               variant={(value === "tv" ? type === "movie" && series : type === value && !series) ? "primary" : "secondary"}
               disabled={saving} onClick={() => { setType(value === "tv" ? "movie" : value); setSeries(value === "tv"); }}>
-              {{ game: "게임", manga: "만화", movie: "영화", tv: "시리즈", av: "AV" }[value]}
+              {value === "tv" ? "시리즈" : KIND_LABEL[value]}
             </Button>
           ))}
         </div> : <Select label="유형" value={type} disabled={existing?.type === "av"} onChange={(event) => setType(event.target.value as CollectionType)}>

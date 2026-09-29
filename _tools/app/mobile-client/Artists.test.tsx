@@ -2,7 +2,7 @@ import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {MutableRefObject} from 'react';
 import {Artists} from './Artists';
-import {choseongOf, matchesArtist, matchedPositions, type LibraryArtist} from './artistsModel';
+import {matchesArtist, matchedPositions, type LibraryArtist} from './artistsModel';
 
 const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn(), loadThumbnail: vi.fn()}));
 vi.mock('./transport', () => ({api: mocks.api, native: mocks.native}));
@@ -41,7 +41,6 @@ afterEach(() => {cleanup(); vi.restoreAllMocks();});
 
 describe('artist model', () => {
   it('matches Korean initials and underlines the matched syllables', () => {
-    expect(choseongOf('하늘빛')).toBe('ㅎㄴㅂ');
     expect(matchesArtist(primary, 'ㅎㄴ')).toBe(true);
     expect(matchedPositions('하늘빛', 'ㅎㄴ')).toEqual(new Set([0, 1]));
   });

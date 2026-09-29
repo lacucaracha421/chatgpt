@@ -1,6 +1,6 @@
 import {useEffect, useState, useSyncExternalStore} from 'react';
 import {rowView, type ExchangeSnapshot} from './exchange';
-import {koreanReleases, localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCounts, shortReleaseDate, type MangaShelf, type ReleaseCaption, type ReleaseCounts} from './collectionReleases';
+import {koreanReleases, localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCounts, type MangaShelf, type ReleaseCaption, type ReleaseCounts} from './collectionReleases';
 import type {CollectionSummary} from './collectionModel';
 import {currentShelf, invalidateReleases, loadShelf, observePublication, releaseEpoch, subscribeReleases} from './releaseStore';
 import {useSimilarityReviewCount} from './useSimilarityReview';
@@ -11,11 +11,11 @@ import type {RefreshJob} from './CatalogRefresh';
 import {fetchLibrarySummary, type LibrarySummary} from './librarySummary';
 import type {CharacterIndex} from './characterModel';
 import type {Asset, Revisit} from './types';
-import {byOrder, noteColorValue, stripMarkdown} from '../src/notes/model';
-import type {Note, NotesState} from '../src/notes/store';
-import {LEDGER, LEDGER_MONTH} from '../src/notes/ledger/model';
-import {monthNotesOf, monthSummary} from '../src/notes/ledger/summary';
+import type {NotesState} from '../src/notes/store';
+import {daysAfter,memoRows,UPCOMING_DAYS,type MemoRow} from '../src/home/homeModel';
 import {commitUpcomingWishlist, flushUpcomingWishlist, readUpcomingWishlistIntents, reconcileUpcomingWishlist, visibleUpcomingWishlist} from './upcomingWishlistOutbox';
+
+export {clockLabel,dateBlock,daysAfter,memoRows,UPCOMING_DAYS,type MemoRow} from '../src/home/homeModel';
 
 /**
  * Home's information dashboard (HOME-DASH-001, layout R2), from data the tablet already reads
@@ -90,28 +90,7 @@ export function upcomingReleases(shelf: MangaShelf | null, today = localToday())
     .sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name, 'ko') || a.volumeNumber - b.volumeNumber);
 }
 
-/** How many days after `today` a `YYYY-MM-DD` date falls (local calendar days). */
-export function daysAfter(date: string, today = localToday()) {
-  const day = (value: string) => { const [y, m, d] = value.split('-').map(Number); return Date.UTC(y, m - 1, d) / 86_400_000; };
-  return Math.round(day(date) - day(today));
-}
-/** The 발매 예정 window. */
-export const UPCOMING_DAYS = 30;
-/** PC Home's title window. Manga keeps the tablet's existing 30-day window. */
-export const TITLE_UPCOMING_DAYS = 60;
-
 export function watchedCount(shelf: MangaShelf | null) { return (shelf?.works ?? []).filter(watching).length; }
-
-/** "10.8" and "수요일" for a `YYYY-MM-DD` date. */
-export function dateBlock(date: string, today = localToday()) {
-  const [year, month, day] = date.split('-').map(Number);
-  return {day: shortReleaseDate(date, today), weekday: `${'일월화수목금토'[new Date(year, month - 1, day).getDay()]}요일`};
-}
-/** "14:32" in local time. */
-export function clockLabel(at: number) {
-  const date = new Date(at);
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-}
 
 /** The outgoing transfers in progress, as one line: the first file, how many more, and the overall progress. */
 export function sendingSummary(snapshot: ExchangeSnapshot | null): SendingSummary | null {
@@ -129,15 +108,6 @@ export function lastPeer(snapshot: ExchangeSnapshot | null) {
   const devices = (snapshot?.devices ?? []).filter(device => device.deviceId !== snapshot?.deviceId && Number.isFinite(Date.parse(device.lastSeenAt)));
   return devices.sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt))[0] ?? null;
 }
-export function agoLabel(at: string, now = Date.now()) {
-  const minutes = Math.floor((now - Date.parse(at)) / 60_000);
-  if (minutes < 1) return '방금';
-  if (minutes < 60) return `${minutes}분 전`;
-  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)}시간 전`;
-  const date = new Date(at);
-  return `${date.getMonth() + 1}.${date.getDate()} ${clockLabel(date.getTime())}`;
-}
-
 /**
  * 자산 현황's 오늘 추가, counted from the first page of recent saves (newest first). When every
  * asset on a page that has more is from today, the true count is unknown: `more` says "N+".
@@ -241,41 +211,6 @@ export function useHomeRevisit(enabled: boolean, scope: string, forceKey?: unkno
   });
 }
 
-/* ---- 메모 ---- */
-export type MemoRow =
-  | {id: string; title: string; color: string | null; kind: 'checklist'; done: number; total: number; items: {text: string; checked: boolean}[]}
-  | {id: string; title: string; color: string | null; kind: 'ledger'; month: number; label: '쓸 수 있는 돈' | '쓴 돈'; amount: number; categories: {label: string; amount: number}[]; latest: {label: string; amount: number}[]}
-  | {id: string; title: string; color: string | null; kind: 'secret'}
-  | {id: string; title: string; color: string | null; kind: 'text'; snippet: string};
-const homeMemoSnippet = (body: string) => body.split('\n').map(stripMarkdown).map(line => line.replace(/\\([\\`*_{}[\]()#+.!><-])/g, '$1')).map(line => line.trim()).filter(Boolean).join(' ').slice(0, 160);
-/** Pinned notes, most recently edited first, as one line each; month notes of a 가계부 never show. */
-export function memoRows(notes: Note[], today = localToday()): MemoRow[] {
-  return notes.filter(note => note.pinned && !note.deleted && !note.archived && note.type !== LEDGER_MONTH)
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    .map((note): MemoRow => {
-      const base = {id: note.id, title: note.title.trim(), color: noteColorValue(note.color)};
-      if (note.type === 'secret') return {...base, kind: 'secret'};
-      if (note.concealed && note.type !== LEDGER) return {...base, kind: 'text', snippet: '숨긴 메모'};
-      if (note.type === LEDGER) {
-        const summary = monthSummary(note, monthNotesOf(notes, note.id), today.slice(0, 7), today);
-        const entries = summary.entries.filter(entry => !entry.in);
-        const withCategory = entries.filter(entry => typeof (entry as unknown as {category?: unknown}).category === 'string' && String((entry as unknown as {category: string}).category).trim());
-        const categoryMap = new Map<string, number>();
-        for (const entry of withCategory) {
-          const label = String((entry as unknown as {category: string}).category).trim();
-          categoryMap.set(label, (categoryMap.get(label) ?? 0) + entry.amount);
-        }
-        const categories = [...categoryMap].map(([label, amount]) => ({label, amount})).sort((a, b) => b.amount - a.amount).slice(0, 3);
-        const latest = entries.slice(0, 3).map(entry => ({label: entry.name || '기록', amount: entry.amount}));
-        return {...base, title: base.title || '가계부', kind: 'ledger', month: Number(today.slice(5, 7)), label: '쓴 돈', amount: summary.spent, categories, latest};
-      }
-      if (note.type === 'checklist' && !note.readOnly) {
-        const items = [...(note.items ?? [])].sort(byOrder);
-        return {...base, kind: 'checklist', done: items.filter(item => item.checked).length, total: items.length, items: items.slice(0, 5).map(item => ({text: item.text, checked: item.checked}))};
-      }
-      return {...base, kind: 'text', snippet: homeMemoSnippet(note.body)};
-    });
-}
 export type HomeMemos = {rows: MemoRow[]; locked: boolean} | null;
 /** Reads the on-device notes (no network) whenever Home is shown and `key` moves. */
 export function useHomeMemos(enabled: boolean, scope: string, forceKey?: unknown): HomeMemos {
@@ -284,7 +219,7 @@ export function useHomeMemos(enabled: boolean, scope: string, forceKey?: unknown
     read: async () => {
       try {
         const state = await native<NotesState>('notesState', {});
-        return {rows: memoRows(state.notes ?? []), locked: !state.unlocked};
+        return {rows: memoRows(state.notes ?? [], localToday()), locked: !state.unlocked};
       } catch {
         return {rows: [], locked: true};
       }
@@ -326,7 +261,7 @@ export type ExternalShelfRow = {entry: UpcomingHomeEntry; fresh: boolean};
  * Tablet adapter for PC `releaseRows` + `upcomingRows`: unread released wishlist items first,
  * then exact upcoming wishlist dates. The calendar contributes only the port marker.
  */
-export function externalShelfRows(entries: UpcomingHomeEntry[], wishlistItems: UpcomingWishItem[], interested: Set<string>, today = localToday(), window = TITLE_UPCOMING_DAYS): ExternalShelfRow[] {
+export function externalShelfRows(entries: UpcomingHomeEntry[], wishlistItems: UpcomingWishItem[], interested: Set<string>, today = localToday(), window = UPCOMING_DAYS): ExternalShelfRow[] {
   const calendar = new Map(entries.map(entry => [entry.id, entry]));
   const wishes = new Map<string, UpcomingWishItem | UpcomingHomeEntry>(wishlistItems.map(item => [item.id, item]));
   // Preserve the pending add overlay before the PC publishes the new wishlist item.

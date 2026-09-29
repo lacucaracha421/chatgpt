@@ -33,7 +33,7 @@ export function releaseTokenLabel(token: string | null, referenceYear = new Date
   return token;
 }
 
-export function releaseEventLine(event: ReleaseWishlistEvent, referenceYear = new Date().getFullYear()): string {
+export function releaseEventLine<T extends Pick<ReleaseWishlistEvent, "kind" | "previousValue" | "currentValue">>(event: T, referenceYear = new Date().getFullYear()): string {
   const current = releaseTokenLabel(event.currentValue, referenceYear);
   switch (event.kind) {
     case "date_set": return `발매일 공개 · ${current}`;

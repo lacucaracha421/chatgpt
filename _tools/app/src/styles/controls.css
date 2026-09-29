@@ -309,6 +309,78 @@ select.ui-text-input {
   font-size: var(--type-meta);
 }
 
+/* Settings rows are shared by the PC settings view and the Android settings screen. */
+.settings-view__group {
+  margin: 0 0 var(--space-8);
+}
+
+.settings-view__group:last-child { margin-bottom: 0; }
+.settings-view__group > .ui-section-label { margin: 0 0 var(--space-2); }
+
+.settings-view__property {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--row-height-2);
+  margin: 0;
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.settings-view__property dt,
+.settings-view__property-label {
+  grid-column: 1;
+  grid-row: 1;
+  color: var(--color-text);
+  font-size: var(--type-body);
+  font-weight: 400;
+}
+
+.settings-view__property dt { display: grid; gap: var(--space-1); }
+.settings-view__value { color: var(--color-text); font-size: var(--type-body); font-weight: 400; }
+.settings-view__property dd { margin: 0; min-width: 0; line-height: var(--line-copy); }
+
+.settings-view__status,
+.settings-view__path {
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+  color: var(--color-faint);
+  font-size: var(--type-meta);
+}
+
+.settings-view__status[data-tone="ok"] { color: var(--color-success); }
+.settings-view__status[data-tone="off"],
+.settings-view__status[data-tone="danger"] { color: var(--color-danger); }
+.settings-view__stacked-status { display: grid; gap: var(--space-1); }
+
+.settings-view__inline-controls,
+.settings-view__control-pair,
+.settings-view__inline-edit,
+.settings-view__group-action {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.settings-view__inline-controls { grid-column: 2; grid-row: 1 / span 2; }
+.settings-view__inline-edit { grid-column: 1 / -1; justify-content: flex-start; padding: var(--space-2) 0; }
+.settings-view__inline-edit .ui-text-input { flex: 1 1 16rem; min-width: 12rem; }
+.settings-view__control-pair .ui-select { flex: none; }
+.settings-view__property > .ui-button,
+.settings-view__property > .ui-toggle { grid-column: 2; justify-self: end; }
+.settings-view__property > .settings-view__actions { grid-column: 2; grid-row: 1 / span 2; padding: 0; }
+.settings-view__property > .settings-view__inline-controls { justify-content: flex-end; }
+.settings-view__row-message { margin: var(--space-2) 0; }
+.settings-view__confirmation { margin: 0 0 var(--space-3); color: var(--color-success); font-size: var(--type-meta); }
+.settings-view__danger-action { color: var(--color-danger); }
+.settings-view__control-disabled { opacity: .45; pointer-events: none; }
+.settings-view__group > .settings-view__status,
+.settings-view__group > .settings-view__row-message { display: block; }
+
 .ui-choice {
   display: inline-flex;
   align-items: center;

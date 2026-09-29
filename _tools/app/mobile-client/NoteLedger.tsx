@@ -5,7 +5,8 @@ import {Badge,Button,IconButton,SectionLabel} from './ui';
 import {keyBetween} from '../src/notes/model';
 import type {Note,NotesStore} from '../src/notes/store';
 import {addDays,addMonths,cycleLabel,dayNumber,inTrial,isEnded,localToday,monthlyEquivalent,nextCharges,recurringTotals} from '../src/notes/ledger/cycle';
-import {forkedIds,keepOnly,ledgerLimitProblem,ledgerSizeProblem,monthLabel,won,type LedgerEntry,type Planned,type Recurring} from '../src/notes/ledger/model';
+import {forkedIds,groupedNumber,keepOnly,ledgerLimitProblem,ledgerSizeProblem,monthLabel,signedWon,won,type LedgerEntry,type Planned,type Recurring} from '../src/notes/ledger/model';
+import {daysUntil} from '../src/notes/ledger/input';
 import {baseIncome,donePlans,ledgerEntries,monthNotesOf,monthSummary,type Charge,type MonthSummary} from '../src/notes/ledger/summary';
 import {ChargeSheet,EntrySheet,IncomeSheet,longDate,PlanSheet,RecurringSheet,type EntryDraft} from './NoteLedgerSheets';
 import {Scrubber} from './Scrubber';
@@ -22,11 +23,8 @@ type LedgerSheet={kind:'entry';draft:EntryDraft}|{kind:'income'}|{kind:'recurrin
 const TABS:[Tab,string][]=[['month','이번 달'],['entries','기록'],['recurring','고정·구독'],['plans','계획']];
 const WEEKDAYS='일월화수목금토';
 const weekday=(date:string)=>WEEKDAYS[new Date(dayNumber(date)*86_400_000).getUTCDay()]!;
-/** Won with a leading minus for money that is short. */
-export const signedWon=(amount:number)=>amount<0?`−${won(-amount)}`:won(amount);
-const plain=(amount:number)=>signedWon(amount).replace('₩','');
+const plain=groupedNumber;
 const monthOnly=(month:string)=>`${Number(month.slice(5,7))}월`;
-const daysUntil=(date:string,today:string)=>{const d=dayNumber(date)-dayNumber(today);return d===0?'오늘':d===1?'내일':`${d}일 후`;};
 const nextOrder=(list:{order:string}[])=>keyBetween(list.reduce<string|null>((max,item)=>max===null||item.order>max?item.order:max,null),null);
 
 function Label({children,more,onMore}:{children:ReactNode;more?:string;onMore?():void}) {

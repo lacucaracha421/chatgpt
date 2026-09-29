@@ -72,6 +72,15 @@ export const monthTitle = (month: string) => `가계부 ${monthLabel(month)}`;
 export function won(amount: number): string {
   return "₩" + String(Math.trunc(amount)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
+/** Grouped integer without a currency symbol, using the same minus sign as `signedWon`. */
+export function groupedNumber(amount: number): string {
+  const value = String(Math.trunc(Math.abs(amount))).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return amount < 0 ? `−${value}` : value;
+}
+/** Won with a leading minus when the balance is short. */
+export function signedWon(amount: number): string {
+  return amount < 0 ? `−${won(-amount)}` : won(amount);
+}
 export const validAmount = (value: unknown): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= 0 && value < LEDGER_LIMITS.amountBound;
 export const validIncomeDay = (value: unknown): value is number =>
@@ -230,6 +239,11 @@ export function keepOnly<T extends Forkable>(list: T[], id: string): T[] {
 }
 
 export const isLedgerKind = (note: { type?: string }) => note.type === LEDGER || note.type === LEDGER_MONTH;
+/** Month notes stay internal while their parent ledger still exists. */
+export function hiddenLedgerMonths(notes: readonly { id: string; type?: string; ledger?: string }[]): Set<string> {
+  const ledgers = new Set(notes.filter((note) => note.type === LEDGER).map((note) => note.id));
+  return new Set(notes.filter((note) => note.type === LEDGER_MONTH && note.ledger !== undefined && ledgers.has(note.ledger)).map((note) => note.id));
+}
 /**
  * Until the ledger screens exist, the generic editors show ledger notes read-only with
  * their fallback body (pin, trash and archive still work, as for unknown types).

@@ -12,6 +12,7 @@ import { byOrder, noteColorValue, stripMarkdown } from "./model";
 import { isSecret, noteKind, type Note } from "./store";
 import { LEDGER } from "./ledger/model";
 import { ledgerCard } from "./ledger/LedgerView";
+import { noteDateLabel } from "./format";
 
 export const CARD_MIN_WIDTH = 240;
 const CARD_MAX_WIDTH = 300;
@@ -52,15 +53,6 @@ export function previewLines(body: string): string {
   }
   while (lines.length && !lines[lines.length - 1]) lines.pop();
   return lines.join("\n");
-}
-
-function cardDate(value: string, now = new Date()) {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "";
-  if (date.toDateString() === now.toDateString()) return date.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
-  return date.getFullYear() === now.getFullYear()
-    ? date.toLocaleDateString("ko-KR", { month: "short", day: "numeric" })
-    : date.toLocaleDateString("ko-KR", { year: "numeric", month: "short", day: "numeric" });
 }
 
 function CardBody({ note, notes }: { note: Note; notes: Note[] }) {
@@ -120,7 +112,7 @@ function NoteCard({ note, notes, selected, onOpen, style }: CardProps) {
     <CardBody note={note} notes={notes} />{" "}
     <span className="notes-card__foot">
       <span className="notes-card__labels">{labels.map((label) => <span key={label} className="notes-card__label">{label}</span>)}</span>
-      <time dateTime={note.updatedAt}>{note.pending && <span className="notes-card__pending" role="img" aria-label="동기화 대기" />}{cardDate(note.updatedAt)}</time>
+      <time dateTime={note.updatedAt}>{note.pending && <span className="notes-card__pending" role="img" aria-label="동기화 대기" />}{noteDateLabel(note.updatedAt)}</time>
     </span>
   </button>;
 }

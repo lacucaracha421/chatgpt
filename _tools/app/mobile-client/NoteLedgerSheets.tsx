@@ -4,6 +4,7 @@ import {Button,Dialog,DialogDescription,IconButton} from './ui';
 import {addDays,addMonths,localToday,nextCharges} from '../src/notes/ledger/cycle';
 import {LEDGER_LIMITS,monthLabel,won,type LedgerEntry,type LedgerUnit,type Planned,type Recurring} from '../src/notes/ledger/model';
 import {matchesKoreanSearch} from '../src/shared/koreanSearch';
+import {dotDate} from '../src/notes/ledger/input';
 
 /**
  * Sheets of the tablet ledger (가계부): the entry sheet with its in-app number pad (the
@@ -20,8 +21,6 @@ export function pressKey(digits:string,key:string):string {
 }
 export const amountOf=(digits:string)=>digits?Number(digits):0;
 const digitsOf=(amount:number|null|undefined)=>amount?String(amount):'';
-/** "2026-09-25" → "9.25". */
-export const shortDate=(date:string)=>`${Number(date.slice(5,7))}.${Number(date.slice(8,10))}`;
 /** "2026-09-25" → "9월 25일". */
 export const longDate=(date:string)=>`${Number(date.slice(5,7))}월 ${Number(date.slice(8,10))}일`;
 
@@ -78,7 +77,7 @@ export function EntrySheet({initial,names,error,onSave,onDelete,onClose}:{initia
     <label className="ledger-field"><span>이름</span><input value={name} maxLength={LEDGER_LIMITS.nameChars} placeholder="이름 (선택)" enterKeyHint="done" onChange={event=>setName(event.target.value)} onKeyDown={event=>{if(event.nativeEvent.isComposing||event.keyCode===229)return;if(event.key==='Enter')(event.target as HTMLInputElement).blur();}}/></label>
     {chips.length>0&&<div className="ledger-chips" role="group" aria-label="최근 이름">{chips.map(entry=><button key={entry} type="button" className="filter-chip" onClick={()=>setName(entry)}>{entry}</button>)}<small>최근</small></div>}
     <div className="ledger-field is-row"><span>날짜</span><div className="ledger-chips">
-      <button type="button" className="filter-chip" aria-pressed={date===today} onClick={()=>setDate(today)}>오늘 <small className="numeric">{shortDate(today)}</small></button>
+      <button type="button" className="filter-chip" aria-pressed={date===today} onClick={()=>setDate(today)}>오늘 <small className="numeric">{dotDate(today)}</small></button>
       <button type="button" className="filter-chip" aria-pressed={date===addDays(today,-1)} onClick={()=>setDate(addDays(today,-1))}>어제</button>
       <label className="filter-chip ledger-date-chip" aria-pressed={other}><CalendarIcon aria-hidden="true"/>{other?longDate(date):'다른 날'}<input type="date" aria-label="다른 날" value={date} max="9999-12-31" onChange={event=>{if(event.target.value)setDate(event.target.value);}}/></label>
     </div></div>

@@ -10,7 +10,7 @@ import { Button } from "../../shared/ui/Button";
 import { keyBetween } from "../model";
 import type { Note, NotesStore } from "../store";
 import { addDays, addMonths, cycleLabel, inTrial, isEnded, localToday, monthEnd, monthlyEquivalent, monthStart, nextCharges, recurringTotals } from "./cycle";
-import { forkedIds, keepOnly, LEDGER, LEDGER_LIMITS, LEDGER_MONTH, ledgerLimitProblem, ledgerSizeProblem, monthLabel, sortRecurring, validIncomeDay, won, type LedgerEntry, type LedgerUnit, type Planned, type Recurring } from "./model";
+import { forkedIds, keepOnly, LEDGER_LIMITS, ledgerLimitProblem, ledgerSizeProblem, monthLabel, signedWon, sortRecurring, validIncomeDay, won, type LedgerEntry, type LedgerUnit, type Planned, type Recurring } from "./model";
 import { baseIncome, donePlans, ledgerEntries, monthNotesOf, monthSummary, type Charge } from "./summary";
 import { amountText, daysUntil, dotDate, formatAmountInput, parseAmount, parseDay, parseMonth, weekday } from "./input";
 import "./ledger.css";
@@ -18,7 +18,6 @@ import "./ledger.css";
 type Tab = "entries" | "recurring" | "plans";
 const TABS: [Tab, string][] = [["entries", "기록"], ["recurring", "고정·구독"], ["plans", "계획"]];
 const monthNumber = (month: string) => Number(month.slice(5, 7));
-const signedWon = (amount: number) => (amount < 0 ? `−${won(-amount)}` : won(amount));
 const codePoints = (text: string) => Array.from(text).length;
 const nameTooLong = (text: string) => codePoints(text) > LEDGER_LIMITS.nameChars;
 /** Every save checks the item limits and the whole-note size first (design §4.4). */
@@ -43,12 +42,6 @@ export function ledgerCard(ledger: Note, notes: Note[], today = localToday()) {
     next: next ? `다음 결제 ${Number(next.date.slice(5, 7))}월 ${Number(next.date.slice(8, 10))}일 · ${next.recurring.name}` : null,
   };
 }
-/** Month notes stay internal while their ledger exists (also in trash); orphans show read-only in 보관함. */
-export function hiddenLedgerMonths(notes: Note[]): Set<string> {
-  const ledgers = new Set(notes.filter((n) => n.type === LEDGER).map((n) => n.id));
-  return new Set(notes.filter((n) => n.type === LEDGER_MONTH && n.ledger !== undefined && ledgers.has(n.ledger)).map((n) => n.id));
-}
-
 /** Enter submits (never while an IME is composing), Esc cancels; buttons keep their own Enter. */
 function formKeys(submit: () => void, cancel?: () => void) {
   return (event: KeyboardEvent<HTMLElement>) => {

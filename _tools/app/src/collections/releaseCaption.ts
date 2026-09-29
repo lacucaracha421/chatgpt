@@ -10,9 +10,7 @@ import type { CollectionSummary, ReleaseBoardEntry, ReleaseInboxItem } from "../
 /** `new` = unread 신간 알림 (■, accent), `out` = released but unowned (muted), `ahead` = pre-registered (□). */
 export type ReleaseCaption = { kind: "new" | "out" | "ahead"; text: string; date: string | null };
 
-export function localDay(now = new Date()): string {
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
+export { localDay } from "../shared/displayDate";
 
 const validDate = (value: string | null | undefined) => (value && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : null);
 

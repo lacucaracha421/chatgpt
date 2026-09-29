@@ -1,4 +1,7 @@
 import type {Asset} from './types';
+import {getChoseong} from 'es-hangul';
+import {artistHandle} from '../src/artists/format';
+import {createKoreanMatcher,normalizeSearchText} from '../src/shared/koreanSearch';
 
 export type LibraryArtist = {
   id: string;
@@ -32,24 +35,12 @@ export type LibraryArtistsReply = {
 };
 export type ArtistDetailReply = {version?: number; revision?: number | string; artist?: LibraryArtist; assignedAssetCount?: number};
 
-const CHOSEONG = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
-const CHOSEONG_SET = new Set(CHOSEONG);
-
 export function artistName(artist: LibraryArtist): string {
   return artist.displayName?.trim() || artist.label.trim() || artist.sourceName?.trim() || artist.id;
 }
 
-export function artistHandle(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return '';
-  const x = trimmed.match(/^https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/([^/?#]+)/i);
-  if (x) return `@${x[1]}`;
-  if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/^https?:\/\//i, '').replace(/\/$/, '');
-  return trimmed.startsWith('@') ? trimmed : `@${trimmed}`;
-}
-
 export function artistHandles(artist: LibraryArtist): string[] {
-  const values = artist.keys.map(artistHandle).filter(Boolean);
+  const values = artist.keys.map(key => artistHandle({keys:[key.replace(/^@/, '')]})).filter((value):value is string=>!!value);
   return [...new Set(values)].slice(0, 3);
 }
 
@@ -101,50 +92,32 @@ export function normalizeAssignments(value: unknown): ArtistAssignment[] {
   });
 }
 
-export function choseongOf(value: string): string {
-  return Array.from(value).map(character => {
-    const code = character.charCodeAt(0);
-    if (code < 0xac00 || code > 0xd7a3) return character;
-    return CHOSEONG[Math.floor((code - 0xac00) / 588)] ?? character;
-  }).join('');
-}
-
-function queryValue(value: string): string { return value.toLocaleLowerCase('ko-KR').replace(/\s+/g, ''); }
-
 export function searchValues(artist: LibraryArtist): string[] {
   return [artistName(artist), artist.label, artist.displayName ?? '', artist.sourceName ?? '', ...artist.keys];
 }
 
 export function matchesArtist(artist: LibraryArtist, query: string): boolean {
-  const needle = queryValue(query);
-  if (!needle) return true;
-  return searchValues(artist).some(value => {
-    const text = queryValue(value);
-    return text.includes(needle) || (Array.from(needle).every(character => CHOSEONG_SET.has(character)) && choseongOf(value).includes(needle));
-  });
+  return createKoreanMatcher(query)(searchValues(artist));
 }
 
 /** Positions in a label to underline. Choseong queries underline the matching Korean syllables. */
 export function matchedPositions(label: string, query: string): Set<number> {
-  const needle = queryValue(query);
+  const needle = normalizeSearchText(query);
   const positions = new Set<number>();
   if (!needle) return positions;
-  const text = queryValue(label);
+  const units = Array.from(label).flatMap((character,index)=>Array.from(normalizeSearchText(character)).map(value=>({value,index})));
+  const text = units.map(unit=>unit.value).join('');
   const at = text.indexOf(needle);
   if (at >= 0) {
-    Array.from(needle).forEach((_, index) => positions.add(at + index));
+    Array.from(needle).forEach((_, index) => positions.add(units[at+index]!.index));
     return positions;
   }
-  if (!Array.from(needle).every(character => CHOSEONG_SET.has(character))) return positions;
-  const initials = choseongOf(label);
-  let queryIndex = 0;
-  Array.from(initials).forEach((initial, index) => {
-    if (initial === Array.from(needle)[queryIndex]) {
-      positions.add(index);
-      queryIndex++;
-    }
-  });
-  return queryIndex === Array.from(needle).length ? positions : new Set<number>();
+  if (!createKoreanMatcher(query)(label)) return positions;
+  const initials = getChoseong(text,{keepNonHangul:true});
+  const initialAt = initials.indexOf(needle);
+  if (initialAt < 0) return positions;
+  Array.from(needle).forEach((_,index)=>positions.add(units[initialAt+index]!.index));
+  return positions;
 }
 
 export function orderedArtists(artists: LibraryArtist[]): LibraryArtist[] {
@@ -184,16 +157,6 @@ export function daysSince(value: string | null | undefined, now = Date.now()): n
   const time = Date.parse(value);
   if (!Number.isFinite(time) || time > now) return null;
   return Math.floor((now - time) / 86_400_000);
-}
-
-export function dateText(value: string | null | undefined, includeYear = true): string {
-  if (!value) return '';
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return includeYear ? `${year}.${month}.${day}` : `${month}.${day}`;
 }
 
 export function profileUrl(artist: LibraryArtist): string | null {

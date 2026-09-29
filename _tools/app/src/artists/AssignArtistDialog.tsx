@@ -2,7 +2,8 @@ import { useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
-import { artistHandle, ArtistThumb } from "./ArtistHub";
+import { ArtistThumb } from "./ArtistHub";
+import { artistHandle } from "./format";
 import { CheckIcon, MagnifyingGlassIcon, PlusIcon } from "./artistIcons";
 import { invalidateArtists, useArtistGateway, useArtistRead } from "./artistStore";
 

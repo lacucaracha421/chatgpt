@@ -297,8 +297,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/Settings.css": {
-      "offScaleSpacing": 3,
-      "offRoleFontSize": 3,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 0
     },
@@ -381,8 +381,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/mobile.css": {
-      "offScaleSpacing": 88,
-      "offRoleFontSize": 53,
+      "offScaleSpacing": 87,
+      "offRoleFontSize": 51,
       "pillRadius": 2,
       "legacyToken": 0
     },

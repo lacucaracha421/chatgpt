@@ -124,7 +124,7 @@ describe('album Library scopes',()=>{
   expect(screen.getByRole('heading',{name:'에셋'})).toBeTruthy();fail=false;fireEvent.click(screen.getByRole('button',{name:'다시 시도'}));await screen.findByRole('heading',{name:'업로드용'});
  });
  it('bounds malformed hierarchy paths and normalizes only the agreed envelope',()=>{
-  const cyclic=[{...albums[0],id:'x',name:'X',parentId:'y'},{...albums[0],id:'y',name:'Y',parentId:'x'}];expect(albumPath(cyclic,'x')).toBe('Y / X');
+  const cyclic=[{...albums[0],id:'x',name:'X',parentId:'y'},{...albums[0],id:'y',name:'Y',parentId:'x'}];expect(albumPath(cyclic,'x')).toBe('Y › X');
   expect(albumPage({...page(),items:[asset('a'),asset('a')]})).toEqual({items:[asset('a')],has_more:false,next_cursor:null,filter_version:1});
   expect(pagePath(albumView(tree,albums[0]),'cursor')).toContain('cursor=cursor');
  });

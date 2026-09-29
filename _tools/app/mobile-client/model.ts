@@ -1,5 +1,6 @@
 import type {Asset, AssetFiltersValue, Page, PageWire, View} from './types';
 import {EMPTY_FILTERS, filterKey, filterVersionOf, withFilters} from './assetFilters';
+import {formatDuration} from '../src/assets/assetMetadata';
 export const PAGE_SIZE = 40;
 /** Thumbnail size: 0 (크게) … 2 (촘촘하게) in half steps; 1 (균형) is the default. */
 export const DENSITIES = ['크게', '조금 크게', '균형', '조금 촘촘하게', '촘촘하게'] as const;
@@ -105,10 +106,5 @@ export function dateLabel(asset: Asset) {
  * rather than treated as missing.
  */
 export function durationLabel(asset: Asset) {
-  const value = asset.duration_ms;
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '';
-  const total = Math.round(value / 1000);
-  const hours = Math.floor(total / 3600), minutes = Math.floor((total % 3600) / 60), seconds = total % 60;
-  const minuteText = hours > 0 ? String(minutes).padStart(2, '0') : String(minutes);
-  return `${hours > 0 ? `${hours}:` : ''}${minuteText}:${String(seconds).padStart(2, '0')}`;
+  return formatDuration(asset.duration_ms);
 }

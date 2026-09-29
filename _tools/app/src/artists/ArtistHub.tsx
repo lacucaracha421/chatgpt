@@ -16,6 +16,7 @@ import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { ArtistCollage } from "./ArtistCollage";
+import { artistHandle } from "./format";
 import { ArrowPathIcon, CheckIcon, ChevronRightIcon, Cog6ToothIcon, MagnifyingGlassIcon, MergeIcon, PinIcon, XMarkIcon } from "./artistIcons";
 import { invalidateArtists, localDateAndOffset, useArtistGateway, useArtistOverview, useArtistRead } from "./artistStore";
 import { UNKNOWN_SOURCE, type ArtistBucket, type ArtistExcludedFolder, type ArtistMergeSuggestion, type ArtistSettings, type ArtistSort, type ArtistSummary } from "./types";
@@ -27,15 +28,6 @@ const PAGE = 200;
 const hubScroll = new Map<ArtistHubSection, number>();
 let mainShown = 30;
 const formatCount = (value: number) => value.toLocaleString("ko-KR");
-
-/** `@handle` for the first handle key, else the host of a creator URL. */
-export function artistHandle(artist: Pick<ArtistSummary, "keys">): string | null {
-  const handle = artist.keys.find((key) => !/^https?:\/\//.test(key));
-  if (handle) return /^\d+$/.test(handle) ? handle : `@${handle}`;
-  const url = artist.keys[0];
-  if (!url) return null;
-  try { return new URL(url).host.replace(/^www\./, ""); } catch { return url; }
-}
 
 export function ArtistThumb({ assetId, privacyMode, className = "artist-thumb" }: { assetId?: string; privacyMode: boolean; className?: string }) {
   return <span className={className} aria-hidden="true">
@@ -54,7 +46,7 @@ export function ThumbStrip({ assetIds, privacyMode, label, onOpen }: { assetIds:
   </div>;
 }
 
-/** `129장 · 최근 저장 09.12`; an artist that is main only by recent saves shows those instead. */
+/** `129장 · 최근 저장 9.12`; an artist that is main only by recent saves shows those instead. */
 function metaLine(artist: ArtistSummary, rule?: ArtistSettings) {
   const saved = artist.lastSavedAt ? `최근 저장 ${displayDate(artist.lastSavedAt)}` : null;
   const byRecent = rule && artist.assetCount < rule.mainMinCount && artist.recentCount >= rule.recentMinCount;

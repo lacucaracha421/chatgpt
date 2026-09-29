@@ -14,14 +14,15 @@ import {toggleMarkdownTask} from '../src/shared/markdown/markdown';
 import {MarkdownHelpButton} from './MarkdownHelp';
 import {byOrder,checklistText,labelKey,NOTE_COLORS,NOTE_LIMITS,noteColorValue,noteLimitProblem,normalizeLabel,stripMarkdown,textToItems,type NoteKind} from '../src/notes/model';
 import {isSecret,noteKind,NotesStore,PIN_REQUIRED_TEXT,type Note} from '../src/notes/store';
-import {genericView,isLedgerKind,LEDGER,LEDGER_MONTH} from '../src/notes/ledger/model';
+import {genericView,hiddenLedgerMonths,isLedgerKind,LEDGER} from '../src/notes/ledger/model';
+import {noteMatches,sortNotes} from '../src/notes/noteList';
+import {noteDateLabel} from '../src/notes/format';
 import {LedgerCard,NoteLedger} from './NoteLedger';
 import {NoteChecklist} from './NoteChecklist';
 import {copySecret,SecretEditor,SecretGate} from './NoteSecret';
 import {caretOffsetAtPoint,revealCaret} from './noteCaret';
 import {appendSection,deleteSection,moveSection,renameSection,replaceSectionBody,splitSections,unfixSection,type NoteSection,type Range} from '../src/notes/sections';
 import './notes.css';
-import {matchesKoreanSearch} from '../src/shared/koreanSearch';
 import {Scrubber} from './Scrubber';
 
 /** A decrypted note as native returns it (Notes v2 fields are optional: v1 notes lack them). */
@@ -45,14 +46,6 @@ export function mobileNotesRequest<T>(operation:string,input:unknown={}):Promise
 type Scope='all'|'archive'|'trash';
 type Sheet='new'|'color'|'more'|'list'|'recovery'|'sectionMore'|null;
 const tint=(color:string|null|undefined)=>{const value=noteColorValue(color);return value?({'--note-tint':value} as CSSProperties):undefined;};
-/** Search: title, body, checklist items and labels in memory; secret notes by title only. */
-export function noteMatches(note:Note,query:string) {
-  if(!query)return true;
-  // A ledger matches by title only; its entries are searched inside the ledger.
-  // Hidden notes match by title only, so a search never reveals them (PC 2026-09-28).
-  const text=isSecret(note)||isLedgerKind(note)||note.concealed?note.title:[note.title,note.body,...(note.items??[]).map(item=>item.text),...(note.labels??[])].join('\n');
-  return matchesKoreanSearch(text,query);
-}
 const CARD_CHECKS=8,CARD_FIELDS=4;
 const NOTE_SECTION_FOLDS_KEY='lakomics.notes.sectionFolds.v1';
 type SectionFolds=Record<string,boolean>;
@@ -152,8 +145,8 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   const note=ledgerOpen?found:genericView(found);
   const ledgerBack=useRef<(()=>boolean)|null>(null);
   // Month notes live inside their ledger: out of the list, 보관함, labels and counts.
-  const ledgerIds=useMemo(()=>new Set(state.notes.filter(n=>n.type===LEDGER).map(n=>n.id)),[state.notes]);
-  const listed=useMemo(()=>state.notes.filter(n=>!(n.type===LEDGER_MONTH&&!!n.ledger&&ledgerIds.has(n.ledger))),[state.notes,ledgerIds]);
+  const hiddenMonths=useMemo(()=>hiddenLedgerMonths(state.notes),[state.notes]);
+  const listed=useMemo(()=>state.notes.filter(n=>!hiddenMonths.has(n.id)),[state.notes,hiddenMonths]);
   // ---- Sync: at once when Notes opens, every minute (or when `signals.notes` moves while the
   // status long-poll is live, with a 10 min fallback), and backing off while writes wait.
   const pending=state.notes.some(n=>n.pending);
@@ -317,7 +310,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   useLevelMotion(section,active&&state.ready&&state.unlocked?(editing?'edit':scope!=='all'?scope:'list'):null,(editing?1:0)+(scope!=='all'?1:0));
   // ---- List
   const allLabels=useMemo(()=>{const map=new Map<string,{label:string;count:number}>();for(const n of listed)if(!n.deleted)for(const l of n.labels??[]){const k=labelKey(l);const e=map.get(k);if(e)e.count++;else map.set(k,{label:l,count:1});}return [...map.values()].sort((a,b)=>a.label.localeCompare(b.label,'ko'));},[listed]);
-  const visible=listed.filter(n=>(trash?n.deleted:!n.deleted&&(scope==='archive'?!!n.archived:!n.archived))&&(trash||!label||(n.labels??[]).some(l=>labelKey(l)===labelKey(label)))&&noteMatches(n,trash?'':query)).sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b.updatedAt.localeCompare(a.updatedAt));
+  const visible=sortNotes(listed.filter(n=>(trash?n.deleted:!n.deleted&&(scope==='archive'?!!n.archived:!n.archived))&&(trash||!label||(n.labels??[]).some(l=>labelKey(l)===labelKey(label)))&&noteMatches(n,trash?'':query)));
   const pinned=scope!=='all'?[]:visible.filter(n=>n.pinned),recent=scope!=='all'?visible:visible.filter(n=>!n.pinned);
   const trashed=listed.filter(n=>n.deleted).length,archived=listed.filter(n=>!n.deleted&&n.archived).length;
   const status=state.error?'확인 필요':state.saving?'저장 중':state.syncing?'동기화 중':pending?'동기화 대기':'동기화됨';
@@ -325,7 +318,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   const scrubberSort=useMemo(()=>({kind:'date' as const,values:visible.map(note=>note.updatedAt)}),[visible]);
   const pull=usePullToRefresh(list,()=>void store.sync(),state.syncing,!active||!state.unlocked||editing);
   // A dot marks a note still waiting to sync; the words are there for screen readers.
-  const meta=(n:Note)=><>{n.pending&&<i className="note-card__pending" aria-hidden="true"/>}{n.conflictCopy&&<><b>사본</b> · </>}{relativeTime(n.updatedAt)}{n.pending&&<span className="sr-only"> · 동기화 대기</span>}</>;
+  const meta=(n:Note)=><>{n.pending&&<i className="note-card__pending" aria-hidden="true"/>}{n.conflictCopy&&<><b>사본</b> · </>}{noteDateLabel(n.updatedAt)}{n.pending&&<span className="sr-only"> · 동기화 대기</span>}</>;
   const card=(n:Note)=>n.type===LEDGER&&!n.readOnly&&!n.deleted?<LedgerCard key={n.id} ledger={n} notes={state.notes} onOpen={()=>openFromList(n.id)} meta={meta(n)}/>:<NoteCard key={n.id} note={n} meta={meta(n)} onOpen={()=>openFromList(n.id)}/>;
   const syncButton=<Button type="button" size="icon" variant="ghost" className={`notes-sync${state.syncing?' is-syncing':''}${state.error?' is-error':''}`} aria-label="동기화" aria-busy={state.syncing} disabled={state.syncing} onClick={()=>void store.sync()}><ArrowPathIcon aria-hidden="true"/></Button>;
   // ---- Editor body
@@ -368,7 +361,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
         {isSecret(note)&&state.secretLocked&&!note.redacted&&<p className="notes-readonly" role="status">잠금이 풀린 사이 저장하지 못한 변경이 있습니다. PIN을 입력하면 이어서 저장합니다.</p>}
         {limitError&&<p className="notes-limit" role="alert">{limitError}</p>}
         <input ref={titleRef} className="notes-title" aria-label="메모 제목" placeholder={isSecret(note)?'암호 메모 제목':'제목'} maxLength={NOTE_LIMITS.title} value={note.title} readOnly={note.deleted||!!note.readOnly} onChange={event=>edit({title:event.target.value})}/>
-        <p className="notes-when">{relativeTime(note.updatedAt)} 수정{note.archived&&' · 보관함'}</p>
+        <p className="notes-when">{noteDateLabel(note.updatedAt)} 수정{note.archived&&' · 보관함'}</p>
         {!note.redacted&&(editable||(note.labels??[]).length>0)&&<LabelEditor key={note.id} labels={note.labels??[]} suggestions={allLabels.map(l=>l.label)} readOnly={!editable} onChange={labels=>edit({labels})}/>}
         {body}
       </div></div>
@@ -424,15 +417,4 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
     {sheet==='recovery'&&<BottomSheet title="메모 복구키" onClose={()=>setSheet(null)}><RecoveryKey store={store}/></BottomSheet>}
     {state.error&&<div className="notes-error" role="alert">{state.error}<Button variant="ghost" onClick={()=>void (state.unlocked?store.sync():store.load())}>다시 시도</Button></div>}
   </section>;
-}
-
-/** "N분 전" for recent edits, then the calendar date. */
-export function relativeTime(iso:string,now=Date.now()){
-  const at=Date.parse(iso);if(!Number.isFinite(at))return '';
-  const minutes=Math.floor((now-at)/60_000);
-  if(minutes<1)return '방금';
-  if(minutes<60)return `${minutes}분 전`;
-  if(minutes<1440)return `${Math.floor(minutes/60)}시간 전`;
-  if(minutes<10080)return `${Math.floor(minutes/1440)}일 전`;
-  return new Date(at).toLocaleDateString();
 }

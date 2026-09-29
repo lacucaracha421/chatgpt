@@ -30,7 +30,7 @@ let notes: Note[];
 
 const exchange = (sending = false): ExchangeSnapshot => ({configured: true, tokenConfigured: true, receiveSupported: true, deviceId: 'tablet', deviceName: '태블릿', code: '', devices: [{deviceId: 'pc', name: '작업실 PC', kind: 'pc', lastSeenAt: '2026-09-25T11:29:00Z'}], incoming: [{transferId: 'rx1', batchId: 'b', fileName: '받은 표지.jpg', sizeBytes: 100, bytes: 100, peer: 'pc', peerId: 'pc', state: 'saved', code: '', createdAt: '2026-09-25T11:00:00Z'}], unseen: 1, outgoing: sending ? [{transferId: 'tx1', batchId: 'b2', fileName: '스케치.zip', sizeBytes: 100, bytes: 62, peer: 'pc', peerId: 'pc', state: 'uploading', code: '', createdAt: '2026-09-25T10:00:00Z'}] : []});
 const note = (id: string, values: Partial<Note>): Note => ({id, title: '', body: '', pinned: true, deleted: false, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z', localRevision: 1, pending: false, conflict: false, ...values});
-const pinnedNotes = (): Note[] => [note('shop', {type: 'checklist', title: 'Todo', items: [{id: '1', text: '우유', checked: true, order: 'a'}, {id: '2', text: '계란', checked: false, order: 'b'}, {id: '3', text: '두부', checked: true, order: 'c'}]}), note('ledger', {type: 'ledger', title: '가계부', income: 1000000, recurring: [], planned: []}), note('month', {type: 'ledger-month', pinned: false, archived: true, ledger: 'ledger', month: '2026-09', income: null, entries: [{id: 'e1', date: '2026-09-10', amount: 250000, name: '마트', createdAt: '2026-09-10T00:00:00Z'}]})];
+const pinnedNotes = (): Note[] => [note('shop', {type: 'checklist', title: 'Todo', items: [{id: '1', text: '**우유**', checked: true, order: 'a'}, {id: '2', text: '계란', checked: false, order: 'b'}, {id: '3', text: '두부', checked: true, order: 'c'}]}), note('ledger', {type: 'ledger', title: '가계부', income: 1000000, recurring: [], planned: []}), note('month', {type: 'ledger-month', pinned: false, archived: true, ledger: 'ledger', month: '2026-09', income: null, entries: [{id: 'e1', date: '2026-09-10', amount: 250000, name: '마트', createdAt: '2026-09-10T00:00:00Z'}]})];
 const props = (overrides: Partial<HomeProps> = {}): HomeProps => ({items: [item('recent')], hasMore: false, captures: [], busy: false, paused: false, secondaryError: '', scope: 'https://a.example', exchange: exchange(), characters: null, review: {enabled: false, refreshKey: 0}, similarityKey: 0, onPending: vi.fn(), onReview: vi.fn(), onSimilarity: vi.fn(), onDuplicates: vi.fn(), onExchange: vi.fn(), onReleases: vi.fn(), onWork: vi.fn(), onSettings: vi.fn(), onRecent: vi.fn(), onLibrary: vi.fn(), onNotes: vi.fn(), onRefresh: vi.fn(), ...overrides});
 
 beforeEach(() => {
@@ -71,7 +71,7 @@ describe('home model', () => {
     const rows = memoRows(pinnedNotes(), '2026-09-25');
     expect(rows[0]).toMatchObject({kind: 'checklist', done: 2, total: 3});
     expect((rows[0] as Extract<typeof rows[number], {kind: 'checklist'}>).items[0]).toEqual({text: '우유', checked: true});
-    expect(rows[1]).toMatchObject({kind: 'ledger', amount: 250000, label: '쓴 돈', categories: [], latest: [{label: '마트', amount: 250000}]});
+    expect(rows[1]).toMatchObject({kind: 'ledger', amount: 750000, available: 750000, spent: 250000, categories: [], latest: [{label: '마트', amount: 250000}]});
   });
   it('unescapes Markdown punctuation in the Home memo preview', () => {
     const rows = memoRows([note('plain', {type: 'text', title: '메모', body: '\\# nai \\# 확장 **읽기**'})], '2026-09-25');
@@ -79,7 +79,10 @@ describe('home model', () => {
   });
   it('keeps shelf ordering and today counts deterministic', () => {
     const release = (id: string, date: string | null) => ({id, name: id, unread: 1, caption: {kind: 'new' as const, text: '신간 1권', date}});
-    expect(shelfEntries([release('old', '9.16'), release('today', null)], [{id: 'soon', name: 'soon', date: '2026-09-30', volumeNumber: 8}], '2026-09-25').map(row => row.id)).toEqual(['today', 'old', 'soon']);
+    expect(shelfEntries([release('old', '9.16'), release('today', null)], [
+      {id: 'soon', name: 'soon', date: '2026-09-30', volumeNumber: 8},
+      {id: 'day-45', name: 'day-45', date: '2026-11-09', volumeNumber: 9},
+    ], '2026-09-25').map(row => row.id)).toEqual(['today', 'old', 'soon', 'day-45']);
     expect(addedToday([item('a', '2026-09-25T01:00:00Z')], true, new Date(2026, 8, 25, 14))).toEqual({count: 1, more: true});
   });
 });
@@ -214,7 +217,8 @@ describe('Home A', () => {
     expect(screen.queryByText('발매 예정')).toBeNull();
     expect(screen.queryByText('♥')).toBeNull();
     expect(screen.queryByText('♡')).toBeNull();
-    expect(within(memo).getAllByText('250,000원')).toHaveLength(2);
+    expect(within(memo).getByText('750,000원')).toBeTruthy();
+    expect(within(memo).getByText('250,000원')).toBeTruthy();
     expect(within(memo).getByText('마트')).toBeTruthy();
     expect(within(region('검토')).getByText('유사 이미지')).toBeTruthy();
     expect(await within(region('자산 현황')).findByRole('button', {name: '이미지 1,200장'})).toBeTruthy();

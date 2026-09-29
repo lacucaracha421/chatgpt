@@ -1,4 +1,5 @@
 export type ReleasePrecision = 'exact' | 'month' | 'quarter' | 'year' | 'tbd';
+export {releaseDateLabel,releaseEventLine,releaseTokenLabel} from '../src/collections/releaseCalendarFormat';
 export type ReleaseKind = 'game' | 'movie' | 'anime';
 
 export type ReleaseCover = {
@@ -146,49 +147,11 @@ export function visibleWishlistIds(authoritative: Set<string>, intents: Record<s
   return ids;
 }
 
-function releaseTokenLabel(token: string | null, referenceYear: number): string {
-  if (!token || token === 'tbd') return '미정';
-  const day = DATE_RE.test(token) ? token : null;
-  if (day) return releaseDateLabel(day, 'exact', referenceYear);
-  const month = /^(\d{4})-(\d{2})$/.exec(token);
-  if (month) return releaseDateLabel(`${token}-01`, 'month', referenceYear);
-  const quarter = /^(\d{4})-Q([1-4])$/.exec(token);
-  if (quarter) return `${quarter[1]} Q${quarter[2]}`;
-  if (/^\d{4}$/.test(token)) return `${token}년 중`;
-  return token;
-}
-
-export function releaseEventLine(event: Pick<ReleaseCalendarEvent, 'kind' | 'previousValue' | 'currentValue'>, referenceYear = new Date().getFullYear()): string {
-  const current = releaseTokenLabel(event.currentValue, referenceYear);
-  switch (event.kind) {
-    case 'date_set': return `발매일 공개 · ${current}`;
-    case 'date_changed': return `발매일 변경 · ${releaseTokenLabel(event.previousValue, referenceYear)} → ${current}`;
-    case 'released': return current;
-  }
-}
-
 export function releaseDaysUntil(date: string | null, today = new Date()): number | null {
   if (!date || !DATE_RE.test(date)) return null;
   const [year, month, day] = date.split('-').map(Number);
   const start = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   return Math.round((Date.UTC(year, month - 1, day) - start) / 86_400_000);
-}
-
-/** Precision-aware wording shared with the PC calendar: exact, month, quarter, year, TBD. */
-export function releaseDateLabel(date: string | null, precision: ReleasePrecision, referenceYear = new Date().getFullYear()): string {
-  const parts = date ? DATE_RE.exec(date) : null;
-  if (!parts || precision === 'tbd') return '미정';
-  const year = Number(parts[1]);
-  const month = Number(parts[2]);
-  const day = Number(parts[3]);
-  const prefix = year === referenceYear ? '' : `${year}년 `;
-  switch (precision) {
-    // Compact numeric date like the Home shelf: 9.12, or 2027.1.5 outside the current year.
-    case 'exact': return year === referenceYear ? `${month}.${day}` : `${year}.${month}.${day}`;
-    case 'month': return `${prefix}${month}월 중`;
-    case 'quarter': return `${year} Q${Math.floor((month - 1) / 3) + 1}`;
-    case 'year': return `${year}년 중`;
-  }
 }
 
 function periodOf(entry: ReleaseCalendarEntry): {monthKey: string; monthLabel: string; dayKey: string; dayLabel: string; order: string} {

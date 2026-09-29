@@ -50,20 +50,12 @@ export function editionVolumes(volumes:CollectionVolume[], edition:number) {
 export function editions(volumes:CollectionVolume[]) { return [...new Set(volumes.map(v=>v.editionIndex))].sort((a,b)=>a-b); }
 export function collectionCover(item:CollectionSummary) { return item.selectedWorkArtworkId ?? [...(item.volumes ?? [])].sort((a,b)=>a.editionIndex-b.editionIndex || a.volumeNumber-b.volumeNumber).find(v=>v.coverArtworkId)?.coverArtworkId; }
 
-export function volumeLabel(volume:CollectionVolume) {
-  const label=volume.displayLabel?.trim();
-  return !label ? `${volume.volumeNumber}권` : /^\d+(?:\.\d+)?$/.test(label) ? `${label}권` : label;
-}
+export {volumeLabel} from '../src/collections/collectionFormat';
 
 /** The 원제 worth showing beside the title: present and not just the title again. */
 export function originalTitle(item:CollectionSummary){const value=item.originalTitle?.trim()??'';return value&&value!==item.name.trim()?value:'';}
-export function collectionCardCredit(item:CollectionSummary){return (item.type==='movie'?item.productionCompany:item.type==='game'?item.developer:item.type==='manga'?item.author:item.av?.people.find(person=>person.role==='performer')?.name)?.trim()??'';}
-export function collectionCardDate(item:CollectionSummary){
-  const short=(date:string)=>{const [y,m,d]=date.split('-');return `${y.slice(-2)}.${Number(m)}.${Number(d)}`;};
-  if(item.type==='movie'&&item.seasonDateRange?.length===2){const [first,last]=item.seasonDateRange;return first===last?short(first):`${short(first)}~${short(last)}`;}
-  if(item.type==='av'&&item.av?.releaseDate)return short(item.av.releaseDate);
-  return item.year?String(item.year):item.releaseDate?.slice(0,4)??'';
-}
+export const collectionCardCredit=(item:CollectionSummary)=>collectionCredit(item);
+export {collectionCardDate};
 
 export const SORT_LABELS:Record<CollectionFilters['sort'],string>={media_date:'최신순',recent:'최근 추가',name:'제목'};
 /** Direction words follow the sort: dates read newest/oldest, titles read alphabetical/reverse. */
@@ -77,3 +69,4 @@ export function volumeReleaseLabel(volume:CollectionVolume) {
   if(!match)return volume.localReleaseDate?.trim()??'';
   return [match[1],Number(match[2]),match[3]?Number(match[3]):null].filter(part=>part!==null).join('.');
 }
+import {collectionCardDate,collectionCredit} from '../src/collections/collectionFormat';

@@ -17,6 +17,9 @@
  */
 import {api} from './transport';
 import {collectionPath, type CollectionPage, type CollectionSummary, type KakaoReleaseVolume} from './collectionModel';
+import {shortReleaseDate} from '../src/collections/releaseCaption';
+export {koreanVolumeLine,shortReleaseDate} from '../src/collections/releaseCaption';
+export {localDay as localToday} from '../src/shared/displayDate';
 
 export const RELEASES_PATH = '/v1/collections/releases';
 export const RELEASES_ACKNOWLEDGE_PATH = '/v1/collections/releases/acknowledge';
@@ -161,24 +164,11 @@ export function groupReleases(events: ReleaseEvent[]): ReleaseGroup[] {
   return [...groups.values()];
 }
 
-/** Today in local time as `YYYY-MM-DD`, the form provider dates compare against. */
-export function localToday(now = new Date()): string {
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-}
 const validDate = (value: string | null | undefined) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
 
 export type KoreanVolume = {volumeNumber: number; date: string | null; upcoming: boolean; released: boolean; fresh: boolean};
 export type KoreanRow = {work: CollectionSummary; owned: number | null; volumes: KoreanVolume[]; fresh: number};
 export type JapanRow = {work: CollectionSummary; latest: number; ahead: number | null; aheadVolumes: {volumeNumber: number; fresh: boolean}[]; fresh: number};
-
-/** A Korean volume's line: "3권 · 9월 16일 발매됨", "4권 · 10월 10일 발매 예정", "5권 · 발매일 미정". */
-export function koreanVolumeLine(volume: KoreanVolume, today: string): string {
-  const head = `${volume.volumeNumber}권`;
-  if (!volume.date) return volume.released ? `${head} · 발매됨` : `${head} · 발매일 미정`;
-  const [year, month, day] = volume.date.split('-').map(Number);
-  const when = `${year === Number(today.slice(0, 4)) ? '' : `${year}년 `}${month}월 ${day}일`;
-  return `${head} · ${when} ${volume.upcoming ? '발매 예정' : '발매됨'}`;
-}
 
 const byCollection = (events: ReleaseEvent[]) => {
   const map = new Map<string, ReleaseEvent[]>();
@@ -250,11 +240,6 @@ export function japanReleases(works: CollectionSummary[], events: ReleaseEvent[]
   return rows.sort((a, b) => news(b) - news(a) || (b.ahead ?? 0) - (a.ahead ?? 0) || a.work.name.localeCompare(b.work.name, 'ko'));
 }
 
-/** A short date for a grid caption: `9.24` this year, `2027.1.5` otherwise. */
-export function shortReleaseDate(date: string, today: string): string {
-  const [year, month, day] = date.split('-').map(Number);
-  return `${String(year) === today.slice(0, 4) ? '' : `${year}.`}${month}.${day}`;
-}
 export type ReleaseCaption = {kind: 'new' | 'out' | 'ahead'; text: string; date: string | null};
 /**
  * The grid tile's 신간 marker, shown after the year and stars. In priority:

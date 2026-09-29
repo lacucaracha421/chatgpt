@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {BookOpenIcon, ChevronRightIcon, InboxIcon, ListBulletIcon, RectangleStackIcon, Square2StackIcon, WalletIcon} from '@heroicons/react/24/outline';
 import {collectionCover, type CollectionSummary} from './collectionModel';
-import {koreanReleases, localToday} from './collectionReleases';
+import {localToday} from './collectionReleases';
 import {Cover} from './CoverGroup';
 import {currentShelf, subscribeReleases} from './releaseStore';
 import {addedToday, clockLabel, dateBlock, daysAfter, externalShelfRows, shelfEntries, useHomeArtists, useHomeAvPick, useHomeDashboard, useHomeMemos, useHomeRevisit, useHomeUpcoming, type HomeCover, type MemoRow, type RevisitGroup, type ShelfEntry, type UpcomingHomeEntry} from './homeDashboard';
@@ -14,6 +14,9 @@ import {usePullToRefresh} from './usePullToRefresh';
 import {usePrivacyMode} from './privacyMode';
 import type {Asset, Ticket} from './types';
 import {PlatformBadges} from '../src/collections/PlatformBadges';
+import {KIND_LABEL} from '../src/collections/collectionFormat';
+import {nextInSeriesRows,type NextInSeriesRow} from '../src/home/homeModel';
+import {groupedNumber} from '../src/notes/ledger/model';
 import {ddayLabel, displayDate} from '../src/shared/displayDate';
 import {Badge, Button, SectionLabel, Skeleton} from './ui';
 import './home.css';
@@ -30,7 +33,7 @@ export interface HomeProps {
   onRevisit?(key: string, title: string): void; onArtists?(): void; onNotes(id?: string): void; onRefresh?(): void;
 }
 
-const grouped = (amount: number) => `${amount < 0 ? '−' : ''}${String(Math.trunc(Math.abs(amount))).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+const grouped = groupedNumber;
 function Progress({value, muted}: {value: number; muted?: boolean}) { return <span className={`home-progress${muted ? ' is-muted' : ''}`} aria-hidden="true"><i style={{width: `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`}} /></span>; }
 
 function Section({title, onMore, className = '', children}: {title: string; onMore?(): void; className?: string; children: ReactNode}) {
@@ -105,7 +108,7 @@ function HomeMangaCover({item, revision, label, active}: {item: CollectionSummar
   return url ? <img className="collection-art" src={url} alt={label} /> : <span className="home-cover-placeholder"><RectangleStackIcon aria-hidden="true" /></span>;
 }
 
-const upcomingKind: Record<UpcomingHomeEntry['kind'], string> = {game: '게임', movie: '영화', anime: '애니'};
+const upcomingKind: Record<UpcomingHomeEntry['kind'], string> = KIND_LABEL;
 
 function ShelfManga({entry, cover, today, privacy, onOpen}: {entry: ShelfEntry; cover: ReactNode; today: string; privacy: boolean; onOpen(): void}) {
   const fresh = entry.kind === 'new';
@@ -137,7 +140,7 @@ function MemoPanel({rows, memos, onOpen}: {rows: MemoRow[]; memos: ReturnType<ty
     ? <button key={key} className="home-tall-memo" onClick={() => onOpen(note.id)}><span className="home-memo-title"><ListBulletIcon className="home-icon" />{note.title || 'Todo'}</span><span className="home-checklist-lines">{note.items.map((item, index) => <span key={index}><i className={item.checked ? 'is-checked' : ''}>{item.checked ? '✓' : ''}</i>{item.text}</span>)}</span><span className="home-memo-foot"><span className="numeric">{note.done}/{note.total}</span> 완료<Progress value={note.total ? note.done / note.total : 0} muted /></span></button>
     : <button key={key} className="home-tall-memo" onClick={() => onOpen(note.id)}><span className="home-memo-title"><ListBulletIcon className="home-icon" />{note.title || '메모'}</span><span className="home-memo-snippet">{note.kind === 'text' ? note.snippet : '잠긴 메모'}</span></button>;
   const noteCard = pinned ? renderNote(pinned, pinned.id) : <button key="empty-note" className="home-tall-memo is-empty" onClick={() => onOpen()}><span className="home-memo-title"><ListBulletIcon className="home-icon" />메모</span><span>고정한 메모가 없습니다.</span></button>;
-  const ledgerCard = ledger ? <button key={ledger.id} className="home-tall-memo" onClick={() => onOpen(ledger.id)}><span className="home-memo-title"><WalletIcon className="home-icon" />{ledger.title || '가계부'}</span><small className="home-ledger-month">{ledger.month}월 쓴 돈</small><strong className="home-ledger-total numeric">{grouped(ledger.amount)}원</strong>{ledger.categories.length > 0 ? <span className="home-ledger-bars">{ledger.categories.map(category => <span key={category.label}><span><b>{category.label}</b><em className="numeric">{grouped(category.amount)}원</em></span><Progress value={ledger.amount ? category.amount / ledger.amount : 0} /></span>)}</span> : <span className="home-ledger-latest"><small>최근 기록</small>{ledger.latest.map(entry => <span key={`${entry.label}:${entry.amount}`}><b>{entry.label}</b><em className="numeric">{grouped(entry.amount)}원</em></span>)}</span>}</button> : <button key="empty-ledger" className="home-tall-memo is-empty" onClick={() => onOpen()}><span className="home-memo-title"><WalletIcon className="home-icon" />가계부</span><span>고정한 가계부가 없습니다.</span></button>;
+  const ledgerCard = ledger ? <button key={ledger.id} className="home-tall-memo" onClick={() => onOpen(ledger.id)}><span className="home-memo-title"><WalletIcon className="home-icon" />{ledger.title || '가계부'}</span><small className="home-ledger-month">{ledger.month}월 {ledger.available !== null ? '쓸 수 있는 돈' : '쓴 돈'}</small><strong className="home-ledger-total numeric">{grouped(ledger.amount)}원</strong>{ledger.categories.length > 0 ? <span className="home-ledger-bars">{ledger.categories.map(category => <span key={category.label}><span><b>{category.label}</b><em className="numeric">{grouped(category.amount)}원</em></span><Progress value={ledger.spent ? category.amount / ledger.spent : 0} /></span>)}</span> : <span className="home-ledger-latest"><small>최근 기록</small>{ledger.latest.map(entry => <span key={`${entry.label}:${entry.amount}`}><b>{entry.label}</b><em className="numeric">{grouped(entry.amount)}원</em></span>)}</span>}</button> : <button key="empty-ledger" className="home-tall-memo is-empty" onClick={() => onOpen()}><span className="home-memo-title"><WalletIcon className="home-icon" />가계부</span><span>고정한 가계부가 없습니다.</span></button>;
   return <Section title="메모" onMore={() => onOpen()}><div className="home-memo-grid">{noteCard}{ledgerCard}</div>{!checklist && !ledger && memos?.locked && <p className="home-memo-locked">메모가 잠겨 있습니다.</p>}</Section>;
 }
 
@@ -159,23 +162,9 @@ function ArtistStrip({group, paused, privacy, onOpen}: {group: RevisitGroup; pau
 function AssetTile({value, title, unit, onOpen, label}: {value: string; title: string; unit: string; onOpen(): void; label: string}) { return <button className="home-asset-tile" onClick={onOpen} aria-label={label}><strong className="numeric">{value}<small>{unit}</small></strong><span>{title}</span></button>; }
 function CollectionCount({value, title}: {value: number; title: string}) { return <span className="home-asset-collection"><strong className="numeric">{grouped(value)}</strong><span>{title}</span></span>; }
 
-type HomeSeriesRow = {work: CollectionSummary; owned: number; next: number; released: number};
-/** Watched manga with a known owned count whose next Korean volumes are already out (PC 이어지는 시리즈). */
-function unownedReleasedSeries(shelf: ReturnType<typeof currentShelf>, today: string): HomeSeriesRow[] {
-  if (!shelf?.ready) return [];
-  const watched = shelf.works.filter(work => work.type === 'manga' && !!work.releaseWatch?.enabled);
-  const ownedOf = (work: CollectionSummary, edition: number) => work.ownedVolumes?.find(value => value.editionIndex === edition)?.count ?? null;
-  return koreanReleases(watched, ownedOf, [], today).flatMap(row => {
-    const released = row.volumes.filter(volume => volume.released);
-    if (row.owned === null || !released.length) return [];
-    const latest = released.map(volume => volume.date ?? '').sort().reverse()[0] ?? '';
-    return [{row: {work: row.work, owned: row.owned, next: released[0]!.volumeNumber, released: released.length}, latest}];
-  }).sort((a, b) => b.latest.localeCompare(a.latest) || a.row.work.name.localeCompare(b.row.work.name, 'ko')).map(entry => entry.row).slice(0, 3);
-}
-
-function ContinuingSeries({rows, revision, active, privacy, onOpen}: {rows: HomeSeriesRow[]; revision: string; active: boolean; privacy: boolean; onOpen(id: string): void}) {
+function ContinuingSeries({rows, revision, active, privacy, onOpen}: {rows: NextInSeriesRow<CollectionSummary>[]; revision: string; active: boolean; privacy: boolean; onOpen(id: string): void}) {
   if (!rows.length) return null;
-  return <Section title="이어지는 시리즈"><div className="home-series-grid">{rows.map(row => <button key={row.work.id} className="home-series-card" onClick={() => onOpen(row.work.id)} aria-label={`${row.work.name} ${row.next}권 발매`}><span className="home-series-pair"><span className="home-series-cover">{privacy ? <span className="home-cover-placeholder is-private" aria-label="비공개 모드로 이미지 숨김" /> : <HomeMangaCover item={row.work} revision={revision} active={active} label={row.work.name} />}{row.owned > 0 && <Badge className="home-volume-badge" variant="scrim">{row.owned}</Badge>}</span><span className="home-series-next"><b><span className="numeric">{row.next}</span><small>권</small></b><small>발매</small></span></span><strong className="home-series-title">{row.work.name}</strong><span className="home-series-meta">{row.owned > 0 ? <><span className="numeric">{row.owned}</span>권까지 소장</> : '소장 없음'}</span></button>)}</div></Section>;
+  return <Section title="이어지는 시리즈"><div className="home-series-grid">{rows.map(row => <button key={row.work.id} className="home-series-card" onClick={() => onOpen(row.work.id)} aria-label={`${row.work.name} ${row.nextVolume.number}권 발매`}><span className="home-series-pair"><span className="home-series-cover">{privacy ? <span className="home-cover-placeholder is-private" aria-label="비공개 모드로 이미지 숨김" /> : <HomeMangaCover item={row.work} revision={revision} active={active} label={row.work.name} />}{row.ownedCount > 0 && <Badge className="home-volume-badge" variant="scrim">{row.ownedCount}</Badge>}</span><span className="home-series-next"><b><span className="numeric">{row.nextVolume.number}</span><small>권</small></b><small>발매</small></span></span><strong className="home-series-title">{row.work.name}</strong><span className="home-series-meta">{row.ownedCount > 0 ? <><span className="numeric">{row.ownedCount}</span>권까지 소장</> : '소장 없음'}</span></button>)}</div></Section>;
 }
 
 /**
@@ -241,7 +230,18 @@ export function Home(props: HomeProps) {
   const todayAdded = summary ? grouped(summary.addedToday) : `${fallback.count}${fallback.more ? '+' : ''}`;
   const weekAdded = summary ? grouped(summary.addedThisWeek) : '—';
   const detailedSummary = summary?.images !== undefined && summary.videos !== undefined && summary.collections !== undefined ? summary : null;
-  const seriesRows = useMemo(() => unownedReleasedSeries(shelf, today), [shelf, today]);
+  const seriesRows = useMemo(() => {
+    if (!shelf?.ready) return [];
+    const works = shelf.works.filter(work => work.type === 'manga' && !!work.releaseWatch?.enabled);
+    return nextInSeriesRows(
+      works,
+      (work, editionIndex) => work.ownedVolumes?.find(value => value.editionIndex === editionIndex)?.count ?? null,
+      work => work.releaseSchedule?.kakao ?? null,
+      d.releases ?? [],
+      event => event.id,
+      today,
+    ).slice(0, 3);
+  }, [d.releases, shelf, today]);
   const reviewRows = [
     {key: 'pending', label: '처리 대기', value: d.todos.pending, unit: '건', icon: InboxIcon, onOpen: props.onPending},
     {key: 'similar', label: '유사 이미지', value: d.todos.similar, unit: '쌍', icon: Square2StackIcon, onOpen: props.onSimilarity},

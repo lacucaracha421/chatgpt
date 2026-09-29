@@ -114,36 +114,49 @@ export function upcomingRows(collections: CollectionSummary[], board: Map<string
 }
 
 /* ---- 이어지는 시리즈 ---- */
-export type NextInSeriesRow = {
-  work: CollectionSummary;
+export type NextInSeriesRow<TWork = CollectionSummary> = {
+  work: TWork;
   ownedCount: number;
   nextVolume: { number: number; date: string | null };
   releasedUnownedCount: number;
   fresh: boolean;
 };
 
-/** Released Korean manga volumes not yet owned, with unread releases first. */
-export function nextInSeriesRows(
-  collections: CollectionSummary[],
-  board: Map<string, ReleaseBoardEntry>,
-  inbox: Map<string, ReleaseInboxItem[]>,
+export type NextInSeriesSchedule = {
+  editionIndex: number;
+  volumes: readonly { volumeNumber: number; date: string | null; status: "upcoming" | "released" | null }[];
+};
+
+/** Released Korean volumes beyond a known owned count, unread first and then latest release. */
+export function nextInSeriesRows<TWork extends { id: string; name: string }, TEvent>(
+  works: readonly TWork[],
+  ownedOf: (work: TWork, editionIndex: number) => number | null,
+  scheduleOf: (work: TWork) => NextInSeriesSchedule | null,
+  events: readonly TEvent[],
+  eventWorkId: (event: TEvent) => string,
   today: string,
-): NextInSeriesRow[] {
-  return koreanReleases(collections.filter((work) => work.type === "manga"), board, inbox, today)
-    .flatMap((row) => {
-      const releasedByStatus = new Set(board.get(row.work.id)?.releaseSchedule.kakao?.volumes
-        .filter((volume) => volume.status === "released")
-        .map((volume) => volume.volumeNumber) ?? []);
-      const released = row.volumes.filter((volume) => volume.released || releasedByStatus.has(volume.volumeNumber));
+): NextInSeriesRow<TWork>[] {
+  const freshWorks = new Set(events.map(eventWorkId));
+  return works.flatMap((work) => {
+      const schedule = scheduleOf(work);
+      if (!schedule) return [];
+      const owned = ownedOf(work, schedule.editionIndex);
+      if (owned === null) return [];
+      const seen = new Set<number>();
+      const released = schedule.volumes
+        .filter((volume) => Number.isInteger(volume.volumeNumber) && volume.volumeNumber > owned && !seen.has(volume.volumeNumber) && seen.add(volume.volumeNumber))
+        .map((volume) => ({ ...volume, date: volume.date && /^\d{4}-\d{2}-\d{2}/.test(volume.date) ? volume.date.slice(0, 10) : null }))
+        .filter((volume) => volume.status === "released" || Boolean(volume.date && volume.date <= today))
+        .sort((a, b) => a.volumeNumber - b.volumeNumber);
       const next = released[0];
       if (!next) return [];
       return [{
         value: {
-          work: row.work,
-          ownedCount: row.owned ?? 0,
+          work,
+          ownedCount: owned,
           nextVolume: { number: next.volumeNumber, date: next.date },
           releasedUnownedCount: released.length,
-          fresh: released.some((volume) => volume.fresh),
+          fresh: freshWorks.has(work.id),
         },
         latestReleaseDate: released.map((volume) => volume.date).filter((date): date is string => !!date).sort().reverse()[0] ?? "",
       }];
@@ -158,7 +171,8 @@ export function nextInSeriesRows(
 /* ---- 메모 ---- */
 export type MemoRow =
   | { id: string; title: string; color: string | null; kind: "checklist"; done: number; total: number; items: { text: string; checked: boolean }[] }
-  | { id: string; title: string; color: string | null; kind: "ledger"; month: number; amount: number; available: number | null; spent: number; scheduled: number; perDay: number | null }
+  | { id: string; title: string; color: string | null; kind: "ledger"; month: number; amount: number; available: number | null; spent: number; scheduled: number; perDay: number | null;
+    categories: { label: string; amount: number }[]; latest: { label: string; amount: number }[] }
   | { id: string; title: string; color: string | null; kind: "secret" }
   | { id: string; title: string; color: string | null; kind: "text"; snippet: string };
 /** Pinned notes, most recently edited first; ledger month notes never show. Home renders the first two. */
@@ -171,8 +185,18 @@ export function memoRows(notes: Note[], today: string): MemoRow[] {
       if (note.concealed && note.type !== LEDGER) return { ...base, kind: "text", snippet: "숨긴 메모" };
       if (note.type === LEDGER) {
         const summary = monthSummary(note, monthNotesOf(notes, note.id), today.slice(0, 7), today);
+        const entries = summary.entries.filter((entry) => !entry.in);
+        const categoryMap = new Map<string, number>();
+        for (const entry of entries) {
+          const category = entry.category;
+          const label = typeof category === "string" ? category.trim() : "";
+          if (label) categoryMap.set(label, (categoryMap.get(label) ?? 0) + entry.amount);
+        }
+        const categories = [...categoryMap].map(([label, amount]) => ({ label, amount })).sort((a, b) => b.amount - a.amount).slice(0, 3);
+        const latest = entries.slice(0, 3).map((entry) => ({ label: entry.name || "기록", amount: entry.amount }));
         return { ...base, title: base.title || "가계부", kind: "ledger", month: Number(today.slice(5, 7)),
-          amount: summary.available ?? summary.spent, available: summary.available, spent: summary.spent, scheduled: summary.scheduled, perDay: summary.perDay };
+          amount: summary.available ?? summary.spent, available: summary.available, spent: summary.spent, scheduled: summary.scheduled, perDay: summary.perDay,
+          categories, latest };
       }
       if (note.type === "checklist" && !note.readOnly) {
         const items = [...(note.items ?? [])].sort(byOrder);
@@ -210,17 +234,6 @@ export function cloudLine(progress: CloudBackfillProgress | null, problemCount: 
   if (progress.controlState === "paused") return { tone: "idle", text: remaining > 0 ? `일시 정지 · ${remaining.toLocaleString()}개 대기` : "일시 정지" };
   if (remaining > 0) return { tone: "busy", text: `올리는 중 · ${remaining.toLocaleString()}개 남음` };
   return { tone: "ok", text: "동기화됨" };
-}
-
-/** "방금", "12분 전", "3시간 전", else "9.24 14:02". */
-export function agoLabel(at: string, now: Date) {
-  const minutes = Math.floor((now.getTime() - Date.parse(at)) / 60_000);
-  if (!Number.isFinite(minutes)) return "";
-  if (minutes < 1) return "방금";
-  if (minutes < 60) return `${minutes}분 전`;
-  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)}시간 전`;
-  const date = new Date(at);
-  return `${date.getMonth() + 1}.${date.getDate()} ${clockLabel(date)}`;
 }
 
 /** Pending S36 candidates of one character, split by verdict (`other`: neither tier). */

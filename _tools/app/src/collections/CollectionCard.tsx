@@ -5,23 +5,9 @@ import { PhysicalCover } from "./physical/PhysicalCover";
 import type { CollectionSummary } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import type { ReleaseCaption } from "./releaseCaption";
+import { collectionCardDate, collectionCredit } from "./collectionFormat";
 
-export function collectionCredit(collection: CollectionSummary): string {
-  const credit = collection.type === "manga"
-    ? collection.author
-    : collection.type === "game"
-      ? collection.developer
-      : collection.productionCompany;
-  return credit?.trim() ?? "";
-}
-
-/** The meta line's date: a series' first–last season premiere (`16.1.14~24.5.5`), else the year. */
-export function collectionCardDate(collection: CollectionSummary): string {
-  const short = (date: string) => { const [year, month, day] = date.split("-"); return `${year!.slice(-2)}.${Number(month)}.${Number(day)}`; };
-  const range = collection.type === "movie" ? collection.seasonDateRange : null;
-  if (range) return range[0] === range[1] ? short(range[0]) : `${short(range[0])}~${short(range[1])}`;
-  return collection.year ? String(collection.year) : collection.releaseDate?.slice(0, 4) ?? "";
-}
+export { collectionCardDate, collectionCredit } from "./collectionFormat";
 
 export function CollectionCard({
   collection,
