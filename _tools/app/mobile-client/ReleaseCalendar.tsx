@@ -91,7 +91,7 @@ function CalendarBody({reply, kind, wishlistOnly, visibleIds, privacy, reference
         {month.days.map(day => {
           // One heading per release day; the day's covers sit side by side under it (up to a row).
           const first = day.items[0]!;
-          const days = releaseDaysUntil(first.date);
+          const days = first.precision === 'exact' ? releaseDaysUntil(first.date) : null;
           const span = Math.min(day.items.length, DAY_SPAN_MAX);
           return <section key={day.key} className="release-calendar-day" style={{'--day-span': span} as CSSProperties} aria-label={day.label}>
             <div className="release-calendar-day-head">

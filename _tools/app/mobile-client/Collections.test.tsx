@@ -315,10 +315,10 @@ describe('read-only collections',()=>{
     fireEvent.click(fold);
     expect(showcaseCalls()).toHaveLength(1);
     expect(showcaseCalls()[0][0]).not.toMatch(/rating=|sort=/);
-    // Folded hides the card; the full view opens from the card header once unfolded.
-    expect(screen.queryByRole('button',{name:'쇼케이스 전체 보기'})).toBeNull();
+    // Folded hides the shelf; the full view opens from the label's › either way.
+    expect(document.querySelector('.collection-showcase-block')).toBeNull();
     fireEvent.click(fold);
-    fireEvent.click(screen.getByRole('button',{name:'쇼케이스 전체 보기'}));
+    fireEvent.click(screen.getByRole('button',{name:'쇼케이스 전체'}));
     expect(await screen.findByText('PC에서 정한 순서대로 보여 줍니다.')).toBeTruthy();
     act(()=>{expect(backRef.current?.()).toBe(true);});
     expect(screen.getByRole('radio',{name:'게임'})).toBeTruthy();
@@ -341,7 +341,7 @@ describe('read-only collections',()=>{
     expect(screen.queryByRole('button',{name:'게임 쇼케이스'})).toBeNull();
     await act(async()=>finishManga({...page,totalCount:2,items:[{...item,id:'manga-showcase',name:'만화 쇼케이스'}]}));
     expect(await screen.findByRole('button',{name:'만화 쇼케이스'})).toBeTruthy();
-    expect(document.querySelector('.collection-showcase-block')?.textContent).toContain('2편');
+    expect(screen.getByRole('region',{name:'쇼케이스'}).querySelector('.ui-section-label__count')?.textContent).toBe('2');
   });
   it('does not present unfiltered results from an older server as filtered results',async()=>{
     mocks.api.mockResolvedValue({...page,filterVersion:undefined});
@@ -399,11 +399,11 @@ describe('read-only collections',()=>{
     render(<Collections active paused={false} backRef={{current:null}} onCalendar={onCalendar}/>);
     await screen.findByText(item.name);
     pressTab('만화');
-    await waitFor(()=>expect(screen.getByRole('region',{name:'소식'}).querySelector('.collection-news-block')).not.toBeNull());
+    await waitFor(()=>expect(screen.getByRole('region',{name:'소식'}).querySelector('.ui-section-label__open')).not.toBeNull());
     pressTab('게임');
-    await waitFor(()=>expect(screen.getByRole('region',{name:'소식'}).querySelector('.collection-news-block')).not.toBeNull());
-    const calendarBlock=screen.getByRole('region',{name:'소식'}).querySelector('.collection-news-block') as HTMLElement;
-    expect(calendarBlock.textContent).toContain('발매 캘린더');
+    await waitFor(()=>expect(screen.getByRole('region',{name:'소식'}).querySelector('.ui-section-label__open')).not.toBeNull());
+    const calendarBlock=screen.getByRole('region',{name:'소식'}).querySelector('.ui-section-label__open') as HTMLElement;
+    expect(calendarBlock.getAttribute('aria-label')).toBe('발매 캘린더 전체');
     fireEvent.click(calendarBlock);
     expect(onCalendar).toHaveBeenCalledWith('game');
     pressTab('AV');

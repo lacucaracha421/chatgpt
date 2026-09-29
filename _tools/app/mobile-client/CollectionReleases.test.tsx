@@ -77,10 +77,10 @@ const renderTab=(backRef:{current:(()=>boolean)|null}={current:null})=>render(<C
 const type=(name:string)=>screen.getByRole('radio',{name});
 const selectManga=()=>fireEvent.click(type('만화'));
 const newsRegion=()=>screen.getByRole('region',{name:'소식'});
-const entry=()=>newsRegion().querySelector<HTMLButtonElement>('.collection-news-block');
+const entry=()=>newsRegion().querySelector<HTMLButtonElement>('.ui-section-label__open');
 const waitForEntry=async(unread?:string)=>{
   await waitFor(()=>expect(entry()).not.toBeNull());
-  if(unread!==undefined)await waitFor(()=>expect(entry()!.querySelector('.ui-badge--count')?.textContent).toBe(unread));
+  if(unread!==undefined)await waitFor(()=>expect(newsRegion().querySelector('.ui-section-label__count')?.textContent).toBe(unread));
   return entry()!;
 };
 const emptyEntry=()=>within(newsRegion()).findByRole('button',{name:'새 신간 없음'});
@@ -130,7 +130,7 @@ it('always shows the 신간 entry, with a count only while something is unread',
   const button=await emptyEntry();
   await waitFor(()=>expect(releaseReads().length).toBeGreaterThan(0));
   expect(button.textContent).toBe('새 신간 없음');
-  expect(button.querySelector('.ui-badge--count')).toBeNull();
+  expect(newsRegion().querySelector('.ui-section-label__count')).toBeNull();
   // Status changes count too: every read names all three kinds.
   expect(releaseReads().every(path=>new URLSearchParams(path.split('?')[1]).get('kinds')===KINDS.join(','))).toBe(true);
   cleanup();
@@ -188,7 +188,7 @@ it('confirms one work with all three kinds and keeps its release information',as
   expect(lines(screen.getByRole('region',{name:'바다의 시간'}))).toEqual(['1권 · 8월 1일 발매됨','2권 · 9월 20일 발매됨']);
   expect(screen.queryByRole('button',{name:'바다의 시간 확인'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
-  await waitFor(()=>expect(entry()!.querySelector('.ui-badge--count')?.textContent).toBe('3'));
+  await waitFor(()=>expect(newsRegion().querySelector('.ui-section-label__count')?.textContent).toBe('3'));
 });
 
 it('confirms everything with the per-Collection form, the information staying',async()=>{
@@ -202,7 +202,7 @@ it('confirms everything with the per-Collection form, the information staying',a
   expect(screen.queryByText('NEW')).toBeNull();
   expect(screen.queryByRole('region',{name:'조용한 숲'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
-  await waitFor(async()=>expect((await emptyEntry()).querySelector('.ui-badge--count')).toBeNull());
+  await emptyEntry();await waitFor(()=>expect(newsRegion().querySelector('.ui-section-label__count')).toBeNull());
 });
 
 it('opens a work, and a queued owned-count change updates the list when Back returns',async()=>{

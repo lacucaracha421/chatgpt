@@ -215,7 +215,7 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
           {releaseDays(group.items).map(day => {
             // One heading per release day; the day's covers sit side by side under it (up to four).
             const first = day[0]!;
-            const dDay = first.released === true ? null : displayDDay(first.date);
+            const dDay = first.released === true || first.precision !== "exact" ? null : displayDDay(first.date);
             return <section key={`${first.date ?? "tbd"}:${first.precision}:${first.id}`} className="release-calendar__day" style={{ "--day-span": Math.min(day.length, DAY_SPAN_MAX) } as CSSProperties}
               aria-label={releaseDateLabel(first.date, first.precision, referenceYear)}>
               <div className="release-calendar__date-row">

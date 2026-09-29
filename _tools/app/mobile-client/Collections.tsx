@@ -13,7 +13,7 @@ import {CollectionBindings} from './CollectionBindings';
 import type {BindProvider} from './collectionBindings';
 import {createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent} from 'react';
 import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,useSegmentMotion,type CardArrival} from './motion';
-import {ArrowsUpDownIcon, CalendarDaysIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, SparklesIcon, StarIcon, XMarkIcon} from '@heroicons/react/24/outline';
+import {ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
 import {Badge, Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel, SegmentedControl} from './ui';
 import {BottomSheet} from './BottomSheet';
@@ -57,9 +57,10 @@ function readSectionPreferences():SectionPreferences {
 }
 function writeSectionPreferences(value:SectionPreferences) { try {localStorage.setItem(COLLECTION_SECTIONS_KEY,JSON.stringify(value));} catch {/* Keep the in-memory fold state. */} }
 
-function CollectionSectionLabel({name,count,open,onToggle}:{name:string;count?:number;open:boolean;onToggle():void}) {
+/** One label per section: name, count, fold toggle and (when the section has a full view) the › that opens it. */
+function CollectionSectionLabel({name,count,open,onToggle,onOpen}:{name:string;count?:number;open:boolean;onToggle():void;onOpen?():void}) {
   const ToggleIcon = open ? ChevronDownIcon : ChevronRightIcon;
-  return <SectionLabel title={name} count={count} actions={<Button type="button" size="icon" variant="ghost" aria-label={`${name} ${open ? '접기' : '펼치기'}`} aria-expanded={open} onClick={onToggle}><ToggleIcon aria-hidden="true" /></Button>} />;
+  return <SectionLabel title={name} count={count} onOpen={onOpen} actions={<Button type="button" size="icon" variant="ghost" aria-label={`${name} ${open ? '접기' : '펼치기'}`} aria-expanded={open} onClick={onToggle}><ToggleIcon aria-hidden="true" /></Button>} />;
 }
 
 function CalendarPreviewCover({entry,privacy,active}:{entry:ReleaseCalendarEntry;privacy:boolean;active:boolean}) {
@@ -708,22 +709,16 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   const typeSwitch=<div className="collection-type-switch"><SegmentedControl label="컬렉션 유형" options={typeOptions} value={tab} onChange={chooseTab} fullWidth/></div>;
   const newsSection=tab==='manga'
     ?<section className="collection-news-section" aria-label="소식">
-      <CollectionSectionLabel name="소식" open={newsOpen} onToggle={()=>setSectionOpen('news',!newsOpen)}/>
+      <CollectionSectionLabel name="신간" count={releases.unread>0?releases.unread:undefined} open={newsOpen} onToggle={()=>setSectionOpen('news',!newsOpen)} onOpen={openInbox}/>
       {newsOpen&&(mangaNews.length>0?<div className="collection-news-block-wrap">
-        <button className="collection-news-block" onClick={openInbox}>
-          <SparklesIcon aria-hidden="true"/><span>신간</span>{releases.unread>0&&<Badge variant="count" aria-label={`새 알림 ${releases.unread}개`}>{releases.unread.toLocaleString('ko-KR')}</Badge>}<ChevronRightIcon aria-hidden="true"/>
-        </button>
           <div className="collection-news-covers">{mangaNews.map(({work,unread})=><button key={work.id} className="collection-news-cover" aria-label={work.name} onClick={()=>openWork(work.id)}><span><Artwork item={card(work)} id={collectionCover(work)} revision={releaseData.shelf?.revision??revision} active={live} label={work.name}/>{unread>0&&<Badge variant="accent" className="collection-news-new">NEW</Badge>}</span></button>)}</div>
       </div>:<button className="collection-news-empty" onClick={openInbox}>새 신간 없음</button>)}
     </section>
     :tab==='game'||tab==='movie'
       ?<section className="collection-news-section" aria-label="소식">
-        <CollectionSectionLabel name="소식" open={newsOpen} onToggle={()=>setSectionOpen('news',!newsOpen)}/>
+        <CollectionSectionLabel name="발매 캘린더" count={calendarInterestCount>0?calendarInterestCount:undefined} open={newsOpen} onToggle={()=>setSectionOpen('news',!newsOpen)} onOpen={()=>onCalendar?.(tab)}/>
         {newsOpen&&(calendarEntries.length>0?<div className="collection-news-block-wrap">
-          <button className="collection-news-block" onClick={()=>onCalendar?.(tab)}>
-            <CalendarDaysIcon aria-hidden="true"/><span>발매 캘린더</span><span className="collection-news-hint">{labels[tab]} · 관심 {calendarInterestCount.toLocaleString('ko-KR')}</span><ChevronRightIcon aria-hidden="true"/>
-          </button>
-          <div className="collection-calendar-covers">{calendarEntries.map(entry=>{const days=releaseDaysUntil(entry.date),dday=ddayLabel(days);return <button key={entry.id} className="collection-calendar-cover" aria-label={`${entry.title} ${releaseDateLabel(entry.date,entry.precision)}`} onClick={()=>onCalendar?.(tab)}><span className="collection-calendar-date numeric">{releaseDateLabel(entry.date,entry.precision)}{dday&&<small className="numeric"> · {dday}</small>}</span><span className="collection-calendar-art"><CalendarPreviewCover entry={entry} privacy={privacyMode} active={live}/></span></button>})}</div>
+          <div className="collection-calendar-covers">{calendarEntries.map(entry=>{const days=entry.precision==='exact'?releaseDaysUntil(entry.date):null,dday=ddayLabel(days);return <button key={entry.id} className="collection-calendar-cover" aria-label={`${entry.title} ${releaseDateLabel(entry.date,entry.precision)}`} onClick={()=>onCalendar?.(tab)}><span className="collection-calendar-date numeric">{releaseDateLabel(entry.date,entry.precision)}{dday&&<small className="numeric"> · {dday}</small>}</span><span className="collection-calendar-art"><CalendarPreviewCover entry={entry} privacy={privacyMode} active={live}/></span></button>})}</div>
           {calendarError&&<span className="sr-only">발매 캘린더 정보를 불러오지 못했습니다.</span>}
         </div>:<><button className="collection-news-empty" onClick={()=>onCalendar?.(tab)}>다가오는 발매 없음</button>{calendarError&&<span className="sr-only">발매 캘린더 정보를 불러오지 못했습니다.</span>}</>)}
       </section>
@@ -752,11 +747,8 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       :{kind:'fallback'},[avView,filters.sort,main.items,tab]);
   const showcaseScrubberSort=useMemo<ScrubberSort>(()=>({kind:'fallback'}),[]);
   const showcaseSection=!filtered&&hasShowcase&&<section className="collection-showcase-fold" aria-label="쇼케이스">
-    <CollectionSectionLabel name="쇼케이스" open={showcaseOpen} onToggle={()=>setSectionOpen('showcase',!showcaseOpen)}/>
+    <CollectionSectionLabel name="쇼케이스" count={showcaseCount} open={showcaseOpen} onToggle={()=>setSectionOpen('showcase',!showcaseOpen)} onOpen={()=>setShowcaseAll(true)}/>
     {showcaseOpen&&<div className="collection-news-block-wrap collection-showcase-block">
-      <button className="collection-news-block" aria-label="쇼케이스 전체 보기" onClick={()=>setShowcaseAll(true)}>
-        <StarIcon aria-hidden="true"/><span>쇼케이스</span>{showcaseCount!==undefined&&<span className="collection-news-hint numeric">{showcaseCount.toLocaleString('ko-KR')}편</span>}<ChevronRightIcon aria-hidden="true"/>
-      </button>
       <div className="collection-shelf">{showcase.busy&&!showcaseItems.length&&<p role="status" className="hint">쇼케이스를 불러오는 중…</p>}{showcase.error&&<p className="error-message" role="alert">{showcase.error}</p>}{showcase.committed&&!showcase.busy&&!showcaseItems.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}{showcaseItems.slice(0,12).map(work=><ShowcaseCover key={work.id} work={card(work)} revision={showcasePage?.revision??revision} active={live&&!selected} onOpen={openWork}/>)}</div>
     </div>}
   </section>;

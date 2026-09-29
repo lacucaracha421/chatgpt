@@ -267,7 +267,7 @@
 .collection-showcase-tile:focus-visible,.collection-news-cover:focus-visible,.collection-calendar-cover:focus-visible{outline:2px solid var(--color-focus);outline-offset:3px}
 .collection-news-section{margin-top:16px}
 .collection-news-block:active,.collection-news-empty:active{background:var(--color-surface-pressed)}
-.collection-news-block-wrap{margin-top:8px;padding:8px 16px 16px;background:var(--color-surface);border-radius:var(--radius-tile)}
+.collection-news-block-wrap{margin-top:8px;padding:16px;background:var(--color-surface);border-radius:var(--radius-tile)}
 .collection-news-block{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;padding:0;background:transparent;border:0;color:inherit;font:600 var(--type-body) var(--font-ui);text-align:left}
 .collection-news-block>svg:first-child{width:20px;height:20px;color:var(--color-muted)}
 .collection-news-block>svg:last-child{width:20px;height:20px;margin-left:auto;color:var(--color-muted)}
