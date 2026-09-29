@@ -30,8 +30,8 @@ export function LightweightModeToggle() {
 export function WorkloadControls() {
   const profile = useWorkloadProfile();
   const [busy, setBusy] = useState(false);
-  const [minutes, setMinutes] = useState(String(profile.autoEnterMinutes ?? 10));
-  useEffect(() => { setMinutes(String(profile.autoEnterMinutes ?? 10)); }, [profile.autoEnterMinutes]);
+  const [minutes, setMinutes] = useState(String(profile.autoEnterMinutes ?? 30));
+  useEffect(() => { setMinutes(String(profile.autoEnterMinutes ?? 30)); }, [profile.autoEnterMinutes]);
   if (!nativeWorkload()) return null;
   const toggle = async () => {
     setBusy(true);
@@ -52,7 +52,7 @@ export function WorkloadControls() {
     </dl>
     <dl className="settings-view__property">
       <dt>자동 전환</dt>
-      <dd className="settings-view__inline-controls"><Switch aria-label="절약 모드 자동 전환" checked={profile.autoEnterMinutes !== null} disabled={!profile.ready || busy} onChange={event => void updateWorkloadSettings({ autoEnterMinutes: event.target.checked ? 10 : null })} /></dd>
+      <dd className="settings-view__inline-controls"><Switch aria-label="절약 모드 자동 전환" checked={profile.autoEnterMinutes !== null} disabled={!profile.ready || busy} onChange={event => void updateWorkloadSettings({ autoEnterMinutes: event.target.checked ? 30 : null })} /></dd>
     </dl>
     <dl className="settings-view__property">
       <dt>자동 전환 대기</dt>

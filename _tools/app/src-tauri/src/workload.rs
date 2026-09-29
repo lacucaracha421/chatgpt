@@ -143,6 +143,9 @@ struct Runtime {
     path: Option<PathBuf>,
     recovery_until: Option<Instant>,
     inactive_since: Option<Instant>,
+    /// 절약 모드 was switched on by inactivity, not by the user: it is never written to the
+    /// machine settings, so the next app start is back in 일반 모드.
+    auto_entered: bool,
     hidden: bool,
     tray_available: bool,
 }
@@ -220,6 +223,11 @@ fn broadcast(app: &tauri::AppHandle) {
     }
 }
 fn update(app: &tauri::AppHandle, settings: Settings) -> Result<Profile, String> {
+    apply(app, settings, false)
+}
+/// Applies settings; `automatic` marks the inactivity switch, which changes only the running
+/// state. A saved copy never records an automatic 절약 모드 as on.
+fn apply(app: &tauri::AppHandle, settings: Settings, automatic: bool) -> Result<Profile, String> {
     if settings
         .auto_enter_minutes
         .is_some_and(|n| !(1..=1440).contains(&n))
@@ -233,13 +241,34 @@ fn update(app: &tauri::AppHandle, settings: Settings) -> Result<Profile, String>
         .path
         .as_ref()
         .ok_or("이 PC의 설정 경로를 찾지 못했습니다.")?;
-    crate::library::machine_settings::set_workload(path, settings.clone())
-        .map_err(|e| e.to_string())?;
+    let (saved, auto_entered) = saved_settings(&settings, state.auto_entered, automatic);
+    if let Some(saved) = saved {
+        crate::library::machine_settings::set_workload(path, saved).map_err(|e| e.to_string())?;
+    }
     state.set(settings, Instant::now());
+    state.auto_entered = auto_entered;
     let profile = state.profile();
     drop(state);
     broadcast(app);
     Ok(profile)
+}
+/// What to write to the machine settings for a change, and whether 절약 모드 is then an
+/// automatic one. The inactivity switch writes nothing; while an automatic 절약 모드 lasts,
+/// saving other settings keeps the stored switch off.
+fn saved_settings(
+    settings: &Settings,
+    was_auto: bool,
+    automatic: bool,
+) -> (Option<Settings>, bool) {
+    let auto_entered = automatic || (was_auto && settings.lightweight);
+    if automatic {
+        return (None, auto_entered);
+    }
+    let mut saved = settings.clone();
+    if auto_entered {
+        saved.lightweight = false;
+    }
+    (Some(saved), auto_entered)
 }
 #[tauri::command]
 pub(crate) fn workload_profile(
@@ -510,7 +539,7 @@ fn start_timers(app: tauri::AppHandle) {
                 })
             };
             if let Some(settings) = auto {
-                if let Err(error) = update(&app, settings) {
+                if let Err(error) = apply(&app, settings, true) {
                     let _ = app.emit("workload://error", error);
                 }
             }
@@ -697,6 +726,30 @@ mod tests {
         state.set(Settings::default(), now);
         assert!(state.restricted(now + Duration::from_secs(179)));
         assert!(!state.restricted(now + RECOVERY));
+    }
+    #[test]
+    fn automatic_saving_mode_is_never_stored() {
+        let on = Settings {
+            lightweight: true,
+            auto_enter_minutes: Some(30),
+            close_to_tray: true,
+        };
+        // The inactivity switch writes nothing and is marked automatic.
+        assert_eq!(saved_settings(&on, false, true), (None, true));
+        // Saving another setting while it lasts keeps the stored switch off.
+        let (saved, auto) = saved_settings(&on, true, false);
+        assert_eq!(saved.map(|s| s.lightweight), Some(false));
+        assert!(auto);
+        // Turning it off ends the automatic state; turning it on by hand is stored.
+        let off = Settings {
+            lightweight: false,
+            ..on.clone()
+        };
+        assert_eq!(
+            saved_settings(&off, true, false),
+            (Some(off.clone()), false)
+        );
+        assert_eq!(saved_settings(&on, false, false), (Some(on.clone()), false));
     }
     #[test]
     fn workload_auto_entry_requires_continuous_inactivity() {
