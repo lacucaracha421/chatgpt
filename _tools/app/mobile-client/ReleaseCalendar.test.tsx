@@ -39,14 +39,14 @@ afterEach(() => { cleanup(); setOutboxConnection(null); delete window.LakomicsNa
 
 describe('release calendar model', () => {
   it('keeps PC precision wording and groups exact dates inside month sections', () => {
-    expect(releaseDateLabel('2026-10-01', 'exact', 2026)).toBe('10월 1일');
+    expect(releaseDateLabel('2026-10-01', 'exact', 2026)).toBe('10.1');
     expect(releaseDateLabel('2026-10-01', 'month', 2026)).toBe('10월 중');
     expect(releaseDateLabel('2026-10-01', 'quarter', 2026)).toBe('2026 Q4');
     expect(releaseDateLabel('2027-01-01', 'year', 2026)).toBe('2027년 중');
     expect(releaseDateLabel(null, 'tbd', 2026)).toBe('미정');
     const groups = groupReleaseEntries(reply.entries);
     expect(groups[0]).toMatchObject({label: '2026년 10월', items: 2});
-    expect(groups[0]?.days.map(day => day.label)).toEqual(['10월 1일', '10월 중']);
+    expect(groups[0]?.days.map(day => day.label)).toEqual(['10.1', '10월 중']);
     expect(groups.at(-1)?.label).toBe('미정');
   });
 });
@@ -81,7 +81,7 @@ describe('ReleaseCalendar', () => {
     expect(screen.queryByText('일본 방영')).toBeNull();
     const movie = screen.getByText('movie-one').closest('li')!;
     expect(movie.querySelector('.release-calendar-kind')).toBeNull();
-    expect(screen.getByText('발매일 변경 · 9월 20일 → 10월 1일')).toBeTruthy();
+    expect(screen.getByText('발매일 변경 · 9.20 → 10.1')).toBeTruthy();
     expect(screen.getByText('NEW 1')).toBeTruthy();
     expect(screen.getAllByText('미정').length).toBe(2);
     fireEvent.click(screen.getByRole('radio', {name: /^게임/}));
@@ -100,8 +100,7 @@ describe('ReleaseCalendar', () => {
     const item = card.closest('li');
     expect(item).toBeTruthy();
     const bookmark = within(item!).getByRole('button', {name: /관심 목록에 추가/});
-    expect(bookmark.closest('.release-calendar-cover')).toBeNull();
-    expect(bookmark.closest('.release-calendar-date-row')).toBeTruthy();
+    expect(bookmark.closest('.release-calendar-cover')).toBeTruthy();
     fireEvent.click(bookmark);
     expect(bookmark.getAttribute('aria-pressed')).toBe('true');
     expect(within(item!).getByText('동기화 대기')).toBeTruthy();
@@ -113,7 +112,7 @@ describe('ReleaseCalendar', () => {
   it('acknowledges one unread calendar event without keeping the event line', async () => {
     render(<ReleaseCalendar onClose={vi.fn()} />);
     const movie = (await screen.findByText('movie-one')).closest('li')!;
-    const eventLine = '발매일 변경 · 9월 20일 → 10월 1일';
+    const eventLine = '발매일 변경 · 9.20 → 10.1';
     expect(within(movie).getByText(eventLine)).toBeTruthy();
     fireEvent.click(within(movie).getByRole('button', {name: 'movie-one 알림 확인'}));
     await waitFor(() => expect(mocks.api.mock.calls.some(([path, , body]) => path === '/v1/home/upcoming/wishlist' && (body as {action?: string})?.action === 'acknowledge')).toBe(true));

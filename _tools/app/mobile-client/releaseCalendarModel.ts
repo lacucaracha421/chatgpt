@@ -183,7 +183,8 @@ export function releaseDateLabel(date: string | null, precision: ReleasePrecisio
   const day = Number(parts[3]);
   const prefix = year === referenceYear ? '' : `${year}년 `;
   switch (precision) {
-    case 'exact': return `${prefix}${month}월 ${day}일`;
+    // Compact numeric date like the Home shelf: 9.12, or 2027.1.5 outside the current year.
+    case 'exact': return year === referenceYear ? `${month}.${day}` : `${year}.${month}.${day}`;
     case 'month': return `${prefix}${month}월 중`;
     case 'quarter': return `${year} Q${Math.floor((month - 1) / 3) + 1}`;
     case 'year': return `${year}년 중`;
@@ -195,7 +196,7 @@ function periodOf(entry: ReleaseCalendarEntry): {monthKey: string; monthLabel: s
   if (!parts || entry.precision === 'tbd') return {monthKey: 'tbd', monthLabel: '미정', dayKey: 'tbd', dayLabel: '날짜 미정', order: '9999-99-z'};
   const year = Number(parts[1]);
   const month = Number(parts[2]);
-  if (entry.precision === 'exact') return {monthKey: `${parts[1]}-${parts[2]}`, monthLabel: `${year}년 ${month}월`, dayKey: entry.date!, dayLabel: `${month}월 ${Number(parts[3])}일`, order: `${entry.date}-a`};
+  if (entry.precision === 'exact') return {monthKey: `${parts[1]}-${parts[2]}`, monthLabel: `${year}년 ${month}월`, dayKey: entry.date!, dayLabel: `${month}.${Number(parts[3])}`, order: `${entry.date}-a`};
   if (entry.precision === 'month') return {monthKey: `${parts[1]}-${parts[2]}`, monthLabel: `${year}년 ${month}월`, dayKey: `${parts[1]}-${parts[2]}-month`, dayLabel: `${month}월 중`, order: `${parts[1]}-${parts[2]}-b`};
   if (entry.precision === 'quarter') {
     const quarter = Math.floor((month - 1) / 3) + 1;

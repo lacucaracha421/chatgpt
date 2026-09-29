@@ -1,6 +1,6 @@
 import {BookmarkIcon as BookmarkOutlineIcon, CalendarDaysIcon, CheckIcon} from '@heroicons/react/24/outline';
 import {BookmarkIcon as BookmarkSolidIcon} from '@heroicons/react/24/solid';
-import {useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
+import {useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject} from 'react';
 import {TopBar} from './TopBar';
 import {Badge, Button, SegmentedControl} from './ui';
 import {api, ApiError, errorText, native} from './transport';
@@ -10,6 +10,7 @@ import {PlatformBadges} from '../src/collections/PlatformBadges';
 import type {Ticket} from './types';
 import {filterReleaseEntries, groupReleaseEntries, normalizeReleaseCalendarReply, releaseDateLabel, releaseDaysUntil, releaseEventLine, visibleWishlistIds, wishlistIds, type KindFilter, type ReleaseCalendarEntry, type ReleaseCalendarEvent, type ReleaseCalendarReply} from './releaseCalendarModel';
 import {Scrubber} from './Scrubber';
+import {useSegmentMotion} from './motion';
 import './releaseCalendar.css';
 
 type ScreenState = 'loading' | 'ready' | 'empty' | 'error';
@@ -44,19 +45,17 @@ function EmptyCalendar({wishlistOnly}: {wishlistOnly: boolean}) {
   </div>;
 }
 
+/** A day block spans at most this many of the four portrait columns. */
+const DAY_SPAN_MAX = 4;
+
 function ReleaseCard({entry, watched, pending, privacy, referenceYear, acknowledging, onToggle, onAcknowledge}: {entry: ReleaseCalendarEntry; watched: boolean; pending: boolean; privacy: boolean; referenceYear: number; acknowledging: string | null; onToggle(): void; onAcknowledge(event: ReleaseCalendarEvent): void}) {
-  const days = releaseDaysUntil(entry.date);
   return <li className={`release-calendar-card${watched ? ' is-watched' : ''}${pending ? ' is-pending' : ''}`}>
-    <div className="release-calendar-date-row">
-      <span className="release-calendar-date numeric">{releaseDateLabel(entry.date, entry.precision, referenceYear)}</span>
-      {days !== null && days > 0 && <span className="release-calendar-dday numeric">D-{days}</span>}
-      <Button type="button" size="icon" variant="quiet" className="release-calendar-watch" aria-pressed={watched} aria-busy={pending} disabled={pending} aria-label={watched ? `${entry.title} 관심 목록에서 빼기${pending ? ' · 동기화 대기' : ''}` : `${entry.title} 관심 목록에 추가${pending ? ' · 동기화 대기' : ''}`} onClick={onToggle}>
-        {watched ? <BookmarkSolidIcon aria-hidden="true" /> : <BookmarkOutlineIcon aria-hidden="true" />}
-      </Button>
-    </div>
     <div className="release-calendar-cover">
       <HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} />
       {entry.unread.length > 0 && <Badge className="release-calendar-new-badge" variant="accent">NEW</Badge>}
+      <Button type="button" size="icon" variant="quiet" className="release-calendar-watch" aria-pressed={watched} aria-busy={pending} disabled={pending} aria-label={watched ? `${entry.title} 관심 목록에서 빼기${pending ? ' · 동기화 대기' : ''}` : `${entry.title} 관심 목록에 추가${pending ? ' · 동기화 대기' : ''}`} onClick={onToggle}>
+        {watched ? <BookmarkSolidIcon aria-hidden="true" /> : <BookmarkOutlineIcon aria-hidden="true" />}
+      </Button>
     </div>
     <strong className="release-calendar-title">{entry.title}</strong>
     {entry.kind === 'game' && entry.platforms.length > 0 && <PlatformBadges platforms={entry.platforms} port={entry.port} />}
@@ -79,12 +78,26 @@ function CalendarBody({reply, kind, wishlistOnly, visibleIds, privacy, reference
   return <div className="release-calendar-groups">
     {groups.map(month => <section key={month.key} className="release-calendar-month" aria-label={month.label}>
       <div className="release-calendar-month-heading"><h2>{month.label}</h2><span className="numeric">{month.items.toLocaleString('ko-KR')}</span></div>
-      <ul className="release-calendar-card-grid">
-        {month.days.flatMap(day => day.items).map(entry => {
-          const visible = visibleUpcomingWishlist(entry.id, visibleIds.has(entry.id));
-          return <ReleaseCard key={entry.id} entry={entry} watched={visible.value} pending={visible.pending} privacy={privacy} referenceYear={referenceYear} acknowledging={acknowledging} onToggle={() => onToggle(entry)} onAcknowledge={event => onAcknowledge(entry, event)} />;
+      <div className="release-calendar-days">
+        {month.days.map(day => {
+          // One heading per release day; the day's covers sit side by side under it (up to a row).
+          const first = day.items[0]!;
+          const days = releaseDaysUntil(first.date);
+          const span = Math.min(day.items.length, DAY_SPAN_MAX);
+          return <section key={day.key} className="release-calendar-day" style={{'--day-span': span} as CSSProperties} aria-label={day.label}>
+            <div className="release-calendar-day-head">
+              <span className="release-calendar-date numeric">{releaseDateLabel(first.date, first.precision, referenceYear)}</span>
+              {days !== null && days > 0 && <span className="release-calendar-dday numeric">D-{days}</span>}
+            </div>
+            <ul className="release-calendar-card-grid">
+              {day.items.map(entry => {
+                const visible = visibleUpcomingWishlist(entry.id, visibleIds.has(entry.id));
+                return <ReleaseCard key={entry.id} entry={entry} watched={visible.value} pending={visible.pending} privacy={privacy} referenceYear={referenceYear} acknowledging={acknowledging} onToggle={() => onToggle(entry)} onAcknowledge={event => onAcknowledge(entry, event)} />;
+              })}
+            </ul>
+          </section>;
         })}
-      </ul>
+      </div>
     </section>)}
   </div>;
 }
@@ -192,6 +205,9 @@ export function ReleaseCalendar({onClose, backRef, initialKind}: ReleaseCalendar
     {value: 'movie', label: '영화', count: kindCounts.movie},
     {value: 'anime', label: '애니', count: kindCounts.anime},
   ] as const);
+  // A kind or 관심 switch slides the list like the other segmented screens (shared motion).
+  const kindIndex = kindOptions.findIndex(option => option.value === kind) + (wishlistOnly ? kindOptions.length : 0);
+  useSegmentMotion(scroller, state === 'ready' ? `${kind}:${wishlistOnly}` : null, kindIndex, host => Array.from(host.children).filter((child): child is HTMLElement => child instanceof HTMLElement && !child.matches('.mobile-scrubber')));
   const unreadTotal = reply?.wishlist.reduce((sum, entry) => sum + entry.unread.length, 0) ?? 0;
 
   const header = <TopBar back={{label: '홈으로', onClick: onClose}} crumbs={<span className="top-bar__crumbs">홈 ›</span>} title="발매 캘린더" count={reply && reply.entries.length ? reply.entries.length.toLocaleString('ko-KR') : undefined} />;

@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.lakomics.mobile" android:versionCode="109" android:versionName="0.8.72">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.lakomics.mobile" android:versionCode="110" android:versionName="0.8.73">
  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
  <uses-permission android:name="android.permission.INTERNET" />
  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
