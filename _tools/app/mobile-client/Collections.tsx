@@ -15,7 +15,7 @@ import {createContext, useCallback, useContext, useEffect, useLayoutEffect, useM
 import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,useSegmentMotion,type CardArrival} from './motion';
 import {ArrowsUpDownIcon, CalendarDaysIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, SparklesIcon, StarIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
-import {Badge, Button, Dialog, DialogDescription, IconButton, SegmentedControl} from './ui';
+import {Badge, Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel, SegmentedControl} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {SearchButton,TopBar,TopBarSearch} from './TopBar';
 import {StepSlider} from './StepSlider';
@@ -55,15 +55,9 @@ function readSectionPreferences():SectionPreferences {
 }
 function writeSectionPreferences(value:SectionPreferences) { try {localStorage.setItem(COLLECTION_SECTIONS_KEY,JSON.stringify(value));} catch {/* Keep the in-memory fold state. */} }
 
-function CollectionSectionLabel({name,count,open,onToggle,onMore,moreLabel}:{name:string;count?:number;open:boolean;onToggle():void;onMore?:()=>void;moreLabel?:string}) {
-  return <div className="collection-section-label-row">
-    <button className="collection-section-label" aria-expanded={open} onClick={onToggle}>
-      <span className="collection-section-label__name"><span className="collection-section-label__mark" aria-hidden="true"/>{name}{count!==undefined&&<span className="numeric collection-section-label__count"> · {count.toLocaleString('ko-KR')}</span>}</span>
-      <span className="collection-section-label__line" aria-hidden="true"/>
-      <ChevronRightIcon className={open?'is-open':undefined} aria-hidden="true"/>
-    </button>
-    {onMore&&<button className="collection-section-label__more" aria-label={moreLabel??`${name} 전체 보기`} onClick={onMore}>전체<ChevronRightIcon aria-hidden="true"/></button>}
-  </div>;
+function CollectionSectionLabel({name,count,open,onToggle}:{name:string;count?:number;open:boolean;onToggle():void}) {
+  const ToggleIcon = open ? ChevronDownIcon : ChevronRightIcon;
+  return <SectionLabel title={name} count={count} actions={<Button type="button" size="icon" variant="ghost" aria-label={`${name} ${open ? '접기' : '펼치기'}`} aria-expanded={open} onClick={onToggle}><ToggleIcon aria-hidden="true" /></Button>} />;
 }
 
 function CalendarPreviewCover({entry,privacy,active}:{entry:ReleaseCalendarEntry;privacy:boolean;active:boolean}) {
@@ -715,9 +709,9 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       <CollectionSectionLabel name="소식" open={newsOpen} onToggle={()=>setSectionOpen('news',!newsOpen)}/>
       {newsOpen&&(mangaNews.length>0?<div className="collection-news-block-wrap">
         <button className="collection-news-block" onClick={openInbox}>
-          <SparklesIcon aria-hidden="true"/><span>신간</span>{releases.unread>0&&<Badge variant="accent" className="collection-news-count numeric" aria-label={`새 알림 ${releases.unread}개`}>{releases.unread.toLocaleString('ko-KR')}</Badge>}<ChevronRightIcon aria-hidden="true"/>
+          <SparklesIcon aria-hidden="true"/><span>신간</span>{releases.unread>0&&<Badge variant="count" aria-label={`새 알림 ${releases.unread}개`}>{releases.unread.toLocaleString('ko-KR')}</Badge>}<ChevronRightIcon aria-hidden="true"/>
         </button>
-        <div className="collection-news-covers">{mangaNews.map(({work,unread})=><button key={work.id} className="collection-news-cover" aria-label={work.name} onClick={()=>openWork(work.id)}><span><Artwork item={card(work)} id={collectionCover(work)} revision={releaseData.shelf?.revision??revision} active={live} label={work.name}/>{unread>0&&<Badge variant="accent" className="collection-news-new">NEW</Badge>}</span></button>)}</div>
+          <div className="collection-news-covers">{mangaNews.map(({work,unread})=><button key={work.id} className="collection-news-cover" aria-label={work.name} onClick={()=>openWork(work.id)}><span><Artwork item={card(work)} id={collectionCover(work)} revision={releaseData.shelf?.revision??revision} active={live} label={work.name}/>{unread>0&&<Badge variant="accent" className="collection-news-new">NEW</Badge>}</span></button>)}</div>
       </div>:<button className="collection-news-empty" onClick={openInbox}>새 신간 없음</button>)}
     </section>
     :tab==='game'||tab==='movie'
@@ -734,7 +728,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       :null;
 
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
-  const unpublishedNotice=<div className="empty-state"><RectangleStackIcon/><h2>컬렉션이 아직 공유되지 않았습니다</h2><p>{main.legacy?'서버에 모바일 컬렉션 기능이 필요합니다. 서버 업데이트 후 PC에서 컬렉션을 게시해 주세요.':'PC의 설정에서 컬렉션을 클라우드에 게시하면 여기에서 감상할 수 있습니다.'}</p></div>;
+  const unpublishedNotice=<EmptyState icon={RectangleStackIcon} title="컬렉션이 아직 공유되지 않았습니다" />;
 
   // Opening a work or the whole Showcase is one level deeper; Back returns from the left.
   useLevelMotion(sectionRef,active?`${selected??''}|${showcaseAll}|${inboxOpen}`:null,(selected?1:0)+(showcaseAll||inboxOpen?1:0));
@@ -764,7 +758,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       <div className="collection-shelf">{showcase.busy&&!showcaseItems.length&&<p role="status" className="hint">쇼케이스를 불러오는 중…</p>}{showcase.error&&<p className="error-message" role="alert">{showcase.error}</p>}{showcase.committed&&!showcase.busy&&!showcaseItems.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}{showcaseItems.slice(0,12).map(work=><ShowcaseCover key={work.id} work={card(work)} revision={showcasePage?.revision??revision} active={live&&!selected} onOpen={openWork}/>)}</div>
     </div>}
   </section>;
-  const collectionTypeLabel=<div className="collection-type-label" aria-label={filtered?'필터 결과 개수':undefined}><span className="collection-section-label__mark" aria-hidden="true"/><h2>{filtered?'검색 결과':labels[type]}{!filtered&&main.page?.totalCount!=null&&<span className="numeric collection-type-label__count"> · {main.page.totalCount.toLocaleString('ko-KR')}</span>}</h2><span className="collection-section-label__line" aria-hidden="true"/></div>;
+  const collectionTypeLabel=<SectionLabel as="h2" className="collection-type-label" title={filtered?'검색 결과':labels[type]} count={!filtered&&main.page?.totalCount!=null ? main.page.totalCount : undefined} />;
   const filterControls=<div className="filter-chips collection-chips" role="group" aria-label="정렬과 필터">
     <button className="filter-chip" onClick={()=>setSheet('sort')}><ArrowsUpDownIcon aria-hidden="true"/>{sortLabel}<ChevronDownIcon aria-hidden="true"/></button>
     <button className={`filter-chip ${filters.rating!=='all'?'selected':''}`} onClick={()=>setSheet('rating')}>{filters.rating==='all'?'내 별점':ratingLabel(filters.rating)}<ChevronDownIcon aria-hidden="true"/></button>
@@ -778,7 +772,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       {tab==='av'?<>
       <AvLookupSender/>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
-      {unpublished(main)?unpublishedNotice:main.busy&&!main.committed?<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<div className="empty-state"><RectangleStackIcon/><h2>PC 앱이 AV 작품을 아직 보내지 않았습니다</h2><p>PC 앱에서 AV 컬렉션을 게시하면 여기에 표시됩니다.</p></div>:<>{showcaseSection}{collectionTypeLabel}<AvCollectionList items={main.items} showcase={showcaseItems} showcaseOpen={false} onShowcase={()=>{}} revision={revision} active={live&&!selected} view={avView} onView={chooseAvView} onOpen={openWork} total={main.page?.totalCount} filters={filters} sortLabel={sortLabel} onSort={()=>setSheet('sort')} onRating={()=>setSheet('rating')} onReset={()=>changeFilters({...filters,rating:'all'})}/></>}
+      {unpublished(main)?unpublishedNotice:main.busy&&!main.committed?<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<EmptyState icon={RectangleStackIcon} title="PC 앱이 AV 작품을 아직 보내지 않았습니다" />:<>{showcaseSection}{collectionTypeLabel}<AvCollectionList items={main.items} showcase={showcaseItems} showcaseOpen={false} onShowcase={()=>{}} revision={revision} active={live&&!selected} view={avView} onView={chooseAvView} onOpen={openWork} total={main.page?.totalCount} filters={filters} sortLabel={sortLabel} onSort={()=>setSheet('sort')} onRating={()=>setSheet('rating')} onReset={()=>changeFilters({...filters,rating:'all'})}/></>}
       {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
       {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
       </>:<>
@@ -787,7 +781,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
         {showcaseSection}
         {newsSection}
         <div className="collection-section collection-all"><div className="collection-type-header">{collectionTypeLabel}{filterControls}</div></div>
-        {main.committed&&!main.items.length&&<div className="empty-state"><RectangleStackIcon/><h2>{filtered?'조건에 맞는 작품이 없습니다':'아직 작품이 없습니다'}</h2>{filtered&&<p>검색어나 별점 조건을 바꿔 보세요.</p>}</div>}
+        {main.committed&&!main.items.length&&<EmptyState icon={RectangleStackIcon} title={filtered?'조건에 맞는 작품이 없습니다':'아직 작품이 없습니다'} />}
         <div className={`collection-grid collection-grid-${shownType}`}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={live&&!selected&&!inboxOpen} caption={captionOf(work)} onOpen={openWork} arriving={mainArrivals.arriving(work.id)} onArrived={mainArrivals.arrived}/>)}</div>
         {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
       {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}

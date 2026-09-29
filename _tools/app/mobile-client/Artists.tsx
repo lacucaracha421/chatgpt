@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode} from 'react';
 import {ArrowUpRightIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronRightIcon, ComputerDesktopIcon, MagnifyingGlassIcon, PhotoIcon, XMarkIcon} from '@heroicons/react/24/outline';
-import {IconButton} from './ui';
+import {EmptyState,IconButton,SectionLabel} from './ui';
 import {TopBar, TopBarSearch} from './TopBar';
 import {api, native} from './transport';
 import {Cover} from './CoverGroup';
@@ -57,7 +57,7 @@ function ArtistTile({artist, privateMode, query, onOpen}: {artist: LibraryArtist
 }
 
 function SectionHeading({title, meta}: {title: string; meta?: ReactNode}) {
-  return <div className="artist-section-heading"><h2>{title}</h2>{meta && <small>{meta}</small>}<span className="rule" aria-hidden="true" /></div>;
+  return <SectionLabel as="h2" className="artist-section-heading" title={title} actions={meta ? <span>{meta}</span> : undefined} />;
 }
 
 function ArtistStats({artist, detail = false}: {artist: LibraryArtist; detail?: boolean}) {
@@ -94,12 +94,12 @@ function ArtistHub({artists, assignments, query, privateMode, paused, onOpen}: {
     {query.trim() ? <div className="artist-search-hint"><strong>결과 {visible.length.toLocaleString('ko-KR')}명</strong><span>이름 · 핸들 · 초성으로 찾기</span></div> : <div className="artist-content">
       {main && <section className="artist-section" aria-label="오늘"><SectionHeading title="오늘" meta={`${new Date().getMonth() + 1}월 ${new Date().getDate()}일 · ${picks.length}명`} /><ArtistToday artist={main} privateMode={privateMode} onOpen={() => onOpen(main)} /><div className="artist-other-picks">{others.map(artist => <button key={artist.id} className="artist-other-pick" onClick={() => onOpen(artist)} aria-label={`${artistName(artist)} 작가`}><Collage assets={assetsFromIds(artist.coverAssetIds)} privateMode={privateMode} /><span className="artist-pick-text"><strong>{artistName(artist)}</strong><small>{artist.lastOpenedAt ? `${daysSince(artist.lastOpenedAt) ?? 0}일 동안 안 봄` : artist.recentCount ? `최근 30일 ${artist.recentCount}장` : '주요 작가'}</small></span><ChevronRightIcon aria-hidden="true" /></button>)}</div></section>}
     </div>}
-    <section className={`artist-section${query.trim() ? '' : ' artist-content'}`} aria-label="주요 작가"><div className="artist-sort-line"><SectionHeading title={query.trim() ? '검색 결과' : '최근 저장 순'} meta={query.trim() ? undefined : <>주요 작가 · {major.length}명</>} /><span>{assignments.length ? `${assignmentCount.size}명 게시` : ''}</span></div><div className="artist-grid">{visible.map(artist => <ArtistTile key={artist.id} artist={artist} privateMode={privateMode} query={query} onOpen={() => onOpen(artist)} />)}</div>{visible.length === 0 && <div className="artist-empty"><PhotoIcon aria-hidden="true" /><h2>검색 결과가 없습니다</h2><p>이름, 핸들 또는 초성을 바꿔 보세요.</p></div>}</section>
+    <section className={`artist-section${query.trim() ? '' : ' artist-content'}`} aria-label="주요 작가"><div className="artist-sort-line"><SectionHeading title={query.trim() ? '검색 결과' : '최근 저장 순'} meta={query.trim() ? undefined : <>주요 작가 · {major.length}명</>} /><span>{assignments.length ? `${assignmentCount.size}명 게시` : ''}</span></div><div className="artist-grid">{visible.map(artist => <ArtistTile key={artist.id} artist={artist} privateMode={privateMode} query={query} onOpen={() => onOpen(artist)} />)}</div>{visible.length === 0 && <EmptyState icon={PhotoIcon} title="검색 결과가 없습니다" />}</section>
     <Scrubber scrollRef={scroller} total={visible.length} sort={scrubberSort} hidden={paused}/>
   </div>;
 }
 
-export function EmptyArtists() { return <div className="artist-empty"><PhotoIcon aria-hidden="true" /><h2>PC 앱이 작가 목록을 아직 보내지 않았습니다</h2><p>작가 관리는 PC 앱에서 합니다.</p></div>; }
+export function EmptyArtists() { return <EmptyState icon={PhotoIcon} title="PC 앱이 작가 목록을 아직 보내지 않았습니다" />; }
 
 function assetPage(value: unknown): ArtistPage {
   if (!value || typeof value !== 'object') return {};

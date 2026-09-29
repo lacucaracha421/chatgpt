@@ -300,8 +300,8 @@ describe("CollectionBrowser", () => {
     ]) } as unknown as CollectionTrackingGateway;
     const collections = [{ ...manga, id: "a", name: "가 작품" }, { ...manga, id: "b", name: "나 작품" }, { ...manga, id: "c", name: "다 작품" }];
     renderBrowser({ collections, typeFilter: "manga", showcase: false, tracking, onViewChange, releaseProvider: "kakao" });
-    const segments = screen.getByRole("tablist", { name: "신간 지역" });
-    expect(within(segments).getByRole("tab", { name: /한국 정발/ })).toHaveAttribute("aria-selected", "true");
+    const segments = screen.getByRole("radiogroup", { name: "신간 지역" });
+    expect(within(segments).getByRole("radio", { name: /한국 정발/ })).toHaveAttribute("aria-checked", "true");
     const group = await screen.findByRole("region", { name: "가 작품" });
     expect(within(group).getByText("2권까지 소장")).toBeInTheDocument();
     expect(within(group).getAllByRole("listitem").map(row => row.textContent)).toEqual([`3권 · ${year - 1}년 9월 16일 발매됨미보유NEW`, `4권 · ${year + 1}년 10월 10일 발매 예정미보유`]);
@@ -309,7 +309,7 @@ describe("CollectionBrowser", () => {
     // A watched work with every Korean volume owned is not listed; an unwatched work never is.
     expect(screen.queryByRole("region", { name: "나 작품" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "다 작품" })).not.toBeInTheDocument();
-    await userEvent.setup().click(within(segments).getByRole("tab", { name: /일본/ }));
+    await userEvent.setup().click(within(segments).getByRole("radio", { name: /일본/ }));
     expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "manga", showcase: false, releaseProvider: "mangadex" });
     cleanup();
     renderBrowser({ collections, typeFilter: "manga", showcase: false, tracking, releaseProvider: "mangadex" });

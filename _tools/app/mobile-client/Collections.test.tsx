@@ -310,7 +310,7 @@ describe('read-only collections',()=>{
     const backRef:{current:(()=>boolean)|null}={current:null};
     render(<Collections active paused={false} backRef={backRef}/>);await screen.findByText('밤의 도서관');
     const showcaseCalls=()=>mocks.api.mock.calls.filter(([path])=>path.includes('showcase=true'));
-    const fold=screen.getByRole('region',{name:'쇼케이스'}).querySelector('.collection-section-label') as HTMLElement;
+    const fold=screen.getByRole('region',{name:'쇼케이스'}).querySelector('.ui-section-label__actions button') as HTMLElement;
     expect(fold.getAttribute('aria-expanded')).toBe('true');await waitFor(()=>expect(showcaseCalls()).toHaveLength(1));
     fireEvent.click(fold);
     expect(showcaseCalls()).toHaveLength(1);
@@ -335,7 +335,7 @@ describe('read-only collections',()=>{
       return {...page,totalCount:1};
     });
     render(<Collections active paused={false} backRef={{current:null}}/>);
-    const fold=await waitFor(()=>screen.getByRole('region',{name:'쇼케이스'}).querySelector('.collection-section-label') as HTMLElement);await waitFor(()=>expect(screen.getByText('밤의 도서관')).toBeTruthy());
+    const fold=await waitFor(()=>screen.getByRole('region',{name:'쇼케이스'}).querySelector('.ui-section-label__actions button') as HTMLElement);await waitFor(()=>expect(screen.getByText('밤의 도서관')).toBeTruthy());
     expect(await screen.findByRole('button',{name:'게임 쇼케이스'})).toBeTruthy();
     pressTab('만화');await screen.findByText('만화 작품');
     expect(screen.queryByRole('button',{name:'게임 쇼케이스'})).toBeNull();
@@ -356,7 +356,7 @@ describe('read-only collections',()=>{
   it('distinguishes unpublished, published empty, and older server',async()=>{
     mocks.api.mockResolvedValueOnce({...page,ready:false,items:[]});const view=render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('컬렉션이 아직 공유되지 않았습니다');
     mocks.api.mockResolvedValueOnce({...page,items:[]});pull(list());await screen.findByText('아직 작품이 없습니다');
-    mocks.api.mockRejectedValueOnce(Object.assign(new Error('요청한 정보를 찾을 수 없습니다.'),{status:404}));pull(list());await screen.findByText(/서버에 모바일 컬렉션 기능이 필요/);view.unmount();
+    mocks.api.mockRejectedValueOnce(Object.assign(new Error('요청한 정보를 찾을 수 없습니다.'),{status:404}));pull(list());await screen.findByText('컬렉션이 아직 공유되지 않았습니다');view.unmount();
   });
   it('searches after typing pauses or on Enter, and clears explicitly',async()=>{
     render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
@@ -414,7 +414,7 @@ describe('read-only collections',()=>{
     const view=render(<Collections active paused={false} backRef={{current:null}}/>);
     await screen.findByText(item.name);
     const region=screen.getByRole('region',{name:'쇼케이스'});
-    const label=region.querySelector('.collection-section-label') as HTMLButtonElement;
+    const label=region.querySelector('.ui-section-label__actions button') as HTMLButtonElement;
     expect(label.getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(label);
     expect(label.getAttribute('aria-expanded')).toBe('false');
@@ -422,7 +422,7 @@ describe('read-only collections',()=>{
     view.unmount();
     render(<Collections active paused={false} backRef={{current:null}}/>);
     await screen.findByText(item.name);
-    expect((screen.getByRole('region',{name:'쇼케이스'}).querySelector('.collection-section-label') as HTMLButtonElement).getAttribute('aria-expanded')).toBe('false');
+    expect((screen.getByRole('region',{name:'쇼케이스'}).querySelector('.ui-section-label__actions button') as HTMLButtonElement).getAttribute('aria-expanded')).toBe('false');
   });
   it('hides AV from the type switch in privacy mode',async()=>{
     localStorage.setItem('lakomics.mobile.privacyMode','1');
@@ -583,7 +583,7 @@ it('uses production company and TV date range for movie grid captions',()=>{
   expect(collectionCardCredit(movie)).toBe('Studio');expect(collectionCardDate(movie)).toBe('16.1.14~24.5.5');expect(collectionCardDate({...movie,seasonDateRange:null})).toBe('2016');
 });
 it('shows the full filtered Collection count instead of the loaded page length',async()=>{
-  mocks.api.mockResolvedValue({...page,totalCount:125});render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText(item.name);expect(document.querySelector('.collection-type-label__count')?.textContent?.trim()).toBe('· 125');
+  mocks.api.mockResolvedValue({...page,totalCount:125});render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText(item.name);expect(document.querySelector('.collection-type-label .ui-section-label__count')?.textContent?.trim()).toBe('125');
 });
 /**
  * jsdom does not lay text out, so the caption rules are asserted on the elements that own them.

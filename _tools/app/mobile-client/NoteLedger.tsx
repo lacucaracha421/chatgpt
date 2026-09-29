@@ -1,7 +1,7 @@
 import {useEffect,useMemo,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
 import {ArrowLeftIcon,ArrowPathIcon,CheckIcon,ChevronDownIcon,ChevronLeftIcon,ChevronRightIcon,EllipsisHorizontalIcon,PlusIcon,WalletIcon} from '@heroicons/react/24/outline';
 import {PinIcon} from './PinIcon';
-import {Button,IconButton} from './ui';
+import {Badge,Button,IconButton,SectionLabel} from './ui';
 import {keyBetween} from '../src/notes/model';
 import type {Note,NotesStore} from '../src/notes/store';
 import {addDays,addMonths,cycleLabel,dayNumber,inTrial,isEnded,localToday,monthlyEquivalent,nextCharges,recurringTotals} from '../src/notes/ledger/cycle';
@@ -30,7 +30,7 @@ const daysUntil=(date:string,today:string)=>{const d=dayNumber(date)-dayNumber(t
 const nextOrder=(list:{order:string}[])=>keyBetween(list.reduce<string|null>((max,item)=>max===null||item.order>max?item.order:max,null),null);
 
 function Label({children,more,onMore}:{children:ReactNode;more?:string;onMore?():void}) {
-  return <h3 className="ledger-label"><span>{children}</span><i aria-hidden="true"/>{more&&<button type="button" onClick={onMore}>{more}<ChevronRightIcon aria-hidden="true"/></button>}</h3>;
+  return <SectionLabel as="h3" title={String(children)} actions={more&&onMore ? <Button type="button" size="sm" variant="ghost" onClick={onMore}>{more}<ChevronRightIcon aria-hidden="true" /></Button> : undefined} />;
 }
 function Meter({summary}:{summary:MonthSummary}) {
   if(!summary.incomeSet||summary.income<=0)return null;
@@ -191,7 +191,7 @@ export function NoteLedger({store,ledger,notes,saveState,onLeave,onMore,backRef}
       const monthly=r.unit!=='month'||r.every!==1;
       return <li key={r.id} className="ledger-row is-recurring" onClick={()=>openSheet({kind:'recurring',item:r})}>
         <span className="ledger-mono" aria-hidden="true">{Array.from(r.name.trim())[0]?.toLocaleUpperCase()??'?'}</span>
-        <span className="ledger-row__name"><strong>{r.name}{inTrial(r,today)&&<em className="ledger-badge">체험 중 · 첫 결제 {longDate(r.start)}</em>}{r.until&&!isEnded(r,today)&&<em className="ledger-badge">해지함 · {longDate(r.until)} 만료</em>}{isEnded(r,today)&&<em className="ledger-badge">{longDate(r.until!)} 종료</em>}</strong>
+        <span className="ledger-row__name"><strong>{r.name}{inTrial(r,today)&&<Badge>체험 중 · 첫 결제 {longDate(r.start)}</Badge>}{r.until&&!isEnded(r,today)&&<Badge>해지함 · {longDate(r.until)} 만료</Badge>}{isEnded(r,today)&&<Badge>{longDate(r.until!)} 종료</Badge>}</strong>
           <small>{cycleLabel(r)}{r.memo&&` · ${r.memo}`}</small>{forkedRecurring.has(r.id)&&<Fork onKeep={()=>editLedger(l=>({recurring:keepOnly(l.recurring??[],r.id)}))}/>}</span>
         {next?<span className="ledger-row__when"><b>{next.slice(0,4)!==today.slice(0,4)?`${next.slice(0,4)}년 `:''}{longDate(next)}</b><small>{daysUntil(next,today)}</small></span>
           :r.until&&!isEnded(r,today)&&<span className="ledger-row__when"><b>{longDate(r.until)}</b><small>{daysUntil(r.until,today)} 만료</small></span>}

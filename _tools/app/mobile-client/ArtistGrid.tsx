@@ -3,7 +3,7 @@ import {ArrowsUpDownIcon,MagnifyingGlassIcon} from '@heroicons/react/24/outline'
 import {BottomSheet} from './BottomSheet';
 import {ArtistImage,EmptyArtists} from './Artists';
 import {api} from './transport';
-import {SegmentedControl} from './ui';
+import {EmptyState,SegmentedControl} from './ui';
 import {usePrivacyMode} from './privacyMode';
 import {PinIcon} from './PinIcon';
 import {artistName,assetsFromIds,matchesArtist,normalizeArtists,sortArtists,type ArtistSort,type LibraryArtist} from './artistsModel';
@@ -80,7 +80,7 @@ export function ArtistGrid({active,paused,onOpenArtist,onVisibleNames}:{active:b
       <label className="artist-grid-search"><MagnifyingGlassIcon aria-hidden="true"/><span className="sr-only">작가 찾기</span><input type="search" aria-label="작가 찾기" placeholder="작가 찾기" value={query} onChange={event => setQuery(event.target.value)}/></label>
       <button type="button" className="artist-grid-sort" aria-label={`정렬: ${SORT_LABELS[sort]}`} onClick={() => setSortOpen(true)}><ArrowsUpDownIcon aria-hidden="true"/>{SORT_LABELS[sort]}</button>
     </div>
-    {state === 'idle' || state === 'loading' ? <div className="artist-empty" role="status"><span>{state === 'loading' ? '작가 목록을 불러오는 중입니다' : '작가 목록을 준비하는 중입니다'}</span></div> : state === 'empty' ? <EmptyArtists/> : visible.length ? <div className="artist-grid-list">{visible.map(artist => <ArtistGridCard key={artist.id} artist={artist} privateMode={privateMode} paused={paused} onOpen={() => onOpenArtist(artist)}/>)}</div> : <div className="artist-empty"><h2>검색 결과가 없습니다</h2><p>이름, 핸들 또는 초성을 바꿔 보세요.</p></div>}
+    {state === 'idle' || state === 'loading' ? <div className="artist-empty" role="status"><span>{state === 'loading' ? '작가 목록을 불러오는 중입니다' : '작가 목록을 준비하는 중입니다'}</span></div> : state === 'empty' ? <EmptyArtists/> : visible.length ? <div className="artist-grid-list">{visible.map(artist => <ArtistGridCard key={artist.id} artist={artist} privateMode={privateMode} paused={paused} onOpen={() => onOpenArtist(artist)}/>)}</div> : <EmptyState title="검색 결과가 없습니다"/>}
     {sortOpen && <BottomSheet title="정렬" onClose={() => setSortOpen(false)}><SegmentedControl fullWidth label="작가 정렬" options={SORT_OPTIONS} value={sort} onChange={chooseSort}/></BottomSheet>}
   </div>;
 }

@@ -27,6 +27,7 @@
 @media(min-width:700px){.collection-grid.collection-showcase{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .collection-showcase-note{margin:4px 0 14px}
 .collection-more-status{text-align:center;padding:16px 0}
+.collection-releases__skeleton-row{width:min(420px,100%);height:48px;margin:16px auto}
 .collection-tile{display:flex;flex-direction:column;min-width:0;background:none;border:0;color:inherit;text-align:left;padding:0;cursor:pointer;font:inherit}
 .collection-tile:focus-visible,.collection-detail-cover:focus-visible,.collection-live-book:focus-visible{outline:2px solid var(--color-focus);outline-offset:4px}
 .collection-tile:active .collection-art{opacity:.8}
@@ -176,8 +177,6 @@
 .collection-personal-pending.is-slot{display:inline-block;min-width:4.5em;text-align:right}
 .collection-personal-switch{transition:background-color .15s var(--ease-standard),border-color .15s var(--ease-standard)}
 .collection-personal-switch::after{transition:transform .15s var(--ease-standard),background-color .15s var(--ease-standard)}
-.collection-release-count{min-width:18px;padding:1px 5px;color:var(--color-bg);background:var(--color-accent);border-radius:var(--radius-sm);font-size:11px;font-weight:600;line-height:1.4;text-align:center}
-.collection-segments .collection-release-count{margin-left:6px}
 .collection-tile{position:relative}
 /* The 신간 marker after the stars: an ivory square and 신간 for unread news, plain muted 신간 for
    Korean volumes out but not owned, a hollow square and 예약 for the next pre-registered one.
@@ -203,7 +202,6 @@
 .collection-release-group__title strong{font-weight:500;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .collection-release-group__title small{font-size:13px;color:var(--color-muted)}
 .collection-release-group__title small.is-ahead{color:var(--color-text)}
-.collection-release-new{flex-shrink:0;padding:1px 6px;color:var(--color-bg);background:var(--color-accent);border-radius:var(--radius-sm);font-size:11px;font-weight:600;line-height:1.5}
 .collection-release-tag{flex-shrink:0;padding:0 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);color:var(--color-muted);font-size:11px;line-height:1.6}
 .collection-release-volumes{list-style:none;margin:6px 0 0;padding:0 0 0 64px}
 .collection-release-volumes li{display:flex;align-items:center;gap:8px;min-height:40px;border-top:1px solid var(--color-border);font-size:14px}
@@ -260,17 +258,6 @@
 .mobile-collections>.collection-type-switch{flex-shrink:0;padding:16px 24px 0}
 .mobile-collections>.collection-type-switch .ui-segmented{min-height:44px}
 .mobile-collections>.collection-list{padding-inline:24px}
-.collection-section-label-row{display:flex;align-items:center;gap:8px;min-height:44px;margin-top:16px}
-.collection-section-label{display:flex;align-items:center;gap:8px;flex:1;min-width:0;min-height:44px;padding:0;background:transparent;border:0;color:inherit;font:inherit;text-align:left}
-.collection-section-label:active,.collection-section-label__more:active,.collection-news-block:active,.collection-news-empty:active{background:var(--color-surface-pressed)}
-.collection-section-label__name{display:inline-flex;align-items:center;gap:8px;flex-shrink:0;color:var(--color-faint);font-size:var(--type-meta);font-weight:500}
-.collection-section-label__mark{width:5px;height:5px;flex:none;background:var(--color-accent)}
-.collection-section-label__count,.collection-type-label__count{color:var(--color-muted);font-weight:500}
-.collection-section-label__line{height:1px;min-width:12px;flex:1;background:var(--color-border)}
-.collection-section-label>svg{width:20px;height:20px;flex:none;color:var(--color-muted);transition:transform 140ms var(--ease-standard)}
-.collection-section-label>svg.is-open{transform:rotate(90deg)}
-.collection-section-label__more{display:inline-flex;align-items:center;gap:2px;min-width:44px;min-height:44px;padding:0 0 0 4px;background:transparent;border:0;color:var(--color-muted);font:500 var(--type-meta) var(--font-ui)}
-.collection-section-label__more svg{width:18px;height:18px}
 .collection-shelf{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 32px)/5);gap:8px;overflow-x:auto;margin:8px 0 8px;padding:0 0 4px;scrollbar-width:none}
 .collection-shelf::-webkit-scrollbar{display:none}
 .collection-shelf>.collection-showcase-tile{width:auto;min-width:0}
@@ -279,17 +266,17 @@
 .collection-showcase-tile .collection-art{aspect-ratio:2/3;border-radius:var(--radius-mark)}
 .collection-showcase-tile:focus-visible,.collection-news-cover:focus-visible,.collection-calendar-cover:focus-visible{outline:2px solid var(--color-focus);outline-offset:3px}
 .collection-news-section{margin-top:16px}
+.collection-news-block:active,.collection-news-empty:active{background:var(--color-surface-pressed)}
 .collection-news-block-wrap{margin-top:8px;padding:8px 16px 16px;background:var(--color-surface);border-radius:var(--radius-tile)}
 .collection-news-block{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;padding:0;background:transparent;border:0;color:inherit;font:600 var(--type-body) var(--font-ui);text-align:left}
 .collection-news-block>svg:first-child{width:20px;height:20px;color:var(--color-muted)}
 .collection-news-block>svg:last-child{width:20px;height:20px;margin-left:auto;color:var(--color-muted)}
-.collection-news-count{width:24px;min-width:24px;height:24px;padding:0;border-radius:var(--radius-mark)}
 .collection-news-hint{min-width:0;overflow:hidden;color:var(--color-faint);font-size:var(--type-meta);font-weight:400;text-overflow:ellipsis;white-space:nowrap}
 .collection-news-covers,.collection-calendar-covers{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-top:4px}
 .collection-news-cover,.collection-calendar-cover{min-width:0;padding:0;background:transparent;border:0;color:inherit;text-align:left;font:inherit}
 .collection-news-cover>span,.collection-calendar-cover{position:relative;display:block}
 .collection-news-cover .collection-art,.collection-calendar-art{aspect-ratio:2/3;border-radius:var(--radius-mark)}
-.collection-news-new{position:absolute;top:6px;left:6px;height:24px;padding:0 6px;border-radius:var(--radius-mark);font-size:var(--type-meta)}
+.collection-news-new{position:absolute;top:6px;left:6px}
 .collection-news-empty{display:flex;align-items:center;width:100%;min-height:44px;margin-top:4px;padding:0;background:transparent;border:0;color:var(--color-faint);font:var(--type-meta) var(--font-ui);text-align:left}
 .collection-calendar-cover{display:flex;flex-direction:column;gap:4px}
 .collection-calendar-date{display:block;min-height:20px;color:var(--color-muted);font-size:var(--type-meta);white-space:nowrap}
@@ -298,9 +285,7 @@
 .collection-calendar-art>img,.collection-calendar-art>span{display:block;width:100%;height:100%;object-fit:cover}
 .collection-news-cover-placeholder{background:var(--color-bg)}
 .collection-type-header{display:flex;align-items:center;gap:12px;width:100%}
-.collection-type-label{display:flex;align-items:center;gap:8px;flex:1;min-width:0;min-height:44px}
-.collection-type-label h2{margin:0;color:var(--color-faint);font-size:var(--type-meta);font-weight:500;white-space:nowrap}
-.collection-type-label__count{font-weight:500}
+.collection-type-label{flex:1;min-width:0}
 .collection-type-header .collection-chips{flex:none}
 .mobile-collections .av-showcase{display:none}
 @media(orientation:landscape){.collection-shelf{grid-auto-columns:calc((100% - 48px)/7)}}

@@ -115,10 +115,10 @@
       "legacyToken": 11
     },
     "_tools/app/src/collections/collectionReleases.css": {
-      "offScaleSpacing": 4,
+      "offScaleSpacing": 3,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 8
+      "legacyToken": 7
     },
     "_tools/app/src/collections/mangaConnections.css": {
       "offScaleSpacing": 0,
@@ -285,8 +285,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/Collections.css": {
-      "offScaleSpacing": 55,
-      "offRoleFontSize": 31,
+      "offScaleSpacing": 51,
+      "offRoleFontSize": 29,
       "pillRadius": 0,
       "legacyToken": 0
     },
@@ -309,8 +309,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/artists.css": {
-      "offScaleSpacing": 24,
-      "offRoleFontSize": 22,
+      "offScaleSpacing": 23,
+      "offRoleFontSize": 19,
       "pillRadius": 0,
       "legacyToken": 0
     },
@@ -363,14 +363,14 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/ledger.css": {
-      "offScaleSpacing": 34,
-      "offRoleFontSize": 38,
+      "offScaleSpacing": 32,
+      "offRoleFontSize": 37,
       "pillRadius": 0,
       "legacyToken": 0
     },
     "_tools/app/mobile-client/library.css": {
       "offScaleSpacing": 19,
-      "offRoleFontSize": 9,
+      "offRoleFontSize": 8,
       "pillRadius": 0,
       "legacyToken": 0
     },

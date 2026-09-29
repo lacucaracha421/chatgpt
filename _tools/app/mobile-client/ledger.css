@@ -45,11 +45,7 @@
 .ledger-review{display:block;width:100%;margin:14px 0 0;padding:10px 12px;border:0;border-radius:var(--radius-sm);background:rgba(224,135,123,.12);color:var(--color-danger);font:inherit;font-size:13px;text-align:left}
 /* Sections and rows */
 .ledger-section{margin-top:26px}
-.ledger-label{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:13px;font-weight:400;color:var(--color-muted);letter-spacing:.3px}
-.ledger-label::before{content:'';width:5px;height:5px;background:var(--color-section-mark);flex:none}
-.ledger-label>i{flex:1;height:1px;background:var(--section-label-rule)}
-.ledger-label button{display:inline-flex;align-items:center;gap:2px;min-height:36px;padding:0 0 0 6px;border:0;background:transparent;color:var(--color-muted);font:inherit;font-size:13px}
-.ledger-label button svg{width:14px;height:14px}
+.ledger-section>.ui-section-label{margin:0 0 6px}
 .ledger-row{display:flex;align-items:center;gap:14px;min-height:56px;padding:6px 0;border-bottom:1px solid var(--color-border);cursor:pointer}
 .ledger-row:last-child{border-bottom:0}
 .ledger-row:active{background:var(--color-selected)}
@@ -78,7 +74,6 @@
 .ledger-buy.ui-button{flex:none;min-height:44px}
 .ledger-mono{display:grid;place-items:center;width:40px;height:40px;flex:none;border-radius:3px;background:var(--color-surface-elevated);color:var(--color-muted);font-size:15px;font-weight:600}
 .ledger-row.is-recurring{min-height:72px}
-.ledger-badge{display:inline-flex;align-items:center;height:20px;padding:0 7px;border:1px solid var(--color-border);border-radius:2px;font-style:normal;font-size:12px;font-weight:400;color:var(--color-muted);white-space:nowrap}
 .ledger-fork{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:12px;color:var(--color-danger)}
 .ledger-fork .ui-button{min-height:36px;color:var(--color-text)}
 .ledger-day{margin-top:18px}

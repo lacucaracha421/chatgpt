@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {BellIcon, RectangleStackIcon} from '@heroicons/react/24/outline';
-import {Button, Dialog, DialogDescription} from './ui';
+import {Badge, Button, Dialog, DialogDescription, EmptyState, SegmentedControl, Skeleton} from './ui';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useSegmentMotion} from './motion';
 import {Scrubber} from './Scrubber';
@@ -149,44 +149,46 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
     <button className="collection-release-group__open" onClick={() => onOpen(work.id)}>
       <span className="collection-release-group__cover">{cover(work, revision, work.name)}</span>
       <span className="collection-release-group__title"><strong>{work.name}</strong>{lines}</span>
-      {fresh > 0 && <span className="collection-release-new numeric" aria-label={`새 알림 ${fresh}개`}>NEW {fresh}</span>}
+      {fresh > 0 && <Badge variant="accent" aria-label={`새 알림 ${fresh}개`}>NEW {fresh}</Badge>}
     </button>
     {fresh > 0 && confirmButton(work.id, work.name)}
   </div>;
 
   return <div ref={scroller} className="collection-list collection-releases" style={{display: active ? undefined : 'none'}}>
     {pull}
-    <div className="library-segments collection-segments" role="tablist" aria-label="신간 지역">
-      {(['kr', 'jp'] as const).map(value => <button key={value} role="tab" aria-selected={region === value} aria-description={news[value] ? `새 소식 ${news[value]}개` : undefined} onClick={() => setRegion(value)}>
-        {value === 'kr' ? '한국 정발' : '일본'}{news[value] > 0 && <span className="collection-release-count numeric" aria-hidden="true">{news[value]}</span>}
-      </button>)}
-    </div>
+    <SegmentedControl<Region>
+      className="collection-segments"
+      label="신간 지역"
+      options={[{value: 'kr', label: '한국 정발', count: news.kr}, {value: 'jp', label: '일본', count: news.jp}]}
+      value={region}
+      onChange={setRegion}
+    />
     {status.error && <div className="inline-error" role="alert"><span>{status.error}</span><Button variant="ghost" onClick={reload}>다시 시도</Button></div>}
     {ackError && <div className="inline-error" role="alert"><span>{ackError}</span></div>}
-    {status.busy && !data.loaded && <p className="hint collection-more-status" role="status">신간 정보를 불러오는 중…</p>}
-    {data.loaded && shelf && !shelf.ready && <div className="empty-state"><RectangleStackIcon/><h2>컬렉션이 아직 공유되지 않았습니다</h2><p>PC의 설정에서 컬렉션을 클라우드에 게시하면 여기에 표시됩니다.</p></div>}
+    {status.busy && !data.loaded && <Skeleton className="collection-releases__skeleton-row" label="신간 정보를 불러오는 중" />}
+    {data.loaded && shelf && !shelf.ready && <EmptyState icon={RectangleStackIcon} title="컬렉션이 아직 공유되지 않았습니다" />}
     {absent && <p className="collection-tracking-reason collection-release-note" role="note">{SCHEDULE_ABSENT_NOTE}</p>}
     {unread > 0 && data.loaded && <div className="collection-releases-head">
       <p className="hint">새 알림 <span className="numeric">{unread.toLocaleString()}</span>개 · 확인하면 PC에서도 읽음으로 바뀝니다.</p>
       <Button variant="ghost" className="collection-releases-all" disabled={busy} onClick={() => setConfirmAll(true)}>모두 확인</Button>
     </div>}
-    {data.loaded && shelf?.ready && !absent && !watched.length && <div className="empty-state"><BellIcon/><h2>신간 알림을 켠 만화가 없습니다</h2><p>작품 상세의 내 기록에서 신간 알림을 켜면 여기에 모입니다.</p></div>}
-    {data.loaded && !absent && watched.length > 0 && region === 'kr' && !korean.length && <div className="empty-state"><BellIcon/><h2>소장하지 않은 정발 권이 없습니다</h2><p>한국에 나온 권을 모두 소장했거나 아직 발매 정보가 없습니다.</p></div>}
-    {data.loaded && !absent && watched.length > 0 && region === 'jp' && !japan.length && <div className="empty-state"><BellIcon/><h2>일본 발매 정보가 없습니다</h2><p>MangaDex에서 찾은 권이 있으면 여기에 표시됩니다.</p></div>}
+    {data.loaded && shelf?.ready && !absent && !watched.length && <EmptyState icon={BellIcon} title="신간 알림을 켠 만화가 없습니다" />}
+    {data.loaded && !absent && watched.length > 0 && region === 'kr' && !korean.length && <EmptyState icon={BellIcon} title="소장하지 않은 정발 권이 없습니다" />}
+    {data.loaded && !absent && watched.length > 0 && region === 'jp' && !japan.length && <EmptyState icon={BellIcon} title="일본 발매 정보가 없습니다" />}
 
     {region === 'kr' && korean.map(row => <section key={row.work.id} className={`collection-release-group${row.fresh ? ' is-new' : ''}`} aria-label={row.work.name}>
       {head(row.work, <small className="numeric">{row.owned === null ? '소장 기록 없음' : `${row.owned}권까지 소장`}</small>, row.fresh)}
       <ul className="collection-release-volumes">{row.volumes.map(volume => <li key={volume.volumeNumber} className={volume.fresh ? 'is-new' : undefined}>
         <span className={`numeric${volume.upcoming ? ' is-upcoming' : ''}`}>{koreanVolumeLine(volume, today)}</span>
         <span className="collection-release-tag">미보유</span>
-        {volume.fresh && <span className="collection-release-new">NEW</span>}
+        {volume.fresh && <Badge variant="accent">NEW</Badge>}
       </li>)}</ul>
     </section>)}
 
     {region === 'jp' && japan.map(row => <section key={row.work.id} className={`collection-release-group${row.fresh ? ' is-new' : ''}`} aria-label={row.work.name}>
       {head(row.work, <><small className="numeric">일본 최신 {row.latest}권</small>{row.ahead ? <small className="numeric is-ahead">한국 정발보다 {row.ahead}권 앞섬</small> : null}</>, row.fresh)}
       {row.aheadVolumes.length > 0 && <ul className="collection-release-chips" aria-label={`${row.work.name} 일본 권`}>
-        {row.aheadVolumes.slice(0, AHEAD_CHIPS).map(volume => <li key={volume.volumeNumber} className={volume.fresh ? 'is-new' : undefined}><span className="numeric">{volume.volumeNumber}권</span>{volume.fresh && <span className="collection-release-new">NEW</span>}</li>)}
+        {row.aheadVolumes.slice(0, AHEAD_CHIPS).map(volume => <li key={volume.volumeNumber} className={volume.fresh ? 'is-new' : undefined}><span className="numeric">{volume.volumeNumber}권</span>{volume.fresh && <Badge variant="accent">NEW</Badge>}</li>)}
         {row.aheadVolumes.length > AHEAD_CHIPS && <li className="is-more"><span className="numeric">외 {row.aheadVolumes.length - AHEAD_CHIPS}권</span></li>}
       </ul>}
     </section>)}
@@ -198,7 +200,7 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
           <button className="collection-release-group__open" onClick={() => onOpen(group.collectionId)}>
             <span className="collection-release-group__cover">{cover(workOf(group.collectionId), revision, group.name)}</span>
             <span className="collection-release-group__title"><strong>{group.name}</strong></span>
-            <span className="collection-release-new numeric" aria-label={`새 알림 ${group.events.length}개`}>NEW {group.events.length}</span>
+            <Badge variant="accent" aria-label={`새 알림 ${group.events.length}개`}>NEW {group.events.length}</Badge>
           </button>
           {confirmButton(group.collectionId, group.name)}
         </div>

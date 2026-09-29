@@ -80,7 +80,7 @@ const newsRegion=()=>screen.getByRole('region',{name:'소식'});
 const entry=()=>newsRegion().querySelector<HTMLButtonElement>('.collection-news-block');
 const waitForEntry=async(unread?:string)=>{
   await waitFor(()=>expect(entry()).not.toBeNull());
-  if(unread!==undefined)await waitFor(()=>expect(entry()!.querySelector('.collection-news-count')?.textContent).toBe(unread));
+  if(unread!==undefined)await waitFor(()=>expect(entry()!.querySelector('.ui-badge--count')?.textContent).toBe(unread));
   return entry()!;
 };
 const emptyEntry=()=>within(newsRegion()).findByRole('button',{name:'새 신간 없음'});
@@ -92,7 +92,7 @@ async function openReleases(backRef?:{current:(()=>boolean)|null}){
   await screen.findByRole('region',{name:'밤의 도서관'});
   return view;
 }
-const tab=(name:string)=>screen.getByRole('tab',{name});
+const tab=(name:string)=>screen.getByRole('radio',{name:new RegExp(`^${name}`)});
 const workOrder=()=>screen.getAllByRole('region').map(region=>region.getAttribute('aria-label')).filter(name=>name!=='컬렉션');
 
 it('computes unowned Korean volumes, including a future pre-registered one, nearest date first',()=>{
@@ -130,7 +130,7 @@ it('always shows the 신간 entry, with a count only while something is unread',
   const button=await emptyEntry();
   await waitFor(()=>expect(releaseReads().length).toBeGreaterThan(0));
   expect(button.textContent).toBe('새 신간 없음');
-  expect(button.querySelector('.collection-news-count')).toBeNull();
+  expect(button.querySelector('.ui-badge--count')).toBeNull();
   // Status changes count too: every read names all three kinds.
   expect(releaseReads().every(path=>new URLSearchParams(path.split('?')[1]).get('kinds')===KINDS.join(','))).toBe(true);
   cleanup();
@@ -144,7 +144,7 @@ it('always shows the 신간 entry, with a count only while something is unread',
 it('lists watched works with unowned Korean volumes and marks the new one',async()=>{
   await openReleases();
   expect(screen.getByRole('heading',{level:1}).textContent).toBe('신간');
-  expect(tab('한국 정발').getAttribute('aria-selected')).toBe('true');
+  expect(tab('한국 정발').getAttribute('aria-checked')).toBe('true');
   const night=screen.getByRole('region',{name:'밤의 도서관'});
   expect(within(night).getByText('3권까지 소장')).toBeTruthy();
   expect(lines(night)).toEqual(['4권 · 9월 16일 발매됨','5권 · 10월 10일 발매 예정','6권 · 발매일 미정']);
@@ -166,8 +166,8 @@ it('lists watched works with unowned Korean volumes and marks the new one',async
 
 it('shows how far the Japanese edition is ahead, newly found volumes marked',async()=>{
   await openReleases();
-  expect(tab('일본').querySelector('.collection-release-count')!.textContent).toBe('1');
-  expect(tab('한국 정발').querySelector('.collection-release-count')!.textContent).toBe('2');
+  expect(tab('일본').querySelector('.ui-segmented__count')!.textContent).toBe('1');
+  expect(tab('한국 정발').querySelector('.ui-segmented__count')!.textContent).toBe('2');
   fireEvent.click(tab('일본'));
   const full=await screen.findByRole('region',{name:'가득 찬 서가'});
   expect(within(full).getByText('일본 최신 4권')).toBeTruthy();
@@ -188,7 +188,7 @@ it('confirms one work with all three kinds and keeps its release information',as
   expect(lines(screen.getByRole('region',{name:'바다의 시간'}))).toEqual(['1권 · 8월 1일 발매됨','2권 · 9월 20일 발매됨']);
   expect(screen.queryByRole('button',{name:'바다의 시간 확인'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
-  await waitFor(()=>expect(entry()!.querySelector('.collection-news-count')?.textContent).toBe('3'));
+  await waitFor(()=>expect(entry()!.querySelector('.ui-badge--count')?.textContent).toBe('3'));
 });
 
 it('confirms everything with the per-Collection form, the information staying',async()=>{
@@ -202,7 +202,7 @@ it('confirms everything with the per-Collection form, the information staying',a
   expect(screen.queryByText('NEW')).toBeNull();
   expect(screen.queryByRole('region',{name:'조용한 숲'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
-  await waitFor(async()=>expect((await emptyEntry()).querySelector('.collection-news-count')).toBeNull());
+  await waitFor(async()=>expect((await emptyEntry()).querySelector('.ui-badge--count')).toBeNull());
 });
 
 it('opens a work, and a queued owned-count change updates the list when Back returns',async()=>{

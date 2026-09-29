@@ -2,7 +2,7 @@ import {BookmarkIcon as BookmarkOutlineIcon, CalendarDaysIcon, CheckIcon} from '
 import {BookmarkIcon as BookmarkSolidIcon} from '@heroicons/react/24/solid';
 import {useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject} from 'react';
 import {TopBar} from './TopBar';
-import {Badge, Button, SegmentedControl} from './ui';
+import {Badge, Button, EmptyState, SegmentedControl, SectionLabel, Skeleton} from './ui';
 import {api, ApiError, errorText, native} from './transport';
 import {usePrivacyMode} from './privacyMode';
 import {commitUpcomingWishlist, flushUpcomingWishlist, readUpcomingWishlistIntents, reconcileUpcomingWishlist, visibleUpcomingWishlist} from './upcomingWishlistOutbox';
@@ -40,9 +40,17 @@ function HomeCoverImage({cover, alt, privacy}: {cover: ReleaseCalendarEntry['cov
 }
 function EmptyCalendar({wishlistOnly}: {wishlistOnly: boolean}) {
   const Icon = wishlistOnly ? BookmarkOutlineIcon : CalendarDaysIcon;
-  return <div className="release-calendar-empty" role="status">
-    <Icon aria-hidden="true" />
-    <p>{wishlistOnly ? '관심 목록 비어 있음' : '6개월 안의 발매 정보 없음'}</p>
+  return <EmptyState icon={Icon} title={wishlistOnly ? '관심 목록 비어 있음' : '6개월 안의 발매 정보 없음'} />;
+}
+
+function LoadingCalendar() {
+  return <div className="release-calendar-skeletons" aria-label="발매 정보 불러오는 중" role="status">
+    {Array.from({length: 8}, (_, index) => <div key={index} className="release-calendar-skeleton-tile">
+      <div className="release-calendar-skeleton-date"><Skeleton label="발매 정보 불러오는 중" /><Skeleton label="발매 정보 불러오는 중" /><span /></div>
+      <Skeleton className="release-calendar-skeleton-cover" label="발매 정보 불러오는 중" />
+      <Skeleton className="release-calendar-skeleton-title" label="발매 정보 불러오는 중" />
+      <Skeleton className="release-calendar-skeleton-badge" label="발매 정보 불러오는 중" />
+    </div>)}
   </div>;
 }
 
@@ -78,7 +86,7 @@ function CalendarBody({reply, kind, wishlistOnly, visibleIds, privacy, reference
   if (!entries.length) return <EmptyCalendar wishlistOnly={wishlistOnly} />;
   return <div className="release-calendar-groups">
     {groups.map(month => <section key={month.key} className="release-calendar-month" aria-label={month.label}>
-      <div className="release-calendar-month-heading"><h2>{month.label}</h2><span className="numeric">{month.items.toLocaleString('ko-KR')}</span></div>
+      <SectionLabel as="h2" className="release-calendar-month-heading" title={month.label} count={month.items} />
       <div className="release-calendar-days">
         {month.days.map(day => {
           // One heading per release day; the day's covers sit side by side under it (up to a row).
@@ -221,7 +229,7 @@ export function ReleaseCalendar({onClose, backRef, initialKind}: ReleaseCalendar
     </div>
     {error && <div className="release-calendar-error" role="alert"><span>{error}</span><button type="button" onClick={() => setRetry(value => value + 1)}>다시 시도</button></div>}
     <main ref={scroller} className="release-calendar-scroll" aria-label="발매 캘린더 목록">
-      {state === 'loading' && <div className="release-calendar-loading" role="status">발매 캘린더를 불러오는 중입니다</div>}
+      {state === 'loading' && <LoadingCalendar />}
       {state === 'empty' && <EmptyCalendar wishlistOnly={wishlistOnly} />}
       {state === 'ready' && reply && <CalendarBody reply={reply} kind={kind} wishlistOnly={wishlistOnly} visibleIds={visibleIds} privacy={privateMode} referenceYear={referenceYear} acknowledging={acknowledging} onToggle={toggle} onAcknowledge={acknowledge} />}
       <Scrubber scrollRef={scroller} total={calendarEntries.length} sort={scrubberSort} hidden={state!=='ready'} />

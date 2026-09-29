@@ -8,6 +8,7 @@ import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
+import { SegmentedControl } from "../shared/ui/SegmentedControl";
 import { groupInbox, japanReleases, koreanReleases, koreanVolumeLine, localDay, releaseLine } from "./releaseCaption";
 import { updateCachedInbox, type ReleaseData } from "./releaseData";
 import "./collectionReleases.css";
@@ -146,15 +147,12 @@ export function CollectionReleases({ provider, collections, data, loading, error
 
   return <section className="collection-releases" aria-label="신간">
     <div className="collection-releases__bar">
-      <div className="collection-releases__segments" role="tablist" aria-label="신간 지역">
-        {(["kakao", "mangadex"] as const).map(value => {
-          const key = value === "kakao" ? "kr" : "jp";
-          return <button key={value} type="button" role="tab" className="collection-releases__segment" aria-selected={provider === value}
-            aria-description={news[key] ? `새 소식 ${news[key]}개` : undefined} onClick={() => { if (value !== provider) onProviderChange(value); }}>
-            {value === "kakao" ? "한국 정발" : "일본"}{news[key] > 0 && <span className="collection-releases__count" aria-hidden="true">{news[key]}</span>}
-          </button>;
-        })}
-      </div>
+      <SegmentedControl
+        label="신간 지역"
+        options={[{ value: "kakao", label: "한국 정발", count: news.kr }, { value: "mangadex", label: "일본", count: news.jp }]}
+        value={provider}
+        onChange={onProviderChange}
+      />
       <div className="collection-releases__actions">
         {inbox.length > 0 && <span className="collection-releases__unread">새 알림 {inbox.length.toLocaleString()}개</span>}
         {api?.runUpdates && <Button size="sm" disabled={busy || waiting || restricted} onClick={() => void check()}>{working === "check" ? "처리 중…" : waiting ? "재시도 대기" : "업데이트 확인"}</Button>}
