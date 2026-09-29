@@ -48,6 +48,15 @@ describe('artist model', () => {
 });
 
 describe('Artists', () => {
+  it('starts on an initial artist detail and closes through the owner on Back', async () => {
+    const close = vi.fn();
+    const directRef: MutableRefObject<(() => boolean) | null> = {current: null};
+    render(<Artists endpoint="https://example.invalid" backRef={directRef} initialArtist={primary} onClose={close} onOpenViewer={vi.fn()} />);
+    expect(await screen.findByRole('heading', {level: 2, name: '하늘빛'})).toBeTruthy();
+    act(() => { expect(directRef.current?.()).toBe(true); });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it('renders a fixture list with today picks and major artist tiles', async () => {
     renderArtists();
     expect(await screen.findByRole('region', {name: '오늘'})).toBeTruthy();

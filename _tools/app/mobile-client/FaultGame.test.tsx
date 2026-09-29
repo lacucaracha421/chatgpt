@@ -125,7 +125,7 @@ describe('FAULT entry',()=>{
     mocks.api.mockImplementation(async(path:string)=>path==='/v1/library/list-generation'?{generation:'b'.repeat(64),filterVersion:1}:path.includes('/v1/albums/assets')?{filterVersion:1,items,hasMore:false,nextCursor:null}:{items:[],has_more:false,next_cursor:null});
   }
   async function openAlbumOptions(){
-    render(<App/>);fireEvent.click(await screen.findByRole('tab',{name:'앨범'}));fireEvent.click(await screen.findByRole('button',{name:'업로드용, 2개'}));
+    render(<App/>);fireEvent.click(await screen.findByRole('radio',{name:'앨범'}));fireEvent.click(await screen.findByRole('button',{name:'업로드용, 2개'}));
     await screen.findByRole('heading',{name:'업로드용'});fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));
   }
   it('offers FAULT in an album with images, opens the game over the app and closes it with Back',async()=>{

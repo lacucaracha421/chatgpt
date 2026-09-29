@@ -17,6 +17,8 @@ export type LibraryArtist = {
   coverAssetIds: string[];
 };
 
+export type ArtistSort = 'recent' | 'count' | 'name';
+
 export type ArtistAssignment = {assetId: string; artistId: string; source?: 'manual' | 'source_url'};
 export type LibraryArtistsReply = {
   version?: number;
@@ -149,6 +151,25 @@ export function orderedArtists(artists: LibraryArtist[]): LibraryArtist[] {
   return [...artists].sort((a, b) => {
     const saved = (b.lastSavedAt ? Date.parse(b.lastSavedAt) : 0) - (a.lastSavedAt ? Date.parse(a.lastSavedAt) : 0);
     return (Number.isFinite(saved) ? saved : 0) || b.assetCount - a.assetCount || artistName(a).localeCompare(artistName(b), 'ko');
+  });
+}
+
+export function sortArtists(artists: LibraryArtist[], sort: ArtistSort): LibraryArtist[] {
+  return [...artists].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+
+    if (sort === 'recent') {
+      const aTime = a.lastSavedAt ? Date.parse(a.lastSavedAt) : NaN;
+      const bTime = b.lastSavedAt ? Date.parse(b.lastSavedAt) : NaN;
+      const aMissing = !Number.isFinite(aTime);
+      const bMissing = !Number.isFinite(bTime);
+      if (aMissing !== bMissing) return aMissing ? 1 : -1;
+      if (!aMissing && aTime !== bTime) return bTime - aTime;
+    } else if (sort === 'count' && a.assetCount !== b.assetCount) {
+      return b.assetCount - a.assetCount;
+    }
+
+    return artistName(a).localeCompare(artistName(b), 'ko');
   });
 }
 

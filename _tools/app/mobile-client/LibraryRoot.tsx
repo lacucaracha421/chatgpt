@@ -1,10 +1,10 @@
-import {useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
+import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import type React from 'react';
 import {ChevronDownIcon,ChevronRightIcon,MagnifyingGlassIcon,PhotoIcon,TrashIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
 import {SearchButton,TopBar,TopBarSearch} from './TopBar';
 import {useSimilarityReviewCount} from './useSimilarityReview';
-import {IconButton} from './ui';
+import {IconButton,SegmentedControl} from './ui';
 import {Cover} from './CoverGroup';
 import {CharacterGlyph,FolderCards,characterCovers,characterKindOf,useFolderCovers} from './FolderCards';
 import {ALL_ASSETS,ancestorsOf,entryView,searchLibraryEntries,type Entry} from './libraryModel';
@@ -15,6 +15,10 @@ import type {CharacterIndex} from './characterModel';
 import {SimilarityReviewEntry} from './SimilarityReview';
 import {Scrubber} from './Scrubber';
 import {createKoreanMatcher} from '../src/shared/koreanSearch';
+import {ArtistGrid} from './ArtistGrid';
+import type {LibraryArtist} from './artistsModel';
+
+export type LibrarySegment = 'folders'|'albums'|'artists';
 export function Highlight({name,query}:{name:string;query:string}) {
   const at=name.toLocaleLowerCase().indexOf(query.trim().toLocaleLowerCase());
   return at<0||!query.trim()?<>{name}</>:<>{name.slice(0,at)}<mark>{name.slice(at,at+query.trim().length)}</mark>{name.slice(at+query.trim().length)}</>;
@@ -73,10 +77,11 @@ function useFolderFit(active:boolean,scroller:React.RefObject<HTMLDivElement|nul
   },[active,scroller,grid,key]);
   return fit;
 }
-export function LibraryRoot({active=true,entries,characters,items,total,paused,busy,revision,onSelect,onRefresh,albumTree,albumError,segment,onSegment,restoreScroll,onScroll,similarity,onTrash}:{/** False while a folder is open: the root stays mounted, hidden, so going back is instant. */active?:boolean;/** Opens the Library Trash; absent until the lifecycle authority is adopted. */onTrash?():void;similarity?:{enabled:boolean;refreshKey:unknown;scope?:string;onOpen():void};entries:Entry[];characters?:CharacterIndex;items:Asset[];total?:number;paused:boolean;busy:boolean;revision:number;onSelect(view:View):void;onRefresh():void;albumTree:AlbumTree|null;albumError:string;segment:'folders'|'albums';onSegment(segment:'folders'|'albums'):void;restoreScroll:number;onScroll(top:number):void}) {
+export function LibraryRoot({active=true,entries,characters,items,total,paused,busy,revision,onSelect,onOpenArtist,onRefresh,albumTree,albumError,segment,onSegment,restoreScroll,onScroll,similarity,onTrash}:{/** False while a folder is open: the root stays mounted, hidden, so going back is instant. */active?:boolean;/** Opens the Library Trash; absent until the lifecycle authority is adopted. */onTrash?():void;similarity?:{enabled:boolean;refreshKey:unknown;scope?:string;onOpen():void};entries:Entry[];characters?:CharacterIndex;items:Asset[];total?:number;paused:boolean;busy:boolean;revision:number;onSelect(view:View):void;onOpenArtist(artist:LibraryArtist):void;onRefresh():void;albumTree:AlbumTree|null;albumError:string;segment:LibrarySegment;onSegment(segment:LibrarySegment):void;restoreScroll:number;onScroll(top:number):void}) {
   const [query,setQuery]=useState('');
   const [searchOpen,setSearchOpen]=useState(false);
   const [queueOpen,setQueueOpen]=useState(false);
+  const [artistNames,setArtistNames]=useState<string[]>([]);
   // The end line describes the first screen only; it leaves once the user scrolls.
   const [scrolled,setScrolled]=useState(false);
   const host=useRef<HTMLDivElement>(null),pull=usePullToRefresh(host,onRefresh,busy,paused);
@@ -85,15 +90,16 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
   const path=(entry:Entry)=>ancestorsOf(entries,entry.id).map(item=>item.name).join(' › ')||'최상위';
   const results=searchLibraryEntries(entries,query);
   const rows=query.trim()?results:[];
-  const {covers,onVisible}=useFolderCovers(rows,paused||segment==='albums',revision);
+  const {covers,onVisible}=useFolderCovers(rows,paused||segment!=='folders',revision);
   // Waiting review work is one quiet "확인 N" in the bar, shown only while something waits.
   const similarityCount=useSimilarityReviewCount(!!similarity?.enabled&&active&&!paused,similarity?.refreshKey,similarity?.scope)??0;
   const waiting=similarityCount;
   const openQueue=()=>setQueueOpen(true);
   const topFolders=entries.filter(entry=>!entry.parent_id);
-  const showFolders=segment==='folders'&&!query.trim();
+  const hasSearch=segment!=='artists'&&!!query.trim();
+  const showFolders=segment==='folders'&&!hasSearch;
   const fit=useFolderFit(active&&showFolders,host,folders,`${topFolders.length}:${!!waiting}`);
-  const searching=searchOpen||!!query;
+  const searching=segment!=='artists'&&(searchOpen||!!query);
   const closeSearch=()=>{setQuery('');setSearchOpen(false);};
   const label=segment==='albums'?'앨범 찾기':'폴더·캐릭터 찾기';
   const albumItems=useMemo(()=>{
@@ -101,24 +107,26 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
     const known=new Set(albumTree.albums.map(album=>album.id)),search=query.trim(),matches=createKoreanMatcher(search);
     return albumTree.albums.filter(album=>search?matches(album.name):!album.parentId||!known.has(album.parentId));
   },[albumTree,query]);
-  const scrubberValues=useMemo(()=>segment==='albums'?albumItems.map(album=>album.name):query.trim()?rows.map(entry=>entry.name):topFolders.map(entry=>entry.name),[albumItems,query,rows,segment,topFolders]);
-  const scrubberSort=useMemo(()=>({kind:'fallback' as const}),[]);
+  const scrubberValues=useMemo(()=>segment==='artists'?artistNames:segment==='albums'?albumItems.map(album=>album.name):hasSearch?rows.map(entry=>entry.name):topFolders.map(entry=>entry.name),[albumItems,artistNames,hasSearch,query,rows,segment,topFolders]);
+  const scrubberSort=useMemo(()=>segment==='artists'?({kind:'name',values:artistNames} as const):({kind:'fallback'} as const),[artistNames,segment]);
+  const onVisibleArtistNames=useCallback((names:string[])=>setArtistNames(previous=>previous.length===names.length&&previous.every((name,index)=>name===names[index])?previous:names),[]);
   return <div className={`library-root${fit?' is-fit':''}`} style={{display:active?undefined:'none',...(fit?{'--root-cover-height':`${fit.cover}px`} as React.CSSProperties:{})}}>
     {searching
       ?<TopBarSearch title="에셋" loading={busy&&'목록 불러오는 중'} onClose={closeSearch}><label className="top-bar__search"><MagnifyingGlassIcon aria-hidden="true"/><input type="search" autoFocus aria-label={label} placeholder={label} value={query} onChange={event=>setQuery(event.target.value)}/></label>{query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>setQuery('')}/>}</TopBarSearch>
-      :<TopBar title="에셋" loading={busy&&'목록 불러오는 중'} actions={<>{waiting>0&&<button className="top-bar__queue" onClick={openQueue} aria-label={`확인할 것 ${waiting}개`}>확인<span className="numeric">{waiting}</span></button>}<SearchButton onClick={()=>setSearchOpen(true)}/>{onTrash&&<IconButton label="휴지통" icon={TrashIcon} onClick={onTrash}/>}</>}/>}
+      :<TopBar title="에셋" loading={busy&&'목록 불러오는 중'} actions={<>{waiting>0&&<button className="top-bar__queue" onClick={openQueue} aria-label={`확인할 것 ${waiting}개`}>확인<span className="numeric">{waiting}</span></button>}{segment!=='artists'&&<SearchButton onClick={()=>setSearchOpen(true)}/>}{onTrash&&<IconButton label="휴지통" icon={TrashIcon} onClick={onTrash}/>}</>}/>}
     <div className="library-root-scroll" ref={host} onScroll={event=>{const top=event.currentTarget.scrollTop;onScroll(top);if(top>8!==scrolled)setScrolled(top>8);}} aria-label="에셋 탐색">{pull}
-    <div className="library-segments" role="tablist" aria-label="에셋 보기">{(['folders','albums'] as const).map(value=><button key={value} role="tab" aria-selected={segment===value} onClick={()=>{onSegment(value);setQuery('');}}>{value==='folders'?'분류':'앨범'}</button>)}</div>
-    {query.trim()?segment==='albums'?<div className="library-results">{albumTree&&<Albums key={`${albumTree.libraryId}:${albumTree.epoch}:search`} tree={albumTree} revision={revision} query={query} paused={paused||segment!=='albums'} onSelect={onSelect}/>}</div>:<div className="library-results">{results.map(entry=><FolderRow key={entry.id} entry={entry} query={query} path={path(entry)} cover={characterCovers(entry,characters)[0]??covers[entry.id]?.[0]} paused={paused} onVisible={onVisible} onSelect={onSelect}/>)}{!searchLibraryEntries(entries,query).length&&<p className="hint">일치하는 폴더가 없습니다.</p>}</div>:<>
-    <div style={{display:segment==='albums'?'none':undefined}}>
-      <button className="library-all" onClick={()=>onSelect(ALL_ASSETS)}><span className="all-covers">{items.slice(0,4).map(asset=><Cover key={asset.id} asset={asset} paused={paused||segment==='albums'}/>)}</span><span className="result-name"><strong>모든 자산</strong><small>최근 저장한 순서</small></span>{total!==undefined&&<span className="numeric muted">{total}</span>}<ChevronRightIcon/></button>
-      <section className="library-root-folders" ref={folders}><h2 className="section-label">분류{!!topFolders.length&&<span className="numeric">{topFolders.length}</span>}</h2><FolderCards items={topFolders} entries={entries} characters={characters} paused={paused||segment==='albums'} revision={revision} onSelect={onSelect}/>{!entries.length&&<p className="hint">아직 게시된 분류가 없습니다.</p>}
+    <SegmentedControl<LibrarySegment> className="library-segments" fullWidth label="에셋 보기" options={[{value:'folders',label:'분류'},{value:'albums',label:'앨범'},{value:'artists',label:'작가'}]} value={segment} onChange={value=>{onSegment(value);setQuery('');setSearchOpen(false);}}/>
+    {hasSearch?segment==='albums'?<div className="library-results">{albumTree&&<Albums key={`${albumTree.libraryId}:${albumTree.epoch}:search`} tree={albumTree} revision={revision} query={query} paused={paused||segment!=='albums'} onSelect={onSelect}/>}</div>:<div className="library-results">{results.map(entry=><FolderRow key={entry.id} entry={entry} query={query} path={path(entry)} cover={characterCovers(entry,characters)[0]??covers[entry.id]?.[0]} paused={paused} onVisible={onVisible} onSelect={onSelect}/>)}{!searchLibraryEntries(entries,query).length&&<p className="hint">일치하는 폴더가 없습니다.</p>}</div>:<>
+    <div style={{display:segment==='folders'?undefined:'none'}}>
+      <button className="library-all" onClick={()=>onSelect(ALL_ASSETS)}><span className="all-covers">{items.slice(0,4).map(asset=><Cover key={asset.id} asset={asset} paused={paused||segment!=='folders'}/>)}</span><span className="result-name"><strong>모든 자산</strong><small>최근 저장한 순서</small></span>{total!==undefined&&<span className="numeric muted">{total}</span>}<ChevronRightIcon/></button>
+      <section className="library-root-folders" ref={folders}><h2 className="section-label">분류{!!topFolders.length&&<span className="numeric">{topFolders.length}</span>}</h2><FolderCards items={topFolders} entries={entries} characters={characters} paused={paused||segment!=='folders'} revision={revision} onSelect={onSelect}/>{!entries.length&&<p className="hint">아직 게시된 분류가 없습니다.</p>}
       {fit&&fit.hidden>0&&!scrolled&&<p className="library-end-line"><ChevronDownIcon aria-hidden="true"/>아래에 분류 {fit.hidden}개 더</p>}</section>
     </div>
     <div style={{display:segment==='albums'?undefined:'none'}}>
       {albumError&&<p className="error-message">{albumError}</p>}
       {albumTree&&<Albums key={`${albumTree.libraryId}:${albumTree.epoch}`} tree={albumTree} revision={revision} query={query} paused={paused||segment!=='albums'} onSelect={onSelect}/>}
     </div>
+    <div style={{display:segment==='artists'?undefined:'none'}}><ArtistGrid active={active&&segment==='artists'} paused={paused} onOpenArtist={onOpenArtist} onVisibleNames={onVisibleArtistNames}/></div>
     </>}
     <Scrubber scrollRef={host} total={scrubberValues.length} sort={scrubberSort} hidden={!active||paused||queueOpen}/>
   </div>

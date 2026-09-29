@@ -31,7 +31,7 @@ import {FilterChips,activeFilterCount,type FilterGroup} from './FilterChips';
 import {BarProgress,LoadingLine,closeVisibleSearch} from './TopBar';
 import {BottomSheet} from './BottomSheet';
 import {LibraryHeader} from './LibraryHeader';
-import {LibraryRoot} from './LibraryRoot';
+import {LibraryRoot,type LibrarySegment} from './LibraryRoot';
 import {FolderCards} from './FolderCards';
 import {Albums,useAlbumTree} from './Albums';
 import {albumAncestors,albumPage,albumView,type AlbumAssetPage} from './albumModel';
@@ -47,6 +47,7 @@ import {readRecentFolders, rememberFolder, RECENT_FOLDERS_KEY} from './homeModel
 import {Viewer} from './Viewer';
 import {Settings} from './Settings';
 import {Artists} from './Artists';
+import type {LibraryArtist} from './artistsModel';
 import {CharacterBrowser} from './CharacterBrowser';
 import {FaultGame} from './FaultGame';
 import {faultCandidates} from '../src/games/fault/host';
@@ -106,13 +107,13 @@ export function App() {
   const characterBack = useRef<(()=>boolean)|null>(null);
   const collectionBack = useRef<(()=>boolean)|null>(null);
   const catalogBack = useRef<(()=>boolean)|null>(null);
-  const [librarySegment,setLibrarySegment]=useState<'folders'|'albums'>('folders');
+  const [librarySegment,setLibrarySegment]=useState<LibrarySegment>('folders');
   const [vaultOpen,setVaultOpen]=useState(false);
   const [vaultPresent,setVaultPresent]=useState(false),[vaultSelected,setVaultSelected]=useState(true);
   // 보내기/받기: a utility screen opened from the Home header or an arrival toast.
   const [exchangeOpen,setExchangeOpen]=useState(false);
   const exchangeBack=useRef<(()=>boolean)|null>(null);
-  const [artistsOpen,setArtistsOpen]=useState(false),[calendarOpen,setCalendarOpen]=useState(false),[calendarKind,setCalendarKind]=useState<'game'|'movie'|undefined>();
+  const [artistsOpen,setArtistsOpen]=useState(false),[artistSelection,setArtistSelection]=useState<LibraryArtist|null>(null),[calendarOpen,setCalendarOpen]=useState(false),[calendarKind,setCalendarKind]=useState<'game'|'movie'|undefined>();
   const calendarBack=useRef<(()=>boolean)|null>(null);
   const artistsBack=useRef<(()=>boolean)|null>(null);
   const vaultBack=useRef<(()=>boolean)|null>(null);
@@ -482,6 +483,8 @@ export function App() {
   // Leaves Collections, Notes or Catalog for the assets area (Home when that is where it was opened
   // from), forgetting the Home origin.
   const returnHome=useCallback(()=>{setHomeOrigin(null);setArea('assets');},[]);
+  const closeArtists=useCallback(()=>{setArtistSelection(null);setArtistsOpen(false);},[]);
+  const openArtist=useCallback((artist:LibraryArtist)=>{setArtistSelection(artist);setArtistsOpen(true);},[]);
   const forgetHome=useCallback(()=>setHomeOrigin(null),[]);
   // Back at the Library entry opened from Home (or at the Library root) goes back to Home with
   // Home's scroll offset instead of stepping up the hierarchy or leaving the app.
@@ -519,7 +522,7 @@ export function App() {
       // An open top-bar search closes (and clears) before Back navigates anywhere.
       else if (closeVisibleSearch()) { /* The search bar consumed back. */ }
       else if (state.calendarOpen) {if (!calendarBack.current?.()) setCalendarOpen(false);}
-      else if (state.artistsOpen) {if (!artistsBack.current?.()) setArtistsOpen(false);}
+      else if (state.artistsOpen) {if (!artistsBack.current?.()) closeArtists();}
       else if (state.area === 'collections') {if (!collectionBack.current?.()) returnHome();}
       else if (state.area === 'notes') {if (!notesBack.current?.()) returnHome();}
       else if (state.area === 'catalog') {if (!catalogBack.current?.()) returnHome();}
@@ -533,7 +536,7 @@ export function App() {
     };
     const removeVisible=onVisible(visible); window.addEventListener('lakomics-list-generation', listChanged); window.addEventListener('lakomics-back', back);
     return () => {removeVisible(); window.removeEventListener('lakomics-list-generation', listChanged); window.removeEventListener('lakomics-back', back);};
-  }, [refreshSecondary, load, restoreBeforeCharacter,goParent,returnHome,libraryHome]);
+  }, [refreshSecondary, load, restoreBeforeCharacter,goParent,returnHome,libraryHome,closeArtists]);
   useEffect(() => {
     const folderId=page.view.classification??(page.view.characterNode?entries.find(entry=>entry.characterNode===page.view.characterNode)?.id:undefined);
     if (!page.version || !folderId) return;
@@ -631,7 +634,7 @@ export function App() {
   };
   const updateStatus = (next: Status) => {
     gate.current.cancel(); secondaryGate.current.cancel(); cancelMore(); viewCache.current.clear(); observedGeneration.current=null; clearMediaCache();
-    setViewer(null); setSimilarity(false); setExchangeOpen(false); setArtistsOpen(false); setViewSettings(false); setFiltersOpen(null); setFilterVersion(null); setFilterNotice(''); setFilters({...EMPTY_FILTERS}); setCharacterIndex(undefined); setClassifications([]); setLibrarySegment('folders'); secondaryAt.current = 0; secondaryPending.current = false; setCaptures(null); setCollectionRequest(null); setNoteRequest(null); setDuplicateRequest(0); resetReleaseStore();
+    setViewer(null); setSimilarity(false); setExchangeOpen(false); closeArtists(); setViewSettings(false); setFiltersOpen(null); setFilterVersion(null); setFilterNotice(''); setFilters({...EMPTY_FILTERS}); setCharacterIndex(undefined); setClassifications([]); setLibrarySegment('folders'); secondaryAt.current = 0; secondaryPending.current = false; setCaptures(null); setCollectionRequest(null); setNoteRequest(null); setDuplicateRequest(0); resetReleaseStore();
     lastLibrary.current = undefined; beforeCharacter.current = undefined; lastIntent.current={view:LIBRARY,cursor:null,previous:[],filters:EMPTY_FILTERS}; setRecentFolders([]);
     try {localStorage.removeItem(RECENT_FOLDERS_KEY);} catch { /* optional */ }
     try {localStorage.removeItem('lakomics.mobile.position');} catch { /* optional */ }
@@ -708,9 +711,9 @@ export function App() {
         {page.view.tab==='library'&&!page.view.root&&!page.view.characters&&<LibraryHeader title={page.view.title} count={hasActiveFilters(page.filters)?`${page.items.length}${page.has_more?'+':''}`:currentEntry?.asset_count??currentAlbum?.assetCount??`${page.items.length}${page.has_more?'+':''}`} crumbs={crumbs} onBack={()=>window.dispatchEvent(new Event('lakomics-back'))} loading={busy&&'목록 불러오는 중'} onOptions={()=>{setOptionsScope(page.view.album?page.items:[]);setViewSettings(true);}} changed={activeFilterCount(page.filters)+(density!==DEFAULT_DENSITY?1:0)}/>}
         {/* The Library root stays mounted while a folder is open, so going back shows its folders,
             covers and position at once instead of rebuilding them. */}
-        <LibraryRoot key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} onTrash={trash.available?()=>trash.setOpen(true):undefined} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onRefresh={refresh} albumTree={albumTree} albumError={albumError} segment={librarySegment} onSegment={setLibrarySegment} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,scope:status.endpoint,onOpen:()=>setSimilarity(true)}}/>
+        <LibraryRoot key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} onTrash={trash.available?()=>trash.setOpen(true):undefined} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onOpenArtist={openArtist} onRefresh={refresh} albumTree={albumTree} albumError={albumError} segment={librarySegment} onSegment={setLibrarySegment} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,scope:status.endpoint,onOpen:()=>setSimilarity(true)}}/>
         {page.view.characters || page.view.root ? null : page.view.tab === 'home' ? <Home items={visibleItems} hasMore={page.has_more} captures={captures} busy={busy} paused={paused} secondaryError={secondaryError} scope={status.endpoint} exchange={exchange.snapshot} characters={characterIndex}
-          review={{enabled:false,refreshKey:0}} similarityKey={similarityClosed} onArtists={() => setArtistsOpen(true)}
+          review={{enabled:false,refreshKey:0}} similarityKey={similarityClosed} onArtists={() => {closeArtists();fromHome(LIBRARY);setLibrarySegment('artists');openRoot();}}
           onRecent={() => {fromHome({tab:'library',title:'최근 저장'});select({tab:'library',title:'최근 저장'});}} onRevisit={(key,title) => {const view:View={tab:'library',revisit:key,title};fromHome(view);select(view);}} onLibrary={() => {fromHome(lastLibrary.current?.view ?? LIBRARY);openLibrary();}} onRefresh={refresh}
           onNotes={id => {setHomeOrigin(id ? {area:'notes'} : null);setNotesVisited(true);setArea('notes');if (id) setNoteRequest(current => ({id,key:(current?.key ?? 0)+1}));}}
           onPending={() => {if (captures?.length) setViewer({items:captures,index:0,pending:true});}}
@@ -729,12 +732,12 @@ export function App() {
         </div>
       </main>
       {calendarOpen && <div className="release-calendar-layer"><ReleaseCalendar onClose={closeCalendar} initialKind={calendarKind} backRef={calendarBack}/></div>}
-      {artistsOpen && <Artists endpoint={status.endpoint} backRef={artistsBack} paused={settings||!!viewer} onOpenViewer={(items,index) => setViewer({items,index})}/>}
+      {artistsOpen && <Artists endpoint={status.endpoint} backRef={artistsBack} initialArtist={artistSelection ?? undefined} onClose={closeArtists} paused={settings||!!viewer} onOpenViewer={(items,index) => setViewer({items,index})}/>}
       {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest} onCalendar={openCalendar} onReturnHome={homeOrigin?.area==='collections'?returnHome:undefined}/>}
       {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack} request={noteRequest} onReturnHome={homeOrigin?.area==='notes'?returnHome:undefined} onHomeEntryGone={homeOrigin?.area==='notes'?forgetHome:undefined}/>}
       {catalogVisited && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} paused={settings || !!viewer} backRef={catalogBack} openDuplicates={duplicateRequest} onReturnHome={homeOrigin?.area==='catalog'?returnHome:undefined}/>}
     </div> : <main className="welcome"><Mark/><span className="eyebrow">YOUR ARCHIVE, WITH YOU</span><h1>어디서든,<br/>나의 라이브러리.</h1><p>보관한 이미지와 영상을 감상하고,<br/>다른 앱에 첨부할 때도 바로 찾아보세요.</p><Button variant="primary" disabled={checking} onClick={() => setSettings(true)}>{checking ? '연결 확인 중' : '라이브러리 연결'}<ChevronRightIcon/></Button>{error && <p className="error-message" role="alert">{error}</p>}<span className="welcome-footer">LAKOMICS <span>／</span> MOBILE</span></main>}
-    {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={()=>{setArtistsOpen(false);openHome();}}><HomeIcon/><span>홈</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={()=>{setArtistsOpen(false);setHomeOrigin(null);openLibrary();}}><PhotoIcon aria-hidden="true"/><span>에셋</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{setArtistsOpen(false);setHomeOrigin(null);setCollectionsVisited(true);setArea('collections');}}><RectangleStackIcon/><span>컬렉션</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{setArtistsOpen(false);setHomeOrigin(null);setCatalogVisited(true);setArea('catalog');}}><BookOpenIcon aria-hidden="true"/><span>카탈로그</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{setArtistsOpen(false);setHomeOrigin(null);setNotesVisited(true);setArea('notes');}}><PencilSquareIcon aria-hidden="true"/><span>메모</span></button></nav>}
+    {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={()=>{closeArtists();openHome();}}><HomeIcon/><span>홈</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={()=>{closeArtists();setHomeOrigin(null);openLibrary();}}><PhotoIcon aria-hidden="true"/><span>에셋</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{closeArtists();setHomeOrigin(null);setCollectionsVisited(true);setArea('collections');}}><RectangleStackIcon/><span>컬렉션</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{closeArtists();setHomeOrigin(null);setCatalogVisited(true);setArea('catalog');}}><BookOpenIcon aria-hidden="true"/><span>카탈로그</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{closeArtists();setHomeOrigin(null);setNotesVisited(true);setArea('notes');}}><PencilSquareIcon aria-hidden="true"/><span>메모</span></button></nav>}
     {viewSettings&&<BottomSheet title="보기 옵션" onClose={()=>setViewSettings(false)}>{/* Filters first: a chip closes this sheet and opens its own choice sheet (never nested). */}{filterable&&!page.view.characters&&<><p className="view-options-label">필터</p><FilterChips sheet={false} value={filters} applied={page.filters} onChange={applyFilters} open={null} onOpen={group=>{setViewSettings(false);setFiltersOpen(group);}}/></>}<div className="view-options-host" ref={setOptionsHost}/><StepSlider className="view-options-density" label="썸네일 크기" count={DENSITIES.length} index={densityIndex(density)} defaultIndex={densityIndex(DEFAULT_DENSITY)} valueText={index=>DENSITIES[index]} onChange={index=>{const next=densityOf(index);setDensity(next);store('lakomics.mobile.density',next);}}/>{faultCandidates(optionsScope).length>0&&<button className="sheet-option" onClick={()=>{setViewSettings(false);setFault(optionsScope);}}>FAULT로 플레이<PlayIcon aria-hidden="true" width={18} height={18}/></button>}</BottomSheet>}
     {filterable&&<FilterChips row={false} value={filters} applied={page.filters} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}
     {vaultOpen && <PrivateVault density={density} onClose={()=>setVaultOpen(false)} backRef={vaultBack}/>}

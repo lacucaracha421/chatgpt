@@ -8,7 +8,7 @@ const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:()=> 'connection failed',
   ApiError:class ApiError extends Error{status:number|null;details:unknown;constructor(message:string,status:number|null,details:unknown){super(message);this.status=status;this.details=details;}}}));
 vi.mock('./media',()=>({clearMediaCache:vi.fn(),loadThumbnail:vi.fn(async(a)=>a),prepareAssets:()=>new Promise(()=>{})}));
-vi.mock('./Home',()=>({Home:({items,onRecent}:HomeProps)=><div><button onClick={onRecent}>전체 보기</button>{items.slice(0,12).map(a=><span key={a.id}>{`tile-${a.id}`}</span>)}</div>}));
+vi.mock('./Home',()=>({Home:({items,onRecent,onArtists}:HomeProps)=><div><button onClick={onRecent}>전체 보기</button><button onClick={onArtists}>작가 전체</button>{items.slice(0,12).map(a=><span key={a.id}>{`tile-${a.id}`}</span>)}</div>}));
 vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,restoreScroll,onScroll}:{intro?:ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll?:number;onScroll?(top:number):void})=><div aria-label="자산 목록" data-restore-scroll={restoreScroll} onScroll={()=>{onNearEnd();onScroll?.(420);}}>{intro}{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}</div>}));
 vi.mock('./Viewer',()=>({Viewer:({items,index,onIndex,onClose}:{items:Asset[];index:number;onIndex(i:number):void;onClose():void})=><div><span>{`viewer-${items[index].id}`}</span><button onClick={()=>onIndex(1)}>viewer next</button><button onClick={onClose}>viewer close</button></div>}));
 import {App} from './App';
@@ -38,6 +38,15 @@ beforeEach(()=>{
   });
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();delete window.LakomicsNative;});
+it('opens Home 작가 전체 in the 에셋 작가 segment instead of the detail overlay',async()=>{
+ render(<App/>);
+ fireEvent.click(await screen.findByRole('button',{name:'작가 전체'}));
+ expect(await screen.findByRole('radio',{name:'작가'})).toBeTruthy();
+ expect(screen.queryByRole('heading',{name:'작가'})).toBeNull();
+ await screen.findByRole('heading',{name:'에셋'});
+ act(()=>{window.dispatchEvent(new Event('lakomics-back'));});
+ expect(await screen.findByRole('button',{name:'작가 전체'})).toBeTruthy();
+});
 it('renders Home from a saved native connection while the async status read is pending', async()=>{
   let resolveStatus!: (value: unknown) => void;
   window.LakomicsNative={localStatus:()=>JSON.stringify({configured:true,endpoint:'https://example.invalid'}),request:vi.fn(),cancel:vi.fn()};
@@ -193,7 +202,7 @@ it('keeps root Albums live so near-end pagination can append',async()=>{
   });
   render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/})); await screen.findByText('tile-a1');
   fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name:'에셋',exact:true}));
-  fireEvent.click(await screen.findByRole('tab',{name:'앨범'}));
+  fireEvent.click(await screen.findByRole('radio',{name:'앨범'}));
   fireEvent.click(await screen.findByText('업로드용'));
   const first=await screen.findByText('tile-album-1');
   fireEvent.scroll(first.parentElement!);

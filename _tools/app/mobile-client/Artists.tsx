@@ -15,11 +15,11 @@ import './artists.css';
 type ArtistState = 'loading' | 'ready' | 'empty';
 type ArtistPage = {items?: Asset[]; has_more?: boolean; next_cursor?: string | null; list_generation?: string};
 
-function Placeholder({privateMode = false, label = '이미지 없음'}: {privateMode?: boolean; label?: string}) {
+export function Placeholder({privateMode = false, label = '이미지 없음'}: {privateMode?: boolean; label?: string}) {
   return <span className={`artist-placeholder${privateMode ? ' is-private' : ''}`} aria-label={privateMode ? '비공개 모드로 이미지 숨김' : label}><PhotoIcon aria-hidden="true" /></span>;
 }
 
-function ArtistImage({asset, privateMode, paused = false}: {asset?: Asset; privateMode: boolean; paused?: boolean}) {
+export function ArtistImage({asset, privateMode, paused = false}: {asset?: Asset; privateMode: boolean; paused?: boolean}) {
   if (privateMode || !asset) return <Placeholder privateMode={privateMode} />;
   return <span className="artist-image"><Cover asset={asset} paused={paused} /></span>;
 }
@@ -99,7 +99,7 @@ function ArtistHub({artists, assignments, query, privateMode, paused, onOpen}: {
   </div>;
 }
 
-function EmptyArtists() { return <div className="artist-empty"><PhotoIcon aria-hidden="true" /><h2>PC 앱이 작가 목록을 아직 보내지 않았습니다</h2><p>작가 관리는 PC 앱에서 합니다.</p></div>; }
+export function EmptyArtists() { return <div className="artist-empty"><PhotoIcon aria-hidden="true" /><h2>PC 앱이 작가 목록을 아직 보내지 않았습니다</h2><p>작가 관리는 PC 앱에서 합니다.</p></div>; }
 
 function assetPage(value: unknown): ArtistPage {
   if (!value || typeof value !== 'object') return {};
@@ -168,14 +168,14 @@ function ArtistDetail({summary, assignments, privateMode, paused, onBack, onOpen
   </div>;
 }
 
-export function Artists({endpoint, backRef, onOpenViewer, paused=false}: {endpoint: string; backRef: MutableRefObject<(() => boolean) | null>; onOpenViewer(items: Asset[], index: number): void; paused?:boolean}) {
+export function Artists({endpoint, backRef, onOpenViewer, paused=false, initialArtist, onClose}: {endpoint: string; backRef: MutableRefObject<(() => boolean) | null>; onOpenViewer(items: Asset[], index: number): void; paused?:boolean; initialArtist?: LibraryArtist; onClose?(): void}) {
   const [privateMode] = usePrivacyMode();
   const [state, setState] = useState<ArtistState>('loading');
   const [artists, setArtists] = useState<LibraryArtist[]>([]);
   const [assignments, setAssignments] = useState<ArtistAssignment[]>([]);
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
-  const [detail, setDetail] = useState<LibraryArtist | null>(null);
+  const [detail, setDetail] = useState<LibraryArtist | null>(() => initialArtist ?? null);
   useEffect(() => {
     const controller = new AbortController();
     setState('loading');
@@ -188,14 +188,14 @@ export function Artists({endpoint, backRef, onOpenViewer, paused=false}: {endpoi
   }, [endpoint]);
   useEffect(() => {
     backRef.current = () => {
-      if (detail) { setDetail(null); return true; }
+      if (detail) { if (initialArtist && onClose) onClose(); else setDetail(null); return true; }
       if (searchOpen) { setSearchOpen(false); setQuery(''); return true; }
       return false;
     };
     return () => { backRef.current = null; };
-  }, [backRef, detail, searchOpen]);
+  }, [backRef, detail, initialArtist, onClose, searchOpen]);
   const closeSearch = () => { setSearchOpen(false); setQuery(''); };
-  if (detail) return <ArtistDetail summary={detail} assignments={assignments} privateMode={privateMode} paused={paused} onBack={() => setDetail(null)} onOpenViewer={onOpenViewer} />;
+  if (detail) return <ArtistDetail summary={detail} assignments={assignments} privateMode={privateMode} paused={paused} onBack={() => { if (initialArtist && onClose) onClose(); else setDetail(null); }} onOpenViewer={onOpenViewer} />;
   const header = searchOpen ? <TopBarSearch title="작가" onClose={closeSearch}><label className="top-bar__search"><MagnifyingGlassIcon aria-hidden="true" /><input autoFocus type="search" aria-label="작가 검색" placeholder="이름, 핸들, 초성" value={query} onChange={event => setQuery(event.target.value)} />{query && <IconButton label="검색어 지우기" icon={XMarkIcon} onClick={() => setQuery('')} />}</label></TopBarSearch> : <TopBar back={{label:'홈으로', onClick:() => window.dispatchEvent(new Event('lakomics-back'))}} crumbs={<span className="top-bar__crumbs">홈 ›</span>} title="작가" count={artists.length ? artists.length.toLocaleString('ko-KR') : undefined} actions={state === 'ready' ? <IconButton label="작가 검색" icon={MagnifyingGlassIcon} onClick={() => setSearchOpen(true)} /> : undefined} />;
   return <div className="artist-screen">{header}{state === 'loading' ? <div className="artist-empty" role="status"><span>작가 목록을 불러오는 중입니다</span></div> : state === 'empty' ? <EmptyArtists /> : <ArtistHub artists={artists} assignments={assignments} query={query} privateMode={privateMode} paused={paused} onOpen={setDetail} />}</div>;
 }

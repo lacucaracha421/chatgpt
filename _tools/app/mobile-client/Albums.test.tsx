@@ -20,7 +20,7 @@ function baseApi(path:string) {
  if(path.includes('/v1/albums/assets'))return page(path.includes('albumId=child')?'child-asset':path.includes('albumId=other')?'other-asset':'a1');
  return {items:[],has_more:false,next_cursor:null};
 }
-async function openRootAlbum(){render(<App/>);fireEvent.click(await screen.findByRole('tab',{name:'앨범'}));fireEvent.click(await screen.findByRole('button',{name:'업로드용, 5개'}));await screen.findByRole('heading',{name:'업로드용'});}
+async function openRootAlbum(){render(<App/>);fireEvent.click(await screen.findByRole('radio',{name:'앨범'}));fireEvent.click(await screen.findByRole('button',{name:'업로드용, 5개'}));await screen.findByRole('heading',{name:'업로드용'});}
 /** Filters live in the folder bar's 보기 옵션 sheet; a chip there opens its own choice sheet. */
 async function choose(group='종류',choice='영상'){fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));fireEvent.click(await screen.findByRole('button',{name:group}));fireEvent.click(screen.getByRole('radio',{name:choice}));}
 /** Opens 보기 옵션, reads the filter chip labels, and closes the sheet again. */
@@ -59,14 +59,14 @@ describe('album Library scopes',()=>{
   back();await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());await chipShown('영상');
   back();await chipShown('종류');expect(screen.getByRole('heading',{name:'임시'})).toBeTruthy();
   back();await screen.findByRole('heading',{name:'업로드용'});back();await screen.findByRole('heading',{name:'에셋'});
-  expect(screen.getByRole('tab',{name:'앨범'}).getAttribute('aria-selected')).toBe('true');expect(screen.getByRole('button',{name:'검색'})).toBeTruthy();
+  expect(screen.getByRole('radio',{name:'앨범'}).getAttribute('aria-checked')).toBe('true');expect(screen.getByRole('button',{name:'검색'})).toBeTruthy();
  });
  it('jumps through breadcrumbs and restores the parent gallery scroll',async()=>{
   await openRootAlbum();fireEvent.scroll(document.querySelector('.gallery-scroll')!);
   fireEvent.click(screen.getByRole('button',{name:'임시'}));await screen.findByText('child-asset');
   fireEvent.click(within(screen.getByRole('navigation',{name:'현재 위치'})).getByRole('button',{name:'업로드용'}));await screen.findByRole('heading',{name:'업로드용'});
   expect(document.querySelector('.gallery-scroll')?.getAttribute('data-restore')).toBe('420');
-  fireEvent.click(within(screen.getByRole('navigation',{name:'현재 위치'})).getByRole('button',{name:'앨범'}));await waitFor(()=>expect(screen.getByRole('tab',{name:'앨범'}).getAttribute('aria-selected')).toBe('true'));await screen.findByRole('heading',{name:'에셋'});
+  fireEvent.click(within(screen.getByRole('navigation',{name:'현재 위치'})).getByRole('button',{name:'앨범'}));await waitFor(()=>expect(screen.getByRole('radio',{name:'앨범'}).getAttribute('aria-checked')).toBe('true'));await screen.findByRole('heading',{name:'에셋'});
  });
  it('uses the album envelope, identity, filter parameters and cursor on the normal append path',async()=>{
   mocks.api.mockImplementation(async(path:string)=>path.includes('/v1/albums/assets')?page(path.includes('cursor=')?'a2':'a1',!path.includes('cursor=')):baseApi(path));
@@ -120,7 +120,7 @@ describe('album Library scopes',()=>{
  });
  it('keeps the root on an authority error and retries the actual album intent',async()=>{
   let fail=true;mocks.api.mockImplementation(async(path:string)=>{if(path.includes('/v1/albums/assets')&&fail)throw new Error('authority unavailable');return baseApi(path);});
-  render(<App/>);fireEvent.click(await screen.findByRole('tab',{name:'앨범'}));fireEvent.click(await screen.findByRole('button',{name:'업로드용, 5개'}));await screen.findByText(/authority unavailable/);
+  render(<App/>);fireEvent.click(await screen.findByRole('radio',{name:'앨범'}));fireEvent.click(await screen.findByRole('button',{name:'업로드용, 5개'}));await screen.findByText(/authority unavailable/);
   expect(screen.getByRole('heading',{name:'에셋'})).toBeTruthy();fail=false;fireEvent.click(screen.getByRole('button',{name:'다시 시도'}));await screen.findByRole('heading',{name:'업로드용'});
  });
  it('bounds malformed hierarchy paths and normalizes only the agreed envelope',()=>{

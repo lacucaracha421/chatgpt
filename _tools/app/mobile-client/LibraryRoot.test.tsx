@@ -9,6 +9,7 @@ import {FolderCards} from './FolderCards';
 import {mergeLibraryEntries} from './libraryModel';
 import type {CharacterIndex} from './characterModel';
 import {resetHomeSourceCache} from './homeCache';
+import type {LibraryArtist} from './artistsModel';
 const mocks=vi.hoisted(()=>({api:vi.fn(async()=>({items:[{id:'cover',kind:'image',preview:'data:image/png;base64,AA'}],has_more:false,next_cursor:null})),native:vi.fn(),thumbnail:vi.fn(async(asset)=>asset)}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:String}));
 vi.mock('./media',()=>({loadThumbnail:mocks.thumbnail}));
@@ -18,7 +19,7 @@ const characters:CharacterIndex={version:1,authority:'pc',authorityEpoch:0,capab
  {id:'character:c',kind:'character',sourceId:'c',seriesId:'s',parentId:'group:g',name:'유우카',description:'',thumbnailAssetId:'character-cover',manualOnly:false,excluded:false}
 ],scopes:[]};
 const entries=mergeLibraryEntries([{id:'game',name:'게임',parent_id:null,asset_count:20},{id:'s',name:'블루 아카이브',parent_id:'game',asset_count:10}],characters);
-const props={entries,characters,recentFolders:['s'],items:[{id:'all-cover',kind:'image',preview:'data:image/png;base64,AA'}],total:20,paused:false,busy:false,revision:1,onSelect:vi.fn(),onRefresh:vi.fn(),albumTree:null,albumError:'',segment:'folders' as const,onSegment:vi.fn(),restoreScroll:0,onScroll:vi.fn()};
+const props={entries,characters,recentFolders:['s'],items:[{id:'all-cover',kind:'image',preview:'data:image/png;base64,AA'}],total:20,paused:false,busy:false,revision:1,onSelect:vi.fn(),onOpenArtist:vi.fn(),onRefresh:vi.fn(),albumTree:null,albumError:'',segment:'folders' as const,onSegment:vi.fn(),restoreScroll:0,onScroll:vi.fn()};
 beforeEach(()=>{resetHomeSourceCache();vi.stubGlobal('ResizeObserver',class{observe(){}unobserve(){}disconnect(){}});});
 afterEach(()=>{cleanup();vi.clearAllMocks();vi.unstubAllGlobals();});
 it('does not read the similarity queue while the retained root is hidden',async()=>{
@@ -30,7 +31,8 @@ it('does not read the similarity queue while the retained root is hidden',async(
  await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/similarity/review'))).toHaveLength(1));
 });
 it('shows root cards and All without recent folders, then searches every character level from the bar',async()=>{
- render(<LibraryRoot {...props}/>);
+ function Root(){const [segment,onSegment]=useState<'folders'|'albums'|'artists'>('folders');return <LibraryRoot {...props} segment={segment} onSegment={onSegment}/>;}
+ render(<Root/>);
  expect(screen.getByRole('heading',{name:'에셋'})).toBeTruthy();
  expect(document.querySelector('.library-recents')).toBeNull();expect(screen.queryByText('최근 연 폴더')).toBeNull();
  // Search is a magnifier in the shared bar until opened.
@@ -50,7 +52,7 @@ it('shows root cards and All without recent folders, then searches every charact
 it('searches nested albums as folder-style result rows and opens a Library scope',async()=>{
  const tree={adopted:true,libraryId:'a'.repeat(32),epoch:1,code:'',albums:[{id:'a',parentId:null,name:'앨범 A',iconKey:null,colorKey:null},{id:'b',parentId:'a',name:'여행',iconKey:null,colorKey:null}]};
  function Root(){const [segment,onSegment]=useState<'folders'|'albums'>('folders');return <LibraryRoot {...props} albumTree={tree} segment={segment} onSegment={onSegment}/>;}
- render(<Root/>);fireEvent.click(screen.getByRole('tab',{name:'앨범'}));
+ render(<Root/>);fireEvent.click(screen.getByRole('radio',{name:'앨범'}));
  await screen.findByText('앨범 A');expect(screen.queryByText('여행')).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'검색'}));
  fireEvent.change(screen.getByRole('searchbox',{name:'앨범 찾기'}),{target:{value:'여행'}});
@@ -66,9 +68,35 @@ it('keeps folder thumbnails mounted while switching to albums and back',async()=
  function Root(){const [segment,onSegment]=useState<'folders'|'albums'>('folders');return <LibraryRoot {...props} albumTree={tree} segment={segment} onSegment={onSegment}/>;}
  render(<Root/>);
  const folderImage=await waitFor(()=>{const image=document.querySelector('.library-root-folders img');if(!image)throw new Error('folder thumbnail not ready');return image;});
- fireEvent.click(screen.getByRole('tab',{name:'앨범'}));await screen.findByText('앨범 A');
- fireEvent.click(screen.getByRole('tab',{name:'분류'}));
+ fireEvent.click(screen.getByRole('radio',{name:'앨범'}));await screen.findByText('앨범 A');
+ fireEvent.click(screen.getByRole('radio',{name:'분류'}));
  expect(document.querySelector('.library-root-folders img')).toBe(folderImage);
+});
+const libraryArtist=(id:string,name:string,overrides:Partial<LibraryArtist>={}):LibraryArtist=>({id,label:name,displayName:name,sourceName:name,keys:[`@${id}`],assetCount:10,recentCount:0,firstSavedAt:null,lastSavedAt:null,lastOpenedAt:null,pinned:false,hidden:false,main:false,coverAssetIds:[`${id}-1`,`${id}-2`,`${id}-3`],...overrides});
+it('shows the three asset segments and lazily browses pinned artists with search and sort persistence',async()=>{
+ const artists=[libraryArtist('pin','지우',{pinned:true,assetCount:2,lastSavedAt:'2026-09-01T00:00:00Z'}),libraryArtist('small','다람',{assetCount:20,lastSavedAt:'2026-09-02T00:00:00Z'}),libraryArtist('large','가나',{assetCount:10,lastSavedAt:'2026-09-03T00:00:00Z'})];
+ const original=mocks.api.getMockImplementation()!;
+ mocks.api.mockImplementation(async(path:string,signal?:AbortSignal)=>path==='/v1/library/artists'?{artists}:original(path,signal));
+ function Root(){const [segment,onSegment]=useState<'folders'|'albums'|'artists'>('folders');return <LibraryRoot {...props} segment={segment} onSegment={onSegment}/>;}
+ render(<Root/>);
+ expect(screen.getByRole('radiogroup',{name:'에셋 보기'})).toBeTruthy();
+ expect(screen.getAllByRole('radio')).toHaveLength(3);
+ fireEvent.click(screen.getByRole('radio',{name:'작가'}));
+ await waitFor(()=>expect(mocks.api).toHaveBeenCalledWith('/v1/library/artists',expect.anything()));
+ await screen.findByRole('button',{name:/지우, 2장/});
+ const cards=[...document.querySelectorAll<HTMLButtonElement>('.artist-grid-card')];
+ expect(cards[0].getAttribute('aria-label')).toBe('지우, 2장, 고정됨');
+ expect(document.querySelector('.artist-grid-pin')).toBeTruthy();
+ fireEvent.click(cards[0]);
+ expect(props.onOpenArtist).toHaveBeenCalledWith(artists[0]);
+ fireEvent.change(screen.getByPlaceholderText('작가 찾기'),{target:{value:'다람'}});
+ expect(screen.getAllByRole('button',{name:/다람/})).toHaveLength(1);
+ fireEvent.change(screen.getByPlaceholderText('작가 찾기'),{target:{value:''}});
+ fireEvent.click(screen.getByRole('button',{name:'정렬: 최근 저장 순'}));
+ fireEvent.click(screen.getByRole('radio',{name:'장수'}));
+ expect(localStorage.getItem('lakomics.mobile.artistSort')).toBe('count');
+ const reordered=[...document.querySelectorAll('.artist-grid-card .artist-grid-name')].map(node=>node.textContent);
+ expect(reordered).toEqual(['지우','다람','가나']);
 });
 it('aligns cards at the top with an identical cover boundary in grids and strips',()=>{
  const folders=[{id:'a',name:'Parent',parent_id:null,asset_count:1},{id:'b',name:'Plain',parent_id:null,asset_count:0},{id:'c',name:'Child',parent_id:'a',asset_count:1}];
