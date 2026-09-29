@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC 폴더 목업</title>
+<style>
+@font-face { font-family:"Pretendard Variable"; src:url("../../../_tools/app/src/styles/fonts/PretendardVariable.woff2") format("woff2-variations"); font-weight:45 920; }
+/* Tokens from _tools/app/src/styles/tokens.css (PC roles 20/15/12/24, spacing 4-32). Numbers use Pretendard tabular. */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-toolbar:#191a1b; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-surface-hover:#2d2e2f; --color-surface-pressed:#343536;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-faint:#7d8184; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-selection-echo:rgba(221,216,202,.4); --color-section-mark:rgba(221,216,202,.6);
+  --color-selection-context:rgba(221,216,202,.16); --color-selection-context-text:#f1eee6;
+  --section-label-rule:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06));
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-success:#7fb88a; --color-focus:#7db1ff;
+  --shadow-floating:0 1px 3px rgba(0,0,0,.24),0 8px 20px rgba(0,0,0,.3);
+  --type-title:20px; --type-body:15px; --type-meta:12px; --type-number:24px;
+  --font-ui:"Pretendard Variable","Pretendard","Segoe UI","Malgun Gothic",sans-serif;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.45 var(--font-ui); }
+h1,h2,h3,p { margin:0; }
+button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; text-align:left; }
+.num { font-variant-numeric:tabular-nums; }
+svg.i { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+svg.i.s { width:16px; height:16px; } svg.i.xs { width:14px; height:14px; }
+
+/* Overview page */
+.doc { max-width:1540px; margin:0 auto; padding:32px 24px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1200px; margin:8px 0 0; line-height:1.7; }
+.lead b, .notes b { color:var(--color-text); font-weight:600; }
+section.topic { margin-top:48px; border-top:1px solid var(--color-border); padding-top:24px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; min-width:28px; height:28px; padding:0 6px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-ui); }
+.notes { color:var(--color-muted); max-width:1300px; line-height:1.7; margin:8px 0 16px; }
+.notes ul { margin:6px 0 0; padding-left:20px; }
+.frame { width:1440px; height:900px; overflow:hidden; border:1px solid var(--color-border); }
+body.frame-only { background:var(--color-bg); } body.frame-only .doc { display:none; }
+#solo { display:none; } body.frame-only #solo { display:block; } body.frame-only .frame { border:0; }
+
+/* ===== PC shell ===== */
+.pc { position:relative; width:1440px; height:900px; background:var(--color-bg); display:grid; grid-template-columns:64px 240px 1fr; overflow:hidden; }
+.rail { background:var(--color-sidebar); border-right:1px solid var(--color-border); display:flex; flex-direction:column; align-items:center; padding:12px 0; gap:4px; }
+.rail .logo { width:28px; height:28px; margin-bottom:12px; color:var(--color-muted); }
+.rail a { width:52px; height:52px; display:grid; place-items:center; align-content:center; gap:4px; color:var(--color-muted); font-size:11px; }
+.rail a.ctx { background:var(--color-selection-context); color:var(--color-selection-context-text); }
+.rail .sp { flex:1; }
+.index { background:var(--color-sidebar); border-right:1px solid var(--color-border); display:flex; flex-direction:column; min-height:0; }
+.index-head { height:44px; flex:none; display:flex; align-items:center; justify-content:space-between; padding:0 16px; font-size:var(--type-body); color:var(--color-muted); border-bottom:1px solid var(--color-border); }
+.index-body { padding:8px; display:flex; flex-direction:column; gap:2px; overflow:hidden; flex:1; }
+.nav { height:32px; display:flex; align-items:center; gap:8px; padding:0 8px; color:var(--color-text); font-size:var(--type-body); }
+.nav small { margin-left:auto; color:var(--color-faint); font-size:12px; font-variant-numeric:tabular-nums; }
+.nav.on { background:var(--color-accent); color:var(--color-on-accent); box-shadow:3px 3px 0 -1px var(--color-sidebar),3px 3px 0 0 var(--color-selection-echo); }
+.nav.on small { color:var(--color-on-accent); opacity:.7; }
+.nav.on::after { content:""; width:7px; height:7px; background:currentColor; flex:none; }
+.nav .i { opacity:.8; }
+.nav.sub { padding-left:28px; }
+.gap { height:12px; }
+.label { display:flex; align-items:center; gap:8px; height:20px; color:var(--color-faint); font-size:var(--type-meta); white-space:nowrap; }
+.label::before { content:""; width:5px; height:5px; background:var(--color-section-mark); flex:none; }
+.label .rule { flex:1; height:1px; background:var(--section-label-rule); min-width:24px; }
+.label .n { font-variant-numeric:tabular-nums; color:var(--color-muted); }
+.index .label { padding:0 8px; margin:4px 0; }
+.chips { display:flex; flex-wrap:wrap; gap:4px; padding:0 8px 4px; }
+.chip { height:24px; display:inline-flex; align-items:center; gap:4px; padding:0 8px; border:1px solid var(--color-border); border-radius:2px; color:var(--color-muted); font-size:var(--type-meta); }
+.main { display:flex; flex-direction:column; min-width:0; min-height:0; position:relative; }
+.toolbar { height:44px; flex:none; display:flex; align-items:center; gap:8px; padding:0 16px; border-bottom:1px solid var(--color-border); background:var(--color-toolbar); }
+.toolbar h1 { font-size:var(--type-title); font-weight:600; display:flex; align-items:center; gap:4px; white-space:nowrap; }
+.toolbar h1 .crumb { color:var(--color-muted); font-weight:500; }
+.toolbar h1 .i { color:var(--color-faint); }
+.toolbar .sp { flex:1; }
+.win { display:flex; gap:24px; color:var(--color-faint); margin-left:8px; }
+.quiet { height:28px; display:inline-flex; align-items:center; gap:4px; padding:0 8px; border-radius:4px; color:var(--color-muted); font-size:13px; white-space:nowrap; }
+.quiet.open { background:var(--color-surface-hover); color:var(--color-text); }
+.quiet.icon { width:28px; padding:0; justify-content:center; }
+.seg { display:inline-flex; height:28px; padding:2px; background:var(--color-surface); border-radius:4px; flex:none; }
+.seg b { display:inline-flex; align-items:center; gap:6px; padding:0 10px; font-size:13px; font-weight:400; color:var(--color-muted); border-radius:2px; white-space:nowrap; }
+.seg b.on { background:var(--color-accent); color:var(--color-on-accent); font-weight:600; box-shadow:2px 2px 0 -1px var(--color-surface),2px 2px 0 0 var(--color-selection-echo); }
+.seg b small { font-size:12px; font-variant-numeric:tabular-nums; opacity:.72; font-weight:500; }
+.vr { width:1px; height:20px; background:var(--color-border); flex:none; }
+
+/* Imagery */
+.art { position:relative; overflow:hidden; background:var(--c1); display:block; }
+.art::before { content:""; position:absolute; left:50%; top:24%; width:40%; aspect-ratio:1; border-radius:50%; background:var(--c2); transform:translateX(-50%); opacity:.85; }
+.art::after { content:""; position:absolute; left:16%; right:16%; bottom:-20%; height:50%; border-radius:50% 50% 0 0; background:var(--c3); opacity:.8; }
+
+/* Scroll area: shelf header scrolls away with the gallery */
+.scroll { flex:1; min-height:0; overflow:hidden; position:relative; }
+.gallery { padding:0 16px; }
+.day { margin-bottom:24px; }
+.day-head { display:flex; align-items:baseline; gap:8px; margin:0 0 12px; }
+.day-head b { font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; }
+.day-head small { color:var(--color-faint); font-size:var(--type-meta); }
+.day-head .rule { flex:1; height:1px; background:var(--color-border); align-self:center; }
+.day-head .n { color:var(--color-faint); font-size:12px; font-variant-numeric:tabular-nums; }
+.masonry { display:grid; grid-template-columns:repeat(var(--cols,4),minmax(0,1fr)); gap:8px; align-items:start; margin-bottom:24px; }
+.masonry .colm { display:flex; flex-direction:column; gap:8px; }
+.tile { position:relative; overflow:hidden; }
+.tile .art { width:100%; }
+.badge { position:absolute; height:20px; padding:0 6px; display:inline-flex; align-items:center; gap:4px; background:rgba(22,23,24,.86); color:var(--color-text); font-size:12px; font-weight:600; font-variant-numeric:tabular-nums; border-radius:2px; z-index:2; white-space:nowrap; }
+.badge.br { right:6px; bottom:6px; } .badge.bl { left:6px; bottom:6px; font-weight:500; } .badge.tl { left:6px; top:6px; font-weight:500; color:var(--color-muted); }
+.badge.tr { right:6px; top:6px; }
+.badge.warn { background:var(--color-danger); color:#1b1010; width:20px; padding:0; justify-content:center; }
+.tools { position:absolute; right:6px; top:6px; display:flex; gap:4px; z-index:3; }
+.tb { width:24px; height:24px; display:grid; place-items:center; background:rgba(22,23,24,.86); color:var(--color-text); border-radius:2px; }
+.tb.on { color:var(--color-accent); }
+.check { position:absolute; left:6px; top:6px; width:16px; height:16px; border:1.5px solid rgba(255,255,255,.85); border-radius:2px; background:rgba(22,23,24,.5); z-index:3; }
+.ring { position:absolute; inset:0; border:2px solid var(--color-accent); z-index:2; pointer-events:none; }
+.tile.sel .check { border-color:var(--color-accent); background:var(--color-on-accent); }
+.check i { position:absolute; left:2px; top:2px; width:9px; height:9px; background:var(--color-accent); }
+
+/* Folder header shelf */
+.fhead { padding:16px 16px 0; display:flex; flex-direction:column; gap:12px; margin-bottom:16px; }
+.fhead .label { height:28px; }
+.fhead .label .quiet { font-size:12px; height:24px; }
+.shelf { position:relative; }
+.shelf-row { display:flex; gap:12px; overflow:hidden; }
+.fcard { width:132px; flex:none; display:flex; flex-direction:column; gap:4px; position:relative; }
+.fcard .wrap { position:relative; width:132px; height:170px; }
+.fcard .wrap > .art { width:100%; height:100%; }
+.fcard .quad { width:100%; height:100%; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:2px; overflow:hidden; }
+.fcard.suggest .wrap { outline:1px dashed var(--color-border-strong); outline-offset:2px; }
+.fcard b { margin-top:4px; font-size:15px; font-weight:500; display:flex; align-items:center; gap:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.fcard b .i { color:var(--color-muted); }
+.fcard small { color:var(--color-faint); font-size:var(--type-meta); display:flex; align-items:center; gap:4px; font-variant-numeric:tabular-nums; }
+.fcard .dot { width:6px; height:6px; border-radius:50%; background:var(--color-success); }
+.fcard.add .wrap { border:1px dashed var(--color-border-strong); display:grid; place-items:center; align-content:center; gap:8px; color:var(--color-muted); font-size:13px; }
+.fcard.ref, .fcard.ref .wrap { width:104px; }
+.fcard.ref .wrap { height:136px; }
+.fcard.add.ref .wrap { height:136px; }
+.shelf .arrow { position:absolute; top:69px; width:32px; height:32px; display:grid; place-items:center; background:var(--color-surface-elevated); border:1px solid var(--color-border); border-radius:4px; color:var(--color-text); box-shadow:var(--shadow-floating); z-index:4; }
+.shelf .arrow.r { right:-4px; } .shelf .arrow.l { left:-4px; }
+.shelf.refs .arrow { top:52px; }
+.shelf-div { width:1px; background:var(--color-border); flex:none; margin:0 4px; }
+.segrow { display:flex; align-items:center; gap:8px; }
+
+/* Selection bar */
+.selbar { position:absolute; left:50%; bottom:20px; transform:translateX(-50%); display:flex; align-items:center; gap:2px; height:44px; padding:0 6px 0 14px; background:var(--color-surface-elevated); border:1px solid var(--color-border); border-radius:4px; box-shadow:var(--shadow-floating); white-space:nowrap; z-index:6; }
+.selbar .count { font-weight:600; font-size:15px; margin-right:8px; font-variant-numeric:tabular-nums; }
+.selbar .act { height:32px; display:inline-flex; align-items:center; gap:6px; padding:0 8px; border-radius:4px; color:var(--color-muted); font-size:13px; }
+.selbar .act.open { background:var(--color-surface-hover); color:var(--color-text); box-shadow:inset 0 0 0 1px var(--color-border-strong); }
+.selbar .act kbd { font:500 11px var(--font-ui); color:var(--color-faint); border:1px solid var(--color-border); border-radius:2px; padding:0 4px; }
+.selbar .act.danger { color:var(--color-danger); }
+.selbar .div { width:1px; height:20px; background:var(--color-border); margin:0 4px; }
+.charwrap { position:relative; }
+
+/* Floating surfaces: square with NieR corner brackets */
+.pop { position:absolute; background-color:var(--color-surface-elevated); border:1px solid var(--color-border); box-shadow:var(--shadow-floating); z-index:8;
+  background-image:linear-gradient(var(--color-accent),var(--color-accent)),linear-gradient(var(--color-accent),var(--color-accent)),linear-gradient(var(--color-accent),var(--color-accent)),linear-gradient(var(--color-accent),var(--color-accent));
+  background-size:8px 2px,2px 8px,8px 2px,2px 8px; background-position:1px 1px,1px 1px,calc(100% - 1px) calc(100% - 1px),calc(100% - 1px) calc(100% - 1px); background-repeat:no-repeat; }
+
+/* Character picker (CharacterAssignPicker) */
+.picker { width:360px; left:-8px; bottom:calc(100% + 14px); display:flex; flex-direction:column; max-height:560px; overflow:hidden; white-space:normal; }
+.psearch { margin:12px 12px 8px; height:32px; display:flex; align-items:center; gap:8px; padding:0 8px; background:var(--color-surface); flex:none; border-bottom:2px solid var(--color-focus); }
+.psearch .i { color:var(--color-faint); }
+.scope { height:20px; display:inline-flex; align-items:center; gap:4px; padding:0 4px 0 8px; background:var(--color-surface-elevated); border-radius:2px; font-size:12px; font-weight:600; color:var(--color-text); }
+.scope .i { color:var(--color-muted); }
+.psearch .ph { color:var(--color-faint); font-size:15px; }
+.psearch .q { font-size:15px; color:var(--color-text); }
+.psearch .caret { width:1px; height:18px; background:var(--color-text); margin-left:-6px; }
+.plist { overflow:hidden; min-height:0; flex:1; }
+.psec { display:flex; align-items:center; gap:8px; height:28px; padding:0 12px; color:var(--color-faint); font-size:12px; }
+.psec::before { content:""; width:5px; height:5px; background:var(--color-section-mark); flex:none; }
+.psec::after { content:""; flex:1; height:1px; background:linear-gradient(90deg,var(--color-border),transparent); }
+.prow { display:grid; grid-template-columns:32px minmax(0,1fr) auto 16px; align-items:center; gap:8px; height:44px; padding:0 12px; }
+.prow.hl { background:var(--color-surface-hover); }
+.prow .art { width:32px; height:32px; }
+.prow .nm { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px; }
+.prow .nm small { display:block; color:var(--color-faint); font-size:12px; line-height:1.2; }
+.prow .ct { color:var(--color-faint); font-size:12px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.prow.cur .nm { color:var(--color-muted); }
+.prow .cur-badge { height:20px; padding:0 6px; display:inline-flex; align-items:center; border-radius:2px; background:var(--color-surface); color:var(--color-muted); font-size:12px; font-weight:600; }
+.prow .ck { width:16px; height:16px; color:var(--color-accent); }
+.prow.new .plus { width:32px; height:32px; display:grid; place-items:center; border:1px dashed var(--color-border-strong); color:var(--color-muted); }
+.pempty { padding:8px 12px 12px; color:var(--color-faint); font-size:13px; }
+.pmeta { flex:none; padding:8px 12px; color:var(--color-faint); font-size:12px; border-top:1px solid var(--color-border); }
+
+/* 모든 시리즈 row: always visible under the list */
+.pall { flex:none; border-top:1px solid var(--color-border); color:var(--color-text); }
+.pall .plus, .prow.new .plus { width:32px; height:32px; display:grid; place-items:center; }
+.pall .plus { background:var(--color-surface); color:var(--color-muted); }
+.pall > .i { color:var(--color-faint); }
+
+/* 편집 attention mark and edit panel */
+.editwrap { position:relative; display:inline-flex; }
+.quiet.icon { position:relative; }
+.attn { position:absolute; right:-3px; top:-1px; width:12px; height:12px; display:grid; place-items:center; background:var(--color-danger); color:#1b1010; font-size:9px; font-weight:700; border-radius:2px; line-height:1; }
+.epanel { left:8px; top:36px; width:380px; display:flex; flex-direction:column; font-size:15px; font-weight:400; }
+.ehead { height:44px; display:flex; align-items:baseline; gap:8px; padding:12px 8px 0 16px; border-bottom:1px solid var(--color-border); }
+.ehead b { font-size:15px; font-weight:600; } .ehead small { color:var(--color-faint); font-size:12px; } .ehead .sp { flex:1; } .ehead .quiet { align-self:center; margin-top:-12px; }
+.ebody { padding:16px; display:flex; flex-direction:column; gap:24px; }
+.ebody label { display:block; color:var(--color-faint); font-size:12px; margin-bottom:4px; }
+.erow { display:flex; gap:12px; }
+.efields { flex:1; display:flex; flex-direction:column; align-items:flex-start; }
+.efields .field { align-self:stretch; margin-bottom:12px; }
+.field { height:32px; display:flex; align-items:center; padding:0 8px; background:var(--color-surface); font-size:15px; }
+.field.tall { height:56px; align-items:flex-start; padding-top:6px; font-size:13px; color:var(--color-muted); }
+.btn { height:32px; display:inline-flex; align-items:center; padding:0 12px; border-radius:4px; font-size:15px; background:var(--color-surface); border:1px solid var(--color-border); color:var(--color-text); }
+.rtile { position:relative; display:block; width:100%; aspect-ratio:1; }
+.rtile .art { width:100%; height:100%; }
+.rtile.hero { width:84px; height:112px; aspect-ratio:auto; flex:none; }
+.rtile.add { border:1px dashed var(--color-border-strong); display:grid; place-items:center; color:var(--color-muted); }
+.rgrid { display:grid; grid-template-columns:repeat(5,1fr); gap:2px; margin-top:8px; }
+.rtile .badge.warn { right:4px; top:4px; width:16px; height:16px; font-size:11px; }
+.warnline { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px; color:var(--color-muted); }
+.warnline .badge.warn { width:16px; height:16px; font-size:11px; }
+.efoot { display:flex; padding:12px 16px; border-top:1px solid var(--color-border); }
+.efoot .btn { background:var(--color-accent); color:var(--color-on-accent); font-weight:600; border:0; }
+.efoot .sp { flex:1; }
+
+/* View menu */
+.vmenu { width:280px; right:16px; top:40px; padding:12px; display:flex; flex-direction:column; gap:16px; }
+.vmenu .sec { display:flex; flex-direction:column; gap:8px; }
+.vmenu .sec > span { color:var(--color-faint); font-size:12px; }
+.vmenu .seg { width:100%; } .vmenu .seg b { flex:1; justify-content:center; }
+.slider { display:flex; align-items:center; gap:12px; font-size:12px; color:var(--color-faint); }
+.slider .track { flex:1; height:2px; background:var(--color-border-strong); position:relative; }
+.slider .track::before { content:""; position:absolute; left:0; top:0; height:2px; width:46%; background:var(--color-accent); }
+.slider .track::after { content:""; position:absolute; left:46%; top:-6px; width:14px; height:14px; border-radius:50%; background:var(--color-accent); transform:translateX(-50%); }
+.aspects { display:grid; grid-template-columns:repeat(4,1fr); gap:4px; }
+.aspects b { height:48px; display:grid; place-items:center; align-content:center; gap:2px; font-size:11px; font-weight:400; color:var(--color-muted); background:var(--color-surface); border-radius:4px; }
+.aspects b.on { background:var(--color-accent); color:var(--color-on-accent); font-weight:600; }
+.switch { display:flex; align-items:center; justify-content:space-between; font-size:15px; }
+.switch i { width:32px; height:18px; border-radius:9px; background:var(--color-border-strong); position:relative; }
+.switch i::after { content:""; position:absolute; left:2px; top:2px; width:14px; height:14px; border-radius:50%; background:var(--color-text); }
+.switch.on i { background:var(--color-accent); } .switch.on i::after { left:16px; background:var(--color-on-accent); }
+.gone { border:1px dashed rgba(226,103,103,.5); padding:6px 8px; color:var(--color-faint); font-size:12px; text-decoration:line-through; }
+
+/* Help popover */
+.help { width:300px; padding:12px; font-size:13px; line-height:1.6; color:var(--color-muted); }
+.help b { color:var(--color-text); font-weight:600; }
+
+/* Annotation (overview only, never in shipped UI) */
+.anno { position:absolute; z-index:20; background:#f2d36b; color:#1b1a14; font-size:12px; font-weight:600; padding:2px 6px; border-radius:2px; white-space:nowrap; }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>PC 폴더 · 캐릭터 폴더 (2026-09-29)</h1>
+    <p class="lead">승인된 폴더 방향 D(<code>pc-assets-20260929/d.png</code>)를 현재 앱 상단바(제목만 · 전체/이미지/영상 · 정렬 · 보기)에 맞춰 다듬고, 캐릭터 폴더를 같은 틀로 다시 그렸습니다. <b>미분류 / 전체</b>가 <b>하위 폴더 포함</b>을 대신하므로 보기 메뉴에서 그 스위치를 뺍니다. 선택 막대의 캐릭터 버튼은 어디서나 같은 선택기를 열고, 시리즈 폴더 안에서는 <b>그 시리즈의 캐릭터만</b> 보여 줍니다(목록 끝 “모든 시리즈”, 또는 검색창의 “블아” 범위를 지우면 전체). 폴더는 열 때마다 미분류로 시작합니다. 이미지는 색 블록입니다. <code>index.html?frame=a|b|c|d|e|f</code>로 한 화면씩 볼 수 있습니다.</p>
+  </header>
+
+  <section class="topic"><h2><span class="k">A</span>일반 폴더 — D 다듬음 (게임 › 리버스)</h2>
+    <div class="notes"><ul>
+      <li><b>상단바</b>: 제목만(개수 없음) · 전체/이미지/영상 · 정렬 · 보기. “제안 숨기기”는 선반 라벨 줄 오른쪽으로(선반에만 해당).</li>
+      <li><b>선반</b>: 캐릭터 → 제안(점선 · 제안 표시) → 하위 폴더, 한 줄 가로 스크롤(휠 · 끌기 · 화살표). 오른쪽 흐림 그라데이션 대신 카드가 잘려 보이고 화살표만. 마우스를 올린 카드는 그림 모서리에 작은 버튼(캡션 안 움직임).</li>
+      <li><b>미분류 · 전체</b>: 선반 바로 아래. 미분류 = 이 폴더에 직접 있고 캐릭터·하위 폴더로 가지 않은 그림(기본값). 전체 = 아래 모두 포함. 그래서 보기 메뉴의 “하위 폴더 포함”은 없어집니다(E). 설명은 ⓘ 안에.</li>
+      <li><b>격자</b>: 날짜 머리글 한 모양, 캡션 없음, 마우스를 올리면 모서리에 ★ · ⋯ 와 작가 · 시각 배지.</li>
+    </ul></div>
+    <div class="frame" data-frame="a"></div>
+  </section>
+
+  <section class="topic"><h2><span class="k">B</span>캐릭터 폴더 (블아 › 하스미)</h2>
+    <div class="notes"><ul>
+      <li>폴더 D와 같은 뼈대. 캐릭터에는 하위 폴더가 없으니 선반은 비어서 빠지고, 라벨 줄(이미지 412 · 후보 8 확인)만 남습니다.</li>
+      <li>제목은 경로(블아 › 하스미), 옆에 <b>편집</b>과 <b>캐릭터 더보기 ⋯</b>(FAULT로 플레이 · 과거 미분류 이미지 갱신 · 일반 폴더로 전환 · S36 자동 분류에서 제외). 인물 확인이 필요하면 편집 버튼 모서리에 빨간 ! 표시.</li>
+      <li>레퍼런스 · 대표 이미지 · 추천으로 보강은 편집 패널 안에만(F).</li>
+    </ul></div>
+    <div class="frame" data-frame="b"></div>
+  </section>
+
+  <section class="topic"><h2><span class="k">C</span>캐릭터 폴더 — 선택 + 캐릭터 선택기 (피드백 4 · 5)</h2>
+    <div class="notes"><ul>
+      <li><b>4</b>: 옛 “캐릭터 지정…” 상자와 상단바의 선택 버튼들 대신 에셋과 같은 선택 막대 + 막대에 붙어 뜨는 선택기. “이 캐릭터에서 제외”는 막대 안에.</li>
+      <li><b>5</b>: 검색창 앞 <b>블아</b> 범위 배지, 목록은 블아 캐릭터만(추천 → 그룹별), 지금 캐릭터는 “현재”. 목록 맨 아래에 늘 보이는 <b>모든 시리즈</b> 줄. 배지 ×/Backspace나 검색으로도 다른 시리즈에 닿음.</li>
+    </ul></div>
+    <div class="frame" data-frame="c"></div>
+  </section>
+
+  <section class="topic"><h2><span class="k">D</span>시리즈 폴더 — 미분류에서 지정, 다른 시리즈로 가는 길</h2>
+    <div class="notes"><ul>
+      <li>시리즈 폴더(블아)도 A와 같은 화면: 그룹 → 캐릭터 → 제안 → 폴더 선반, 라벨 줄에 “후보 24 확인”(S36).</li>
+      <li>블아에 없는 이름을 치면 “블아에 없음” 한 줄 뒤에 <b>다른 시리즈</b> 결과(넣으면 그 시리즈 폴더로 옮김)와 <b>새 캐릭터</b> 줄(옛 상자의 “새 캐릭터” 버튼을 대신).</li>
+    </ul></div>
+    <div class="frame" data-frame="d"></div>
+  </section>
+
+  <section class="topic"><h2><span class="k">E</span>보기 메뉴 — 하위 폴더 포함이 빠진 모습</h2>
+    <div class="notes"><ul>
+      <li>배치 · 크기 · 비율 · 정보만. 하위 폴더 포함은 선반 아래 미분류 / 전체가 맡습니다(설명 ⓘ 팝오버 열린 상태 함께 표시).</li>
+    </ul></div>
+    <div class="frame" data-frame="e"></div>
+  </section>
+
+  <section class="topic"><h2><span class="k">F</span>캐릭터 편집 패널 — 레퍼런스는 여기에만</h2>
+    <div class="notes"><ul>
+      <li>편집을 누르면 버튼 아래에 붙어 뜨는 패널(지금의 캐릭터 정보 패널). 이름 · 대표 이미지 · 레퍼런스 12/25(추천으로 보강, 추가) · 설명 · 자동 분류. 확인이 필요한 레퍼런스에는 !, 아래에 “인물 확인 1장”.</li>
+    </ul></div>
+    <div class="frame" data-frame="f"></div>
+  </section>
+</div>
+<div id="solo"></div>
+
+<script>
+const I = {
+  home:'<path d="M3 11.5 12 4l9 7.5V20h-6v-5H9v5H3z"/>', grid:'<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 10h16M10 10v10"/>',
+  box:'<rect x="4" y="6" width="16" height="13" rx="1"/><path d="M7 3h10"/>', book:'<path d="M4 5h6a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4zM20 5h-6a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h6z"/>',
+  note:'<path d="M6 3h12v18H6zM9 8h6M9 12h6M9 16h4"/>', swap:'<path d="M7 7h12l-3-3M17 17H5l3 3"/>', search:'<circle cx="11" cy="11" r="6"/><path d="m20 20-4-4"/>',
+  more:'<circle cx="6" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="18" cy="12" r="1"/>', folder:'<path d="M3 7h6l2 2h10v10H3z"/>',
+  user:'<circle cx="12" cy="8" r="4"/><path d="M4 20c1-4 4-6 8-6s7 2 8 6"/>', people:'<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.8-3.4 3-5 6-5s5.2 1.6 6 5"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.3c1.8.7 3 2.300 3.5 4.700"/>',
+  star:'<path d="m12 4 2.4 5 5.6.6-4.2 3.8 1.2 5.5L12 16.2 7 18.9l1.2-5.5L4 9.6 9.6 9z"/>', trash:'<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>',
+  x:'<path d="M6 6l12 12M18 6 6 18"/>', info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>', left:'<path d="m15 5-7 7 7 7"/>', right:'<path d="m9 5 7 7-7 7"/>',
+  chev:'<path d="m9 6 6 6-6 6"/>', chevd:'<path d="m6 9 6 6 6-6"/>', sort:'<path d="M7 4v16l-3-3M17 20V4l3 3"/>', view:'<rect x="4" y="4" width="7" height="7"/><rect x="13" y="4" width="7" height="7"/><rect x="4" y="13" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/>',
+  play:'<path d="m8 5 11 7-11 7z"/>', edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/>', plus:'<path d="M12 5v14M5 12h14"/>', minus:'<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>',
+  album:'<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 15l5-5 5 5 3-3 3 3"/>', check:'<path d="m5 12 5 5 9-10"/>', sparkle:'<path d="M12 3v5M12 16v5M3 12h5M16 12h5"/>',
+  starf:'<path fill="currentColor" d="m12 4 2.4 5 5.6.6-4.2 3.8 1.2 5.5L12 16.2 7 18.9l1.2-5.5L4 9.6 9.6 9z"/>', useradd:'<circle cx="10" cy="8" r="4"/><path d="M3 20c1-4 3.5-6 7-6 1.500 0 2.800.3 3.800 1M18 14v6M15 17h6"/>',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24">${I[n]}</svg>`;
+const PAL = [['#c7d3a6','#6f7d44','#95ad6d'],['#a9d7c4','#4e8a6c','#6aa88b'],['#d7a3b3','#8a4f63','#b27686'],['#9fc2c8','#4a7a82','#6f9ea6'],['#b9a2d8','#5d4a86','#8a74b3'],['#e0c99e','#8a6d3c','#b8995f'],['#9eb6e0','#3f5c8a','#6f8cc2'],['#d9b3a0','#8a5842','#b47c64'],['#a6c9a0','#4b7a44','#76a36e'],['#c9a0c2','#7a4570','#a8709f'],['#a0bfd9','#456a8a','#6f92b4'],['#d9cfa0','#857a42','#b0a66b']];
+const art = (i, cls = '', style = '') => { const p = PAL[((i % PAL.length) + PAL.length) % PAL.length]; return `<span class="art ${cls}" style="--c1:${p[0]};--c2:${p[1]};--c3:${p[2]};${style}"></span>`; };
+
+const rail = `<nav class="rail"><svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4v16M9 6v12M13 4v16M17 7v10"/></svg>
+  <a>${ic('home')}홈</a><a class="ctx">${ic('grid')}에셋</a><a>${ic('box')}컬렉션</a><a>${ic('book')}망가</a><a>${ic('note')}메모</a><a>${ic('swap')}전송</a>
+  <span class="sp"></span><a>${ic('search')}찾기</a><a>${ic('more')}더보기</a></nav>`;
+const tree = (active) => {
+  const sub = (id, name, n) => `<div class="nav sub ${active === id ? 'on' : ''}">${ic('folder','s')}${name}<small>${n}</small></div>`;
+  return `<aside class="index"><div class="index-head"><span>에셋</span>${ic('more','s')}</div><div class="index-body">
+  <div class="nav">${ic('folder','s')}전체<small>9,453</small></div>
+  <div class="nav">${ic('user','s')}작가<small>45</small></div>
+  <div class="nav">${ic('album','s')}앨범<small>3</small></div>
+  <div class="gap"></div><div class="label">즐겨찾기<span class="rule"></span></div>
+  <div class="chips"><span class="chip">★ 리버스</span><span class="chip">★ 블아</span><span class="chip">★ 명조</span><span class="chip">★ 백합</span></div>
+  <div class="gap"></div><div class="label">폴더<span class="rule"></span></div>
+  <div class="nav">${ic('folder','s')}게임<small>5,915</small></div>
+  ${sub('rev','리버스','2,666')}${sub('zzz','젠레스','831')}${sub('wuwa','명조','516')}${sub('ba','블아','428')}${sub('nikke','니케','136')}
+  ${sub('pkm','포켓몬','370')}${sub('nin','닌텐도','111')}${sub('idol','아이돌','106')}
+  <div class="nav">${ic('folder','s')}만화<small>1,364</small></div>${sub('yuri','백합','312')}${sub('gundam','건담','196')}
+  <div class="nav">${ic('folder','s')}오리지널<small>938</small></div></div></aside>`;
+};
+// Toolbar as in AssetToolbar.tsx: title only, 종류 segment, 정렬 menu, 보기 menu.
+const toolbar = (title, opts = {}) => `<header class="toolbar"><h1>${title}</h1>${opts.accessory ?? ''}<span class="sp"></span>
+  <span class="seg"><b class="on">전체</b><b>이미지</b><b>영상</b></span>
+  <button class="quiet">${ic('sort','s')}최신순${ic('chevd','xs')}</button><button class="quiet ${opts.viewOpen ? 'open' : ''}">${ic('view','s')}보기</button>
+  <span class="win">— □ ✕</span></header>`;
+
+const H = [150, 260, 190, 320, 170, 230, 280, 160, 210, 300, 180, 240];
+function masonry(cols, count, seed, opts = {}) {
+  const out = [];
+  for (let c = 0; c < cols; c++) {
+    let items = '';
+    for (let k = 0; k < count; k++) {
+      const n = seed + c * 3 + k * 7;
+      const h = H[n % H.length];
+      const key = `${c}:${k}`;
+      const sel = (opts.sel ?? []).includes(key);
+      const hover = opts.hover === key;
+      const video = (n % 5) === 0;
+      items += `<div class="tile${sel ? ' sel' : ''}">${art(n, '', `height:${h}px`)}
+        ${video ? `<span class="badge br">${ic('play','xs')}0:${10 + n % 40}</span>` : ''}
+        ${sel ? '<span class="ring"></span><span class="check"><i></i></span>' : hover || opts.checks ? '<span class="check"></span>' : ''}
+        ${hover ? `<span class="tools"><span class="tb">${ic('star','xs')}</span><span class="tb">${ic('more','xs')}</span></span><span class="badge bl">az7970936${n % 9} · ${7 + n % 3}:${10 + n % 49}</span>` : ''}</div>`;
+    }
+    out.push(`<div class="colm">${items}</div>`);
+  }
+  return `<div class="masonry" style="--cols:${cols}">${out.join('')}</div>`;
+}
+const dayHead = (d, w, n) => `<div class="day-head"><b>${d}</b><small>${w}</small><span class="rule"></span><span class="n">${n}</span></div>`;
+
+// Shelf cards
+const charCard = (name, n, i, hover = false) => `<div class="fcard"><div class="wrap">${art(i)}${hover ? `<span class="tools"><span class="tb">${ic('edit','xs')}</span></span>` : ''}</div><b>${ic('user','s')}${name}</b><small>${n}장</small></div>`;
+const groupCard = (name, n, seeds) => `<div class="fcard"><div class="wrap"><div class="quad">${seeds.map((s) => art(s)).join('')}</div></div><b>${ic('people','s')}${name}</b><small>${n}명</small></div>`;
+const sugCard = (name, n, k) => `<div class="fcard suggest"><div class="wrap"><span class="badge tl">제안</span><div class="quad">${art(k)}${art(k+1)}${art(k+2)}${art(k+3)}</div></div><b>${name}</b><small>${n}장 · <span class="dot"></span>일치</small></div>`;
+const folderCard = (name, n, i, hover = false) => `<div class="fcard"><div class="wrap">${art(i)}${hover ? `<span class="tools"><span class="tb">${ic('more','xs')}</span></span>` : ''}</div><b>${ic('folder','s')}${name}</b><small>${n}장</small></div>`;
+const shelf = (cards, cls = '', left = false) => `<div class="shelf ${cls}"><div class="shelf-row">${cards}</div>${left ? `<button class="arrow l">${ic('left','s')}</button>` : ''}<button class="arrow r">${ic('right','s')}</button></div>`;
+const help = `<button class="quiet icon" aria-label="도움말">${ic('info','s')}</button>`;
+
+function folderScreen(opts = {}) {
+  const cards = charCard('버틴', 36, 2) + charCard('안조', 36, 4, !opts.noHover)
+    + sugCard('젤다 공주', 16, 0) + sugCard('시버', 14, 4) + sugCard('링크', 12, 8)
+    + folderCard('4.0', 82, 6) + folderCard('가방팟', 96, 8) + folderCard('라모나', 103, 9);
+  return `<div class="fhead">
+      <div class="label">캐릭터 <span class="n">2</span> · 제안 <span class="n">33</span> · 폴더 <span class="n">12</span><span class="rule"></span><button class="quiet">제안 숨기기</button></div>
+      ${shelf(cards)}
+      <div class="segrow"><span class="seg"><b class="on">미분류 <small>2,457</small></b><b>전체 <small>2,666</small></b></span>${opts.helpOpen ? `<button class="quiet icon open">${ic('info','s')}</button>` : help}</div>
+    </div>
+    <div class="gallery">${dayHead('9.28','월',7)}${masonry(4, 2, 30, { hover: opts.noHover ? null : '2:0' })}${dayHead('9.27','일',12)}${masonry(4, 1, 50)}</div>`;
+}
+
+function frameA() {
+  return `<div class="pc">${rail}${tree('rev')}<main class="main">${toolbar('리버스')}
+    <div class="scroll">${folderScreen()}</div></main></div>`;
+}
+
+// Character folder
+const charAccessory = (open = false) => `<span class="editwrap"><button class="quiet icon ${open ? 'open' : ''}" style="margin-left:8px" aria-label="편집" aria-description="인물 확인 1장">${ic('edit','s')}<span class="attn">!</span></button>${open ? editPanel() : ''}</span><button class="quiet icon" aria-label="캐릭터 더보기">${ic('more','s')}</button>`;
+// Character edit panel (existing AnchoredPanel + CharacterRegistry): references live only here.
+function editPanel() {
+  const refs = [3,5,7,1,9,11,2,6,10,0,4,8].map((s, k) => `<span class="rtile">${art(s + 12)}${k === 3 ? '<span class="badge tr warn">!</span>' : ''}</span>`).join('');
+  return `<div class="pop epanel" role="dialog" aria-label="하스미 · 캐릭터 정보">
+    <div class="ehead"><b>하스미</b><small>캐릭터 정보</small><span class="sp"></span><button class="quiet icon">${ic('x','s')}</button></div>
+    <div class="ebody">
+      <div class="erow"><span class="rtile hero">${art(4)}</span><div class="efields"><label>캐릭터 이름</label><div class="field">하스미</div><button class="btn">대표 이미지</button></div></div>
+      <div><div class="label">레퍼런스 <span class="n">12/25</span><span class="rule"></span><button class="quiet">${ic('sparkle','xs')}추천으로 보강</button></div>
+        <div class="rgrid">${refs}<span class="rtile add">${ic('plus','s')}</span></div>
+        <p class="warnline"><span class="badge warn" style="position:static">!</span>인물 확인 1장</p></div>
+      <div><label>설명</label><div class="field tall">트리니티 정의실현위원회 부위원장</div></div>
+      <div class="switch on">자동 분류<i></i></div>
+    </div>
+    <div class="efoot"><span class="sp"></span><button class="btn">저장</button></div></div>`;
+}
+const crumbTitle = (series, name) => `<span class="crumb">${series}</span>${ic('chev','s')}${name}`;
+// A character has no subfolders, so its shelf is empty and dropped; only the label row stays.
+function characterHead() {
+  return `<div class="fhead" style="margin-bottom:4px">
+      <div class="label">이미지 <span class="n">412</span><span class="rule"></span><button class="quiet">후보 <span class="num">8</span> 확인</button></div>
+    </div>`;
+}
+function characterScreen(opts = {}) {
+  const sel = opts.sel ?? [];
+  return `${characterHead()}<div class="gallery">${dayHead('9.29','',5)}${masonry(4, 2, 60, { sel, hover: opts.hover })}${dayHead('9.26','금',3)}${masonry(4, 1, 80)}</div>`;
+}
+function frameB() {
+  return `<div class="pc">${rail}${tree('ba')}<main class="main">${toolbar(crumbTitle('블아','하스미'), { accessory: charAccessory() })}
+    <div class="scroll">${characterScreen({ hover:'1:0' })}</div></main></div>`;
+}
+function frameF() {
+  return `<div class="pc">${rail}${tree('ba')}<main class="main">${toolbar(crumbTitle('블아','하스미'), { accessory: charAccessory(true) })}
+    <div class="scroll">${characterScreen({})}</div></main></div>`;
+}
+
+// Picker (CharacterAssignPicker scoped to the series)
+const prow = (name, sub, ct, seed, o = {}) => `<div class="prow${o.hl ? ' hl' : ''}${o.cur ? ' cur' : ''}${o.indent ? ' ind' : ''}">${art(seed)}<span class="nm">${name}${sub ? `<small>${sub}</small>` : ''}</span>${o.cur ? '<span class="cur-badge">현재</span>' : `<span class="ct">${ct}</span>`}${o.ck ? ic('check','s ck') : '<span></span>'}</div>`;
+const psec = (t) => `<div class="psec">${t}</div>`;
+function pickerSeries() {
+  return `<div class="pop picker" role="listbox" aria-label="캐릭터에 넣기">
+    <div class="psearch">${ic('search','s')}<span class="scope">블아 ${ic('x','xs')}</span><span class="caret"></span><span class="ph">캐릭터 찾기</span></div>
+    <div class="plist">
+      ${psec('추천')}${prow('미유','','3장 중 3장',9,{hl:true})}${prow('츠루기','','3장 중 1장',5)}
+      ${psec('트리니티')}${prow('하스미','','',4,{cur:true})}${prow('츠루기','','96',5)}${prow('마시로','','71',11)}${prow('이치카','','38',1)}
+      ${psec('게헨나')}${prow('히나','','210',3)}${prow('아코','','88',7)}${prow('이오리','','52',2)}
+    </div>
+    <div class="prow pall"><span class="plus solid">${ic('grid','s')}</span><span class="nm">모든 시리즈</span><span></span>${ic('chev','s')}</div>
+    <div class="pmeta">누르면 바로 넣기 · Ctrl+클릭 여러 명</div></div>`;
+}
+function pickerOther() {
+  return `<div class="pop picker" role="listbox" aria-label="캐릭터에 넣기">
+    <div class="psearch">${ic('search','s')}<span class="scope">블아 ${ic('x','xs')}</span><span class="q">링크</span><span class="caret" style="margin-left:0"></span></div>
+    <div class="plist">
+      <div class="pempty">블아에 없음</div>
+      ${psec('다른 시리즈')}${prow('링크','젤다 · 폴더 옮김','124',6,{hl:true})}${prow('링크','리버스 · 폴더 옮김','12',8)}
+      ${psec('새 캐릭터')}<div class="prow new"><span class="plus">${ic('plus','s')}</span><span class="nm">블아에 “링크” 만들기</span><span></span><span></span></div>
+    </div>
+    <div class="prow pall"><span class="plus solid">${ic('grid','s')}</span><span class="nm">모든 시리즈</span><span></span>${ic('chev','s')}</div>
+    <div class="pmeta">누르면 바로 넣기 · Ctrl+클릭 여러 명</div></div>`;
+}
+const selbar = (n, picker, extra = '') => `<div class="selbar"><span class="count">${n}개 선택</span><span class="div"></span>
+  <div class="charwrap"><button class="act ${picker ? 'open' : ''}">${ic('user','s')}캐릭터 <kbd>C</kbd></button>${picker ?? ''}</div>${extra}
+  <button class="act">${ic('starf','s')}</button><button class="act">${ic('star','s')}</button>
+  <button class="act">${ic('useradd','s')}작가 지정</button><span class="div"></span><button class="act danger">${ic('trash','s')}</button><button class="act">${ic('x','s')}</button></div>`;
+
+function frameC() {
+  return `<div class="pc">${rail}${tree('ba')}<main class="main">${toolbar(crumbTitle('블아','하스미'), { accessory: charAccessory() })}
+    <div class="scroll">${characterScreen({ sel:['0:0','1:0','2:1'] })}</div>
+    ${selbar(3, pickerSeries(), `<button class="act">${ic('minus','s')}이 캐릭터에서 제외</button>`)}</main></div>`;
+}
+
+function frameD() {
+  const cards = groupCard('트리니티', 4, [4,5,11,1]) + charCard('히나', 210, 3) + charCard('하스미', 412, 4) + charCard('아코', 88, 7)
+    + sugCard('아리스', 9, 2) + folderCard('이벤트', 44, 10) + folderCard('만화', 31, 6) + charCard('미유', 96, 9);
+  return `<div class="pc">${rail}${tree('ba')}<main class="main">${toolbar('블아', { accessory:`<button class="quiet icon" style="margin-left:8px" aria-label="시리즈 더보기">${ic('more','s')}</button>` })}
+    <div class="scroll"><div class="fhead">
+      <div class="label">그룹 <span class="n">1</span> · 캐릭터 <span class="n">14</span> · 제안 <span class="n">3</span> · 폴더 <span class="n">2</span><span class="rule"></span><button class="quiet">후보 <span class="num">24</span> 확인</button><button class="quiet">제안 숨기기</button></div>
+      ${shelf(cards, '', true)}
+      <div class="segrow"><span class="seg"><b class="on">미분류 <small>162</small></b><b>전체 <small>428</small></b></span>${help}</div>
+    </div>
+    <div class="gallery">${dayHead('9.29','',4)}${masonry(4, 2, 90, { sel:['1:0','3:0'] })}</div></div>
+    ${selbar(2, pickerOther())}</main></div>`;
+}
+
+function frameE() {
+  const menu = `<div class="pop vmenu" aria-label="보기">
+    <div class="sec"><span>배치</span><span class="seg"><b class="on">폭포수</b><b>같은 높이</b></span></div>
+    <div class="sec"><div class="slider">크기<span class="track"></span></div></div>
+    <div class="sec"><span>비율</span><div class="aspects">
+      <b class="on">${ic('view','s')}전체</b><b>${ic('grid','s')}정사각형</b><b>${ic('album','s')}가로형</b><b>${ic('box','s')}세로형</b></div></div>
+    <div class="switch">정보<i></i></div>
+  </div>`;
+  const helpPop = `<div class="pop help" style="left:230px;top:262px">
+    <b>미분류</b> — 이 폴더에 바로 있고 캐릭터나 하위 폴더로 아직 가지 않은 그림.<br><b>전체</b> — 캐릭터 · 하위 폴더까지 모두.</div>`;
+  return `<div class="pc">${rail}${tree('rev')}<main class="main">${toolbar('리버스', { viewOpen:true })}
+    <div class="scroll">${folderScreen({ noHover:true, helpOpen:true })}${helpPop}</div>${menu}</main></div>`;
+}
+
+const FRAMES = { a: frameA, b: frameB, c: frameC, d: frameD, e: frameE, f: frameF };
+document.querySelectorAll('[data-frame]').forEach((el) => { el.innerHTML = FRAMES[el.dataset.frame](); });
+const solo = new URLSearchParams(location.search).get('frame');
+if (solo && FRAMES[solo]) { document.body.classList.add('frame-only'); document.getElementById('solo').innerHTML = `<div class="frame">${FRAMES[solo]()}</div>`; }
+
+// Shelf: wheel scrolls sideways, drag pans, arrows page (interactive in the overview page).
+document.querySelectorAll('.shelf').forEach((s) => {
+  const row = s.querySelector('.shelf-row');
+  row.addEventListener('wheel', (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { row.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive:false });
+  s.querySelectorAll('.arrow').forEach((a) => a.addEventListener('click', () => row.scrollBy({ left: (a.classList.contains('l') ? -1 : 1) * row.clientWidth * .8, behavior:'smooth' })));
+  let x0 = null, sl = 0; row.addEventListener('pointerdown', (e) => { x0 = e.clientX; sl = row.scrollLeft; });
+  addEventListener('pointermove', (e) => { if (x0 !== null) row.scrollLeft = sl - (e.clientX - x0); }); addEventListener('pointerup', () => { x0 = null; });
+});
+</script>
+</body>
+</html>

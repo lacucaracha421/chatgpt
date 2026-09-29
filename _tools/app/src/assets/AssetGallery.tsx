@@ -54,6 +54,8 @@ type AssetGalleryProps = {
   onClearSelection?: () => void;
   onAssignCharacter?: (asset?: AssetSummary) => void;
   onToggleFavorite?: (asset: AssetSummary) => void;
+  /** `i`: show or hide the 정보 panel. */
+  onToggleInfo?: () => void;
   onEscape?: () => void;
   onMoveFocus?: (delta: number, extend: boolean) => void;
   onOpen?: (asset: AssetSummary) => void;
@@ -63,7 +65,7 @@ type AssetGalleryProps = {
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
-export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, totalCount = null, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onEscape, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, totalCount = null, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   void _metadataVisible;
   const scrollRef = useRef<HTMLDivElement>(null);
   const introRef = useRef<HTMLDivElement>(null);
@@ -301,6 +303,9 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
         } else if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "f" && focusedAsset && onToggleFavorite && !isTextEditingTarget(event.target)) {
           event.preventDefault();
           onToggleFavorite(focusedAsset);
+        } else if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "i" && onToggleInfo && !isTextEditingTarget(event.target)) {
+          event.preventDefault();
+          onToggleInfo();
         } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
           event.preventDefault();
           onSelectAll?.();

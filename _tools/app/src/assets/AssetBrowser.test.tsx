@@ -85,6 +85,7 @@ describe("AssetBrowser", () => {
     );
     const { rerender } = render(browser(0));
     await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
+    await user.keyboard("i");
     expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
     await waitFor(() => expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ selectedAsset: null })));
 
@@ -753,6 +754,7 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
+    await user.keyboard("i");
     const sourceGroup = await screen.findByRole("region", { name: "같은 게시물" });
     expect(gateway.recordAssetOpened).not.toHaveBeenCalled();
 
@@ -762,7 +764,7 @@ describe("AssetBrowser", () => {
     expect(screen.getByRole("dialog", { name: "asset-1.png" })).toBeVisible();
   });
 
-  it("opens the inspector on a plain click and switches its focused asset", async () => {
+  it("a plain click only picks; 정보 opens with i and follows the pick", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
     renderBrowser(gateway);
@@ -770,19 +772,21 @@ describe("AssetBrowser", () => {
     const first = await screen.findByRole("option", { name: "asset-0.png" });
     const second = screen.getByRole("option", { name: "asset-1.png" });
     await user.click(first);
-    expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "asset-0.png 감상 화면으로 열기" })).toBeVisible();
+    expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
     expect(first).toHaveAttribute("aria-selected", "false");
 
-    await user.click(second);
+    await user.keyboard("i");
     expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "asset-0.png 감상 화면으로 열기" })).toBeVisible();
+
+    await user.click(second);
     expect(screen.getByRole("button", { name: "asset-1.png 감상 화면으로 열기" })).toBeVisible();
 
     await user.click(within(screen.getByRole("complementary", { name: "자산 정보" })).getByRole("button", { name: "정보 닫기" }));
     await waitFor(() => expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument());
 
-    await user.click(second);
-    expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
+    await user.click(first);
+    expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
   });
 
   it("clears a multi-selection when a plain click focuses another asset", async () => {
@@ -800,7 +804,6 @@ describe("AssetBrowser", () => {
 
     expect([first, second, third].map((tile) => tile.getAttribute("aria-selected"))).toEqual(["false", "false", "false"]);
     expect(screen.queryByRole("toolbar", { name: "선택 작업" })).not.toBeInTheDocument();
-    expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
   });
 
   it("closes the info panel on Escape without clearing a selection", async () => {
@@ -809,6 +812,7 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
     const first = await screen.findByRole("option", { name: "asset-0.png" });
     await user.click(first);
+    await user.keyboard("i");
     fireEvent.click(first, { ctrlKey: true });
     first.focus();
     await user.keyboard("{Escape}");
@@ -826,6 +830,7 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: original.originalName }));
+    await user.keyboard("i");
     await user.click(screen.getByRole("button", { name: "출처 정보 편집" }));
     await user.type(screen.getByLabelText("제작자 이름"), "Updated Artist");
     await user.click(screen.getByRole("button", { name: "저장" }));

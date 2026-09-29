@@ -51,6 +51,7 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
   const freezeRef = useRef<HTMLCanvasElement>(null);
   const freezeTimerRef = useRef<number | null>(null);
   const [frozen, setFrozen] = useState(false);
+  const frozenRef = useRef(false);
   const savedPositionRef = useRef<number | null>(null);
   const metadataReadyRef = useRef(false);
   const progressTouchedRef = useRef(false);
@@ -176,11 +177,19 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
   const releaseFrame = useCallback(() => {
     if (freezeTimerRef.current !== null) window.clearTimeout(freezeTimerRef.current);
     freezeTimerRef.current = null;
+    frozenRef.current = false;
     setFrozen(false);
   }, []);
   useEffect(() => releaseFrame, [releaseFrame]);
   /** Some engines (WebKitGTK) show black while a seek flushes; hold the current frame over it until `seeked`. */
   const holdFrame = () => {
+    // While a frame is already held (a drag seeks many times), keep that good frame: a capture taken
+    // mid-seek can be the engine's black flush frame, which made releasing the scrubber flicker.
+    if (frozenRef.current) {
+      if (freezeTimerRef.current !== null) window.clearTimeout(freezeTimerRef.current);
+      freezeTimerRef.current = window.setTimeout(releaseFrame, SEEK_FREEZE_MAX_MS);
+      return;
+    }
     const video = videoRef.current;
     const canvas = freezeRef.current;
     if (!video || !canvas || video.readyState < 2 || !video.videoWidth) return;
@@ -189,6 +198,7 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     try { context.drawImage(video, 0, 0); } catch { return; }
+    frozenRef.current = true;
     setFrozen(true);
     if (freezeTimerRef.current !== null) window.clearTimeout(freezeTimerRef.current);
     freezeTimerRef.current = window.setTimeout(releaseFrame, SEEK_FREEZE_MAX_MS);
@@ -267,7 +277,8 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
         progressTouchedRef.current = false;
         if (!untracked) void libraryGateway.clearVideoPlaybackProgress(asset.id).catch(() => undefined);
       }}
-      onSeeked={releaseFrame}
+      // Release only after the last of several queued seeks has landed.
+      onSeeked={(event) => { if (!event.currentTarget.seeking) releaseFrame(); }}
       onTimeUpdate={(event) => {
         if (event.currentTarget.currentTime > 0) progressTouchedRef.current = true;
         setCurrentTime(event.currentTarget.currentTime);
