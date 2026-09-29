@@ -280,6 +280,9 @@ describe('Home A', () => {
     const call = mocks.api.mock.calls.find(([path, , body]) => path === '/v1/home/upcoming/wishlist' && body);
     expect(call?.[2]).toMatchObject({version: 1, action: 'remove', itemId: 'game-1'});
     expect(typeof (call?.[2] as {operationId?: unknown}).operationId).toBe('string');
+    // The pending removal hides the title at once, before the server confirms it.
+    expect(await screen.findByRole('button', {name: '관심 목록에 추가'})).toBeTruthy();
+    expect(within(screen.getByRole('region', {name: '신간', hidden: true})).queryByRole('button', {name: /Hades II/, hidden: true})).toBeNull();
   });
   it('hides the AV card for privacy mode and for an unavailable pick', async () => {
     localStorage.setItem('lakomics.mobile.privacyMode', '1');

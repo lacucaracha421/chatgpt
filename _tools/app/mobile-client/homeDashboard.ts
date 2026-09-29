@@ -362,7 +362,8 @@ export function useHomeUpcoming(enabled: boolean, scope: string, forceKey?: unkn
   const [tick, setTick] = useState(0);
   const ids = wishlistIds(reply);
   const pending = readUpcomingWishlistIntents();
-  for (const id of Object.keys(pending)) ids.add(id);
+  // A pending intent overrides the server: `add` shows the title, `remove` hides it.
+  for (const [id, intent] of Object.entries(pending)) { if (intent.action === 'add') ids.add(id); else ids.delete(id); }
   const toggle = (itemId: string) => {
     const current = visibleUpcomingWishlist(itemId, wishlistIds(reply).has(itemId)).value;
     commitUpcomingWishlist(itemId, !current); setTick(n => n + 1);
