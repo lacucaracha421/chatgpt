@@ -11,7 +11,7 @@ vi.mock('./transport', () => ({api:mocks.api, native:mocks.native, errorText:() 
   ApiError:class ApiError extends Error {status:number|null; details:unknown; constructor(message:string,status:number|null,details:unknown) {super(message); this.status = status; this.details = details;}}}));
 vi.mock('./media', () => ({clearMediaCache:vi.fn(), loadThumbnail:vi.fn(async(a) => a), prepareAssets:() => new Promise(() => {})}));
 vi.mock('./Home', () => ({Home:(props:HomeProps) => <div className="home-scroll" aria-label="홈 대시보드">
-  <button onClick={props.onReleases}>home 신간</button>
+  <button onClick={props.onReleases}>home 캘린더</button>
   <button onClick={() => props.onWork('w1')}>home 작품</button>
   <button onClick={() => props.onNotes('n1')}>home 메모</button>
   <button onClick={() => props.onNotes()}>home 메모 카드</button>
@@ -171,7 +171,7 @@ it('does not expose the character review overview from Home',async() => {
 
 it('opens the 발매 캘린더 from the Home shelf over Home, and Back returns to Home',async() => {
   const home = await startHome();
-  fireEvent.click(screen.getByRole('button',{name:'home 신간'}));
+  fireEvent.click(screen.getByRole('button',{name:'home 캘린더'}));
   await screen.findByRole('region',{name:'calendar-screen'});
   back();
   await waitFor(() => expect(screen.queryByRole('region',{name:'calendar-screen'})).toBeNull());

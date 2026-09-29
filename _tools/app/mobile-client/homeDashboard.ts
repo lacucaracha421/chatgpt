@@ -42,29 +42,6 @@ export const TODO_LABELS: Record<TodoKey, {label: string; unit: string; note: st
   duplicates: {label: '중복 판본', unit: '건', note: '카탈로그 · 같은 작품'},
 };
 export const TODO_ORDER: TodoKey[] = ['pending', 'character', 'similar', 'duplicates'];
-/** The pending-capture read's page size: a full page reads as "40+". */
-export const PENDING_LIMIT = 40;
-
-export type HomeTodoBadgeSnapshot = {
-  scope: string;
-  pending: number | null;
-  similar: number | null;
-  duplicates: number | null;
-};
-
-let homeTodoBadgeSnapshot: HomeTodoBadgeSnapshot = {scope: '', pending: null, similar: null, duplicates: null};
-const homeTodoBadgeListeners = new Set<() => void>();
-
-export function currentHomeTodoBadges() { return homeTodoBadgeSnapshot; }
-export function subscribeHomeTodoBadges(listener: () => void) {
-  homeTodoBadgeListeners.add(listener);
-  return () => homeTodoBadgeListeners.delete(listener);
-}
-function publishHomeTodoBadges(next: HomeTodoBadgeSnapshot) {
-  if (homeTodoBadgeSnapshot.scope === next.scope && homeTodoBadgeSnapshot.pending === next.pending && homeTodoBadgeSnapshot.similar === next.similar && homeTodoBadgeSnapshot.duplicates === next.duplicates) return;
-  homeTodoBadgeSnapshot = next;
-  homeTodoBadgeListeners.forEach(listener => listener());
-}
 
 export type ReleaseRow = {id: string; name: string; unread: number; caption: ReleaseCaption | null};
 export type UpcomingRow = {id: string; name: string; date: string; volumeNumber: number};
@@ -498,13 +475,6 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
 
   const pick = <T,>(value: T | null, kept: Stamped<T> | undefined) => value ?? kept?.value ?? null;
   const todos = Object.fromEntries(TODO_ORDER.map(key => [key, pick(live[key], snapshot.counts[key])])) as Record<TodoKey, number | null>;
-  useEffect(() => {
-    if (!enabled || !scope) return;
-    publishHomeTodoBadges({scope, pending: todos.pending, similar: todos.similar, duplicates: todos.duplicates});
-  }, [enabled, scope, todos.pending, todos.similar, todos.duplicates]);
-  useEffect(() => () => {
-    publishHomeTodoBadges({scope, pending: null, similar: null, duplicates: null});
-  }, [scope]);
   const kept = Object.values(snapshot.counts).map(entry => entry?.at ?? 0);
   return {
     todos,

@@ -13,11 +13,11 @@ import {useLibraryTrash} from './useLibraryTrash';
 import {useSimilarityReviewBackgroundFlush} from './useSimilarityReview';
 import {useDuplicateDecisionFlush} from './CatalogDuplicates';
 import type {ViewerCharacterContext} from './Viewer';
-import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
+import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {BookOpenIcon, PhotoIcon, PencilSquareIcon, HomeIcon, RectangleStackIcon, AdjustmentsHorizontalIcon, ArrowsUpDownIcon, LockClosedIcon, ChevronRightIcon, PlayIcon} from '@heroicons/react/24/outline';
 import {Exchange} from './Exchange';
 import {useExchange} from './useExchange';
-import {currentHomeTodoBadges, PENDING_LIMIT, sendingSummary, subscribeHomeTodoBadges, type HomeTodoBadgeSnapshot} from './homeDashboard';
+import {sendingSummary} from './homeDashboard';
 
 import {Button, IconButton, Mark} from './ui';
 import {api, errorText, native} from './transport';
@@ -54,7 +54,6 @@ import {faultCandidates} from '../src/games/fault/host';
 import {useLevelMotion,useScrollMemory,useTabMotion} from './motion';
 import {setOutboxConnection} from './outboxConnection';
 import {usePrivacyMode} from './privacyMode';
-import {createPortal} from 'react-dom';
 /** The durable outboxes follow the connection before any screen re-renders against it. */
 const adoptConnection=(next:Status)=>{setOutboxConnection(next.configured?next.endpoint:null);return next;};
 
@@ -69,21 +68,6 @@ function readLocalStatus(): Status {
     if (typeof value.configured !== 'boolean' || typeof value.endpoint !== 'string') return {configured:false, endpoint:''};
     return value.configured && value.endpoint ? {configured:true, endpoint:value.endpoint} : {configured:false, endpoint:''};
   } catch { return {configured:false, endpoint:''}; }
-}
-function homeTodoBadgeValue(value: number) { return value >= PENDING_LIMIT ? `${PENDING_LIMIT}+` : String(value); }
-export function HomeTodoBadges({snapshot, pending, onPending, onSimilar, onDuplicates}: {snapshot: HomeTodoBadgeSnapshot; pending: number | null; onPending(): void; onSimilar(): void; onDuplicates(): void}) {
-  const items = [
-    {label: '처리 대기', value: pending, onOpen: onPending},
-    {label: '유사 이미지', value: snapshot.similar, onOpen: onSimilar},
-    {label: '중복', value: snapshot.duplicates, onOpen: onDuplicates},
-  ].filter(item => item.value !== null && item.value > 0);
-  if (!items.length) return null;
-  return <div className="home-header-todo-badges" aria-label="홈 확인 항목">{items.map(item => <button type="button" className="home-header-todo-badge" key={item.label} onClick={item.onOpen} aria-label={`${item.label} ${homeTodoBadgeValue(item.value!)}`}><span>{item.label}</span><span className="numeric">{homeTodoBadgeValue(item.value!)}</span></button>)}</div>;
-}
-function HomeTodoBadgePortal(props: {snapshot: HomeTodoBadgeSnapshot; pending: number | null; onPending(): void; onSimilar(): void; onDuplicates(): void}) {
-  const [target, setTarget] = useState<HTMLElement | null>(null);
-  useEffect(() => { setTarget(document.getElementById('context-tools')); }, []);
-  return target ? createPortal(<HomeTodoBadges {...props} />, target) : null;
 }
 async function readPage(view:View,cursor:string|null,filters:AssetFiltersValue,signal:AbortSignal):Promise<Page> {
   const path=pagePath(view,cursor,filters);
@@ -173,7 +157,6 @@ export function App() {
   const trash = useLibraryTrash(status.configured, status.endpoint, setViewer);
   const exchange = useExchange(status.configured, status.endpoint, exchangeOpen);
   const visibleItems = useMemo(() => trash.hidden.size ? page.items.filter(item => !trash.hidden.has(item.id)) : page.items, [page.items, trash.hidden]);
-  const homeTodoSnapshot = useSyncExternalStore(subscribeHomeTodoBadges, currentHomeTodoBadges, currentHomeTodoBadges);
   const [density, setDensity] = useState(() => {try {return validDensity(JSON.parse(localStorage.getItem('lakomics.mobile.density') ?? '1'));} catch {return DEFAULT_DENSITY;}});
   const entries=useMemo(()=>mergeLibraryEntries(classifications,characterIndex),[classifications,characterIndex]);
   const entriesRef=useRef(entries);entriesRef.current=entries;
@@ -697,12 +680,8 @@ export function App() {
   const rootPage=useRef<{items:Asset[];total?:number}>({items:[]});
   if(page.view.root)rootPage.current={items:visibleItems,total:page.version&&!page.has_more?visibleItems.length:undefined};
   const demo = import.meta.env.DEV && new URLSearchParams(location.search).has('demo');
-  const homeTopBar = status.configured && area === 'assets' && page.view.tab === 'home';
-  const homePendingBadge = homeTopBar && captures !== null ? captures.length : null;
-  const homeTodoForBar = homeTodoSnapshot.scope === status.endpoint ? homeTodoSnapshot : {scope: status.endpoint, pending: null, similar: null, duplicates: null};
-  const openPendingBadge = () => { if (captures?.length) setViewer({items: captures, index: 0, pending: true}); else void refreshSecondary(true); };
+  const openPending = () => { if (captures?.length) setViewer({items: captures, index: 0, pending: true}); else void refreshSecondary(true); };
   return <div className="mobile-app" ref={appRef}>
-    {homeTopBar&&<HomeTodoBadgePortal snapshot={homeTodoForBar} pending={homePendingBadge} onPending={openPendingBadge} onSimilar={()=>setSimilarity(true)} onDuplicates={()=>{setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n=>n+1);}}/>}
     {/* Every configured area except Home draws its own title bar. */}
     {!(status.configured&&(area!=='assets'||page.view.tab==='library')||artistsOpen)&&<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&vaultPresent&&<IconButton label="비밀 보관함 열기" icon={LockClosedIcon} onClick={()=>setVaultOpen(true)}/>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<span className="header-action-badge"><IconButton label={exchangeLabel} icon={ArrowsUpDownIcon} onClick={()=>setExchangeOpen(true)}/>{exchangeBadge&&<span className="header-badge" aria-hidden="true">{exchangeBadge}</span>}</span>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={()=>setSettings(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>}
     {status.configured ? <div className="app-body" ref={bodyRef} data-active-tab={area==='assets'?page.view.tab:area}>
@@ -716,7 +695,7 @@ export function App() {
           review={{enabled:false,refreshKey:0}} similarityKey={similarityClosed} onArtists={() => {closeArtists();fromHome(LIBRARY);setLibrarySegment('artists');openRoot();}}
           onRecent={() => {fromHome({tab:'library',title:'최근 저장'});select({tab:'library',title:'최근 저장'});}} onRevisit={(key,title) => {const view:View={tab:'library',revisit:key,title};fromHome(view);select(view);}} onLibrary={() => {fromHome(lastLibrary.current?.view ?? LIBRARY);openLibrary();}} onRefresh={refresh}
           onNotes={id => {setHomeOrigin(id ? {area:'notes'} : null);setNotesVisited(true);setArea('notes');if (id) setNoteRequest(current => ({id,key:(current?.key ?? 0)+1}));}}
-          onPending={() => {if (captures?.length) setViewer({items:captures,index:0,pending:true});}}
+          onPending={openPending}
           onReview={() => {}} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
           onDuplicates={() => {setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
           onReleases={() => openCalendar()} onWork={id => {setHomeOrigin({area:'collections'});openCollections({kind:'work',id});}}/> : <>
