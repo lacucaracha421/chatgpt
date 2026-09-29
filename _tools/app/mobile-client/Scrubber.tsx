@@ -5,7 +5,9 @@ import './scrubber.css';
 const DRAG_THRESHOLD = 8;
 const HINT_MS = 1000;
 const RELEASE_MS = 800;
-const FADE_MS = 180;
+/** A tap on the bottom band shows the bar this long without a drag. */
+const SUMMON_MS = 2600;
+const FADE_MS = 220;
 
 type Metrics = {long: boolean; progress: number; top: number; bottom: number};
 
@@ -26,6 +28,7 @@ export function Scrubber({scrollRef, total, sort, hidden = false, onEndReached}:
   const releaseTimer = useRef<number | undefined>(undefined);
   const fadeTimer = useRef<number | undefined>(undefined);
   const trackRef = useRef<HTMLDivElement | null>(null);
+  const bubbleRef = useRef<HTMLDivElement | null>(null);
   const onEndReachedRef = useRef(onEndReached);
   onEndReachedRef.current = onEndReached;
 
@@ -80,15 +83,28 @@ export function Scrubber({scrollRef, total, sort, hidden = false, onEndReached}:
 
   const cancelRelease = () => { window.clearTimeout(releaseTimer.current); window.clearTimeout(fadeTimer.current); setFading(false); };
 
-  const finishRelease = () => {
-    if (!scrubbing.current) return;
-    scrubbing.current = false;
-    setPhase('released');
+  const scheduleHide = (delay: number) => {
     window.clearTimeout(releaseTimer.current); window.clearTimeout(fadeTimer.current);
     releaseTimer.current = window.setTimeout(() => {
       setFading(true);
       fadeTimer.current = window.setTimeout(() => { setPhase('idle'); setFading(false); }, FADE_MS);
-    }, RELEASE_MS);
+    }, delay);
+  };
+
+  const finishRelease = () => {
+    if (!scrubbing.current) return;
+    scrubbing.current = false;
+    setPhase('released');
+    scheduleHide(RELEASE_MS);
+  };
+
+  /** Tap on the bottom band: show the bar at the current scroll position, ready to drag. */
+  const summon = () => {
+    const ratio = metrics.progress;
+    setPosition({ratio, index: scrubberIndexAt(ratio, total)});
+    setHint(false); setFading(false);
+    setPhase('released');
+    scheduleHide(SUMMON_MS);
   };
 
   const updateFromX = (clientX: number) => {
@@ -123,8 +139,10 @@ export function Scrubber({scrollRef, total, sort, hidden = false, onEndReached}:
     if (!origin || origin.pointerId !== event.pointerId) return;
     const dx = event.clientX - origin.x, dy = event.clientY - origin.y;
     if (!scrubbing.current) {
-      if (Math.max(Math.abs(dx), Math.abs(dy)) < DRAG_THRESHOLD) return;
-      if (Math.abs(dx) <= Math.abs(dy)) { start.current = null; return; }
+      // Once the bar is showing, any sideways-ish drag scrubs; from the idle band it must be clearly sideways.
+      const shown = phase !== 'idle';
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < (shown ? 4 : DRAG_THRESHOLD)) return;
+      if (!shown && Math.abs(dx) <= Math.abs(dy)) { start.current = null; return; }
       scrubbing.current = true;
       setPhase('active'); setHint(false);
       event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -138,10 +156,25 @@ export function Scrubber({scrollRef, total, sort, hidden = false, onEndReached}:
     if (wasScrubbing) event.currentTarget.releasePointerCapture?.(event.pointerId);
     start.current = null;
     finishRelease();
-    // The idle band lies over the list: a plain tap belongs to whatever is underneath it.
-    if (!wasScrubbing && origin && event.type === 'pointerup' && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < DRAG_THRESHOLD) forwardTap(event.currentTarget, event.clientX, event.clientY);
+    // A plain tap on the band summons the bar; a tap on the shown bar jumps there.
+    if (!wasScrubbing && origin && event.type === 'pointerup' && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < DRAG_THRESHOLD) {
+      if (phase === 'idle') summon();
+      else { updateFromX(event.clientX); scheduleHide(SUMMON_MS); }
+    }
   };
 
+  // Keep the date bubble inside the screen at both ends; its pointer still marks the thumb.
+  useLayoutEffect(() => {
+    const bubble = bubbleRef.current, root = bubble?.parentElement;
+    if (!bubble || !root) return;
+    const width = root.clientWidth, half = bubble.offsetWidth / 2;
+    // The thumb sits on the track: bar inset 12px + track inset 18px on each side.
+    const thumb = 30 + (width - 60) * position.ratio;
+    const center = Math.min(width - 12 - half, Math.max(12 + half, thumb));
+    const reach = Math.max(0, half - 16);
+    bubble.style.left = `${center}px`;
+    bubble.style.setProperty('--bubble-pointer', `${Math.max(-reach, Math.min(reach, thumb - center))}px`);
+  }, [position.ratio, position.index, phase]);
   const visible = !hidden && metrics.long && total > 1;
   if (!visible && phase === 'idle' && !hint) return null;
   const label = model.labelAt(position.index);
@@ -154,21 +187,13 @@ export function Scrubber({scrollRef, total, sort, hidden = false, onEndReached}:
       <div className="mobile-scrubber-bar" aria-hidden="true">
         <div className="mobile-scrubber-track" ref={trackRef}/>
         <div className="mobile-scrubber-fill"/>
-        {model.ticks.map((tick, index) => <span key={`${tick.index}:${index}`} className={`mobile-scrubber-tick${tick.major ? ' is-major' : ''}`} style={{left:`calc(18px + (100% - 36px) * ${tick.position})`}}>{tick.major && tick.label && <b>{tick.label}</b>}</span>)}
+        {model.ticks.map((tick, index) => <span key={`${tick.index}:${index}`} className={`mobile-scrubber-tick${tick.major ? ' is-major' : ''}`} style={{left:`calc(18px + (100% - 36px) * ${tick.position})`}}>{tick.major && tick.label && <b className={tick.position > .9 ? 'is-end' : undefined}>{tick.label}</b>}</span>)}
         <i className="mobile-scrubber-thumb"/>
       </div>
-      <div className="mobile-scrubber-bubble" style={{left:`calc(12px + (100% - 24px) * ${position.ratio})`}}>
+      <div className="mobile-scrubber-bubble" ref={bubbleRef}>
         {label && <b>{label}</b>}
-        <small>{position.index.toLocaleString()} / {total.toLocaleString()}</small>
+        <small>{(position.index + 1).toLocaleString()} / {total.toLocaleString()}</small>
       </div>
     </>}
   </div>;
-}
-
-function forwardTap(zone: HTMLElement, x: number, y: number) {
-  const previous = zone.style.pointerEvents;
-  zone.style.pointerEvents = 'none';
-  const target = document.elementFromPoint?.(x, y);
-  zone.style.pointerEvents = previous;
-  if (target instanceof HTMLElement && !zone.contains(target)) target.click();
 }

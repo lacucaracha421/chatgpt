@@ -41,9 +41,16 @@ describe('Scrubber',()=>{
   it('fades after release and shows a hairline for one second after ordinary scrolling',()=>{
     vi.useFakeTimers();const {list}=mount();const zone=document.querySelector('.mobile-scrubber-zone')!;
     fireEvent.pointerDown(zone,{pointerId:1,pointerType:'touch',clientX:40,clientY:10});fireEvent.pointerMove(zone,{pointerId:1,pointerType:'touch',clientX:300,clientY:10});fireEvent.pointerUp(zone,{pointerId:1,pointerType:'touch',clientX:300,clientY:10});
-    expect(document.querySelector('.mobile-scrubber-bar')).not.toBeNull();act(()=>vi.advanceTimersByTime(800));expect(document.querySelector('.mobile-scrubber.is-fading')).not.toBeNull();act(()=>vi.advanceTimersByTime(180));expect(document.querySelector('.mobile-scrubber-bar')).toBeNull();
+    expect(document.querySelector('.mobile-scrubber-bar')).not.toBeNull();act(()=>vi.advanceTimersByTime(800));expect(document.querySelector('.mobile-scrubber.is-fading')).not.toBeNull();act(()=>vi.advanceTimersByTime(220));expect(document.querySelector('.mobile-scrubber-bar')).toBeNull();
     fireEvent.scroll(list);expect(document.querySelector('.mobile-scrubber-hint')).not.toBeNull();act(()=>vi.advanceTimersByTime(1000));expect(document.querySelector('.mobile-scrubber-hint')).toBeNull();
   });
 
+  it('shows the bar on a tap of the bottom band and hides it again',()=>{
+    vi.useFakeTimers();mount();const zone=document.querySelector('.mobile-scrubber-zone')!;
+    fireEvent.pointerDown(zone,{pointerId:1,pointerType:'touch',clientX:200,clientY:10});fireEvent.pointerUp(zone,{pointerId:1,pointerType:'touch',clientX:201,clientY:10});
+    expect(document.querySelector('.mobile-scrubber.is-released .mobile-scrubber-bar')).not.toBeNull();
+    act(()=>vi.advanceTimersByTime(2600));expect(document.querySelector('.mobile-scrubber.is-fading')).not.toBeNull();
+    act(()=>vi.advanceTimersByTime(220));expect(document.querySelector('.mobile-scrubber-bar')).toBeNull();
+  });
   it('hides when the list fits in roughly one and a half screens',()=>{mount({short:true});expect(document.querySelector('.mobile-scrubber-zone')).toBeNull();expect(document.querySelector('.mobile-scrubber-bar')).toBeNull();});
 });

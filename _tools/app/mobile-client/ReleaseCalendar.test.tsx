@@ -71,7 +71,7 @@ describe('ReleaseCalendar', () => {
   it('filters by kind and then by the counted interest list', async () => {
     render(<ReleaseCalendar onClose={vi.fn()} />);
     expect(await screen.findByRole('heading', {name: '2026년 10월'})).toBeTruthy();
-    expect(document.querySelector('.release-calendar-segment-counts')?.textContent).toBe('5221');
+    for (const name of ['전체 5', '게임 2', '영화 2', '애니 1']) expect(screen.getByRole('radio', {name})).toBeTruthy();
     const game = screen.getByText('game-one').closest('li')!;
     expect(within(game).getByRole('img', {name: 'PC'})).toBeTruthy();
     expect(within(game).getByRole('img', {name: 'PS5'})).toBeTruthy();
@@ -84,10 +84,10 @@ describe('ReleaseCalendar', () => {
     expect(screen.getByText('발매일 변경 · 9월 20일 → 10월 1일')).toBeTruthy();
     expect(screen.getByText('NEW 1')).toBeTruthy();
     expect(screen.getAllByText('미정').length).toBe(2);
-    fireEvent.click(screen.getByRole('radio', {name: '게임'}));
+    fireEvent.click(screen.getByRole('radio', {name: /^게임/}));
     expect(screen.getByText('game-one')).toBeTruthy();
     expect(screen.queryByText('movie-one')).toBeNull();
-    fireEvent.click(screen.getByRole('radio', {name: '전체'}));
+    fireEvent.click(screen.getByRole('radio', {name: /^전체/}));
     fireEvent.click(screen.getByRole('button', {name: /^관심 목록/}));
     expect(screen.getByText('movie-one')).toBeTruthy();
     expect(screen.queryByText('game-one')).toBeNull();

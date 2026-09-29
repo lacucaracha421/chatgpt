@@ -1,9 +1,6 @@
 .release-calendar-screen { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; background:var(--color-bg); }
-.release-calendar-controls { display:flex; align-items:center; gap:var(--space-2); min-height:var(--control-height); padding:0 var(--space-6); border-bottom:1px solid var(--color-border); overflow-x:auto; }
-.release-calendar-segments-frame { position:relative; flex:none; }
-.release-calendar-segments .ui-segmented__cell { min-width:var(--space-8); padding-right:var(--space-8); }
-.release-calendar-segment-counts { position:absolute; inset:0; display:grid; grid-template-columns:repeat(4,1fr); pointer-events:none; }
-.release-calendar-segment-counts span { padding-right:var(--space-2); color:var(--color-faint); font:500 var(--type-meta) / 1 var(--font-numeric); text-align:right; }
+.release-calendar-controls { display:flex; align-items:center; gap:var(--space-2); min-height:var(--control-height); padding:var(--space-2) var(--space-6); border-bottom:1px solid var(--color-border); overflow-x:auto; }
+.release-calendar-segments { flex:none; }
 .release-calendar-interest.ui-button--quiet { flex:none; }
 .release-calendar-interest.is-selected { background:var(--color-filter-selected); color:var(--color-text); font-weight:600; }
 .release-calendar-interest .numeric { color:var(--color-faint); font:500 var(--type-meta) / 1 var(--font-numeric); }

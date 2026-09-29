@@ -144,7 +144,8 @@ export function ReleaseCalendar({onClose, backRef, initialKind}: ReleaseCalendar
   const visibleIds = useMemo(() => visibleWishlistIds(authoritativeIds, localIntents), [authoritativeIds, tick]);
   const scroller = useRef<HTMLElement>(null);
   const calendarEntries = useMemo(() => reply ? filterReleaseEntries(wishlistOnly ? reply.wishlist : reply.entries, kind, wishlistOnly, visibleIds) : [], [reply, kind, wishlistOnly, visibleIds]);
-  const scrubberSort=useMemo(()=>({kind:'date' as const,values:calendarEntries.map(entry=>entry.date)}),[calendarEntries]);
+  // The scrubber walks the entries in the order the screen shows them (grouped by month).
+  const scrubberSort=useMemo(()=>({kind:'date' as const,values:groupReleaseEntries(calendarEntries).flatMap(month=>month.days.flatMap(day=>day.items.map(entry=>entry.date)))}),[calendarEntries]);
   const count = visibleIds.size;
 
   function toggle(entry: ReleaseCalendarEntry) {
@@ -181,26 +182,23 @@ export function ReleaseCalendar({onClose, backRef, initialKind}: ReleaseCalendar
     }
   }
 
-  const kindOptions = ([
-    {value: 'all', label: '전체'},
-    {value: 'game', label: '게임'},
-    {value: 'movie', label: '영화'},
-    {value: 'anime', label: '애니'},
-  ] as const);
   const kindCounts = useMemo(() => {
     const entries = reply?.entries ?? [];
     return {all: entries.length, game: entries.filter(entry => entry.kind === 'game').length, movie: entries.filter(entry => entry.kind === 'movie').length, anime: entries.filter(entry => entry.kind === 'anime').length};
   }, [reply]);
+  const kindOptions = ([
+    {value: 'all', label: '전체', count: kindCounts.all},
+    {value: 'game', label: '게임', count: kindCounts.game},
+    {value: 'movie', label: '영화', count: kindCounts.movie},
+    {value: 'anime', label: '애니', count: kindCounts.anime},
+  ] as const);
   const unreadTotal = reply?.wishlist.reduce((sum, entry) => sum + entry.unread.length, 0) ?? 0;
 
   const header = <TopBar back={{label: '홈으로', onClick: onClose}} crumbs={<span className="top-bar__crumbs">홈 ›</span>} title="발매 캘린더" count={reply && reply.entries.length ? reply.entries.length.toLocaleString('ko-KR') : undefined} />;
   return <div className="release-calendar-screen">
     {header}
     <div className="release-calendar-controls">
-      <div className="release-calendar-segments-frame">
-        <SegmentedControl className="release-calendar-segments" label="종류" options={kindOptions} value={kind} onChange={setKind} />
-        <div className="release-calendar-segment-counts" aria-hidden="true">{kindOptions.map(option => <span key={option.value}>{kindCounts[option.value].toLocaleString('ko-KR')}</span>)}</div>
-      </div>
+      <SegmentedControl className="release-calendar-segments" label="종류" options={kindOptions} value={kind} onChange={setKind} />
       <Button type="button" size="sm" variant="quiet" className={`release-calendar-interest${wishlistOnly ? ' is-selected' : ''}`} aria-label={`관심 목록 ${count.toLocaleString('ko-KR')}`} aria-pressed={wishlistOnly} onClick={() => setWishlistOnly(value => !value)}><BookmarkOutlineIcon aria-hidden="true" />관심 <span className="numeric">{count.toLocaleString('ko-KR')}</span></Button>
       {unreadTotal > 0 && <Badge variant="accent">NEW {unreadTotal.toLocaleString('ko-KR')}</Badge>}
     </div>
