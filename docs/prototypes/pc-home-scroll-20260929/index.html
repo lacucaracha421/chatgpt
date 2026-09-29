@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC 홈 스크롤 목업</title>
+<style>
+/* Fonts are the app's bundled files, loaded by relative path from the repository (no network). */
+@font-face { font-family:"Pretendard Variable"; src:url("../../../_tools/app/src/styles/fonts/PretendardVariable.woff2") format("woff2-variations"); font-weight:45 920; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens copied from _tools/app/src/styles/tokens.css (PC roles 20/15/12/24, spacing 4-32). */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-toolbar:#191a1b; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-surface-hover:#2d2e2f; --color-surface-pressed:#343536;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-faint:#7d8184; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-selection-echo:rgba(221,216,202,.4); --color-section-mark:rgba(221,216,202,.6);
+  --section-label-rule:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06));
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-success:#7fb88a;
+  --shadow-floating:0 1px 3px rgba(0,0,0,.24),0 8px 20px rgba(0,0,0,.3);
+  --type-title:20px; --type-body:15px; --type-meta:12px; --type-number:24px;
+  --font-ui:"Pretendard Variable","Pretendard","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+  --ease:cubic-bezier(.2,0,0,1);
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.45 var(--font-ui); }
+h1,h2,h3,p { margin:0; }
+button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; text-align:left; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+svg.i { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+svg.i.s { width:16px; height:16px; }
+
+/* ===== Document around the frames ===== */
+.doc { max-width:1540px; margin:0 auto; padding:32px 24px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1200px; margin:8px 0 0; line-height:1.7; }
+.lead b, .notes b { color:var(--color-text); font-weight:600; }
+section.topic { margin-top:48px; border-top:1px solid var(--color-border); padding-top:24px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; min-width:28px; height:28px; padding:0 6px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-ui); }
+.notes { color:var(--color-muted); max-width:1300px; line-height:1.7; margin:8px 0 16px; }
+.notes ul { margin:6px 0 0; padding-left:20px; }
+.frame { width:1440px; height:900px; overflow:hidden; border:1px solid var(--color-border); }
+.replay { margin:0 0 12px; height:32px; padding:0 12px; border-radius:4px; background:var(--color-surface); color:var(--color-muted); font-size:13px; }
+.replay:hover { background:var(--color-surface-hover); }
+body.frame-only { background:var(--color-bg); } body.frame-only .doc { display:none; }
+#solo { display:none; } body.frame-only #solo { display:block; } body.frame-only .frame { border:0; } body.frame-only .content, body.frame-only .menu { animation:none; }
+
+/* ===== PC shell 1440 × 900 ===== */
+.pc { position:relative; width:1440px; height:900px; background:var(--color-bg); display:grid; grid-template-columns:64px 240px 1fr; overflow:hidden; }
+.pc.wide { grid-template-columns:64px 1fr; }
+.rail { background:var(--color-sidebar); border-right:1px solid var(--color-border); display:flex; flex-direction:column; align-items:center; padding:12px 0; gap:4px; }
+.rail .logo { width:28px; height:28px; margin-bottom:12px; color:var(--color-muted); }
+.rail a { width:52px; height:52px; display:grid; place-items:center; align-content:center; gap:4px; color:var(--color-muted); font-size:11px; position:relative; }
+.rail a.on { background:var(--color-accent); color:var(--color-on-accent); box-shadow:3px 3px 0 -1px var(--color-sidebar),3px 3px 0 0 var(--color-selection-echo); }
+.rail a.on::after { content:""; position:absolute; right:4px; top:50%; width:5px; height:5px; margin-top:-2.5px; background:var(--color-on-accent); }
+.rail .sp { flex:1; }
+.index { background:var(--color-sidebar); border-right:1px solid var(--color-border); display:flex; flex-direction:column; min-height:0; }
+.index-head { height:44px; flex:none; display:flex; align-items:center; padding:0 16px; font-size:var(--type-meta); color:var(--color-faint); border-bottom:1px solid var(--color-border); }
+.index-body { padding:16px; display:flex; flex-direction:column; gap:24px; overflow:hidden; }
+.main { display:flex; flex-direction:column; min-width:0; min-height:0; }
+.toolbar { height:44px; flex:none; display:flex; align-items:center; gap:8px; padding:0 16px; border-bottom:1px solid var(--color-border); background:var(--color-toolbar); }
+.toolbar h1 { font-size:var(--type-title); font-weight:600; display:flex; align-items:baseline; gap:8px; }
+.toolbar h1 small { font-size:var(--type-meta); color:var(--color-faint); font-weight:400; }
+.toolbar .sp { flex:1; }
+.toolbar .win { display:flex; gap:24px; color:var(--color-faint); margin-left:16px; }
+.quiet { height:28px; display:inline-flex; align-items:center; gap:4px; padding:0 8px; border-radius:4px; color:var(--color-muted); font-size:var(--type-meta); }
+.quiet:hover, .quiet.open { background:var(--color-surface-hover); color:var(--color-text); }
+.quiet b { color:var(--color-text); font-weight:600; font-family:var(--font-numeric); font-size:14px; }
+.content { flex:1; min-height:0; padding:16px 16px 24px; display:flex; flex-direction:column; gap:24px; overflow:hidden; animation:homeIn 200ms var(--ease) both; }
+@keyframes homeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+
+/* Section label: 5px square + fading hairline, name in meta/faint, › at the right */
+.sec { display:flex; flex-direction:column; gap:12px; min-width:0; min-height:0; }
+.label { display:flex; align-items:center; gap:8px; height:20px; color:var(--color-faint); font-size:var(--type-meta); }
+.label::before { content:""; width:5px; height:5px; background:var(--color-section-mark); flex:none; }
+.label .rule { flex:1; height:1px; background:var(--section-label-rule); }
+.label .more { color:var(--color-faint); display:inline-flex; }
+.label .more:hover { color:var(--color-text); }
+
+/* Imagery: generated colour blocks with a figure */
+.art { position:relative; overflow:hidden; background:var(--c1); }
+.art::before { content:""; position:absolute; left:50%; top:26%; width:38%; aspect-ratio:1; border-radius:50%; background:var(--c2); transform:translateX(-50%); opacity:.85; }
+.art::after { content:""; position:absolute; left:18%; right:18%; bottom:-22%; height:52%; border-radius:50% 50% 0 0; background:var(--c3); opacity:.8; }
+
+/* Release shelf */
+.shelf { display:flex; gap:16px; overflow:hidden; }
+.cover { width:148px; flex:none; display:flex; flex-direction:column; gap:4px; }
+.cover .d { display:flex; justify-content:space-between; align-items:baseline; font-size:var(--type-meta); color:var(--color-faint); }
+.cover .d b { font-family:var(--font-numeric); font-size:15px; font-weight:500; color:var(--color-text); }
+.cover .art { width:148px; height:208px; border-radius:2px; margin-top:4px; }
+.cover .new { position:absolute; left:8px; top:8px; z-index:1; height:20px; padding:0 8px; display:inline-flex; align-items:center; background:var(--color-accent); color:var(--color-on-accent); font-size:var(--type-meta); font-weight:600; border-radius:2px; }
+.cover .vol { position:absolute; right:8px; bottom:8px; z-index:1; height:20px; min-width:20px; padding:0 4px; display:inline-grid; place-items:center; background:rgba(22,23,24,.82); color:var(--color-text); font:500 13px var(--font-numeric); border-radius:2px; }
+.cover .t { font-size:var(--type-body); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:8px; }
+.plat { display:flex; gap:4px; height:20px; }
+.plat i { width:20px; height:20px; border-radius:2px; background:var(--p); display:inline-grid; place-items:center; }
+.plat i::after { content:""; width:10px; height:10px; border:1.5px solid rgba(255,255,255,.85); border-radius:2px; }
+.cover .hover-ring:hover .art { outline:1px solid var(--color-border-strong); }
+
+/* 오늘 / 기록 two columns */
+.pair { flex:1; min-height:0; display:grid; grid-template-columns:1fr 1fr; gap:32px; }
+.today { display:grid; grid-template-columns:200px 1fr; gap:16px; min-height:0; }
+.face { display:flex; flex-direction:column; gap:12px; }
+.face .art { width:200px; flex:1; min-height:0; border-radius:2px; }
+.face b { font-size:var(--type-body); font-weight:600; }
+.face small { display:block; font-size:var(--type-meta); color:var(--color-faint); margin-top:4px; }
+.mosaic { display:grid; grid-template-columns:2fr 1fr 1fr; grid-template-rows:1fr 1fr; gap:2px; min-height:0; }
+.mosaic .art:first-child { grid-row:1 / span 2; }
+.cap { font-size:var(--type-meta); color:var(--color-faint); margin-top:8px; display:flex; gap:8px; }
+.cap .numeric { color:var(--color-muted); }
+.strip { flex:1; min-height:0; display:grid; grid-template-columns:repeat(4,1fr); gap:2px; }
+.nums { display:grid; grid-template-columns:repeat(4,1fr); border-top:1px solid var(--color-border); padding-top:12px; }
+.nums > div { padding-left:16px; border-left:1px solid var(--color-border); }
+.nums > div:first-child { padding-left:0; border-left:0; }
+.nums b { display:block; font:500 var(--type-number)/1.1 var(--font-numeric); }
+.nums small { font-size:var(--type-meta); color:var(--color-faint); }
+.col { display:flex; flex-direction:column; gap:12px; min-height:0; }
+
+/* Index: memo tiles, transfer */
+.memo { background:var(--color-surface); border-radius:4px; padding:12px 16px; display:flex; flex-direction:column; gap:4px; }
+.memo:hover { background:var(--color-surface-hover); }
+.memo .h { display:flex; align-items:center; gap:8px; font-size:var(--type-body); font-weight:600; }
+.memo .h .i { color:var(--color-muted); width:16px; height:16px; }
+.memo .h em { margin-left:auto; font-style:normal; font-size:var(--type-meta); color:var(--color-faint); font-weight:400; }
+.memo p { font-size:var(--type-meta); color:var(--color-muted); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.memo .amt { font:500 var(--type-number)/1.1 var(--font-numeric); }
+.memo .amt small { font:400 var(--type-meta) var(--font-ui); color:var(--color-muted); margin-left:2px; }
+.memo .bar { height:2px; background:var(--color-border); margin-top:4px; } .memo .bar i { display:block; height:100%; background:var(--color-accent); }
+.add { height:32px; display:flex; align-items:center; gap:8px; padding:0 8px; color:var(--color-faint); font-size:var(--type-meta); border-radius:4px; }
+.add:hover { background:var(--color-surface-hover); color:var(--color-muted); }
+.stack { display:flex; flex-direction:column; gap:8px; }
+.xfer { height:48px; display:flex; align-items:center; gap:12px; padding:0 8px; border-radius:4px; }
+.xfer:hover { background:var(--color-surface-hover); }
+.xfer .i { color:var(--color-muted); }
+.xfer span { flex:1; min-width:0; font-size:var(--type-body); }
+.xfer span small { display:block; font-size:var(--type-meta); color:var(--color-faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.xfer b { font:500 18px var(--font-numeric); }
+.dot { display:inline-flex; align-items:center; gap:4px; font-size:var(--type-meta); color:var(--color-muted); }
+.dot::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--color-success); }
+.dot.off::before { background:var(--color-danger); }
+
+/* Menu with NieR corner brackets */
+.menu { position:absolute; z-index:5; width:280px; background:var(--color-surface-elevated); border:1px solid var(--color-border); box-shadow:var(--shadow-floating); padding:8px 0;
+  background-image:linear-gradient(var(--color-accent),var(--color-accent)),linear-gradient(var(--color-accent),var(--color-accent)),linear-gradient(var(--color-accent),var(--color-accent)),linear-gradient(var(--color-accent),var(--color-accent));
+  background-size:8px 2px,2px 8px,8px 2px,2px 8px; background-position:2px 2px,2px 2px,calc(100% - 2px) calc(100% - 2px),calc(100% - 2px) calc(100% - 2px); background-repeat:no-repeat;
+  animation:menuIn 140ms var(--ease) both; }
+@keyframes menuIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+.menu .label { padding:0 12px; margin-bottom:4px; }
+.menu button { width:100%; height:32px; display:flex; align-items:center; gap:8px; padding:0 12px; font-size:var(--type-body); }
+.menu button:hover { background:var(--color-surface-hover); }
+.menu button .i { color:var(--color-muted); width:16px; height:16px; }
+.menu button span { flex:1; }
+.menu button b { font:500 16px var(--font-numeric); color:var(--color-text); }
+
+/* C/D: large memo blocks, asset table and status in the index; review list in the content */
+.memo.big { padding:16px; gap:8px; }
+.memo.big ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; font-size:var(--type-meta); color:var(--color-muted); }
+.memo.big li { display:flex; align-items:center; gap:8px; height:20px; }
+.memo.big li::before { content:""; width:12px; height:12px; border:1.5px solid var(--color-border-strong); border-radius:2px; flex:none; }
+.memo.big li.done { color:var(--color-faint); text-decoration:line-through; }
+.memo.big li.done::before { border-color:var(--color-accent); background:radial-gradient(var(--color-accent) 0 0) center/6px 6px no-repeat; }
+.memo.big p { -webkit-line-clamp:6; line-height:1.6; }
+.memo.big .sub { font-size:var(--type-meta); color:var(--color-faint); }
+.memo.big .rows { display:flex; flex-direction:column; font-size:var(--type-meta); color:var(--color-muted); }
+.memo.big .rows span { display:flex; justify-content:space-between; height:20px; align-items:center; }
+.memo.big .rows b { font:500 14px var(--font-numeric); color:var(--color-text); }
+.assets { display:grid; grid-template-columns:1fr 1fr; border:1px solid var(--color-border); border-radius:4px; }
+.assets button { padding:8px 12px; display:flex; flex-direction:column; border-right:1px solid var(--color-border); border-bottom:1px solid var(--color-border); }
+.assets button:hover { background:var(--color-surface-hover); }
+.assets button:nth-child(2n) { border-right:0; }
+.assets b { font:500 20px/1.1 var(--font-numeric); }
+.assets small { font-size:var(--type-meta); color:var(--color-faint); }
+.assets .four { grid-column:1 / -1; display:grid; grid-template-columns:repeat(4,1fr); border-bottom:1px solid var(--color-border); }
+.assets .four button { border-bottom:0; padding:8px; } .assets .four button:nth-child(2n) { border-right:1px solid var(--color-border); } .assets .four button:last-child { border-right:0; }
+.assets .four b { font-size:16px; }
+.assets .foot { grid-column:1 / -1; display:flex; gap:12px; padding:8px 12px; font-size:var(--type-meta); color:var(--color-faint); }
+.assets .foot .numeric { color:var(--color-muted); }
+.status { display:flex; flex-direction:column; }
+.status span { height:28px; display:flex; align-items:center; gap:8px; font-size:var(--type-meta); color:var(--color-muted); padding:0 4px; }
+.status span::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--color-success); flex:none; }
+.status span.off::before { background:var(--color-danger); }
+.status span em { margin-left:auto; font-style:normal; color:var(--color-faint); }
+.status span.off em { color:var(--color-danger); }
+.queue { display:flex; flex-direction:column; }
+.queue button { height:32px; display:flex; align-items:center; gap:8px; padding:0 8px; border-bottom:1px solid var(--color-border); font-size:var(--type-body); }
+.queue button:last-child { border-bottom:0; }
+.queue button:hover { background:var(--color-surface-hover); }
+.queue button .i { width:16px; height:16px; color:var(--color-muted); }
+.queue button span { flex:1; }
+.queue button b { font:500 17px var(--font-numeric); }
+.queue button small { font-size:var(--type-meta); color:var(--color-faint); margin-left:2px; }
+.grid-c { flex:1; min-height:0; display:grid; grid-template-columns:minmax(0,1fr) 240px; gap:32px; }
+.grid-c .left { display:flex; flex-direction:column; gap:24px; min-width:0; min-height:0; }
+.trio { flex:1; min-height:0; display:grid; grid-template-columns:180px 1fr 1fr; gap:24px; }
+.av { flex:1; display:flex; flex-direction:column; gap:8px; min-height:0; }
+.av .art { flex:1; min-height:0; border-radius:2px; }
+.av b { font-size:var(--type-body); font-weight:600; }
+.av small { font-size:var(--type-meta); color:var(--color-faint); }
+.av .facts { display:flex; gap:16px; font-size:var(--type-meta); color:var(--color-faint); }
+.av .facts b { font:500 17px var(--font-numeric); margin-right:2px; }
+.jackets { display:grid; grid-template-columns:repeat(3,1fr); gap:2px; height:88px; }
+.jackets .art { height:100%; }
+.grid-d { flex:1; min-height:0; display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:32px; }
+.grid-d .left, .grid-d .right { display:flex; flex-direction:column; gap:24px; min-width:0; min-height:0; }
+.duo { flex:1; min-height:0; display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+.avrow { display:grid; grid-template-columns:120px 1fr; gap:16px; }
+.avrow .art { height:160px; border-radius:2px; }
+.avrow .who { display:flex; flex-direction:column; gap:4px; }
+
+/* B: memo cards row in the content */
+.memos-row { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+.memos-row .memo { min-height:88px; }
+
+/* ===== Scroll round (2026-09-29): D + 이어 보기 · 이어지는 시리즈 · AV 확장 ===== */
+.scroll { overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--color-border-strong) transparent; }
+.content.scroll { overflow-y:auto; }
+.index-body.scroll { overflow-y:auto; min-height:0; flex:1; }
+/* First screen keeps D's proportions with fixed heights so the page can grow below it */
+.grid-d.long { flex:none; align-items:start; }
+.grid-d.long .left > .duo { flex:none; height:392px; }
+.grid-d.split { flex:1; min-height:0; align-items:stretch; }
+.grid-d.split > .left, .grid-d.split > .right { overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--color-border-strong) transparent; padding-right:4px; }
+.grid-d.split .left > .duo { flex:none; height:392px; }
+.fold { display:flex; flex-direction:column; gap:32px; }
+
+/* 이어 보기: cover with a thin neutral progress line and a position caption */
+.cont { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:16px; }
+.cont.five { grid-template-columns:repeat(5,minmax(0,1fr)); }
+.cont button { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.cont .art { aspect-ratio:3/4; border-radius:2px; }
+.cont .prog { height:2px; background:var(--color-border); margin-top:4px; }
+.cont .prog i { display:block; height:100%; background:var(--color-muted); }
+.cont .t { font-size:var(--type-body); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:4px; }
+.cont .m { display:flex; justify-content:space-between; font-size:var(--type-meta); color:var(--color-faint); }
+.cont .m .numeric { color:var(--color-muted); }
+.cont .kind { position:absolute; left:8px; top:8px; z-index:1; height:20px; padding:0 6px; display:inline-flex; align-items:center; background:rgba(22,23,24,.82); color:var(--color-muted); font-size:var(--type-meta); border-radius:2px; }
+.cont button:hover .art { outline:1px solid var(--color-border-strong); }
+
+/* 이어지는 시리즈: owned latest volume + the next one as an outlined slot */
+.series { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:24px; }
+.series.three { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.ser { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.ser .pair2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.ser .art { aspect-ratio:3/4; border-radius:2px; }
+.ser .next { aspect-ratio:3/4; border:1px dashed var(--color-border-strong); border-radius:2px; display:grid; place-items:center; align-content:center; gap:4px; color:var(--color-muted); }
+.ser .next b { font:500 28px/1 var(--font-numeric); color:var(--color-text); }
+.ser .next small { font-size:var(--type-meta); color:var(--color-faint); }
+.ser .next.out { border-style:solid; border-color:var(--color-accent); }
+.ser .next.out small { color:var(--color-accent); }
+.ser .vol { position:absolute; right:8px; bottom:8px; z-index:1; height:20px; min-width:20px; padding:0 4px; display:inline-grid; place-items:center; background:rgba(22,23,24,.82); font:500 13px var(--font-numeric); border-radius:2px; }
+.ser .t { font-size:var(--type-body); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ser .m { font-size:var(--type-meta); color:var(--color-faint); display:flex; gap:8px; }
+.ser .m .numeric { color:var(--color-muted); }
+.ser:hover .next { background:var(--color-surface-hover); }
+
+/* AV 확장: favourite performers as a face grid, AV 신작 as compact rows */
+.faces { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px 8px; }
+.faces.six { grid-template-columns:repeat(6,minmax(0,1fr)); }
+.faces button { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.faces .art { aspect-ratio:1; border-radius:2px; }
+.faces b { font-size:var(--type-meta); font-weight:500; color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.faces .new-dot { position:absolute; right:4px; top:4px; z-index:1; min-width:18px; height:18px; padding:0 4px; display:inline-grid; place-items:center; background:var(--color-accent); color:var(--color-on-accent); font:600 12px var(--font-numeric); border-radius:2px; }
+.faces button:hover b { color:var(--color-text); }
+.rel { display:flex; flex-direction:column; }
+.rel button { display:grid; grid-template-columns:56px 1fr auto; gap:12px; align-items:center; padding:8px 4px; border-bottom:1px solid var(--color-border); }
+.rel button:last-child { border-bottom:0; }
+.rel button:hover { background:var(--color-surface-hover); }
+.rel .art { width:56px; height:38px; border-radius:2px; }
+.rel .who { min-width:0; display:flex; flex-direction:column; }
+.rel .who b { font-size:var(--type-body); font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rel .who small { font-size:var(--type-meta); color:var(--color-faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rel .when { text-align:right; font-size:var(--type-meta); color:var(--color-faint); }
+.rel .when b { display:block; font:500 15px var(--font-numeric); color:var(--color-text); }
+.rel .when .own { color:var(--color-success); }
+.avband { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.2fr); gap:32px; }
+.rel.grid2 { display:grid; grid-template-columns:1fr 1fr; column-gap:24px; }
+.rel.grid2 button:nth-last-child(2) { border-bottom:0; }
+.end { height:24px; }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>PC 홈 — 아래로 스크롤해서 더 보기 (2026-09-29)</h1>
+    <p class="lead">D안의 첫 화면은 그대로 두고, 스크롤을 내리면 <b>이어 보기</b> · <b>이어지는 시리즈</b> · <b>AV 확장</b>(즐겨찾는 배우 · AV 신작)이 나오는 목업입니다.
+    사이드바는 세 안 모두 따로 스크롤됩니다. <b>각 화면 안에서 직접 휠을 굴려 보세요.</b> 이미지는 색 블록입니다.</p>
+  </header>
+
+  <section class="topic">
+    <h2><span class="k">E</span>추천 — 가운데와 오른쪽을 한 스크롤로, 칸은 끝까지 유지</h2>
+    <p class="notes">가운데와 오른쪽이 같이 내려갑니다. 가운데 칸 아래에 <b>이어 보기</b>(읽다 만 망가 · 보다 만 영상, 진행선과 위치)와 <b>이어지는 시리즈</b>(가진 마지막 권 옆에 다음 권 자리: 발매됐으면 “발매됨”, 아직이면 D-day)가 이어집니다.
+    오른쪽 300px 칸은 검토 아래에 <b>즐겨찾는 배우</b>(얼굴 여덟, 새 작품 수 배지)와 <b>AV 신작</b>(표지 · 배우 · 날짜, 가진 것은 “소장”)이 붙습니다.</p>
+    <div class="frame" data-frame="e"></div>
+  </section>
+
+  <section class="topic">
+    <h2><span class="k">F</span>대안 — 첫 화면 아래는 폭 전체를 쓰는 띠</h2>
+    <p class="notes">첫 화면(캘린더 · 다시 보기 · 작가 / AV 배우 · 검토)은 D와 같은 높이로 두고, 그 아래는 오른쪽 칸 없이 폭 전체를 씁니다. 표지가 한 줄에 더 많이 들어가고, AV는 <b>즐겨찾는 배우 여섯 + AV 신작 두 줄 목록</b>으로 한 띠에 모입니다.
+    대신 오른쪽 칸이 첫 화면에서 끝나서, 스크롤하면 구조가 한 번 바뀝니다.</p>
+    <div class="frame" data-frame="f"></div>
+  </section>
+
+  <section class="topic">
+    <h2><span class="k">G</span>비교용 — 가운데와 오른쪽이 각자 스크롤</h2>
+    <p class="notes">내용은 E와 같고, 가운데 칸과 오른쪽 칸이 따로 스크롤됩니다. 휠을 굴렸을 때 커서 위치에 따라 움직이는 곳이 다른 것, 한쪽만 내렸을 때 옆 칸과 어긋나는 것을 직접 비교해 보세요.</p>
+    <div class="frame" data-frame="g"></div>
+  </section>
+</div>
+<div id="solo"></div>
+
+<script>
+const ICON = {
+  logo:'<path d="M6 4v16M10 7v10M14 7v10M18 4v16"/>',
+  home:'<path d="m3 11 9-7 9 7M5 10v10h14V10"/>',
+  photo:'<rect x="3" y="5" width="18" height="14" rx="1"/><path d="m3 16 5-5 5 5 3-3 5 5"/>',
+  stack:'<path d="M4 9h16v10H4zM6 6h12M8 3h8"/>',
+  book:'<path d="M12 6c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V4c-3 0-6 .5-8 2zM12 6v14"/>',
+  pencil:'<path d="m4 20 4-1 11-11-3-3L5 16l-1 4z"/>',
+  arrows:'<path d="M7 20V4M3 8l4-4 4 4M17 4v16M13 16l4 4 4-4"/>',
+  search:'<circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/>',
+  dots:'<path d="M5 12h.01M12 12h.01M19 12h.01"/>',
+  chev:'<path d="m9 6 6 6-6 6"/>',
+  list:'<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
+  wallet:'<rect x="3" y="6" width="18" height="13" rx="1"/><path d="M3 10h18M16 14h2"/>',
+  doc:'<path d="M6 3h8l4 4v14H6zM14 3v4h4"/>',
+  down:'<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+  up:'<path d="M12 20V9M7 14l5-5 5 5M5 4h14"/>',
+  check:'<path d="m5 12 4 4 10-10"/>',
+  user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>',
+  tag:'<path d="M3 12V4h8l10 10-8 8z"/><path d="M7.5 8h.01"/>',
+  copy:'<rect x="8" y="8" width="12" height="12" rx="1"/><path d="M4 16V4h12"/>',
+  inbox:'<path d="M4 13h5l1 3h4l1-3h5M4 13l3-8h10l3 8v6H4z"/>',
+  film:'<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>',
+  folder:'<path d="M3 6h7l2 2h9v11H3z"/>',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24">${ICON[n]}</svg>`;
+const PAL = [['#a79bcf','#4f4a78','#8e6fae'],['#9f95c3','#5b5a8c','#b08bbf'],['#cf9f98','#7a4b4d','#b39a82'],['#b6d6cf','#4f7a66','#5f9ea5'],['#d8a3a7','#7a4f5c','#a88a79'],['#d6c99c','#7a6650','#a6aa74'],
+  ['#c2d0a3','#6c6b4a','#88a86c'],['#aedcc0','#557f58','#5e9a86'],['#9fc7c1','#4f7f6f','#78a8b4'],['#dcbab4','#7f5058','#a0806a'],['#9d94c9','#56578a','#8067a3'],['#c99bd6','#634774','#a871a8'],
+  ['#a9b7d4','#4b5d74','#7b7cb4'],['#cbbf9f','#76604c','#a39f6a'],['#9ccac6','#517c74','#7da4b3'],['#cda0b4','#7b4f63','#ad7676'],['#a6d3a6','#4d7250','#6ea08a'],['#b9d7d0','#50786c','#7ab0b8']];
+const art = (i, cls = '', inner = '') => { const p = PAL[i % PAL.length]; return `<span class="art ${cls}" style="--c1:${p[0]};--c2:${p[1]};--c3:${p[2]}">${inner}</span>`; };
+const label = (name) => `<div class="label"><span>${name}</span><span class="rule"></span><button class="more" aria-label="${name} 전체">${ic('chev','s')}</button></div>`;
+const P = { sw:'#e60012', ps:'#1f4fcf', xb:'#107c10', pc:'#1b2838' };
+
+const SHELF = [
+  ['9.30','D-2','마법소녀를 동경해서',0,{ neu:1, vol:8 }], ['10.1','D-3','Warhammer 40,000',1,{ plat:['sw'] }], ['10.4','D-6','학생회에도 구멍은 있다!',2,{ vol:12 }],
+  ['10.8','D-10','록맨',3,{}], ['10.15','D-17','Castlevania',4,{ plat:['pc','ps','sw','xb'] }], ['11.5','D-38','The Legend',5,{ plat:['sw'] }],
+  ['11.12','D-45','던전밥 원화집',9,{}], ['11.20','D-53','Metaphor',10,{ plat:['ps','xb','pc'] }], ['12.4','D-67','나의 히어로',11,{ vol:41 }],
+];
+const cover = ([date, dday, title, pi, o]) => `<button class="cover">
+  <span class="d"><b>${date}</b><span class="numeric">${dday}</span></span>
+  ${art(pi, '', (o.neu ? '<span class="new">NEW</span>' : '') + (o.vol ? `<span class="vol">${o.vol}</span>` : ''))}
+  <span class="t">${title}</span>
+  <span class="plat">${(o.plat || []).map((k) => `<i style="--p:${P[k]}"></i>`).join('')}</span>
+</button>`;
+
+const rail = `<nav class="rail">${ic('logo','logo')}
+  <a class="on">${ic('home')}홈</a><a>${ic('photo')}에셋</a><a>${ic('stack')}컬렉션</a><a>${ic('book')}망가</a><a>${ic('pencil')}메모</a><a>${ic('arrows')}전송</a>
+  <span class="sp"></span><a>${ic('search')}찾기</a><a>${ic('dots')}더보기</a></nav>`;
+
+const memoTodo = `<button class="memo"><span class="h">${ic('list')}장보기<em class="numeric">2/6</em></span><span class="bar"><i style="width:33%"></i></span></button>`;
+const memoLedger = `<button class="memo"><span class="h">${ic('wallet')}가계부<em>9월</em></span><span class="amt numeric">412,300<small>원</small></span></button>`;
+const memoNote = `<button class="memo"><span class="h">${ic('doc')}서버 이사 메모</span><p>VPS 스냅샷 확인 · R2 주소 바뀌면 설정의 미디어 주소도 갱신 · 백업은 그 전날 밤</p></button>`;
+
+const indexA = `<aside class="index"><div class="index-head">홈</div><div class="index-body">
+  <div class="sec">${label('메모')}<div class="stack">${memoTodo}${memoLedger}${memoNote}
+    <button class="add">＋ 새 메모</button></div></div>
+  <div class="sec">${label('전송')}<div class="stack" style="gap:0">
+    <button class="xfer">${ic('down')}<span>받은 파일<small>Galaxy Tab S11</small></span><b class="numeric">3</b></button>
+    <button class="xfer">${ic('up')}<span>보내는 중<small>스케치_0926.zip 외 1</small></span><b class="numeric">62%</b></button></div></div>
+  <div style="margin-top:auto;display:flex;gap:12px;padding:0 8px"><span class="dot">서버</span><span class="dot">태블릿</span><span class="dot off">확장</span></div>
+</div></aside>`;
+
+const toolbar = (review, extra = '') => `<div class="toolbar"><h1><span class="numeric">9.29</span><small>화요일</small></h1><span class="sp"></span>
+  ${extra}${review ? `<button class="quiet${review === 'open' ? ' open' : ''}">${ic('check','s')}검토 <b>1,093</b></button>` : ''}
+  <span class="win">— ▢ ✕</span></div>`;
+
+const today = `<div class="col">${label('오늘')}<div class="today" style="flex:1;min-height:0">
+    <button class="face">${art(12)}<span><b>하야세 미오</b><small>早瀬みお</small></span></button>
+    <div style="display:flex;flex-direction:column;min-height:0"><div class="mosaic" style="flex:1">${art(6)}${art(7)}${art(15)}${art(8)}${art(16)}</div>
+      <div class="cap">1년 전 오늘<span class="numeric">24장</span></div></div>
+  </div></div>`;
+const record = `<div class="col">${label('기록')}<div class="strip">${art(13)}${art(14)}${art(17)}${art(10)}</div>
+    <div class="cap" style="margin-top:0">오늘의 작가 · DainiArt<span class="numeric">312장</span></div>
+    <div class="nums"><div><b>146</b><small>오늘</small></div><div><b>812</b><small>이번 주</small></div><div><b>41,230</b><small>전체</small></div><div><b>318</b><small>분류 안 됨</small></div></div>
+  </div>`;
+
+const menu = `<div class="menu" style="right:96px;top:40px"><div class="label"><span>검토</span><span class="rule"></span></div>
+  <button>${ic('user')}<span>캐릭터 검토</span><b>610</b></button>
+  <button>${ic('tag')}<span>태거 검토</span><b>48</b></button>
+  <button>${ic('copy')}<span>유사 이미지</span><b>6</b></button>
+  <button>${ic('book')}<span>중복 판본</span><b>97</b></button>
+  <button>${ic('folder')}<span>미분류</span><b>318</b></button>
+  <button>${ic('film')}<span>AV 품번</span><b>12</b></button>
+  <button>${ic('inbox')}<span>처리 대기</span><b>2</b></button></div>`;
+
+function frameA(open) {
+  return `<div class="pc">${rail}${indexA}<main class="main" style="position:relative">${toolbar(open ? 'open' : true)}
+    <div class="content">
+      <div class="sec">${label('신간')}<div class="shelf">${SHELF.slice(0, 7).map(cover).join('')}</div></div>
+      <div class="pair">${today}${record}</div>
+    </div>${open ? menu : ''}</main></div>`;
+}
+function frameB() {
+  const xfer = `<button class="quiet">${ic('arrows','s')}전송 <b>3</b></button>`;
+  return `<div class="pc wide">${rail}<main class="main">${toolbar(true, xfer)}
+    <div class="content" style="padding:16px 24px 24px">
+      <div class="sec">${label('메모')}<div class="memos-row">${memoTodo}${memoLedger}${memoNote}</div></div>
+      <div class="sec">${label('신간')}<div class="shelf">${SHELF.map(cover).join('')}</div></div>
+      <div class="pair">${today}${record}</div>
+    </div></main></div>`;
+}
+const indexC = `<aside class="index"><div class="index-head">홈</div><div class="index-body" style="gap:24px">
+  <div class="sec">${label('메모')}<div class="stack">
+    <button class="memo big"><span class="h">${ic('list')}장보기<em class="numeric">2/6</em></span>
+      <ul><li class="done">우유</li><li class="done">커피 원두</li><li>세제 리필</li><li>건전지 AA</li><li>택배 상자</li></ul></button>
+    <button class="memo big"><span class="h">${ic('wallet')}가계부<em>9월</em></span><span class="amt numeric">412,300<small>원</small></span>
+      <span class="rows"><span>에어팟 5세대<b>215,000</b></span><span>식비<b>98,400</b></span><span>구독<b>32,900</b></span></span></button>
+  </div></div>
+  <div class="sec">${label('자산 현황')}<div class="assets">
+    <button><b class="numeric">41,230</b><small>이미지</small></button><button><b class="numeric">1,204</b><small>영상</small></button>
+    <div class="four"><button><b class="numeric">84</b><small>게임</small></button><button><b class="numeric">212</b><small>만화</small></button><button><b class="numeric">57</b><small>영화</small></button><button><b class="numeric">31</b><small>AV</small></button></div>
+    <div class="foot"><span>오늘 <span class="numeric">+146</span></span><span>이번 주 <span class="numeric">+812</span></span><span>휴지통 <span class="numeric">37</span></span></div>
+  </div></div>
+  <div class="sec">${label('상태')}<div class="status"><span>서버<em>21:40</em></span><span>태블릿<em>21:38</em></span><span class="off">확장<em>어제 22:10</em></span></div></div>
+</div></aside>`;
+const queue = `<div class="sec" style="min-height:0">${label('검토')}<div class="queue">
+  <button>${ic('user')}<span>캐릭터</span><b>610</b></button><button>${ic('tag')}<span>태거</span><b>48</b></button>
+  <button>${ic('copy')}<span>유사 이미지</span><b>6</b><small>쌍</small></button><button>${ic('book')}<span>중복 판본</span><b>97</b></button>
+  <button>${ic('folder')}<span>미분류</span><b>318</b></button><button>${ic('film')}<span>AV 품번</span><b>12</b></button>
+  <button>${ic('inbox')}<span>처리 대기</span><b>2</b></button></div></div>`;
+const revisit = `<div class="col">${label('다시 보기')}<div class="mosaic" style="flex:1">${art(6)}${art(7)}${art(15)}${art(8)}${art(16)}</div>
+  <div class="cap" style="margin-top:0">1년 전 오늘<span class="numeric">24장</span></div></div>`;
+const artist = (cols) => `<div class="col">${label('작가')}<div class="strip" style="grid-template-columns:repeat(${cols},1fr)">${[13, 14, 17, 10, 11, 3].slice(0, cols).map((i) => art(i)).join('')}</div>
+  <div class="cap" style="margin-top:0">DainiArt<span class="numeric">312장</span></div></div>`;
+function frameC() {
+  const av = `<div class="col">${label('AV 배우')}<button class="av">${art(12)}<span><b>하야세 미오</b><br><small>早瀬みお</small></span>
+    <span class="facts"><span><b class="numeric">24</b>출연</span><span><b class="numeric">9</b>소장</span></span></button></div>`;
+  return `<div class="pc">${rail}${indexC}<main class="main">${toolbar(false)}
+    <div class="content"><div class="grid-c">
+      <div class="left"><div class="sec">${label('캘린더')}<div class="shelf">${SHELF.map(cover).join('')}</div></div>
+        <div class="trio">${av}${revisit}${artist(3)}</div></div>
+      ${queue}
+    </div></div></main></div>`;
+}
+function frameD() {
+  const av = `<div class="sec">${label('AV 배우')}<button class="avrow">${art(12)}<span class="who"><b style="font-size:15px;font-weight:600">하야세 미오</b><small style="font-size:12px;color:var(--color-faint)">早瀬みお</small>
+    <span class="facts" style="display:flex;gap:16px;margin-top:8px;font-size:12px;color:var(--color-faint)"><span><b class="numeric" style="font:500 17px var(--font-numeric);color:var(--color-text)">24</b> 출연</span><span><b class="numeric" style="font:500 17px var(--font-numeric);color:var(--color-text)">9</b> 소장</span></span></span></button>
+    <span class="jackets">${art(0)}${art(4)}${art(11)}</span></div>`;
+  return `<div class="pc">${rail}${indexC}<main class="main">${toolbar(false)}
+    <div class="content"><div class="grid-d">
+      <div class="left"><div class="sec">${label('캘린더')}<div class="shelf">${SHELF.map(cover).join('')}</div></div>
+        <div class="duo">${revisit}${artist(4)}</div></div>
+      <div class="right">${av}${queue}</div>
+    </div></div></main></div>`;
+}
+const avCard = `<div class="sec">${label('AV 배우')}<button class="avrow">${art(12)}<span class="who"><b style="font-size:15px;font-weight:600">하야세 미오</b><small style="font-size:12px;color:var(--color-faint)">早瀬みお</small>
+    <span class="facts" style="display:flex;gap:16px;margin-top:8px;font-size:12px;color:var(--color-faint)"><span><b class="numeric" style="font:500 17px var(--font-numeric);color:var(--color-text)">24</b> 출연</span><span><b class="numeric" style="font:500 17px var(--font-numeric);color:var(--color-text)">9</b> 소장</span></span></span></button>
+    <span class="jackets">${art(0)}${art(4)}${art(11)}</span></div>`;
+const indexScroll = indexC.replace('class="index-body"', 'class="index-body scroll"');
+
+const CONT = [
+  ['망가', '던전밥', 3, '8권', '112/196', 57], ['망가', '장송의 프리렌', 9, '11권', '40/188', 21],
+  ['영상', 'SSIS-918', 12, '', '1:12 / 2:00', 60, true], ['망가', '체인소 맨', 4, '17권', '180/192', 94],
+  ['망가', '약사의 혼잣말', 15, '5권', '66/180', 37], ['영상', 'MIDV-702', 11, '', '0:31 / 2:31', 21, true],
+];
+const cont = (n, cls = '') => `<div class="sec">${label('이어 보기')}<div class="cont ${cls}">${CONT.slice(0, n).map(([kind, title, pi, vol, pos, pct, video]) => `<button>
+  ${art(pi, '', `<span class="kind">${kind}</span>`)}<span class="prog"><i style="width:${pct}%"></i></span>
+  <span class="t">${title}</span><span class="m"><span>${vol || '&nbsp;'}</span><span class="numeric">${pos}</span></span></button>`).join('')}</div></div>`;
+
+const SER = [
+  ['던전밥', 9, 13, 14, 'out', '발매됨', '9.12'], ['장송의 프리렌', 10, 13, 14, '', 'D-24', '10.23'],
+  ['약사의 혼잣말', 15, 12, 13, 'out', '발매됨', '9.25'], ['학생회에도 구멍은 있다!', 2, 11, 12, '', 'D-6', '10.4'],
+  ['나의 히어로', 11, 40, 41, '', 'D-67', '12.4'], ['마법소녀를 동경해서', 0, 7, 8, '', 'D-2', '9.30'],
+];
+const series = (n, cls = '') => `<div class="sec">${label('이어지는 시리즈')}<div class="series ${cls}">${SER.slice(0, n).map(([title, pi, have, next, out, state, date]) => `<button class="ser">
+  <span class="pair2">${art(pi, '', `<span class="vol">${have}</span>`)}<span class="next${out ? ' out' : ''}"><b>${next}</b><small>${state}</small></span></span>
+  <span class="t">${title}</span><span class="m"><span><span class="numeric">${have}</span>권까지 소장</span><span>다음 <span class="numeric">${date}</span></span></span></button>`).join('')}</div></div>`;
+
+const FAV = [['하야세 미오', 12, 2], ['미카미 유아', 3], ['츠키노 루나', 5, 1], ['이토 마리나', 14], ['사쿠라 모모', 16], ['카와키타 사이카', 10, 1], ['아오이 츠카사', 7], ['유즈키 아이', 17]];
+const faces = (n, cls = '') => `<div class="sec">${label('즐겨찾는 배우')}<div class="faces ${cls}">${FAV.slice(0, n).map(([name, pi, fresh]) => `<button>${art(pi, '', fresh ? `<span class="new-dot">${fresh}</span>` : '')}<b>${name}</b></button>`).join('')}</div></div>`;
+const REL = [['SSIS-944', '하야세 미오', 1, '10.7', ''], ['MIDV-731', '츠키노 루나', 6, '10.1', ''], ['SONE-402', '카와키타 사이카', 13, '9.24', '소장'], ['IPZZ-318', '하야세 미오', 8, '9.17', '소장'], ['START-155', '아오이 츠카사', 5, '9.10', ''], ['SSIS-930', '유즈키 아이', 16, '9.3', '']];
+const rel = (n, cls = '') => `<div class="sec">${label('AV 신작')}<div class="rel ${cls}">${REL.slice(0, n).map(([code, who, pi, date, own]) => `<button>${art(pi)}<span class="who"><b class="numeric">${code}</b><small>${who}</small></span>
+  <span class="when"><b>${date}</b>${own ? `<span class="own">${own}</span>` : ''}</span></button>`).join('')}</div></div>`;
+
+const leftTop = `<div class="sec">${label('캘린더')}<div class="shelf">${SHELF.map(cover).join('')}</div></div><div class="duo">${revisit}${artist(4)}</div>`;
+
+function frameE() {
+  return `<div class="pc">${rail}${indexScroll}<main class="main">${toolbar(false)}
+    <div class="content scroll"><div class="grid-d long">
+      <div class="left">${leftTop}${cont(5, 'five')}${series(3, 'three')}<div class="end"></div></div>
+      <div class="right">${avCard}${queue}${faces(8)}${rel(6)}</div>
+    </div></div></main></div>`;
+}
+function frameF() {
+  return `<div class="pc">${rail}${indexScroll}<main class="main">${toolbar(false)}
+    <div class="content scroll"><div class="grid-d long"><div class="left">${leftTop}</div><div class="right">${avCard}${queue}</div></div>
+      <div class="fold">${cont(6)}${series(4)}<div class="avband">${faces(6, 'six')}${rel(6, 'grid2')}</div><div class="end"></div></div>
+    </div></main></div>`;
+}
+function frameG() {
+  return `<div class="pc">${rail}${indexScroll}<main class="main">${toolbar(false)}
+    <div class="content"><div class="grid-d split">
+      <div class="left">${leftTop}${cont(5, 'five')}${series(3, 'three')}<div class="end"></div></div>
+      <div class="right">${avCard}${queue}${faces(8)}${rel(6)}</div>
+    </div></div></main></div>`;
+}
+const FRAMES = { e: frameE, f: frameF, g: frameG };
+document.querySelectorAll('[data-frame]').forEach((el) => { el.innerHTML = FRAMES[el.dataset.frame](); });
+const solo = new URLSearchParams(location.search).get('frame');
+const scrollTo = Number(new URLSearchParams(location.search).get('y') || 0);
+if (solo && FRAMES[solo]) {
+  document.body.classList.add('frame-only'); document.getElementById('solo').innerHTML = `<div class="frame">${FRAMES[solo]()}</div>`;
+  if (scrollTo) document.querySelectorAll('#solo .content.scroll, #solo .grid-d.split > .left, #solo .grid-d.split > .right').forEach((el) => { el.scrollTop = scrollTo; });
+}
+</script>
+</body>
+</html>

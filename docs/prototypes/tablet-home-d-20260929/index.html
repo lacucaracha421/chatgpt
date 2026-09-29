@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>태블릿 홈 D 목업</title>
+<style>
+/* Fonts are the app's bundled files, loaded by relative path from the repository (no network). */
+@font-face { font-family:"Pretendard Variable"; src:url("../../../_tools/app/src/styles/fonts/PretendardVariable.woff2") format("woff2-variations"); font-weight:45 920; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens from _tools/app/src/styles/tokens.css with the tablet overrides of mobile-client/mobile.css (22/17/13/28). */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-surface:#222324; --color-surface-elevated:#292a2b; --color-surface-hover:#2d2e2f;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-faint:#7d8184; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-section-mark:rgba(221,216,202,.6); --section-label-rule:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06));
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-success:#7fb88a;
+  --type-title:22px; --type-body:17px; --type-meta:13px; --type-number:28px;
+  --font-ui:"Pretendard Variable","Pretendard","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.45 var(--font-ui); }
+h1,h2,p { margin:0; }
+button { font:inherit; color:inherit; background:none; border:0; padding:0; text-align:left; cursor:pointer; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+svg.i { width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+svg.i.s { width:18px; height:18px; }
+
+.doc { max-width:1700px; margin:0 auto; padding:32px 24px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1250px; margin:8px 0 0; line-height:1.7; }
+.lead b, .notes b { color:var(--color-text); font-weight:600; }
+section.topic { margin-top:44px; border-top:1px solid var(--color-border); padding-top:22px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; min-width:28px; height:28px; padding:0 6px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-ui); }
+.notes { color:var(--color-muted); max-width:1300px; line-height:1.7; margin:8px 0 18px; }
+.notes ul { margin:6px 0 0; padding-left:20px; }
+.frame { width:800px; height:1280px; overflow:hidden; border:1px solid var(--color-border); border-radius:14px; }
+body.frame-only { background:var(--color-bg); } body.frame-only .doc { display:none; }
+#solo { display:none; } body.frame-only #solo { display:block; } body.frame-only .frame { border:0; border-radius:0; }
+
+/* ===== Tablet shell 800 × 1280 ===== */
+.tab { width:800px; height:1280px; background:var(--color-bg); display:flex; flex-direction:column; overflow:hidden; }
+.top { height:64px; flex:none; display:flex; align-items:center; gap:12px; padding:0 24px; border-bottom:1px solid var(--color-border); }
+.top h1 { font-size:var(--type-title); font-weight:600; display:flex; align-items:baseline; gap:8px; }
+.top h1 small { font-size:var(--type-meta); color:var(--color-faint); font-weight:400; }
+.top .sp { flex:1; }
+.top .tool { width:44px; height:44px; display:grid; place-items:center; color:var(--color-muted); }
+.body { flex:1; min-height:0; overflow-y:auto; padding:16px 24px 32px; display:flex; flex-direction:column; gap:32px; scrollbar-width:none; animation:homeIn 180ms cubic-bezier(.2,0,0,1) both; }
+@keyframes homeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+.nav { flex:none; height:64px; display:flex; justify-content:center; gap:4px; padding:6px 24px; border-top:1px solid var(--color-border); background:var(--color-sidebar); }
+.nav span { width:132px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; color:var(--color-muted); font-size:12px; }
+.nav span.on { color:var(--color-text); }
+
+/* Section label: 5px square + fading hairline, name in meta/faint, › at the right (same as PC D) */
+.sec { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.label { display:flex; align-items:center; gap:8px; height:24px; color:var(--color-faint); font-size:var(--type-meta); }
+.label::before { content:""; width:5px; height:5px; background:var(--color-section-mark); flex:none; }
+.label .rule { flex:1; height:1px; background:var(--section-label-rule); }
+.label .more { width:44px; height:44px; margin:-10px -12px -10px 0; display:grid; place-items:center; color:var(--color-faint); }
+.later .label span:first-child::after { content:" · PC 결정 후"; color:var(--color-border-strong); }
+
+.art { position:relative; overflow:hidden; background:var(--c1); display:block; }
+.art::before { content:""; position:absolute; left:50%; top:26%; width:38%; aspect-ratio:1; border-radius:50%; background:var(--c2); transform:translateX(-50%); opacity:.85; }
+.art::after { content:""; position:absolute; left:18%; right:18%; bottom:-22%; height:52%; border-radius:50% 50% 0 0; background:var(--c3); opacity:.8; }
+
+/* 캘린더 shelf */
+.shelf { display:flex; gap:16px; overflow-x:auto; scrollbar-width:none; margin-right:-24px; padding-right:24px; }
+.cover { width:132px; flex:none; display:flex; flex-direction:column; gap:4px; }
+.cover .d { display:flex; justify-content:space-between; align-items:baseline; font-size:var(--type-meta); color:var(--color-faint); }
+.cover .d b { font:500 17px var(--font-numeric); color:var(--color-text); }
+.cover .art { width:132px; height:186px; border-radius:2px; margin-top:4px; }
+.badge-new { position:absolute; left:8px; top:8px; z-index:1; height:24px; padding:0 8px; display:inline-flex; align-items:center; background:var(--color-accent); color:var(--color-on-accent); font-size:var(--type-meta); font-weight:600; border-radius:2px; }
+.badge-vol { position:absolute; right:8px; bottom:8px; z-index:1; height:24px; min-width:24px; padding:0 4px; display:inline-grid; place-items:center; background:rgba(22,23,24,.82); font:500 15px var(--font-numeric); border-radius:2px; }
+.cover .t { font-size:var(--type-body); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:8px; }
+.plat { display:flex; gap:4px; height:20px; }
+.plat i { width:20px; height:20px; border-radius:2px; background:var(--p); display:inline-grid; place-items:center; }
+.plat i::after { content:""; width:10px; height:10px; border:1.5px solid rgba(255,255,255,.85); border-radius:2px; }
+
+/* 다시 보기 · 작가 */
+.duo { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+.mosaic { display:grid; grid-template-columns:2fr 1fr 1fr; grid-template-rows:1fr 1fr; gap:2px; height:280px; }
+.mosaic .art:first-child { grid-row:1 / span 2; }
+.strip { display:grid; grid-template-columns:repeat(3,1fr); gap:2px; height:280px; }
+.cap { font-size:var(--type-meta); color:var(--color-faint); display:flex; gap:8px; }
+.cap .numeric { color:var(--color-muted); }
+
+/* AV 배우 */
+.avrow { display:grid; grid-template-columns:132px 1fr; gap:16px; }
+.avrow .art { height:176px; border-radius:2px; }
+.who { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.who b { font-size:var(--type-body); font-weight:600; }
+.who small { font-size:var(--type-meta); color:var(--color-faint); }
+.facts { display:flex; gap:16px; margin-top:8px; font-size:var(--type-meta); color:var(--color-faint); }
+.facts b { font:500 20px var(--font-numeric); color:var(--color-text); margin-right:2px; }
+.jackets { display:grid; grid-template-columns:repeat(3,1fr); gap:2px; height:96px; }
+
+/* 검토 list */
+.queue { display:flex; flex-direction:column; }
+.queue button { height:48px; display:flex; align-items:center; gap:12px; padding:0 8px; border-bottom:1px solid var(--color-border); font-size:var(--type-body); }
+.queue button:last-child { border-bottom:0; }
+.queue .i { color:var(--color-muted); }
+.queue span { flex:1; }
+.queue b { font:500 20px var(--font-numeric); }
+.queue small { font-size:var(--type-meta); color:var(--color-faint); margin-left:2px; }
+
+/* 메모 big blocks */
+.memos { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.memos.stack { grid-template-columns:1fr; gap:12px; }
+.memo { background:var(--color-surface); border-radius:4px; padding:16px; display:flex; flex-direction:column; gap:8px; min-width:0; }
+.memo .h { display:flex; align-items:center; gap:8px; font-size:var(--type-body); font-weight:600; }
+.memo .h .i { width:20px; height:20px; color:var(--color-muted); }
+.memo .h em { margin-left:auto; font-style:normal; font-size:var(--type-meta); color:var(--color-faint); font-weight:400; }
+.memo ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; font-size:var(--type-meta); color:var(--color-muted); }
+.memo li { display:flex; align-items:center; gap:8px; height:24px; }
+.memo li::before { content:""; width:14px; height:14px; border:1.5px solid var(--color-border-strong); border-radius:2px; flex:none; }
+.memo li.done { color:var(--color-faint); text-decoration:line-through; }
+.memo li.done::before { border-color:var(--color-accent); background:radial-gradient(var(--color-accent) 0 0) center/7px 7px no-repeat; }
+.memo .amt { font:500 var(--type-number)/1.1 var(--font-numeric); }
+.memo .amt small { font:400 var(--type-meta) var(--font-ui); color:var(--color-muted); margin-left:2px; }
+.memo .rows { display:flex; flex-direction:column; font-size:var(--type-meta); color:var(--color-muted); }
+.memo .rows span { display:flex; justify-content:space-between; height:24px; align-items:center; }
+.memo .rows b { font:500 16px var(--font-numeric); color:var(--color-text); }
+
+/* 자산 현황 + 상태 */
+.assets { display:grid; grid-template-columns:repeat(6,1fr); border:1px solid var(--color-border); border-radius:4px; }
+.assets.two { grid-template-columns:repeat(2,1fr); }
+.assets button { padding:12px; display:flex; flex-direction:column; border-right:1px solid var(--color-border); min-height:64px; }
+.assets button:last-of-type { border-right:0; }
+.assets.two button { border-bottom:1px solid var(--color-border); }
+.assets.two button:nth-child(2n) { border-right:0; }
+.assets b { font:500 22px/1.1 var(--font-numeric); }
+.assets small { font-size:var(--type-meta); color:var(--color-faint); }
+.assets .foot { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:16px; padding:12px; border-top:1px solid var(--color-border); font-size:var(--type-meta); color:var(--color-faint); }
+.assets.two .foot { border-top:0; }
+.assets .foot .numeric { color:var(--color-muted); }
+.assets .foot .st { display:inline-flex; align-items:center; gap:6px; }
+.assets .foot .st::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--color-success); }
+.assets .foot .st.off { color:var(--color-danger); } .assets .foot .st.off::before { background:var(--color-danger); }
+.assets .foot .gap { flex:1; }
+
+/* below the first screen: sections shared with PC E */
+.series { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+.ser { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.ser .pair2 { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.ser .art { aspect-ratio:3/4; border-radius:2px; }
+.ser .next { aspect-ratio:3/4; border:1px dashed var(--color-border-strong); border-radius:2px; display:grid; place-items:center; align-content:center; gap:4px; }
+.ser .next b { font:500 28px/1 var(--font-numeric); }
+.ser .next small { font-size:var(--type-meta); color:var(--color-faint); }
+.ser .next.out { border-style:solid; border-color:var(--color-accent); } .ser .next.out small { color:var(--color-accent); }
+.ser .t { font-size:var(--type-body); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ser .m { font-size:var(--type-meta); color:var(--color-faint); }
+.cont { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; }
+.cont button { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.cont .art { aspect-ratio:3/4; border-radius:2px; }
+.cont .kind { position:absolute; left:8px; top:8px; z-index:1; height:24px; padding:0 6px; display:inline-flex; align-items:center; background:rgba(22,23,24,.82); color:var(--color-muted); font-size:var(--type-meta); border-radius:2px; }
+.cont .prog { height:2px; background:var(--color-border); margin-top:4px; } .cont .prog i { display:block; height:100%; background:var(--color-muted); }
+.cont .t { font-size:var(--type-body); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cont .m { display:flex; justify-content:space-between; font-size:var(--type-meta); color:var(--color-faint); }
+.faces { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:12px 8px; }
+.faces.four { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.faces button { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.faces .art { aspect-ratio:1; border-radius:2px; }
+.faces b { font-size:var(--type-meta); font-weight:500; color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.faces .new-dot { position:absolute; right:4px; top:4px; z-index:1; min-width:20px; height:20px; padding:0 4px; display:inline-grid; place-items:center; background:var(--color-accent); color:var(--color-on-accent); font:600 13px var(--font-numeric); border-radius:2px; }
+
+/* B: two columns like PC D (main + 260px side) */
+.cols { display:grid; grid-template-columns:minmax(0,1fr) 256px; gap:24px; align-items:start; }
+.cols > div { display:flex; flex-direction:column; gap:32px; min-width:0; }
+.cols .mosaic, .cols .strip { height:240px; }
+.cols .avrow { grid-template-columns:1fr; }
+.cols .avrow .art { height:240px; }
+.cols .shelf { margin-right:0; padding-right:0; }
+body.frame-only .body { animation:none; }
+.cols .series { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.cols .cont { grid-template-columns:repeat(3,minmax(0,1fr)); }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>태블릿 홈 — PC D안에 맞추기 (2026-09-29)</h1>
+    <p class="lead">PC 홈 D안(캘린더 · 다시 보기 · 작가 · AV 배우 · 검토 · 메모 · 자산 현황 · 상태)을 태블릿 800 × 1280에 옮긴 목업입니다. 태블릿 글자 기준(제목 22 · 본문 17 · 보조 12–13 · 숫자 28), 섹션 이름은 PC와 같은 작은 표식 + 흐린 선 + ›.
+    지금 태블릿 홈처럼 한 화면에 억지로 맞추지 않고 <b>아래로 스크롤</b>되며, 맨 아래에는 PC 스크롤 목업(E/F)의 <b>이어지는 시리즈 · 이어 보기 · 즐겨찾는 배우</b> 자리를 흐리게 표시했습니다(PC에서 정해지면 같이 들어옴). <b>화면 안에서 스크롤해 보세요.</b> 이미지는 색 블록입니다.</p>
+  </header>
+
+  <section class="topic">
+    <h2><span class="k">A</span>추천 — 한 줄로 PC D의 순서대로</h2>
+    <p class="notes">위에서부터 <b>캘린더</b>(옆으로 밀기) → <b>다시 보기 · 작가</b> 두 칸 → <b>AV 배우 · 검토</b> 두 칸(PC 오른쪽 칸을 그대로 옆으로 눕힘) → <b>메모</b> 큰 블록 둘 → <b>자산 현황</b> 한 줄(맨 끝에 서버 · PC 연결 점).
+    지금 상단바의 “중복 101” 배지는 검토 목록으로 들어가 없어집니다. 첫 화면에 캘린더부터 AV 배우까지 보이고, 메모는 한 번 내리면 나옵니다.</p>
+    <div class="frame" data-frame="a"></div>
+  </section>
+
+  <section class="topic">
+    <h2><span class="k">B</span>대안 — PC처럼 오른쪽 좁은 칸</h2>
+    <p class="notes">본문과 256px 오른쪽 칸이 같이 스크롤됩니다. 오른쪽 칸 = 메모 → AV 배우 → 검토 → 자산 현황(PC 사이드바 + 오른쪽 칸을 합친 것). PC와 가장 닮았지만 태블릿 세로 폭에서는 캘린더 표지가 세 개 반만 보이고 다시 보기 · 작가가 좁아집니다. 가로로 들고 쓸 때 더 맞는 배치입니다.</p>
+    <div class="frame" data-frame="b"></div>
+  </section>
+</div>
+<div id="solo"></div>
+
+<script>
+const ICON = {
+  home:'<path d="m3 11 9-7 9 7M5 10v10h14V10"/>', photo:'<rect x="3" y="5" width="18" height="14" rx="1"/><path d="m3 16 5-5 5 5 3-3 5 5"/>',
+  stack:'<path d="M4 9h16v10H4zM6 6h12M8 3h8"/>', book:'<path d="M12 6c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V4c-3 0-6 .5-8 2zM12 6v14"/>',
+  pencil:'<path d="m4 20 4-1 11-11-3-3L5 16l-1 4z"/>', search:'<circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/>', gear:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>',
+  chev:'<path d="m9 6 6 6-6 6"/>', list:'<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>', wallet:'<rect x="3" y="6" width="18" height="13" rx="1"/><path d="M3 10h18M16 14h2"/>',
+  user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>', copy:'<rect x="8" y="8" width="12" height="12" rx="1"/><path d="M4 16V4h12"/>', inbox:'<path d="M4 13h5l1 3h4l1-3h5M4 13l3-8h10l3 8v6H4z"/>',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24">${ICON[n]}</svg>`;
+const PAL = [['#a79bcf','#4f4a78','#8e6fae'],['#9f95c3','#5b5a8c','#b08bbf'],['#cf9f98','#7a4b4d','#b39a82'],['#b6d6cf','#4f7a66','#5f9ea5'],['#d8a3a7','#7a4f5c','#a88a79'],['#d6c99c','#7a6650','#a6aa74'],
+  ['#c2d0a3','#6c6b4a','#88a86c'],['#aedcc0','#557f58','#5e9a86'],['#9fc7c1','#4f7f6f','#78a8b4'],['#dcbab4','#7f5058','#a0806a'],['#9d94c9','#56578a','#8067a3'],['#c99bd6','#634774','#a871a8'],
+  ['#a9b7d4','#4b5d74','#7b7cb4'],['#cbbf9f','#76604c','#a39f6a'],['#9ccac6','#517c74','#7da4b3'],['#cda0b4','#7b4f63','#ad7676'],['#a6d3a6','#4d7250','#6ea08a'],['#b9d7d0','#50786c','#7ab0b8']];
+const art = (i, cls = '', inner = '') => { const p = PAL[i % PAL.length]; return `<span class="art ${cls}" style="--c1:${p[0]};--c2:${p[1]};--c3:${p[2]}">${inner}</span>`; };
+const label = (name) => `<div class="label"><span>${name}</span><span class="rule"></span><button class="more" aria-label="${name} 전체">${ic('chev','s')}</button></div>`;
+const P = { sw:'#e60012', ps:'#1f4fcf', xb:'#107c10', pc:'#1b2838' };
+
+const SHELF = [['9.30','D-2','마법소녀를 동경해서',0,{ neu:1, vol:8 }], ['10.1','D-3','Warhammer 40,000',1,{ plat:['sw'] }], ['10.4','D-6','학생회에도 구멍은 있다!',2,{ vol:12 }],
+  ['10.8','D-10','록맨',3,{}], ['10.15','D-17','Castlevania',4,{ plat:['pc','ps','sw','xb'] }], ['11.5','D-38','The Legend',5,{ plat:['sw'] }], ['12.4','D-67','나의 히어로',11,{ vol:41 }]];
+const cover = ([date, dday, title, pi, o]) => `<button class="cover"><span class="d"><b>${date}</b><span class="numeric">${dday}</span></span>
+  ${art(pi, '', (o.neu ? '<span class="badge-new">NEW</span>' : '') + (o.vol ? `<span class="badge-vol">${o.vol}</span>` : ''))}
+  <span class="t">${title}</span><span class="plat">${(o.plat || []).map((k) => `<i style="--p:${P[k]}"></i>`).join('')}</span></button>`;
+const topBar = `<div class="top"><h1><span class="numeric">9.29</span><small>화요일</small></h1><span class="sp"></span><button class="tool">${ic('search')}</button><button class="tool">${ic('gear')}</button></div>`;
+const nav = `<div class="nav">${[['home','홈'],['photo','에셋'],['stack','컬렉션'],['book','카탈로그'],['pencil','메모']].map(([i, l]) => `<span class="${l === '홈' ? 'on' : ''}">${ic(i)}${l}</span>`).join('')}</div>`;
+
+const calendar = `<div class="sec">${label('캘린더')}<div class="shelf">${SHELF.map(cover).join('')}</div></div>`;
+const revisit = `<div class="sec">${label('다시 보기')}<div class="mosaic">${art(6)}${art(7)}${art(15)}${art(8)}${art(16)}</div><div class="cap">1년 전 오늘<span class="numeric">24장</span></div></div>`;
+const artist = `<div class="sec">${label('작가')}<div class="strip">${art(13)}${art(14)}${art(17)}</div><div class="cap">DainiArt<span class="numeric">312장</span></div></div>`;
+const av = `<div class="sec">${label('AV 배우')}<button class="avrow">${art(12)}<span class="who"><b>하야세 미오</b><small>早瀬みお</small>
+  <span class="facts"><span><b class="numeric">24</b>출연</span><span><b class="numeric">9</b>소장</span></span></span></button><span class="jackets">${art(0)}${art(4)}${art(11)}</span></div>`;
+// Tablet review queues today: character, similarity, duplicate editions, capture inbox (0 rows are hidden).
+const queue = `<div class="sec">${label('검토')}<div class="queue">
+  <button>${ic('user')}<span>캐릭터</span><b>610</b></button><button>${ic('copy')}<span>유사 이미지</span><b>6</b><small>쌍</small></button>
+  <button>${ic('book')}<span>중복 판본</span><b>101</b></button><button>${ic('inbox')}<span>처리 대기</span><b>2</b></button></div></div>`;
+const memoTodo = `<button class="memo"><span class="h">${ic('list')}장보기<em class="numeric">2/6</em></span><ul><li class="done">우유</li><li class="done">커피 원두</li><li>세제 리필</li><li>건전지 AA</li><li>택배 상자</li></ul></button>`;
+const memoLedger = `<button class="memo"><span class="h">${ic('wallet')}가계부<em>9월</em></span><span class="amt numeric">412,300<small>원</small></span>
+  <span class="rows"><span>에어팟 5세대<b>215,000</b></span><span>식비<b>98,400</b></span><span>구독<b>32,900</b></span></span></button>`;
+const memos = (cls = '') => `<div class="sec">${label('메모')}<div class="memos ${cls}">${memoTodo}${memoLedger}</div></div>`;
+const foot = `<div class="foot"><span>오늘 <span class="numeric">+146</span></span><span>이번 주 <span class="numeric">+812</span></span><span class="gap"></span><span class="st">서버</span><span class="st">PC</span></div>`;
+const assets = `<div class="sec">${label('자산 현황')}<div class="assets">
+  <button><b class="numeric">41,230</b><small>이미지</small></button><button><b class="numeric">1,204</b><small>영상</small></button><button><b class="numeric">84</b><small>게임</small></button>
+  <button><b class="numeric">212</b><small>만화</small></button><button><b class="numeric">57</b><small>영화</small></button><button><b class="numeric">31</b><small>AV</small></button>${foot}</div></div>`;
+const assetsNarrow = `<div class="sec">${label('자산 현황')}<div class="assets two">
+  <button><b class="numeric">41,230</b><small>이미지</small></button><button><b class="numeric">1,204</b><small>영상</small></button><button><b class="numeric">84</b><small>게임</small></button>
+  <button><b class="numeric">212</b><small>만화</small></button><button><b class="numeric">57</b><small>영화</small></button><button><b class="numeric">31</b><small>AV</small></button>${foot}</div></div>`;
+
+const SER = [['던전밥', 9, 13, 14, 1, '발매됨'], ['장송의 프리렌', 10, 13, 14, 0, 'D-24'], ['약사의 혼잣말', 15, 12, 13, 1, '발매됨']];
+const series = (n) => `<div class="sec later">${label('이어지는 시리즈')}<div class="series">${SER.slice(0, n).map(([t, pi, have, next, out, state]) => `<button class="ser"><span class="pair2">${art(pi, '', `<span class="badge-vol">${have}</span>`)}<span class="next${out ? ' out' : ''}"><b class="numeric">${next}</b><small>${state}</small></span></span><span class="t">${t}</span><span class="m">${have}권까지 소장</span></button>`).join('')}</div></div>`;
+const CONT = [['망가','던전밥',3,'8권','112/196',57],['망가','장송의 프리렌',9,'11권','40/188',21],['영상','SSIS-918',12,'','1:12 / 2:00',60],['망가','체인소 맨',4,'17권','180/192',94]];
+const cont = (n) => `<div class="sec later">${label('이어 보기')}<div class="cont">${CONT.slice(0, n).map(([k, t, pi, vol, pos, pct]) => `<button>${art(pi, '', `<span class="kind">${k}</span>`)}<span class="prog"><i style="width:${pct}%"></i></span><span class="t">${t}</span><span class="m"><span>${vol || '&nbsp;'}</span><span class="numeric">${pos}</span></span></button>`).join('')}</div></div>`;
+const FAV = [['하야세 미오',12,2],['미카미 유아',3],['츠키노 루나',5,1],['이토 마리나',14],['사쿠라 모모',16],['카와키타 사이카',10,1]];
+const faces = (cls = '', n = 6) => `<div class="sec later">${label('즐겨찾는 배우')}<div class="faces ${cls}">${FAV.slice(0, n).map(([nm, pi, f]) => `<button>${art(pi, '', f ? `<span class="new-dot">${f}</span>` : '')}<b>${nm}</b></button>`).join('')}</div></div>`;
+
+function frameA() {
+  return `<div class="tab">${topBar}<div class="body">${calendar}<div class="duo">${revisit}${artist}</div><div class="duo">${av}${queue}</div>${memos()}${assets}${series(3)}${cont(4)}${faces()}</div>${nav}</div>`;
+}
+function frameB() {
+  return `<div class="tab">${topBar}<div class="body"><div class="cols">
+    <div>${calendar}${revisit}${artist}${series(2)}${cont(3)}</div>
+    <div>${memos('stack')}${av}${queue}${assetsNarrow}${faces('four', 4)}</div></div></div>${nav}</div>`;
+}
+const FRAMES = { a: frameA, b: frameB };
+document.querySelectorAll('[data-frame]').forEach((el) => { el.innerHTML = FRAMES[el.dataset.frame](); });
+const q = new URLSearchParams(location.search), solo = q.get('frame'), y = Number(q.get('y') || 0);
+if (solo && FRAMES[solo]) { document.body.classList.add('frame-only'); document.getElementById('solo').innerHTML = `<div class="frame">${FRAMES[solo]()}</div>`; if (y) document.querySelector('#solo .body').scrollTop = y; }
+</script>
+</body>
+</html>
