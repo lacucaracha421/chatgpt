@@ -217,6 +217,26 @@ fn write_title(
     Ok(())
 }
 
+fn restrict_to_tracked_platforms(
+    title: &ReleaseTitle,
+    tracked_platforms: &[String],
+) -> Option<ReleaseTitle> {
+    let mut scoped = title.clone();
+    scoped
+        .dates
+        .retain(|row| tracked_platforms.contains(&row.platform));
+    if scoped.dates.is_empty() {
+        return None;
+    }
+    scoped.platforms = tracked_platforms
+        .iter()
+        .filter(|platform| scoped.dates.iter().any(|row| &row.platform == *platform))
+        .cloned()
+        .collect();
+    (scoped.date, scoped.precision, scoped.region) = headline(&scoped.dates);
+    Some(scoped)
+}
+
 pub(crate) fn insert_watch(
     transaction: &rusqlite::Connection,
     title: &ReleaseTitle,
@@ -233,10 +253,12 @@ pub(crate) fn insert_watch(
     )?;
     if !exists {
         let released = released_on(title.date.as_deref(), title.precision, today);
+        let tracked_platforms = (source == "calendar" && title.port)
+            .then(|| serde_json::to_string(&title.platforms).unwrap_or_else(|_| "[]".into()));
         transaction.execute(
                 "INSERT INTO release_watch_items(id, kind, provider, external_id, title, original_title, cover,
-                   platforms_json, source, added_at, last_checked_at, next_check_at, released_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '[]', ?8, ?9, ?9, ?10, ?11)",
+                   platforms_json, tracked_platforms_json, source, added_at, last_checked_at, next_check_at, released_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '[]', ?8, ?9, ?10, ?10, ?11, ?12)",
                 params![
                     title.id,
                     title.kind.as_str(),
@@ -245,6 +267,7 @@ pub(crate) fn insert_watch(
                     title.title,
                     title.original_title,
                     title.cover,
+                    tracked_platforms,
                     source,
                     checked_at,
                     next_check(now, today, title.date.as_deref(), title.precision).map(|time| time.to_rfc3339()),
@@ -570,21 +593,28 @@ impl Library {
         let checked_at = now.to_rfc3339();
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
-        let released: Option<Option<String>> = transaction
+        let stored: Option<(Option<String>, Option<String>)> = transaction
             .query_row(
-                "SELECT released_at FROM release_watch_items WHERE id = ?1",
+                "SELECT released_at, tracked_platforms_json FROM release_watch_items WHERE id = ?1",
                 [id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
         // Removed from the wishlist while the request was in flight.
-        let Some(released_at) = released else {
+        let Some((released_at, tracked_platforms_json)) = stored else {
             return Ok(false);
         };
+        let tracked_platforms = tracked_platforms_json
+            .as_deref()
+            .and_then(|value| serde_json::from_str::<Vec<String>>(value).ok());
         let previous = headline(&read_dates(&transaction, id)?);
-        let current = match fetched {
+        let scoped = fetched.and_then(|title| match &tracked_platforms {
+            Some(platforms) => restrict_to_tracked_platforms(title, platforms),
+            None => Some(title.clone()),
+        });
+        let current = match scoped {
             Some(title) => {
-                write_title(&transaction, title, &checked_at)?;
+                write_title(&transaction, &title, &checked_at)?;
                 (title.date.clone(), title.precision)
             }
             None => (previous.0.clone(), previous.1),

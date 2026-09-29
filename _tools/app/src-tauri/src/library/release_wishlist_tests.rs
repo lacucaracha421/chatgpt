@@ -17,7 +17,12 @@ fn movie(id: i64, korean_date: Option<&str>) -> serde_json::Value {
 }
 
 fn game_release(date: Option<&str>, format: &str) -> serde_json::Value {
+    game_release_on(date, format, 167)
+}
+
+fn game_release_on(date: Option<&str>, format: &str, platform: i64) -> serde_json::Value {
     let mut release = json!({"date_format": {"format": format}, "release_region": {"region": "korea"}, "platform": {"id": 167}});
+    release["platform"] = json!({"id": platform});
     if let Some(date) = date {
         release["date"] = json!(day(date)
             .and_hms_opt(0, 0, 0)
@@ -26,6 +31,147 @@ fn game_release(date: Option<&str>, format: &str) -> serde_json::Value {
             .timestamp());
     }
     release
+}
+
+#[test]
+fn calendar_port_tracks_only_its_platform_until_that_port_is_released() {
+    let (_temp, library) = library();
+    let transport = MockTransport::default();
+    let original = game_release_on(Some("2024-09-05"), "YYYYMMDD", 6);
+    let switch_quarter = game_release_on(Some("2026-10-01"), "YYYYQ4", 508);
+    transport.igdb_pages.borrow_mut().push(Ok(json!([igdb_game(
+        185252,
+        "Warhammer 40,000: Space Marine II",
+        json!([original.clone(), switch_quarter.clone()])
+    )])));
+    library
+        .refresh_release_calendar_with(
+            &transport,
+            false,
+            at("2026-09-28T00:00:00Z"),
+            day("2026-09-28"),
+        )
+        .unwrap();
+    let added = library
+        .add_release_watch_with(
+            &transport,
+            "igdb:185252",
+            at("2026-09-28T01:00:00Z"),
+            day("2026-09-28"),
+        )
+        .unwrap();
+    assert_eq!(added.platforms, vec!["Switch 2"]);
+    assert_eq!(added.date.as_deref(), Some("2026-10-01"));
+    assert_eq!(added.precision, DatePrecision::Quarter);
+    assert_eq!(
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT tracked_platforms_json FROM release_watch_items WHERE id='igdb:185252'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        "[\"Switch 2\"]"
+    );
+
+    transport.igdb_pages.borrow_mut().push(Ok(json!([igdb_game(
+        185252,
+        "Warhammer 40,000: Space Marine II",
+        json!([original, switch_quarter])
+    )])));
+    library
+        .run_due_release_watchlist_with(&transport, at("2026-09-29T02:00:00Z"), day("2026-09-29"))
+        .unwrap();
+    let pending = library.list_release_watch().unwrap().pop().unwrap();
+    assert_eq!(pending.platforms, vec!["Switch 2"]);
+    assert_eq!(pending.date.as_deref(), Some("2026-10-01"));
+    assert_eq!(pending.precision, DatePrecision::Quarter);
+    assert!(!pending.released);
+    assert!(pending.next_check_at.is_some());
+    assert!(pending.unread.is_empty());
+
+    // If IGDB temporarily omits the tracked platform, retain the known port date.
+    transport.igdb_pages.borrow_mut().push(Ok(json!([igdb_game(
+        185252,
+        "Warhammer 40,000: Space Marine II",
+        json!([game_release_on(Some("2024-09-05"), "YYYYMMDD", 6)])
+    )])));
+    library
+        .run_due_release_watchlist_with(&transport, at("2026-09-30T03:00:00Z"), day("2026-09-30"))
+        .unwrap();
+    let retained = library.list_release_watch().unwrap().pop().unwrap();
+    assert_eq!(retained.platforms, vec!["Switch 2"]);
+    assert_eq!(retained.date.as_deref(), Some("2026-10-01"));
+    assert_eq!(retained.precision, DatePrecision::Quarter);
+    assert!(!retained.released);
+
+    let switch_exact = game_release_on(Some("2026-10-02"), "YYYYMMDD", 508);
+    transport.igdb_pages.borrow_mut().push(Ok(json!([igdb_game(
+        185252,
+        "Warhammer 40,000: Space Marine II",
+        json!([
+            game_release_on(Some("2024-09-05"), "YYYYMMDD", 6),
+            switch_exact
+        ])
+    )])));
+    library
+        .run_due_release_watchlist_with(&transport, at("2026-10-02T03:00:00Z"), day("2026-10-02"))
+        .unwrap();
+    let released = library.list_release_watch().unwrap().pop().unwrap();
+    assert!(released.released);
+    assert_eq!(released.platforms, vec!["Switch 2"]);
+    assert_eq!(released.date.as_deref(), Some("2026-10-02"));
+    assert_eq!(released.precision, DatePrecision::Exact);
+    assert_eq!(
+        released
+            .unread
+            .iter()
+            .filter(|event| event.kind == "released")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn non_port_calendar_game_still_tracks_all_fetched_platforms() {
+    let (_temp, library) = library();
+    let transport = MockTransport::default();
+    let ps5 = game_release_on(Some("2026-12-01"), "YYYYMMDD", 167);
+    transport.igdb_pages.borrow_mut().push(Ok(json!([igdb_game(
+        7,
+        "Original release",
+        json!([ps5.clone()])
+    )])));
+    library
+        .refresh_release_calendar_with(
+            &transport,
+            false,
+            at("2026-09-28T00:00:00Z"),
+            day("2026-09-28"),
+        )
+        .unwrap();
+    library
+        .add_release_watch_with(
+            &transport,
+            "igdb:7",
+            at("2026-09-28T01:00:00Z"),
+            day("2026-09-28"),
+        )
+        .unwrap();
+
+    transport.igdb_pages.borrow_mut().push(Ok(json!([igdb_game(
+        7,
+        "Original release",
+        json!([game_release_on(Some("2026-11-15"), "YYYYMMDD", 6), ps5])
+    )])));
+    library
+        .run_due_release_watchlist_with(&transport, at("2026-09-29T02:00:00Z"), day("2026-09-29"))
+        .unwrap();
+    let item = library.list_release_watch().unwrap().pop().unwrap();
+    assert_eq!(item.platforms, vec!["PC", "PS5"]);
+    assert_eq!(item.date.as_deref(), Some("2026-11-15"));
 }
 
 #[test]

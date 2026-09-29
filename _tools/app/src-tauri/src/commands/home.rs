@@ -113,7 +113,7 @@ fn collection_counts(c: &Connection) -> Result<HomeCollectionCounts, LibraryErro
     Ok(c.query_row(
         "SELECT COALESCE(SUM(type='game'),0),COALESCE(SUM(type='manga'),0),
                 COALESCE(SUM(type='movie'),0),COALESCE(SUM(type='av'),0)
-         FROM collections",
+         FROM collections WHERE legacy_kind IS NULL OR legacy_kind <> 'gacha'",
         [],
         |row| {
             Ok(HomeCollectionCounts {
@@ -354,7 +354,9 @@ mod tests {
             .execute_batch(
                 "INSERT INTO collections(id,name,type,created_at,updated_at) VALUES
              ('g','Game','game','t','t'),('m','Manga','manga','t','t'),
-             ('f','Movie','movie','t','t'),('a1','AV 1','av','t','t'),('a2','AV 2','av','t','t');",
+             ('f','Movie','movie','t','t'),('a1','AV 1','av','t','t'),('a2','AV 2','av','t','t');
+             INSERT INTO collections(id,name,type,legacy_kind,created_at,updated_at) VALUES
+             ('gacha','Gacha','game','gacha','t','t');",
             )
             .unwrap();
         assert_eq!(

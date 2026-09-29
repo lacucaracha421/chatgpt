@@ -4,13 +4,14 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 114;
+pub(crate) const SCHEMA_VERSION: i64 = 115;
 
-/// Test helper: undoes migrations 0103 through 0114 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0115 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    ALTER TABLE release_watch_items DROP COLUMN tracked_platforms_json;
     DROP TABLE av_favorite_performers;
     DROP TABLE video_playback_progress;
     DROP TABLE manga_reading_progress;
@@ -680,6 +681,11 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         if version <= 113 {
             transaction.execute_batch(include_str!(
                 "../../migrations/0114_home_continue_favorites.sql"
+            ))?;
+        }
+        if version <= 114 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0115_release_watch_port_platforms.sql"
             ))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
