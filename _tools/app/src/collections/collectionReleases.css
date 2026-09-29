@@ -30,7 +30,6 @@
 .collection-releases__title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-md); font-weight: 600; }
 .collection-releases__title small { color: var(--color-muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .collection-releases__title small.is-ahead { color: var(--color-text); }
-.collection-releases__new { flex: none; padding: 0 6px; color: var(--color-on-accent); background: var(--color-accent); border-radius: var(--radius-tile); font-family: var(--font-numeric); font-size: var(--text-xs); font-weight: 600; line-height: 1.6; }
 .collection-releases__tag { flex: none; padding: 0 6px; border: 1px solid var(--color-border); border-radius: var(--radius-tile); color: var(--color-muted); font-size: var(--text-xs); line-height: 1.5; }
 .collection-releases__confirm { flex: none; color: var(--color-muted); }
 

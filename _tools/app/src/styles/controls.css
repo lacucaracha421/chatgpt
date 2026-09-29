@@ -33,9 +33,120 @@
   color: var(--color-on-accent);
 }
 
+.ui-badge--scrim {
+  background: var(--color-cover-scrim);
+  color: var(--color-text);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
 .ui-badge--danger {
   background: color-mix(in srgb, var(--color-danger) 16%, transparent);
   color: var(--color-danger);
+}
+
+.ui-section-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--line-ui);
+  color: var(--color-faint);
+  font: 400 var(--type-meta) / 1.2 var(--font-ui);
+}
+
+.ui-section-label::before {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 5px;
+  background: var(--color-section-mark);
+}
+
+.ui-section-label__title {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.ui-section-label__count {
+  flex: none;
+  color: var(--color-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-section-label__rule {
+  flex: 1;
+  min-width: 0;
+  height: 1px;
+  background: var(--section-label-rule);
+}
+
+.ui-section-label__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.ui-section-label__open {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-faint);
+}
+
+.ui-section-label__open::before {
+  content: "";
+  position: absolute;
+  inset: calc((var(--icon-sm) - var(--touch-target)) / 2);
+}
+
+.ui-section-label__open > svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.ui-section-label__open:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.ui-section-label__open:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-width);
+}
+
+.ui-empty-state {
+  display: grid;
+  place-items: center;
+  min-height: var(--gallery-target-row-height);
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-4);
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.ui-empty-state__icon {
+  width: var(--space-8);
+  height: var(--space-8);
+  color: var(--color-faint);
+}
+
+.ui-empty-state h2 {
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-muted);
+  font: 400 var(--type-body) / 1.35 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 input[type="checkbox"].ui-checkbox,
@@ -467,6 +578,7 @@ select.ui-text-input {
 }
 
 .ui-skeleton {
+  display: block;
   background: color-mix(in srgb, var(--color-surface) 70%, var(--color-bg));
   border-radius: var(--radius-mark);
   animation: ui-skeleton-in 400ms ease-out 300ms both, ui-skeleton-breathe 2.4s ease-in-out 700ms infinite;

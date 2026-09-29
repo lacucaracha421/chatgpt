@@ -115,7 +115,7 @@
       "legacyToken": 11
     },
     "_tools/app/src/collections/collectionReleases.css": {
-      "offScaleSpacing": 5,
+      "offScaleSpacing": 4,
       "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 8
@@ -244,7 +244,7 @@
       "offScaleSpacing": 9,
       "offRoleFontSize": 2,
       "pillRadius": 0,
-      "legacyToken": 22
+      "legacyToken": 21
     },
     "_tools/app/src/styles/controls.css": {
       "offScaleSpacing": 0,
@@ -262,7 +262,7 @@
       "offScaleSpacing": 13,
       "offRoleFontSize": 0,
       "pillRadius": 3,
-      "legacyToken": 106
+      "legacyToken": 104
     },
     "_tools/app/src/styles/tokens.css": {
       "offScaleSpacing": 0,

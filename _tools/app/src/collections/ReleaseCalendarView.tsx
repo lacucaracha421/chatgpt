@@ -9,8 +9,10 @@ import { usePrivacy } from "../privacy/PrivacyContext";
 import { displayDateTime, displayDDay } from "../shared/displayDate";
 import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
+import { EmptyState } from "../shared/ui/EmptyState";
 import { SegmentedControl } from "../shared/ui/SegmentedControl";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { PlatformBadges } from "./PlatformBadges";
 import { groupReleases, RELEASE_SOURCE_PROBLEM, releaseDateLabel, releaseEventLine } from "./releaseCalendarFormat";
 import "./releaseCalendar.css";
@@ -39,10 +41,7 @@ function groupHeadingLabel(label: string, referenceYear: number): string {
 }
 
 function EmptyCalendarState({ title, icon: Icon }: { title: string; icon: ComponentType<SVGProps<SVGSVGElement>> }) {
-  return <section className="release-calendar__empty" aria-label={title}>
-    <Icon aria-hidden="true" />
-    <p>{title}</p>
-  </section>;
+  return <EmptyState className="release-calendar__empty" title={title} icon={Icon} />;
 }
 
 function LoadingCalendarState() {
@@ -145,7 +144,7 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
     const body = bodyRef.current;
     if (before === null || before === switchIndex || !body || typeof body.animate !== "function") return;
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-    body.animate([{ opacity: 0.5, transform: `translateX(${Math.sign(switchIndex - before) * 14}px)` }, { opacity: 1, transform: "none" }], { duration: 180, easing: "cubic-bezier(0.2, 0, 0, 1)" });
+    body.animate([{ opacity: 0.5, transform: `translateX(${Math.sign(switchIndex - before) * 16}px)` }, { opacity: 1, transform: "none" }], { duration: 200, easing: "cubic-bezier(0.2, 0, 0, 1)" });
   }, [switchIndex]);
   const unreadTotal = (wishlist ?? []).reduce((sum, item) => sum + item.unread.length, 0);
 
@@ -211,7 +210,7 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
         ? <EmptyCalendarState title="관심 목록 비어 있음" icon={BookmarkOutlineIcon} />
         : needle ? <EmptyCalendarState title="검색 결과 없음" icon={MagnifyingGlassIcon} /> : <EmptyCalendarState title="6개월 안의 발매 정보 없음" icon={CalendarDaysIcon} />)}
       {groups.map(group => <section key={group.key} className="release-calendar__month" aria-label={group.label}>
-        <h3 className="release-calendar__month-title"><span className="release-calendar__section-mark" aria-hidden="true" /><span className="release-calendar__month-name">{groupHeadingLabel(group.label, referenceYear)}</span><span className="release-calendar__month-count">{group.items.length.toLocaleString()}</span><span className="release-calendar__month-rule" aria-hidden="true" /></h3>
+        <SectionLabel as="h3" title={groupHeadingLabel(group.label, referenceYear)} count={group.items.length} />
         <div className="release-calendar__days">
           {releaseDays(group.items).map(day => {
             // One heading per release day; the day's covers sit side by side under it (up to four).
@@ -221,7 +220,7 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
               aria-label={releaseDateLabel(first.date, first.precision, referenceYear)}>
               <div className="release-calendar__date-row">
                 <span className="release-calendar__date">{releaseDateLabel(first.date, first.precision, referenceYear)}</span>
-                {dDay && dDay !== "D-DAY" && <span className="release-calendar__dday">{dDay}</span>}
+                {dDay && <span className="release-calendar__dday">{dDay}</span>}
               </div>
               <ul className="release-calendar__grid">
                 {day.map(tile => {

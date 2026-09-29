@@ -98,12 +98,12 @@ describe('segment swap',()=>{
     view.rerender(<Segment segment="manga" index={1}/>);
     expect(animate).toHaveBeenCalledTimes(1);
     expect(animate.mock.contexts[0]).toBe(view.getByTestId('segment'));
-    expect(firstFrame(0)).toMatchObject({transform:'translateX(14px)',opacity:.5});
+    expect(firstFrame(0)).toMatchObject({transform:'translateX(16px)',opacity:.5});
     const options=animate.mock.calls[0][1] as KeyframeAnimationOptions;
     expect(options.duration).toBeLessThanOrEqual(200);expect(options.easing).toBe('cubic-bezier(0.2,0,0,1)');
     // A tab to the left comes in from the left; the same tab again does not move.
     view.rerender(<Segment segment="game" index={0}/>);
-    expect(firstFrame(1).transform).toBe('translateX(-14px)');
+    expect(firstFrame(1).transform).toBe('translateX(-16px)');
     view.rerender(<Segment segment="game" index={0}/>);
     expect(animate).toHaveBeenCalledTimes(2);
   });

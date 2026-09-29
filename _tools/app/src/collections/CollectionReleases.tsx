@@ -4,6 +4,7 @@ import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { CollectionSummary, CollectionUpdateFailure, CollectionUpdateProvider, CollectionUpdateStatus, ReleaseInboxItem } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
+import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
@@ -138,7 +139,7 @@ export function CollectionReleases({ provider, collections, data, loading, error
     <button type="button" className="collection-releases__open" data-collection-id={id} onClick={() => onOpen(id)}>
       {cover(byId.get(id))}
       <span className="collection-releases__title"><strong>{name}</strong>{lines}</span>
-      {items.length > 0 && <span className="collection-releases__new" aria-label={`새 알림 ${items.length}개`}>NEW {items.length}</span>}
+      {items.length > 0 && <Badge variant="accent" aria-label={`새 알림 ${items.length}개`}>NEW {items.length}</Badge>}
     </button>
     {items.length > 0 && confirm(id, name, items)}
   </div>;
@@ -178,14 +179,14 @@ export function CollectionReleases({ provider, collections, data, loading, error
         <ul className="collection-releases__volumes">{row.volumes.map(volume => <li key={volume.volumeNumber} className={volume.fresh ? "is-new" : undefined}>
           <span className={volume.upcoming ? "is-upcoming" : undefined}>{koreanVolumeLine(volume, today)}</span>
           <span className="collection-releases__tag">미보유</span>
-          {volume.fresh && <span className="collection-releases__new">NEW</span>}
+          {volume.fresh && <Badge variant="accent">NEW</Badge>}
         </li>)}</ul>
       </section>)}
 
       {region === "jp" && japan.map(row => <section key={row.work.id} className={`collection-releases__group${row.fresh ? " is-new" : ""}`} aria-label={row.work.name}>
         {head(row.work.id, row.work.name, <><small>일본 최신 {row.latest}권</small>{row.ahead ? <small className="is-ahead">한국 정발보다 {row.ahead}권 앞섬</small> : null}</>, byWork.get(row.work.id) ?? [])}
         {row.aheadVolumes.length > 0 && <ul className="collection-releases__chips" aria-label={`${row.work.name} 일본 권`}>
-          {row.aheadVolumes.slice(0, AHEAD_CHIPS).map(volume => <li key={volume.volumeNumber} className={volume.fresh ? "is-new" : undefined}><span>{volume.volumeNumber}권</span>{volume.fresh && <span className="collection-releases__new">NEW</span>}</li>)}
+          {row.aheadVolumes.slice(0, AHEAD_CHIPS).map(volume => <li key={volume.volumeNumber} className={volume.fresh ? "is-new" : undefined}><span>{volume.volumeNumber}권</span>{volume.fresh && <Badge variant="accent">NEW</Badge>}</li>)}
           {row.aheadVolumes.length > AHEAD_CHIPS && <li className="is-more"><span>외 {row.aheadVolumes.length - AHEAD_CHIPS}권</span></li>}
         </ul>}
       </section>)}

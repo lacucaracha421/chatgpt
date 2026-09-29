@@ -61,7 +61,7 @@ describe("displayDateTime", () => {
 describe("displayDDay", () => {
   it("uses local calendar days and leaves past dates to the date label", () => {
     expect(displayDDay("2026-09-29", now)).toBe("D-6");
-    expect(displayDDay("2026-09-23T23:59", now)).toBe("D-DAY");
+    expect(displayDDay("2026-09-23T23:59", now)).toBe("오늘");
     expect(displayDDay("2026-09-22", now)).toBeNull();
   });
 });

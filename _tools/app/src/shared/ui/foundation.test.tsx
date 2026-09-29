@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Badge } from "./Badge";
 import { Button } from "./Button";
 import { Checkbox } from "./Checkbox";
+import { EmptyState } from "./EmptyState";
 import { Field, TextInput } from "./TextInput";
 import { SegmentedControl } from "./SegmentedControl";
+import { SectionLabel } from "./SectionLabel";
 import { Switch } from "./Switch";
 import { Tabs } from "./Tabs";
 
@@ -51,6 +53,26 @@ describe("shared foundation controls", () => {
 
     const badge = screen.getByRole("img", { name: "Pinned" });
     expect(badge).toHaveClass("ui-badge", "ui-badge--plain", "ui-badge--icon");
+  });
+
+  it("renders SectionLabel content, actions, and its open button", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    render(<SectionLabel title="작품" count={12} actions={<button type="button">필터</button>} onOpen={onOpen} />);
+
+    expect(screen.getByText("작품")).toBeInTheDocument();
+    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "필터" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "작품 전체" }));
+
+    expect(onOpen).toHaveBeenCalledOnce();
+  });
+
+  it("renders an optional EmptyState icon", () => {
+    render(<EmptyState title="비어 있음" icon={(props) => <Icon {...props} data-testid="empty-icon" />} />);
+
+    expect(screen.getByTestId("empty-icon")).toHaveClass("ui-empty-state__icon");
+    expect(screen.getByText("비어 있음")).toBeInTheDocument();
   });
 
   it("adds the quiet Button variant", () => {

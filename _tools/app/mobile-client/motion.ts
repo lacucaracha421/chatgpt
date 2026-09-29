@@ -15,8 +15,8 @@ import {useCallback,useEffect,useLayoutEffect,useRef,useState,type RefObject} fr
 export const TAB_MOTION_MS=200;
 export const LEVEL_MOTION_MS=220;
 export const SWAP_MOTION_MS=140;
-export const SEGMENT_MOTION_MS=180;
-export const SEGMENT_SHIFT_PX=14;
+export const SEGMENT_MOTION_MS=200;
+export const SEGMENT_SHIFT_PX=16;
 /** A fast start that settles softly, like the system's own screen transitions. */
 export const EASE_OUT='cubic-bezier(0.2,0,0,1)';
 const STAGGER_TILES=10,STAGGER_STEP_MS=12,STAGGER_TILE_MS=110;

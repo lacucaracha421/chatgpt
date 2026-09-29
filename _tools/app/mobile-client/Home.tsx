@@ -14,6 +14,7 @@ import {usePullToRefresh} from './usePullToRefresh';
 import {usePrivacyMode} from './privacyMode';
 import type {Asset, Ticket} from './types';
 import {PlatformBadges} from '../src/collections/PlatformBadges';
+import {ddayLabel, displayDate} from '../src/shared/displayDate';
 import './home.css';
 
 export interface HomeProps {
@@ -111,7 +112,7 @@ function ShelfManga({entry, cover, today, privacy, onOpen}: {entry: ShelfEntry; 
   const date = entry.date ?? today;
   const block = dateBlock(date, today);
   const days = daysAfter(date, today);
-  const rail = <span className={`home-rail${todayNew ? ' is-new' : ''}`}><span className="home-rail-d numeric">{block?.day ?? '오늘'}</span>{days !== null && <span className="home-rail-dd numeric">{days === 0 ? '오늘' : days > 0 ? `D-${days}` : '지난'}</span>}</span>;
+  const rail = <span className={`home-rail${todayNew ? ' is-new' : ''}`}><span className="home-rail-d numeric">{block?.day ?? '오늘'}</span>{ddayLabel(days) && <span className="home-rail-dd numeric">{ddayLabel(days)}</span>}</span>;
   const volumes = fresh ? entry.volumes : `${entry.volumeNumber}권`;
   const volume = volumes.match(/(\d+(?:[–-]\d+)?)권/)?.[1];
   return <button className="home-shelf-item" onClick={onOpen} aria-label={`${entry.name} ${volumes}`}><span>{rail}</span><span className="home-shelf-art">{privacy ? <span className="home-cover-placeholder is-private" aria-label="비공개 모드로 이미지 숨김" /> : cover}{fresh && <span className="home-newmark">NEW</span>}{volume && <span className="home-volume-badge numeric">{volume}</span>}</span><span className="home-shelf-title">{entry.name}</span><span className="home-shelf-sub" aria-hidden="true" /></button>;
@@ -122,7 +123,7 @@ function ShelfExternal({entry, fresh, today, privacy, onOpen}: {entry: UpcomingH
   const days = date ? daysAfter(date, today) : null;
   const block = date ? dateBlock(date, today) : null;
   const hasGamePlatforms = entry.kind === 'game' && !!entry.platforms?.length;
-  return <button className="home-shelf-item home-external-item" onClick={onOpen} aria-label={`${entry.title}${date ? ` · ${days === 0 ? '오늘' : days !== null && days > 0 ? `D-${days}` : '발매됨'}` : ''}`}><span className="home-rail"><span className="home-rail-d numeric">{block?.day ?? '—'}</span>{block && <span className="home-rail-dd numeric">{days === 0 ? '오늘' : days !== null && days > 0 ? `D-${days}` : '지난'}</span>}</span><span className="home-shelf-art"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} />{fresh && <span className="home-newmark">NEW</span>}</span><span className="home-shelf-title">{entry.title}</span><span className="home-shelf-sub">{hasGamePlatforms ? <PlatformBadges platforms={entry.platforms!} port={entry.port === true} /> : null}</span></button>;
+  return <button className="home-shelf-item home-external-item" onClick={onOpen} aria-label={`${entry.title}${date ? ` · ${ddayLabel(days) ?? '발매됨'}` : ''}`}><span className="home-rail"><span className="home-rail-d numeric">{block?.day ?? '—'}</span>{block && <span className="home-rail-dd numeric">{ddayLabel(days)}</span>}</span><span className="home-shelf-art"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} />{fresh && <span className="home-newmark">NEW</span>}</span><span className="home-shelf-title">{entry.title}</span><span className="home-shelf-sub">{hasGamePlatforms ? <PlatformBadges platforms={entry.platforms!} port={entry.port === true} /> : null}</span></button>;
 }
 
 function MemoPanel({rows, memos, onOpen}: {rows: MemoRow[]; memos: ReturnType<typeof useHomeMemos>; onOpen(id?: string): void}) {
@@ -197,7 +198,7 @@ function AvPlaceholder() {
 
 function UpcomingDetailSheet({entry, interested, privacy, onToggle, onClose}: {entry: UpcomingHomeEntry; interested: boolean; privacy: boolean; onToggle(): void; onClose(): void}) {
   const days = entry.date ? daysAfter(entry.date, localToday()) : null;
-  return <BottomSheet title={entry.title} onClose={onClose}><div className="home-detail-sheet"><div className="home-detail-cover"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} /></div><span className="home-kind">{upcomingKind[entry.kind]}</span>{entry.originalTitle && <p className="home-detail-original">{entry.originalTitle}</p>}<p className="home-detail-meta">{entry.date ?? '발매일 미정'}{days !== null && ` · ${days === 0 ? '오늘' : days > 0 ? `D-${days}` : '발매됨'}`}</p>{entry.platforms?.length ? <p className="home-detail-meta">{entry.platforms.join(' · ')}</p> : null}{entry.description && <p className="home-detail-description">{entry.description}</p>}<button className="home-interest-action" onClick={onToggle}>{interested ? '관심 목록에서 빼기' : '관심 목록에 추가'}</button></div></BottomSheet>;
+  return <BottomSheet title={entry.title} onClose={onClose}><div className="home-detail-sheet"><div className="home-detail-cover"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} /></div><span className="home-kind">{upcomingKind[entry.kind]}</span>{entry.originalTitle && <p className="home-detail-original">{entry.originalTitle}</p>}<p className="home-detail-meta">{entry.date ? displayDate(entry.date) : '발매일 미정'}{days !== null && ` · ${ddayLabel(days) ?? '발매됨'}`}</p>{entry.platforms?.length ? <p className="home-detail-meta">{entry.platforms.join(' · ')}</p> : null}{entry.description && <p className="home-detail-description">{entry.description}</p>}<button className="home-interest-action" onClick={onToggle}>{interested ? '관심 목록에서 빼기' : '관심 목록에 추가'}</button></div></BottomSheet>;
 }
 
 export function Home(props: HomeProps) {

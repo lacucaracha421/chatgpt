@@ -1,6 +1,6 @@
 import type { ComponentType, HTMLAttributes, ReactNode, SVGProps } from "react";
 
-type BadgeVariant = "plain" | "accent" | "danger" | "count";
+type BadgeVariant = "plain" | "accent" | "danger" | "count" | "scrim";
 type BadgeIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
 type BadgeBaseProps = Omit<HTMLAttributes<HTMLSpanElement>, "aria-label" | "children" | "className" | "role"> & {

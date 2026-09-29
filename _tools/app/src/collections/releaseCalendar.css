@@ -17,11 +17,8 @@
 
 .release-calendar__body { flex: 1; min-height: 0; overflow: auto; padding: var(--space-4) var(--space-4) var(--space-8); scrollbar-gutter: stable; }
 .release-calendar__month + .release-calendar__month { margin-top: var(--space-6); }
-.release-calendar__month-title { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-3); color: var(--color-muted); font: 600 var(--type-meta) / 1 var(--font-ui); }
-.release-calendar__section-mark { width: 5px; height: 5px; flex: none; background: var(--color-section-mark); }
-.release-calendar__month-name { color: var(--color-muted); }
-.release-calendar__month-count { color: var(--color-faint); font: 500 var(--type-meta) / 1 var(--font-numeric); }
-.release-calendar__month-rule { flex: 1; height: 1px; background: var(--section-label-rule); }
+.release-calendar__month > .ui-section-label { margin: 0 0 var(--space-3); }
+.release-calendar__empty { padding: var(--space-8) var(--space-4); }
 .release-calendar__days { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: var(--space-6) var(--space-4); }
 .release-calendar__day { grid-column: span var(--day-span, 1); display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
 .release-calendar__grid { display: grid; grid-template-columns: repeat(var(--day-span, 1), minmax(0, 1fr)); gap: var(--space-6) var(--space-4); list-style: none; margin: 0; padding: 0; }
@@ -48,9 +45,6 @@
 .release-calendar__confirm.ui-button--quiet { width: 20px; min-height: 20px; height: 20px; flex: none; padding: 0; color: var(--color-faint); }
 .release-calendar__confirm.ui-button--quiet > svg { width: 16px; height: 16px; }
 
-.release-calendar__empty { display: grid; place-items: center; gap: var(--space-2); padding: var(--space-8) var(--space-4); color: var(--color-faint); text-align: center; }
-.release-calendar__empty svg { width: 32px; height: 32px; }
-.release-calendar__empty p { margin: 0; font-size: var(--type-body); }
 .release-calendar__skeletons { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: var(--space-6) var(--space-4); }
 .release-calendar__skeleton-tile { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .release-calendar__skeleton-date { display: flex; align-items: center; gap: var(--space-2); height: 20px; }
@@ -61,4 +55,3 @@
 .release-calendar__skeleton-title { width: 84%; height: 38px; margin-top: var(--space-2); }
 .release-calendar__skeleton-badge { width: 24px; height: 20px; }
 .release-calendar__attribution { margin: var(--space-6) 0 0; color: var(--color-faint); font-size: var(--type-meta); }
-

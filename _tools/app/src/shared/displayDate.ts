@@ -104,9 +104,13 @@ export function displayDateTime(value: DisplayDate, now = new Date(), options: D
 export function displayDDay(value: DisplayDate, now = new Date()): string | null {
   const parsed = parseDisplayValue(value);
   if (!parsed) return null;
-  const difference = localDayNumber(parsed.date) - localDayNumber(now);
-  if (difference === 0) return "D-DAY";
-  return difference > 0 ? `D-${difference}` : null;
+  return ddayLabel(localDayNumber(parsed.date) - localDayNumber(now));
+}
+
+/** Days until a release as shown everywhere: `오늘`, `D-6`, or nothing once it has passed. */
+export function ddayLabel(days: number | null | undefined): string | null {
+  if (days === null || days === undefined || !Number.isFinite(days) || days < 0) return null;
+  return days === 0 ? "오늘" : `D-${days}`;
 }
 
 export function displayCount(value: number, unit = ""): string {

@@ -468,12 +468,12 @@ describe('read-only collections',()=>{
       const moves=animate.mock.calls as unknown as [Keyframe[],KeyframeAnimationOptions][];
       expect(moves).toHaveLength(1);
       expect((animate.mock.contexts as HTMLElement[])[0]).toBe(list());
-      expect(moves[0][0][0].transform).toBe('translateX(14px)');
+      expect(moves[0][0][0].transform).toBe('translateX(16px)');
       // AV lies to the right as well; back to 게임 comes in from the left.
       pressTab('AV');await screen.findByText('PC 앱이 AV 작품을 아직 보내지 않았습니다');
-      expect(moves.at(-1)![0][0].transform).toBe('translateX(14px)');
+      expect(moves.at(-1)![0][0].transform).toBe('translateX(16px)');
       pressTab('게임');await screen.findByText('밤의 도서관');
-      await waitFor(()=>expect(moves.at(-1)![0][0].transform).toBe('translateX(-14px)'));
+      await waitFor(()=>expect(moves.at(-1)![0][0].transform).toBe('translateX(-16px)'));
     }finally{delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;}
   });
   it('shows the AV tab and requests the deployed AV collection type',async()=>{

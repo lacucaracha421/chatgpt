@@ -10,6 +10,7 @@ import { groupInbox, localDay } from "../collections/releaseCaption";
 import { useReleaseData } from "../collections/releaseData";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useLibrary } from "../library/LibraryContext";
+import { ddayLabel } from "../shared/displayDate";
 import type { AssetView, AvFavoritePerformer, ClassificationEntry, CollectionSummary, ContinueItem, HomeOverview, ReleaseCalendar, ReleaseWishlistItem } from "../library/types";
 import { characterApi, type CharacterTarget } from "../characters/api";
 import { TaggerReview } from "../characters/TaggerReview";
@@ -19,6 +20,8 @@ import { usePrivacy } from "../privacy/PrivacyContext";
 import { AvPortrait } from "../collections/av/AvPortrait";
 import { shadowReviewApi, type ShadowReviewApi, type ShadowReviewPendingTarget } from "../characters/shadowReviewApi";
 import { localDateAndOffset, useArtistGateway, useArtistRead } from "../artists/artistStore";
+import { Badge } from "../shared/ui/Badge";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { avProfileLines, clockLabel, dateBlock, daysAfter, localBoundaries, memoRows, nextInSeriesRows, releaseRows, serverOutage, UPCOMING_DAYS, weekdayLabel, upcomingRows, type MemoRow, type ReleaseRow, type UpcomingRow } from "./homeModel";
 import { HomeArtist, HomeRevisit } from "./HomeRevisit";
 import { useConnectionRows, type ConnectionRow } from "../layout/ConnectionStatusBlock";
@@ -286,15 +289,15 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
                     const platforms = row.kind === "game" ? upcomingRow?.platforms ?? release?.title?.platforms ?? [] : [];
                     const port = calendarPorts.has(row.key.replace(/^title:/, ""));
                     return <button key={`${item.source}:${row.key}`} type="button" className="home-shelf__item" onClick={() => release ? openRelease(release) : openUpcoming(upcomingRow!)}
-                      aria-label={`${row.name} ${released ? "발매됨" : `${block.day} D-${left}`}`}>
+                      aria-label={`${row.name} ${released ? "발매됨" : `${block.day} ${ddayLabel(left) ?? ""}`}`}>
                       <span className="home-shelf__date">
                         {released ? (row.date ? <span className="numeric">{block.day}</span> : <span>새 권</span>) : <span className="numeric">{block.day}</span>}
-                        {!released && <span className="home-shelf__days numeric">D-{left}</span>}
+                        {!released && ddayLabel(left) && <span className="home-shelf__days numeric">{ddayLabel(left)}</span>}
                       </span>
                       <span className={`home-shelf__art${!url ? " home-cover--title" : ""}`} aria-hidden="true">
                         {url && <img src={url} alt="" loading="lazy" decoding="async" draggable={false} />}
-                        {released && <span className="home-shelf__new">NEW</span>}
-                        {volume !== null && <span className="home-shelf__volume numeric">{volume}</span>}
+                        {released && <span className="home-shelf__badge home-shelf__badge--new"><Badge variant="accent">NEW</Badge></span>}
+                        {volume !== null && <span className="home-shelf__badge home-shelf__badge--volume"><Badge variant="scrim">{volume}</Badge></span>}
                       </span>
                       <span className="home-shelf__title">{row.name}</span>
                       {platforms.length > 0 && <span className="home-shelf__platforms"><PlatformBadges platforms={platforms} port={port} /></span>}
@@ -371,7 +374,6 @@ const noopSubscribe = () => () => undefined;
 const EMPTY_NOTES = { notes: [], keyringLocked: false } as unknown as ReturnType<NotesStore["snapshot"]>;
 const emptyNotes = () => EMPTY_NOTES;
 
-function Chevron() { return <ChevronRightIcon className="home-chevron" aria-hidden="true" />; }
 /** A horizontally scrolling shelf (like the tablet's swipe): mouse wheel and drag move it
  * smoothly, a released drag glides, and arrow buttons page while there is more to either side. */
 function ShelfScroller({ children }: { children: ReactNode }) {
@@ -486,15 +488,6 @@ function HomeSection({ title, onOpen, actions, children }: { title: string; onOp
   </section>;
 }
 
-function SectionLabel({ title, onOpen, actions }: { title: string; onOpen?: () => void; actions?: ReactNode }) {
-  return <div className="home-section-label">
-    <span>{title}</span>
-    <span className="home-section-label__rule" />
-    {actions && <span className="home-section-label__actions">{actions}</span>}
-    {onOpen && <button type="button" className="home-section-label__more" aria-label={`${title} 전체`} onClick={onOpen}><Chevron /></button>}
-  </div>;
-}
-
 function HomeIndex({ memos, locked, overview, trashCount, privacyMode, connectionRows, onNavigate }: {
   memos: MemoRow[]; locked: boolean; overview: HomeOverview | null; trashCount: number; privacyMode: boolean;
   connectionRows: ConnectionRow[]; onNavigate: (view: AssetView) => void;
@@ -581,7 +574,7 @@ function HomeSeries({ rows, privacyMode, onOpen, onOpenCollection }: { rows: Ret
           <span className="home-series-card__pair">
             <span className="home-series-card__owned">
               {!privacyMode && thumbnail && <img src={thumbnail} alt="" loading="lazy" decoding="async" draggable={false} onError={(event) => { event.currentTarget.style.display = "none"; }} />}
-              <span className="home-shelf__volume numeric">{row.ownedCount}</span>
+              <span className="home-shelf__badge home-shelf__badge--volume"><Badge variant="scrim">{row.ownedCount}</Badge></span>
             </span>
             <span className="home-series-card__next"><b><span className="numeric">{row.nextVolume.number}</span><small>권</small></b><small>발매</small></span>
           </span>
@@ -599,7 +592,7 @@ function HomeFavoritePerformers({ performers, onOpen, onOpenPerformer }: { perfo
       {performers.map((performer) => <button key={performer.id} type="button" className="home-av-favorite" aria-label={`${performer.displayName} 배우 페이지`} onClick={() => onOpenPerformer(performer.id)}>
         <span className="home-av-favorite__portrait">
           <AvPortrait portrait={performer.portrait} name={performer.displayName} size={72} />
-          {performer.recentOwnedCount > 0 && <span className="home-shelf__volume home-av-favorite__count numeric">{performer.recentOwnedCount}</span>}
+          {performer.recentOwnedCount > 0 && <span className="home-shelf__badge home-av-favorite__count"><Badge variant="scrim">{performer.recentOwnedCount}</Badge></span>}
         </span>
         <span className="home-av-favorite__name">{performer.displayName}</span>
       </button>)}

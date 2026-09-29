@@ -27,6 +27,8 @@
   --color-sidebar-hover: #292a2b;
   --color-sidebar-connector: #59616b;
   --color-overlay: rgba(7, 10, 15, 0.82);
+  --color-cover-scrim: rgb(22 23 24 / 82%);
+  --color-private-fill: #17191b;
   --color-viewer-bg: #070a0f;
   --color-text: #e7e9ec;
   --color-muted: #a0a3a5;

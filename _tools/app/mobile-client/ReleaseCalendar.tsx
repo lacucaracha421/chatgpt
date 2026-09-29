@@ -10,6 +10,7 @@ import {PlatformBadges} from '../src/collections/PlatformBadges';
 import type {Ticket} from './types';
 import {filterReleaseEntries, groupReleaseEntries, normalizeReleaseCalendarReply, releaseDateLabel, releaseDaysUntil, releaseEventLine, visibleWishlistIds, wishlistIds, type KindFilter, type ReleaseCalendarEntry, type ReleaseCalendarEvent, type ReleaseCalendarReply} from './releaseCalendarModel';
 import {Scrubber} from './Scrubber';
+import {ddayLabel} from '../src/shared/displayDate';
 import {useSegmentMotion} from './motion';
 import './releaseCalendar.css';
 
@@ -87,7 +88,7 @@ function CalendarBody({reply, kind, wishlistOnly, visibleIds, privacy, reference
           return <section key={day.key} className="release-calendar-day" style={{'--day-span': span} as CSSProperties} aria-label={day.label}>
             <div className="release-calendar-day-head">
               <span className="release-calendar-date numeric">{releaseDateLabel(first.date, first.precision, referenceYear)}</span>
-              {days !== null && days > 0 && <span className="release-calendar-dday numeric">D-{days}</span>}
+              {ddayLabel(days) && <span className="release-calendar-dday numeric">{ddayLabel(days)}</span>}
             </div>
             <ul className="release-calendar-card-grid">
               {day.items.map(entry => {

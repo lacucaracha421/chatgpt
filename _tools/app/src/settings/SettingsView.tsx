@@ -8,6 +8,7 @@ import { Button } from "../shared/ui/Button";
 import { SegmentedControl } from "../shared/ui/SegmentedControl";
 import { Select } from "../shared/ui/Select";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { Switch } from "../shared/ui/Switch";
 import { TextInput } from "../shared/ui/TextInput";
 import { Toast } from "../shared/ui/Toast";
@@ -584,7 +585,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
 
 function SettingsGroup({ title, help, children }: { title: string; help?: string; children: ReactNode }) {
   return <section className="settings-view__group" aria-labelledby={`settings-group-${title}`}>
-    <div className="settings-view__group-label"><span id={`settings-group-${title}`} role="heading" aria-level={3}>{title}</span><span className="settings-view__group-rule" />{help && <HelpButton title={title} text={help} />}</div>
+    <SectionLabel as="h3" id={`settings-group-${title}`} title={title} actions={help ? <HelpButton title={title} text={help} /> : undefined} />
     {children}
   </section>;
 }
