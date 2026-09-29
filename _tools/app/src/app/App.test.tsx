@@ -1233,7 +1233,7 @@ describe("App", () => {
       fireEvent.click(tile, { ctrlKey: true });
       await userEvent.click(screen.getByRole("button", { name: /캐릭터/ }));
       await userEvent.click(
-        await screen.findByRole("option", { name: "마커스 · 게임 · 1장 중 1장" }),
+        await screen.findByRole("option", { name: "마커스 · 게임 · 1/1장 일치" }),
       );
       await waitFor(() => expect(move).toHaveBeenCalledWith([{ targetId: character.id, expectedFingerprint: character.fingerprint }], [asset.id]));
       expect(await screen.findByText((_content, element) =>

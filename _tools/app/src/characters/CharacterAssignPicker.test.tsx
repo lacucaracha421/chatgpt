@@ -28,7 +28,7 @@ it("shows suggestions, recent characters and series groups in count order while 
       { targetId: "meguri", matched: 2, total: 2 },
     ])} />);
 
-  expect(await screen.findByText("2장 중 2장")).toBeVisible();
+  expect(await screen.findByText("2/2장 일치")).toBeVisible();
   const recommended = screen.getByRole("group", { name: "추천" });
   expect(within(recommended).getAllByRole("option").map(row => row.textContent)).toEqual([
     expect.stringContaining("미노시마 메구리"),
@@ -82,4 +82,44 @@ it("checks several characters with Ctrl click, confirms a cross-series move, and
     expect.objectContaining({ id: "kazusa" }),
     expect.objectContaining({ id: "fern" }),
   ]);
+});
+
+it("limits a scoped picker to one series, marks the current character, and widens from the all-series row", async () => {
+  const user = userEvent.setup();
+  render(<CharacterAssignPicker assetIds={["a"]} targets={targets} groups={groups} classifications={series} counts={counts}
+    scopeSeriesId="blue" currentTargetId="kazusa" privacyMode={false} onAssign={vi.fn()} onClose={vi.fn()}
+    loadSuggestions={vi.fn().mockResolvedValue([{ targetId: "fern", matched: 1, total: 1 }, { targetId: "kazusa", matched: 1, total: 1 }])} />);
+
+  const picker = await screen.findByRole("listbox", { name: "캐릭터에 넣기" });
+  expect(screen.getByRole("button", { name: "블루 아카이브 범위 해제" })).toBeVisible();
+  expect(within(picker).getAllByRole("option", { name: /카즈사 · 현재/ })[0]).toBeVisible();
+  expect(within(picker).queryByRole("option", { name: /페른/ })).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "모든 시리즈" }));
+  expect(screen.queryByRole("button", { name: "블루 아카이브 범위 해제" })).not.toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /페른 · 40/ })).toBeVisible();
+});
+
+it("clears a scoped picker with Backspace and offers other-series results plus creation", async () => {
+  const user = userEvent.setup();
+  const onCreate = vi.fn();
+  render(<CharacterAssignPicker assetIds={["a"]} targets={targets} groups={groups} classifications={series} counts={counts}
+    scopeSeriesId="blue" privacyMode={false} onAssign={vi.fn()} onClose={vi.fn()} onCreate={onCreate}
+    loadSuggestions={vi.fn().mockResolvedValue([])} />);
+
+  const search = await screen.findByRole("searchbox", { name: "캐릭터 찾기" });
+  await user.type(search, "페른");
+  expect(screen.getByText("블루 아카이브에 없음")).toBeVisible();
+  expect(screen.getByText("장송의 프리렌 · 폴더 옮김")).toBeVisible();
+
+  await user.clear(search);
+  await user.type(search, "새 캐릭터");
+  const create = screen.getByRole("button", { name: '블루 아카이브에 “새 캐릭터” 만들기' });
+  await user.click(create);
+  expect(onCreate).toHaveBeenCalledWith("새 캐릭터");
+
+  await user.clear(search);
+  fireEvent.keyDown(search, { key: "Backspace" });
+  expect(screen.queryByRole("button", { name: "블루 아카이브 범위 해제" })).not.toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /페른 · 40/ })).toBeVisible();
 });

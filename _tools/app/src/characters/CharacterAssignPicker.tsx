@@ -1,10 +1,10 @@
 import { CheckIcon, MagnifyingGlassIcon } from "@heroicons/react/20/solid";
+import { ChevronRightIcon, PlusIcon, Squares2X2Icon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useState } from "react";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import type { ClassificationEntry } from "../library/types";
 import { matchesKoreanSearch } from "../shared/koreanSearch";
 import { Button } from "../shared/ui/Button";
-import { TextInput } from "../shared/ui/TextInput";
 import { characterAssignSuggestions, type CharacterAssignSuggestion, type CharacterTarget } from "./api";
 import type { CharacterGroup } from "./hubApi";
 import "./CharacterAssignPicker.css";
@@ -21,6 +21,9 @@ type Props = {
   busy?: boolean;
   onAssign: (targets: CharacterTarget[]) => void | Promise<void>;
   onClose: () => void;
+  scopeSeriesId?: string;
+  currentTargetId?: string;
+  onCreate?: (name: string) => void | Promise<void>;
   loadSuggestions?: (assetIds: string[]) => Promise<CharacterAssignSuggestion[]>;
 };
 
@@ -30,10 +33,12 @@ type PickerRow = {
   context?: string;
   right: string;
   indented?: boolean;
+  current?: boolean;
 };
 
-export function CharacterAssignPicker({ assetIds, targets, groups, classifications, counts, privacyMode, busy = false, onAssign, onClose, loadSuggestions = characterAssignSuggestions }: Props) {
+export function CharacterAssignPicker({ assetIds, targets, groups, classifications, counts, privacyMode, busy = false, onAssign, onClose, scopeSeriesId, currentTargetId, onCreate, loadSuggestions = characterAssignSuggestions }: Props) {
   const [query, setQuery] = useState("");
+  const [activeScopeId, setActiveScopeId] = useState<string | null>(scopeSeriesId ?? null);
   const [suggestions, setSuggestions] = useState<CharacterAssignSuggestion[]>([]);
   const [recentIds, setRecentIds] = useState(loadRecentIds);
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
@@ -42,10 +47,13 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
   const [confirmTargets, setConfirmTargets] = useState<CharacterTarget[] | null>(null);
   const targetById = useMemo(() => new Map(targets.map(target => [target.id, target])), [targets]);
   const seriesName = (target: CharacterTarget) => classifications.find(entry => entry.id === target.seriesClassificationId)?.name ?? "시리즈 없음";
+  const activeScopeName = activeScopeId ? classifications.find(entry => entry.id === activeScopeId)?.name ?? "시리즈" : null;
+
+  useEffect(() => { setActiveScopeId(scopeSeriesId ?? null); }, [scopeSeriesId]);
 
   useEffect(() => {
     let active = true;
-    void loadSuggestions(assetIds).then(result => {
+    void Promise.resolve(loadSuggestions(assetIds)).then(result => {
       if (!active) return;
       const next = result.filter(item => targetById.has(item.targetId)).sort((a, b) => b.matched - a.matched || a.targetId.localeCompare(b.targetId)).slice(0, 3);
       setSuggestions(next);
@@ -56,11 +64,13 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
 
   const recommendedRows = suggestions.flatMap(suggestion => {
     const target = targetById.get(suggestion.targetId);
-    return target ? [{ key: `recommended:${target.id}`, target, context: seriesName(target), right: `${suggestion.total.toLocaleString("ko-KR")}장 중 ${suggestion.matched.toLocaleString("ko-KR")}장` }] : [];
+    if (!target || (activeScopeId && target.seriesClassificationId !== activeScopeId)) return [];
+    return [{ key: `recommended:${target.id}`, target, context: activeScopeId ? undefined : seriesName(target), right: `${suggestion.matched.toLocaleString("ko-KR")}/${suggestion.total.toLocaleString("ko-KR")}장 일치`, current: target.id === currentTargetId }];
   });
   const recentRows = recentIds.flatMap(id => {
     const target = targetById.get(id);
-    return target ? [{ key: `recent:${target.id}`, target, context: seriesName(target), right: formatCount(counts[target.id] ?? 0) }] : [];
+    if (!target || (activeScopeId && target.seriesClassificationId !== activeScopeId)) return [];
+    return [{ key: `recent:${target.id}`, target, context: activeScopeId ? undefined : seriesName(target), right: formatCount(counts[target.id] ?? 0), current: target.id === currentTargetId }];
   });
   const seriesSections = useMemo(() => buildSeriesSections(targets, groups, classifications, counts), [classifications, counts, groups, targets]);
   const filteredRecommended = recommendedRows.filter(row => matchesKoreanSearch([row.target.displayName, row.context], query));
@@ -73,10 +83,20 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
     const ungrouped = section.ungrouped.filter(row => matchesKoreanSearch([row.target.displayName, section.name], query));
     return grouped.length || ungrouped.length ? [{ ...section, groups: grouped, ungrouped }] : [];
   });
-  const visibleRows = [
+  const scopedSeries = activeScopeId ? filteredSeries.filter(section => section.id === activeScopeId) : filteredSeries;
+  const scopeRows = [
     ...filteredRecommended,
     ...filteredRecent,
-    ...filteredSeries.flatMap(section => [...section.groups.flatMap(group => group.rows), ...section.ungrouped]),
+    ...scopedSeries.flatMap(section => [...section.groups.flatMap(group => group.rows), ...section.ungrouped]),
+  ].map(row => row.target.id === currentTargetId ? { ...row, current: true, right: "현재" } : row);
+  const scopedNoMatch = Boolean(activeScopeId && query.trim() && scopeRows.length === 0);
+  const otherSeriesRows = scopedNoMatch
+    ? filteredSeries.filter(section => section.id !== activeScopeId).flatMap(section => [
+      ...section.groups.flatMap(group => group.rows), ...section.ungrouped,
+    ].map(row => ({ ...row, key: `other:${row.key}`, context: `${section.name} · 폴더 옮김`, current: false })))
+    : [];
+  const visibleRows = [
+    ...(scopedNoMatch ? otherSeriesRows : scopeRows),
   ];
   useEffect(() => {
     if (!visibleRows.some(row => row.key === highlightKey)) setHighlightKey(visibleRows[0]?.key ?? null);
@@ -116,10 +136,11 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
       }}>
       <CharacterThumbnail target={row.target} privacyMode={privacyMode} />
       <span className="character-assign-picker__name">{row.target.displayName}{row.context && <small>{row.context}</small>}</span>
-      <span className="character-assign-picker__count">{row.right}</span>
+      {row.current ? <span className="character-assign-picker__current">현재</span> : <span className="character-assign-picker__count">{row.right}</span>}
       {checked && <CheckIcon className="character-assign-picker__check" aria-hidden="true" />}
     </button>;
   };
+  const clearScope = () => { setActiveScopeId(null); setConfirmTargets(null); setMessage(null); };
   const keyDown = (event: React.KeyboardEvent) => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); return; }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -138,19 +159,38 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
   const checkedTargets = checkedIds.flatMap(id => targetById.get(id) ?? []);
 
   return <div className="character-assign-picker ui-menu" role="listbox" aria-label="캐릭터에 넣기" aria-multiselectable="true" onKeyDown={keyDown} onClick={event => event.stopPropagation()}>
-    <TextInput autoFocus type="search" role="searchbox" aria-label="캐릭터 찾기" icon={MagnifyingGlassIcon} value={query} onChange={event => { setQuery(event.target.value); setConfirmTargets(null); setMessage(null); }} autoComplete="off" />
+    <div className="character-assign-picker__search ui-text-input">
+      <MagnifyingGlassIcon aria-hidden="true" />
+      {activeScopeId && <button type="button" className="character-assign-picker__scope" aria-label={`${activeScopeName} 범위 해제`} onMouseDown={event => event.preventDefault()} onClick={clearScope}>
+        <span>{activeScopeName}</span><XMarkIcon aria-hidden="true" />
+      </button>}
+      <input autoFocus type="search" role="searchbox" aria-label="캐릭터 찾기" placeholder="캐릭터 찾기" value={query}
+        onChange={event => { setQuery(event.target.value); setConfirmTargets(null); setMessage(null); }}
+        onKeyDown={event => { if (event.key === "Backspace" && !query && activeScopeId) { event.preventDefault(); clearScope(); } }} autoComplete="off" />
+    </div>
     <div className="character-assign-picker__scroll" data-native-scrollbar="true">
-      {filteredRecommended.length > 0 && <PickerSection label="추천">{filteredRecommended.map(renderRow)}</PickerSection>}
-      {filteredRecent.length > 0 && <PickerSection label="최근">{filteredRecent.map(renderRow)}</PickerSection>}
-      {filteredSeries.map(section => <PickerSection key={section.id} label={section.name}>
+      {!scopedNoMatch && filteredRecommended.length > 0 && <PickerSection label="추천">{filteredRecommended.map(row => renderRow(row.target.id === currentTargetId ? { ...row, current: true, right: "현재" } : row))}</PickerSection>}
+      {!scopedNoMatch && filteredRecent.length > 0 && <PickerSection label="최근">{filteredRecent.map(row => renderRow(row.target.id === currentTargetId ? { ...row, current: true, right: "현재" } : row))}</PickerSection>}
+      {!scopedNoMatch && scopedSeries.map(section => <PickerSection key={section.id} label={section.name}>
         {section.groups.map(group => <div key={group.id} role="group" aria-label={group.name}>
           <div className="character-assign-picker__group-caption">{group.name}</div>
-          {group.rows.map(renderRow)}
+          {group.rows.map(row => renderRow(row.target.id === currentTargetId ? { ...row, current: true, right: "현재" } : row))}
         </div>)}
-        {section.ungrouped.map(renderRow)}
+        {section.ungrouped.map(row => renderRow(row.target.id === currentTargetId ? { ...row, current: true, right: "현재" } : row))}
       </PickerSection>)}
-      {visibleRows.length === 0 && <div className="character-assign-picker__empty">일치하는 캐릭터가 없습니다.</div>}
+      {scopedNoMatch && <>
+        <div className="character-assign-picker__empty character-assign-picker__empty--scoped">{activeScopeName}에 없음</div>
+        {otherSeriesRows.length > 0 && <PickerSection label="다른 시리즈">{otherSeriesRows.map(renderRow)}</PickerSection>}
+        {onCreate && <PickerSection label="새 캐릭터"><button type="button" className="character-assign-picker__create" onClick={() => void onCreate(query.trim())}>
+          <span className="character-assign-picker__create-icon"><PlusIcon aria-hidden="true" /></span><span>{activeScopeName}에 “{query.trim()}” 만들기</span>
+        </button></PickerSection>}
+        {otherSeriesRows.length === 0 && !onCreate && <div className="character-assign-picker__empty">일치하는 캐릭터가 없습니다.</div>}
+      </>}
+      {!scopedNoMatch && visibleRows.length === 0 && <div className="character-assign-picker__empty">일치하는 캐릭터가 없습니다.</div>}
     </div>
+    {activeScopeId && <button type="button" className="character-assign-picker__all-series" onClick={clearScope}>
+      <span className="character-assign-picker__all-series-icon"><Squares2X2Icon aria-hidden="true" /></span><span>모든 시리즈</span><ChevronRightIcon aria-hidden="true" />
+    </button>}
     {(message || confirmTargets) && <div className="character-assign-picker__message" role="status">
       {message ?? "시리즈가 다른 캐릭터 — 첫 캐릭터의 시리즈 폴더로 옮김"}
       {confirmTargets && <Button size="sm" onClick={() => { const chosen = confirmTargets; setConfirmTargets(null); void assign(chosen); }}>계속 넣기</Button>}
@@ -160,9 +200,9 @@ export function CharacterAssignPicker({ assetIds, targets, groups, classificatio
   </div>;
 }
 
-function PickerSection({ label, children }: { label: string; children: React.ReactNode }) {
+function PickerSection({ label, children }: { label?: string; children: React.ReactNode }) {
   return <section className="character-assign-picker__section" role="group" aria-label={label}>
-    <div className="character-assign-picker__section-label"><span aria-hidden="true" />{label}<i aria-hidden="true" /></div>
+    {label && <div className="character-assign-picker__section-label"><span aria-hidden="true" />{label}<i aria-hidden="true" /></div>}
     {children}
   </section>;
 }

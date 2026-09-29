@@ -157,6 +157,7 @@ function initialWorkspaceView(): AssetView {
   switch (new URLSearchParams(window.location.search).get("view")) {
     case "assets": return { kind: "classification", classificationId: null };
     case "assets-folder": return { kind: "classification", classificationId: "class-reverse" };
+    case "assets-parent": return { kind: "classification", classificationId: "class-game" };
     case "artists": return { kind: "artists" };
     case "artist": return { kind: "creator", creatorKey: "artist-1" };
     case "albums": return { kind: "albums" };

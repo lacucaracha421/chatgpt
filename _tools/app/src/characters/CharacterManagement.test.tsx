@@ -1,5 +1,5 @@
 import { within } from "@testing-library/react";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
@@ -169,41 +169,16 @@ it("shows inherited folder exclusions and lets the owning folder restore inclusi
 });
 
 
-it("paginates groups, characters and folders in two rows and clamps the page after resizing", async () => {
-  let resize = () => {};
-  vi.stubGlobal("ResizeObserver", class {
-    constructor(callback: () => void) { resize = callback; }
-    observe() {} disconnect() {} unobserve() {}
-  });
-  try {
-    const members = Array.from({ length: 7 }, (_, index) => fixtureTarget(`pilot-${index}`, `파일럿 ${index}`));
-    const group = { id: "group", name: "파일럿 그룹", revision: 1, targetIds: [members[0].id] };
-    const view = render(<CharacterGroups seriesId="series" members={members} groups={[group]} folderCards={[
-      <button key="machines">기체 폴더</button>, <button key="scenery">배경 폴더</button>,
-    ]}>{pageMembers => <>{pageMembers.map(member => <button key={member.id}>{member.displayName}</button>)}</>}</CharacterGroups>);
-    const grid = view.container.querySelector(".series-characters")!;
-    Object.defineProperty(grid, "clientWidth", { configurable: true, value: 400 });
-    act(() => resize());
-    expect(screen.getByRole("button", { name: "파일럿 그룹 그룹 열기" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "파일럿 3" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "파일럿 4" })).not.toBeInTheDocument();
-    const pages = screen.getByRole("navigation", { name: "캐릭터·폴더 페이지" });
-    expect(within(pages).getByRole("button", { name: "1페이지" })).toHaveAttribute("aria-current", "page");
-    const user = userEvent.setup();
-    await user.click(within(pages).getByRole("button", { name: "2페이지" }));
-    expect(screen.getByRole("button", { name: "파일럿 4" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "기체 폴더" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "파일럿 3" })).not.toBeInTheDocument();
-    await user.click(within(pages).getByRole("button", { name: "3페이지" }));
-    expect(screen.getByRole("button", { name: "배경 폴더" })).toBeInTheDocument();
-    Object.defineProperty(grid, "clientWidth", { configurable: true, value: 600 });
-    act(() => resize());
-    expect(within(pages).queryByRole("button", { name: "3페이지" })).not.toBeInTheDocument();
-    expect(within(pages).getByRole("button", { name: "2페이지" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: "배경 폴더" })).toBeInTheDocument();
-    view.rerender(<CharacterGroups seriesId="series" members={members.slice(0, 1)} groups={[]}>{pageMembers => <>{pageMembers.map(member => <button key={member.id}>{member.displayName}</button>)}</>}</CharacterGroups>);
-    expect(screen.queryByRole("navigation", { name: "캐릭터·폴더 페이지" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "파일럿 0" })).toBeInTheDocument();
-    view.unmount();
-  } finally { vi.unstubAllGlobals(); }
+it("keeps groups, characters and folders in one shelf without page controls", () => {
+  const members = Array.from({ length: 7 }, (_, index) => fixtureTarget(`pilot-${index}`, `파일럿 ${index}`));
+  const group = { id: "group", name: "파일럿 그룹", revision: 1, targetIds: [members[0].id] };
+  const view = render(<CharacterGroups seriesId="series" members={members} groups={[group]} folderCards={[
+    <button key="machines">기체 폴더</button>, <button key="scenery">배경 폴더</button>,
+  ]}>{pageMembers => <>{pageMembers.map(member => <button key={member.id}>{member.displayName}</button>)}</>}</CharacterGroups>);
+  const shelf = view.container.querySelector<HTMLElement>(".series-characters")!;
+  expect(screen.getByRole("button", { name: "파일럿 그룹 그룹 열기" })).toBeInTheDocument();
+  expect(within(shelf).getByRole("button", { name: "파일럿 6" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "기체 폴더" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "배경 폴더" })).toBeInTheDocument();
+  expect(screen.queryByRole("navigation", { name: "캐릭터·폴더 페이지" })).not.toBeInTheDocument();
 });

@@ -229,6 +229,16 @@ Menus, popovers and dialogs are square (radius 0) with the NieR corner brackets:
 - **Empty:** a faint 32px icon and one line ("이미지 없음"); one button only when there is a real next step.
 - **Error:** one line and "다시 시도"; codes and explanations go behind the ⓘ help button.
 
+### No flash on change
+
+Rule (user, 2026-09-29): content never blanks, flickers or jumps while it changes.
+
+- Switching a filter, scope, sort, folder or item keeps the current content on screen until the next content is ready, then swaps in one step. A skeleton appears only on a screen's first load, when there is nothing to keep showing. Stale content is non-interactive (`inert`) while it waits and is never dimmed.
+- Images: the element that loaded and decoded the next image is the one shown (two-slot swap, see `StableImage`); never swap `src` on the visible `<img>` — WebKitGTK does not reuse a preloaded `lakomics://` image and flashes blank. Hide a loading element with inline style, not the `hidden` attribute (component classes override it).
+- Video seeks hold the last good frame until the final seek lands.
+- No fade or slide on content switches; motion belongs to controls (a segmented thumb may slide, the list under it switches at once).
+- New views must follow this; `src/shared/noFlash.test.ts` fails on new resets to empty or `<img hidden>` (checklist in `docs/agents/implementation.md`).
+
 ### Dates and numbers
 
 Dot notation: current year `10.4`, other years `2025.9.28`, no zero padding; times are 24-hour `21:45`; "오늘 21:45" is written as just `21:45` in a dated group and `어제 21:45` for yesterday — no other relative times ("3분 전"). Days left `D-6`; past dates show the date only. Counts use thousands separators (`1,284`) and a unit without a space (`23장`, `17권`). Date group headings may use the longer `9월 28일 (일)`. Use the shared formatters in `src/shared/displayDate.ts`.

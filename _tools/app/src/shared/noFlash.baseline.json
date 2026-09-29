@@ -1,0 +1,58 @@
+{
+  "src/artists/ArtistPage.tsx": {
+    "blankingReset": 1,
+    "hiddenImage": 0
+  },
+  "src/characters/FolderCharacterRegistration.tsx": {
+    "blankingReset": 1,
+    "hiddenImage": 0
+  },
+  "src/characters/ReferenceCandidateDialog.tsx": {
+    "blankingReset": 1,
+    "hiddenImage": 0
+  },
+  "src/collections/AvEditPanel.tsx": {
+    "blankingReset": 1,
+    "hiddenImage": 0
+  },
+  "src/collections/AvLinkChooserDialog.tsx": {
+    "blankingReset": 2,
+    "hiddenImage": 0
+  },
+  "src/collections/AvLinkInbox.tsx": {
+    "blankingReset": 1,
+    "hiddenImage": 0
+  },
+  "src/collections/TmdbMovieDialog.tsx": {
+    "blankingReset": 2,
+    "hiddenImage": 0
+  },
+  "src/collections/av/AvPerformerPage.tsx": {
+    "blankingReset": 1,
+    "hiddenImage": 0
+  },
+  "src/external-vault/ExternalVaultBrowser.tsx": {
+    "blankingReset": 1,
+    "hiddenImage": 0
+  },
+  "src/manga/CatalogEditionsDialog.tsx": {
+    "blankingReset": 1,
+    "hiddenImage": 0
+  },
+  "src/manga/OnlineCatalogBrowser.tsx": {
+    "blankingReset": 1,
+    "hiddenImage": 0
+  },
+  "src/statistics/StatisticsPanel.tsx": {
+    "blankingReset": 1,
+    "hiddenImage": 0
+  },
+  "mobile-client/Catalog.tsx": {
+    "blankingReset": 2,
+    "hiddenImage": 0
+  },
+  "mobile-client/CatalogDuplicates.tsx": {
+    "blankingReset": 1,
+    "hiddenImage": 0
+  }
+}

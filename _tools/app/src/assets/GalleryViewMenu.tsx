@@ -20,8 +20,6 @@ type GalleryViewMenuProps = {
   onThumbnailRowHeightChange: (value: number) => void;
   aspectFilter?: AssetAspectFilter;
   onAspectFilterChange?: (value: AssetAspectFilter) => void;
-  directOnly?: boolean;
-  onDirectOnlyChange?: (value: boolean) => void;
   inspectorOpen?: boolean;
   inspectorAvailable?: boolean;
   onInspectorOpenChange?: (value: boolean) => void;
@@ -34,8 +32,6 @@ export function GalleryViewMenu({
   onThumbnailRowHeightChange,
   aspectFilter = "all",
   onAspectFilterChange,
-  directOnly,
-  onDirectOnlyChange,
   inspectorOpen,
   inspectorAvailable = true,
   onInspectorOpenChange,
@@ -60,9 +56,7 @@ export function GalleryViewMenu({
           {ASPECT_OPTIONS.map((option) => <button key={option.value} type="button" role="radio" aria-checked={aspectFilter === option.value} className="asset-view-menu__aspect" onClick={() => onAspectFilterChange(option.value)}>{option.icon}<span>{option.label}</span></button>)}
         </div>
       </section>}
-      {onDirectOnlyChange && <Switch label="하위 폴더 포함" checked={!directOnly} onChange={(event) => onDirectOnlyChange(!event.target.checked)} />}
       {onInspectorOpenChange && <Switch label="정보" checked={Boolean(inspectorOpen)} disabled={!inspectorAvailable} onChange={(event) => onInspectorOpenChange(event.target.checked)} />}
     </div>}
   />;
 }
-

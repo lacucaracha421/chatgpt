@@ -22,6 +22,16 @@ Lakomics를 구현하거나 수정할 때 다음 규칙을 적용합니다.
 - 기존 공통 UI로 표현할 수 없으면 먼저 그 Interface에 필요한 변형을 추가하고, 특정 화면 전용 구현은 실제로 동작이 다를 때만 만듭니다.
 - 공통 UI를 바꾸면 그 UI를 사용하는 모든 화면에 같은 결과가 나타나야 합니다.
 
+## No flash on change
+
+Every data view follows `DESIGN.md` §12 "No flash on change". Check it when building and when reviewing a diff:
+
+- A filter, scope, sort, folder or item change keeps the current content until the next first page/result arrives, then swaps once; stale content is `inert`, not dimmed. Do not reset list/page/data state to empty on such a change, and do not remount the view through a changing `key`.
+- A skeleton appears only on a screen's first load. Images swap through `StableImage` (the element that loaded the next image is the one shown); hide a loading element with inline style, never the `hidden` attribute. Video seeks hold the last good frame.
+- No fade or slide on content switches.
+- `src/shared/noFlash.test.ts` ratchets the patterns that caused past flashes (resets to empty, `<img hidden>`); a new occurrence fails. A deliberate reset (a different screen's first load, unmount) carries a `no-flash-ok: <reason>` comment on the same line. Lower the baseline with `UPDATE_NOFLASH_BASELINE=1` when a count goes down.
+- WebKitGTK (the PC app) shows flashes that Chrome and jsdom hide; say so when a change was not seen in the native app.
+
 ## Module 설계
 
 - 파일 저장, SQLite, 중복 검사, 썸네일 작업은 라이브러리 Module 안에 숨기고 화면에서 직접 처리하지 않습니다.

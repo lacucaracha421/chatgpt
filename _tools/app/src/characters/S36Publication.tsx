@@ -72,6 +72,21 @@ export function useS36Publication(api: S36PublicationApi) {
   return { settings, error, save };
 }
 
+/** Shared character-level S36 exclusion state for the editor and overflow menu. */
+export function useS36CharacterExclusion(seriesId: string, targetId: string | null, api: S36PublicationApi = s36PublicationApi) {
+  const publication = useS36Publication(api);
+  const enabled = Boolean(publication.settings?.series.includes(seriesId));
+  const excluded = Boolean(targetId && publication.settings?.excludedTargets.includes(targetId));
+  const toggle = useCallback(() => {
+    if (!publication.settings || !targetId || !enabled) return;
+    const next = excluded
+      ? publication.settings.excludedTargets.filter(id => id !== targetId)
+      : [...publication.settings.excludedTargets, targetId];
+    void publication.save(publication.settings.series, next);
+  }, [enabled, excluded, publication, targetId]);
+  return { ...publication, enabled, excluded, toggle };
+}
+
 /** Series header control: which model classifies this series automatically. */
 export function S36SeriesControl({ seriesId, seriesName, disabled, onChanged, readiness, api = s36PublicationApi }: { seriesId: string; seriesName: string; disabled?: boolean; onChanged?: () => void; readiness?: Map<string, S36Readiness>; api?: S36PublicationApi }) {
   const { settings, error, save } = useS36Publication(api);
@@ -125,12 +140,10 @@ export function S36SeriesControl({ seriesId, seriesName, disabled, onChanged, re
 
 /** Character control, meaningful only in an S36 series: leave this character to manual work. */
 export function S36CharacterExclusion({ seriesId, targetId, disabled, api = s36PublicationApi }: { seriesId: string; targetId: string; disabled?: boolean; api?: S36PublicationApi }) {
-  const { settings, error, save } = useS36Publication(api);
-  if (!settings || !settings.series.includes(seriesId)) return null;
-  const excluded = settings.excludedTargets.includes(targetId);
-  const next = excluded ? settings.excludedTargets.filter(id => id !== targetId) : [...settings.excludedTargets, targetId];
+  const { error, enabled, excluded, toggle } = useS36CharacterExclusion(seriesId, targetId, api);
+  if (!enabled) return null;
   return <label className="s36-exclusion">
-    <input type="checkbox" checked={excluded} disabled={disabled} aria-description="이 캐릭터는 S36 자동 분류 대신 직접 확인과 추천만 사용합니다" onChange={() => void save(settings.series, next)} />
+    <input type="checkbox" checked={excluded} disabled={disabled} aria-description="이 캐릭터는 S36 자동 분류 대신 직접 확인과 추천만 사용합니다" onChange={toggle} />
     <span>S36 제외{error && <small role="status">{error}</small>}</span>
   </label>;
 }

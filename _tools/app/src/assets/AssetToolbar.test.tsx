@@ -12,9 +12,9 @@ const baseProps = {
   classifications: [{ id: "game", kind: "root" as const, name: "게임", parentId: null, iconKey: null, colorKey: null }],
   albums: [{ id: "covers", name: "표지", parentId: null, iconKey: null, colorKey: null }],
   collections: [], sort: "newest" as AssetSort, mediaFilter: "all" as const, aspectFilter: "all" as const,
-  directOnly: false, metadataVisible: true, privacyMode: false, thumbnailRowHeight: 180,
+  metadataVisible: true, privacyMode: false, thumbnailRowHeight: 180,
   onPrivacyModeChange: vi.fn(), onSortChange: vi.fn(), onMediaFilterChange: vi.fn(), onAspectFilterChange: vi.fn(),
-  onDirectOnlyChange: vi.fn(), onMetadataVisibleChange: vi.fn(), onThumbnailRowHeightChange: vi.fn(), onReshuffle: vi.fn(),
+  onMetadataVisibleChange: vi.fn(), onThumbnailRowHeightChange: vi.fn(), onReshuffle: vi.fn(),
 };
 
 afterEach(cleanup);
@@ -64,15 +64,11 @@ it("offers reshuffle only from the random sort menu", async () => {
   expect(onReshuffle).toHaveBeenCalledOnce();
 });
 
-it("offers 하위 폴더 포함 only in a folder, off while the folder shows only itself", async () => {
+it("keeps the folder scope choice out of the 보기 menu", async () => {
   const user = userEvent.setup();
-  const onDirectOnlyChange = vi.fn();
-  renderChrome(<AssetToolbar {...baseProps} directOnly view={{ kind: "classification", classificationId: "game" }} onDirectOnlyChange={onDirectOnlyChange} />);
+  renderChrome(<AssetToolbar {...baseProps} view={{ kind: "classification", classificationId: "game" }} />);
   await user.click(screen.getByRole("button", { name: "보기" }));
-  const include = screen.getByRole("switch", { name: "하위 폴더 포함" });
-  expect(include).not.toBeChecked();
-  await user.click(include);
-  expect(onDirectOnlyChange).toHaveBeenCalledWith(false);
+  expect(screen.queryByRole("switch", { name: "하위 폴더 포함" })).not.toBeInTheDocument();
 });
 
 it("shows collection names and no folder count", () => {

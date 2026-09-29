@@ -6,6 +6,7 @@ import { LibraryProvider } from "../library/LibraryContext";
 import { ChromeSettingsDock, ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { WindowControls } from "../layout/WindowControls";
 import type { AssetPage, AssetSort, AssetSummary, AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
+import type { CharacterHubApi } from "../characters/hubApi";
 import { AssetBrowser, type AssetBrowserStatus, type AssetNavigationMemory } from "./AssetBrowser";
 
 const classifications: ClassificationEntry[] = [];
@@ -331,18 +332,70 @@ describe("AssetBrowser", () => {
     expect(Number.parseFloat(space.style.height)).toBeGreaterThan(10000);
   });
 
-  it("shows only the folder itself by default, maps 하위 폴더 포함 and every selectable sort", async () => {
-    const user = userEvent.setup();
+  it("shows only the folder itself by default and offers every selectable sort", async () => {
     const gateway = createGateway();
     const { rerender } = renderBrowser(gateway, { view: { kind: "classification", classificationId: "tag" } });
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ directOnly: true, sort: "newest" })));
-    await user.click(await screen.findByRole("button", { name: "보기" }));
-    await user.click(screen.getByRole("switch", { name: "하위 폴더 포함" }));
-    await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ directOnly: false, sort: "newest" })));
     for (const sort of ["oldest", "favorites", "random"] as const) {
       rerender(browserElement(gateway, { sort }));
       await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ sort, randomPivot: sort === "random" ? expect.stringMatching(/^[\da-f]{32}$/) : null })));
     }
+  });
+
+  it("shows direct child folders in a sorted shelf with the folder image filter", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway();
+    const entries: ClassificationEntry[] = [
+      { id: "parent", kind: "root", name: "상위", parentId: null, iconKey: null, colorKey: null, assetCount: 7, totalAssetCount: 20 },
+      { id: "child-b", kind: "tag", name: "베타", parentId: "parent", iconKey: null, colorKey: null, assetCount: 3, totalAssetCount: 11 },
+      { id: "child-a", kind: "tag", name: "알파", parentId: "parent", iconKey: null, colorKey: null, assetCount: 2, totalAssetCount: 5 },
+    ];
+    const folderShelfApi: Pick<CharacterHubApi, "seriesFolders"> = {
+      seriesFolders: vi.fn().mockResolvedValue([{ classificationId: "child-b", thumbnailAssetId: "thumb-beta" }]),
+    };
+    renderBrowser(gateway, { view: { kind: "classification", classificationId: "parent" }, classifications: entries, folderShelfApi });
+
+    expect(await screen.findByRole("heading", { name: "폴더 2" })).toBeVisible();
+    expect(screen.getAllByRole("button", { name: /폴더 열기/ }).map(button => button.getAttribute("aria-label"))).toEqual(["베타 폴더 열기", "알파 폴더 열기"]);
+    expect(screen.getByText("11장")).toBeVisible();
+    expect(screen.getByRole("radio", { name: "미분류 7" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "전체 20" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("button", { name: "미분류와 전체 설명" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "미분류와 전체 설명" }));
+    expect(screen.getByRole("dialog", { name: "미분류와 전체" })).toHaveTextContent("캐릭터와 하위 폴더까지 모두");
+
+    await user.click(screen.getByRole("radio", { name: "전체 20" }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ classificationId: "parent", directOnly: false })));
+  });
+
+  it("resets the folder image filter when the classification changes", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway();
+    const entries: ClassificationEntry[] = [
+      { id: "folder-a", kind: "root", name: "폴더 A", parentId: null, iconKey: null, colorKey: null, assetCount: 3, totalAssetCount: 8 },
+      { id: "leaf-a", kind: "tag", name: "자식 A", parentId: "folder-a", iconKey: null, colorKey: null, assetCount: 1, totalAssetCount: 2 },
+      { id: "folder-b", kind: "root", name: "폴더 B", parentId: null, iconKey: null, colorKey: null, assetCount: 4, totalAssetCount: 9 },
+      { id: "leaf-b", kind: "tag", name: "자식 B", parentId: "folder-b", iconKey: null, colorKey: null, assetCount: 1, totalAssetCount: 2 },
+    ];
+    const folderShelfApi: Pick<CharacterHubApi, "seriesFolders"> = { seriesFolders: vi.fn().mockResolvedValue([]) };
+    const { rerender } = renderBrowser(gateway, { view: { kind: "classification", classificationId: "folder-a" }, classifications: entries, folderShelfApi });
+    await user.click(await screen.findByRole("radio", { name: "전체 8" }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({ classificationId: "folder-a", directOnly: false, limit: 100 })));
+
+    rerender(browserElement(gateway, { view: { kind: "classification", classificationId: "folder-b" }, classifications: entries, folderShelfApi }));
+    expect(await screen.findByRole("radio", { name: "미분류 4" })).toHaveAttribute("aria-checked", "true");
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({ classificationId: "folder-b", directOnly: true, limit: 100 })));
+  });
+
+  it("does not show a shelf or folder image filter when there are no child folders", async () => {
+    const gateway = createGateway();
+    const entries: ClassificationEntry[] = [{ id: "leaf", kind: "root", name: "단일 폴더", parentId: null, iconKey: null, colorKey: null, assetCount: 2, totalAssetCount: 2 }];
+    const folderShelfApi: Pick<CharacterHubApi, "seriesFolders"> = { seriesFolders: vi.fn() };
+    renderBrowser(gateway, { view: { kind: "classification", classificationId: "leaf" }, classifications: entries, folderShelfApi });
+    await screen.findByRole("heading", { name: "자산이 없습니다" });
+    expect(screen.queryByRole("region", { name: "하위 폴더" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "폴더 이미지 필터" })).not.toBeInTheDocument();
+    expect(folderShelfApi.seriesFolders).not.toHaveBeenCalled();
   });
 
   it("replaces the random pivot only when reshuffled", async () => {
@@ -1154,9 +1207,9 @@ function withWorkspaceChrome(child: ReactNode) {
   );
 }
 
-type BrowserOptions = { navigationMemory?: AssetNavigationMemory; view?: AssetView; sort?: AssetSort; refreshVersion?: number; status?: (status: AssetBrowserStatus) => void };
-function browserElement(gateway: LibraryGateway, { navigationMemory, view = { kind: "classification", classificationId: null }, sort = "newest", refreshVersion = 0, status = vi.fn() }: BrowserOptions = {}) {
-  return <LibraryProvider gateway={gateway}>{withWorkspaceChrome(<AssetBrowser navigationMemory={navigationMemory} galleryLayout="justified" view={view} classifications={classifications} sort={sort} metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={refreshVersion} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} />)}</LibraryProvider>;
+type BrowserOptions = { navigationMemory?: AssetNavigationMemory; view?: AssetView; sort?: AssetSort; refreshVersion?: number; status?: (status: AssetBrowserStatus) => void; classifications?: ClassificationEntry[]; folderShelfApi?: Pick<CharacterHubApi, "seriesFolders"> };
+function browserElement(gateway: LibraryGateway, { navigationMemory, view = { kind: "classification", classificationId: null }, sort = "newest", refreshVersion = 0, status = vi.fn(), classifications: viewClassifications = classifications, folderShelfApi }: BrowserOptions = {}) {
+  return <LibraryProvider gateway={gateway}>{withWorkspaceChrome(<AssetBrowser navigationMemory={navigationMemory} galleryLayout="justified" view={view} classifications={viewClassifications} folderShelfApi={folderShelfApi} sort={sort} metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={refreshVersion} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={status} />)}</LibraryProvider>;
 }
 
 function asset(index: number) {

@@ -1,6 +1,5 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { afterEach, expect, it, vi } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, expect, it } from "vitest";
 import { CharacterGroups } from "./CharacterGroups";
 import { fixtureTarget } from "./characterFixtures";
 
@@ -48,43 +47,28 @@ it("omits a zero group count and counts ordinary folders separately", () => {
 
 it("starts a group view with its member tiles and no heading or back button", () => {
   render(<CharacterGroups seriesId="series" members={members} groups={groups} activeGroupId="group">{children}</CharacterGroups>);
-  expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "캐릭터 2" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "시리즈로" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "그룹 편집" })).not.toBeInTheDocument();
   expect(screen.getByLabelText("그룹 이름 그룹 캐릭터")).toBeInTheDocument();
   expect(screen.queryByText("캐릭터 3")).not.toBeInTheDocument();
 });
 
-it("shows a single row of cards per page when asked and pages the rest", async () => {
-  let resize = () => {};
-  vi.stubGlobal("ResizeObserver", class {
-    constructor(callback: () => void) { resize = callback; }
-    observe() {} disconnect() {} unobserve() {}
-  });
-  try {
-    const many = Array.from({ length: 5 }, (_, index) => fixtureTarget(`m-${index}`, `캐릭터 ${index}`));
-    const view = render(<CharacterGroups seriesId="series" members={many} groups={[]} rows={1}>{page => <>{page.map(member => <button key={member.id}>{member.displayName}</button>)}</>}</CharacterGroups>);
-    const grid = view.container.querySelector<HTMLElement>(".series-characters")!;
-    Object.defineProperty(grid, "clientWidth", { configurable: true, value: 400 });
-    act(() => resize());
-    expect(grid.style.getPropertyValue("--series-card-rows")).toBe("1");
-    expect(within(grid).getAllByRole("button").map(button => button.textContent)).toEqual(["캐릭터 0", "캐릭터 1"]);
-    const pages = screen.getByRole("navigation", { name: "캐릭터·폴더 페이지" });
-    expect(within(pages).getAllByRole("button")).toHaveLength(3);
-    await userEvent.setup().click(within(pages).getByRole("button", { name: "3페이지" }));
-    expect(within(grid).getAllByRole("button").map(button => button.textContent)).toEqual(["캐릭터 4"]);
-  } finally { vi.unstubAllGlobals(); }
+it("renders every card in one shelf without page controls", () => {
+  const many = Array.from({ length: 5 }, (_, index) => fixtureTarget(`m-${index}`, `캐릭터 ${index}`));
+  const view = render(<CharacterGroups seriesId="series" members={many} groups={[]}>{page => <>{page.map(member => <button key={member.id}>{member.displayName}</button>)}</>}</CharacterGroups>);
+  const shelf = view.container.querySelector<HTMLElement>(".series-characters")!;
+  expect(within(shelf).getAllByRole("button")).toHaveLength(5);
+  expect(screen.queryByRole("navigation", { name: "캐릭터·폴더 페이지" })).not.toBeInTheDocument();
 });
 
-it("counts suggestions and pages their tiles after registered characters", async () => {
-  const user = userEvent.setup();
-  render(<CharacterGroups seriesId="series" members={[members[0]]} groups={[]} rows={1}
+it("keeps suggestions in the same shelf after registered characters", () => {
+  render(<CharacterGroups seriesId="series" members={[members[0]]} groups={[]}
     suggestionCount={1} suggestionCards={[<button key="suggestion">새 캐릭터 제안</button>]}>
     {page => <>{page.map(member => <button key={member.id}>{member.displayName}</button>)}</>}
   </CharacterGroups>);
   expect(screen.getByRole("heading", { name: "캐릭터 1 · 제안 1" })).toBeVisible();
   expect(screen.getByRole("button", { name: "A" })).toBeVisible();
-  expect(screen.queryByRole("button", { name: "새 캐릭터 제안" })).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "2페이지" }));
   expect(screen.getByRole("button", { name: "새 캐릭터 제안" })).toBeVisible();
+  expect(screen.queryByRole("navigation", { name: "캐릭터·폴더 페이지" })).not.toBeInTheDocument();
 });
