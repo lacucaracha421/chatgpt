@@ -87,7 +87,7 @@ it('discards a late unlock reply after an automatic lock and never auto-unlocks'
   expect(mocked.native.mock.calls.filter(([op])=>op==='vaultUnlock')).toHaveLength(1);
 });
 
-it('uses recovery unlock, offers native video seeking, and consumes Back inside the viewer',async()=>{
+it('uses recovery unlock, offers shared video seeking, and consumes Back inside the viewer',async()=>{
   const backRef:{current:(()=>boolean)|null}={current:null};
   render(<PrivateVault onClose={vi.fn()} backRef={backRef}/>);
   fireEvent.click(await screen.findByRole('button',{name:'복구 키'}));
@@ -95,7 +95,9 @@ it('uses recovery unlock, offers native video seeking, and consumes Back inside 
   fireEvent.click(screen.getByRole('button',{name:'보관함 열기'}));
   fireEvent.click(await screen.findByRole('button',{name:'영상 제목 · 영상'}));
   const video=document.querySelector('video')!;
-  expect(video.controls).toBe(true);expect(video.getAttribute('src')).toBe(open.items[1].url);
+  expect(video.controls).toBe(false);expect(video.getAttribute('src')).toBe(open.items[1].url);
+  expect(screen.getByRole('slider',{name:'재생 위치'})).toBeTruthy();
+  expect(screen.getByRole('button',{name:'재생'})).toBeTruthy();
   expect(video.getAttribute('controlsList')).toContain('nodownload');
   act(()=>expect(backRef.current?.()).toBe(true));
   expect(document.querySelector('video')).toBeNull();

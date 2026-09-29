@@ -9,18 +9,19 @@ const progressApi = vi.hoisted(() => ({
   save: vi.fn(),
   clear: vi.fn(),
 }));
-vi.mock("../library/client", () => ({
-  libraryGateway: {
-    getVideoPlaybackProgress: progressApi.get,
-    saveVideoPlaybackProgress: progressApi.save,
-    clearVideoPlaybackProgress: progressApi.clear,
-  },
-}));
 
 beforeEach(() => {
   progressApi.get.mockResolvedValue(null);
   progressApi.save.mockResolvedValue(undefined);
   progressApi.clear.mockResolvedValue(undefined);
+  Object.defineProperty(globalThis, "__TAURI_INTERNALS__", {configurable: true, writable: true, value: {
+    invoke: (command: string, args?: {assetId?: string; positionMs?: number; durationMs?: number}) => {
+      if (command === "get_video_playback_progress") return progressApi.get(args?.assetId);
+      if (command === "save_video_playback_progress") return progressApi.save(args?.assetId, args?.positionMs, args?.durationMs);
+      if (command === "clear_video_playback_progress") return progressApi.clear(args?.assetId);
+      return Promise.reject(new Error(`Unexpected IPC command: ${command}`));
+    },
+  }});
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
   vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
@@ -33,9 +34,58 @@ afterEach(() => {
   progressApi.get.mockReset();
   progressApi.save.mockReset();
   progressApi.clear.mockReset();
+  Reflect.deleteProperty(globalThis, "__TAURI_INTERNALS__");
 });
 
 describe("VideoPlayer", () => {
+  it("accepts a host media URL and controlled chrome without changing playback on a media tap", () => {
+    const onControlsActivity = vi.fn();
+    const onError = vi.fn();
+    let element: HTMLVideoElement | null = null;
+    render(<VideoPlayer
+      asset={videoAsset()}
+      sourceUrl="https://tablet.invalid/ticket"
+      poster="https://tablet.invalid/poster"
+      autoPlay
+      loop
+      controlsVisible={false}
+      onControlsActivity={onControlsActivity}
+      togglePlaybackOnMediaClick={false}
+      scrubFrameUrlBuilder={null}
+      mediaRef={value => { element = value; }}
+      mediaEvents={{onError}}
+    />);
+
+    const video = screen.getByLabelText("sample.webm 영상");
+    expect(video).toHaveAttribute("src", "https://tablet.invalid/ticket");
+    expect(video).toHaveAttribute("poster", "https://tablet.invalid/poster");
+    expect(video).toHaveAttribute("autoplay");
+    expect(video).toHaveAttribute("loop");
+    expect(element).toBe(video);
+    expect(screen.getByTestId("video-player")).toHaveAttribute("data-controls-visible", "false");
+
+    fireEvent.click(video);
+    expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+    fireEvent.error(video);
+    expect(onError).toHaveBeenCalledOnce();
+    fireEvent.pointerMove(screen.getByTestId("video-player"));
+    expect(onControlsActivity).toHaveBeenCalled();
+  });
+
+  it("keeps timeline pointer gestures inside the player", () => {
+    const outerPointer = vi.fn();
+    render(<div onPointerDown={outerPointer} onPointerMove={outerPointer} onPointerUp={outerPointer}>
+      <VideoPlayer asset={videoAsset()} sourceUrl="https://tablet.invalid/ticket"/>
+    </div>);
+    const timeline = screen.getByRole("slider", {name: "재생 위치"});
+
+    fireEvent.pointerDown(timeline, {pointerId: 1, clientX: 20});
+    fireEvent.pointerMove(timeline, {pointerId: 1, clientX: 50});
+    fireEvent.pointerUp(timeline, {pointerId: 1, clientX: 50});
+
+    expect(outerPointer).not.toHaveBeenCalled();
+  });
+
   it("uses the playback stream and reflects native time events", () => {
     render(<VideoPlayer asset={videoAsset()} />);
     const video = screen.getByLabelText("sample.webm 영상");

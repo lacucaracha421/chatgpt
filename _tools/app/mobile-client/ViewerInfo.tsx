@@ -1,8 +1,10 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {ArrowTopRightOnSquareIcon, CheckIcon, ClipboardDocumentIcon, XMarkIcon} from '@heroicons/react/24/outline';
-import {Button, IconButton} from './ui';
+import {ArrowTopRightOnSquareIcon, CheckIcon, ClipboardDocumentIcon} from '@heroicons/react/24/outline';
+import {IconButton} from './ui';
 import type {Asset} from './types';
-import {dateLabel, durationLabel} from './model';
+import {durationLabel} from './model';
+import {displayDateTime} from '../src/shared/displayDate';
+import {formatBytes} from '../src/shared/formatBytes';
 import {errorText, native} from './transport';
 
 /**
@@ -45,9 +47,8 @@ export function sourceOpenUrl(url: string): string {
   }
 }
 
-function sourcePublishedLabel(value: string): string {
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toLocaleDateString('ko-KR', {year: 'numeric', month: '2-digit', day: '2-digit'}) : value;
+function dateTimeLabel(value: string | undefined | null, now = new Date()): string {
+  return value ? displayDateTime(value, now, {withTime: true}) : '';
 }
 
 export function creatorText(asset: Asset): string {
@@ -58,10 +59,7 @@ export function creatorText(asset: Asset): string {
 
 /** PC formats bytes as B/KB/MB/GB; mobile keeps the same thresholds so sizes compare directly. */
 export function sizeLabel(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1048576) return `${Math.round(bytes / 1024)} KB`;
-  if (bytes < 1073741824) return `${Math.round(bytes / 1048576)} MB`;
-  return `${(bytes / 1073741824).toFixed(1)} GB`;
+  return formatBytes(bytes);
 }
 
 /**
@@ -69,24 +67,23 @@ export function sizeLabel(bytes: number): string {
  * rows that also carry the copyable metadata summary, so the summary cannot drift
  * from what is on screen: it is generated from these same values.
  */
-export function infoFields(asset: Asset): {rows: (InfoField & {section: 'source' | 'file'; file?: boolean})[]; heading: string} {
+export function infoFields(asset: Asset, now = new Date()): {rows: (InfoField & {section: 'source' | 'file'; file?: boolean})[]; heading: string} {
   const kind = asset.kind === 'video' ? '영상' : '이미지';
   const source = openableSource(asset.source_url) ? asset.source_url : undefined;
-  const creator = creatorText(asset);
   const rows: (InfoField & {section: 'source' | 'file'; file?: boolean})[] = [];
-  if (creator) rows.push({key: 'creator', label: '작가', value: creator, section: 'source'});
-  if (source) rows.push({key: 'source', label: '출처', value: sourceLabel(source), section: 'source'});
+  if (source) rows.push({key: 'source', label: '게시물', value: sourceLabel(source), section: 'source'});
   // `source_published_at` is the only field that means a publication date. `created_at`
   // and `collected_at` are this library's own storage times, so neither may stand in for
   // it: when the server sends no publication time, the row is absent rather than wrong.
-  if (asset.source_published_at) rows.push({key: 'published', label: '게시 시각', value: sourcePublishedLabel(asset.source_published_at), section: 'source'});
-  rows.push({key: 'collected', label: asset.pending ? '수집 요청' : '수집일', value: dateLabel(asset), section: 'file', file: true});
+  if (asset.source_published_at) rows.push({key: 'published', label: '게시', value: dateTimeLabel(asset.source_published_at, now), section: 'source'});
   if (asset.width && asset.height) rows.push({key: 'dimensions', label: '해상도', value: `${asset.width.toLocaleString()} × ${asset.height.toLocaleString()}`, section: 'file', file: true});
+  if (asset.size_bytes != null) rows.push({key: 'size', label: '크기', value: sizeLabel(asset.size_bytes), section: 'file', file: true});
+  rows.push({key: 'format', label: '형식', value: asset.content_type || kind, section: 'file', file: true});
   const duration = durationLabel(asset);
   if (duration) rows.push({key: 'duration', label: '재생 시간', value: duration, section: 'file', file: true});
-  rows.push({key: 'format', label: '형식', value: asset.content_type || kind, section: 'file', file: true});
-  if (asset.size_bytes != null) rows.push({key: 'size', label: '크기', value: sizeLabel(asset.size_bytes), section: 'file', file: true});
-  return {rows, heading: asset.creator_name?.trim() || asset.creator_handle?.trim() || kind};
+  const imported = dateTimeLabel(asset.collected_at ?? asset.created_at, now);
+  rows.push({key: 'collected', label: asset.pending ? '수집 요청' : '가져옴', value: imported || '날짜 없음', section: 'file', file: true});
+  return {rows, heading: asset.creator_name?.trim() || (asset.creator_handle?.trim() ? handleLabel(asset.creator_handle) : '작가 미상')};
 }
 
 const SECTIONS: {key: 'source' | 'file'; title: string}[] = [{key: 'source', title: '출처'}, {key: 'file', title: '파일'}];
@@ -100,8 +97,8 @@ export function sectionHasVisibleTitle(rows: InfoField[], section: 'source' | 'f
 }
 
 /** `label: value` per line, covering exactly the 파일 정보 the panel shows. */
-export function summaryText(asset: Asset): string {
-  return infoFields(asset).rows.filter(row => row.file).map(row => `${row.label}: ${row.value.replace(/\n/g, ' ')}`).join('\n');
+export function summaryText(asset: Asset, now = new Date()): string {
+  return infoFields(asset, now).rows.filter(row => row.file).map(row => `${row.label}: ${row.value.replace(/\n/g, ' ')}`).join('\n');
 }
 
 /**
@@ -124,7 +121,7 @@ async function writeClipboard(text: string): Promise<void> {
  * Open/closed state and mutual exclusion with the Album and Classification editors stay in
  * `Viewer`, so those three overlays keep one owner.
  */
-export function ViewerInfo({asset, mediaError = '', onClose}: {asset: Asset; mediaError?: string; onClose(): void}) {
+export function ViewerInfo({asset, mediaError = ''}: {asset: Asset; mediaError?: string; onClose?(): void}) {
   const [status, setStatus] = useState<{kind: 'copied' | 'failed'; label: string} | null>(null);
   const [copied, setCopied] = useState('');
   const [busy, setBusy] = useState(false);
@@ -171,42 +168,53 @@ export function ViewerInfo({asset, mediaError = '', onClose}: {asset: Asset; med
   };
 
   const creator = creatorText(asset);
+  const artistHandle = asset.creator_name?.trim() && asset.creator_handle?.trim() && asset.creator_name.trim() !== asset.creator_handle.trim()
+    ? handleLabel(asset.creator_handle)
+    : '';
   const copiedLabel = (label: string) => copied === label;
 
   return <section className="viewer-info" aria-label="미디어 정보">
-    <header className="viewer-info-heading">
-      <span className="viewer-info-kind">{asset.kind === 'video' ? 'VIDEO' : 'IMAGE'}</span>
-      <h2>{heading}</h2>
-      <IconButton label="정보 닫기" icon={XMarkIcon} onClick={onClose}/>
+    <header className="viewer-info-heading" data-info-section="artist">
+      <div className="viewer-info-preview" aria-hidden="true">
+        {asset.preview ? <img src={asset.preview} alt="" draggable={false}/> : null}
+      </div>
+      <div className="viewer-info-artist">
+        <div className="viewer-info-artist-line">
+          <h2>{heading}</h2>
+          {creator && (
+            <IconButton label="작가 복사" icon={copiedLabel('작가') ? CheckIcon : ClipboardDocumentIcon} onClick={() => void copy(creator, '작가')} disabled={busy}/>
+          )}
+        </div>
+        {artistHandle && <span className="viewer-info-artist-handle">{artistHandle}</span>}
+      </div>
     </header>
     <div className="viewer-info-body">
       {SECTIONS.map(section => {
         const sectionRows = rows.filter(row => row.section === section.key);
         if (!sectionRows.length) return null;
-        return <dl key={section.key} className="viewer-info-group">
-          {sectionHasVisibleTitle(sectionRows, section.key) && <dt className="viewer-info-group-title">{section.title}</dt>}
+        return <section key={section.key} className="viewer-info-section" data-info-section={section.key}>
+          <div className="viewer-info-section-heading">
+            {sectionHasVisibleTitle(sectionRows, section.key) && <h3>{section.title}</h3>}
+            {section.key === 'file' && (
+              <IconButton label="파일 정보 복사" icon={copiedLabel('파일 정보') ? CheckIcon : ClipboardDocumentIcon} onClick={() => void copy(summaryText(asset), '파일 정보')} disabled={busy}/>
+            )}
+          </div>
+          <dl className="viewer-info-group">
           {sectionRows.map(row => <div key={row.key} className="viewer-info-row">
             <dt>{row.label}</dt>
-            <dd>{row.value}</dd>
+            <dd className="viewer-info-value">
+              <span>{row.value}</span>
+              {row.key === 'source' && source && <span className="viewer-info-value-actions">
+                <IconButton label="출처 복사" icon={copiedLabel('출처') ? CheckIcon : ClipboardDocumentIcon} onClick={() => void copy(source, '출처')} disabled={busy}/>
+                <IconButton label="출처 열기" icon={ArrowTopRightOnSquareIcon} onClick={() => void openSource()}/>
+              </span>}
+            </dd>
           </div>)}
-        </dl>;
+          </dl>
+        </section>;
       })}
-      <div className="viewer-info-actions">
-        {creator && <Button variant="ghost" disabled={busy} onClick={() => void copy(creator, '작가')}>
-          {copiedLabel('작가') ? <CheckIcon/> : <ClipboardDocumentIcon/>}작가 복사
-        </Button>}
-        {source && <Button variant="ghost" disabled={busy} onClick={() => void copy(source, '출처')}>
-          {copiedLabel('출처') ? <CheckIcon/> : <ClipboardDocumentIcon/>}출처 복사
-        </Button>}
-        <Button variant="ghost" disabled={busy} onClick={() => void copy(summaryText(asset), '파일 정보')}>
-          {copiedLabel('파일 정보') ? <CheckIcon/> : <ClipboardDocumentIcon/>}파일 정보 복사
-        </Button>
-        {source && <Button onClick={() => void openSource()}>
-          <ArrowTopRightOnSquareIcon/>출처 열기
-        </Button>}
-      </div>
       {status && <p className={`viewer-info-copy ${status.kind}`} role="alert">
-        {status.kind === 'copied' ? `${status.label} 정보를 클립보드에 복사했습니다.` : status.label}
+        {status.kind === 'copied' ? `${status.label}를 클립보드에 복사했습니다.` : status.label}
       </p>}
       {mediaError && <p className="viewer-info-media-error" role="status">{mediaError}</p>}
     </div>

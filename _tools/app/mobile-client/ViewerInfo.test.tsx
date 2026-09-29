@@ -1,6 +1,7 @@
 import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
+import {displayDateTime} from '../src/shared/displayDate';
 const mocks = vi.hoisted(() => ({native: vi.fn()}));
 vi.mock('./transport', () => ({
   native: mocks.native,
@@ -16,6 +17,7 @@ const asset = (overrides: Partial<Asset> = {}): Asset => ({
   ...overrides,
 });
 const clipboard = {writeText: vi.fn()};
+const NOW = new Date('2026-09-29T12:00:00+09:00');
 
 beforeEach(() => {
   mocks.native.mockReset();
@@ -29,8 +31,8 @@ afterEach(cleanup);
 
 describe('ViewerInfo field projection', () => {
   it('renders only fields the Asset actually carries', () => {
-    const {rows} = infoFields(asset());
-    expect(rows.map(row => row.label)).toEqual(['작가', '출처', '수집일', '해상도', '형식', '크기']);
+    const {rows} = infoFields(asset(), NOW);
+    expect(rows.map(row => row.label)).toEqual(['게시물', '해상도', '크기', '형식', '가져옴']);
     expect(rows.map(row => row.value)).toContain('1,200 × 800');
     expect(rows.map(row => row.value)).toContain('472 KB');
   });
@@ -41,7 +43,7 @@ describe('ViewerInfo field projection', () => {
   });
   it('omits unknown dimensions, size and duration instead of inventing them', () => {
     const {rows} = infoFields({id: 'a', kind: 'video', preview: 'x'});
-    expect(rows.map(row => row.label)).toEqual(['수집일', '형식']);
+    expect(rows.map(row => row.label)).toEqual(['형식', '가져옴']);
     expect(rows.map(row => row.value)).toContain('영상');
   });
   it('shows a video duration including a legitimate zero', () => {
@@ -50,11 +52,11 @@ describe('ViewerInfo field projection', () => {
     expect(infoFields({id: 'v', kind: 'video', duration_ms: null}).rows.map(row => row.label)).not.toContain('재생 시간');
   });
   it('keeps the post time distinct from the imported date', () => {
-    const {rows} = infoFields(asset({created_at: '2026-08-01T00:00:00Z', source_published_at: '2026-07-01T00:00:00Z'}));
-    const posted = rows.find(row => row.label === '게시 시각');
-    const expected = new Date('2026-07-01T00:00:00Z').toLocaleDateString('ko-KR', {year: 'numeric', month: '2-digit', day: '2-digit'});
+    const {rows} = infoFields(asset({created_at: '2026-08-01T00:00:00Z', source_published_at: '2026-07-01T00:00:00Z'}), NOW);
+    const posted = rows.find(row => row.label === '게시');
+    const expected = displayDateTime('2026-07-01T00:00:00Z', NOW, {withTime: true});
     expect(posted?.value).toBe(expected);
-    expect(rows.filter(row => row.label === '수집일')).toHaveLength(1);
+    expect(rows.filter(row => row.label === '가져옴')).toHaveLength(1);
   });
   it('never presents a storage time as the publication time', () => {
     // `created_at`/`collected_at` are this library's own storage times, not publication
@@ -67,10 +69,10 @@ describe('ViewerInfo field projection', () => {
       {source_published_at: null},
     ]) {
       const {rows} = infoFields(asset(candidate));
-      expect(rows.map(row => row.label)).not.toContain('게시 시각');
+      expect(rows.map(row => row.label)).not.toContain('게시');
     }
-    const {rows} = infoFields(asset({created_at: '2026-08-01T00:00:00Z', source_published_at: '2026-07-01T00:00:00Z'}));
-    expect(rows.filter(row => row.label === '게시 시각')).toHaveLength(1);
+    const {rows} = infoFields(asset({created_at: '2026-08-01T00:00:00Z', source_published_at: '2026-07-01T00:00:00Z'}), NOW);
+    expect(rows.filter(row => row.label === '게시')).toHaveLength(1);
   });
   it('labels a pending capture without pretending it has a date', () => {
     const {rows} = infoFields({id: 'p', kind: 'image', pending: true});
@@ -95,22 +97,21 @@ describe('ViewerInfo field projection', () => {
     expect(sizeLabel(9_700_000_000)).toBe('9.0 GB');
   });
   it('builds the copy summary from the same values the file rows show', () => {
-    expect(summaryText(asset())).toBe('수집일: 2026. 09. 06.\n해상도: 1,200 × 800\n형식: image/webp\n크기: 472 KB');
+    expect(summaryText(asset(), NOW)).toBe('해상도: 1,200 × 800\n크기: 472 KB\n형식: image/webp\n가져옴: 9.6 21:00');
   });
 });
 
 describe('ViewerInfo section headings', () => {
-  it('suppresses a heading that would only repeat the row beneath it', () => {
-    // With no creator, 출처 is both this section's title and its first row label.
+  it('keeps the PC section headings beside the ordered rows', () => {
     const rows = infoFields({id: 'a', kind: 'image', source_url: 'https://example.com/posts/42'});
-    expect(sectionHasVisibleTitle(rows.rows.filter(row => row.section === 'source'), 'source')).toBe(false);
-    // The file section always starts with 수집일, so its heading still earns its space.
+    expect(rows.rows.filter(row => row.section === 'source').map(row => row.label)).toEqual(['게시물']);
+    expect(sectionHasVisibleTitle(rows.rows.filter(row => row.section === 'source'), 'source')).toBe(true);
     expect(sectionHasVisibleTitle(rows.rows.filter(row => row.section === 'file'), 'file')).toBe(true);
   });
   it('keeps the heading when the first row is not that title', () => {
-    // 작가 comes first here, so the 출처 heading still tells the reader what the section is.
+    // 게시물 comes first here, so the 출처 heading still tells the reader what the section is.
     const rows = infoFields(asset()).rows.filter(row => row.section === 'source');
-    expect(rows[0].label).toBe('작가');
+    expect(rows[0].label).toBe('게시물');
     expect(sectionHasVisibleTitle(rows, 'source')).toBe(true);
   });
   it('renders no empty heading for a section with no rows', () => {
@@ -119,29 +120,30 @@ describe('ViewerInfo section headings', () => {
 });
 
 describe('ViewerInfo panel', () => {
-  it('is media-first and compact: heading, sections, one explicit close control', () => {
-    render(<ViewerInfo asset={asset()} onClose={() => {}}/>);
+  it('matches the PC order with a preview header and no internal close button', () => {
+    const {container} = render(<ViewerInfo asset={asset({preview: 'https://example.com/thumb.webp'})} onClose={() => {}}/>);
     expect(screen.getByRole('heading', {level: 2}).textContent).toBe('서유진');
-    expect(screen.getByText('IMAGE')).toBeTruthy();
-    expect(screen.getByRole('button', {name: '정보 닫기'})).toBeTruthy();
-    // 작가 leads this fixture's 출처 section, so the heading stays distinct from the rows.
-    expect(screen.getAllByText('출처')).toHaveLength(2);
-    expect(screen.getByText('작가')).toBeTruthy();
+    expect(screen.getByText('@bluealex1203')).toBeTruthy();
+    expect(container.querySelector('.viewer-info-preview img')?.getAttribute('src')).toBe('https://example.com/thumb.webp');
+    expect(screen.queryByText('IMAGE')).toBeNull();
+    expect(screen.queryByRole('button', {name: /닫기/})).toBeNull();
+    expect(screen.getByRole('heading', {name: '출처'})).toBeTruthy();
+    expect(screen.getByRole('heading', {name: '파일'})).toBeTruthy();
+    expect(screen.getByText('게시물')).toBeTruthy();
     expect(screen.getByText('example.com/posts/42')).toBeTruthy();
-    expect(screen.getByText('파일')).toBeTruthy();
+    expect([...container.querySelectorAll('[data-info-section]')].map(node => node.getAttribute('data-info-section'))).toEqual(['artist', 'source', 'file']);
+    expect([...container.querySelectorAll('.viewer-info-row > dt')].map(node => node.textContent)).toEqual(['게시물', '해상도', '크기', '형식', '가져옴']);
+    expect(container.querySelector('.viewer-info-actions')).toBeNull();
+    expect(screen.getByRole('button', {name: '작가 복사'}).closest('.viewer-info-artist-line')).toBeTruthy();
+    expect(screen.getByRole('button', {name: '출처 복사'}).closest('.viewer-info-value')).toBeTruthy();
+    expect(screen.getByRole('button', {name: '파일 정보 복사'}).closest('.viewer-info-section-heading')).toBeTruthy();
   });
-  it('drops the 출처 heading when it would be the section\'s first label', () => {
-    // No creator is known, so 출처 is both the section title and its first row.
+  it('omits data that is not part of the tablet Asset projection', () => {
     const {container} = render(<ViewerInfo asset={{id: 'a', kind: 'image', source_url: 'https://example.com/posts/42'}} onClose={() => {}}/>);
-    const headings = [...container.querySelectorAll('.viewer-info-group-title')].map(node => node.textContent);
-    expect(headings).toEqual(['파일']);
-    expect(screen.getAllByText('출처')).toHaveLength(1);
-  });
-  it('closes through the labelled control', () => {
-    const close = vi.fn();
-    render(<ViewerInfo asset={asset()} onClose={close}/>);
-    fireEvent.click(screen.getByRole('button', {name: '정보 닫기'}));
-    expect(close).toHaveBeenCalledOnce();
+    expect([...container.querySelectorAll('[data-info-section]')].map(node => node.getAttribute('data-info-section'))).toEqual(['artist', 'source', 'file']);
+    expect(screen.queryByText('같은 게시물')).toBeNull();
+    expect(screen.queryByText('자동 태그')).toBeNull();
+    expect(screen.queryByText('폴더')).toBeNull();
   });
   it('copies creator, source and metadata summary through the native bridge', async () => {
     // The bridge must be present, otherwise the panel correctly prefers the browser API.
@@ -156,7 +158,7 @@ describe('ViewerInfo panel', () => {
     await waitFor(() => expect(mocks.native.mock.calls[1]?.[1]).toEqual({text: 'https://example.com/posts/42'}));
     fireEvent.click(screen.getByRole('button', {name: '파일 정보 복사'}));
     await waitFor(() => expect(mocks.native.mock.calls[2]?.[1]).toEqual({text: summaryText(asset())}));
-    expect(await screen.findByText('파일 정보 정보를 클립보드에 복사했습니다.')).toBeTruthy();
+    expect(await screen.findByText('파일 정보를 클립보드에 복사했습니다.')).toBeTruthy();
   });
   it('labels the summary action as the file information it actually copies', () => {
     const {rows} = infoFields(asset());
@@ -223,6 +225,15 @@ describe('ViewerInfo panel', () => {
     await waitFor(() => expect(screen.getByRole('heading', {level: 2}).textContent).toBe('다른 작가'));
     expect(screen.queryByText(/복사했습니다/)).toBeNull();
     expect(document.querySelector('.viewer-info-copy')).toBeNull();
+  });
+  it('swaps the open panel content in place when the Asset changes', () => {
+    const {container, rerender} = render(<ViewerInfo asset={asset()} onClose={() => {}}/>);
+    const panel = container.querySelector('.viewer-info')!;
+    rerender(<ViewerInfo asset={asset({id: 'b', creator_name: '다른 작가', source_url: 'https://example.com/posts/99'})} onClose={() => {}}/>);
+    expect(container.querySelector('.viewer-info')).toBe(panel);
+    expect(screen.getByRole('heading', {level: 2}).textContent).toBe('다른 작가');
+    expect(screen.getByText('example.com/posts/99')).toBeTruthy();
+    expect(screen.queryByText('example.com/posts/42')).toBeNull();
   });
   it('drops a stale copy failure after the Asset changes', async () => {
     Object.defineProperty(window, 'LakomicsNative', {configurable: true, value: {request: vi.fn(), cancel: vi.fn()}});

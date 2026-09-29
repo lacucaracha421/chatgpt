@@ -1,6 +1,6 @@
 @import '../src/styles/tokens.css';
 @import '../src/styles/controls.css';
-:root { color-scheme: dark; --touch:44px; --mobile-gutter:24px; --mobile-header:64px; --mobile-nav:64px; --mobile-row-gap:10px; --type-title:22px; --type-body:17px; --type-meta:13px; --type-number:28px; --control-height:44px; --control-height-compact:36px; --touch-target:44px; --row-height:48px; --row-height-2:64px; --badge-height:24px; --badge-icon:16px; --checkbox-size:20px; --checkbox-inset:4px; --switch-width:40px; --switch-height:22px; }
+:root { color-scheme: dark; --selection-check-size:28px; --touch:44px; --mobile-gutter:24px; --mobile-header:64px; --mobile-nav:64px; --mobile-row-gap:10px; --gallery-date-heading-height:44px; --type-title:22px; --type-body:17px; --type-meta:13px; --type-number:28px; --control-height:44px; --control-height-compact:36px; --touch-target:44px; --row-height:48px; --row-height-2:64px; --badge-height:24px; --badge-icon:16px; --checkbox-size:20px; --checkbox-inset:4px; --switch-width:40px; --switch-height:22px; }
 * { box-sizing:border-box; }
 html, body, #root { margin:0; width:100%; height:100%; overflow:hidden; }
 body { background:var(--color-bg); color:var(--color-text); font:var(--type-body)/1.5 var(--font-ui); -webkit-tap-highlight-color:transparent; }
@@ -66,8 +66,15 @@ h1,h2,h3,p { margin:0; }
 .density-0 { letter-spacing:3px; }.density-2 { transform:scaleX(.75); }
 .gallery-scroll { flex:1; min-height:140px; overflow:auto; padding:18px 16px 0; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:var(--color-border) transparent; }
 .gallery-canvas { width:100%; position:relative; }
+.gallery-justified-unit { position:absolute; inset:0 0 auto; width:100%; background:var(--color-bg); }
 .gallery-row { position:absolute; top:0; left:0; display:flex; gap:var(--mobile-row-gap); width:100%; }
-.media-tile { padding:0; background:none; border:0; text-align:left; flex-shrink:0; min-width:0; border-radius:var(--radius-tile); overflow:hidden; }
+.gallery-row-segment { display:flex; flex:none; }
+.gallery-date-heading { position:absolute; left:0; right:0; height:var(--gallery-date-heading-height); display:flex; align-items:baseline; gap:var(--space-2); line-height:var(--gallery-date-heading-height); color:var(--color-muted); font-family:var(--font-numeric); font-size:var(--type-meta); font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; }
+.gallery-date-heading__day { min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--color-text); font-weight:500; }
+.gallery-date-heading__weekday { color:var(--color-faint); font-family:var(--font-ui); font-weight:400; }
+.gallery-date-heading__rule { align-self:center; flex:1; min-width:0; height:var(--border-width); margin:0 var(--space-1); background:var(--color-border); }
+.gallery-date-heading__count { flex:none; color:var(--color-muted); }
+.media-tile { position:relative; padding:0; background:none; border:0; text-align:left; flex-shrink:0; min-width:0; border-radius:var(--radius-tile); overflow:hidden; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; touch-action:pan-y; }
 .tile-picture { background:var(--color-surface); display:flex; align-items:center; justify-content:center; position:relative; width:100%; overflow:hidden; border-radius:var(--radius-tile); }
 .tile-picture img { width:100%; height:100%; object-fit:contain; display:block; }
 .missing-media { color:var(--color-muted); width:26px; height:26px; opacity:.45; }
@@ -216,6 +223,18 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .album-membership-name{flex:1;min-width:0;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
 .album-membership-row small{color:var(--color-muted);white-space:nowrap;font-size:11px}
 .album-membership-entry.is-blocked small{color:var(--color-danger)}
+.album-batch-list{display:flex;flex-direction:column;max-height:min(62dvh,620px);overflow:auto;margin-top:8px}
+.album-batch-entry{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding-block:8px;padding-right:12px;border:0;border-bottom:1px solid var(--color-border);background:transparent;text-align:left;color:var(--color-text)}
+.album-batch-entry:active:not(:disabled){background:var(--color-surface-pressed)}
+.album-batch-entry>svg{width:20px;height:20px;color:var(--color-muted);flex:none}
+.album-batch-entry>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.album-batch-progress,.album-batch-confirmation{margin:8px 0;color:var(--color-muted);font-size:var(--type-meta);font-variant-numeric:tabular-nums}
+.album-batch-confirmation{color:var(--color-success)}
+.mobile-app .asset-selection-bar{position:absolute;z-index:30;right:var(--mobile-gutter);bottom:var(--space-3);left:var(--mobile-gutter);display:flex;align-items:center;gap:var(--space-2);width:auto;max-width:720px;margin-inline:auto;min-height:var(--touch-target);padding:var(--space-1);background:var(--color-surface-raised);border:1px solid var(--color-border);border-radius:var(--radius-sm);box-shadow:var(--shadow-floating)}
+.mobile-app .asset-selection-bar>strong{flex:none;padding:0 var(--space-1);font-size:var(--type-body);font-weight:600;white-space:nowrap}
+.mobile-app .asset-selection-bar .view-toolbar__divider{width:1px;height:24px;background:var(--color-border);flex:none}
+.mobile-app .asset-selection-bar .ui-button--primary{flex:1;min-width:0}
+.mobile-app .asset-selection-bar .ui-button--primary>svg{width:20px;height:20px}
 /* Single-Asset Classification assignment.
    The picker composes with the existing Classification tree idiom rather than introducing a
    parallel one: it carries `.classification-index` (which also selects the portrait
@@ -344,10 +363,25 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 /* 보기 옵션 in the folder bar: quiet at the defaults; PC grey face and a count once changed. */
 .top-bar .top-bar__options.is-changed { width:auto; gap:6px; padding:0 10px; background:var(--color-filter-selected); border-color:var(--color-filter-border); color:var(--color-filter-text); }
 .top-bar__options-count { font-size:14px; line-height:1; }
-/* The 보기 옵션 sheet groups the gallery's filters above the thumbnail size. */
-.library-sheet .view-options-label { margin:4px 0 6px; font-size:13px; color:var(--color-muted); }
-.library-sheet .filter-chips { padding:0 0 14px; flex-wrap:wrap; }
+/* Asset galleries keep the title and all controls on one row in both orientations. */
+.asset-topbar { flex-wrap:nowrap; }
+.asset-topbar .top-bar__titles { flex:1 1 auto; min-width:0; overflow:hidden; }
+.asset-topbar .top-bar__space { flex:0 0 4px; }
+.asset-topbar__kind-control { display:flex; align-items:center; flex:none; }
+.asset-topbar .filter-chips { flex:none; }
+/* Compact toolbar buttons share one look: body size, weight 400, muted (DESIGN.md §12 Controls). */
+.asset-topbar__sort, .asset-topbar__sort.ui-button { flex:none; gap:5px; white-space:nowrap; color:var(--color-muted); font-size:var(--type-body); font-weight:400; }
+.asset-topbar__sort svg { width:16px; height:16px; color:var(--color-muted); }
+/* One centre line for every bar control: the segmented track is 44px (its cells fill it), the
+   compact buttons sit centred at 36px with their own 44px hit area. */
+.asset-topbar > *, .asset-topbar .filter-chips--toolbar { align-self:center; }
+.asset-topbar .filter-chip--toolbar, .asset-topbar__sort { line-height:1; }
+.asset-topbar .top-bar__title h1 { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .view-options-host:empty { display:none; }
+@media (max-width:760px) {
+  .asset-topbar__sort > span { display:none; }
+  .asset-topbar__sort { width:var(--touch); padding:10px; gap:0; }
+}
 /* Stepped slider (썸네일 크기, 내 별점): a 44px touch row, an ivory filled track up to the thumb,
    and a short tick under the default step. */
 .step-slider { display:flex; flex-direction:column; gap:2px; margin:4px 0 10px; }
@@ -364,3 +398,43 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 /* Page and scope loads show only here: over the bar's bottom border, never inside the content. */
 .top-bar__progress, .app-header .top-bar__progress { position:absolute; left:0; right:0; bottom:-1px; margin:0; z-index:4; }
 .app-header { position:relative; }
+
+/* Tablet folder and character shelves share the PC FolderShelf order. The card size is larger
+   than PC's 132 x 170 so the same portrait row remains comfortable to tap. */
+.folder-shelf { min-width:0; }
+.folder-shelf > .folder-shelf__label { margin:0 0 var(--space-3); }
+.folder-shelf .home-shelf__track { gap:var(--space-3); padding:2px 0 var(--space-2); touch-action:pan-x; }
+.folder-shelf .home-shelf__track > * { width:148px; min-width:148px; flex:0 0 148px; }
+.folder-shelf .home-shelf__arrow { top:95px; }
+.folder-shelf__card { position:relative; min-width:0; }
+.folder-shelf__card-open { display:flex; flex-direction:column; width:148px; min-width:0; padding:0; border:0; background:transparent; color:var(--color-text); text-align:left; cursor:pointer; }
+.folder-shelf__card-open > .home-cover-group,
+.folder-shelf .character-card-image { display:flex; width:148px; height:190px; flex:none; box-sizing:border-box; align-items:center; justify-content:center; overflow:hidden; border-radius:var(--radius-mark); background:var(--color-surface); }
+.folder-shelf__card-open > .home-cover-group { display:grid; grid-template-columns:2fr 1fr; grid-template-rows:1fr 1fr; gap:2px; }
+.folder-shelf__card-open > .home-cover-group.single { grid-template-columns:1fr; }
+.folder-shelf__card-open .home-cover { border-radius:0; }
+.folder-shelf__card-open > strong,
+.folder-shelf .character-card-caption strong { display:flex; align-items:center; gap:var(--space-1); width:148px; min-width:0; margin-top:var(--space-1); overflow:hidden; font-size:var(--type-body); font-weight:500; line-height:var(--line-ui); }
+.folder-shelf__icon,
+.folder-shelf .character-card-caption strong > svg { display:flex; width:16px; height:16px; flex:none; color:var(--color-muted); }
+.folder-shelf__icon > svg { width:16px; height:16px; }
+/* The shared ShelfScroller root is also named .home-shelf; the tablet Home stylesheet's own
+   .home-shelf row (fixed height, negative right margin, its own scrolling) must not apply to it,
+   or the whole folder view pans sideways. Only the inner track scrolls. */
+.folder-shelf .home-shelf { display:block; height:auto; margin-right:0; padding-right:0; overflow:visible; }
+.folder-shelf__name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.folder-shelf__meta { display:block; width:148px; min-width:0; margin-top:var(--space-1); overflow:hidden; color:var(--color-faint); font-size:var(--type-meta); font-variant-numeric:tabular-nums; line-height:var(--line-ui); white-space:nowrap; text-overflow:ellipsis; }
+.folder-shelf__card-open:active { color:var(--color-text); }
+.folder-shelf__card-open:active > .home-cover-group,
+.folder-shelf .character-card:active .character-card-image { background:var(--color-surface-pressed); }
+.folder-shelf__card-open:focus-visible { outline:var(--focus-width) solid var(--color-focus); outline-offset:var(--space-1); }
+.folder-shelf__tool { position:absolute; top:var(--space-1); right:var(--space-1); width:44px; height:44px; }
+.folder-filter { display:flex; align-items:center; gap:var(--space-2); min-height:var(--control-height); margin-top:var(--space-3); }
+.folder-filter__explanation { display:grid; gap:var(--space-2); color:var(--color-muted); font-size:var(--type-meta); line-height:var(--line-copy); }
+.folder-filter__explanation p { margin:0; }
+.folder-filter__explanation strong { color:var(--color-text); font-weight:600; }
+.series-breadcrumb { display:inline-flex; align-items:center; min-width:0; max-width:100%; gap:var(--space-1); }
+.series-breadcrumb > span { display:inline-flex; align-items:center; min-width:0; }
+.series-breadcrumb button { min-width:0; max-width:8em; overflow:hidden; padding:0; border:0; background:transparent; color:var(--color-muted); font:inherit; text-overflow:ellipsis; white-space:nowrap; }
+.series-breadcrumb button:active { color:var(--color-text); }
+.series-breadcrumb svg { width:16px; height:16px; flex:none; color:var(--color-muted); }

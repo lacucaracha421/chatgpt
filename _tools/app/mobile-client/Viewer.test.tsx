@@ -5,8 +5,8 @@ import {readFileSync} from 'node:fs';
 // Radix's dialog focus/escape machinery schedules work outside `fireEvent`, so the
 // environment must advertise `act` support for those updates to be flushed.
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?: boolean}).IS_REACT_ACT_ENVIRONMENT = true;
-const mocks=vi.hoisted(()=>({ticket:vi.fn(),decode:vi.fn(),info:vi.fn()}));
-vi.mock('./media',()=>({mediaTicket:mocks.ticket,decodeImage:mocks.decode,invalidateTicket:vi.fn()}));
+const mocks=vi.hoisted(()=>({ticket:vi.fn(),decode:vi.fn(),thumbnail:vi.fn(),info:vi.fn()}));
+vi.mock('./media',()=>({mediaTicket:mocks.ticket,decodeImage:mocks.decode,loadThumbnail:mocks.thumbnail,invalidateTicket:vi.fn()}));
 vi.mock('./AlbumMembershipEditor',()=>({AlbumMembershipEditor:({open}:{open:boolean})=>open?<div>album-editor-open</div>:null}));
 vi.mock('./ClassificationAssignmentEditor',()=>({ClassificationAssignmentEditor:({open}:{open:boolean})=>open?<div>classification-editor-open</div>:null}));
 vi.mock('./ViewerInfo',()=>({ViewerInfo:(props:{asset:Asset;mediaError:string;onClose():void})=>{mocks.info(props);return <div>viewer-info-open<button aria-label="정보 닫기" onClick={props.onClose}/></div>;}}));
@@ -14,7 +14,7 @@ import {Viewer} from './Viewer';
 const items:Asset[]=[{id:'a',kind:'image',preview:'https://test.invalid/thumb-a',creator_name:'A'},{id:'b',kind:'image',preview:'https://test.invalid/thumb-b',creator_name:'B'}];
 afterEach(()=>{cleanup();delete window.LakomicsNative;vi.restoreAllMocks();});
 // jsdom has no media playback; the viewer's own calls (resume, release) are observed instead.
-beforeEach(()=>{vi.spyOn(HTMLMediaElement.prototype,'play').mockResolvedValue(undefined);vi.spyOn(HTMLMediaElement.prototype,'load').mockImplementation(()=>{});vi.spyOn(HTMLMediaElement.prototype,'pause').mockImplementation(()=>{});mocks.ticket.mockReset();mocks.decode.mockReset();mocks.info.mockReset();mocks.ticket.mockImplementation((asset:Asset)=>Promise.resolve({url:`https://test.invalid/original-${asset.id}`}));});
+beforeEach(()=>{Object.defineProperty(window,'innerWidth',{configurable:true,value:800});Object.defineProperty(window,'innerHeight',{configurable:true,value:1280});vi.spyOn(HTMLMediaElement.prototype,'play').mockResolvedValue(undefined);vi.spyOn(HTMLMediaElement.prototype,'load').mockImplementation(()=>{});vi.spyOn(HTMLMediaElement.prototype,'pause').mockImplementation(()=>{});mocks.ticket.mockReset();mocks.decode.mockReset();mocks.thumbnail.mockReset();mocks.info.mockReset();mocks.ticket.mockImplementation((asset:Asset)=>Promise.resolve({url:`https://test.invalid/original-${asset.id}`}));mocks.thumbnail.mockImplementation(async(asset:Asset)=>({...asset,preview:`https://test.invalid/thumb-loaded-${asset.id}`}));});
 describe('progressive viewer',()=>{
   it('logs the original commit only after decode and observes prepared neighbour reuse',async()=>{
     const events:Record<string,unknown>[]=[];
@@ -196,13 +196,26 @@ describe('progressive viewer',()=>{
     await waitFor(()=>expect(screen.getByRole('img').getAttribute('src')).toContain('original-b'));
     finishA(); expect(screen.getByRole('img').getAttribute('src')).toContain('original-b');
   });
-  it('swipes across video content while keeping the native control strip usable',async()=>{
+  it('swipes across shared video content while keeping timeline gestures inside the player',async()=>{
     const change=vi.fn();render(<Viewer items={[{id:'v',kind:'video'},items[1]]} index={0} onIndex={change} onClose={()=>{}}/>);
     await waitFor(()=>expect(document.querySelector('video')?.getAttribute('src')).toContain('original-v'));
-    const player=document.querySelector('video')!,surface=document.querySelector('.viewer-surface')!;
-    vi.spyOn(player,'getBoundingClientRect').mockReturnValue({left:0,top:0,right:800,bottom:600,width:800,height:600,x:0,y:0,toJSON:()=>({})});
+    const surface=document.querySelector('.viewer-surface')!;
     fireEvent.pointerDown(surface,{pointerId:1,button:0,clientX:600,clientY:300});fireEvent.pointerUp(surface,{pointerId:1,clientX:200,clientY:300});expect(change).toHaveBeenCalledWith(1);
-    change.mockClear();fireEvent.pointerDown(player,{pointerId:2,button:0,clientX:600,clientY:570});fireEvent.pointerUp(player,{pointerId:2,clientX:200,clientY:570});expect(change).not.toHaveBeenCalled();
+    change.mockClear();
+    const timeline=screen.getByRole('slider',{name:'재생 위치'});
+    fireEvent.pointerDown(timeline,{pointerId:2,button:0,clientX:600,clientY:570});
+    fireEvent.pointerMove(timeline,{pointerId:2,clientX:200,clientY:570});
+    fireEvent.pointerUp(timeline,{pointerId:2,clientX:200,clientY:570});
+    expect(change).not.toHaveBeenCalled();
+  });
+  it('keeps the shared video element mounted while switching between videos',async()=>{
+    const videos:Asset[]=[{id:'v1',kind:'video',preview:'poster:1'},{id:'v2',kind:'video',preview:'poster:2'}];
+    const view=render(<Viewer items={videos} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    await waitFor(()=>expect(document.querySelector('video')?.getAttribute('src')).toContain('original-v1'));
+    const first=document.querySelector('video');
+    view.rerender(<Viewer items={videos} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
+    expect(document.querySelector('video')).toBe(first);
+    await waitFor(()=>expect(document.querySelector('video')?.getAttribute('src')).toContain('original-v2'));
   });
   it('requests the next asset page when approaching the loaded end',()=>{
     const more=vi.fn();render(<Viewer items={items} index={1} onIndex={()=>{}} onClose={()=>{}} onNearEnd={more}/>);expect(more).toHaveBeenCalledOnce();
@@ -251,12 +264,14 @@ describe('progressive viewer',()=>{
     rerender(<Viewer items={items} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
     await waitFor(()=>expect(screen.queryByText('classification-editor-open')).toBeNull());
   });
-  it('native video control gestures cannot navigate the gallery',async()=>{
+  it('toggles the shared chrome on a video tap without toggling playback',async()=>{
     const change=vi.fn(); const {container}=render(<Viewer items={[{id:'v',kind:'video'},items[1]]} index={0} onIndex={change} onClose={()=>{}}/>);
-    const surface=container.ownerDocument.querySelector('.viewer-surface')!;
-    fireEvent.pointerDown(surface,{pointerId:1,clientX:200,clientY:100}); fireEvent.pointerUp(surface,{pointerId:1,clientX:20,clientY:100});
+    const player=container.ownerDocument.querySelector('video')!;
+    await waitFor(()=>expect(player.getAttribute('src')).toContain('original-v'));
+    fireEvent.pointerDown(player,{pointerId:1,clientX:200,clientY:100}); fireEvent.pointerUp(player,{pointerId:1,clientX:200,clientY:100});
+    expect(container.ownerDocument.querySelector('.viewer')?.classList.contains('chrome-visible')).toBe(false);
+    expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
     expect(change).not.toHaveBeenCalled();
-    await waitFor(()=>expect(container.ownerDocument.querySelector('video')?.getAttribute('src')).toContain('original-v'));
   });
   it('opens the information panel in its own dialog with a labelled close control',()=>{
     render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
@@ -268,6 +283,13 @@ describe('progressive viewer',()=>{
     expect(panel.className).toContain('ui-dialog');
     expect(panel.contains(screen.getByText('viewer-info-open'))).toBe(true);
     expect(screen.getByRole('button',{name:'정보 닫기'})).toBeTruthy();
+  });
+  it('keeps the information open when moving to another asset',()=>{
+    const {rerender}=render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    fireEvent.click(screen.getByRole('button',{name:'미디어 정보'}));
+    expect(screen.getByText('viewer-info-open')).toBeTruthy();
+    rerender(<Viewer items={items} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
+    expect(screen.getByText('viewer-info-open')).toBeTruthy();
   });
   it('closes the information panel through its own close control',()=>{
     render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
@@ -358,6 +380,92 @@ describe('progressive viewer',()=>{
     expect(change).not.toHaveBeenCalled();
   });
 });
+
+describe('tablet immersive viewer chrome',()=>{
+  it('shows the position, handle-first title, date and optional folder path',()=>{
+    const current:Asset={...items[0],creator_name:'Display Name',creator_handle:'maker',collected_at:'2026-09-29T07:20:00'};
+    render(<Viewer items={[current,items[1]]} index={0} totalCount={9453} folderLabel={()=>'작가 / 스케치'} onIndex={()=>{}} onClose={()=>{}}/>);
+    expect(screen.getByText('1 / 9,453')).toBeTruthy();
+    expect(screen.getByText('@maker')).toBeTruthy();
+    expect(screen.getByText('9.29 07:20 · 작가 / 스케치')).toBeTruthy();
+    expect(screen.getByRole('button',{name:'분류'}).className).toContain('viewer-action');
+    expect(screen.getByRole('button',{name:'앨범'}).className).toContain('viewer-action');
+  });
+
+  it('renders the available filmstrip window and jumps through a thumbnail',()=>{
+    const change=vi.fn();
+    const many=Array.from({length:15},(_,index)=>({id:`asset-${index}`,kind:'image',preview:`thumb:${index}`} as Asset));
+    render(<Viewer items={many} index={7} onIndex={change} onClose={()=>{}}/>);
+    const strip=screen.getByRole('navigation',{name:'주변 자산'});
+    expect(strip.querySelectorAll('button')).toHaveLength(15);
+    expect(strip.querySelector('[aria-current="true"]')?.getAttribute('aria-label')).toBe('8번째 자산 보기');
+    fireEvent.click(screen.getByRole('button',{name:'3번째 자산 보기'}));
+    expect(change).toHaveBeenCalledWith(2);
+  });
+
+  it('hides the filmstrip for a single item and for video',()=>{
+    const {rerender}=render(<Viewer items={[items[0]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    expect(screen.queryByRole('navigation',{name:'주변 자산'})).toBeNull();
+    rerender(<Viewer items={[{...items[0],kind:'video'},items[1]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    expect(screen.queryByRole('navigation',{name:'주변 자산'})).toBeNull();
+  });
+
+  it('uses the portrait sheet and the landscape dock for information',()=>{
+    const portrait=render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    fireEvent.click(screen.getByRole('button',{name:'미디어 정보'}));
+    expect(screen.getByRole('dialog',{name:'미디어 정보'}).querySelector('.library-sheet')).toBeTruthy();
+    portrait.unmount();
+
+    Object.defineProperty(window,'innerWidth',{configurable:true,value:1280});
+    Object.defineProperty(window,'innerHeight',{configurable:true,value:800});
+    render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+    fireEvent.click(screen.getByRole('button',{name:'미디어 정보'}));
+    expect(screen.queryByRole('dialog',{name:'미디어 정보'})).toBeNull();
+    expect(screen.getByRole('complementary',{name:'미디어 정보'})).toBeTruthy();
+  });
+
+  it('closes the landscape information dock with Android Back before the viewer',()=>{
+    Object.defineProperty(window,'innerWidth',{configurable:true,value:1280});
+    Object.defineProperty(window,'innerHeight',{configurable:true,value:800});
+    const backRef:{current:(()=>boolean)|null}={current:null};
+    render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}} backRef={backRef}/>);
+    fireEvent.click(screen.getByRole('button',{name:'미디어 정보'}));
+    let consumed=false;
+    act(()=>{consumed=backRef.current!();});
+    expect(consumed).toBe(true);
+    expect(screen.queryByRole('complementary',{name:'미디어 정보'})).toBeNull();
+  });
+
+  it('auto-hides image and shared video controls through the same chrome state',()=>{
+    vi.useFakeTimers();
+    try {
+      const {rerender}=render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+      act(()=>{vi.advanceTimersByTime(2500);});
+      expect(document.querySelector('.viewer')?.classList.contains('chrome-visible')).toBe(false);
+      rerender(<Viewer items={[{id:'v',kind:'video'},items[1]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+      act(()=>{vi.advanceTimersByTime(5000);});
+      expect(document.querySelector('.viewer')?.classList.contains('chrome-visible')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps chrome visible while a finger owns the filmstrip',()=>{
+    vi.useFakeTimers();
+    try {
+      render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+      const thumb=screen.getByRole('button',{name:'1번째 자산 보기'});
+      fireEvent.pointerDown(thumb,{pointerId:9,clientX:20,clientY:20});
+      act(()=>{vi.advanceTimersByTime(3000);});
+      expect(document.querySelector('.viewer')?.classList.contains('chrome-visible')).toBe(true);
+      fireEvent.pointerUp(thumb,{pointerId:9,clientX:20,clientY:20});
+      act(()=>{vi.advanceTimersByTime(2500);});
+      expect(document.querySelector('.viewer')?.classList.contains('chrome-visible')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 describe('viewer Library Trash action',()=>{
   it('offers 휴지통으로 without confirmation and renders the host snackbar inside the viewer',async()=>{
     const trash=vi.fn();
@@ -416,10 +524,14 @@ describe('video controls',()=>{
     for(const props of [{vault},{}]){
       mocks.ticket.mockResolvedValue({url:'https://test.invalid/original-v'});
       const view=render(<Viewer items={[{id:'v',kind:'video'}]} index={0} onIndex={()=>{}} onClose={()=>{}} {...props}/>);
-      const viewer=document.querySelector('.viewer')!,surface=viewer.querySelector('.viewer-surface')!,footer=viewer.querySelector('footer.viewer-bar')!;
+      const viewer=document.querySelector('.viewer')!,surface=viewer.querySelector('.viewer-surface')!,footer=viewer.querySelector('footer.viewer-bar');
       expect(viewer.classList.contains('is-video')).toBe(true);
-      expect(surface.nextElementSibling===footer||!!(surface.compareDocumentPosition(footer)&Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-      expect(footer.contains(surface)).toBe(false);
+      if (props.vault) {
+        expect(footer).toBeTruthy();
+        expect(footer!.contains(surface)).toBe(false);
+      } else {
+        expect(footer).toBeNull();
+      }
       view.unmount();
     }
     // Where bars otherwise overlay the media, a video viewer returns to row layout and static bars.

@@ -1,43 +1,385 @@
-/*
- * Viewer information panel.
- *
- * Self-contained: the viewer's media surface, chrome and gestures are untouched, and
- * `mobile.css` no longer carries any `.viewer-info` rule. The panel is presented in a
- * shared wide Dialog, so it is sized by content and capped, never a full-height column.
- */
+/* The viewer keeps its media stage fixed under the chrome. Toggling chrome therefore
+   changes opacity and hit testing, not the image's box. */
+.viewer {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #111213;
+}
+
+.viewer-main {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.viewer.has-info-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+  /* One full-height row: the legacy .viewer rule in mobile.css carries a three-row template. */
+  grid-template-rows: minmax(0, 1fr);
+  padding: 0;
+}
+
+.viewer.has-info-panel .viewer-main { min-width: 0; }
+
+.viewer-info-dock {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  padding: calc(12px + env(safe-area-inset-top)) 16px calc(12px + env(safe-area-inset-bottom));
+  background: var(--color-sidebar);
+  border-left: 1px solid var(--color-border);
+}
+
+.viewer-info-dock .viewer-info { min-height: 0; flex: 1; }
+
+.viewer-bar {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  height: calc(56px + env(safe-area-inset-top));
+  min-height: 56px;
+  padding: env(safe-area-inset-top) 12px 0;
+  color: var(--color-muted);
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(#111213ee, #111213aa 68%, transparent);
+  font-size: 13px;
+  transition: opacity 140ms var(--ease-standard), visibility 0s linear 140ms;
+}
+
+.chrome-visible .viewer-bar,
+.viewer-bar:focus-within {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+
+.viewer-position {
+  flex: none;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.viewer-position b { color: var(--color-text); font-weight: 600; }
+
+.viewer-heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.2;
+}
+
+.viewer-heading strong,
+.viewer-heading small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-heading strong { color: var(--color-text); font-size: 17px; font-weight: 600; }
+.viewer-heading small { color: var(--color-muted); font-size: 13px; }
+.viewer-spacer { flex: 1; min-width: 4px; }
+
+.viewer-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.viewer-actions .viewer-action,
+.viewer-action--exclude {
+  flex: none;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 10px;
+  color: var(--color-text);
+}
+
+.viewer-actions .viewer-action svg,
+.viewer-action--exclude svg { width: 22px; height: 22px; color: var(--color-muted); }
+.viewer-actions .viewer-action[aria-pressed="true"] { background: var(--color-selected); }
+.viewer-actions .viewer-action.is-danger { color: var(--color-danger); }
+.viewer-actions .viewer-action.is-danger svg { color: currentColor; }
+.viewer-actions__divider { display: none; }
+
+.viewer-surface {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.viewer-surface.is-video { touch-action: pan-y; }
+.viewer-surface video,
+.viewer-image { display: block; width: 100%; height: 100%; object-fit: contain; }
+.viewer-image { user-select: none; will-change: transform; }
+.viewer-placeholder { position: absolute; inset: 0; }
+
+.viewer-surface > .video-player {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  outline: none;
+}
+
+.viewer-surface .video-player__media {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  outline: none;
+  touch-action: pan-y;
+}
+
+.viewer-surface .video-player__freeze {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.viewer-surface .video-player__controls {
+  position: absolute;
+  z-index: 3;
+  right: var(--space-6);
+  bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+  left: var(--space-6);
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text);
+  background: var(--video-overlay-bg);
+  border-radius: var(--radius-control);
+  opacity: 1;
+  touch-action: none;
+  transition: opacity var(--motion-standard) var(--ease-standard), visibility 0s linear 0s;
+}
+
+.viewer-surface .video-player--controls-hidden .video-player__controls {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition-delay: 0s, var(--motion-standard);
+}
+
+.viewer-surface .video-player__timeline-wrap { position: relative; width: 100%; height: 44px; }
+.viewer-surface .video-player__timeline {
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+  accent-color: var(--color-accent);
+  touch-action: none;
+}
+
+.viewer-surface .video-player__timeline::-webkit-slider-runnable-track,
+.viewer-surface .video-player__volume::-webkit-slider-runnable-track { height: 6px; background: var(--color-border-strong); border-radius: 2px; }
+.viewer-surface .video-player__timeline::-webkit-slider-thumb,
+.viewer-surface .video-player__volume::-webkit-slider-thumb { width: 24px; height: 24px; margin-top: -9px; appearance: none; background: var(--color-accent); border: 0; border-radius: 2px; }
+.viewer-surface .video-player__timeline::-moz-range-track,
+.viewer-surface .video-player__volume::-moz-range-track { height: 6px; background: var(--color-border-strong); border-radius: 2px; }
+.viewer-surface .video-player__timeline::-moz-range-thumb,
+.viewer-surface .video-player__volume::-moz-range-thumb { width: 24px; height: 24px; background: var(--color-accent); border: 0; border-radius: 2px; }
+.viewer-surface .video-player__timeline:focus-visible,
+.viewer-surface .video-player__volume:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }
+
+.viewer-surface .video-player__control-row { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; }
+.viewer-surface .video-player__control-row .ui-button { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 10px; }
+.viewer-surface .video-player__control-row .ui-button svg { width: 24px; height: 24px; }
+.viewer-surface .video-player__time { min-width: 7.5rem; color: var(--color-text); font-size: var(--type-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.viewer-surface .video-player__volume { width: 112px; height: 44px; margin: 0; appearance: none; background: transparent; accent-color: var(--color-accent); touch-action: none; }
+.viewer-surface .video-player__control-row > :last-child { margin-left: auto; }
+
+.viewer-error {
+  position: absolute;
+  z-index: 5;
+  right: 16px;
+  bottom: 96px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: #242526ed;
+  font-size: 13px;
+}
+
+.viewer.is-video .viewer-error { top: calc(64px + env(safe-area-inset-top)); bottom: auto; }
+.zoom-reset { position: absolute; z-index: 5; top: calc(64px + env(safe-area-inset-top)); left: 16px; background: var(--color-sidebar); }
+.empty-inline { padding: 24px; color: var(--color-muted); }
+
+.viewer-filmstrip {
+  position: absolute;
+  z-index: 4;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-2);
+  height: 100px;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3) calc(var(--space-2) + env(safe-area-inset-bottom));
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
+  background: linear-gradient(transparent, #000000a8);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms var(--ease-standard), visibility 0s linear 140ms;
+}
+
+.viewer-filmstrip::-webkit-scrollbar { display: none; }
+.chrome-visible .viewer-filmstrip { opacity: 1; pointer-events: auto; transition-delay: 0s; }
+.viewer-filmstrip:focus-within { opacity: 1; pointer-events: auto; visibility: visible; }
+
+.viewer-filmstrip__button {
+  display: block;
+  flex: none;
+  width: 56px;
+  height: 76px;
+  padding: 2px;
+  background: transparent;
+  border: 0;
+  border-radius: 2px;
+  opacity: .58;
+  scroll-snap-align: center;
+}
+
+.viewer-filmstrip__button img,
+.viewer-filmstrip__placeholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 2px;
+}
+
+.viewer-filmstrip__placeholder { border-radius: 0; }
+.viewer-filmstrip__button.is-current {
+  width: 64px;
+  height: 84px;
+  opacity: 1;
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.viewer-nav-a11y {
+  position: absolute;
+  z-index: 6;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.viewer-nav-a11y button { width: 1px; height: 1px; padding: 0; border: 0; }
+
+/* Vault retains the old footer affordance and does not get the library's side panel. */
+.viewer.is-vault .viewer-bar:last-of-type {
+  top: auto;
+  bottom: 0;
+  height: calc(56px + env(safe-area-inset-bottom));
+  padding: 0 12px env(safe-area-inset-bottom);
+  background: linear-gradient(transparent, #111213ee 32%, #111213ee);
+}
+
+.viewer-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer.is-video { display: block; }
+.viewer.is-video .viewer-bar { position: absolute; height: calc(56px + env(safe-area-inset-top)); }
+.viewer.is-video .viewer-surface { width: auto; height: auto; }
 
 .viewer-info {
-  display:flex;
-  flex-direction:column;
-  gap:0;
-  max-height:100%;
-  overflow:hidden;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
 }
-/* Content-height header, so the panel does not reserve space it has no rows for. */
-.viewer-info-heading { display:flex; align-items:flex-start; gap:10px; margin:-4px 0 0; padding-bottom:10px; border-bottom:1px solid var(--color-border); }
-.viewer-info-kind { flex:none; font-size:10px; letter-spacing:2px; color:var(--color-muted); padding-top:5px; }
-.viewer-info-heading h2 { flex:1; min-width:0; margin:1px 0 0; font-size:17px; font-weight:500; line-height:1.4; overflow-wrap:anywhere; }
-.viewer-info-heading .ui-button { flex:none; }
-/* Scrolls only once the rows genuinely exceed the cap; otherwise it is as tall as its content. */
-.viewer-info-body { min-height:0; overflow:auto; overscroll-behavior:contain; padding-top:2px; }
 
-.viewer-info-group { display:grid; grid-template-columns:auto minmax(0,1fr); gap:6px 12px; margin:12px 0 0; font-size:13px; line-height:1.5; }
-.viewer-info-group-title { grid-column:1/-1; margin:0; color:var(--color-muted); font-size:10px; letter-spacing:1.4px; }
-/* `display:contents` lets each row's cells join the grid above, keeping the two-column
-   metric without a nested table. */
-.viewer-info-row { display:contents; }
-.viewer-info-row>dt { color:var(--color-muted); white-space:nowrap; }
-.viewer-info-row>dd { margin:0; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+.viewer-info-heading { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 12px; margin: -4px 0 0; padding-bottom: 16px; border-bottom: 1px solid var(--color-border); }
+.viewer-info-preview { display: flex; align-items: center; justify-content: center; width: 64px; height: 64px; overflow: hidden; background: var(--color-surface); border-radius: var(--radius-sm); }
+.viewer-info-preview img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.viewer-info-artist { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.viewer-info-artist-line { display: flex; min-width: 0; align-items: center; gap: 4px; }
+.viewer-info-artist-line h2 { min-width: 0; margin: 0; overflow: hidden; overflow-wrap: anywhere; font-size: 17px; font-weight: 600; line-height: 1.35; text-overflow: ellipsis; }
+.viewer-info-artist-line .ui-button { margin-left: auto; flex: none; }
+.viewer-info-artist-handle { min-width: 0; overflow: hidden; color: var(--color-muted); font-size: 13px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-info-body { min-height: 0; padding-top: 2px; overflow: auto; overscroll-behavior: contain; }
+.viewer-info-section { margin-top: 16px; }
+.viewer-info-section-heading { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 8px; }
+.viewer-info-section-heading h3 { margin: 0; color: var(--color-muted); font-size: 13px; font-weight: 600; line-height: 1.4; }
+.viewer-info-group { display: grid; gap: 2px; margin: 0; }
+.viewer-info-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 12px; min-height: 44px; font-size: 13px; line-height: 1.5; }
+.viewer-info-row > dt { color: var(--color-muted); white-space: nowrap; }
+.viewer-info-row > dd { margin: 0; min-width: 0; }
+.viewer-info-value { display: flex; min-width: 0; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.viewer-info-value > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.viewer-info-value-actions { display: flex; flex: none; align-items: center; gap: 2px; margin-left: auto; }
+.viewer-info-value-actions .ui-button,
+.viewer-info-section-heading .ui-button,
+.viewer-info-artist-line .ui-button { width: 44px; min-width: 44px; min-height: 44px; padding: 10px; }
+.viewer-info-copy { margin: 8px 0 0; color: var(--color-muted); font-size: 12px; line-height: 1.6; }
+.viewer-info-copy.failed { color: var(--color-danger); }
+.viewer-info-media-error { margin: 10px 0 0; padding-top: 10px; color: var(--color-muted); border-top: 1px solid var(--color-border); font-size: 11px; line-height: 1.6; }
 
-.viewer-info-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:14px; }
-.viewer-info-actions .ui-button { font-size:12px; }
-/* Copy feedback is a quiet inline line, deliberately distinct from the media error. */
-.viewer-info-copy { margin:8px 0 0; font-size:12px; line-height:1.6; color:var(--color-muted); }
-.viewer-info-copy.failed { color:var(--color-danger); }
-.viewer-info-media-error { margin:10px 0 0; padding-top:10px; border-top:1px solid var(--color-border); color:var(--color-muted); font-size:11px; line-height:1.6; }
+@media (max-width: 620px) {
+  .viewer-bar { gap: 4px; padding-inline: 8px; }
+  .viewer-heading strong { font-size: 15px; }
+  .viewer-heading small { font-size: 13px; }
+  .viewer-filmstrip { justify-content: flex-start; }
+  .viewer-surface .video-player__controls { right: 8px; left: 8px; }
+  .viewer-surface .video-player__volume { width: 80px; }
+}
 
-/* Portrait phone: the shared dialog already spans the width; only the row metric needs
-   to stay legible at the smallest gutter. */
-@media (max-width:550px) {
-  .viewer-info-group { grid-template-columns:auto minmax(0,1fr); gap:6px 10px; }
+@media (prefers-reduced-motion: reduce) {
+  .viewer-bar, .viewer-filmstrip, .viewer-surface .video-player__controls { transition: none; }
 }

@@ -8,7 +8,7 @@ vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:()=> 'co
   ApiError:class ApiError extends Error{status:number|null;details:unknown;constructor(message:string,status:number|null,details:unknown){super(message);this.status=status;this.details=details;}}}));
 vi.mock('./media',()=>({clearMediaCache:vi.fn(),loadThumbnail:vi.fn(async(a)=>a),prepareAssets:()=>new Promise(()=>{})}));
 vi.mock('./Home',()=>({Home:({items,onOpen}:HomeProps)=><div>{items.slice(0,12).map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}</div>}));
-vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,identity}:{intro?:ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;identity:string})=><div aria-label="자산 목록" data-identity={identity}>{intro}{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}<button data-testid="near-end" onClick={onNearEnd}>near end</button></div>}));
+vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,onScroll,restoreScroll,identity}:{intro?:ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;onScroll?(top:number):void;restoreScroll:number;identity:string})=><div aria-label="자산 목록" data-identity={identity} data-restore={restoreScroll} onScroll={()=>onScroll?.(420)}>{intro}{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}<button data-testid="near-end" onClick={onNearEnd}>near end</button></div>}));
 vi.mock('./Viewer',()=>({Viewer:({items,index,onClose}:{items:Asset[];index:number;onClose():void})=><div><span>{`viewer-${items[index].id}`}</span><button onClick={onClose}>viewer close</button></div>}));
 import {App} from './App';
 
@@ -31,28 +31,33 @@ const legacy=async(path:string)=>{
   if(path.includes('revisit'))return{bundles:[]}; if(path.includes('captures'))return{captures:[]};
   return page(['a1']);
 };
-/** Choose one filter value by its accessible group and label. */
+/** Open the top-bar kind segmented control or one of the compact filter buttons. */
 const openFilters=(group='종류')=>{
-  // The filter chips live in the folder bar's 보기 옵션 sheet.
-  if(!screen.queryByRole('group',{name:'자산 필터'}))fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));
-  const index=['종류','비율','길이'].indexOf(group==='미디어'?'종류':group);
-  fireEvent.click(screen.getByRole('group',{name:'자산 필터'}).querySelectorAll('button')[index]);
+  if(group==='종류'||group==='미디어')return screen.getByRole('radiogroup',{name:'종류'});
+  const toolbar=screen.getByRole('group',{name:'자산 필터'});
+  const index=['비율','길이'].indexOf(group);
+  fireEvent.click(toolbar.querySelectorAll('button')[index]);
 };
 const chooseIn=(group:string,label:string)=>{
   const name=group==='미디어'?'종류':group;
+  if(group==='미디어'||group==='종류'){
+    fireEvent.click(screen.getByRole('radiogroup',{name:'종류'}).querySelector(`button[aria-label="${label}"]`)!);
+    return;
+  }
   if(!screen.queryByRole('radiogroup',{name})){
     if(screen.queryByRole('dialog'))fireEvent.click(screen.getByRole('button',{name:'닫기'}));
     openFilters(name);
   }
   fireEvent.click(screen.getByRole('radio',{name:label}));
 };
-/** Opens the 보기 옵션 sheet, reads the filter chip labels, and closes the sheet again. */
-const chipLabels=async()=>{
+/** Reads the compact filter labels from the gallery top bar. */
+const toolbarFilterLabels=()=>[...screen.getByRole('group',{name:'자산 필터'}).querySelectorAll('button')].map(b=>b.textContent);
+/** Opens and closes the view sheet. */
+const openViewSheet=async()=>{
   fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));
-  const labels=[...(await screen.findByRole('group',{name:'자산 필터'})).querySelectorAll('button')].map(b=>b.textContent);
-  fireEvent.click(within(screen.getByRole('dialog',{name:'보기 옵션'})).getByRole('button',{name:'닫기'}));
+  const dialog=await screen.findByRole('dialog',{name:'보기 옵션'});
+  fireEvent.click(within(dialog).getByRole('button',{name:'닫기'}));
   await waitFor(()=>expect(screen.queryByRole('dialog',{name:'보기 옵션'})).toBeNull());
-  return labels;
 };
 const openFolder=async(name:string)=>{
   fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name:'에셋',exact:true}));
@@ -70,15 +75,27 @@ beforeEach(()=>{
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 
 describe('asset filters',()=>{
+  it('keeps kind, supported sort and density controls in the gallery top bar',async()=>{
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
+    const kind=screen.getByRole('radiogroup',{name:'종류'});
+    fireEvent.click(within(kind).getByRole('radio',{name:'영상'}));
+    await waitFor(()=>expect(lastPagePath()).toContain('media_kind=videos'));
+    fireEvent.click(screen.getByRole('button',{name:/^정렬/}));
+    expect(screen.getByRole('dialog',{name:'정렬'})).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio',{name:'오래된순'}));
+    await waitFor(()=>expect(lastPagePath()).toContain('sort=oldest'));
+    fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));
+    const viewSheet=screen.getByRole('dialog',{name:'보기 옵션'});
+    expect(within(viewSheet).getByRole('slider',{name:'썸네일 크기'})).toBeTruthy();
+    expect(within(viewSheet).queryByRole('group',{name:'자산 필터'})).toBeNull();
+  });
+
   it('sends the agreed media, aspect and duration parameters for the chosen buckets',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();
-    // The duration controls state their video-only scope while the dialog is open.
-
     chooseIn('미디어','영상');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=videos'));
-    // The dialog closes on commit, so it is reopened for each further choice.
-    openFilters();chooseIn('비율','세로형');
+    chooseIn('비율','세로형');
     await waitFor(()=>expect(lastPagePath()).toContain('aspect_ratio=portrait'));
     expect(lastPagePath()).toContain('media_kind=videos');
     openFilters();chooseIn('길이','1–5분');
@@ -90,15 +107,15 @@ describe('asset filters',()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     expect(lastPagePath()).not.toContain('media_kind');
     expect(lastPagePath()).not.toContain('aspect_ratio');
-    expect(await chipLabels()).toContain('종류');
+    expect(toolbarFilterLabels()).toEqual(['비율','길이']);
     openFilters();chooseIn('미디어','이미지');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=images'));
-    // The summary is both visible and part of the trigger's accessible name, so a narrowed
-    // gallery announces its narrowing rather than looking like an unfiltered one.
-    // The folder bar's 보기 옵션 button turns grey with a count, and the chip names the choice.
-    await waitFor(()=>expect(screen.getByRole('button',{name:'보기 옵션'}).classList.contains('is-changed')).toBe(true));
-    expect(screen.getByRole('button',{name:'보기 옵션'}).textContent).toBe('1');
-    expect(await chipLabels()).toContain('이미지');
+    // The selected filter stays visible in the bar; 보기 has no count or changed face.
+    await waitFor(()=>expect(toolbarFilterLabels()).toEqual(['비율']));
+    expect(screen.getByRole('button',{name:'보기 옵션'}).classList.contains('is-changed')).toBe(false);
+    expect(screen.getByRole('button',{name:'보기 옵션'}).textContent).not.toContain('1');
+    expect(screen.getByRole('radio',{name:'이미지'}).getAttribute('aria-checked')).toBe('true');
+    expect(screen.queryByText('필터 적용 대기')).toBeNull();
   });
 
   it('refuses to present an unfiltered list as filtered when the server has no filter contract',async()=>{
@@ -141,7 +158,7 @@ describe('asset filters',()=>{
     expect(screen.getByLabelText('자산 목록').getAttribute('data-identity')).not.toContain('media_kind');
   });
 
-  it('drops the cursor and scroll on a filter change while keeping the previous page on failure',async()=>{
+  it('drops the cursor while preserving scroll on a filter change',async()=>{
     let paged=false;
     mocks.api.mockImplementation((path:string)=>{
       if(path.startsWith('/v1/library/assets')&&path.includes('media_kind')){
@@ -151,6 +168,7 @@ describe('asset filters',()=>{
       return supporting()(path);
     });
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
+    fireEvent.scroll(screen.getByLabelText('자산 목록'));
     fireEvent.click(screen.getByTestId('near-end'));
     await waitFor(()=>expect(lastPagePath()).toContain('cursor=c1'));
     openFilters();chooseIn('미디어','영상');
@@ -158,6 +176,7 @@ describe('asset filters',()=>{
     // The narrowing request starts from the first page again, and the filter is set.
     expect(lastPagePath()).toContain('media_kind=videos');
     expect(lastPagePath()).not.toContain('cursor=c1');
+    expect(screen.getByLabelText('자산 목록').getAttribute('data-restore')).toBe('420');
     // An empty filtered result is explained by the filter, not reported as an empty library.
     await waitFor(()=>expect(screen.getByText('조건에 맞는 자산이 없습니다')).toBeTruthy());
   });
@@ -193,8 +212,10 @@ describe('asset filters',()=>{
     // The committed page must have adopted the duration filter; otherwise the reset below
     // would be comparing against a stale set and could legitimately no-op.
     await waitFor(()=>expect(screen.getByLabelText('자산 목록').getAttribute('data-identity')).toContain('duration_ms_min=300000'));
-    // The reset is inside the dialog and clears every group at once.
-    fireEvent.click(screen.getByRole('button',{name:'보기 옵션'}));fireEvent.click(await screen.findByRole('button',{name:'초기화'}));
+    // Each visible toolbar filter can return to 전체; the 보기 sheet no longer owns a reset row.
+    fireEvent.click(screen.getByRole('button',{name:'5분 이상'}));
+    fireEvent.click(await screen.findByRole('radio',{name:'전체'}));
+    fireEvent.click(screen.getByRole('radio',{name:'전체'}));
     await waitFor(()=>expect(lastPagePath()).not.toContain('media_kind'));
     expect(lastPagePath()).not.toContain('duration_ms_min');
   });
@@ -238,7 +259,7 @@ describe('asset filters',()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','영상');
     await waitFor(()=>expect(signal).toBeTruthy());
-    expect(screen.getByText('필터 적용 대기')).toBeTruthy();
+    expect(screen.queryByText('필터 적용 대기')).toBeNull();
     fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name:'에셋',exact:true}));
     expect(signal.aborted).toBe(true);
     await waitFor(()=>expect(screen.queryByText('필터 적용 대기')).toBeNull());
@@ -271,7 +292,7 @@ describe('asset filters',()=>{
     fireEvent.click(screen.getByTestId('near-end'));
     await new Promise(resolve=>setTimeout(resolve,20));
     expect(mocks.api.mock.calls.filter(call=>String(call[0]).includes('cursor=c1'))).toHaveLength(before);
-    expect(screen.getByText('필터 적용 대기')).toBeTruthy();
+    expect(screen.queryByText('필터 적용 대기')).toBeNull();
   });
 
   it('keeps the previous page and its filter identity when a narrowed load fails, and retries the attempt',async()=>{
@@ -319,10 +340,10 @@ describe('asset filters',()=>{
 
   it('closes the filter dialog on Back before the gallery surface itself',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
-    openFilters();
-    expect(screen.getByRole('dialog',{name:'종류'})).toBeTruthy();
+    openFilters('비율');
+    expect(screen.getByRole('dialog',{name:'비율'})).toBeTruthy();
     act(()=>window.dispatchEvent(new Event('lakomics-back')));
-    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'종류'})).toBeNull());
+    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'비율'})).toBeNull());
     // The gallery is untouched by the press that closed the dialog.
     expect(screen.getByText('tile-a1')).toBeTruthy();
   });
@@ -344,7 +365,7 @@ describe('asset filters',()=>{
 
   it('does not offer filters on Home, where a control would imply a narrowing that is not applied',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
-    expect(await chipLabels()).toContain('종류');
+    expect(toolbarFilterLabels()).toEqual(['비율','길이']);
     fireEvent.click(screen.getByRole('button',{name:'홈'}));
     await screen.findByText('tile-a1');
     expect(screen.queryByRole('button',{name:'보기 옵션'})).toBeNull();
@@ -393,13 +414,16 @@ describe('asset filters',()=>{
 describe('asset filter dialog shape',()=>{
   it('groups each control with its own accessible name and the PC labels',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
-    openFilters();
-    for(const [name,labels] of Object.entries({'종류':['전체','이미지','영상'],'비율':['전체','정사각형','가로형','세로형'],'길이':['전체','30초 미만','30초–1분','1–5분','5분 이상']})){
-      if(name!=='종류'){fireEvent.click(screen.getByRole('button',{name:'닫기'}));openFilters(name);}
+    const kindLabels=['전체','이미지','영상'];
+    expect([...screen.getByRole('radiogroup',{name:'종류'}).querySelectorAll('button')].map(b=>b.getAttribute('aria-label'))).toEqual(kindLabels);
+    expect(screen.getByRole('radiogroup',{name:'종류'}).querySelector('button[aria-label="전체"]')?.getAttribute('aria-checked')).toBe('true');
+    for(const [name,labels] of Object.entries({'비율':['전체','정사각형','가로형','세로형'],'길이':['전체','30초 미만','30초–1분','1–5분','5분 이상']})){
+      openFilters(name);
       expect([...screen.getByRole('radiogroup',{name}).querySelectorAll('button')].map(b=>b.textContent)).toEqual(labels);
-      expect(screen.getByRole('radio',{name:'전체'}).getAttribute('aria-checked')).toBe('true');
+      expect(within(screen.getByRole('radiogroup',{name})).getByRole('radio',{name:'전체'}).getAttribute('aria-checked')).toBe('true');
+      fireEvent.click(screen.getByRole('button',{name:'닫기'}));
     }
-    fireEvent.click(screen.getByRole('button',{name:'닫기'}));openFilters();chooseIn('미디어','이미지');
+    chooseIn('미디어','이미지');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=images'));
     openFilters();expect(screen.getByRole('radio',{name:'이미지'}).getAttribute('aria-checked')).toBe('true');
   });

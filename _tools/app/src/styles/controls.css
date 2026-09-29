@@ -753,3 +753,12 @@ select.ui-text-input {
     transition: none;
   }
 }
+
+/* Shared media selection (PC and tablet, user 2026-09-30: the tablet look is the one).
+   Put `ui-selectable-media` on a positioned tile with aria-selected, and render
+   `<span class="ui-selection-check">` inside it while selected. Drawn ABOVE the picture:
+   a 3px accent ring, a hairline of the page colour inside it, and the teal selection tint. */
+:root { --selection-check-size: 22px; }
+.ui-selectable-media[aria-selected="true"]::after { position: absolute; z-index: 3; inset: 0; content: ""; border-radius: inherit; box-shadow: inset 0 0 0 3px var(--color-accent), inset 0 0 0 4px color-mix(in srgb, var(--color-bg) 78%, transparent); background: var(--asset-selection-tint); pointer-events: none; }
+.ui-selection-check { position: absolute; z-index: 4; top: 0; left: 0; display: grid; place-items: center; width: var(--selection-check-size); height: var(--selection-check-size); color: var(--color-on-accent); background: var(--color-accent); border-radius: 0 0 var(--radius-control) 0; box-shadow: 1px 1px 0 color-mix(in srgb, var(--color-bg) 62%, transparent); pointer-events: none; font: 700 calc(var(--selection-check-size) * 0.6) / 1 var(--font-ui); }
+.ui-selection-check::after { content: "\2713"; }

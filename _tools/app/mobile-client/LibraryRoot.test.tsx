@@ -98,15 +98,19 @@ it('shows the three asset segments and lazily browses pinned artists with search
  const reordered=[...document.querySelectorAll('.artist-grid-card .artist-grid-name')].map(node=>node.textContent);
  expect(reordered).toEqual(['지우','다람','가나']);
 });
-it('aligns cards at the top with an identical cover boundary in grids and strips',()=>{
+it('keeps the root grid and uses the PC style shelf for child folders',()=>{
  const folders=[{id:'a',name:'Parent',parent_id:null,asset_count:1},{id:'b',name:'Plain',parent_id:null,asset_count:0},{id:'c',name:'Child',parent_id:'a',asset_count:1}];
  const view=render(<FolderCards items={folders.slice(0,2)} entries={folders} paused revision={1} onSelect={()=>{}}/>);
- for(const strip of [false,true]) {
-  view.rerender(<FolderCards items={folders.slice(0,2)} entries={folders} paused revision={1} strip={strip} onSelect={()=>{}}/>);
-  const cards=view.container.querySelectorAll('.library-folder');expect(cards).toHaveLength(2);
-  cards.forEach(card=>expect(card.firstElementChild?.classList.contains('home-cover-group')).toBe(true));
-  expect(cards[0].querySelector('small')).not.toBeNull();expect(cards[1].querySelector('small')).toBeNull();
- }
+ const gridCards=view.container.querySelectorAll('.library-folder');expect(gridCards).toHaveLength(2);
+ gridCards.forEach(card=>expect(card.firstElementChild?.classList.contains('home-cover-group')).toBe(true));
+ expect(gridCards[0].querySelector('small')).not.toBeNull();expect(gridCards[1].querySelector('small')).toBeNull();
+ view.rerender(<FolderCards items={folders.slice(0,2)} entries={folders} paused revision={1} strip onSelect={()=>{}}/>);
+ const shelf=view.container.querySelector('.folder-shelf') as HTMLElement;
+ expect(shelf).toBeTruthy();
+ expect(shelf.querySelector('h3')?.textContent).toBe('폴더 2');
+ const shelfCards=shelf.querySelectorAll('.folder-shelf__card-open');expect(shelfCards).toHaveLength(2);
+ expect(shelfCards[0].textContent).toContain('Parent');expect(shelfCards[0].textContent).toContain('1장');
+ expect(shelfCards[1].textContent).toContain('Plain');expect(shelfCards[1].textContent).toContain('0장');
  expect(css).toMatch(/\.library-folder \{[^}]*display:flex[^}]*flex-direction:column[^}]*justify-content:flex-start/);
  expect(css).toMatch(/\.library-folder \.home-cover-group \{[^}]*width:100%[^}]*flex-shrink:0[^}]*aspect-ratio:4\/3/);
 });

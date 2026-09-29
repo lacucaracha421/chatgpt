@@ -317,12 +317,12 @@ describe('character exclusion refresh',()=>{
   it('hands the viewer a character context only for a character gallery',async()=>{
     mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?structuredClone(index):{revision,items:pageItems,totalCount:2,sourceCount:2,has_more:false,next_cursor:null});
     render(<CharacterBrowser {...props}/>);
-    fireEvent.click(await screen.findByRole('button',{name:'Series · 2개'}));
+    fireEvent.click(await screen.findByRole('button',{name:'Series · 2장'}));
     // The action is viewer-only: no gallery offers it from its own header.
     expect(screen.queryByRole('button',{name:/에서 제외/})).toBeNull();
-    fireEvent.click(await screen.findByRole('button',{name:'Group · 2개'}));
+    fireEvent.click(await screen.findByRole('button',{name:'Group · 2장'}));
     expect(screen.queryByRole('button',{name:/에서 제외/})).toBeNull();
-    fireEvent.click(await screen.findByRole('button',{name:'Lumi · 2개'}));
+    fireEvent.click(await screen.findByRole('button',{name:'Lumi · 2장'}));
     await screen.findByText('asset-1');
     expect(screen.queryByRole('button',{name:/에서 제외/})).toBeNull();
     fireEvent.click(screen.getByText('asset-1'));
@@ -335,9 +335,9 @@ describe('character exclusion refresh',()=>{
       return {revision,items:pageItems,totalCount:pageItems.length,sourceCount:2,has_more:false,next_cursor:null};
     });
     const result=render(<CharacterBrowser {...props}/>);
-    fireEvent.click(await screen.findByRole('button',{name:'Series · 2개'}));
-    fireEvent.click(await screen.findByRole('button',{name:'Group · 2개'}));
-    fireEvent.click(await screen.findByRole('button',{name:'Lumi · 2개'}));
+    fireEvent.click(await screen.findByRole('button',{name:'Series · 2장'}));
+    fireEvent.click(await screen.findByRole('button',{name:'Group · 2장'}));
+    fireEvent.click(await screen.findByRole('button',{name:'Lumi · 2장'}));
     await screen.findByText('asset-1');
     pageItems=[items[1]];
     result.rerender(<CharacterBrowser {...props} refreshKey={2}/>);

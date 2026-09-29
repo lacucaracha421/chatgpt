@@ -1,9 +1,10 @@
 import {useCallback, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent} from 'react';
-import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, InformationCircleIcon, ArrowPathIcon, MagnifyingGlassMinusIcon, FolderIcon, Square2StackIcon, TrashIcon} from '@heroicons/react/24/outline';
+import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, InformationCircleIcon, ArrowPathIcon, MagnifyingGlassMinusIcon, FolderIcon, Square2StackIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
 import type {ComponentType, SVGProps} from 'react';
 import {Dialog, DialogDescription, IconButton, Button} from './ui';
+import {BottomSheet} from './BottomSheet';
 import type {Asset} from './types';
-import {dateLabel, imageNeighbours, fitTransform} from './model';
+import {imageNeighbours, fitTransform} from './model';
 import {decodeImage, invalidateTicket, mediaTicket} from './media';
 import {errorText} from './transport';
 import {videoEvent, viewerTiming} from './perf';
@@ -11,6 +12,8 @@ import {AlbumMembershipEditor} from './AlbumMembershipEditor';
 import {ClassificationAssignmentEditor} from './ClassificationAssignmentEditor';
 import {CharacterExclusionEditor, type ExclusionRequest, type ExclusionKey, type ExclusionReceipt} from './CharacterExclusion';
 import {ViewerInfo} from './ViewerInfo';
+import {ViewerFilmstrip} from './ViewerFilmstrip';
+import {VideoPlayerSurface} from '../src/video/VideoPlayer';
 
 import './Viewer.css';
 
@@ -31,18 +34,40 @@ export type ViewerVaultSource = {original(asset: Asset): string; label(asset: As
 
 export type ViewerCharacterContext = {targetId:string;name:string;libraryId:string;revision:string;protectedAssetIds:string[]};
 
+function handleLabel(handle: string): string {
+  const trimmed = handle.trim();
+  return trimmed.startsWith('@') ? trimmed : `@${trimmed}`;
+}
+
+function viewerDateLabel(value?: string): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  return `${month}.${day} ${hour}:${minute}`;
+}
+
 /**
- * A viewer bar action that names itself: icon plus a short label (the label hides on narrow
- * phones). `name` keeps the established accessible name where it is longer than the label.
+ * A viewer bar action that names itself with an icon and keeps the existing accessible name.
+ * `name` is used where the established name is longer than the short action label.
  */
 function ViewerAction({label, name, icon: Icon, active, danger, onClick}: {label: string; name?: string; icon: ComponentType<SVGProps<SVGSVGElement>>; active?: boolean; danger?: boolean; onClick(): void}) {
-  return <Button type="button" size="sm" variant="ghost" className={`viewer-action${danger ? ' is-danger' : ''}`} aria-label={name} aria-pressed={active} onClick={onClick}><Icon aria-hidden="true"/><span className="viewer-action__label">{label}</span></Button>;
+  return <Button type="button" size="icon" variant={danger ? 'danger' : 'ghost'} className={`viewer-action${danger ? ' is-danger' : ''}`} aria-label={name ?? label} aria-pressed={active} onClick={onClick}><Icon aria-hidden="true"/></Button>;
 }
-export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,onTrash,trashNotice,vault}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
+export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,onTrash,trashNotice,totalCount,folderLabel,privacy,vault}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
   /** Move the Asset on screen to the Library Trash (no confirmation: it is reversible). */
   onTrash?(asset:Asset):void;
   /** The host's "휴지통으로 이동함 · 실행 취소" snackbar, rendered inside the modal viewer. */
   trashNotice?:React.ReactNode;
+  /** The server total when the current page is only a slice of the gallery. */
+  totalCount?: number | null;
+  /** Optional current folder path for the second line of the viewer title. */
+  folderLabel?: (asset: Asset) => string | null;
+  /** Privacy mode keeps the media and filmstrip as plain, non-identifying blocks. */
+  privacy?: boolean;
   /** Private Vault mode: same gestures, chrome and video controls; no library media or actions. */
   vault?:ViewerVaultSource}) {
   const asset = items[index];
@@ -88,6 +113,9 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const [albumOpen, setAlbumOpen] = useState(false);
   const [classificationOpen, setClassificationOpen] = useState(false);
   const [chrome, setChrome] = useState(true);
+  const [chromeActivity, setChromeActivity] = useState(0);
+  const [filmstripActive, setFilmstripActive] = useState(false);
+  const [landscape, setLandscape] = useState(() => window.innerWidth > window.innerHeight);
   const [transform, setTransform] = useState({scale: 1, x: 0, y: 0});
   const surface = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
@@ -98,10 +126,20 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const progressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const autoRetry = useRef({id:'',used:false});
   const gesture = useRef({points: new Map<number, {x: number; y: number}>(), startX: 0, startY: 0, distance: 0, scale: 1, lastX: 0, lastY: 0, moved: false, pinched: false});
+  const revealChrome = useCallback(() => { setChrome(true); setChromeActivity(value => value + 1); }, []);
+  const total = totalCount != null && Number.isFinite(totalCount) && totalCount >= items.length ? totalCount : items.length;
+  const artistLabel = asset.creator_handle?.trim() ? handleLabel(asset.creator_handle) : asset.creator_name?.trim() || '저장한 이미지';
+  const folder = folderLabel?.(asset)?.trim() || '';
+  const metaLabel = [viewerDateLabel(asset.collected_at ?? asset.created_at), folder].filter(Boolean).join(' · ');
+  useEffect(() => {
+    const update = () => setLandscape(window.innerWidth > window.innerHeight);
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    return () => { window.removeEventListener('resize', update); window.removeEventListener('orientationchange', update); };
+  }, []);
   useEffect(() => {
     if (vault) {
-      // Moving to another item never brings the bars back; only a tap on the image does. A
-      // video keeps its bars, since its own tap goes to the native controls.
+      // Moving to another item never brings the bars back; only direct viewer activity does.
       timing.current = undefined; setLoaded(''); setError(''); if (asset.kind === 'video') setChrome(true); gesture.current.points.clear();
       return () => clearTimeout(stallTimer.current);
     }
@@ -111,7 +149,8 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     const observation={id:asset.id,url:fromPrepared?prepared.current.get(asset.id):undefined,span};
     timing.current=observation;
     span.log('open');
-    setDecoded(prepared.current.has(asset.id)?{id:asset.id,url:prepared.current.get(asset.id)!}:undefined); setError(''); setInfo(false); setAlbumOpen(false); setClassificationOpen(false); setExclusion(null); if (asset.kind === 'video') setChrome(true);
+    // The info sheet/panel stays open across assets and swaps its content in place (PC viewer C).
+    setDecoded(current => prepared.current.has(asset.id) ? {id:asset.id,url:prepared.current.get(asset.id)!} : current); setError(''); setAlbumOpen(false); setClassificationOpen(false); setExclusion(null); if (asset.kind === 'video') setChrome(true);
     gesture.current.points.clear();
     const load = async () => {
       try {
@@ -129,19 +168,8 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     return () => {controller.abort();if(!span.done)span.log('end','canceled');clearTimeout(stallTimer.current);clearTimeout(progressTimer.current);};
   }, [asset.id, asset.pending, retry]);
   useEffect(() => {autoRetry.current={id:asset.id,used:false};}, [asset.id]);
-  // A replaced or closed library video must stop its own network: a detached element keeps
-  // its media request (and the native stream behind it) open otherwise. A stable ref callback
-  // sees each element leave, including one inside the dialog's portal.
-  const libraryVideo = useRef(!vault);
-  libraryVideo.current = !vault;
   const videoRef = useCallback((element: HTMLVideoElement | null) => {
     video.current = element;
-    if (!element) return;
-    return () => {
-      if (video.current === element) video.current = null;
-      if (!libraryVideo.current) return;
-      try { element.pause(); element.removeAttribute('src'); element.load(); } catch { /* Already released. */ }
-    };
   }, []);
   // Observe React's committed src, not setDecoded() scheduling or a screen paint.
   useLayoutEffect(() => {
@@ -173,9 +201,9 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     }
   }, [original, items, index, asset.id]);
   useEffect(() => {
-    if (!chrome || info || albumOpen || classificationOpen || exclusion || asset.kind === 'video') return;
-    const timer = setTimeout(() => setChrome(false), 4000); return () => clearTimeout(timer);
-  }, [chrome, info, albumOpen, classificationOpen, exclusion, asset.id, asset.kind]);
+    if (!chrome || filmstripActive || info || albumOpen || classificationOpen || exclusion) return;
+    const timer = setTimeout(() => setChrome(false), vault ? 4000 : 2500); return () => clearTimeout(timer);
+  }, [chrome, chromeActivity, filmstripActive, info, albumOpen, classificationOpen, exclusion, asset.id, vault]);
   const change = (next: number) => { if (next >= 0 && next < items.length) onIndex(next); };
   const renewVideo = (element: HTMLVideoElement | null, intendPlay: boolean) => {
     clearTimeout(progressTimer.current);
@@ -217,7 +245,7 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const canExclude=!!exclusionKey&&!(character?.protectedAssetIds??[]).includes(asset.id);
   const openExclusion = () => {
     if(!exclusionKey||!character) return;
-    setInfo(false); setAlbumOpen(false); setClassificationOpen(false); setChrome(true);
+    setInfo(false); setAlbumOpen(false); setClassificationOpen(false); revealChrome();
     setExclusion({
       version:1,
       libraryId:character.libraryId,
@@ -229,20 +257,39 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
       revision:character.revision,
     });
   };
+  const imageSrc = original || asset.preview || (!vault && decoded?.id !== asset.id ? decoded?.url : undefined);
+  const playerAsset = {id:asset.id,title:vault?vault.label(asset):artistLabel,originalName:vault?vault.label(asset):artistLabel,thumbnailRevision:asset.thumbnail_revision,media:{durationMs:asset.duration_ms ?? 0,scrubFrameCount:0}};
   return <Dialog open title="미디어 감상" variant="fullscreen" onClose={onClose} onKeyDown={event => {
+    if (event.key === 'Escape' && info) { event.preventDefault(); setInfo(false); return; }
     if (event.target instanceof HTMLVideoElement) return;
     // Panels own their own keyboard input, so arrows inside one never change the asset.
+    revealChrome();
     if (info || albumOpen || classificationOpen || exclusion) return;
     if (event.key === 'ArrowLeft') { event.preventDefault(); change(index - 1); }
     if (event.key === 'ArrowRight') { event.preventDefault(); change(index + 1); }
   }}>
     <DialogDescription className="sr-only">이미지는 두 손가락으로 확대할 수 있습니다. 좌우로 밀거나 버튼을 눌러 같은 목록의 이전·다음 자산을 봅니다. 미디어 정보를 열면 그 패널이 키보드 조작을 우선합니다.</DialogDescription>
-    <div className={`viewer ${chrome ? 'chrome-visible' : ''}${asset.kind === 'video' ? ' is-video' : ''}`}>
-      <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric">{index + 1} / {items.length}</span><div className="viewer-actions">{!vault&&<>{canExclude&&<Button size="sm" variant="ghost" onClick={openExclusion}>{`${character!.name}에서 제외`}</Button>}<ViewerAction label="분류" icon={FolderIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);setChrome(true);}}/><ViewerAction label="앨범" icon={Square2StackIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);setChrome(true);}}/><ViewerAction label="정보" name="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); setChrome(true);}}/>{onTrash&&!asset.pending&&<><span className="viewer-actions__divider" aria-hidden="true"/><ViewerAction label="휴지통" name="휴지통으로" danger icon={TrashIcon} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setChrome(true);onTrash(asset);}}/></>}</>}</div></header>
+    <div className={`viewer ${chrome ? 'chrome-visible' : ''}${asset.kind === 'video' ? ' is-video' : ''}${vault ? ' is-vault' : ''}${info && landscape && !vault ? ' has-info-panel' : ''}`}>
+      <div className="viewer-main">
+      <header className="viewer-bar">
+        <IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/>
+        <span className="numeric viewer-position">{index + 1} / {total.toLocaleString('ko-KR')}</span>
+        {!vault&&<div className="viewer-heading"><strong>{artistLabel}</strong>{metaLabel&&<small>{metaLabel}</small>}</div>}
+        {!vault&&<span className="viewer-spacer"/>}
+        <div className="viewer-actions">
+          {!vault&&<>
+            <ViewerAction label="앨범" icon={Square2StackIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);revealChrome();}}/>
+            <ViewerAction label="분류" icon={FolderIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);revealChrome();}}/>
+            {canExclude&&<Button type="button" size="icon" variant="ghost" className="viewer-action viewer-action--exclude" aria-label={`${character!.name}에서 제외`} onClick={openExclusion}><UserMinusIcon aria-hidden="true"/></Button>}
+            <ViewerAction label="정보" name="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); revealChrome();}}/>
+            {onTrash&&!asset.pending&&<ViewerAction label="휴지통" name="휴지통으로" danger icon={TrashIcon} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);revealChrome();onTrash(asset);}}/>}
+          </>}
+        </div>
+      </header>
       <div ref={surface} className={`viewer-surface ${asset.kind === 'video' ? 'is-video' : ''}${vault ? ' is-vault' : ''}`} onContextMenu={vault ? event => event.preventDefault() : undefined} onPointerDown={event => {
         if (event.button > 0 || info || albumOpen || classificationOpen || exclusion) return;
-        if(asset.kind==='video'&&video.current){const rect=video.current.getBoundingClientRect();if(event.clientY>rect.bottom-64)return;}
-        if(asset.kind!=='video')event.currentTarget.setPointerCapture?.(event.pointerId);
+        if (chrome) revealChrome();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
         const g = gesture.current; g.points.set(event.pointerId, {x:event.clientX, y:event.clientY});
         if (g.points.size === 1) Object.assign(g, {startX:event.clientX, startY:event.clientY, lastX:event.clientX, lastY:event.clientY, moved:false, pinched:false});
         if (g.points.size === 2) { g.pinched=true; if(asset.kind==='video')return; g.distance = distance(); g.scale = transform.scale; g.pinched = true; }
@@ -269,28 +316,61 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
         if (g.points.size === 1) { const remaining = [...g.points.values()][0]; g.lastX = remaining.x; g.lastY = remaining.y; }
         const dx = event.clientX - g.startX, dy = event.clientY - g.startY;
         if (g.points.size === 0 && !g.pinched && transform.scale === 1 && Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.2) change(index + (dx < 0 ? 1 : -1));
-        else if (asset.kind!=='video' && g.points.size === 0 && !g.moved && !g.pinched) setChrome(value => !value);
+        else if (g.points.size === 0 && !g.moved && !g.pinched) setChrome(value => !value);
       }} onPointerCancel={() => gesture.current.points.clear()}>
-        {asset.kind === 'video' ? <video ref={videoRef} key={`${asset.id}:${retry}`} src={original} poster={asset.preview} controls autoPlay={videoResume.current.id!==asset.id||videoResume.current.playing} loop playsInline preload="auto" onWaiting={event => {track(event);waiting();}} onStalled={event => {track(event);waiting();}} onPlaying={event => {track(event);playing();}} onCanPlay={event => {track(event);playing();}} onLoadStart={loadStart} onSuspend={track} onAbort={track} onEmptied={track} onLoadedMetadata={event => {
-          track(event);clearTimeout(progressTimer.current);const saved=videoResume.current;if(saved.id!==asset.id)return;
-          event.currentTarget.currentTime=Math.min(saved.time,Number.isFinite(event.currentTarget.duration)?event.currentTarget.duration:saved.time);
-          if(saved.playing)void event.currentTarget.play().catch(() => {});
-        }} onError={event => {track(event);if(original){clearTimeout(stallTimer.current);clearTimeout(progressTimer.current);if(autoRenew(event.currentTarget))return;setError(`영상을 재생하지 못했습니다. 연결 또는 지원 형식을 확인해 주세요.${vault?mediaErrorCode(event.currentTarget.error):''}`);}}} {...(vault?{controlsList:'nodownload noremoteplayback',disablePictureInPicture:true}:{})}/>
+        {asset.kind === 'video' ? <VideoPlayerSurface
+          key={retry}
+          asset={playerAsset}
+          source={vault?'vault':'library'}
+          sourceUrl={original ?? null}
+          poster={asset.preview}
+          autoPlay={videoResume.current.id!==asset.id||videoResume.current.playing}
+          loop
+          preload="auto"
+          controlsVisible={chrome}
+          onControlsActivity={revealChrome}
+          togglePlaybackOnMediaClick={false}
+          scrubFrameUrlBuilder={null}
+          positionStore={null}
+          mediaRef={videoRef}
+          controlsList={vault?'nodownload noremoteplayback':undefined}
+          disablePictureInPicture={!!vault||undefined}
+          mediaEvents={{
+            onWaiting:event => {track(event);waiting();},
+            onStalled:event => {track(event);waiting();},
+            onPlaying:event => {track(event);playing();},
+            onCanPlay:event => {track(event);playing();},
+            onLoadStart:loadStart,
+            onSuspend:track,
+            onAbort:track,
+            onEmptied:track,
+            onLoadedMetadata:event => {
+              track(event);clearTimeout(progressTimer.current);const saved=videoResume.current;if(saved.id!==asset.id)return;
+              event.currentTarget.currentTime=Math.min(saved.time,Number.isFinite(event.currentTarget.duration)?event.currentTarget.duration:saved.time);
+              if(saved.playing)void event.currentTarget.play().catch(() => {});
+            },
+            onError:event => {track(event);if(original){clearTimeout(stallTimer.current);clearTimeout(progressTimer.current);if(autoRenew(event.currentTarget))return;setError(`영상을 재생하지 못했습니다. 연결 또는 지원 형식을 확인해 주세요.${vault?mediaErrorCode(event.currentTarget.error):''}`);}},
+          }}
+        />
           : vault ? <>
             {asset.preview && loaded !== asset.id && <img className="viewer-image viewer-placeholder" src={asset.preview} alt="" aria-hidden="true" draggable={false}/>}
             <img key={asset.id} className="viewer-image" src={original} alt={vault.label(asset)} draggable={false} onLoad={() => setLoaded(asset.id)} onError={() => setError('이미지를 표시하지 못했습니다. USB 연결과 지원 형식을 확인해 주세요.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, opacity: loaded === asset.id ? undefined : 0}}/>
           </>
-          : (original || asset.preview) ? <img key={asset.id} className="viewer-image" src={original || asset.preview} alt={asset.creator_name || asset.creator_handle || '저장한 이미지'} draggable={false} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}}/> : <div className="empty-inline">{error ? '미리보기를 표시할 수 없습니다.' : '이미지 불러오는 중'}</div>}
+          : imageSrc ? <img key={asset.id} className="viewer-image" src={imageSrc} alt={artistLabel} draggable={false} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}}/> : <div className="empty-inline">{error ? '미리보기를 표시할 수 없습니다.' : '이미지 불러오는 중'}</div>}
       </div>
       {error && <div className="viewer-error" role="status"><span>{error}</span><Button onClick={() => {autoRetry.current={id:asset.id,used:false};renewVideo(video.current,!!video.current&&!video.current.paused);}}><ArrowPathIcon/>다시 시도</Button></div>}
       {transform.scale > 1 && <div className="zoom-reset"><IconButton label="화면에 맞추기" icon={MagnifyingGlassMinusIcon} onClick={() => setTransform({scale:1,x:0,y:0})}/></div>}
-      <footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index === 0} onClick={() => change(index - 1)}/><span className={vault ? 'viewer-title' : undefined}>{vault ? vault.label(asset) : asset.pending ? '처리 대기' : dateLabel(asset)}</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index === items.length - 1} onClick={() => change(index + 1)}/></footer>
+      {!vault&&<ViewerFilmstrip items={items} index={index} privacy={privacy} onIndex={change} onInteract={revealChrome} onInteractionChange={setFilmstripActive}/>}
+      {vault&&<footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index === 0} onClick={() => change(index - 1)}/><span className="viewer-title">{vault.label(asset)}</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index === items.length - 1} onClick={() => change(index + 1)}/></footer>}
+      {!vault&&<nav className="viewer-nav-a11y" aria-label="자산 이동"><button type="button" aria-label="이전 자산" disabled={index === 0} onClick={() => change(index - 1)}>이전 자산</button><button type="button" aria-label="다음 자산" disabled={index === items.length - 1} onClick={() => change(index + 1)}>다음 자산</button></nav>}
+      </div>
+      {!vault&&info&&landscape&&<aside className="viewer-info-dock" aria-label="미디어 정보"><ViewerInfo asset={asset} mediaError={error} onClose={() => setInfo(false)}/></aside>}
       {!vault&&<>
       <AlbumMembershipEditor assetId={asset.id} open={albumOpen} onClose={()=>setAlbumOpen(false)}/>
       <ClassificationAssignmentEditor assetId={asset.id} open={classificationOpen} onClose={()=>setClassificationOpen(false)}/>
       <CharacterExclusionEditor request={exclusion} target={exclusionKey} characterName={character?.name||'이 캐릭터'} assetLabel={asset.creator_name||asset.creator_handle||'이 자산'} onClose={()=>setExclusion(null)} onExcluded={receipt=>{setExclusion(null);onCharacterExcluded?.(receipt);}}/>
       {trashNotice}
-      {info && <Dialog open title="미디어 정보" variant="wide" onClose={() => setInfo(false)}><DialogDescription className="sr-only">작가, 출처와 파일 정보를 확인하고 텍스트로 복사합니다.</DialogDescription><ViewerInfo asset={asset} mediaError={error} onClose={() => setInfo(false)}/></Dialog>}
+      {info&&!landscape&&<BottomSheet title="미디어 정보" onClose={() => setInfo(false)}><ViewerInfo asset={asset} mediaError={error} onClose={() => setInfo(false)}/></BottomSheet>}
       </>}
     </div>
   </Dialog>;

@@ -43,12 +43,11 @@ describe('character scope filters',()=>{
     const back={current:null as (()=>boolean)|null};
     render(<CharacterBrowser initialNode="series:s" active paused={false} density={1} refreshKey={0} onOpen={()=>{}} backRef={back} onExit={()=>{}}/>);
     await screen.findByText('a1');
-    fireEvent.click(screen.getByRole('button',{name:'종류'}));
+    fireEvent.click(screen.getByRole('button',{name:'비율'}));
     expect(back.current?.()).toBe(true);
     await waitFor(()=>expect(screen.queryByRole('dialog',{name:'종류'})).toBeNull());
     expect(screen.getByText('a1')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button',{name:'종류'}));
-    fireEvent.click([...screen.getByRole('radiogroup',{name:'종류'}).querySelectorAll('button')].find(b=>b.textContent==='영상')!);
+    fireEvent.click(screen.getByRole('radio',{name:'영상'}));
     await screen.findByText(/서버를 업데이트해 주세요/);
     expect(document.querySelector('.gallery-scroll')!.getAttribute('data-identity')).not.toContain('media_kind');
   });
@@ -83,9 +82,7 @@ describe('character scope filters',()=>{
     render(<CharacterBrowser initialNode="series:s" active paused={false} density={1} refreshKey={0} onOpen={()=>{}} backRef={{current:null}} onExit={()=>{}}/>);
     await screen.findByText('Series');
     await screen.findByText('a1');
-    fireEvent.click(screen.getByRole('button',{name:'종류'}));
-    const within=screen.getByRole('radiogroup',{name:'종류'});
-    fireEvent.click([...within.querySelectorAll('button')].find(b=>b.textContent==='영상')!);
+    fireEvent.click(screen.getByRole('radio',{name:'영상'}));
     await waitFor(()=>expect(screen.getAllByText(/서버를 업데이트해 주세요/).length).toBeGreaterThan(0));
   });
 
@@ -107,22 +104,19 @@ describe('character scope filters',()=>{
     render(<CharacterBrowser initialNode="series:s" active paused={false} density={1} refreshKey={0} onOpen={()=>{}} backRef={{current:null}} onExit={()=>{}}/>);
     await screen.findByText('Series');
     await screen.findByText('a1');
-    fireEvent.click(screen.getByRole('button',{name:'종류'}));
-    fireEvent.click([...screen.getByRole('radiogroup',{name:'종류'}).querySelectorAll('button')].find(b=>b.textContent==='영상')!);
+    fireEvent.click(screen.getByRole('radio',{name:'영상'}));
     await waitFor(()=>expect(failed).toBe(true));
     // The failed narrowing does not discard the page already on screen.
     await waitFor(()=>expect(screen.getAllByText(/character narrowing failed/).length).toBeGreaterThan(0));
     expect(screen.getByText('a1')).toBeTruthy();
     // The trigger reports the attempted set, so it is matched by prefix rather than exact name.
     // Choosing the same value again is already the attempt, so it is cleared and re-applied.
-    fireEvent.click(screen.getByRole('button',{name:'종류'}));
-    fireEvent.click([...screen.getByRole('radiogroup',{name:'종류'}).querySelectorAll('button')].find(b=>b.textContent==='전체')!);
+    fireEvent.click(screen.getByRole('radio',{name:'전체'}));
     await waitFor(()=>expect(screen.queryByText(/character narrowing failed/)).toBeNull());
-    expect(screen.getByRole('button',{name:'종류'})).toBeTruthy();
-    fireEvent.click(screen.getByRole('button',{name:'종류'}));
-    fireEvent.click([...screen.getByRole('radiogroup',{name:'종류'}).querySelectorAll('button')].find(b=>b.textContent==='영상')!);
+    expect(screen.getByRole('radiogroup',{name:'종류'})).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio',{name:'영상'}));
     await waitFor(()=>expect(screen.getByText('f1')).toBeTruthy());
-    expect(screen.getByRole('button',{name:'영상'})).toBeTruthy();
+    expect(screen.getByRole('radio',{name:'영상'})).toBeTruthy();
   });
 
   it('refuses a contract-less character continuation instead of splicing it into the filtered scope',async()=>{
@@ -137,8 +131,7 @@ describe('character scope filters',()=>{
     render(<CharacterBrowser initialNode="series:s" active paused={false} density={1} refreshKey={0} onOpen={()=>{}} backRef={{current:null}} onExit={()=>{}}/>);
     await screen.findByText('Series');
     await screen.findByText('a1');
-    fireEvent.click(screen.getByRole('button',{name:'종류'}));
-    fireEvent.click([...screen.getByRole('radiogroup',{name:'종류'}).querySelectorAll('button')].find(b=>b.textContent==='영상')!);
+    fireEvent.click(screen.getByRole('radio',{name:'영상'}));
     await waitFor(()=>expect(String(mocks.api.mock.calls.at(-1)?.[0])).toContain('media_kind=videos'));
     fireEvent.click(screen.getByTestId('near-end'));
     await waitFor(()=>expect(screen.getAllByText(/서버를 업데이트해 주세요/).length).toBeGreaterThan(0));
@@ -159,8 +152,8 @@ it('clears character filters on Back before leaving a directly opened character 
   mocks.api.mockImplementation(async(path:string)=>path==='/v1/library/characters'?index:{revision,filterVersion:1,items:[asset('a1')],totalCount:1,sourceCount:1,has_more:false,next_cursor:null});
   const back={current:null as (()=>boolean)|null};
   render(<CharacterBrowser initialNode="series:s" active paused={false} density={1} refreshKey={0} onOpen={()=>{}} backRef={back} onExit={()=>{}}/>);
-  await screen.findByText('a1');fireEvent.click(screen.getByRole('button',{name:'종류'}));fireEvent.click(screen.getByRole('radio',{name:'영상'}));
-  await screen.findByRole('button',{name:'영상'});
-  expect(back.current?.()).toBe(true);await screen.findByRole('button',{name:'종류'});
+  await screen.findByText('a1');fireEvent.click(screen.getByRole('radio',{name:'영상'}));
+  await screen.findByRole('radio',{name:'영상'});
+  expect(back.current?.()).toBe(true);await screen.findByRole('radio',{name:'전체'});
   expect(back.current?.()).toBe(false);expect(screen.getByRole('heading',{name:'Series'})).toBeTruthy();
 });

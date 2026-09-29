@@ -7,7 +7,7 @@ export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(appVersion) },
   root: 'mobile-client', base: './', plugins: [react(), {
     name: 'bundled-font-licenses', generateBundle() {
-      for (const name of ['Pretendard-OFL.txt', 'Rajdhani-OFL.txt']) {
+      for (const name of ['Pretendard-OFL.txt']) {
         this.emitFile({type:'asset',fileName:`licenses/${name}`,source:readFileSync(new URL(`./src/styles/fonts/${name}`,import.meta.url),'utf8')});
       }
     },

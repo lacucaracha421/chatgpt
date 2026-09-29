@@ -1,11 +1,13 @@
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {CoverGroup} from './CoverGroup';
 import {api} from './transport';
 import {mapBounded,normalizePage} from './model';
 import type {Asset,Page,View} from './types';
 import type {CharacterIndex} from './characterModel';
 import {entryView,type Entry} from './libraryModel';
-import {PeopleIcon,PersonIcon} from '../src/shared/ui/ArchiveIcons';
+import {SectionLabel} from './ui';
+import {ShelfScroller} from '../src/shared/ui/ShelfScroller';
+import {FolderIcon,PeopleIcon,PersonIcon} from '../src/shared/ui/ArchiveIcons';
 export type CharacterFolderKind='series'|'group'|'character';
 /** The character kind of a Library entry, or undefined for an ordinary asset folder. */
 export const characterKindOf=(entry:Entry):CharacterFolderKind|undefined=>entry.characterNode?characterFolderKind(entry.characterKind??'series'):undefined;
@@ -20,6 +22,39 @@ export function CharacterGlyph({kind}:{kind:CharacterFolderKind}) {
   return <Icon className="character-glyph" aria-hidden="true"/>;
 }
 const KIND_NAMES:Record<CharacterFolderKind,string>={series:'캐릭터 시리즈',group:'캐릭터 그룹',character:'캐릭터'};
+
+/**
+ * Tablet counterpart of the PC FolderShelf. The PC component also owns an anchored panel and
+ * therefore cannot be mounted here without the desktop BackNavigation provider. ShelfScroller is
+ * presentation-only, so it keeps the same wheel, drag and clipped-last-card behaviour on both
+ * clients.
+ */
+export function FolderShelf({label,cards,accessory,ariaLabel,className,cardsId,cardsHidden}:{label:string;cards:ReactNode[];accessory?:ReactNode;ariaLabel?:string;className?:string;cardsId?:string;cardsHidden?:boolean}) {
+  return <section className={['folder-shelf',className].filter(Boolean).join(' ')} aria-label={ariaLabel??label}>
+    <SectionLabel as="h3" className="folder-shelf__label" title={label} actions={accessory}/>
+    {cards.length>0&&<div id={cardsId} hidden={cardsHidden}><ShelfScroller previousLabel="이전 항목" nextLabel="다음 항목">{cards}</ShelfScroller></div>}
+  </section>;
+}
+
+function ShelfFolderCard({entry,items,characters,paused,onSelect,onVisible}:{entry:Entry;items:Asset[];characters?:CharacterIndex;paused:boolean;onSelect():void;onVisible(id:string,visible:boolean):void}) {
+  const host=useRef<HTMLElement>(null),[visible,setVisible]=useState(false);
+  useEffect(()=>{
+    if(!host.current)return;
+    if(!window.IntersectionObserver){setVisible(true);onVisible(entry.id,true);return;}
+    const observer=new IntersectionObserver(records=>{const next=records.some(record=>record.isIntersecting);setVisible(next);onVisible(entry.id,next);},{rootMargin:'120px'});
+    observer.observe(host.current);return()=>observer.disconnect();
+  },[entry.id,onVisible]);
+  const kind=characterKindOf(entry);
+  const count=entry.asset_count;
+  return <article className="folder-shelf__card" ref={host}>
+    <button type="button" className="folder-shelf__card-open" onClick={onSelect} aria-label={`${entry.name}${count===undefined?'':`, ${count}장`}`}>
+      <CoverGroup items={kind?characterCovers(entry,characters):items} paused={paused||!visible}/>
+      <strong><span className="folder-shelf__icon">{kind?<CharacterGlyph kind={kind}/>:<FolderIcon aria-hidden="true"/>}</span><span className="folder-shelf__name">{entry.name}</span></strong>
+      {count!==undefined&&<small className="folder-shelf__meta">{count.toLocaleString('ko-KR')}장</small>}
+    </button>
+  </article>;
+}
+
 export function characterCovers(entry:Entry,index?:CharacterIndex):Asset[] {
   const node=index?.nodes.find(node=>node.id===entry.characterNode);
   return node?.thumbnailAssetId?[{id:node.thumbnailAssetId,kind:'image'}]:[];
@@ -36,6 +71,7 @@ export function FolderCard({id,name,count,items,paused,childrenLabel,kind,onSele
 }
 export function FolderCards({items,entries,characters,paused,revision,onSelect,strip=false}:{items:Entry[];entries:Entry[];characters?:CharacterIndex;paused:boolean;revision:number;onSelect(view:View):void;strip?:boolean}) {
   const {covers,onVisible}=useFolderCovers(items,paused,revision,entries);
+  if(strip)return <FolderShelf label={`폴더 ${items.length}`} cards={items.map(entry=><ShelfFolderCard key={entry.id} entry={entry} items={covers[entry.id]??[]} characters={characters} paused={paused} onSelect={()=>onSelect(entryView(entry))} onVisible={onVisible}/>)} />;
   return <div className={strip?'library-children':'library-folder-grid'}>{items.map(entry=><FolderCard key={entry.id} id={entry.id} name={entry.name} kind={characterKindOf(entry)} count={entry.asset_count} items={entry.characterNode?characterCovers(entry,characters):covers[entry.id]??[]} paused={paused} childrenLabel={entries.some(item=>item.parent_id===entry.id)?`하위 폴더 ${entries.filter(item=>item.parent_id===entry.id).length}`:undefined} onSelect={()=>onSelect(entryView(entry))} onVisible={onVisible}/>)}</div>;
 }
 const coverDate=(asset:Asset)=>asset.collected_at??asset.created_at??'';

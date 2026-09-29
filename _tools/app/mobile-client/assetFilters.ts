@@ -11,6 +11,10 @@
  */
 import type {AssetFiltersValue, AssetMediaFilter, AssetAspectFilter, AssetDurationFilter} from './types';
 
+/** Sort values supported by the ordinary tablet library endpoint. */
+export type AssetSort = 'newest' | 'oldest';
+export type AssetQueryFilters = AssetFiltersValue & {sort?: AssetSort};
+
 export const EMPTY_FILTERS: AssetFiltersValue = {media:'all', aspect:'all', duration:'all'};
 
 /** The only Asset filter contract this client understands. */
@@ -39,6 +43,12 @@ export const ASPECT_LABELS: Record<AssetAspectFilter, string> = {all:'전체', s
 export const DURATION_LABELS: Record<AssetDurationFilter, string> = {
   all:'전체', under_30s:'30초 미만', '30s_1m':'30초–1분', '1m_5m':'1–5분', over_5m:'5분 이상',
 };
+export const SORT_LABELS: Record<AssetSort, string> = {newest:'최신순',oldest:'오래된순'};
+export const ASSET_SORTS: readonly AssetSort[] = ['newest','oldest'];
+
+export function sortOf(filters: AssetFiltersValue): AssetSort {
+  return (filters as AssetQueryFilters).sort === 'oldest' ? 'oldest' : 'newest';
+}
 
 /** Inclusive/exclusive millisecond bounds. Absent means unbounded, never `0`. */
 const DURATION_BOUNDS: Record<AssetDurationFilter, {min?:number; max?:number}> = {
@@ -76,6 +86,8 @@ export function filterParams(filters: AssetFiltersValue) {
   const bounds = DURATION_BOUNDS[filters.duration] ?? {};
   if (bounds.min !== undefined) params.set('duration_ms_min', String(bounds.min));
   if (bounds.max !== undefined) params.set('duration_ms_max', String(bounds.max));
+  // newest is the endpoint default; only the non-default value needs a wire parameter.
+  if ((filters as AssetQueryFilters).sort === 'oldest') params.set('sort', 'oldest');
   return params;
 }
 /** Append the active filters to an already-built path. No filters leaves the path untouched. */

@@ -1,12 +1,14 @@
 import { ArrowsPointingOutIcon, ArrowsPointingInIcon, PauseIcon, PlayIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from "@heroicons/react/24/outline";
-import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import type { AssetSummary } from "../library/types";
-import { libraryGateway } from "../library/client";
-import { playbackUrl, scrubFrameUrl, vaultPlaybackUrl } from "../assets/mediaUrl";
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref, type VideoHTMLAttributes } from "react";
 import { Button } from "../shared/ui/Button";
 
-type VideoAsset = AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> };
+export type VideoPlayerAsset = {
+  id: string;
+  title?: string | null;
+  originalName: string;
+  thumbnailRevision?: string | null;
+  media: {durationMs: number; scrubFrameCount: number};
+};
 const CONTROLS_IDLE_MS = 1_800;
 /** Seconds moved by one Left/Right arrow press. */
 export const VIDEO_SEEK_STEP_SECONDS = 5;
@@ -17,22 +19,99 @@ export type VideoPlayerHandle = { seekBy: (deltaSeconds: number) => void; toggle
 const SEEK_FREEZE_MAX_MS = 1_500;
 const PROGRESS_SAVE_INTERVAL_MS = 10_000;
 
-type PlaybackUrlResolver = (assetId: string) => Promise<string>;
+export type PlaybackUrlResolver = (assetId: string) => Promise<string>;
+export type ScrubFrameUrlBuilder = (assetId: string, frameIndex: number, revision?: string | null) => string;
+export type VideoPositionStore = {
+  get(assetId: string): Promise<{positionMs: number; durationMs: number} | null>;
+  save(assetId: string, positionMs: number, durationMs: number): Promise<void>;
+  clear(assetId: string): Promise<void>;
+};
+export type VideoPlayerMediaEvents = Partial<Pick<VideoHTMLAttributes<HTMLVideoElement>,
+  "onAbort" | "onCanPlay" | "onDurationChange" | "onEmptied" | "onEnded" | "onError" |
+  "onLoadedMetadata" | "onLoadStart" | "onPause" | "onPlay" | "onPlaying" | "onSeeked" |
+  "onStalled" | "onSuspend" | "onTimeUpdate" | "onVolumeChange" | "onWaiting"
+>>;
 
-const resolveInternalPlaybackUrl: PlaybackUrlResolver = (assetId) =>
-  invoke<string>("get_internal_playback_url", { assetId });
-const resolveInternalVaultPlaybackUrl: PlaybackUrlResolver = (itemId) =>
-  invoke<string>("get_internal_vault_playback_url", { itemId });
+export type VideoPlayerProps = {
+  asset: VideoPlayerAsset;
+  source?: "library" | "vault";
+  rememberPosition?: boolean;
+  resolvePlaybackUrl?: PlaybackUrlResolver;
+  /** A host-owned URL. Passing `null` deliberately leaves the media waiting for its source. */
+  sourceUrl?: string | null;
+  scrubFrameUrlBuilder?: ScrubFrameUrlBuilder | null;
+  positionStore?: VideoPositionStore | null;
+  poster?: string;
+  autoPlay?: boolean;
+  loop?: boolean;
+  preload?: VideoHTMLAttributes<HTMLVideoElement>["preload"];
+  controlsList?: string;
+  disablePictureInPicture?: boolean;
+  controlsVisible?: boolean;
+  onControlsActivity?(): void;
+  togglePlaybackOnMediaClick?: boolean;
+  mediaRef?: Ref<HTMLVideoElement>;
+  mediaEvents?: VideoPlayerMediaEvents;
+  ref?: Ref<VideoPlayerHandle>;
+};
+
+type VideoPlayerSurfaceProps = Omit<VideoPlayerProps, "sourceUrl"> & {sourceUrl: string | null};
+
+type TauriInternals = {
+  convertFileSrc?: (path: string, protocol?: string) => string;
+  invoke?: <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+};
+
+function tauriInternals(): TauriInternals | undefined {
+  return (globalThis as typeof globalThis & {__TAURI_INTERNALS__?: TauriInternals}).__TAURI_INTERNALS__;
+}
+
+function desktopMediaOrigin(): string {
+  const convert = tauriInternals()?.convertFileSrc;
+  return (globalThis as typeof globalThis & {isTauri?: boolean}).isTauri && convert
+    ? convert("", "lakomics").replace(/\/$/, "")
+    : "http://lakomics.localhost";
+}
+
+const desktopPlaybackUrl = (assetId: string, vault: boolean) =>
+  `${desktopMediaOrigin()}/${vault ? "vault-playback" : "playback"}/${encodeURIComponent(assetId)}`;
+const desktopScrubFrameUrl: ScrubFrameUrlBuilder = (assetId, frameIndex, revision) => {
+  const base = `${desktopMediaOrigin()}/scrub-frame/${encodeURIComponent(assetId)}/${frameIndex}`;
+  return revision ? `${base}/v${encodeURIComponent(revision)}` : base;
+};
+const desktopInvoke = <T,>(command: string, args: Record<string, unknown>) => {
+  const invoke = tauriInternals()?.invoke;
+  return invoke ? Promise.resolve(invoke<T>(command, args)) : Promise.reject(new Error("Tauri IPC is unavailable"));
+};
+const resolveInternalPlaybackUrl: PlaybackUrlResolver = assetId => desktopInvoke("get_internal_playback_url", {assetId});
+const resolveInternalVaultPlaybackUrl: PlaybackUrlResolver = itemId => desktopInvoke("get_internal_vault_playback_url", {itemId});
+const desktopPositionStore: VideoPositionStore = {
+  get: assetId => desktopInvoke("get_video_playback_progress", {assetId}),
+  save: (assetId, positionMs, durationMs) => desktopInvoke("save_video_playback_progress", {assetId, positionMs, durationMs}),
+  clear: assetId => desktopInvoke("clear_video_playback_progress", {assetId}),
+};
 
 /**
  * `vault` plays an encrypted Private Vault item: no scrub frames, vault routes only.
  * `rememberPosition` resumes and records the playback position (이어 보기); never for vault items.
  */
-export function VideoPlayer({ asset, source: mediaSource = "library", rememberPosition = false, resolvePlaybackUrl, ref }: { asset: VideoAsset; source?: "library" | "vault"; rememberPosition?: boolean; resolvePlaybackUrl?: PlaybackUrlResolver; ref?: Ref<VideoPlayerHandle> }) {
+export function VideoPlayer(props: VideoPlayerProps) {
+  const vault = props.source === "vault";
+  const hasExternalSource = Object.prototype.hasOwnProperty.call(props, "sourceUrl");
+  return <VideoPlayerSurface
+    {...props}
+    sourceUrl={hasExternalSource ? props.sourceUrl ?? null : desktopPlaybackUrl(props.asset.id, vault)}
+    resolvePlaybackUrl={props.resolvePlaybackUrl ?? (vault ? resolveInternalVaultPlaybackUrl : resolveInternalPlaybackUrl)}
+    scrubFrameUrlBuilder={props.scrubFrameUrlBuilder === undefined ? desktopScrubFrameUrl : props.scrubFrameUrlBuilder}
+    positionStore={props.positionStore === undefined ? desktopPositionStore : props.positionStore}
+  />;
+}
+
+/** Shared player surface. Hosts provide media/platform seams, so this export has no desktop dependency. */
+export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
+  const {asset, source: mediaSource = "library", rememberPosition = false, resolvePlaybackUrl, scrubFrameUrlBuilder: buildScrubFrameUrl = null, positionStore = null, poster, autoPlay, loop, preload = "metadata", controlsList, disablePictureInPicture, controlsVisible: controlledControlsVisible, onControlsActivity, togglePlaybackOnMediaClick = true, mediaRef, mediaEvents, ref} = props;
   const vault = mediaSource === "vault";
-  const untracked = vault || !rememberPosition;
-  const protocolUrl = vault ? vaultPlaybackUrl : playbackUrl;
-  const resolveHttpUrl = resolvePlaybackUrl ?? (vault ? resolveInternalVaultPlaybackUrl : resolveInternalPlaybackUrl);
+  const untracked = vault || !rememberPosition || !positionStore;
   const rootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -42,11 +121,11 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
   const [volume, setVolume] = useState(1);
   const [fullscreen, setFullscreen] = useState(false);
   const [hoverRatio, setHoverRatio] = useState<number | null>(null);
-  const [controlsVisible, setControlsVisible] = useState(true);
+  const [localControlsVisible, setLocalControlsVisible] = useState(true);
   const [scrubbing, setScrubbing] = useState(false);
   const [volumeInteracting, setVolumeInteracting] = useState(false);
   const [controlsFocused, setControlsFocused] = useState(false);
-  const [source, setSource] = useState<string | undefined>(() => protocolUrl(asset.id));
+  const [source, setSource] = useState<string | undefined>(() => props.sourceUrl ?? undefined);
   const idleTimerRef = useRef<number | null>(null);
   const freezeRef = useRef<HTMLCanvasElement>(null);
   const freezeTimerRef = useRef<number | null>(null);
@@ -55,6 +134,13 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
   const savedPositionRef = useRef<number | null>(null);
   const metadataReadyRef = useRef(false);
   const progressTouchedRef = useRef(false);
+  const controlsVisible = controlledControlsVisible ?? localControlsVisible;
+
+  const setVideoRef = useCallback((element: HTMLVideoElement | null) => {
+    videoRef.current = element;
+    if (typeof mediaRef === "function") mediaRef(element);
+    else if (mediaRef) mediaRef.current = element;
+  }, [mediaRef]);
 
   const restoreProgress = useCallback((video: HTMLVideoElement) => {
     const position = savedPositionRef.current;
@@ -76,7 +162,7 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
     if (!video) return;
     if (video.ended) {
       progressTouchedRef.current = false;
-      void libraryGateway.clearVideoPlaybackProgress(asset.id).catch(() => undefined);
+      void positionStore?.clear(asset.id).catch(() => undefined);
       return;
     }
     const position = Number.isFinite(video.currentTime) ? video.currentTime : 0;
@@ -84,8 +170,8 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
       ? video.duration
       : asset.media.durationMs / 1_000;
     if (position < 0 || !Number.isFinite(mediaDuration) || mediaDuration <= 0) return;
-    void libraryGateway.saveVideoPlaybackProgress(asset.id, Math.round(position * 1_000), Math.round(mediaDuration * 1_000)).catch(() => undefined);
-  }, [asset.id, asset.media.durationMs, untracked]);
+    void positionStore?.save(asset.id, Math.round(position * 1_000), Math.round(mediaDuration * 1_000)).catch(() => undefined);
+  }, [asset.id, asset.media.durationMs, positionStore, untracked]);
 
   useEffect(() => {
     metadataReadyRef.current = false;
@@ -94,7 +180,7 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
     if (untracked) return;
     let active = true;
     const video = videoRef.current;
-    void libraryGateway.getVideoPlaybackProgress(asset.id)
+    void positionStore!.get(asset.id)
       .then(progress => {
         if (!active || !progress) return;
         savedPositionRef.current = progress.positionMs / 1_000;
@@ -106,7 +192,7 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
       active = false;
       saveProgress(video);
     };
-  }, [asset.id, restoreProgress, saveProgress, untracked]);
+  }, [asset.id, positionStore, restoreProgress, saveProgress, untracked]);
 
   useEffect(() => {
     if (untracked || !playing) return;
@@ -120,13 +206,17 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
   }, []);
   const scheduleIdle = useCallback(() => {
     clearIdleTimer();
-    setControlsVisible(true);
+    if (controlledControlsVisible !== undefined) {
+      onControlsActivity?.();
+      return;
+    }
+    setLocalControlsVisible(true);
     if (!playing || scrubbing || volumeInteracting || controlsFocused) return;
     idleTimerRef.current = window.setTimeout(() => {
       idleTimerRef.current = null;
-      setControlsVisible(false);
+      setLocalControlsVisible(false);
     }, CONTROLS_IDLE_MS);
-  }, [clearIdleTimer, controlsFocused, playing, scrubbing, volumeInteracting]);
+  }, [clearIdleTimer, controlledControlsVisible, controlsFocused, onControlsActivity, playing, scrubbing, volumeInteracting]);
 
   useEffect(() => {
     const updateFullscreen = () => setFullscreen(document.fullscreenElement === rootRef.current);
@@ -135,33 +225,40 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
   }, []);
 
   useEffect(() => {
+    if (controlledControlsVisible !== undefined) {
+      clearIdleTimer();
+      return clearIdleTimer;
+    }
     scheduleIdle();
     return clearIdleTimer;
-  }, [clearIdleTimer, scheduleIdle]);
+  }, [clearIdleTimer, controlledControlsVisible, scheduleIdle]);
 
   useEffect(() => {
     setPlaying(false);
     setCurrentTime(0);
     setDuration(asset.media.durationMs / 1_000);
     setHoverRatio(null);
-    setControlsVisible(true);
+    setLocalControlsVisible(true);
     setScrubbing(false);
     setVolumeInteracting(false);
     setControlsFocused(false);
     const video = videoRef.current;
-    const fallback = protocolUrl(asset.id);
+    const fallback = props.sourceUrl ?? undefined;
     let active = true;
-    const applySource = (next: string) => {
+    const applySource = (next: string | undefined) => {
       if (!active) return;
       setSource(next);
-      if (video) video.src = next;
+      if (video) {
+        if (next) video.src = next;
+        else video.removeAttribute("src");
+      }
     };
     // Linux WebKitGTK uses the lakomics: scheme, which does not stream ranged video well;
     // there the player uses the app's authenticated local HTTP playback URL instead.
-    if (fallback.startsWith("lakomics:")) {
+    if (fallback?.startsWith("lakomics:")) {
       setSource(undefined);
       video?.removeAttribute("src");
-      void resolveHttpUrl(asset.id).then(applySource).catch(() => undefined);
+      if (resolvePlaybackUrl) void resolvePlaybackUrl(asset.id).then(applySource).catch(() => undefined);
     } else {
       applySource(fallback);
     }
@@ -172,7 +269,7 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
       video.removeAttribute("src");
       video.load();
     };
-  }, [asset.id, asset.media.durationMs, protocolUrl, resolveHttpUrl]);
+  }, [asset.id, asset.media.durationMs, props.sourceUrl, resolvePlaybackUrl]);
 
   const releaseFrame = useCallback(() => {
     if (freezeTimerRef.current !== null) window.clearTimeout(freezeTimerRef.current);
@@ -257,31 +354,48 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
     }}
   >
     <video
-      ref={videoRef}
+      ref={setVideoRef}
       className="video-player__media"
       src={source}
+      poster={poster}
       aria-label={`${title} 영상`}
       playsInline
-      preload="metadata"
+      preload={preload}
+      autoPlay={autoPlay}
+      loop={loop}
+      controlsList={controlsList}
+      disablePictureInPicture={disablePictureInPicture}
       tabIndex={-1}
       onPointerDown={(event) => event.preventDefault()}
-      onClick={togglePlayback}
+      onClick={togglePlaybackOnMediaClick ? togglePlayback : undefined}
+      onLoadStart={mediaEvents?.onLoadStart}
+      onWaiting={mediaEvents?.onWaiting}
+      onStalled={mediaEvents?.onStalled}
+      onPlaying={mediaEvents?.onPlaying}
+      onCanPlay={mediaEvents?.onCanPlay}
+      onSuspend={mediaEvents?.onSuspend}
+      onAbort={mediaEvents?.onAbort}
+      onEmptied={mediaEvents?.onEmptied}
+      onError={mediaEvents?.onError}
       onLoadedMetadata={(event) => {
         metadataReadyRef.current = true;
         restoreProgress(event.currentTarget);
+        mediaEvents?.onLoadedMetadata?.(event);
       }}
-      onPlay={() => { progressTouchedRef.current = true; setPlaying(true); }}
-      onPause={() => { setPlaying(false); saveProgress(); }}
-      onEnded={() => {
+      onPlay={(event) => { progressTouchedRef.current = true; setPlaying(true); mediaEvents?.onPlay?.(event); }}
+      onPause={(event) => { setPlaying(false); saveProgress(); mediaEvents?.onPause?.(event); }}
+      onEnded={(event) => {
         setPlaying(false);
         progressTouchedRef.current = false;
-        if (!untracked) void libraryGateway.clearVideoPlaybackProgress(asset.id).catch(() => undefined);
+        if (!untracked) void positionStore?.clear(asset.id).catch(() => undefined);
+        mediaEvents?.onEnded?.(event);
       }}
       // Release only after the last of several queued seeks has landed.
-      onSeeked={(event) => { if (!event.currentTarget.seeking) releaseFrame(); }}
+      onSeeked={(event) => { if (!event.currentTarget.seeking) releaseFrame(); mediaEvents?.onSeeked?.(event); }}
       onTimeUpdate={(event) => {
         if (event.currentTarget.currentTime > 0) progressTouchedRef.current = true;
         setCurrentTime(event.currentTarget.currentTime);
+        mediaEvents?.onTimeUpdate?.(event);
       }}
       onDurationChange={(event) => {
         setDuration(event.currentTarget.duration);
@@ -289,21 +403,27 @@ export function VideoPlayer({ asset, source: mediaSource = "library", rememberPo
           metadataReadyRef.current = true;
           restoreProgress(event.currentTarget);
         }
+        mediaEvents?.onDurationChange?.(event);
       }}
-      onVolumeChange={(event) => { setMuted(event.currentTarget.muted); setVolume(event.currentTarget.volume); }}
+      onVolumeChange={(event) => { setMuted(event.currentTarget.muted); setVolume(event.currentTarget.volume); mediaEvents?.onVolumeChange?.(event); }}
     />
-    <canvas ref={freezeRef} className="video-player__freeze" aria-hidden="true" hidden={!frozen} />
+    <canvas ref={freezeRef} className="video-player__freeze" aria-hidden="true" style={{display: frozen ? undefined : "none"}} />
     <div
       className="video-player__controls"
       aria-hidden={!controlsVisible}
       inert={!controlsVisible ? true : undefined}
-      onFocusCapture={() => { setControlsFocused(true); setControlsVisible(true); clearIdleTimer(); }}
+      onPointerDown={event => { event.stopPropagation(); scheduleIdle(); }}
+      onPointerMove={event => { event.stopPropagation(); scheduleIdle(); }}
+      onPointerUp={event => { event.stopPropagation(); scheduleIdle(); }}
+      onPointerCancel={event => { event.stopPropagation(); scheduleIdle(); }}
+      onClick={event => event.stopPropagation()}
+      onFocusCapture={() => { setControlsFocused(true); if (controlledControlsVisible === undefined) setLocalControlsVisible(true); else onControlsActivity?.(); clearIdleTimer(); }}
       onBlurCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setControlsFocused(false);
       }}
     >
       <div className="video-player__timeline-wrap">
-        {timelineAvailable && hoverRatio !== null && !vault && <img className="video-player__scrub-preview" src={scrubFrameUrl(asset.id, hoverFrame, asset.thumbnailRevision)} alt={`${formatTime(hoverTime)} 미리보기`} style={{ left: `${hoverRatio * 100}%` }} />}
+        {timelineAvailable && hoverRatio !== null && !vault && buildScrubFrameUrl && <img className="video-player__scrub-preview" src={buildScrubFrameUrl(asset.id, hoverFrame, asset.thumbnailRevision)} alt={`${formatTime(hoverTime)} 미리보기`} style={{ left: `${hoverRatio * 100}%` }} />}
         <input
           type="range"
           className="video-player__timeline"

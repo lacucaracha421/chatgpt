@@ -21,7 +21,7 @@ afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();delete (HTMLEl
 
 const asset=(id:string):Asset=>({id,kind:'image',preview:`data:image/png;base64,${id}`,width:600,height:800});
 const tile=(id:string)=>document.querySelector(`[data-asset-id="${id}"]`) as HTMLElement;
-const gallery=(items:Asset[],identity='all')=><Gallery items={items} density={1} identity={identity} restoreScroll={0} onScroll={()=>{}} onOpen={()=>{}} onReady={()=>{}} onNearEnd={()=>{}} paused={false} vault={{label:item=>`항목 ${item.id}`}}/>;
+const gallery=(items:Asset[],identity='all',stale=false)=><Gallery items={items} density={1} identity={identity} restoreScroll={0} onScroll={()=>{}} onOpen={()=>{}} onReady={()=>{}} onNearEnd={()=>{}} paused={false} stale={stale} vault={{label:item=>`항목 ${item.id}`}}/>;
 const tileAnimations=(id:string)=>animate.mock.calls.filter(([element])=>element===tile(id));
 async function load(id:string){fireEvent.load(tile(id).querySelector('img')!);await act(async()=>{});}
 
@@ -61,6 +61,30 @@ it('does not animate the first page, a new place or anything under reduced motio
  expect(tile('b').querySelector('img')!.style.opacity).not.toBe('0');
  await load('b');
  expect(animate).not.toHaveBeenCalled();
+});
+
+it('keeps a stale list mounted and does not arrive ready thumbnails on replacement',()=>{
+ const complete=Object.getOwnPropertyDescriptor(HTMLImageElement.prototype,'complete');
+ const naturalWidth=Object.getOwnPropertyDescriptor(HTMLImageElement.prototype,'naturalWidth');
+ const naturalHeight=Object.getOwnPropertyDescriptor(HTMLImageElement.prototype,'naturalHeight');
+ Object.defineProperty(HTMLImageElement.prototype,'complete',{configurable:true,value:true});
+ Object.defineProperty(HTMLImageElement.prototype,'naturalWidth',{configurable:true,value:600});
+ Object.defineProperty(HTMLImageElement.prototype,'naturalHeight',{configurable:true,value:800});
+ try {
+   const first=[asset('a'),asset('b')];
+   const view=render(gallery(first));
+   view.rerender(gallery(first,'all',true));
+   expect(tile('a')).toBeTruthy();
+   expect(screen.getByLabelText('자산 목록').hasAttribute('inert')).toBe(true);
+   view.rerender(gallery([asset('x'),asset('y')],'replacement'));
+   expect(document.querySelector('[data-asset-id="a"]')).toBeNull();
+   expect(tile('x').style.opacity).not.toBe('0');
+   expect(tileAnimations('x')).toHaveLength(0);
+ } finally {
+   if(complete)Object.defineProperty(HTMLImageElement.prototype,'complete',complete);else delete (HTMLImageElement.prototype as {complete?:unknown}).complete;
+   if(naturalWidth)Object.defineProperty(HTMLImageElement.prototype,'naturalWidth',naturalWidth);else delete (HTMLImageElement.prototype as {naturalWidth?:unknown}).naturalWidth;
+   if(naturalHeight)Object.defineProperty(HTMLImageElement.prototype,'naturalHeight',naturalHeight);else delete (HTMLImageElement.prototype as {naturalHeight?:unknown}).naturalHeight;
+ }
 });
 
 it('shows an appended tile whose thumbnail is slow after a short wait, then fades the image in',async()=>{

@@ -111,6 +111,19 @@ it('opens character browsing inside Library and uses Android back for its parent
   expect(screen.queryByRole('region',{name:'시리즈·캐릭터'})).toBeNull();
 });
 
+it('shows the direct image empty state when a plain folder only has child folders',async()=>{
+  const original=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation((path:string,signal?:AbortSignal)=>{
+    if(path.includes('classifications'))return Promise.resolve({items:[{id:'parent',name:'Parent',asset_count:0,parent_id:null},{id:'child',name:'Child',asset_count:1,parent_id:'parent'}]});
+    if(path.includes('classification_id=parent'))return Promise.resolve({items:[],has_more:false,next_cursor:null});
+    return original(path,signal);
+  });
+  render(<App/>);
+  fireEvent.click(await screen.findByRole('button',{name:'Parent, 0개'}));
+  await screen.findByRole('heading',{name:'Parent'});
+  expect(screen.getByText('이 폴더에 바로 들어 있는 이미지가 없습니다')).toBeTruthy();
+});
+
 it('returns from a directly opened character folder to the non-home folder and scroll it was opened from',async()=>{
   const original=mocks.api.getMockImplementation()!;
   const revision='a'.repeat(64);
@@ -126,7 +139,7 @@ it('returns from a directly opened character folder to the non-home folder and s
   await screen.findByText('tile-b1');
   expect(screen.getByRole('heading',{name:'분류 B'})).toBeTruthy();
   fireEvent.scroll(screen.getByLabelText('자산 목록'));
-  fireEvent.click(await screen.findByRole('button',{name:'Series, 2개'}));
+  fireEvent.click(await screen.findByRole('button',{name:'Series, 2장'}));
   await screen.findByText('tile-b1');
   await screen.findByRole('heading',{name:'Series'});
   act(()=>window.dispatchEvent(new Event('lakomics-back')));
@@ -166,10 +179,10 @@ it('steps up the character hierarchy while drilled down inside the browser',asyn
   render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
   await openFolder('Series, 2개');
   await screen.findByText('tile-b1');
-  fireEvent.click(await screen.findByRole('button',{name:'Group · 2개'}));
+  fireEvent.click(await screen.findByRole('button',{name:'Group · 2장'}));
   await screen.findByText('tile-b1');
   act(()=>window.dispatchEvent(new Event('lakomics-back')));
-  await screen.findByRole('button',{name:'Group · 2개'});
+  await screen.findByRole('button',{name:'Group · 2장'});
   act(()=>window.dispatchEvent(new Event('lakomics-back')));
   await screen.findByRole('heading',{name:'에셋'});
 });
@@ -388,12 +401,12 @@ it('uses drill-down in both orientations and keeps settings only on Home',async(
     expect(screen.queryByRole('button',{name:'사이드바 열기'})).toBeNull();
   }
 });
-it('sets the thumbnail size with a slider, stores it and counts only a size other than the default',async()=>{
+it('sets the thumbnail size with a slider, stores it and keeps 보기 quiet',async()=>{
   localStorage.setItem('lakomics.mobile.density','0');
   render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
-  // A pre-slider stored value (0 = 크게) is still honoured, and it differs from 균형.
+  // A pre-slider stored value (0 = 크게) is still honoured, but 보기 has no changed badge.
   const opener=screen.getByRole('button',{name:'보기 옵션'});
-  expect(opener.classList.contains('is-changed')).toBe(true);
+  expect(opener.classList.contains('is-changed')).toBe(false);
   opener.focus();fireEvent.click(opener);
   const slider=screen.getByRole('slider',{name:'썸네일 크기'}) as HTMLInputElement;
   expect(slider.value).toBe('0');expect(slider.getAttribute('aria-valuetext')).toBe('크게');
@@ -414,14 +427,14 @@ it('walks root, parent, child, Back, Back, root, finish and supports breadcrumb 
   render(<App/>);await screen.findByRole('heading',{name:'에셋'});
   fireEvent.click(await screen.findByRole('button',{name:'Parent, 2개'}));await screen.findByRole('heading',{name:'Parent'});
   fireEvent.scroll(screen.getByLabelText('자산 목록'));
-  fireEvent.click(screen.getByRole('button',{name:'Child, 2개'}));await screen.findByRole('heading',{name:'Child'});
+  fireEvent.click(screen.getByRole('button',{name:'Child, 2장'}));await screen.findByRole('heading',{name:'Child'});
   act(()=>window.dispatchEvent(new Event('lakomics-back')));await screen.findByRole('heading',{name:'Parent'});
   await waitFor(()=>expect(screen.getAllByLabelText('자산 목록').find(element=>!element.closest('[style="display: none;"]'))?.getAttribute('data-restore-scroll')).toBe('420'));
   act(()=>window.dispatchEvent(new Event('lakomics-back')));await screen.findByRole('heading',{name:'에셋'});
   act(()=>window.dispatchEvent(new Event('lakomics-back')));await waitFor(()=>expect(mocks.native).toHaveBeenCalledWith('finish'));
   fireEvent.click(screen.getByRole('button',{name:'Parent, 2개'}));await screen.findByRole('heading',{name:'Parent'});
-  fireEvent.click(screen.getByRole('button',{name:'Child, 2개'}));await screen.findByRole('heading',{name:'Child'});
-  fireEvent.click(screen.getByRole('button',{name:'Grandchild, 2개'}));await screen.findByRole('heading',{name:'Grandchild'});
+  fireEvent.click(screen.getByRole('button',{name:'Child, 2장'}));await screen.findByRole('heading',{name:'Child'});
+  fireEvent.click(screen.getByRole('button',{name:'Grandchild, 2장'}));await screen.findByRole('heading',{name:'Grandchild'});
   fireEvent.click(within(screen.getByRole('navigation',{name:'현재 위치'})).getByRole('button',{name:'Parent'}));await screen.findByRole('heading',{name:'Parent'});
   fireEvent.click(within(screen.getByRole('navigation',{name:'현재 위치'})).getByRole('button',{name:'에셋',exact:true}));await screen.findByRole('heading',{name:'에셋'});
 });

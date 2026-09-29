@@ -2158,45 +2158,6 @@ textarea:focus-visible {
   border-radius: var(--radius-sm);
 }
 
-.asset-gallery__asset[aria-selected="true"] {
-  outline: 3px solid var(--color-accent);
-  outline-offset: -3px;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-bg) 78%, transparent);
-}
-
-.asset-gallery__asset[aria-selected="true"]::after {
-  position: absolute;
-  z-index: 3;
-  inset: 0;
-  content: "";
-  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-  pointer-events: none;
-}
-
-.asset-gallery__selection-indicator {
-  position: absolute;
-  z-index: 4;
-  top: 0;
-  left: 0;
-  width: 22px;
-  height: 22px;
-  background: var(--color-accent);
-  border-radius: 0 0 9px 0;
-  box-shadow: 1px 1px 0 color-mix(in srgb, var(--color-bg) 62%, transparent);
-  pointer-events: none;
-}
-
-.asset-gallery__selection-indicator::after {
-  position: absolute;
-  top: 7px;
-  left: 7px;
-  width: 6px;
-  height: 6px;
-  content: "";
-  background: color-mix(in srgb, var(--color-bg) 92%, white 8%);
-  border-radius: 50%;
-}
-
 .asset-gallery__asset img {
   display: block;
   width: 100%;
@@ -6347,13 +6308,8 @@ textarea:focus-visible {
 }
 .asset-context-menu__separator { height: var(--border-width); margin: var(--space-1) 0; background: var(--color-border); }
 .asset-context-menu__destinations { max-height: min(60vh, var(--radix-context-menu-content-available-height)); max-width: min(28rem, 85vw); overflow-y: auto; }
-.asset-gallery__asset[aria-selected="true"] { outline: none; box-shadow: none; }
-.asset-gallery__asset[aria-selected="true"]::after { display: none; }
 .asset-gallery__asset[data-focused="true"] { outline: 1px solid var(--color-focus); outline-offset: 2px; }
-.asset-gallery__asset[aria-selected="true"] .asset-gallery__image::after { content: ""; position: absolute; inset: 0; background: var(--asset-selection-tint); pointer-events: none; }
 .asset-gallery__asset:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
-.asset-gallery__selection-indicator { top: var(--space-2); left: var(--space-2); width: 18px; height: 18px; border-radius: 0; box-shadow: none; }
-.asset-gallery__selection-indicator::after { top: 5px; left: 5px; width: 8px; height: 8px; border-radius: 0; background: var(--color-on-accent); }
 
 .collection-browser__grid { gap: var(--space-6); }
 .collection-card__object--game { padding: 0; background: transparent; }

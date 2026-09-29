@@ -1,19 +1,21 @@
-import {LibraryHeader,type LibraryCrumb} from './LibraryHeader';
-import {FilterChips,activeFilterCount,type FilterGroup} from './FilterChips';
-import {characterFolderKind} from './FolderCards';
-import {createPortal} from 'react-dom';
+import type {LibraryCrumb} from './LibraryHeader';
+import {FilterChips,type FilterGroup} from './FilterChips';
 import {usePublicationCheck} from './usePublicationCheck';
 import {useCallback,useEffect,useId,useRef,useState,type MutableRefObject} from 'react';
-import {ChevronLeftIcon,ChevronRightIcon,ChevronUpIcon,FolderIcon,PhotoIcon,UserGroupIcon} from '@heroicons/react/24/outline';
-import {Button,IconButton} from './ui';
+import {ArrowLeftIcon,ChevronUpIcon,InformationCircleIcon,PhotoIcon,Squares2X2Icon} from '@heroicons/react/24/outline';
+import {BottomSheet} from './BottomSheet';
+import {BarProgress} from './TopBar';
+import {Button,IconButton,SegmentedControl} from './ui';
 import {api,errorText} from './transport';
 import {loadThumbnail} from './media';
+import {readyFirstScreen} from './firstScreen';
 import {Gallery} from './Gallery';
-import {DEFAULT_DENSITY,RequestGate} from './model';
-import type {Asset,AssetFiltersValue} from './types';
-import {ASSET_FILTER_VERSION,EMPTY_FILTERS,filterKey,filterVersionOf,hasActiveFilters,sameFilters} from './assetFilters';
-import {filterSummary} from './AssetFilters';
+import {RequestGate} from './model';
+import type {Asset,AssetFiltersValue,AssetMediaFilter} from './types';
+import {ASSET_FILTER_VERSION,EMPTY_FILTERS,MEDIA_LABELS,filterKey,filterVersionOf,hasActiveFilters,sameFilters} from './assetFilters';
 import {characterChildren,characterExclusion,characterExclusionTarget,characterPath,validCharacterIndex,type CharacterFilter,type CharacterIndex,type CharacterNode,type CharacterPage} from './characterModel';
+import {FolderShelf} from './FolderCards';
+import {FolderIcon,PeopleIcon,PersonIcon} from '../src/shared/ui/ArchiveIcons';
 import {useLevelMotion} from './motion';
 import './characters.css';
 
@@ -29,7 +31,6 @@ type Location={node:string|null;filter:CharacterFilter;filters:AssetFiltersValue
 type Cached={page:CharacterPage;scroll:number};
 const ROOT:Location={node:null,filter:'all',filters:{...EMPTY_FILTERS}};
 /** The series filters the mobile app offers; 추가 확인 (needs_review) stays a server scope only. */
-const labels:Partial<Record<CharacterFilter,string>>={unclassified:'미분류',all:'전체 이미지'};
 const SERIES_FILTERS:CharacterFilter[]=['unclassified','all'];
 /**
  * A series opens on 미분류 (the images still waiting for a character); every other scope has
@@ -59,7 +60,7 @@ function Preview({id,paused,label=''}:{id?:string|null;paused:boolean;label?:str
   },[id,paused,preview]);
   return preview?<img src={preview} alt={label}/>:<PhotoIcon aria-hidden="true"/>;
 }
-function Card({node,count,paused,onSelect,previews=[],lazy=false}:{node:CharacterNode;count:number;paused:boolean;onSelect():void;previews?:string[];lazy?:boolean}) {
+function Card({node,count,paused,onSelect,previews=[],lazy=false}:{node:CharacterNode;count?:number;paused:boolean;onSelect():void;previews?:string[];lazy?:boolean}) {
   const host=useRef<HTMLButtonElement>(null),[visible,setVisible]=useState(!lazy);
   useEffect(()=>{
     if(!lazy||!host.current)return;
@@ -69,16 +70,16 @@ function Card({node,count,paused,onSelect,previews=[],lazy=false}:{node:Characte
     observer.observe(host.current);return()=>observer.disconnect();
   },[lazy]);
   const previewPaused=paused||(lazy&&!visible);
-  return <button ref={host} className="character-card" data-kind={node.kind} onClick={onSelect} aria-label={`${node.name} · ${count}개`}>
+  return <button ref={host} type="button" className="folder-shelf__card-open character-card" data-kind={node.kind} onClick={onSelect} aria-label={`${node.name}${count===undefined?'':` · ${count}장`}`}>
     <span className={`character-card-image${node.kind==='group'?' character-mosaic':''}`} data-count={previews.length}>
       {node.kind==='group'&&previews.length?previews.map(id=><span key={id}><Preview id={id} paused={previewPaused}/></span>):node.thumbnailAssetId?<Preview id={node.thumbnailAssetId} paused={previewPaused}/>:node.kind==='folder'?<FolderIcon/>:<PhotoIcon/>}
     </span>
-    <span className="character-card-caption"><strong>{node.kind==='group'?<UserGroupIcon/>:node.kind==='folder'?<FolderIcon/>:null}{node.name}</strong><span className="muted numeric">{count}개</span></span>
-    {node.excluded&&<small>자동 분류 제외</small>}
+    <span className="character-card-caption"><strong>{node.kind==='group'||node.kind==='series'?<PeopleIcon/>:node.kind==='folder'?<FolderIcon/>:<PersonIcon/>}<span className="folder-shelf__name">{node.name}</span></strong>{count!==undefined&&<small className="folder-shelf__meta">{count.toLocaleString('ko-KR')}장</small>}</span>
+    {node.excluded&&<small className="character-card__status">자동 분류 제외</small>}
   </button>;
 }
 
-export function CharacterBrowser({hostBusy=false,optionsHost,onCloseOptions,entryKey=0,crumbs=[],onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit}:{/** The host's own load of this scope (the list generation read), shown in the same bar slot. */hostBusy?:boolean;/** The open 보기 옵션 sheet's filter slot (null while closed); absent when used standalone, which keeps the chips inline. */optionsHost?:HTMLElement|null;onCloseOptions?():void;entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
+export function CharacterBrowser({hostBusy=false,entryKey=0,onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit}:{/** The host's own load of this scope (the list generation read), shown in the same bar slot. */hostBusy?:boolean;/** Kept for character-local view options supplied by the host; asset filters are rendered in the top bar. */optionsHost?:HTMLElement|null;onCloseOptions?():void;entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
   const [landscape,setLandscape]=useState(()=>window.matchMedia?.('(orientation: landscape) and (min-width: 900px)').matches??false);
   useEffect(()=>{const media=window.matchMedia?.('(orientation: landscape) and (min-width: 900px)');if(!media)return;const change=()=>setLandscape(media.matches);media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[]);
   const [index,setIndex]=useState<CharacterIndex>();
@@ -90,7 +91,7 @@ export function CharacterBrowser({hostBusy=false,optionsHost,onCloseOptions,entr
   // what lets an append use the right filters instead of the ones that never applied.
   const [committed,setCommitted]=useState<Location|null>(null);
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[moreError,setMoreError]=useState('');
-  const [more,setMore]=useState(false),[cardsPage,setCardsPage]=useState(0),[columns,setColumns]=useState(3);
+  const [more,setMore]=useState(false);
   const [foldersCollapsed,setFoldersCollapsed]=useState(false);
   const folderStripId=useId();
   const [restore,setRestore]=useState(0);
@@ -98,7 +99,7 @@ export function CharacterBrowser({hostBusy=false,optionsHost,onCloseOptions,entr
   const host=useRef<HTMLDivElement>(null),scroll=useRef(0);
   const indexGate=useRef(new RequestGate()),pageGate=useRef(new RequestGate()),moreGate=useRef(new RequestGate());
   const cache=useRef(new Map<string,Cached>()),morePending=useRef(false);
-  const [filtersOpen,setFiltersOpen]=useState<FilterGroup|null>(null);
+  const [filtersOpen,setFiltersOpen]=useState<FilterGroup|null>(null),[filterHelpOpen,setFilterHelpOpen]=useState(false);
   const latest=useRef({index,where,page,active,paused,committed,filtersOpen});latest.current={index,where,page,active,paused,committed,filtersOpen};
   // The filter set is part of the location, so it is already part of this key.
   const key=(revision:string,location:Location)=>`${revision}:${location.node}:${location.filter}:${filterKey(location.filters)}`;
@@ -112,7 +113,7 @@ export function CharacterBrowser({hostBusy=false,optionsHost,onCloseOptions,entr
   const navigate=useCallback((next:Location)=>{
     remember();pageGate.current.cancel();moreGate.current.cancel();morePending.current=false;
     setRestore(0);scroll.current=0;
-    setPage(undefined);setCommitted(null);setError('');setMoreError('');setMore(false);setWhere(next);setCardsPage(0);
+    setPage(undefined);setCommitted(null);setError('');setMoreError('');setMore(false);setWhere(next);
   },[remember]);
   /**
    * Commit one filter change inside the current scope.
@@ -131,6 +132,19 @@ export function CharacterBrowser({hostBusy=false,optionsHost,onCloseOptions,entr
     // page still on screen under the new filter key would hand it back as this filter's result.
     pageGate.current.cancel();moreGate.current.cancel();morePending.current=false;
     setError('');setMoreError('');setMore(false);setWhere({...current,filters:next});
+  },[]);
+  const applyMedia=useCallback((media:AssetMediaFilter)=>{
+    const current=latest.current.where;
+    const next=media==='images'?{...current.filters,media,duration:'all' as const}:{...current.filters,media};
+    applyFilters(next);
+  },[applyFilters]);
+  const applyCharacterFilter=useCallback((filter:CharacterFilter)=>{
+    const current=latest.current.where;
+    if(current.filter===filter)return;
+    // The series scope stays mounted while its page is replaced. This is the character-folder
+    // equivalent of the PC pageScope rule: a filter switch is not hierarchy navigation.
+    pageGate.current.cancel();moreGate.current.cancel();morePending.current=false;
+    setError('');setMoreError('');setMore(false);setWhere({...current,filter});
   },[]);
   const appliedInitialNode=useRef<string|undefined>(undefined);
   const appliedEntryKey=useRef(entryKey);
@@ -156,7 +170,7 @@ export function CharacterBrowser({hostBusy=false,optionsHost,onCloseOptions,entr
       if(!s.where.node)return false;
       // Resetting also returns a series from 전체 이미지 to its default 미분류 before leaving.
       const home=defaultCharacterFilter(s.where.node,s.index);
-      if(s.where.filter!==home){navigate({node:s.where.node,filter:home,filters:{...EMPTY_FILTERS}});return true;}
+      if(s.where.filter!==home){applyCharacterFilter(home);return true;}
       // A folder opened directly from the index is a top-level entry, not an in-browser
       // drill-down. Consuming Back there would strand the user on the bare series
       // overview, so decline it and let the host restore the actual prior context.
@@ -172,7 +186,7 @@ export function CharacterBrowser({hostBusy=false,optionsHost,onCloseOptions,entr
       navigate({node:parent,filter:defaultCharacterFilter(parent,s.index),filters:s.where.filters});return true;
     };
     return()=>{backRef.current=null;};
-  },[backRef,navigate,applyFilters]);
+  },[backRef,navigate,applyFilters,applyCharacterFilter]);
   // The header arrow means "leave this folder", not a global Back press: it steps up one
   // level inside the browser, or hands the direct entry back to the host so the host can
   // restore the prior context without closing an unrelated open surface.
@@ -202,6 +216,8 @@ export function CharacterBrowser({hostBusy=false,optionsHost,onCloseOptions,entr
     // cannot present a page the server would now refuse simply because it was cached.
     const usable=cached&&(!hasActiveFilters(where.filters)||cached.page.filter_version===ASSET_FILTER_VERSION)?cached:undefined;
     const promise=(usable?Promise.resolve(usable.page):api<CharacterPage>(characterPath(where.node,where.filter,index.revision,null,where.filters),request.signal).then(value=>({...value,filter_version:filterVersionOf(value)??undefined})))
+      // A switch inside a shown scope keeps the old page until the new first screen is decoded.
+      .then(result=>latest.current.page?readyFirstScreen(result.items,request.signal).then(items=>({...result,items})):result)
       .then(result=>{
         if(!pageGate.current.current(request.id))return;
         // The reader's own envelope declares the contract under the wire name, so it is resolved
@@ -220,13 +236,11 @@ export function CharacterBrowser({hostBusy=false,optionsHost,onCloseOptions,entr
   // The gallery's identity follows the page that is actually visible, so a failed narrowing
   // cannot re-key the gallery and reset its scroll anchor. The filter summary in the overview
   // reports what the user asked for, so a failed choice stays visible and retryable.
-  const shown=committed&&committed.node===where.node&&committed.filter===where.filter?committed:null;
-  const filterPending=!!shown&&!sameFilters(shown.filters,where.filters);
-  useEffect(()=>{
-    if(!active||!host.current)return;
-    const observer=new ResizeObserver(()=>setColumns(Math.max(2,Math.min(6,Math.floor((host.current?.clientWidth??600)/(landscape?180:150))))));
-    observer.observe(host.current);return()=>observer.disconnect();
-  },[active,landscape]);
+  // `shown` is the page scope that is actually on screen. A filter switch changes `where` first,
+  // but leaves this value alone until the replacement page commits, so Gallery keeps its identity
+  // and the old images do not flash out during the request.
+  const shown=committed&&committed.node===where.node?committed:null;
+  const filterPending=!!shown&&(shown.filter!==where.filter||!sameFilters(shown.filters,where.filters));
   const append=useCallback(async()=>{
     const s=latest.current;
     if(!s.active||s.paused||!s.page?.next_cursor||!s.index?.revision||!s.where.node||morePending.current)return;
@@ -259,50 +273,70 @@ export function CharacterBrowser({hostBusy=false,optionsHost,onCloseOptions,entr
   const nearEnd=useCallback(()=>{if(!busy&&!moreError)void append();},[busy,moreError,append]);
   const node=index?.nodes.find(n=>n.id===where.node);
   const children=index?characterChildren(index,where.node):[];
-  const capacity=columns*2,pages=Math.ceil(children.length/capacity),cardPage=Math.min(cardsPage,Math.max(0,pages-1));
   const scope=index?.scopes.find(s=>s.nodeId===where.node&&s.filter===where.filter);
   const ancestors:CharacterNode[]=[];
   let parent=node?.parentId;
   while(parent&&index&&!ancestors.some(n=>n.id===parent)){const found=index.nodes.find(n=>n.id===parent);if(!found)break;ancestors.unshift(found);parent=found.parentId;}
-  const folderStrip=!landscape&&!!node;
+  const folderStrip=!!node&&node.kind!=='character';
   // While the next folder loads, the previous one stays on screen, quieted, instead of blanking;
   // once it commits the new level slides in from the side it was entered from.
   const lastPage=useRef<CharacterPage|undefined>(undefined);
+  const visibleGalleryIdentity=useRef('character:empty');
+  if(shown&&index?.revision)visibleGalleryIdentity.current=key(index.revision,shown);
   const level=useRef<{key:string;depth:number}|null>(null);
   if(!active){lastPage.current=undefined;level.current=null;}
   else if(page)lastPage.current=page;
   if(active&&committed&&index){
     let depth=committed.node?1:0,up=index.nodes.find(n=>n.id===committed.node)?.parentId;const seen=new Set<string>();
     while(up&&!seen.has(up)){seen.add(up);depth++;up=index.nodes.find(n=>n.id===up)?.parentId;}
-    level.current={key:`${committed.node}:${committed.filter}`,depth};
+    // Character filters replace the page inside one level. Keep the level key stable so the
+    // retained gallery does not replay the hierarchy fade when 미분류 and 전체 swap.
+    level.current={key:committed.node??'root',depth};
   }
   useLevelMotion(host,level.current?.key??null,level.current?.depth??0);
-  const stale=!page&&busy&&!error&&!!where.node&&!!lastPage.current;
+  const stale=!!shown&&filterPending||(!page&&busy&&!error&&!!where.node&&!!lastPage.current);
   const galleryItems=page?.items??(stale?lastPage.current!.items:[]);
   const foldable=folderStrip&&children.length>0;
-  const filterControls=(node?.kind==='series'||foldable)&&<div className="character-filters">{node?.kind==='series'&&SERIES_FILTERS.map(filter=><Button key={filter} variant="ghost" aria-pressed={where.filter===filter} onClick={()=>enterInside({node:node.id,filter})}>{labels[filter]}</Button>)}{foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>}</div>;
+  const childCharacterCount=children.filter(child=>child.kind!=='folder').length;
+  const childFolderCount=children.filter(child=>child.kind==='folder').length;
+  const shelfLabel=childCharacterCount>0&&childFolderCount>0?`캐릭터 ${childCharacterCount} · 폴더 ${childFolderCount}`:childCharacterCount>0?`캐릭터 ${childCharacterCount}`:`폴더 ${childFolderCount}`;
+  const scopeCount=(filter:CharacterFilter)=>node?.kind==='series'?index?.scopes.find(scope=>scope.nodeId===node.id&&scope.filter===filter)?.totalCount:undefined;
+  const filterControls=node?.kind==='series'&&<div className="folder-filter character-filters">
+    <SegmentedControl<CharacterFilter> label="이미지 범위" options={SERIES_FILTERS.map(filter=>({value:filter,label:filter==='unclassified'?'미분류':'전체',count:scopeCount(filter)}))} value={where.filter} onChange={applyCharacterFilter}/>
+    <IconButton label="미분류와 전체 설명" icon={InformationCircleIcon} onClick={()=>setFilterHelpOpen(true)}/>
+  </div>;
+  const shelf=children.length>0&&<FolderShelf label={shelfLabel} cards={children.map(child=><Card key={child.id} node={child} count={index?.scopes.find(scope=>scope.nodeId===child.id&&scope.filter==='all')?.totalCount} paused={!active||paused||(folderStrip&&foldersCollapsed)} lazy={folderStrip} previews={child.kind==='group'?[...new Set(index?.nodes.filter(n=>n.parentId===child.id&&n.thumbnailAssetId).map(n=>n.thumbnailAssetId!)??[])].slice(0,4):[]} onSelect={()=>enterInside({node:child.id,filter:defaultCharacterFilter(child.id,index)})}/>) } accessory={foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>} cardsId={folderStripId} cardsHidden={foldersCollapsed} />;
   const overview=<>
-    {!landscape&&filterControls}
     {error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
-    {hasActiveFilters(where.filters)&&<p className="hint">{filterSummary(where.filters)}{filterPending&&' · 표시 중인 목록에는 아직 적용되지 않았습니다.'}<Button variant="ghost" onClick={()=>applyFilters({...EMPTY_FILTERS})}>필터 해제</Button></p>}
     {index&&!index.ready&&<div className="empty-state"><h3>캐릭터 보기가 아직 공유되지 않았습니다</h3><p>PC 설정에서 모바일 캐릭터 업데이트를 실행하면 여기에서 감상할 수 있습니다.</p></div>}
     {landscape&&node?.kind==='series'&&node.heroAssetId&&<div className="character-hero"><Preview id={node.heroAssetId} paused={!active||paused} label={`${node.name} 대표 이미지`}/></div>}
-    {!!children.length&&landscape&&node&&<h4 className="character-section-title">{node.kind==='group'?'그룹 캐릭터':'캐릭터 · 폴더'}</h4>}
-    {!!children.length&&<div key={where.node??'root'} id={folderStrip?folderStripId:undefined} className={`character-cards${folderStrip?' character-folder-strip':pages>1?' character-cards-paged':''}`} hidden={folderStrip&&foldersCollapsed} role={folderStrip?'region':undefined} aria-label={folderStrip?'캐릭터 폴더':undefined} tabIndex={folderStrip?0:undefined} style={folderStrip?undefined:{gridTemplateColumns:`repeat(${columns},minmax(0,${landscape?'180px':'1fr'}))`}}>{(folderStrip?children:children.slice(cardPage*capacity,(cardPage+1)*capacity)).map(child=><Card key={child.id} node={child} count={index?.scopes.find(s=>s.nodeId===child.id&&s.filter==='all')?.totalCount??0} paused={!active||paused||(folderStrip&&foldersCollapsed)} lazy={folderStrip} previews={landscape&&child.kind==='group'?[...new Set(index?.nodes.filter(n=>n.parentId===child.id&&n.thumbnailAssetId).map(n=>n.thumbnailAssetId!)??[])].slice(0,4):[]} onSelect={()=>enterInside({node:child.id,filter:defaultCharacterFilter(child.id,index)})}/>)}</div>}
-    {!folderStrip&&pages>1&&<div className="character-card-pages"><IconButton label="이전 폴더" icon={ChevronLeftIcon} disabled={!cardPage} onClick={()=>setCardsPage(cardPage-1)}/><span>{cardPage+1} / {pages}</span><IconButton label="다음 폴더" icon={ChevronRightIcon} disabled={cardPage+1>=pages} onClick={()=>setCardsPage(cardPage+1)}/></div>}
+    {!!children.length&&shelf}
+    {filterControls}
     {node?.description&&<p className="character-description">{node.description}</p>}
-    {landscape&&filterControls}
     {scope&&scope.sourceCount>scope.totalCount&&<p className="character-description">서버에 보관된 {scope.totalCount}개를 표시합니다. 아직 공유되지 않은 자산 {scope.sourceCount-scope.totalCount}개가 있습니다.</p>}
-    {index?.ready&&!busy&&!error&&(!where.node&&!children.length||where.node&&page?.items.length===0)&&<div className="empty-state"><h3>{where.node?(filterPending?'조건에 맞는 자산이 없습니다':hasActiveFilters(shown?.filters??EMPTY_FILTERS)?'조건에 맞는 자산이 없습니다':'이 보기에 자산이 없습니다'):'등록된 시리즈가 없습니다'}</h3>{where.node&&hasActiveFilters(shown?.filters??EMPTY_FILTERS)&&<p>필터를 해제하면 이 보기의 자산을 모두 볼 수 있습니다.</p>}</div>}
+    {index?.ready&&!busy&&!error&&(!where.node&&!children.length||where.node&&page?.items.length===0)&&<div className="empty-state"><h3>{where.node?(filterPending?'조건에 맞는 자산이 없습니다':node?.kind==='series'&&where.filter==='unclassified'?'미분류 이미지가 없습니다':hasActiveFilters(shown?.filters??EMPTY_FILTERS)?'조건에 맞는 자산이 없습니다':'이 보기에 자산이 없습니다'):'등록된 시리즈가 없습니다'}</h3></div>}
   </>;
+  const breadcrumbNodes=node?[...ancestors,node]:[];
+  const characterHeader=<header className="top-bar library-header asset-topbar character-header">
+    <IconButton label="뒤로" icon={ArrowLeftIcon} onClick={goUp}/>
+    <div className="top-bar__titles">
+      <nav className="character-breadcrumb" aria-label="현재 위치">
+        {breadcrumbNodes.length?breadcrumbNodes.map((item,itemIndex)=><span key={item.id}>{itemIndex>0&&<span className="character-breadcrumb__separator" aria-hidden="true">›</span>}{itemIndex<breadcrumbNodes.length-1?<button type="button" onClick={()=>enterInside({node:item.id,filter:defaultCharacterFilter(item.id,index)})}>{item.name}</button>:<span className="character-breadcrumb__current" aria-current="page">{item.name}</span>}</span>):<span className="character-breadcrumb__current" aria-current="page">시리즈</span>}
+      </nav>
+      <h1 className="sr-only" aria-label={node?.name??'시리즈'}/>
+    </div>
+    <span className="top-bar__space"/>
+    {where.node&&<div className="asset-topbar__kind-control"><SegmentedControl<AssetMediaFilter> label="종류" options={(Object.keys(MEDIA_LABELS) as AssetMediaFilter[]).map(media=>({value:media,label:MEDIA_LABELS[media]}))} value={where.filters.media} onChange={applyMedia}/></div>}
+    {where.node&&<FilterChips media={false} sheet={false} variant="toolbar" showReset={false} value={where.filters} applied={where.filters} onChange={applyFilters} open={null} onOpen={setFiltersOpen}/>}
+    <Button type="button" size="icon" variant="ghost" className="top-bar__options" aria-label="보기 옵션" onClick={()=>onOptions(page?.items??[])}><Squares2X2Icon aria-hidden="true"/></Button>
+    <BarProgress label={(busy||hostBusy)&&'캐릭터 보기 불러오는 중'}/>
+  </header>;
   return <section className={`character-browser${landscape?' character-browser-landscape':''}`} style={{display:active?undefined:'none'}} aria-label="시리즈·캐릭터" ref={host}>
-    <LibraryHeader loading={(busy||hostBusy)&&'캐릭터 보기 불러오는 중'} kind={characterFolderKind(node?.kind)} title={node?.name??'시리즈'} count={page?.totalCount??scope?.totalCount} crumbs={[...crumbs,...ancestors.map(ancestor=>({id:ancestor.id,name:ancestor.name,onSelect:()=>{drilled.current=ancestor.id!==appliedInitialNode.current&&!!ancestor.parentId;navigate({node:ancestor.id,filter:defaultCharacterFilter(ancestor.id,index),filters:{...EMPTY_FILTERS}});}}))]} onBack={goUp} onOptions={()=>onOptions(page?.items??[])} changed={where.node?activeFilterCount(shown?.filters??EMPTY_FILTERS)+(density!==DEFAULT_DENSITY?1:0)+(where.filter!==defaultCharacterFilter(where.node,index)?1:0):0}/>
-    <Gallery items={galleryItems} stale={stale} intro={<>{overview}{where.node&&optionsHost===undefined&&<FilterChips value={where.filters} applied={shown?.filters??EMPTY_FILTERS} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={`${index?.revision}:${where.node}:${where.filter}:${filterKey(shown?.filters??EMPTY_FILTERS)}`} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null}/>
-    {optionsHost!==undefined&&where.node&&<>
-      {optionsHost&&active&&createPortal(<><p className="view-options-label">필터</p><FilterChips sheet={false} value={where.filters} applied={shown?.filters??EMPTY_FILTERS} onChange={applyFilters} open={null} onOpen={group=>{onCloseOptions?.();setFiltersOpen(group);}}/></>,optionsHost)}
-      <FilterChips row={false} value={where.filters} applied={shown?.filters??EMPTY_FILTERS} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>
-    </>}
+    {characterHeader}
+    <Gallery items={galleryItems} stale={stale} intro={overview} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null}/>
+    {where.node&&<FilterChips media={false} row={false} value={where.filters} applied={where.filters} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}
     {more&&<div className="loading-line is-bottom" role="status" aria-label="다음 캐릭터 자산 불러오는 중"/>}
     {moreError&&<div className="inline-error" role="alert">{moreError}<Button onClick={()=>void append()}>다시 시도</Button><Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
+    {filterHelpOpen&&<BottomSheet title="미분류와 전체" onClose={()=>setFilterHelpOpen(false)}><div className="folder-filter__explanation"><p><strong>미분류</strong>: 이 폴더에 바로 들어 있고 아직 캐릭터나 하위 폴더에 없는 이미지</p><p><strong>전체</strong>: 캐릭터와 하위 폴더까지 모두</p></div></BottomSheet>}
   </section>;
 }

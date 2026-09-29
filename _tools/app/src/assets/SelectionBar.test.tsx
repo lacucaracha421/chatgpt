@@ -21,6 +21,18 @@ it("renders nothing when the selection is empty", () => {
   expect(container).toBeEmptyDOMElement();
 });
 
+it("supports a narrow album-only selection bar without desktop actions", async () => {
+  const user = userEvent.setup();
+  const onAddToAlbum = vi.fn();
+  render(<SelectionBar selectedCount={2} batchPending={false} onAddToAlbum={onAddToAlbum} onClearSelection={vi.fn()} />);
+
+  expect(screen.getByRole("button", { name: "앨범에 추가" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "좋아요 켜기" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "휴지통으로 이동" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "앨범에 추가" }));
+  expect(onAddToAlbum).toHaveBeenCalledOnce();
+});
+
 it("shows the selection size and keeps browsing commands keyboard reachable", async () => {
   const user = userEvent.setup();
   const onFavorite = vi.fn();

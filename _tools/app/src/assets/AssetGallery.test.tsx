@@ -40,7 +40,7 @@ describe("AssetGallery", () => {
       heading.querySelector(".asset-gallery__date-day")?.textContent,
       heading.querySelector(".asset-gallery__date-weekday")?.textContent,
       heading.querySelector(".asset-gallery__date-count")?.textContent,
-    ])).toEqual([["9.24", "오늘", "2"], ["9.23", "수", "1"]]);
+    ])).toEqual([["9.24", "오늘", "2"], ["9.23", "수", undefined]]); // a single image shows no count
     rerender(<AssetGallery layout="masonry" items={items} fullDateHeadings />);
     expect(container.querySelector(".asset-gallery__date-day")).toHaveTextContent(/^9\.24$/);
     expect(container.querySelector(".asset-gallery__date-weekday")).toHaveTextContent("오늘");
@@ -341,8 +341,8 @@ describe("AssetGallery", () => {
     const first = await screen.findByRole("option", { name: "asset-0.png" });
     const second = screen.getByRole("option", { name: "asset-1.png" });
     expect(first).toHaveAttribute("aria-selected", "true");
-    expect(first.querySelector(".asset-gallery__selection-indicator")).not.toBeNull();
-    expect(second.querySelector(".asset-gallery__selection-indicator")).toBeNull();
+    expect(first.querySelector(".ui-selection-check")).not.toBeNull();
+    expect(second.querySelector(".ui-selection-check")).toBeNull();
     expect(first).not.toHaveAttribute("aria-pressed");
 
     await user.keyboard("{Control>}");
