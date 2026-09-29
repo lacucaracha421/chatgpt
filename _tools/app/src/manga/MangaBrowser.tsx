@@ -22,6 +22,11 @@ type MangaSort = "recent" | "title_asc" | "author_asc" | "pages_desc";
 type MangaBrowserProps = {
   onOpenSeries?: (series: MangaSeries) => void;
 };
+
+function initialMangaSource(): "local" | "online" {
+  return __LAKOMICS_PREVIEW__ && new URLSearchParams(window.location.search).get("view") === "manga" ? "local" : "online";
+}
+
 export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const { gateway } = useLibrary();
   const { privacyMode, setPrivacyMode } = usePrivacy();
@@ -34,7 +39,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [recovery, setRecovery] = useState<MangaCatalogRecoveryPreview | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
-  const [source, setSource] = useState<"local" | "online">("online");
+  const [source, setSource] = useState<"local" | "online">(initialMangaSource);
   const [onlineScope, setOnlineScope] = useState<CatalogScope>("all");
   useAutoDismiss(message, setMessage);
 

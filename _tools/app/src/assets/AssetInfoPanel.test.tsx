@@ -44,7 +44,7 @@ it("orders information sections and formats timestamps in the app date style", a
 
   await waitFor(() => expect(screen.getByRole("region", { name: "같은 게시물" })).toBeVisible());
   expect([...container.querySelectorAll<HTMLElement>("[data-info-section]")].map((node) => node.dataset.infoSection)).toEqual([
-    "artist", "same-post", "tags", "source", "file", "collection",
+    "artist", "source", "file", "same-post", "tags", "collection",
   ]);
   expect(screen.getByText("9.29 07:20")).toBeVisible();
   expect(screen.getByText("9.29 08:10")).toBeVisible();

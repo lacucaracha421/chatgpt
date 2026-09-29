@@ -2,6 +2,7 @@ import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XMarkIcon } from "@heroico
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { Toast } from "../shared/ui/Toast";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { applyAutoTagFilter, useAutoTagFilter } from "./autoTagFilter";
 import { autoTagEnglish, buildAutoTagView, characterSeries, searchAutoTags, type AutoTagChip, type AutoTagView } from "./autoTagModel";
@@ -122,7 +123,7 @@ export function AutoTagHighlights({ state }: { state: AssetAutoTagState | null }
   const filter = useAutoTagFilter();
   if (!state || state.view.characters.length === 0) return null;
   return <section className="asset-inspector__section auto-tags auto-tags--highlights" aria-label="주요 태그">
-    <h3>주요 태그</h3>
+    <SectionLabel as="h3" title="주요 태그" />
     <div className="auto-tags__chips">
       {state.view.characters.map((chip) => <Chip key={chip.tag} chip={chip} state={state} active={filter.include.includes(chip.tag)} removable={false} />)}
     </div>
@@ -134,6 +135,8 @@ export function AutoTagList({ state }: { state: AssetAutoTagState | null }) {
   const filter = useAutoTagFilter();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [adding, setAdding] = useState(false);
+  // Closed by default; the choice stays while moving between assets.
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => { setAdding(false); }, [state?.assetId]);
   if (!state) return null;
   const toggle = (key: string) => setCollapsed((previous) => {
@@ -143,11 +146,11 @@ export function AutoTagList({ state }: { state: AssetAutoTagState | null }) {
   });
   return <section className="asset-inspector__section auto-tags" aria-label="자동 태그">
     <div className="auto-tags__heading">
-      <h3>자동 태그 <span className="auto-tags__count">{state.view.total.toLocaleString("ko-KR")}</span></h3>
-      {!adding && (state.vocabulary?.entries.length ?? 0) > 0 && <button type="button" className="auto-tags__add" onClick={() => setAdding(true)}><PlusIcon aria-hidden="true" />태그 추가</button>}
+      <h3><button type="button" className="auto-tags__toggle" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>{expanded ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}자동 태그 <span className="auto-tags__count">{state.view.total.toLocaleString("ko-KR")}</span></button></h3>
+      {expanded && !adding && (state.vocabulary?.entries.length ?? 0) > 0 && <button type="button" className="auto-tags__add" onClick={() => setAdding(true)}><PlusIcon aria-hidden="true" />태그 추가</button>}
     </div>
-    {adding && <AutoTagAdder state={state} onClose={() => setAdding(false)} />}
-    {state.view.groups.map((group) => {
+    {expanded && adding && <AutoTagAdder state={state} onClose={() => setAdding(false)} />}
+    {expanded && state.view.groups.map((group) => {
       const open = !collapsed.has(group.key);
       return <div key={group.key} className="auto-tags__group">
         <button type="button" className="auto-tags__group-label" aria-expanded={open} onClick={() => toggle(group.key)}>

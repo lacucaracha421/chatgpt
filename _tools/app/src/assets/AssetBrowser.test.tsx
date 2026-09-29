@@ -60,7 +60,7 @@ describe("AssetBrowser", () => {
       onReviewVideos={onReviewVideos}
     /></LibraryProvider>);
     const first = await screen.findByRole("option", { name: /asset-0.png/ });
-    fireEvent.click(first);
+    fireEvent.click(first, { ctrlKey: true });
     fireEvent.click(screen.getByRole("option", { name: /asset-1.png/ }), { ctrlKey: true });
     fireEvent.contextMenu(first, { clientX: 200, clientY: 180 });
     if (mixed) {
@@ -85,7 +85,8 @@ describe("AssetBrowser", () => {
     );
     const { rerender } = render(browser(0));
     await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
-    await waitFor(() => expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ selectedAsset: expect.objectContaining({ id: "asset-0" }) })));
+    expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
+    await waitFor(() => expect(status).toHaveBeenLastCalledWith(expect.objectContaining({ selectedAsset: null })));
 
     rerender(browser(1));
 
@@ -153,9 +154,6 @@ describe("AssetBrowser", () => {
       </LibraryProvider>
     );
     const { rerender } = render(renderView({ kind: "classification", classificationId: null }));
-    const tile = await screen.findByRole("option", { name: "asset-0.png" });
-    await user.click(tile);
-    expect(tile).toHaveAttribute("aria-selected", "true");
 
     await user.click(screen.getByRole("radio", { name: "이미지" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
@@ -266,7 +264,7 @@ describe("AssetBrowser", () => {
     const second = screen.getByRole("option", { name: "asset-1.png" });
     const third = screen.getByRole("option", { name: "asset-2.png" });
 
-    await user.click(first);
+    fireEvent.click(first, { ctrlKey: true });
     await user.keyboard("{Control>}");
     await user.click(third);
     await user.keyboard("{/Control}");
@@ -370,7 +368,7 @@ describe("AssetBrowser", () => {
     gateway.refreshAssets = vi.fn().mockResolvedValue(retained);
     const status = vi.fn();
     const { rerender } = renderBrowser(gateway, { status });
-    await userEvent.click(await screen.findByRole("option", { name: "asset-249.png" }));
+    fireEvent.click(await screen.findByRole("option", { name: "asset-249.png" }), { ctrlKey: true });
     vi.mocked(gateway.listAssets).mockResolvedValue({ items: retained.slice(1,101), nextCursor: null });
     rerender(browserElement(gateway, { refreshVersion: 1, status }));
     await waitFor(() => expect(gateway.refreshAssets).toHaveBeenCalled());
@@ -662,15 +660,14 @@ describe("AssetBrowser", () => {
   });
 
   it("preserves selection and detail through refresh when the asset remains", async () => {
-    const user = userEvent.setup();
     const gateway = createGateway();
     vi.mocked(gateway.listAssets)
       .mockResolvedValueOnce({ items: [{ ...asset(0), title: "Before" }], nextCursor: null })
       .mockResolvedValueOnce({ items: [{ ...asset(0), title: "After" }], nextCursor: null });
     const { container, rerender } = renderBrowser(gateway);
     const tile = await screen.findByRole("option", { name: "Before" });
-    await user.click(tile);
-    await user.dblClick(tile);
+    fireEvent.click(tile, { ctrlKey: true });
+    fireEvent.keyDown(tile, { key: "Enter" });
     expect(screen.getByRole("dialog")).toBeInTheDocument();
 
     rerender(browserElement(gateway, { refreshVersion: 1 }));
@@ -681,17 +678,17 @@ describe("AssetBrowser", () => {
   });
 
   it("clears selection when the refreshed page no longer contains the asset", async () => {
-    const user = userEvent.setup(); const gateway = createGateway();
+    const gateway = createGateway();
     vi.mocked(gateway.listAssets).mockResolvedValueOnce({ items: [{ ...asset(0), title: "Selected" }], nextCursor: null }).mockResolvedValueOnce({ items: [], nextCursor: null });
-    const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("option", { name: "Selected" }));
+    const { rerender } = renderBrowser(gateway); fireEvent.click(await screen.findByRole("option", { name: "Selected" }), { ctrlKey: true });
     rerender(browserElement(gateway, { refreshVersion: 1 }));
     expect(await screen.findByRole("heading", { name: "자산이 없습니다" })).toBeInTheDocument();
   });
 
   it("clears selection when the view changes", async () => {
-    const user = userEvent.setup(); const gateway = createGateway();
+    const gateway = createGateway();
     vi.mocked(gateway.listAssets).mockResolvedValue({ items: [{ ...asset(0), title: "Selected" }], nextCursor: null });
-    const { rerender } = renderBrowser(gateway); await user.click(await screen.findByRole("option", { name: "Selected" }));
+    const { rerender } = renderBrowser(gateway); fireEvent.click(await screen.findByRole("option", { name: "Selected" }), { ctrlKey: true });
     rerender(<LibraryProvider gateway={gateway}><AssetBrowser galleryLayout="justified" view={{ kind: "trash" }} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
     expect(await screen.findByRole("option", { name: "Selected" })).toHaveAttribute("aria-selected", "false");
   });
@@ -752,8 +749,6 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
-    await user.click(screen.getByRole("button", { name: "보기" }));
-    await user.click(screen.getByRole("switch", { name: "정보" }));
     const sourceGroup = await screen.findByRole("region", { name: "같은 게시물" });
     expect(gateway.recordAssetOpened).not.toHaveBeenCalled();
 
@@ -763,7 +758,7 @@ describe("AssetBrowser", () => {
     expect(screen.getByRole("dialog", { name: "asset-1.png" })).toBeVisible();
   });
 
-  it("keeps the inspector closed on selection and opens it only from the toolbar toggle", async () => {
+  it("opens the inspector on a plain click and switches its focused asset", async () => {
     const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
     renderBrowser(gateway);
@@ -771,20 +766,51 @@ describe("AssetBrowser", () => {
     const first = await screen.findByRole("option", { name: "asset-0.png" });
     const second = screen.getByRole("option", { name: "asset-1.png" });
     await user.click(first);
-    await waitFor(() => expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument());
-
-    await user.click(screen.getByRole("button", { name: "보기" }));
-    await user.click(screen.getByRole("switch", { name: "정보" }));
     expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "asset-0.png 감상 화면으로 열기" })).toBeVisible();
+    expect(first).toHaveAttribute("aria-selected", "false");
 
     await user.click(second);
     expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "asset-1.png 감상 화면으로 열기" })).toBeVisible();
 
     await user.click(within(screen.getByRole("complementary", { name: "자산 정보" })).getByRole("button", { name: "정보 닫기" }));
     await waitFor(() => expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument());
 
     await user.click(second);
-    expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
+  });
+
+  it("clears a multi-selection when a plain click focuses another asset", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1), asset(2)], nextCursor: null });
+    renderBrowser(gateway);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    const second = screen.getByRole("option", { name: "asset-1.png" });
+    const third = screen.getByRole("option", { name: "asset-2.png" });
+    fireEvent.click(first, { ctrlKey: true });
+    fireEvent.click(second, { ctrlKey: true });
+    expect(screen.getByRole("toolbar", { name: "선택 작업" })).toBeVisible();
+
+    await user.click(third);
+
+    expect([first, second, third].map((tile) => tile.getAttribute("aria-selected"))).toEqual(["false", "false", "false"]);
+    expect(screen.queryByRole("toolbar", { name: "선택 작업" })).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
+  });
+
+  it("closes the info panel on Escape without clearing a selection", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
+    renderBrowser(gateway);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    await user.click(first);
+    fireEvent.click(first, { ctrlKey: true });
+    first.focus();
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument());
+    expect(first).toHaveAttribute("aria-selected", "true");
   });
 
   it("keeps the selected page summary in sync after metadata editing", async () => {
@@ -796,7 +822,6 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: original.originalName }));
-    await user.click(await selectionAction("정보 열기"));
     await user.click(screen.getByRole("button", { name: "출처 정보 편집" }));
     await user.type(screen.getByLabelText("제작자 이름"), "Updated Artist");
     await user.click(screen.getByRole("button", { name: "저장" }));
@@ -820,7 +845,7 @@ describe("AssetBrowser", () => {
     const gateway = createGateway({ items: [{ ...asset(0), title: "Delete me" }], nextCursor: null });
     renderBrowser(gateway);
 
-    await user.click(await screen.findByRole("option", { name: "Delete me" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Delete me" }), { ctrlKey: true });
     await user.click(await selectionAction("휴지통으로 이동"));
 
     expect(gateway.trashAssets).toHaveBeenCalledWith(["asset-0"]);
@@ -837,19 +862,18 @@ describe("AssetBrowser", () => {
       </LibraryProvider>,
     );
 
-    await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
+    fireEvent.click(await screen.findByRole("option", { name: "asset-0.png" }), { ctrlKey: true });
     await user.click(await selectionAction("휴지통으로 이동"));
 
     expect(onMembershipChanged).toHaveBeenCalledOnce();
   });
 
   it("expires the trash undo action with its toast", async () => {
-    const user = userEvent.setup();
     const gateway = createGateway({ items: [asset(0)], nextCursor: null });
     vi.mocked(gateway.setAssetFavorite).mockRejectedValue(new Error("favorite failed"));
     renderBrowser(gateway);
     const tile = await screen.findByRole("option", { name: "asset-0.png" });
-    await user.click(tile);
+    fireEvent.click(tile, { ctrlKey: true });
     vi.useFakeTimers();
 
     fireEvent.click(await selectionAction("휴지통으로 이동"));
@@ -872,7 +896,7 @@ describe("AssetBrowser", () => {
     const gateway = createGateway({ items: [asset(0), asset(1), asset(2)], nextCursor: null });
     renderBrowser(gateway);
     const first = await screen.findByRole("option", { name: "asset-0.png" });
-    fireEvent.click(first);
+    fireEvent.click(first, { ctrlKey: true });
     fireEvent.click(screen.getByRole("option", { name: "asset-1.png" }), { ctrlKey: true });
     fireEvent.contextMenu(first, { clientX: 200, clientY: 180 });
     expect(screen.getByRole("menuitem", { name: "2개 선택" })).toBeInTheDocument();
@@ -971,7 +995,7 @@ describe("AssetBrowser", () => {
     vi.mocked(gateway.trashAssets).mockRejectedValue(new Error("trash failed"));
     renderBrowser(gateway);
 
-    await user.click(await screen.findByRole("option", { name: "Keep me" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Keep me" }), { ctrlKey: true });
     await user.click(await selectionAction("휴지통으로 이동"));
 
     expect(await screen.findByText("trash failed")).toBeVisible();
@@ -986,11 +1010,11 @@ describe("AssetBrowser", () => {
     vi.mocked(gateway.trashAssets).mockReturnValue(pendingTrash);
     renderBrowser(gateway);
 
-    await user.click(await screen.findByRole("option", { name: "First" }));
+    fireEvent.click(await screen.findByRole("option", { name: "First" }), { ctrlKey: true });
     await user.click(await selectionAction("휴지통으로 이동"));
     expect(await selectionAction("휴지통으로 이동")).toBeDisabled();
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("option", { name: "Second" }));
+    fireEvent.click(screen.getByRole("option", { name: "Second" }), { ctrlKey: true });
     await act(async () => { resolveTrash(); await pendingTrash; });
 
     expect(await screen.findByRole("option", { name: "Second" })).toHaveAttribute("aria-selected", "true");
@@ -1002,7 +1026,9 @@ describe("AssetBrowser", () => {
     const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
     vi.mocked(gateway.patchAssetAlbums).mockResolvedValue(undefined);
     renderBrowser(gateway, { view: { kind: "album", albumId: "album-1" } });
-    await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    fireEvent.click(first, { ctrlKey: true });
+    first.focus();
     await user.keyboard("{Control>}a{/Control}");
     const previousQueries = vi.mocked(gateway.listAssets).mock.calls.length;
     await user.click(await selectionAction("이 앨범에서 제외"));
@@ -1035,7 +1061,7 @@ describe("AssetBrowser", () => {
     const onCollectionsChanged = vi.fn();
     render(<LibraryProvider gateway={gateway}><AssetBrowser galleryLayout="justified" view={{ kind: "collection", collectionId: "collection-1" }} classifications={classifications} onCollectionsChanged={onCollectionsChanged} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} /></LibraryProvider>);
 
-    await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
+    fireEvent.click(await screen.findByRole("option", { name: "asset-0.png" }), { ctrlKey: true });
     await user.click(await selectionAction("대표 이미지로 지정"));
 
     expect(gateway.setCollectionCover).toHaveBeenCalledWith("collection-1", "asset-0");

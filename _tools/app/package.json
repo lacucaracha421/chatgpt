@@ -10,6 +10,8 @@
   "packageManager": "npm@12.0.2",
   "scripts": {
     "dev": "vite",
+    "dev:preview": "LAKOMICS_PREVIEW=1 vite --config vite.config.ts --port 1430 --strictPort",
+    "preview:shots": "node scripts/preview-shots.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "mobile:dev": "vite --config vite.mobile.config.ts",

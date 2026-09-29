@@ -30,10 +30,13 @@
   z-index: 1;
   width: var(--dvd-width);
   height: var(--dvd-height);
-  transform: rotateX(var(--dvd-pitch)) rotateY(calc(var(--dvd-yaw) + var(--dvd-rest)));
+  transform: rotateY(calc(var(--dvd-yaw) + var(--dvd-rest)));
   transform-style: preserve-3d;
-  transition: transform 420ms cubic-bezier(.2, .8, .2, 1);
+  transition: var(--dvd-transition, transform 320ms cubic-bezier(.2, .8, .2, 1));
 }
+.dvd-case__stage--interactive .dvd-case { will-change: transform; }
+/* The case follows the pointer directly while dragged; easing would make it lag behind. */
+.dvd-case--dragging .dvd-case { transition: none; }
 
 .dvd-case__stage--interactive .dvd-case { pointer-events: none; }
 .dvd-case__stage--interactive .dvd-case__face { pointer-events: none; }

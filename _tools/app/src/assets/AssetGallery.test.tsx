@@ -46,12 +46,10 @@ describe("AssetGallery", () => {
     expect(container.querySelector(".asset-gallery__date-weekday")).toHaveTextContent("오늘");
   });
 
-  it("leaves the missing creator caption empty while retaining time and its description", () => {
-    const { container } = render(<AssetGallery layout="masonry" items={[asset(0)]} metadataVisible />);
-    const caption = container.querySelector(".asset-gallery__metadata")!;
-    expect(caption.querySelector("span")).toBeEmptyDOMElement();
-    expect(caption.querySelector("time")).toHaveAttribute("datetime", asset(0).collectedAt);
-    expect(caption.querySelector("time")?.textContent).toMatch(/^\d{2}:\d{2}$/);
+  it("shows no hover caption without a creator and never shows the time on the tile", () => {
+    render(<AssetGallery layout="masonry" items={[asset(0)]} metadataVisible />);
+    expect(document.querySelector(".asset-gallery__metadata")).toBeNull();
+    expect(document.querySelector(".asset-gallery__asset time")).toBeNull();
     expect(screen.queryByText("작가 미상")).not.toBeInTheDocument();
     expect(screen.getByRole("option")).not.toHaveAttribute("aria-description", expect.stringContaining("작가 미상"));
   });
@@ -75,7 +73,7 @@ describe("AssetGallery", () => {
     fireEvent.keyDown(await screen.findByRole("option", { name: "asset-0.png" }), { key: " " });
     expect(select).toHaveBeenCalledWith(expect.objectContaining({ id: "asset-0" }), { toggle: true, range: false });
   });
-  it("opens character assignment with C only when the gallery has a selection", async () => {
+  it("opens character assignment for a selection or the focused asset", async () => {
     const open = vi.fn();
     const { rerender } = render(<AssetGallery layout="masonry" items={[asset(0)]} selectedAssetIds={new Set(["asset-0"])} onAssignCharacter={open} />);
     const tile = await screen.findByRole("option", { name: "asset-0.png" });
@@ -84,6 +82,19 @@ describe("AssetGallery", () => {
     rerender(<AssetGallery layout="masonry" items={[asset(0)]} selectedAssetIds={new Set()} onAssignCharacter={open} />);
     fireEvent.keyDown(tile, { key: "c" });
     expect(open).toHaveBeenCalledOnce();
+    rerender(<AssetGallery layout="masonry" items={[asset(0)]} selectedAssetIds={new Set()} focusAssetId="asset-0" onAssignCharacter={open} />);
+    fireEvent.keyDown(tile, { key: "c" });
+    expect(open).toHaveBeenLastCalledWith(expect.objectContaining({ id: "asset-0" }));
+  });
+  it("routes favorite and trash shortcuts for a focused asset", async () => {
+    const favorite = vi.fn();
+    const trash = vi.fn();
+    render(<AssetGallery layout="masonry" items={[asset(0)]} focusAssetId="asset-0" onToggleFavorite={favorite} onDeleteSelection={trash} />);
+    const tile = await screen.findByRole("option", { name: "asset-0.png" });
+    fireEvent.keyDown(tile, { key: "f" });
+    fireEvent.keyDown(tile, { key: "Delete" });
+    expect(favorite).toHaveBeenCalledWith(expect.objectContaining({ id: "asset-0" }));
+    expect(trash).toHaveBeenCalledOnce();
   });
   it("bounds masonry DOM and loads the next page only near the displayed end", async () => {
     const next = vi.fn();
@@ -99,11 +110,11 @@ describe("AssetGallery", () => {
     expect(screen.getAllByRole("option").length).toBeLessThan(100);
   });
 
-  it("places creator and local time below masonry images and merges a continued date", async () => {
+  it("shows neither creator nor time on masonry tiles and merges a continued date", async () => {
     const first = { ...asset(0), creatorName: "긴 작가 이름", collectedAt: new Date(2026, 8, 6, 21, 7).toISOString() };
     const { container, rerender } = render(<AssetGallery layout="masonry" metadataVisible items={[first]} />);
-    expect(await screen.findByText(/긴 작가 이름/)).toBeVisible();
-    expect(screen.getByText("21:07")).toBeVisible();
+    expect(screen.queryByText(/긴 작가 이름/)).toBeNull();
+    expect(screen.queryByText("21:07")).toBeNull();
     rerender(<AssetGallery layout="masonry" metadataVisible items={[first, { ...first, id: "second" }]} />);
     expect(container.querySelectorAll(".asset-gallery__date")).toHaveLength(1);
   });
@@ -158,11 +169,13 @@ describe("AssetGallery", () => {
     expect(await screen.findByRole("img", { name: "asset-0.png" })).toHaveAttribute("decoding", "async");
   });
 
-  it("selects once and opens on double click or Enter", async () => {
-    const user = userEvent.setup(); const select = vi.fn(); const open = vi.fn();
-    render(<AssetGallery items={[asset(0)]} selectedAssetIds={new Set()} focusAssetId="asset-0" targetRowHeight={180} onSelectionGesture={select} onOpen={open} />);
+  it("focuses on plain click, selects with Ctrl or Shift, and opens on double click or Enter", async () => {
+    const user = userEvent.setup(); const focus = vi.fn(); const select = vi.fn(); const open = vi.fn();
+    render(<AssetGallery items={[asset(0)]} selectedAssetIds={new Set()} focusAssetId="asset-0" targetRowHeight={180} onFocusAsset={focus} onSelectionGesture={select} onOpen={open} />);
     const tile = await screen.findByRole("option", { name: "asset-0.png" });
-    await user.click(tile); expect(select).toHaveBeenCalledWith(expect.objectContaining({ id: "asset-0" }), { toggle: false, range: false }); expect(open).not.toHaveBeenCalled();
+    await user.click(tile); expect(focus).toHaveBeenCalledWith(expect.objectContaining({ id: "asset-0" })); expect(select).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
+    fireEvent.click(tile, { ctrlKey: true }); expect(select).toHaveBeenLastCalledWith(expect.objectContaining({ id: "asset-0" }), { toggle: true, range: false });
+    fireEvent.click(tile, { shiftKey: true }); expect(select).toHaveBeenLastCalledWith(expect.objectContaining({ id: "asset-0" }), { toggle: false, range: true });
     await user.dblClick(tile); expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: "asset-0" }));
     fireEvent.keyDown(tile, { key: "Enter" }); expect(open).toHaveBeenCalledTimes(2);
   });

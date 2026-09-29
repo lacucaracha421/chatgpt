@@ -184,7 +184,6 @@ body .ui-menu { border-color: var(--chrome-border); border-radius: var(--chrome-
 .chrome-index-controls select { width: 100%; min-width: 0; height: 32px; background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-border); border-radius: 0; }
 .chrome-index-controls .ui-toggle { align-self: flex-start; }
 .chrome-index-controls .ui-button { justify-content: flex-start; }
-.asset-gallery__quick-preview-trigger { border: 1px solid var(--color-border); border-radius: 0; }
 .workspace-settings-dock[hidden] { display: none; }
 .chrome-index-controls legend { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
 .workspace-content .online-catalog__sync-summary:not(:has(.online-catalog__visibility-status, .online-catalog__sync-status)) { display: none; }

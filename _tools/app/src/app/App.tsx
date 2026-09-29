@@ -152,6 +152,24 @@ function LibraryScreen({
 
 type SidebarDropTarget = Exclude<ClassificationDropTarget, { kind: "character" }>;
 
+function initialWorkspaceView(): AssetView {
+  if (!__LAKOMICS_PREVIEW__) return { kind: "home" };
+  switch (new URLSearchParams(window.location.search).get("view")) {
+    case "assets": return { kind: "classification", classificationId: null };
+    case "assets-folder": return { kind: "classification", classificationId: "class-reverse" };
+    case "artists": return { kind: "artists" };
+    case "albums": return { kind: "albums" };
+    case "collections": return { kind: "collections", typeFilter: "game", showcase: false };
+    case "collection-detail": return { kind: "collection", collectionId: "game-1" };
+    case "calendar": return { kind: "collections", typeFilter: "game", showcase: false, releaseCalendar: true };
+    case "manga":
+    case "manga-catalog": return { kind: "manga" };
+    case "notes": return { kind: "notes" };
+    case "settings": return { kind: "settings", section: "frequent" };
+    default: return { kind: "home" };
+  }
+}
+
 function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscribeExtensionIngest }: { libraryRoot: string; subscribeDrops: DropSubscriber; startAssetDrag: StartAssetDrag; subscribeExtensionIngest: ExtensionIngestListener }) {
   const { gateway } = useLibrary();
   const workload = useWorkloadProfile();
@@ -169,7 +187,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const collectionNavigationMemory = useRef<CollectionNavigationMemory>(new Map());
   const assetNavigationMemory = useRef<AssetNavigationMemory>(new Map());
   // The app opens on Home (HOME-DASH-001); the rail's 에셋 opens the library.
-  const [view, setView] = useState<AssetView>({ kind: "home" });
+  const [view, setView] = useState<AssetView>(initialWorkspaceView);
   const viewHistoryRef = useRef<AssetView[]>([]);
   useCollectionOpen(gateway, libraryRoot, view.kind === "collection" ? view.collectionId : null);
   const collectionReturnViewRef = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);

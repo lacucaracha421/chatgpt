@@ -8,7 +8,6 @@ import { Menu } from "../shared/ui/Menu";
 import { CollectionSidebarSection } from "./CollectionSidebarSection";
 import { avError, avGateway } from "./avClient";
 import type { AvCoverSet, AvDetails, AvGateway, AvRelated, AvWorkCard } from "./avTypes";
-import type { DvdPose } from "./av/DvdCase";
 import { AvEditPanel } from "./AvEditPanel";
 import { AvArtworkDialog } from "./AvArtworkDialog";
 import { AvPerformerPage } from "./av/AvPerformerPage";
@@ -38,7 +37,6 @@ export function AvCollectionDetail({ collection, scope: _scope, api = avGateway,
   const [selectedPerformerId, setSelectedPerformerId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
-  const [pose, setPose] = useState<DvdPose>("front");
 
   useEffect(() => {
     let active = true;
@@ -94,7 +92,7 @@ export function AvCollectionDetail({ collection, scope: _scope, api = avGateway,
     {error && <p className="av-collection-detail__error" role="alert">{error} <Button size="sm" onClick={() => setReload(value => value + 1)}>다시 불러오기</Button></p>}
     {!details && !error && <p role="status">불러오는 중…</p>}
     {details && performerId ? <AvPerformerPage key={performerId} personId={performerId} currentCollectionId={collection.id} api={api} onOpenSettings={onOpenSettings} onBack={() => setPerformerId(null)} onOpenCollection={onOpenCollection} onOpenPerformer={setPerformerId} /> : details && covers && <>
-      <AvHero id="av-detail-work" collection={collection} details={details} covers={covers} title={title} pose={pose} privacyMode={privacyMode} onPoseChange={setPose} onViewer={() => setPanel("viewer")} onEditInfo={() => setPanel("info")} onEdit={onEdit} onCopy={() => void copyText(details.productCode)} />
+      <AvHero id="av-detail-work" collection={collection} details={details} covers={covers} title={title} privacyMode={privacyMode} onViewer={() => setPanel("viewer")} onEditInfo={() => setPanel("info")} onEdit={onEdit} onCopy={() => void copyText(details.productCode)} />
       <CastSection id="av-detail-cast" people={performers} directors={directors} privacyMode={privacyMode} onOpenPerson={setPerformerId} />
       <RelatedSections related={related} activePerformer={activePerformer} hasMultiplePerformers={performers.length > 1} onSelectPerformer={setSelectedPerformerId} onOpenPerformer={setPerformerId} onOpenCollection={onOpenCollection} />
       <details className="av-detail-more" id="av-detail-more"><summary>자세한 정보</summary><dl>
@@ -110,16 +108,15 @@ export function AvCollectionDetail({ collection, scope: _scope, api = avGateway,
   </article>;
 }
 
-function AvHero({ id, collection, details, covers, title, pose, privacyMode, onPoseChange, onViewer, onEdit, onEditInfo, onCopy }: {
-  id: string; collection: CollectionSummary; details: AvDetails; covers: AvCoverSet; title: string; pose: DvdPose; privacyMode: boolean;
-  onPoseChange(pose: DvdPose): void; onViewer(): void; onEdit(): void; onEditInfo(): void; onCopy(): void;
+function AvHero({ id, collection, details, covers, title, privacyMode, onViewer, onEdit, onEditInfo, onCopy }: {
+  id: string; collection: CollectionSummary; details: AvDetails; covers: AvCoverSet; title: string; privacyMode: boolean;
+  onViewer(): void; onEdit(): void; onEditInfo(): void; onCopy(): void;
 }) {
   const wash = useCoverWash(covers.frontId, covers.revision, privacyMode);
   return <section id={id} className="av-detail-hero" style={{ "--av-wash-one": wash.one, "--av-wash-two": wash.two } as CSSProperties}>
     <div className="av-detail-hero__atmosphere" aria-hidden="true" />
     <div className="av-detail-hero__case">
-      <div onDoubleClick={onViewer}><DvdCase frontArtworkId={covers.frontId} spineArtworkId={covers.spineId} backArtworkId={covers.backId} revision={covers.revision} pose={pose} interactive large restingAngle={12} size={392} onPoseChange={onPoseChange} alt={`${title} DVD 케이스`} /></div>
-      <div className="av-detail-stops" role="group" aria-label="케이스 면">{(["front", "spine", "back"] as const).map(value => <Button key={value} size="sm" aria-pressed={pose === value} onClick={() => onPoseChange(value)}>{value === "front" ? "앞면" : value === "spine" ? "책등" : "뒷면"}</Button>)}</div>
+      <div onDoubleClick={onViewer}><DvdCase frontArtworkId={covers.frontId} spineArtworkId={covers.spineId} backArtworkId={covers.backId} revision={covers.revision} interactive large restingAngle={12} size={392} alt={`${title} DVD 케이스`} /></div>
       <Button size="sm" variant="ghost" disabled={privacyMode} onClick={onViewer}>표지 감상</Button>
     </div>
     <div className="av-detail-hero__identity">

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applySelectionGesture,
   emptySelection,
+  focusAsset,
   moveSelectionFocus,
   reconcileSelection,
   selectAllLoaded,
@@ -16,7 +17,12 @@ function from(...selectedIds: string[]): SelectionState {
 }
 
 describe("asset selection", () => {
-  it("replaces selection on a plain click and toggles one loaded item with Ctrl", () => {
+  it("focuses without selecting on a plain click and toggles one loaded item with Ctrl", () => {
+    expect(focusAsset(from("b"), ids, "c"))
+      .toEqual({ ids: new Set(), anchorId: "c", focusId: "c" });
+    // Shift+click after a plain click selects from the plain-clicked asset.
+    expect(applySelectionGesture(focusAsset(emptySelection(), ids, "b"), ids, "d", { toggle: false, range: true }).ids)
+      .toEqual(new Set(["b", "c", "d"]));
     expect(applySelectionGesture(emptySelection(), ids, "b", { toggle: false, range: false }))
       .toEqual(from("b"));
     expect(applySelectionGesture(from("b"), ids, "c", { toggle: true, range: false }).ids)
@@ -36,6 +42,8 @@ describe("asset selection", () => {
     expect(selectAllLoaded(from("outside"), ids).ids).toEqual(new Set(ids));
     expect(reconcileSelection(from("outside", "b", "d"), ["a", "b", "c"]))
       .toEqual({ ids: new Set(["b"]), anchorId: "b", focusId: "b" });
+    expect(reconcileSelection({ ids: new Set(), anchorId: "c", focusId: "c" }, ["a", "c"]))
+      .toEqual({ ids: new Set(), anchorId: "c", focusId: "c" });
   });
 
   it("moves keyboard focus inside loaded IDs and optionally extends the range", () => {

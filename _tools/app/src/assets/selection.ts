@@ -10,6 +10,16 @@ export function emptySelection(): SelectionState {
   return { ids: new Set(), anchorId: null, focusId: null };
 }
 
+/** A plain gallery click: clears any selection and focuses the asset, which also anchors a later Shift+click range. */
+export function focusAsset(
+  state: SelectionState,
+  orderedIds: readonly string[],
+  id: string,
+): SelectionState {
+  if (!orderedIds.includes(id)) return reconcileSelection(state, orderedIds);
+  return { ids: new Set(), anchorId: id, focusId: id };
+}
+
 export function applySelectionGesture(
   state: SelectionState,
   orderedIds: readonly string[],
@@ -55,8 +65,8 @@ export function reconcileSelection(
   const fallback = orderedIds.find((id) => ids.has(id)) ?? null;
   return {
     ids,
-    anchorId: state.anchorId && ids.has(state.anchorId) ? state.anchorId : fallback,
-    focusId: state.focusId && ids.has(state.focusId) ? state.focusId : fallback,
+    anchorId: state.anchorId && loaded.has(state.anchorId) ? state.anchorId : fallback,
+    focusId: state.focusId && loaded.has(state.focusId) ? state.focusId : fallback,
   };
 }
 

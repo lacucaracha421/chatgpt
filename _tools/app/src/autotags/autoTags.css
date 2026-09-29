@@ -1,7 +1,11 @@
-/* 자동 태그: machine tags are dashed outline chips, distinct from solid user Classification tags. */
+/* 자동 태그: machine tags use a quiet face, with text carrying confidence and state. */
 .auto-tags__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-2); }
 .asset-inspector__section.auto-tags h3 { display: flex; align-items: baseline; gap: var(--space-compact); }
 .auto-tags__heading h3 { margin: 0; }
+.auto-tags__toggle { display: inline-flex; align-items: baseline; gap: var(--space-compact); padding: 0; border: 0; background: transparent; color: var(--color-muted); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.auto-tags__toggle:hover { color: var(--color-text); }
+.auto-tags__toggle svg { width: 12px; height: 12px; align-self: center; }
+.auto-tags__toggle:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 1px; }
 .auto-tags__count { font: 500 var(--text-xs) var(--font-numeric); color: var(--color-faint); font-variant-numeric: tabular-nums; }
 .auto-tags__add { display: inline-flex; align-items: center; gap: var(--space-1); height: 24px; padding: 0 var(--space-compact); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--color-muted); font: inherit; font-size: var(--text-xs); cursor: pointer; }
 .auto-tags__add:hover { color: var(--color-text); background: var(--color-surface-hover); }
@@ -12,21 +16,21 @@
 .auto-tags__group-label:hover { color: var(--color-muted); }
 .auto-tags__group-label svg { width: 11px; height: 11px; align-self: center; }
 
-.auto-tag { position: relative; display: inline-flex; align-items: center; height: 24px; border: 1px dashed var(--color-border-strong); border-radius: 3px; color: var(--color-text); font-size: 12.5px; white-space: nowrap; }
+.auto-tag { position: relative; display: inline-flex; align-items: center; height: 24px; border: 0; border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-text); font-size: 12.5px; white-space: nowrap; }
 .auto-tag__label { display: inline-flex; align-items: center; gap: 5px; height: 100%; padding: 0 7px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .auto-tag__label:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 1px; }
-.auto-tag--common { color: var(--color-faint); border-color: var(--color-border); }
-.auto-tag--character { border-color: var(--color-selection-echo); color: var(--color-accent); }
-.auto-tag__guess { padding-left: 5px; border-left: 1px solid var(--color-border-strong); color: var(--color-muted); font-size: 10.5px; line-height: 12px; }
-/* User-added: solid outline and a small dot. */
-.auto-tag--added { border-style: solid; }
+.auto-tag--common { color: var(--color-faint); }
+.auto-tag--character { color: var(--color-accent); }
+.auto-tag__guess { padding-left: 5px; color: var(--color-muted); font-size: 10.5px; line-height: 12px; }
+/* User-added: a small dot carries the extra cue. */
 .auto-tag--added .auto-tag__label::after { content: ""; width: 4px; height: 4px; background: var(--color-muted); }
-.auto-tag--active { background: var(--color-filter-selected); border-style: solid; border-color: var(--color-filter-border); }
-.auto-tag:hover { background: var(--color-surface-hover); border-style: solid; border-color: var(--color-filter-border); }
-.auto-tag__remove { display: none; width: 16px; height: 16px; margin-right: 3px; place-items: center; padding: 0; border: 0; border-radius: 2px; background: var(--color-control-pressed); color: var(--color-text); cursor: pointer; }
-.auto-tag__remove svg { width: 12px; height: 12px; stroke-width: 2; }
-.auto-tag:hover .auto-tag__label, .auto-tag:focus-within .auto-tag__label { padding-right: 4px; }
-.auto-tag:hover .auto-tag__remove, .auto-tag:focus-within .auto-tag__remove { display: grid; }
+.auto-tag--active { background: var(--color-filter-selected); }
+.auto-tag:hover { background: var(--color-surface-hover); }
+/* ✕ floats on the chip's corner so hovering never changes the chip width or reflows the row. */
+.auto-tag__remove { position: absolute; z-index: 1; top: -6px; right: -6px; display: grid; width: 16px; height: 16px; place-items: center; padding: 0; border: 0; border-radius: var(--radius-tile); background: var(--color-surface-pressed); color: var(--color-text); cursor: pointer; opacity: 0; pointer-events: none; transition: opacity var(--motion-fast) var(--ease-standard); }
+.auto-tag__remove:hover { background: var(--color-danger); color: var(--color-on-accent); }
+.auto-tag__remove svg { width: 10px; height: 10px; stroke-width: 2.5; }
+.auto-tag:hover .auto-tag__remove, .auto-tag:focus-within .auto-tag__remove { opacity: 1; pointer-events: auto; }
 .auto-tag__remove:focus-visible { outline: var(--focus-width) solid var(--color-focus); }
 .auto-tag__card { position: absolute; left: -1px; top: calc(100% + 4px); z-index: 2; display: grid; gap: var(--space-1); padding: 5px 8px; border: 1px solid var(--color-border-strong); border-radius: 3px; background: var(--color-viewer-bg); box-shadow: var(--shadow-floating); color: var(--color-text); font-size: var(--text-xs); line-height: 1.45; white-space: nowrap; }
 .auto-tag__card small { color: var(--color-muted); font-size: 11.5px; }

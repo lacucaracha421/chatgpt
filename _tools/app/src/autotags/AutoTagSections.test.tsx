@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AssetInspector } from "../assets/AssetInspector";
@@ -47,14 +47,16 @@ it("shows the guessed character above 출처 and the grouped list below it", asy
   const highlights = await screen.findByRole("region", { name: "주요 태그" });
   expect(within(highlights).getByRole("button", { name: /Vertin · 리버스:1999\s*추정/ })).toBeVisible();
   const list = screen.getByRole("region", { name: "자동 태그" });
+  // The tag list starts closed.
+  expect(within(list).queryByRole("button", { name: /인물·외모/ })).toBeNull();
+  fireEvent.click(within(list).getByRole("button", { name: /자동 태그/ }));
   expect(within(list).getByRole("button", { name: /인물·외모/ })).toBeVisible();
   expect(within(list).getByRole("button", { name: /성적 표현/ })).toBeVisible();
   const body = within(list).getAllByRole("button", { name: /^(분홍 머리|여자 1명)$/ }).map((button) => button.textContent);
   expect(body).toEqual(["분홍 머리", "여자 1명"]);
-  // Tag groups stay together before source and file details.
-  const headings = screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent?.replace(/\d+/g, "").trim());
-  expect(headings.indexOf("캐릭터 · 자동 태그")).toBeLessThan(headings.indexOf("출처"));
-  expect(headings.indexOf("출처")).toBeLessThan(headings.indexOf("파일"));
+  expect(screen.queryByRole("heading", { name: "캐릭터 · 자동 태그" })).not.toBeInTheDocument();
+  // Source and file facts come first, beside the preview; tags follow.
+  expect(screen.getByLabelText("출처와 파일").compareDocumentPosition(highlights) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 it("omits 주요 태그 when the asset has a confirmed character", async () => {
@@ -68,6 +70,7 @@ it("applies a chip as an 에셋 filter and removes a tag with undo", async () =>
   const user = userEvent.setup();
   const gateway = tagGateway(tags);
   renderInspector(gateway);
+  await user.click(await screen.findByRole("button", { name: /^자동 태그/ }));
   await user.click(await screen.findByRole("button", { name: "분홍 머리" }));
   await user.click(screen.getByRole("button", { name: "이 태그로 찾기" }));
   expect(getAutoTagFilter()).toEqual({ include: ["pink_hair"], exclude: [] });
@@ -83,6 +86,7 @@ it("adds a tag from the vocabulary by Korean name", async () => {
   const user = userEvent.setup();
   const gateway = tagGateway(tags);
   renderInspector(gateway);
+  await user.click(await screen.findByRole("button", { name: /^자동 태그/ }));
   await user.click(await screen.findByRole("button", { name: "태그 추가" }));
   await user.type(screen.getByRole("combobox", { name: "추가할 태그 (한국어 또는 영어)" }), "사이하");
   const option = await screen.findByRole("option", { name: /사이하이/ });

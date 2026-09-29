@@ -1,4 +1,4 @@
-import { ArrowTopRightOnSquareIcon, CheckIcon, ClipboardDocumentIcon, PencilSquareIcon } from "@heroicons/react/24/outline";
+import { ArrowTopRightOnSquareIcon, CheckIcon, ChevronRightIcon, ClipboardDocumentIcon, PencilSquareIcon } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { artistHandle } from "../artists/format";
@@ -12,6 +12,7 @@ import { breadcrumbPath } from "../shared/breadcrumb";
 import { displayDateTime } from "../shared/displayDate";
 import { formatBytes } from "../shared/formatBytes";
 import { Button } from "../shared/ui/Button";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { TextField } from "../shared/ui/TextField";
 import { Toast } from "../shared/ui/Toast";
@@ -154,17 +155,25 @@ export function AssetInfoPanel({
   };
 
   return <div ref={rootRef} className="asset-info-panel" onKeyDown={handleEscape}>
-    <section className="asset-info-panel__artist" data-info-section="artist">
+    {/* Image left; artist, source and file facts gathered on its right. */}
+    <section className="asset-info-panel__head" data-info-section="artist">
       <button type="button" className="asset-inspector__preview" aria-label={`${asset.title || asset.originalName} 감상 화면으로 열기`} onClick={() => onOpenAsset?.(asset)}>
         {privacyMode ? <span className="asset-inspector__preview-placeholder"><Skeleton className="privacy-mask" label="비공개 모드" /></span> : <img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" draggable={false} />}
       </button>
-      <div className="asset-info-panel__artist-copy">
-        <strong className="artist-name">{artist?.label ?? asset.creatorName ?? handle ?? "작가 미상"}</strong>
-        <span>{handle ?? "계정 정보 없음"}{artist ? ` · 모은 그림 ${artist.assetCount.toLocaleString("ko-KR")}장` : ""}</span>
-        {artist && <span>처음 저장 {displayDateTime(artist.firstSavedAt)} · 최근 {displayDateTime(artist.lastSavedAt)}</span>}
-        {(artist?.id || asset.creatorHandle || asset.creatorUrl) && (onOpenArtist || asset.creatorUrl) && <Button size="sm" variant="ghost" onClick={openArtist}>작가 페이지 <ArrowTopRightOnSquareIcon aria-hidden="true" /></Button>}
+      <div className="asset-info-panel__facts">
+        <div className="asset-info-panel__artist-copy">
+          <div className="asset-info-panel__artist-line"><strong className="artist-name">{artist?.label ?? asset.creatorName ?? handle ?? "작가 미상"}</strong><Button data-edit-source size="icon" variant="ghost" aria-label="출처 정보 편집" onClick={beginEditing}><PencilSquareIcon aria-hidden="true" /></Button></div>
+          <span>{handle ?? "계정 정보 없음"}{artist ? ` · 모은 그림 ${artist.assetCount.toLocaleString("ko-KR")}장` : ""}</span>
+          {(artist?.id || asset.creatorHandle || asset.creatorUrl) && (onOpenArtist || asset.creatorUrl) && <Button size="sm" variant="quiet" className="asset-info-panel__artist-link" onClick={openArtist}>작가 페이지 <ChevronRightIcon aria-hidden="true" /></Button>}
+        </div>
+        <dl className="asset-info-panel__facts-list" data-info-section="source" aria-label="출처와 파일">
+          <div><dt>{asset.sourceUrl ? <button type="button" className="asset-inspector__link" aria-label="출처 열기" onClick={() => void openUrl(asset.sourceUrl!)}>게시물<ArrowTopRightOnSquareIcon aria-hidden="true" /></button> : "게시물"}</dt><dd className="asset-inspector__source">{asset.sourceUrl ? <><span className="asset-inspector__source-url" aria-description={asset.sourceUrl}>{sourceLabel(asset.sourceUrl)}</span><Button size="icon" variant="ghost" aria-label="출처 복사" onClick={() => void copySource()}>{copied ? <CheckIcon aria-hidden="true" /> : <ClipboardDocumentIcon aria-hidden="true" />}</Button></> : "—"}</dd></div>
+          <div><dt>게시</dt><dd>{displayDateTime(asset.sourcePublishedAt, new Date(), { withTime: true }) || "—"}</dd></div>
+          <div data-info-section="file"><dt>파일</dt><dd><span>{asset.width}×{asset.height}</span> · <span>{formatBytes(asset.byteSize)}</span>{asset.media.kind === "video" && <> · <span>{formatDuration(asset.media.durationMs)}</span></>}</dd></div>
+          <div><dt>가져옴</dt><dd><span>{displayDateTime(asset.collectedAt, new Date(), { withTime: true }) || "—"}</span> · <span>{importSourceLabel(asset.importSource)}</span></dd></div>
+          <div><dt>폴더</dt><dd title={folderPaths.join(" · ")}>{folderPaths.join(" · ") || "—"}</dd></div>
+        </dl>
       </div>
-      <Button data-edit-source size="icon" variant="ghost" aria-label="출처 정보 편집" onClick={beginEditing}><PencilSquareIcon aria-hidden="true" /></Button>
     </section>
     {editing && draft && <div className="asset-inspector__metadata-editor">
       <TextField autoFocus label="제작자 이름" value={draft.creatorName} onChange={(event) => setDraft({ ...draft, creatorName: event.target.value })} />
@@ -174,20 +183,10 @@ export function AssetInfoPanel({
       <div className="asset-inspector__metadata-actions"><Button variant="ghost" disabled={saving} onClick={cancelEditing}>취소</Button><Button variant="primary" disabled={saving} onClick={() => void saveMetadata()}>저장</Button></div>
     </div>}
     {sourceGroup.length > 1 && <section className="asset-inspector__section asset-inspector__source-group" data-info-section="same-post" aria-label="같은 게시물">
-      <div className="asset-inspector__source-group-heading"><h3>같은 게시물</h3><span>{sourceGroup.length}개</span></div>
+      <SectionLabel as="h3" title="같은 게시물" count={sourceGroup.length} />
       <div className="asset-inspector__source-group-strip">{sourceGroup.map((sibling) => <button key={sibling.id} type="button" className="asset-inspector__source-group-item" aria-label={`${sibling.title || sibling.originalName} 같은 게시물에서 열기`} aria-current={sibling.id === asset.id ? "true" : undefined} onClick={() => onOpenAsset?.(sibling)}>{!privacyMode && <img src={assetThumbnailUrl(sibling)} alt="" loading="lazy" decoding="async" draggable={false} />}</button>)}</div>
     </section>}
-    <section className="asset-inspector__section" data-info-section="tags"><h3>캐릭터 · 자동 태그</h3><AutoTagHighlights state={autoTags.state} /><AutoTagList state={autoTags.state} /></section>
-    <section className="asset-inspector__section" data-info-section="source"><h3>출처</h3><dl className="asset-inspector__metadata">
-      <div><dt>{asset.sourceUrl ? <button type="button" className="asset-inspector__link" aria-label="출처 열기" onClick={() => void openUrl(asset.sourceUrl!)}><ArrowTopRightOnSquareIcon aria-hidden="true" />게시물</button> : "게시물"}</dt><dd className="asset-inspector__source">{asset.sourceUrl ? <><span className="asset-inspector__source-url" aria-description={asset.sourceUrl}>{sourceLabel(asset.sourceUrl)}</span><Button size="icon" variant="ghost" aria-label="출처 복사" onClick={() => void copySource()}>{copied ? <CheckIcon aria-hidden="true" /> : <ClipboardDocumentIcon aria-hidden="true" />}</Button></> : "—"}</dd></div>
-      <div><dt>게시 시각</dt><dd>{displayDateTime(asset.sourcePublishedAt, new Date(), { withTime: true }) || "—"}</dd></div>
-    </dl></section>
-    <section className="asset-inspector__section" data-info-section="file"><h3>파일</h3><dl className="asset-inspector__metadata">
-      <div><dt>해상도</dt><dd>{asset.width}×{asset.height}</dd></div><div><dt>크기</dt><dd>{formatBytes(asset.byteSize)}</dd></div>
-      {asset.media.kind === "video" && <div><dt>재생 시간</dt><dd>{formatDuration(asset.media.durationMs)}</dd></div>}
-      <div><dt>가져옴</dt><dd>{displayDateTime(asset.collectedAt, new Date(), { withTime: true }) || "—"}</dd></div><div><dt>방식</dt><dd>{importSourceLabel(asset.importSource)}</dd></div>
-      <div><dt>폴더</dt><dd>{folderPaths.join(" · ") || "—"}</dd></div>
-    </dl></section>
+    <section className="asset-inspector__section" data-info-section="tags"><AutoTagHighlights state={autoTags.state} /><AutoTagList state={autoTags.state} /></section>
     {currentCollection && <CollectionInfo collection={currentCollection} />}
     {styleSuggestion && !styleSuggestionHidden && <AssetStyleSuggestionBox suggestion={styleSuggestion} privacyMode={privacyMode} pending={styleSuggestionPending} error={styleSuggestionError} onOpen={(id) => { void gateway.getAsset(id).then((item) => onOpenAsset?.(item), () => undefined); }} onAssign={() => void (async () => { if (!gateway.artists || styleSuggestionPending) return; setStyleSuggestionPending(true); setStyleSuggestionError(null); try { await gateway.artists.assignAssets([asset.id], { artistId: styleSuggestion.artist.id }); setStyleSuggestionHidden(true); invalidateArtists(); } catch (error) { setStyleSuggestionError(commandErrorMessage(error, "작가를 지정하지 못했습니다.")); } finally { setStyleSuggestionPending(false); } })()} onDismiss={() => void (async () => { if (!gateway.artists || styleSuggestionPending) return; setStyleSuggestionPending(true); setStyleSuggestionError(null); try { await gateway.artists.dismissStyleSuggestion([asset.id], styleSuggestion.artist.id); setStyleSuggestionHidden(true); invalidateArtists(); } catch (error) { setStyleSuggestionError(commandErrorMessage(error, "추천을 제외하지 못했습니다.")); } finally { setStyleSuggestionPending(false); } })()} />}
     {copyError && <Toast tone="error" onDismiss={() => setCopyError(null)}>{copyError}</Toast>}
@@ -196,7 +195,7 @@ export function AssetInfoPanel({
 }
 
 function CollectionInfo({ collection }: { collection: CollectionSummary }) {
-  return <section className="asset-inspector__collection-info" data-info-section="collection" aria-label="컬렉션 정보"><h3>{collection.name}</h3>{collection.description?.trim() && <p className="asset-inspector__collection-description">{collection.description}</p>}<dl>
+  return <section className="asset-inspector__collection-info" data-info-section="collection" aria-label="컬렉션 정보"><SectionLabel as="h3" title="컬렉션" /><strong className="asset-inspector__collection-name">{collection.name}</strong>{collection.description?.trim() && <p className="asset-inspector__collection-description">{collection.description}</p>}<dl>
     {collection.type === "game" && <>{collection.author && <div><dt>제작사</dt><dd>{collection.author}</dd></div>}{collection.externalScore != null && <div><dt>외부 점수</dt><dd>{collection.externalScore}</dd></div>}{collection.myScore != null && <div><dt>내 점수</dt><dd>{collection.myScore}</dd></div>}</>}
     {collection.type === "manga" && <>{collection.author && <div><dt>작가</dt><dd>{collection.author}</dd></div>}{collection.year != null && <div><dt>출간 연도</dt><dd>{collection.year}</dd></div>}</>}
     {collection.type === "movie" && <>{collection.director && <div><dt>감독</dt><dd>{collection.director}</dd></div>}{collection.year != null && <div><dt>개봉 연도</dt><dd>{collection.year}</dd></div>}</>}

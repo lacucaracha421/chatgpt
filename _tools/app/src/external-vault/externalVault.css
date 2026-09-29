@@ -10,9 +10,6 @@
 .external-vault-browser__hint { margin: 0; padding: 8px 16px; color: var(--color-muted); font-size: var(--text-sm); border-bottom: 1px solid var(--color-border); }
 .external-vault-confirm { margin: 0; }
 .external-vault-browser__actions { display: flex; align-items: center; gap: 4px; }
-.external-vault-browser .asset-gallery__asset--caption .asset-gallery__metadata { color: var(--color-text); }
-.external-vault-browser .asset-gallery__asset--caption .asset-gallery__metadata time { display: none; }
-.external-vault-browser .asset-gallery__asset--caption .asset-gallery__metadata > span { width: 100%; }
 .external-vault-editor__hint, .external-vault-editor__error { margin: var(--space-2) 0 0; font-size: var(--text-sm); color: var(--color-muted); }
 .external-vault-editor__error { color: var(--color-danger); }
 .external-vault-browser__progress { display: flex; align-items: center; gap: var(--space-3); padding: 8px 16px; border-bottom: 1px solid var(--color-border); color: var(--color-muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }

@@ -88,9 +88,10 @@ it("opens the viewer from the preview and groups the metadata into sections", as
     </LibraryProvider>,
   );
 
-  expect(screen.getByRole("heading", { name: "출처" })).toBeVisible();
-  expect(screen.getByRole("heading", { name: "파일" })).toBeVisible();
-  expect(screen.getByText("가져옴")).toBeVisible();
+  // Artist, source and file facts sit together beside the preview.
+  const facts = screen.getByLabelText("출처와 파일");
+  expect(within(facts).getByText("가져옴")).toBeVisible();
+  expect(within(facts).getByText("파일")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "a.png 감상 화면으로 열기" }));
   expect(onOpenAsset).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
 });
@@ -108,7 +109,7 @@ it("shows and opens assets saved from the same X post", async () => {
 
   const group = await screen.findByRole("region", { name: "같은 게시물" });
   expect(listSourceGroupAssets).toHaveBeenCalledWith("x-1");
-  expect(within(group).getByText("2개")).toBeVisible();
+  expect(within(group).getByText("2")).toBeVisible();
   expect(within(group).getByRole("button", { name: `x-1.png 같은 게시물에서 열기` })).toHaveAttribute("aria-current", "true");
   await user.click(within(group).getByRole("button", { name: `x-2.png 같은 게시물에서 열기` }));
   expect(onOpenAsset).toHaveBeenCalledWith(expect.objectContaining({ id: "x-2" }));

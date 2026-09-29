@@ -3,40 +3,20 @@ import { workArtworkThumbnailUrl, workArtworkUrl } from "../../assets/mediaUrl";
 import { usePrivacy } from "../../privacy/PrivacyContext";
 import "./dvdCase.css";
 
-export type DvdPose = "front" | "spine" | "back";
 export type DvdCaseProps = {
   frontArtworkId: string | null | undefined;
   spineArtworkId: string | null | undefined;
   backArtworkId: string | null | undefined;
   revision?: string | number | null;
-  pose?: DvdPose;
   interactive?: boolean;
   large?: boolean;
   restingAngle?: number;
   size?: number;
   alt?: string;
-  onPoseChange?: (pose: DvdPose) => void;
   onDoubleClick?: () => void;
 };
 
-const POSE_ANGLES: Record<DvdPose, number> = { front: 0, spine: 90, back: 180 };
-const POSES: DvdPose[] = ["front", "spine", "back"];
-
-function normalize(value: number) {
-  return ((value % 360) + 360) % 360;
-}
-
-function shortestDistance(target: number, current: number) {
-  return ((target - current + 540) % 360) - 180;
-}
-
-function nearestPose(yaw: number): DvdPose {
-  const current = normalize(yaw);
-  return POSES.reduce((best, candidate) => {
-    const distance = Math.abs(shortestDistance(POSE_ANGLES[candidate], current));
-    return distance < best.distance ? { pose: candidate, distance } : best;
-  }, { pose: "front" as DvdPose, distance: Number.POSITIVE_INFINITY }).pose;
-}
+const KEY_STEP = 15;
 
 function revisioned(url: string, revision: string | number | null | undefined) {
   return revision === null || revision === undefined || revision === "" ? url : `${url}?v=${encodeURIComponent(String(revision))}`;
@@ -61,87 +41,75 @@ export function DvdCase({
   spineArtworkId,
   backArtworkId,
   revision,
-  pose = "front",
   interactive = false,
   large = interactive,
   restingAngle = interactive ? 0 : 12,
   size = 320,
   alt = "DVD 케이스",
-  onPoseChange,
   onDoubleClick,
 }: DvdCaseProps) {
   const { privacyMode } = usePrivacy();
   const reducedMotion = useReducedMotion(interactive);
-  const [yaw, setYaw] = useState(POSE_ANGLES[pose]);
-  const [pitch, setPitch] = useState(0);
-  const drag = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
+  // Rotation lives outside React state: a drag writes the transform directly once per frame.
+  const yaw = useRef(0);
+  const frame = useRef(0);
+  const drag = useRef<{ x: number; yaw: number } | null>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const caseRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!drag.current) {
-      setYaw(POSE_ANGLES[pose]);
-      setPitch(0);
-    }
-  }, [pose]);
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
   const artworkUrl = (artworkId: string | null | undefined) => {
     if (privacyMode || !artworkId) return undefined;
     const url = large ? workArtworkUrl(artworkId) : workArtworkThumbnailUrl(artworkId);
     return revisioned(url, revision);
   };
-  const faces: Array<{ name: DvdPose; artworkId: string | null | undefined }> = [
+  const faces: Array<{ name: "front" | "back" | "spine"; artworkId: string | null | undefined }> = [
     { name: "front", artworkId: frontArtworkId },
     { name: "back", artworkId: backArtworkId },
     { name: "spine", artworkId: spineArtworkId },
   ];
 
-  function applyYaw(nextYaw: number, nextPitch = pitch) {
-    setYaw(nextYaw);
-    setPitch(Math.max(-20, Math.min(20, nextPitch)));
+  function paint() {
+    frame.current = 0;
+    caseRef.current?.style.setProperty("--dvd-yaw", `${yaw.current}deg`);
   }
 
-  function snap() {
-    const selected = nearestPose(yaw);
-    const nextYaw = yaw + shortestDistance(POSE_ANGLES[selected], normalize(yaw));
-    setYaw(nextYaw);
-    setPitch(0);
-    onPoseChange?.(selected);
+  function rotateTo(next: number, immediate: boolean) {
+    yaw.current = next;
+    if (immediate) {
+      if (!frame.current) frame.current = requestAnimationFrame(paint);
+    } else {
+      cancelAnimationFrame(frame.current);
+      paint();
+    }
   }
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!interactive) return;
-    drag.current = { x: event.clientX, y: event.clientY, yaw, pitch };
-    if (caseRef.current && typeof caseRef.current.setPointerCapture === "function") caseRef.current.setPointerCapture(event.pointerId);
-    caseRef.current?.classList.add("dvd-case--dragging");
+    if (!interactive || event.button !== 0) return;
+    drag.current = { x: event.clientX, yaw: yaw.current };
+    stageRef.current?.setPointerCapture?.(event.pointerId);
+    stageRef.current?.classList.add("dvd-case--dragging");
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const active = drag.current;
     if (!active) return;
-    applyYaw(active.yaw + (event.clientX - active.x) * 0.55, active.pitch - (event.clientY - active.y) * 0.25);
+    rotateTo(active.yaw + (event.clientX - active.x) * 0.5, true);
   }
 
   function endDrag() {
     if (!drag.current) return;
     drag.current = null;
-    caseRef.current?.classList.remove("dvd-case--dragging");
-    snap();
+    stageRef.current?.classList.remove("dvd-case--dragging");
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!interactive || !["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
     event.preventDefault();
     event.stopPropagation();
-    if (event.key === "Home") {
-      setYaw(0);
-      setPitch(0);
-      onPoseChange?.("front");
-      return;
-    }
-    const next = nearestPose(yaw + (event.key === "ArrowRight" ? 90 : -90));
-    setYaw(POSE_ANGLES[next]);
-    setPitch(0);
-    onPoseChange?.(next);
+    if (event.key === "Home") rotateTo(Math.round(yaw.current / 360) * 360, false);
+    else rotateTo(yaw.current + (event.key === "ArrowRight" ? KEY_STEP : -KEY_STEP), false);
   }
 
   const width = Math.round(size * 0.703);
@@ -150,9 +118,7 @@ export function DvdCase({
     "--dvd-width": `${width}px`,
     "--dvd-height": `${size}px`,
     "--dvd-depth": `${depth}px`,
-    "--dvd-wrap-width": `${width * 2 + depth}px`,
-    "--dvd-yaw": `${yaw}deg`,
-    "--dvd-pitch": `${pitch}deg`,
+    "--dvd-yaw": `${yaw.current}deg`,
     "--dvd-rest": `${restingAngle}deg`,
     "--dvd-transition": reducedMotion ? "none" : undefined,
   } as CSSProperties;
@@ -167,16 +133,15 @@ export function DvdCase({
 
   return (
     <div
-      ref={caseRef}
+      ref={stageRef}
       className={`dvd-case__stage${interactive ? " dvd-case__stage--interactive" : ""}`}
       style={{ width: width + depth + 18, height: size + 22, "--dvd-width": `${width}px` } as CSSProperties}
       tabIndex={interactive ? 0 : undefined}
       role="img"
       aria-label={alt}
-      data-pose={nearestPose(yaw)}
       {...interactionProps}
     >
-      <div className="dvd-case" style={style}>
+      <div ref={caseRef} className="dvd-case" style={style}>
         {faces.map(({ name, artworkId }) => {
           const src = artworkUrl(artworkId);
           return (
