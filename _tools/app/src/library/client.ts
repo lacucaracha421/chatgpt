@@ -111,6 +111,10 @@ import type {
   ReleaseWatchRunResult,
   ReleaseWatchStatus,
   RemoteReadingProgress,
+  MangaReadingProgress,
+  VideoPlaybackProgress,
+  ContinueItem,
+  AvFavoritePerformer,
   ResolvedGallery,
   CloudBackfillPreflightReport,
   CloudBackfillSeedReport,
@@ -183,7 +187,19 @@ async function classificationMutation<T>(run: () => Promise<T>): Promise<T> {
   return result;
 }
 
-export const libraryGateway: LibraryGateway = {
+type DesktopHomeDataGateway = Required<Pick<LibraryGateway,
+  | "getMangaReadingProgress"
+  | "saveMangaReadingProgress"
+  | "clearMangaReadingProgress"
+  | "getVideoPlaybackProgress"
+  | "saveVideoPlaybackProgress"
+  | "clearVideoPlaybackProgress"
+  | "listContinueItems"
+  | "setAvFavorite"
+  | "listAvFavorites"
+>>;
+
+export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   getLibraryStatistics: () => invoke("get_library_statistics"),
   getHomeOverview: (todayStart, weekStart, localDate) => invoke("get_home_overview", { todayStart, weekStart, localDate }),
   measureLibraryDerivativeStorage: () => invoke("measure_library_derivative_storage"),
@@ -377,6 +393,23 @@ export const libraryGateway: LibraryGateway = {
     invoke<RemoteReadingProgress | null>("get_remote_reading_progress", { identity }),
   saveRemoteReadingProgress: (progress) =>
     invoke("save_remote_reading_progress", { progress }),
+  getMangaReadingProgress: (seriesId) =>
+    invoke<MangaReadingProgress | null>("get_manga_reading_progress", { seriesId }),
+  saveMangaReadingProgress: (seriesId, lastPage, pageCount) =>
+    invoke<void>("save_manga_reading_progress", { seriesId, lastPage, pageCount }),
+  clearMangaReadingProgress: (seriesId) =>
+    invoke<void>("clear_manga_reading_progress", { seriesId }),
+  getVideoPlaybackProgress: (assetId) =>
+    invoke<VideoPlaybackProgress | null>("get_video_playback_progress", { assetId }),
+  saveVideoPlaybackProgress: (assetId, positionMs, durationMs) =>
+    invoke<void>("save_video_playback_progress", { assetId, positionMs, durationMs }),
+  clearVideoPlaybackProgress: (assetId) =>
+    invoke<void>("clear_video_playback_progress", { assetId }),
+  listContinueItems: (limit) =>
+    invoke<ContinueItem[]>("list_continue_items", { limit }),
+  setAvFavorite: (personId, favorite) =>
+    invoke<void>("set_av_favorite", { personId, favorite }),
+  listAvFavorites: () => invoke<AvFavoritePerformer[]>("list_av_favorites"),
   clearRemoteMangaCache: () => invoke("clear_remote_manga_cache"),
   getExtensionConnection: () =>
     invoke<ExtensionConnection>("get_extension_connection"),

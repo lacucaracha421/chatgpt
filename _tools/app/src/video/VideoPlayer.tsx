@@ -2,6 +2,7 @@ import { ArrowsPointingOutIcon, ArrowsPointingInIcon, PauseIcon, PlayIcon, Speak
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { AssetSummary } from "../library/types";
+import { libraryGateway } from "../library/client";
 import { playbackUrl, scrubFrameUrl, vaultPlaybackUrl } from "../assets/mediaUrl";
 import { Button } from "../shared/ui/Button";
 
@@ -14,6 +15,7 @@ export const VIDEO_SEEK_STEP_SECONDS = 5;
 export type VideoPlayerHandle = { seekBy: (deltaSeconds: number) => void; togglePlayback: () => void };
 /** Longest time the pre-seek frame may cover the video if `seeked` never fires. */
 const SEEK_FREEZE_MAX_MS = 1_500;
+const PROGRESS_SAVE_INTERVAL_MS = 10_000;
 
 type PlaybackUrlResolver = (assetId: string) => Promise<string>;
 
@@ -22,9 +24,13 @@ const resolveInternalPlaybackUrl: PlaybackUrlResolver = (assetId) =>
 const resolveInternalVaultPlaybackUrl: PlaybackUrlResolver = (itemId) =>
   invoke<string>("get_internal_vault_playback_url", { itemId });
 
-/** `vault` plays an encrypted Private Vault item: no scrub frames, vault routes only. */
-export function VideoPlayer({ asset, source: mediaSource = "library", resolvePlaybackUrl, ref }: { asset: VideoAsset; source?: "library" | "vault"; resolvePlaybackUrl?: PlaybackUrlResolver; ref?: Ref<VideoPlayerHandle> }) {
+/**
+ * `vault` plays an encrypted Private Vault item: no scrub frames, vault routes only.
+ * `rememberPosition` resumes and records the playback position (이어 보기); never for vault items.
+ */
+export function VideoPlayer({ asset, source: mediaSource = "library", rememberPosition = false, resolvePlaybackUrl, ref }: { asset: VideoAsset; source?: "library" | "vault"; rememberPosition?: boolean; resolvePlaybackUrl?: PlaybackUrlResolver; ref?: Ref<VideoPlayerHandle> }) {
   const vault = mediaSource === "vault";
+  const untracked = vault || !rememberPosition;
   const protocolUrl = vault ? vaultPlaybackUrl : playbackUrl;
   const resolveHttpUrl = resolvePlaybackUrl ?? (vault ? resolveInternalVaultPlaybackUrl : resolveInternalPlaybackUrl);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -45,6 +51,67 @@ export function VideoPlayer({ asset, source: mediaSource = "library", resolvePla
   const freezeRef = useRef<HTMLCanvasElement>(null);
   const freezeTimerRef = useRef<number | null>(null);
   const [frozen, setFrozen] = useState(false);
+  const savedPositionRef = useRef<number | null>(null);
+  const metadataReadyRef = useRef(false);
+  const progressTouchedRef = useRef(false);
+
+  const restoreProgress = useCallback((video: HTMLVideoElement) => {
+    const position = savedPositionRef.current;
+    if (untracked || position === null || !metadataReadyRef.current) return;
+    if (progressTouchedRef.current) {
+      savedPositionRef.current = null;
+      return;
+    }
+    const limit = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : position;
+    const next = Math.max(0, Math.min(position, limit));
+    video.currentTime = next;
+    setCurrentTime(next);
+    savedPositionRef.current = null;
+  }, [untracked]);
+
+  const saveProgress = useCallback((target?: HTMLVideoElement | null) => {
+    if (untracked || !progressTouchedRef.current) return;
+    const video = target ?? videoRef.current;
+    if (!video) return;
+    if (video.ended) {
+      progressTouchedRef.current = false;
+      void libraryGateway.clearVideoPlaybackProgress(asset.id).catch(() => undefined);
+      return;
+    }
+    const position = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+    const mediaDuration = Number.isFinite(video.duration) && video.duration > 0
+      ? video.duration
+      : asset.media.durationMs / 1_000;
+    if (position < 0 || !Number.isFinite(mediaDuration) || mediaDuration <= 0) return;
+    void libraryGateway.saveVideoPlaybackProgress(asset.id, Math.round(position * 1_000), Math.round(mediaDuration * 1_000)).catch(() => undefined);
+  }, [asset.id, asset.media.durationMs, untracked]);
+
+  useEffect(() => {
+    metadataReadyRef.current = false;
+    savedPositionRef.current = null;
+    progressTouchedRef.current = false;
+    if (untracked) return;
+    let active = true;
+    const video = videoRef.current;
+    void libraryGateway.getVideoPlaybackProgress(asset.id)
+      .then(progress => {
+        if (!active || !progress) return;
+        savedPositionRef.current = progress.positionMs / 1_000;
+        const video = videoRef.current;
+        if (video) restoreProgress(video);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      saveProgress(video);
+    };
+  }, [asset.id, restoreProgress, saveProgress, untracked]);
+
+  useEffect(() => {
+    if (untracked || !playing) return;
+    const timer = window.setInterval(saveProgress, PROGRESS_SAVE_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [playing, saveProgress, untracked]);
 
   const clearIdleTimer = useCallback(() => {
     if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
@@ -145,6 +212,7 @@ export function VideoPlayer({ asset, source: mediaSource = "library", resolvePla
     const from = Number.isFinite(video.currentTime) ? video.currentTime : 0;
     const next = Math.max(0, limit > 0 ? Math.min(limit, from + deltaSeconds) : from + deltaSeconds);
     if (next === from) return;
+    progressTouchedRef.current = true;
     holdFrame();
     video.currentTime = next;
     setCurrentTime(next);
@@ -188,12 +256,29 @@ export function VideoPlayer({ asset, source: mediaSource = "library", resolvePla
       tabIndex={-1}
       onPointerDown={(event) => event.preventDefault()}
       onClick={togglePlayback}
-      onPlay={() => setPlaying(true)}
-      onPause={() => setPlaying(false)}
-      onEnded={() => setPlaying(false)}
+      onLoadedMetadata={(event) => {
+        metadataReadyRef.current = true;
+        restoreProgress(event.currentTarget);
+      }}
+      onPlay={() => { progressTouchedRef.current = true; setPlaying(true); }}
+      onPause={() => { setPlaying(false); saveProgress(); }}
+      onEnded={() => {
+        setPlaying(false);
+        progressTouchedRef.current = false;
+        if (!untracked) void libraryGateway.clearVideoPlaybackProgress(asset.id).catch(() => undefined);
+      }}
       onSeeked={releaseFrame}
-      onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
-      onDurationChange={(event) => setDuration(event.currentTarget.duration)}
+      onTimeUpdate={(event) => {
+        if (event.currentTarget.currentTime > 0) progressTouchedRef.current = true;
+        setCurrentTime(event.currentTarget.currentTime);
+      }}
+      onDurationChange={(event) => {
+        setDuration(event.currentTarget.duration);
+        if (event.currentTarget.readyState >= 1) {
+          metadataReadyRef.current = true;
+          restoreProgress(event.currentTarget);
+        }
+      }}
       onVolumeChange={(event) => { setMuted(event.currentTarget.muted); setVolume(event.currentTarget.volume); }}
     />
     <canvas ref={freezeRef} className="video-player__freeze" aria-hidden="true" hidden={!frozen} />
@@ -220,6 +305,7 @@ export function VideoPlayer({ asset, source: mediaSource = "library", resolvePla
           onChange={(event) => {
             if (!timelineAvailable) return;
             const next = Number(event.currentTarget.value);
+            progressTouchedRef.current = true;
             if (videoRef.current) { holdFrame(); videoRef.current.currentTime = next; }
             setCurrentTime(next);
             scheduleIdle();

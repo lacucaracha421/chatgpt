@@ -4,13 +4,16 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 113;
+pub(crate) const SCHEMA_VERSION: i64 = 114;
 
-/// Test helper: undoes migrations 0103 through 0113 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0114 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP TABLE av_favorite_performers;
+    DROP TABLE video_playback_progress;
+    DROP TABLE manga_reading_progress;
     DROP TABLE collection_volume_ranges;
     DROP VIEW asset_artist_scope;
     DROP TABLE artist_excluded_classifications;
@@ -674,6 +677,11 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
                 "../../migrations/0113_collection_volume_range.sql"
             ))?;
         }
+        if version <= 113 {
+            transaction.execute_batch(include_str!(
+                "../../migrations/0114_home_continue_favorites.sql"
+            ))?;
+        }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
             .prepare("PRAGMA foreign_key_check")?
@@ -899,6 +907,45 @@ mod tests {
                 [],
             )
             .is_err());
+    }
+
+    #[test]
+    fn home_data_migration_from_113_adds_constrained_local_state() {
+        let mut c = Connection::open_in_memory().unwrap();
+        historical_schema(&mut c, 113);
+        migrate_to_latest(&mut c, 113).unwrap();
+        assert_eq!(
+            c.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        c.execute_batch("INSERT INTO manga_series(id,relative_path,title,author,page_count,thumbnail_relative_path,scanned_at) VALUES('m','m','Manga','Author',10,'m.webp','t');
+            INSERT INTO collection_people(id,display_name,created_at,updated_at) VALUES('p','Performer','t','t');
+            INSERT INTO manga_reading_progress(series_id,last_page,page_count,updated_at) VALUES('m',2,10,'t');
+            INSERT INTO av_favorite_performers(person_id,created_at) VALUES('p','t');").unwrap();
+        assert!(c
+            .execute(
+                "INSERT INTO manga_reading_progress(series_id,last_page,page_count,updated_at) VALUES('missing',11,10,'t')",
+                [],
+            )
+            .is_err());
+        c.execute("DELETE FROM manga_series WHERE id='m'", [])
+            .unwrap();
+        c.execute("DELETE FROM collection_people WHERE id='p'", [])
+            .unwrap();
+        for table in ["manga_reading_progress", "av_favorite_performers"] {
+            assert_eq!(
+                c.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+        }
+        assert_eq!(
+            c.query_row("PRAGMA quick_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
     }
 
     #[test]

@@ -1,8 +1,10 @@
-import { ArrowTopRightOnSquareIcon, ChevronLeftIcon, PencilIcon } from "@heroicons/react/24/outline";
+import { ArrowTopRightOnSquareIcon, ChevronLeftIcon, PencilIcon, StarIcon } from "@heroicons/react/24/outline";
+import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
 import { useEffect, useMemo, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { displayDate } from "../../shared/displayDate";
 import { Button } from "../../shared/ui/Button";
+import { libraryGateway } from "../../library/client";
 import { usePrivacy } from "../../privacy/PrivacyContext";
 import { avError } from "../avClient";
 import type { AvGateway, AvPerformerPage as PerformerData, AvWorkCard } from "../avTypes";
@@ -27,6 +29,8 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
   const [memoEditing, setMemoEditing] = useState(false);
   const [memo, setMemo] = useState("");
   const [busy, setBusy] = useState(false);
+  const [favorite, setFavorite] = useState<boolean | null>(null);
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,6 +40,15 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
     void api.getPerformer(personId).then(value => { if (active) { setPage(value); setMemo(value.person.memo ?? ""); } }, reason => { if (active) setError(avError(reason)); });
     return () => { active = false; };
   }, [api, personId]);
+
+  useEffect(() => {
+    let active = true;
+    setFavorite(null);
+    void libraryGateway.listAvFavorites()
+      .then(rows => { if (active) setFavorite(rows.some(row => row.id === personId)); })
+      .catch(reason => { if (active) setSourceError(avError(reason)); });
+    return () => { active = false; };
+  }, [personId]);
 
   const works = useMemo(() => {
     if (!page) return [];
@@ -52,6 +65,17 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
     finally { setBusy(false); }
   }
 
+  async function toggleFavorite() {
+    if (favorite === null || favoriteBusy) return;
+    const next = !favorite;
+    setFavoriteBusy(true); setSourceError(null);
+    try {
+      await libraryGateway.setAvFavorite(personId, next);
+      setFavorite(next);
+    } catch (reason) { setSourceError(avError(reason)); }
+    finally { setFavoriteBusy(false); }
+  }
+
   if (error) return <article className="av-performer-page" aria-label="AV 배우 상세"><p role="alert">{error}</p><Button onClick={onBack}>작품으로 돌아가기</Button></article>;
   if (!page) return <article className="av-performer-page" aria-label="AV 배우 상세"><p role="status">배우 정보를 불러오는 중…</p></article>;
 
@@ -63,6 +87,7 @@ export function AvPerformerPage({ personId, currentCollectionId, api, onBack, on
         <div className="av-performer-page__portrait"><AvPortrait portrait={page.person.portrait} name={page.person.displayName} size="performer" /></div>
         <div className="av-performer-page__source-line">
           {source.label}
+          {favorite !== null && <Button size="icon" variant="ghost" aria-label={favorite ? "즐겨찾기 해제" : "즐겨찾기"} aria-pressed={favorite} disabled={favoriteBusy} onClick={() => void toggleFavorite()}>{favorite ? <StarSolidIcon aria-hidden="true" /> : <StarIcon aria-hidden="true" />}</Button>}
           {source.url && safeProfileUrl(source.url) && <button type="button" onClick={() => void openUrl(source.url!).catch(() => setSourceError("원본 링크를 열지 못했습니다."))} aria-label="대표 이미지 출처 열기"><ArrowTopRightOnSquareIcon aria-hidden="true" />원본</button>}
           <button type="button" className="av-performer-page__change-portrait" onClick={() => setPickerOpen(true)}><PencilIcon aria-hidden="true" />바꾸기</button>
         </div>

@@ -4,7 +4,23 @@ import { StrictMode } from "react";
 import type { AssetSummary } from "../library/types";
 import { VideoPlayer } from "./VideoPlayer";
 
+const progressApi = vi.hoisted(() => ({
+  get: vi.fn(),
+  save: vi.fn(),
+  clear: vi.fn(),
+}));
+vi.mock("../library/client", () => ({
+  libraryGateway: {
+    getVideoPlaybackProgress: progressApi.get,
+    saveVideoPlaybackProgress: progressApi.save,
+    clearVideoPlaybackProgress: progressApi.clear,
+  },
+}));
+
 beforeEach(() => {
+  progressApi.get.mockResolvedValue(null);
+  progressApi.save.mockResolvedValue(undefined);
+  progressApi.clear.mockResolvedValue(undefined);
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
   vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
@@ -14,6 +30,9 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  progressApi.get.mockReset();
+  progressApi.save.mockReset();
+  progressApi.clear.mockReset();
 });
 
 describe("VideoPlayer", () => {
@@ -207,11 +226,11 @@ describe("VideoPlayer", () => {
     expect(player).toHaveAttribute("data-controls-visible", "false");
   });
 
-  it("cleans up the idle timer when unmounted", () => {
+  it("cleans up the player timers when unmounted", () => {
     vi.useFakeTimers();
-    const { unmount } = render(<VideoPlayer asset={videoAsset()} />);
+    const { unmount } = render(<VideoPlayer asset={videoAsset()} rememberPosition />);
     fireEvent.play(screen.getByLabelText("sample.webm 영상"));
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(2);
 
     unmount();
 
@@ -246,6 +265,62 @@ describe("VideoPlayer", () => {
     fireEvent(document, new Event("fullscreenchange"));
     fireEvent.click(screen.getByRole("button", { name: "전체 화면 종료" }));
     expect(exitFullscreen).toHaveBeenCalledOnce();
+  });
+
+  it("restores library playback progress after metadata is available", async () => {
+    progressApi.get.mockResolvedValue({ positionMs: 25_000, durationMs: 100_000 });
+    render(<VideoPlayer asset={videoAsset()} rememberPosition />);
+    const video = screen.getByLabelText("sample.webm 영상");
+    await waitFor(() => expect(progressApi.get).toHaveBeenCalledWith("video-1"));
+
+    setMediaNumber(video, "duration", 100);
+    fireEvent.loadedMetadata(video);
+
+    expect(video).toHaveProperty("currentTime", 25);
+    expect(screen.getByText("0:25 / 1:40")).toBeInTheDocument();
+  });
+
+  it("saves library playback every ten seconds, on pause, and on unmount", async () => {
+    vi.useFakeTimers();
+    const { unmount } = render(<VideoPlayer asset={videoAsset()} rememberPosition />);
+    await act(async () => undefined);
+    const video = screen.getByLabelText("sample.webm 영상");
+    setMediaNumber(video, "duration", 100);
+    setMediaNumber(video, "currentTime", 12);
+    fireEvent.play(video);
+
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(progressApi.save).toHaveBeenLastCalledWith("video-1", 12_000, 100_000);
+
+    setMediaNumber(video, "currentTime", 27);
+    fireEvent.pause(video);
+    expect(progressApi.save).toHaveBeenLastCalledWith("video-1", 27_000, 100_000);
+
+    setMediaNumber(video, "currentTime", 31);
+    unmount();
+    expect(progressApi.save).toHaveBeenLastCalledWith("video-1", 31_000, 100_000);
+  });
+
+  it("does not read playback progress unless asked to remember the position", () => {
+    render(<VideoPlayer asset={videoAsset()} />);
+    expect(progressApi.get).not.toHaveBeenCalled();
+  });
+
+  it("never reads or writes playback progress for vault media", () => {
+    vi.useFakeTimers();
+    const { unmount } = render(<VideoPlayer asset={videoAsset()} source="vault" rememberPosition />);
+    const video = screen.getByLabelText("sample.webm 영상");
+    setMediaNumber(video, "duration", 100);
+    setMediaNumber(video, "currentTime", 12);
+    fireEvent.loadedMetadata(video);
+    fireEvent.play(video);
+    act(() => vi.advanceTimersByTime(10_000));
+    fireEvent.pause(video);
+    unmount();
+
+    expect(progressApi.get).not.toHaveBeenCalled();
+    expect(progressApi.save).not.toHaveBeenCalled();
+    expect(progressApi.clear).not.toHaveBeenCalled();
   });
 });
 

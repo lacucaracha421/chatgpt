@@ -8,6 +8,9 @@ use serde::Serialize;
 use tauri::State;
 
 use super::{background_task_error, current_required, AppState, CommandError};
+use crate::library::home_data::{
+    AvFavorite, ContinueItem, HomeDataError, MangaReadingProgress, VideoPlaybackProgress,
+};
 use crate::library::{
     av_collection::AvHomePerformer, error::LibraryError, tagger_review::TaggerReviewCounts, Library,
 };
@@ -171,6 +174,122 @@ pub async fn get_home_overview(
     })
     .await
     .map_err(|_| background_task_error())?
+}
+
+fn home_data_error(error: HomeDataError) -> CommandError {
+    match error {
+        HomeDataError::InvalidMangaProgress => CommandError {
+            code: "invalid_manga_reading_progress",
+            message: "망가 읽기 위치가 올바르지 않습니다.".into(),
+        },
+        HomeDataError::InvalidVideoProgress => CommandError {
+            code: "invalid_video_playback_progress",
+            message: "영상 재생 위치가 올바르지 않습니다.".into(),
+        },
+        HomeDataError::TargetNotFound => CommandError {
+            code: "home_target_not_found",
+            message: "이어 볼 대상을 찾을 수 없습니다.".into(),
+        },
+        HomeDataError::InvalidAvPerformer => CommandError {
+            code: "invalid_av_performer",
+            message: "즐겨찾기에 추가할 AV 배우를 찾을 수 없습니다.".into(),
+        },
+        HomeDataError::Library(error) => error.into(),
+        HomeDataError::Database(error) => LibraryError::Database(error).into(),
+        HomeDataError::Av(error) => error.into(),
+    }
+}
+
+#[tauri::command]
+pub fn save_manga_reading_progress(
+    series_id: String,
+    last_page: u64,
+    page_count: u64,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .save_manga_reading_progress(&series_id, last_page, page_count)
+        .map_err(home_data_error)
+}
+
+#[tauri::command]
+pub fn get_manga_reading_progress(
+    series_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<MangaReadingProgress>, CommandError> {
+    current_required(state)?
+        .get_manga_reading_progress(&series_id)
+        .map_err(home_data_error)
+}
+
+#[tauri::command]
+pub fn clear_manga_reading_progress(
+    series_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .clear_manga_reading_progress(&series_id)
+        .map_err(home_data_error)
+}
+
+#[tauri::command]
+pub fn save_video_playback_progress(
+    asset_id: String,
+    position_ms: u64,
+    duration_ms: u64,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .save_video_playback_progress(&asset_id, position_ms, duration_ms)
+        .map_err(home_data_error)
+}
+
+#[tauri::command]
+pub fn get_video_playback_progress(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<VideoPlaybackProgress>, CommandError> {
+    current_required(state)?
+        .get_video_playback_progress(&asset_id)
+        .map_err(home_data_error)
+}
+
+#[tauri::command]
+pub fn clear_video_playback_progress(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .clear_video_playback_progress(&asset_id)
+        .map_err(home_data_error)
+}
+
+#[tauri::command]
+pub fn list_continue_items(
+    limit: u32,
+    state: State<'_, AppState>,
+) -> Result<Vec<ContinueItem>, CommandError> {
+    current_required(state)?
+        .list_continue_items(limit)
+        .map_err(home_data_error)
+}
+
+#[tauri::command]
+pub fn set_av_favorite(
+    person_id: String,
+    favorite: bool,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    current_required(state)?
+        .set_av_favorite(&person_id, favorite)
+        .map_err(home_data_error)
+}
+
+#[tauri::command]
+pub fn list_av_favorites(state: State<'_, AppState>) -> Result<Vec<AvFavorite>, CommandError> {
+    current_required(state)?
+        .list_av_favorites()
+        .map_err(home_data_error)
 }
 
 #[cfg(test)]

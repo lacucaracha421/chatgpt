@@ -117,6 +117,7 @@ mod external_binding;
 pub(crate) mod external_vault;
 mod favorite;
 mod folder_appearance;
+pub(crate) mod home_data;
 pub(crate) mod igdb;
 mod igdb_flow;
 mod image_fingerprint;

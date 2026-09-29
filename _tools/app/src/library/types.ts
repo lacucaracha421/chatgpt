@@ -253,6 +253,41 @@ export type RemoteReadingProgress = CatalogWorkIdentity & {
   lastReadAt: string;
 };
 
+export type MangaReadingProgress = {
+  seriesId: string;
+  lastPage: number;
+  pageCount: number;
+  updatedAt: string;
+};
+
+export type VideoPlaybackProgress = {
+  assetId: string;
+  positionMs: number;
+  durationMs: number;
+  updatedAt: string;
+};
+
+export type ContinueItem = {
+  kind: "manga" | "online" | "video";
+  id: string;
+  provider: CatalogProvider | null;
+  title: string | null;
+  thumbnailRevision: string | null;
+  position: number;
+  total: number;
+  updatedAt: string;
+};
+
+export type AvFavoritePerformer = {
+  id: string;
+  displayName: string;
+  originalName: string | null;
+  portrait: AvPortrait | null;
+  ownedWorkCount: number;
+  recentOwnedCount: number;
+  createdAt: string;
+};
+
 export type CatalogSort = "latest" | "views" | "hotDay" | "hotWeek" | "hotMonth";
 export type CatalogScope = "all" | "bookmarked";
 export type CatalogLanguage = "korean" | "japanese";
@@ -1360,6 +1395,15 @@ export interface LibraryGateway {
   resolveOnlineCatalogWork(identity: CatalogWorkIdentity): Promise<ResolvedGallery>;
   getRemoteReadingProgress(identity: CatalogWorkIdentity): Promise<RemoteReadingProgress | null>;
   saveRemoteReadingProgress(progress: RemoteReadingProgress): Promise<void>;
+  getMangaReadingProgress?(seriesId: string): Promise<MangaReadingProgress | null>;
+  saveMangaReadingProgress?(seriesId: string, lastPage: number, pageCount: number): Promise<void>;
+  clearMangaReadingProgress?(seriesId: string): Promise<void>;
+  getVideoPlaybackProgress?(assetId: string): Promise<VideoPlaybackProgress | null>;
+  saveVideoPlaybackProgress?(assetId: string, positionMs: number, durationMs: number): Promise<void>;
+  clearVideoPlaybackProgress?(assetId: string): Promise<void>;
+  listContinueItems?(limit: number): Promise<ContinueItem[]>;
+  setAvFavorite?(personId: string, favorite: boolean): Promise<void>;
+  listAvFavorites?(): Promise<AvFavoritePerformer[]>;
   clearRemoteMangaCache(): Promise<void>;
   getExtensionConnection(): Promise<ExtensionConnection>;
   listClassifications(): Promise<ClassificationEntry[]>;

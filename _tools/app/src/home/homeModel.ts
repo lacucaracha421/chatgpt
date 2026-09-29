@@ -113,6 +113,48 @@ export function upcomingRows(collections: CollectionSummary[], board: Map<string
   return [...manga, ...titles].sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name, "ko") || a.key.localeCompare(b.key));
 }
 
+/* ---- 이어지는 시리즈 ---- */
+export type NextInSeriesRow = {
+  work: CollectionSummary;
+  ownedCount: number;
+  nextVolume: { number: number; date: string | null };
+  releasedUnownedCount: number;
+  fresh: boolean;
+};
+
+/** Released Korean manga volumes not yet owned, with unread releases first. */
+export function nextInSeriesRows(
+  collections: CollectionSummary[],
+  board: Map<string, ReleaseBoardEntry>,
+  inbox: Map<string, ReleaseInboxItem[]>,
+  today: string,
+): NextInSeriesRow[] {
+  return koreanReleases(collections.filter((work) => work.type === "manga"), board, inbox, today)
+    .flatMap((row) => {
+      const releasedByStatus = new Set(board.get(row.work.id)?.releaseSchedule.kakao?.volumes
+        .filter((volume) => volume.status === "released")
+        .map((volume) => volume.volumeNumber) ?? []);
+      const released = row.volumes.filter((volume) => volume.released || releasedByStatus.has(volume.volumeNumber));
+      const next = released[0];
+      if (!next) return [];
+      return [{
+        value: {
+          work: row.work,
+          ownedCount: row.owned ?? 0,
+          nextVolume: { number: next.volumeNumber, date: next.date },
+          releasedUnownedCount: released.length,
+          fresh: released.some((volume) => volume.fresh),
+        },
+        latestReleaseDate: released.map((volume) => volume.date).filter((date): date is string => !!date).sort().reverse()[0] ?? "",
+      }];
+    })
+    .sort((left, right) => Number(right.value.fresh) - Number(left.value.fresh)
+      || right.latestReleaseDate.localeCompare(left.latestReleaseDate)
+      || left.value.work.name.localeCompare(right.value.work.name, "ko")
+      || left.value.work.id.localeCompare(right.value.work.id))
+    .map((row) => row.value);
+}
+
 /* ---- 메모 ---- */
 export type MemoRow =
   | { id: string; title: string; color: string | null; kind: "checklist"; done: number; total: number; items: { text: string; checked: boolean }[] }
