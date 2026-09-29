@@ -80,7 +80,7 @@ export function CharacterReviewOverview({ source, targets, seriesName, version, 
   let body;
   if (restricted) {
     body = <div className="crv-notice" role="status">
-      <p><b>가벼운 모드</b>에서는 후보 목록 전체를 읽지 않아 시리즈 · 캐릭터별로 나누어 보여 주지 않습니다. 가벼운 모드를 끄면 바로 셉니다.</p>
+      <p><b>절약 모드</b>에서는 후보 목록 전체를 읽지 않아 시리즈 · 캐릭터별로 나누어 보여 주지 않습니다. 절약 모드를 끄면 바로 셉니다.</p>
       <Button size="sm" onClick={() => onOpen({})}>전체 후보 검토</Button>
     </div>;
   } else if (error) {

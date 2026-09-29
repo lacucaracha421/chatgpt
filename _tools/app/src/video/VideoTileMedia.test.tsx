@@ -115,7 +115,7 @@ it("labels pending videos according to workload mode and preserves retry for fai
   expect(screen.getByText("준비 중")).toBeInTheDocument();
   workload.restricted = true;
   rerender(<VideoTileMedia asset={video("pending")} active={false} onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={retry} />);
-  expect(screen.getByText("가벼운 모드로 대기 중")).toBeInTheDocument();
+  expect(screen.getByText("절약 모드로 대기 중")).toBeInTheDocument();
   rerender(<VideoTileMedia asset={video("failed")} active={false} onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={retry} />);
   fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
   expect(retry).toHaveBeenCalledOnce();

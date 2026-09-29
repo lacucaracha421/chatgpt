@@ -213,9 +213,9 @@ fn broadcast(app: &tauri::AppHandle) {
     let _ = app.emit("workload://changed", profile.clone());
     if let Some(menu) = app.try_state::<TrayMenu>() {
         let _ = menu.0.set_text(if profile.settings.lightweight {
-            "가벼운 모드 끄기"
+            "절약 모드 끄기"
         } else {
-            "가벼운 모드 켜기"
+            "절약 모드 켜기"
         });
     }
 }
@@ -386,9 +386,9 @@ pub(crate) fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Er
         app,
         "workload-light",
         if is_lightweight() {
-            "가벼운 모드 끄기"
+            "절약 모드 끄기"
         } else {
-            "가벼운 모드 켜기"
+            "절약 모드 켜기"
         },
         true,
         None::<&str>,

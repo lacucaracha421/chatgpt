@@ -1,8 +1,8 @@
-import { BookOpenIcon, CheckCircleIcon, ChevronRightIcon, PauseCircleIcon, DocumentTextIcon, FilmIcon, FolderIcon, InboxIcon, ListBulletIcon, LockClosedIcon, Square2StackIcon, TagIcon, UserIcon, WalletIcon } from "@heroicons/react/24/outline";
+import { BookOpenIcon, CheckCircleIcon, ChevronRightIcon, DocumentTextIcon, FilmIcon, FolderIcon, InboxIcon, ListBulletIcon, LockClosedIcon, Square2StackIcon, TagIcon, UserIcon, WalletIcon } from "@heroicons/react/24/outline";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useAuthoritySyncHealth, useCloudSyncStatus } from "../app/useCloudProblems";
 import { useWorkloadProfile } from "../app/workloadProfile";
-import { igdbImagePreviewUrl, tmdbImagePreviewUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
+import { igdbImagePreviewUrl, nativeMediaUrl, thumbnailUrl, tmdbImagePreviewUrl, workArtworkThumbnailUrl, mangaCoverUrl } from "../assets/mediaUrl";
 import { collectionCoverUrl } from "../collections/collectionCover";
 import { PlatformBadges } from "../collections/PlatformBadges";
 import { useAvLinkPendingCount, type AvLinkApi } from "../collections/AvLinkInbox";
@@ -10,7 +10,7 @@ import { groupInbox, localDay } from "../collections/releaseCaption";
 import { useReleaseData } from "../collections/releaseData";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useLibrary } from "../library/LibraryContext";
-import type { AssetView, ClassificationEntry, CollectionSummary, HomeOverview, ReleaseCalendar, ReleaseWishlistItem } from "../library/types";
+import type { AssetView, AvFavoritePerformer, ClassificationEntry, CollectionSummary, ContinueItem, HomeOverview, ReleaseCalendar, ReleaseWishlistItem } from "../library/types";
 import { characterApi, type CharacterTarget } from "../characters/api";
 import { TaggerReview } from "../characters/TaggerReview";
 import { taggerDecisionApi, taggerReviewSource, type TaggerDecisionApi, type TaggerReviewItem, type TaggerReviewSource } from "../characters/taggerReviewClient";
@@ -19,7 +19,7 @@ import { usePrivacy } from "../privacy/PrivacyContext";
 import { AvPortrait } from "../collections/av/AvPortrait";
 import { shadowReviewApi, type ShadowReviewApi, type ShadowReviewPendingTarget } from "../characters/shadowReviewApi";
 import { localDateAndOffset, useArtistGateway, useArtistRead } from "../artists/artistStore";
-import { avProfileLines, clockLabel, dateBlock, daysAfter, localBoundaries, memoRows, releaseRows, serverOutage, UPCOMING_DAYS, weekdayLabel, upcomingRows, type MemoRow, type ReleaseRow, type UpcomingRow } from "./homeModel";
+import { avProfileLines, clockLabel, dateBlock, daysAfter, localBoundaries, memoRows, nextInSeriesRows, releaseRows, serverOutage, UPCOMING_DAYS, weekdayLabel, upcomingRows, type MemoRow, type ReleaseRow, type UpcomingRow } from "./homeModel";
 import { HomeArtist, HomeRevisit } from "./HomeRevisit";
 import { useConnectionRows, type ConnectionRow } from "../layout/ConnectionStatusBlock";
 import { CharacterReviewOverview, type CharacterReviewScope } from "./CharacterReviewOverview";
@@ -42,6 +42,8 @@ export type HomeViewProps = {
   collections: CollectionSummary[];
   /** Opens one asset in the library viewer (다시 보기 thumbnails). */
   onOpenAsset?: (assetId: string) => void;
+  /** Opens a reading or playback item at its saved position. */
+  onOpenContinue?: (item: ContinueItem) => void;
   /** Similarity review groups waiting (the app's count). */
   reviewCount: number;
   /** Null until read; Home asks for a read when it opens. */
@@ -66,8 +68,8 @@ export type HomeViewProps = {
 };
 
 /**
- * PC Home (HOME-DASH-001, layout D): the index holds nearby state, while the content keeps the
- * release shelf, image-first revisit/artist blocks and the review queue in the approved split.
+ * PC Home (HOME-DASH-001, layout E): the index holds nearby state, while one page scroll contains
+ * the release shelf, image-first revisit/artist blocks, review queue and the below-fold sections.
  * Every row opens the PC screen that owns it. Reads happen when Home opens (and the asset
  * counts again after imports); live parts follow the stores the app already keeps (exchange,
  * notes, cloud progress, server-sync health, the 신간 cache). No polling.
@@ -75,7 +77,7 @@ export type HomeViewProps = {
 /** Covers on the 발매 예정 shelf; the rest are in the 발매 캘린더. */
 const SHELF_MAX = 40;
 
-export function HomeView({ collections, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, notes, shadowApi, characterSource, taggerSource, taggerApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, onOpenAsset }: HomeViewProps) {
+export function HomeView({ collections, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, notes, shadowApi, characterSource, taggerSource, taggerApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, onOpenAsset, onOpenContinue }: HomeViewProps) {
   const { gateway, library } = useLibrary();
   const root = library?.root ?? "";
   const { privacyMode } = usePrivacy();
@@ -102,6 +104,8 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
 
   const [queueRead, setQueueRead] = useState(0);
   const [overview, setOverview] = useState<HomeOverview | null>(null);
+  const [continueItems, setContinueItems] = useState<ContinueItem[]>([]);
+  const [avFavorites, setAvFavorites] = useState<AvFavoritePerformer[]>([]);
   useEffect(() => {
     if (!gateway.getHomeOverview) return;
     let live = true;
@@ -111,6 +115,20 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
     // `now` is a test seam; the read follows the gateway, imports and trash changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gateway, refreshVersion, trashCount, queueRead]);
+
+  useEffect(() => {
+    if (!gateway.listContinueItems) { setContinueItems([]); return; }
+    let live = true;
+    void gateway.listContinueItems(6).then((items) => { if (live) setContinueItems((items ?? []).slice(0, 6)); }, () => { if (live) setContinueItems([]); });
+    return () => { live = false; };
+  }, [gateway, refreshVersion]);
+
+  useEffect(() => {
+    if (!gateway.listAvFavorites) { setAvFavorites([]); return; }
+    let live = true;
+    void gateway.listAvFavorites().then((items) => { if (live) setAvFavorites(items ?? []); }, () => { if (live) setAvFavorites([]); });
+    return () => { live = false; };
+  }, [gateway, refreshVersion]);
 
   // 확인할 것 counts other screens own; read when Home opens and after their dialogs close.
   const [dialog, setDialog] = useState<Dialog | null>(null);
@@ -205,6 +223,7 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
   const releases = releaseRows(collections, board, inbox, wishlist, today);
   const upcomingAll = upcomingRows(collections, board, inbox, wishlist, today);
   const upcoming = upcomingAll.filter((row) => daysAfter(row.date, today) <= UPCOMING_DAYS);
+  const seriesRows = useMemo(() => nextInSeriesRows(collections, board, inbox, today), [board, collections, inbox, today]);
   const shelfAll: HomeShelfRow[] = [...releases.map((row) => ({ source: "release" as const, row })), ...upcoming.map((row) => ({ source: "upcoming" as const, row }))];
   const shelfRows = shelfAll;
   const openRelease = (row: ReleaseRow) => row.collection ? onNavigate({ kind: "collection", collectionId: row.collection.id }) : onNavigate(calendarView(row.kind === "movie" ? "movie" : "game"));
@@ -297,6 +316,8 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
                 <HomeArtist artist={artistRows?.[0] ?? null} privacyMode={privacyMode} onOpenAsset={onOpenAsset} onOpenArtist={(creatorKey) => onNavigate({ kind: "creator", creatorKey })} />
               </HomeSection>
             </div>
+            {continueItems.length > 0 && <HomeContinue items={continueItems} privacyMode={privacyMode} onOpen={onOpenContinue} />}
+            {seriesRows.length > 0 && <HomeSeries rows={seriesRows} privacyMode={privacyMode} onOpen={() => onNavigate(releaseView)} onOpenCollection={(collectionId) => onNavigate({ kind: "collection", collectionId })} />}
           </div>
           <div className="home-grid__right">
             {!privacyMode && overview?.avPerformer && <HomeSection title="AV 배우" onOpen={() => onNavigate({ kind: "collections", typeFilter: "av", showcase: false })}>
@@ -336,8 +357,8 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
                   <span className="home-review-row__count numeric">{todo.count.toLocaleString()}{todo.unit && <small>{todo.unit}</small>}</span>
                 </button>)}</div>
                 : !restricted && <div className="home-review-empty"><CheckCircleIcon aria-hidden="true" /><span>모두 확인함</span></div>}
-              {restricted && <div className="home-review-paused" role="status"><PauseCircleIcon aria-hidden="true" /><span>가벼운 모드 · 캐릭터 검토 수를 세지 않음</span></div>}
             </HomeSection>
+            {!privacyMode && avFavorites.length > 0 && <HomeFavoritePerformers performers={avFavorites} onOpen={() => onNavigate({ kind: "collections", typeFilter: "av", showcase: false })} onOpenPerformer={() => onNavigate({ kind: "collections", typeFilter: "av", showcase: false })} />}
           </div>
         </div>
       </div>
@@ -524,6 +545,83 @@ function HomeIndex({ memos, locked, overview, trashCount, privacyMode, connectio
       </div>
     </section>
   </nav>;
+}
+
+function HomeContinue({ items, privacyMode, onOpen }: { items: ContinueItem[]; privacyMode: boolean; onOpen?: (item: ContinueItem) => void }) {
+  return <HomeSection title="이어 보기">
+    <div className="home-continue-grid">
+      {items.map((item) => {
+        const title = item.title?.trim() || "제목 없음";
+        const progress = item.total > 0 ? Math.max(0, Math.min(100, (item.position / item.total) * 100)) : 0;
+        const thumbnail = continueThumbnailUrl(item);
+        const kind = item.kind === "video" ? "영상" : "망가";
+        return <button key={`${item.kind}:${item.provider ?? "local"}:${item.id}`} type="button" className="home-continue-card" aria-label={`${title} 이어 보기`} onClick={() => onOpen?.(item)}>
+          <span className="home-continue-card__cover">
+            {!privacyMode && thumbnail && <img src={thumbnail} alt="" loading="lazy" decoding="async" draggable={false} onError={(event) => { event.currentTarget.style.display = "none"; }} />}
+          </span>
+          <span className="home-continue-card__progress" aria-hidden="true"><i style={{ width: `${progress}%` }} /></span>
+          <span className="home-continue-card__title">{title}</span>
+          <span className="home-continue-card__meta">
+            <span>{kind}</span>
+            {item.kind === "video" ? <span className="numeric">{formatPlaybackTime(item.position)} / {formatPlaybackTime(item.total)}</span> : <span className="numeric">{item.position}/{item.total}</span>}
+          </span>
+        </button>;
+      })}
+    </div>
+  </HomeSection>;
+}
+
+function HomeSeries({ rows, privacyMode, onOpen, onOpenCollection }: { rows: ReturnType<typeof nextInSeriesRows>; privacyMode: boolean; onOpen: () => void; onOpenCollection: (collectionId: string) => void }) {
+  return <HomeSection title="이어지는 시리즈" onOpen={onOpen}>
+    <div className="home-series-grid">
+      {rows.slice(0, 4).map((row) => {
+        const title = row.work.name || "제목 없음";
+        const thumbnail = collectionCoverUrl(row.work);
+        return <button key={row.work.id} type="button" className="home-series-card" aria-label={`${title} 이어지는 시리즈`} onClick={() => onOpenCollection(row.work.id)}>
+          <span className="home-series-card__pair">
+            <span className="home-series-card__owned">
+              {!privacyMode && thumbnail && <img src={thumbnail} alt="" loading="lazy" decoding="async" draggable={false} onError={(event) => { event.currentTarget.style.display = "none"; }} />}
+              <span className="home-shelf__volume numeric">{row.ownedCount}</span>
+            </span>
+            <span className="home-series-card__next"><b><span className="numeric">{row.nextVolume.number}</span><small>권</small></b><small>발매</small></span>
+          </span>
+          <span className="home-series-card__title">{title}</span>
+          <span className="home-series-card__meta"><span><span className="numeric">{row.ownedCount}</span>권까지 소장</span>{row.nextVolume.date && <span>다음 <span className="numeric">{shortDate(row.nextVolume.date)}</span></span>}</span>
+        </button>;
+      })}
+    </div>
+  </HomeSection>;
+}
+
+function HomeFavoritePerformers({ performers, onOpen, onOpenPerformer }: { performers: AvFavoritePerformer[]; onOpen: () => void; onOpenPerformer: (id: string) => void }) {
+  return <HomeSection title="즐겨찾는 배우" onOpen={onOpen}>
+    <div className="home-av-favorites">
+      {performers.map((performer) => <button key={performer.id} type="button" className="home-av-favorite" aria-label={`${performer.displayName} 배우 페이지`} onClick={() => onOpenPerformer(performer.id)}>
+        <span className="home-av-favorite__portrait">
+          <AvPortrait portrait={performer.portrait} name={performer.displayName} size={72} />
+          {performer.recentOwnedCount > 0 && <span className="home-shelf__volume home-av-favorite__count numeric">{performer.recentOwnedCount}</span>}
+        </span>
+        <span className="home-av-favorite__name">{performer.displayName}</span>
+      </button>)}
+    </div>
+  </HomeSection>;
+}
+
+function continueThumbnailUrl(item: ContinueItem): string | null {
+  if (item.kind === "manga") return mangaCoverUrl(item.id);
+  if (item.kind === "video") return thumbnailUrl(item.id, item.thumbnailRevision ?? undefined);
+  if (!item.provider) return null;
+  return nativeMediaUrl(`http://lakomics.localhost/remote-catalog-thumbnail/${encodeURIComponent(item.provider)}/${encodeURIComponent(item.id)}`);
+}
+
+function formatPlaybackTime(milliseconds: number): string {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1_000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function shortDate(value: string): string {
+  const [, month, day] = value.split("-");
+  return month && day ? `${Number(month)}.${Number(day)}` : value;
 }
 
 function MemoTileBody({ memo }: { memo: MemoRow }) {

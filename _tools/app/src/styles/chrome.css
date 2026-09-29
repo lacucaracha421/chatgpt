@@ -293,3 +293,11 @@ body .ui-menu { border-color: var(--chrome-border); border-radius: var(--chrome-
 .classification-sidebar__tree-row--character > .classification-sidebar__tree-surface { font-size: var(--text-sm); }
 .classification-sidebar__tree-row--character:not([aria-selected="true"]) > .classification-sidebar__tree-surface { color: var(--color-muted); }
 .classification-sidebar__tree-row--character:not([aria-selected="true"]):hover > .classification-sidebar__tree-surface { color: var(--color-text); }
+.lightweight-toggle .chrome-settings-controls { display: flex; align-items: center; gap: var(--space-2); }
+.lightweight-toggle__label { display: inline-flex; align-items: center; gap: var(--space-1); margin-right: auto; color: var(--color-text); font-size: var(--type-body); }
+.lightweight-toggle__label svg { width: 16px; height: 16px; color: var(--color-muted); }
+.lightweight-mode-indicator.is-recovering { cursor: default; color: var(--color-faint); }
+.lightweight-mode-indicator.is-recovering:hover { background: transparent; color: var(--color-faint); }
+.lightweight-mode-indicator__spin { animation: lightweight-spin 1.2s linear infinite; }
+@keyframes lightweight-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .lightweight-mode-indicator__spin { animation: none; } }

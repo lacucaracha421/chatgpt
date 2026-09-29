@@ -1,14 +1,20 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { PauseCircleIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, PauseCircleIcon } from "@heroicons/react/24/outline";
 import { updateWorkloadSettings, useWorkloadProfile } from "../app/workloadProfile";
 
+/** Title-bar mark while the PC runs slow: a button that turns 절약 모드 off, then a quiet
+ * "해제 중" label for the short recovery window before normal work resumes. */
 export function LightweightModeIndicator() {
-  const { restricted } = useWorkloadProfile();
+  const { lightweight, restricted } = useWorkloadProfile();
   if (!restricted) return null;
-  return <button type="button" className="lightweight-mode-indicator" aria-label="가벼운 모드 끄기"
+  if (!lightweight) return <span className="lightweight-mode-indicator is-recovering" role="status">
+    <ArrowPathIcon className="lightweight-mode-indicator__spin" aria-hidden="true" />
+    <span>절약 모드 해제 중</span>
+  </span>;
+  return <button type="button" className="lightweight-mode-indicator" aria-label="절약 모드 끄기"
     onClick={() => { void updateWorkloadSettings({ lightweight: false }); }}>
     <PauseCircleIcon aria-hidden="true" />
-    <span>가벼운 모드</span>
+    <span>절약 모드</span>
   </button>;
 }
 

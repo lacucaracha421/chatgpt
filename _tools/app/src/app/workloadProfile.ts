@@ -19,7 +19,7 @@ async function start() {
     await listen<string>("workload://error", ({ payload }) => publish({ ...profile, error: payload }));
     const initial = await invoke<Omit<WorkloadProfile, "ready" | "error">>("workload_profile");
     if (!received) accept(initial);
-  } catch { publish({ ...profile, error: "가벼운 모드 설정을 불러오지 못했습니다." }); }
+  } catch { publish({ ...profile, error: "절약 모드 설정을 불러오지 못했습니다." }); }
 }
 export function getWorkloadProfile() { return profile; }
 export function useWorkloadProfile() {
@@ -36,6 +36,6 @@ async function saveSettings(patch: Partial<WorkloadSettings>) {
   const { lightweight, autoEnterMinutes, closeToTray } = profile;
   try {
     accept(await invoke<Omit<WorkloadProfile, "ready" | "error">>("workload_profile", { settings: { lightweight, autoEnterMinutes, closeToTray, ...patch } }));
-  } catch { publish({ ...profile, error: "가벼운 모드 설정을 저장하지 못했습니다." }); }
+  } catch { publish({ ...profile, error: "절약 모드 설정을 저장하지 못했습니다." }); }
 }
 export function workloadPollDelay(normal: number, value = profile) { return value.restricted || value.hidden ? Math.max(60_000, normal) : normal; }

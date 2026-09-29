@@ -81,7 +81,7 @@ export function useNavigationEntries({ view, onNavigate, reviewCount, unsortedCo
   const actions: NavigationEntry[] = [
     ...(onImportFiles ? [{ id: "import", group: "action" as const, label: "파일 가져오기", icon: <PlusIcon />, run: onImportFiles }] : []),
     ...(nativeWorkload() && workload.ready ? [{
-      id: "lightweight", group: "action" as const, label: workload.lightweight ? "가벼운 모드 끄기" : "가벼운 모드 켜기", keywords: ["가벼운 모드"], icon: <ActivityIcon />,
+      id: "lightweight", group: "action" as const, label: workload.lightweight ? "절약 모드 끄기" : "절약 모드 켜기", keywords: ["절약 모드"], icon: <ActivityIcon />,
       run: () => { void updateWorkloadSettings({ lightweight: !workload.lightweight }); },
     }] : []),
   ];

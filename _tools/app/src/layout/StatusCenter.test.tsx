@@ -112,14 +112,14 @@ it("offers the instant lightweight-mode toggle only in the native app", async ()
   const user = userEvent.setup();
   const { unmount } = render(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null} onNavigate={vi.fn()} />);
   await user.click(screen.getByRole("button", { name: "상태" }));
-  expect(screen.queryByRole("switch", { name: "가벼운 모드" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("switch", { name: "절약 모드" })).not.toBeInTheDocument();
   unmount();
 
   workload.native = true;
   render(<StatusCenter characterAutomation={idleCharacterAutomation} progress={null} onNavigate={vi.fn()} />);
   await user.click(screen.getByRole("button", { name: "상태" }));
   const pc = screen.getByRole("region", { name: "이 PC" });
-  const toggle = within(pc).getByRole("switch", { name: "가벼운 모드" });
+  const toggle = within(pc).getByRole("switch", { name: "절약 모드" });
   expect(toggle).not.toBeChecked();
   await user.click(toggle);
   expect(workload.update).toHaveBeenCalledWith({ lightweight: true });

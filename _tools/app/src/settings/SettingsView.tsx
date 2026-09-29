@@ -470,7 +470,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             {appZoomError && <p className="settings-view__row-message" role="alert">{appZoomError}</p>}
             <SimpleRow name="비공개 모드" control={<Switch aria-label="비공개 모드" checked={privacyMode} onChange={event => onPrivacyModeChange(event.target.checked)} />} />
           </SettingsGroup>
-          <SettingsGroup title="가벼운 모드">
+          <SettingsGroup title="절약 모드">
             <WorkloadControls />
           </SettingsGroup>
         </div>}
@@ -619,12 +619,12 @@ function MobilePublishRow({ name, job, action, disabled, onClick }: { name: stri
 function LightweightModeRow() {
   const profile = useWorkloadProfile();
   const [busy, setBusy] = useState(false);
-  const control = !profile.ready ? <Switch aria-label="가벼운 모드" checked={profile.lightweight} disabled /> : <Switch aria-label="가벼운 모드" checked={profile.lightweight} disabled={busy} onChange={() => {
+  const control = !profile.ready ? <Switch aria-label="절약 모드" checked={profile.lightweight} disabled /> : <Switch aria-label="절약 모드" checked={profile.lightweight} disabled={busy} onChange={() => {
     setBusy(true);
     void updateWorkloadSettings({ lightweight: !profile.lightweight }).finally(() => setBusy(false));
   }} />;
-  const status = profile.ready ? `${profile.lightweight ? "켜짐" : "꺼짐"}${profile.autoEnterMinutes === null ? " · 자동 전환 꺼짐" : ` · ${profile.autoEnterMinutes}분 쉬면 자동으로 켜짐`}` : "확인 중…";
-  return <SimpleRow name="가벼운 모드" status={status} control={control} />;
+  const status = profile.ready ? `${profile.lightweight ? "절약 모드" : profile.restricted ? "절약 모드 해제 중" : "일반 모드"}${profile.autoEnterMinutes === null ? " · 자동 전환 꺼짐" : ` · ${profile.autoEnterMinutes}분 쉬면 자동으로 켜짐`}` : "확인 중…";
+  return <SimpleRow name="절약 모드" status={status} control={control} />;
 }
 
 function joinStatus(value: string, time?: string) { return time ? `${value} · ${time}` : value; }

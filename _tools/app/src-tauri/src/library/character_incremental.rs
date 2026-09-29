@@ -331,7 +331,7 @@ impl Library {
         self.character_wake.notify();
     }
     pub(super) fn character_shadow_backfill_available(&self) -> Result<()> {
-        if crate::workload::is_restricted() { return Err(Error::Invalid("가벼운 모드가 끝난 뒤 과거 이미지 채점을 시작해 주세요.")); }
+        if crate::workload::is_restricted() { return Err(Error::Invalid("절약 모드가 끝난 뒤 과거 이미지 채점을 시작해 주세요.")); }
         let engine = self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !engine.running || engine.stop.load(Ordering::Acquire)
             || !engine.config.as_ref().is_some_and(|config| config.shadow_model.is_some()) {

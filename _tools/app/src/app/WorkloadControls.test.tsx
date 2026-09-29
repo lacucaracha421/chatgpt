@@ -11,8 +11,8 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 it("toggles lightweight mode without exposing scan cancellation", () => {
   render(<LightweightModeToggle />);
   expect(mocks.invoke).not.toHaveBeenCalled();
-  expect(screen.getByRole("switch", { name: "가벼운 모드" })).toBeChecked();
-  fireEvent.click(screen.getByRole("switch", { name: "가벼운 모드" }));
+  expect(screen.getByRole("switch", { name: "절약 모드" })).toBeChecked();
+  fireEvent.click(screen.getByRole("switch", { name: "절약 모드" }));
   expect(mocks.update).toHaveBeenCalledWith({ lightweight: false });
   expect(screen.queryByRole("button", { name: "검사 중단 요청" })).not.toBeInTheDocument();
 });

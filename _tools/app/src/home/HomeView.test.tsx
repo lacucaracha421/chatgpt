@@ -18,6 +18,8 @@ const gateway = vi.hoisted(() => ({
   cloudBackfillProgress: vi.fn(),
   authoritySyncHealth: vi.fn(),
   getRevisitSlate: vi.fn(),
+  listContinueItems: vi.fn(),
+  listAvFavorites: vi.fn(),
 }));
 vi.mock("../library/LibraryContext", () => ({ useLibrary: () => ({ gateway, library: { root: "fixture" } }) }));
 const artistFixture = vi.hoisted(() => ({ gateway: null as unknown, rows: null as unknown }));
@@ -100,6 +102,8 @@ beforeEach(() => {
   gateway.listCatalogReview.mockResolvedValue({ rows: [], inspectedWorks: 0, comparisons: 0, skippedBuckets: 0 });
   gateway.cloudBackfillProgress.mockResolvedValue({ controlState: "idle", totalAssets: 1, queued: 0, preparing: 0, uploading: 0, committing: 0, completed: 1, failed: 0, activeWorkers: 0, lastError: null });
   gateway.authoritySyncHealth.mockResolvedValue(healthy);
+  gateway.listContinueItems.mockResolvedValue([]);
+  gateway.listAvFavorites.mockResolvedValue([]);
 });
 afterEach(() => {
   artistFixture.gateway = null;
@@ -108,6 +112,43 @@ afterEach(() => {
 });
 
 describe("HomeView", () => {
+  it("renders 이어 보기 items and opens the selected item", async () => {
+    const item = { kind: "manga" as const, id: "manga-1", provider: null, title: "던전밥", thumbnailRevision: null, position: 112, total: 196, updatedAt: iso(13) };
+    gateway.listContinueItems.mockResolvedValue([item]);
+    const onOpenContinue = vi.fn();
+    renderHome({ props: { onOpenContinue } });
+
+    const continueSection = await screen.findByRole("region", { name: "이어 보기" });
+    expect(continueSection).toHaveTextContent("던전밥망가112/196");
+    await user().click(within(continueSection).getByRole("button", { name: "던전밥 이어 보기" }));
+    expect(onOpenContinue).toHaveBeenCalledWith(item);
+  });
+
+  it("renders 이어지는 시리즈 rows and opens the collection", async () => {
+    const series = work("m1", "던전밥");
+    gateway.collectionTracking.releaseBoard.mockResolvedValue([entry("m1", 3, [{ volumeNumber: 4, date: "2026-09-20" }])]);
+    const { onNavigate } = renderHome({ props: { collections: [series] } });
+
+    const seriesSection = await screen.findByRole("region", { name: "이어지는 시리즈" });
+    expect(seriesSection).toHaveTextContent("던전밥3권까지 소장다음 9.20");
+    await user().click(within(seriesSection).getByRole("button", { name: "던전밥 이어지는 시리즈" }));
+    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "collection", collectionId: "m1" });
+  });
+
+  it("renders favourite performers and hides them in privacy mode", async () => {
+    gateway.listAvFavorites.mockResolvedValue([{ id: "person-1", displayName: "미카미 유아", originalName: null, portrait: null, ownedWorkCount: 4, recentOwnedCount: 2, createdAt: iso(12) }]);
+    const { onNavigate } = renderHome();
+
+    const favorites = await screen.findByRole("region", { name: "즐겨찾는 배우" });
+    expect(favorites).toHaveTextContent("미카미 유아");
+    await user().click(within(favorites).getByRole("button", { name: "미카미 유아 배우 페이지" }));
+    expect(onNavigate).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "av", showcase: false });
+
+    cleanup();
+    renderHome({ privacy: true });
+    await waitFor(() => expect(screen.queryByRole("region", { name: "즐겨찾는 배우" })).not.toBeInTheDocument());
+  });
+
   it("renders up to two memo blocks with checklist details and the quiet add row", async () => {
     const items = ["**우유**", "- [ ] 커피 원두", "[세제 리필](https://example.test)", "건전지 AA", "택배 상자", "여섯 번째"].map((text, index) => ({ id: `i${index}`, text, checked: index < 2, order: String.fromCharCode(97 + index) }));
     const { onNavigate } = renderHome({ notes: [
@@ -325,7 +366,7 @@ describe("HomeView 캐릭터 검토", () => {
     // Turned on while the overview is open: a notice, no further reads.
     workload.restricted = true;
     rerender();
-    expect(await screen.findByText("가벼운 모드")).toBeInTheDocument();
+    expect(await screen.findByText("절약 모드")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "백합" })).not.toBeInTheDocument();
     await user().click(screen.getByRole("button", { name: "전체 후보 검토" }));
     expect(await screen.findByRole("dialog", { name: "S36 확인" })).toHaveTextContent("범위 -/-");

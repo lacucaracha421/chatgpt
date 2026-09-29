@@ -173,7 +173,7 @@ function PendingVideoTile() {
   const { restricted } = useWorkloadProfile();
   return <div className="video-tile video-tile--pending">
     <ClockIcon className="video-tile__status-icon" aria-hidden="true" />
-    <span className="video-tile__status">{restricted ? "가벼운 모드로 대기 중" : "준비 중"}</span>
+    <span className="video-tile__status">{restricted ? "절약 모드로 대기 중" : "준비 중"}</span>
   </div>;
 }
 
