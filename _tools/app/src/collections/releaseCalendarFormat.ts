@@ -12,7 +12,8 @@ export function releaseDateLabel(date: string | null, precision: ReleaseDatePrec
   const day = Number(parts[3]);
   const prefix = year === referenceYear ? "" : `${year}년 `;
   switch (precision) {
-    case "exact": return `${prefix}${month}월 ${day}일`;
+    // Compact numeric date, same as the tablet: 9.12, or 2027.1.5 outside the current year.
+    case "exact": return year === referenceYear ? `${month}.${day}` : `${year}.${month}.${day}`;
     case "month": return `${prefix}${month}월 중`;
     case "quarter": return `${year} Q${Math.floor((month - 1) / 3) + 1}`;
     case "year": return `${year}년 중`;

@@ -47,7 +47,7 @@ function mount(api: ReleaseCalendarGateway, onWishlistChange = vi.fn(), props: {
 
 describe("release calendar wording", () => {
   it("states each precision the way it is known", () => {
-    expect(releaseDateLabel("2026-10-22", "exact", 2026)).toBe("10월 22일");
+    expect(releaseDateLabel("2026-10-22", "exact", 2026)).toBe("10.22");
     expect(releaseDateLabel("2026-10-01", "month", 2026)).toBe("10월 중");
     expect(releaseDateLabel("2027-01-01", "month", 2026)).toBe("2027년 1월 중");
     expect(releaseDateLabel("2027-01-01", "quarter", 2026)).toBe("2027 Q1");
@@ -55,7 +55,7 @@ describe("release calendar wording", () => {
     expect(releaseDateLabel(null, "tbd", 2026)).toBe("미정");
     expect(releaseTokenLabel("2026-Q4", 2026)).toBe("2026 Q4");
     expect(releaseTokenLabel("2026-11", 2026)).toBe("11월 중");
-    expect(releaseEventLine({ id: "e", itemId: "igdb:1", kind: "date_changed", previousValue: "2026-10-02", currentValue: "2026-10-09", detectedAt: "", readAt: null }, 2026)).toBe("발매일 변경 · 10월 2일 → 10월 9일");
+    expect(releaseEventLine({ id: "e", itemId: "igdb:1", kind: "date_changed", previousValue: "2026-10-02", currentValue: "2026-10-09", detectedAt: "", readAt: null }, 2026)).toBe("발매일 변경 · 10.2 → 10.9");
   });
 
   it("groups months first, a quarter after its last month, bare years after every month, then TBD", () => {
@@ -82,7 +82,7 @@ describe("ReleaseCalendarView", () => {
     mount(api, changed);
     const october = await screen.findByRole("region", { name: "2026년 10월" });
     expect(within(october).getByText("기다리는 게임")).toBeInTheDocument();
-    expect(within(october).getByText("10월 22일")).toBeInTheDocument();
+    expect(within(october).getByText("10.22")).toBeInTheDocument();
     expect(within(october).getByRole("img", { name: "PC" })).toHaveAttribute("title", "PC (Steam): PC");
     expect(within(october).getByRole("img", { name: "PS5" })).toHaveAttribute("title", "PlayStation: PS5");
     expect(within(october).queryByText("이식")).not.toBeInTheDocument();
@@ -95,7 +95,7 @@ describe("ReleaseCalendarView", () => {
     expect(within(topRow).getByRole("button", { name: "관심 0", pressed: false })).toBeInTheDocument();
 
     const watchButton = screen.getByRole("button", { name: "기다리는 게임 관심 목록에 추가" });
-    expect(watchButton.closest(".release-calendar__cover")).toBeNull();
+    expect(watchButton.closest(".release-calendar__cover")).not.toBeNull();
 
     await userEvent.click(watchButton);
     await waitFor(() => expect(api.add).toHaveBeenCalledWith("igdb:1"));
@@ -130,7 +130,7 @@ describe("ReleaseCalendarView", () => {
       unread: [{ id: "ev1", itemId: id, kind: "date_changed", previousValue: "2026-10-02", currentValue: "2026-10-09", detectedAt: "", readAt: null }],
     }]);
     mount(api);
-    expect(await screen.findByText(/발매일 변경 · .*10월 2일 → .*10월 9일/)).toBeInTheDocument();
+    expect(await screen.findByText(/발매일 변경 · .*10\.2 → .*10\.9/)).toBeInTheDocument();
     expect(screen.getByText("NEW 1")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "관심 1", pressed: false }));
     expect(screen.getByRole("button", { name: "관심 1", pressed: true })).toBeInTheDocument();

@@ -1,6 +1,6 @@
 import { ArrowPathIcon, BookmarkIcon as BookmarkOutlineIcon, CalendarDaysIcon, CheckIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { BookmarkIcon } from "@heroicons/react/24/solid";
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type SVGProps } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type SVGProps } from "react";
 import { igdbImagePreviewUrl, tmdbImagePreviewUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -61,6 +61,18 @@ function LoadingCalendarState() {
  * months, month by month. Each title can be added to the 관심 목록 (wishlist), whose date changes
  * and releases are tracked like manga releases and shown here until 확인.
  */
+/** A day block spans at most this many grid columns. */
+const DAY_SPAN_MAX = 4;
+/** Tiles with the same date and precision form one release day, earliest day first. */
+function releaseDays<T extends { date: string | null; precision: string }>(items: T[]): T[][] {
+  const days = new Map<string, T[]>();
+  for (const item of items) {
+    const key = `${item.date ?? "9999-99-99"}|${item.precision}`;
+    days.set(key, [...(days.get(key) ?? []), item]);
+  }
+  return [...days.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, day]) => day);
+}
+
 export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettings }: Props) {
   const { gateway } = useLibrary();
   const api = gateway.releaseCalendar;
@@ -124,6 +136,17 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
     ? (wishlist ?? []).filter(matches).map(item => ({ ...item, watched: true }))
     : (calendar?.entries ?? []).filter(matches).map(entry => ({ ...entry, watched: wishById.has(entry.id), unread: wishById.get(entry.id)?.unread ?? [] }));
   const groups = groupReleases(tiles);
+  // A kind or 관심 switch slides the list toward the chosen side (same motion as the tablet).
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const shownSwitch = useRef<number | null>(null);
+  const switchIndex = kindOptions.findIndex(option => option.value === kind) + (watchOnly ? kindOptions.length : 0);
+  useLayoutEffect(() => {
+    const before = shownSwitch.current; shownSwitch.current = switchIndex;
+    const body = bodyRef.current;
+    if (before === null || before === switchIndex || !body || typeof body.animate !== "function") return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    body.animate([{ opacity: 0.5, transform: `translateX(${Math.sign(switchIndex - before) * 14}px)` }, { opacity: 1, transform: "none" }], { duration: 180, easing: "cubic-bezier(0.2, 0, 0, 1)" });
+  }, [switchIndex]);
   const unreadTotal = (wishlist ?? []).reduce((sum, item) => sum + item.unread.length, 0);
 
   async function toggle(tile: Tile) {
@@ -182,42 +205,51 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
         {source.errorCode === "credential_not_configured" && onOpenSettings && <Button type="button" size="sm" variant="quiet" onClick={onOpenSettings}>외부 서비스 설정</Button>}</div>)}
     </div>}
     {error && <p className="release-calendar__error" role="alert">{error}</p>}
-    <div className="release-calendar__body">
+    <div ref={bodyRef} className="release-calendar__body">
       {api && !calendar && !error && <LoadingCalendarState />}
       {calendar && groups.length === 0 && (watchOnly
         ? <EmptyCalendarState title="관심 목록 비어 있음" icon={BookmarkOutlineIcon} />
         : needle ? <EmptyCalendarState title="검색 결과 없음" icon={MagnifyingGlassIcon} /> : <EmptyCalendarState title="6개월 안의 발매 정보 없음" icon={CalendarDaysIcon} />)}
       {groups.map(group => <section key={group.key} className="release-calendar__month" aria-label={group.label}>
         <h3 className="release-calendar__month-title"><span className="release-calendar__section-mark" aria-hidden="true" /><span className="release-calendar__month-name">{groupHeadingLabel(group.label, referenceYear)}</span><span className="release-calendar__month-count">{group.items.length.toLocaleString()}</span><span className="release-calendar__month-rule" aria-hidden="true" /></h3>
-        <ul className="release-calendar__grid">
-          {group.items.map(tile => {
-            const url = privacyMode ? null : coverUrl(tile);
-            const dDay = tile.released === true ? null : displayDDay(tile.date);
-            return <li key={tile.id} className={`release-calendar__tile${tile.watched ? " is-watched" : ""}${tile.unread.length ? " is-new" : ""}`}>
+        <div className="release-calendar__days">
+          {releaseDays(group.items).map(day => {
+            // One heading per release day; the day's covers sit side by side under it (up to four).
+            const first = day[0]!;
+            const dDay = first.released === true ? null : displayDDay(first.date);
+            return <section key={`${first.date ?? "tbd"}:${first.precision}:${first.id}`} className="release-calendar__day" style={{ "--day-span": Math.min(day.length, DAY_SPAN_MAX) } as CSSProperties}
+              aria-label={releaseDateLabel(first.date, first.precision, referenceYear)}>
               <div className="release-calendar__date-row">
-                <span className="release-calendar__date">{releaseDateLabel(tile.date, tile.precision, referenceYear)}</span>
+                <span className="release-calendar__date">{releaseDateLabel(first.date, first.precision, referenceYear)}</span>
                 {dDay && dDay !== "D-DAY" && <span className="release-calendar__dday">{dDay}</span>}
-                <button type="button" className="release-calendar__watch" aria-pressed={tile.watched} disabled={pending === tile.id}
-                  aria-label={tile.watched ? `${tile.title} 관심 목록에서 빼기` : `${tile.title} 관심 목록에 추가`}
-                  onClick={() => void toggle(tile)}>
-                  {tile.watched ? <BookmarkIcon aria-hidden="true" /> : <BookmarkOutlineIcon aria-hidden="true" />}
-                </button>
               </div>
-              <div className={`release-calendar__cover release-calendar__cover--${tile.kind}`}>
-                {url ? <img src={url} alt="" loading="lazy" decoding="async" draggable={false} /> : <span aria-hidden="true">{tile.kind === "game" ? "GAME" : tile.kind === "anime" ? "ANIME" : "MOVIE"}</span>}
-                {tile.unread.length > 0 && <Badge className="release-calendar__new-badge" variant="accent">NEW</Badge>}
-              </div>
-              <strong className="release-calendar__title">{tile.title}</strong>
-              {tile.kind === "game" && tile.platforms.length > 0 && <PlatformBadges platforms={tile.platforms} port={tile.port} />}
-              {tile.unread.length > 0 && <div className="release-calendar__news">
-                {tile.unread.map(event => <div key={event.id} className="release-calendar__event">
-                  <span>{releaseEventLine(event, referenceYear)}</span>
-                  <Button type="button" size="icon" variant="quiet" className="release-calendar__confirm" disabled={Boolean(pending)} aria-label={`${tile.title} 알림 확인`} onClick={() => void acknowledge(tile.id, [event])}><CheckIcon aria-hidden="true" /></Button>
-                </div>)}
-              </div>}
-            </li>;
+              <ul className="release-calendar__grid">
+                {day.map(tile => {
+                  const url = privacyMode ? null : coverUrl(tile);
+                  return <li key={tile.id} className={`release-calendar__tile${tile.watched ? " is-watched" : ""}${tile.unread.length ? " is-new" : ""}`}>
+                    <div className={`release-calendar__cover release-calendar__cover--${tile.kind}`}>
+                      {url ? <img src={url} alt="" loading="lazy" decoding="async" draggable={false} /> : <span aria-hidden="true">{tile.kind === "game" ? "GAME" : tile.kind === "anime" ? "ANIME" : "MOVIE"}</span>}
+                      {tile.unread.length > 0 && <Badge className="release-calendar__new-badge" variant="accent">NEW</Badge>}
+                      <button type="button" className="release-calendar__watch" aria-pressed={tile.watched} disabled={pending === tile.id}
+                        aria-label={tile.watched ? `${tile.title} 관심 목록에서 빼기` : `${tile.title} 관심 목록에 추가`}
+                        onClick={() => void toggle(tile)}>
+                        {tile.watched ? <BookmarkIcon aria-hidden="true" /> : <BookmarkOutlineIcon aria-hidden="true" />}
+                      </button>
+                    </div>
+                    <strong className="release-calendar__title">{tile.title}</strong>
+                    {tile.kind === "game" && tile.platforms.length > 0 && <PlatformBadges platforms={tile.platforms} port={tile.port} />}
+                    {tile.unread.length > 0 && <div className="release-calendar__news">
+                      {tile.unread.map(event => <div key={event.id} className="release-calendar__event">
+                        <span>{releaseEventLine(event, referenceYear)}</span>
+                        <Button type="button" size="icon" variant="quiet" className="release-calendar__confirm" disabled={Boolean(pending)} aria-label={`${tile.title} 알림 확인`} onClick={() => void acknowledge(tile.id, [event])}><CheckIcon aria-hidden="true" /></Button>
+                      </div>)}
+                    </div>}
+                  </li>;
+                })}
+              </ul>
+            </section>;
           })}
-        </ul>
+        </div>
       </section>)}
       <p className="release-calendar__attribution">게임 정보 IGDB · 영화·애니 정보 TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
     </div>
