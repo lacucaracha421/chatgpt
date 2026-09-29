@@ -221,6 +221,8 @@ Collected by the user while using tablet 0.8.64. Grouped for execution; design i
 
 Collected while the user tries the release build of 57cb571c; fix in one batch when the user asks.
 
+Status 2026-09-29 night: 1–3 and 6–13 done and checked by the user in the release build; 4–5 wait for the character-folder design with folder D. Follow-ups done in the same round: segmented controls select on tap on the PC, calendar kind switch no longer slides its list, 에셋 filter chip row removed, 작가 hub (other artists row, 다시 고르기 rotates the hero, no X, +N badge, two-row paging, corner hover tools). Open: calendar covers still appear late on the PC (user deferred; session-only cache today — a disk cache is the likely fix if it matters on first open).
+
 1. **정보 panel close animation:** the overlay pauses briefly, then disappears; it should slide/fade out in one continuous motion (`OverlayPanel` exit in the 에셋 grid).
 2. **Sparse days waste space:** when many consecutive days hold one asset each, every day takes a full row. Bring back the earlier behaviour that packs consecutive dates side by side in one row (each keeps its own date label).
 3. **Tile artist caption still shown:** the 에셋 grid still passes the artist caption (`useArtistCaptionLabel` in `AssetBrowser.tsx`); remove it so tiles show no source/artist at all (view-supplied notes such as the vault file name and picker "원본 없음" stay).

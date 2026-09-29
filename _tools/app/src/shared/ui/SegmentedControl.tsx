@@ -179,7 +179,16 @@ export function SegmentedControl<T extends string>({ className, fullWidth = fals
       return;
     }
 
-    if (!session.dragging && session.targetButton) return;
+    if (!session.dragging && session.targetButton) {
+      // Pointer capture on the track keeps some engines (WebKitGTK on the PC) from sending the
+      // button its click, so a tap selects here; a click that still follows is swallowed once.
+      const index = buttonRefs.current.indexOf(session.targetButton);
+      if (index < 0) return;
+      handledPointerClickRef.current = true;
+      window.setTimeout(() => { handledPointerClickRef.current = false; }, 0);
+      selectIndex(index);
+      return;
+    }
 
     const center = session.dragging
       ? session.left + session.width / 2

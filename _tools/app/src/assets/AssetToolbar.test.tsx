@@ -25,9 +25,8 @@ function renderChrome(ui: React.ReactElement) {
 
 it("puts kind, sort, and view controls in the toolbar and removes sidebar view settings", async () => {
   const user = userEvent.setup();
-  renderChrome(<AssetToolbar {...baseProps} totalCount={9453} inspectorAvailable onInspectorOpenChange={vi.fn()} />);
+  renderChrome(<AssetToolbar {...baseProps} inspectorAvailable onInspectorOpenChange={vi.fn()} />);
   expect(screen.getByRole("heading", { name: "전체" })).toBeVisible();
-  expect(screen.getByText("9,453")).toBeVisible();
   expect(screen.getByRole("radiogroup", { name: "종류" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "보기 설정" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "보기" }));
@@ -46,12 +45,13 @@ it("changes media kind from the segmented control", async () => {
   expect(onMediaFilterChange).toHaveBeenCalledWith("videos");
 });
 
-it("keeps aspect filtering in a quiet toolbar menu", async () => {
+it("keeps aspect filtering inside the 보기 menu", async () => {
   const user = userEvent.setup();
   const onAspectFilterChange = vi.fn();
   renderChrome(<AssetToolbar {...baseProps} onAspectFilterChange={onAspectFilterChange} />);
-  await user.click(screen.getByRole("button", { name: "비율" }));
-  await user.click(screen.getByRole("menuitemradio", { name: "세로형" }));
+  expect(screen.queryByRole("button", { name: "비율" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "보기" }));
+  await user.click(within(screen.getByRole("radiogroup", { name: "비율" })).getByRole("radio", { name: "세로형" }));
   expect(onAspectFilterChange).toHaveBeenCalledWith("portrait");
 });
 
@@ -64,18 +64,23 @@ it("offers reshuffle only from the random sort menu", async () => {
   expect(onReshuffle).toHaveBeenCalledOnce();
 });
 
-it("shows the current classification switch only where it applies", async () => {
+it("offers 하위 폴더 포함 only in a folder, off while the folder shows only itself", async () => {
   const user = userEvent.setup();
-  renderChrome(<AssetToolbar {...baseProps} view={{ kind: "classification", classificationId: "game" }} />);
+  const onDirectOnlyChange = vi.fn();
+  renderChrome(<AssetToolbar {...baseProps} directOnly view={{ kind: "classification", classificationId: "game" }} onDirectOnlyChange={onDirectOnlyChange} />);
   await user.click(screen.getByRole("button", { name: "보기" }));
-  expect(screen.getByRole("switch", { name: "현재 분류만 보기" })).toBeVisible();
+  const include = screen.getByRole("switch", { name: "하위 폴더 포함" });
+  expect(include).not.toBeChecked();
+  await user.click(include);
+  expect(onDirectOnlyChange).toHaveBeenCalledWith(false);
 });
 
-it("shows collection names and folder count status", () => {
+it("shows collection names and no folder count", () => {
   const collections: CollectionSummary[] = [{ id: "collection-1", name: "엘든 링", description: null, type: "game", coverAssetId: null, selectedWorkArtworkId: null, selectedHeroArtworkId: null, selectedBackdropArtworkId: null, assetCount: 3, unreadReleaseCount: 0, year: null, originalTitle: null, runtimeMinutes: null, author: null, developer: null, publisher: null, platforms: null, productionCompany: null, releaseDate: null, director: null, externalScore: null, myScore: null, genres: null, overview: null, showcase: false, showcaseOrder: null, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" }];
   const { unmount } = renderChrome(<AssetToolbar {...baseProps} view={{ kind: "collection", collectionId: "collection-1" }} collections={collections} />);
   expect(screen.getByRole("heading", { name: "엘든 링" })).toBeVisible();
   unmount();
   renderChrome(<AssetToolbar {...baseProps} view={{ kind: "classification", classificationId: "game" }} classifications={[{ ...baseProps.classifications[0], assetCount: 428, totalAssetCount: 12345 }]} />);
-  expect(screen.getByText("12,345장 · 이 폴더만 428장")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "게임" })).toBeVisible();
+  expect(screen.queryByText(/12,345/)).not.toBeInTheDocument();
 });

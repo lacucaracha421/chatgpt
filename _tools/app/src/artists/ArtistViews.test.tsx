@@ -101,6 +101,8 @@ const asset = (index: number, creator: Partial<AssetSummary> = {}): AssetSummary
 function libraryGateway(artists: ArtistGateway, items: AssetSummary[] = []): LibraryGateway {
   const known: Record<string, unknown> = {
     artists,
+    // No auto-tag service in these views; a proxy function here would look like a broken gateway.
+    autoTags: undefined,
     listAssets: vi.fn().mockResolvedValue({ items, nextCursor: null, totalCount: items.length }),
     listAssetDateBuckets: vi.fn().mockResolvedValue([]),
     getAsset: vi.fn().mockImplementation(async (id: string) => asset(Number(id.replace(/\D/g, "")) || 0)),
@@ -276,6 +278,19 @@ describe("ArtistHub", () => {
     expect(gateway.today).toHaveBeenCalledTimes(1);
   });
 
+  it("다시 고르기 shows another hero even when the server returns the same picks", async () => {
+    const user = userEvent.setup();
+    const gateway = artistGateway();
+    gateway.today = vi.fn().mockResolvedValue([
+      { artist: artist("yun", "윤슬"), kind: "anniversary", reason: "3년 전 오늘 저장", assetIds: ["t1", "t2", "t3"] },
+      { artist: artist("mira", "미라", { assetCount: 3 }), kind: "fresh", reason: "이번 주 새로 저장", assetIds: ["m1", "m2"] },
+    ]);
+    renderHub({ kind: "artists" }, gateway);
+    await screen.findByRole("article", { name: "윤슬 · 3년 전 오늘 저장" });
+    await user.click(screen.getByRole("button", { name: "다시 고르기" }));
+    expect(await screen.findByRole("article", { name: "미라 · 이번 주 새로 저장" })).toBeInTheDocument();
+  });
+
   it("keeps the card pin action and existing menu items", async () => {
     const user = userEvent.setup();
     const { gateway } = renderHub({ kind: "artists" });
@@ -362,8 +377,8 @@ describe("artist pages in the gallery", () => {
     expect(await screen.findByText("3년 전 오늘")).toBeInTheDocument();
     expect(screen.getByText("1년 넘게 열지 않은 58장")).toBeInTheDocument();
     expect(screen.getByText("x 402 · Pixiv 72 · 지정 12")).toBeInTheDocument();
-    // The caption uses the artist's own name rather than the source name.
-    await waitFor(() => expect(screen.getByRole("option", { name: /asset-0.png/ })).toHaveAttribute("aria-description", expect.stringMatching(/^달그림자 · /)));
+    // Tiles carry no artist caption, not even the artist's own name (user, 2026-09-29).
+    expect(within(await screen.findByRole("option", { name: /asset-0.png/ })).queryByText("달그림자")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "작가 편집" }));
     const panel = screen.getByRole("complementary", { name: "작가 편집" });
@@ -382,7 +397,8 @@ describe("artist pages in the gallery", () => {
     const gateway = libraryGateway(artists, [asset(0), asset(1)]);
     renderPage({ kind: "creator", creatorKey: "unknown:none" }, gateway);
     expect(await screen.findByRole("button", { name: "출처 없음 7" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(await screen.findByRole("option", { name: /asset-0.png/ }));
+    // A plain click opens 정보; Ctrl-click selects.
+    fireEvent.click(await screen.findByRole("option", { name: /asset-0.png/ }), { ctrlKey: true });
     fireEvent.click(screen.getByRole("option", { name: /asset-1.png/ }), { ctrlKey: true });
     await user.click(screen.getByRole("button", { name: "작가 지정" }));
     const dialog = await screen.findByRole("dialog", { name: "작가 지정 · 2장" });

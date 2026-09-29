@@ -70,17 +70,16 @@ export function useArtistScopeChrome(view: AssetView, { onNavigate, onPlay, priv
     invalidateArtists();
     if (next && next !== summary.id) navigate({ kind: "creator", creatorKey: next });
   };
-  const otherNames = detail ? [...new Set(detail.members.map((member) => member.name).filter((name): name is string => Boolean(name) && name !== summary?.label))] : [];
+  // The toolbar keeps only the artist's name; identity details and actions live in the page head (user, 2026-09-29).
+  const actions = summary ? <div className="artist-head__actions">
+    <Button size="icon" variant={summary.pinned ? "secondary" : "ghost"} aria-label={summary.pinned ? "고정 해제" : "고정"} aria-pressed={summary.pinned} onClick={() => void togglePin()}><PinIcon aria-hidden="true" /></Button>
+    <Button size="icon" variant={editOpen ? "secondary" : "ghost"} aria-label="작가 편집" aria-expanded={editOpen} onClick={() => setEditOpen((open) => !open)}><PencilIcon aria-hidden="true" /></Button>
+    <Button size="sm" variant="primary" onClick={onPlay}><PlayIcon aria-hidden="true" />연속 보기</Button>
+  </div> : null;
   return {
     title: summary?.label ?? (error ? "작가" : "…"),
-    accessory: summary ? <>
-      {summary.reposter && <span className="artist-badge artist-badge--reposter">퍼온 계정</span>}
-      <span className="artist-page__subtitle">{[otherNames[0], otherNames.length > 1 ? `외 ${otherNames.length - 1}` : null].filter(Boolean).join(" ")}{otherNames.length ? " · " : ""}{formatCount(summary.assetCount)}장</span>
-      <Button size="icon" variant={summary.pinned ? "secondary" : "ghost"} aria-label={summary.pinned ? "고정 해제" : "고정"} aria-pressed={summary.pinned} onClick={() => void togglePin()}><PinIcon aria-hidden="true" /></Button>
-      <Button size="icon" variant={editOpen ? "secondary" : "ghost"} aria-label="작가 편집" aria-expanded={editOpen} onClick={() => setEditOpen((open) => !open)}><PencilIcon aria-hidden="true" /></Button>
-      <Button size="sm" variant="primary" onClick={onPlay}><PlayIcon aria-hidden="true" />연속 보기</Button>
-    </> : null,
-    intro: detail ? <ArtistIntro detail={detail} privacyMode={privacyMode} /> : error ? <p role="alert" className="artist-error artist-intro">{commandErrorMessage(error, "작가를 불러오지 못했습니다.")}</p> : null,
+    accessory: null,
+    intro: detail ? <ArtistIntro detail={detail} privacyMode={privacyMode} actions={actions} /> : error ? <p role="alert" className="artist-error artist-intro">{commandErrorMessage(error, "작가를 불러오지 못했습니다.")}</p> : null,
     panel: detail && editOpen ? <ArtistEditPanel key={detail.summary.id} detail={detail} privacyMode={privacyMode} onClose={() => setEditOpen(false)} onNavigate={navigate} /> : null,
   };
 }
@@ -219,7 +218,7 @@ function ArtistStyleSuggestionRow({ group, privacyMode, onNavigate, onOpen }: { 
   </article>;
 }
 
-function ArtistIntro({ detail, privacyMode }: { detail: ArtistDetail; privacyMode: boolean }) {
+function ArtistIntro({ detail, privacyMode, actions }: { detail: ArtistDetail; privacyMode: boolean; actions: ReactNode }) {
   const { summary } = detail;
   const [viewer, setViewer] = useState<{ items: AssetSummary[]; activeId: string } | null>(null);
   const { gateway } = useLibrary();
@@ -229,13 +228,17 @@ function ArtistIntro({ detail, privacyMode }: { detail: ArtistDetail; privacyMod
   const manual = detail.assignments.find((entry) => entry.source === "manual");
   const stat = (label: string, value: ReactNode) => <div className="artist-stat"><span>{label}</span><strong>{value}</strong></div>;
   return <div className="artist-intro">
-    <div className="artist-stats">
-      {stat("저장", formatCount(summary.assetCount))}
-      {stat("처음 저장", summary.firstSavedAt ? displayDate(summary.firstSavedAt) : "–")}
-      {stat("최근 저장", summary.lastSavedAt ? displayDate(summary.lastSavedAt) : "–")}
-      {stat("출처", detail.sources.map((source) => `${SITE_LABEL[source.host] ?? source.host} ${formatCount(source.count)}`).join(" · ") || "–")}
+    <div className="artist-head">
+      <div className="artist-stats">
+        {stat("저장", formatCount(summary.assetCount))}
+        {stat("처음 저장", summary.firstSavedAt ? displayDate(summary.firstSavedAt) : "–")}
+        {stat("최근 저장", summary.lastSavedAt ? displayDate(summary.lastSavedAt) : "–")}
+        {stat("출처", detail.sources.map((source) => `${SITE_LABEL[source.host] ?? source.host} ${formatCount(source.count)}`).join(" · ") || "–")}
+      </div>
+      {actions}
     </div>
     <div className="artist-origins">
+      {summary.reposter && <span className="artist-badge artist-badge--reposter">퍼온 계정</span>}
       {summary.displayName && <span className="artist-badge">직접 지은 이름</span>}
       <span className="artist-muted">원래 이름</span>
       {detail.members.map((member) => <span key={member.key} className="artist-origin">

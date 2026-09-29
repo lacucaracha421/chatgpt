@@ -79,16 +79,13 @@ button.artist-strip__item:focus-visible { outline: 2px solid var(--color-focus);
 .artist-hero-mosaic--n2 .artist-hero-mosaic__cell:nth-child(2), .artist-hero-mosaic--n3 .artist-hero-mosaic__cell:first-child, .artist-hero-mosaic--n4 .artist-hero-mosaic__cell:first-child, .artist-hero-mosaic--n5 .artist-hero-mosaic__cell:first-child { grid-row: 1 / 3; }
 .artist-hero-mosaic__cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--color-surface); }
 .artist-hero-mosaic__cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.artist-hero-mosaic__cell--more img { filter: brightness(.45); }
-.artist-hero-mosaic__cell--more > span { position: absolute; inset: 0; display: grid; place-items: center; color: var(--color-text); font-family: var(--font-numeric); font-size: var(--text-lg); }
+/* +N: a small count in the bottom-right corner; the image itself stays undimmed (user, 2026-09-29). */
+.artist-hero-mosaic__cell--more > span { position: absolute; right: var(--space-2); bottom: var(--space-2); padding: 2px var(--space-1); border-radius: var(--radius-control); background: rgb(0 0 0 / 62%); color: #fff; font: 500 var(--type-meta) / 1.2 var(--font-numeric); font-variant-numeric: tabular-nums; }
 .artist-today__info { position: relative; display: flex; flex-direction: column; min-width: 0; padding-top: 2px; }
-.artist-today__dismiss { position: absolute; top: -4px; right: 0; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; background: transparent; color: var(--color-muted); cursor: pointer; }
-.artist-today__dismiss:hover { color: var(--color-text); background: var(--color-surface-hover); }
-.artist-today__dismiss svg { width: 18px; height: 18px; }
 .artist-today__reason { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--color-muted); font-size: var(--text-sm); }
 .artist-today__reason::before { content: ""; width: 6px; height: 6px; flex: none; background: var(--color-section-mark); }
 .artist-today__reason--unseen::before { background: transparent; box-shadow: inset 0 0 0 1px var(--color-section-mark); }
-.artist-today__name { margin: 10px 40px 0 0; font-size: 34px; line-height: 1.1; font-weight: 600; letter-spacing: .2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artist-today__name { margin: 10px 0 0; font-size: 34px; line-height: 1.1; font-weight: 600; letter-spacing: .2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artist-today__handle { margin-top: 4px; color: var(--color-faint); font-size: var(--text-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artist-today__facts { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 18px; }
 .artist-today__facts > div { display: grid; gap: 1px; }
@@ -101,7 +98,8 @@ button.artist-strip__item:focus-visible { outline: 2px solid var(--color-focus);
 .artist-today__others > .workspace-section-label { display: flex; margin-bottom: 6px; font-size: var(--text-xs); }
 .artist-today__other { display: flex; align-items: center; width: 100%; min-width: 0; min-height: 52px; gap: 10px; padding: 4px 6px 4px 0; border: 0; border-top: 1px solid var(--color-border); background: transparent; color: var(--color-text); text-align: left; font: inherit; cursor: pointer; }
 .artist-today__other:hover { background: var(--color-surface-hover); }
-.artist-today__other-collage { width: 64px; height: 44px; flex: none; aspect-ratio: auto; border-radius: var(--radius-tile); }
+/* Two classes so the shared square .artist-collage (declared later) cannot stretch it. */
+.artist-today__other .artist-today__other-collage { width: 64px; height: 44px; flex: none; aspect-ratio: auto; border-radius: var(--radius-tile); }
 .artist-today__other-copy { display: grid; min-width: 0; flex: 1; line-height: 1.35; }
 .artist-today__other-copy strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-md); font-weight: 600; }
 .artist-today__other-copy .artist-today__reason { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
@@ -126,12 +124,13 @@ button.artist-strip__item:focus-visible { outline: 2px solid var(--color-focus);
 .artist-card__handle { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-faint); font-size: var(--text-xs); }
 .artist-card__count { flex: none; color: var(--color-muted); font-family: var(--font-numeric); font-size: var(--text-md); font-variant-numeric: tabular-nums; }
 .artist-card__meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
-.artist-card__tools { display: none; flex: none; gap: 2px; margin: -3px -4px -3px 0; }
-.artist-card__tool { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-muted); cursor: pointer; }
-.artist-card__tool:hover, .artist-card__tool[aria-pressed=true] { background: var(--color-surface-hover); color: var(--color-text); }
-.artist-card__tool svg { width: 16px; height: 16px; }
-.artist-card:hover .artist-card__count, .artist-card:focus-within .artist-card__count { display: none; }
-.artist-card:hover .artist-card__tools, .artist-card:focus-within .artist-card__tools { display: flex; }
+/* Two classes: the shared .ui-menu__trigger (transparent, muted) must not win over the ⋯ tool. */
+.artist-card__tools { position: absolute; top: var(--space-2); right: var(--space-2); z-index: 1; display: flex; gap: var(--space-1); opacity: 0; pointer-events: none; transition: opacity var(--motion-fast) var(--ease-standard); }
+.artist-card__tools .artist-card__tool { display: grid; min-height: 0; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-control); background: rgb(0 0 0 / 62%); color: #fff; cursor: pointer; }
+.artist-card__tools .artist-card__tool:hover { color: #fff; background: rgb(0 0 0 / 80%); }
+.artist-card__tools .artist-card__tool[aria-pressed=true] { color: var(--color-accent); }
+.artist-card__tools .artist-card__tool svg { width: 16px; height: 16px; }
+.artist-card:hover .artist-card__tools, .artist-card:focus-within .artist-card__tools, .artist-card__tools:has([aria-expanded=true]) { opacity: 1; pointer-events: auto; }
 
 /* 그 외 작가 list */
 .artist-others__controls { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-2); }
@@ -209,11 +208,14 @@ button.artist-strip__item:focus-visible { outline: 2px solid var(--color-focus);
 .artist-fill__handle, .artist-fill__target { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Artist page */
-.artist-page__subtitle { color: var(--color-muted); font-size: var(--text-sm); margin: 0 var(--space-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .artist-intro { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3) 0 var(--space-4); }
 .artist-intro--unknown { gap: var(--space-2); }
 .artist-intro--unknown .artist-muted { margin: 0; }
 .artist-badge--reposter { color: var(--color-text); border-color: var(--color-section-mark); }
+.artist-head { display: flex; align-items: center; gap: var(--space-4); min-width: 0; }
+.artist-head > .artist-stats { flex: 1; min-width: 0; }
+.artist-head__actions { display: flex; flex: none; align-items: center; gap: var(--space-1); }
+.artist-head__actions .ui-button--primary { margin-left: var(--space-2); white-space: nowrap; }
 .artist-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 880px; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
 .artist-stat { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-3); min-width: 0; }
 .artist-stat + .artist-stat { border-left: 1px solid var(--color-border); }
@@ -299,6 +301,7 @@ button.artist-strip__item:focus-visible { outline: 2px solid var(--color-focus);
   .artist-merge-grid { grid-template-columns: minmax(0, 1fr); }
   .artist-fill--open { grid-template-columns: minmax(0, 1fr); }
   .artist-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .artist-head { flex-wrap: wrap; }
   .artist-style-row { grid-template-columns: minmax(0, 1fr); grid-template-areas: "artist" "candidates" "actions"; }
   .artist-style-row__actions + .artist-error { grid-column: auto; }
 }

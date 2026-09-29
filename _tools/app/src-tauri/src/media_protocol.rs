@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashMap, VecDeque},
     io::{Read, Seek, SeekFrom},
     sync::{Condvar, Mutex, MutexGuard, PoisonError, OnceLock},
     time::Duration,
@@ -83,6 +84,161 @@ impl Drop for MediaPermit {
 
 fn lock_media_active() -> MutexGuard<'static, usize> {
     MEDIA_ACTIVE.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+const PREVIEW_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
+const PREVIEW_CACHE_CONTROL: &str = "private, max-age=86400";
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum PreviewVariant {
+    IgdbCover,
+    IgdbHero,
+    TmdbPoster,
+    TmdbBackdrop,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct PreviewCacheKey {
+    variant: PreviewVariant,
+    image_path: String,
+}
+
+impl PreviewCacheKey {
+    fn new(variant: PreviewVariant, image_path: &str) -> Self {
+        Self {
+            variant,
+            image_path: image_path.to_owned(),
+        }
+    }
+}
+
+struct PreviewCacheEntry {
+    bytes: Vec<u8>,
+    content_type: String,
+}
+
+struct PreviewCache {
+    entries: HashMap<PreviewCacheKey, PreviewCacheEntry>,
+    lru: VecDeque<PreviewCacheKey>,
+    total_bytes: usize,
+    max_bytes: usize,
+}
+
+impl PreviewCache {
+    fn new(max_bytes: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            lru: VecDeque::new(),
+            total_bytes: 0,
+            max_bytes,
+        }
+    }
+
+    fn get(&mut self, key: &PreviewCacheKey) -> Option<Response<Vec<u8>>> {
+        let (bytes, content_type) = {
+            let entry = self.entries.get(key)?;
+            (entry.bytes.clone(), entry.content_type.clone())
+        };
+        self.touch(key);
+        Some(preview_response(bytes, &content_type))
+    }
+
+    fn insert(&mut self, key: PreviewCacheKey, response: &Response<Vec<u8>>) {
+        if response.status() != StatusCode::OK {
+            return;
+        }
+        let Some(content_type) = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        let bytes = response.body().clone();
+
+        self.remove(&key);
+        if bytes.len() > self.max_bytes {
+            return;
+        }
+        while bytes.len() > self.max_bytes.saturating_sub(self.total_bytes) {
+            let Some(oldest) = self.lru.pop_front() else {
+                break;
+            };
+            if let Some(entry) = self.entries.remove(&oldest) {
+                self.total_bytes -= entry.bytes.len();
+            }
+        }
+
+        self.total_bytes += bytes.len();
+        self.lru.push_back(key.clone());
+        self.entries.insert(
+            key,
+            PreviewCacheEntry {
+                bytes,
+                content_type,
+            },
+        );
+    }
+
+    fn remove(&mut self, key: &PreviewCacheKey) {
+        if let Some(entry) = self.entries.remove(key) {
+            self.total_bytes -= entry.bytes.len();
+        }
+        if let Some(position) = self.lru.iter().position(|candidate| candidate == key) {
+            self.lru.remove(position);
+        }
+    }
+
+    fn touch(&mut self, key: &PreviewCacheKey) {
+        if let Some(position) = self.lru.iter().position(|candidate| candidate == key) {
+            self.lru.remove(position);
+        }
+        self.lru.push_back(key.clone());
+    }
+}
+
+static PREVIEW_CACHE: OnceLock<Mutex<PreviewCache>> = OnceLock::new();
+
+fn preview_cache() -> &'static Mutex<PreviewCache> {
+    PREVIEW_CACHE.get_or_init(|| Mutex::new(PreviewCache::new(PREVIEW_CACHE_MAX_BYTES)))
+}
+
+fn cached_preview(
+    key: PreviewCacheKey,
+    fetch: impl FnOnce() -> Response<Vec<u8>>,
+) -> Response<Vec<u8>> {
+    cached_preview_from(preview_cache(), key, fetch)
+}
+
+fn cached_preview_from(
+    cache: &Mutex<PreviewCache>,
+    key: PreviewCacheKey,
+    fetch: impl FnOnce() -> Response<Vec<u8>>,
+) -> Response<Vec<u8>> {
+    if let Ok(mut cache) = cache.lock() {
+        if let Some(response) = cache.get(&key) {
+            return response;
+        }
+    }
+
+    let response = fetch();
+    if response.status() == StatusCode::OK {
+        if let Ok(mut cache) = cache.lock() {
+            cache.insert(key, &response);
+        }
+    }
+    response
+}
+
+fn preview_response(bytes: Vec<u8>, content_type: &str) -> Response<Vec<u8>> {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, content_type)
+        .header(CACHE_CONTROL, PREVIEW_CACHE_CONTROL)
+        .header(CONTENT_LENGTH, bytes.len().to_string())
+        .body(bytes)
+        .expect("preview image response is valid")
 }
 
 pub(crate) fn media_response_with_range(
@@ -343,39 +499,41 @@ fn parse_media_path(path: &str) -> Result<(MediaVariant, Option<String>), ()> {
 }
 
 fn igdb_image_response(image_id: &str, variant: MediaVariant) -> Response<Vec<u8>> {
-    let size = match variant {
-        MediaVariant::IgdbImagePreviewCover => IgdbImageSize::CoverBig,
-        MediaVariant::IgdbImagePreviewHero => IgdbImageSize::Hd720p,
+    let (size, cache_variant) = match variant {
+        MediaVariant::IgdbImagePreviewCover => {
+            (IgdbImageSize::CoverBig, PreviewVariant::IgdbCover)
+        }
+        MediaVariant::IgdbImagePreviewHero => {
+            (IgdbImageSize::Hd720p, PreviewVariant::IgdbHero)
+        }
         _ => return empty_response(StatusCode::BAD_REQUEST),
     };
     let Ok(url) = IgdbClient::image_url(image_id, size) else {
         return empty_response(StatusCode::BAD_REQUEST);
     };
-    let response = igdb_image_agent().get(&url).call();
-    let mut response = match response {
-        Ok(response) => response,
-        Err(ureq::Error::StatusCode(404)) => return empty_response(StatusCode::NOT_FOUND),
-        Err(ureq::Error::StatusCode(429)) => return empty_response(StatusCode::TOO_MANY_REQUESTS),
-        Err(_) => return empty_response(StatusCode::BAD_GATEWAY),
-    };
-    let mut bytes = Vec::new();
-    if response
-        .body_mut()
-        .as_reader()
-        .take((MAX_WORK_ARTWORK_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .is_err()
-        || bytes.len() > MAX_WORK_ARTWORK_BYTES
-    {
-        return empty_response(StatusCode::BAD_GATEWAY);
-    }
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(CONTENT_TYPE, "image/jpeg")
-        .header("Cache-Control", "private, max-age=86400")
-        .header(CONTENT_LENGTH, bytes.len().to_string())
-        .body(bytes)
-        .expect("IGDB image response is valid")
+    cached_preview(PreviewCacheKey::new(cache_variant, image_id), || {
+        let response = igdb_image_agent().get(&url).call();
+        let mut response = match response {
+            Ok(response) => response,
+            Err(ureq::Error::StatusCode(404)) => return empty_response(StatusCode::NOT_FOUND),
+            Err(ureq::Error::StatusCode(429)) => {
+                return empty_response(StatusCode::TOO_MANY_REQUESTS);
+            }
+            Err(_) => return empty_response(StatusCode::BAD_GATEWAY),
+        };
+        let mut bytes = Vec::new();
+        if response
+            .body_mut()
+            .as_reader()
+            .take((MAX_WORK_ARTWORK_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .is_err()
+            || bytes.len() > MAX_WORK_ARTWORK_BYTES
+        {
+            return empty_response(StatusCode::BAD_GATEWAY);
+        }
+        preview_response(bytes, "image/jpeg")
+    })
 }
 
 fn igdb_image_agent() -> &'static ureq::Agent {
@@ -391,39 +549,42 @@ fn igdb_image_agent() -> &'static ureq::Agent {
 }
 
 fn tmdb_image_response(file_path: &str, variant: MediaVariant) -> Response<Vec<u8>> {
-    let size = match variant {
-        MediaVariant::TmdbImagePreviewPoster => TmdbImageSize::W342,
-        MediaVariant::TmdbImagePreviewBackdrop => TmdbImageSize::W780,
+    let (size, cache_variant) = match variant {
+        MediaVariant::TmdbImagePreviewPoster => {
+            (TmdbImageSize::W342, PreviewVariant::TmdbPoster)
+        }
+        MediaVariant::TmdbImagePreviewBackdrop => {
+            (TmdbImageSize::W780, PreviewVariant::TmdbBackdrop)
+        }
         _ => return empty_response(StatusCode::BAD_REQUEST),
     };
     let Ok(url) = TmdbClient::image_url(file_path, size) else {
         return empty_response(StatusCode::BAD_REQUEST);
     };
-    let response = tmdb_image_agent().get(&url).call();
-    let mut response = match response {
-        Ok(response) => response,
-        Err(ureq::Error::StatusCode(404)) => return empty_response(StatusCode::NOT_FOUND),
-        Err(ureq::Error::StatusCode(429)) => return empty_response(StatusCode::TOO_MANY_REQUESTS),
-        Err(_) => return empty_response(StatusCode::BAD_GATEWAY),
-    };
-    let mut bytes = Vec::new();
-    if response
-        .body_mut()
-        .as_reader()
-        .take((MAX_WORK_ARTWORK_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .is_err()
-        || bytes.len() > MAX_WORK_ARTWORK_BYTES
-    {
-        return empty_response(StatusCode::BAD_GATEWAY);
-    }
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(CONTENT_TYPE, tmdb_image_mime(file_path))
-        .header("Cache-Control", "private, max-age=86400")
-        .header(CONTENT_LENGTH, bytes.len().to_string())
-        .body(bytes)
-        .expect("TMDB image response is valid")
+    let content_type = tmdb_image_mime(file_path);
+    cached_preview(PreviewCacheKey::new(cache_variant, file_path), || {
+        let response = tmdb_image_agent().get(&url).call();
+        let mut response = match response {
+            Ok(response) => response,
+            Err(ureq::Error::StatusCode(404)) => return empty_response(StatusCode::NOT_FOUND),
+            Err(ureq::Error::StatusCode(429)) => {
+                return empty_response(StatusCode::TOO_MANY_REQUESTS);
+            }
+            Err(_) => return empty_response(StatusCode::BAD_GATEWAY),
+        };
+        let mut bytes = Vec::new();
+        if response
+            .body_mut()
+            .as_reader()
+            .take((MAX_WORK_ARTWORK_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .is_err()
+            || bytes.len() > MAX_WORK_ARTWORK_BYTES
+        {
+            return empty_response(StatusCode::BAD_GATEWAY);
+        }
+        preview_response(bytes, content_type)
+    })
 }
 
 fn tmdb_image_agent() -> &'static ureq::Agent {
@@ -784,8 +945,9 @@ mod tests {
     use crate::library::{error::LibraryError, models::thumbnail_revision, Library, MediaVariant};
 
     use super::{
-        media_response, media_response_with_range, parse_catalog_thumbnail_path,
-        parse_media_path, parse_path, parse_remote_manga_path,
+        cached_preview_from, media_response, media_response_with_range,
+        parse_catalog_thumbnail_path, parse_media_path, parse_path, parse_remote_manga_path,
+        PreviewCache, PreviewCacheKey, PreviewVariant,
     };
 
     const ASSET_ID: &str = "00000000-0000-4000-8000-000000000001";
@@ -795,6 +957,80 @@ mod tests {
     const SERIES_ID: &str = "00000000-0000-4000-8000-000000000005";
     const COLLECTION_ID: &str = "00000000-0000-4000-8000-000000000006";
     const ARTWORK_ID: &str = "00000000-0000-4000-8000-000000000007";
+
+    fn preview_test_response(status: StatusCode, bytes: &[u8]) -> Response<Vec<u8>> {
+        Response::builder()
+            .status(status)
+            .header(CONTENT_TYPE, "image/png")
+            .body(bytes.to_vec())
+            .unwrap()
+    }
+
+    #[test]
+    fn preview_cache_hit_returns_stored_bytes_without_fetching() {
+        let cache = std::sync::Mutex::new(PreviewCache::new(32));
+        let key = PreviewCacheKey::new(PreviewVariant::IgdbCover, "cover-1");
+        let mut fetches = 0;
+
+        cached_preview_from(&cache, key.clone(), || {
+            fetches += 1;
+            preview_test_response(StatusCode::OK, b"cached")
+        });
+        let response = cached_preview_from(&cache, key, || {
+            fetches += 1;
+            preview_test_response(StatusCode::OK, b"fresh")
+        });
+
+        assert_eq!(fetches, 1);
+        assert_eq!(response.body(), b"cached");
+        assert_eq!(response.headers()[CONTENT_TYPE], "image/png");
+        assert_eq!(response.headers()[CACHE_CONTROL], "private, max-age=86400");
+        assert_eq!(response.headers()[CONTENT_LENGTH], "6");
+    }
+
+    #[test]
+    fn preview_cache_does_not_store_errors() {
+        let cache = std::sync::Mutex::new(PreviewCache::new(32));
+        let key = PreviewCacheKey::new(PreviewVariant::TmdbPoster, "poster-1");
+        let mut fetches = 0;
+
+        for _ in 0..2 {
+            let response = cached_preview_from(&cache, key.clone(), || {
+                fetches += 1;
+                preview_test_response(StatusCode::NOT_FOUND, b"")
+            });
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+
+        assert_eq!(fetches, 2);
+    }
+
+    #[test]
+    fn preview_cache_evicts_the_oldest_entry_over_budget() {
+        let cache = std::sync::Mutex::new(PreviewCache::new(5));
+        let oldest = PreviewCacheKey::new(PreviewVariant::IgdbCover, "oldest");
+        let newest = PreviewCacheKey::new(PreviewVariant::IgdbHero, "newest");
+
+        cached_preview_from(&cache, oldest.clone(), || {
+            preview_test_response(StatusCode::OK, b"123")
+        });
+        cached_preview_from(&cache, newest.clone(), || {
+            preview_test_response(StatusCode::OK, b"456")
+        });
+
+        let newest_response = cached_preview_from(&cache, newest, || {
+            panic!("the newest entry should remain cached")
+        });
+        assert_eq!(newest_response.body(), b"456");
+
+        let mut refetched = 0;
+        let oldest_response = cached_preview_from(&cache, oldest, || {
+            refetched += 1;
+            preview_test_response(StatusCode::OK, b"789")
+        });
+        assert_eq!(refetched, 1);
+        assert_eq!(oldest_response.body(), b"789");
+    }
 
     #[test]
     fn remote_manga_routes_accept_only_closed_numeric_paths() {

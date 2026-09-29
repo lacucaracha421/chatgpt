@@ -95,7 +95,7 @@ describe("AssetBrowser", () => {
   });
 
   it.each<[string, AssetView, AssetSort, Partial<Record<string, unknown>>]>([
-    ["classification", { kind: "classification", classificationId: "tag" }, "oldest", { classificationId: "tag", directOnly: false, unclassifiedOnly: false, sort: "oldest" }],
+    ["classification", { kind: "classification", classificationId: "tag" }, "oldest", { classificationId: "tag", directOnly: true, unclassifiedOnly: false, sort: "oldest" }],
     ["unsorted", { kind: "unsorted" }, "newest", { classificationId: null, directOnly: false, unclassifiedOnly: true, sort: "newest" }],
     ["album", { kind: "album", albumId: "album-1" }, "newest", { classificationId: null, albumId: "album-1", directOnly: false, unclassifiedOnly: false, sort: "newest" }],
     ["collection", { kind: "collection", collectionId: "collection-1" }, "newest", { classificationId: null, albumId: null, collectionId: "collection-1", directOnly: false, unclassifiedOnly: false, sort: "newest" }],
@@ -161,8 +161,9 @@ describe("AssetBrowser", () => {
     ));
     expect(await screen.findByRole("option", { name: "asset-0.png" })).toHaveAttribute("aria-selected", "false");
 
-    await user.click(screen.getByRole("button", { name: "비율" }));
-    await user.click(screen.getByRole("menuitemradio", { name: "세로형" }));
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    await user.click(within(screen.getByRole("radiogroup", { name: "비율" })).getByRole("radio", { name: "세로형" }));
+    await user.keyboard("{Escape}");
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
       expect.objectContaining({ mediaKind: "images", aspectRatio: "portrait" }),
     ));
@@ -175,7 +176,9 @@ describe("AssetBrowser", () => {
 
     rerender(renderView({ kind: "collection", collectionId: "collection-1" }));
     expect(screen.queryByRole("radiogroup", { name: "종류" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "비율" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    expect(screen.queryByRole("radiogroup", { name: "비율" })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
       expect.objectContaining({ collectionId: "collection-1", mediaKind: null, aspectRatio: null }),
     ));
@@ -327,13 +330,14 @@ describe("AssetBrowser", () => {
     expect(Number.parseFloat(space.style.height)).toBeGreaterThan(10000);
   });
 
-  it("maps direct-only and every selectable sort", async () => {
+  it("shows only the folder itself by default, maps 하위 폴더 포함 and every selectable sort", async () => {
     const user = userEvent.setup();
     const gateway = createGateway();
     const { rerender } = renderBrowser(gateway, { view: { kind: "classification", classificationId: "tag" } });
-    await user.click(await screen.findByRole("button", { name: "보기" }));
-    await user.click(screen.getByRole("switch", { name: "현재 분류만 보기" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ directOnly: true, sort: "newest" })));
+    await user.click(await screen.findByRole("button", { name: "보기" }));
+    await user.click(screen.getByRole("switch", { name: "하위 폴더 포함" }));
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ directOnly: false, sort: "newest" })));
     for (const sort of ["oldest", "favorites", "random"] as const) {
       rerender(browserElement(gateway, { sort }));
       await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ sort, randomPivot: sort === "random" ? expect.stringMatching(/^[\da-f]{32}$/) : null })));

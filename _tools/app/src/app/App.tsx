@@ -158,6 +158,7 @@ function initialWorkspaceView(): AssetView {
     case "assets": return { kind: "classification", classificationId: null };
     case "assets-folder": return { kind: "classification", classificationId: "class-reverse" };
     case "artists": return { kind: "artists" };
+    case "artist": return { kind: "creator", creatorKey: "artist-1" };
     case "albums": return { kind: "albums" };
     case "collections": return { kind: "collections", typeFilter: "game", showcase: false };
     case "collection-detail": return { kind: "collection", collectionId: "game-1" };

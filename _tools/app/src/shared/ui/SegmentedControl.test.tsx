@@ -96,6 +96,19 @@ describe("SegmentedControl", () => {
     expect(onChange).toHaveBeenCalledWith("two");
   });
 
+  it("selects on a tap even when pointer capture keeps the click from the button", () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    const track = screen.getByRole("radiogroup", { name: "Choices" });
+    const second = screen.getByRole("radio", { name: "Two 1,284" });
+
+    fireEvent.pointerDown(second, { button: 0, pointerId: 4, clientX: 200 });
+    fireEvent.pointerUp(track, { pointerId: 4, clientX: 200 });
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith("two");
+  });
+
   it("restores the current value when the pointer is cancelled", () => {
     const onChange = vi.fn();
     render(<Harness onChange={onChange} />);

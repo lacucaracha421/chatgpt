@@ -26,7 +26,9 @@ type Navigate = (view: AssetView) => void;
 const PAGE = 200;
 /** Scroll position and 더 보기 depth per hub section, kept while the app runs so 뒤로 returns to the same place. */
 const hubScroll = new Map<ArtistHubSection, number>();
-let mainShown = 30;
+// The main list opens with two grid rows; 더 보기 adds two more rows (user, 2026-09-29).
+const MAIN_ROWS_STEP = 2;
+let mainRows = MAIN_ROWS_STEP;
 const formatCount = (value: number) => value.toLocaleString("ko-KR");
 
 export function ArtistThumb({ assetId, privacyMode, className = "artist-thumb" }: { assetId?: string; privacyMode: boolean; className?: string }) {
@@ -201,19 +203,35 @@ function TierRuleDialog({ settings, mainCount, onClose }: { settings: ArtistSett
 }
 
 function MainSection({ onNavigate, privacyMode }: { onNavigate: Navigate; privacyMode: boolean }) {
-  const [shown, setShownState] = useState(mainShown);
-  const setShown = (next: (value: number) => number) => setShownState((value) => (mainShown = next(value)));
   const rule = useArtistOverview()?.settings;
   const page = useArtistRead((gateway) => gateway.list({ bucket: "main", sort: "recent", limit: 1000 }), "main").data;
+  const [rows, setRowsState] = useState(mainRows);
+  const addRows = () => setRowsState((value) => (mainRows = value + MAIN_ROWS_STEP));
+  // Columns follow the grid's container queries (5 · 4 · 3), so read them from the rendered grid.
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const [columns, setColumns] = useState(5);
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const measure = () => {
+      const count = getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length;
+      if (count > 0) setColumns(count);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(grid);
+    return () => observer?.disconnect();
+  }, [page !== null]);
+  const shown = rows * columns;
   return <>
     <TodaySection onNavigate={onNavigate} privacyMode={privacyMode} />
     <div className="artist-section-head"><span className="workspace-section-label">최근 저장 순 · 고정한 작가 제외</span>{page && <span className="artist-section-count">{formatCount(page.total)}명</span>}</div>
     {!page && <Skeleton className="artist-hub__skeleton" label="작가를 불러오는 중" />}
     {page && page.artists.length === 0 && <EmptyState title="주요 작가가 아직 없습니다">작가 정보가 있는 이미지를 모으면 기준에 맞는 작가가 여기에 모입니다.</EmptyState>}
-    {page && <div className="artist-grid" role="list" aria-label="주요 작가">
+    {page && <div ref={gridRef} className="artist-grid" role="list" aria-label="주요 작가">
       {page.artists.slice(0, shown).map((artist) => <ArtistCard key={artist.id} artist={artist} rule={rule} privacyMode={privacyMode} onNavigate={onNavigate} />)}
     </div>}
-    {page && page.artists.length > shown && <div className="artist-more"><Button variant="ghost" onClick={() => setShown((value) => value + 30)}>주요 작가 {formatCount(page.artists.length - shown)}명 더 보기</Button></div>}
+    {page && page.artists.length > shown && <div className="artist-more"><Button variant="ghost" onClick={() => addRows}>주요 작가 {formatCount(Math.min(MAIN_ROWS_STEP * columns, page.artists.length - shown))}명 더 보기</Button></div>}
   </>;
 }
 
@@ -233,15 +251,16 @@ function ArtistCard({ artist, rule, privacyMode, onNavigate }: { artist: ArtistS
       <button type="button" className="artist-card__open" onClick={() => onNavigate({ kind: "creator", creatorKey: artist.id })} aria-label={`${artist.label} ${metaLine(artist, rule)}`}>
         <ArtistCollage assetIds={artist.coverAssetIds} privacyMode={privacyMode} />
       </button>
+      {/* Hover tools sit on the image corner so the caption and grid never shift. */}
+      <span className="artist-card__tools">
+        <button type="button" className="artist-card__tool" aria-label={artist.pinned ? `${artist.label} 고정 해제` : `${artist.label} 고정`} aria-pressed={artist.pinned} onClick={handlePin}><PinIcon aria-hidden="true" /></button>
+        <Menu label={`${artist.label} 더보기`} triggerClassName="artist-card__tool" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={artistMenuItems(artist, onNavigate, gateway)} />
+      </span>
       <div className="artist-card__caption">
         <div className="artist-card__line">
           <span className="artist-card__name artist-name">{artist.label}</span>
           {artistHandle(artist) && <><span className="artist-card__separator" aria-hidden="true">·</span><span className="artist-card__handle">{artistHandle(artist)}</span></>}
           <span className="artist-card__count">{formatCount(artist.assetCount)}</span>
-          <span className="artist-card__tools">
-            <button type="button" className="artist-card__tool" aria-label={artist.pinned ? `${artist.label} 고정 해제` : `${artist.label} 고정`} aria-pressed={artist.pinned} onClick={handlePin}><PinIcon aria-hidden="true" /></button>
-            <Menu label={`${artist.label} 더보기`} triggerClassName="artist-card__tool" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={artistMenuItems(artist, onNavigate, gateway)} />
-          </span>
         </div>
         <div className="artist-card__meta">{gridMetaLine(artist, rule)}</div>
       </div>
@@ -269,14 +288,19 @@ function HeroFact({ value, label, suffix }: { value: string | number; label: str
 /** 오늘: two or three artists to revisit, fixed for the day until 다시 고르기. */
 function TodaySection({ onNavigate, privacyMode }: { onNavigate: Navigate; privacyMode: boolean }) {
   const [seed, setSeed] = useState(0);
-  const [dismissed, setDismissed] = useState<string[]>([]);
   const [heroId, setHeroId] = useState<string | null>(null);
   const gateway = useArtistGateway();
   const { localDate, offsetMinutes } = localDateAndOffset();
-  const rows = useArtistRead((gateway) => gateway.today(localDate, offsetMinutes, seed, dismissed), `today:${localDate}:${seed}:${dismissed.join("|")}`).data;
+  const fetched = useArtistRead((gateway) => gateway.today(localDate, offsetMinutes, seed, []), `today:${localDate}:${seed}`).data;
+  // Keep the current picks on screen while 다시 고르기 loads the next ones.
+  const [lastRows, setLastRows] = useState<typeof fetched>(null);
+  useEffect(() => { if (fetched) setLastRows(fetched); }, [fetched]);
+  const rows = fetched ?? lastRows;
   if (rows && rows.length === 0) return null;
   const [, month, day] = localDate.split("-");
-  const hero = rows?.find((row) => row.artist.id === heroId) ?? rows?.[0];
+  // A day often has one candidate per kind, so the server's re-pick can return the same rows;
+  // 다시 고르기 also moves the hero along the rows so it always visibly changes.
+  const hero = rows?.find((row) => row.artist.id === heroId) ?? (rows?.length ? rows[seed % rows.length] : undefined);
   if (!hero) return <section className="artist-today" aria-label="오늘">
     <div className="artist-section-head">
       <span className="workspace-section-label">오늘 · {Number(month)}월 {Number(day)}일</span>
@@ -289,7 +313,6 @@ function TodaySection({ onNavigate, privacyMode }: { onNavigate: Navigate; priva
       <Button size="sm" variant="ghost" onClick={() => { setHeroId(null); setSeed((value) => value + 1); }}><ArrowPathIcon aria-hidden="true" />다시 고르기</Button>
     </div>
     {hero && <article className="artist-today__hero" aria-label={`${hero.artist.label} · ${hero.reason}`}>
-      <button type="button" className="artist-today__dismiss" aria-label={`${hero.artist.label} 오늘에서 빼기`} onClick={() => { setHeroId(null); setDismissed((list) => [...list, hero.artist.id]); }}><XMarkIcon aria-hidden="true" /></button>
       <button type="button" className="artist-hero-mosaic-button" aria-label={`${hero.artist.label} 작가 페이지`} onClick={() => onNavigate({ kind: "creator", creatorKey: hero.artist.id })}>
         <HeroMosaic assetIds={hero.assetIds} assetCount={hero.artist.assetCount} privacyMode={privacyMode} />
       </button>

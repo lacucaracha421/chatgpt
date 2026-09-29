@@ -28,21 +28,31 @@ describe("date masonry", () => {
     expect(result.headings.map(({ weekday, count }) => [weekday, count])).toEqual([["오늘", 2], ["금", 1]]);
     expect(headingWeekday("")).toBe("");
   });
-  it("gives every date a full-width row above its group", () => {
-    const result = buildMasonryLayout([item("a", 5, 80), item("b", 4, 300), item("c", 3), item("d", 2)], 640, 180, 20, true, true);
-    expect(result.headings.every((heading) => heading.left === 0 && heading.width === 640)).toBe(true);
-    expect(result.headings.map((heading) => heading.top)).toEqual([...result.headings.map((heading) => heading.top)].sort((a, b) => a - b));
-    expect(result.headings[1].top).toBeGreaterThan(result.tiles[0].top + result.tiles[0].height);
-    expect(result.tiles.map((tile) => tile.asset.id)).toEqual(["a", "b", "c", "d"]);
+  it("packs five single-asset dates into one band and starts a seven-item date in the next band", () => {
+    const items = [
+      ...[5, 4, 3, 2, 1].map((day, index) => item(`small-${index}`, day)),
+      ...Array.from({ length: 7 }, (_, index) => item(`large-${index}`, 0)),
+    ];
+    const result = buildMasonryLayout(items, 1_200, 180, 20, true, true);
+    const firstBand = result.headings.slice(0, 5);
+
+    expect(firstBand.every((heading) => heading.top === 0)).toBe(true);
+    expect(new Set(firstBand.map((heading) => heading.left)).size).toBe(5);
+    expect(firstBand.every((heading) => heading.width < 1_200)).toBe(true);
+    expect(result.headings[5]).toMatchObject({ left: 0, width: 1_200 });
+    expect(result.headings[5].top).toBeGreaterThan(0);
+    expect(result.tiles.slice(0, 5).map((tile) => tile.left)).toEqual(firstBand.map((heading) => heading.left));
+    expect(result.tiles.slice(5).every((tile) => tile.left + tile.width <= 1_200)).toBe(true);
   });
-  it("keeps date headings full width on wide and narrow screens", () => {
-    const items = [item("a", 5), item("b", 5), item("c", 4), item("d", 3)];
-    const wide = buildMasonryLayout(items, 640, 180, 20, true, true);
-    expect(wide.headings[0]).toMatchObject({ left: 0, width: 640, top: 0 });
-    expect(wide.headings[1].top).toBeGreaterThan(wide.tiles[1].top + wide.tiles[1].height);
-    const narrow = buildMasonryLayout(items, 200, 180, 20, true, true);
-    expect(narrow.headings.every((heading) => heading.left === 0 && heading.width === 200)).toBe(true);
-    expect(narrow.headings[1].top).toBeGreaterThan(narrow.tiles[1].top + narrow.tiles[1].height);
+  it("packs date segments left to right while preserving a new band for overflow", () => {
+    const result = buildMasonryLayout([item("a", 5, 80), item("b", 5, 300), item("c", 4), item("d", 3)], 640, 180, 20, true, true);
+    expect(result.headings.slice(0, 2)).toEqual([
+      expect.objectContaining({ left: 0, width: 420, top: 0 }),
+      expect.objectContaining({ left: 440, width: 200, top: 0 }),
+    ]);
+    expect(result.headings[2].left).toBe(0);
+    expect(result.headings[2].top).toBeGreaterThan(0);
+    expect(result.tiles.map((tile) => tile.asset.id)).toEqual(["a", "b", "c", "d"]);
   });
   it("keeps earlier positions when a page extends the same date", () => {
     const first = [item("a"), item("b", 5, 80), item("c")];

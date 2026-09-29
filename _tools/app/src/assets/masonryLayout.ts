@@ -44,22 +44,31 @@ export function buildMasonryLayout(items: AssetSummary[], width: number, targetW
     } else last.items.push(asset);
   });
   let rowTop = 0;
+  let rowBottom = 0;
+  let usedColumns = 0;
   for (const group of groups) {
+    const span = groupDates ? Math.min(columns, group.items.length) : columns;
+    if (usedColumns + span > columns) {
+      rowTop = rowBottom;
+      usedColumns = 0;
+    }
+    const left = usedColumns * (tileWidth + gap);
     if (groupDates) headings.push({
       key: group.items[0].id, label: collectedDate(group.items[0].collectedAt).label,
       weekday: headingWeekday(group.items[0].collectedAt), count: group.items.length,
-      top: rowTop, left: 0, width,
+      top: rowTop, left, width: span * (tileWidth + gap) - gap,
     });
-    const bottoms = Array<number>(columns).fill(rowTop + (groupDates ? DATE_HEADING_HEIGHT : 0));
+    const bottoms = Array<number>(span).fill(rowTop + (groupDates ? DATE_HEADING_HEIGHT : 0));
     group.items.forEach((asset, offset) => {
       const column = bottoms.indexOf(Math.min(...bottoms));
       const imageHeight = tileWidth * (asset.width > 0 && asset.height > 0 ? asset.height / asset.width : 1);
-      tiles.push({ asset, index: group.start + offset, left: column * (tileWidth + gap), top: bottoms[column], width: tileWidth, imageHeight, height: imageHeight });
+      tiles.push({ asset, index: group.start + offset, left: left + column * (tileWidth + gap), top: bottoms[column], width: tileWidth, imageHeight, height: imageHeight });
       bottoms[column] += imageHeight + gap;
     });
-    rowTop = Math.max(...bottoms);
+    rowBottom = Math.max(rowBottom, ...bottoms);
+    usedColumns += span;
   }
-  return { tiles, headings, height: rowTop };
+  return { tiles, headings, height: rowBottom };
 }
 
 export function masonryMove(tiles: MasonryTile[], currentId: string, direction: 1 | -1) {

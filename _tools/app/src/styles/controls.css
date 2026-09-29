@@ -648,10 +648,14 @@ select.ui-text-input {
   border: var(--border-width) solid var(--color-border);
   background-color: var(--color-sidebar);
   box-shadow: var(--shadow-floating);
-  animation: none;
   opacity: 1;
   transform: translateX(0);
   transition: transform 220ms var(--ease-standard), opacity 220ms var(--ease-standard);
+}
+
+/* The shared floating-surface animation (fill "both") would pin opacity at 1 and hold the panel visible until unmount; the overlay moves by transition only. */
+.ui-overlay-panel.ui-overlay-panel {
+  animation: none;
 }
 
 .ui-overlay-panel[data-state="closed"] {

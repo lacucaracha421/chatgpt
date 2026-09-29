@@ -1,6 +1,8 @@
 /* PC 발매 캘린더: quiet controls, media first grid, and the shared Foundation roles. */
 .release-calendar { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
-.release-calendar__top-row { display: flex; flex: none; align-items: center; gap: var(--space-2); height: 44px; padding: 0 var(--space-4); border-bottom: 1px solid var(--color-border); }
+/* The filter bar sits right under the title bar, and the first month follows it closely (user, 2026-09-29). */
+.workspace-content .collection-browser__stage:has(.release-calendar) { padding-top: 0; }
+.release-calendar__top-row { display: flex; flex: none; align-items: center; gap: var(--space-2); height: 44px; padding: 0 var(--space-4); }
 .release-calendar__filter.ui-button--quiet { flex: none; }
 .release-calendar__filter.is-selected { background: var(--color-filter-selected); color: var(--color-text); font-weight: 600; }
 .release-calendar__filter-count { color: var(--color-faint); font: 500 var(--type-meta) / 1 var(--font-numeric); }
@@ -15,9 +17,9 @@
 .release-calendar__status-line .ui-button { flex: none; }
 .release-calendar__error { margin: 0; padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--color-border); color: var(--color-danger); font-size: var(--type-meta); }
 
-.release-calendar__body { flex: 1; min-height: 0; overflow: auto; padding: var(--space-4) var(--space-4) var(--space-8); scrollbar-gutter: stable; }
+.release-calendar__body { flex: 1; min-height: 0; overflow: auto; padding: var(--space-1) var(--space-4) var(--space-8); scrollbar-gutter: stable; }
 .release-calendar__month + .release-calendar__month { margin-top: var(--space-6); }
-.release-calendar__month > .ui-section-label { margin: 0 0 var(--space-3); }
+.release-calendar__month > .ui-section-label { margin: 0 0 var(--space-2); }
 .release-calendar__empty { padding: var(--space-8) var(--space-4); }
 .release-calendar__days { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: var(--space-6) var(--space-4); }
 .release-calendar__day { grid-column: span var(--day-span, 1); display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }

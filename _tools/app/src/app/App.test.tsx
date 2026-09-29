@@ -176,7 +176,7 @@ function gateway(): LibraryGateway {
     purgeExpiredTrash: vi.fn().mockResolvedValue({ deletedCount: 0, failedAssetIds: [] }),
     setAssetFavorite: vi.fn(),
     setAssetsFavorite: vi.fn(),
-    getAssetClassifications: vi.fn(),
+    getAssetClassifications: vi.fn().mockResolvedValue([]),
     setAssetClassification: vi.fn(),
     patchAssetAlbums: vi.fn(),
     getAssetAlbums: vi.fn().mockResolvedValue([]),
@@ -1015,7 +1015,7 @@ describe("App", () => {
         albumId: null,
         collectionId: null,
         creatorKey: null,
-        directOnly: false,
+        directOnly: true,
         unclassifiedOnly: false,
         mediaKind: null,
         aspectRatio: null,
@@ -1056,7 +1056,7 @@ describe("App", () => {
     expect(libraryGateway.listAssets).toHaveBeenLastCalledWith({
       classificationId: "tag-arona",
       albumId: null,
-      directOnly: false,
+      directOnly: true,
       unclassifiedOnly: false,
       collectionId: null,
       creatorKey: null,
@@ -1109,7 +1109,7 @@ describe("App", () => {
         albumId: null,
         collectionId: null,
         creatorKey: null,
-        directOnly: false,
+        directOnly: true,
         unclassifiedOnly: false,
         mediaKind: null,
         aspectRatio: null,
@@ -1229,7 +1229,8 @@ describe("App", () => {
       render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
       await openAssets();
       const tile = await screen.findByRole("option", { name: "arona.png" });
-      await userEvent.click(tile);
+      // A plain click opens 정보; Ctrl-click selects.
+      fireEvent.click(tile, { ctrlKey: true });
       await userEvent.click(screen.getByRole("button", { name: /캐릭터/ }));
       await userEvent.click(
         await screen.findByRole("option", { name: "마커스 · 게임 · 1장 중 1장" }),
@@ -1735,7 +1736,7 @@ describe("Chrome 03b app integration", () => {
     render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
     await openAssets();
     const tile = await screen.findByRole("option", { name: "arona.png" });
-    await user.click(tile);
+    fireEvent.click(tile, { ctrlKey: true });
     const gallery = document.querySelector(".asset-gallery");
     const calls = vi.mocked(libraryGateway.listAssets).mock.calls.length;
     await user.click(screen.getByRole("button", { name: "보기" }));

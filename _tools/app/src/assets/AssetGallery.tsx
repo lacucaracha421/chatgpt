@@ -8,7 +8,8 @@ import { assetDragIds, type InternalDragPayload } from "../shared/interaction/po
 import { Skeleton } from "../shared/ui/Skeleton";
 import type { SelectionGesture } from "./selection";
 import { buildJustifiedRows } from "./justifiedRows";
-import { buildMasonryLayout, collectedDate, headingWeekday, masonryMove, type GalleryLayout } from "./masonryLayout";
+import { buildJustifiedGalleryRows, type JustifiedGalleryRow } from "./galleryRows";
+import { buildMasonryLayout, collectedDate, masonryMove, type GalleryLayout } from "./masonryLayout";
 import { assetThumbnailUrl, assetUrl, thumbnailUrl, vaultAssetUrl, vaultPlaybackUrl, vaultThumbnailUrl } from "./mediaUrl";
 import { AssetGalleryScrollbar } from "./AssetGalleryScrollbar";
 import { VideoTileMedia } from "../video/VideoTileMedia";
@@ -84,8 +85,8 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
   const { width, gap, height: viewportHeight } = useGalleryMetrics(scrollRef, layout);
   const [scrollTop, setScrollTop] = useState(0);
   const masonry = useMemo(() => buildMasonryLayout(layout === "masonry" ? items : [], width, targetRowHeight, gap, false, groupDates, fullDateHeadings), [layout, items, width, targetRowHeight, gap, groupDates, fullDateHeadings]);
-  const rows = useMemo(() => buildJustifiedGalleryRows(layout === "justified" ? items : [], width, targetRowHeight, gap, groupDates, fullDateHeadings), [layout, gap, groupDates, fullDateHeadings, items, targetRowHeight, width]);
-  const rowVirtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => scrollRef.current, estimateSize: (index) => (rows[index]?.height ?? targetRowHeight) + (rows[index]?.dateHeading ? DATE_HEADING_HEIGHT : 0), getItemKey: (index) => rows[index]?.items[0]?.id ?? index, gap, scrollMargin: introHeight, overscan: VIRTUAL_OVERSCAN_ROWS });
+  const rows = useMemo<JustifiedGalleryRow[]>(() => buildJustifiedGalleryRows(layout === "justified" ? items : [], width, targetRowHeight, gap, groupDates, fullDateHeadings), [layout, gap, groupDates, fullDateHeadings, items, targetRowHeight, width]);
+  const rowVirtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => scrollRef.current, estimateSize: (index) => (rows[index]?.height ?? targetRowHeight) + (rows[index]?.dateHeadings?.length ? DATE_HEADING_HEIGHT : 0), getItemKey: (index) => rows[index]?.items[0]?.id ?? index, gap, scrollMargin: introHeight, overscan: VIRTUAL_OVERSCAN_ROWS });
   const lastScopeKeyRef = useRef<string | null>(scopeKey ?? null);
   const scrollMemoryRef = useRef(new Map<string, number>());
   const pendingRestoreRef = useRef<{ scopeKey: string | null; offset: number } | null>(null);
@@ -240,7 +241,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
           rowIndex += 1;
         }
         let insertedHeight = 0;
-        for (let index = 0; index < rowIndex; index += 1) insertedHeight += rows[index].height + (rows[index].dateHeading ? DATE_HEADING_HEIGHT : 0) + gap;
+        for (let index = 0; index < rowIndex; index += 1) insertedHeight += rows[index].height + (rows[index].dateHeadings?.length ? DATE_HEADING_HEIGHT : 0) + gap;
         if (layout !== "masonry") element.scrollTop += insertedHeight;
       }
     }
@@ -332,9 +333,20 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
         </div>)}
         {layout === "justified" && virtualRows.map((virtualRow) => {
           const row = rows[virtualRow.index]; if (!row) return null;
-          return <div key={virtualRow.key} className="asset-gallery__justified-unit" style={{ height: row.height + (row.dateHeading ? DATE_HEADING_HEIGHT : 0) + gap, transform: `translateY(${virtualRow.start - introHeight}px)` }}>
-            {row.dateHeading && <div className="asset-gallery__date" role="presentation"><span className="asset-gallery__date-day">{row.dateHeading.label}</span>{row.dateHeading.weekday && <span className="asset-gallery__date-weekday">{row.dateHeading.weekday}</span>}<span className="asset-gallery__date-rule" aria-hidden="true" /><span className="asset-gallery__date-count">{row.dateHeading.count.toLocaleString()}</span></div>}
-            <div className="asset-gallery__row" style={{ gap, top: row.dateHeading ? DATE_HEADING_HEIGHT : 0, height: row.height, backgroundColor: "var(--color-bg)" }}>{row.items.map((asset, index) => <AssetTile key={asset.id} asset={asset} height={row.height} selected={selectedAssetIds.has(asset.id)} selectedAssetIds={selectedAssetIds} focused={focusAssetId ? focusAssetId === asset.id : virtualRow.index === 0 && index === 0} focusVisible={Boolean(focusAssetId) && focusAssetId === asset.id} captionLabel={captionLabel?.(asset)} privacyMode={privacyMode} thumbnailCacheKey={thumbnailCacheKey} mediaSource={mediaSource} activePreview={activePreviewId === asset.id} onRequestPreview={() => setActivePreviewId(asset.id)} onReleasePreview={() => setActivePreviewId((current) => current === asset.id ? null : current)} onRequestQuickPreview={requestQuickPreview} onCancelQuickPreview={cancelQuickPreview} onRetryVideo={onRetryVideo} onSelectionGesture={onSelectionGesture} onFocusAsset={onFocusAsset} onOpen={onOpen} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}</div>
+          const hasDateHeadings = Boolean(row.dateHeadings?.length);
+          const packedHeadings = row.dateHeadings && row.dateHeadings.length > 1 ? row.dateHeadings : null;
+          const renderAssetTile = (asset: AssetSummary, index: number) => <AssetTile key={asset.id} asset={asset} height={row.height} selected={selectedAssetIds.has(asset.id)} selectedAssetIds={selectedAssetIds} focused={focusAssetId ? focusAssetId === asset.id : virtualRow.index === 0 && index === 0} focusVisible={Boolean(focusAssetId) && focusAssetId === asset.id} captionLabel={captionLabel?.(asset)} privacyMode={privacyMode} thumbnailCacheKey={thumbnailCacheKey} mediaSource={mediaSource} activePreview={activePreviewId === asset.id} onRequestPreview={() => setActivePreviewId(asset.id)} onReleasePreview={() => setActivePreviewId((current) => current === asset.id ? null : current)} onRequestQuickPreview={requestQuickPreview} onCancelQuickPreview={cancelQuickPreview} onRetryVideo={onRetryVideo} onSelectionGesture={onSelectionGesture} onFocusAsset={onFocusAsset} onOpen={onOpen} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />;
+          let itemOffset = 0;
+          const tileContent = packedHeadings
+            ? packedHeadings.map((heading) => {
+              const start = itemOffset;
+              itemOffset += heading.count;
+              return <div key={`${heading.label}-${heading.left}`} className="asset-gallery__row-segment" style={{ width: heading.width, gap }}>{row.items.slice(start, start + heading.count).map((asset, index) => renderAssetTile(asset, start + index))}</div>;
+            })
+            : row.items.map(renderAssetTile);
+          return <div key={virtualRow.key} className="asset-gallery__justified-unit" style={{ height: row.height + (hasDateHeadings ? DATE_HEADING_HEIGHT : 0) + gap, transform: `translateY(${virtualRow.start - introHeight}px)` }}>
+            {row.dateHeadings?.map((heading) => <div key={`${heading.label}-${heading.left}`} className="asset-gallery__date asset-gallery__date-segment" role="presentation" style={{ position: "absolute", left: heading.left, top: 0, width: heading.width }}><span className="asset-gallery__date-day">{heading.label}</span>{heading.weekday && <span className="asset-gallery__date-weekday">{heading.weekday}</span>}<span className="asset-gallery__date-rule" aria-hidden="true" /><span className="asset-gallery__date-count">{heading.count.toLocaleString()}</span></div>)}
+            <div className="asset-gallery__row" style={{ gap: packedHeadings ? gap * 4 : gap, top: hasDateHeadings ? DATE_HEADING_HEIGHT : 0, height: row.height, backgroundColor: "var(--color-bg)" }}>{tileContent}</div>
           </div>;
         })}
       </div>
@@ -346,26 +358,6 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
 
 function isTextEditingTarget(target: EventTarget | null) {
   return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
-}
-
-type JustifiedGalleryRow = ReturnType<typeof buildJustifiedRows<AssetSummary>>[number] & { dateHeading?: { label: string; weekday: string; count: number } };
-
-function buildJustifiedGalleryRows(items: AssetSummary[], width: number, targetHeight: number, gap: number, groupDates: boolean, _fullDateHeadings: boolean): JustifiedGalleryRow[] {
-  if (!groupDates) return buildJustifiedRows(items, width, targetHeight, gap);
-  const groups: AssetSummary[][] = [];
-  for (const asset of items) {
-    const current = groups[groups.length - 1];
-    if (!current || collectedDate(current[0].collectedAt).key !== collectedDate(asset.collectedAt).key) groups.push([asset]);
-    else current.push(asset);
-  }
-  return groups.flatMap((group) => buildJustifiedRows(group, width, targetHeight, gap).map((row, index) => index === 0 ? {
-    ...row,
-    dateHeading: {
-      label: collectedDate(group[0].collectedAt).label,
-      weekday: headingWeekday(group[0].collectedAt),
-      count: group.length,
-    },
-  } : row));
 }
 
 function AssetTile({ asset, height, selected, selectedAssetIds, focused, focusVisible, captionLabel, privacyMode, thumbnailCacheKey, mediaSource, activePreview, onRequestPreview, onReleasePreview, onRequestQuickPreview, onCancelQuickPreview, onRetryVideo, onSelectionGesture, onFocusAsset, onOpen, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: { asset: AssetSummary; height: number; selected: boolean; selectedAssetIds: ReadonlySet<string>; focused: boolean; focusVisible: boolean; captionLabel?: string | null; privacyMode: boolean; thumbnailCacheKey?: string | number; mediaSource: "library" | "vault"; activePreview: boolean; onRequestPreview(): void; onReleasePreview(): void; onRequestQuickPreview(asset: AssetSummary, trigger: HTMLElement): void; onCancelQuickPreview(): void; onRetryVideo?: AssetGalleryProps["onRetryVideo"]; onSelectionGesture?: (asset: AssetSummary, gesture: SelectionGesture) => void; onFocusAsset?: (asset: AssetSummary) => void; onOpen?: (asset: AssetSummary) => void; onPointerDragStart?: AssetGalleryProps["onPointerDragStart"]; onPointerDragMove?: AssetGalleryProps["onPointerDragMove"]; onPointerDragEnd?: AssetGalleryProps["onPointerDragEnd"]; onPointerDragCancel?: AssetGalleryProps["onPointerDragCancel"] }) {

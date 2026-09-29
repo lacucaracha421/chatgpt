@@ -1,6 +1,6 @@
 import { ArrowPathIcon, BookmarkIcon as BookmarkOutlineIcon, CalendarDaysIcon, CheckIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { BookmarkIcon } from "@heroicons/react/24/solid";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type SVGProps } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type SVGProps } from "react";
 import { igdbImagePreviewUrl, tmdbImagePreviewUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -72,12 +72,17 @@ function releaseDays<T extends { date: string | null; precision: string }>(items
   return [...days.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, day]) => day);
 }
 
+// The last calendar and 관심 list, kept for the app session so reopening the calendar shows them at once
+// while the fresh copy loads behind them.
+const lastShown = new WeakMap<object, { calendar: ReleaseCalendar | null; wishlist: ReleaseWishlistItem[] | null }>();
+
 export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettings }: Props) {
   const { gateway } = useLibrary();
   const api = gateway.releaseCalendar;
   const { privacyMode } = usePrivacy();
-  const [calendar, setCalendar] = useState<ReleaseCalendar | null>(null);
-  const [wishlist, setWishlist] = useState<ReleaseWishlistItem[] | null>(null);
+  const [calendar, setCalendar] = useState<ReleaseCalendar | null>(() => (api && lastShown.get(api)?.calendar) ?? null);
+  const [wishlist, setWishlist] = useState<ReleaseWishlistItem[] | null>(() => (api && lastShown.get(api)?.wishlist) ?? null);
+  useEffect(() => { if (api) lastShown.set(api, { calendar, wishlist }); }, [api, calendar, wishlist]);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [kind, setKind] = useState<KindFilter>("all");
@@ -135,17 +140,6 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
     ? (wishlist ?? []).filter(matches).map(item => ({ ...item, watched: true }))
     : (calendar?.entries ?? []).filter(matches).map(entry => ({ ...entry, watched: wishById.has(entry.id), unread: wishById.get(entry.id)?.unread ?? [] }));
   const groups = groupReleases(tiles);
-  // A kind or 관심 switch slides the list toward the chosen side (same motion as the tablet).
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const shownSwitch = useRef<number | null>(null);
-  const switchIndex = kindOptions.findIndex(option => option.value === kind) + (watchOnly ? kindOptions.length : 0);
-  useLayoutEffect(() => {
-    const before = shownSwitch.current; shownSwitch.current = switchIndex;
-    const body = bodyRef.current;
-    if (before === null || before === switchIndex || !body || typeof body.animate !== "function") return;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-    body.animate([{ opacity: 0.5, transform: `translateX(${Math.sign(switchIndex - before) * 16}px)` }, { opacity: 1, transform: "none" }], { duration: 200, easing: "cubic-bezier(0.2, 0, 0, 1)" });
-  }, [switchIndex]);
   const unreadTotal = (wishlist ?? []).reduce((sum, item) => sum + item.unread.length, 0);
 
   async function toggle(tile: Tile) {
@@ -204,7 +198,7 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
         {source.errorCode === "credential_not_configured" && onOpenSettings && <Button type="button" size="sm" variant="quiet" onClick={onOpenSettings}>외부 서비스 설정</Button>}</div>)}
     </div>}
     {error && <p className="release-calendar__error" role="alert">{error}</p>}
-    <div ref={bodyRef} className="release-calendar__body">
+    <div className="release-calendar__body">
       {api && !calendar && !error && <LoadingCalendarState />}
       {calendar && groups.length === 0 && (watchOnly
         ? <EmptyCalendarState title="관심 목록 비어 있음" icon={BookmarkOutlineIcon} />

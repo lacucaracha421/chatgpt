@@ -25,8 +25,9 @@ export function ArtistIndex({ view, onNavigate }: { view: AssetView; onNavigate:
   const [query, setQuery] = useState("");
   const trimmedQuery = query.trim();
   const mainPage = useArtistRead(
-    (gateway) => gateway.list({ bucket: "main", sort: "recent", limit: 1000 }),
-    "index:main",
+    // Most-saved artists first (user, 2026-09-29).
+    (gateway) => gateway.list({ bucket: "main", sort: "count", limit: 1000 }),
+    "index:main:count",
   );
   const searchablePage = useArtistRead(
     trimmedQuery ? (gateway) => gateway.list({ bucket: "all", sort: "recent", limit: 2000 }) : null,

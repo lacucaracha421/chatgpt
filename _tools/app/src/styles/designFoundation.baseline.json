@@ -7,10 +7,10 @@
       "legacyToken": 0
     },
     "_tools/app/src/artists/artists.css": {
-      "offScaleSpacing": 24,
+      "offScaleSpacing": 22,
       "offRoleFontSize": 1,
       "pillRadius": 0,
-      "legacyToken": 23
+      "legacyToken": 21
     },
     "_tools/app/src/assets/SelectionBar.css": {
       "offScaleSpacing": 0,
@@ -268,7 +268,7 @@
       "offScaleSpacing": 13,
       "offRoleFontSize": 0,
       "pillRadius": 3,
-      "legacyToken": 102
+      "legacyToken": 101
     },
     "_tools/app/src/styles/tokens.css": {
       "offScaleSpacing": 0,
