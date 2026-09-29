@@ -51,11 +51,10 @@ it("shows the guessed character above 출처 and the grouped list below it", asy
   expect(within(list).getByRole("button", { name: /성적 표현/ })).toBeVisible();
   const body = within(list).getAllByRole("button", { name: /^(분홍 머리|여자 1명)$/ }).map((button) => button.textContent);
   expect(body).toEqual(["분홍 머리", "여자 1명"]);
-  // Order in the panel: 주요 태그, 출처, 자동 태그, 파일.
+  // Tag groups stay together before source and file details.
   const headings = screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent?.replace(/\d+/g, "").trim());
-  expect(headings.indexOf("주요 태그")).toBeLessThan(headings.indexOf("출처"));
-  expect(headings.indexOf("출처")).toBeLessThan(headings.indexOf("자동 태그"));
-  expect(headings.indexOf("자동 태그")).toBeLessThan(headings.indexOf("파일"));
+  expect(headings.indexOf("캐릭터 · 자동 태그")).toBeLessThan(headings.indexOf("출처"));
+  expect(headings.indexOf("출처")).toBeLessThan(headings.indexOf("파일"));
 });
 
 it("omits 주요 태그 when the asset has a confirmed character", async () => {
@@ -70,6 +69,7 @@ it("applies a chip as an 에셋 filter and removes a tag with undo", async () =>
   const gateway = tagGateway(tags);
   renderInspector(gateway);
   await user.click(await screen.findByRole("button", { name: "분홍 머리" }));
+  await user.click(screen.getByRole("button", { name: "이 태그로 찾기" }));
   expect(getAutoTagFilter()).toEqual({ include: ["pink_hair"], exclude: [] });
 
   await user.click(screen.getByRole("button", { name: "유두 태그 빼기" }));

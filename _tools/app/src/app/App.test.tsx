@@ -812,14 +812,11 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
     await openAssets();
 
-    await user.click(await screen.findByRole("button", { name: "보기 설정" }));
-    const metadata = await screen.findByLabelText("정보 숨기기");
-    expect(metadata).toBeChecked();
-    expect(screen.getByLabelText("정렬")).toHaveValue("oldest");
+    expect(await screen.findByRole("button", { name: "정렬" })).toHaveTextContent("오래된순");
     expect(screen.getByRole("complementary", { name: "탐색 인덱스" }).style.getPropertyValue("--workspace-index-width")).toBe("264px");
 
-    await user.selectOptions(screen.getByLabelText("정렬"), "random");
-    await user.click(metadata);
+    await user.click(screen.getByRole("button", { name: "정렬" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "랜덤" }));
     await user.click(screen.getByRole("button", { name: "게임 접기" }));
     const resizeHandle = screen.getByRole("separator", { name: "사이드바 너비 조절" });
     Object.defineProperties(resizeHandle, {
@@ -834,7 +831,7 @@ describe("App", () => {
       expect(JSON.parse(localStorage.getItem(UI_PREFERENCES_KEY) ?? "{}")).toEqual({
         appZoom: 100,
         galleryLayout: "masonry",
-        metadataVisible: true,
+        metadataVisible: false,
         privacyMode: false,
         sidebarWidth: 272,
         expandedClassificationIds: [],
@@ -1728,7 +1725,11 @@ describe("App", () => {
 describe("Chrome 03b app integration", () => {
   beforeEach(() => { localStorage.clear(); localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics"); vi.mocked(open).mockReset(); });
   afterEach(cleanup);
-  it("does not reload, unselect or remount assets when opening and closing view settings", async () => {
+  it("does not reload, unselect or remount assets when opening and closing the view menu", async () => {
+    Object.defineProperties(HTMLElement.prototype, {
+      offsetWidth: { configurable: true, get: () => 900 }, clientWidth: { configurable: true, get: () => 840 },
+      offsetHeight: { configurable: true, get: () => 600 }, clientHeight: { configurable: true, get: () => 600 },
+    });
     const user = userEvent.setup(); const libraryGateway = gateway();
     vi.mocked(libraryGateway.listAssets).mockResolvedValue({ items: [asset], nextCursor: null });
     render(<App gateway={libraryGateway} subscribeDrops={noDrops} />);
@@ -1737,10 +1738,10 @@ describe("Chrome 03b app integration", () => {
     await user.click(tile);
     const gallery = document.querySelector(".asset-gallery");
     const calls = vi.mocked(libraryGateway.listAssets).mock.calls.length;
-    await user.click(screen.getByRole("button", { name: "보기 설정" }));
-    await screen.findByRole("dialog", { name: "보기 설정" });
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    await screen.findByRole("menu");
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: "보기 설정" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(document.querySelector(".asset-gallery")).toBe(gallery);
     expect(screen.getByRole("option", { name: "arona.png" })).toHaveAttribute("aria-selected", "true");
     expect(libraryGateway.listAssets).toHaveBeenCalledTimes(calls);

@@ -618,6 +618,7 @@ select.ui-text-input {
 /* Floating surfaces draw the NieR corner brackets as inset backgrounds because dialogs and anchored panels clip anything outside their box. */
 .ui-menu.ui-menu,
 .ui-anchored-panel.ui-anchored-panel,
+.ui-overlay-panel.ui-overlay-panel,
 .ui-dialog.ui-dialog.ui-dialog:not(.ui-dialog--fullscreen):not(:has(.classification-index)):not(:has(>.library-sheet)) {
   border-radius: 0;
   background-image:
@@ -632,6 +633,74 @@ select.ui-text-input {
   background-origin: padding-box;
   animation: ui-floating-surface-open var(--motion-standard) var(--ease-standard) both;
 }
+
+.ui-overlay-panel {
+  position: absolute;
+  z-index: var(--z-floating-menu);
+  top: var(--space-2);
+  right: var(--space-2);
+  bottom: var(--space-2);
+  display: flex;
+  width: min(var(--overlay-panel-width), calc(100% - var(--space-4)));
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: var(--border-width) solid var(--color-border);
+  background-color: var(--color-sidebar);
+  box-shadow: var(--shadow-floating);
+  animation: none;
+  opacity: 1;
+  transform: translateX(0);
+  transition: transform 220ms var(--ease-standard), opacity 220ms var(--ease-standard);
+}
+
+.ui-overlay-panel[data-state="closed"] {
+  opacity: 0;
+  transform: translateX(24px);
+  pointer-events: none;
+}
+
+.ui-overlay-panel__header {
+  display: flex;
+  min-height: var(--toolbar-height);
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) 0 var(--space-4);
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.ui-overlay-panel__header > strong {
+  font-size: var(--type-meta);
+  font-weight: 500;
+}
+
+.ui-overlay-panel__actions {
+  display: inline-flex;
+  margin-left: auto;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.ui-overlay-panel__body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-4);
+}
+
+.home-shelf { position: relative; min-width: 0; }
+.home-shelf__track { display: flex; gap: var(--space-4); min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+.home-shelf__track::-webkit-scrollbar { display: none; }
+.home-shelf__track.is-dragging { cursor: grabbing; }
+.home-shelf__track.is-dragging > * { pointer-events: none; }
+.home-shelf__arrow { position: absolute; top: 50%; z-index: 2; width: var(--control-height-compact); height: var(--control-height-compact); display: grid; place-items: center; padding: 0; border: 0; background: var(--color-surface-elevated); color: var(--color-muted); border-radius: var(--radius-control); box-shadow: var(--shadow-floating); transform: translateY(-50%); }
+.home-shelf__arrow:hover { color: var(--color-text); background: var(--color-surface-hover); }
+.home-shelf__arrow:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-width); }
+.home-shelf__arrow svg { width: var(--icon-sm); height: var(--icon-sm); }
+.home-shelf__arrow--prev { left: var(--space-1); }
+.home-shelf__arrow--prev svg { transform: rotate(180deg); }
+.home-shelf__arrow--next { right: var(--space-1); }
 
 /* Bottom sheets retain their edge-attached shape and existing sheet animation. */
 .ui-dialog.ui-dialog:has(>.library-sheet) {
@@ -669,9 +738,14 @@ select.ui-text-input {
 @media (prefers-reduced-motion: reduce) {
   .ui-menu.ui-menu,
   .ui-anchored-panel.ui-anchored-panel,
+  .ui-overlay-panel.ui-overlay-panel,
   .ui-dialog.ui-dialog.ui-dialog:not(.ui-dialog--fullscreen):not(:has(.classification-index)):not(:has(>.library-sheet)),
   .ui-skeleton {
     animation: none;
     opacity: 1;
+  }
+
+  .ui-overlay-panel {
+    transition: none;
   }
 }

@@ -147,16 +147,13 @@ async function mount(targetId?: string, pendingOnly = false, groups: CharacterGr
 
 it("provides working display settings inside character folders", async () => {
   const callbacks=await mount("hina",false,[],undefined,true); const user=userEvent.setup();
-  const trigger=await screen.findByRole("button",{name:"보기 설정"});
+  const trigger=await screen.findByRole("button",{name:"보기"});
   expect(trigger).toBeEnabled();
   await user.click(trigger);
-  const panel=screen.getByRole("dialog",{name:"보기 설정"});
-  await user.selectOptions(within(panel).getByLabelText("배치"),"justified");
-  await user.click(within(panel).getByRole("checkbox",{name:"정보 숨기기"}));
-  await user.click(within(panel).getByRole("checkbox",{name:"비공개 모드"}));
+  await user.click(within(screen.getByRole("menu")).getByRole("radio",{name:"같은 높이"}));
   expect(callbacks.onGalleryLayoutChange).toHaveBeenCalledWith("justified");
-  expect(callbacks.onMetadataVisibleChange).toHaveBeenCalledWith(false);
-  expect(callbacks.onPrivacyModeChange).toHaveBeenCalledWith(true);
+  expect(callbacks.onMetadataVisibleChange).not.toHaveBeenCalled();
+  expect(callbacks.onPrivacyModeChange).not.toHaveBeenCalled();
 });
 it("opens a character relation from its card without changing classifications",async()=>{
   const {navigate,browse}=await mount(); const user=userEvent.setup();

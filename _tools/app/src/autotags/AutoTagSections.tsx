@@ -100,20 +100,20 @@ function chipLabel(chip: AutoTagChip) {
 }
 
 function Chip({ chip, state, active, removable = true }: { chip: AutoTagChip; state: AssetAutoTagState; active: boolean; removable?: boolean }) {
-  const [card, setCard] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const label = chipLabel(chip);
   const english = autoTagEnglish(chip.tag);
   const count = countText(state.vocabulary, chip.tag);
   const detail = [english, count].filter(Boolean).join(" · ");
   const className = ["auto-tag", chip.common && "auto-tag--common", chip.group === "character" && "auto-tag--character",
     chip.source === "added" && "auto-tag--added", active && "auto-tag--active"].filter(Boolean).join(" ");
-  return <span className={className} onPointerEnter={() => setCard(true)} onPointerLeave={() => setCard(false)}>
-    <button type="button" className="auto-tag__label" aria-description={`${detail} · 누르면 이 태그로 찾기`} aria-pressed={active}
-      onFocus={() => setCard(true)} onBlur={() => setCard(false)} onClick={() => state.filter(chip.tag)}>
+  return <span className={className}>
+    <button type="button" className="auto-tag__label" aria-description={detail || undefined} aria-expanded={detailsOpen} aria-pressed={active}
+      onClick={() => setDetailsOpen((open) => !open)}>
       {label}{chip.guessed && <span className="auto-tag__guess">추정</span>}
     </button>
     {removable && <button type="button" className="auto-tag__remove" aria-label={`${label} 태그 빼기`} onClick={() => state.remove(chip)}><XMarkIcon aria-hidden="true" /></button>}
-    {card && <span className="auto-tag__card" aria-hidden="true"><span lang="en">{english}</span>{count && <small>{count}</small>}</span>}
+    {detailsOpen && <span className="auto-tag__card"><span lang="en">{english}</span>{count && <small>{count}</small>}<button type="button" onClick={() => state.filter(chip.tag)}>이 태그로 찾기</button></span>}
   </span>;
 }
 

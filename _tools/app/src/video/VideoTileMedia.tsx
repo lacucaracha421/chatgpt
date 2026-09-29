@@ -4,6 +4,7 @@ import type { AssetSummary } from "../library/types";
 import { assetThumbnailUrl, playbackUrl, scrubFrameUrl } from "../assets/mediaUrl";
 import { useWorkloadProfile } from "../app/workloadProfile";
 import { Button } from "../shared/ui/Button";
+import { Badge } from "../shared/ui/Badge";
 import { Skeleton } from "../shared/ui/Skeleton";
 
 type VideoAsset = AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> };
@@ -141,7 +142,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
       onSeeked={(event) => { if (!scrubbingRef.current) { setPlayedRatio(Math.min(1, event.currentTarget.currentTime / Math.max(0.001, durationSeconds))); setPreviewRatio(null); } }}
       onDurationChange={(event) => { const d = event.currentTarget.duration; if (Number.isFinite(d) && d > 0) setVideoDuration(d); }}
     />}
-    <span className="video-tile__duration">{formatDuration(asset.media.durationMs)}</span><span className="video-tile__icon" aria-hidden="true">▶</span>
+    <Badge className="video-tile__duration" variant="scrim">{formatDuration(asset.media.durationMs)}</Badge><span className="video-tile__icon" aria-hidden="true">▶</span>
     <div
       className="video-tile__scrub"
       tabIndex={0}

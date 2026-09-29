@@ -1,2 +1,17 @@
 .asset-selection-bar__character { position: relative; }
 .asset-selection-bar__character > .ui-button kbd { margin-left: var(--space-1); color: var(--color-faint); font: inherit; font-size: var(--type-meta); }
+.asset-selection-bar,
+.asset-selection-bar .ui-button { flex-wrap: nowrap; white-space: nowrap; }
+.asset-selection-bar { max-width: calc(100% - var(--space-4)); }
+
+.asset-browser__gallery { container: asset-selection-host / inline-size; }
+
+.asset-selection-bar--compact .asset-selection-bar__label,
+.asset-selection-bar--compact .asset-selection-bar__character kbd { display: none; }
+.asset-selection-bar--compact .ui-button:has(> .asset-selection-bar__label) { width: var(--control-height-icon); min-height: var(--control-height-icon); padding: 0; }
+
+@container asset-selection-host (max-width: 720px) {
+  .asset-selection-bar__label,
+  .asset-selection-bar__character kbd { display: none; }
+  .asset-selection-bar .ui-button:has(> .asset-selection-bar__label) { width: var(--control-height-icon); min-height: var(--control-height-icon); padding: 0; }
+}

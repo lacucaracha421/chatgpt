@@ -7,9 +7,7 @@ import { SelectionBar } from "./SelectionBar";
 const baseProps = {
   view: { kind: "classification", classificationId: null } as AssetView,
   selectedCount: 3,
-  inspectorOpen: false,
   batchPending: false,
-  onInspectorToggle: vi.fn(),
   onFavorite: vi.fn(),
   onTrash: vi.fn(),
   onClearSelection: vi.fn(),
@@ -46,6 +44,15 @@ it("places the character picker action first and exposes its C shortcut", () => 
   const buttons = within(toolbar).getAllByRole("button");
   expect(buttons[0]).toHaveTextContent("캐릭터");
   expect(buttons[0]).toHaveTextContent("C");
+});
+
+it("renders icon-only narrow actions with accessible names", () => {
+  render(<SelectionBar {...baseProps} compact onCharacterToggle={vi.fn()} onAssignArtist={vi.fn()} />);
+
+  expect(screen.getByRole("button", { name: "캐릭터 지정" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "작가 지정" })).toBeVisible();
+  expect(screen.queryByText("캐릭터")).not.toBeInTheDocument();
+  expect(screen.queryByText("작가 지정")).not.toBeInTheDocument();
 });
 
 it("keeps collection actions inside a collection detail view", async () => {
@@ -97,20 +104,6 @@ it("does not show collection actions outside a collection detail view", () => {
 
   expect(screen.queryByRole("button", { name: "이 컬렉션에서 제거" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "대표 이미지로 지정" })).not.toBeInTheDocument();
-});
-
-it("toggles the inspector from the selection bar", async () => {
-  const user = userEvent.setup();
-  const onInspectorToggle = vi.fn();
-  const { rerender } = render(
-    <SelectionBar {...baseProps} selectedCount={1} inspectorOpen={false} onInspectorToggle={onInspectorToggle} />,
-  );
-
-  await user.click(screen.getByRole("button", { name: "정보 열기" }));
-  expect(onInspectorToggle).toHaveBeenCalledOnce();
-
-  rerender(<SelectionBar {...baseProps} selectedCount={1} inspectorOpen={true} onInspectorToggle={onInspectorToggle} />);
-  expect(screen.getByRole("button", { name: "정보 닫기" })).toBeVisible();
 });
 
 it("disables batch actions while a batch operation is pending", () => {

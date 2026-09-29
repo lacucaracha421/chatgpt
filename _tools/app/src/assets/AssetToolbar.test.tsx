@@ -1,178 +1,81 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { AssetSort, AssetView, CollectionSummary } from "../library/types";
-import { WorkspaceChromeProvider, ChromeSettingsDock, ChromeTarget } from "../layout/WorkspaceChrome";
+import { ChromeSettingsDock, ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { AssetToolbar } from "./AssetToolbar";
 
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({ minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() }),
-}));
+vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ minimize: vi.fn(), toggleMaximize: vi.fn(), close: vi.fn() }) }));
 
 const baseProps = {
   view: { kind: "classification", classificationId: null } as AssetView,
   classifications: [{ id: "game", kind: "root" as const, name: "게임", parentId: null, iconKey: null, colorKey: null }],
   albums: [{ id: "covers", name: "표지", parentId: null, iconKey: null, colorKey: null }],
-  collections: [],
-  sort: "newest" as AssetSort,
-  mediaFilter: "all" as const,
-  aspectFilter: "all" as const,
-  directOnly: false,
-  metadataVisible: true,
-  privacyMode: false,
-  onPrivacyModeChange: vi.fn(),
-  thumbnailRowHeight: 180,
-  onSortChange: vi.fn(),
-  onMediaFilterChange: vi.fn(),
-  onAspectFilterChange: vi.fn(),
-  onDirectOnlyChange: vi.fn(),
-  onMetadataVisibleChange: vi.fn(),
-  onThumbnailRowHeightChange: vi.fn(),
-  onReshuffle: vi.fn(),
+  collections: [], sort: "newest" as AssetSort, mediaFilter: "all" as const, aspectFilter: "all" as const,
+  directOnly: false, metadataVisible: true, privacyMode: false, thumbnailRowHeight: 180,
+  onPrivacyModeChange: vi.fn(), onSortChange: vi.fn(), onMediaFilterChange: vi.fn(), onAspectFilterChange: vi.fn(),
+  onDirectOnlyChange: vi.fn(), onMetadataVisibleChange: vi.fn(), onThumbnailRowHeightChange: vi.fn(), onReshuffle: vi.fn(),
 };
 
 afterEach(cleanup);
 
 function renderChrome(ui: React.ReactElement) {
-  return render(
-    <WorkspaceChromeProvider scope="assets-test">
-      <aside aria-label="index">
-        <ChromeTarget name="header" />
-        <ChromeTarget name="actions" />
-        <ChromeTarget name="search" />
-        <ChromeTarget name="navigation" />
-        <ChromeSettingsDock />
-      </aside>
-      {ui}
-    </WorkspaceChromeProvider>
-  );
+  return render(<WorkspaceChromeProvider scope="assets-test"><aside aria-label="index"><ChromeTarget name="header" /><ChromeTarget name="actions" /><ChromeSettingsDock /></aside>{ui}</WorkspaceChromeProvider>);
 }
 
-async function openViewSettings(user: { click: (element: HTMLElement) => Promise<void> }) {
-  await user.click(await screen.findByRole("button", { name: "보기 설정" }));
-  return screen.findByRole("dialog");
-}
-
-it("keeps the titlebar as location and status only, with view controls in the settings panel", async () => {
+it("puts kind, sort, and view controls in the toolbar and removes sidebar view settings", async () => {
   const user = userEvent.setup();
-  renderChrome(<AssetToolbar {...baseProps} />);
-
+  renderChrome(<AssetToolbar {...baseProps} totalCount={9453} inspectorAvailable onInspectorOpenChange={vi.fn()} />);
   expect(screen.getByRole("heading", { name: "전체" })).toBeVisible();
-  expect(screen.queryByRole("combobox", { name: "정렬" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /미디어 필터/ })).not.toBeInTheDocument();
-  // 선택 명령은 상단바가 아니라 SelectionBar가 담당한다.
-  expect(screen.queryByText(/개 선택/)).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "휴지통으로 이동" })).not.toBeInTheDocument();
-
-  await openViewSettings(user);
-  expect(screen.getByRole("combobox", { name: "정렬" })).toBeVisible();
-  expect(screen.getByRole("combobox", { name: "미디어" })).toBeVisible();
-  expect(screen.getByRole("combobox", { name: "비율" })).toBeVisible();
+  expect(screen.getByText("9,453")).toBeVisible();
+  expect(screen.getByRole("radiogroup", { name: "종류" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "보기 설정" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "보기" }));
+  expect(screen.getByRole("radiogroup", { name: "배치" })).toBeVisible();
   expect(screen.getByLabelText("미리보기 크기")).toBeVisible();
-  expect(screen.getByRole("checkbox", { name: "정보 숨기기" })).toBeVisible();
-  expect(screen.getByRole("checkbox", { name: "비공개 모드" })).toBeVisible();
-  expect(screen.getByRole("checkbox", { name: "이 분류만" })).toBeVisible();
+  expect(screen.getByRole("switch", { name: "정보" })).toBeVisible();
+  expect(screen.queryByRole("switch", { name: "정보 숨기기" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("switch", { name: "비공개 모드" })).not.toBeInTheDocument();
 });
 
-it("applies media and aspect filters from the settings panel in asset browsing views", async () => {
+it("changes media kind from the segmented control", async () => {
   const user = userEvent.setup();
   const onMediaFilterChange = vi.fn();
+  renderChrome(<AssetToolbar {...baseProps} onMediaFilterChange={onMediaFilterChange} />);
+  await user.click(within(screen.getByRole("radiogroup", { name: "종류" })).getByRole("radio", { name: "영상" }));
+  expect(onMediaFilterChange).toHaveBeenCalledWith("videos");
+});
+
+it("keeps aspect filtering in a quiet toolbar menu", async () => {
+  const user = userEvent.setup();
   const onAspectFilterChange = vi.fn();
-  renderChrome(<AssetToolbar {...baseProps} onMediaFilterChange={onMediaFilterChange} onAspectFilterChange={onAspectFilterChange} />);
-
-  await openViewSettings(user);
-  await user.click(screen.getByRole("combobox", { name: "미디어" }));
-  expect(onMediaFilterChange).not.toHaveBeenCalled();
-  // select 변경은 소유 뷰가 반영하므로 여기서는 컨트롤 존재와 요약 갱신만 확인한다.
+  renderChrome(<AssetToolbar {...baseProps} onAspectFilterChange={onAspectFilterChange} />);
+  await user.click(screen.getByRole("button", { name: "비율" }));
+  await user.click(screen.getByRole("menuitemradio", { name: "세로형" }));
+  expect(onAspectFilterChange).toHaveBeenCalledWith("portrait");
 });
 
-it("hides asset filters in the settings panel for non-browsing views", async () => {
-  const user = userEvent.setup();
-  renderChrome(<AssetToolbar {...baseProps} view={{ kind: "collection", collectionId: "collection-1" }} />);
-
-  await openViewSettings(user);
-  expect(screen.queryByRole("combobox", { name: "미디어" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("combobox", { name: "비율" })).not.toBeInTheDocument();
-});
-
-it("toggles privacy mode from the settings panel", async () => {
-  const user = userEvent.setup();
-  const onPrivacyModeChange = vi.fn();
-  renderChrome(<AssetToolbar {...baseProps} privacyMode onPrivacyModeChange={onPrivacyModeChange} />);
-
-  await openViewSettings(user);
-  const toggle = screen.getByRole("checkbox", { name: "비공개 모드" });
-  expect(toggle).toBeChecked();
-  await user.click(toggle);
-  expect(onPrivacyModeChange).toHaveBeenCalledWith(false);
-});
-
-it("shows the privacy status in the titlebar while privacy mode is on", () => {
-  renderChrome(<AssetToolbar {...baseProps} privacyMode />);
-  expect(screen.getByText("비공개 모드")).toBeVisible();
-});
-
-it("does not show folder or album transfer controls that duplicate sidebar drag and drop", () => {
-  renderChrome(<AssetToolbar {...baseProps} />);
-
-  expect(screen.queryByLabelText("폴더")).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "폴더로 이동" })).not.toBeInTheDocument();
-  expect(screen.queryByLabelText("앨범")).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "앨범에 추가" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "추가 작업" })).not.toBeInTheDocument();
-});
-
-it("shows the collection name as the location in a collection detail view", () => {
-  const collections: CollectionSummary[] = [{ id: "collection-1", name: "엘든 링", description: null, type: "game", coverAssetId: null, selectedWorkArtworkId: null, selectedHeroArtworkId: null, selectedBackdropArtworkId: null, assetCount: 3, unreadReleaseCount: 0, year: null, originalTitle: null, runtimeMinutes: null, author: null, developer: null, publisher: null, platforms: null, productionCompany: null, releaseDate: null, director: null, externalScore: null, myScore: null, genres: null, overview: null, showcase: false, showcaseOrder: null, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" }];
-  renderChrome(<AssetToolbar {...baseProps} view={{ kind: "collection", collectionId: "collection-1" }} collections={collections} />);
-
-  expect(screen.getByRole("heading", { name: "엘든 링" })).toBeVisible();
-});
-
-it("offers reshuffle inside the settings panel for random sort", async () => {
+it("offers reshuffle only from the random sort menu", async () => {
   const user = userEvent.setup();
   const onReshuffle = vi.fn();
   renderChrome(<AssetToolbar {...baseProps} sort="random" onReshuffle={onReshuffle} />);
-
-  await openViewSettings(user);
-  await user.click(screen.getByRole("button", { name: "다시 섞기" }));
+  await user.click(screen.getByRole("button", { name: "정렬" }));
+  await user.click(screen.getByRole("menuitem", { name: "다시 섞기" }));
   expect(onReshuffle).toHaveBeenCalledOnce();
 });
 
-it("does not offer reshuffle outside random sort", async () => {
+it("shows the current classification switch only where it applies", async () => {
   const user = userEvent.setup();
-  renderChrome(<AssetToolbar {...baseProps} />);
-
-  await openViewSettings(user);
-  expect(screen.queryByRole("button", { name: "다시 섞기" })).not.toBeInTheDocument();
+  renderChrome(<AssetToolbar {...baseProps} view={{ kind: "classification", classificationId: "game" }} />);
+  await user.click(screen.getByRole("button", { name: "보기" }));
+  expect(screen.getByRole("switch", { name: "현재 분류만 보기" })).toBeVisible();
 });
 
-it("leaves information visible when Hide information is off", async () => {
-  const onMetadataVisibleChange = vi.fn();
-  const user = userEvent.setup();
-  renderChrome(<AssetToolbar {...baseProps} metadataVisible onMetadataVisibleChange={onMetadataVisibleChange} />);
-  await openViewSettings(user);
-  expect(screen.getByLabelText("정보 숨기기")).not.toBeChecked();
-  await user.click(screen.getByLabelText("정보 숨기기"));
-  expect(onMetadataVisibleChange).toHaveBeenLastCalledWith(false);
-});
-it("shows the folder count with subfolders and the direct-only count, with thousands separators", () => {
-  const classifications = [{ id: "game", kind: "root" as const, name: "게임", parentId: null, iconKey: null, colorKey: null, assetCount: 428, totalAssetCount: 12345 }];
-  const view = { kind: "classification", classificationId: "game" } as AssetView;
-  const { rerender } = renderChrome(<AssetToolbar {...baseProps} view={view} classifications={classifications} />);
+it("shows collection names and folder count status", () => {
+  const collections: CollectionSummary[] = [{ id: "collection-1", name: "엘든 링", description: null, type: "game", coverAssetId: null, selectedWorkArtworkId: null, selectedHeroArtworkId: null, selectedBackdropArtworkId: null, assetCount: 3, unreadReleaseCount: 0, year: null, originalTitle: null, runtimeMinutes: null, author: null, developer: null, publisher: null, platforms: null, productionCompany: null, releaseDate: null, director: null, externalScore: null, myScore: null, genres: null, overview: null, showcase: false, showcaseOrder: null, createdAt: "2026-08-10T00:00:00Z", updatedAt: "2026-08-10T00:00:00Z" }];
+  const { unmount } = renderChrome(<AssetToolbar {...baseProps} view={{ kind: "collection", collectionId: "collection-1" }} collections={collections} />);
+  expect(screen.getByRole("heading", { name: "엘든 링" })).toBeVisible();
+  unmount();
+  renderChrome(<AssetToolbar {...baseProps} view={{ kind: "classification", classificationId: "game" }} classifications={[{ ...baseProps.classifications[0], assetCount: 428, totalAssetCount: 12345 }]} />);
   expect(screen.getByText("12,345장 · 이 폴더만 428장")).toBeVisible();
-  rerender(<WorkspaceChromeProvider scope="assets-test"><aside aria-label="index"><ChromeTarget name="header" /><ChromeSettingsDock /></aside><AssetToolbar {...baseProps} view={view} classifications={classifications} directOnly /></WorkspaceChromeProvider>);
-  expect(screen.getByText("이 폴더만 428장 표시 · 하위 포함 12,345장")).toBeVisible();
-});
-
-it("shows no folder count for 전체 or a character view", () => {
-  const classifications = [{ id: "game", kind: "root" as const, name: "게임", parentId: null, iconKey: null, colorKey: null, assetCount: 3, totalAssetCount: 5 }];
-  renderChrome(<AssetToolbar {...baseProps} view={{ kind: "classification", classificationId: "game", characterId: "c1" }} classifications={classifications} />);
-  expect(screen.queryByText(/장/)).not.toBeInTheDocument();
-});
-
-it("hides the unfiltered folder count while a media or aspect filter is active", () => {
-  const classifications = [{ id: "game", kind: "root" as const, name: "게임", parentId: null, iconKey: null, colorKey: null, assetCount: 3, totalAssetCount: 5 }];
-  renderChrome(<AssetToolbar {...baseProps} view={{ kind: "classification", classificationId: "game" }} classifications={classifications} mediaFilter="videos" />);
-  expect(screen.queryByText(/5장/)).not.toBeInTheDocument();
 });

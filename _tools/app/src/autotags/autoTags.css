@@ -28,9 +28,9 @@
 .auto-tag:hover .auto-tag__label, .auto-tag:focus-within .auto-tag__label { padding-right: 4px; }
 .auto-tag:hover .auto-tag__remove, .auto-tag:focus-within .auto-tag__remove { display: grid; }
 .auto-tag__remove:focus-visible { outline: var(--focus-width) solid var(--color-focus); }
-/* The hover card: English name and library count (user decision 2026-09-27, auto-tags mockup topic 4). */
-.auto-tag__card { position: absolute; left: -1px; top: calc(100% + 4px); z-index: 2; display: grid; gap: 1px; padding: 5px 8px; border: 1px solid var(--color-border-strong); border-radius: 3px; background: var(--color-viewer-bg); box-shadow: var(--shadow-floating); color: var(--color-text); font-size: var(--text-xs); line-height: 1.45; white-space: nowrap; pointer-events: none; }
+.auto-tag__card { position: absolute; left: -1px; top: calc(100% + 4px); z-index: 2; display: grid; gap: var(--space-1); padding: 5px 8px; border: 1px solid var(--color-border-strong); border-radius: 3px; background: var(--color-viewer-bg); box-shadow: var(--shadow-floating); color: var(--color-text); font-size: var(--text-xs); line-height: 1.45; white-space: nowrap; }
 .auto-tag__card small { color: var(--color-muted); font-size: 11.5px; }
+.auto-tag__card button { padding: 0; border: 0; background: transparent; color: var(--color-accent); font: inherit; text-align: left; cursor: pointer; }
 
 .auto-tags__adder { position: relative; margin-bottom: var(--space-2); }
 .auto-tags__field { display: flex; align-items: center; gap: var(--space-compact); height: var(--control-height-sm); padding: 0 var(--space-1) 0 var(--space-2); border: 1px solid var(--color-focus); border-radius: 3px; background: var(--color-control); color: var(--color-muted); }

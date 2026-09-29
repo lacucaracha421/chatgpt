@@ -5,7 +5,7 @@ import { buildMasonryLayout, collectedDate, headingWeekday, masonryMove } from "
 const item = (id: string, day = 5, height = 300) => ({ id, width: 200, height, collectedAt: new Date(2026, 8, day, 21, 7).toISOString() } as AssetSummary);
 afterEach(() => vi.useRealTimers());
 describe("date masonry", () => {
-  it("shortens headings without changing grouping keys, captions, or geometry", () => {
+  it("uses the shared app date without changing grouping keys or geometry", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 8, 23));
     const items = [item("a"), item("b"), item("c", 4)];
@@ -13,7 +13,7 @@ describe("date masonry", () => {
     expect(current.headings.map(heading => heading.label)).toEqual(["9.5", "9.4"]);
     expect(collectedDate(items[0].collectedAt)).toMatchObject({ key: "2026.09.05", label: "9.5", time: "21:07" });
     const fullDates = buildMasonryLayout(items, 640, 180, 20, true, true, true);
-    expect(fullDates.headings.map(heading => heading.label)).toEqual(["2026.09.05", "2026.09.04"]);
+    expect(fullDates.headings.map(heading => heading.label)).toEqual(["9.5", "9.4"]);
     expect(fullDates.tiles).toEqual(current.tiles);
     vi.setSystemTime(new Date(2027, 0, 1));
     const next = buildMasonryLayout(items, 640, 180, 20, true, true);
@@ -28,19 +28,18 @@ describe("date masonry", () => {
     expect(result.headings.map(({ weekday, count }) => [weekday, count])).toEqual([["오늘", 2], ["금", 1]]);
     expect(headingWeekday("")).toBe("");
   });
-  it("shares a row between sparse dates and wraps below the tallest group", () => {
+  it("gives every date a full-width row above its group", () => {
     const result = buildMasonryLayout([item("a", 5, 80), item("b", 4, 300), item("c", 3), item("d", 2)], 640, 180, 20, true, true);
-    expect(result.headings.slice(0, 3).map((heading) => heading.top)).toEqual([0, 0, 0]);
-    expect(result.headings.slice(0, 3).map((heading) => heading.left)).toEqual([0, 220, 440]);
-    expect(result.headings.map((heading) => heading.width)).toEqual([200, 200, 200, 200]);
-    expect(result.headings[3].top).toBe(Math.max(...result.tiles.slice(0, 3).map((tile) => tile.top + tile.height)) + 20);
+    expect(result.headings.every((heading) => heading.left === 0 && heading.width === 640)).toBe(true);
+    expect(result.headings.map((heading) => heading.top)).toEqual([...result.headings.map((heading) => heading.top)].sort((a, b) => a - b));
+    expect(result.headings[1].top).toBeGreaterThan(result.tiles[0].top + result.tiles[0].height);
     expect(result.tiles.map((tile) => tile.asset.id)).toEqual(["a", "b", "c", "d"]);
   });
-  it("keeps multi-image date headings over their own columns and stacks on narrow screens", () => {
+  it("keeps date headings full width on wide and narrow screens", () => {
     const items = [item("a", 5), item("b", 5), item("c", 4), item("d", 3)];
     const wide = buildMasonryLayout(items, 640, 180, 20, true, true);
-    expect(wide.headings[0]).toMatchObject({ left: 0, width: 420, top: 0 });
-    expect(wide.headings[1]).toMatchObject({ left: 440, width: 200, top: 0 });
+    expect(wide.headings[0]).toMatchObject({ left: 0, width: 640, top: 0 });
+    expect(wide.headings[1].top).toBeGreaterThan(wide.tiles[1].top + wide.tiles[1].height);
     const narrow = buildMasonryLayout(items, 200, 180, 20, true, true);
     expect(narrow.headings.every((heading) => heading.left === 0 && heading.width === 200)).toBe(true);
     expect(narrow.headings[1].top).toBeGreaterThan(narrow.tiles[1].top + narrow.tiles[1].height);

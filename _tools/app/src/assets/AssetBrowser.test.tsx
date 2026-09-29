@@ -157,29 +157,27 @@ describe("AssetBrowser", () => {
     await user.click(tile);
     expect(tile).toHaveAttribute("aria-selected", "true");
 
-    await user.click(screen.getByRole("button", { name: "보기 설정" }));
-    await screen.findByRole("dialog");
-    await user.selectOptions(screen.getByRole("combobox", { name: "미디어" }), "images");
+    await user.click(screen.getByRole("radio", { name: "이미지" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
       expect.objectContaining({ mediaKind: "images", aspectRatio: null, after: null, aroundDate: null }),
     ));
     expect(await screen.findByRole("option", { name: "asset-0.png" })).toHaveAttribute("aria-selected", "false");
 
-    await user.selectOptions(screen.getByRole("combobox", { name: "비율" }), "portrait");
+    await user.click(screen.getByRole("button", { name: "비율" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "세로형" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
       expect.objectContaining({ mediaKind: "images", aspectRatio: "portrait" }),
     ));
 
     rerender(renderView({ kind: "unsorted" }));
-    expect(screen.getByRole("combobox", { name: "미디어" })).toHaveValue("images");
-    expect(screen.getByRole("combobox", { name: "비율" })).toHaveValue("portrait");
+    expect(screen.getByRole("radio", { name: "이미지" })).toHaveAttribute("aria-checked", "true");
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
       expect.objectContaining({ unclassifiedOnly: true, mediaKind: "images", aspectRatio: "portrait" }),
     ));
 
     rerender(renderView({ kind: "collection", collectionId: "collection-1" }));
-    expect(screen.queryByRole("combobox", { name: "미디어" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "비율" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "종류" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "비율" })).not.toBeInTheDocument();
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
       expect.objectContaining({ collectionId: "collection-1", mediaKind: null, aspectRatio: null }),
     ));
@@ -252,8 +250,7 @@ describe("AssetBrowser", () => {
       </LibraryProvider>,
     );
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledOnce());
-    await userEvent.click(screen.getByRole("button", { name: "보기 설정" }));
-    await screen.findByRole("dialog");
+    await userEvent.click(screen.getByRole("button", { name: "보기" }));
 
     fireEvent.change(screen.getByRole("slider", { name: "미리보기 크기" }), { target: { value: "240" } });
 
@@ -335,10 +332,9 @@ describe("AssetBrowser", () => {
   it("maps direct-only and every selectable sort", async () => {
     const user = userEvent.setup();
     const gateway = createGateway();
-    const { rerender } = renderBrowser(gateway);
-    await user.click(await screen.findByRole("button", { name: "보기 설정" }));
-    await screen.findByRole("dialog");
-    await user.click(screen.getByRole("checkbox", { name: "이 분류만" }));
+    const { rerender } = renderBrowser(gateway, { view: { kind: "classification", classificationId: "tag" } });
+    await user.click(await screen.findByRole("button", { name: "보기" }));
+    await user.click(screen.getByRole("switch", { name: "현재 분류만 보기" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ directOnly: true, sort: "newest" })));
     for (const sort of ["oldest", "favorites", "random"] as const) {
       rerender(browserElement(gateway, { sort }));
@@ -351,9 +347,8 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway, { sort: "random" });
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalled());
     const first = vi.mocked(gateway.listAssets).mock.calls[0]![0].randomPivot;
-    await user.click(screen.getByRole("button", { name: "보기 설정" }));
-    await screen.findByRole("dialog");
-    await user.click(screen.getByRole("button", { name: "다시 섞기" }));
+    await user.click(screen.getByRole("button", { name: "정렬" }));
+    await user.click(screen.getByRole("menuitem", { name: "다시 섞기" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
     expect(vi.mocked(gateway.listAssets).mock.calls[1]![0].randomPivot).not.toBe(first);
   });
@@ -757,7 +752,8 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway);
 
     await user.click(await screen.findByRole("option", { name: "asset-0.png" }));
-    await user.click(await selectionAction("정보 열기"));
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    await user.click(screen.getByRole("switch", { name: "정보" }));
     const sourceGroup = await screen.findByRole("region", { name: "같은 게시물" });
     expect(gateway.recordAssetOpened).not.toHaveBeenCalled();
 
@@ -775,16 +771,17 @@ describe("AssetBrowser", () => {
     const first = await screen.findByRole("option", { name: "asset-0.png" });
     const second = screen.getByRole("option", { name: "asset-1.png" });
     await user.click(first);
-    expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument());
 
-    await user.click(await selectionAction("정보 열기"));
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    await user.click(screen.getByRole("switch", { name: "정보" }));
     expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
 
     await user.click(second);
     expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
 
     await user.click(within(screen.getByRole("complementary", { name: "자산 정보" })).getByRole("button", { name: "정보 닫기" }));
-    expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument());
 
     await user.click(second);
     expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();

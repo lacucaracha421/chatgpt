@@ -22,11 +22,6 @@
 .home-header-action:hover { color: var(--color-text); background: var(--color-surface-hover); }
 
 /* The release shelf keeps the existing wheel, drag and arrow behavior. */
-.home-shelf { position: relative; min-width: 0; }
-.home-shelf__track { display: flex; gap: 16px; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; cursor: grab; user-select: none; -webkit-user-select: none; }
-.home-shelf__track::-webkit-scrollbar { display: none; }
-.home-shelf__track.is-dragging { cursor: grabbing; }
-.home-shelf__track.is-dragging .home-shelf__item { pointer-events: none; }
 .home-shelf__item { width: 148px; min-width: 148px; display: flex; flex-direction: column; gap: 4px; padding: 0; text-align: left; border-radius: var(--radius-control); }
 .home-shelf__item:hover { background: var(--color-surface-hover); }
 .home-shelf__date { height: 20px; display: flex; align-items: baseline; justify-content: space-between; color: var(--color-faint); font-size: var(--type-meta); white-space: nowrap; }
@@ -41,12 +36,6 @@
 .home-shelf__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text); font-size: var(--type-body); line-height: 20px; }
 .home-shelf__platforms { height: 20px; min-width: 0; overflow: hidden; }
 .home-shelf__platforms .platform-badges { flex-wrap: nowrap; }
-.home-shelf__arrow { position: absolute; top: 50%; z-index: 2; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; background: var(--color-surface-elevated); color: var(--color-muted); border-radius: var(--radius-control); transform: translateY(-50%); }
-.home-shelf__arrow:hover { color: var(--color-text); background: var(--color-surface-hover); }
-.home-shelf__arrow svg { width: 16px; height: 16px; }
-.home-shelf__arrow--prev { left: 4px; }
-.home-shelf__arrow--prev svg { transform: rotate(180deg); }
-.home-shelf__arrow--next { right: 4px; }
 .home-shelf--empty { position: relative; min-height: 256px; }
 .home-shelf--empty .home-shelf__track { overflow: hidden; }
 .home-shelf__ghost { visibility: hidden; }

@@ -24,13 +24,16 @@ export type MenuItem = {
 
 type MenuProps = {
   label: string;
-  items: MenuItem[];
+  items?: MenuItem[];
+  content?: ReactNode;
   trigger: ReactNode;
   disabled?: boolean;
   triggerClassName?: string;
+  contentClassName?: string;
+  align?: "start" | "center" | "end";
 };
 
-export function Menu({ items, label, trigger, disabled = false, triggerClassName }: MenuProps): ReactNode {
+export function Menu({ items = [], content, label, trigger, disabled = false, triggerClassName, contentClassName, align = "start" }: MenuProps): ReactNode {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [panelOwner, setPanelOwner] = useState<string | undefined>();
   return (
@@ -41,8 +44,8 @@ export function Menu({ items, label, trigger, disabled = false, triggerClassName
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content className="ui-menu" data-panel-owner={panelOwner} align="start" sideOffset={4}>
-          {renderMenuItems(items)}
+        <DropdownMenu.Content className={`ui-menu${contentClassName ? ` ${contentClassName}` : ""}`} data-panel-owner={panelOwner} align={align} sideOffset={4}>
+          {content ?? renderMenuItems(items)}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

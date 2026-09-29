@@ -3,7 +3,6 @@ import type { AssetSummary } from "../library/types";
 
 export type GalleryLayout = "masonry" | "justified";
 export type MasonryTile = { asset: AssetSummary; index: number; left: number; top: number; width: number; imageHeight: number; height: number };
-export const CAPTION_HEIGHT = 26;
 const DATE_HEADING_HEIGHT = 44;
 const fullDateFormat = new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "medium", hour12: false });
 function dateKey(date: Date) {
@@ -30,7 +29,7 @@ export function collectedDate(value: string | null | undefined) {
   return { key, label: displayDate(date), time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`, full: fullDateFormat.format(date) };
 }
 
-export function buildMasonryLayout(items: AssetSummary[], width: number, targetWidth: number, gap: number, captions: boolean, groupDates: boolean, fullDateHeadings = false) {
+export function buildMasonryLayout(items: AssetSummary[], width: number, targetWidth: number, gap: number, _captions: boolean, groupDates: boolean, _fullDateHeadings = false) {
   const tiles: MasonryTile[] = [];
   const headings: Array<{ key: string; label: string; weekday: string; count: number; top: number; left: number; width: number }> = [];
   if (width <= 0 || targetWidth <= 0) return { tiles, headings, height: 0 };
@@ -45,32 +44,22 @@ export function buildMasonryLayout(items: AssetSummary[], width: number, targetW
     } else last.items.push(asset);
   });
   let rowTop = 0;
-  let rowBottom = 0;
-  let usedColumns = 0;
   for (const group of groups) {
-    const span = groupDates ? Math.min(columns, group.items.length) : columns;
-    if (usedColumns + span > columns) {
-      rowTop = rowBottom;
-      usedColumns = 0;
-    }
-    const left = usedColumns * (tileWidth + gap);
     if (groupDates) headings.push({
-      key: group.items[0].id, label: fullDateHeadings ? group.key === "unknown" ? "수집일 미상" : group.key : collectedDate(group.items[0].collectedAt).label,
+      key: group.items[0].id, label: collectedDate(group.items[0].collectedAt).label,
       weekday: headingWeekday(group.items[0].collectedAt), count: group.items.length,
-      top: rowTop, left, width: span * (tileWidth + gap) - gap,
+      top: rowTop, left: 0, width,
     });
-    const bottoms = Array<number>(span).fill(rowTop + (groupDates ? DATE_HEADING_HEIGHT : 0));
+    const bottoms = Array<number>(columns).fill(rowTop + (groupDates ? DATE_HEADING_HEIGHT : 0));
     group.items.forEach((asset, offset) => {
       const column = bottoms.indexOf(Math.min(...bottoms));
       const imageHeight = tileWidth * (asset.width > 0 && asset.height > 0 ? asset.height / asset.width : 1);
-      const height = imageHeight + (captions ? CAPTION_HEIGHT : 0);
-      tiles.push({ asset, index: group.start + offset, left: left + column * (tileWidth + gap), top: bottoms[column], width: tileWidth, imageHeight, height });
-      bottoms[column] += height + gap;
+      tiles.push({ asset, index: group.start + offset, left: column * (tileWidth + gap), top: bottoms[column], width: tileWidth, imageHeight, height: imageHeight });
+      bottoms[column] += imageHeight + gap;
     });
-    rowBottom = Math.max(rowBottom, ...bottoms);
-    usedColumns += span;
+    rowTop = Math.max(...bottoms);
   }
-  return { tiles, headings, height: rowBottom };
+  return { tiles, headings, height: rowTop };
 }
 
 export function masonryMove(tiles: MasonryTile[], currentId: string, direction: 1 | -1) {

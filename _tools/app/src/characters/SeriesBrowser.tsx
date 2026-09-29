@@ -10,7 +10,7 @@ import { commandErrorMessage } from "../library/errorMessage";
 import { AssetGallery } from "../assets/AssetGallery";
 import { AssetViewer } from "../assets/AssetViewer";
 import { AssetInspector } from "../assets/AssetInspector";
-import { GalleryDisplaySettings } from "../assets/GalleryDisplaySettings";
+import { GalleryViewMenu } from "../assets/GalleryViewMenu";
 import { libraryContextItems } from "../assets/libraryContextItems";
 import { assetUrl, thumbnailUrl } from "../assets/mediaUrl";
 import { applySelectionGesture, emptySelection, moveSelectionFocus, selectAllLoaded } from "../assets/selection";
@@ -75,6 +75,8 @@ function characterStatus(target: CharacterTarget, readiness: S36Readiness | unde
 }
 
 export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId, groupId, targets, groups = [], classifications, galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi }: Props) {
+  void onPrivacyModeChange;
+  void onMetadataVisibleChange;
   const { gateway } = useLibrary();
   const suggestions = useCharacterSuggestions(refreshVersion);
   const [hiddenSuggestions, setHiddenSuggestions] = useState<string[]>([]);
@@ -384,14 +386,11 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
           { id: "edit-group", label: "그룹 편집", icon: <PencilIcon aria-hidden="true" />, onSelect: () => setGroupEditRequest(v => v + 1) },
           ...faultItem,
         ]} />}
+        {!picking && <GalleryViewMenu galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} inspectorOpen={inspector} inspectorAvailable={selectedIds.length > 0} onInspectorOpenChange={setInspector} />}
       </div>}
       chrome={{
-        summary: `${galleryLayout === "masonry" ? "폭포수" : "같은 높이"} · ${thumbnailRowHeight}px${metadataVisible ? " · 정보" : ""}${privacyMode ? " · 비공개" : ""}`,
+        summary: `${galleryLayout === "masonry" ? "폭포수" : "같은 높이"} · ${thumbnailRowHeight}px${privacyMode ? " · 비공개" : ""}`,
         status: automationRecovery,
-        settings: <GalleryDisplaySettings galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange}
-          thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange}
-          metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange}
-          privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} />,
       }} actions={automationRecovery} />
     {picking && <div className="series-picking" role="region" aria-label="갤러리 이미지 선택">
       <div className="series-picking__title"><strong>{picking.kind === "references" ? `레퍼런스 선택 · ${picking.ids.length}/${MAX_CHARACTER_REFERENCES}` : picking.kind === "hero" ? "히어로 이미지 선택" : "대표 이미지 선택"}</strong><small>{picking.kind === "hero" ? name : editor?.target ? `${editor.target.displayName} 캐릭터 폴더 · 다른 캐릭터와 공유된 이미지는 제외됩니다` : "다른 캐릭터의 이미지는 제외됩니다"}</small></div>
@@ -528,7 +527,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     {s36Setup && <Dialog open title="S36 자동 분류" onClose={() => setS36Setup(false)}>
       <S36SeriesControl seriesId={series.classificationId} seriesName={name} disabled={busy} onChanged={refresh} readiness={readiness} />
     </Dialog>}
-    <AssetInspector assets={page.items.filter(a => selection.ids.has(a.id))} open={inspector} onOpenChange={setInspector} onOpenAsset={a => setViewer(a.id)} onAssetUpdated={refresh} onAutoTagFilterApplied={() => onNavigate({ kind: "classification", classificationId: null })} />
+    <AssetInspector assets={page.items.filter(a => selection.ids.has(a.id))} classifications={classifications} open={inspector} onOpenChange={setInspector} onOpenAsset={a => setViewer(a.id)} onOpenArtist={creatorKey => onNavigate({ kind: "creator", creatorKey })} onAssetUpdated={refresh} onAutoTagFilterApplied={() => onNavigate({ kind: "classification", classificationId: null })} />
     <AssetViewer items={externalAsset && !page.items.some(a => a.id === externalAsset.id) ? [externalAsset, ...page.items] : page.items} activeId={viewer} onActiveIdChange={setViewer} onClose={() => setViewer(null)} privacyMode={privacyMode} onAssetOpened={a => gateway.recordAssetOpened(a.id, new Date().toISOString())} onToggleFavorite={a => void action(() => gateway.setAssetFavorite(a.id, !a.favorite))} onTrash={a => void action(() => gateway.trashAssets([a.id]))} />
   </section>;
 }

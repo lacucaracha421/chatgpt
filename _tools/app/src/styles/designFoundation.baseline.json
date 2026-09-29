@@ -210,11 +210,17 @@
       "pillRadius": 0,
       "legacyToken": 24
     },
-    "_tools/app/src/notes/notes.css": {
-      "offScaleSpacing": 29,
+    "_tools/app/src/notes/noteCard.css": {
+      "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 11
+      "legacyToken": 0
+    },
+    "_tools/app/src/notes/notes.css": {
+      "offScaleSpacing": 17,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 8
     },
     "_tools/app/src/shared/markdown/markdown.css": {
       "offScaleSpacing": 1,
@@ -363,8 +369,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/ledger.css": {
-      "offScaleSpacing": 32,
-      "offRoleFontSize": 37,
+      "offScaleSpacing": 28,
+      "offRoleFontSize": 35,
       "pillRadius": 0,
       "legacyToken": 0
     },
@@ -387,9 +393,9 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/notes.css": {
-      "offScaleSpacing": 39,
-      "offRoleFontSize": 27,
-      "pillRadius": 4,
+      "offScaleSpacing": 18,
+      "offRoleFontSize": 11,
+      "pillRadius": 0,
       "legacyToken": 0
     },
     "_tools/app/mobile-client/releaseCalendar.css": {

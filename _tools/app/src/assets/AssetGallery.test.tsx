@@ -16,14 +16,14 @@ afterEach(() => {
 });
 
 describe("AssetGallery", () => {
-  it("keeps full date headings when requested by the revisit view", () => {
+  it("keeps the shared compact date heading even when a legacy caller requests full dates", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 8, 23));
     const items = [{ ...asset(0), collectedAt: new Date(2026, 8, 23, 12).toISOString() }];
     const { container, rerender } = render(<AssetGallery layout="masonry" items={items} />);
     expect(container.querySelector(".asset-gallery__date")).toHaveTextContent("9.23");
     rerender(<AssetGallery layout="masonry" items={items} fullDateHeadings />);
-    expect(container.querySelector(".asset-gallery__date")).toHaveTextContent("2026.09.23");
+    expect(container.querySelector(".asset-gallery__date-day")).toHaveTextContent(/^9\.23$/);
   });
 
   it("labels date headings with the date, 오늘 or the weekday, and the group count", () => {
@@ -42,7 +42,7 @@ describe("AssetGallery", () => {
       heading.querySelector(".asset-gallery__date-count")?.textContent,
     ])).toEqual([["9.24", "오늘", "2"], ["9.23", "수", "1"]]);
     rerender(<AssetGallery layout="masonry" items={items} fullDateHeadings />);
-    expect(container.querySelector(".asset-gallery__date-day")).toHaveTextContent(/^2026\.09\.24$/);
+    expect(container.querySelector(".asset-gallery__date-day")).toHaveTextContent(/^9\.24$/);
     expect(container.querySelector(".asset-gallery__date-weekday")).toHaveTextContent("오늘");
   });
 
@@ -102,7 +102,7 @@ describe("AssetGallery", () => {
   it("places creator and local time below masonry images and merges a continued date", async () => {
     const first = { ...asset(0), creatorName: "긴 작가 이름", collectedAt: new Date(2026, 8, 6, 21, 7).toISOString() };
     const { container, rerender } = render(<AssetGallery layout="masonry" metadataVisible items={[first]} />);
-    expect(await screen.findByText("긴 작가 이름")).toBeVisible();
+    expect(await screen.findByText(/긴 작가 이름/)).toBeVisible();
     expect(screen.getByText("21:07")).toBeVisible();
     rerender(<AssetGallery layout="masonry" metadataVisible items={[first, { ...first, id: "second" }]} />);
     expect(container.querySelectorAll(".asset-gallery__date")).toHaveLength(1);
@@ -142,9 +142,9 @@ describe("AssetGallery", () => {
     const { container } = render(<AssetGallery items={[asset(0), asset(1)]} />);
     computedStyle.mockRestore();
 
-    const row = await waitFor(() => container.querySelector(".asset-gallery__row") as HTMLElement);
-    const tile = row.querySelector(".asset-gallery__asset") as HTMLElement;
-    expect(Number.parseFloat(row.style.height)).toBe(Number.parseFloat(tile.style.height) + 6);
+    const unit = await waitFor(() => container.querySelector(".asset-gallery__justified-unit") as HTMLElement);
+    const tile = unit.querySelector(".asset-gallery__asset") as HTMLElement;
+    expect(Number.parseFloat(unit.style.height)).toBe(Number.parseFloat(tile.style.height) + 44 + 6);
   });
 
   it("keeps the DOM bounded with 50,000 asset metadata rows", async () => {
@@ -532,12 +532,11 @@ describe("AssetGallery", () => {
       />,
     );
 
-    // 200px squares in an 840px gallery (6px gap from tokens) form rows of 5
-    // at 164.8px; 100 total items estimate 25 rows: 25 * 175.4 = 4385.
+    // The estimate includes the full-width date heading reserved above each date group.
     const space = await waitFor(() =>
       container.querySelector(".asset-gallery__virtual-space") as HTMLElement,
     );
-    expect(space.style.height).toBe("4385px");
+    expect(space.style.height).toBe("4935px");
   });
 
   it("sizes the virtual space from measured rows without a total count", async () => {
@@ -548,7 +547,7 @@ describe("AssetGallery", () => {
     const space = await waitFor(() =>
       container.querySelector(".asset-gallery__virtual-space") as HTMLElement,
     );
-    expect(space.style.height).toBe("350.8px");
+    expect(space.style.height).toBe("394.8px");
   });
 
   it("loads the next page when scrolled deep into the reserved range", async () => {
@@ -605,10 +604,10 @@ describe("AssetGallery", () => {
     fireEvent.scroll(scroller);
 
     const thumb = container.querySelector(".asset-gallery__scrollbar-thumb") as HTMLElement;
-    // Reserved 4385px, viewport 600px: thumb 82px over 518px of travel.
-    expect(Number.parseFloat(thumb.style.height)).toBeCloseTo(82.06, 0);
+    // Reserved 4935px, viewport 600px: the heading is part of the scroll range.
+    expect(Number.parseFloat(thumb.style.height)).toBeCloseTo(72.95, 0);
     const top = Number.parseFloat(thumb.style.transform.replace("translateY(", ""));
-    expect(top).toBeCloseTo(259, 0);
+    expect(top).toBeCloseTo(230, 0);
   });
 
   it("drags the overlay thumb to scroll", async () => {
@@ -628,8 +627,7 @@ describe("AssetGallery", () => {
     fireEvent.pointerMove(thumb, { pointerId: 7, clientY: 200 });
     fireEvent.pointerUp(thumb, { pointerId: 7 });
 
-    // 100px over 518px of travel maps onto 3785px of scroll range.
-    expect(scroller.scrollTop).toBeCloseTo(730.8, 0);
+    expect(scroller.scrollTop).toBeCloseTo(822.5, 0);
   });
 
   it("ignores hovers after a release outside the thumb", async () => {
@@ -647,14 +645,14 @@ describe("AssetGallery", () => {
     const thumb = container.querySelector(".asset-gallery__scrollbar-thumb") as HTMLElement;
     fireEvent.pointerDown(thumb, { pointerId: 7, clientY: 100 });
     fireEvent.pointerMove(thumb, { pointerId: 7, clientY: 200 });
-    expect(scroller.scrollTop).toBeCloseTo(730.8, 0);
+    expect(scroller.scrollTop).toBeCloseTo(822.5, 0);
 
     // The release lands outside the thumb (missed capture): later hovers
     // must not keep scrolling as if still grabbed.
     fireEvent.pointerUp(window, { pointerId: 7 });
     fireEvent.pointerMove(thumb, { pointerId: 7, clientY: 400, buttons: 0 });
 
-    expect(scroller.scrollTop).toBeCloseTo(730.8, 0);
+    expect(scroller.scrollTop).toBeCloseTo(822.5, 0);
   });
 
   it("ignores a thumb drag started with a non-primary button", async () => {
@@ -708,7 +706,7 @@ describe("AssetGallery", () => {
     await screen.findByRole("option", { name: "asset-0.png" });
     const space = () =>
       container.querySelector(".asset-gallery__virtual-space") as HTMLElement;
-    expect(space().style.height).toBe("4385px");
+    expect(space().style.height).toBe("4935px");
 
     rerender(
       <AssetGallery
@@ -721,7 +719,7 @@ describe("AssetGallery", () => {
     );
     await screen.findByRole("option", { name: "asset-0.png" });
 
-    expect(space().style.height).not.toBe("4385px");
+    expect(space().style.height).not.toBe("4935px");
   });
 
   it("falls back to the measured range without a total count", async () => {
@@ -736,7 +734,7 @@ describe("AssetGallery", () => {
     await screen.findByRole("option", { name: "asset-0.png" });
     const space = () =>
       container.querySelector(".asset-gallery__virtual-space") as HTMLElement;
-    expect(space().style.height).toBe("4385px");
+    expect(space().style.height).toBe("4935px");
 
     rerender(
       <AssetGallery
@@ -746,7 +744,7 @@ describe("AssetGallery", () => {
       />,
     );
 
-    expect(space().style.height).toBe("350.8px");
+    expect(space().style.height).toBe("394.8px");
   });
 
   it("jumps the track click to the matching scroll position", async () => {
@@ -767,7 +765,7 @@ describe("AssetGallery", () => {
     const scroller = container.querySelector(".asset-gallery__scroll") as HTMLElement;
     fireEvent.pointerDown(track, { clientY: 400 });
 
-    expect(scroller.scrollTop).toBeCloseTo(1892.5, 0);
+    expect(scroller.scrollTop).toBeCloseTo(2167.5, 0);
   });
 
   it("keeps the overlay thumb steady when pages append at the same offset", async () => {

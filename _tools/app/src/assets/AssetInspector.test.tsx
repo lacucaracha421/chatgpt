@@ -90,7 +90,7 @@ it("opens the viewer from the preview and groups the metadata into sections", as
 
   expect(screen.getByRole("heading", { name: "출처" })).toBeVisible();
   expect(screen.getByRole("heading", { name: "파일" })).toBeVisible();
-  expect(screen.getByRole("heading", { name: "가져오기" })).toBeVisible();
+  expect(screen.getByText("가져옴")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "a.png 감상 화면으로 열기" }));
   expect(onOpenAsset).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
 });
@@ -141,9 +141,10 @@ it("shows source and provenance details with quiet external links", async () => 
     </LibraryProvider>,
   );
 
-  expect(screen.getByText("Example Artist (@example)")).toBeVisible();
+  expect(screen.getByText("Example Artist")).toBeVisible();
+  expect(screen.getByText("@example")).toBeVisible();
   expect(screen.getByText("브라우저 확장")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "제작자 페이지 열기" }));
+  await user.click(screen.getByRole("button", { name: /작가 페이지/ }));
   expect(openUrl).toHaveBeenCalledWith("https://x.com/example");
 });
 
