@@ -3,23 +3,23 @@
 :root { color-scheme: dark; --touch:44px; --mobile-gutter:24px; --mobile-header:64px; --mobile-nav:64px; --mobile-row-gap:10px; --type-title:22px; --type-body:17px; --type-meta:13px; --type-number:28px; --control-height:44px; --control-height-compact:36px; --touch-target:44px; --row-height:48px; --row-height-2:64px; --badge-height:24px; --badge-icon:16px; --checkbox-size:20px; --checkbox-inset:4px; --switch-width:40px; --switch-height:22px; }
 * { box-sizing:border-box; }
 html, body, #root { margin:0; width:100%; height:100%; overflow:hidden; }
-body { background:var(--color-bg); color:var(--color-text); font:15px/1.5 var(--font-ui); -webkit-tap-highlight-color:transparent; }
+body { background:var(--color-bg); color:var(--color-text); font:var(--type-body)/1.5 var(--font-ui); -webkit-tap-highlight-color:transparent; }
 button, input { font:inherit; }
 button { cursor:pointer; color:inherit; }
 button:disabled { opacity:.4; cursor:default; }
 button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline:2px solid var(--color-focus); outline-offset:3px; }
 button, a { touch-action:manipulation; }
-svg { width:22px; height:22px; stroke-width:1.4; flex-shrink:0; }
+svg { width:24px; height:24px; stroke-width:1.5; flex-shrink:0; }
 h1,h2,h3,p { margin:0; }
 .numeric, time { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
 .muted { color:var(--color-muted); }
 .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .eyebrow { font-size:11px; letter-spacing:2px; color:var(--color-muted); }
-.ui-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:40px; padding:0 14px; background:var(--color-surface); border:1px solid var(--color-border); border-radius:var(--radius-sm); white-space:nowrap; font-weight:500; }
+.ui-button { display:inline-flex; align-items:center; justify-content:center; gap:var(--space-2); min-height:var(--control-height); padding:0 var(--space-4); background:var(--color-surface); border:1px solid var(--color-border); border-radius:var(--radius-sm); white-space:nowrap; font-weight:500; }
 .ui-button--ghost { background:transparent; border-color:transparent; }
 .ui-button--primary { background:var(--color-accent); color:var(--color-on-accent); border-color:var(--color-accent); }
 .ui-button--icon { width:var(--touch); min-height:var(--touch); padding:10px; flex-shrink:0; }
-.ui-button[aria-pressed=true] { background:var(--color-selected); }
+.ui-button[aria-pressed=true] { background:var(--color-filter-selected); color:var(--color-text); }
 /* PC button recipe (global.css): a control face with a 1px border and a faint top light, the
    ivory accent only for the main action, and quiet actions in muted text. Labelled buttons are
    40px faces; their ::before keeps the 44px touch target.
@@ -31,7 +31,7 @@ h1,h2,h3,p { margin:0; }
 .ui-button--danger { background:transparent; color:var(--color-danger); border-color:color-mix(in srgb,var(--color-danger) 40%,transparent); }
 .ui-button--primary:active:not(:disabled) { background:var(--color-accent-pressed); border-color:var(--color-accent-pressed); }
 .ui-button--secondary:active:not(:disabled), .ui-button--ghost:active:not(:disabled) { background:var(--color-control-pressed); color:var(--color-text); }
-.ui-button--sm:not(.ui-button--icon) { min-height:36px; padding:0 10px; font-size:14px; }
+.ui-button--sm:not(.ui-button--icon) { min-height:var(--control-height-compact); padding:0 var(--space-3); }
 :where(.ui-button--sm:not(.ui-button--icon))::before { inset:-4px 0; }
 @media(hover:hover) { button:not(:disabled):hover { filter:brightness(1.15); } .ui-button--ghost:not(:disabled):hover { background:var(--color-surface); } }
 .mobile-app { height:100dvh; display:flex; flex-direction:column; padding-top:env(safe-area-inset-top); }
@@ -305,11 +305,11 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .top-bar__brand .brand-mark { width:22px; height:26px; }
 .top-bar__titles { display:flex; flex-direction:column; justify-content:center; min-width:0; flex:0 1 auto; }
 .top-bar__title { display:flex; align-items:baseline; gap:8px; min-width:0; }
-.top-bar h1 { display:flex; align-items:baseline; gap:8px; margin:0; font-size:20px; font-weight:600; line-height:1.2; letter-spacing:-.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.top-bar h1 .numeric, .top-bar__count { font-size:14px; font-weight:500; color:var(--color-muted); white-space:nowrap; }
-.top-bar__titles:has(> :first-child:not(.top-bar__title)) h1 { font-size:17px; }
-.top-bar__crumbs.is-alone { font-size:14px; color:var(--color-text); }
-.top-bar__crumbs { font-size:11px; color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.top-bar h1 { display:flex; align-items:baseline; gap:8px; margin:0; font-size:var(--type-title); font-weight:600; line-height:1.2; letter-spacing:-.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.top-bar h1 .numeric, .top-bar__count { font-size:var(--type-meta); font-weight:500; color:var(--color-muted); white-space:nowrap; }
+.top-bar__titles:has(> :first-child:not(.top-bar__title)) h1 { font-size:var(--type-body); }
+.top-bar__crumbs.is-alone { font-size:var(--type-body); color:var(--color-text); }
+.top-bar__crumbs { font-size:var(--type-meta); color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .top-bar .library-breadcrumb button { min-height:20px; padding:0 4px 0 0; font-size:11px; }
 .top-bar .library-breadcrumb>span>span { padding-right:4px; font-size:11px; }
 .top-bar__space { flex:1; min-width:4px; }
@@ -331,8 +331,8 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 /* Home keeps its own header element; it takes the same brand and title size. */
 .app-header .home-brand .brand-mark { width:22px; height:26px; }
 .app-header:has(.home-brand > .brand-mark:only-child) { padding-left:16px; }
-#context-location .gallery-heading h2 { font-size:20px; font-weight:600; letter-spacing:-.2px; }
-@media (orientation:portrait), (max-width:999px) { #context-location { margin-inline:12px 0; } #context-location .gallery-heading h2 { font-size:20px; } }
+#context-location .gallery-heading h2 { font-size:var(--type-title); font-weight:600; letter-spacing:-.2px; }
+@media (orientation:portrait), (max-width:999px) { #context-location { margin-inline:12px 0; } #context-location .gallery-heading h2 { font-size:var(--type-title); } }
 /* Viewer actions name themselves; the destructive one sits apart. */
 .viewer-actions .viewer-action { min-height:36px; padding:0 10px; gap:6px; color:var(--color-text); font-size:13px; font-weight:500; }
 .viewer-actions .viewer-action svg { width:19px; height:19px; color:var(--color-muted); }

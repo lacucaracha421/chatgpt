@@ -181,7 +181,7 @@
 .home-series-card__owned { background: var(--color-surface); }
 .home-series-card__owned img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .home-series-card__next { display: grid; place-items: center; align-content: center; gap: 4px; color: var(--color-muted); border: 1px solid var(--color-border-strong); }
-.home-series-card__next b { color: var(--color-text); font: 500 28px/1 var(--font-numeric); }
+.home-series-card__next b { color: var(--color-text); font: 500 var(--type-number)/1 var(--font-numeric); }
 .home-series-card__next b small { margin-left: 2px; color: var(--color-muted); font: 400 var(--type-body) var(--font-ui); }
 .home-continue-card__meta > span:first-child { color: var(--color-faint); }
 .home-series-card__next small { color: var(--color-faint); font-size: var(--type-meta); }

@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC 에셋 목업</title>
+<style>
+@font-face { font-family:"Pretendard Variable"; src:url("../../../_tools/app/src/styles/fonts/PretendardVariable.woff2") format("woff2-variations"); font-weight:45 920; }
+@font-face { font-family:"Rajdhani Numbers"; src:url("../../../_tools/app/src/styles/fonts/Rajdhani-Medium.ttf") format("truetype"); font-weight:500; unicode-range:U+0025,U+002B-003A; }
+/* Tokens copied from _tools/app/src/styles/tokens.css (PC roles 20/15/12/24, spacing 4-32). */
+:root {
+  color-scheme:dark;
+  --color-bg:#161718; --color-sidebar:#1a1b1c; --color-toolbar:#191a1b; --color-surface:#222324; --color-surface-elevated:#292a2b;
+  --color-surface-hover:#2d2e2f; --color-surface-pressed:#343536;
+  --color-text:#e7e9ec; --color-muted:#a0a3a5; --color-faint:#7d8184; --color-accent:#ddd8ca; --color-on-accent:#202628;
+  --color-selection-echo:rgba(221,216,202,.4); --color-section-mark:rgba(221,216,202,.6);
+  --section-label-rule:linear-gradient(90deg,rgba(221,216,202,.3),rgba(221,216,202,.06));
+  --color-border:#363739; --color-border-strong:#55585a; --color-danger:#e26767; --color-success:#7fb88a;
+  --shadow-floating:0 1px 3px rgba(0,0,0,.24),0 8px 20px rgba(0,0,0,.3);
+  --type-title:20px; --type-body:15px; --type-meta:12px; --type-number:24px;
+  --font-ui:"Pretendard Variable","Pretendard","Segoe UI","Malgun Gothic",sans-serif; --font-numeric:"Rajdhani Numbers",var(--font-ui);
+  --ease:cubic-bezier(.2,0,0,1);
+}
+* { box-sizing:border-box; }
+body { margin:0; background:#0e0f10; color:var(--color-text); font:15px/1.45 var(--font-ui); }
+h1,h2,h3,p { margin:0; }
+button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; text-align:left; }
+.numeric { font-family:var(--font-numeric); font-variant-numeric:tabular-nums; }
+svg.i { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+svg.i.s { width:16px; height:16px; }
+
+.doc { max-width:1540px; margin:0 auto; padding:32px 24px 80px; }
+.doc>header h1 { font-size:26px; font-weight:600; }
+.lead { color:var(--color-muted); max-width:1200px; margin:8px 0 0; line-height:1.7; }
+.lead b, .notes b { color:var(--color-text); font-weight:600; }
+section.topic { margin-top:48px; border-top:1px solid var(--color-border); padding-top:24px; }
+section.topic>h2 { font-size:22px; font-weight:600; display:flex; gap:12px; align-items:center; }
+section.topic>h2 .k { display:inline-grid; place-items:center; min-width:28px; height:28px; padding:0 6px; background:var(--color-accent); color:var(--color-on-accent); font:600 16px var(--font-ui); }
+.notes { color:var(--color-muted); max-width:1300px; line-height:1.7; margin:8px 0 16px; }
+.notes ul { margin:6px 0 0; padding-left:20px; }
+.frame { width:1440px; height:900px; overflow:hidden; border:1px solid var(--color-border); }
+body.frame-only { background:var(--color-bg); } body.frame-only .doc { display:none; }
+#solo { display:none; } body.frame-only #solo { display:block; } body.frame-only .frame { border:0; }
+
+/* ===== PC shell ===== */
+.pc { position:relative; width:1440px; height:900px; background:var(--color-bg); display:grid; grid-template-columns:64px 240px 1fr; overflow:hidden; }
+.pc.with-panel { grid-template-columns:64px 240px 1fr 320px; }
+.rail { background:var(--color-sidebar); border-right:1px solid var(--color-border); display:flex; flex-direction:column; align-items:center; padding:12px 0; gap:4px; }
+.rail .logo { width:28px; height:28px; margin-bottom:12px; color:var(--color-muted); }
+.rail a { width:52px; height:52px; display:grid; place-items:center; align-content:center; gap:4px; color:var(--color-muted); font-size:11px; position:relative; }
+.rail a.on { background:var(--color-accent); color:var(--color-on-accent); box-shadow:3px 3px 0 -1px var(--color-sidebar),3px 3px 0 0 var(--color-selection-echo); }
+.rail .sp { flex:1; }
+.index { background:var(--color-sidebar); border-right:1px solid var(--color-border); display:flex; flex-direction:column; min-height:0; }
+.index-head { height:44px; flex:none; display:flex; align-items:center; justify-content:space-between; padding:0 16px; font-size:var(--type-body); color:var(--color-muted); border-bottom:1px solid var(--color-border); }
+.index-body { padding:8px; display:flex; flex-direction:column; gap:2px; overflow:hidden; flex:1; }
+.nav { height:32px; display:flex; align-items:center; gap:8px; padding:0 8px; border-radius:4px; color:var(--color-text); font-size:var(--type-body); }
+.nav small { margin-left:auto; color:var(--color-faint); font:500 12px var(--font-numeric); }
+.nav.on { background:var(--color-accent); color:var(--color-on-accent); box-shadow:3px 3px 0 -1px var(--color-sidebar),3px 3px 0 0 var(--color-selection-echo); }
+.nav.on small { color:var(--color-on-accent); opacity:.7; }
+.nav .i { color:currentColor; opacity:.8; }
+.nav.sub { padding-left:28px; } .nav.sub2 { padding-left:48px; }
+.gap { height:12px; }
+.label { display:flex; align-items:center; gap:8px; height:20px; color:var(--color-faint); font-size:var(--type-meta); }
+.label::before { content:""; width:5px; height:5px; background:var(--color-section-mark); flex:none; }
+.label .rule { flex:1; height:1px; background:var(--section-label-rule); }
+.label .n { font-family:var(--font-numeric); }
+.index .label { padding:0 8px; margin:4px 0; }
+.chips { display:flex; flex-wrap:wrap; gap:4px; padding:0 8px 4px; }
+.chip { height:24px; display:inline-flex; align-items:center; gap:4px; padding:0 8px; border:1px solid var(--color-border); border-radius:2px; color:var(--color-muted); font-size:var(--type-meta); }
+.main { display:flex; flex-direction:column; min-width:0; min-height:0; position:relative; }
+.toolbar { height:44px; flex:none; display:flex; align-items:center; gap:8px; padding:0 16px; border-bottom:1px solid var(--color-border); background:var(--color-toolbar); }
+.toolbar h1 { font-size:var(--type-title); font-weight:600; display:flex; align-items:baseline; gap:8px; }
+.toolbar h1 small { font:500 13px var(--font-numeric); color:var(--color-faint); }
+.toolbar .sp { flex:1; }
+.win { display:flex; gap:24px; color:var(--color-faint); margin-left:8px; }
+.quiet { height:28px; display:inline-flex; align-items:center; gap:4px; padding:0 8px; border-radius:4px; color:var(--color-muted); font-size:var(--type-meta); }
+.quiet:hover, .quiet.open { background:var(--color-surface-hover); color:var(--color-text); }
+.seg { display:inline-flex; height:28px; padding:2px; background:var(--color-surface); border-radius:4px; }
+.seg b { display:inline-flex; align-items:center; gap:4px; padding:0 10px; font-size:var(--type-meta); font-weight:500; color:var(--color-muted); border-radius:2px; }
+.seg b.on { background:var(--color-accent); color:var(--color-on-accent); font-weight:600; }
+.seg b small { font:500 11px var(--font-numeric); opacity:.7; }
+.vr { width:1px; height:20px; background:var(--color-border); }
+
+/* Imagery */
+.art { position:relative; overflow:hidden; background:var(--c1); display:block; }
+.art::before { content:""; position:absolute; left:50%; top:24%; width:40%; aspect-ratio:1; border-radius:50%; background:var(--c2); transform:translateX(-50%); opacity:.85; }
+.art::after { content:""; position:absolute; left:16%; right:16%; bottom:-20%; height:50%; border-radius:50% 50% 0 0; background:var(--c3); opacity:.8; }
+
+/* Gallery */
+.gallery { flex:1; min-height:0; overflow:hidden; padding:16px 16px 0; }
+.day { margin-bottom:24px; }
+.day-head { display:flex; align-items:baseline; gap:8px; margin-bottom:12px; }
+.day-head b { font:500 17px var(--font-numeric); }
+.day-head small { color:var(--color-faint); font-size:var(--type-meta); }
+.day-head .rule { flex:1; height:1px; background:var(--color-border); align-self:center; }
+.day-head .n { color:var(--color-faint); font:500 12px var(--font-numeric); }
+.masonry { display:grid; grid-template-columns:repeat(var(--cols,5),minmax(0,1fr)); gap:8px; align-items:start; }
+.masonry .colm { display:flex; flex-direction:column; gap:8px; }
+.tile { position:relative; border-radius:2px; overflow:hidden; }
+.tile .art { width:100%; }
+.tile .dur { position:absolute; right:6px; bottom:6px; height:20px; padding:0 6px; display:inline-flex; align-items:center; gap:4px; background:rgba(22,23,24,.82); color:var(--color-text); font:500 12px var(--font-numeric); border-radius:2px; }
+.tile .hover { position:absolute; inset:auto 0 0 0; padding:24px 8px 6px; display:flex; justify-content:space-between; align-items:flex-end; background:linear-gradient(transparent,rgba(0,0,0,.66)); font-size:var(--type-meta); color:#fff; opacity:0; }
+.tile.show-hover .hover { opacity:1; }
+.tile .check { position:absolute; left:6px; top:6px; width:18px; height:18px; border:1.5px solid rgba(255,255,255,.85); border-radius:2px; background:rgba(0,0,0,.25); }
+.tile.sel { outline:2px solid var(--color-accent); outline-offset:-2px; }
+.tile.sel .check { background:var(--color-accent); border-color:var(--color-accent); }
+.tile.sel .check::after { content:""; position:absolute; inset:3px; background:var(--color-on-accent); }
+.tile.sel .art { filter:brightness(.8); }
+
+/* Selection bar: one line, labels shrink to icons before they wrap */
+.selbar { position:absolute; left:50%; bottom:20px; transform:translateX(-50%); display:flex; align-items:center; gap:2px; height:44px; padding:0 6px 0 14px; background:var(--color-surface-elevated); border:1px solid var(--color-border); border-radius:4px; box-shadow:var(--shadow-floating); white-space:nowrap; z-index:4; }
+.selbar .count { font-weight:600; font-size:14px; margin-right:8px; }
+.selbar .count b { font-family:var(--font-numeric); font-size:16px; }
+.selbar .act { height:32px; display:inline-flex; align-items:center; gap:6px; padding:0 8px; border-radius:4px; color:var(--color-muted); font-size:13px; }
+.selbar .act kbd { font:500 11px var(--font-numeric); color:var(--color-faint); border:1px solid var(--color-border); border-radius:2px; padding:0 4px; }
+.selbar .act.danger { color:var(--color-danger); }
+.selbar .div { width:1px; height:20px; background:var(--color-border); margin:0 4px; }
+
+/* Inspector (right panel) */
+.panel { background:var(--color-sidebar); border-left:1px solid var(--color-border); display:flex; flex-direction:column; min-height:0; }
+.panel-head { height:44px; flex:none; display:flex; align-items:center; gap:4px; padding:0 8px 0 16px; border-bottom:1px solid var(--color-border); color:var(--color-muted); font-size:var(--type-meta); }
+.panel-head .sp { flex:1; }
+.panel-body { flex:1; overflow:hidden; padding:16px; display:flex; flex-direction:column; gap:20px; }
+.pv { display:flex; gap:12px; }
+.pv .art { width:112px; height:150px; border-radius:2px; flex:none; }
+.pv .who { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.pv .who b { font-size:17px; font-weight:600; }
+.pv .who small { color:var(--color-faint); font-size:var(--type-meta); }
+.pv .who .link { margin-top:auto; display:inline-flex; align-items:center; gap:4px; color:var(--color-muted); font-size:13px; }
+.rows { display:grid; grid-template-columns:72px 1fr; gap:6px 12px; font-size:13px; }
+.rows dt { color:var(--color-faint); }
+.rows dd { margin:0; color:var(--color-text); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rows dd .numeric { font-size:14px; }
+.rows dd small { color:var(--color-faint); margin-left:4px; }
+.tags { display:flex; flex-wrap:wrap; gap:4px; }
+.tag { height:24px; display:inline-flex; align-items:center; gap:4px; padding:0 8px; background:var(--color-surface); border-radius:2px; font-size:var(--type-meta); color:var(--color-muted); }
+.tag.char { background:var(--color-surface-elevated); color:var(--color-text); }
+.tag .p { font:500 11px var(--font-numeric); color:var(--color-faint); }
+.tag.add { background:transparent; border:1px dashed var(--color-border-strong); }
+.post { display:flex; gap:4px; }
+.post .art { width:48px; height:64px; border-radius:2px; }
+.post .art.cur { outline:2px solid var(--color-accent); outline-offset:-2px; }
+.sug { background:var(--color-surface); border-radius:4px; padding:12px; display:flex; flex-direction:column; gap:8px; }
+.sug .top { display:flex; gap:8px; align-items:center; }
+.sug .top .art { width:32px; height:32px; border-radius:50%; }
+.sug .top b { font-size:14px; } .sug .top small { display:block; color:var(--color-faint); font-size:11px; }
+.sug .refs { display:grid; grid-template-columns:repeat(4,1fr); gap:2px; }
+.sug .refs .art { height:56px; }
+.sug .acts { display:flex; gap:6px; }
+.btn { height:28px; display:inline-flex; align-items:center; padding:0 10px; border-radius:4px; font-size:13px; background:var(--color-surface-elevated); color:var(--color-text); }
+.btn.pri { background:var(--color-accent); color:var(--color-on-accent); font-weight:600; }
+
+/* Viewer */
+.viewer { position:absolute; inset:0; background:#0b0c0d; display:grid; grid-template-columns:1fr; }
+.viewer.docked { grid-template-columns:1fr 340px; }
+.stage { position:relative; display:grid; place-items:center; min-width:0; overflow:hidden; }
+.stage .big { height:calc(100% - 128px); aspect-ratio:3/4; border-radius:2px; }
+.vbar { position:absolute; left:0; right:0; top:0; height:56px; display:flex; align-items:center; gap:12px; padding:0 16px; background:linear-gradient(rgba(0,0,0,.6),transparent); z-index:2; }
+.vbar .pos { font:500 15px var(--font-numeric); color:var(--color-muted); } .vbar .pos b { color:var(--color-text); }
+.vbar .ttl { display:flex; flex-direction:column; line-height:1.25; }
+.vbar .ttl b { font-size:15px; font-weight:600; } .vbar .ttl small { font-size:var(--type-meta); color:var(--color-faint); }
+.vbar .sp { flex:1; }
+.vbtn { width:36px; height:36px; display:grid; place-items:center; border-radius:4px; color:var(--color-muted); }
+.vbtn:hover { background:rgba(255,255,255,.08); color:var(--color-text); }
+.vbtn.on { color:var(--color-accent); }
+.vbtn.danger { color:var(--color-danger); }
+.vbtn.text { width:auto; padding:0 10px; gap:6px; display:inline-flex; align-items:center; font-size:13px; }
+.edge { position:absolute; top:56px; bottom:88px; width:96px; display:flex; align-items:center; justify-content:center; color:rgba(255,255,255,.55); z-index:1; }
+.edge.l { left:0; } .edge.r { right:0; }
+.edge svg { width:28px; height:28px; }
+.strip { position:absolute; left:0; right:0; bottom:0; height:88px; display:flex; justify-content:center; align-items:center; gap:4px; background:linear-gradient(transparent,rgba(0,0,0,.55)); z-index:2; }
+.strip .art { width:44px; height:60px; border-radius:2px; opacity:.55; }
+.strip .art.cur { opacity:1; outline:2px solid var(--color-accent); outline-offset:1px; height:64px; width:48px; }
+.dockp { background:var(--color-sidebar); border-left:1px solid var(--color-border); display:flex; flex-direction:column; min-height:0; }
+
+/* Folder header shelf */
+.fhead { padding:16px 16px 0; display:flex; flex-direction:column; gap:12px; }
+.shelf-row { display:flex; gap:12px; overflow:hidden; position:relative; }
+.fcard { width:132px; flex:none; display:flex; flex-direction:column; gap:6px; }
+.fcard .art { width:132px; height:170px; border-radius:2px; }
+.fcard .quad { width:132px; height:170px; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:2px; border-radius:2px; overflow:hidden; }
+.fcard .quad .art { width:auto; height:auto; }
+.fcard b { font-size:14px; font-weight:500; display:flex; align-items:center; gap:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.fcard small { color:var(--color-faint); font-size:var(--type-meta); display:flex; align-items:center; gap:4px; }
+.fcard .mark { position:absolute; left:6px; top:6px; height:20px; padding:0 6px; display:inline-flex; align-items:center; background:rgba(22,23,24,.82); color:var(--color-muted); font-size:11px; border-radius:2px; z-index:1; }
+.fcard .wrap { position:relative; }
+.fcard.suggest .quad { outline:1px dashed var(--color-border-strong); outline-offset:2px; }
+.fcard .dot { width:6px; height:6px; border-radius:50%; background:var(--color-success); }
+.arrow { position:absolute; right:0; top:70px; width:32px; height:32px; display:grid; place-items:center; background:var(--color-surface-elevated); border-radius:4px; color:var(--color-muted); box-shadow:var(--shadow-floating); z-index:2; }
+.fade-r { position:absolute; right:0; top:0; bottom:0; width:96px; background:linear-gradient(90deg,transparent,var(--color-bg)); z-index:1; }
+
+/* ===== E: inspector open/close motion demo ===== */
+.demo-controls { display:flex; gap:8px; margin:0 0 12px; }
+.demo-controls button { height:32px; padding:0 12px; border-radius:4px; background:var(--color-surface); color:var(--color-muted); font-size:13px; }
+.demo-controls button.on { background:var(--color-accent); color:var(--color-on-accent); font-weight:600; }
+.demo { position:relative; width:1136px; height:620px; overflow:hidden; border:1px solid var(--color-border); background:var(--color-bg); display:flex; }
+.demo .dgrid { flex:1; min-width:0; padding:16px; overflow:hidden; }
+.demo .dcols { display:grid; grid-template-columns:repeat(var(--cols),minmax(0,1fr)); gap:8px; align-items:start; }
+.demo .dcol { display:flex; flex-direction:column; gap:8px; }
+.demo .dtile { border-radius:2px; overflow:hidden; will-change:transform; }
+.demo .dtile .art { width:100%; height:100%; }
+.demo .dtile.sel { outline:2px solid var(--color-accent); outline-offset:-2px; }
+.demo .dpanel { width:320px; flex:none; background:var(--color-sidebar); border-left:1px solid var(--color-border); overflow:hidden; }
+.demo .dpanel .panel-body { width:320px; }
+/* push: the panel's width animates; tiles FLIP to their new columns */
+.demo.push .dpanel { transition:width 240ms var(--ease), opacity 240ms var(--ease); }
+.demo.push:not(.open) .dpanel { width:0; opacity:0; border-left:0; }
+/* overlay: the panel floats over the grid and slides in; the grid never moves */
+.demo.overlay .dpanel { position:absolute; top:8px; right:8px; bottom:8px; border:1px solid var(--color-border); border-radius:4px; box-shadow:var(--shadow-floating); transition:transform 220ms var(--ease), opacity 180ms var(--ease); }
+.demo.overlay:not(.open) .dpanel { transform:translateX(24px); opacity:0; pointer-events:none; }
+@media (prefers-reduced-motion:reduce) { .demo .dpanel { transition:none !important; } }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>PC 에셋 — 본 화면 리디자인 (2026-09-29)</h1>
+    <p class="lead">현재 화면(사용자 스크린샷 2026-09-29)에서 고칠 점: <b>타일마다 붙은 시각 캡션</b>, 뷰에 따라 다른 날짜 머리글, 상단바에 개수·정렬이 없음(보기 설정은 사이드바 맨 아래), 폴더 상단의 <b>1·2·3… 페이지 넘김</b>, 검은 빈 화면에 가까운 뷰어(위치·작가·정보 없음), 정보 패널을 열면 <b>선택 막대 글자가 세로로 깨짐</b>, 정보 패널의 로캘 날짜("2026. 9. 29. AM 7:20:00"). 이미지는 색 블록입니다. <code>index.html?frame=a|b|c|d</code>로 한 화면씩 볼 수 있습니다.</p>
+  </header>
+
+  <section class="topic"><h2><span class="k">A</span>격자 + 정보 패널</h2>
+    <div class="notes"><ul>
+      <li><b>상단바</b>: 제목 옆 개수, 오른쪽에 종류(전체·이미지·영상) · 정렬 · 배치 — 보기 설정을 사이드바 바닥에서 올림.</li>
+      <li><b>타일</b>: 시각 캡션 없음(마우스를 올리면 작가 · 시각), 영상은 길이 배지만. 날짜 머리글은 모든 뷰에서 한 모양(9.29 오늘 ─── 6).</li>
+      <li><b>정보 패널</b>: 미리보기 옆에 작가(가장 많이 찾는 정보) → 같은 게시물 → 캐릭터 · 자동 태그 → 출처 · 파일 · 가져오기. 날짜는 앱 표기(9.29 07:20). 라벨 열 72px.</li>
+      <li><b>선택 막대</b>: 한 줄 유지, 좁으면 글자 대신 아이콘만.</li>
+    </ul></div>
+    <div class="frame" data-frame="a"></div>
+  </section>
+
+  <section class="topic"><h2><span class="k">B</span>뷰어 — 몰입형 (추천)</h2>
+    <div class="notes"><ul>
+      <li>그림이 화면 대부분. 위쪽 막대(위치 12 / 9,453 · 작가 · 날짜 · 동작)와 아래 필름 띠는 마우스를 움직일 때만 나타났다 사라짐.</li>
+      <li>상자 모양 화살표 대신 좌우 가장자리 전체가 넘김 영역. 정보(i)를 누르면 C처럼 패널이 붙음.</li>
+    </ul></div>
+    <div class="frame" data-frame="b"></div>
+  </section>
+
+  <section class="topic"><h2><span class="k">C</span>뷰어 — 정보 패널 붙임</h2>
+    <div class="notes"><ul><li>B에서 i를 누른 상태. 패널은 A의 정보 패널과 같은 부품이라 격자와 뷰어가 같은 정보를 같은 순서로 보여 줌.</li></ul></div>
+    <div class="frame" data-frame="c"></div>
+  </section>
+
+  <section class="topic"><h2><span class="k">D</span>폴더 화면 — 캐릭터·제안·하위 폴더</h2>
+    <div class="notes"><ul>
+      <li>1·2·3… 페이지 대신 홈 캘린더처럼 옆으로 넘기는 선반(휠·끌기·화살표). 종류별 구분: 캐릭터 → 제안(점선) → 폴더.</li>
+      <li>미분류 · 전체 이미지는 공통 분류 전환 버튼(개수 포함)으로.</li>
+    </ul></div>
+    <div class="frame" data-frame="d"></div>
+  </section>
+
+  <section class="topic"><h2><span class="k">E</span>정보 패널 여닫기 — 움직임 비교 (직접 눌러 보기)</h2>
+    <div class="notes"><ul>
+      <li><b>오버레이</b>: 격자는 그대로, 패널이 오른쪽 위에 떠서 미끄러져 들어옴(220ms). 다시 배치하지 않아 가장 부드러움. 오른쪽 한 열을 가림.</li>
+      <li><b>밀어내기</b>: 패널 폭이 240ms 동안 늘고, 격자는 5열 → 4열로 바뀌며 각 그림이 새 자리로 미끄러짐(FLIP). 가리는 것 없음.</li>
+      <li>그림을 누르면 선택되고 패널이 열립니다. 같은 그림을 다시 누르거나 “닫기”로 닫힘.</li>
+    </ul></div>
+    <div class="demo-controls"><button data-mode="overlay" class="on">오버레이</button><button data-mode="push">밀어내기</button><span style="flex:1"></span><button id="demo-toggle">정보 열기 / 닫기</button></div>
+    <div class="demo overlay" id="demo"><div class="dgrid"><div class="dcols" id="dcols"></div></div><aside class="dpanel"><div class="panel-head">정보<span class="sp"></span></div><div id="dpanel-body"></div></aside></div>
+  </section>
+</div>
+<div id="solo"></div>
+
+<script>
+const I = {
+  home:'<path d="M3 11.5 12 4l9 7.5V20h-6v-5H9v5H3z"/>', grid:'<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 10h16M10 10v10"/>',
+  box:'<rect x="4" y="6" width="16" height="13" rx="1"/><path d="M7 3h10"/>', book:'<path d="M4 5h6a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4zM20 5h-6a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h6z"/>',
+  note:'<path d="M6 3h12v18H6zM9 8h6M9 12h6M9 16h4"/>', swap:'<path d="M7 7h12l-3-3M17 17H5l3 3"/>', search:'<circle cx="11" cy="11" r="6"/><path d="m20 20-4-4"/>',
+  more:'<circle cx="6" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="18" cy="12" r="1"/>', folder:'<path d="M3 7h6l2 2h10v10H3z"/>',
+  user:'<circle cx="12" cy="8" r="4"/><path d="M4 20c1-4 4-6 8-6s7 2 8 6"/>', image:'<rect x="3" y="5" width="18" height="14" rx="1"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-8 8"/>',
+  star:'<path d="m12 4 2.4 5 5.6.6-4.2 3.8 1.2 5.5L12 16.2 7 18.9l1.2-5.5L4 9.6 9.6 9z"/>', trash:'<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>',
+  x:'<path d="M6 6l12 12M18 6 6 18"/>', info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>', left:'<path d="m15 5-7 7 7 7"/>', right:'<path d="m9 5 7 7-7 7"/>',
+  chev:'<path d="m9 6 6 6-6 6"/>', link:'<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>', copy:'<rect x="8" y="8" width="12" height="12" rx="1"/><path d="M4 16V4h12"/>',
+  sort:'<path d="M7 4v16l-3-3M17 20V4l3 3"/>', layout:'<rect x="4" y="4" width="7" height="10"/><rect x="13" y="4" width="7" height="6"/><rect x="4" y="16" width="7" height="4"/><rect x="13" y="12" width="7" height="8"/>',
+  play:'<path d="m8 5 11 7-11 7z"/>', pin:'<path d="M12 21v-6M8 3h8l-1 6 3 3H6l3-3z"/>', move:'<path d="M3 7h6l2 2h10v10H3zM12 12v5M9.5 14.5 12 17l2.5-2.5"/>', edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+  tag:'<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8" r="1.2"/>', album:'<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 15l5-5 5 5 3-3 3 3"/>',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24">${I[n]}</svg>`;
+const PAL = [['#c7d3a6','#6f7d44','#95ad6d'],['#a9d7c4','#4e8a6c','#6aa88b'],['#d7a3b3','#8a4f63','#b27686'],['#9fc2c8','#4a7a82','#6f9ea6'],['#b9a2d8','#5d4a86','#8a74b3'],['#e0c99e','#8a6d3c','#b8995f'],['#9eb6e0','#3f5c8a','#6f8cc2'],['#d9b3a0','#8a5842','#b47c64'],['#a6c9a0','#4b7a44','#76a36e'],['#c9a0c2','#7a4570','#a8709f'],['#a0bfd9','#456a8a','#6f92b4'],['#d9cfa0','#857a42','#b0a66b']];
+const art = (i, cls = '', style = '') => { const p = PAL[i % PAL.length]; return `<span class="art ${cls}" style="--c1:${p[0]};--c2:${p[1]};--c3:${p[2]};${style}"></span>`; };
+
+const rail = `<nav class="rail"><svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4v16M9 6v12M13 4v16M17 7v10"/></svg>
+  <a>${ic('home')}홈</a><a class="on">${ic('grid')}에셋</a><a>${ic('box')}컬렉션</a><a>${ic('book')}망가</a><a>${ic('note')}메모</a><a>${ic('swap')}전송</a>
+  <span class="sp"></span><a>${ic('search')}찾기</a><a>${ic('more')}더보기</a></nav>`;
+const tree = (active) => `<aside class="index"><div class="index-head"><span>에셋</span>${ic('more','s')}</div><div class="index-body">
+  <div class="nav ${active === 'all' ? 'on' : ''}">${ic('folder','s')}전체<small>9,453</small></div>
+  <div class="nav">${ic('user','s')}작가<small>45</small></div>
+  <div class="nav">${ic('album','s')}앨범<small>3</small></div>
+  <div class="gap"></div><div class="label">즐겨찾기<span class="rule"></span></div>
+  <div class="chips"><span class="chip">★ 리버스</span><span class="chip">★ 젠레스</span><span class="chip">★ 명조</span><span class="chip">★ 백합</span></div>
+  <div class="gap"></div><div class="label">폴더<span class="rule"></span></div>
+  <div class="nav">${ic('folder','s')}게임<small>5,915</small></div>
+  <div class="nav sub ${active === 'rev' ? 'on' : ''}">${ic('folder','s')}리버스<small>2,666</small></div>
+  <div class="nav sub">${ic('folder','s')}젠레스<small>831</small></div><div class="nav sub">${ic('folder','s')}명조<small>516</small></div>
+  <div class="nav sub">${ic('folder','s')}블아<small>428</small></div><div class="nav sub">${ic('folder','s')}니케<small>136</small></div>
+  <div class="nav sub">${ic('folder','s')}포켓몬<small>370</small></div><div class="nav sub">${ic('folder','s')}닌텐도<small>111</small></div>
+  <div class="nav sub">${ic('folder','s')}아이돌<small>106</small></div><div class="nav">${ic('folder','s')}만화<small>1,364</small></div>
+  <div class="nav sub">${ic('folder','s')}백합<small>312</small></div><div class="nav sub">${ic('folder','s')}건담<small>196</small></div>
+  <div class="nav">${ic('folder','s')}오리지널<small>938</small></div></div></aside>`;
+const toolbar = (title, count) => `<header class="toolbar"><h1>${title}<small>${count}</small></h1><span class="sp"></span>
+  <span class="seg"><b class="on">전체</b><b>이미지 <small>8,996</small></b><b>영상 <small>457</small></b></span>
+  <span class="vr"></span><button class="quiet">${ic('sort','s')}최신순</button><button class="quiet">${ic('layout','s')}폭포수</button>
+  <span class="vr"></span><button class="quiet">${ic('info','s')}정보</button><span class="win">— □ ✕</span></header>`;
+
+// Masonry: fixed pseudo-random heights per column
+const H = [150, 260, 190, 320, 170, 230, 280, 160, 210, 300, 180, 240];
+function masonry(cols, count, seed, opts = {}) {
+  const colsHtml = [];
+  for (let c = 0; c < cols; c++) {
+    let items = '';
+    for (let k = 0; k < count; k++) {
+      const n = seed + c * 3 + k * 7;
+      const h = H[n % H.length];
+      const sel = opts.sel === `${c}:${k}`;
+      const hover = opts.hover === `${c}:${k}`;
+      const video = (n % 5) === 0;
+      items += `<div class="tile${sel ? ' sel' : ''}${hover ? ' show-hover' : ''}">${art(n, '', `height:${h}px`)}${video ? `<span class="dur">${ic('play','s')}0:${10 + n % 40}</span>` : ''}
+        ${sel || opts.checks ? '<span class="check"></span>' : ''}<span class="hover"><span>@az7970936${n % 9}</span><span class="numeric">0${7 + n % 3}:${10 + n % 49}</span></span></div>`;
+    }
+    colsHtml.push(`<div class="colm">${items}</div>`);
+  }
+  return `<div class="masonry" style="--cols:${cols}">${colsHtml.join('')}</div>`;
+}
+const dayHead = (d, w, n) => `<div class="day-head"><b>${d}</b><small>${w}</small><span class="rule"></span><span class="n">${n}</span></div>`;
+const selbar = (n) => `<div class="selbar"><span class="count"><b>${n}</b>개 선택</span><span class="div"></span>
+  <button class="act">${ic('user','s')}캐릭터 <kbd>C</kbd></button><button class="act">${ic('album','s')}앨범</button><button class="act">${ic('tag','s')}작가 지정</button>
+  <button class="act">${ic('star','s')}</button><span class="div"></span><button class="act danger">${ic('trash','s')}</button><button class="act">${ic('x','s')}</button></div>`;
+
+const inspectorBody = (docked) => `<div class="panel-body">
+  <div class="pv">${art(1)}<div class="who"><b>az79709363</b><small>@az79709363 · 모은 그림 10장</small>
+    <small>처음 저장 2025.7.18 · 최근 9.29</small><button class="link">작가 페이지 ${ic('chev','s')}</button></div></div>
+  <div><div class="label">같은 게시물 <span class="n">4</span><span class="rule"></span></div><div class="post" style="margin-top:8px">${art(1,'cur')}${art(3)}${art(5)}${art(7)}</div></div>
+  <div><div class="label">캐릭터 · 자동 태그<span class="rule"></span></div><div class="tags" style="margin-top:8px">
+    <span class="tag char">${ic('user','s')}하스미 (블아)</span><span class="tag char">${ic('user','s')}미유 (블아)</span>
+    <span class="tag">2girls <span class="p">.97</span></span><span class="tag">police uniform <span class="p">.91</span></span><span class="tag">green hair <span class="p">.88</span></span><span class="tag">halo <span class="p">.86</span></span><span class="tag add">＋ 태그</span></div></div>
+  <div><div class="label">출처<span class="rule"></span></div><dl class="rows" style="margin-top:8px">
+    <dt>게시물</dt><dd>x.com/WorldSa… ${ic('copy','s')}</dd><dt>게시</dt><dd><span class="numeric">9.29 07:20</span></dd></dl></div>
+  <div><div class="label">파일<span class="rule"></span></div><dl class="rows" style="margin-top:8px">
+    <dt>해상도</dt><dd><span class="numeric">821 × 1200</span></dd><dt>크기</dt><dd><span class="numeric">147</span><small>KB</small></dd>
+    <dt>가져옴</dt><dd><span class="numeric">9.29</span><small>브라우저 확장</small></dd><dt>폴더</dt><dd>게임 › 블아</dd></dl></div>
+  ${docked ? '' : ''}</div>`;
+
+function frameA() {
+  return `<div class="pc with-panel">${rail}${tree('all')}<main class="main">${toolbar('전체','9,453')}
+    <div class="gallery">${dayHead('9.29','오늘',6)}${masonry(4, 2, 0, { sel:'1:0', hover:'2:1' })}${dayHead('9.28','월',39)}${masonry(4, 1, 20)}</div>${selbar(1)}</main>
+    <aside class="panel"><div class="panel-head">정보<span class="sp"></span><button class="vbtn">${ic('edit','s')}</button><button class="vbtn">${ic('x','s')}</button></div>${inspectorBody(false)}</aside></div>`;
+}
+const vbar = (docked) => `<div class="vbar"><button class="vbtn">${ic('left')}</button><span class="pos numeric"><b>12</b> / 9,453</span>
+  <span class="ttl"><b>az79709363</b><small>게임 › 블아 · 9.29 07:20</small></span><span class="sp"></span>
+  <button class="vbtn text">${ic('user','s')}캐릭터</button><button class="vbtn text">${ic('album','s')}앨범</button><button class="vbtn">${ic('link','s')}</button>
+  <button class="vbtn on">${ic('star')}</button><button class="vbtn">${ic('move')}</button><button class="vbtn danger">${ic('trash')}</button>
+  <button class="vbtn ${docked ? 'on' : ''}">${ic('info')}</button><button class="vbtn">${ic('x')}</button></div>`;
+const strip = () => `<div class="strip">${[4,6,8,9,10,1,3,5,7,2,11].map((n, i) => art(n, i === 5 ? 'cur' : '')).join('')}</div>`;
+function frameB() {
+  return `<div class="pc" style="display:block"><div class="viewer"><div class="stage">${vbar(false)}
+    <span class="edge l">${ic('left')}</span>${art(1,'big')}<span class="edge r">${ic('right')}</span>${strip()}</div></div></div>`;
+}
+function frameC() {
+  return `<div class="pc" style="display:block"><div class="viewer docked"><div class="stage">${vbar(true)}
+    <span class="edge l">${ic('left')}</span>${art(1,'big')}<span class="edge r">${ic('right')}</span>${strip()}</div>
+    <aside class="dockp"><div class="panel-head">정보<span class="sp"></span><button class="vbtn">${ic('edit','s')}</button><button class="vbtn">${ic('x','s')}</button></div>${inspectorBody(true)}</aside></div></div>`;
+}
+function frameD() {
+  const chars = [['버틴',2],['안조',4]].map(([n, i]) => `<div class="fcard"><div class="wrap">${art(i,'',`width:132px;height:170px`)}</div><b>${ic('user','s')}${n}</b><small><span class="numeric">36</span>장</small></div>`).join('');
+  const sug = [['젤다 공주',16],['시버',14],['링크',12]].map(([n, c], k) => `<div class="fcard suggest"><div class="wrap"><span class="mark">제안</span><div class="quad">${art(k*4)}${art(k*4+1)}${art(k*4+2)}${art(k*4+3)}</div></div><b>${n}</b><small><span class="numeric">${c}</span>장 · <span class="dot"></span>일치</small></div>`).join('');
+  const folders = [['4.0',6],['가방팟',8],['라모나',9],['런던',10]].map(([n, i]) => `<div class="fcard"><div class="wrap">${art(i,'',`width:132px;height:170px`)}</div><b>${ic('folder','s')}${n}</b><small><span class="numeric">${40 + i * 7}</span>장</small></div>`).join('');
+  return `<div class="pc">${rail}${tree('rev')}<main class="main"><header class="toolbar"><h1>리버스<small>2,666</small></h1><span class="sp"></span>
+      <button class="quiet">${ic('sort','s')}최신순</button><button class="quiet">${ic('layout','s')}폭포수</button><span class="vr"></span><button class="quiet">제안 숨기기</button><span class="win">— □ ✕</span></header>
+    <div class="fhead"><div class="label">캐릭터 <span class="n">2</span> · 제안 <span class="n">33</span> · 폴더 <span class="n">12</span><span class="rule"></span></div>
+      <div class="shelf-row">${chars}${sug}${folders}<span class="fade-r"></span><button class="arrow">${ic('chev','s')}</button></div>
+      <div style="display:flex;align-items:center;gap:12px"><span class="seg"><b class="on">미분류 <small>2,457</small></b><b>전체 이미지 <small>2,666</small></b></span></div></div>
+    <div class="gallery">${dayHead('9.28','월',7)}${masonry(4, 2, 30)}</div></main></div>`;
+}
+
+// ===== E demo =====
+(function () {
+  const demo = document.getElementById('demo'); if (!demo) return;
+  const cols = document.getElementById('dcols');
+  document.getElementById('dpanel-body').innerHTML = inspectorBody(false);
+  const tiles = Array.from({ length: 22 }, (_, i) => ({ i, h: H[(i * 7) % H.length] }));
+  let selected = 3;
+  function layout(n) {
+    // Masonry: shortest column first, like the app.
+    const heights = Array(n).fill(0); const buckets = Array.from({ length: n }, () => []);
+    tiles.forEach((t) => { const c = heights.indexOf(Math.min(...heights)); buckets[c].push(t); heights[c] += t.h + 8; });
+    cols.style.setProperty('--cols', n);
+    cols.innerHTML = buckets.map((b) => `<div class="dcol">${b.map((t) => `<div class="dtile${t.i === selected ? ' sel' : ''}" data-i="${t.i}" style="height:${t.h}px">${art(t.i)}</div>`).join('')}</div>`).join('');
+  }
+  const rects = () => new Map(Array.from(cols.querySelectorAll('.dtile')).map((el) => [el.dataset.i, el.getBoundingClientRect()]));
+  function setOpen(open) {
+    const push = demo.classList.contains('push');
+    if (!push) { demo.classList.toggle('open', open); return; }
+    const before = rects();
+    demo.classList.toggle('open', open);
+    layout(open ? 4 : 5);
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // FLIP: each tile starts where it was and eases into its new column (the grid width is final at once).
+    cols.querySelectorAll('.dtile').forEach((el) => {
+      const a = before.get(el.dataset.i), b = el.getBoundingClientRect(); if (!a || reduce) return;
+      el.animate([{ transform: `translate(${a.left - b.left}px, ${a.top - b.top}px) scale(${a.width / b.width})`, transformOrigin: 'top left' }, { transform: 'none', transformOrigin: 'top left' }], { duration: 260, easing: 'cubic-bezier(.2,0,0,1)' });
+    });
+  }
+  layout(5);
+  cols.addEventListener('click', (e) => { const t = e.target.closest('.dtile'); if (!t) return; const i = Number(t.dataset.i); const open = !(demo.classList.contains('open') && i === selected); selected = i; cols.querySelectorAll('.dtile').forEach((el) => el.classList.toggle('sel', Number(el.dataset.i) === selected)); setOpen(open); });
+  document.getElementById('demo-toggle').addEventListener('click', () => setOpen(!demo.classList.contains('open')));
+  document.querySelectorAll('.demo-controls [data-mode]').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('.demo-controls [data-mode]').forEach((x) => x.classList.toggle('on', x === b));
+    demo.classList.remove('open', 'overlay', 'push'); demo.classList.add(b.dataset.mode); layout(5);
+  }));
+})();
+const FRAMES = { a: frameA, b: frameB, c: frameC, d: frameD };
+document.querySelectorAll('[data-frame]').forEach((el) => { el.innerHTML = FRAMES[el.dataset.frame](); });
+const solo = new URLSearchParams(location.search).get('frame');
+if (solo && FRAMES[solo]) { document.body.classList.add('frame-only'); document.getElementById('solo').innerHTML = `<div class="frame">${FRAMES[solo]()}</div>`; }
+</script>
+</body>
+</html>

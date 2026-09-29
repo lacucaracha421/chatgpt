@@ -178,7 +178,7 @@ input:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: var(--control-height-md);
+  min-height: var(--control-height);
   padding: 0 var(--space-3);
   color: var(--color-text);
   background: transparent;
