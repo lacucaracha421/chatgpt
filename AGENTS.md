@@ -28,6 +28,7 @@
 - Run npm and Cargo from the owning package/crate so pinned tools and configuration apply. Root `app/` and `mobile/` are not active packages. The legacy `extension/` collector was removed on 2026-09-26; `extension-list/` is the only collector.
 - Before editing, inspect the branch, staged/unstaged changes, and relevant untracked files. `main` is the integration baseline, not a substitute for current worktree state.
 - Support Windows and Linux: preserve portable paths, media protocols, filesystem behavior, and credential backends; report unavailable native verification explicitly.
+- PC is canonical for design: design each screen on the PC first with shared components, then bring the tablet along in the same round; tablet differences are limited to touch targets, portrait layout, and gestures, as defined in `DESIGN.md` §12.
 - Preserve the current framework, custom UI, and package manager. Ordinary work does not authorize Next.js, shadcn, Vercel hosting, AI SDK, new persistence, or another browser runtime; the existing Vercel AI Gateway integration is not approval to adopt that stack.
 
 ## Data, credentials, and user work
@@ -56,6 +57,7 @@
 - For performance work, measure before optimizing and follow `docs/agents/implementation.md` (Performance work).
 - Reuse inspected successful evidence unless later edits or changed inputs invalidate it. Planning, review, delegation, commit, or completion is not itself a reason to rerun checks.
 - For purely visual changes (CSS, spacing, typography, color, shadow, animation), skip automated tests and production builds unless there is plausible compile or behavioral risk; report whether rendering was inspected.
+- Batch the relevant checks once per round before the commit; visual-only edits skip automated tests.
 - Keep evidence levels distinct: static checks, frontend/browser checks, native Tauri acceptance, Android device checks, and production sync. Fixture or browser success does not prove native integration or live deployment. Never claim tests passed from source inspection or a native fix from compilation alone.
 - Report checks actually run with results, and remaining gaps.
 

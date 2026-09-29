@@ -29,8 +29,8 @@ Applicable `AGENTS.md` instructions govern the work. Read the references needed
 for the current task; this list is a map, not a mandatory reading sequence.
 
 - `../CONTEXT.md` — product vocabulary and domain boundaries when behavior or terminology is affected.
-- `../DESIGN.md` — current design language for visual changes.
-- `agents/pc-design-reference.md` — PC shell, content, and interaction contracts for affected desktop UI.
+- `../DESIGN.md` — current design language for visual changes; §12 Foundation (PC and tablet, with PC first) is canonical and is grounded in `prototypes/design-foundation-20260928/`.
+- `agents/pc-design-reference.md` — PC shell, content, and interaction contracts for affected desktop UI; it follows the shared `DESIGN.md` §12 foundation.
 - `adr/README.md` — architecture decision status when changing architectural boundaries.
 - `roadmap/lakomics-backlog.md` — active pending work when checking priorities, recording a request, or resuming a tracked item.
 - `roadmap/lakomics-completed.md` — completed/superseded/historical records; not an executable backlog.
@@ -38,7 +38,7 @@ for the current task; this list is a map, not a mandatory reading sequence.
 ## Current reference documents
 
 - `agents/pc-design-reference.md` — Chrome 03b shell, Asset browsing, selection, floating surfaces, search, Works physicality, responsive/performance rules, and current implementation checkpoint.
-- `agents/works-viewer-design.md` — type-specific Works presentation inside the shared PC design: manga shelf, game exhibit, video poster archive, Showcase.
+- `agents/works-viewer-design.md` — type-specific Works presentation inside the shared PC design and §12 foundation: manga shelf, game exhibit, video poster archive, Showcase.
 - `agents/lakomics-works-handoff-v2.md` — Collection/Works product and architecture boundaries.
 - `agents/domain.md` — how to resolve documentation/domain conflicts.
 - `agents/implementation.md` — implementation/shared-UI rules, review scope, and verification evidence.
@@ -49,7 +49,7 @@ for the current task; this list is a map, not a mandatory reading sequence.
 - `research/server-authority-v2-product-decisions-20260915.md` — confirmed Server Authority v2 product decisions, Android/mobile audit findings, and pre-design migration constraints; not an implementation plan.
 - `research/server-authority-v2-pc-audit-20260915.md` — PC publication/recovery audit: stale-snapshot risks, local-vs-shared state, and safe retirement order.
 - `adr/0037-server-authority-v2-replica-and-command-contract.md` — proposed common per-domain authority, client-replica/outbox, recovery and fence contract for the next CLOUD-POST-001 batches.
-- `agents/mobile-consumption-ux.md` — approved Mobile Home/Library/viewer behavior.
+- `agents/mobile-consumption-ux.md` — approved Mobile Home/Library/viewer behavior; some early navigation and implementation checkpoints are historical, so current tablet source and `DESIGN.md` §12 take precedence.
 - `edge-extension.md` — legacy `extension/` collector routing and Cloud Library behavior (historical; the code was removed 2026-09-26); the active collector is documented in `../extension-list/README.md`, with source rules in `../extension-list/AGENTS.md`.
 - `agents/catalog-troubleshooting.md` — catalog transport/checkpoint behavior and rollout safeguards.
 - `operations/linux-desktop.md` — Linux desktop setup, filesystem guarantees, system media tools, and platform limitations.

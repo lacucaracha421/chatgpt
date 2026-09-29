@@ -7,6 +7,11 @@ and also includes Collections and Catalog/Reader outside this document's scope.
 See the [Android README](../../android/README.md) and the living backlog for current
 feature coverage and the separate installed-device/acceptance status.
 
+The shared visual foundation for the PC and Android tablet is `DESIGN.md` §12. PC is
+canonical; the tablet follows in the same design round and differs only for touch,
+portrait layout and gestures. Current tablet navigation is verified in
+`_tools/app/mobile-client/App.tsx`.
+
 The new `_tools/app/mobile-client` / `android` preview implements the core consumption path. See `android/README.md` for its exact scope and current limitations. Browser fixture/static/offline checks do not complete the Galaxy Tab device gate below. The living backlog retains MOBILE-004 as PARTIAL.
 
 This document defines the consumption-oriented UI and loading behavior for the
@@ -23,14 +28,11 @@ Mobile should optimize for these activities in order:
 2. choose a classification or creator and browse it deliberately;
 3. rediscover older media without a specific destination.
 
-The primary device is Galaxy Tab S11. The 2026-09-19 user direction supersedes
-landscape-first layout work: finish portrait first because it is used much more
-often, then design the landscape experience. Reduce persistent chrome, redundant
-headings and explanatory copy; keep assets and thumbnails dominant. Consolidate
-secondary controls without removing existing actions, applied-filter visibility,
-loading/error feedback, or Android Back behavior. Preserve landscape functionality
-during this pass rather than redesigning it. Visual alignment does not itself add
-desktop management or server write authority.
+Historical (superseded by `DESIGN.md` §12 and the current tablet source): the
+2026-09-19 user direction prioritized portrait over landscape. Its guidance to
+reduce persistent chrome, redundant headings and explanatory copy, keep assets and
+thumbnails dominant, and preserve loading/error feedback and Android Back behavior
+remains applicable; the shared foundation now follows the PC-first rule.
 
 ## Scope
 
@@ -46,23 +48,27 @@ This design covers:
 
 This design does not cover:
 
-- Collections or Showcase implementation;
+- Historical scope note: Collections or Showcase implementation was outside this
+  document's original scope; the current tablet source includes Collections.
 - Online Manga Catalog browsing, catalog bookmarks, or reading-progress sync;
 - Android `DocumentsProvider` or the native application shell;
 - a new cloud `display.webp` representation;
 - classification editing, bulk organization, or other desktop management work.
 
-Collections may return as a primary Mobile destination when their consumption
-experience is implemented. The Online Manga Catalog should be designed
-separately after its PC experience and data contracts are updated.
+Collections and the Online Manga Catalog are current tablet destinations; their
+detailed behavior is outside this focused consumption reference and follows the
+current source and subsystem documents.
 
 ## Information architecture
 
-The initial bottom navigation contains two destinations:
+Historical (superseded by the current tablet source and `DESIGN.md` §12): the
+initial bottom navigation contained two destinations:
 
 - **Home** — inspect recent additions and enter lightweight revisit
   or discovery experiences;
 - **Library** — browse the existing classification hierarchy and its assets.
+
+The current tablet bottom navigation is **홈 · 에셋 · 컬렉션 · 카탈로그 · 메모**.
 
 Connection status and settings move to the top-right overflow menu. They must
 remain accessible without occupying a persistent consumption tab. Empty future
@@ -86,7 +92,7 @@ item in one section must not leak navigation into another section.
 
 ## Aspect-ratio-preserving gallery
 
-The gallery uses a justified-row layout:
+The current tablet asset gallery uses a justified-row layout:
 
 - every image is shown at its complete intrinsic aspect ratio;
 - rows share a target height while tile widths vary by media aspect ratio;
@@ -212,7 +218,9 @@ latency. Originals must not be destructively replaced as part of that decision.
 - Recent content paints before slower Revisit or discovery requests finish.
 - An already useful grid or viewer thumbnail is never replaced by a global
   loading message.
-- A spinner is used only when no visual placeholder is available.
+- Loading uses the §12 skeleton blocks in the shape of the content; content areas
+  use no spinners. A no-content state may use a spinner only when no visual
+  placeholder exists.
 - Original-image failure leaves the thumbnail visible with a retry action.
 - Video failure leaves the poster visible with a retry action and a concise
   error state.
@@ -242,7 +250,7 @@ The Galaxy Tab S11 device gate should cover portrait first and then landscape:
    layout shifts.
 3. Density cycles Large -> Balanced -> Compact and survives reload.
 4. Tapping a loaded tile produces no blank or black intermediate viewer frame.
-5. A preloaded previous or next image appears without a loading spinner.
+5. A preloaded previous or next image appears without a content spinner.
 6. Large portrait and landscape images initially fit without page scrolling or
    dragging; panning begins only after pinch zoom.
 7. Videos initially fit the viewport, keep their poster until ready, and retain

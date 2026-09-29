@@ -1,10 +1,10 @@
 # Lakomics Design Language
 
-> 상태: 현재 PC Lakomics의 최상위 시각·상호작용 원칙. 2026-09-06의 Lab 06 콘텐츠 방향과 Chrome 03b 실제 개편을 통합한 기준이다.
+> Status: current visual and interaction rules for the Lakomics PC and Android tablet on Windows and Linux. 2026-09-06의 Lab 06 콘텐츠 방향과 Chrome 03b 실제 개편을 통합한 기준이다.
 > 상세 구현 기준은 `docs/agents/pc-design-reference.md`를 따른다. 매체별 Works 문법은 `docs/agents/works-viewer-design.md`를 따른다.
 > Spacing, type, radius, colour roles and shared controls for **both PC and the Android tablet** are defined in section 12 (Foundation, decided 2026-09-28); where an older line below disagrees, section 12 wins.
 
-Lakomics는 장시간 사용하는 Windows 데스크톱 개인 미디어 아카이브다. 이미지·영상과 작품이 화면의 주인공이며, 앱 chrome은 자료를 찾고 정리하고 다시 감상하기 위한 조용한 도구여야 한다.
+Lakomics는 Windows와 Linux PC, Android tablet에서 장시간 사용하는 개인 미디어 아카이브다. 이미지·영상과 작품이 화면의 주인공이며, 앱 chrome은 자료를 찾고 정리하고 다시 감상하기 위한 조용한 도구여야 한다.
 
 ## 1. 핵심 인상
 
@@ -42,7 +42,7 @@ PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 
 카드보다 **명도 차이 → 1px separator → 간격 → typography** 순으로 계층을 만든다.
 
-- Radius has four steps (section 12): 0 media tiles and floating menus/dialogs · 2 marks (badges, checkboxes, covers) · 4 controls and rows · 8 tablet bottom sheets.
+- Radius has four steps (section 12): 0 media tiles and floating menus/dialogs · 2 marks (badges, checkboxes, covers, 5px menu marks) · 4 controls and rows · 8 tablet bottom sheets.
 - dialog: 필요할 때만 더 큰 surface와 shadow.
 - shadow는 실제로 떠 있는 menu/dialog/drag preview와 의미 있는 collectible object에만 쓴다.
 - 일반 grid tile, toolbar, settings row, sidebar section에 장식용 shadow를 퍼뜨리지 않는다.
@@ -58,7 +58,7 @@ PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 - 설정 → 일반의 앱 전체 배율은 80·90·100·110·125·150%를 지원하며 기본값은 100%다. WebView 배율로 모든 UI와 미디어를 함께 조절하고, 이 PC의 UI 설정에 저장해 다음 실행에도 적용한다.
 - monospace는 경로·ID·timestamp 같은 실제 기술 값에만 제한한다.
 - 사용자 폴더/앨범 이름을 uppercase로 바꾸지 않는다.
-- dark neutral surface가 기본이며, accent는 선택·focus·valid drop·중요한 confirmation에만 쓴다.
+- dark neutral surface가 기본이며, accent는 선택·primary·checked/on·NEW에만 쓴다. Focus는 blue `--color-focus`다.
 
 ## 6. 선택과 컨트롤
 
@@ -66,9 +66,9 @@ PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 
 - **Current location / slab**: the most specific navigation location uses `--color-sidebar-selection` / `--color-accent` with `--color-on-accent`, square corners, and `--selection-echo` (`--selection-echo-surface` on the standalone Settings surface). A selected row carries its own small dark mark (`--selection-mark-size`) at the right end; never add a separate ivory square to the left of or outside the row. Retain existing inner markers such as Classification tree icons. Blurred/decorative selection shadows remain banned.
 - **Parent context / tint**: when a parent level and a more specific child are both current, only the child keeps the slab. The parent (the area rail, Notes scopes) uses `--color-selection-context` with `--color-selection-context-text`; hover uses `--color-selection-context-hover`; no echo or mark. Collection type, `신간`, `발매 캘린더` and update-provider destinations remain slabs.
-- **Index section labels**: preserve font size/color and add a 5px square (`--color-section-mark`) followed by a fading 1px hairline (`--section-label-rule`).
+- **Index section labels**: follow §12's faint `meta` role and add a 5px square (`--color-section-mark`) followed by a fading 1px hairline (`--section-label-rule`).
 - **복수 선택 필터**: 중성 회색 면, 반복 사각 표식 없음. 누런/올리브 selection은 사용하지 않는다.
-- **자산 자체의 선택**: 좌상단 작은 사각 표식 + 이미지에만 청록색 선택 음영(`--asset-selection-tint`). 2026-09-06 사용자가 기존 중성 회색 음영의 낮은 가시성을 이유로 승인한 값이다. 바깥 selection outline과 metadata 영역의 색·여백 변화로 선택을 표현하지 않는다.
+- **자산 자체의 선택 (legacy)**: 좌상단 작은 사각 표식 + 이미지에만 청록색 선택 음영(`--asset-selection-tint`). 2026-09-06 사용자가 기존 중성 회색 음영의 낮은 가시성을 이유로 승인한 값이다. 에셋 화면을 다시 설계할 때는 이 legacy treatment를 `docs/prototypes/pc-assets-20260929/`의 §12 selection treatment로 옮긴다. 바깥 selection outline과 metadata 영역의 색·여백 변화로 선택을 표현하지 않는다.
 - keyboard focus는 selection과 별도 상태다. focus가 이동했다고 선택으로 보이거나, 선택 때문에 focus가 사라지면 안 된다.
 - 일반 icon action은 quiet하게 두고, 한 화면에 강한 primary surface를 여러 개 만들지 않는다.
 
@@ -96,11 +96,11 @@ PC 자산 기본 보기는 **수집일별 masonry/waterfall**이다. justified r
 - **상세**: 원본 hero/backdrop 뒤에 표지를 겹치고 하단을 넓게 fade한다. 표지에는 fade를 걸지 않는다.
 - 배경이 없으면 가짜 blurred background를 만들지 않고 상단 공간을 접어 compact 정보 배치로 전환한다.
 
-물성은 Library < Detail < Showcase 순으로 강해질 수 있지만, ordinary UI와 Asset tile에는 전염시키지 않는다. 쇼케이스는 매체별로 사용자가 고른 표지만 촘촘히 전시하며 9개까지 3×3, 10개부터 4×4, 16개 초과는 다음 페이지로 이어진다.
+물성은 library grid < Detail < Showcase 순으로 강해질 수 있지만, ordinary UI와 Asset tile에는 전염시키지 않는다. 쇼케이스는 매체별로 사용자가 고른 표지만 촘촘히 전시하며 9개까지 3×3, 10개부터 4×4, 16개 초과는 다음 페이지로 이어진다.
 
 ## 9. Floating surface와 tooltip
 
-- menu, context menu, popover, 보기 설정은 같은 얇은 경계 언어를 쓴다.
+- menu, context menu, popover, 보기 설정과 dialog는 §12를 따른다: radius 0의 square surface와 NieR corner brackets, 같은 얇은 경계 언어를 쓴다.
 - 파괴적 확인은 dialog, 즉시 선택은 menu/popover로 역할을 나눈다.
 - 커서를 올리거나 키보드 focus를 옮겼을 때 뜨는 tooltip은 사용하지 않는다. 공통 tooltip과 HTML `title` 말풍선 모두 포함한다.
 - 아이콘 버튼의 `aria-label`과 키보드 조작은 유지한다. 추가 설명은 필요하면 `aria-description`으로 제공하고, 화면에서 필요한 안내는 실제 내용이나 클릭해서 여는 surface에 둔다. A necessary explanation goes behind a single ⓘ help button at one side (section 12, Words).
@@ -110,7 +110,7 @@ PC 자산 기본 보기는 **수집일별 masonry/waterfall**이다. justified r
 
 ## 10. Motion과 성능
 
-- 일반 UI 전환은 대체로 80–160ms 범위의 opacity/background/border/짧은 위치 변화로 충분하다.
+- Motion은 90/140/200 ms 역할을 따른다: 작은 feedback, open/close, screen transition 순서이며 `--ease-standard`와 no bounce를 쓴다.
 - spring, bounce, 장식용 entrance animation, 상시 animation을 피한다.
 - sidebar/panel open-close는 공간 관계를 이해시키기 위한 짧은 motion만 허용한다.
 - gallery scroll 중 레이아웃 재계산·shadow·transform을 매 프레임 추가하지 않는다.
@@ -133,6 +133,8 @@ PC 자산 기본 보기는 **수집일별 masonry/waterfall**이다. justified r
 ## 12. Foundation (PC and tablet)
 
 Decided with the user on 2026-09-28 from `docs/prototypes/design-foundation-20260928/` (`index.html`, `part2.html`). PC and the Android tablet share one foundation; they differ only in size. Values are tokens in `_tools/app/src/styles/tokens.css` (PC) with tablet overrides in `_tools/app/mobile-client/mobile.css`; shared control styles live in `_tools/app/src/styles/controls.css`. Use the role tokens, never raw numbers.
+
+**PC first, tablet follows (user, 2026-09-29).** The PC is canonical. A screen is (re)designed on the PC first from the shared components; anything it lacks becomes a new shared component or variant, not a screen-local copy; the tablet then ports the finished screen with the same components and differs only where the tablet needs it (touch targets, portrait width, gestures, bottom sheets). When one client changes a shared screen, the other follows in the same round. On the tablet the foundation CSS (`mobile.css`, which imports tokens and controls) is loaded before any screen stylesheet (`mobile-client/main.tsx`), as on the PC, so a screen rule wins over a shared rule of equal specificity; screen CSS positions shared components but does not restyle their colour or size.
 
 ### Direction
 
@@ -172,7 +174,7 @@ Section names use meta in `--color-faint`. Only showcase/detail hero titles over
 
 ### Radius
 
-0 media tiles, edge-attached surfaces, and menus/popovers/dialogs (they carry the corner brackets) · 2 marks (badges, checkboxes, covers, selection) · 4 buttons, inputs, row cards · 8 tablet bottom sheets (top corners only). 50% only for content that is itself round (a performer face). No pill shapes except the toggle switch.
+0 media tiles, edge-attached surfaces, and menus/popovers/dialogs (they carry the corner brackets) · 2 marks (badges, checkboxes, covers, 5px menu marks; not selection slabs) · 4 buttons, inputs, row cards · 8 tablet bottom sheets (top corners only). 50% only for content that is itself round (a performer face). No pill shapes except the toggle switch.
 
 ### Colour roles
 
@@ -231,12 +233,17 @@ Menus, popovers and dialogs are square (radius 0) with the NieR corner brackets:
 
 Dot notation: current year `10.4`, other years `2025.9.28`, no zero padding; times are 24-hour `21:45`; "오늘 21:45" is written as just `21:45` in a dated group and `어제 21:45` for yesterday — no other relative times ("3분 전"). Days left `D-6`; past dates show the date only. Counts use thousands separators (`1,284`) and a unit without a space (`23장`, `17권`). Date group headings may use the longer `9월 28일 (일)`. Use the shared formatters in `src/shared/displayDate.ts`.
 
+Release calendars (PC and tablet, 2026-09-29): covers released on the same day sit under one date heading (`9.29  D-1`, a hairline under it), up to four per day block, so single-cover days still pack into the row; the bookmark is an icon only on the cover's top-right corner (outline white with a soft shadow; filled accent when on; no button face). Home and calendar shelves list only exact dates; quarter/month-only dates stay in the calendar with their period label. A release that is today reads `오늘` in place of the D-day, everywhere (user, 2026-09-29); days left `D-6`; past dates show the date only. A calendar port (for example, a Switch 2 version of an older game) is tracked on the wishlist by its port platforms only.
+
 ### Feedback and motion
 
 - **Press (tablet):** the face darkens to `--color-surface-pressed` while pressed and returns immediately on release; no scaling, no lingering pressed state. **Hover (PC):** the face lightens. Keyboard focus is a separate blue outline.
 - **Selected chips:** `--color-filter-selected` face and weight 600; unselected text is muted. Segmented controls use the ivory sliding thumb described above.
 - **Segmented drag exception:** the selected thumb lifts to scale 1.04 while it is dragged; this is the only scaling press feedback in the foundation.
 - **Motion:** 90 ms small feedback (press, colour), 140 ms open/close (menus, sheets, popovers), 200 ms screen transitions; `--ease-standard`; no bounce, no looping decoration except the skeleton breathing.
+- **Segment switch:** changing a segmented filter (e.g. 전체/게임/영화/애니, 관심) slides the list 16 px in from the side of the chosen segment and fades it from 0.5 in 200 ms, on both clients (tablet `useSegmentMotion`, PC the same values).
+- **Side panels:** an information panel over a reflowing grid opens as an overlay (slides in, the grid never reflows); a panel beside a single image (viewer) pushes the image aside. Decided for the PC 에셋 screen 2026-09-29 (`docs/prototypes/pc-assets-20260929/`).
+- **Tablet scrubber:** a tap on the bottom band shows the date scrubber at the current position (it hides after about 2.6 s); dragging scrubs. The bar rises in with a slight settle (a small overshoot, the one approved exception to "no bounce", user 2026-09-29), the date bubble grows from the thumb and the list dims; leaving reverses it. The bubble stays on screen at both ends and its pointer follows the thumb.
 - **Toasts:** success is shown in place (the changed row briefly tints toward `--color-success` and a check fades) — no success toast, except "되돌리기" after an undoable action (e.g. moving to the trash). Failures always show a one-line toast with "다시 시도".
 
 ### Theme

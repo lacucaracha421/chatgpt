@@ -1,6 +1,6 @@
 # Lakomics PC design reference
 
-> Status: current PC visual/interaction reference.
+> Status: current PC visual/interaction reference. The Android tablet shares the `DESIGN.md` §12 Foundation; PC is canonical and tablet differences are limited to touch, portrait layout and gestures.
 > Baseline: Lab 06 content direction + Chrome 03b B left-centric shell, integrated by commit `2d7bac2`, then refined by PC-UI-001 and PC-DECLUTTER-001.
 > `DESIGN.md` is the short constitution; this file holds implementation-level design contracts. Product terms come from `CONTEXT.md`; feature behavior lives in its subsystem reference (Works: `lakomics-works-handoff-v2.md` and `works-viewer-design.md`; characters: `docs/research/character-classification-quiet-workflow-design-20260911.md`). Verification history lives in `docs/roadmap/lakomics-completed.md`.
 > Colors are named by their `_tools/app/src/styles/tokens.css` custom properties; read values there rather than copying hex literals.
@@ -35,7 +35,7 @@ Typography (user-approved 2026-09-28, replaces the 2026-09-06 SUIT + Barlow pair
 
 ### Area rail
 
-- Areas: 에셋, 컬렉션, 망가, 메모, 전송 (plus 비밀 when the private vault is available). The tail holds `찾기` (the command/search palette, `Ctrl+K` / `Ctrl+F`) and `더보기`, a panel listing pending queues (유사 검토, 미분류, 전송 when they have items) and destinations (다시보기, 통계, 휴지통, 설정). The `더보기` badge counts only pending similarity review; 전송 shows its own received-file count.
+- Areas start with 홈, 에셋, 컬렉션, 망가, 메모, 전송 (plus 비밀 when the private vault is available). The tail holds `찾기` (the command/search palette, `Ctrl+K` / `Ctrl+F`) and `더보기`, a panel listing pending queues (유사 검토, 미분류, 전송 when they have items) and destinations (작가, 다시보기, 통계, 휴지통, 설정). The `더보기` badge counts only pending similarity review; 전송 shows its own received-file count. The area order and the `작가` entry follow `layout/WorkspaceNavigation.tsx` and `layout/navigationEntries.tsx`.
 - Work, sync and error status live in the titlebar status center beside the window controls, not as rail buttons.
 - The rail is narrow and visually weaker than the contextual index; its current area uses the parent-context tint (§7).
 - Switching areas preserves the owning screen state where the code supports it rather than resetting for visual neatness.
@@ -99,7 +99,7 @@ Default PC Asset layout is **date-grouped masonry/waterfall**; justified rows re
 
 Asset selection is intentionally quieter than navigation selection.
 
-- Keep the small top-left square marker and apply `--asset-selection-tint` (teal, user-approved 2026-09-06) to the image area only.
+- **Legacy Asset selection:** keep the small top-left square marker and apply `--asset-selection-tint` (teal, user-approved 2026-09-06) to the image area only until the Asset screen is redesigned; then move it to the §12 selection treatment described by `docs/prototypes/pc-assets-20260929/`.
 - No strong outer outline around the tile; do not recolor or reflow the caption because the asset is selected.
 - Keyboard focus stays independently visible.
 - Multi-selection actions use the existing selection bar/context flow without shifting the rail, index or header.
@@ -112,39 +112,39 @@ Asset selection is intentionally quieter than navigation selection.
 - **Selected-row mark.** A selected index/list row is the ivory slab with its own small dark square (`--selection-mark-size`, `currentColor`) at the right end. Never add a separate small ivory square cursor to the left of or outside the row; it duplicates that mark (user, 2026-09-26). `--selection-cursor-offset` has no consumer; `--selection-cursor-size` survives only as the section-label mark size. Classification tree rows keep their folder icon and inner treatment.
 - **Echo.** A hard 1px `--color-selection-echo` line offset 3px right/down; the double shadow masks the interior with the panel background so only the right/bottom outline shows. Blurred or decorative selection shadows remain banned.
 - **Tint — parent context (N4 parent-tint rule).** When a parent level and a more specific child are both current, only the most specific keeps the slab; the parent uses `--color-selection-context` with `--color-selection-context-text`, hover `--color-selection-context-hover`, and no echo or mark. Current users: the area rail, Notes scopes and the ledger segments. Never show two slabs for different levels of the same hierarchy.
-- **Cards.** A selected card (e.g. a Notes card) keeps its layout and uses a 1px `--color-accent` outline with the echo instead of a slab fill.
-- **Index section labels.** `.workspace-section-label` and index `.chrome-settings-group > legend` show a small square (`--color-section-mark`) before the text and a 1px fading hairline (`--section-label-rule`) filling the width, keeping the existing font size/color.
+- **Cards.** A selected card (e.g. a Notes card) keeps its layout and uses only a 1px `--color-accent` outline, without the 3px echo or a slab fill.
+- **Index section labels.** `.workspace-section-label` and index `.chrome-settings-group > legend` use the §12 faint `meta` role and show a small square (`--color-section-mark`) before the text and a 1px fading hairline (`--section-label-rule`) filling the width.
 
 Keyboard `:focus-visible` outlines (`--color-focus`) stay separate and visible on slab, tint and card selections.
 
 ### Multi-select filters
 
-Neutral gray, marker-free: `--color-filter-selected` surface, `--color-filter-text`, `--color-filter-border`, hover `--color-filter-hover` / `--color-filter-hover-border`. Multi-select filters stay gray even when only one value is active; never use the ivory slab for them.
+Neutral gray, marker-free: selected filter chips use the `--color-filter-selected` face and weight 600 with no border; unselected text is muted. Use `--color-filter-text`, `--color-filter-border`, hover `--color-filter-hover` / `--color-filter-hover-border` for the remaining states. Multi-select filters stay gray even when only one value is active; never use the ivory slab for them.
 
 ### Toggles and checkbox labels
 
-- An unchecked box must be visible on dark surfaces: 1px `--color-border-strong` on `--color-bg`. Checked fills `--color-accent` with a `--color-on-accent` check; focus uses the `--color-focus` ring; disabled dims.
-- A checkbox/toggle label names the setting (`자동 갱신`, `가벼운 모드`) or, when the row heading already names it, the current state (`켜짐` / `꺼짐`). Never use action wording (`켜기`) on a checkbox; the box already shows state.
-- Action wording (`가벼운 모드 켜기` / `끄기`) belongs to one-shot commands in menus or the palette and must follow the current state.
+- An unchecked box must be visible on dark surfaces: the §12 1.5px `--color-border-strong` border on `--color-bg`, radius 2. Checked uses an accent border with an inner solid accent square; focus uses the `--color-focus` ring; disabled dims.
+- A checkbox/toggle label names the setting (`자동 갱신`, `절약 모드`) or, when the row heading already names it, the current state (`켜짐` / `꺼짐`). Never use action wording (`켜기`) on a checkbox; the box already shows state.
+- Action wording (`절약 모드 켜기` / `끄기`) belongs to one-shot commands in menus or the palette and must follow the current state.
 - A label may read inverted when that is natural (`정보 숨기기` checked = metadata hidden), but the stored preference keeps its meaning (`metadataVisible`); metadata is visible by default.
 
 ## 8. Dates
 
 User-facing dates go through `shared/displayDate.ts` (`displayDate`, `displayDateRange`):
 
-- a full date in the viewer's current local calendar year shows `MM.DD`; any other year shows `YYYY.MM.DD` (relative to the viewer's clock, so the display changes at New Year);
-- year-only values show `YYYY`; month-only values always keep the year, `YYYY.MM`;
+- a full date in the viewer's current local calendar year shows `M.D`; any other year shows `YYYY.M.D` (relative to the viewer's clock, so the display changes at New Year, with no zero padding);
+- year-only values show `YYYY`; month-only values always keep the year, `YYYY.M` (with no zero padding);
 - timestamps use the viewer-local date; calendar strings keep their own precision;
 - ranges join both ends with `–`, each formatted independently; equal ends collapse to one value;
 - invalid input passes through unchanged.
 
-This covers Collection cards/info/details, TV seasons/episodes and Asset date headings. Stored values, grouping/sorting, caption times (`HH:mm`), Revisit date headings and machine-facing values (paths, IDs, diagnostic timestamps) are unchanged.
+This covers Collection cards/info/details, TV seasons/episodes and Asset date headings. Same-day releases use `오늘` as defined in `DESIGN.md` §12. Stored values, grouping/sorting, caption times (`HH:mm`), Revisit date headings and machine-facing values (paths, IDs, diagnostic timestamps) are unchanged.
 
 ## 9. Floating surfaces and icon hints
 
-- Menus, context menus, anchored panels and search surfaces use thin borders, small radii, shallow contrast and only `--shadow-floating`; dialogs (`--shadow-dialog`) are reserved for modal confirmation or genuinely blocking flows.
+- Menus, context menus, anchored panels and search surfaces use the §12 square radius-0 surface with NieR corner brackets, thin borders and only `--shadow-floating`; dialogs (`--shadow-dialog`) are reserved for modal confirmation or genuinely blocking flows.
 - No tooltips on hover or keyboard focus, including shared tooltip overlays and native `title` bubbles (user, 2026-09-12; supersedes the tooltip allowance in ADR-0034, whose other decisions still apply).
-  - Exception (user, 2026-09-27): 자동 태그 chips show a small hover card with the English Danbooru name and library count, because labels are Korean-only; the same text is in `aria-description`.
+- 자동 태그 chip details open in a small popover on click or keyboard activation; they never appear on hover, and the same text may remain in `aria-description`.
 - Keep `aria-label` and keyboard-accessible naming; supplementary text may use `aria-description`. Keep real headings and dialog titles.
 - Focus, selected, disabled, open, destructive and hover states must remain distinguishable without color alone.
 
@@ -181,7 +181,7 @@ For details with a backdrop: use the chosen original backdrop as the wide backgr
 
 - Do not fill the bottom bar with asset counts or generic “drag files here” text just because space exists.
 - Show real ingestion/progress/error state when it matters (status center).
-- Empty states explain the next useful action concisely.
+- Empty state: use a faint 32px icon and one line; add a button only when there is a real next step.
 - Avoid repeating area names, subtitles and counts already evident from the rail/index/content.
 
 ## 12. Responsive and desktop constraints
@@ -209,7 +209,7 @@ Keep state with the feature that owns it; the shell relocates controls and prese
 | Asset controls / gallery / selection | `assets/AssetToolbar.tsx`, `AssetBrowser.tsx`, `AssetGallery.tsx`, `GalleryDisplaySettings.tsx`, `SelectionBar.tsx` |
 | Collection browser / details | `collections/CollectionBrowser.tsx`, `CollectionCard.tsx`, `physical/`, type detail components |
 | Manga local / online catalog | `manga/MangaBrowser.tsx`, `OnlineCatalogBrowser.tsx` |
-| Tokens and layout CSS | `styles/tokens.css`, `global.css`, `chrome.css` |
+| Tokens and layout CSS | `styles/tokens.css`, `global.css`, `chrome.css`, `styles/controls.css` |
 
 Do not paste comparison HTML into React, duplicate feature state in the shell, or create a second settings/search persistence model.
 

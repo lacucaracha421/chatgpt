@@ -1,15 +1,15 @@
 # Lakomics — Works / Collection Reference
 
-> Status: current product/architecture/UX reference. Updated 2026-08-31. This is not a backlog.
+> Status: current product/architecture/UX reference. Current documentation checkpoint: 2026-09-29. This is not a backlog.
 > Retained product/interaction reference: `docs/prototypes/lakomics-works-v6-reference.html`.
-> Current PC visual/UX rules: `docs/agents/pc-design-reference.md` (2026-09-06), with type-specific presentation in `docs/agents/works-viewer-design.md`. Historical Lab/Works prototypes do not override the domain/ownership contracts below.
+> Current PC/tablet visual/UX rules: `DESIGN.md` §12 and `docs/agents/pc-design-reference.md` (2026-09-29), with type-specific presentation in `docs/agents/works-viewer-design.md`. Historical Lab/Works prototypes do not override the domain/ownership contracts below.
 
 ## Product boundary
 
 Lakomics has two connected but distinct pillars:
 
 - **Asset Library** — user-collected media files, provenance, classification, albums, duplicate handling, trash, viewers, and media-vault lifecycle.
-- **Collections / Works** — games, manga, and movies the user cares about, with type-specific metadata and presentation artwork that can link to existing Assets.
+- **Collections / Works** — games, manga, movies, and AV the user cares about, with type-specific metadata and presentation artwork that can link to existing Assets.
 
 Do not collapse Asset, Classification, Album, Collection/Work, WorkArtwork, Volume, or ExternalBinding into one concept merely because they are related.
 
@@ -59,7 +59,7 @@ Different presentation roles may use different artwork; game hero/main artwork i
 - MangaDex and Kakao notifications occupy separate title-only lists in the manga Collection content area, using the shared virtual grid. Clicking a title opens the work and keeps the notification unread; explicit confirmation acknowledges only the captured provider-specific events. Back navigation returns to the notification view.
 - Provider refresh status retains request counts, processing/network/pacing times and remaining works. Metadata clients share connection pools and request pacing (MangaDex 250ms, Kakao 100ms); temporary transport/server failures retry after 5s, 30s, 2m, then 10m; quota failures back off from 1m to 15m and honor server retry deadlines (up to 24h). Authentication/access failures retain a one-hour wait. The app schedules the earliest pending retry instead of waiting for its hourly pass. Safe failure details retain the affected collection, request stage, HTTP code or transport category; request URLs, queries, credentials and raw bodies are never recorded. Legacy generic transport cooldowns use the new short retry policy. Individual invalid/missing works are deferred for 24 hours so later works can proceed. These are app-running checks, not OS notifications or off-app scheduling.
 - Ownership uses one numeric count per edition: N means volumes 1 through N are owned, without distinguishing physical and digital copies. The ownership panel shows the latest known released volume and the missing count (latest released number minus owned count, floored at zero); upcoming volumes are not counted as missing, and covers alone never establish publication or ownership. Saving a count atomically replaces that edition's holdings, including a decrease to zero; older per-format records stay readable. Opening a work never acknowledges its release notifications.
-- The manga ownership row exposes a persistent `신간 알림` checkbox beside the owned count; Kakao connection is required. The redundant subscription status block and upcoming-release line are omitted. Collection rating filters use a square-thumb horizontal slider with ten half-point cells, plus all/unrated presets.
+- The manga ownership row exposes a persistent `신간 알림` Switch beside the owned count; Kakao connection is required. The redundant subscription status block and upcoming-release line are omitted. Collection rating filters use a square-thumb horizontal slider with ten half-point cells, plus all/unrated presets.
 - Verification for the daily update change is recorded in `docs/performance/collection-daily-updates-20260913.md`; native application/production migration acceptance is separate.
 - Kakao search follows all result pages (`size=50`, at most 50 pages); incomplete results fail rather than silently apply. Publisher/author/title groups remain distinct. Covers remain owned by the current artwork selection; Kakao thumbnail URLs in raw snapshots are not automatically applied.
 - Schema v40 expands the release subscription provider constraint without rewriting legacy sources. Applying it to an active library requires the separate operational approval in `AGENTS.md`.

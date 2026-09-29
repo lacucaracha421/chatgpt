@@ -2,7 +2,7 @@
 
 > Status: current media-specific presentation reference.
 > Global PC shell, controls, Asset layout, surfaces, and selection rules live in `docs/agents/pc-design-reference.md` and `DESIGN.md`.
-> This document defines how game, manga, video, and Showcase differ **inside** that shared system. It is not a backlog.
+> This document defines how game, manga, video, AV, and Showcase differ **inside** that shared system. It is not a backlog.
 
 ## 1. Shared rule
 
@@ -20,7 +20,7 @@ External APIs shape useful structure; they do not justify dumping every field in
 
 Personal state outranks external score/provider state. Provider refresh must preserve explicit user edits and presentation choices.
 
-Presentation intensity is **Library < Detail < Showcase**. Ordinary browsing stays dense; detail can add restrained collectibility; Showcase can breathe more without becoming a second renderer.
+Presentation intensity is **library grid < Detail < Showcase**. Ordinary browsing stays dense; detail can add restrained collectibility; Showcase can breathe more without becoming a second renderer.
 
 ## 2. Manga — volume shelf
 
@@ -108,9 +108,9 @@ TMDB expansion should add only data needed by an approved presentation: TV searc
 Showcase is a manually curated exhibition, not an automatic favorites filter or ranking page.
 
 - membership and order remain user-controlled;
-- game, manga and film are separate exhibition scopes; type-aware presentation remains intact;
+- game, manga, film and AV are separate exhibition scopes; type-aware presentation remains intact;
 - selected works, not synthetic ranking or recommendations, fill a cover-only wall: up to 9 uses 3×3, 10–16 uses 4×4, more than 16 continues on pages;
-- pack the wall by the available book/poster height rather than distributing narrow objects across the whole window; titles may appear on hover/focus;
+- pack the wall by the available book/poster height rather than distributing narrow objects across the whole window; titles are always visible, never hover-only;
 - use the same primitives as normal Library/Detail with slightly more space and appreciation;
 - stronger book/package lift or larger artwork is allowed, but no simulated room, cabinet renderer, or continuous animation;
 - clicking a Showcase item opens the normal Collection detail model.

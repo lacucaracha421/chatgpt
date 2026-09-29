@@ -15,18 +15,18 @@ Repository paths below are relative to the checkout root. Read applicable `AGENT
 | Desktop native | `_tools/app/src-tauri/` | Owning Rust module, migrations, tests, platform guide |
 | Android frontend | `_tools/app/mobile-client/` | `android/README.md`, `docs/agents/mobile.md` |
 | Android native | `android/src/` | `android/README.md`, native bridge and provider tests |
-| Browser collector | `extension-list/` | `extension-list/AGENTS.md`, `extension-list/README.md`, `docs/edge-extension.md` |
+| Browser collector | `extension-list/` | `extension-list/AGENTS.md`, `extension-list/README.md` |
 | Cloud API | `server/lakomics-api/` | `docs/agents/cloud-capture.md`, relevant authority modules and tests |
 | Works / Collection | Owning desktop/mobile Collection modules | References below before substantial changes |
 
-Root `app/` is not the desktop package. Root `mobile/` is not the Android-bundled React client. `extension/` is frozen legacy code. `_tools/lakomics-cloudmedia-poc/` is a separate experiment. Do not redirect an active task to these paths based on an old document.
+Root `app/` is not the desktop package. Root `mobile/` is not the Android-bundled React client. The legacy `extension/` collector was removed on 2026-09-26; `extension-list/` is the only collector. `_tools/lakomics-cloudmedia-poc/` is a separate experiment. Do not redirect an active task to these paths based on an old document.
 
 ## Load only relevant context
 
 Use `docs/README.md` as the map:
 
 - Product vocabulary: `CONTEXT.md`; accepted architectural decisions: `docs/adr/README.md` and relevant Accepted ADRs.
-- UI: `DESIGN.md`, `docs/agents/pc-design-reference.md`; preserve shared UI and design tokens.
+- UI: `DESIGN.md` §12 (the PC and tablet foundation; PC first, tablet in the same round), `docs/agents/pc-design-reference.md`; use the shared components in `_tools/app/src/shared/ui/` and the role tokens.
 - Substantial Works/Collection changes: `docs/agents/lakomics-works-handoff-v2.md`, `docs/agents/pc-design-reference.md`, `docs/agents/works-viewer-design.md`. Historical prototype HTML is not production code to copy.
 - Catalog operations: `docs/agents/catalog-troubleshooting.md`.
 - Linux: `docs/operations/linux-desktop.md`; backup and migration: `docs/operations/pc-migration.md`.

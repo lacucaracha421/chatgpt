@@ -17,7 +17,7 @@ Useful subsystem references:
 
 - Cloud Capture / cloud sync: `docs/agents/cloud-capture.md`
 - Works / Collection: `docs/agents/lakomics-works-handoff-v2.md`
-- X Collector: `docs/edge-extension.md` and `extension/AGENTS.md`
+- X Collector: `extension-list/AGENTS.md` and `extension-list/README.md`
 - Catalog changes and deployment/canary safeguards: `docs/agents/catalog-troubleshooting.md`
 - Backup/recovery and PC migration: `docs/operations/pc-migration.md`
 - Review scope and evidence reuse: `docs/agents/implementation.md`

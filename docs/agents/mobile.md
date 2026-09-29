@@ -2,6 +2,11 @@
 
 Status: current product direction with retained rollout history
 
+Current visual foundation: `DESIGN.md` §12 covers both PC and the Android tablet.
+PC is canonical; design each screen on PC first with shared components, then bring
+the tablet along in the same round with differences only for touch, portrait layout
+and gestures.
+
 ## Character source checkpoint — 2026-09-13
 
 Library now includes series/group/character/ordinary-folder browsing against an
@@ -178,7 +183,7 @@ production write, or rerun of completed deployment/backfill work.
 - Alpha 15.54 passed the Galaxy Tab S11 device gate in portrait/landscape use after the final Home/detail stabilization pass.
 - The temporary device-gate preview host is not part of the production architecture; canonical web access is `https://lacucaracha421.github.io/chatgpt/`.
 - Mobile feature polish is intentionally paused at this checkpoint. The next major Mobile milestones remain Phase 3 native Android shell and Phase 4 `DocumentsProvider`, not more browser-only Home features.
-- The browser prototype still uses the extension runtime for authenticated Cloud API mediation, so the long-term direct/native client boundary described below remains future work.
+- Historical (2026-09-03 browser checkpoint, superseded by the current direct/native source): the browser prototype still uses the extension runtime for authenticated Cloud API mediation, so the long-term direct/native client boundary described below remained future work at that checkpoint.
 
 This document defines the intended role, scope, UX, and implementation order for Lakomics Mobile. It is a durable product reference, not a second backlog. Concrete implementation work remains tracked in `docs/roadmap/lakomics-backlog.md`, especially the full-library cloud replication work under `CLOUD-006`.
 
@@ -481,7 +486,7 @@ The file picker may eventually prefer a compatible efficient representation whil
 Recommended direction, not yet a hard architecture lock:
 
 - React + TypeScript for the main Mobile UI
-- reuse/replace the current `mobile/` prototype incrementally rather than rewriting the experience twice
+- Historical prototype direction: reuse/replace the former `mobile/` prototype incrementally rather than rewriting the experience twice. The active client is under `_tools/app/mobile-client/`.
 - Android application shell around the web UI
 - a small Kotlin/native layer for Android-specific capabilities such as `DocumentsProvider`, secure token storage, lifecycle/back behavior, and sharing/file streams
 - Capacitor is a reasonable wrapper candidate; Tauri Mobile can be revisited if its native/file integration becomes preferable
@@ -490,7 +495,9 @@ The Android shell should stay thin. Product UI and cloud contracts should not be
 
 ## Relationship to the existing mobile prototype
 
-The current `mobile/index.html` and extension-injected `mobile-bridge.js` / `mobile-assets.js` are useful prototypes and should inform the migration.
+Historical (superseded by the active `_tools/app/mobile-client/` source): the former
+`mobile/index.html` and extension-injected `mobile-bridge.js` / `mobile-assets.js`
+were useful prototypes and informed the migration.
 
 They are not the desired final dependency structure.
 
@@ -508,18 +515,20 @@ Migration goal:
 
 ## Collections and showcase
 
-Collections (games/manga/anime/movies) and richer showcase behavior are explicitly later work.
+Historical scope note: Collections (games/manga/anime/movies) and richer Showcase
+behavior were explicitly later work in the original v1 plan.
 
-They should not block v1.
+The current source checkpoint above records read-only Collections shipped; Showcase
+remains consumption-oriented and should not recreate desktop management screens.
 
-When added, their mobile purpose should stay consumption-oriented: revisit favorites, browse covers/artwork, resume previously viewed works, and surface meaningful personal library history rather than recreating desktop management screens.
+Historical original-plan guidance: when added, their mobile purpose should stay consumption-oriented: revisit favorites, browse covers/artwork, resume previously viewed works, and surface meaningful personal library history rather than recreating desktop management screens.
 
 ## Implementation phases
 
 ### Phase 0 — freeze product scope and audit the prototype
 
 - Treat this document as the Mobile product boundary.
-- Audit `mobile/index.html`, `mobile-bridge.js`, and `mobile-assets.js`.
+- Historical audit target: `mobile/index.html`, `mobile-bridge.js`, and `mobile-assets.js`.
 - Identify prototype UI that can be retained and demo-only code that should be removed.
 - Define the direct Cloud API boundary before adding more extension-to-page bridge behavior.
 
@@ -768,7 +777,7 @@ Goal: build an installable independent Galaxy Tab consumption APK, with direct a
 
 Architecture decision for this first build: reuse installed React/TypeScript/Vite and bundled fonts from app; isolate the new entry at app/mobile-client and native source at android. A small platform Java WebView shell uses the available Android SDK/JDK without adding Capacitor/Gradle/Kotlin dependencies. Java serves the proposed small native-layer responsibility; it does not introduce a second product UI. Capacitor adds a plugin/dependency chain and Tauri Mobile adds a separate Rust/mobile toolchain; neither is needed for this bounded platform shell.
 
-Design: dark neutral surfaces, ivory rectangular active states, small square markers, SUIT/Barlow/Rajdhani fonts, 44px touch actions, minimal separators. Portrait Home/Library bottom navigation; landscape contextual classification index. Recent dominates Home; Continue and Revisit remain secondary. Settings and connection live in one modal surface. Full-aspect justified rows, three row-height densities, contained progressive image/video viewer with pinch-only image pan and explicit adjacent actions. Pending Captures remain a separate labelled preview section and never count as Assets. No copied NieR artwork or HUD.
+Historical (superseded by `DESIGN.md` §12): the earlier design used dark neutral surfaces, ivory rectangular active states, small square markers, SUIT/Barlow/Rajdhani fonts, 44px touch actions, portrait Home/Library navigation and a landscape classification index. Recent dominated Home; Continue and Revisit were secondary. The current foundation uses Pretendard, Rajdhani only for the `number` role, and shared PC-first components with the current tablet navigation. Pending Captures remain a separate labelled preview section and never count as Assets. No copied NieR artwork or HUD.
 
 Bridge contract: window.LakomicsNative.request(id, operation, JSON.stringify(payload)); cancel(id). Native dispatches CustomEvent('lakomics-native', {detail:{id,ok,data,error}}). Operations: status -> {configured,endpoint}; configure {endpoint,token,allowPrivateHttp} -> status; disconnect -> status; api {path,method?,body?} -> server JSON; openExternal {url}. Native emits lakomics-resume and lakomics-back; frontend calls finish operation only when no overlay/back context remains. API paths are native allowlisted for read-only library/classification/revisit, media-ticket POST, pending list/download; no ingest/delete/writeback routes. Credentials are encrypted under Android Keystore, excluded from backup, never returned to JS or logged. Plain HTTP requires explicit connection-screen opt-in and numeric private-network address. No redirects carrying Authorization. WebView loads bundled content only from https://app.lakomics.local/; external pages cannot use the bridge.
 

@@ -27,7 +27,7 @@ Start with [the documentation map](../../../docs/README.md), then load only what
 | Substantial Works/Collection changes | [Works handoff](../../../docs/agents/lakomics-works-handoff-v2.md), [PC design reference](../../../docs/agents/pc-design-reference.md), [Works viewer design](../../../docs/agents/works-viewer-design.md) |
 | Terminology or authority-sensitive actions | [CONTEXT.md](../../../CONTEXT.md), the owning contracts and relevant Accepted ADRs |
 
-Read the affected component, its callers/state owner, nearby shared controls, and applicable styles before proposing a replacement. Desktop entry points include `_tools/app/src/shared/ui/` and `_tools/app/src/styles/tokens.css`; locate Android equivalents in its own client rather than assuming desktop CSS is shared. Current code defines implemented behavior; design references define intent, not proof of delivery.
+Read the affected component, its callers/state owner, nearby shared controls, and applicable styles before proposing a replacement. Desktop entry points include `_tools/app/src/shared/ui/` and `_tools/app/src/styles/tokens.css`; the tablet (`_tools/app/mobile-client/`) uses the same shared components through `mobile-client/ui.tsx` and loads the same foundation CSS (`tokens.css`, `controls.css`) via `mobile.css`, which only overrides sizes. The foundation is `DESIGN.md` §12. Current code defines implemented behavior; design references define intent, not proof of delivery.
 
 ## Preserve the product identity
 
@@ -35,13 +35,13 @@ These are guardrails summarized from the current design references, not a second
 
 - Media and artwork dominate. Keep chrome quiet, dense, dark-neutral, and rectangular. Build hierarchy with surface value, separators, spacing, and typography before containers or decoration.
 - Retain Chrome 03b's area rail and contextual index. Keep search and view controls contextual; do not add a duplicate top toolbar, command route, or dashboard card wall.
-- Reuse semantic tokens and bundled fonts: SUIT for Korean UI, Barlow for Latin/creator names, Rajdhani for specified numeric roles, and the existing Japanese/platform fallbacks. Do not import web fonts or impose a generic 16px base over the approved type scale.
+- Reuse the role tokens and bundled fonts: Pretendard for all UI text, Rajdhani only for the large standalone `number` role; type roles PC 20/15/12/24, tablet 22/17/13/28 (`DESIGN.md` §12). Do not import web fonts or use raw sizes.
 - Preserve distinct current-location, multi-filter, asset-selection, hover, pressed, disabled, and keyboard-focus states. Asset selection belongs on the image with its small marker, not a new border or metadata layout change.
 - No hover/focus tooltips, including HTML `title`. Keep accessible names and keyboard operation. Expose necessary explanations and full truncated values in visible content or a click/keyboard-operated disclosure, not a hover-only substitute.
-- No decorative gradients, glassmorphism, large rounded cards, glowing accents, routine shadows, springs, bounce, or gallery entrance choreography. Short purposeful motion may use the existing tokens; instant feedback and reduced-motion behavior are valid.
-- Preserve intrinsic media ratios and stable loading geometry. Do not replace desktop masonry with the mobile justified grid, or vice versa, merely to make layouts identical.
+- No decorative gradients, glassmorphism, large rounded cards, glowing accents, routine shadows, springs, bounce, or gallery entrance choreography. Motion follows §12: 90 ms feedback, 140 ms open/close, 200 ms screen and segment transitions, `--ease-standard`, no overshoot; reduced motion turns it off.
+- Preserve intrinsic media ratios and stable loading geometry. A grid layout difference between PC and tablet is allowed only when it serves touch or portrait width; record it as a tablet difference.
 - Keep Works physicality type-specific: games use the approved neutral case; manga follows Paperback FINAL and bounded cached list rendering; ordinary video listings remain flat posters. Do not spread collectible effects into Asset tiles or ordinary controls.
-- Android is not simply a shrunken desktop. Preserve the approved landscape hierarchy and portrait consumption flow, touch behavior, safe areas, and system Back. Visual alignment does not add management features or write authority.
+- PC is canonical: design the screen on the PC first with shared components (build anything missing as a new shared component or variant), then bring the tablet along in the same round. The tablet differs only for touch targets (≥44), portrait width, gestures, bottom sheets, safe areas and system Back. Visual alignment does not add management features or write authority.
 - Preserve the current React/Tauri/Android architecture and custom UI. No implicit Next.js, shadcn, Tailwind migration, GSAP, new icon/font package, persistence layer, or browser runtime.
 
 ## Work from a user task to a complete interaction
@@ -60,10 +60,10 @@ Apply only the rows relevant to the changed surface; do not turn a spacing fix i
 | Concern | Check |
 | --- | --- |
 | Accessibility | Semantic buttons/inputs, visible labels and accessible names, meaningful image alternatives, logical reading/tab order, visible unobscured focus, and no color-only meaning. Verify applicable contrast, typically 4.5:1 for normal text and 3:1 for large text; do not claim WCAG compliance from a checklist. |
-| Keyboard/pointer/touch | Complete keyboard path; discoverable click/tap alternatives to drag or gestures; no hover-only critical action. Preserve desktop density while keeping usable hit areas. Web 24 CSS px target guidance and Android 48dp touch guidance use different units and exceptions: validate the actual surface rather than blindly applying 44px to everything. |
+| Keyboard/pointer/touch | Complete keyboard path; discoverable click/tap alternatives to drag or gestures; no hover-only critical action. Preserve desktop density while keeping usable hit areas. Web 24 CSS px target guidance and Android 48dp touch guidance use different units and exceptions: on the tablet every control and touch target is at least 44 (compact buttons 36 with a 44 hit area); on the PC buttons are 32 and compact buttons 28 (`DESIGN.md` §12). |
 | Layout/text | Long Korean/Japanese names, missing metadata, unbroken paths/IDs, text wrapping, zoom/scaling, and viewport-clamped floating surfaces. Desktop checks include a practical narrow window around 800×640 when relevant; mobile checks include both orientations and safe areas. Do not hide the entire navigation as the first narrow-window fix. |
 | State/feedback | Differentiate no results, unavailable data, stale/offline content, and errors. Make asynchronous work and recoverable failures legible without moving focus or flooding live announcements. Preserve accurate pending/confirmed semantics. |
-| Performance/motion | Preserve virtualization, thumbnail-to-original loading, cancellation, and bounded caches. No tile-by-tile live 3D contexts or per-frame gallery layout/shadow work. Respect reduced motion; do not add skeleton shimmer or animation merely because a generic checklist suggests it. |
+| Performance/motion | Preserve virtualization, thumbnail-to-original loading, cancellation, and bounded caches. No tile-by-tile live 3D contexts or per-frame gallery layout/shadow work. Respect reduced motion. Loading uses the shared §12 skeleton (content-shaped, slow breathing, appears after 300 ms); no spinners in content areas. |
 | Native integration | Keep native drag regions away from interactive controls, one set of window controls, supported media protocols, and Windows/Linux portability. Browser mocks do not establish native or Android device correctness. |
 
 ## Optional local reference search
@@ -85,7 +85,7 @@ Inspect the returned category and recommendation, not just the match count. Retr
 
 ## Verify and report proportionately
 
-For purely visual CSS/spacing/type/color/motion changes, skip automated tests and production builds unless there is a plausible compile or behavioral risk. Inspect rendering with available supported tools when possible, naming the viewport and states; if unavailable, say it was not inspected. Never install another browser runtime or launch a prohibited persistent process just to satisfy this skill.
+For purely visual CSS/spacing/type/color/motion changes, skip automated tests and production builds unless there is a plausible compile or behavioral risk. Batch the relevant checks (tests, design ratchet, tablet before/after captures) once per round before the commit rather than after every small fix. Inspect rendering with available supported tools when possible, naming the viewport and states; if unavailable, say it was not inspected. Never install another browser runtime or launch a prohibited persistent process just to satisfy this skill.
 
 For interaction or component-logic changes, use the nearest existing tests and add realistic missing regression coverage. Use [verification-before-completion](../verification-before-completion/SKILL.md) to separate source inspection, static checks, browser fixtures, native Tauri, Android device, and production evidence. Do not test by modifying the active library without separate approval.
 

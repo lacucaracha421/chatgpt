@@ -5,7 +5,7 @@ Root `AGENTS.md` applies. `extension-list/` is the user's current and active Lak
 ## Scope boundary
 
 - For ordinary requests about “the extension”, “the list extension”, collection UI, classification picker, X/forum capture, pairing, or extension UX, modify `extension-list/` only.
-- Do not mirror changes into the legacy `extension/` tree unless the user explicitly asks for legacy-extension work.
+- The legacy `extension/` tree was removed on 2026-09-26; do not recreate or mirror changes into it.
 - The active extension consumes the live classification tree supplied by Lakomics/server; do not hardcode app classifications unless an offline contract specifically requires it.
 - Keep `icons/` self-contained inside this directory and keep manifest icon paths relative to `extension-list/`.
 
