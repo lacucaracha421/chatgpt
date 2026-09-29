@@ -37,7 +37,7 @@ beforeEach(() => {
   vi.useFakeTimers({toFake: ['Date']}); vi.setSystemTime(new Date(2026, 8, 25, 14, 32));
   window.dispatchEvent(new CustomEvent('lakomics-sync-signals', {detail: {live: false}}));
   localStorage.clear(); resetHomeSourceCache(); setOutboxConnection('https://a.example'); resetReleaseStore(); mocks.api.mockReset(); mocks.native.mockReset(); mocks.loadThumbnail.mockReset();
-  notes = pinnedNotes(); server = {offline: false, summary: {total: 1500, addedToday: 12, addedThisWeek: 80, unclassified: 7, todayStart: '2026-09-25T00:00:00Z', weekStart: '2026-09-22T00:00:00Z', listGeneration: 'a'.repeat(64)}, upcoming: {version: 1, revision: 2, entries: [upcomingEntry], wishlist: [upcomingEntry], pending: []}, avPick: {version: 1, pick: {personId: 'p1', name: '라라', workCount: 12, cover: null, latestWork: {code: 'LW-1', title: '최근 작품', date: '2026-09-24'}}}, artists: {artists: [{id: 'ranzu', label: 'Ranzu', main: true, assetCount: 38, coverAssetIds: ['r1']}]}};
+  notes = pinnedNotes(); server = {offline: false, summary: {total: 1500, images: 1200, videos: 300, collections: {game: 10, manga: 20, movie: 30, av: 40}, addedToday: 12, addedThisWeek: 80, unclassified: 7, todayStart: '2026-09-25T00:00:00Z', weekStart: '2026-09-22T00:00:00Z', listGeneration: 'a'.repeat(64)}, upcoming: {version: 1, revision: 2, entries: [upcomingEntry], wishlist: [upcomingEntry], pending: []}, avPick: {version: 1, pick: {personId: 'p1', name: '라라', workCount: 12, cover: null, latestWork: {code: 'LW-1', title: '최근 작품', date: '2026-09-24'}}}, artists: {artists: [{id: 'ranzu', label: 'Ranzu', main: true, assetCount: 38, coverAssetIds: ['r1']}]}};
   mocks.loadThumbnail.mockImplementation(async (asset: Asset) => ({...asset, preview: `blob:${asset.id}`}));
   mocks.native.mockImplementation(async (op: string) => op === 'notesState' ? {unlocked: true, notes, lastSyncedAt: null} : op === 'exchangeThumbnail' ? {url: 'blob:received'} : {url: 'https://example.invalid/cover', expires_in: 300});
   mocks.api.mockImplementation(async (path: string, _signal?: AbortSignal, body?: unknown, method?: string) => {
@@ -217,7 +217,7 @@ describe('Home A', () => {
     expect(within(memo).getAllByText('250,000원')).toHaveLength(2);
     expect(within(memo).getByText('마트')).toBeTruthy();
     expect(within(region('검토')).getByText('유사 이미지')).toBeTruthy();
-    expect(await within(region('자산 현황')).findByRole('button', {name: '전체 1,500장'})).toBeTruthy();
+    expect(await within(region('자산 현황')).findByRole('button', {name: '이미지 1,200장'})).toBeTruthy();
     expect(within(region('메모')).getByRole('button', {name: '메모 전체'})).toBeTruthy();
     expect(within(region('캘린더')).getByRole('button', {name: '캘린더 전체'})).toBeTruthy();
     expect(within(region('다시 보기')).getByRole('button', {name: '다시 보기 전체'})).toBeTruthy();
@@ -270,6 +270,31 @@ describe('Home A', () => {
     expect(card.querySelector('.home-shelf-title')?.textContent).toBe(longGame.title);
     expect(card.querySelector('.home-kind')).toBeNull();
   });
+  it('uses only exact wishlist dates within the PC 60-day title window', async () => {
+    const wish = (values: Record<string, unknown>) => ({...upcomingEntry, source: 'calendar', addedAt: '2026-09-01T00:00:00Z', muted: false, released: false, events: [], ...values});
+    const quarter = wish({id: 'quarter', title: 'Quarter Port', date: '2026-10-01', precision: 'quarter'});
+    const month = wish({id: 'month', title: 'Month Movie', kind: 'movie', date: '2026-10-01', precision: 'month'});
+    const exact = wish({id: 'exact', title: 'Exact Game', date: '2026-11-20', precision: 'exact', platforms: ['Switch 2', 'PC']});
+    server.upcoming = {version: 1, entries: [quarter, month, {...exact, port: true, platforms: ['wrong']}], wishlist: [quarter, month, exact]};
+    render(<Home {...props()}/>);
+    const shelf = await screen.findByRole('region', {name: '캘린더'});
+    expect(within(shelf).queryByRole('button', {name: /Quarter Port/})).toBeNull();
+    expect(within(shelf).queryByRole('button', {name: /Month Movie/})).toBeNull();
+    const exactCard = within(shelf).getByRole('button', {name: /Exact Game/});
+    expect(within(exactCard).getByRole('img', {name: 'Switch 2'})).toBeTruthy();
+    expect(within(exactCard).getByRole('img', {name: 'PC'})).toBeTruthy();
+    expect(within(exactCard).getByText('이식')).toBeTruthy();
+  });
+  it('shows unread released wishlist titles as NEW and hides muted titles', async () => {
+    const released = {...upcomingEntry, id: 'released', title: 'Released Game', source: 'calendar', addedAt: '2026-09-01T00:00:00Z', muted: false, released: true, events: [{id: 'released-event', kind: 'released', previousValue: null, currentValue: '2026-09-24', detectedAt: '2026-09-25T01:00:00Z', readAt: null}]};
+    const muted = {...released, id: 'muted', title: 'Muted Game', muted: true};
+    server.upcoming = {version: 1, entries: [released, muted], wishlist: [released, muted]};
+    render(<Home {...props()}/>);
+    const shelf = await screen.findByRole('region', {name: '캘린더'});
+    const releasedCard = within(shelf).getByRole('button', {name: /Released Game/});
+    expect(within(releasedCard).getByText('NEW')).toBeTruthy();
+    expect(within(shelf).queryByRole('button', {name: /Muted Game/})).toBeNull();
+  });
   it('handles an empty or 404 upcoming publication without dropping manga', async () => {
     server.upcoming = 404;
     render(<Home {...props()}/>);
@@ -308,6 +333,35 @@ describe('Home A', () => {
     expect(within(region('자산 현황')).getByRole('button', {name: '오늘 +1+'})).toBeTruthy();
     expect(JSON.parse(localStorage.getItem(HOME_SNAPSHOT_KEY)!).summary).toBeUndefined();
   });
+  it('keeps the legacy asset card when a server omits detailed fields', async () => {
+    server.summary = {total: 1500, addedToday: 12, addedThisWeek: 80, unclassified: 7,
+      todayStart: '2026-09-25T00:00:00Z', weekStart: '2026-09-22T00:00:00Z', listGeneration: 'a'.repeat(64)};
+    render(<Home {...props()}/>);
+    const assets = await screen.findByRole('region', {name: '자산 현황'});
+    expect(within(assets).getByRole('button', {name: '전체 1,500장'})).toBeTruthy();
+    expect(within(assets).getByRole('button', {name: '분류 안 됨 7장'})).toBeTruthy();
+    expect(within(assets).queryByText('이미지')).toBeNull();
+  });
+  it('renders detailed asset and collection counts, hiding AV in privacy mode', async () => {
+    const onRecent = vi.fn(), onLibrary = vi.fn();
+    render(<Home {...props({onRecent, onLibrary})}/>);
+    const assets = await screen.findByRole('region', {name: '자산 현황'});
+    expect(within(assets).getByRole('button', {name: '이미지 1,200장'})).toBeTruthy();
+    expect(within(assets).getByRole('button', {name: '영상 300장'})).toBeTruthy();
+    expect(within(assets).getByText('게임').previousSibling?.textContent).toBe('10');
+    expect(within(assets).getByText('만화').previousSibling?.textContent).toBe('20');
+    expect(within(assets).getByText('영화').previousSibling?.textContent).toBe('30');
+    expect(within(assets).getByText('AV').previousSibling?.textContent).toBe('40');
+    expect(within(assets).getByRole('button', {name: '분류 안 됨 7장'})).toBeTruthy();
+    fireEvent.click(within(assets).getByRole('button', {name: '영상 300장'}));
+    fireEvent.click(within(assets).getByRole('button', {name: '분류 안 됨 7장'}));
+    expect(onRecent).toHaveBeenCalledTimes(1);
+    expect(onLibrary).toHaveBeenCalledTimes(1);
+    cleanup(); localStorage.setItem('lakomics.mobile.privacyMode', '1'); resetHomeSourceCache();
+    render(<Home {...props()}/>);
+    const privateAssets = await screen.findByRole('region', {name: '자산 현황'});
+    expect(within(privateAssets).queryByText('AV')).toBeNull();
+  });
   it('opens the read-only artist hub from both Home A artist entries', async () => {
     const onArtists = vi.fn();
     render(<Home {...props({onArtists})} />);
@@ -315,6 +369,16 @@ describe('Home A', () => {
     fireEvent.click(screen.getByRole('button', {name: /오늘의 작가 · Ranzu/}));
     fireEvent.click(screen.getByRole('button', {name: '작가 전체'}));
     expect(onArtists).toHaveBeenCalledTimes(2);
+  });
+
+  it('labels the next released volume with 권 and 발매 without the extra release count', async () => {
+    render(<Home {...props()}/>);
+    const series = await screen.findByRole('region', {name: '이어지는 시리즈'});
+    const card = within(series).getByRole('button', {name: '밤의 도서관 4권 발매'});
+    expect(card.querySelector('.home-series-next b')?.textContent).toBe('4권');
+    expect(card.querySelector('.home-series-next > small')?.textContent).toBe('발매');
+    expect(card.textContent).not.toContain('발매됨');
+    expect(card.textContent).not.toContain('+');
   });
 
   it('shows only non-zero review rows, routes them, and shows the clear state when empty', async () => {

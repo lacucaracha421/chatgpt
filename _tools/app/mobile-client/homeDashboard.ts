@@ -53,7 +53,15 @@ export type UpcomingHomeEntry = {
   date?: string | null; precision?: string | null; region?: string | null; platforms?: string[];
   releaseType?: string | null; cover?: HomeCover | null; description?: string | null; port?: boolean;
 };
-export type UpcomingHomeReply = {version?: number; revision?: string | number | null; entries?: UpcomingHomeEntry[]; wishlist?: UpcomingHomeEntry[]; pending?: {itemId?: string; action?: string}[]};
+export type UpcomingWatchEvent = {
+  id: string; kind: 'date_set' | 'date_changed' | 'released'; previousValue?: string | null;
+  currentValue?: string | null; detectedAt: string; readAt?: string | null;
+};
+export type UpcomingWishItem = UpcomingHomeEntry & {
+  source: 'calendar' | 'manual'; addedAt: string; muted: boolean; released: boolean;
+  events: UpcomingWatchEvent[];
+};
+export type UpcomingHomeReply = {version?: number; revision?: string | number | null; entries?: UpcomingHomeEntry[]; wishlist?: UpcomingWishItem[]; pending?: {itemId?: string; action?: string}[]};
 export type AvPick = {date?: string; personId: string; name: string; aliases?: string[]; workCount?: number; latestWork?: {code?: string; label?: string; series?: string | null; title?: string; date?: string; collectionId?: string | null; cover?: HomeCover | null} | null; cover?: HomeCover | null};
 export type AvPickReply = {version?: number; revision?: string | number | null; pick?: AvPick | null};
 export type LibraryArtist = {id: string; label: string; displayName?: string | null; sourceName?: string | null; assetCount?: number; recentCount?: number; lastOpenedAt?: string | null; main?: boolean; hidden?: boolean; coverAssetIds?: string[]};
@@ -89,6 +97,8 @@ export function daysAfter(date: string, today = localToday()) {
 }
 /** The 발매 예정 window. */
 export const UPCOMING_DAYS = 30;
+/** PC Home's title window. Manga keeps the tablet's existing 30-day window. */
+export const TITLE_UPCOMING_DAYS = 60;
 
 export function watchedCount(shelf: MangaShelf | null) { return (shelf?.works ?? []).filter(watching).length; }
 
@@ -288,9 +298,62 @@ function validHomeEntry(value: unknown): value is UpcomingHomeEntry {
   return typeof row.id === 'string' && typeof row.title === 'string' && (row.kind === 'game' || row.kind === 'movie' || row.kind === 'anime');
 }
 
+function normalizeWishlistItem(value: unknown): UpcomingWishItem | null {
+  if (!validHomeEntry(value)) return null;
+  const row = value as UpcomingHomeEntry & Partial<UpcomingWishItem>;
+  const events = Array.isArray(row.events) ? row.events.filter((event): event is UpcomingWatchEvent => {
+    if (!event || typeof event !== 'object') return false;
+    const candidate = event as Partial<UpcomingWatchEvent>;
+    return typeof candidate.id === 'string' && typeof candidate.detectedAt === 'string'
+      && (candidate.kind === 'date_set' || candidate.kind === 'date_changed' || candidate.kind === 'released');
+  }) : [];
+  return {...row, source: row.source === 'manual' ? 'manual' : 'calendar',
+    addedAt: typeof row.addedAt === 'string' ? row.addedAt : '', muted: row.muted === true,
+    released: row.released === true, events};
+}
+
 export function normalizeUpcomingReply(value: unknown): UpcomingHomeReply {
   const reply = value && typeof value === 'object' ? value as UpcomingHomeReply : {};
-  return {...reply, entries: (Array.isArray(reply.entries) ? reply.entries : []).filter(validHomeEntry), wishlist: (Array.isArray(reply.wishlist) ? reply.wishlist : []).filter(validHomeEntry)};
+  return {...reply, entries: (Array.isArray(reply.entries) ? reply.entries : []).filter(validHomeEntry),
+    wishlist: (Array.isArray(reply.wishlist) ? reply.wishlist : []).flatMap(value => {
+      const item = normalizeWishlistItem(value); return item ? [item] : [];
+    })};
+}
+
+export type ExternalShelfRow = {entry: UpcomingHomeEntry; fresh: boolean};
+
+/**
+ * Tablet adapter for PC `releaseRows` + `upcomingRows`: unread released wishlist items first,
+ * then exact upcoming wishlist dates. The calendar contributes only the port marker.
+ */
+export function externalShelfRows(entries: UpcomingHomeEntry[], wishlistItems: UpcomingWishItem[], interested: Set<string>, today = localToday(), window = TITLE_UPCOMING_DAYS): ExternalShelfRow[] {
+  const calendar = new Map(entries.map(entry => [entry.id, entry]));
+  const wishes = new Map<string, UpcomingWishItem | UpcomingHomeEntry>(wishlistItems.map(item => [item.id, item]));
+  // Preserve the pending add overlay before the PC publishes the new wishlist item.
+  for (const id of interested) if (!wishes.has(id)) {
+    const entry = calendar.get(id); if (entry) wishes.set(id, entry);
+  }
+  const released: Array<ExternalShelfRow & {detectedAt: string}> = [];
+  const upcoming: ExternalShelfRow[] = [];
+  for (const item of wishes.values()) {
+    if (!interested.has(item.id) || ('muted' in item && item.muted)) continue;
+    const calendarEntry = calendar.get(item.id);
+    const base = {...item, port: calendarEntry?.port === true};
+    const unreadReleased = ('events' in item ? item.events : [])
+      .filter(event => event.kind === 'released' && !event.readAt)
+      .sort((a, b) => b.detectedAt.localeCompare(a.detectedAt))[0];
+    if (unreadReleased) {
+      const eventDate = unreadReleased.currentValue?.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? null;
+      released.push({entry: {...base, date: eventDate}, fresh: true, detectedAt: unreadReleased.detectedAt});
+      continue;
+    }
+    if (('released' in item && item.released) || item.precision !== 'exact' || !item.date) continue;
+    const days = daysAfter(item.date, today);
+    if (days >= 0 && days <= window) upcoming.push({entry: base, fresh: false});
+  }
+  released.sort((a, b) => b.detectedAt.localeCompare(a.detectedAt));
+  upcoming.sort((a, b) => (a.entry.date ?? '').localeCompare(b.entry.date ?? '') || a.entry.title.localeCompare(b.entry.title, 'ko'));
+  return [...released, ...upcoming];
 }
 
 export function wishlistIds(reply: UpcomingHomeReply | null): Set<string> {
@@ -347,7 +410,7 @@ export function useHomeUpcoming(enabled: boolean, scope: string, forceKey?: unkn
     const controller = new AbortController();
     void flushUpcomingWishlist(controller.signal, scope).finally(() => controller.abort());
   };
-  return {entries: reply?.entries ?? [], wishlist: ids, wishlistPending: tick, toggle};
+  return {entries: reply?.entries ?? [], wishlistItems: reply?.wishlist ?? [], wishlist: ids, wishlistPending: tick, toggle};
 }
 
 export function useHomeAvPick(enabled: boolean, scope: string, forceKey?: unknown) {

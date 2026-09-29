@@ -26,14 +26,15 @@ import classification_authority
 CLASS_ID = "10000000-0000-4000-8000-000000000001"
 # Thursday 2026-09-24 20:30 UTC = Friday 2026-09-25 05:30 KST.
 NOW = datetime(2026, 9, 24, 20, 30, tzinfo=timezone.utc)
-KEYS = {"total", "addedToday", "addedThisWeek", "unclassified", "todayStart",
-        "weekStart", "tzOffsetMinutes", "listGeneration"}
+KEYS = {"total", "images", "videos", "collections", "addedToday", "addedThisWeek",
+        "unclassified", "todayStart", "weekStart", "tzOffsetMinutes", "listGeneration"}
 
 
 class MobileLibrarySummaryTests(AssetAuthorityFixture):
     def setUp(self):
         super().setUp()
         api_app.startup_classifications()
+        api_app.startup_mobile_collections()
         clock = mock.patch.object(api_app, "_summary_now", return_value=NOW)
         clock.start()
         self.addCleanup(clock.stop)
@@ -42,22 +43,25 @@ class MobileLibrarySummaryTests(AssetAuthorityFixture):
             db.commit()
         self.reader = {"Authorization": f"Bearer {token}"}
 
-    def publish(self, asset_id, collected_at, classification_ids=()):
+    def publish(self, asset_id, collected_at, classification_ids=(), kind="image"):
         digest = hashlib.sha256(asset_id.encode()).hexdigest()
         prepared = self.client.post("/v1/replication/prepare", headers=self.admin, json={
-            "asset_id": asset_id, "kind": "image", "content_type": "image/png",
+            "asset_id": asset_id, "kind": kind,
+            "content_type": "video/mp4" if kind == "video" else "image/gif" if kind == "gif" else "image/png",
             "size_bytes": 4, "sha256": digest, "collected_at": collected_at})
         self.assertEqual(prepared.status_code, 200, prepared.text)
         for variant in ("original", "thumbnail"):
             fake_s3.put_object(Bucket="test-bucket", Key=f"library/{asset_id}/{variant}",
                                Body=io.BytesIO(b"xxxx"), ContentType="image/png")
         committed = self.client.post("/v1/replication/commit", headers=self.admin, json={
-            "asset_id": asset_id, "kind": "image",
+            "asset_id": asset_id, "kind": kind,
             "original": {"object_key": f"library/{asset_id}/original",
-                         "content_type": "image/png", "size_bytes": 4, "sha256": digest},
+                         "content_type": "video/mp4" if kind == "video" else "image/gif" if kind == "gif" else "image/png",
+                         "size_bytes": 4, "sha256": digest},
             "thumbnail": {"object_key": f"library/{asset_id}/thumbnail",
                           "content_type": "image/webp", "size_bytes": 4},
-            "content_type": "image/png", "collected_at": collected_at,
+            "content_type": "video/mp4" if kind == "video" else "image/gif" if kind == "gif" else "image/png",
+            "collected_at": collected_at,
             "source_published_at": None, "source_url": None, "creator_name": None,
             "creator_handle": None, "import_source": "Direct",
             "classification_ids": list(classification_ids),
@@ -125,6 +129,33 @@ class MobileLibrarySummaryTests(AssetAuthorityFixture):
         self.assertEqual((body["addedToday"], body["addedThisWeek"]), (1, 2))
         self.assertEqual(body["listGeneration"], listed["listGeneration"])
 
+    def test_media_split_uses_the_same_visible_committed_assets(self):
+        self.publish("plain-image", "2026-09-24T20:00:00Z", kind="image")
+        self.publish("animated-image", "2026-09-24T20:00:00Z", kind="gif")
+        self.publish("visible-video", "2026-09-24T20:00:00Z", kind="video")
+        self.publish("hidden-video", "2026-09-24T20:00:00Z", kind="video")
+        self.publish("uncommitted-image", "2026-09-24T20:00:00Z", kind="image")
+        self.activate()
+        with api_app.get_db() as db:
+            db.execute("UPDATE asset_authority_state SET lifecycle=? WHERE asset_id='hidden-video'",
+                       [asset_authority.TRASH])
+            db.execute("UPDATE assets SET committed=0 WHERE id='uncommitted-image'")
+            db.commit()
+        body = self.summary()
+        self.assertEqual((body["total"], body["images"], body["videos"]), (3, 2, 1))
+
+    def test_collection_counts_include_zero_types(self):
+        with api_app.get_db() as db:
+            db.executemany("INSERT INTO mobile_collections VALUES(?,?,?,?,?,?)", [
+                ("game-a", "game", "A", 0, None, "{}"),
+                ("game-b", "game", "B", 0, None, "{}"),
+                ("manga-a", "manga", "M", 0, None, "{}"),
+                ("movie-a", "movie", "F", 0, None, "{}"),
+            ])
+            db.commit()
+        self.assertEqual(self.summary()["collections"],
+                         {"game": 2, "manga": 1, "movie": 1, "av": 0})
+
     def test_unclassified_before_and_after_classification_authority(self):
         self.publish("p", "2026-09-24T20:00:00Z", [CLASS_ID])
         self.publish("q", "2026-09-24T20:00:00Z")
@@ -165,8 +196,10 @@ class MobileLibrarySummaryTests(AssetAuthorityFixture):
     def test_shape_and_conditional_get(self):
         empty = self.summary()
         self.assertEqual(set(empty), KEYS)
-        self.assertEqual((empty["total"], empty["addedToday"], empty["addedThisWeek"],
-                          empty["unclassified"], empty["tzOffsetMinutes"]), (0, 0, 0, 0, 0))
+        self.assertEqual((empty["total"], empty["images"], empty["videos"],
+                          empty["addedToday"], empty["addedThisWeek"], empty["unclassified"],
+                          empty["tzOffsetMinutes"]), (0, 0, 0, 0, 0, 0, 0))
+        self.assertEqual(empty["collections"], {"game": 0, "manga": 0, "movie": 0, "av": 0})
         first = self.client.get("/v1/library/summary", headers=self.reader)
         etag = first.headers["ETag"]
         again = self.client.get("/v1/library/summary",
@@ -178,6 +211,15 @@ class MobileLibrarySummaryTests(AssetAuthorityFixture):
         self.assertEqual(changed.status_code, 200)
         self.assertEqual(changed.json()["total"], 1)
         self.assertNotEqual(changed.json()["listGeneration"], empty["listGeneration"])
+        collection_etag = changed.headers["ETag"]
+        with api_app.get_db() as db:
+            db.execute("INSERT INTO mobile_collections VALUES(?,?,?,?,?,?)",
+                       ["game-a", "game", "A", 0, None, "{}"])
+            db.commit()
+        collection_changed = self.client.get(
+            "/v1/library/summary", headers={**self.reader, "If-None-Match": collection_etag})
+        self.assertEqual(collection_changed.status_code, 200)
+        self.assertEqual(collection_changed.json()["collections"]["game"], 1)
 
 
 if __name__ == "__main__":

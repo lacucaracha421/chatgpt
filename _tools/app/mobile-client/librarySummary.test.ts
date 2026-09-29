@@ -12,6 +12,7 @@ import {fetchLibrarySummary, librarySummaryPath, parseLibrarySummary, tzOffsetMi
 const GENERATION = 'a'.repeat(64);
 const REPLY = {
   total: 9800, addedToday: 12, addedThisWeek: 40, unclassified: 3,
+  images: 9200, videos: 600, collections: {game: 11, manga: 22, movie: 33, av: 44},
   todayStart: '2026-09-25T15:00:00Z', weekStart: '2026-09-20T15:00:00Z',
   tzOffsetMinutes: 540, listGeneration: GENERATION,
 };
@@ -38,6 +39,15 @@ describe('librarySummary', () => {
     expect(mocks.api).toHaveBeenCalledWith('/v1/library/summary?tzOffsetMinutes=540', undefined);
     expect(summary).toEqual({
       total: 9800, addedToday: 12, addedThisWeek: 40, unclassified: 3,
+      images: 9200, videos: 600, collections: {game: 11, manga: 22, movie: 33, av: 44},
+      todayStart: '2026-09-25T15:00:00Z', weekStart: '2026-09-20T15:00:00Z', listGeneration: GENERATION,
+    });
+  });
+
+  it('keeps the old summary shape valid when detailed fields are absent', () => {
+    const {images: _images, videos: _videos, collections: _collections, ...oldReply} = REPLY;
+    expect(parseLibrarySummary(oldReply)).toEqual({
+      total: 9800, addedToday: 12, addedThisWeek: 40, unclassified: 3,
       todayStart: '2026-09-25T15:00:00Z', weekStart: '2026-09-20T15:00:00Z', listGeneration: GENERATION,
     });
   });
@@ -61,5 +71,8 @@ describe('librarySummary', () => {
     expect(parseLibrarySummary({...REPLY, unclassified: '3'})).toBeNull();
     expect(parseLibrarySummary({...REPLY, weekStart: undefined})).toBeNull();
     expect(parseLibrarySummary({...REPLY, listGeneration: 'nope'})).toBeNull();
+    expect(parseLibrarySummary({...REPLY, images: -1})).toBeNull();
+    expect(parseLibrarySummary({...REPLY, collections: {...REPLY.collections, av: '44'}})).toBeNull();
+    expect(parseLibrarySummary({...REPLY, videos: undefined})).toBeNull();
   });
 });

@@ -4,7 +4,7 @@ import {collectionCover, type CollectionSummary} from './collectionModel';
 import {koreanReleases, localToday} from './collectionReleases';
 import {Cover} from './CoverGroup';
 import {currentShelf, subscribeReleases} from './releaseStore';
-import {addedToday, clockLabel, dateBlock, daysAfter, shelfEntries, useHomeArtists, useHomeAvPick, useHomeDashboard, useHomeMemos, useHomeRevisit, useHomeUpcoming, type HomeCover, type MemoRow, type RevisitGroup, type ShelfEntry, type UpcomingHomeEntry} from './homeDashboard';
+import {addedToday, clockLabel, dateBlock, daysAfter, externalShelfRows, shelfEntries, useHomeArtists, useHomeAvPick, useHomeDashboard, useHomeMemos, useHomeRevisit, useHomeUpcoming, type HomeCover, type MemoRow, type RevisitGroup, type ShelfEntry, type UpcomingHomeEntry} from './homeDashboard';
 import type {CharacterIndex} from './characterModel';
 import type {ExchangeSnapshot} from './exchange';
 import {api, native} from './transport';
@@ -117,12 +117,12 @@ function ShelfManga({entry, cover, today, privacy, onOpen}: {entry: ShelfEntry; 
   return <button className="home-shelf-item" onClick={onOpen} aria-label={`${entry.name} ${volumes}`}><span>{rail}</span><span className="home-shelf-art">{privacy ? <span className="home-cover-placeholder is-private" aria-label="비공개 모드로 이미지 숨김" /> : cover}{fresh && <span className="home-newmark">NEW</span>}{volume && <span className="home-volume-badge numeric">{volume}</span>}</span><span className="home-shelf-title">{entry.name}</span><span className="home-shelf-sub" aria-hidden="true" /></button>;
 }
 
-function ShelfExternal({entry, today, privacy, onOpen}: {entry: UpcomingHomeEntry; today: string; privacy: boolean; onOpen(): void}) {
+function ShelfExternal({entry, fresh, today, privacy, onOpen}: {entry: UpcomingHomeEntry; fresh: boolean; today: string; privacy: boolean; onOpen(): void}) {
   const date = entry.date && /^\d{4}-\d{2}-\d{2}$/.test(entry.date) ? entry.date : null;
   const days = date ? daysAfter(date, today) : null;
   const block = date ? dateBlock(date, today) : null;
   const hasGamePlatforms = entry.kind === 'game' && !!entry.platforms?.length;
-  return <button className="home-shelf-item home-external-item" onClick={onOpen} aria-label={`${entry.title}${date ? ` · ${days === 0 ? '오늘' : `D-${days}`}` : ''}`}><span className="home-rail"><span className="home-rail-d numeric">{block?.day ?? '—'}</span>{block && <span className="home-rail-dd numeric">{days === 0 ? '오늘' : days !== null && days > 0 ? `D-${days}` : '지난'}</span>}</span><span className="home-shelf-art"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} /></span><span className="home-shelf-title">{entry.title}</span><span className="home-shelf-sub">{hasGamePlatforms ? <PlatformBadges platforms={entry.platforms!} port={entry.port === true} /> : null}</span></button>;
+  return <button className="home-shelf-item home-external-item" onClick={onOpen} aria-label={`${entry.title}${date ? ` · ${days === 0 ? '오늘' : days !== null && days > 0 ? `D-${days}` : '발매됨'}` : ''}`}><span className="home-rail"><span className="home-rail-d numeric">{block?.day ?? '—'}</span>{block && <span className="home-rail-dd numeric">{days === 0 ? '오늘' : days !== null && days > 0 ? `D-${days}` : '지난'}</span>}</span><span className="home-shelf-art"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} />{fresh && <span className="home-newmark">NEW</span>}</span><span className="home-shelf-title">{entry.title}</span><span className="home-shelf-sub">{hasGamePlatforms ? <PlatformBadges platforms={entry.platforms!} port={entry.port === true} /> : null}</span></button>;
 }
 
 function MemoPanel({rows, memos, onOpen}: {rows: MemoRow[]; memos: ReturnType<typeof useHomeMemos>; onOpen(id?: string): void}) {
@@ -155,6 +155,7 @@ function ArtistStrip({group, paused, privacy, onOpen}: {group: RevisitGroup; pau
 }
 
 function AssetTile({value, title, unit, onOpen, label}: {value: string; title: string; unit: string; onOpen(): void; label: string}) { return <button className="home-asset-tile" onClick={onOpen} aria-label={label}><strong className="numeric">{value}<small>{unit}</small></strong><span>{title}</span></button>; }
+function CollectionCount({value, title}: {value: number; title: string}) { return <span className="home-asset-collection"><strong className="numeric">{grouped(value)}</strong><span>{title}</span></span>; }
 
 type HomeSeriesRow = {work: CollectionSummary; owned: number; next: number; released: number};
 /** Watched manga with a known owned count whose next Korean volumes are already out (PC 이어지는 시리즈). */
@@ -172,7 +173,7 @@ function unownedReleasedSeries(shelf: ReturnType<typeof currentShelf>, today: st
 
 function ContinuingSeries({rows, revision, active, privacy, onOpen}: {rows: HomeSeriesRow[]; revision: string; active: boolean; privacy: boolean; onOpen(id: string): void}) {
   if (!rows.length) return null;
-  return <Section title="이어지는 시리즈"><div className="home-series-grid">{rows.map(row => <button key={row.work.id} className="home-series-card" onClick={() => onOpen(row.work.id)} aria-label={`${row.work.name} ${row.next}권 발매됨`}><span className="home-series-pair"><span className="home-series-cover">{privacy ? <span className="home-cover-placeholder is-private" aria-label="비공개 모드로 이미지 숨김" /> : <HomeMangaCover item={row.work} revision={revision} active={active} label={row.work.name} />}{row.owned > 0 && <span className="home-volume-badge numeric">{row.owned}</span>}</span><span className="home-series-next"><b className="numeric">{row.next}</b><small>{row.released > 1 ? `발매됨 +${row.released - 1}` : '발매됨'}</small></span></span><strong className="home-series-title">{row.work.name}</strong><span className="home-series-meta">{row.owned > 0 ? <><span className="numeric">{row.owned}</span>권까지 소장</> : '소장 없음'}</span></button>)}</div></Section>;
+  return <Section title="이어지는 시리즈"><div className="home-series-grid">{rows.map(row => <button key={row.work.id} className="home-series-card" onClick={() => onOpen(row.work.id)} aria-label={`${row.work.name} ${row.next}권 발매`}><span className="home-series-pair"><span className="home-series-cover">{privacy ? <span className="home-cover-placeholder is-private" aria-label="비공개 모드로 이미지 숨김" /> : <HomeMangaCover item={row.work} revision={revision} active={active} label={row.work.name} />}{row.owned > 0 && <span className="home-volume-badge numeric">{row.owned}</span>}</span><span className="home-series-next"><b><span className="numeric">{row.next}</span><small>권</small></b><small>발매</small></span></span><strong className="home-series-title">{row.work.name}</strong><span className="home-series-meta">{row.owned > 0 ? <><span className="numeric">{row.owned}</span>권까지 소장</> : '소장 없음'}</span></button>)}</div></Section>;
 }
 
 /**
@@ -229,8 +230,7 @@ export function Home(props: HomeProps) {
   const artistGroup = publishedArtist && artistBase ? {...artistBase, key: `artist:${publishedArtist.id}`, title: `오늘의 작가 · ${publishedArtist.displayName || publishedArtist.label}`, label: ''} : fallbackArtist ? {...fallbackArtist, title: `오늘의 작가 · ${fallbackArtist.name ?? fallbackArtist.title}`, label: ''} : null;
 
   const mangaEntries = shelfEntries(d.unreadWorks && d.unreadWorks > 0 ? d.releases ?? [] : [], d.upcoming ?? [], today);
-  // Home lists only games/movies/anime on the 관심 목록 (user, 2026-09-27); the 발매 캘린더 shows everything.
-  const externalEntries = upcoming.entries.filter(entry => (entry.kind === 'game' || entry.kind === 'movie' || entry.kind === 'anime') && upcoming.wishlist.has(entry.id) && entry.precision !== 'year').filter(entry => !entry.date || daysAfter(entry.date, today) >= 0).sort((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999'));
+  const externalEntries = externalShelfRows(upcoming.entries, upcoming.wishlistItems, upcoming.wishlist, today);
   const cover = (id: string, name: string) => { const work = works.get(id); return work ? <HomeMangaCover item={work} revision={shelf?.revision ?? ''} active={!paused} label={name} /> : <span className="home-cover-placeholder"><RectangleStackIcon aria-hidden="true" /></span>; };
   const summary = d.summary;
   const fallback = addedToday(items, props.hasMore);
@@ -238,6 +238,7 @@ export function Home(props: HomeProps) {
   const unclassified = summary ? grouped(summary.unclassified) : '—';
   const todayAdded = summary ? grouped(summary.addedToday) : `${fallback.count}${fallback.more ? '+' : ''}`;
   const weekAdded = summary ? grouped(summary.addedThisWeek) : '—';
+  const detailedSummary = summary?.images !== undefined && summary.videos !== undefined && summary.collections !== undefined ? summary : null;
   const seriesRows = useMemo(() => unownedReleasedSeries(shelf, today), [shelf, today]);
   const reviewRows = [
     {key: 'pending', label: '처리 대기', value: d.todos.pending, unit: '건', icon: InboxIcon, onOpen: props.onPending},
@@ -246,11 +247,11 @@ export function Home(props: HomeProps) {
   ].filter(row => row.value !== null && row.value > 0);
 
   const avLoading = !privacy && avPick === undefined;
-  const shelfLoading = !paused && d.releases === null && d.upcoming === null && upcoming.entries.length === 0;
+  const shelfLoading = !paused && d.releases === null && d.upcoming === null && upcoming.entries.length === 0 && upcoming.wishlistItems.length === 0;
   const enterClass = reducedMotion ? '' : ' home-enter-block';
   const shelfCards = shelfLoading
     ? Array.from({length: 6}, (_, index) => <span className="home-shelf-item is-loading" key={`loading:${index}`} aria-hidden="true"><span className="home-rail" /><span className="home-shelf-art" /><span className="home-shelf-title" /><span className="home-shelf-sub" /></span>)
-    : <>{mangaEntries.slice(0, 12).map(entry => <ShelfManga key={`manga:${entry.kind}:${entry.id}:${entry.kind === 'upcoming' ? entry.volumeNumber : ''}`} entry={entry} today={today} privacy={privacy} cover={cover(entry.id, entry.name)} onOpen={() => props.onWork(entry.id)} />)}{externalEntries.slice(0, 12).map(entry => <ShelfExternal key={`${entry.kind}:${entry.id}`} entry={entry} today={today} privacy={privacy} onOpen={() => setDetail(entry)} />)}{mangaEntries.length + externalEntries.length === 0 && <p className="home-empty-shelf">신간이 없습니다.</p>}</>;
+    : <>{mangaEntries.slice(0, 12).map(entry => <ShelfManga key={`manga:${entry.kind}:${entry.id}:${entry.kind === 'upcoming' ? entry.volumeNumber : ''}`} entry={entry} today={today} privacy={privacy} cover={cover(entry.id, entry.name)} onOpen={() => props.onWork(entry.id)} />)}{externalEntries.slice(0, 12).map(row => <ShelfExternal key={`${row.entry.kind}:${row.entry.id}`} entry={row.entry} fresh={row.fresh} today={today} privacy={privacy} onOpen={() => setDetail(row.entry)} />)}{mangaEntries.length + externalEntries.length === 0 && <p className="home-empty-shelf">신간이 없습니다.</p>}</>;
   return <div className={`home-scroll home-c${privacy ? ' is-private' : ''}${stale ? ' is-stale' : ''}`} ref={homeScroll} aria-label="홈">
     {pull}
     {stale && <div className="home-offline" role="status"><SignalSlashIcon aria-hidden="true" /><div><strong>오프라인 — 서버에 닿지 않습니다</strong><p>{d.since ? <>숫자와 목록은 <span className="numeric">{clockLabel(d.since)}</span> 기준으로 남겨 둔 값입니다. 메모는 그대로 쓸 수 있습니다.</> : '연결되면 다시 불러옵니다. 메모는 그대로 쓸 수 있습니다.'}</p></div><button className="home-retry" onClick={refreshHome}>다시 연결</button></div>}
@@ -259,7 +260,7 @@ export function Home(props: HomeProps) {
       <div className={`home-block home-duo-block${enterClass}`}><div className="home-duo"><Section title="다시 보기" onMore={() => dateGroup ? props.onRevisit?.('date', dateGroup.title) : props.onRecent?.()} moreLabel="다시 보기 전체"><>{dateGroup ? <RevisitMosaic group={dateGroup} paused={paused} privacy={privacy} onOpen={() => props.onRevisit?.('date', dateGroup.title)} /> : <div className="home-revisit is-empty"><span className="home-private-cell" /><span className="home-caption"><span>1년 전 오늘</span><span className="numeric">0장</span></span></div>}</></Section><Section title="작가" onMore={props.onArtists} moreLabel="작가 전체"><>{artistGroup ? <ArtistStrip group={artistGroup} paused={paused} privacy={privacy} onOpen={() => props.onArtists?.()} /> : <div className="home-artist-strip is-empty"><span className="home-artist-pics">{Array.from({length: 6}, (_, index) => <span className="home-private-cell" key={index} />)}</span><span className="home-caption"><span>오늘의 작가</span><span className="numeric">0장</span></span></div>}</></Section></div></div>
       <div className={`home-block home-duo-block${enterClass}`}><div className={`home-duo home-review-duo${!privacy && avPick !== null ? '' : ' is-review-wide'}`}>{!privacy && avPick !== null && <Section title="AV 배우"><div className="home-today-av">{avLoading ? <AvPlaceholder /> : <AvCard pick={avPick!} privacy={privacy} />}</div></Section>}<Section title="검토"><div className="home-review-list">{reviewRows.length ? reviewRows.map(row => { const Icon = row.icon; return <button key={row.key} className="home-review-row" onClick={row.onOpen}><Icon aria-hidden="true" /><span>{row.label}</span><strong className="home-review-row-count numeric">{row.value}<small>{row.unit}</small></strong><ChevronRightIcon aria-hidden="true" /></button>; }) : <div className="home-review-empty"><span className="home-review-ok" aria-hidden="true">✓</span><span>모두 확인함</span></div>}</div></Section></div></div>
       <div className={`home-block home-memo-block${enterClass}`}><MemoPanel rows={memos?.rows ?? []} memos={memos} onOpen={props.onNotes} /></div>
-      <div className={`home-block home-assets-block${enterClass}`}><Section title="자산 현황"><div className="home-assets"><div className="home-assets-cells"><AssetTile value={total} unit="장" title="전체" label={`전체 ${total}장`} onOpen={props.onRecent} /><AssetTile value={unclassified} unit="장" title="분류 안 됨" label={`분류 안 됨 ${unclassified}장`} onOpen={props.onLibrary} /></div><div className="home-assets-foot"><button onClick={props.onRecent}>오늘 <strong className="numeric">+{todayAdded}</strong></button><span>이번 주 <strong className="numeric">+{weekAdded}</strong></span><span className={`home-server-status${stale ? ' is-offline' : ''}`}><i aria-hidden="true" />서버</span></div></div></Section></div>
+      <div className={`home-block home-assets-block${enterClass}`}><Section title="자산 현황"><div className="home-assets">{detailedSummary ? <><div className="home-assets-media"><AssetTile value={grouped(detailedSummary.images!)} unit="장" title="이미지" label={`이미지 ${grouped(detailedSummary.images!)}장`} onOpen={props.onRecent} /><AssetTile value={grouped(detailedSummary.videos!)} unit="장" title="영상" label={`영상 ${grouped(detailedSummary.videos!)}장`} onOpen={props.onRecent} /></div><div className={`home-assets-collections${privacy ? ' is-private' : ''}`}><CollectionCount value={detailedSummary.collections!.game} title="게임" /><CollectionCount value={detailedSummary.collections!.manga} title="만화" /><CollectionCount value={detailedSummary.collections!.movie} title="영화" />{!privacy && <CollectionCount value={detailedSummary.collections!.av} title="AV" />}</div></> : <div className="home-assets-cells"><AssetTile value={total} unit="장" title="전체" label={`전체 ${total}장`} onOpen={props.onRecent} /><AssetTile value={unclassified} unit="장" title="분류 안 됨" label={`분류 안 됨 ${unclassified}장`} onOpen={props.onLibrary} /></div>}<div className="home-assets-foot"><button onClick={props.onRecent}>오늘 <strong className="numeric">+{todayAdded}</strong></button><button onClick={props.onRecent}>이번 주 <strong className="numeric">+{weekAdded}</strong></button>{detailedSummary && <button onClick={props.onLibrary} aria-label={`분류 안 됨 ${unclassified}장`}>분류 안 됨 <strong className="numeric">{unclassified}</strong></button>}<span className={`home-server-status${stale ? ' is-offline' : ''}`}><i aria-hidden="true" />서버</span></div></div></Section></div>
       {seriesRows.length > 0 && <div className={`home-block home-series-block${enterClass}`}><ContinuingSeries rows={seriesRows} revision={shelf?.revision ?? ''} active={!paused} privacy={privacy} onOpen={props.onWork} /></div>}
     </div>
     {secondaryError && <p className="hint" role="status">{secondaryError}</p>}

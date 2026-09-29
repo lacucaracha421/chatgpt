@@ -11,6 +11,9 @@ const GENERATION_PATTERN = /^[a-f0-9]{64}$/;
  */
 export type LibrarySummary = {
   total: number;
+  images?: number;
+  videos?: number;
+  collections?: {game: number; manga: number; movie: number; av: number};
   addedToday: number;
   addedThisWeek: number;
   unclassified: number;
@@ -39,10 +42,20 @@ export function parseLibrarySummary(reply: unknown): LibrarySummary | null {
   if (!isCount(r.total) || !isCount(r.addedToday) || !isCount(r.addedThisWeek) || !isCount(r.unclassified)) return null;
   if (typeof r.todayStart !== 'string' || typeof r.weekStart !== 'string') return null;
   if (typeof r.listGeneration !== 'string' || !GENERATION_PATTERN.test(r.listGeneration)) return null;
+  const detailValues = [r.images, r.videos, r.collections];
+  const hasDetail = detailValues.some(value => value !== undefined);
+  let detail: Pick<LibrarySummary, 'images' | 'videos' | 'collections'> = {};
+  if (hasDetail) {
+    const collections = r.collections;
+    if (!isCount(r.images) || !isCount(r.videos) || typeof collections !== 'object' || collections === null) return null;
+    const counts = collections as Record<string, unknown>;
+    if (!isCount(counts.game) || !isCount(counts.manga) || !isCount(counts.movie) || !isCount(counts.av)) return null;
+    detail = {images: r.images, videos: r.videos, collections: {game: counts.game, manga: counts.manga, movie: counts.movie, av: counts.av}};
+  }
   return {
     total: r.total, addedToday: r.addedToday, addedThisWeek: r.addedThisWeek,
     unclassified: r.unclassified, todayStart: r.todayStart, weekStart: r.weekStart,
-    listGeneration: r.listGeneration,
+    listGeneration: r.listGeneration, ...detail,
   };
 }
 

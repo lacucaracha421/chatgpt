@@ -2177,13 +2177,15 @@ def mobile_library_summary(
     # client's local midnight in this fixed offset.
     tz_offset_minutes: int = Query(default=0, alias="tzOffsetMinutes", ge=-840, le=840),
 ):
-    """Counts for the tablet Home's library card, over the ordinary library's visibility.
+    """Asset and Collection counts for the tablet Home's library card.
 
-    Every count reads `visible_assets` with `committed = 1`, exactly the rows
-    `/v1/library/assets` can list, and dates by that list's sort key
+    Asset counts read `visible_assets` with `committed = 1`, exactly the rows
+    `/v1/library/assets` can list. `images` includes the stored image and animated-GIF kinds;
+    `videos` includes the video kind. Dates use that list's sort key
     `COALESCE(collected_at, created_at)`. `unclassified` is a visible Asset with no
     Classification: after the classification authority is active, no assignment row with a
-    non-null Classification; before it, no legacy `asset_classifications` row.
+    non-null Classification; before it, no legacy `asset_classifications` row. Collection
+    counts read the four published `mobile_collections` types in the same transaction.
     """
     # Client role (shared token, a client token or the publisher), like the media tickets.
     client_guard(get_db, API_TOKEN)(authorization)
@@ -2210,6 +2212,8 @@ def mobile_library_summary(
         row = db.execute(
             f"""
             SELECT COUNT(*) AS total,
+                   COALESCE(SUM(asset.kind IN ('image', 'gif', 'animated_gif')), 0) AS images,
+                   COALESCE(SUM(asset.kind = 'video'), 0) AS videos,
                    COALESCE(SUM(COALESCE(asset.collected_at, asset.created_at) >= ?), 0) AS added_today,
                    COALESCE(SUM(COALESCE(asset.collected_at, asset.created_at) >= ?), 0) AS added_week,
                    COALESCE(SUM(NOT {classified_sql}), 0) AS unclassified
@@ -2218,8 +2222,16 @@ def mobile_library_summary(
             """,
             [today_start, week_start, *classified_params],
         ).fetchone()
+        collections = {kind: 0 for kind in ("game", "manga", "movie", "av")}
+        for collection_row in db.execute(
+                "SELECT type, COUNT(*) AS total FROM mobile_collections "
+                "WHERE type IN ('game','manga','movie','av') GROUP BY type"):
+            collections[collection_row["type"]] = collection_row["total"]
     payload = {
         "total": row["total"],
+        "images": row["images"],
+        "videos": row["videos"],
+        "collections": collections,
         "addedToday": row["added_today"],
         "addedThisWeek": row["added_week"],
         "unclassified": row["unclassified"],
