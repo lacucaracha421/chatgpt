@@ -264,6 +264,22 @@ The default is the current dark neutral ("먹색") with the ivory accent. A ligh
 
 Buttons, inputs, checkboxes, toggles, badges, segmented controls and tabs always come from the shared components in `_tools/app/src/shared/ui/` (used by both PC and tablet): `Button` (including `variant="quiet"`), `TextInput`/`Field`, `Checkbox`, `Switch`, `Badge`, `SegmentedControl`, `Tabs`. If a screen needs a shape they lack, add a variant to the shared component instead of styling a local copy. Screen-specific controls are allowed only for surfaces designed as their own object — the media viewer, the manga reader, Works covers and cases, and the NieR selection marks — and the code says why. The older `Toggle` (a checkbox) and `TextField` are legacy; screens move to `Checkbox` and `TextInput` when they are migrated.
 
+### What PC and tablet share (user, 2026-09-30)
+
+Sharing is decided per layer, not per screen:
+
+| Layer | Rule |
+| --- | --- |
+| Rules and wording: dates, D-day, sorting, grouping, labels, captions, counts | Always one shared module under `_tools/app/src/`; the tablet imports it and keeps no copy |
+| Basic parts: buttons, badges, shelf cards, tiles, selection marks, empty states, skeletons | Always the shared component; the clients differ only through size tokens |
+| Screen pieces: info panel contents, filmstrip, folder shelf, selection bar, toolbars | Shared by default; each client arranges them in its own layout |
+| Screen frame and input: portrait layout, bottom sheets, long-press, swipe, bottom navigation | Tablet-owned |
+| Data access: PC local library commands, tablet server reads | Separate per client; a shared piece takes plain data as props |
+
+- A shared piece does not branch on the client. Differences are absorbed by size tokens and by the layout that places the piece; when that is not enough, that part stays tablet-owned rather than growing a "tablet mode" inside a PC component.
+- Both clients are mid-redesign, so this applies **round by round**: a screen adopts the layers when its redesign round reaches it (PC first, tablet in the same round). Screens not yet redesigned on the PC are not refactored for sharing ahead of their round, and a PC design that is still changing is shared only once it is decided. Tablet copies made in earlier rounds are replaced when a later round touches the same piece, not in a separate sweep.
+- While the tablet is still catching up, a tablet screen may trail the PC; it may not gain a **new** copy of a PC rule or basic part.
+
 ### Icons and rows
 
 - Heroicons outline, stroke 1.5. Sizes 16 (inside badges and buttons), 20 (PC default: rows, toolbars), 24 (tablet default: top and bottom bars). Solid icons only for an on state (heart, pin). Icons follow text colour: muted at rest, bright when pressed or selected.
