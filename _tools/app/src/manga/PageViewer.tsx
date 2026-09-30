@@ -15,7 +15,7 @@ type PageViewerProps = {
   pageUrls: string[];
   initialPage: number;
   sourceLabel: string;
-  onPageChange: (page: number) => void;
+  onPageChange?: (page: number) => void;
   onClose: () => void;
   actions?: ReactNode;
   onRetryPage?: () => Promise<void>;
@@ -80,7 +80,7 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
   const move = (next: number) => {
     const bounded = Math.max(1, Math.min(pageCount, next));
     setPage(bounded);
-    onPageChange(bounded);
+    onPageChange?.(bounded);
   };
   const goNext = () => move(spread ? nextSpreadStart(page, pageCount, coverSingle) : Math.min(pageCount, page + 1));
   const goPrev = () => move(spread ? prevSpreadStart(page, pageCount, coverSingle) : Math.max(1, page - 1));

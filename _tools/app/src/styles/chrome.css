@@ -100,7 +100,7 @@
 .workspace-content .collection-browser__heading { display: none; }
 .workspace-content .collection-browser__stage { padding-top: var(--space-4); }
 
-.workspace-index .collection-browser__segment, .workspace-index .manga-source-tabs { display: flex; flex-direction: column; align-items: stretch; width: 100%; margin: 0 0 var(--space-4); gap: var(--space-1); }
+.workspace-index .collection-browser__segment { display: flex; flex-direction: column; align-items: stretch; width: 100%; margin: 0 0 var(--space-4); gap: var(--space-1); }
 .workspace-index .collection-browser__segment-button { text-align: left; justify-content: flex-start; min-height: 34px; padding: var(--space-2); }
 .workspace-index .collection-browser__segment-button[aria-pressed="true"] { position: relative; }
 .ui-anchored-panel { position: fixed; z-index: var(--chrome-z-panel); width: min(var(--chrome-panel-width), calc(100vw - 24px)); max-height: calc(100dvh - 24px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--chrome-border); border-radius: var(--chrome-radius); background: var(--color-surface-elevated); color: var(--color-text); box-shadow: var(--shadow-floating); outline: none; }
@@ -153,12 +153,6 @@ body .ui-menu { border-color: var(--chrome-border); border-radius: var(--chrome-
 .chrome-search-editor .online-catalog__search { position: relative; display: flex; width: 100%; min-width: 0; max-width: none; margin: 0; }
 .chrome-search-editor .online-catalog__search input { width: 100%; min-width: 0; height: 40px; font-size: var(--text-lg); }
 .chrome-search-editor .online-catalog__suggestions { z-index: 1; }
-.workspace-index .manga-source-tabs button { width: 100%; min-height: 36px; text-align: center; justify-content: center; }
-.workspace-index .manga-source-tabs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-.workspace-index .manga-source-tabs button:last-child { position: relative; grid-column: 1 / -1; margin-top: var(--space-2); }
-.workspace-index .manga-source-tabs button:last-child::before { content: ""; position: absolute; top: calc(var(--space-2) * -1); left: var(--space-1); right: var(--space-1); height: var(--border-width); background: var(--color-border); pointer-events: none; }
-.workspace-index .manga-source-tabs + .ui-select { display: grid; gap: var(--space-2); color: var(--color-muted); font-size: var(--text-xs); }
-.workspace-index .manga-source-tabs + .ui-select select { width: 100%; }
 
 /* Chrome refinement: compact labels, squared symbols, quiet tree hierarchy. */
 .workspace-titlebar { padding-left: 0; }

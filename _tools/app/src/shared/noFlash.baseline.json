@@ -39,10 +39,6 @@
     "blankingReset": 1,
     "hiddenImage": 0
   },
-  "src/manga/OnlineCatalogBrowser.tsx": {
-    "blankingReset": 1,
-    "hiddenImage": 0
-  },
   "src/statistics/StatisticsPanel.tsx": {
     "blankingReset": 1,
     "hiddenImage": 0

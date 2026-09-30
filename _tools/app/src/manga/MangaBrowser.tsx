@@ -1,20 +1,18 @@
-import { ArrowPathIcon } from "@heroicons/react/24/outline";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
+import { useCallback, useEffect, useMemo, useLayoutEffect, useRef, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import type { CatalogScope, MangaCatalogRecoveryPreview, MangaSeries } from "../library/types";
 import { mangaCoverUrl } from "../assets/mediaUrl";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
-import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
-import { ViewToolbar } from "../layout/ViewToolbar";
 import { Menu } from "../shared/ui/Menu";
-import { Slider } from "../shared/ui/Slider";
-import { Select } from "../shared/ui/Select";
 import { Toggle } from "../shared/ui/Toggle";
-import { MangaSourceTabs, OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
+import { OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
+import { MangaCard, MangaSkeletonGrid } from "./MangaCard";
+import { MangaToolbar, MangaChoiceMenu, type MangaSource } from "./MangaToolbar";
 import { createKoreanMatcher } from "../shared/koreanSearch";
 
 type MangaSort = "recent" | "title_asc" | "author_asc" | "pages_desc";
@@ -35,12 +33,34 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const [scanning, setScanning] = useState(false);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<MangaSort>("recent");
-  const [cardWidth, setCardWidth] = useState(152);
+  const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [recovery, setRecovery] = useState<MangaCatalogRecoveryPreview | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [source, setSource] = useState<"local" | "online">(initialMangaSource);
   const [onlineScope, setOnlineScope] = useState<CatalogScope>("all");
+  const [displayedSource, setDisplayedSource] = useState(source);
+  const [localVisited, setLocalVisited] = useState(source === "local");
+  const [onlineVisited, setOnlineVisited] = useState(source === "online");
+  const [onlineReadyScope, setOnlineReadyScope] = useState<CatalogScope | null>(null);
+  const [bookmarkCount, setBookmarkCount] = useState<number | undefined>();
+  const onlineReady = useCallback((scope: CatalogScope) => setOnlineReadyScope(scope), []);
+  function selectSource(next: MangaSource) {
+    if (next === "local") { setLocalVisited(true); setSource("local"); }
+    else { setOnlineScope(next); setOnlineVisited(true); setSource("online"); }
+  }
+  useEffect(() => {
+    if (source === "local" && (root === null || series !== null || loadError)) setDisplayedSource("local");
+    if (source === "online" && onlineReadyScope === onlineScope) setDisplayedSource("online");
+  }, [source, root, series, loadError, onlineReadyScope, onlineScope]);
+  const previousSource = useRef(displayedSource);
+  useLayoutEffect(() => {
+    if (previousSource.current !== displayedSource) {
+      document.querySelector<HTMLButtonElement>('.manga-toolbar__controls [role="radio"][aria-checked="true"]')?.focus();
+      previousSource.current = displayedSource;
+    }
+  }, [displayedSource]);
   useAutoDismiss(message, setMessage);
 
   const visibleSeries = useMemo(() => {
@@ -60,11 +80,10 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
     if (!active()) return;
     setScanning(true);
     try {
-      const scanned = await gateway.scanManga();
+      await gateway.scanManga();
       if (!active()) return;
-      setMessage(scanned > 0 ? `망가 ${scanned}개를 새로고침했습니다` : "새로 변경된 망가가 없습니다");
       const next = await gateway.listMangaSeries();
-      if (active()) setSeries(next);
+      if (active()) { setSeries(next); setRefreshedAt(new Date().toISOString()); setLoadError(false); }
     } catch {
       if (active()) setMessage("망가 목록을 불러오지 못했습니다");
     } finally {
@@ -87,11 +106,9 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
     setRecoveryBusy(true);
     try {
       const result = await gateway.refreshMangaCatalogRecoveryRemote();
-      setMessage(result.importedCount > 0
-        ? `원격 카탈로그에서 정확한 ID ${result.importedCount}개를 보강했습니다`
-        : result.attemptedCount > 0
-          ? `원격에서도 ${result.notFoundCount}개 ID를 찾지 못했습니다. 로컬/자체번역 작품일 수 있습니다`
-          : "원격 확인이 필요한 숫자 ID가 없습니다");
+      if (result.attemptedCount > 0 && result.importedCount === 0 && result.notFoundCount > 0) {
+        setMessage(`원격에서도 ${result.notFoundCount}개 ID를 찾지 못했습니다. 로컬/자체번역 작품일 수 있습니다`);
+      }
       setRecovery(await gateway.previewMangaCatalogRecovery());
     } catch {
       setMessage("원격 카탈로그 확인에 실패했습니다");
@@ -102,8 +119,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
     if (!gateway.applyMangaCatalogRecovery || !gateway.previewMangaCatalogRecovery) return;
     setRecoveryBusy(true);
     try {
-      const result = await gateway.applyMangaCatalogRecovery();
-      setMessage(`카탈로그 북마크 ${result.createdBookmarks}개를 복구했습니다`);
+      await gateway.applyMangaCatalogRecovery();
       setSeries(await gateway.listMangaSeries());
       setRecovery(await gateway.previewMangaCatalogRecovery());
     } catch {
@@ -115,8 +131,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
     if (!gateway.applyMangaCatalogRecoverySelection || !gateway.previewMangaCatalogRecovery) return;
     setRecoveryBusy(true);
     try {
-      const result = await gateway.applyMangaCatalogRecoverySelection([{ mangaId, workId }]);
-      setMessage(result.createdBookmarks > 0 ? "선택한 작품을 북마크에 등록했습니다" : "이미 등록된 북마크입니다");
+      await gateway.applyMangaCatalogRecoverySelection([{ mangaId, workId }]);
       setSeries(await gateway.listMangaSeries());
       setRecovery(await gateway.previewMangaCatalogRecovery());
     } catch {
@@ -139,70 +154,52 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
           void refreshSeries(() => active);
         }
       } catch {
-        if (active) setMessage("망가 목록을 불러오지 못했습니다");
+        if (active) { setMessage("망가 목록을 불러오지 못했습니다"); setLoadError(true); }
       }
     })();
     return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gateway, source]);
 
-  const localNavigation = <MangaSourceTabs source="local" onLocal={() => undefined} onOnline={(scope) => { setOnlineScope(scope); setSource("online"); }} />;
-
-  if (source === "online") {
-    return <OnlineCatalogBrowser initialScope={onlineScope} onSwitchLocal={() => setSource("local")} />;
-  }
-
-  if (root === undefined) {
-    return <section className="manga-browser" aria-label="망가">
-      <ViewToolbar title="망가" titleContent="로컬" ariaLabel="망가 도구" chrome={{ navigation: localNavigation }} />
-      <div className="manga-browser__content"><Skeleton className="manga-browser__skeleton" label="망가를 불러오는 중" /></div>
-    </section>;
-  }
-
-  if (!root) {
-    return <section className="manga-browser" aria-label="망가">
-      <ViewToolbar title="망가" titleContent="로컬" ariaLabel="망가 도구" chrome={{ navigation: localNavigation }} />
-      <div className="manga-browser__content"><EmptyState title="망가 폴더가 설정되지 않았습니다">설정에서 망가 폴더를 선택하면 여기에 표시됩니다.</EmptyState></div>
-    </section>;
-  }
-
   const countLabel = query.trim() && visibleSeries.length !== series?.length
     ? `${visibleSeries.length} / ${series?.length ?? 0}개 작품`
     : `${series?.length ?? 0}개 작품`;
 
-  return <section className="manga-browser" aria-label="망가">
-    <ViewToolbar
-      title="망가"
-      titleContent="로컬"
-      ariaLabel="망가 도구"
+  const localActive = displayedSource === "local";
+  return <>
+    {onlineVisited && <div className="manga-browser__screen" style={{ display: displayedSource === "online" ? undefined : "none" }}>
+      <OnlineCatalogBrowser initialScope={onlineScope} requestedSource={source === "local" ? "local" : onlineScope}
+        active={displayedSource === "online"} onSourceChange={selectSource} onSwitchLocal={() => selectSource("local")}
+        onReady={onlineReady} localCount={series?.length} bookmarkCount={bookmarkCount} onBookmarkCount={setBookmarkCount} />
+    </div>}
+    {localVisited && <section className="manga-browser manga-browser__screen" aria-label="망가" style={{ display: localActive ? undefined : "none" }}>
+    {localActive && <MangaToolbar source={source === "local" ? "local" : onlineScope} onSourceChange={selectSource}
+      localCount={series?.length} bookmarkCount={bookmarkCount} countLabel={series ? countLabel : undefined}
+      refreshedAt={refreshedAt} refreshing={scanning} onRefresh={root ? () => void refreshSeries() : undefined}
+      controls={<MangaChoiceMenu label="정렬" value={sort} onChange={setSort} options={[
+        { value: "recent", label: "최근 변경순" }, { value: "title_asc", label: "제목순" }, { value: "author_asc", label: "작가순" }, { value: "pages_desc", label: "페이지 많은 순" },
+      ]} />}
+      actions={root && gateway.previewMangaCatalogRecovery ? <Menu label="망가 관리" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
+        { id: "recovery", label: "카탈로그로 복구", disabled: recoveryBusy, onSelect: () => void previewRecovery() },
+      ]} /> : undefined}
       chrome={{
-        navigation: localNavigation,
-        status: <><span>{countLabel}</span>{scanning && <span role="status">폴더 스캔 중</span>}</>,
-        summary: `${mangaSortLabel(sort)} · ${cardWidth}px${privacyMode ? " · 비공개" : ""}`,
+        status: scanning ? <span role="status">폴더 스캔 중</span> : undefined,
+        summary: `${mangaSortLabel(sort)}${privacyMode ? " · 비공개" : ""}`,
         search: { scope: "로컬 망가", label: "망가 검색", placeholder: "제목 또는 작가 검색", query, onApply: setQuery },
-        actions: <Menu label="망가 관리" trigger={<ArrowPathIcon aria-hidden="true" />} items={[
-          { id: "refresh", label: scanning ? "스캔 중" : "새로고침", disabled: scanning, onSelect: () => void refreshSeries() },
-          ...(gateway.previewMangaCatalogRecovery ? [{ id: "recovery", label: "카탈로그로 복구", disabled: recoveryBusy, onSelect: () => void previewRecovery() }] : []),
-        ]} />,
-        settings: <>
-          <fieldset className="chrome-settings-group"><legend>정렬 · 보기</legend>
-            <Select label="정렬" value={sort} onChange={(event) => setSort(event.target.value as MangaSort)}><option value="recent">최근 변경순</option><option value="title_asc">제목순</option><option value="author_asc">작가순</option><option value="pages_desc">페이지 많은 순</option></Select>
-            <Slider label="카드 크기" min={112} max={220} step={8} value={cardWidth} onChange={(event) => setCardWidth(Number(event.target.value))} />
-          </fieldset>
-          <fieldset className="chrome-settings-group"><legend>표시</legend><Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => setPrivacyMode(event.target.checked)}>비공개 모드</Toggle></fieldset>
-        </>,
-      }}
-    />
+        settings: <fieldset className="chrome-settings-group"><legend>표시</legend><Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => setPrivacyMode(event.target.checked)}>비공개 모드</Toggle></fieldset>,
+      }} />}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     {recovery && <MangaRecoveryPanel preview={recovery} busy={recoveryBusy} onRemoteLookup={gateway.refreshMangaCatalogRecoveryRemote ? () => void refreshRecoveryRemote() : undefined} onApply={() => void applyRecovery()} onApplySelection={(mangaId, workId) => void applyRecoverySelection(mangaId, workId)} onClose={() => setRecovery(null)} />}
-    <div className="manga-browser__content">
-      {!series ? <Skeleton className="manga-browser__skeleton" label="망가를 불러오는 중" /> : series.length === 0 ? (
+    <div className="manga-browser__content" inert={source !== "local"}>
+      {loadError && !series ? <EmptyState title="망가 목록을 불러오지 못했습니다" />
+        : root === null ? <EmptyState title="망가 폴더가 설정되지 않았습니다">설정에서 망가 폴더를 선택하면 여기에 표시됩니다.</EmptyState>
+        : !series ? <MangaSkeletonGrid /> : series.length === 0 ? (
         <EmptyState title="망가가 없습니다">망가 폴더에 시리즈 폴더를 추가하세요.</EmptyState>
       ) : visibleSeries.length === 0 ? (
         <EmptyState title="검색 결과가 없습니다">다른 제목이나 작가 이름으로 검색하세요.</EmptyState>
-      ) : <MangaCoverGrid series={visibleSeries} cardWidth={cardWidth} onOpenSeries={onOpenSeries} />}
+      ) : <div className="manga-grid">{visibleSeries.map(entry => <MangaCard key={entry.id} title={entry.title} artist={entry.author} pageCount={entry.pageCount} coverUrl={mangaCoverUrl(entry.id)} privacyMode={privacyMode} onOpen={() => onOpenSeries?.(entry)} />)}</div>}
     </div>
-  </section>;
+  </section>}</>;
 }
 
 function MangaRecoveryPanel({ preview, busy, onRemoteLookup, onApply, onApplySelection, onClose }: { preview: MangaCatalogRecoveryPreview; busy: boolean; onRemoteLookup?: () => void; onApply(): void; onApplySelection(mangaId: string, workId: number): void; onClose(): void }) {
@@ -255,21 +252,4 @@ function MangaRecoveryPanel({ preview, busy, onRemoteLookup, onApply, onApplySel
 
 function mangaSortLabel(sort: MangaSort): string {
   return sort === "title_asc" ? "제목순" : sort === "author_asc" ? "작가순" : sort === "pages_desc" ? "페이지 많은 순" : "최근 변경순";
-}
-
-function MangaCoverGrid({ series, cardWidth, onOpenSeries }: { series: MangaSeries[]; cardWidth: number; onOpenSeries?: (series: MangaSeries) => void }) {
-  const { privacyMode } = usePrivacy();
-  const [failedCovers, setFailedCovers] = useState<ReadonlySet<string>>(new Set());
-  return <div className="manga-browser__grid" style={{ "--manga-card-width": `${cardWidth}px` } as CSSProperties}>
-    {series.map((entry) => (
-      <button key={entry.id} type="button" className="manga-browser__cover" onClick={() => onOpenSeries?.(entry)}>
-        {privacyMode ? <Skeleton className="privacy-mask manga-browser__cover-mask" label="비공개 모드" />
-          : failedCovers.has(entry.id)
-            ? <span className="manga-browser__cover-fallback catalog-thumbnail__fallback"><strong>{entry.pageCount}페이지</strong></span>
-            : <img src={mangaCoverUrl(entry.id)} alt="" loading="lazy" draggable={false} onError={() => setFailedCovers((current) => new Set(current).add(entry.id))} />}
-        <span className="manga-browser__cover-title" aria-description={entry.title}>{entry.title}</span>
-        <span className="manga-browser__cover-author" aria-description={`${entry.author} · ${entry.pageCount}페이지`}>{entry.author} · {entry.pageCount}페이지</span>
-      </button>
-    ))}
-  </div>;
 }

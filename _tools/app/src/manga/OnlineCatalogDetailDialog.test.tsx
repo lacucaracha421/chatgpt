@@ -30,12 +30,11 @@ const detail: CatalogWorkDetail = {
 };
 
 describe("OnlineCatalogDetailDialog", () => {
-  it("shows metadata and routes tag and resume actions", async () => {
+  it("shows metadata and routes tag and reading actions", async () => {
     const onTagSearch = vi.fn();
     const onRead = vi.fn();
     render(<OnlineCatalogDetailDialog
       detail={detail}
-      progress={{ provider: "kHentai", providerWorkId: "3", lastPage: 7, pageCount: 24, lastReadAt: "" }}
       bookmarkPending={false}
       reading={false}
       onBookmark={vi.fn()}
@@ -58,7 +57,8 @@ describe("OnlineCatalogDetailDialog", () => {
     await userEvent.click(screen.getByRole("button", { name: "character:teitoku 검색" }));
     expect(onTagSearch).toHaveBeenCalledWith("character:teitoku");
 
-    await userEvent.click(screen.getByRole("button", { name: "이어 읽기" }));
+    await userEvent.click(screen.getByRole("button", { name: "읽기" }));
     expect(onRead).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/페이지까지 읽음|이어 읽기/)).not.toBeInTheDocument();
   });
 });

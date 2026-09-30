@@ -1,5 +1,5 @@
 import { formatBytes } from "../assets/assetMetadata";
-import type { CatalogWorkDetail, RemoteReadingProgress } from "../library/types";
+import type { CatalogWorkDetail } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { CatalogThumbnail } from "./CatalogThumbnail";
@@ -18,7 +18,6 @@ const languageLabels: Record<string, string> = {
 
 type Props = {
   detail: CatalogWorkDetail;
-  progress: RemoteReadingProgress | null;
   bookmarkPending: boolean;
   reading: boolean;
   onBookmark: (bookmarked: boolean) => void;
@@ -40,7 +39,6 @@ function unixDate(value: number) {
 
 export function OnlineCatalogDetailDialog({
   detail,
-  progress,
   bookmarkPending,
   reading,
   onBookmark,
@@ -50,9 +48,6 @@ export function OnlineCatalogDetailDialog({
   editionCount = 0,
   onEditions,
 }: Props) {
-  const canResume = progress !== null
-    && progress.pageCount === detail.fileCount
-    && progress.lastPage > 1;
   const category = detail.category === null ? null : catalogCategoryLabel(detail.category);
   const summaryGroups = detail.tagGroups.filter((group) => ["artist", "language"].includes(group.namespace));
   const tags = detail.tagGroups.filter((group) => !["artist", "language"].includes(group.namespace));
@@ -72,14 +67,12 @@ export function OnlineCatalogDetailDialog({
           className="online-catalog-detail__cover"
           src={detail.thumbnailUrl}
           title={detail.title}
-          pageCount={detail.fileCount}
         />
         <div className="online-catalog-detail__info">
         <div className="online-catalog-detail__facts">
           <p className="online-catalog-detail__essentials"><strong>{detail.fileCount.toLocaleString()}페이지</strong>{category && <span>{category}</span>}
             {editionCount >= 2 && onEditions && <button type="button" className="online-catalog-detail__editions" onClick={onEditions}>판본 {editionCount.toLocaleString()}개 보기</button>}</p>
           <div className="online-catalog-detail__tags online-catalog-detail__identity">{summaryGroups.map(renderGroup)}</div>
-          {canResume && <p className="online-catalog-detail__progress">{progress.lastPage.toLocaleString()}페이지까지 읽음</p>}
         </div>
       {tags.length > 0 && <div className="online-catalog-detail__tags" aria-label="작품 태그">{tags.map(renderGroup)}</div>}
       <details className="online-catalog-detail__extra">
@@ -101,7 +94,7 @@ export function OnlineCatalogDetailDialog({
         </Button>
         <Button onClick={onClose}>닫기</Button>
         <Button variant="primary" disabled={reading} onClick={onRead}>
-          {reading ? "불러오는 중…" : canResume ? "이어 읽기" : "읽기"}
+          {reading ? "불러오는 중…" : "읽기"}
         </Button>
       </div>
         </div>

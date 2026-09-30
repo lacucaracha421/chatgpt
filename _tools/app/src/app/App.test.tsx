@@ -1534,7 +1534,7 @@ describe("App", () => {
 
     expect(await screen.findByRole("region", { name: "온라인 망가" })).toBeInTheDocument();
     expect(libraryGateway.scanManga).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "로컬" }));
+    await user.click(screen.getByRole("radio", { name: /^로컬/ }));
     expect(await screen.findByRole("region", { name: "망가" })).toBeInTheDocument();
     await waitFor(() => expect(libraryGateway.scanManga).toHaveBeenCalled());
     expect(await screen.findByRole("button", { name: /Blue Archive/ })).toBeInTheDocument();

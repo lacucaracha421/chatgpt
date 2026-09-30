@@ -1,16 +1,15 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { CatalogThumbnail } from "./CatalogThumbnail";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 
 afterEach(cleanup);
-const props = { src: "https://example.com/cover.jpg", title: "작품", pageCount: 24, className: "online-catalog-card__cover" };
+const props = { src: "https://example.com/cover.jpg", title: "작품", className: "online-catalog-detail__cover" };
 
-it("reserves the cover surface while loading, then replaces the cue with the image", () => {
+it("reserves a quiet surface while loading and on failure", () => {
   const { container } = render(<CatalogThumbnail {...props} />);
   const surface = container.firstElementChild;
-  expect(screen.getByRole("img", { name: "표지를 불러오는 중" })).toBeVisible();
-  expect(surface).toHaveClass("online-catalog-card__cover");
+  expect(surface).toHaveClass("manga-cover", "online-catalog-detail__cover");
   expect(surface).toHaveAttribute("aria-busy", "true");
   const cover = screen.getByAltText("작품 표지");
   expect(cover).not.toBeVisible();
@@ -18,25 +17,30 @@ it("reserves the cover surface while loading, then replaces the cue with the ima
   expect(container.firstElementChild).toBe(surface);
   expect(cover).toBeVisible();
   expect(surface).toHaveAttribute("aria-busy", "false");
-  expect(screen.queryByLabelText("표지를 불러오는 중")).not.toBeInTheDocument();
+  fireEvent.error(cover);
+  expect(container.firstElementChild).toBe(surface);
+  expect(container.querySelector("img")).toBeNull();
 });
 
-it("keeps the existing failure state and restarts loading when the source changes", () => {
-  const { rerender } = render(<CatalogThumbnail {...props} />);
-  fireEvent.error(screen.getByAltText("작품 표지"));
-  expect(screen.getByText("24페이지")).toBeVisible();
-  expect(screen.queryByLabelText("표지를 불러오는 중")).not.toBeInTheDocument();
+it("keeps the painted element until the next source loads", async () => {
+  const { container, rerender } = render(<CatalogThumbnail {...props} />);
+  const painted = screen.getByAltText("작품 표지");
+  fireEvent.load(painted);
   rerender(<CatalogThumbnail {...props} src="https://example.com/next.jpg" />);
-  expect(screen.getByLabelText("표지를 불러오는 중")).toBeVisible();
-  fireEvent.load(screen.getByAltText("작품 표지"));
-  rerender(<CatalogThumbnail {...props} />);
-  expect(screen.getByLabelText("표지를 불러오는 중")).toBeVisible();
+  expect(painted).toBeVisible();
+  expect(painted).toHaveAttribute("src", props.src);
+  const next = container.querySelector('[data-stable-image-loading="true"]')!;
+  expect(next).not.toBeVisible();
+  await act(async () => fireEvent.load(next));
+  expect(next).toBeVisible();
+  expect(painted).not.toBeVisible();
 });
 
-it("does not request a cover in privacy mode and handles absent sources", () => {
+it("requests no cover in privacy mode or for an absent source", () => {
   const { container, rerender } = render(<PrivacyProvider privacyMode setPrivacyMode={vi.fn()}><CatalogThumbnail {...props} /></PrivacyProvider>);
   expect(container.querySelector("img")).toBeNull();
-  expect(screen.queryByLabelText("표지를 불러오는 중")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("비공개 모드")).toBeVisible();
   rerender(<CatalogThumbnail {...props} src={null} />);
-  expect(screen.getByText("24페이지")).toBeVisible();
+  expect(container.querySelector("img")).toBeNull();
+  expect(container.firstElementChild).toHaveClass("manga-cover");
 });
