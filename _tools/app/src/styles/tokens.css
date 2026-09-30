@@ -137,6 +137,7 @@
   --shadow-floating: 0 1px 3px rgba(0, 0, 0, 0.24), 0 8px 20px rgba(0, 0, 0, 0.3);
   --shadow-dialog: 0 3px 10px rgba(0, 0, 0, 0.26), 0 18px 48px rgba(0, 0, 0, 0.38);
   --inset-light: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --font-spine: "Noto Sans KR", var(--font-ui);
   --font-ui: "Pretendard Variable", "Pretendard", "Yu Gothic UI", "Meiryo", "Segoe UI", "Malgun Gothic", sans-serif;
   /* Numbers use Pretendard too (user, 2026-09-29); numeric roles keep tabular figures. */
   --font-numeric: var(--font-ui);

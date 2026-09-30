@@ -46,6 +46,7 @@ type CollectionBrowserProps = {
   showcase: boolean;
   onViewChange: (next: AssetView) => void;
   onChanged: () => Promise<void>;
+  onOpenWork?: (id: string, order: string[]) => void;
   libraryState: CollectionLibraryState;
   onLibraryStateChange: (next: CollectionLibraryState) => void;
   avLinkApi?: AvLinkApi;
@@ -76,12 +77,14 @@ export function CollectionBrowser({
   showcase,
   onViewChange,
   onChanged,
+  onOpenWork,
   libraryState,
   onLibraryStateChange,
   avLinkApi,
 }: CollectionBrowserProps) {
   const { gateway, library } = useLibrary();
   const workspace = useWorkspaceChrome();
+  const [pickedId, setPickedId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
   const [mangaDexOpen, setMangaDexOpen] = useState(false);
   const [igdbOpen, setIgdbOpen] = useState(false);
@@ -203,9 +206,10 @@ export function CollectionBrowser({
     }
   }
 
-  const openCollection = (collection: CollectionSummary) => {
+  const openCollection = (collection: CollectionSummary, order = visible) => {
     navigationMemory?.set(scope, { scrollTop: stageRef.current?.scrollTop ?? 0, focusId: collection.id, page: exhibition.page });
-    onViewChange({ kind: "collection", collectionId: collection.id });
+    if (onOpenWork && (collection.type === "game" || collection.type === "av")) onOpenWork(collection.id, order.map(item => item.id));
+    else onViewChange({ kind: "collection", collectionId: collection.id });
   };
 
   const renderCollection = (collection: CollectionSummary, options: { meta?: boolean } = {}) => (
@@ -220,12 +224,14 @@ export function CollectionBrowser({
               <CollectionCard
                 collection={collection}
                 coverUrl={collectionCoverUrl(collection)}
-                selected={false}
+                selected={pickedId === collection.id}
                 meta={options.meta}
                 releaseCaption={releaseCaption(collection, releases.data?.board.get(collection.id), inboxByWork.get(collection.id) ?? [], today)}
                 scope={library?.root ?? ""}
                 exhibition={showcase}
-                onClick={() => openCollection(collection)}
+                onClick={() => { if (collection.type === "game" || collection.type === "av") setPickedId(collection.id); else openCollection(collection); }}
+                onDoubleClick={() => { if (collection.type === "game" || collection.type === "av") openCollection(collection, options.meta === false ? showcaseItems : visible); }}
+                onKeyDown={event => { if ((collection.type === "game" || collection.type === "av") && event.key === "Enter") { event.preventDefault(); openCollection(collection, options.meta === false ? showcaseItems : visible); } }}
               />
             </ContextMenu>
 

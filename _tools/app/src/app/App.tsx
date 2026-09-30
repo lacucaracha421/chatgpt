@@ -192,6 +192,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [view, setView] = useState<AssetView>(initialWorkspaceView);
   const viewHistoryRef = useRef<AssetView[]>([]);
   useCollectionOpen(gateway, libraryRoot, view.kind === "collection" ? view.collectionId : null);
+  const collectionWorkOrderRef = useRef<string[]>([]);
   const collectionReturnViewRef = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
   const [preferences, setPreferences] = useState<UiPreferences>(loadUiPreferences);
   const appZoomError = useAppZoom(preferences.appZoom);
@@ -894,11 +895,16 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 ) : view.kind === "collection" ? (
                   <CollectionOverlay
                     collectionId={view.collectionId}
+                    listOrder={collectionWorkOrderRef.current}
                     initialTmdbSearch={view.tmdbSearch}
                     onTmdbSearchConsumed={() => setView(current => current.kind === "collection" ? { kind: "collection", collectionId: current.collectionId } : current)}
                     collections={collections}
                     onOpenSettings={() => navigateView({ kind: "settings", section: "catalog" })}
-                    onOpenCollection={(collectionId) => navigateView({ kind: "collection", collectionId })}
+                    onOpenCollection={(collectionId) => {
+                      const current = collections.find(item => item.id === view.collectionId);
+                      if (current?.type === "game" || current?.type === "av") setView({ kind: "collection", collectionId });
+                      else navigateView({ kind: "collection", collectionId });
+                    }}
                     onExit={() => {
                       const detailCollection = collections.find((item) => item.id === view.collectionId);
                       navigateBack(collectionReturnViewRef.current ?? {
@@ -920,6 +926,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     navigationMemory={collectionNavigationMemory.current}
                     onLibraryStateChange={(next) => updateCollectionLibraryState(view.typeFilter, next)}
                     onViewChange={navigateView}
+                    onOpenWork={(collectionId, order) => { collectionWorkOrderRef.current = order; navigateView({ kind: "collection", collectionId }); }}
                     onChanged={refreshCollections}
                   />
                 ) : view.kind === "albums" ? (

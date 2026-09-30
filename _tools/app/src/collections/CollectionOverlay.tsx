@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { assetUrl, collectionCoverUrl, collectionSourcePreviewUrl, workArtworkUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { BookConnection, CollectionCover, CollectionSummary, CollectionVolume, CollectionVolumeRangeInput, CreateCollection, IgdbConnection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, TmdbConnection, UpdateCollection, VolumeImportProgress, WorkArtworkSummary } from "../library/types";
+import type { BookConnection, CollectionCover, CollectionSummary, CollectionVolume, CollectionVolumeRangeInput, CreateCollection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, TmdbConnection, UpdateCollection, VolumeImportProgress } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { CollectionSidebarSection } from "./CollectionSidebarSection";
@@ -26,10 +26,9 @@ import { ReleaseWatchSummary } from "./ReleaseWatchSummary";
 import { CollectionOwnershipPanel } from "./CollectionOwnershipPanel";
 import { MangaConnections } from "./MangaConnections";
 import { invalidateReleaseData } from "./releaseData";
-import { GameCollectionDetail } from "./GameCollectionDetail";
-import { IgdbImportDialog } from "./IgdbImportDialog";
+import { CollectionWorkOverlay } from "./work/CollectionWorkOverlay";
 import { MovieCollectionDetail } from "./MovieCollectionDetail";
-import { AvCollectionDetail } from "./AvCollectionDetail";
+
 import { TmdbMovieDialog, type TmdbMovieTarget } from "./TmdbMovieDialog";
 
 type CollectionOverlayProps = {
@@ -37,20 +36,26 @@ type CollectionOverlayProps = {
   initialTmdbSearch?: { query: string; mediaType: "movie" | "tv" };
   onTmdbSearchConsumed?: () => void;
   collections: CollectionSummary[];
+  listOrder?: string[];
   onExit: () => void;
   onChanged: () => Promise<void>;
   onOpenSettings: () => void;
   onOpenCollection?: (collectionId: string) => void;
 };
 
-export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearchConsumed, collections, onExit, onChanged, onOpenSettings, onOpenCollection }: CollectionOverlayProps) {
+export function CollectionOverlay(props: CollectionOverlayProps) {
+  const collection = props.collections.find(item => item.id === props.collectionId);
+  if (collection && (collection.type === "game" || collection.type === "av")) return <CollectionWorkOverlay collection={collection} collections={props.collections} listOrder={props.listOrder} onExit={props.onExit} onChanged={props.onChanged} onOpenSettings={props.onOpenSettings} onOpenCollection={props.onOpenCollection} />;
+  return <LegacyCollectionOverlay {...props} />;
+}
+
+function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearchConsumed, collections, onExit, onChanged, onOpenSettings, onOpenCollection }: CollectionOverlayProps) {
   const sidebar = Boolean(useWorkspaceChrome());
   const { gateway, library } = useLibrary();
   const { privacyMode } = usePrivacy();
   const [covers, setCovers] = useState<CollectionCover[] | null>(null);
   const [volumes, setVolumes] = useState<CollectionVolume[] | null>(null);
   const [volumeImport, setVolumeImport] = useState<VolumeImportProgress | null>(null);
-  const [workArtworks, setWorkArtworks] = useState<WorkArtworkSummary[]>([]);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [selectedVolumeId, setSelectedVolumeId] = useState<string | null>(null);
   const [viewerVolumeId, setViewerVolumeId] = useState<string | null>(null);
@@ -58,20 +63,16 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
   const [editionIndex, setEditionIndex] = useState(0);
   const [mangaDexConnection, setMangaDexConnection] = useState<MangaDexConnection | null | undefined>(undefined);
   const [kakaoConnection, setBookConnection] = useState<BookConnection | null | undefined>(undefined);
-  const [igdbConnection, setIgdbConnection] = useState<IgdbConnection | null | undefined>(undefined);
   const [tmdbConnection, setTmdbConnection] = useState<TmdbConnection | null | undefined>(undefined);
   const [importOpen, setImportOpen] = useState(false);
   const [kakaoOpen, setKakaoOpen] = useState(false);
-  const [igdbOpen, setIgdbOpen] = useState(false);
   const [tmdbTarget, setTmdbTarget] = useState<TmdbMovieTarget | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [kakaoRefreshing, setKakaoRefreshing] = useState(false);
-  const [igdbRefreshing, setIgdbRefreshing] = useState(false);
   const [tmdbRefreshing, setTmdbRefreshing] = useState(false);
   const [releaseWatchStatus, setReleaseWatchStatus] = useState<ReleaseWatchStatus | null>(null);
   const [releaseChanges, setReleaseChanges] = useState<ReleaseWatchEvent[]>([]);
   const [releaseWatchSaving, setReleaseWatchSaving] = useState(false);
-  const [igdbError, setIgdbError] = useState<string | null>(null);
   const [tmdbError, setTmdbError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -234,26 +235,6 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
 
   useEffect(() => {
     let active = true;
-    setIgdbError(null);
-    if (!isGame) {
-      setIgdbConnection(null);
-      return () => { active = false; };
-    }
-    setIgdbConnection(undefined);
-    void gateway.getIgdbConnection(collectionId).then(
-      (next) => { if (active) setIgdbConnection(next); },
-      (error) => {
-        if (active) {
-          setIgdbConnection(null);
-          setIgdbError(commandErrorMessage(error, "IGDB 연결 상태를 불러오지 못했습니다."));
-        }
-      },
-    );
-    return () => { active = false; };
-  }, [gateway, collectionId, isGame]);
-
-  useEffect(() => {
-    let active = true;
     setTmdbError(null);
     if (!isMovie) {
       setTmdbConnection(null);
@@ -286,20 +267,8 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
     return () => { active = false; };
   }, [gateway, collectionId, isManga]);
 
-  useEffect(() => {
-    // 게임 뷰어의 스크린샷·아트웍 갤러리. 컬렉션이 갱신되면(지연 등록 포함) 다시 읽는다.
-    let active = true;
-    setWorkArtworks([]);
-    if (!isGame) return () => { active = false; };
-    void gateway.listCollectionWorkArtworks(collectionId).then(
-      (artworks) => { if (active) setWorkArtworks(artworks); },
-      () => undefined,
-    );
-    return () => { active = false; };
-  }, [gateway, collectionId, isGame, collection]);
-
   const backNavigation = useBackNavigationContext();
-  const canExit = viewerVolumeId === null && !importOpen && !kakaoOpen && !igdbOpen && tmdbTarget === null && editMode === null && !deleteOpen;
+  const canExit = viewerVolumeId === null && !importOpen && !kakaoOpen && tmdbTarget === null && editMode === null && !deleteOpen;
   useBackHandler(onExit, 10, canExit);
   useEffect(() => {
     if (backNavigation || !canExit) return;
@@ -326,9 +295,6 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
     ? workArtworkUrl(collection.selectedWorkArtworkId)
     : collection?.coverAssetId ? assetUrl(collection.coverAssetId)
     : collection?.sourcePath ? collectionSourcePreviewUrl(collection.id) : null;
-  const gameHeroUrl = collection?.selectedHeroArtworkId
-    ? workArtworkUrl(collection.selectedHeroArtworkId)
-    : null;
   const moviePosterUrl = gameCoverUrl;
   const movieBackdropUrl = collection?.selectedBackdropArtworkId ? workArtworkUrl(collection.selectedBackdropArtworkId) : null;
 
@@ -442,19 +408,6 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
     }
   }
 
-  async function refreshIgdb() {
-    setIgdbRefreshing(true);
-    setIgdbError(null);
-    try {
-      await gateway.refreshIgdbGame(collectionId);
-      await onChanged();
-    } catch (error) {
-      setIgdbError(commandErrorMessage(error, "IGDB 정보를 새로고침하지 못했습니다."));
-    } finally {
-      setIgdbRefreshing(false);
-    }
-  }
-
   async function refreshTmdb() {
     setTmdbRefreshing(true);
     setTmdbError(null);
@@ -467,11 +420,6 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
     } finally {
       setTmdbRefreshing(false);
     }
-  }
-
-  function openIgdbSettings() {
-    setIgdbOpen(false);
-    onOpenSettings();
   }
 
   async function toggleReleaseWatch(enabled: boolean) {
@@ -553,24 +501,7 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
         } catch (error) { setMessage(commandErrorMessage(error, "신간 알림을 확인 처리하지 못했습니다.")); }
         finally { setReleaseWatchSaving(false); }
       }}>표시된 신간 알림 확인</Button>}
-      {isAv && collection ? <AvCollectionDetail key={collection.id} collection={collection} scope={library?.root ?? ""} onChanged={onChanged} onOpenCollection={onOpenCollection} onOpenSettings={onOpenSettings}
-        onEdit={() => setEditMode({ kind: "edit", collection })} onToggleShowcase={() => void toggleShowcase()} onDelete={() => setDeleteOpen(true)} /> : isGame && collection ? (
-        <GameCollectionDetail
-          collection={collection}
-          renderScope={library?.root ?? ""}
-          coverUrl={gameCoverUrl}
-          heroUrl={gameHeroUrl}
-          artworks={workArtworks}
-          providerConnected={Boolean(igdbConnection)}
-          providerBusy={igdbConnection === undefined || igdbRefreshing}
-          providerError={igdbError}
-          onEdit={() => setEditMode({ kind: "edit", collection })}
-          onToggleShowcase={() => void toggleShowcase()}
-          onDelete={() => setDeleteOpen(true)}
-          onRefreshProvider={() => void refreshIgdb()}
-          onChangeArtwork={() => setIgdbOpen(true)}
-        />
-      ) : isMovie && collection ? (
+      {isMovie && collection ? (
         <MovieCollectionDetail
           series={tmdbConnection?.series}
           film={tmdbConnection?.mediaType === "tv" ? null : tmdbConnection?.film}
@@ -678,25 +609,6 @@ export function CollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearc
           onApplied={async () => {
             await onChanged();
             setMangaDexConnection(await gateway.getMangaDexConnection(collection.id));
-          }}
-        />
-      )}
-      {igdbOpen && collection && isGame && (
-        <IgdbImportDialog
-          open
-          target={{ kind: "existing", collectionId: collection.id }}
-          onClose={() => setIgdbOpen(false)}
-          onOpenSettings={openIgdbSettings}
-          onApplied={async () => {
-            setIgdbOpen(false);
-            try {
-              await onChanged();
-              setIgdbError(null);
-              setIgdbConnection(await gateway.getIgdbConnection(collection.id));
-            } catch (error) {
-              setIgdbConnection(null);
-              setIgdbError(commandErrorMessage(error, "IGDB 정보를 갱신하지 못했습니다."));
-            }
           }}
         />
       )}

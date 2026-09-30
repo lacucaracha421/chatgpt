@@ -119,6 +119,7 @@ function renderOverlay(
     listCollectionCovers: vi.fn().mockResolvedValue([]),
     listCollectionVolumes: vi.fn().mockResolvedValue([]),
     listCollectionWorkArtworks: vi.fn().mockResolvedValue([]),
+    importCollectionArtworks: vi.fn().mockResolvedValue(0),
     syncMangaDexVolumeCovers: vi.fn().mockResolvedValue({ completed: 0, skipped: 0, failed: 0 }), inspectLegacyPackageMigration: vi.fn(), executeLegacyPackageMigration: vi.fn().mockResolvedValue({ completed: 0, skipped: 0, failed: 0 }),
     getMangaDexConnection: vi.fn().mockResolvedValue(null),
     refreshMangaDex: vi.fn().mockResolvedValue(collection),
@@ -186,7 +187,8 @@ describe("CollectionOverlay MangaDex flow", () => {
     const people = vi.spyOn(avGateway, "searchPeople").mockResolvedValue([]);
     try {
       const { onExit } = renderOverlay({}, undefined, undefined, { ...collection, id: "av-1", type: "av" });
-      await userEvent.click(await screen.findByRole("button", { name: "AV 정보 편집" }));
+      await userEvent.click(await screen.findByRole("button", { name: "작품 관리" }));
+      await userEvent.click(screen.getByRole("menuitem", { name: "AV 정보 편집" }));
       expect(screen.getByRole("dialog", { name: "AV 정보 편집" })).toBeInTheDocument();
       await userEvent.keyboard("{Escape}");
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -222,7 +224,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(onExit).toHaveBeenCalledTimes(2);
   });
 
-  it.each([collection, gameCollection, movieCollection])("places $type information and working management actions in the sidebar", async (target) => {
+  it.each([collection, movieCollection])("places $type information and working management actions in the sidebar", async (target) => {
     const user = userEvent.setup();
     const { gateway } = renderOverlay({}, undefined, undefined, target, undefined, true);
     const sidebar = within(screen.getByRole("complementary", { name: "작품 사이드바" }));
@@ -662,27 +664,17 @@ describe("CollectionOverlay MangaDex flow", () => {
 });
 
 describe("CollectionOverlay game detail flow", () => {
-  it("branches to game detail with selected cover and hero artwork URLs", () => {
+  it("opens the merged game screen with the selected front cover", async () => {
     renderOverlay({}, undefined, undefined, gameCollection);
-
-    expect(screen.getByRole("heading", { name: "Astral Chain", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Astral Chain 표지" })).toHaveAttribute(
-      "src",
-      coverSourceUrl({ src: "http://lakomics.localhost/work-artwork/game-cover", scope: "", revision: gameCollection.updatedAt }),
-    );
-    expect(screen.getByRole("img", { name: "Astral Chain 대표 아트워크" })).toHaveAttribute(
-      "src",
-      "http://lakomics.localhost/work-artwork/game-hero",
-    );
+    expect(await screen.findByRole("article", { name: "게임 작품 화면" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Astral Chain 앞면" })).toHaveAttribute("src", "http://lakomics.localhost/work-artwork/game-cover");
+    expect(screen.queryByText(gameCollection.overview!)).not.toBeInTheDocument();
   });
 
-  it("renders local game detail before the connection request resolves", () => {
-    let resolveConnection!: (connection: null) => void;
-    const getIgdbConnection = vi.fn().mockReturnValue(new Promise((resolve) => { resolveConnection = resolve; }));
+  it("renders the local game while its provider request is pending", async () => {
+    const getIgdbConnection = vi.fn().mockReturnValue(new Promise(() => undefined));
     renderOverlay({ getIgdbConnection }, undefined, undefined, gameCollection);
-
-    expect(screen.getByRole("heading", { name: "Astral Chain", level: 1 })).toBeInTheDocument();
-    resolveConnection(null);
+    expect(await screen.findByRole("heading", { name: "Astral Chain", level: 1 })).toBeInTheDocument();
   });
 
   it("exposes game edit, Showcase, delete, refresh, and artwork actions", async () => {
@@ -690,10 +682,10 @@ describe("CollectionOverlay game detail flow", () => {
     renderOverlay({}, undefined, undefined, gameCollection);
     await waitFor(() => expect(screen.getByRole("button", { name: "작품 관리" })).toBeEnabled());
 
-    await user.click(screen.getByRole("button", { name: "작품 관리" }));
-    expect(screen.getByRole("menuitem", { name: "편집" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "작품 관리" }));
+    expect(screen.getByRole("menuitem", { name: "컬렉션 편집" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "쇼케이스에 추가" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "삭제" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "컬렉션 삭제" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "IGDB 새로고침" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeInTheDocument();
   });
@@ -702,7 +694,7 @@ describe("CollectionOverlay game detail flow", () => {
     const user = userEvent.setup();
     renderOverlay({ getIgdbConnection: vi.fn().mockResolvedValue(null) }, undefined, undefined, gameCollection);
 
-    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await user.click(await screen.findByRole("button", { name: "작품 관리" }));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "IGDB 미연결" })).toBeInTheDocument());
     expect(screen.getByRole("menuitem", { name: "IGDB 새로고침" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeDisabled();
@@ -717,16 +709,16 @@ describe("CollectionOverlay game detail flow", () => {
       refreshIgdbGame,
     }, onChanged, undefined, gameCollection);
 
-    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await user.click(await screen.findByRole("button", { name: "작품 관리" }));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "IGDB 새로고침" })).toBeEnabled());
     await user.click(screen.getByRole("menuitem", { name: "IGDB 새로고침" }));
 
     await waitFor(() => expect(gateway.refreshIgdbGame).toHaveBeenCalledWith("game-1"));
     expect(onChanged).toHaveBeenCalledOnce();
     expect(screen.getByRole("heading", { name: "Astral Chain", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Astral Chain 대표 아트워크" })).toHaveAttribute(
+    expect(screen.getByRole("img", { name: "Astral Chain 앞면" })).toHaveAttribute(
       "src",
-      "http://lakomics.localhost/work-artwork/game-hero",
+      "http://lakomics.localhost/work-artwork/game-cover",
     );
   });
 
@@ -737,15 +729,15 @@ describe("CollectionOverlay game detail flow", () => {
       refreshIgdbGame: vi.fn().mockRejectedValue(new Error("IGDB 새로고침 실패")),
     }, undefined, undefined, gameCollection);
 
-    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await user.click(await screen.findByRole("button", { name: "작품 관리" }));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "IGDB 새로고침" })).toBeEnabled());
     await user.click(screen.getByRole("menuitem", { name: "IGDB 새로고침" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("IGDB 새로고침 실패");
     expect(screen.getByRole("heading", { name: "Astral Chain", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Astral Chain 대표 아트워크" })).toHaveAttribute(
+    expect(screen.getByRole("img", { name: "Astral Chain 앞면" })).toHaveAttribute(
       "src",
-      "http://lakomics.localhost/work-artwork/game-hero",
+      "http://lakomics.localhost/work-artwork/game-cover",
     );
   });
 
@@ -754,7 +746,7 @@ describe("CollectionOverlay game detail flow", () => {
     const onChanged = vi.fn().mockResolvedValue(undefined);
     const { gateway } = renderOverlay({ getIgdbConnection: vi.fn().mockResolvedValue({ gameId: 17, lastSyncedAt: "t" }) }, onChanged, undefined, gameCollection);
 
-    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await user.click(await screen.findByRole("button", { name: "작품 관리" }));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeEnabled());
     await user.click(screen.getByRole("menuitem", { name: "표지·hero 변경" }));
     expect(screen.getByRole("dialog", { name: "IGDB 게임 아트워크 변경" })).toBeInTheDocument();
@@ -785,7 +777,7 @@ describe("CollectionOverlay game detail flow", () => {
       .mockRejectedValueOnce(new Error("연결 상태 갱신 실패"));
     const { gateway } = renderOverlay({ getIgdbConnection }, onChanged, undefined, gameCollection);
 
-    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await user.click(await screen.findByRole("button", { name: "작품 관리" }));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeEnabled());
     await user.click(screen.getByRole("menuitem", { name: "표지·hero 변경" }));
     await screen.findByRole("heading", { name: "표지 선택" });
@@ -804,7 +796,7 @@ describe("CollectionOverlay game detail flow", () => {
     const onChanged = vi.fn().mockRejectedValue(new Error("컬렉션 갱신 실패"));
     const { gateway } = renderOverlay({ getIgdbConnection: vi.fn().mockResolvedValue({ gameId: 17, lastSyncedAt: "t" }) }, onChanged, undefined, gameCollection);
 
-    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await user.click(await screen.findByRole("button", { name: "작품 관리" }));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeEnabled());
     await user.click(screen.getByRole("menuitem", { name: "표지·hero 변경" }));
     await screen.findByRole("heading", { name: "표지 선택" });
@@ -826,7 +818,7 @@ describe("CollectionOverlay game detail flow", () => {
         .mockRejectedValue({ code: "igdb_credential_not_configured" }),
     }, undefined, undefined, gameCollection, onOpenSettings);
 
-    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await user.click(await screen.findByRole("button", { name: "작품 관리" }));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "표지·hero 변경" })).toBeEnabled());
     await user.click(screen.getByRole("menuitem", { name: "표지·hero 변경" }));
     await user.click(await screen.findByRole("button", { name: "IGDB 설정 열기" }));

@@ -1,7 +1,6 @@
 {
   "duplicateExports": [
     "mobile-client/App.tsx#App",
-    "mobile-client/AvCollections.tsx#AvCollectionDetail",
     "mobile-client/CharacterReviewOverview.tsx#CharacterReviewOverview",
     "mobile-client/CollectionReleases.tsx#CollectionReleases",
     "mobile-client/FaultGame.tsx#loadFaultPhotos",

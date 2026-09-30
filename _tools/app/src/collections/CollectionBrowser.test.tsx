@@ -57,6 +57,7 @@ function renderBrowser(props: {
   typeFilter: CollectionSummary["type"];
   showcase: boolean;
   onViewChange?: () => void;
+  onOpenWork?: (id: string, order: string[]) => void;
   onChanged?: () => Promise<void>;
   libraryState?: ReturnType<typeof createDefaultCollectionLibraryState>["game"];
   onLibraryStateChange?: (next: ReturnType<typeof createDefaultCollectionLibraryState>["game"]) => void;
@@ -73,7 +74,7 @@ function renderBrowser(props: {
     const [state, setState] = useState(props.libraryState ?? createDefaultCollectionLibraryState().game);
     return <LibraryProvider gateway={gateway}><CollectionBrowser releaseProvider={props.releaseProvider} releaseCalendar={props.releaseCalendar} avLinkApi={props.avLinkApi}
       collections={props.collections} typeFilter={props.typeFilter} showcase={props.showcase}
-      onViewChange={props.onViewChange ?? (() => undefined)} onChanged={props.onChanged ?? (async () => undefined)}
+      onOpenWork={props.onOpenWork} onViewChange={props.onViewChange ?? (() => undefined)} onChanged={props.onChanged ?? (async () => undefined)}
       libraryState={state} onLibraryStateChange={(next) => { props.onLibraryStateChange?.(next); setState(next); }}
     /></LibraryProvider>;
   }
@@ -338,6 +339,19 @@ describe("CollectionBrowser", () => {
     expect(screen.getByRole("region", { name: "z" })).toHaveTextContent("1권 새로 나옴");
   });
 
+  it("opens a Showcase row work with that row's order, excluding the regular grid", async () => {
+    const onOpenWork = vi.fn();
+    const first = { ...sample, showcase: true, showcaseOrder: 1 };
+    const second = { ...sample, id: "second", name: "두 번째", showcase: true, showcaseOrder: 2 };
+    renderBrowser({ collections: [first, second, { ...sample, id: "regular", name: "일반 게임" }], typeFilter: "game", showcase: false, onOpenWork });
+    const user = userEvent.setup();
+    const row = screen.getByRole("region", { name: "쇼케이스" });
+    await user.click(within(row).getByRole("button", { name: /쇼케이스/ }));
+    const shelf = within(row).getByRole("group", { name: "게임 쇼케이스" });
+    await user.dblClick(within(shelf).getByRole("button", { name: /Astral Chain/ }));
+    expect(onOpenWork).toHaveBeenCalledWith("c1", ["c1", "second"]);
+  });
+
   it("folds a Showcase row above 전체 whose 전체 보기 opens the whole Showcase", async () => {
     const onViewChange = vi.fn();
     const onLibraryStateChange = vi.fn();
@@ -460,10 +474,10 @@ describe("CollectionBrowser", () => {
     expect(screen.getByLabelText("작품 1개")).toHaveTextContent("1");
   });
 
-  it("opens the detail view when a card is clicked", () => {
+  it("opens the work screen when a game card is double-clicked", async () => {
     const onViewChange = vi.fn();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onViewChange });
-    screen.getByText("Astral Chain").click();
+    await userEvent.dblClick(screen.getByText("Astral Chain"));
     expect(onViewChange).toHaveBeenCalledWith({ kind: "collection", collectionId: "c1" });
   });
 

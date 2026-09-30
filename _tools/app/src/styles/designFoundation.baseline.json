@@ -90,12 +90,6 @@
       "pillRadius": 0,
       "legacyToken": 4
     },
-    "_tools/app/src/collections/av/avViewer.css": {
-      "offScaleSpacing": 0,
-      "offRoleFontSize": 0,
-      "pillRadius": 0,
-      "legacyToken": 0
-    },
     "_tools/app/src/collections/av/dvdCase.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
@@ -103,16 +97,22 @@
       "legacyToken": 0
     },
     "_tools/app/src/collections/avCollections.css": {
-      "offScaleSpacing": 13,
-      "offRoleFontSize": 1,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 22
+      "legacyToken": 0
     },
     "_tools/app/src/collections/avLink.css": {
       "offScaleSpacing": 6,
       "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 11
+    },
+    "_tools/app/src/collections/case/CollectionCase.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
     },
     "_tools/app/src/collections/collectionReleases.css": {
       "offScaleSpacing": 3,
@@ -139,6 +139,12 @@
       "legacyToken": 0
     },
     "_tools/app/src/collections/releaseCalendar.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/collections/work/collectionWork.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
@@ -268,7 +274,7 @@
       "offScaleSpacing": 12,
       "offRoleFontSize": 0,
       "pillRadius": 3,
-      "legacyToken": 96
+      "legacyToken": 90
     },
     "_tools/app/src/styles/tokens.css": {
       "offScaleSpacing": 0,

@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lakomics AV 배우 페이지 시안</title>
+<!-- The mockup loads the app's real tokens and shared controls; only screen layout is local. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Do+Hyeon&family=Gothic+A1:wght@800;900&family=IBM+Plex+Sans+KR:wght@600;700&family=Noto+Sans+KR:wght@700&family=Noto+Serif+KR:wght@700;900&display=swap">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<style>
+/* Layout: a document page of 1440 x 900 app frames; each frame is one direction for the same work. */
+:root { color-scheme: dark; --page: #0e0f10; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--color-text); font: 400 var(--type-body)/var(--line-ui) var(--font-ui); font-variant-numeric: tabular-nums; }
+h1, h2, h3, p, dl, dd { margin: 0; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+button:focus-visible, [tabindex]:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-width); }
+svg.i { width: var(--icon-md); height: var(--icon-md); fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+svg.i.s { width: var(--icon-sm); height: var(--icon-sm); }
+
+/* Base button, copied from _tools/app/src/styles/global.css (that file also styles the app shell, so it is not linked). */
+.ui-button { display: inline-flex; align-items: center; justify-content: center; min-height: var(--control-height); padding: 0 var(--space-3); color: var(--color-text); background: transparent; border: var(--border-width) solid transparent; border-radius: var(--radius-sm); font-size: var(--text-md); line-height: var(--line-ui); gap: var(--space-compact); }
+.ui-button svg { width: 16px; height: 16px; }
+.ui-button--primary { color: var(--color-on-accent); background: var(--color-accent); border-color: var(--color-accent); }
+.ui-button--secondary { background: var(--color-control); border-color: var(--color-border); box-shadow: var(--inset-light); }
+.ui-button--ghost { color: var(--color-muted); }
+.ui-button--icon { width: var(--control-height); padding: 0; }
+
+/* ===== Document ===== */
+.doc { max-width: 1540px; margin: 0 auto; padding-block: 32px 80px; padding-inline: 24px; display: flex; flex-direction: column; gap: 48px; }
+.doc-head h1 { font-size: var(--text-title-large); line-height: var(--line-title-large); font-weight: 600; }
+.lead { color: var(--color-muted); max-width: 70ch; line-height: var(--line-copy); margin-top: var(--space-2); }
+.lead b, .notes b { color: var(--color-text); font-weight: 600; }
+.pick { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-4); color: var(--color-faint); font-size: var(--type-meta); }
+.seg { display: inline-flex; flex-wrap: wrap; padding: 2px; background: var(--color-surface); border-radius: var(--radius-control); }
+.seg button { min-height: 24px; padding: 0 var(--space-3); border-radius: var(--radius-mark); color: var(--color-muted); font-size: var(--type-meta); }
+.seg button[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+.topic { display: flex; flex-direction: column; gap: var(--space-3); border-top: 1px solid var(--color-border); padding-top: var(--space-6); }
+.topic h2 { font-size: var(--type-title); line-height: var(--line-title); font-weight: 600; display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; text-wrap: balance; }
+.topic h2 .k { display: inline-grid; place-items: center; min-width: 28px; height: 28px; padding: 0 var(--space-2); background: var(--color-accent); color: var(--color-on-accent); font-size: var(--type-body); }
+.notes { color: var(--color-muted); max-width: 74ch; line-height: var(--line-copy); padding-left: 20px; margin: 0; }
+.needs { color: var(--color-faint); font-size: var(--type-meta); line-height: var(--line-meta); max-width: 90ch; }
+.scroll { overflow-x: auto; }
+.frame { width: 1440px; height: 900px; overflow: hidden; border: 1px solid var(--color-border); }
+
+/* ===== App shell (mock chrome) ===== */
+.pc { --work: #6f8cc2; --work-deep: #3f5c8a; --ground: color-mix(in srgb, var(--work) 7%, var(--color-bg));
+  width: 1440px; height: 900px; display: grid; grid-template-columns: 64px 240px 1fr; background: var(--color-bg); position: relative; overflow: hidden; }
+.rail { background: var(--color-sidebar); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; align-items: center; padding: var(--space-3) 0; gap: var(--space-1); }
+.rail span { width: 52px; height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-1); color: var(--color-muted); font-size: var(--type-meta); line-height: 14px; }
+.rail span.on, .idx.on { background: var(--color-sidebar-selection); color: var(--color-on-accent); box-shadow: var(--selection-echo); }
+.rail .grow { flex: 1; height: auto; }
+.index { background: var(--color-sidebar); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; min-height: 0; }
+.index-head { height: var(--toolbar-height); flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-4); color: var(--color-muted); border-bottom: 1px solid var(--color-border); }
+.index-body { padding: var(--space-2); display: flex; flex-direction: column; gap: 2px; }
+.index-body .ui-section-label { padding: 0 var(--space-2); margin: var(--space-2) 0 var(--space-1); }
+.idx { height: var(--row-height); display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); border-radius: var(--radius-control); }
+.idx small { margin-left: auto; color: var(--color-faint); font-size: var(--type-meta); }
+.idx.on small { color: var(--color-on-accent); opacity: .7; }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ground); position: relative; }
+.bar { height: var(--toolbar-height); flex: none; display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-4) 0 var(--space-2); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.bar b { font-size: var(--type-title); line-height: var(--line-title); font-weight: 600; }
+.bar .grow { flex: 1; }
+.ib { width: var(--control-height-compact); height: var(--control-height-compact); display: inline-grid; place-items: center; border-radius: var(--radius-control); color: var(--color-muted); }
+
+/* ===== Imagery: generated colour blocks ===== */
+.art { position: relative; display: block; overflow: hidden; background: var(--c1); border-radius: var(--radius-mark); flex: none; }
+.art::before { content: ""; position: absolute; left: var(--hx, 50%); top: var(--hy, 22%); width: 42%; aspect-ratio: 1; border-radius: 50%; background: var(--c2); transform: translateX(-50%); }
+.art::after { content: ""; position: absolute; left: calc(var(--hx, 50%) - 36%); right: calc(64% - var(--hx, 50%)); bottom: -18%; height: 48%; border-radius: 50% 50% 0 0; background: var(--c3); }
+.scene { position: relative; overflow: hidden; background: var(--s1); display: block; }
+.scene i { position: absolute; display: block; }
+.scene .sun { left: var(--sx, 70%); top: var(--sy, 16%); width: 13%; aspect-ratio: 1; border-radius: 50%; background: var(--s4); }
+.scene .h1 { left: -12%; right: 28%; bottom: -52%; height: 96%; border-radius: 50%; background: var(--s2); }
+.scene .h2 { left: 30%; right: -18%; bottom: -64%; height: 104%; border-radius: 50%; background: var(--s3); }
+.scene .tw { left: var(--tx, 56%); bottom: 30%; width: 3.2%; height: 34%; background: var(--s3); clip-path: polygon(50% 0, 100% 22%, 100% 100%, 0 100%, 0 22%); }
+
+/* ===== Shared detail pieces ===== */
+.pkg { position: relative; border-radius: var(--radius-mark); box-shadow: var(--work-cover-edge) 0 0 -1px var(--work-page-edge), var(--work-shadow-lifted); }
+.pkg .art { width: 100%; height: 100%; }
+.ttl { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.ttl h1 { font-size: var(--text-title-large); line-height: var(--line-title-large); font-weight: 600; text-wrap: balance; }
+.ttl .orig { color: var(--color-muted); font-size: var(--type-meta); line-height: var(--line-meta); }
+.ttl .line { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; color: var(--color-muted); margin-top: var(--space-1); }
+.acts { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
+.stars { display: inline-flex; gap: 2px; color: var(--color-muted); }
+.stars svg { width: var(--icon-sm); height: var(--icon-sm); fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+.stars svg.on { fill: var(--color-accent); stroke: var(--color-accent); }
+.over { color: var(--color-muted); line-height: var(--line-copy); max-width: 62ch; }
+.facts { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--space-2) var(--space-3); align-items: baseline; align-content: start; }
+.facts dt { color: var(--color-faint); font-size: var(--type-meta); }
+.facts dd { display: flex; flex-wrap: wrap; gap: var(--space-1); min-width: 0; }
+.record { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.record dl { display: grid; grid-template-columns: 72px minmax(0, 1fr); border-top: 1px solid var(--color-border); }
+.record dt, .record dd { min-height: 36px; display: flex; align-items: center; border-bottom: 1px solid var(--color-border); min-width: 0; }
+.record dt { color: var(--color-faint); font-size: var(--type-meta); }
+.record dd.memo { color: var(--color-muted); }
+.menu-q { display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--control-height-compact); margin-left: calc(-1 * var(--space-2)); padding: 0 var(--space-2); border-radius: var(--radius-control); }
+.menu-q svg { color: var(--color-faint); }
+.shots { display: flex; gap: var(--space-2); overflow: hidden; }
+.shots .scene { border-radius: var(--radius-mark); flex: none; }
+.sec { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+
+/* ===== 가: label ===== */
+.va { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.va-art { height: 280px; flex: none; }
+.va-head { display: grid; grid-template-columns: auto minmax(0, 1fr) 320px; gap: var(--space-6); padding: 0 var(--space-6); margin-top: -132px; position: relative; }
+.va-head .pkg { height: 270px; width: calc(270px * var(--ratio)); }
+.va-head .ttl, .va-head .record { padding-top: 148px; }
+.va-head .over { margin-top: var(--space-4); }
+.strip { display: grid; grid-template-columns: 1fr 1fr 1.4fr 1fr; margin: var(--space-6) var(--space-6) 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+.strip div { padding: var(--space-3) var(--space-4) var(--space-3) 0; display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.strip dt { color: var(--color-faint); font-size: var(--type-meta); }
+.strip dd { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.va .sec { padding: var(--space-6) var(--space-6) 0; }
+
+/* ===== 나: vitrine ===== */
+.vb { flex: 1; min-height: 0; display: grid; grid-template-columns: 500px minmax(0, 1fr); }
+.stage { position: relative; overflow: hidden; display: grid; place-items: center; perspective: 1400px; background: color-mix(in srgb, var(--work-deep) 36%, #0b0c0d); border-right: 1px solid var(--color-border); }
+.stage::before { content: ""; position: absolute; left: 0; right: 0; top: calc(50% + 191px); bottom: 0; background: color-mix(in srgb, var(--work-deep) 22%, #0b0c0d); border-top: 1px solid color-mix(in srgb, var(--color-text) 10%, transparent); }
+.floor-shadow { position: absolute; left: 50%; top: calc(50% + 180px); width: 300px; height: 26px; transform: translateX(-50%); background: rgba(0, 0, 0, .6); filter: blur(14px); border-radius: 50%; }
+.case3d { --ry: 28deg; --ch: 382px; --cw: calc(var(--ch) * var(--ratio)); --cd: 24px; position: relative; width: var(--cw); height: var(--ch); transform-style: preserve-3d; transform: rotateX(-4deg) rotateY(var(--ry)); cursor: grab; touch-action: none; }
+.case3d:active { cursor: grabbing; }
+.case3d > span { position: absolute; display: block; backface-visibility: hidden; }
+.case3d .front, .case3d .back { inset: 0; }
+.case3d .front { transform: translateZ(calc(var(--cd) / 2)); }
+.case3d .front .art { width: 100%; height: 100%; border-radius: 1px; }
+.case3d .back { transform: rotateY(180deg) translateZ(calc(var(--cd) / 2)); background: color-mix(in srgb, var(--work-deep) 70%, #111); padding: var(--space-6) var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); }
+.case3d .back i { display: block; height: 8px; background: color-mix(in srgb, var(--color-text) 18%, transparent); }
+.case3d .back .scene { height: 88px; margin-bottom: var(--space-2); }
+.case3d .side { top: 0; bottom: 0; left: calc(50% - var(--cd) / 2); width: var(--cd); }
+.case3d .spine { transform: rotateY(-90deg) translateZ(calc(var(--cw) / 2)); background: color-mix(in srgb, var(--work-deep) 82%, #000); display: flex !important; align-items: center; justify-content: center; color: color-mix(in srgb, var(--color-text) 86%, transparent); font-size: var(--type-meta); font-weight: 600; writing-mode: vertical-rl; white-space: nowrap; overflow: hidden; }
+.case3d .edge { transform: rotateY(90deg) translateZ(calc(var(--cw) / 2)); background: #cfd0cb; }
+.case3d .lid { left: 0; right: 0; top: calc(50% - var(--cd) / 2); height: var(--cd); transform: rotateX(90deg) translateZ(calc(var(--ch) / 2)); background: color-mix(in srgb, var(--work-deep) 60%, #000); }
+.vb-info { padding: var(--space-8); display: flex; flex-direction: column; gap: var(--space-6); min-width: 0; overflow: hidden; }
+.vb-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-8); }
+
+/* ===== 다: key art ===== */
+.vc { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.vc-art { position: relative; height: 450px; flex: none; }
+.vc-art > .scene { position: absolute; inset: 0; }
+.film { position: absolute; right: var(--space-6); bottom: var(--space-4); display: flex; gap: var(--space-1); padding: var(--space-1); background: var(--color-cover-scrim); border-radius: var(--radius-mark); }
+.film button { display: block; }
+.film .scene { width: 72px; height: 40px; }
+.film button[aria-pressed="true"] .scene { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.vc-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-6); align-items: end; padding: 0 var(--space-6); margin-top: -56px; position: relative; }
+.vc-head .pkg { height: 152px; width: calc(152px * var(--ratio)); }
+.vc-head .ttl h1 { font-size: 40px; line-height: 46px; letter-spacing: -0.01em; }
+.vc-head .ttl { padding-top: 72px; }
+.vc-cols { display: grid; grid-template-columns: minmax(0, 1fr) 280px 300px; gap: var(--space-8); padding: var(--space-6); }
+
+/* ===== 책장: manga shelf ===== */
+.vm { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.vm-art { height: 176px; flex: none; }
+.vm-head { display: grid; grid-template-columns: auto minmax(0, 1fr) 320px; gap: var(--space-6); padding: 0 var(--space-6); margin-top: -88px; position: relative; }
+.vm-head .pkg { height: 208px; width: calc(208px * var(--ratio)); }
+.vm-head .ttl, .vm-head .record { padding-top: 104px; }
+.own { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3); color: var(--color-muted); flex-wrap: wrap; }
+.own .div { width: 1px; height: 16px; background: var(--color-border); }
+.stepper { display: inline-flex; align-items: center; background: var(--color-surface); border-radius: var(--radius-control); color: var(--color-text); }
+.stepper button { width: var(--control-height-compact); height: var(--control-height-compact); display: grid; place-items: center; color: var(--color-muted); }
+.stepper b { min-width: 28px; text-align: center; font-weight: 600; }
+.vm > .sec { padding: var(--space-6) var(--space-6) 0; }
+.vm-cols { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--space-8); padding: var(--space-6) var(--space-6) 0; }
+.shelf { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-6); align-items: end; }
+.pulled { display: flex; flex-direction: column; gap: var(--space-2); }
+.pulled .art { height: 186px; width: calc(186px * var(--ratio)); }
+.pulled b { font-weight: 600; }
+.pulled small { display: block; color: var(--color-faint); font-size: var(--type-meta); line-height: var(--line-meta); }
+.board { padding: var(--space-3) var(--space-2) 0; background: color-mix(in srgb, #000 26%, var(--ground)); border-bottom: 10px solid color-mix(in srgb, var(--color-text) 13%, var(--ground)); box-shadow: inset 0 -2px 3px rgba(0, 0, 0, .45), 0 1px 0 var(--color-border-strong); }
+.spines { display: flex; align-items: flex-end; gap: 1px; height: 212px; }
+/* A book's spine is rounded: light from the upper left, darker at both joints, head and tail. Physical rendering, like the app's cases. */
+.spn, .bk-spine { --spine-light: linear-gradient(90deg, rgba(0, 0, 0, .36), rgba(255, 255, 255, .12) 20%, rgba(255, 255, 255, 0) 46%, rgba(0, 0, 0, .1) 80%, rgba(0, 0, 0, .4)), linear-gradient(180deg, rgba(255, 255, 255, .12), rgba(0, 0, 0, 0) 7%, rgba(0, 0, 0, 0) 93%, rgba(0, 0, 0, .3)); }
+.spn { position: relative; box-shadow: 2px 0 3px -1px rgba(0, 0, 0, .5); }
+.spn::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: var(--spine-light); }
+.spn.gap, .spn.gap::after { box-shadow: none; background-image: none; }
+.spn { width: 30px; height: 196px; flex: none; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding-bottom: var(--space-2); border-radius: 1px; background: var(--c1); color: #1d2326; font-size: var(--type-meta); font-weight: 600; transition: transform var(--motion-fast) var(--ease-standard); overflow: hidden; }
+.spn::before { content: ""; width: 100%; height: 16px; background: var(--c2); flex: none; }
+.spn .t { writing-mode: vertical-rl; white-space: nowrap; overflow: hidden; flex: 1; min-height: 0; padding: var(--space-2) 0; }
+.spn[aria-pressed="true"] { transform: translateY(-14px); }
+.spn.gap { background: transparent; color: var(--color-faint); outline: 1px dashed var(--color-border-strong); outline-offset: -1px; font-weight: 400; }
+.spn.gap::before { background: transparent; }
+.spn.new { color: var(--color-accent); outline-color: var(--color-accent); font-weight: 600; }
+/* 표지 띠: each volume is a book. At rest only its spine shows (a strip of the real cover); the picked one
+   shows its cover facing front (no spine), lifted a little, with its number sliding in under it. Double-click opens the cover large. */
+.spn.slice { overflow: visible; padding: 0; background: none; box-shadow: none; border-radius: 0; transition: width var(--motion-screen) var(--ease-standard); }
+.spn.slice::before, .spn.slice::after { display: none; }
+.spn.slice[aria-pressed="true"] { transform: none; z-index: 2; }
+.book { position: absolute; left: 0; top: 0; width: 100%; height: 100%; transition: transform var(--motion-screen) var(--ease-standard); }
+.spn.slice[aria-pressed="true"] .book { transform: translateY(-10px); }
+.bk-spine, .bk-front { position: absolute; left: 0; top: 0; height: 100%; overflow: hidden; background: var(--color-surface); transition: opacity var(--motion-screen) var(--ease-standard); }
+.bk-spine { width: var(--w); border-radius: 2px; box-shadow: 2px 0 3px -1px rgba(0, 0, 0, .5); }
+.bk-spine::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: var(--spine-light); }
+.bk-front { width: var(--W); border-radius: 2px; opacity: 0; box-shadow: 0 8px 14px -6px rgba(0, 0, 0, .7), 0 0 0 1px rgba(0, 0, 0, .3); }
+.spn.slice[aria-pressed="true"] .bk-front { opacity: 1; }
+.spn.slice[aria-pressed="true"] .bk-spine { opacity: 0; }
+.bk-spine .art { position: absolute; top: 0; left: 50%; width: 139px; height: 100%; margin-left: -70px; border-radius: 0; }
+.bk-front .art { width: 100%; height: 100%; border-radius: 0; }
+.bk-spine .cv, .bk-front .cv { position: absolute; inset: 0; }
+.bk-spine .num { position: absolute; left: 2px; right: 2px; bottom: 4px; height: var(--badge-height); display: grid; place-items: center; background: var(--color-cover-scrim); color: var(--color-text); font-weight: 500; border-radius: 1px; z-index: 1; }
+.spn.dim .bk-spine, .spn.dim .bk-front { outline: 1px dashed var(--color-border-strong); outline-offset: -1px; }
+/* The number leaves the spine and settles under the cover, below the shelf board. */
+.cap { position: absolute; left: 50%; top: calc(100% + 18px); display: flex; gap: var(--space-2); align-items: baseline; white-space: nowrap; color: var(--color-text); font-size: var(--type-body); font-weight: 400; opacity: 0; transform: translate(-50%, -14px); transition: opacity var(--motion-screen) var(--ease-standard), transform var(--motion-screen) var(--ease-standard); pointer-events: none; }
+.cap b { font-weight: 600; }
+.cap small { color: var(--color-faint); font-size: var(--type-meta); }
+.spn.slice[aria-pressed="true"] .cap { opacity: 1; transform: translate(-50%, 0); }
+.shelf.wide .board { margin-bottom: 44px; }
+/* Large cover (double-click). */
+.cover-view { position: absolute; inset: 0; z-index: 10; display: grid; grid-template-rows: minmax(0, 1fr) auto; justify-items: center; gap: var(--space-4); padding: var(--space-8); background: var(--color-viewer-bg); animation: cover-in var(--motion-screen) var(--ease-standard); }
+.cover-view .cv, .cover-view .art { height: 100%; width: auto; aspect-ratio: var(--ratio); object-fit: contain; border-radius: var(--radius-mark); box-shadow: var(--shadow-dialog); }
+.cover-view p { color: var(--color-muted); }
+.cover-view p b { color: var(--color-text); font-weight: 600; margin-right: var(--space-2); }
+.cover-view .ib { position: absolute; right: var(--space-4); top: var(--space-4); width: 36px; height: 36px; }
+@keyframes cover-in { from { opacity: 0; } to { opacity: 1; } }
+/* 색 띠: the cover's colour and the number only; no lettering. */
+.spn.plain .t { visibility: hidden; }
+.shelf.wide { grid-template-columns: minmax(0, 1fr); }
+/* Real covers (only when window.LAKOMICS_REAL_COVERS is provided; never committed). */
+.cv { display: block; width: 100%; height: 100%; object-fit: cover; }
+.pkg .cv, .bk-front .cv { object-fit: fill; }
+.spn.dim .cv, .pulled .cv.dim { opacity: .35; }
+.spn.dim:not(.slice) { outline: 1px dashed var(--color-border-strong); outline-offset: -1px; }
+.spn.light { color: #f1f2f3; }
+.pkg .cv { border-radius: var(--radius-mark); }
+.pulled .cv { height: 186px; width: auto; border-radius: var(--radius-mark); }
+.picked-line { display: flex; gap: var(--space-2); align-items: baseline; margin-top: var(--space-3); }
+.picked-line b { font-weight: 600; }
+.picked-line small { color: var(--color-faint); font-size: var(--type-meta); }
+.mode { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; color: var(--color-faint); font-size: var(--type-meta); }
+@media (prefers-reduced-motion: reduce) { .spn, .spn.slice, .book, .bk-spine, .bk-front, .cap { transition: none; } .cover-view { animation: none; } }
+
+/* ===== Cases (game, AV): one model sized from the cover's ratio ===== */
+.vb.wide { grid-template-columns: 580px minmax(0, 1fr); }
+.stage { --ch: 330px; --cw: calc(var(--ch) * var(--ratio)); --cd: 24px; perspective: 1500px; }
+.stage::before { top: calc(50% + var(--ch) / 2 + 4px); }
+.stage .floor-shadow { top: calc(50% + var(--ch) / 2 - 8px); width: calc(var(--cw) * 1.35); transition: transform 420ms var(--ease-standard), width 420ms var(--ease-standard); }
+.stage.is-open .floor-shadow { width: calc(var(--cw) * 2.4); }
+.stage-btn { position: absolute; right: var(--space-4); top: var(--space-4); z-index: 3; }
+.kase { --ry: 32deg; --open: 0; --gloss: 50%; position: relative; width: var(--cw); height: var(--ch); transform-style: preserve-3d;
+  transform: rotateX(-5deg) rotateY(var(--ry)) translateX(calc(var(--open) * (var(--cw) + var(--cd)) * .5)); cursor: grab; touch-action: none; }
+.kase:active { cursor: grabbing; }
+.kase.anim, .kase.anim .k-hinge, .kase.anim .k-lid { transition: transform 420ms var(--ease-standard); }
+.kase > span, .k-hinge > span, .k-lid > span { position: absolute; display: block; backface-visibility: hidden; }
+/* The case opens like a real one: the spine folds flat on the back-left edge and the lid folds on the spine, so lid, spine and tray end up side by side. */
+.kase > .k-hinge { backface-visibility: visible; left: 0; top: 0; width: var(--cd); height: 100%; transform-style: preserve-3d; transform-origin: 0 50%; transform: translateZ(calc(var(--cd) / -2)) rotateY(calc(-90deg - var(--open) * 90deg)); }
+.k-hinge > .k-lid { backface-visibility: visible; left: 100%; top: 0; width: var(--cw); height: 100%; transform-style: preserve-3d; transform-origin: 0 50%; transform: rotateY(calc(90deg - var(--open) * 86deg)); }
+/* plastic: a tint over a dark base so nothing shows through */
+.k-front, .k-back, .k-spine, .k-edge, .k-cap { background: linear-gradient(var(--plastic), var(--plastic)), #1b1c1e; }
+.k-front, .k-inner { inset: 0; border-radius: 3px 6px 6px 3px; }
+.k-back { inset: 0; border-radius: 6px 3px 3px 6px; transform: rotateY(180deg) translateZ(calc(var(--cd) / 2)); }
+.k-floor { inset: 3px; border-radius: 3px; transform: translateZ(calc(var(--cd) / -2 + 3px)); background: #111213; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05), inset 0 0 18px rgba(0, 0, 0, .8); }
+.k-inner { transform: rotateY(180deg); background: #161719; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05); }
+.k-edge { top: 0; bottom: 0; left: calc(50% - var(--cd) / 2); width: var(--cd); transform: rotateY(90deg) translateZ(calc(var(--cw) / 2)); }
+.k-spine, .k-spine-in { inset: 0; }
+.k-spine-in { transform: rotateY(180deg); background: #161719; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05); }
+.k-cap { left: 0; right: 0; top: calc(50% - var(--cd) / 2); height: var(--cd); }
+.k-top { transform: rotateX(90deg) translateZ(calc(var(--ch) / 2)); }
+.k-bottom { transform: rotateX(-90deg) translateZ(calc(var(--ch) / 2)); }
+/* the paper insert under the plastic */
+.ins { position: absolute; inset: 2px 2px 2px 0; overflow: hidden; border-radius: 0 2px 2px 0; display: block; background: var(--color-surface); }
+.ins > .art, .ins > .cv, .ins > .scene { width: 100%; height: 100%; border-radius: 0; }
+.k-spine .ins { inset: 2px 0; border-radius: 0; }
+.k-spine .ins > .art { position: absolute; left: 50%; top: 0; width: var(--cw); margin-left: calc(var(--cw) / -2); }
+.cv.wrap { position: absolute; left: -18px; top: -18px; width: calc(var(--cw, var(--W)) * 16); max-width: none; height: calc(100% + 36px); object-fit: fill; filter: blur(11px) saturate(.85) brightness(.82); }
+.wrap-plain { position: absolute; inset: 0; display: block; }
+.k-back .ins { inset: 2px 0 2px 2px; border-radius: 2px 0 0 2px; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); background: color-mix(in srgb, var(--work-deep) 55%, #111); }
+.k-back .ins i { display: block; height: 6px; background: color-mix(in srgb, var(--color-text) 16%, transparent); }
+.k-back .ins .scene { height: 34%; flex: none; }
+/* gloss follows the turn; hinge and lip are moulded details */
+.k-front::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(104deg, rgba(255, 255, 255, 0) 38%, rgba(255, 255, 255, .2) 47%, rgba(255, 255, 255, .05) 53%, rgba(255, 255, 255, 0) 60%) var(--gloss) 0 / 260% 100% no-repeat,
+    linear-gradient(90deg, rgba(0, 0, 0, .34), rgba(0, 0, 0, 0) 5%, rgba(255, 255, 255, .1) 6.5%, rgba(0, 0, 0, 0) 9%); }
+.k-spine::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(0, 0, 0, .4), rgba(255, 255, 255, .12) 30%, rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, .35)); }
+.k-edge::after { content: ""; position: absolute; left: 25%; right: 25%; top: 42%; height: 16%; border-radius: 3px; background: rgba(255, 255, 255, .14); }
+/* inside: media in the tray, the personal record as a slip under the clips */
+.holder { position: absolute; left: 50%; top: 50%; width: 84%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07); }
+.disc { position: absolute; inset: 2%; border-radius: 50%;
+  background: radial-gradient(circle, #111213 0 7%, #d9dbdf 7% 9%, color-mix(in srgb, var(--work) 55%, #9aa0a8) 9% 17%, rgba(255, 255, 255, 0) 17%),
+    conic-gradient(from 25deg, #c5c9cf, #f6f7f8 11%, #a3a9b1 24%, #eceef0 37%, #b4b9c1 50%, #f6f7f8 61%, #a3a9b1 74%, #e8eaec 87%, #c5c9cf);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .6); }
+/* a Switch case keeps its game card at the bottom centre of the tray (user, 2026-09-30) */
+.cart-slot { position: absolute; left: 39%; bottom: 7%; width: 22%; aspect-ratio: 21 / 31; border-radius: 3px; background: #0b0c0d; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07); }
+.cart { position: absolute; inset: 5%; border-radius: 3px; background: linear-gradient(180deg, color-mix(in srgb, var(--work) 70%, #333) 0 56%, #2b2c2f 56%); box-shadow: 0 1px 3px rgba(0, 0, 0, .6); }
+.clip { position: absolute; left: 6%; width: 9%; height: 5%; border-radius: 2px; background: rgba(255, 255, 255, .1); z-index: 1; }
+.slip { position: absolute; left: 11%; right: 9%; top: 12%; padding: var(--space-3); background: var(--color-accent); color: var(--color-on-accent); font-size: var(--type-meta); line-height: var(--line-meta); transform: rotate(-1.4deg); box-shadow: 0 2px 5px rgba(0, 0, 0, .5); border-radius: 1px; }
+.slip b { display: block; font-size: var(--type-body); line-height: var(--line-ui); font-weight: 600; margin-bottom: var(--space-2); }
+.slip dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-1) var(--space-3); }
+.slip dt { opacity: .66; }
+.slip .stars { color: var(--color-on-accent); }
+.slip .stars svg.on { fill: var(--color-on-accent); stroke: var(--color-on-accent); }
+.slip p { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid rgba(32, 38, 40, .25); }
+/* ===== Shelves (list view) ===== */
+.vs { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: var(--space-6); padding: var(--space-4) var(--space-6); }
+.vs .shelf.wide .board { margin-bottom: 40px; }
+.vs { --bh: 196px; }
+.vs .spines { height: calc(var(--bh) + 10px); }
+.vs .spn { height: var(--bh); }
+.vs .bk-spine .art { width: var(--W); margin-left: calc(var(--W) / -2); }
+/* a thin real spine grows under the pointer so its title can be read */
+.spn.real { transition: width var(--motion-screen) var(--ease-standard), transform var(--motion-fast) var(--ease-standard); transform-origin: 50% 100%; }
+.spn.real[aria-pressed="false"]:hover, .spn.real[aria-pressed="false"]:focus-visible { transform: scale(1.9); z-index: 3; }
+/* 크게: one tall row that scrolls sideways */
+.vs.big { --bh: 400px; }
+.vs.big .shelf { overflow-x: auto; padding-bottom: var(--space-2); }
+.vs.big .board { width: max-content; min-width: 100%; }
+/* 표지 위주: each case is a solid box turned on the shelf, seen a little from above, so it has a front, a spine and a top. */
+.vs.covers { gap: var(--space-4); overflow: hidden; }
+/* One shelf per row, seen from the same height as the cases: a top surface that narrows toward the wall, a front lip that catches the light, and the shelf's own shadow on the wall below. */
+.shelf-row { position: relative; margin-bottom: 38px; }
+.shelf-row::before { content: ""; position: absolute; left: 0; right: 0; top: 0; bottom: 20px; background: linear-gradient(180deg, color-mix(in srgb, var(--color-text) 3%, transparent), transparent 70%); pointer-events: none; }
+.cases { position: relative; z-index: 1; display: flex; gap: 0 18px; padding: var(--space-4) var(--space-6) 0; }
+.plank { position: relative; height: 36px; margin-top: -15px; }
+.plank::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 25px; clip-path: polygon(16px 0, calc(100% - 16px) 0, 100% 100%, 0 100%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-text) 4%, var(--color-bg)), color-mix(in srgb, var(--color-text) 15%, var(--color-bg))); }
+.plank::after { content: ""; position: absolute; left: 0; right: 0; top: 25px; height: 10px; border-radius: 0 0 2px 2px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-text) 38%, var(--color-bg)) 0 1px, color-mix(in srgb, var(--color-text) 19%, var(--color-bg)) 1px, color-mix(in srgb, var(--color-text) 9%, var(--color-bg)));
+  box-shadow: 0 16px 20px -8px rgba(0, 0, 0, .7), 0 1px 0 rgba(0, 0, 0, .6); }
+.cs { position: relative; flex: none; height: var(--bh); perspective: 480px; perspective-origin: 35% 30%; transition: width var(--motion-screen) var(--ease-standard); }
+/* the shadow the case casts on the shelf surface */
+.cs::after { content: ""; position: absolute; left: 2px; right: -16px; top: calc(var(--bh) - 4px); height: 12px; background: rgba(0, 0, 0, .8); filter: blur(6px); border-radius: 50%; }
+.cs-box { position: absolute; z-index: 1; left: var(--lead); top: 0; width: var(--W); height: var(--bh); transform-style: preserve-3d; transform-origin: 0 100%; transform: rotateX(-6deg) rotateY(34deg); transition: transform var(--motion-screen) var(--ease-standard), left var(--motion-screen) var(--ease-standard); }
+.cs[aria-pressed="true"] { z-index: 2; }
+.cs[aria-pressed="true"] .cs-box { transform: translateY(-6px) translateZ(34px) rotateX(0deg) rotateY(0deg); left: 0; }
+.cs-front, .cs-spine, .cs-top { position: absolute; overflow: hidden; backface-visibility: hidden; background: var(--color-surface); display: block; }
+.cs-front { left: 0; top: 0; width: 100%; height: 100%; border-radius: 0 2px 2px 0; }
+/* light from the upper left: the cover falls off toward its far edge, with a bright line on the near corner */
+.cs-front::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(255, 255, 255, .34) 0, rgba(255, 255, 255, .06) 1.6%, rgba(0, 0, 0, 0) 22%, rgba(0, 0, 0, .34) 100%), linear-gradient(180deg, rgba(255, 255, 255, .1), rgba(0, 0, 0, 0) 18%); transition: opacity var(--motion-screen) var(--ease-standard); }
+.cs[aria-pressed="true"] .cs-front::after { opacity: .25; }
+.cs-spine { left: calc(var(--d) * -1); top: 0; width: var(--d); height: 100%; transform-origin: 100% 50%; transform: rotateY(-90deg); }
+.cs-spine::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(0, 0, 0, .5), rgba(0, 0, 0, .22) 70%, rgba(0, 0, 0, .34)); }
+.cs-top { left: 0; top: calc(var(--d) * -1); width: 100%; height: var(--d); transform-origin: 50% 100%; transform: rotateX(90deg); background: color-mix(in srgb, var(--color-text) 34%, #1b1c1e); }
+.cs-spine .art { position: absolute; left: 50%; top: 0; width: var(--W); height: 100%; margin-left: calc(var(--W) / -2); border-radius: 0; }
+.cs-front .art { width: 100%; height: 100%; border-radius: 0; }
+.cs-title { position: absolute; left: 0; right: 0; top: calc(var(--bh) + 30px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted); font-size: var(--type-meta); line-height: var(--line-meta); text-align: left; }
+/* The picked title is shown in full on a plate of the page colour, so it covers its neighbours' titles instead of running into them. */
+.cs[aria-pressed="true"] .cs-title { color: var(--color-text); font-weight: 600; right: auto; width: max-content; max-width: 300px; z-index: 3; padding-right: var(--space-3); background: var(--color-bg); box-shadow: 10px 0 8px var(--color-bg); }
+.cs.end[aria-pressed="true"] .cs-title { left: auto; right: 0; padding: 0 0 0 var(--space-3); box-shadow: -10px 0 8px var(--color-bg); text-align: right; }
+@media (prefers-reduced-motion: reduce) { .cs, .cs-box, .cs-front::after { transition: none; } }
+/* 보기 menu, as on the 에셋 toolbar (배치 + a size slider); here the slider sets how many stand on one shelf. */
+.view-menu { position: absolute; right: var(--space-4); top: calc(var(--toolbar-height) + var(--space-1)); z-index: 6; width: 264px; padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-3); background: var(--color-surface-elevated); border: 1px solid var(--color-border); box-shadow: var(--shadow-floating); }
+.view-menu::before, .view-menu::after { content: ""; position: absolute; width: 7px; height: 7px; border: 1px solid var(--color-accent); pointer-events: none; }
+.view-menu::before { left: -1px; top: -1px; border-right: 0; border-bottom: 0; }
+.view-menu::after { right: -1px; bottom: -1px; border-left: 0; border-top: 0; }
+.view-menu .row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); color: var(--color-faint); font-size: var(--type-meta); }
+.view-menu .row b { color: var(--color-text); font-weight: 600; }
+.view-menu .seg { display: flex; width: 100%; }
+.view-menu .seg button { flex: 1; text-align: center; min-height: 24px; }
+.view-menu input[type="range"] { width: 100%; margin: 0; accent-color: var(--color-accent); }
+.quiet[aria-expanded="true"] { background: var(--color-surface-hover); color: var(--color-text); }
+/* 눕혀 쌓기: cases lie flat in piles, so a spine reads left to right at its full length */
+.stacks { flex: 1; min-height: 0; display: flex; gap: var(--space-8); align-items: flex-end; padding: 0 var(--space-2); border-bottom: 10px solid color-mix(in srgb, var(--color-text) 13%, var(--color-bg)); box-shadow: 0 1px 0 var(--color-border-strong); }
+.stack { display: flex; flex-direction: column; gap: var(--space-2); width: 330px; flex: none; }
+.pile { display: flex; flex-direction: column; gap: 1px; }
+.lay { position: relative; display: block; width: 330px; flex: none; overflow: visible; background: var(--color-surface); border-radius: 1px; box-shadow: 0 2px 3px -1px rgba(0, 0, 0, .55); transition: transform var(--motion-screen) var(--ease-standard); }
+.lay > span { position: absolute; inset: 0; overflow: hidden; border-radius: 1px; display: block; }
+.lay > span::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(255, 255, 255, .14), rgba(0, 0, 0, 0) 35%, rgba(0, 0, 0, .1) 70%, rgba(0, 0, 0, .4)); }
+.lay .turn { position: absolute; left: 50%; top: 50%; width: var(--t); height: 330px; margin: -165px 0 0 calc(var(--t) / -2); transform: rotate(-90deg); object-fit: fill; display: block; }
+.lay .art { width: 100%; height: 330px; margin-top: -120px; border-radius: 0; }
+.lay[aria-pressed="true"] { transform: translateX(22px); z-index: 2; }
+.lay .tip { position: absolute; left: calc(100% + 12px); top: 50%; transform: translateY(-50%); display: none; align-items: center; height: 24px; padding: 0 var(--space-2); white-space: nowrap; background: var(--color-surface-elevated); border-radius: var(--radius-mark); box-shadow: var(--shadow-floating); font-weight: 600; z-index: 3; }
+.lay[aria-pressed="true"] .tip { display: flex; }
+.stack-name { color: var(--color-faint); font-size: var(--type-meta); padding-bottom: var(--space-2); }
+@media (prefers-reduced-motion: reduce) { .spn.real, .lay { transition: none; } }
+.spn.real .bk-spine { border-radius: 1px; }
+.spn.real .bk-spine::after { background: linear-gradient(90deg, rgba(0, 0, 0, .3), rgba(255, 255, 255, .1) 28%, rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, .28)); }
+.tools { display: flex; align-items: center; gap: var(--space-2); }
+.quiet { display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--control-height-compact); padding: 0 var(--space-2); border-radius: var(--radius-control); color: var(--color-muted); font-size: var(--type-meta); }
+.quiet b { color: var(--color-text); font-weight: 400; }
+.bar small { color: var(--color-faint); font-size: var(--type-meta); margin-left: var(--space-2); font-weight: 400; }
+.bar .seg button { min-height: 24px; }
+.bar .quiet b { font-size: inherit; line-height: inherit; }
+@media (prefers-reduced-motion: reduce) { .kase.anim, .kase.anim .k-lid, .stage .floor-shadow { transition: none; } }
+
+/* A case without a real spine image shows its own plastic and the work's title set in one spine typeface (user, 2026-09-30). */
+:root { --spine-font: "IBM Plex Sans KR", var(--font-ui); --spine-weight: 700; }
+.ins.bare { background: transparent; display: flex; align-items: center; justify-content: center; }
+.spine-title { display: block; max-height: 92%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; writing-mode: vertical-rl; text-orientation: sideways; font-family: var(--spine-font); font-weight: var(--spine-weight); font-size: calc(var(--cd, var(--d)) * .5); line-height: 1; letter-spacing: .02em; color: rgba(255, 255, 255, .92); }
+.cs-spine.bare { display: flex; align-items: center; justify-content: center; background: linear-gradient(var(--plastic), var(--plastic)), #1b1c1e; }
+
+/* Spine templates (user, 2026-09-30): without a real spine image, follow the platform's own spine layout — a platform block at the top, the title on the band, the publisher at the foot. */
+.ins.full { background: transparent; }
+.tpl { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; }
+.tpl .t-head { flex: none; width: 100%; background: var(--t-head) center / 100% 100% no-repeat; }
+.tpl .t-band { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 6% 0; background: var(--t-band); }
+.tpl .t-band .spine-title { color: var(--t-ink); max-height: 100%; }
+.tpl .t-foot { flex: none; width: 100%; display: flex; align-items: center; justify-content: center; background: var(--t-foot) center / 100% 100% no-repeat; }
+.tpl .t-pub { white-space: nowrap; writing-mode: vertical-rl; text-orientation: sideways; font-family: var(--spine-font); font-weight: var(--spine-weight); font-size: calc(var(--cd, var(--d)) * .28); line-height: 1; color: var(--t-pub, #fff); }
+.tpl .t-foot.text { padding: 45% 0 55%; }
+.tpl.ps5 .t-head { box-shadow: 0 2px 0 #2a4fb0; }
+/* A real back face fills the insert. */
+.k-back .ins:has(> .cv) { padding: 0; }
+.v-flat .face-back:has(> .cv) { padding: 0; }
+.v-flat .sheet .cv { width: 100%; height: 100%; }
+/* Floor (user, 2026-09-30): no horizon line or darker band. The case stands in a soft pool of light that fades into the background, with a tight contact shadow under a wide ambient one. */
+.stage::before, .v-stage .stage::before { border-top: 0; top: calc(50% + var(--ch) / 2 - var(--ch) * .16); height: calc(var(--ch) * .34); bottom: auto; left: 50%; right: auto; width: calc(var(--ch) * 2.6); transform: translateX(-50%);
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, var(--color-text) 9%, transparent), color-mix(in srgb, var(--color-text) 3%, transparent) 45%, transparent 70%); }
+.stage .floor-shadow { top: calc(50% + var(--ch) / 2 - 3px); height: 10px; width: calc(var(--cw) * 1.02); background: rgba(0, 0, 0, .85); filter: blur(5px); box-shadow: 0 calc(var(--ch) * .03) calc(var(--ch) * .09) calc(var(--ch) * .035) rgba(0, 0, 0, .5); }
+.stage.is-open .floor-shadow { width: calc(var(--cw) * 2.05); }
+.v-strip { background: transparent; }
+/* ===== AV performer page ===== */
+.pf { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pf-head { flex: none; display: grid; grid-template-columns: 96px minmax(180px, auto) minmax(0, 1fr) minmax(0, 300px); gap: var(--space-8); align-items: start; padding: var(--space-5) var(--space-6); border-bottom: 1px solid var(--color-border); }
+.pf-portrait { position: relative; width: 96px; aspect-ratio: 4 / 5; overflow: hidden; border-radius: var(--radius-mark); background: var(--color-surface); }
+.pf-portrait > * { width: 100%; height: 100%; object-fit: cover; border-radius: 0; display: block; }
+.pf-name { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.pf-name h1 { font-size: var(--text-title-large); line-height: var(--line-title-large); font-weight: 600; white-space: nowrap; }
+.pf-name .ja { color: var(--color-muted); }
+.pf-name .src { color: var(--color-faint); font-size: var(--type-meta); line-height: var(--line-meta); }
+.pf-acts { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
+.pf-facts { display: grid; grid-template-columns: repeat(2, max-content minmax(0, 1fr)); gap: var(--space-2) var(--space-3); align-items: baseline; align-content: start; min-width: 0; }
+.pf-facts dt { color: var(--color-faint); font-size: var(--type-meta); white-space: nowrap; }
+.pf-facts dd { min-width: 0; white-space: nowrap; }
+.pf-links { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.pf-memo { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.pf-memo p { color: var(--color-muted); line-height: var(--line-copy); }
+.pf-main { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--color-bg); }
+.pf-tools { height: var(--toolbar-height); flex: none; display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-6); }
+.pf-tools b { font-weight: 600; }
+.pf-tools small { color: var(--color-faint); font-size: var(--type-meta); }
+.pf-tools .grow { flex: 1; }
+.pf-body { flex: 1; min-height: 0; overflow: hidden auto; display: flex; flex-direction: column; gap: var(--space-5); padding: 0 var(--space-6) var(--space-6); }
+.pf-body .cases { padding-left: var(--space-4); padding-right: var(--space-4); }
+.pf-body .cs-title b { display: block; color: var(--color-text); font-weight: 600; }
+.pf-body .cs-title { white-space: normal; line-height: var(--line-meta); }
+.pf-body .cs.now .cs-title b::after { content: "이 작품"; margin-left: var(--space-2); padding: 0 var(--space-1); background: var(--color-surface); color: var(--color-muted); font-weight: 400; }
+.pf-body .shelf-row { margin-bottom: 52px; }
+.pf-row2 { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--space-8); }
+.pf-co { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); }
+.pf-co button { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-1) var(--space-2) var(--space-1) 0; border-radius: var(--radius-control); text-align: left; }
+.pf-co .face { width: 40px; height: 40px; border-radius: 50%; overflow: hidden; flex: none; }
+.pf-co .face > * { width: 100%; height: 100%; border-radius: 0; }
+.pf-co small { display: block; color: var(--color-faint); font-size: var(--type-meta); }
+.pf-labels { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.pf-labels .ui-badge small { color: var(--color-faint); margin-left: var(--space-1); }
+.crumb { color: var(--color-faint); font-size: var(--type-meta); margin-left: var(--space-2); }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header class="doc-head">
+    <h1>AV 배우 페이지</h1>
+    <p class="lead">새 작품 화면에 맞춰 배우 페이지를 다시 짠 안입니다. 위쪽 띠에 사람 정보를 모으고, 그 아래 전체 폭에 목록과 같은 <b>선반</b>으로 작품을 놓습니다. 작품이 여러 편일 때를 가정했고, 그림은 색 블록입니다.</p>
+    <div class="pick" hidden><div id="work-pick"></div><div id="device-pick"></div><div id="font-pick"></div><div id="group-pick"></div><span id="spine-controls"><span id="spine-pick"></span></span></div>
+  </header>
+  <section class="topic" id="performer">
+    <h2><span class="k">1</span>배우 페이지</h2>
+    <ul class="notes">
+      <li><b>위쪽 띠</b>: 대표 사진, 이름, 즐겨찾기, 프로필(내 작품 · 발매 기간 · 활동 · 생년월일 · 키 · 사이즈 · 링크), 내 메모를 한 줄 높이로 모았습니다. 지금 페이지의 항목은 모두 그대로입니다. 왼쪽 칸을 따로 두지 않아 선반이 화면 폭을 다 씁니다(2026-09-30 의견).</li>
+      <li><b>아래</b>: 작품을 목록과 같은 선반에 세웁니다(표지 위주, 진짜 책등이 옆에 조금). 누르면 정면으로 돌아서고, 두 번 누르면 그 작품 화면으로 갑니다. 정렬 · 역할 거르기 · 보기(한 줄에 몇 개)는 목록과 같은 부품입니다.</li>
+      <li>작품 화면에서 왔다면 그 작품에 <b>이 작품</b> 표시가 붙고, 위 막대의 뒤로 가기는 그 작품 화면으로 돌아갑니다.</li>
+      <li>선반 아래에 자주 함께 나온 배우와 레이블. 배우를 누르면 그 배우 페이지로, 레이블을 누르면 AV 목록이 그 레이블로 걸러집니다.</li>
+    </ul>
+    <p class="needs">새로 필요한 것: 없음(자료는 지금 페이지와 같음). 선반과 케이스는 목록 선반 단계의 부품을 그대로 씁니다.</p>
+    <div class="scroll"><div class="frame" data-frame="performer"></div></div>
+  </section>
+</div>
+
+<script>
+const I = {
+  home: '<path d="M3 11.5 12 4l9 7.5V20h-6v-5H9v5H3z"/>', grid: '<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 10h16M10 10v10"/>',
+  box: '<rect x="4" y="6" width="16" height="13" rx="1"/><path d="M7 3h10"/>', book: '<path d="M12 6v14M4 5h6a2 2 0 0 1 2 2 2 2 0 0 1 2-2h6v14h-6a2 2 0 0 0-2 2 2 2 0 0 0-2-2H4z"/>',
+  note: '<path d="M6 3h12v18H6zM9 8h6M9 12h6M9 16h4"/>', swap: '<path d="M7 7h12l-3-3M17 17H5l3 3"/>', search: '<circle cx="11" cy="11" r="6"/><path d="m20 20-4-4"/>',
+  more: '<circle cx="6" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="18" cy="12" r="1"/>', left: '<path d="m15 5-7 7 7 7"/>', down: '<path d="m6 9 6 6 6-6"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>', star: '<path d="m12 4 2.4 5 5.6.6-4.2 3.8 1.2 5.5L12 16.2 7 18.9l1.2-5.5L4 9.6 9.6 9z"/>',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${I[n]}</svg>`;
+
+const WORKS = [
+  { key: 'dq', device: 'sw2', name: '드래곤 퀘스트 VII 리이매진드', orig: 'ドラゴンクエストVII Reimagined', date: '2026.2.5', dev: 'HexaDrive', pub: 'Square Enix', plat: 'Switch · Switch 2 · PS5 · PC · Xbox', genres: ['RPG', '어드벤처'],
+    over: '석판 조각을 모아 잃어버린 섬들을 되살리는 모험. 원작의 이야기를 다시 짜고 전투와 직업 시스템을 새로 만든 리메이크.',
+    work: '#6f8cc2', deep: '#3f5c8a', c: ['#9eb6e0', '#3f5c8a', '#6f8cc2'], rec: { got: '2026.2.7', state: '하는 중', score: 4, dev: 'Switch 2', memo: '석판 12장째. 주말에 이어서.' },
+    scenes: [['#a9c4ea', '#5f7fb8', '#3f5c8a', '#f0e2b0'], ['#e8c9a0', '#b8905f', '#6b4d33', '#f6efd8'], ['#23304a', '#3f5c8a', '#182236', '#d9e3f4'], ['#b7d6c4', '#5f9c84', '#2f6350', '#f2ecc6'], ['#d8b6c8', '#9a6a86', '#5d3b52', '#f4e2c8']] },
+  { key: 'pk', device: 'sw2', name: '포코피아', orig: 'Pokémon Pokopia', date: '2026.3.5', dev: 'Omega Force', pub: 'Nintendo', plat: 'Switch 2', genres: ['생활 시뮬레이션'],
+    over: '메타몽이 되어 포켓몬들과 함께 마을을 가꾸는 생활 시뮬레이션. 기술을 빌려 땅을 일구고 집과 가구를 만든다.',
+    work: '#7fae72', deep: '#4b7a44', c: ['#a6c9a0', '#4b7a44', '#76a36e'], rec: { got: '2026.3.5', state: '다 함', score: 4, dev: 'Switch 2', memo: '마을 3단계까지.' },
+    scenes: [['#cfe3b8', '#8bb77c', '#4b7a44', '#f4efc4'], ['#a9d7e0', '#5fa6b8', '#2f6f82', '#f6f0d0'], ['#e6d2a8', '#b89a5f', '#6e5a2e', '#f8f2dc'], ['#2a3a2c', '#4b7a44', '#1c2a1f', '#dfe9c8'], ['#d9c0de', '#9a78a8', '#5b3f6a', '#f3e6c8']] },
+  { key: 'co', device: 'ps5', name: '클레르 옵스퀴르: 33 원정대', orig: 'Clair Obscur: Expedition 33', date: '2025.4.24', dev: 'Sandfall Interactive', pub: 'Kepler Interactive', plat: 'PS5 · PC · Xbox', genres: ['RPG', '턴제'],
+    over: '해마다 숫자를 그려 사람들을 지우는 페인트리스를 멈추려는 서른세 번째 원정대의 이야기. 턴제 전투에 실시간 회피와 받아치기를 섞었다.',
+    work: '#b86a7c', deep: '#8a4f63', c: ['#d7a3b3', '#8a4f63', '#b27686'], rec: { got: '2025.5.2', state: '다 함', score: 5, dev: 'PC', memo: '2회차는 나중에.' },
+    scenes: [['#3a2630', '#8a4f63', '#5a2f40', '#e7c9a0'], ['#d9b8a8', '#a8705f', '#6a3f35', '#f3e4cc'], ['#1f2230', '#4f5a8a', '#2a2f4a', '#d8d2e8'], ['#c9a8b8', '#8a5f78', '#4f3347', '#f0dcc4'], ['#2b3330', '#5f8a78', '#2f4a40', '#dce8d8']] },
+];
+let work = WORKS[0];
+let sceneIndex = 0;
+let caseAngle = 28;
+
+const PALS = [['#c7d3a6', '#6f7d44', '#95ad6d'], ['#a9d7c4', '#4e8a6c', '#6aa88b'], ['#d7a3b3', '#8a4f63', '#b27686'], ['#9fc2c8', '#4a7a82', '#6f9ea6'], ['#b9a2d8', '#5d4a86', '#8a74b3'], ['#e0c99e', '#8a6d3c', '#b8995f'], ['#9eb6e0', '#3f5c8a', '#6f8cc2'], ['#d9b3a0', '#8a5842', '#b47c64'], ['#a6c9a0', '#4b7a44', '#76a36e'], ['#c9a0c2', '#7a4570', '#a8709f']];
+const art = (c, style = '') => `<span class="art" style="--c1:${c[0]};--c2:${c[1]};--c3:${c[2]};${style}"></span>`;
+const scene = (s, style = '', k = 0) => `<span class="scene" style="--s1:${s[0]};--s2:${s[1]};--s3:${s[2]};--s4:${s[3]};--sx:${[70, 22, 58, 80, 34][k % 5]}%;--sy:${[16, 20, 12, 24, 14][k % 5]}%;--tx:${[56, 68, 30, 44, 74][k % 5]}%;${style}"><i class="sun"></i><i class="h1"></i><i class="h2"></i><i class="tw"></i></span>`;
+const stars = (n) => `<span class="stars" role="img" aria-label="별점 ${n}점">${[1, 2, 3, 4, 5].map((k) => `<svg viewBox="0 0 24 24" class="${k <= n ? 'on' : ''}">${I.star}</svg>`).join('')}</span>`;
+const label = (title, count) => `<div class="ui-section-label"><span class="ui-section-label__title">${title}</span>${count === undefined ? '' : `<span class="ui-section-label__count">${count}</span>`}<span class="ui-section-label__rule" aria-hidden="true"></span></div>`;
+const chips = (list) => list.map((g) => `<span class="ui-badge">${g}</span>`).join('');
+
+const rail = () => `<nav class="rail" aria-label="주요 탐색">${[['home', '홈'], ['grid', '에셋'], ['box', '컬렉션'], ['book', '망가'], ['note', '메모'], ['swap', '전송']].map(([n, l]) => `<span class="${l === '컬렉션' ? 'on' : ''}">${ic(n)}${l}</span>`).join('')}<span class="grow"></span><span>${ic('search')}찾기</span><span>${ic('more')}더보기</span></nav>`;
+const index = (on) => `<aside class="index"><div class="index-head"><span>컬렉션</span>${ic('search', 's')}</div><div class="index-body">${label('유형')}${[['게임', 181], ['만화', 149], ['영화', 14], ['AV', 1]].map(([n, c]) => `<div class="idx${on === n ? ' on' : ''}">${n}<small>${c}</small></div>`).join('')}${label('소식')}<div class="idx">신간<small>5</small></div><div class="idx">발매 캘린더<small>관심 13</small></div></div></aside>`;
+const bar = (type) => `<header class="bar"><button class="ib" aria-label="목록으로">${ic('left', 's')}</button><b>${type}</b><span class="grow"></span><button class="ib" aria-label="작품 관리">${ic('more', 's')}</button></header>`;
+const shell = (type, body) => `<div class="pc" style="--work:${work.work};--work-deep:${work.deep};--ratio:${work.ratio ?? 0.711}">${rail()}${index(type)}<main class="main">${bar(type)}${body}</main></div>`;
+
+const title = (w, extra = '') => `<div class="ttl"><h1>${w.name}</h1><span class="orig">${w.orig}</span><div class="line"><span>${w.date}</span><span>${w.dev}</span>${stars(w.rec.score)}</div><div class="acts"><button class="ui-button ui-button--secondary">${ic('star', 's')}쇼케이스</button><button class="ui-button ui-button--secondary ui-button--icon" aria-label="편집">${ic('edit', 's')}</button></div>${extra}</div>`;
+const record = (w) => `<div class="record">${label('내 기록')}<dl><dt>들인 날</dt><dd>${w.rec.got}</dd><dt>상태</dt><dd><button class="menu-q">${w.rec.state}${ic('down', 's')}</button></dd><dt>별점</dt><dd>${stars(w.rec.score)}</dd><dt>기기</dt><dd><button class="menu-q">${w.rec.dev}${ic('down', 's')}</button></dd><dt>메모</dt><dd class="memo">${w.rec.memo}</dd></dl></div>`;
+const facts = (w) => `<dl class="facts"><dt>개발사</dt><dd>${w.dev}</dd><dt>배급사</dt><dd>${w.pub}</dd><dt>플랫폼</dt><dd>${w.plat}</dd><dt>장르</dt><dd>${chips(w.genres)}</dd></dl>`;
+const shots = (w, height = 120) => `<div class="sec">${label('스크린샷 · 아트워크', 6)}<div class="shots">${[0, 1, 2, 3, 4, 5].map((k) => scene(w.scenes[(k + 1) % w.scenes.length], `height:${height}px;width:${Math.round(height * (k % 2 ? 16 / 9 : 4 / 3))}px`, k + 1)).join('')}</div></div>`;
+
+
+// ---- data ----
+const DEVICES = {
+  sw2: { name: 'Switch 2', plastic: 'rgba(206, 44, 54, .9)', media: 'cart' },
+  sw: { name: 'Switch', plastic: 'rgba(214, 222, 230, .24)', media: 'cart' },
+  ps5: { name: 'PS5', plastic: 'rgba(214, 222, 230, .24)', media: 'disc' },
+  pc: { name: 'PC', plastic: 'rgba(120, 128, 136, .38)', media: 'none' },
+};
+const SPINE_FONTS = [['noto', 'Noto Sans KR', '"Noto Sans KR"', 700], ['plex', 'IBM Plex Sans KR', '"IBM Plex Sans KR"', 700], ['gothic', 'Gothic A1', '"Gothic A1"', 900], ['pretendard', 'Pretendard', '"Pretendard Variable"', 800], ['dohyeon', '도현', '"Do Hyeon"', 400], ['blackhan', '검은고딕', '"Black Han Sans"', 400], ['serif', 'Noto Serif KR', '"Noto Serif KR"', 900]];
+let spineFont = 'noto'; // user pick, 2026-09-30
+function applySpineFont() { const f = SPINE_FONTS.find((x) => x[0] === spineFont); document.documentElement.style.setProperty('--spine-font', `${f[2]}, var(--font-ui)`); document.documentElement.style.setProperty('--spine-weight', String(f[3])); }
+// Platform spine templates. The private build supplies the real platform blocks (cut from real spines); the committed mockup falls back to plain blocks.
+const HEADS = window.LAKOMICS_SPINE_HEADS || null;
+const readable = (rgb) => { const m = String(rgb).match(/\d+/g); if (!m) return '#fff'; const [r, g, b] = m.map(Number); return r * 0.299 + g * 0.587 + b * 0.114 > 150 ? '#16181a' : '#fff'; };
+function spineTemplate(kind, name, publisher, band) {
+  const real = HEADS?.[kind];
+  const head = (ratio, colour) => real ? `<span class="t-head" style="aspect-ratio:${real.head.w} / ${real.head.h};--t-head:url(${real.head.src})"></span>` : `<span class="t-head" style="aspect-ratio:${ratio};--t-head:linear-gradient(${colour},${colour})"></span>`;
+  const pub = publisher ? `<span class="t-pub">${publisher}</span>` : '';
+  if (kind === 'sw2') { const red = real?.red ?? 'rgb(230,72,45)', nintendo = real && /nintendo/i.test(publisher ?? '');
+    return `<span class="tpl sw2" style="--t-band:${band};--t-ink:${readable(band)};--t-foot:${nintendo ? `url(${real.nintendo.src})` : `linear-gradient(${red},${red})`}">${head('96 / 203', red)}<span class="t-band"><span class="spine-title">${name}</span></span>${nintendo ? `<span class="t-foot" style="aspect-ratio:96 / 198"></span>` : `<span class="t-foot text">${pub}</span>`}</span>`; }
+  if (kind === 'sw') { const red = real?.red ?? 'rgb(218,24,32)';
+    return `<span class="tpl sw" style="--t-band:${red};--t-ink:#fff;--t-foot:linear-gradient(${red},${red})">${head('96 / 92', red)}<span class="t-band"><span class="spine-title">${name}</span></span><span class="t-foot text">${pub}</span></span>`; }
+  if (kind === 'ps5') return `<span class="tpl ps5" style="--t-band:#050505;--t-ink:#fff;--t-foot:linear-gradient(#050505,#050505);--t-pub:#b9bcc0">${head('96 / 271', '#fff')}<span class="t-band"><span class="spine-title">${name}</span></span><span class="t-foot text">${pub}</span></span>`;
+  return null;
+}
+const REAL_GAMES = window.LAKOMICS_REAL_GAMES || null;
+for (const w of WORKS) w.ratio = 0.667;
+if (REAL_GAMES) {
+  // Private review build: a few real works replace the examples; covers come from the library.
+  WORKS.length = 0;
+  for (const g of REAL_GAMES.filter((g) => g.featured)) WORKS.push({ key: g.key, ratio: g.w / 392, name: g.name, orig: g.orig ?? '', date: g.date ?? '', dev: g.dev ?? '', pub: g.pub ?? '', plat: g.plat ?? '', genres: g.genres ?? [], over: g.over ?? '',
+    work: g.c, deep: `color-mix(in srgb, ${g.c} 62%, #000)`, c: ['#555', '#333', '#444'], src: g.src, fx: g.fx, device: g.device, spine: g.spine,
+    rec: { got: g.got ?? '', state: '다 함', score: g.score ?? 0, dev: DEVICES[g.device].name, memo: '예시 메모' }, scenes: [['#2a2f3a', '#3f4757', '#1c2029', '#d9dde6']] });
+  work = WORKS[0];
+}
+let device = work.device ?? 'sw2';
+const kases = new Map(); // id -> { ry, open, saved }
+const cover = (w, style = '') => w.src ? `<img class="cv" src="${w.src}" alt="" draggable="false" style="${style}">` : art(w.c, style);
+const slip = (w) => `<span class="clip" style="top:20%"></span><span class="clip" style="top:60%"></span><div class="slip"><b>내 기록</b><dl><dt>들인 날</dt><dd>${w.rec.got}</dd><dt>상태</dt><dd>${w.rec.state}</dd><dt>별점</dt><dd>${stars(w.rec.score)}</dd></dl><p>${w.rec.memo}</p></div>`;
+const media = (kind) => kind === 'cart' ? '<span class="cart-slot"><span class="cart"></span></span>' : kind === 'disc' ? '<span class="holder"><span class="disc"></span></span>' : '<span class="holder"></span>';
+function kase(id, w, o) {
+  const state = kases.get(id) ?? { ry: 32, open: false, saved: 32 };
+  kases.set(id, state);
+  // A real spine image wins; otherwise a strip of the cover, cut at the figure's head.
+  // A real spine image wins. Without one the spine is the case's own plastic with the work's title on it.
+  const spineFace = o.spine ? `<span class="ins">${o.spine}</span>` : w.spine ? `<span class="ins"><img class="cv" src="${w.spine.src}" alt="" draggable="false" style="object-fit:fill"></span>` : (spineTemplate(o.kind, w.name, w.pub, w.work) ? `<span class="ins full">${spineTemplate(o.kind, w.name, w.pub, w.work)}</span>` : `<span class="ins bare"><span class="spine-title">${w.name}</span></span>`);
+  return `<div class="stage${state.open ? ' is-open' : ''}" style="--ratio:${o.ratio}"><span class="floor-shadow"></span>
+    <button class="ui-button ui-button--ghost stage-btn" data-kase-toggle="${id}">${state.open ? '닫기' : '열기'}</button>
+    <div class="kase" id="${id}" tabindex="0" role="group" aria-label="케이스. 끌어서 돌리고 Enter로 열고 닫습니다" style="--plastic:${o.plastic};--ry:${state.ry}deg;--open:${state.open ? 1 : 0};--gloss:${50 + state.ry}%">
+      <span class="k-back"><span class="ins">${o.back ?? ''}</span></span><span class="k-floor">${media(o.media)}</span>
+      <span class="k-edge"></span><span class="k-cap k-top"></span><span class="k-cap k-bottom"></span>
+      <span class="k-hinge"><span class="k-spine">${spineFace}</span><span class="k-spine-in"></span>
+        <span class="k-lid"><span class="k-front"><span class="ins">${cover(w)}</span></span><span class="k-inner">${slip(w)}</span></span></span>
+    </div></div>`;
+}
+function frameGame() {
+  const w = work, d = DEVICES[device];
+  const rec = { ...w.rec, dev: d.name };
+  return shell('게임', `<div class="vb wide">${kase('case-game', w, { kind: device, ratio: w.ratio, plastic: d.plastic, media: d.media })}
+    <div class="vb-info">${title(w)}<div class="vb-two">${facts(w)}${record({ ...w, rec })}</div>${shots(w, 140)}</div></div>`);
+}
+const AV = { key: 'av', ratio: 0.71, name: 'サンプル作品タイトル（配信限定版）', orig: 'ABC-123', date: '9.9', dev: 'SAMPLE STUDIO', work: '#b58aa0', deep: '#6f4a5e', c: ['#d7a3b3', '#8a4f63', '#b27686'],
+  rec: { got: '2026.9.12', state: '다 봄', score: 3, memo: '예시 메모' }, scenes: [['#d9b8c6', '#a8708a', '#6a3f55', '#f3e4cc']] };
+// The private build supplies the library's one real AV work (three real faces); the committed mockup keeps colour blocks.
+const REAL_AV = window.LAKOMICS_REAL_AV || null;
+const face = (f) => `<img class="cv" src="${f.src}" alt="" draggable="false" style="object-fit:fill">`;
+const avPerson = (p, k, size) => (p.src ? `<img src="${p.src}" alt="" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;flex:none">` : art([['#b9a2d8', '#5d4a86', '#8a74b3'], ['#9fc2c8', '#4a7a82', '#6f9ea6']][k % 2], `width:${size}px;height:${size}px;border-radius:50%`));
+if (REAL_AV) Object.assign(AV, { ratio: REAL_AV.cover.w / REAL_AV.cover.h, name: REAL_AV.title, orig: REAL_AV.code, date: REAL_AV.date, dev: REAL_AV.maker, src: REAL_AV.cover.src, scenes: [], rec: { got: REAL_AV.got, state: '안 봄', score: 0, memo: '' } });
+Object.assign(AV, REAL_AV ? { maker: REAL_AV.maker, label: REAL_AV.label, tags: REAL_AV.tags, people: REAL_AV.people.map((p) => ({ name: p.name, sub: p.role === 'director' ? '감독' : `${p.ja} · 내 라이브러리 ${p.count}편`, src: p.src })) }
+  : { maker: 'サンプルスタジオ', label: 'SAMPLE', tags: ['単体作品', 'ドラマ', '4K'], people: [{ name: '배우 이름', sub: '原語表記 · 내 라이브러리 1편' }, { name: '감독 이름', sub: '감독' }] });
+function frameAv() {
+  const saved = work; work = AV;
+  const w = AV;
+  const back = REAL_AV ? face(REAL_AV.back) : `${scene(w.scenes[0], '', 3)}<i style="width:86%"></i><i style="width:70%"></i><i style="width:78%"></i><i style="width:52%"></i>`;
+  const spine = REAL_AV ? face(REAL_AV.spine) : art(['#b27686', '#6f4a5e', '#8a4f63'], '--hx:50%;--hy:8%');
+  const html = shell('AV', `<div class="vb wide">${kase('case-av', w, { ratio: w.ratio, plastic: 'rgba(10, 10, 11, .94)', media: 'disc', back, spine })}
+    <div class="vb-info"><div class="ttl"><h1>${w.name}</h1><span class="orig">${w.orig}</span><div class="line"><span>${w.date}</span><span>${w.dev}</span>${stars(w.rec.score)}</div>
+      <div class="acts"><button class="ui-button ui-button--secondary">${ic('star', 's')}쇼케이스</button><button class="ui-button ui-button--secondary ui-button--icon" aria-label="편집">${ic('edit', 's')}</button></div></div>
+      <div class="vb-two"><dl class="facts"><dt>메이커</dt><dd>${w.maker}</dd><dt>레이블</dt><dd>${w.label}</dd><dt>태그</dt><dd>${chips(w.tags)}</dd></dl>
+        <div class="record">${label('내 기록')}<dl><dt>들인 날</dt><dd>${w.rec.got}</dd><dt>상태</dt><dd><button class="menu-q">${w.rec.state}${ic('down', 's')}</button></dd><dt>별점</dt><dd>${stars(w.rec.score)}</dd><dt>메모</dt><dd class="memo">${w.rec.memo}</dd></dl></div></div>
+      <div class="sec">${label('출연 · 감독')}<div style="display:flex;gap:24px">${w.people.map((p, k) => `<div style="display:flex;gap:12px;align-items:center">${avPerson(p, k, 48)}<span><b style="display:block;font-weight:600">${p.name}</b><small style="color:var(--color-faint);font-size:var(--type-meta)">${p.sub}</small></span></div>`).join('')}</div></div></div></div>`);
+  work = saved;
+  return html;
+}
+// shelf: mock games unless the private build supplies real covers
+const MOCK_GAMES = ['드래곤 퀘스트 VII 리이매진드', '포코피아', '웰컴 투어', '클레르 옵스퀴르: 33 원정대', '제노블레이드 크로니클스 X', '동키콩 바난자', '메트로이드 프라임 4', '몬스터 헌터 와일즈', '유니콘 오버로드', '페르소나 3 리로드', '발더스 게이트 3', '하데스 II', '젤다의 전설: 티어스', '아머드 코어 VI', '엘든 링', '메트로이드 드레드', '세키로', '페르소나 4 골든', '별의 커비', '스플래툰 3', '파이어 엠블렘', '옥토패스 트래블러', '니어: 오토마타', '다크 소울 III', '블러드본', '위쳐 3', '호라이즌', '갓 오브 워', '스타크래프트 II', '포탈 2']
+  .map((name, k) => ({ name, year: 2026 - Math.floor(k / 3), w: 261, c: PALS[k % PALS.length], fig: `--hx:${[50, 34, 62, 44, 70, 28, 56][k % 7]}%;--hy:${[22, 14, 30, 18, 26][k % 5]}%` }));
+let shelfPicked = null, spineMode = 'mix', groupBy = 'device', shelfLayout = 'stand', perRow = 8, viewOpen = true;
+// Case height that lets `perRow` turned cases (2:3 covers) stand on one shelf, with room for the picked one to turn to the front.
+const caseHeight = (count) => Math.round(Math.min(300, (1004 / count - 18 - 13) / (0.8 * 0.667)));
+const HAS_SPINES = Boolean(REAL_GAMES && REAL_GAMES.some((g) => g.spine));
+const DEVICE_ORDER = ['sw2', 'sw', 'ps5', 'pc'];
+function shelfBody() {
+  // A real spine tells which edition is on the shelf, so it decides the device group.
+  const spineDevice = (plat) => /Switch 2/.test(plat) ? 'sw2' : /Switch|GameCube|Wii|Nintendo/.test(plat) ? 'sw' : /Playstation|Xbox/.test(plat) ? 'ps5' : 'pc';
+  const bh = shelfLayout === 'big' ? 400 : 196;
+  const games = REAL_GAMES ? REAL_GAMES.map((g) => ({ ...g, device: g.spine ? spineDevice(g.spine.plat) : g.device, year: Number((g.date ?? '0').slice(0, 4)) })) : MOCK_GAMES.map((g, k) => ({ ...g, device: DEVICE_ORDER[k % 4] }));
+  const byYear = (a, b) => b.year - a.year;
+  let rows;
+  if (groupBy === 'device') {
+    const nintendo = games.filter((g) => g.device === 'sw2' || g.device === 'sw').sort((a, b) => DEVICE_ORDER.indexOf(a.device) - DEVICE_ORDER.indexOf(b.device) || byYear(a, b));
+    const rest = games.filter((g) => g.device !== 'sw2' && g.device !== 'sw').sort((a, b) => DEVICE_ORDER.indexOf(a.device) - DEVICE_ORDER.indexOf(b.device) || byYear(a, b));
+    rows = [['닌텐도', nintendo], ['PS · Xbox · PC', rest]];
+  } else {
+    const sorted = [...games].sort(byYear), per = Math.ceil(sorted.length / 2);
+    const years = (list) => { const dated = list.map((g) => g.year).filter((y) => y > 0); if (!dated.length) return '발매일 없음'; const a = Math.max(...dated), b = Math.min(...dated); return a === b ? `${a}` : `${b}–${a}`; };
+    rows = [sorted.slice(0, per), sorted.slice(per)].map((list) => [years(list), list]);
+  }
+  const pickedName = shelfPicked ?? rows[0][1][Math.min(5, rows[0][1].length - 1)].name;
+  const face = (g, style = '') => g.src ? `<img class="cv" src="${g.src}" alt="" draggable="false" style="${style}">` : art(g.c, `${g.fig};${style}`);
+  const item = (g) => { const full = Math.round(g.w * bh / 392), on = g.name === pickedName, real = spineMode === 'mix' && g.spine;
+    const strip = real ? Math.max(10, Math.round(g.spine.w * bh / g.spine.h)) : Math.round(28 * bh / 196);
+    const spine = real ? `<img class="cv" src="${g.spine.src}" alt="" draggable="false" style="object-fit:fill">` : face(g, `object-position:${Math.round((g.fx ?? 0.5) * 100)}% 50%`);
+    return `<button class="spn slice${real ? ' real' : ''}" aria-pressed="${on}" aria-label="${g.name}" data-strip="${strip}" data-open="${full}" data-shelf-name="${g.name}" style="--w:${strip}px;--W:${full}px;width:${on ? full : strip}px"><span class="book"><span class="bk-spine">${spine}</span><span class="bk-front">${face(g)}</span></span><span class="cap"><b>${g.name}</b></span></button>`; };
+  // Cover-led: the case is turned 34 degrees and seen a little from above; its footprint is the turned cover plus the visible part of the spine.
+  const BH = caseHeight(perRow);
+  const widths = new Map();
+  const kase3 = (g) => { const W = Math.round(g.w * BH / 392), on = g.name === pickedName, real = spineMode === 'mix' && g.spine;
+    const d = real ? Math.max(20, Math.round(g.spine.w * BH / g.spine.h * 2)) : 22, lead = Math.round(d * 0.6), turned = Math.round(W * 0.8 + lead);
+    const template = real ? null : spineTemplate(g.device, g.name, g.pub, g.c && !Array.isArray(g.c) ? g.c : '#3a3d42');
+    const spine = real ? `<img class="cv" src="${g.spine.src}" alt="" draggable="false" style="object-fit:fill">` : template ?? `<span class="spine-title">${g.name}</span>`;
+    widths.set(g.name, turned);
+    return `<button class="cs" aria-pressed="${on}" aria-label="${g.name}" data-case-name="${g.name}" data-turned="${turned}" data-open="${W}" style="--W:${W}px;--d:${d}px;--lead:${lead}px;width:${on ? W : turned}px"><span class="cs-box"><span class="cs-front">${face(g)}</span><span class="cs-spine${real || template ? '' : ' bare'}" style="--plastic:${DEVICES[g.device]?.plastic ?? DEVICES.pc.plastic}">${spine}</span><span class="cs-top"></span></span><span class="cs-title">${g.name}</span></button>`; };
+  const shelves = (list) => { const out = [];
+    for (let k = 0; k < list.length; k += perRow) out.push(list.slice(k, k + perRow).map((g, n) => n >= perRow - 2 ? kase3(g).replace('class="cs"', 'class="cs end"') : kase3(g)));
+    return out.map((row) => `<div class="shelf-row"><div class="cases">${row.join('')}</div><div class="plank"></div></div>`).join(''); };
+  const body = rows.map(([name, list]) => `<div class="sec">${label(name, list.length)}<div>${shelves(list)}</div></div>`).join('');
+  return { count: games.length, bh: BH, html: body };
+}
+function frameShelf() {
+  const view = shelfBody();
+  const menu = viewOpen ? `<div class="view-menu" role="dialog" aria-label="보기"><div class="row"><span>배치</span></div><div class="seg" role="group" aria-label="배치"><button aria-pressed="false">격자</button><button aria-pressed="true">선반</button></div>
+      <div class="row"><label for="per-row">한 줄에</label><b id="per-row-value">${perRow}개</b></div><input type="range" id="per-row" min="5" max="12" step="1" value="${perRow}" aria-label="한 줄에 놓는 개수"></div>` : '';
+  return `<div class="pc" style="--work:#8a8f96;--work-deep:#3a3d42;--ratio:0.667">${rail()}${index('게임')}<main class="main" style="background:var(--color-bg)">
+    <header class="bar" style="padding-left:var(--space-4)"><b>게임</b><small>${view.count}</small><span class="grow"></span><div class="tools"><button class="quiet">정렬 <b>발매일</b>${ic('down', 's')}</button><button class="quiet">내 별점 <b>전체</b>${ic('down', 's')}</button><button class="quiet" data-view-toggle aria-expanded="${viewOpen}">${ic('grid', 's')}보기</button><button class="ib" aria-label="검색">${ic('search', 's')}</button></div></header>
+    ${menu}<div class="vs covers" id="shelf-body" style="--bh:${view.bh}px">${view.html}</div></main></div>`;
+}
+
+// ===== AV performer page =====
+const REAL_PF = window.LAKOMICS_REAL_AV || null;
+const PF_PALS = [['#d7a3b3', '#8a4f63', '#b27686'], ['#c9b0d8', '#6f5a8e', '#9a80bd'], ['#e3c4b0', '#9a6a52', '#c0927a'], ['#a9c7d9', '#4f7a92', '#7aa2ba'], ['#d9cfa3', '#8a7d44', '#b3a66d'], ['#b8d6b4', '#5a8a56', '#84b080'], ['#dcb0c8', '#8e5a78', '#b884a2']];
+const PF_WORKS = [['GVH-877', '2026.9.9', true], ['MIDA-412', '2026.7.22', true], ['SONE-903', '2026.5.14', false], ['GVH-801', '2026.3.3', true], ['MIDA-288', '2025.12.19', true], ['CAWD-771', '2025.10.2', false], ['MIDA-190', '2025.8.8', true], ['SONE-455', '2025.6.13', true], ['GVH-702', '2025.4.1', false], ['MIDA-077', '2025.1.24', true], ['CAWD-602', '2024.11.15', true]];
+let pfPicked = 0, pfPerRow = 9;
+function pfShelf() {
+  const BH = Math.round(Math.min(240, (1056 / pfPerRow - 18 - 10) / (0.8 * 0.706)));
+  const item = (w, k) => { const real = k === 0 && REAL_PF, W = Math.round(BH * (real ? REAL_PF.cover.w / REAL_PF.cover.h : 0.706)), d = Math.max(16, Math.round(BH * 0.078)), lead = Math.round(d * 0.6), turned = Math.round(W * 0.8 + lead), on = k === pfPicked, pal = PF_PALS[k % PF_PALS.length];
+    const front = real ? `<img class="cv" src="${REAL_PF.cover.src}" alt="" draggable="false">` : art(pal, `--hx:${[50, 38, 62, 46][k % 4]}%;--hy:${[20, 26, 18][k % 3]}%`);
+    const spine = real ? `<img class="cv" src="${REAL_PF.spine.src}" alt="" draggable="false" style="object-fit:fill">` : art([pal[2], pal[1], pal[0]], '--hx:50%;--hy:6%');
+    return `<button class="cs${k === 0 ? ' now' : ''}${k % pfPerRow >= pfPerRow - 2 ? ' end' : ''}" aria-pressed="${on}" aria-label="${w[0]}" data-pf="${k}" style="--W:${W}px;--d:${d}px;--lead:${lead}px;width:${on ? W : turned}px"><span class="cs-box"><span class="cs-front">${front}</span><span class="cs-spine">${spine}</span><span class="cs-top"></span></span><span class="cs-title"><b>${w[0]}</b>${w[1]}${w[2] ? '' : ' · 공연'}</span></button>`; };
+  const rows = [];
+  for (let k = 0; k < PF_WORKS.length; k += pfPerRow) rows.push(PF_WORKS.slice(k, k + pfPerRow).map((w, n) => item(w, k + n)).join(''));
+  return { bh: BH, html: rows.map((row) => `<div class="shelf-row"><div class="cases">${row}</div><div class="plank"></div></div>`).join('') };
+}
+function framePerformer() {
+  const me = REAL_PF?.people?.[0], name = me?.name ?? '배우 이름', ja = me ? REAL_PF.people[0].ja : '原語表記';
+  const portrait = me?.src ? `<img src="${me.src}" alt="">` : art(['#b9a2d8', '#5d4a86', '#8a74b3'], '--hy:20%');
+  const shelf = pfShelf();
+  const co = [['함께 나온 배우 가', 3, 0], ['함께 나온 배우 나', 2, 3], ['함께 나온 배우 다', 2, 5]];
+  const solo = PF_WORKS.filter((w) => w[2]).length;
+  const side = `<div class="pf-head"><div class="pf-portrait">${portrait}</div>
+      <div class="pf-name"><h1>${name}</h1><span class="ja" lang="ja">${ja}</span><span class="src">표지에서 자름 · GVH-877</span>
+        <div class="pf-acts"><button class="ui-button ui-button--secondary ui-button--icon" aria-label="즐겨찾기" aria-pressed="true">${ic('star', 's')}</button><button class="ui-button ui-button--secondary">사진 바꾸기</button></div></div>
+      <dl class="pf-facts"><dt>내 작품</dt><dd>${PF_WORKS.length}편 · 단독 ${solo}</dd><dt>발매 기간</dt><dd>2024–2026</dd><dt>활동</dt><dd>2024–</dd>
+        <dt>생년월일</dt><dd>2003.4.12 · 23세</dd><dt>키</dt><dd>158cm</dd><dt>사이즈</dt><dd>B83 · W57 · H85 · D</dd>
+        <dt>가슴 유형</dt><dd>자연</dd><dt>링크</dt><dd><span class="pf-links"><span class="ui-badge">StashDB</span><span class="ui-badge">FANZA</span><span class="ui-badge">X</span></span></dd></dl>
+      <div class="pf-memo">${label('내 메모')}<p>예시 메모. 누르면 그 자리에서 고칩니다.</p></div></div>`;
+  const main = `<section class="pf-main"><div class="pf-tools"><b>작품</b><small>${PF_WORKS.length}</small><span class="grow"></span><div class="seg" role="group" aria-label="역할"><button aria-pressed="true">전체</button><button aria-pressed="false">단독</button><button aria-pressed="false">공연</button></div>
+        <button class="quiet">정렬 <b>최신순</b>${ic('down', 's')}</button><button class="quiet">${ic('grid', 's')}보기</button></div>
+      <div class="pf-body"><div class="vs covers" id="pf-shelf" style="--bh:${shelf.bh}px;padding:0;flex:none;overflow:visible">${shelf.html}</div>
+        <div class="pf-row2"><div class="sec">${label('자주 함께 나온 배우', co.length)}<div class="pf-co">${co.map(([n, c, p]) => `<button><span class="face">${art(PF_PALS[p], '--hy:20%')}</span><span>${n}<small>${c}편</small></span></button>`).join('')}</div></div>
+          <div class="sec">${label('레이블', 3)}<div class="pf-labels">${[['GLORY QUEST', 3], ['MOODYZ', 5], ['S1', 3]].map(([n, c]) => `<span class="ui-badge">${n}<small>${c}</small></span>`).join('')}</div></div></div></div></section>`;
+  return `<div class="pc" style="--work:#b58aa0;--work-deep:#6f4a5e;--ratio:0.71">${rail()}${index('AV')}<main class="main" style="background:var(--color-bg)">
+    <header class="bar"><button class="ib" aria-label="작품으로 돌아가기">${ic('left', 's')}</button><b>${name}</b><span class="crumb">AV › 배우</span><span class="grow"></span><button class="ib" aria-label="배우 관리">${ic('more', 's')}</button></header>
+    <div class="pf">${side}${main}</div></main></div>`;
+}
+document.addEventListener('click', (event) => { const b = event.target.closest('[data-pf]'); if (!b) return; pfPicked = Number(b.dataset.pf); render('performer'); });
+const FRAMES = { performer: framePerformer };
+function render(only) {
+  document.querySelectorAll('[data-frame]').forEach((el) => { if (!only || only === el.dataset.frame) el.innerHTML = FRAMES[el.dataset.frame](); });
+  bindKases();
+}
+function renderPicker() {
+  document.getElementById('work-pick').innerHTML = WORKS.map((w) => `<button aria-pressed="${w === work}" data-work="${w.key}">${w.name}</button>`).join('');
+  document.getElementById('group-pick').innerHTML = [['year', '발매 연도'], ['device', '기기']].map(([key, name]) => `<button aria-pressed="${key === groupBy}" data-group="${key}">${name}</button>`).join('');
+  if (HAS_SPINES) { document.getElementById('spine-controls').hidden = false; document.getElementById('spine-pick').innerHTML = [['mix', '진짜 책등 + 표지 띠'], ['strip', '표지 띠만']].map(([key, name]) => `<button aria-pressed="${key === spineMode}" data-spine-mode="${key}">${name}</button>`).join(''); }
+  document.getElementById('font-pick').innerHTML = SPINE_FONTS.map(([key, name]) => `<button aria-pressed="${key === spineFont}" data-spine-font="${key}">${name}</button>`).join('');
+  applySpineFont();
+  document.getElementById('device-pick').innerHTML = Object.entries(DEVICES).map(([key, d]) => `<button aria-pressed="${key === device}" data-device="${key}">${d.name}</button>`).join('');
+}
+function applyKase(element, state, animate) {
+  if (animate) { element.classList.add('anim'); window.setTimeout(() => element.classList.remove('anim'), 460); }
+  element.style.setProperty('--ry', `${state.ry}deg`);
+  element.style.setProperty('--gloss', `${50 + state.ry}%`);
+  element.style.setProperty('--open', state.open ? '1' : '0');
+  element.closest('.stage').classList.toggle('is-open', state.open);
+  element.closest('.stage').querySelector('.stage-btn').textContent = state.open ? '닫기' : '열기';
+}
+function toggleKase(id) {
+  const state = kases.get(id), element = document.getElementById(id);
+  state.open = !state.open;
+  if (state.open) { state.saved = state.ry; state.ry = -10; } else state.ry = state.saved;
+  applyKase(element, state, true);
+}
+// A case turns left/right by drag and stays where released; arrows turn 15 degrees, Home returns to the front, Enter opens.
+function bindKases() {
+  document.querySelectorAll('.kase').forEach((element) => {
+    const state = kases.get(element.id);
+    const set = (angle) => { state.ry = ((angle + 180) % 360 + 360) % 360 - 180; applyKase(element, state, false); };
+    let start = null;
+    element.onpointerdown = (event) => { start = { x: event.clientX, angle: state.ry }; element.setPointerCapture(event.pointerId); };
+    element.onpointermove = (event) => { if (start) set(start.angle + (event.clientX - start.x) * 0.6); };
+    element.onpointerup = element.onpointercancel = () => { start = null; };
+    element.ondblclick = () => toggleKase(element.id);
+    element.onkeydown = (event) => {
+      if (event.key === 'ArrowLeft') set(state.ry - 15); else if (event.key === 'ArrowRight') set(state.ry + 15); else if (event.key === 'Home') set(0);
+      else if (event.key === 'Enter' || event.key === ' ') toggleKase(element.id); else return;
+      event.preventDefault();
+    };
+  });
+}
+document.addEventListener('click', (event) => {
+  const view = event.target.closest('.cover-view');
+  if (view) { view.remove(); return; }
+  const fontButton = event.target.closest('[data-spine-font]');
+  if (fontButton) { spineFont = fontButton.dataset.spineFont; renderPicker(); return; }
+  if (event.target.closest('.view-menu')) return;
+  const turned = event.target.closest('.cs');
+  if (turned) {
+    const previous = turned.closest('.vs').querySelector('.cs[aria-pressed="true"]');
+    if (previous && previous !== turned) { previous.setAttribute('aria-pressed', 'false'); previous.style.width = `${previous.dataset.turned}px`; }
+    turned.setAttribute('aria-pressed', 'true'); turned.style.width = `${turned.dataset.open}px`; shelfPicked = turned.dataset.caseName;
+    return;
+  }
+  const laid = event.target.closest('.lay');
+  if (laid) {
+    laid.closest('.vs').querySelector('.lay[aria-pressed="true"]')?.setAttribute('aria-pressed', 'false');
+    laid.setAttribute('aria-pressed', 'true'); shelfPicked = laid.dataset.stackName;
+    return;
+  }
+  const book = event.target.closest('.spn.slice');
+  if (book) {
+    const previous = book.closest('.vs').querySelector('.spn.slice[aria-pressed="true"]');
+    if (previous && previous !== book) { previous.setAttribute('aria-pressed', 'false'); previous.style.width = `${previous.dataset.strip}px`; }
+    book.setAttribute('aria-pressed', 'true'); book.style.width = `${book.dataset.open}px`; shelfPicked = book.dataset.shelfName;
+    return;
+  }
+  const target = event.target.closest('[data-work], [data-device], [data-kase-toggle], [data-group], [data-spine-mode], [data-layout], [data-view-toggle]');
+  if (!target) return;
+  if (target.dataset.kaseToggle) toggleKase(target.dataset.kaseToggle);
+  else if ('viewToggle' in target.dataset) { viewOpen = !viewOpen; render('shelf'); }
+  else if (target.dataset.layout) { shelfLayout = target.dataset.layout; renderPicker(); render('shelf'); }
+  else if (target.dataset.group) { groupBy = target.dataset.group; shelfPicked = null; renderPicker(); render('shelf'); }
+  else if (target.dataset.spineMode) { spineMode = target.dataset.spineMode; renderPicker(); render('shelf'); }
+  else if (target.dataset.device) { device = target.dataset.device; renderPicker(); render('game'); }
+  else { work = WORKS.find((w) => w.key === target.dataset.work); device = work.device ?? device; renderPicker(); render('game'); }
+});
+// Dragging the slider redraws only the shelves, so the slider keeps the pointer.
+document.addEventListener('input', (event) => {
+  if (event.target.id !== 'per-row') return;
+  perRow = Number(event.target.value);
+  const view = shelfBody(), body = document.getElementById('shelf-body');
+  body.style.setProperty('--bh', `${view.bh}px`); body.innerHTML = view.html;
+  document.getElementById('per-row-value').textContent = `${perRow}개`;
+});
+document.addEventListener('dblclick', (event) => {
+  const book = event.target.closest('.spn.slice');
+  if (!book) return;
+  const view = document.createElement('div');
+  view.className = 'cover-view'; view.setAttribute('role', 'dialog'); view.setAttribute('aria-label', '표지 크게 보기');
+  view.style.setProperty('--ratio', String(Number(book.dataset.open) / 196));
+  view.append(book.querySelector('.bk-front').firstElementChild.cloneNode(true));
+  const caption = document.createElement('p'); caption.innerHTML = book.querySelector('.cap').innerHTML; view.append(caption);
+  book.closest('.pc').append(view);
+});
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') document.querySelector('.cover-view')?.remove(); });
+const hash = location.hash.slice(1);
+if (WORKS.some((w) => w.key === hash)) { work = WORKS.find((w) => w.key === hash); device = work.device ?? device; }
+if (SPINE_FONTS.some((f) => f[0] === hash)) spineFont = hash;
+if (hash === 'year') groupBy = 'year';
+if (/^row\d+$/.test(hash)) perRow = Number(hash.slice(3));
+if (hash === 'big' || hash === 'stack') shelfLayout = hash;
+if (hash === 'open') for (const id of ['case-game', 'case-av']) kases.set(id, { ry: -10, open: true, saved: 32 });
+renderPicker();
+render();
+</script>
+</body>
+</html>

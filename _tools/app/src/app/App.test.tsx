@@ -1633,8 +1633,8 @@ describe("App", () => {
     await user.type(search, "nier");
     expect(screen.getAllByRole("option")[0]).toHaveTextContent(/‘nier’ — .*컬렉션에서 검색/);
     await user.keyboard("{Enter}");
-    await user.click(await screen.findByText("NieR: Automata"));
-    await user.click(await screen.findByRole("button", { name: "컬렉션으로 돌아가기" }, { timeout: 5_000 }));
+    await user.dblClick(await screen.findByText("NieR: Automata"));
+    await user.click(await screen.findByRole("button", { name: "목록으로" }, { timeout: 5_000 }));
     expect(await screen.findByRole("button", { name: "검색 해제" })).toBeInTheDocument();
     expect(screen.getByText("nier")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "찾기" }));
@@ -1696,6 +1696,32 @@ describe("App", () => {
     expect(screen.getByText("던전밥")).toBeInTheDocument();
   });
 
+  it("returns to the list after stepping between merged game works", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ collectionType: "game" }));
+    const libraryGateway = gateway();
+    const work = {
+      id: "showcase-game", name: "Showcase Game", description: null, type: "game",
+      coverAssetId: null, selectedWorkArtworkId: null, selectedHeroArtworkId: null, selectedBackdropArtworkId: null, assetCount: 0, unreadReleaseCount: 0,
+      year: 2020, originalTitle: null, runtimeMinutes: null, author: null, developer: null, publisher: null, platforms: null, productionCompany: null, releaseDate: null,
+      director: null, externalScore: null, myScore: null, genres: null, overview: null,
+      showcase: true, showcaseOrder: 1, createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+    } as const;
+    vi.mocked(libraryGateway.listCollections).mockResolvedValue([work, { ...work, id: "game-next", name: "다음 게임", showcaseOrder: 2 }]);
+    const user = userEvent.setup();
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await user.click(await screen.findByRole("button", { name: "컬렉션" }));
+    await user.dblClick(await screen.findByText("Showcase Game"));
+    const root = await screen.findByRole("article", { name: "게임 작품 화면" });
+    const position = root.querySelector(".asset-viewer__position")!.textContent!;
+    await user.click(screen.getByRole("button", { name: position.startsWith("1") ? "다음 작품" : "이전 작품" }));
+    await screen.findByRole("heading", { name: "다음 게임" });
+    expect(screen.getByRole("article", { name: "게임 작품 화면" })).toBe(root);
+    await user.click(screen.getByRole("button", { name: "목록으로" }));
+    expect(await screen.findByRole("region", { name: "컬렉션" })).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "게임 작품 화면" })).toBeNull();
+  });
+
   it("returns from a Showcase detail to the whole Showcase it was opened from", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ collectionType: "game" }));
@@ -1715,8 +1741,8 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: /쇼케이스/, expanded: false }));
     await user.click(await screen.findByRole("button", { name: "전체 보기" }));
     expect(await screen.findByRole("heading", { name: "게임 쇼케이스" })).toBeInTheDocument();
-    await user.click(await screen.findByText("Showcase Game"));
-    await user.click(await screen.findByRole("button", { name: "컬렉션으로 돌아가기" }));
+    await user.dblClick(await screen.findByText("Showcase Game"));
+    await user.click(await screen.findByRole("button", { name: "목록으로" }));
     expect(await screen.findByRole("heading", { name: "게임 쇼케이스" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "게임" })).toHaveAttribute("aria-current", "page");
   });

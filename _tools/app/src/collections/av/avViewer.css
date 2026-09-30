@@ -1,7 +1,0 @@
-.av-viewer { display: flex; min-height: 650px; flex-direction: column; }
-.av-viewer__stage { position: relative; display: grid; flex: 1; min-height: 520px; place-items: center; overflow: hidden; background: radial-gradient(60% 60% at 50% 45%, #2b2d30, #1b1c1e 80%); }
-.av-viewer__privacy { position: absolute; color: var(--color-muted); }
-.av-viewer__controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-height: 52px; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--color-border); }
-.av-viewer__spacer { flex: 1; }.av-viewer__hint { color: var(--color-faint); font-size: var(--text-xs); }
-.av-viewer__flat { display: flex; align-items: center; width: min(92%, 940px); height: min(62%, 430px); box-shadow: 0 10px 30px rgb(0 0 0 / 45%); }
-.av-viewer__flat-surface { position: relative; height: 100%; overflow: hidden; background: linear-gradient(135deg, #33373a, #1a1c1e 72%); }.av-viewer__flat-surface--front, .av-viewer__flat-surface--back { flex: 1; }.av-viewer__flat-surface--spine { width: 5%; min-width: 18px; }.av-viewer__flat-surface img { display: block; width: 100%; height: 100%; object-fit: cover; }
