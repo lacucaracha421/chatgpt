@@ -1,0 +1,34 @@
+{
+  "duplicateExports": [
+    "mobile-client/App.tsx#App",
+    "mobile-client/AvCollections.tsx#AvCollectionDetail",
+    "mobile-client/CharacterReviewOverview.tsx#CharacterReviewOverview",
+    "mobile-client/CollectionReleases.tsx#CollectionReleases",
+    "mobile-client/FaultGame.tsx#loadFaultPhotos",
+    "mobile-client/FilmDetails.tsx#FilmDetails",
+    "mobile-client/FolderCards.tsx#FolderShelf",
+    "mobile-client/MarkdownHelp.tsx#MarkdownHelpButton",
+    "mobile-client/NoteSecret.tsx#REVEAL_MS",
+    "mobile-client/NoteSecret.tsx#SecretEditor",
+    "mobile-client/NoteSecret.tsx#SecretGate",
+    "mobile-client/NoteSecret.tsx#copySecret",
+    "mobile-client/Notes.tsx#SECRET_IDLE_MS",
+    "mobile-client/PinIcon.tsx#PinIcon",
+    "mobile-client/ViewerInfo.tsx#sourceLabel",
+    "mobile-client/collectionReleases.ts#groupReleases",
+    "mobile-client/collectionReleases.ts#japanReleases",
+    "mobile-client/collectionReleases.ts#koreanReleases",
+    "mobile-client/collectionReleases.ts#releaseCaption",
+    "mobile-client/collectionReleases.ts#releaseLine",
+    "mobile-client/exchange.ts#timelineEntries",
+    "mobile-client/homeDashboard.ts#releaseRows",
+    "mobile-client/noteCaret.ts#caretOffset",
+    "mobile-client/noteCaret.ts#caretOffsetAtPoint"
+  ],
+  "controlClasses": [
+    "mobile-client/collectionBindings.css#.ui-dialog:has(>.bind-sheet)",
+    "mobile-client/ledger.css#.ui-dialog:has(>.ledger-sheet)",
+    "mobile-client/library.css#.ui-dialog:has(.classification-index)",
+    "mobile-client/library.css#.ui-dialog:has(>.library-sheet)"
+  ]
+}

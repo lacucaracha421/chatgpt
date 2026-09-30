@@ -278,9 +278,9 @@ describe("VideoPlayer", () => {
 
   it("cleans up the player timers when unmounted", () => {
     vi.useFakeTimers();
-    const { unmount } = render(<VideoPlayer asset={videoAsset()} rememberPosition />);
+    const { unmount } = render(<VideoPlayer asset={videoAsset()} />);
     fireEvent.play(screen.getByLabelText("sample.webm 영상"));
-    expect(vi.getTimerCount()).toBe(2);
+    expect(vi.getTimerCount()).toBe(1);
 
     unmount();
 
@@ -317,48 +317,34 @@ describe("VideoPlayer", () => {
     expect(exitFullscreen).toHaveBeenCalledOnce();
   });
 
-  it("restores library playback progress after metadata is available", async () => {
+  it("starts at zero despite old saved playback progress and never records playback", async () => {
     progressApi.get.mockResolvedValue({ positionMs: 25_000, durationMs: 100_000 });
-    render(<VideoPlayer asset={videoAsset()} rememberPosition />);
+    const { unmount } = render(<VideoPlayer asset={videoAsset()} />);
     const video = screen.getByLabelText("sample.webm 영상");
-    await waitFor(() => expect(progressApi.get).toHaveBeenCalledWith("video-1"));
-
     setMediaNumber(video, "duration", 100);
     fireEvent.loadedMetadata(video);
-
-    expect(video).toHaveProperty("currentTime", 25);
-    expect(screen.getByText("0:25 / 1:40")).toBeInTheDocument();
-  });
-
-  it("saves library playback every ten seconds, on pause, and on unmount", async () => {
-    vi.useFakeTimers();
-    const { unmount } = render(<VideoPlayer asset={videoAsset()} rememberPosition />);
+    fireEvent.durationChange(video);
     await act(async () => undefined);
-    const video = screen.getByLabelText("sample.webm 영상");
-    setMediaNumber(video, "duration", 100);
-    setMediaNumber(video, "currentTime", 12);
-    fireEvent.play(video);
 
-    act(() => vi.advanceTimersByTime(10_000));
-    expect(progressApi.save).toHaveBeenLastCalledWith("video-1", 12_000, 100_000);
-
-    setMediaNumber(video, "currentTime", 27);
-    fireEvent.pause(video);
-    expect(progressApi.save).toHaveBeenLastCalledWith("video-1", 27_000, 100_000);
-
-    setMediaNumber(video, "currentTime", 31);
-    unmount();
-    expect(progressApi.save).toHaveBeenLastCalledWith("video-1", 31_000, 100_000);
-  });
-
-  it("does not read playback progress unless asked to remember the position", () => {
-    render(<VideoPlayer asset={videoAsset()} />);
+    expect(video).toHaveProperty("currentTime", 0);
+    expect(screen.getByText("0:00 / 1:40")).toBeInTheDocument();
     expect(progressApi.get).not.toHaveBeenCalled();
+
+    vi.useFakeTimers();
+    setMediaNumber(video, "currentTime", 12);
+    fireEvent.timeUpdate(video);
+    fireEvent.play(video);
+    act(() => vi.advanceTimersByTime(10_000));
+    fireEvent.pause(video);
+    fireEvent.ended(video);
+    unmount();
+    expect(progressApi.save).not.toHaveBeenCalled();
+    expect(progressApi.clear).not.toHaveBeenCalled();
   });
 
   it("never reads or writes playback progress for vault media", () => {
     vi.useFakeTimers();
-    const { unmount } = render(<VideoPlayer asset={videoAsset()} source="vault" rememberPosition />);
+    const { unmount } = render(<VideoPlayer asset={videoAsset()} source="vault" />);
     const video = screen.getByLabelText("sample.webm 영상");
     setMediaNumber(video, "duration", 100);
     setMediaNumber(video, "currentTime", 12);

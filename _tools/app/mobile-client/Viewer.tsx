@@ -331,7 +331,6 @@ export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
           onControlsActivity={revealChrome}
           togglePlaybackOnMediaClick={false}
           scrubFrameUrlBuilder={null}
-          positionStore={null}
           mediaRef={videoRef}
           controlsList={vault?'nodownload noremoteplayback':undefined}
           disablePictureInPicture={!!vault||undefined}

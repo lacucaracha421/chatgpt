@@ -52,7 +52,7 @@ import type {LibraryArtist} from './artistsModel';
 import {CharacterBrowser} from './CharacterBrowser';
 import {FaultGame} from './FaultGame';
 import {faultCandidates} from '../src/games/fault/host';
-import {useLevelMotion,useScrollMemory,useTabMotion} from './motion';
+import {useLevelMotion,useScrollMemory} from './motion';
 import {setOutboxConnection} from './outboxConnection';
 import {usePrivacyMode} from './privacyMode';
 /** The durable outboxes follow the connection before any screen re-renders against it. */
@@ -167,7 +167,7 @@ export function App() {
   const entriesRef=useRef(entries);entriesRef.current=entries;
   const {tree:albumTree,error:albumError}=useAlbumTree(status.configured&&area==='assets'&&!settings&&!viewer&&page.view.tab==='library'&&(librarySegment==='albums'||!!page.view.album),indexRevision,status.endpoint);
   const albumTreeRef=useRef(albumTree);albumTreeRef.current=albumTree;
-  const appRef=useRef<HTMLDivElement>(null),mainRef=useRef<HTMLElement>(null),bodyRef=useRef<HTMLDivElement>(null);
+  const appRef=useRef<HTMLDivElement>(null),mainRef=useRef<HTMLElement>(null);
   const scroll = useRef(0), gate = useRef(new RequestGate()), secondaryGate = useRef(new RequestGate());
   const secondaryAt = useRef(0), secondaryPending = useRef(false), capturesRef = useRef<Asset[] | null>(captures);
   capturesRef.current = captures;
@@ -689,8 +689,7 @@ export function App() {
   };
   const libraryLevel=status.configured&&area==='assets'&&page.view.tab==='library'&&page.version>0;
   useLevelMotion(mainRef,libraryLevel?viewKey(page.view):null,libraryLevel?levelDepth(page.view):0);
-  // A committed tab switch settles the new tab's content under its still bar.
-  useTabMotion(bodyRef,area==='assets'?page.view.tab:area);
+  // Tab surfaces, including their backdrop gradients, appear at their final opacity and position.
   // Back from a Library entry opened from Home puts Home's scroll offset back once it is shown.
   // Home's cards render from their kept snapshot first, so a second try covers late growth.
   useLayoutEffect(()=>{
@@ -722,7 +721,7 @@ export function App() {
   return <div className="mobile-app" ref={appRef}>
     {/* Every configured area except Home draws its own title bar. */}
     {!(status.configured&&(area!=='assets'||page.view.tab==='library')||artistsOpen)&&<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&vaultPresent&&<IconButton label="비밀 보관함 열기" icon={LockClosedIcon} onClick={()=>setVaultOpen(true)}/>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<span className="header-action-badge"><IconButton label={exchangeLabel} icon={ArrowsUpDownIcon} onClick={()=>setExchangeOpen(true)}/>{exchangeBadge&&<span className="header-badge" aria-hidden="true">{exchangeBadge}</span>}</span>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={()=>setSettings(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>}
-    {status.configured ? <div className="app-body" ref={bodyRef} data-active-tab={area==='assets'?page.view.tab:area}>
+    {status.configured ? <div className="app-body" data-active-tab={area==='assets'?page.view.tab:area}>
       <main className="library-main" ref={mainRef} style={{display:area!=='assets'||artistsOpen?'none':undefined}}>
         {page.view.tab==='home'&&<HeaderTools active={area==='assets'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2></div></HeaderTools>}
         {assetToolbar}{revisitToolbar}

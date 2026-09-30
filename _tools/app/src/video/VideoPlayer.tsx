@@ -17,15 +17,9 @@ export const VIDEO_SEEK_STEP_SECONDS = 5;
 export type VideoPlayerHandle = { seekBy: (deltaSeconds: number) => void; togglePlayback: () => void };
 /** Longest time the pre-seek frame may cover the video if `seeked` never fires. */
 const SEEK_FREEZE_MAX_MS = 1_500;
-const PROGRESS_SAVE_INTERVAL_MS = 10_000;
 
 export type PlaybackUrlResolver = (assetId: string) => Promise<string>;
 export type ScrubFrameUrlBuilder = (assetId: string, frameIndex: number, revision?: string | null) => string;
-export type VideoPositionStore = {
-  get(assetId: string): Promise<{positionMs: number; durationMs: number} | null>;
-  save(assetId: string, positionMs: number, durationMs: number): Promise<void>;
-  clear(assetId: string): Promise<void>;
-};
 export type VideoPlayerMediaEvents = Partial<Pick<VideoHTMLAttributes<HTMLVideoElement>,
   "onAbort" | "onCanPlay" | "onDurationChange" | "onEmptied" | "onEnded" | "onError" |
   "onLoadedMetadata" | "onLoadStart" | "onPause" | "onPlay" | "onPlaying" | "onSeeked" |
@@ -35,12 +29,10 @@ export type VideoPlayerMediaEvents = Partial<Pick<VideoHTMLAttributes<HTMLVideoE
 export type VideoPlayerProps = {
   asset: VideoPlayerAsset;
   source?: "library" | "vault";
-  rememberPosition?: boolean;
   resolvePlaybackUrl?: PlaybackUrlResolver;
   /** A host-owned URL. Passing `null` deliberately leaves the media waiting for its source. */
   sourceUrl?: string | null;
   scrubFrameUrlBuilder?: ScrubFrameUrlBuilder | null;
-  positionStore?: VideoPositionStore | null;
   poster?: string;
   autoPlay?: boolean;
   loop?: boolean;
@@ -85,15 +77,8 @@ const desktopInvoke = <T,>(command: string, args: Record<string, unknown>) => {
 };
 const resolveInternalPlaybackUrl: PlaybackUrlResolver = assetId => desktopInvoke("get_internal_playback_url", {assetId});
 const resolveInternalVaultPlaybackUrl: PlaybackUrlResolver = itemId => desktopInvoke("get_internal_vault_playback_url", {itemId});
-const desktopPositionStore: VideoPositionStore = {
-  get: assetId => desktopInvoke("get_video_playback_progress", {assetId}),
-  save: (assetId, positionMs, durationMs) => desktopInvoke("save_video_playback_progress", {assetId, positionMs, durationMs}),
-  clear: assetId => desktopInvoke("clear_video_playback_progress", {assetId}),
-};
-
 /**
  * `vault` plays an encrypted Private Vault item: no scrub frames, vault routes only.
- * `rememberPosition` resumes and records the playback position (이어 보기); never for vault items.
  */
 export function VideoPlayer(props: VideoPlayerProps) {
   const vault = props.source === "vault";
@@ -103,15 +88,13 @@ export function VideoPlayer(props: VideoPlayerProps) {
     sourceUrl={hasExternalSource ? props.sourceUrl ?? null : desktopPlaybackUrl(props.asset.id, vault)}
     resolvePlaybackUrl={props.resolvePlaybackUrl ?? (vault ? resolveInternalVaultPlaybackUrl : resolveInternalPlaybackUrl)}
     scrubFrameUrlBuilder={props.scrubFrameUrlBuilder === undefined ? desktopScrubFrameUrl : props.scrubFrameUrlBuilder}
-    positionStore={props.positionStore === undefined ? desktopPositionStore : props.positionStore}
   />;
 }
 
 /** Shared player surface. Hosts provide media/platform seams, so this export has no desktop dependency. */
 export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
-  const {asset, source: mediaSource = "library", rememberPosition = false, resolvePlaybackUrl, scrubFrameUrlBuilder: buildScrubFrameUrl = null, positionStore = null, poster, autoPlay, loop, preload = "metadata", controlsList, disablePictureInPicture, controlsVisible: controlledControlsVisible, onControlsActivity, togglePlaybackOnMediaClick = true, mediaRef, mediaEvents, ref} = props;
+  const {asset, source: mediaSource = "library", resolvePlaybackUrl, scrubFrameUrlBuilder: buildScrubFrameUrl = null, poster, autoPlay, loop, preload = "metadata", controlsList, disablePictureInPicture, controlsVisible: controlledControlsVisible, onControlsActivity, togglePlaybackOnMediaClick = true, mediaRef, mediaEvents, ref} = props;
   const vault = mediaSource === "vault";
-  const untracked = vault || !rememberPosition || !positionStore;
   const rootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -131,9 +114,6 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
   const freezeTimerRef = useRef<number | null>(null);
   const [frozen, setFrozen] = useState(false);
   const frozenRef = useRef(false);
-  const savedPositionRef = useRef<number | null>(null);
-  const metadataReadyRef = useRef(false);
-  const progressTouchedRef = useRef(false);
   const controlsVisible = controlledControlsVisible ?? localControlsVisible;
 
   const setVideoRef = useCallback((element: HTMLVideoElement | null) => {
@@ -141,64 +121,6 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
     if (typeof mediaRef === "function") mediaRef(element);
     else if (mediaRef) mediaRef.current = element;
   }, [mediaRef]);
-
-  const restoreProgress = useCallback((video: HTMLVideoElement) => {
-    const position = savedPositionRef.current;
-    if (untracked || position === null || !metadataReadyRef.current) return;
-    if (progressTouchedRef.current) {
-      savedPositionRef.current = null;
-      return;
-    }
-    const limit = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : position;
-    const next = Math.max(0, Math.min(position, limit));
-    video.currentTime = next;
-    setCurrentTime(next);
-    savedPositionRef.current = null;
-  }, [untracked]);
-
-  const saveProgress = useCallback((target?: HTMLVideoElement | null) => {
-    if (untracked || !progressTouchedRef.current) return;
-    const video = target ?? videoRef.current;
-    if (!video) return;
-    if (video.ended) {
-      progressTouchedRef.current = false;
-      void positionStore?.clear(asset.id).catch(() => undefined);
-      return;
-    }
-    const position = Number.isFinite(video.currentTime) ? video.currentTime : 0;
-    const mediaDuration = Number.isFinite(video.duration) && video.duration > 0
-      ? video.duration
-      : asset.media.durationMs / 1_000;
-    if (position < 0 || !Number.isFinite(mediaDuration) || mediaDuration <= 0) return;
-    void positionStore?.save(asset.id, Math.round(position * 1_000), Math.round(mediaDuration * 1_000)).catch(() => undefined);
-  }, [asset.id, asset.media.durationMs, positionStore, untracked]);
-
-  useEffect(() => {
-    metadataReadyRef.current = false;
-    savedPositionRef.current = null;
-    progressTouchedRef.current = false;
-    if (untracked) return;
-    let active = true;
-    const video = videoRef.current;
-    void positionStore!.get(asset.id)
-      .then(progress => {
-        if (!active || !progress) return;
-        savedPositionRef.current = progress.positionMs / 1_000;
-        const video = videoRef.current;
-        if (video) restoreProgress(video);
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-      saveProgress(video);
-    };
-  }, [asset.id, positionStore, restoreProgress, saveProgress, untracked]);
-
-  useEffect(() => {
-    if (untracked || !playing) return;
-    const timer = window.setInterval(saveProgress, PROGRESS_SAVE_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [playing, saveProgress, untracked]);
 
   const clearIdleTimer = useCallback(() => {
     if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
@@ -319,7 +241,6 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
     const from = Number.isFinite(video.currentTime) ? video.currentTime : 0;
     const next = Math.max(0, limit > 0 ? Math.min(limit, from + deltaSeconds) : from + deltaSeconds);
     if (next === from) return;
-    progressTouchedRef.current = true;
     holdFrame();
     video.currentTime = next;
     setCurrentTime(next);
@@ -377,32 +298,21 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
       onAbort={mediaEvents?.onAbort}
       onEmptied={mediaEvents?.onEmptied}
       onError={mediaEvents?.onError}
-      onLoadedMetadata={(event) => {
-        metadataReadyRef.current = true;
-        restoreProgress(event.currentTarget);
-        mediaEvents?.onLoadedMetadata?.(event);
-      }}
-      onPlay={(event) => { progressTouchedRef.current = true; setPlaying(true); mediaEvents?.onPlay?.(event); }}
-      onPause={(event) => { setPlaying(false); saveProgress(); mediaEvents?.onPause?.(event); }}
+      onLoadedMetadata={mediaEvents?.onLoadedMetadata}
+      onPlay={(event) => { setPlaying(true); mediaEvents?.onPlay?.(event); }}
+      onPause={(event) => { setPlaying(false); mediaEvents?.onPause?.(event); }}
       onEnded={(event) => {
         setPlaying(false);
-        progressTouchedRef.current = false;
-        if (!untracked) void positionStore?.clear(asset.id).catch(() => undefined);
         mediaEvents?.onEnded?.(event);
       }}
       // Release only after the last of several queued seeks has landed.
       onSeeked={(event) => { if (!event.currentTarget.seeking) releaseFrame(); mediaEvents?.onSeeked?.(event); }}
       onTimeUpdate={(event) => {
-        if (event.currentTarget.currentTime > 0) progressTouchedRef.current = true;
         setCurrentTime(event.currentTarget.currentTime);
         mediaEvents?.onTimeUpdate?.(event);
       }}
       onDurationChange={(event) => {
         setDuration(event.currentTarget.duration);
-        if (event.currentTarget.readyState >= 1) {
-          metadataReadyRef.current = true;
-          restoreProgress(event.currentTarget);
-        }
         mediaEvents?.onDurationChange?.(event);
       }}
       onVolumeChange={(event) => { setMuted(event.currentTarget.muted); setVolume(event.currentTarget.volume); mediaEvents?.onVolumeChange?.(event); }}
@@ -436,7 +346,6 @@ export function VideoPlayerSurface(props: VideoPlayerSurfaceProps) {
           onChange={(event) => {
             if (!timelineAvailable) return;
             const next = Number(event.currentTarget.value);
-            progressTouchedRef.current = true;
             if (videoRef.current) { holdFrame(); videoRef.current.currentTime = next; }
             setCurrentTime(next);
             scheduleIdle();

@@ -2,8 +2,7 @@ import {useCallback,useEffect,useLayoutEffect,useRef,useState,type RefObject} fr
 
 /**
  * Motion spec (transform and opacity only, all ≤ 220 ms, nothing under reduced motion):
- * - Tab switch: the new tab's content rises 6px and fades from 0.4 in TAB_MOTION_MS. The top
- *   bar never moves, so the logo and the bar stay put while only the content settles.
+ * - Bottom-tab switches show content and its backdrop together without an entrance animation.
  * - Deeper level: the content is pushed in from 20px right (0.5 → 1) in LEVEL_MOTION_MS, and the
  *   first tiles fade in with a short stagger that ends by the same 220 ms.
  * - Shallower level: the content comes back from 20px left, without a stagger (it was retained).
@@ -12,7 +11,6 @@ import {useCallback,useEffect,useLayoutEffect,useRef,useState,type RefObject} fr
  *   the direction of the tab order (a tab further right brings it in from the right) and fades
  *   from 0.5 in SEGMENT_MOTION_MS; the tab underline glides to the new tab over the same time.
  */
-export const TAB_MOTION_MS=200;
 export const LEVEL_MOTION_MS=220;
 export const SWAP_MOTION_MS=140;
 export const SEGMENT_MOTION_MS=200;
@@ -30,10 +28,9 @@ const hidden=(element:HTMLElement)=>element.hidden||element.style.display==='non
 /**
  * The parts of a screen that move: every shown child except the top bar and floating notices.
  * A child that carries its own top bar (the Library root, a character level) is opened up one
- * level, so its bar stays still too. With nothing else to move, the host itself moves unless
- * `bareHost` is false (a tab still loading shows only its bar, which must not move).
+ * level, so its bar stays still too. With nothing else to move, the host itself moves.
  */
-export function motionParts(host:HTMLElement,bareHost=true):HTMLElement[]{
+export function motionParts(host:HTMLElement):HTMLElement[]{
   const parts:HTMLElement[]=[];
   const collect=(parent:HTMLElement,depth:number)=>{
     for(const child of Array.from(parent.children)){
@@ -43,7 +40,7 @@ export function motionParts(host:HTMLElement,bareHost=true):HTMLElement[]{
     }
   };
   collect(host,0);
-  return parts.length||!bareHost?parts:[host];
+  return parts.length?parts:[host];
 }
 
 function animateAll(parts:HTMLElement[],frames:Keyframe[],options:KeyframeAnimationOptions){
@@ -71,39 +68,23 @@ function useRunning(){
  * Callers change `key` only once the new level's data has committed, so the motion never plays
  * over stale content and nothing flashes twice. Enter-only by design: the previous level is
  * replaced at once, nothing is kept alive, and only transform and opacity move. A `null` key
- * means "no level is on screen", so the next level after it appears without motion, as after a
- * tab switch.
+ * means "no level is on screen" and cancels an unfinished entrance, so returning to a retained
+ * tab shows its content and backdrop at their final opacity and position.
  */
 export function useLevelMotion(host:RefObject<HTMLElement|null>,key:string|null,depth:number){
   const previous=useRef<{key:string|null;depth:number}|null>(null);
   const run=useRunning();
   useLayoutEffect(()=>{
     const before=previous.current;previous.current={key,depth};
+    if(key===null){run([]);return;}
     const element=host.current;
-    if(!before||before.key===null||key===null||before.key===key||!element||prefersReducedMotion())return;
+    if(!before||before.key===null||before.key===key||!element||prefersReducedMotion())return;
     const step=Math.sign(depth-before.depth);
     const parts=motionParts(element);
     run(step
       ?[...animateAll(parts,[{transform:`translateX(${step*20}px)`,opacity:.5},{transform:'none',opacity:1}],{duration:LEVEL_MOTION_MS,easing:EASE_OUT}),...(step>0?staggerTiles(element):[])]
       :animateAll(parts,[{opacity:.6},{opacity:1}],{duration:SWAP_MOTION_MS,easing:EASE_OUT}));
   },[host,key,depth]);// eslint-disable-line react-hooks/exhaustive-deps
-}
-
-/**
- * Settles the content of a newly selected tab: a 6px rise and a fade from 0.4, while the bar
- * stays still. `host` holds the tabs; the one shown is the child that is not hidden. Retained
- * tabs appear with their content already laid out, so only transform and opacity change.
- */
-export function useTabMotion(host:RefObject<HTMLElement|null>,tab:string){
-  const last=useRef(tab);
-  const run=useRunning();
-  useLayoutEffect(()=>{
-    if(last.current===tab)return;last.current=tab;
-    const element=host.current;
-    if(!element||prefersReducedMotion())return;
-    const shown=Array.from(element.children).filter((child):child is HTMLElement=>child instanceof HTMLElement&&!hidden(child));
-    run(shown.flatMap(section=>animateAll(motionParts(section,false),[{transform:'translateY(6px)',opacity:.4},{transform:'none',opacity:1}],{duration:TAB_MOTION_MS,easing:EASE_OUT})));
-  },[host,tab]);// eslint-disable-line react-hooks/exhaustive-deps
 }
 
 /**

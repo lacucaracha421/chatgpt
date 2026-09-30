@@ -5,6 +5,7 @@ import type {ExchangeSnapshot} from './exchange';
 import type {Asset, Classification} from './types';
 import type {Note} from '../src/notes/store';
 import {ApiError} from './transport';
+import {homeReadProblem} from './homeDashboard';
 import {Home, type HomeProps} from './Home';
 import {addedToday, daysAfter, memoRows, releaseRows, shelfEntries, sendingSummary, upcomingReleases} from './homeDashboard';
 import {setOutboxConnection} from './outboxConnection';
@@ -41,7 +42,7 @@ beforeEach(() => {
   mocks.loadThumbnail.mockImplementation(async (asset: Asset) => ({...asset, preview: `blob:${asset.id}`}));
   mocks.native.mockImplementation(async (op: string) => op === 'notesState' ? {unlocked: true, notes, lastSyncedAt: null} : op === 'exchangeThumbnail' ? {url: 'blob:received'} : {url: 'https://example.invalid/cover', expires_in: 300});
   mocks.api.mockImplementation(async (path: string, _signal?: AbortSignal, body?: unknown, method?: string) => {
-    if (server.offline) throw new ApiError('offline', null, null);
+    if (server.offline) throw new ApiError('서버에 연결할 수 없습니다. 주소와 네트워크를 확인해 주세요.', null, null);
     if (path.startsWith('/v1/library/similarity/review')) return {ready: true, counts: {open: 6}};
     if (path.startsWith('/v1/mobile-catalog/duplicates')) return {counts: {undecided: 2}};
     if (path.startsWith('/v1/collections/releases')) return releaseReply;
@@ -319,14 +320,14 @@ describe('Home A', () => {
     expect(await screen.findByRole('button', {name: '관심 목록에 추가'})).toBeTruthy();
     expect(within(screen.getByRole('region', {name: '캘린더', hidden: true})).queryByRole('button', {name: /Hades II/, hidden: true})).toBeNull();
   });
-  it('hides the AV card for privacy mode and for an unavailable pick', async () => {
+  it('hides the AV card for privacy and retains its place for an unavailable pick', async () => {
     localStorage.setItem('lakomics.mobile.privacyMode', '1');
     render(<Home {...props()}/>);
     expect(screen.queryByRole('region', {name: 'AV 배우'})).toBeNull();
     expect(screen.getByRole('region', {name: '검토'})).toBeTruthy();
     cleanup(); localStorage.clear(); server.avPick = 404;
     render(<Home {...props()}/>);
-    await waitFor(() => expect(screen.queryByRole('region', {name: 'AV 배우'})).toBeNull());
+    await within(screen.getByRole('region', {name: 'AV 배우'})).findByText('배우 없음');
     expect(screen.getByRole('region', {name: '검토'})).toBeTruthy();
   });
   it('renders the four asset counters even when the summary is unavailable', async () => {
@@ -438,4 +439,60 @@ describe('Home A', () => {
       else delete (window as Partial<Window>).matchMedia;
     }
   });
+});
+
+
+describe('Home error regressions', () => {
+  it('settles an offline AV read in place and recovers on retry', async () => {
+    server.offline = true;
+    render(<Home {...props()}/>);
+    const av = screen.getByRole('region', {name: 'AV 배우'});
+    expect(await within(av).findByRole('button', {name: '다시 시도'})).toBeTruthy();
+    expect(within(av).queryByLabelText('오늘의 AV 배우 불러오는 중')).toBeNull();
+    server.offline = false;
+    fireEvent.click(within(av).getByRole('button', {name: '다시 시도'}));
+    expect((await within(av).findAllByText('라라')).length).toBeGreaterThan(0);
+  });
+
+  it('retains the AV column on a 404 day', async () => {
+    server.avPick = 404;
+    render(<Home {...props()}/>);
+    const av = screen.getByRole('region', {name: 'AV 배우'});
+    expect(await within(av).findByText('배우 없음')).toBeTruthy();
+    expect(av.closest('.home-review-duo')?.classList.contains('is-review-wide')).toBe(false);
+    expect(within(av).queryByLabelText('오늘의 AV 배우 불러오는 중')).toBeNull();
+  });
+
+  it.each([new SyntaxError('bad JSON'), new ApiError('proxy', 502, null)])('reports %s as a server problem, retaining errors from slower sources', async reason => {
+    const original = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path, ...args) => typeof path === 'string' && path.startsWith('/v1/library/summary?') ? Promise.reject(reason) : original(path, ...args));
+    render(<Home {...props()}/>);
+    expect(await screen.findByText('서버가 요청을 처리하지 못했습니다.')).toBeTruthy();
+    expect(screen.queryByText(/서버에 닿지 않음/)).toBeNull();
+    expect(screen.getAllByRole('button', {name: '다시 시도'}).length).toBeGreaterThan(0);
+  });
+});
+
+it('keeps the shown AV pick during a failed refresh and offers retry in that section', async () => {
+  const original = mocks.api.getMockImplementation()!;
+  render(<Home {...props()}/>);
+  const av = screen.getByRole('region', {name: 'AV 배우'});
+  await within(av).findAllByText('라라');
+  mocks.api.mockImplementation((path, ...args) => path === '/v1/home/av-pick' ? Promise.reject(new ApiError('proxy', 503, null)) : original(path, ...args));
+  window.dispatchEvent(new CustomEvent('lakomics-sync-signals', {detail: {live: true, signals: {avPick: 'changed'}}}));
+  expect(await within(av).findByRole('button', {name: '다시 시도'})).toBeTruthy();
+  expect(within(av).getAllByText('라라').length).toBeGreaterThan(0);
+  expect(av.querySelector('.home-today-av')?.hasAttribute('inert')).toBe(true);
+  mocks.api.mockImplementation(original);
+  fireEvent.click(within(av).getByRole('button', {name: '다시 시도'}));
+  await waitFor(() => expect(within(av).queryByRole('button', {name: '다시 시도'})).toBeNull());
+});
+
+it('recognizes native connectivity failures without misclassifying malformed replies or cancellation', () => {
+  expect(homeReadProblem(new ApiError('서버에 연결할 수 없습니다. 주소와 네트워크를 확인해 주세요.', null, null))).toBe('offline');
+  expect(homeReadProblem(new Error('연결 시간이 초과되었습니다. 다시 시도해 주세요.'))).toBe('offline');
+  expect(homeReadProblem(new ApiError('요청에 실패했습니다. 연결 상태를 확인하고 다시 시도해 주세요.', null, null))).toBe('server');
+  expect(homeReadProblem(new SyntaxError('invalid JSON'))).toBe('server');
+  expect(homeReadProblem(new ApiError('proxy', 503, null))).toBe('server');
+  expect(homeReadProblem(new DOMException('cancelled', 'AbortError'))).toBeNull();
 });

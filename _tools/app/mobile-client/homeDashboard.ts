@@ -349,13 +349,25 @@ export function useHomeUpcoming(enabled: boolean, scope: string, forceKey?: unkn
 }
 
 export function useHomeAvPick(enabled: boolean, scope: string, forceKey?: unknown) {
-  return useCachedHomeSource<AvPick | null | undefined>({
+  const [failure, setFailure] = useState<string | null>(null);
+  const pick = useCachedHomeSource<AvPick | null | undefined>({
     enabled, scope, source: 'avPick', signalKey: 'avPick', initial: undefined, forceKey,
     read: async signal => {
-      try { return (await api<AvPickReply>('/v1/home/av-pick', signal))?.pick ?? null; }
-      catch (reason) { if ((reason as {status?: number})?.status === 404) return null; throw reason; }
+      try {
+        const reply = await api<AvPickReply>('/v1/home/av-pick', signal);
+        if (!signal.aborted) setFailure(null);
+        return reply?.pick ?? null;
+      } catch (reason) {
+        if (reason instanceof ApiError && reason.status === 404) {
+          if (!signal.aborted) setFailure(null);
+          return null;
+        }
+        throw reason;
+      }
     },
+    onError: () => setFailure(scope),
   });
+  return {pick, error: failure === scope};
 }
 
 export function useHomeArtists(enabled: boolean, scope: string, forceKey?: unknown) {
@@ -406,7 +418,16 @@ export function rememberHomeValues(scope: string, fresh: {counts: Partial<Record
 /** A request failure that means "cannot reach the server" rather than a server answer. */
 export function isOffline(reason: unknown) {
   if (reason instanceof DOMException && reason.name === 'AbortError') return false;
-  return reason instanceof ApiError ? reason.status === null : true;
+  // Android distinguishes DNS/connect failures and timeouts in these sanitized messages.
+  // A missing HTTP status alone also includes malformed JSON and local bridge failures.
+  return reason instanceof Error && (!(reason instanceof ApiError) || reason.status === null)
+    && (reason.message === '서버에 연결할 수 없습니다. 주소와 네트워크를 확인해 주세요.'
+      || reason.message === '연결 시간이 초과되었습니다. 다시 시도해 주세요.');
+}
+
+export function homeReadProblem(reason: unknown): 'offline' | 'server' | null {
+  if (reason instanceof DOMException && reason.name === 'AbortError') return null;
+  return isOffline(reason) ? 'offline' : 'server';
 }
 
 export type HomeDashboardInput = {
@@ -417,21 +438,30 @@ export type HomeDashboardInput = {
 };
 export function useHomeDashboard({enabled, scope, pending, similarityKey, exchange}: HomeDashboardInput) {
   const [refreshKey, setRefreshKey] = useState(0);
-  const [unreachable, setUnreachable] = useState(false);
-  const fail = (reason: unknown) => { if (isOffline(reason)) setUnreachable(true); };
+  const [problems, setProblems] = useState<Record<string, 'offline' | 'server'>>({});
+  useEffect(() => setProblems({}), [scope]);
+  const result = (source: string, reason?: unknown) => {
+    const problem = reason === undefined ? null : homeReadProblem(reason);
+    setProblems(previous => {
+      if (previous[source] === problem || (!problem && !previous[source])) return previous;
+      const next = {...previous};
+      if (problem) next[source] = problem; else delete next[source];
+      return next;
+    });
+  };
   const similar = useSimilarityReviewCount(enabled, similarityKey, scope, refreshKey);
   const duplicates = useDuplicateCount(enabled, scope, refreshKey);
   const counts = useCachedHomeSource<ReleaseCounts | null>({
     enabled, scope, source: 'releaseCounts', signalKey: 'releases', initial: null, forceKey: refreshKey,
-    read: async signal => { const reply = await api<unknown>(RELEASE_COUNTS_PATH, signal); setUnreachable(false); return reply ? releaseCounts(reply) : NO_RELEASES; }, onError: fail,
+    read: async signal => { const reply = await api<unknown>(RELEASE_COUNTS_PATH, signal); if (!signal.aborted) result('releases'); return reply ? releaseCounts(reply) : NO_RELEASES; }, onError: reason => result('releases', reason),
   });
   const collectionRevision = useCachedHomeSource<string | null>({
     enabled, scope, source: 'collectionsStatus', signalKey: 'collections', initial: null, forceKey: refreshKey,
-    read: async signal => { const reply = await api<{revision?: string | null}>('/v1/collections/status', signal); setUnreachable(false); return reply?.revision ?? null; }, onError: fail,
+    read: async signal => { const reply = await api<{revision?: string | null}>('/v1/collections/status', signal); if (!signal.aborted) result('collections'); return reply?.revision ?? null; }, onError: reason => result('collections', reason),
   });
   const summary = useCachedHomeSource<LibrarySummary | null | undefined>({
     enabled, scope, source: 'summary', signalKey: 'listGeneration', initial: undefined, forceKey: refreshKey,
-    read: async signal => { const reply = await fetchLibrarySummary(signal); setUnreachable(false); return reply; }, onError: fail,
+    read: async signal => { const reply = await fetchLibrarySummary(signal); if (!signal.aborted) result('summary'); return reply; }, onError: reason => result('summary', reason),
   });
   const catalogJob = useCachedHomeSource<RefreshJob | null>({
     enabled, scope, source: 'catalogJob', signalKey: 'catalog', initial: null, forceKey: refreshKey,
@@ -455,11 +485,12 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
   useEffect(() => {
     if (!enabled || currentShelf()) return;
     const controller = new AbortController();
-    void loadShelf(controller.signal).catch(reason => { if (!controller.signal.aborted && isOffline(reason)) setUnreachable(true); });
+    void loadShelf(controller.signal).then(() => { if (!controller.signal.aborted) result('shelf'); }, reason => { if (!controller.signal.aborted) result('shelf', reason); });
     return () => controller.abort();
   }, [enabled, epoch]);
 
-  const offline = !online || unreachable;
+  const offline = !online || Object.values(problems).includes('offline');
+  const serverProblem = Object.values(problems).includes('server');
   const live: Record<TodoKey, number | null> = {pending, character: null, similar, duplicates};
   const releases = counts && shelf ? releaseRows(shelf, counts) : null;
   const upcoming = shelf ? upcomingReleases(shelf) : null;
@@ -494,10 +525,11 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
     /** The server answered without a summary route: count the first page instead. */
     summaryUnsupported: summary === null && !offline,
     /** Re-check now (the offline notice's 다시 연결). */
-    retry: () => { invalidateReleases(); setOnline(typeof navigator === 'undefined' || navigator.onLine !== false); setUnreachable(false); setRefreshKey(key => key + 1); },
+    retry: () => { invalidateReleases(); setOnline(typeof navigator === 'undefined' || navigator.onLine !== false); setRefreshKey(key => key + 1); },
     probe: refreshKey,
     refreshKey,
     offline,
+    serverProblem,
     /** When the values shown offline were last fresh. */
     since: kept.length ? Math.max(...kept) : null,
   };

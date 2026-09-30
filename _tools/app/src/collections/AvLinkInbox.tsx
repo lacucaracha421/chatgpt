@@ -64,26 +64,29 @@ export function useAvLinkPendingCount({ enabled = true, refreshVersion = 0, api 
   refreshVersion?: number;
   api?: AvLinkApi;
 }) {
-  const [count, setCount] = useState(0);
-  const refresh = useCallback(async () => {
-    if (!enabled) return;
-    try { setCount(await api.pendingCount()); } catch { /* A missing library keeps this pointer quiet. */ }
-  }, [api, enabled]);
+  const [count, setCount] = useState<number | null>(null);
   useEffect(() => {
-    if (!enabled) { setCount(0); return; }
+    if (!enabled) return;
+    let live = true;
+    let request = 0;
+    const refresh = async () => {
+      const version = ++request;
+      try {
+        const next = await api.pendingCount();
+        if (live && version === request) setCount(next);
+      } catch { if (live && version === request) setCount(value => value ?? 0); }
+    };
     void refresh();
-  }, [enabled, refresh, refreshVersion]);
-  useEffect(() => {
-    if (!enabled) return;
     const visibleRefresh = () => { if (document.visibilityState !== "hidden") void refresh(); };
     window.addEventListener("focus", visibleRefresh);
     document.addEventListener("visibilitychange", visibleRefresh);
     return () => {
+      live = false;
       window.removeEventListener("focus", visibleRefresh);
       document.removeEventListener("visibilitychange", visibleRefresh);
     };
-  }, [enabled, refresh]);
-  return count;
+  }, [api, enabled, refreshVersion]);
+  return enabled ? count : 0;
 }
 
 export function AvLinkInbox({ items, collections, api = avLinkClient, error, onRefresh, onCollectionsChanged }: {

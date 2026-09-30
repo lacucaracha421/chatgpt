@@ -108,7 +108,7 @@ export type CloudBackfillProgress = {
 export type HomeOverview = {
   assets: { total: number; today: number; week: number; images: number; videos: number };
   collections: Record<CollectionType, number>;
-  tagger: { total: number; recommendation: number; veto: number };
+  tagger: { total: number; recommendation: number; veto: number } | null;
   avPerformer: {
     id: string;
     displayName: string;
@@ -119,7 +119,8 @@ export type HomeOverview = {
     recentOwnedWorks: HomeAvWork[];
     portrait: AvPortrait | null;
   } | null;
-  server: { configured: boolean; live: boolean; confirmedAt: string | null; capturesPending: number | null };
+  server: { configured: boolean; live: boolean; confirmedAt: string | null; capturesPending: number | null } | null;
+  failed: ("tagger" | "avPerformer" | "server")[];
 };
 
 export type HomeAvWork = {
@@ -251,31 +252,6 @@ export type RemoteReadingProgress = CatalogWorkIdentity & {
   lastPage: number;
   pageCount: number;
   lastReadAt: string;
-};
-
-export type MangaReadingProgress = {
-  seriesId: string;
-  lastPage: number;
-  pageCount: number;
-  updatedAt: string;
-};
-
-export type VideoPlaybackProgress = {
-  assetId: string;
-  positionMs: number;
-  durationMs: number;
-  updatedAt: string;
-};
-
-export type ContinueItem = {
-  kind: "manga" | "online" | "video";
-  id: string;
-  provider: CatalogProvider | null;
-  title: string | null;
-  thumbnailRevision: string | null;
-  position: number;
-  total: number;
-  updatedAt: string;
 };
 
 export type AvFavoritePerformer = {
@@ -1395,13 +1371,6 @@ export interface LibraryGateway {
   resolveOnlineCatalogWork(identity: CatalogWorkIdentity): Promise<ResolvedGallery>;
   getRemoteReadingProgress(identity: CatalogWorkIdentity): Promise<RemoteReadingProgress | null>;
   saveRemoteReadingProgress(progress: RemoteReadingProgress): Promise<void>;
-  getMangaReadingProgress?(seriesId: string): Promise<MangaReadingProgress | null>;
-  saveMangaReadingProgress?(seriesId: string, lastPage: number, pageCount: number): Promise<void>;
-  clearMangaReadingProgress?(seriesId: string): Promise<void>;
-  getVideoPlaybackProgress?(assetId: string): Promise<VideoPlaybackProgress | null>;
-  saveVideoPlaybackProgress?(assetId: string, positionMs: number, durationMs: number): Promise<void>;
-  clearVideoPlaybackProgress?(assetId: string): Promise<void>;
-  listContinueItems?(limit: number): Promise<ContinueItem[]>;
   setAvFavorite?(personId: string, favorite: boolean): Promise<void>;
   listAvFavorites?(): Promise<AvFavoritePerformer[]>;
   clearRemoteMangaCache(): Promise<void>;

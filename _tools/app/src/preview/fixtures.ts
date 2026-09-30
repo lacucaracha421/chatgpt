@@ -243,12 +243,8 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     }
     case "list_auto_tag_vocabulary": return [{ tag: "1girl", category: "general", count: 184 }, { tag: "original", category: "copyright", count: 91 }, { tag: "warm_light", category: "general", count: 73 }];
     case "get_auto_tag_import_summary": return { model: "preview-tagger", importedAt: "2026-09-28T04:00:00.000Z", sourceName: "preview.sqlite", taggedAssets: 218, tagRows: 1280, skippedAssets: 4 };
-    case "get_home_overview": return { assets: { total: 300, today: 30, week: 180, images: 283, videos: 17 }, collections: { game: 12, manga: 12, movie: 12, av: 12 }, tagger: { total: 6, recommendation: 4, veto: 2 }, avPerformer: null, server: { configured: true, live: true, confirmedAt: "2026-09-29T06:00:00.000Z", capturesPending: 3 } };
+    case "get_home_overview": return { failed: [], assets: { total: 300, today: 30, week: 180, images: 283, videos: 17 }, collections: { game: 12, manga: 12, movie: 12, av: 12 }, tagger: { total: 6, recommendation: 4, veto: 2 }, avPerformer: null, server: { configured: true, live: true, confirmedAt: "2026-09-29T06:00:00.000Z", capturesPending: 3 } };
     case "get_revisit_slate": return { localDate: "2026-09-29", createdAt: "2026-09-29T00:00:00.000Z", revision: 1, bundles: [{ id: "revisit-date", kind: "date", title: "1년 전 오늘", reason: "지난해 오늘 저장한 그림", assetIds: previewAssets.slice(80, 88).map(asset => asset.id), revision: 1 }] };
-    case "list_continue_items": return [
-      { kind: "manga", id: "manga-1", provider: null, title: "해질녘의 기록", thumbnailRevision: null, position: 34, total: 148, updatedAt: "2026-09-29T05:00:00.000Z" },
-      { kind: "video", id: "asset-017", provider: null, title: "작업 과정", thumbnailRevision: "preview-17", position: 42_000, total: 92_000, updatedAt: "2026-09-28T18:00:00.000Z" },
-    ];
     case "list_av_favorites": return [];
     case "get_artist_overview": return { settings: { mainMinCount: 10, recentMinCount: 3, recentDays: 30 }, total: previewArtists.length, main: 7, other: 2, twoToFour: 1, single: 0, hidden: 0, reposter: 1, styleSuggestionCount: 4, unknownNone: 12, unknownSource: 7, mergeSuggestions: 1, sourceFillable: 7, pinned: previewArtists.filter(artist => artist.pinned) };
     case "list_artists": {
@@ -316,7 +312,6 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "get_other_machine_manga_root": return null;
     case "scan_manga": return 0;
     case "list_manga_series": return Array.from({ length: 18 }, (_, index) => ({ id: `manga-${index + 1}`, title: ["해질녘의 기록", "유리별", "작은 정원", "비 오는 오후", "그 여름의 지도", "달빛 우체국"][index % 6] + (index > 5 ? ` ${Math.floor(index / 6) + 1}` : ""), author: creatorNames[index % creatorNames.length]!, galleryId: String(9000 + index), pageCount: 80 + index * 7 }));
-    case "get_manga_reading_progress": return null;
     case "get_online_catalog_status": return { installed: true, workCount: 24863, updateEnabled: true, updateIntervalSeconds: 86400, lastAttemptAt: "2026-09-29T03:00:00.000Z", lastSuccessAt: "2026-09-29T03:00:00.000Z", lastAdded: 28, lastError: null, streams: [{ provider: "kHentai", language: "korean", hasState: true, initialComplete: true, watermark: 24863, cursor: 1, pendingMax: 0, lastAttemptAt: "2026-09-29T03:00:00.000Z", lastProgressAt: "2026-09-29T03:00:00.000Z", lastCompletedAt: "2026-09-29T03:00:00.000Z", lastAdded: 28, lastError: null }, { provider: "kHentai", language: "japanese", hasState: true, initialComplete: true, watermark: 12000, cursor: 1, pendingMax: 0, lastAttemptAt: "2026-09-28T03:00:00.000Z", lastProgressAt: "2026-09-28T03:00:00.000Z", lastCompletedAt: "2026-09-28T03:00:00.000Z", lastAdded: 12, lastError: null }] };
     case "run_due_online_catalog_update": return null;
     case "search_catalog_groups": {
@@ -364,7 +359,6 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "list_trash": return { items: [], nextCursor: null, totalCount: 4, totalBytes: 8_400_000 };
     case "get_trash_policy": return { retentionDays: 30 };
     case "prepare_pending_videos": return { processed: 0, remaining: 0, failed: 0, changedAssetIds: [] };
-    case "get_video_playback_progress": return null;
     case "get_internal_playback_url": return `/preview-media/playback/${encodeURIComponent(String(args.assetId ?? "preview"))}`;
     case "get_internal_vault_playback_url": return `/preview-media/vault-playback/${encodeURIComponent(String(args.itemId ?? "preview"))}`;
     case "get_auto_tag_inbox": return { folder: "/preview/inbox", applyTaggerReview: true, last: null };

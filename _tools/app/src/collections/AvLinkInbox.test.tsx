@@ -1,7 +1,7 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AvLinkInbox, type AvLinkApi } from "./AvLinkInbox";
+import { AvLinkInbox, useAvLinkPendingCount, type AvLinkApi } from "./AvLinkInbox";
 import type { AvLinkInboxItem } from "./avLinkClient";
 
 const item = (id: string, status: AvLinkInboxItem["status"], extra: Partial<AvLinkInboxItem> = {}): AvLinkInboxItem => ({
@@ -48,4 +48,28 @@ describe("AvLinkInbox", () => {
     expect(client.dismiss).toHaveBeenCalledWith("found");
     expect(refresh).toHaveBeenCalledTimes(3);
   });
+});
+
+it("ignores a pending count after privacy is enabled, including a later re-enable", async () => {
+  let resolve!: (value: number) => void;
+  const client = api({pendingCount: vi.fn().mockReturnValueOnce(new Promise<number>(yes => { resolve = yes; })).mockResolvedValue(2)});
+  const {result, rerender} = renderHook(({enabled}) => useAvLinkPendingCount({enabled, api: client}), {initialProps: {enabled: true}});
+  rerender({enabled: false});
+  await act(async () => { resolve(9); });
+  expect(result.current).toBe(0);
+  rerender({enabled: true});
+  await act(async () => {});
+  expect(result.current).toBe(2);
+});
+
+it("ignores an older pending count even after privacy is turned off again", async () => {
+  let resolve!: (value: number) => void;
+  const client = api({pendingCount: vi.fn().mockReturnValueOnce(new Promise<number>(yes => { resolve = yes; })).mockResolvedValue(2)});
+  const {result, rerender} = renderHook(({enabled}) => useAvLinkPendingCount({enabled, api: client}), {initialProps: {enabled: true}});
+  rerender({enabled: false});
+  rerender({enabled: true});
+  await act(async () => {});
+  expect(result.current).toBe(2);
+  await act(async () => { resolve(9); });
+  expect(result.current).toBe(2);
 });

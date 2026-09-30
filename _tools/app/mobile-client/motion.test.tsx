@@ -2,7 +2,7 @@ import {useRef,type CSSProperties} from 'react';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {cleanup,render} from '@testing-library/react';
 import {act} from 'react';
-import {PROGRESS_DELAY_MS,PROGRESS_FADE_MS,PROGRESS_MIN_MS,SEGMENT_MOTION_MS,useDelayedPresence,useLevelMotion,useScrollMemory,useSegmentMotion,useTabIndicator,useTabMotion} from './motion';
+import {PROGRESS_DELAY_MS,PROGRESS_FADE_MS,PROGRESS_MIN_MS,SEGMENT_MOTION_MS,useDelayedPresence,useLevelMotion,useScrollMemory,useSegmentMotion,useTabIndicator} from './motion';
 import {BarProgress} from './TopBar';
 
 function Level({levelKey,depth}:{levelKey:string|null;depth:number}){const host=useRef<HTMLDivElement>(null);useLevelMotion(host,levelKey,depth);return <div ref={host} data-testid="level"/>;}
@@ -34,6 +34,17 @@ it('does not move after a tab switch or when reduced motion is requested',()=>{
   view.rerender(<Level levelKey="deeper" depth={2}/>);
   expect(animate).not.toHaveBeenCalled();
 });
+it('cancels an unfinished level entrance when its tab is hidden, before showing it again',()=>{
+  const cancel=vi.fn();
+  animate.mockReturnValue({cancel});
+  const view=render(<Level levelKey="root" depth={0}/>);
+  view.rerender(<Level levelKey="folder" depth={1}/>);
+  expect(animate).toHaveBeenCalledTimes(1);
+  view.rerender(<Level levelKey={null} depth={1}/>);
+  expect(cancel).toHaveBeenCalledTimes(1);
+  view.rerender(<Level levelKey="folder" depth={1}/>);
+  expect(animate).toHaveBeenCalledTimes(1);
+});
 
 function Tabs({tab}:{tab:string}){const host=useRef<HTMLDivElement>(null);useScrollMemory(host,tab);return <div ref={host}><div data-testid="list" style={{display:tab==='a'?undefined:'none'}}/></div>;}
 it('puts a retained tab back where it was when the tab returns',()=>{
@@ -62,29 +73,6 @@ it('moves the content under a still bar and staggers the first tiles only on a d
   animate.mockClear();
   view.rerender(<Screen levelKey="root" depth={0}/>);
   expect(animate).toHaveBeenCalledTimes(1);
-});
-
-function TabHost({tab}:{tab:string}){const host=useRef<HTMLDivElement>(null);useTabMotion(host,tab);return <div ref={host}>
-  <section data-testid="a" style={{display:tab==='a'?undefined:'none'}}><header className="top-bar"/><div data-testid="a-content"/></section>
-  <section data-testid="b" style={{display:tab==='b'?undefined:'none'}}><header className="top-bar"/><div data-testid="b-content"/></section>
-</div>;}
-it('settles only the shown tab\'s content on a tab switch, and nothing under reduced motion',()=>{
-  const view=render(<TabHost tab="a"/>);
-  expect(animate).not.toHaveBeenCalled();
-  view.rerender(<TabHost tab="b"/>);
-  expect(animate).toHaveBeenCalledTimes(1);
-  expect(animate.mock.contexts[0]).toBe(view.getByTestId('b-content'));
-  expect(firstFrame(0).transform).toBe('translateY(6px)');
-  expect((animate.mock.calls[0][1] as KeyframeAnimationOptions).duration).toBeLessThanOrEqual(220);
-  reduced(true);
-  view.rerender(<TabHost tab="a"/>);
-  expect(animate).toHaveBeenCalledTimes(1);
-});
-it('leaves a tab that still shows only its bar alone',()=>{
-  function Loading({tab}:{tab:string}){const host=useRef<HTMLDivElement>(null);useTabMotion(host,tab);return <div ref={host}><section style={{display:tab==='a'?undefined:'none'}}><header className="top-bar"/></section></div>;}
-  const view=render(<Loading tab="b"/>);
-  view.rerender(<Loading tab="a"/>);
-  expect(animate).not.toHaveBeenCalled();
 });
 
 function Segment({segment,index}:{segment:string|null;index:number}){const host=useRef<HTMLDivElement>(null);useSegmentMotion(host,segment,index);return <div ref={host} data-testid="segment"/>;}

@@ -69,31 +69,8 @@ describe("MangaViewer", () => {
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={onClose} />);
     await screen.findByText("1 / 60");
     await user.click(screen.getByRole("button", { name: "망가 뷰어 닫기" }));
-    expect(progressApi.save).toHaveBeenCalledWith("s1", 1, 60);
-    expect(onClose).toHaveBeenCalledOnce();
-  });
-
-  it("saves the resumed page on close even when the page did not change", async () => {
-    progressApi.get.mockResolvedValue({ lastPage: 18, pageCount: 60 });
-    const onClose = vi.fn();
-    render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={onClose} />);
-    await screen.findByText("18 / 60");
-
-    fireEvent.click(screen.getByRole("button", { name: "망가 뷰어 닫기" }));
-
-    expect(progressApi.save).toHaveBeenCalledOnce();
-    expect(progressApi.save).toHaveBeenCalledWith("s1", 18, 60);
-    expect(onClose).toHaveBeenCalledOnce();
-  });
-
-  it("does not overwrite saved progress when loading it failed and the page did not change", async () => {
-    progressApi.get.mockRejectedValue(new Error("temporarily unavailable"));
-    render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
-
-    await screen.findByText("1 / 60");
-    fireEvent.click(screen.getByRole("button", { name: "망가 뷰어 닫기" }));
-
     expect(progressApi.save).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("toggles spread mode with the button and shows two pages", async () => {
@@ -138,36 +115,31 @@ describe("MangaViewer", () => {
     expect(preloads[0]).toHaveAttribute("src", expect.stringContaining("/manga-page/s1/2"));
   });
 
-  it("waits for saved progress and starts on that page without rendering page one first", async () => {
-    let resolveProgress!: (value: { lastPage: number; pageCount: number }) => void;
-    progressApi.get.mockReturnValue(new Promise(resolve => { resolveProgress = resolve; }));
-    render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
+  it("opens immediately at page one despite old saved progress and never records pages", async () => {
+    progressApi.get.mockResolvedValue({ lastPage: 18, pageCount: 60 });
+    const onClose = vi.fn();
+    const { unmount } = render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={onClose} />);
 
-    expect(screen.queryByRole("heading", { name: "T" })).not.toBeInTheDocument();
-    await act(async () => resolveProgress({ lastPage: 18, pageCount: 60 }));
-
-    expect(await screen.findByText("18 / 60")).toBeVisible();
-    expect(screen.queryByText("1 / 60")).not.toBeInTheDocument();
+    expect(screen.getByText("1 / 60")).toBeVisible();
+    await act(async () => undefined);
+    expect(progressApi.get).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
+    expect(screen.getByText("2 / 60")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "망가 뷰어 닫기" }));
+    unmount();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(progressApi.save).not.toHaveBeenCalled();
   });
 
-  it("debounces page saves and flushes the latest page before closing", async () => {
-    vi.useFakeTimers();
-    const onClose = vi.fn();
-    render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={onClose} />);
-    await act(async () => undefined);
+  it("starts a different series at page one when the viewer stays mounted", () => {
+    const { rerender } = render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
-    fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
+    expect(screen.getByText("2 / 60")).toBeVisible();
 
+    rerender(<MangaViewer seriesId="s2" galleryId={null} title="Other" pageCount={20} onClose={vi.fn()} />);
+    expect(screen.getByText("1 / 20")).toBeVisible();
+    expect(progressApi.get).not.toHaveBeenCalled();
     expect(progressApi.save).not.toHaveBeenCalled();
-    act(() => vi.advanceTimersByTime(999));
-    expect(progressApi.save).not.toHaveBeenCalled();
-    act(() => vi.advanceTimersByTime(1));
-    expect(progressApi.save).toHaveBeenLastCalledWith("s1", 3, 60);
-
-    fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
-    fireEvent.click(screen.getByRole("button", { name: "망가 뷰어 닫기" }));
-    expect(progressApi.save).toHaveBeenLastCalledWith("s1", 4, 60);
-    expect(onClose).toHaveBeenCalledOnce();
   });
 });
 

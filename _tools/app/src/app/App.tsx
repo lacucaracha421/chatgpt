@@ -43,7 +43,7 @@ import {
   selectLibraryFolder,
   type FolderPicker,
 } from "../library/LibrarySetup";
-import type { AlbumEntry, AssetSort, AssetSummary, AssetView, ClassificationEntry, CloudCaptureSyncResult, CollectionSummary, ContinueItem, IngestOutcome, LibraryGateway } from "../library/types";
+import type { AlbumEntry, AssetSort, AssetSummary, AssetView, ClassificationEntry, CloudCaptureSyncResult, CollectionSummary, IngestOutcome, LibraryGateway } from "../library/types";
 import {
   loadUiPreferences,
   saveUiPreferences,
@@ -859,11 +859,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 ) : view.kind === "home" ? (
                   <HomeView collections={collections} reviewCount={reviewCount} unsortedCount={unsortedCount} trashCount={trashCount}
                     refreshVersion={assetRefresh} onNavigate={(next) => navigateView(next, { fromHome: true })} onOpenAsset={(assetId) => void openExisting(assetId, { fromHome: true })}
-                    onOpenContinue={(item: ContinueItem) => {
-                      if (item.kind === "video") void openExisting(item.id, { fromHome: true });
-                      else if (item.kind === "manga") setMangaViewer({ seriesId: item.id, title: item.title ?? "망가", pageCount: item.total, galleryId: null });
-                      else navigateView({ kind: "manga" }, { fromHome: true });
-                    }} onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}
+                    onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}
                     characters={characterHub.targets} classifications={entries} />
                 ) : view.kind === "notes" ? <NotesView noteId={view.noteId} /> : view.kind === "exchange" ? <ExchangeView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
                   <SettingsView

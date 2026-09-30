@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetReleaseDataForTests } from "../collections/releaseData";
@@ -57,8 +57,8 @@ function title(id: string, name: string, kind: "game" | "movie", date: string, e
     date, precision: "exact", region: null, popularity: 0, dates: [], source: "calendar", addedAt: "2026-09-01", muted: false, lastCheckedAt: null, nextCheckAt: null,
     released: false, unread: [], ...extra };
 }
-const overview = (assets: Pick<HomeOverview["assets"], "total" | "today" | "week"> & Partial<HomeOverview["assets"]>, server: Partial<HomeOverview["server"]> = {}, extra: Partial<HomeOverview> = {}): HomeOverview =>
-  ({ assets: { images: assets.total, videos: 0, ...assets }, collections: { game: 0, manga: 0, movie: 0, av: 0 },
+const overview = (assets: Pick<HomeOverview["assets"], "total" | "today" | "week"> & Partial<HomeOverview["assets"]>, server: Partial<NonNullable<HomeOverview["server"]>> = {}, extra: Partial<HomeOverview> = {}): HomeOverview =>
+  ({ failed: [], assets: { images: assets.total, videos: 0, ...assets }, collections: { game: 0, manga: 0, movie: 0, av: 0 },
     tagger: { total: 0, recommendation: 0, veto: 0 }, avPerformer: null,
     server: { configured: true, live: true, confirmedAt: iso(14, 30), capturesPending: 0, ...server }, ...extra });
 const healthy: AuthoritySyncHealth = {
@@ -112,16 +112,18 @@ afterEach(() => {
 });
 
 describe("HomeView", () => {
-  it("renders 이어 보기 items and opens the selected item", async () => {
-    const item = { kind: "manga" as const, id: "manga-1", provider: null, title: "던전밥", thumbnailRevision: null, position: 112, total: 196, updatedAt: iso(13) };
-    gateway.listContinueItems.mockResolvedValue([item]);
-    const onOpenContinue = vi.fn();
-    renderHome({ props: { onOpenContinue } });
+  it("omits resume content and its read even when legacy progress is available", async () => {
+    gateway.listContinueItems.mockResolvedValue([{ kind: "manga", id: "manga-1", provider: null, title: "던전밥", thumbnailRevision: null, position: 112, total: 196, updatedAt: iso(13) }]);
+    const series = work("m1", "던전밥");
+    gateway.collectionTracking.releaseBoard.mockResolvedValue([entry("m1", 3, [{ volumeNumber: 4, date: "2026-09-20" }])]);
+    renderHome({ props: { collections: [series] } });
 
-    const continueSection = await screen.findByRole("region", { name: "이어 보기" });
-    expect(continueSection).toHaveTextContent("던전밥망가112/196");
-    await user().click(within(continueSection).getByRole("button", { name: "던전밥 이어 보기" }));
-    expect(onOpenContinue).toHaveBeenCalledWith(item);
+    const section = await screen.findByRole("region", { name: "이어지는 시리즈" });
+    expect(section.parentElement).toHaveClass("home-grid__left");
+    expect(section.previousElementSibling).toHaveClass("home-grid__duo");
+    expect(screen.queryByRole("region", { name: "이어 보기" })).toBeNull();
+    expect(document.querySelector('[class*="home-continue"]')).toBeNull();
+    expect(gateway.listContinueItems).not.toHaveBeenCalled();
   });
 
   it("renders 이어지는 시리즈 rows and opens the collection", async () => {
@@ -233,7 +235,7 @@ describe("HomeView", () => {
     cleanup();
 
     renderHome();
-    expect(screen.queryByRole("region", { name: "AV 배우" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "AV 배우" })).toBeInTheDocument();
   });
 });
 
@@ -382,4 +384,116 @@ describe("avProfileLines", () => {
       .toEqual(["1998.3.2 · 28세", "158cm · B83(D) W57 H85", "2019– · 7년차"]);
     expect(avProfileLines({ birthDate: null, heightCm: null, bandIn: null, waistIn: null, hipIn: null, cup: null, careerStart: null, careerEnd: null }, new Date())).toEqual([]);
   });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return {promise, resolve, reject};
+}
+
+describe("Home failure and loading regressions", () => {
+  it("reserves AV and asset sections and waits for both shelf sources before empty wording", async () => {
+    const read = deferred<HomeOverview>();
+    const wishlist = deferred<ReleaseWishlistItem[]>();
+    gateway.getHomeOverview.mockReturnValue(read.promise);
+    gateway.releaseCalendar.wishlist.mockReturnValue(wishlist.promise);
+    renderHome();
+    expect(section("AV 배우").querySelector(".home-av-performer")).toBeTruthy();
+    expect(section("자산 현황").querySelector(".home-assets")).toBeTruthy();
+    expect(within(section("캘린더")).queryByText("새 신간 없음")).toBeNull();
+    await act(async () => { read.resolve(overview({total: 10, today: 1, week: 4})); });
+    expect(within(section("캘린더")).queryByText("새 신간 없음")).toBeNull();
+    await act(async () => { wishlist.resolve([]); });
+    expect(await within(section("캘린더")).findByText("새 신간 없음")).toBeTruthy();
+    expect(section("AV 배우").querySelector(".home-av-performer")).toBeTruthy();
+  });
+
+  it("reports an overview failure in place and recovers through retry", async () => {
+    gateway.getHomeOverview.mockRejectedValueOnce(new Error("unavailable"));
+    renderHome();
+    const assets = section("자산 현황");
+    const retry = await within(assets).findByRole("button", {name: "다시 시도"});
+    expect(section("AV 배우")).toBeTruthy();
+    expect(section("검토")).not.toHaveTextContent("모두 확인함");
+    await user().click(retry);
+    expect(await within(assets).findByRole("button", {name: /48,213이미지/})).toBeTruthy();
+  });
+
+  it("keeps successful counts when optional overview reads fail and retries", async () => {
+    gateway.getHomeOverview.mockResolvedValueOnce(overview({total: 10, today: 1, week: 4}, {}, {
+      tagger: null, server: null, avPerformer: null, failed: ["tagger", "server", "avPerformer"],
+    } as unknown as Partial<HomeOverview>));
+    renderHome();
+    expect(await within(section("자산 현황")).findByRole("button", {name: /10이미지/})).toBeTruthy();
+    expect(await within(section("AV 배우")).findByRole("button", {name: "다시 시도"})).toBeTruthy();
+    expect(section("검토")).not.toHaveTextContent("모두 확인함");
+    await user().click(within(section("검토")).getAllByRole("button", {name: "다시 시도"})[0]);
+    expect(await within(section("검토")).findByText("모두 확인함")).toBeTruthy();
+  });
+
+  it("does not claim all clear while overview or duplicate counts are pending", async () => {
+    const read = deferred<HomeOverview>();
+    const duplicates = deferred<{rows: {state: string; actionable: boolean}[]}>();
+    gateway.getHomeOverview.mockReturnValue(read.promise);
+    gateway.listCatalogReview.mockReturnValue(duplicates.promise);
+    renderHome({props: {avLinkApi: {pendingCount: vi.fn().mockResolvedValue(0)} as unknown as AvLinkApi}});
+    await act(async () => {});
+    expect(section("검토")).not.toHaveTextContent("모두 확인함");
+    await act(async () => { read.resolve(overview({total: 0, today: 0, week: 0})); });
+    expect(section("검토")).not.toHaveTextContent("모두 확인함");
+    await act(async () => { duplicates.resolve({rows: [{state: "pending", actionable: true}]}); });
+    expect(await within(section("검토")).findByRole("button", {name: /중복 판본/})).toBeTruthy();
+    expect(section("검토")).not.toHaveTextContent("모두 확인함");
+  });
+
+  it("updates the date, D-day and today's count at midnight without reloading the shelf", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(2026, 8, 26, 23, 59, 59));
+      gateway.releaseCalendar.wishlist.mockResolvedValue([title("game", "내일 게임", "game", "2026-09-27")]);
+      gateway.getHomeOverview.mockResolvedValueOnce(overview({total: 10, today: 5, week: 8}))
+        .mockResolvedValue(overview({total: 10, today: 0, week: 8}));
+      renderHome({props: {now: () => new Date()}});
+      await act(async () => {});
+      expect(screen.getByText("D-1")).toBeTruthy();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(document.querySelector(".home-title-date")).toHaveTextContent("9.27");
+      expect(screen.queryByText("D-1")).toBeNull();
+      expect(within(section("자산 현황")).getByRole("button", {name: "오늘 +0"})).toBeTruthy();
+      expect(gateway.getHomeOverview).toHaveBeenCalledTimes(2);
+      expect(gateway.collectionTracking.releaseBoard).toHaveBeenCalledOnce();
+      expect(gateway.releaseCalendar.wishlist).toHaveBeenCalledOnce();
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+it("keeps shown overview content during refresh and optional failure", async () => {
+  const latest = {collectionId: "av", productCode: null, title: "소장 작품", releaseDate: null, frontArtworkId: null};
+  const pick: NonNullable<HomeOverview["avPerformer"]> = {id: "person", displayName: "보이는 배우", originalName: null, knownWorks: 4, ownedWorks: 2, latestWork: latest, recentOwnedWorks: [], portrait: null};
+  gateway.getHomeOverview.mockResolvedValueOnce(overview({total: 10, today: 1, week: 4}, {}, {avPerformer: pick, tagger: {total: 3, recommendation: 3, veto: 0}}));
+  const {view} = renderHome();
+  expect(await within(section("AV 배우")).findByText("보이는 배우")).toBeTruthy();
+  const read = deferred<HomeOverview>();
+  gateway.getHomeOverview.mockReturnValueOnce(read.promise);
+  view.rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><WorkspaceChromeProvider scope="home"><ChromeTarget name="navigation" /><HomeView collections={[]} reviewCount={0} unsortedCount={0} trashCount={0} refreshVersion={1} onNavigate={vi.fn()} now={() => NOW} /></WorkspaceChromeProvider></PrivacyProvider>);
+  expect(section("AV 배우")).toHaveTextContent("보이는 배우");
+  expect(section("AV 배우").querySelector(".home-av-performer")).toHaveAttribute("inert");
+  expect(within(section("자산 현황")).getByRole("button", {name: /10이미지/})).toBeTruthy();
+  await act(async () => { read.resolve(overview({total: 11, today: 2, week: 5}, {}, {tagger: null, avPerformer: null, failed: ["tagger", "avPerformer"]})); });
+  expect(section("AV 배우")).toHaveTextContent("보이는 배우");
+  expect(await within(section("AV 배우")).findByRole("button", {name: "다시 시도"})).toBeTruthy();
+  expect(section("검토").textContent?.match(/태거/g)).toHaveLength(1);
+  expect(section("검토")).toHaveTextContent("태거3");
+});
+
+it("does not show all clear while the AV count is still pending", async () => {
+  const count = deferred<number>();
+  renderHome({props: {avLinkApi: {pendingCount: () => count.promise} as unknown as AvLinkApi}});
+  await act(async () => {});
+  expect(section("검토")).not.toHaveTextContent("모두 확인함");
+  await act(async () => { count.resolve(4); });
+  expect(await within(section("검토")).findByRole("button", {name: /AV 품번/})).toHaveTextContent("4");
 });

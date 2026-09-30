@@ -401,6 +401,33 @@ it('uses drill-down in both orientations and keeps settings only on Home',async(
     expect(screen.queryByRole('button',{name:'사이드바 열기'})).toBeNull();
   }
 });
+it('shows bottom tabs with their final backdrop on the first commit and retains visited screens',async()=>{
+  const animate=vi.fn(function(this:HTMLElement){return {cancel(){}};});
+  const descriptor=Object.getOwnPropertyDescriptor(HTMLElement.prototype,'animate');
+  Object.defineProperty(HTMLElement.prototype,'animate',{configurable:true,value:animate});
+  try {
+    render(<App/>);
+    await screen.findByRole('heading',{name:'에셋'});
+    const body=document.querySelector('.app-body')!;
+    const retained=new Map<string,Element>();
+    const tabs=[['홈','home','.library-main'],['에셋','library','.library-root'],['컬렉션','collections','.mobile-collections'],['카탈로그','catalog','.mobile-catalog'],['메모','notes','.mobile-notes']] as const;
+    for(const [label,key,selector] of [...tabs,...tabs]){
+      animate.mockClear();
+      await act(async()=>{fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name:label,exact:true}));});
+      expect(body.getAttribute('data-active-tab')).toBe(key);
+      const shown=body.querySelector(selector)!;
+      expect(shown).toBeTruthy();
+      // A tab entrance used to fade and translate whole surfaces, including their gradients.
+      // The first commit must leave those surfaces at their final opacity and position.
+      expect(animate).not.toHaveBeenCalled();
+      if(retained.has(key))expect(shown).toBe(retained.get(key));
+      else retained.set(key,shown);
+    }
+  } finally {
+    if(descriptor)Object.defineProperty(HTMLElement.prototype,'animate',descriptor);
+    else delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;
+  }
+});
 it('sets the thumbnail size with a slider, stores it and keeps 보기 quiet',async()=>{
   localStorage.setItem('lakomics.mobile.density','0');
   render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');

@@ -111,9 +111,6 @@ import type {
   ReleaseWatchRunResult,
   ReleaseWatchStatus,
   RemoteReadingProgress,
-  MangaReadingProgress,
-  VideoPlaybackProgress,
-  ContinueItem,
   AvFavoritePerformer,
   ResolvedGallery,
   CloudBackfillPreflightReport,
@@ -188,13 +185,6 @@ async function classificationMutation<T>(run: () => Promise<T>): Promise<T> {
 }
 
 type DesktopHomeDataGateway = Required<Pick<LibraryGateway,
-  | "getMangaReadingProgress"
-  | "saveMangaReadingProgress"
-  | "clearMangaReadingProgress"
-  | "getVideoPlaybackProgress"
-  | "saveVideoPlaybackProgress"
-  | "clearVideoPlaybackProgress"
-  | "listContinueItems"
   | "setAvFavorite"
   | "listAvFavorites"
 >>;
@@ -393,20 +383,6 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
     invoke<RemoteReadingProgress | null>("get_remote_reading_progress", { identity }),
   saveRemoteReadingProgress: (progress) =>
     invoke("save_remote_reading_progress", { progress }),
-  getMangaReadingProgress: (seriesId) =>
-    invoke<MangaReadingProgress | null>("get_manga_reading_progress", { seriesId }),
-  saveMangaReadingProgress: (seriesId, lastPage, pageCount) =>
-    invoke<void>("save_manga_reading_progress", { seriesId, lastPage, pageCount }),
-  clearMangaReadingProgress: (seriesId) =>
-    invoke<void>("clear_manga_reading_progress", { seriesId }),
-  getVideoPlaybackProgress: (assetId) =>
-    invoke<VideoPlaybackProgress | null>("get_video_playback_progress", { assetId }),
-  saveVideoPlaybackProgress: (assetId, positionMs, durationMs) =>
-    invoke<void>("save_video_playback_progress", { assetId, positionMs, durationMs }),
-  clearVideoPlaybackProgress: (assetId) =>
-    invoke<void>("clear_video_playback_progress", { assetId }),
-  listContinueItems: (limit) =>
-    invoke<ContinueItem[]>("list_continue_items", { limit }),
   setAvFavorite: (personId, favorite) =>
     invoke<void>("set_av_favorite", { personId, favorite }),
   listAvFavorites: () => invoke<AvFavoritePerformer[]>("list_av_favorites"),

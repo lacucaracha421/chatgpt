@@ -1,3 +1,4 @@
+import {HomeReadState} from '../src/home/HomeReadState';
 import {useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {BookOpenIcon, ChevronRightIcon, InboxIcon, ListBulletIcon, RectangleStackIcon, Square2StackIcon, WalletIcon} from '@heroicons/react/24/outline';
 import {collectionCover, type CollectionSummary} from './collectionModel';
@@ -36,8 +37,8 @@ export interface HomeProps {
 const grouped = groupedNumber;
 function Progress({value, muted}: {value: number; muted?: boolean}) { return <span className={`home-progress${muted ? ' is-muted' : ''}`} aria-hidden="true"><i style={{width: `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`}} /></span>; }
 
-function Section({title, onMore, className = '', children}: {title: string; onMore?(): void; className?: string; children: ReactNode}) {
-  return <section className={`home-sec ${className}`} aria-label={title}><SectionLabel title={title} onOpen={onMore} /><div className="home-section-body">{children}</div></section>;
+function Section({title, onMore, actions, className = '', children}: {title: string; onMore?(): void; actions?: ReactNode; className?: string; children: ReactNode}) {
+  return <section className={`home-sec ${className}`} aria-label={title}><SectionLabel title={title} onOpen={onMore} actions={actions} /><div className="home-section-body">{children}</div></section>;
 }
 
 function HomeCoverImage({cover, alt, privacy = false, className = ''}: {cover?: HomeCover | null; alt: string; privacy?: boolean; className?: string}) {
@@ -171,7 +172,7 @@ function ContinuingSeries({rows, revision, active, privacy, onOpen}: {rows: Next
  * 오늘의 AV 배우: the performer face on the left and the published name data on the right.
  * The tablet response currently carries one cover, aliases, and an optional work count only.
  */
-function AvCard({pick, privacy}: {pick: NonNullable<ReturnType<typeof useHomeAvPick>>; privacy: boolean}) {
+function AvCard({pick, privacy}: {pick: NonNullable<ReturnType<typeof useHomeAvPick>["pick"]>; privacy: boolean}) {
   const cover = pick.latestWork?.cover ?? pick.cover ?? null;
   const initials = Array.from(pick.name.replace(/\s+/g, '')).slice(0, 2).join('') || 'AV';
   const originalName = pick.aliases?.[0];
@@ -201,7 +202,8 @@ export function Home(props: HomeProps) {
   const d = useHomeDashboard({enabled: !paused, scope: props.scope, pending, similarityKey: props.similarityKey, exchange: props.exchange});
   const memos = useHomeMemos(!paused, props.scope, d.refreshKey);
   const upcoming = useHomeUpcoming(!paused, props.scope, d.refreshKey);
-  const avPick = useHomeAvPick(!paused && !privacy, props.scope, d.refreshKey);
+  const av = useHomeAvPick(!paused && !privacy, props.scope, d.refreshKey);
+  const avPick = av.pick;
   const artists = useHomeArtists(!paused, props.scope, d.refreshKey);
   const revisit = useHomeRevisit(!paused, props.scope, d.refreshKey);
   const homeScroll = useRef<HTMLDivElement>(null);
@@ -248,7 +250,7 @@ export function Home(props: HomeProps) {
     {key: 'duplicates', label: '중복 판본', value: d.todos.duplicates, unit: '건', icon: BookOpenIcon, onOpen: props.onDuplicates},
   ].filter(row => row.value !== null && row.value > 0);
 
-  const avLoading = !privacy && avPick === undefined;
+  const avLoading = !privacy && avPick === undefined && !av.error;
   const shelfLoading = !paused && d.releases === null && d.upcoming === null && upcoming.entries.length === 0 && upcoming.wishlistItems.length === 0;
   const enterClass = reducedMotion ? '' : ' home-enter-block';
   const shelfCards = shelfLoading
@@ -257,10 +259,11 @@ export function Home(props: HomeProps) {
   return <div className={`home-scroll home-c${privacy ? ' is-private' : ''}${stale ? ' is-stale' : ''}`} ref={homeScroll} aria-label="홈">
     {pull}
     {stale && <div className="home-offline" role="status"><span>서버에 닿지 않음{d.since && <> · <span className="numeric">{clockLabel(d.since)}</span>부터</>}</span><Button variant="ghost" size="sm" onClick={refreshHome}>다시 시도</Button></div>}
+    {!stale && d.serverProblem && <div className="home-offline" role="status"><span>서버가 요청을 처리하지 못했습니다.</span><Button variant="ghost" size="sm" onClick={refreshHome}>다시 시도</Button></div>}
     <div className="home-c-grid">
       <div className={`home-block home-release-block${enterClass}`}><Section title="캘린더" onMore={props.onReleases}><div className="home-shelf">{shelfCards}</div></Section></div>
       <div className={`home-block home-duo-block${enterClass}`}><div className="home-duo"><Section title="다시 보기" onMore={() => dateGroup ? props.onRevisit?.('date', dateGroup.title) : props.onRecent?.()}><>{dateGroup ? <RevisitMosaic group={dateGroup} paused={paused} privacy={privacy} onOpen={() => props.onRevisit?.('date', dateGroup.title)} /> : <div className="home-revisit is-empty"><span className="home-private-cell" /><span className="home-caption"><span>1년 전 오늘</span><span className="numeric">0장</span></span></div>}</></Section><Section title="작가" onMore={props.onArtists}><>{artistGroup ? <ArtistStrip group={artistGroup} paused={paused} privacy={privacy} onOpen={() => props.onArtists?.()} /> : <div className="home-artist-strip is-empty"><span className="home-artist-pics">{Array.from({length: 6}, (_, index) => <span className="home-private-cell" key={index} />)}</span><span className="home-caption"><span>오늘의 작가</span><span className="numeric">0장</span></span></div>}</></Section></div></div>
-      <div className={`home-block home-duo-block${enterClass}`}><div className={`home-duo home-review-duo${!privacy && avPick !== null ? '' : ' is-review-wide'}`}>{!privacy && avPick !== null && <Section title="AV 배우"><div className="home-today-av">{avLoading ? <AvPlaceholder /> : <AvCard pick={avPick!} privacy={privacy} />}</div></Section>}<Section title="검토"><div className="home-review-list">{reviewRows.length ? reviewRows.map(row => { const Icon = row.icon; return <button key={row.key} className="home-review-row" onClick={row.onOpen}><Icon aria-hidden="true" /><span>{row.label}</span><strong className="home-review-row-count numeric">{row.value}<small>{row.unit}</small></strong><ChevronRightIcon aria-hidden="true" /></button>; }) : <div className="home-review-empty"><span className="home-review-ok" aria-hidden="true">✓</span><span>모두 확인함</span></div>}</div></Section></div></div>
+      <div className={`home-block home-duo-block${enterClass}`}><div className={`home-duo home-review-duo${!privacy ? '' : ' is-review-wide'}`}>{!privacy && <Section title="AV 배우" actions={av.error && avPick ? <Button variant="quiet" onClick={refreshHome}>다시 시도</Button> : undefined}><div className="home-today-av" inert={Boolean(avPick) && av.error}>{avLoading ? <AvPlaceholder /> : avPick ? <AvCard pick={avPick} privacy={privacy} /> : <HomeReadState failed={av.error} onRetry={refreshHome} />}</div></Section>}<Section title="검토"><div className="home-review-list">{reviewRows.length ? reviewRows.map(row => { const Icon = row.icon; return <button key={row.key} className="home-review-row" onClick={row.onOpen}><Icon aria-hidden="true" /><span>{row.label}</span><strong className="home-review-row-count numeric">{row.value}<small>{row.unit}</small></strong><ChevronRightIcon aria-hidden="true" /></button>; }) : <div className="home-review-empty"><span className="home-review-ok" aria-hidden="true">✓</span><span>모두 확인함</span></div>}</div></Section></div></div>
       <div className={`home-block home-memo-block${enterClass}`}><MemoPanel rows={memos?.rows ?? []} memos={memos} onOpen={props.onNotes} /></div>
       <div className={`home-block home-assets-block${enterClass}`}><Section title="자산 현황"><div className="home-assets">{detailedSummary ? <><div className="home-assets-media"><AssetTile value={grouped(detailedSummary.images!)} unit="장" title="이미지" label={`이미지 ${grouped(detailedSummary.images!)}장`} onOpen={props.onRecent} /><AssetTile value={grouped(detailedSummary.videos!)} unit="장" title="영상" label={`영상 ${grouped(detailedSummary.videos!)}장`} onOpen={props.onRecent} /></div><div className={`home-assets-collections${privacy ? ' is-private' : ''}`}><CollectionCount value={detailedSummary.collections!.game} title="게임" /><CollectionCount value={detailedSummary.collections!.manga} title="만화" /><CollectionCount value={detailedSummary.collections!.movie} title="영화" />{!privacy && <CollectionCount value={detailedSummary.collections!.av} title="AV" />}</div></> : <div className="home-assets-cells"><AssetTile value={total} unit="장" title="전체" label={`전체 ${total}장`} onOpen={props.onRecent} /><AssetTile value={unclassified} unit="장" title="분류 안 됨" label={`분류 안 됨 ${unclassified}장`} onOpen={props.onLibrary} /></div>}<div className="home-assets-foot"><button onClick={props.onRecent}>오늘 <strong className="numeric">+{todayAdded}</strong></button><button onClick={props.onRecent}>이번 주 <strong className="numeric">+{weekAdded}</strong></button>{detailedSummary && <button onClick={props.onLibrary} aria-label={`분류 안 됨 ${unclassified}장`}>분류 안 됨 <strong className="numeric">{unclassified}</strong></button>}<span className={`home-server-status${stale ? ' is-offline' : ''}`}><i aria-hidden="true" />서버</span></div></div></Section></div>
       {seriesRows.length > 0 && <div className={`home-block home-series-block${enterClass}`}><ContinuingSeries rows={seriesRows} revision={shelf?.revision ?? ''} active={!paused} privacy={privacy} onOpen={props.onWork} /></div>}

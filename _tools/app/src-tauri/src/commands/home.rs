@@ -8,9 +8,7 @@ use serde::Serialize;
 use tauri::State;
 
 use super::{background_task_error, current_required, AppState, CommandError};
-use crate::library::home_data::{
-    AvFavorite, ContinueItem, HomeDataError, MangaReadingProgress, VideoPlaybackProgress,
-};
+use crate::library::home_data::{AvFavorite, HomeDataError};
 use crate::library::{
     av_collection::AvHomePerformer, error::LibraryError, tagger_review::TaggerReviewCounts, Library,
 };
@@ -57,9 +55,10 @@ pub struct HomeServerStatus {
 pub struct HomeOverview {
     pub assets: HomeAssetCounts,
     pub collections: HomeCollectionCounts,
-    pub tagger: TaggerReviewCounts,
+    pub tagger: Option<TaggerReviewCounts>,
     pub av_performer: Option<AvHomePerformer>,
-    pub server: HomeServerStatus,
+    pub server: Option<HomeServerStatus>,
+    pub failed: Vec<&'static str>,
 }
 
 fn boundary(value: &str) -> Result<String, CommandError> {
@@ -157,39 +156,83 @@ pub async fn get_home_overview(
     let local_date = parse_local_date(&local_date)?;
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let (assets, collections) = {
-            let connection = library.connection()?;
-            (
-                asset_counts(&connection, &today_start, &week_start)?,
-                collection_counts(&connection)?,
-            )
-        };
-        Ok::<_, CommandError>(HomeOverview {
-            assets,
-            collections,
-            tagger: library.tagger_review_counts()?,
-            av_performer: library.home_av_performer(local_date)?,
-            server: server_status(&library)?,
-        })
+        read_home_overview(&library, &today_start, &week_start, local_date)
     })
     .await
     .map_err(|_| background_task_error())?
 }
 
+/// Missing optional projections/configuration degrade independently. Database corruption and
+/// storage failures still reject the command, including those encountered after the core read.
+fn optional_home_read<T, E>(
+    result: Result<T, E>,
+    field: &'static str,
+    failed: &mut Vec<&'static str>,
+) -> Result<Option<T>, CommandError>
+where
+    E: std::error::Error + Into<CommandError> + 'static,
+{
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(error) => {
+            let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+            while let Some(cause) = source {
+                if let Some(rusqlite::Error::SqliteFailure(code, _)) =
+                    cause.downcast_ref::<rusqlite::Error>()
+                {
+                    if matches!(
+                        code.code,
+                        rusqlite::ErrorCode::DatabaseCorrupt
+                            | rusqlite::ErrorCode::NotADatabase
+                            | rusqlite::ErrorCode::SystemIoFailure
+                            | rusqlite::ErrorCode::CannotOpen
+                            | rusqlite::ErrorCode::OutOfMemory
+                    ) {
+                        return Err(error.into());
+                    }
+                }
+                source = cause.source();
+            }
+            failed.push(field);
+            Ok(None)
+        }
+    }
+}
+
+fn read_home_overview(
+    library: &Library,
+    today_start: &str,
+    week_start: &str,
+    local_date: NaiveDate,
+) -> Result<HomeOverview, CommandError> {
+    let (assets, collections) = {
+        let connection = library.connection()?;
+        (
+            asset_counts(&connection, today_start, week_start)?,
+            collection_counts(&connection)?,
+        )
+    };
+    let mut failed = Vec::new();
+    let tagger = optional_home_read(library.tagger_review_counts(), "tagger", &mut failed)?;
+    let av_performer = optional_home_read(
+        library.home_av_performer(local_date),
+        "avPerformer",
+        &mut failed,
+    )?
+    .flatten();
+    let server = optional_home_read(server_status(library), "server", &mut failed)?;
+    Ok(HomeOverview {
+        assets,
+        collections,
+        tagger,
+        av_performer,
+        server,
+        failed,
+    })
+}
+
 fn home_data_error(error: HomeDataError) -> CommandError {
     match error {
-        HomeDataError::InvalidMangaProgress => CommandError {
-            code: "invalid_manga_reading_progress",
-            message: "망가 읽기 위치가 올바르지 않습니다.".into(),
-        },
-        HomeDataError::InvalidVideoProgress => CommandError {
-            code: "invalid_video_playback_progress",
-            message: "영상 재생 위치가 올바르지 않습니다.".into(),
-        },
-        HomeDataError::TargetNotFound => CommandError {
-            code: "home_target_not_found",
-            message: "이어 볼 대상을 찾을 수 없습니다.".into(),
-        },
         HomeDataError::InvalidAvPerformer => CommandError {
             code: "invalid_av_performer",
             message: "즐겨찾기에 추가할 AV 배우를 찾을 수 없습니다.".into(),
@@ -198,80 +241,6 @@ fn home_data_error(error: HomeDataError) -> CommandError {
         HomeDataError::Database(error) => LibraryError::Database(error).into(),
         HomeDataError::Av(error) => error.into(),
     }
-}
-
-#[tauri::command]
-pub fn save_manga_reading_progress(
-    series_id: String,
-    last_page: u64,
-    page_count: u64,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    current_required(state)?
-        .save_manga_reading_progress(&series_id, last_page, page_count)
-        .map_err(home_data_error)
-}
-
-#[tauri::command]
-pub fn get_manga_reading_progress(
-    series_id: String,
-    state: State<'_, AppState>,
-) -> Result<Option<MangaReadingProgress>, CommandError> {
-    current_required(state)?
-        .get_manga_reading_progress(&series_id)
-        .map_err(home_data_error)
-}
-
-#[tauri::command]
-pub fn clear_manga_reading_progress(
-    series_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    current_required(state)?
-        .clear_manga_reading_progress(&series_id)
-        .map_err(home_data_error)
-}
-
-#[tauri::command]
-pub fn save_video_playback_progress(
-    asset_id: String,
-    position_ms: u64,
-    duration_ms: u64,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    current_required(state)?
-        .save_video_playback_progress(&asset_id, position_ms, duration_ms)
-        .map_err(home_data_error)
-}
-
-#[tauri::command]
-pub fn get_video_playback_progress(
-    asset_id: String,
-    state: State<'_, AppState>,
-) -> Result<Option<VideoPlaybackProgress>, CommandError> {
-    current_required(state)?
-        .get_video_playback_progress(&asset_id)
-        .map_err(home_data_error)
-}
-
-#[tauri::command]
-pub fn clear_video_playback_progress(
-    asset_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), CommandError> {
-    current_required(state)?
-        .clear_video_playback_progress(&asset_id)
-        .map_err(home_data_error)
-}
-
-#[tauri::command]
-pub fn list_continue_items(
-    limit: u32,
-    state: State<'_, AppState>,
-) -> Result<Vec<ContinueItem>, CommandError> {
-    current_required(state)?
-        .list_continue_items(limit)
-        .map_err(home_data_error)
 }
 
 #[tauri::command]
@@ -303,6 +272,102 @@ mod tests {
             params![id, collected_at, status, kind],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn home_optional_failure_preserves_other_fields_and_can_recover() {
+        let directory = tempfile::tempdir().unwrap();
+        let library = Library::open(directory.path()).unwrap();
+        let view_sql: String = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name='character_tagger_pending'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute_batch("DROP VIEW character_tagger_pending")
+            .unwrap();
+        let read = || {
+            read_home_overview(
+                &library,
+                "2026-09-26T00:00:00.000Z",
+                "2026-09-21T00:00:00.000Z",
+                parse_local_date("2026-09-26").unwrap(),
+            )
+        };
+        let value = read().unwrap();
+        assert_eq!(value.assets.total, 0);
+        assert!(value.tagger.is_none());
+        assert!(value.server.is_some());
+        assert_eq!(value.failed, vec!["tagger"]);
+        library
+            .connection()
+            .unwrap()
+            .execute_batch(&view_sql)
+            .unwrap();
+        assert!(read().unwrap().failed.is_empty());
+        library
+            .connection()
+            .unwrap()
+            .execute_batch("DROP TABLE assets")
+            .unwrap();
+        assert!(read().is_err());
+    }
+
+    #[test]
+    fn home_av_and_server_failures_are_independent_of_core_counts() {
+        for (statement, field) in [
+            ("DROP TABLE collection_person_relations", "avPerformer"),
+            ("DROP TABLE library_settings", "server"),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let library = Library::open(directory.path()).unwrap();
+            library
+                .connection()
+                .unwrap()
+                .execute_batch(statement)
+                .unwrap();
+            let value = read_home_overview(
+                &library,
+                "2026-09-26T00:00:00.000Z",
+                "2026-09-21T00:00:00.000Z",
+                parse_local_date("2026-09-26").unwrap(),
+            )
+            .unwrap();
+            assert_eq!(value.assets.total, 0);
+            assert_eq!(value.failed, vec![field]);
+            assert!(value.tagger.is_some());
+        }
+    }
+
+    #[test]
+    fn home_optional_reads_distinguish_empty_failure_and_unusable_database() {
+        let mut failed = Vec::new();
+        assert_eq!(
+            optional_home_read::<_, LibraryError>(Ok(None::<i64>), "avPerformer", &mut failed)
+                .unwrap(),
+            Some(None)
+        );
+        assert!(failed.is_empty());
+        assert!(optional_home_read::<i64, _>(
+            Err(LibraryError::InvalidCloudSyncConfig),
+            "server",
+            &mut failed
+        )
+        .unwrap()
+        .is_none());
+        assert_eq!(failed, vec!["server"]);
+        let corrupt = LibraryError::Database(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+            None,
+        ));
+        assert!(optional_home_read::<i64, _>(Err(corrupt), "tagger", &mut failed).is_err());
+        assert_eq!(failed, vec!["server"]);
     }
 
     #[test]
