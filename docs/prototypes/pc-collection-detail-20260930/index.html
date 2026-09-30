@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lakomics 컬렉션 상세 시안</title>
+<!-- The mockup loads the app's real tokens and shared controls; only screen layout is local. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<style>
+/* Layout: a document page of 1440 x 900 app frames; each frame is one direction for the same work. */
+:root { color-scheme: dark; --page: #0e0f10; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--color-text); font: 400 var(--type-body)/var(--line-ui) var(--font-ui); font-variant-numeric: tabular-nums; }
+h1, h2, h3, p, dl, dd { margin: 0; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+button:focus-visible, [tabindex]:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-width); }
+svg.i { width: var(--icon-md); height: var(--icon-md); fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+svg.i.s { width: var(--icon-sm); height: var(--icon-sm); }
+
+/* Base button, copied from _tools/app/src/styles/global.css (that file also styles the app shell, so it is not linked). */
+.ui-button { display: inline-flex; align-items: center; justify-content: center; min-height: var(--control-height); padding: 0 var(--space-3); color: var(--color-text); background: transparent; border: var(--border-width) solid transparent; border-radius: var(--radius-sm); font-size: var(--text-md); line-height: var(--line-ui); gap: var(--space-compact); }
+.ui-button svg { width: 16px; height: 16px; }
+.ui-button--primary { color: var(--color-on-accent); background: var(--color-accent); border-color: var(--color-accent); }
+.ui-button--secondary { background: var(--color-control); border-color: var(--color-border); box-shadow: var(--inset-light); }
+.ui-button--ghost { color: var(--color-muted); }
+.ui-button--icon { width: var(--control-height); padding: 0; }
+
+/* ===== Document ===== */
+.doc { max-width: 1540px; margin: 0 auto; padding-block: 32px 80px; padding-inline: 24px; display: flex; flex-direction: column; gap: 48px; }
+.doc-head h1 { font-size: var(--text-title-large); line-height: var(--line-title-large); font-weight: 600; }
+.lead { color: var(--color-muted); max-width: 70ch; line-height: var(--line-copy); margin-top: var(--space-2); }
+.lead b, .notes b { color: var(--color-text); font-weight: 600; }
+.pick { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-4); color: var(--color-faint); font-size: var(--type-meta); }
+.seg { display: inline-flex; flex-wrap: wrap; padding: 2px; background: var(--color-surface); border-radius: var(--radius-control); }
+.seg button { min-height: 24px; padding: 0 var(--space-3); border-radius: var(--radius-mark); color: var(--color-muted); font-size: var(--type-meta); }
+.seg button[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+.topic { display: flex; flex-direction: column; gap: var(--space-3); border-top: 1px solid var(--color-border); padding-top: var(--space-6); }
+.topic h2 { font-size: var(--type-title); line-height: var(--line-title); font-weight: 600; display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; text-wrap: balance; }
+.topic h2 .k { display: inline-grid; place-items: center; min-width: 28px; height: 28px; padding: 0 var(--space-2); background: var(--color-accent); color: var(--color-on-accent); font-size: var(--type-body); }
+.notes { color: var(--color-muted); max-width: 74ch; line-height: var(--line-copy); padding-left: 20px; margin: 0; }
+.needs { color: var(--color-faint); font-size: var(--type-meta); line-height: var(--line-meta); max-width: 90ch; }
+.scroll { overflow-x: auto; }
+.frame { width: 1440px; height: 900px; overflow: hidden; border: 1px solid var(--color-border); }
+
+/* ===== App shell (mock chrome) ===== */
+.pc { --work: #6f8cc2; --work-deep: #3f5c8a; --ground: color-mix(in srgb, var(--work) 7%, var(--color-bg));
+  width: 1440px; height: 900px; display: grid; grid-template-columns: 64px 240px 1fr; background: var(--color-bg); position: relative; overflow: hidden; }
+.rail { background: var(--color-sidebar); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; align-items: center; padding: var(--space-3) 0; gap: var(--space-1); }
+.rail span { width: 52px; height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-1); color: var(--color-muted); font-size: var(--type-meta); line-height: 14px; }
+.rail span.on, .idx.on { background: var(--color-sidebar-selection); color: var(--color-on-accent); box-shadow: var(--selection-echo); }
+.rail .grow { flex: 1; height: auto; }
+.index { background: var(--color-sidebar); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; min-height: 0; }
+.index-head { height: var(--toolbar-height); flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-4); color: var(--color-muted); border-bottom: 1px solid var(--color-border); }
+.index-body { padding: var(--space-2); display: flex; flex-direction: column; gap: 2px; }
+.index-body .ui-section-label { padding: 0 var(--space-2); margin: var(--space-2) 0 var(--space-1); }
+.idx { height: var(--row-height); display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); border-radius: var(--radius-control); }
+.idx small { margin-left: auto; color: var(--color-faint); font-size: var(--type-meta); }
+.idx.on small { color: var(--color-on-accent); opacity: .7; }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ground); position: relative; }
+.bar { height: var(--toolbar-height); flex: none; display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-4) 0 var(--space-2); border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.bar b { font-size: var(--type-title); line-height: var(--line-title); font-weight: 600; }
+.bar .grow { flex: 1; }
+.ib { width: var(--control-height-compact); height: var(--control-height-compact); display: inline-grid; place-items: center; border-radius: var(--radius-control); color: var(--color-muted); }
+
+/* ===== Imagery: generated colour blocks ===== */
+.art { position: relative; display: block; overflow: hidden; background: var(--c1); border-radius: var(--radius-mark); flex: none; }
+.art::before { content: ""; position: absolute; left: var(--hx, 50%); top: var(--hy, 22%); width: 42%; aspect-ratio: 1; border-radius: 50%; background: var(--c2); transform: translateX(-50%); }
+.art::after { content: ""; position: absolute; left: calc(var(--hx, 50%) - 36%); right: calc(64% - var(--hx, 50%)); bottom: -18%; height: 48%; border-radius: 50% 50% 0 0; background: var(--c3); }
+.scene { position: relative; overflow: hidden; background: var(--s1); display: block; }
+.scene i { position: absolute; display: block; }
+.scene .sun { left: var(--sx, 70%); top: var(--sy, 16%); width: 13%; aspect-ratio: 1; border-radius: 50%; background: var(--s4); }
+.scene .h1 { left: -12%; right: 28%; bottom: -52%; height: 96%; border-radius: 50%; background: var(--s2); }
+.scene .h2 { left: 30%; right: -18%; bottom: -64%; height: 104%; border-radius: 50%; background: var(--s3); }
+.scene .tw { left: var(--tx, 56%); bottom: 30%; width: 3.2%; height: 34%; background: var(--s3); clip-path: polygon(50% 0, 100% 22%, 100% 100%, 0 100%, 0 22%); }
+
+/* ===== Shared detail pieces ===== */
+.pkg { position: relative; border-radius: var(--radius-mark); box-shadow: var(--work-cover-edge) 0 0 -1px var(--work-page-edge), var(--work-shadow-lifted); }
+.pkg .art { width: 100%; height: 100%; }
+.ttl { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.ttl h1 { font-size: var(--text-title-large); line-height: var(--line-title-large); font-weight: 600; text-wrap: balance; }
+.ttl .orig { color: var(--color-muted); font-size: var(--type-meta); line-height: var(--line-meta); }
+.ttl .line { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; color: var(--color-muted); margin-top: var(--space-1); }
+.acts { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
+.stars { display: inline-flex; gap: 2px; color: var(--color-muted); }
+.stars svg { width: var(--icon-sm); height: var(--icon-sm); fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+.stars svg.on { fill: var(--color-accent); stroke: var(--color-accent); }
+.over { color: var(--color-muted); line-height: var(--line-copy); max-width: 62ch; }
+.facts { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--space-2) var(--space-3); align-items: baseline; align-content: start; }
+.facts dt { color: var(--color-faint); font-size: var(--type-meta); }
+.facts dd { display: flex; flex-wrap: wrap; gap: var(--space-1); min-width: 0; }
+.record { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.record dl { display: grid; grid-template-columns: 72px minmax(0, 1fr); border-top: 1px solid var(--color-border); }
+.record dt, .record dd { min-height: 36px; display: flex; align-items: center; border-bottom: 1px solid var(--color-border); min-width: 0; }
+.record dt { color: var(--color-faint); font-size: var(--type-meta); }
+.record dd.memo { color: var(--color-muted); }
+.menu-q { display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--control-height-compact); margin-left: calc(-1 * var(--space-2)); padding: 0 var(--space-2); border-radius: var(--radius-control); }
+.menu-q svg { color: var(--color-faint); }
+.shots { display: flex; gap: var(--space-2); overflow: hidden; }
+.shots .scene { border-radius: var(--radius-mark); flex: none; }
+.sec { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+
+/* ===== 가: label ===== */
+.va { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.va-art { height: 280px; flex: none; }
+.va-head { display: grid; grid-template-columns: auto minmax(0, 1fr) 320px; gap: var(--space-6); padding: 0 var(--space-6); margin-top: -132px; position: relative; }
+.va-head .pkg { height: 270px; width: calc(270px * var(--ratio)); }
+.va-head .ttl, .va-head .record { padding-top: 148px; }
+.va-head .over { margin-top: var(--space-4); }
+.strip { display: grid; grid-template-columns: 1fr 1fr 1.4fr 1fr; margin: var(--space-6) var(--space-6) 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+.strip div { padding: var(--space-3) var(--space-4) var(--space-3) 0; display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.strip dt { color: var(--color-faint); font-size: var(--type-meta); }
+.strip dd { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.va .sec { padding: var(--space-6) var(--space-6) 0; }
+
+/* ===== 나: vitrine ===== */
+.vb { flex: 1; min-height: 0; display: grid; grid-template-columns: 500px minmax(0, 1fr); }
+.stage { position: relative; overflow: hidden; display: grid; place-items: center; perspective: 1400px; background: color-mix(in srgb, var(--work-deep) 36%, #0b0c0d); border-right: 1px solid var(--color-border); }
+.stage::before { content: ""; position: absolute; left: 0; right: 0; top: calc(50% + 191px); bottom: 0; background: color-mix(in srgb, var(--work-deep) 22%, #0b0c0d); border-top: 1px solid color-mix(in srgb, var(--color-text) 10%, transparent); }
+.floor-shadow { position: absolute; left: 50%; top: calc(50% + 180px); width: 300px; height: 26px; transform: translateX(-50%); background: rgba(0, 0, 0, .6); filter: blur(14px); border-radius: 50%; }
+.case3d { --ry: 28deg; --ch: 382px; --cw: calc(var(--ch) * var(--ratio)); --cd: 24px; position: relative; width: var(--cw); height: var(--ch); transform-style: preserve-3d; transform: rotateX(-4deg) rotateY(var(--ry)); cursor: grab; touch-action: none; }
+.case3d:active { cursor: grabbing; }
+.case3d > span { position: absolute; display: block; backface-visibility: hidden; }
+.case3d .front, .case3d .back { inset: 0; }
+.case3d .front { transform: translateZ(calc(var(--cd) / 2)); }
+.case3d .front .art { width: 100%; height: 100%; border-radius: 1px; }
+.case3d .back { transform: rotateY(180deg) translateZ(calc(var(--cd) / 2)); background: color-mix(in srgb, var(--work-deep) 70%, #111); padding: var(--space-6) var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); }
+.case3d .back i { display: block; height: 8px; background: color-mix(in srgb, var(--color-text) 18%, transparent); }
+.case3d .back .scene { height: 88px; margin-bottom: var(--space-2); }
+.case3d .side { top: 0; bottom: 0; left: calc(50% - var(--cd) / 2); width: var(--cd); }
+.case3d .spine { transform: rotateY(-90deg) translateZ(calc(var(--cw) / 2)); background: color-mix(in srgb, var(--work-deep) 82%, #000); display: flex !important; align-items: center; justify-content: center; color: color-mix(in srgb, var(--color-text) 86%, transparent); font-size: var(--type-meta); font-weight: 600; writing-mode: vertical-rl; white-space: nowrap; overflow: hidden; }
+.case3d .edge { transform: rotateY(90deg) translateZ(calc(var(--cw) / 2)); background: #cfd0cb; }
+.case3d .lid { left: 0; right: 0; top: calc(50% - var(--cd) / 2); height: var(--cd); transform: rotateX(90deg) translateZ(calc(var(--ch) / 2)); background: color-mix(in srgb, var(--work-deep) 60%, #000); }
+.vb-info { padding: var(--space-8); display: flex; flex-direction: column; gap: var(--space-6); min-width: 0; overflow: hidden; }
+.vb-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-8); }
+
+/* ===== 다: key art ===== */
+.vc { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.vc-art { position: relative; height: 450px; flex: none; }
+.vc-art > .scene { position: absolute; inset: 0; }
+.film { position: absolute; right: var(--space-6); bottom: var(--space-4); display: flex; gap: var(--space-1); padding: var(--space-1); background: var(--color-cover-scrim); border-radius: var(--radius-mark); }
+.film button { display: block; }
+.film .scene { width: 72px; height: 40px; }
+.film button[aria-pressed="true"] .scene { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.vc-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-6); align-items: end; padding: 0 var(--space-6); margin-top: -56px; position: relative; }
+.vc-head .pkg { height: 152px; width: calc(152px * var(--ratio)); }
+.vc-head .ttl h1 { font-size: 40px; line-height: 46px; letter-spacing: -0.01em; }
+.vc-head .ttl { padding-top: 72px; }
+.vc-cols { display: grid; grid-template-columns: minmax(0, 1fr) 280px 300px; gap: var(--space-8); padding: var(--space-6); }
+
+/* ===== 책장: manga shelf ===== */
+.vm { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.vm-art { height: 176px; flex: none; }
+.vm-head { display: grid; grid-template-columns: auto minmax(0, 1fr) 320px; gap: var(--space-6); padding: 0 var(--space-6); margin-top: -88px; position: relative; }
+.vm-head .pkg { height: 208px; width: calc(208px * var(--ratio)); }
+.vm-head .ttl, .vm-head .record { padding-top: 104px; }
+.own { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3); color: var(--color-muted); flex-wrap: wrap; }
+.own .div { width: 1px; height: 16px; background: var(--color-border); }
+.stepper { display: inline-flex; align-items: center; background: var(--color-surface); border-radius: var(--radius-control); color: var(--color-text); }
+.stepper button { width: var(--control-height-compact); height: var(--control-height-compact); display: grid; place-items: center; color: var(--color-muted); }
+.stepper b { min-width: 28px; text-align: center; font-weight: 600; }
+.vm > .sec { padding: var(--space-6) var(--space-6) 0; }
+.vm-cols { display: grid; grid-template-columns: minmax(0, 420px); gap: var(--space-8); padding: var(--space-6) var(--space-6) 0; }
+.shelf { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-6); align-items: end; }
+.pulled { display: flex; flex-direction: column; gap: var(--space-2); }
+.pulled .art { height: 186px; width: calc(186px * var(--ratio)); }
+.pulled b { font-weight: 600; }
+.pulled small { display: block; color: var(--color-faint); font-size: var(--type-meta); line-height: var(--line-meta); }
+.board { padding: var(--space-3) var(--space-2) 0; background: color-mix(in srgb, #000 26%, var(--ground)); border-bottom: 10px solid color-mix(in srgb, var(--color-text) 13%, var(--ground)); box-shadow: inset 0 -2px 3px rgba(0, 0, 0, .45), 0 1px 0 var(--color-border-strong); }
+.spines { display: flex; align-items: flex-end; gap: 1px; height: 212px; }
+/* A book's spine is rounded: light from the upper left, darker at both joints, head and tail. Physical rendering, like the app's cases. */
+.spn, .bk-spine { --spine-light: linear-gradient(90deg, rgba(0, 0, 0, .36), rgba(255, 255, 255, .12) 20%, rgba(255, 255, 255, 0) 46%, rgba(0, 0, 0, .1) 80%, rgba(0, 0, 0, .4)), linear-gradient(180deg, rgba(255, 255, 255, .12), rgba(0, 0, 0, 0) 7%, rgba(0, 0, 0, 0) 93%, rgba(0, 0, 0, .3)); }
+.spn { position: relative; box-shadow: 2px 0 3px -1px rgba(0, 0, 0, .5); }
+.spn::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: var(--spine-light); }
+.spn.gap, .spn.gap::after { box-shadow: none; background-image: none; }
+.spn { width: 30px; height: 196px; flex: none; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding-bottom: var(--space-2); border-radius: 1px; background: var(--c1); color: #1d2326; font-size: var(--type-meta); font-weight: 600; transition: transform var(--motion-fast) var(--ease-standard); overflow: hidden; }
+.spn::before { content: ""; width: 100%; height: 16px; background: var(--c2); flex: none; }
+.spn .t { writing-mode: vertical-rl; white-space: nowrap; overflow: hidden; flex: 1; min-height: 0; padding: var(--space-2) 0; }
+.spn[aria-pressed="true"] { transform: translateY(-14px); }
+.spn.gap { background: transparent; color: var(--color-faint); outline: 1px dashed var(--color-border-strong); outline-offset: -1px; font-weight: 400; }
+.spn.gap::before { background: transparent; }
+.spn.new { color: var(--color-accent); outline-color: var(--color-accent); font-weight: 600; }
+/* 표지 띠: each volume is a book. At rest only its spine shows (a strip of the real cover); the picked one
+   shows its cover facing front (no spine), lifted a little, with its number sliding in under it. Double-click opens the cover large. */
+.spn.slice { overflow: visible; padding: 0; background: none; box-shadow: none; border-radius: 0; transition: width var(--motion-screen) var(--ease-standard); }
+.spn.slice::before, .spn.slice::after { display: none; }
+.spn.slice[aria-pressed="true"] { transform: none; z-index: 2; }
+.book { position: absolute; left: 0; top: 0; width: 100%; height: 100%; transition: transform var(--motion-screen) var(--ease-standard); }
+.spn.slice[aria-pressed="true"] .book { transform: translateY(-10px); }
+.bk-spine, .bk-front { position: absolute; left: 0; top: 0; height: 100%; overflow: hidden; background: var(--color-surface); transition: opacity var(--motion-screen) var(--ease-standard); }
+.bk-spine { width: var(--w); border-radius: 2px; box-shadow: 2px 0 3px -1px rgba(0, 0, 0, .5); }
+.bk-spine::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: var(--spine-light); }
+.bk-front { width: var(--W); border-radius: 2px; opacity: 0; box-shadow: 0 8px 14px -6px rgba(0, 0, 0, .7), 0 0 0 1px rgba(0, 0, 0, .3); }
+.spn.slice[aria-pressed="true"] .bk-front { opacity: 1; }
+.spn.slice[aria-pressed="true"] .bk-spine { opacity: 0; }
+.bk-spine .art { position: absolute; top: 0; left: 50%; width: 139px; height: 100%; margin-left: -70px; border-radius: 0; }
+.bk-front .art { width: 100%; height: 100%; border-radius: 0; }
+.bk-spine .cv, .bk-front .cv { position: absolute; inset: 0; }
+.bk-spine .num { position: absolute; left: 2px; right: 2px; bottom: 4px; height: var(--badge-height); display: grid; place-items: center; background: var(--color-cover-scrim); color: var(--color-text); font-weight: 500; border-radius: 1px; z-index: 1; }
+.spn.dim .bk-spine, .spn.dim .bk-front { outline: 1px dashed var(--color-border-strong); outline-offset: -1px; }
+/* The number leaves the spine and settles under the cover, below the shelf board. */
+.cap { position: absolute; left: 50%; top: calc(100% + 18px); display: flex; gap: var(--space-2); align-items: baseline; white-space: nowrap; color: var(--color-text); font-size: var(--type-body); font-weight: 400; opacity: 0; transform: translate(-50%, -14px); transition: opacity var(--motion-screen) var(--ease-standard), transform var(--motion-screen) var(--ease-standard); pointer-events: none; }
+.cap b { font-weight: 600; }
+.cap small { color: var(--color-faint); font-size: var(--type-meta); }
+.spn.slice[aria-pressed="true"] .cap { opacity: 1; transform: translate(-50%, 0); }
+.shelf.wide .board { margin-bottom: 44px; }
+/* Large cover (double-click). */
+.cover-view { position: absolute; inset: 0; z-index: 10; display: grid; grid-template-rows: minmax(0, 1fr) auto; justify-items: center; gap: var(--space-4); padding: var(--space-8); background: var(--color-viewer-bg); animation: cover-in var(--motion-screen) var(--ease-standard); }
+.cover-view .cv, .cover-view .art { height: 100%; width: auto; aspect-ratio: var(--ratio); object-fit: contain; border-radius: var(--radius-mark); box-shadow: var(--shadow-dialog); }
+.cover-view p { color: var(--color-muted); }
+.cover-view p b { color: var(--color-text); font-weight: 600; margin-right: var(--space-2); }
+.cover-view .ib { position: absolute; right: var(--space-4); top: var(--space-4); width: 36px; height: 36px; }
+@keyframes cover-in { from { opacity: 0; } to { opacity: 1; } }
+/* 색 띠: the cover's colour and the number only; no lettering. */
+.spn.plain .t { visibility: hidden; }
+.shelf.wide { grid-template-columns: minmax(0, 1fr); }
+/* Real covers (only when window.LAKOMICS_REAL_COVERS is provided; never committed). */
+.cv { display: block; width: 100%; height: 100%; object-fit: cover; }
+.pkg .cv, .bk-front .cv { object-fit: fill; }
+.spn.dim .cv, .pulled .cv.dim { opacity: .35; }
+.spn.dim:not(.slice) { outline: 1px dashed var(--color-border-strong); outline-offset: -1px; }
+.spn.light { color: #f1f2f3; }
+.pkg .cv { border-radius: var(--radius-mark); }
+.pulled .cv { height: 186px; width: auto; border-radius: var(--radius-mark); }
+.picked-line { display: flex; gap: var(--space-2); align-items: baseline; margin-top: var(--space-3); }
+.picked-line b { font-weight: 600; }
+.picked-line small { color: var(--color-faint); font-size: var(--type-meta); }
+.mode { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; color: var(--color-faint); font-size: var(--type-meta); }
+@media (prefers-reduced-motion: reduce) { .spn, .spn.slice, .book, .bk-spine, .bk-front, .cap { transition: none; } .cover-view { animation: none; } }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header class="doc-head">
+    <h1>컬렉션 상세, 꾸미는 세 방향</h1>
+    <p class="lead">같은 게임 한 편을 세 가지 방향으로 그렸습니다. 공통으로 들어간 것은 두 가지입니다. <b>작품 색</b>(표지에서 뽑은 색이 화면 바탕에 은은하게 깔림)과 <b>내 기록</b>(들인 날, 상태, 별점, 메모를 적는 작은 표). 아래에서 예시 작품을 바꾸면 세 화면이 함께 바뀝니다. 표지와 배경 그림은 색 블록이고, 작품 설명은 예시입니다.</p>
+    <div class="pick"><span>예시 작품</span><div class="seg" role="group" aria-label="예시 작품" id="work-pick"></div></div>
+  </header>
+
+  <section class="topic" id="a">
+    <h2><span class="k">가</span>라벨</h2>
+    <ul class="notes">
+      <li>가장 차분한 안. 위에 배경 그림 한 띠, 그 아래로 표지가 걸쳐 서고, 옆에 제목과 설명이 <b>전시 라벨처럼</b> 놓입니다.</li>
+      <li>배경 그림은 어둡게 덮지 않고 깨끗하게 자릅니다. 오른쪽에 <b>내 기록</b>, 아래에 제작 정보 한 줄과 스크린샷 선반. 개요 칸은 없습니다(게임 개요는 한국어 자료가 없음).</li>
+    </ul>
+    <p class="needs">새로 필요한 것: 표지에서 색을 뽑아 두는 일. 내 기록의 상태 · 기기는 새로 저장하는 항목(들인 날 · 별점 · 메모는 이미 있음).</p>
+    <div class="scroll"><div class="frame" data-frame="a"></div></div>
+  </section>
+
+  <section class="topic" id="b">
+    <h2><span class="k">나</span>진열장</h2>
+    <ul class="notes">
+      <li>작품이 <b>물건</b>으로 보이는 안. 왼쪽 절반이 진열대이고, 케이스가 작품 색 바닥 위에 서 있습니다. <b>끌어서 돌려 볼 수 있습니다</b>(아래 화면에서 직접 해 보세요. 화살표 키도 됩니다).</li>
+      <li>오른쪽에 제목 · 제작 정보 · 내 기록 · 스크린샷.</li>
+    </ul>
+    <p class="needs">새로 필요한 것: 가와 같음. 케이스 옆면 · 뒷면 그림(지금은 앞면만 있음. AV 케이스처럼 만들면 됨).</p>
+    <div class="scroll"><div class="frame" data-frame="b"></div></div>
+  </section>
+
+  <section class="topic" id="c">
+    <h2><span class="k">다</span>포스터</h2>
+    <ul class="notes">
+      <li>배경 그림이 주인공인 안. 화면 위 절반을 그림이 차지하고, 오른쪽 아래 작은 그림들로 <b>배경을 바꿔 봅니다</b>(눌러 보세요. 저절로 넘어가지는 않습니다).</li>
+      <li>제목을 <b>크게</b> 씁니다. 아래 한 줄에 스크린샷 · 정보 · 내 기록.</li>
+    </ul>
+    <p class="needs">새로 필요한 것: 가와 같음. 제목 글자 크기(40)는 지금 글자 규칙(제목 20 · 24)의 예외라서, 이 안을 고르면 "작품 상세 제목만 크게" 규칙을 추가해야 함.</p>
+    <div class="scroll"><div class="frame" data-frame="c"></div></div>
+  </section>
+
+  <section class="topic" id="m">
+    <h2><span class="k">책장</span>만화는 한 줄로 꽂아서</h2>
+    <ul class="notes">
+      <li>어느 안을 고르든 만화에 붙일 수 있는 조각. 권별 표지 격자 대신 <b>가진 권을 한 줄로 꽂아</b> 보여 줍니다. 없는 권은 빈칸, 새로 나온 권은 아이보리 점선, 발매 예정은 날짜.</li>
+      <li>책등 그림 자료는 없으므로 <b>없는 것을 지어내지 않는</b> 방식 셋을 비교합니다. <b>표지 띠</b>: 실제 표지의 세로 한 줄을 잘라 꽂고, 누르면 그 자리에서 표지 전체로 펼쳐짐. <b>색 띠</b>: 표지 색과 권 번호만. <b>글자 책등</b>: 제목을 같은 글자로 세로로 씀(처음 안).</li>
+    </ul>
+    <p class="needs">새로 필요한 것: 표지 띠는 권별 표지만 있으면 됨(표지가 없는 권은 색 띠로). 색 띠 · 글자 책등은 권별 표지에서 색을 뽑아야 함. 권수가 아주 많은 작품은 옆으로 넘겨 봄.</p>
+    <div class="mode"><span>꽂는 방식</span><div class="seg" role="group" aria-label="꽂는 방식" id="shelf-pick"></div><span id="real-controls" hidden style="display:contents"><span>작품</span><span class="seg" role="group" aria-label="작품" id="real-pick"></span><span>자르는 위치</span><span class="seg" role="group" aria-label="자르는 위치" id="cut-pick"></span></span></div>
+    <div class="scroll"><div class="frame" data-frame="m"></div></div>
+  </section>
+</div>
+
+<script>
+const I = {
+  home: '<path d="M3 11.5 12 4l9 7.5V20h-6v-5H9v5H3z"/>', grid: '<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 10h16M10 10v10"/>',
+  box: '<rect x="4" y="6" width="16" height="13" rx="1"/><path d="M7 3h10"/>', book: '<path d="M12 6v14M4 5h6a2 2 0 0 1 2 2 2 2 0 0 1 2-2h6v14h-6a2 2 0 0 0-2 2 2 2 0 0 0-2-2H4z"/>',
+  note: '<path d="M6 3h12v18H6zM9 8h6M9 12h6M9 16h4"/>', swap: '<path d="M7 7h12l-3-3M17 17H5l3 3"/>', search: '<circle cx="11" cy="11" r="6"/><path d="m20 20-4-4"/>',
+  more: '<circle cx="6" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="18" cy="12" r="1"/>', left: '<path d="m15 5-7 7 7 7"/>', down: '<path d="m6 9 6 6 6-6"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>', star: '<path d="m12 4 2.4 5 5.6.6-4.2 3.8 1.2 5.5L12 16.2 7 18.9l1.2-5.5L4 9.6 9.6 9z"/>',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${I[n]}</svg>`;
+
+const WORKS = [
+  { key: 'dq', ratio: 0.62, name: '드래곤 퀘스트 VII 리이매진드', orig: 'ドラゴンクエストVII Reimagined', date: '2026.2.5', dev: 'HexaDrive', pub: 'Square Enix', plat: 'Switch · Switch 2 · PS5 · PC · Xbox', genres: ['RPG', '어드벤처'],
+    over: '석판 조각을 모아 잃어버린 섬들을 되살리는 모험. 원작의 이야기를 다시 짜고 전투와 직업 시스템을 새로 만든 리메이크.',
+    work: '#6f8cc2', deep: '#3f5c8a', c: ['#9eb6e0', '#3f5c8a', '#6f8cc2'], rec: { got: '2026.2.7', state: '하는 중', score: 4, dev: 'Switch 2', memo: '석판 12장째. 주말에 이어서.' },
+    scenes: [['#a9c4ea', '#5f7fb8', '#3f5c8a', '#f0e2b0'], ['#e8c9a0', '#b8905f', '#6b4d33', '#f6efd8'], ['#23304a', '#3f5c8a', '#182236', '#d9e3f4'], ['#b7d6c4', '#5f9c84', '#2f6350', '#f2ecc6'], ['#d8b6c8', '#9a6a86', '#5d3b52', '#f4e2c8']] },
+  { key: 'pk', ratio: 0.62, name: '포코피아', orig: 'Pokémon Pokopia', date: '2026.3.5', dev: 'Omega Force', pub: 'Nintendo', plat: 'Switch 2', genres: ['생활 시뮬레이션'],
+    over: '메타몽이 되어 포켓몬들과 함께 마을을 가꾸는 생활 시뮬레이션. 기술을 빌려 땅을 일구고 집과 가구를 만든다.',
+    work: '#7fae72', deep: '#4b7a44', c: ['#a6c9a0', '#4b7a44', '#76a36e'], rec: { got: '2026.3.5', state: '다 함', score: 4, dev: 'Switch 2', memo: '마을 3단계까지.' },
+    scenes: [['#cfe3b8', '#8bb77c', '#4b7a44', '#f4efc4'], ['#a9d7e0', '#5fa6b8', '#2f6f82', '#f6f0d0'], ['#e6d2a8', '#b89a5f', '#6e5a2e', '#f8f2dc'], ['#2a3a2c', '#4b7a44', '#1c2a1f', '#dfe9c8'], ['#d9c0de', '#9a78a8', '#5b3f6a', '#f3e6c8']] },
+  { key: 'co', ratio: 0.79, name: '클레르 옵스퀴르: 33 원정대', orig: 'Clair Obscur: Expedition 33', date: '2025.4.24', dev: 'Sandfall Interactive', pub: 'Kepler Interactive', plat: 'PS5 · PC · Xbox', genres: ['RPG', '턴제'],
+    over: '해마다 숫자를 그려 사람들을 지우는 페인트리스를 멈추려는 서른세 번째 원정대의 이야기. 턴제 전투에 실시간 회피와 받아치기를 섞었다.',
+    work: '#b86a7c', deep: '#8a4f63', c: ['#d7a3b3', '#8a4f63', '#b27686'], rec: { got: '2025.5.2', state: '다 함', score: 5, dev: 'PC', memo: '2회차는 나중에.' },
+    scenes: [['#3a2630', '#8a4f63', '#5a2f40', '#e7c9a0'], ['#d9b8a8', '#a8705f', '#6a3f35', '#f3e4cc'], ['#1f2230', '#4f5a8a', '#2a2f4a', '#d8d2e8'], ['#c9a8b8', '#8a5f78', '#4f3347', '#f0dcc4'], ['#2b3330', '#5f8a78', '#2f4a40', '#dce8d8']] },
+];
+let work = WORKS[0];
+let sceneIndex = 0;
+let caseAngle = 28;
+
+const art = (c, style = '') => `<span class="art" style="--c1:${c[0]};--c2:${c[1]};--c3:${c[2]};${style}"></span>`;
+const scene = (s, style = '', k = 0) => `<span class="scene" style="--s1:${s[0]};--s2:${s[1]};--s3:${s[2]};--s4:${s[3]};--sx:${[70, 22, 58, 80, 34][k % 5]}%;--sy:${[16, 20, 12, 24, 14][k % 5]}%;--tx:${[56, 68, 30, 44, 74][k % 5]}%;${style}"><i class="sun"></i><i class="h1"></i><i class="h2"></i><i class="tw"></i></span>`;
+const stars = (n) => `<span class="stars" role="img" aria-label="별점 ${n}점">${[1, 2, 3, 4, 5].map((k) => `<svg viewBox="0 0 24 24" class="${k <= n ? 'on' : ''}">${I.star}</svg>`).join('')}</span>`;
+const label = (title, count) => `<div class="ui-section-label"><span class="ui-section-label__title">${title}</span>${count === undefined ? '' : `<span class="ui-section-label__count">${count}</span>`}<span class="ui-section-label__rule" aria-hidden="true"></span></div>`;
+const chips = (list) => list.map((g) => `<span class="ui-badge">${g}</span>`).join('');
+
+const rail = () => `<nav class="rail" aria-label="주요 탐색">${[['home', '홈'], ['grid', '에셋'], ['box', '컬렉션'], ['book', '망가'], ['note', '메모'], ['swap', '전송']].map(([n, l]) => `<span class="${l === '컬렉션' ? 'on' : ''}">${ic(n)}${l}</span>`).join('')}<span class="grow"></span><span>${ic('search')}찾기</span><span>${ic('more')}더보기</span></nav>`;
+const index = (on) => `<aside class="index"><div class="index-head"><span>컬렉션</span>${ic('search', 's')}</div><div class="index-body">${label('유형')}${[['게임', 181], ['만화', 149], ['영화', 14], ['AV', 1]].map(([n, c]) => `<div class="idx${on === n ? ' on' : ''}">${n}<small>${c}</small></div>`).join('')}${label('소식')}<div class="idx">신간<small>5</small></div><div class="idx">발매 캘린더<small>관심 13</small></div></div></aside>`;
+const bar = (type) => `<header class="bar"><button class="ib" aria-label="목록으로">${ic('left', 's')}</button><b>${type}</b><span class="grow"></span><button class="ib" aria-label="작품 관리">${ic('more', 's')}</button></header>`;
+const shell = (type, body) => `<div class="pc" style="--work:${work.work};--work-deep:${work.deep};--ratio:${work.ratio ?? 0.711}">${rail()}${index(type)}<main class="main">${bar(type)}${body}</main></div>`;
+
+const title = (w, extra = '') => `<div class="ttl"><h1>${w.name}</h1><span class="orig">${w.orig}</span><div class="line"><span>${w.date}</span><span>${w.dev}</span>${stars(w.rec.score)}</div><div class="acts"><button class="ui-button ui-button--secondary">${ic('star', 's')}쇼케이스</button><button class="ui-button ui-button--secondary ui-button--icon" aria-label="편집">${ic('edit', 's')}</button></div>${extra}</div>`;
+const record = (w) => `<div class="record">${label('내 기록')}<dl><dt>들인 날</dt><dd>${w.rec.got}</dd><dt>상태</dt><dd><button class="menu-q">${w.rec.state}${ic('down', 's')}</button></dd><dt>별점</dt><dd>${stars(w.rec.score)}</dd><dt>기기</dt><dd><button class="menu-q">${w.rec.dev}${ic('down', 's')}</button></dd><dt>메모</dt><dd class="memo">${w.rec.memo}</dd></dl></div>`;
+const facts = (w) => `<dl class="facts"><dt>개발사</dt><dd>${w.dev}</dd><dt>배급사</dt><dd>${w.pub}</dd><dt>플랫폼</dt><dd>${w.plat}</dd><dt>장르</dt><dd>${chips(w.genres)}</dd></dl>`;
+const shots = (w, height = 120) => `<div class="sec">${label('스크린샷 · 아트워크', 6)}<div class="shots">${[0, 1, 2, 3, 4, 5].map((k) => scene(w.scenes[(k + 1) % w.scenes.length], `height:${height}px;width:${Math.round(height * (k % 2 ? 16 / 9 : 4 / 3))}px`, k + 1)).join('')}</div></div>`;
+
+function frameA() {
+  const w = work;
+  return shell('게임', `<div class="va">${scene(w.scenes[0], '', 0).replace('class="scene"', 'class="scene va-art"')}
+    <div class="va-head"><div class="pkg">${art(w.c)}</div>${title(w)}${record(w)}</div>
+    <dl class="strip"><div><dt>개발사</dt><dd>${w.dev}</dd></div><div><dt>배급사</dt><dd>${w.pub}</dd></div><div><dt>플랫폼</dt><dd>${w.plat}</dd></div><div><dt>장르</dt><dd>${chips(w.genres)}</dd></div></dl>
+    ${shots(w)}</div>`);
+}
+function frameB() {
+  const w = work;
+  return shell('게임', `<div class="vb"><div class="stage"><span class="floor-shadow"></span>
+    <div class="case3d" id="case" tabindex="0" role="slider" aria-label="케이스 돌리기" aria-valuemin="-180" aria-valuemax="180" aria-valuenow="${caseAngle}" style="--ry:${caseAngle}deg">
+      <span class="front">${art(w.c)}</span><span class="back">${scene(w.scenes[1], '', 1)}<i style="width:80%"></i><i style="width:64%"></i><i style="width:72%"></i></span>
+      <span class="side spine">${w.name}</span><span class="side edge"></span><span class="lid"></span></div></div>
+    <div class="vb-info">${title(w)}<div class="vb-two">${facts(w)}${record(w)}</div>${shots(w, 156)}</div></div>`);
+}
+function frameC() {
+  const w = work;
+  return shell('게임', `<div class="vc"><div class="vc-art">${scene(w.scenes[sceneIndex], '', sceneIndex)}
+    <div class="film" role="group" aria-label="배경 그림">${w.scenes.map((s, k) => `<button aria-pressed="${k === sceneIndex}" aria-label="배경 그림 ${k + 1}" data-scene="${k}">${scene(s, '', k)}</button>`).join('')}</div></div>
+    <div class="vc-head"><div class="pkg">${art(w.c)}</div><div class="ttl"><h1>${w.name}</h1><span class="orig">${w.orig}</span><div class="line"><span>${w.date}</span><span>${w.dev}</span>${stars(w.rec.score)}</div></div>
+      <div class="acts"><button class="ui-button ui-button--secondary">${ic('star', 's')}쇼케이스</button><button class="ui-button ui-button--secondary ui-button--icon" aria-label="편집">${ic('edit', 's')}</button></div></div>
+    <div class="vc-cols">${shots(w, 104)}<div class="sec">${label('정보')}${facts(w)}</div>${record(w)}</div></div>`);
+}
+
+// 책장: one manga, independent of the game picker.
+const MANGA = { name: '위치 워치', orig: 'ウィッチウォッチ', author: '시노하라 켄타', year: '2021', pub: '서울미디어코믹스', genres: ['코미디', '판타지', '학원'],
+  over: '마녀 수행을 마치고 돌아온 니코와, 그를 지키는 사역마가 된 소꿉친구 모리히토의 동거 생활. 마법이 부르는 소동과 이어지는 재앙의 예언을 그린다.', own: 23, last: 24, upcoming: [[25, '11.12']], hue: 268,
+  rec: { got: '2023.6.18', state: '모으는 중', score: 4, memo: '24권 나옴. 다음 주문에 넣기.' }, scenes: [['#d9cdea', '#9a86c4', '#5d4a86', '#f6ecc8']] };
+let pickedVolume = 22;
+let shelfMode = 'slice';
+const SHELF_MODES = [['slice', '표지 띠'], ['plain', '색 띠'], ['text', '글자 책등']];
+// A picked book shows its whole cover, so its slot is as wide as the cover.
+const openWidth = (spineWidth, coverWidth) => coverWidth;
+const volumeFigure = (n) => `--hx:${[50, 34, 62, 44, 70, 28, 56][n % 7]}%;--hy:${[22, 14, 30, 18, 26][n % 5]}%;`;
+const volumeColours = (n) => { const h = MANGA.hue + ((n * 37) % 9 - 4) * 5; return [`hsl(${h} 42% ${72 + (n % 3) * 3}%)`, `hsl(${h} 36% 44%)`, `hsl(${h} 40% 58%)`]; };
+const REAL = window.LAKOMICS_REAL_COVERS || null;
+let realIndex = 0, realPicked = null;
+// 'auto' centres the strip on the detected person (fx = the person's horizontal centre, 0..1) and falls back to the middle.
+let cutAt = REAL && REAL.some((m) => m.vols.some((v) => v.fx != null)) ? 'auto' : 50;
+const CUTS = [['auto', '인물'], [0, '왼쪽 끝'], [25, '왼쪽'], [50, '가운데'], [75, '오른쪽'], [100, '오른쪽 끝']];
+const cutPosition = (v, strip) => { if (cutAt !== 'auto') return cutAt; const full = v.w / 2; if (v.fx == null || full <= strip) return 50; return Math.round(Math.max(0, Math.min(1, (v.fx * full - strip / 2) / (full - strip))) * 100); };
+const isDark = (rgb) => { const [r, g, b] = rgb.match(/\d+/g).map(Number); return r * 0.299 + g * 0.587 + b * 0.114 < 140; };
+function frameReal() {
+  const m = REAL[realIndex], vols = m.vols, owned = vols.filter((v) => v.own).length;
+  const picked = vols.find((v) => v.n === realPicked) ?? vols[Math.min(vols.length - 1, Math.floor(vols.length * 0.6))];
+  const full = (v) => Math.round(v.w / 2);
+  const open = openWidth(30, full(picked));
+  const strip = Math.max(16, Math.min(44, Math.floor((1072 - (shelfMode === 'slice' ? open : 0) - 2 * vols.length) / (vols.length - (shelfMode === 'slice' ? 1 : 0)))));
+  const img = (v, extra = '') => `<img class="cv${v.own ? '' : ' dim'}" src="${v.src}" alt="" draggable="false" ${extra}>`;
+  const spine = (v) => { const on = v.n === picked.n, dim = v.own ? '' : ' dim';
+    if (shelfMode === 'slice') return `<button class="spn slice${dim}" aria-pressed="${on}" aria-label="${v.n}권" data-real-volume="${v.n}" data-strip="${strip}" data-open="${full(v)}" style="--w:${strip}px;--W:${full(v)}px;width:${on ? full(v) : strip}px"><span class="book"><span class="bk-spine">${img(v, `style="object-position:${cutPosition(v, strip)}% 50%"`)}<span class="num">${v.n}</span></span><span class="bk-front">${img(v)}</span></span><span class="cap"><b>${v.n}권</b></span></button>`;
+    return `<button class="spn${shelfMode === 'plain' ? ' plain' : ''}${isDark(v.c) ? ' light' : ''}${dim}" aria-pressed="${on}" aria-label="${v.n}권" data-real-volume="${v.n}" style="width:${strip}px;--c1:${v.own ? v.c : 'transparent'};--c2:${v.own ? `color-mix(in srgb, ${v.c} 70%, #000)` : 'transparent'}"><span class="t">${m.name}</span><span>${v.n}</span></button>`; };
+  const board = `<div class="board"><div class="spines">${vols.map(spine).join('')}</div></div>`;
+  const shelf = shelfMode === 'slice'
+    ? `<div class="shelf wide">${board}</div>`
+    : `<div class="shelf"><div class="pulled">${img(picked)}<div><b>${picked.n}권</b></div></div>${board}</div>`;
+  const saved = work; work = { ...work, work: vols[0].c, deep: `color-mix(in srgb, ${vols[0].c} 60%, #000)`, ratio: (vols[0].w / 392).toFixed(4) };
+  const html = shell('만화', `<div class="vm"><span class="vm-art" style="display:block;background:color-mix(in srgb, var(--work) 46%, var(--color-bg))"></span>
+    <div class="vm-head"><div class="pkg">${img({ ...vols[0], own: true })}</div>
+      <div class="ttl"><h1>${m.name}</h1><span class="orig">${m.orig ?? ''}</span><div class="line"><span>${m.author ?? ''}</span><span>${m.year ?? ''}</span></div>
+        <div class="own"><span>보유</span><span class="stepper"><button aria-label="한 권 줄이기">−</button><b>${owned}</b><button aria-label="한 권 늘리기">+</button></span><span>/ ${vols.length}권</span><span class="div"></span><span>신간 알림</span><input type="checkbox" role="switch" class="ui-switch" checked aria-label="신간 알림" id="alert-switch-real"><span class="div"></span><button class="menu-q" style="margin-left:0">기본판${ic('down', 's')}</button></div></div>
+      <div class="record">${label('내 기록')}<dl><dt>들인 날</dt><dd>2023.6.18</dd><dt>상태</dt><dd><button class="menu-q">모으는 중${ic('down', 's')}</button></dd><dt>메모</dt><dd class="memo">예시 메모</dd></dl></div></div>
+    <div class="sec">${label('책장', `${owned}권 · 없는 권 ${vols.length - owned}`)}${shelf}</div></div>`);
+  work = saved;
+  return html;
+}
+function frameM() {
+  if (REAL) return frameReal();
+  const m = MANGA, slots = [];
+  for (let n = 1; n <= m.last; n++) slots.push({ n, kind: n <= m.own ? 'own' : 'new' });
+  for (const [n, d] of m.upcoming) slots.push({ n, kind: 'up', date: d });
+  const picked = slots.find((s) => s.n === pickedVolume) ?? slots[0];
+  const c = volumeColours(picked.n);
+  const spine = (s) => { const v = volumeColours(s.n);
+    if (s.kind !== 'own') return `<button class="spn gap${s.kind === 'new' ? ' new' : ''}" aria-pressed="${s.n === picked.n}" aria-label="${s.n}권 ${s.kind === 'new' ? '새로 나옴' : '발매 예정'}" data-volume="${s.n}"><span class="t">${s.kind === 'new' ? 'NEW' : s.date}</span><span>${s.n}</span></button>`;
+    if (shelfMode === 'slice') return `<button class="spn slice" aria-pressed="${s.n === picked.n}" aria-label="${s.n}권" data-volume="${s.n}" data-strip="30" data-open="139" style="--w:30px;--W:139px;width:${s.n === picked.n ? 139 : 30}px"><span class="book"><span class="bk-spine">${art(v, volumeFigure(s.n))}<span class="num">${s.n}</span></span><span class="bk-front">${art(v, volumeFigure(s.n))}</span></span><span class="cap"><b>${s.n}권</b></span></button>`;
+    return `<button class="spn${shelfMode === 'plain' ? ' plain' : ''}" aria-pressed="${s.n === picked.n}" aria-label="${s.n}권" data-volume="${s.n}" style="--c1:${v[0]};--c2:${v[1]}"><span class="t">${m.name}</span><span>${s.n}</span></button>`; };
+  const board = `<div class="board"><div class="spines">${slots.map(spine).join('')}</div></div>`;
+  const shelf = shelfMode === 'slice'
+    ? `<div class="shelf wide">${board}</div>`
+    : `<div class="shelf"><div class="pulled">${art(c, volumeFigure(picked.n))}<div><b>${picked.n}권</b></div></div>${board}</div>`;
+  const saved = work; work = { ...work, work: `hsl(${m.hue} 36% 62%)`, deep: `hsl(${m.hue} 30% 40%)`, ratio: 0.711 };
+  const html = shell('만화', `<div class="vm">${scene(m.scenes[0], '', 2).replace('class="scene"', 'class="scene vm-art"')}
+    <div class="vm-head"><div class="pkg">${art(volumeColours(1))}</div>
+      <div class="ttl"><h1>${m.name}</h1><span class="orig">${m.orig}</span><div class="line"><span>${m.author}</span><span>${m.year}</span>${stars(m.rec.score)}</div>
+        <div class="own"><span>보유</span><span class="stepper"><button aria-label="한 권 줄이기">−</button><b>${m.own}</b><button aria-label="한 권 늘리기">+</button></span><span>/ ${m.last}권</span><span class="div"></span><span>신간 알림</span><input type="checkbox" role="switch" class="ui-switch" checked aria-label="신간 알림" id="alert-switch"><span class="div"></span><button class="menu-q" style="margin-left:0">기본판${ic('down', 's')}</button></div></div>
+      <div class="record">${label('내 기록')}<dl><dt>들인 날</dt><dd>${m.rec.got}</dd><dt>상태</dt><dd><button class="menu-q">${m.rec.state}${ic('down', 's')}</button></dd><dt>메모</dt><dd class="memo">${m.rec.memo}</dd></dl></div></div>
+    <div class="sec">${label('책장', `${m.own}권 · 없는 권 ${m.last - m.own} · 예정 ${m.upcoming.length}`)}
+      ${shelf}</div>
+    <div class="vm-cols"><div class="sec">${label('정보')}<dl class="facts"><dt>작가</dt><dd>${m.author}</dd><dt>출판사</dt><dd>${m.pub}</dd><dt>장르</dt><dd>${chips(m.genres)}</dd><dt>발매 정보</dt><dd>카카오 · MangaDex</dd></dl></div></div></div>`);
+  work = saved;
+  return html;
+}
+
+const FRAMES = { a: frameA, b: frameB, c: frameC, m: frameM };
+function render(only) {
+  document.querySelectorAll('[data-frame]').forEach((el) => { if (!only || only === el.dataset.frame) el.innerHTML = FRAMES[el.dataset.frame](); });
+  bindCase();
+}
+function renderPicker() {
+  document.getElementById('work-pick').innerHTML = WORKS.map((w) => `<button aria-pressed="${w === work}" data-work="${w.key}">${w.name}</button>`).join('');
+  if (REAL) {
+    document.getElementById('real-controls').hidden = false;
+    document.getElementById('real-pick').innerHTML = REAL.map((m, k) => `<button aria-pressed="${k === realIndex}" data-real="${k}">${m.name}</button>`).join('');
+    document.getElementById('cut-pick').innerHTML = CUTS.map(([at, name]) => `<button aria-pressed="${at === cutAt}" data-cut="${at}">${name}</button>`).join('');
+  }
+  document.getElementById('shelf-pick').innerHTML = SHELF_MODES.map(([key, name]) => `<button aria-pressed="${key === shelfMode}" data-shelf="${key}">${name}</button>`).join('');
+}
+document.addEventListener('click', (event) => {
+  const view = event.target.closest('.cover-view');
+  if (view) { view.remove(); return; }
+  const book = event.target.closest('.spn.slice');
+  if (book) {
+    const previous = book.parentElement.querySelector('.spn.slice[aria-pressed="true"]');
+    if (previous && previous !== book) { previous.setAttribute('aria-pressed', 'false'); previous.style.width = `${previous.dataset.strip}px`; }
+    book.setAttribute('aria-pressed', 'true'); book.style.width = `${book.dataset.open}px`;
+    if (book.dataset.realVolume) realPicked = Number(book.dataset.realVolume); else pickedVolume = Number(book.dataset.volume);
+    return;
+  }
+  const target = event.target.closest('[data-work], [data-scene], [data-volume], [data-shelf], [data-real], [data-cut], [data-real-volume]');
+  if (!target) return;
+  if (target.dataset.work) { work = WORKS.find((w) => w.key === target.dataset.work); sceneIndex = 0; renderPicker(); render(); }
+  else if (target.dataset.real) { realIndex = Number(target.dataset.real); realPicked = null; renderPicker(); render('m'); }
+  else if (target.dataset.cut) { cutAt = target.dataset.cut === 'auto' ? 'auto' : Number(target.dataset.cut); renderPicker(); render('m'); }
+  else if (target.dataset.realVolume) { realPicked = Number(target.dataset.realVolume); render('m'); }
+  else if (target.dataset.shelf) { shelfMode = target.dataset.shelf; renderPicker(); render('m'); }
+  else if (target.dataset.scene) { sceneIndex = Number(target.dataset.scene); render('c'); }
+  else { pickedVolume = Number(target.dataset.volume); render('m'); }
+});
+// The case turns left/right by drag and stays where released; arrows turn 15 degrees, Home returns to the front.
+function bindCase() {
+  const element = document.getElementById('case');
+  if (!element) return;
+  const set = (angle) => { caseAngle = ((angle + 180) % 360 + 360) % 360 - 180; element.style.setProperty('--ry', `${caseAngle}deg`); element.setAttribute('aria-valuenow', String(Math.round(caseAngle))); };
+  let start = null;
+  element.onpointerdown = (event) => { start = { x: event.clientX, angle: caseAngle }; element.setPointerCapture(event.pointerId); };
+  element.onpointermove = (event) => { if (start) set(start.angle + (event.clientX - start.x) * 0.6); };
+  element.onpointerup = element.onpointercancel = () => { start = null; };
+  element.onkeydown = (event) => {
+    if (event.key === 'ArrowLeft') set(caseAngle - 15); else if (event.key === 'ArrowRight') set(caseAngle + 15); else if (event.key === 'Home') set(0); else return;
+    event.preventDefault();
+  };
+}
+const fromHash = WORKS.find((w) => w.key === location.hash.slice(1));
+if (fromHash) work = fromHash;
+if (SHELF_MODES.some(([key]) => key === location.hash.slice(1))) shelfMode = location.hash.slice(1);
+if (/^cut\d+$/.test(location.hash.slice(1))) cutAt = Number(location.hash.slice(4));
+if (/^real\d$/.test(location.hash.slice(1))) realIndex = Number(location.hash.slice(5));
+// Double-click opens the picked cover large inside the app frame; a click or Esc closes it.
+document.addEventListener('dblclick', (event) => {
+  const book = event.target.closest('.spn.slice');
+  if (!book) return;
+  const frame = book.closest('.pc'), front = book.querySelector('.bk-front').firstElementChild.cloneNode(true);
+  const view = document.createElement('div');
+  view.className = 'cover-view'; view.setAttribute('role', 'dialog'); view.setAttribute('aria-label', '표지 크게 보기');
+  view.style.setProperty('--ratio', String(Number(book.dataset.open) / 196));
+  view.append(front);
+  const caption = document.createElement('p'); caption.innerHTML = book.querySelector('.cap').innerHTML; view.append(caption);
+  const close = document.createElement('button'); close.className = 'ib'; close.setAttribute('aria-label', '닫기'); close.innerHTML = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>'; view.append(close);
+  frame.append(view);
+});
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') document.querySelector('.cover-view')?.remove(); });
+renderPicker();
+render();
+</script>
+</body>
+</html>
