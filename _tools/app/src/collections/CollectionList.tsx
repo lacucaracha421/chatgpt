@@ -1,4 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import type { CollectionSummary, CollectionType } from "../library/types";
 import { casePlatform } from "./case/CollectionCase";
 
@@ -36,12 +37,19 @@ export function shelfGroups<T extends ShelfItem>(items: T[], grouping: Collectio
   }
   return [...groups].map(([label, works]) => ({ label, items: works }));
 }
-/** Flat, keyed cells keep their media mounted when columns or the layout change. */
-export function CollectionList<T extends ShelfItem>({ items, view, render, label, onPick, showcase = false }: {
+// Mount one viewport ahead of either edge; keep this single knob for native measurements.
+const SHELF_OVERSCAN_VIEWPORTS = 1;
+
+/** Flat, keyed cells retain shelf geometry even while their cases are outside the window. */
+export function CollectionList<T extends ShelfItem>({ items, view, render, label, onPick, showcase = false, windowRows = false, pickedId, restoredFocusId }: {
   items: T[]; view: CollectionViewSettings; render(item: T): ReactNode; label: string;
   onPick(id: string): void; showcase?: boolean;
+  windowRows?: boolean; pickedId?: string | null; restoredFocusId?: string | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const measureWindow = useRef<(() => void) | null>(null);
+  const [nearRows, setNearRows] = useState<Set<number>>(() => new Set([1, 2]));
+  const [focusedId, setFocusedId] = useState<string | null>(null);
   const [metrics, setMetrics] = useState({ width: 960, gap: 16, padding: 48 });
   useLayoutEffect(() => {
     const element = ref.current; if (!element) return;
@@ -61,30 +69,86 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
   // Approved shelf geometry reserves the turned cover and the 22px spine.
   const height = Math.min(300, Math.max(1, (cellWidth - 13) / (.8 * (2 / 3))));
   const perRow = view.perRow, grouping = view.grouping;
-  // The cells depend on the items, the columns and the card renderer only: a re-measure (the list's
-  // width) changes the container's custom properties without re-rendering every card.
-  const { children, positions, ordered } = useMemo(() => {
+  const windowed = windowRows && shelf && !showcase;
+  const { groups, positions, ordered, rowStarts } = useMemo(() => {
     const groups = shelf && !showcase ? shelfGroups(items, grouping) : [{ label: "", items }];
     const ordered = groups.flatMap(group => group.items);
-    const children: ReactNode[] = [];
     const positions: { row: number; column: number }[] = [];
+    const rowStarts: { row: number; index: number }[] = [];
     let row = 1;
+    for (const group of groups) {
+      if (group.label) row++;
+      group.items.forEach((_, index) => {
+        const itemRow = showcase ? row : row + Math.floor(index / perRow);
+        if (index % perRow === 0 && (!showcase || index === 0)) rowStarts.push({ row: itemRow, index: positions.length });
+        positions.push({ row: itemRow, column: showcase ? index : index % perRow });
+      });
+      row += Math.ceil(group.items.length / perRow);
+    }
+    return { groups, positions, ordered, rowStarts };
+  }, [items, shelf, showcase, grouping, perRow]);
+
+  useLayoutEffect(() => {
+    if (!windowed) return;
+    const element = ref.current;
+    const root = element?.closest<HTMLElement>(".collection-browser__list-scroll");
+    if (!element || !root) return;
+    // Empty cell wrappers have exactly the card height. Read actual grid positions so group
+    // headings, padding, resize and a folded Showcase need no estimated offsets.
+    const cells = rowStarts.map(({ row, index }) => ({ row,
+      cell: element.querySelector<HTMLElement>(`[data-list-index="${index}"]`)! }));
+    const measure = () => {
+      if (root.clientHeight <= 0) return;
+      const top = root.getBoundingClientRect().top + root.clientTop;
+      const overscan = root.clientHeight * SHELF_OVERSCAN_VIEWPORTS;
+      const next = new Set(cells.filter(({ cell }) => {
+        const rect = cell.getBoundingClientRect();
+        return rect.bottom >= top - overscan && rect.top <= top + root.clientHeight + overscan;
+      }).map(({ row }) => row));
+      setNearRows(current => current.size === next.size && [...next].every(row => current.has(row)) ? current : next);
+    };
+    measureWindow.current = measure;
+    // The browser restores scroll in its parent layout effect, after this first measurement.
+    const frame = requestAnimationFrame(() => flushSync(measure));
+    const onScroll = () => flushSync(measure);
+    root.addEventListener("scroll", onScroll, { passive: true });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => flushSync(measure));
+    observer?.observe(root); observer?.observe(element);
+    return () => { measureWindow.current = null; cancelAnimationFrame(frame); root.removeEventListener("scroll", onScroll); observer?.disconnect(); };
+  }, [windowed, rowStarts, height]);
+  // Also measure after parent renders that move the list without resizing it (Showcase fold).
+  useLayoutEffect(() => { measureWindow.current?.(); });
+
+  const pinnedRows = useMemo(() => new Set(windowed ? ordered.flatMap((item, index) =>
+    item.id === pickedId || item.id === focusedId || item.id === restoredFocusId ? [positions[index].row] : []) : []),
+  [windowed, ordered, positions, pickedId, focusedId, restoredFocusId]);
+  // Width-only measurements update the CSS geometry without drawing every case again.
+  const children = useMemo(() => {
+    const children: ReactNode[] = [];
+    let row = 1, itemIndex = 0;
     for (const group of groups) {
       if (group.label) children.push(<div key={`group:${group.label}`} className="collection-list__group" style={{ gridRow: row++, gridColumn: "1 / -1" }}>{group.label}<span>{group.items.length.toLocaleString()}</span></div>);
       group.items.forEach((item, index) => {
-        const itemIndex = positions.length;
-        positions.push({ row: showcase ? row : row + Math.floor(index / perRow), column: showcase ? index : index % perRow });
-        children.push(<div key={item.id} className={`collection-list__cell${index % perRow >= perRow - 2 ? " is-end" : ""}`} data-list-index={itemIndex} style={{ gridRow: showcase ? row : row + Math.floor(index / perRow), gridColumn: showcase ? index + 1 : index % perRow + 1 }}>{render(item)}</div>);
+        const position = positions[itemIndex];
+        children.push(<div key={item.id} className={`collection-list__cell${index % perRow >= perRow - 2 ? " is-end" : ""}`} data-list-index={itemIndex++}
+          style={{ gridRow: position.row, gridColumn: position.column + 1, height: windowed ? "calc(var(--case-height) + 64px)" : undefined }}>
+          {!windowed || nearRows.has(position.row) || pinnedRows.has(position.row) ? render(item) : null}
+        </div>);
       });
       for (let index = 0; index < (showcase ? Math.min(1, group.items.length) : Math.ceil(group.items.length / perRow)); index++) {
         children.push(<div key={`plank:${group.label}:${index}`} className="collection-list__plank" aria-hidden="true" style={{ gridRow: row + index, gridColumn: showcase ? `1 / ${Math.max(perRow, group.items.length) + 1}` : "1 / -1" }} />);
       }
       row += Math.ceil(group.items.length / perRow);
     }
-    return { children, positions, ordered };
-  }, [items, shelf, showcase, grouping, perRow, render]);
+    return children;
+  }, [groups, positions, perRow, showcase, render, windowed, nearRows, pinnedRows]);
   return <div ref={ref} className={`collection-list collection-list--${shelf ? "shelf" : "grid"}${showcase ? " collection-list--showcase" : ""}`} role="group" aria-label={label}
     data-per-row={view.perRow} style={{ "--columns": view.perRow, "--cell-width": `${cellWidth}px`, "--case-height": `${height}px` } as CSSProperties}
+    onFocusCapture={event => {
+      const card = (event.target as HTMLElement).closest<HTMLElement>("[data-collection-id]");
+      if (windowed && card) setFocusedId(card.dataset.collectionId ?? null);
+    }}
+    onBlurCapture={event => { if (windowed && !event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedId(null); }}
     onKeyDown={event => {
       const cell = (event.target as HTMLElement).closest<HTMLElement>("[data-list-index]"); if (!cell || event.altKey || event.metaKey || event.ctrlKey) return;
       let index = Number(cell.dataset.listIndex);
@@ -99,7 +163,11 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
         });
       } else return;
       event.preventDefault(); index = Math.max(0, Math.min(ordered.length - 1, index));
-      if (ordered[index]) onPick(ordered[index].id);
+      if (ordered[index]) {
+        // Commit the target row before querying/focusing its previously unmounted button.
+        if (windowed) flushSync(() => setFocusedId(ordered[index].id));
+        onPick(ordered[index].id);
+      }
       ref.current?.querySelector<HTMLElement>(`[data-list-index="${index}"] [data-collection-id]`)?.focus();
     }}>{children}</div>;
 }
