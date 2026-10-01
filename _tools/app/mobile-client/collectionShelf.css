@@ -10,6 +10,8 @@
 .mobile-collections .collection-list--showcase::-webkit-scrollbar { display: none; }
 .mobile-collections .collection-card { display: flex; flex-direction: column; min-width: 0; padding: 0; color: var(--color-text); text-align: left; background: transparent; border: 0; border-radius: 0; font: inherit; cursor: pointer; }
 .mobile-collections .collection-card:focus-visible { outline: 2px solid var(--color-focus); outline-offset: var(--space-1); }
+/* The picked case's title only widens so titles do not collide: no sideways shift (the PC's side padding) and no lift (it replaced the 4px top padding). */
+.mobile-collections .collection-list--shelf .collection-card[aria-selected="true"] .collection-card__meta { min-width: 100%; padding: var(--space-1) 0 0; }
 .mobile-collections .collection-card__meta { display: flex; flex-direction: column; min-width: 0; padding-top: var(--space-1); }
 .mobile-collections .collection-card__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text); font-weight: 500; }
 .collection-grid.is-counted { grid-template-columns: repeat(var(--columns), minmax(0, 1fr)); }
