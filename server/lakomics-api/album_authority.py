@@ -1385,6 +1385,7 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
     async def album_assets(request: Request, libraryId: str, epoch: int, albumId: str,
                            cursor: str | None = None, limit: int = DEFAULT_ALBUM_ASSET_PAGE,
                            sort: str = "newest", toc: int = 0,
+                           utcOffsetMinutes: str = "0",
                            authorization: str | None = Header(default=None),
                            if_none_match: str | None = Header(default=None)):
         """Bounded read-only projection of one Album's displayable Assets.
@@ -1398,14 +1399,15 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
 
         The same three media filters the ordinary library offers are applied here, in
         SQL and before this page is cut, through the shared ``asset_filters`` predicates.
-        `toc=1` returns the full UTC month index in the requested date/id order instead
-        of a page; it accepts no cursor and is independent of the page limit.
+        `toc=1` returns the full month index at `utcOffsetMinutes` (default UTC) in the
+        requested date/id order instead of a page; it accepts no cursor and is
+        independent of the page limit. Pages ignore `utcOffsetMinutes`.
         """
         require_client(authorization)
         if toc == 1 and cursor is not None:
             fail(400, "invalidAlbumAssets", "toc and cursor are mutually exclusive")
         if not set(request.query_params) <= {"libraryId", "epoch", "albumId", "cursor", "limit",
-                                             "sort", "toc", "media_kind", "aspect_ratio",
+                                             "sort", "toc", "utcOffsetMinutes", "media_kind", "aspect_ratio",
                                              "duration_ms_min", "duration_ms_max"}:
             fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
         if (not LIBRARY_ID_PATTERN.fullmatch(libraryId) or epoch < 1
@@ -1413,6 +1415,12 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                 or sort not in ("newest", "oldest") or toc not in (0, 1)
                 or not 1 <= limit <= MAX_ALBUM_ASSET_PAGE):
             fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
+        applied_offset = 0
+        if toc:
+            try:
+                applied_offset = asset_list_query.parse_utc_offset_minutes(utcOffsetMinutes)
+            except ValueError:
+                fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
         filters, filter_clause, filter_params = parse_asset_filters(request.query_params, fail)
         after = None if cursor is None else resolve_asset_cursor(cursor, albumId, filters, fail, sort)
 
@@ -1440,7 +1448,7 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                     clause_params, sort)
                 if toc:
                     return query.toc(db, generation, lambda previous: encode_asset_cursor(
-                        albumId, previous, filters, sort))
+                        albumId, previous, filters, sort), applied_offset)
                 request_cursor = encode_asset_cursor(albumId, after, filters, sort) if after else None
                 rows = query.page(db, limit + 1, after)
                 has_more = len(rows) > limit

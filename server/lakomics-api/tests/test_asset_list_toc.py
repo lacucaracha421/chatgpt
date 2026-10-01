@@ -4,7 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -166,23 +166,27 @@ class AssetListTocTests(unittest.TestCase):
         return sorted(result, key=lambda asset_id: (self.assets[asset_id]["date"], asset_id),
                       reverse=sort == "newest")
 
-    def assert_toc(self, scope, sort="newest", **filters):
-        params = {"sort": sort, **filters}
+    def assert_toc(self, scope, sort="newest", *, utc_offset_minutes=0, **filters):
+        params = {"sort": sort, "utcOffsetMinutes": utc_offset_minutes, **filters}
         items, generation = self.walk(scope, **params)
         ids = [item["id"] for item in items]
         self.assertEqual(ids, self.expected(scope, sort, filters))
         response = self.read(scope, toc=1, limit=1, **params)
         self.assertEqual(response.status_code, 200, response.text)
         toc = response.json()
-        self.assertEqual(set(toc), {"tocVersion", "listGeneration", "totalCount", "sort", "buckets"})
+        self.assertEqual(set(toc), {"tocVersion", "listGeneration", "totalCount", "sort",
+                                    "utcOffsetMinutes", "buckets"})
         self.assertEqual(toc["tocVersion"], 1)
+        self.assertEqual(toc["utcOffsetMinutes"], utc_offset_minutes)
         self.assertEqual(toc["listGeneration"], generation)
         self.assertEqual(toc["sort"], sort)
         self.assertEqual(toc["totalCount"], len(ids))
         expected_buckets = []
         for index, asset_id in enumerate(ids):
             month = datetime.fromisoformat(self.assets[asset_id]["date"].replace("Z", "+00:00"))
-            month = month.astimezone(timezone.utc).strftime("%Y-%m")
+            if month.tzinfo is not None:
+                month = month.astimezone(timezone.utc)
+            month = (month + timedelta(minutes=utc_offset_minutes)).strftime("%Y-%m")
             if not expected_buckets or expected_buckets[-1]["key"] != month:
                 expected_buckets.append({"key": month, "startIndex": index, "count": 0})
             expected_buckets[-1]["count"] += 1
@@ -238,6 +242,101 @@ class AssetListTocTests(unittest.TestCase):
                 with self.subTest(scope=scope, sort=sort):
                     toc = self.assert_toc(scope, sort)
                     self.assertNotIn("2019-05", [bucket["key"] for bucket in toc["buckets"]])
+
+    def test_kst_month_edge_and_every_bucket_cursor(self):
+        ids = list(self.assets)
+        dates = {ids[0]: "2026-09-30T15:30:00Z",
+                 ids[4]: "2026-09-30T14:59:59.999999Z",
+                 ids[13]: "2026-09-30T15:00:00Z"}
+        with api_app.get_db() as db:
+            for asset_id, date in dates.items():
+                self.assets[asset_id]["date"] = date
+                # Preserve the last row's NULL collected_at to check created_at fallback.
+                db.execute("UPDATE assets SET created_at=?, collected_at=CASE"
+                           " WHEN collected_at IS NULL THEN NULL ELSE ? END WHERE id=?",
+                           [date, date, asset_id])
+            db.commit()
+        for scope in ("library", "classification", "album"):
+            for sort in ("newest", "oldest"):
+                with self.subTest(scope=scope, sort=sort):
+                    utc = self.assert_toc(scope, sort)
+                    self.assertIn("2026-09", [bucket["key"] for bucket in utc["buckets"]])
+                    self.assertNotIn("2026-10", [bucket["key"] for bucket in utc["buckets"]])
+                    kst = self.assert_toc(scope, sort, utc_offset_minutes=540)
+                    counts = {bucket["key"]: bucket["count"] for bucket in kst["buckets"]}
+                    self.assertEqual(counts["2026-10"], 1 if scope == "classification" else 2)
+                    self.assertEqual(counts["2026-09"], 1)
+                    self.assertEqual(kst["listGeneration"], utc["listGeneration"])
+                    self.assertEqual(kst["totalCount"], utc["totalCount"])
+
+    def test_negative_offset_month_edge_and_naive_utc_timestamp(self):
+        asset_id = list(self.assets)[0]
+        for date in ("2026-10-01T00:30:00Z", "2026-10-01T00:30:00",
+                     "2026-10-01T02:30:00+02:00"):
+            self.assets[asset_id]["date"] = date
+            with api_app.get_db() as db:
+                db.execute("UPDATE assets SET collected_at=? WHERE id=?", [date, asset_id])
+                db.commit()
+            for scope in ("library", "classification", "album"):
+                for sort in ("newest", "oldest"):
+                    with self.subTest(date=date, scope=scope, sort=sort):
+                        utc = self.assert_toc(scope, sort)
+                        shifted = self.assert_toc(scope, sort, utc_offset_minutes=-60)
+                        self.assertIn("2026-10", [bucket["key"] for bucket in utc["buckets"]])
+                        self.assertIn("2026-09", [bucket["key"] for bucket in shifted["buckets"]])
+                        self.assertNotIn("2026-10", [bucket["key"] for bucket in shifted["buckets"]])
+
+    def test_offset_defaults_bounds_and_album_parameter_allowlist(self):
+        for scope in ("library", "classification", "album"):
+            with self.subTest(scope=scope):
+                default = self.read(scope, toc=1)
+                zero = self.read(scope, toc=1, utcOffsetMinutes=0)
+                self.assertEqual(default.status_code, 200, default.text)
+                self.assertEqual(default.json()["utcOffsetMinutes"], 0)
+                self.assertEqual(default.json(), zero.json())
+                self.assertEqual(default.headers["ETag"], zero.headers["ETag"])
+            for offset in (-720, 840):
+                with self.subTest(scope=scope, offset=offset):
+                    self.assert_toc(scope, utc_offset_minutes=offset)
+        self.assertEqual(self.read("album", toc=1, utcOffsetMinutes=540,
+                                   unknown="value").status_code, 422)
+
+    def test_bad_offsets_rejected_only_for_tocs(self):
+        values = (-721, 841, "1.5", "540.0", "true", "", "1_0", "not-an-integer")
+        for scope in ("library", "classification", "album"):
+            page = self.read(scope, toc=0, limit=2)
+            cursor = page.json().get("nextCursor", page.json().get("next_cursor"))
+            for offset in (540, *values):
+                with self.subTest(scope=scope, offset=offset):
+                    ignored = self.read(scope, toc=0, utcOffsetMinutes=offset, limit=2)
+                    self.assertEqual(ignored.status_code, 200, ignored.text)
+                    self.assertEqual(ignored.json(), page.json())
+                    self.assertEqual(ignored.headers["ETag"], page.headers["ETag"])
+                    implicit_page = self.read(scope, utcOffsetMinutes=offset, limit=2,
+                                              cursor=cursor)
+                    normal_page = self.read(scope, limit=2, cursor=cursor)
+                    self.assertEqual(implicit_page.status_code, 200, implicit_page.text)
+                    self.assertEqual(implicit_page.json(), normal_page.json())
+                    if offset in values:
+                        self.assertEqual(self.read(scope, toc=1,
+                                                   utcOffsetMinutes=offset).status_code, 422)
+
+    def test_toc_etag_varies_by_offset_even_when_buckets_are_unchanged(self):
+        for scope in ("library", "classification", "album"):
+            with self.subTest(scope=scope):
+                utc = self.read(scope, toc=1)
+                # Positive offsets 1 and 2 move exactly the same fixture rows.
+                one = self.read(scope, toc=1, utcOffsetMinutes=1)
+                two = self.read(scope, toc=1, utcOffsetMinutes=2,
+                                headers={"If-None-Match": one.headers["ETag"]})
+                self.assertEqual(two.status_code, 200, two.text)
+                self.assertEqual(one.json()["buckets"], two.json()["buckets"])
+                self.assertEqual(len({utc.headers["ETag"], one.headers["ETag"],
+                                      two.headers["ETag"]}), 3)
+                cached = self.read(scope, toc=1, utcOffsetMinutes=2,
+                                   headers={"If-None-Match": two.headers["ETag"]})
+                self.assertEqual(cached.status_code, 304)
+                self.assertEqual(cached.content, b"")
 
     def test_empty_results(self):
         for scope in ("library", "classification", "album"):
@@ -315,13 +414,13 @@ class AssetListTocTests(unittest.TestCase):
         original_toc = asset_list_query.AssetListQuery.toc
         for scope in ("library", "classification", "album"):
             before = self.read(scope, toc=1).json()
-            def mutate_then_read(query, db, generation, encode_cursor):
+            def mutate_then_read(query, db, generation, encode_cursor, utc_offset_minutes=0):
                 self.assertTrue(db.in_transaction)
                 with api_app.get_db() as writer:
                     writer.execute("UPDATE assets SET collected_at='2020-01-01T00:00:00Z' WHERE id=?",
                                    [list(self.assets)[0]])
                     writer.commit()
-                return original_toc(query, db, generation, encode_cursor)
+                return original_toc(query, db, generation, encode_cursor, utc_offset_minutes)
             with patch.object(asset_list_query.AssetListQuery, "toc", mutate_then_read):
                 response = self.read(scope, toc=1)
             self.assertEqual(response.status_code, 200, response.text)

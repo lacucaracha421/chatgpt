@@ -1,8 +1,19 @@
 """Shared date/id keyset selection for ordinary Asset pages and their TOCs."""
 
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
 
 SORT_AT = "COALESCE(asset.collected_at, asset.created_at)"
+
+
+def parse_utc_offset_minutes(value: str) -> int:
+    """Validate the TOC-only offset; page routes deliberately skip this parser."""
+    if not re.fullmatch(r"[+-]?[0-9]+", value):
+        raise ValueError("utcOffsetMinutes must be an integer between -720 and 840")
+    offset = int(value)
+    if not -720 <= offset <= 840:
+        raise ValueError("utcOffsetMinutes must be an integer between -720 and 840")
+    return offset
 
 
 class AssetListQuery:
@@ -39,7 +50,7 @@ class AssetListQuery:
                                  after=after, limit=limit)
         return db.execute(sql, params).fetchall()
 
-    def toc(self, db, generation, encode_cursor):
+    def toc(self, db, generation, encode_cursor, utc_offset_minutes=0):
         """Count ordered month runs and mint their preceding-row cursors.
 
         The caller holds the read transaction that also supplied ``generation``.
@@ -47,9 +58,10 @@ class AssetListQuery:
         Using the actual ordering avoids a separate boundary query and preserves the
         id tie-break even when many Assets share a timestamp at a month edge.
         """
-        # Month keys are UTC calendar months, labelled by the client. Legacy naive
-        # timestamps are UTC too. Parse without SQLite's millisecond rounding, which
+        # Month keys use the viewer's offset from UTC. Legacy naive timestamps are
+        # UTC too. Parse without SQLite's millisecond rounding, which
         # would move 23:59:59.999999 at a month edge into the following month.
+        offset = timedelta(minutes=utc_offset_minutes)
         sql, params = self.select(f"asset.id, {SORT_AT} AS mobile_sort_at")
         buckets = []
         total = 0
@@ -58,6 +70,7 @@ class AssetListQuery:
             instant = datetime.fromisoformat(row["mobile_sort_at"].replace("Z", "+00:00"))
             if instant.tzinfo is not None:
                 instant = instant.astimezone(timezone.utc)
+            instant += offset
             month = f"{instant.year:04d}-{instant.month:02d}"
             if not buckets or buckets[-1]["key"] != month:
                 buckets.append({"key": month, "startIndex": total, "count": 0,
@@ -66,4 +79,4 @@ class AssetListQuery:
             total += 1
             previous = (row["mobile_sort_at"], row["id"])
         return {"tocVersion": 1, "listGeneration": generation, "totalCount": total,
-                "sort": self.sort, "buckets": buckets}
+                "sort": self.sort, "utcOffsetMinutes": utc_offset_minutes, "buckets": buckets}

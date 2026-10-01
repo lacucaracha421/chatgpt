@@ -1971,6 +1971,8 @@ def list_mobile_classification_assets(
     authorization: str | None = Header(default=None),
     cursor: str | None = None,
     toc: int = Query(default=0, ge=0, le=1),
+    # Read raw text so pages can ignore even an invalid TOC-only offset.
+    utc_offset_minutes: str = Query(default="0", alias="utcOffsetMinutes"),
     if_none_match: str | None = Header(default=None),
     sort: Literal["newest", "oldest"] = "newest",
     limit: int = Query(
@@ -1993,12 +1995,19 @@ def list_mobile_classification_assets(
     fields a user filters on — `width`, `height`, `duration_ms` — are read live from the
     canonical Asset row, and pages advertise `filterVersion` even when nothing is filtered
     so a client can tell "this server applied no filter" from "this server ignores filters".
-    `toc=1` returns the full UTC month index for that same listing instead of a page;
-    it accepts no cursor and is independent of the page limit.
+    `toc=1` returns the full month index at `utcOffsetMinutes` (default UTC) for that
+    same listing instead of a page; it accepts no cursor and is independent of the
+    page limit. Pages ignore `utcOffsetMinutes`.
     """
     require_auth(authorization)
     if toc and cursor is not None:
         raise HTTPException(status_code=400, detail="toc and cursor are mutually exclusive")
+    applied_offset = 0
+    if toc:
+        try:
+            applied_offset = asset_list_query.parse_utc_offset_minutes(utc_offset_minutes)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     filters = asset_filters.parse(media_kind, aspect_ratio, duration_ms_min, duration_ms_max)
     classification_clause = ""
     after = None
@@ -2080,7 +2089,7 @@ def list_mobile_classification_assets(
             clause_params + filter_params, sort)
         if toc:
             payload = query.toc(db, generation, lambda previous: asset_filters.encode_cursor(
-                "library-assets", filters, [sort, classification_id, *previous]))
+                "library-assets", filters, [sort, classification_id, *previous]), applied_offset)
             return conditional.json_response(payload, if_none_match)
         rows = query.page(db, limit + 1, after)
         has_more = len(rows) > limit
