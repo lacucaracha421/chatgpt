@@ -6,14 +6,14 @@
 .collection-rating-filter .ui-slider input.is-idle { opacity: .45; }
 .collection-rating-filter .ui-button[aria-pressed="true"] { background: var(--color-filter-selected); border-color: var(--color-filter-border); color: var(--color-filter-text); }
 
-/* The index contains only type and news navigation. */
+/* The index contains the news navigation; the types are the section bar. */
 .collection-index { display: flex; flex-direction: column; gap: var(--space-3); }
 .collection-index__section { display: flex; flex-direction: column; gap: var(--space-1); }
-.collection-index__types, .collection-index__news { display: flex; flex-direction: column; gap: var(--space-1); }
+.collection-index__news { display: flex; flex-direction: column; gap: var(--space-1); }
 .collection-index__release { margin-top: 0; }
 .collection-index__count { margin-left: auto; color: var(--color-text); font-family: var(--font-numeric); font-size: var(--type-meta); font-weight: 600; font-variant-numeric: tabular-nums; }
-.collection-index__release[aria-current=page] .collection-index__count, .collection-index__calendar[aria-current=page] .collection-index__count, .collection-index__av[aria-current=page] .collection-index__count { color: inherit; }
-.collection-index__release[aria-current=page]:has(.collection-index__count)::after, .collection-index__calendar[aria-current=page]:has(.collection-index__count)::after, .collection-index__av[aria-current=page]:has(.collection-index__count)::after { margin-left: 0; }
+.collection-index__release[aria-current=page] .collection-index__count, .collection-index__calendar[aria-current=page] .collection-index__count { color: inherit; }
+.collection-index__release[aria-current=page]:has(.collection-index__count)::after, .collection-index__calendar[aria-current=page]:has(.collection-index__count)::after { margin-left: 0; }
 
 /* Library: folding Showcase row, then the 전체 heading. */
 .collection-browser__section { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 40px; }

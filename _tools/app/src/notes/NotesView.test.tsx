@@ -30,6 +30,14 @@ it("creates, edits, pins, trashes and restores through the actual notes editor",
   await waitFor(()=>expect(store.snapshot().saving).toBe(false));
   expect(store.snapshot().notes[0]).toMatchObject({title:"읽을 책",body:"내일 2장 읽기",deleted:false,pinned:true});
 });
+it("keeps the kind filter and the new/view menus in the section bar under the top bar",async()=>{
+  const store=new NotesStore((async()=>({unlocked:true,notes:[],lastSyncedAt:null})) as NotesRequest);surface(store);
+  const kinds=await screen.findByRole("radiogroup",{name:"메모 종류"});
+  const bar=kinds.closest(".ui-section-bar") as HTMLElement;
+  expect(bar).toHaveClass("ui-section-bar--pinned");
+  expect(bar.querySelector(".ui-section-bar__trailing")).toContainElement(screen.getByRole("button",{name:"새 메모"}));
+  expect(bar.querySelector(".ui-section-bar__trailing")).toContainElement(screen.getByRole("button",{name:/보기/}));
+});
 it("requires backing up a newly generated key before unlocking",async()=>{
   const operations:string[]=[];
   const store=new NotesStore((async(op:string)=>{operations.push(op);if(op==="generateKey")return{key:"a".repeat(64)};return{unlocked:op==="unlock",notes:[],lastSyncedAt:null};}) as NotesRequest);

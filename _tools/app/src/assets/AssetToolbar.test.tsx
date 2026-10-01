@@ -23,11 +23,18 @@ function renderChrome(ui: React.ReactElement) {
   return render(<WorkspaceChromeProvider scope="assets-test"><aside aria-label="index"><ChromeTarget name="header" /><ChromeTarget name="actions" /><ChromeSettingsDock /></aside>{ui}</WorkspaceChromeProvider>);
 }
 
-it("puts kind, sort, and view controls in the toolbar and removes sidebar view settings", async () => {
+it("puts kind in the section bar with sort and view at its right end, and removes sidebar view settings", async () => {
   const user = userEvent.setup();
   renderChrome(<AssetToolbar {...baseProps} inspectorAvailable onInspectorOpenChange={vi.fn()} />);
   expect(screen.getByRole("heading", { name: "전체" })).toBeVisible();
-  expect(screen.getByRole("radiogroup", { name: "종류" })).toBeVisible();
+  const kinds = screen.getByRole("radiogroup", { name: "종류" });
+  expect(kinds).toBeVisible();
+  const bar = kinds.closest(".ui-section-bar") as HTMLElement;
+  const header = screen.getByRole("toolbar", { name: "자산 도구" });
+  expect(header).not.toContainElement(kinds);
+  expect(within(bar).getByRole("button", { name: "정렬" })).toBeVisible();
+  expect(within(bar).getByRole("button", { name: "보기" })).toBeVisible();
+  expect(within(header).queryByRole("button", { name: "정렬" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "보기 설정" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "보기" }));
   expect(screen.getByRole("radiogroup", { name: "배치" })).toBeVisible();
@@ -79,4 +86,13 @@ it("shows collection names and no folder count", () => {
   renderChrome(<AssetToolbar {...baseProps} view={{ kind: "classification", classificationId: "game" }} classifications={[{ ...baseProps.classifications[0], assetCount: 428, totalAssetCount: 12345 }]} />);
   expect(screen.getByRole("heading", { name: "게임" })).toBeVisible();
   expect(screen.queryByText(/12,345/)).not.toBeInTheDocument();
+});
+
+it("has no section bar where there is no kind choice and keeps sort and view in the top bar", () => {
+  renderChrome(<AssetToolbar {...baseProps} view={{ kind: "trash" }} />);
+  expect(screen.queryByRole("radiogroup", { name: "종류" })).not.toBeInTheDocument();
+  expect(document.querySelector(".ui-section-bar")).toBeNull();
+  const header = screen.getByRole("toolbar", { name: "자산 도구" });
+  expect(within(header).getByRole("button", { name: "정렬" })).toBeVisible();
+  expect(within(header).getByRole("button", { name: "보기" })).toBeVisible();
 });

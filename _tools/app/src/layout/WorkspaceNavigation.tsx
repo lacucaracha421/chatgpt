@@ -7,7 +7,6 @@ import { useVaultExportJob, vaultExportProgressText } from "../external-vault/va
 import { useVaultImportJob, vaultImportProgressText } from "../external-vault/vaultImportJob";
 import { ArtistIndex, isArtistView } from "../artists/ArtistIndex";
 import { useArtistOverview } from "../artists/artistStore";
-import { KIND_LABEL } from "../collections/collectionFormat";
 import { CommandPalette } from "./CommandPalette";
 import { useAutoTagPaletteSearch } from "../autotags/autoTagPalette";
 import { MoreEntryList, MorePanel } from "./MorePanel";
@@ -152,7 +151,6 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
         <div hidden={area !== "assets" || artistView} className="workspace-index__assets">{assetNavigation}</div>
         {artistView && <ArtistIndex view={view} onNavigate={onNavigate} />}
         <ChromeTarget name="navigation" className="workspace-index__view-navigation" />
-        {view.kind === "collections" && !chrome?.meta?.navigation && <div className="workspace-index__fallback"><span className="workspace-section-label">작품 유형</span>{(["game", "manga", "movie", "av"] as const).map((type) => <button key={type} type="button" className="workspace-index-link" onClick={() => onNavigate({ kind: "collections", typeFilter: type, showcase: false })}>{KIND_LABEL[type]}</button>)}</div>}
         {area === "manage" && view.kind !== "settings" && <div className="workspace-index__fallback"><MoreEntryList entries={moreEntries.filter((entry) => entry.group === "queue" || entry.group === "go")} heading="더보기" /></div>}
         {view.kind === "collection" && <ChromeTarget name="details" className="collection-detail-sidebar" />}
       </div>

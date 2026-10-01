@@ -4,7 +4,7 @@ import { ArrowPathIcon, ArrowsUpDownIcon, ChevronDownIcon } from "@heroicons/rea
 import type { AlbumEntry, AssetAspectFilter, AssetMediaFilter, AssetSort, AssetView, ClassificationEntry, CollectionSummary } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Menu } from "../shared/ui/Menu";
-import { SegmentedControl } from "../shared/ui/SegmentedControl";
+import { SectionBar } from "../shared/ui/SectionBar";
 import { GalleryViewMenu } from "./GalleryViewMenu";
 
 type AssetToolbarProps = {
@@ -52,8 +52,8 @@ export function AssetToolbar({
   const filterable = rawView.kind === "classification" || rawView.kind === "unsorted" || rawView.kind === "album" || rawView.kind === "creator";
   const location = title ?? (view.kind === "creator" ? "작가" : view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId)?.name ?? "컬렉션" : view.kind === "unsorted" ? "미분류" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : view.kind === "collections" ? "컬렉션" : view.kind === "albums" ? "앨범" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체");
   const sortLabel = ({ newest: "최신순", oldest: "오래된순", favorites: "좋아요순", random: "랜덤" } as const)[sort];
-  const controls = <div className="asset-toolbar__controls">
-    {filterable && <SegmentedControl label="종류" options={[{ value: "all", label: "전체" }, { value: "images", label: "이미지" }, { value: "videos", label: "영상" }]} value={mediaFilter} onChange={onMediaFilterChange} />}
+  // Views with a 종류 choice get the section bar under the top bar; sort and view sit at its right end.
+  const viewControls = <>
     <Menu label="정렬" align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<><ArrowsUpDownIcon aria-hidden="true" /><span>{sortLabel}</span><ChevronDownIcon aria-hidden="true" /></>} items={[
       { id: "newest", label: "최신순", group: "sort", selected: sort === "newest", onSelect: () => onSortChange("newest") },
       { id: "oldest", label: "오래된순", group: "sort", selected: sort === "oldest", onSelect: () => onSortChange("oldest") },
@@ -65,12 +65,15 @@ export function AssetToolbar({
       thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange}
       aspectFilter={filterable ? aspectFilter : undefined} onAspectFilterChange={filterable ? onAspectFilterChange : undefined}
       inspectorOpen={inspectorOpen} inspectorAvailable={inspectorAvailable} onInspectorOpenChange={onInspectorOpenChange} />
-  </div>;
+  </>;
 
-  return (
-    <ViewToolbar title={location} ariaLabel="자산 도구" titleAccessory={<>{registration}{titleAccessory}{controls}</>} chrome={{
+  return <>
+    <ViewToolbar title={location} ariaLabel="자산 도구" titleAccessory={<>{registration}{titleAccessory}{!filterable && <div className="asset-toolbar__controls">{viewControls}</div>}</>} chrome={{
       summary: [sortLabel, galleryLayout === "masonry" ? "폭포수" : "같은 높이", filterable && (mediaFilter !== "all" || aspectFilter !== "all") ? `필터 ${Number(mediaFilter !== "all") + Number(aspectFilter !== "all")}` : "", privacyMode ? "비공개" : ""].filter(Boolean).join(" · "),
       status: privacyMode ? <span>비공개 모드</span> : undefined,
     }} />
-  );
+    {filterable && <SectionBar label="종류" options={MEDIA_OPTIONS} value={mediaFilter} onChange={onMediaFilterChange} trailing={viewControls} />}
+  </>;
 }
+
+const MEDIA_OPTIONS = [{ value: "all", label: "전체" }, { value: "images", label: "이미지" }, { value: "videos", label: "영상" }] as const;

@@ -193,7 +193,7 @@ describe("OnlineCatalogBrowser", () => {
     expect(screen.queryByText("북마크된 판본 있음")).not.toBeInTheDocument();
     expect(footer.textContent).toBe(before);
   });
-  it("keeps catalog controls in the toolbar and opens search only from its icon", async () => {
+  it("keeps catalog controls in the section bar and opens search only from its icon", async () => {
     const gateway = createGateway(true);
     const user = userEvent.setup();
     const DeferredCatalog = lazy(async () => ({ default: (await import("./OnlineCatalogBrowser")).OnlineCatalogBrowser }));
@@ -203,16 +203,19 @@ describe("OnlineCatalogBrowser", () => {
       <Suspense fallback={null}><DeferredCatalog onSwitchLocal={vi.fn()} /></Suspense>
     </WorkspaceChromeProvider></LibraryProvider>);
     const index = screen.getByRole("complementary", { name: "카탈로그 인덱스" });
-    expect(await within(screen.getByTestId("shared-titlebar")).findByRole("button", { name: "정렬" })).toBeVisible();
+    const bar = (await screen.findByRole("radiogroup", { name: "망가 출처" })).closest(".ui-section-bar") as HTMLElement;
+    expect(await within(bar).findByRole("button", { name: "정렬" })).toBeVisible();
     expect(within(index).queryByRole("button", { name: "신규 작품 갱신" })).not.toBeInTheDocument();
     expect(within(index).queryByRole("button", { name: "중복 후보 검토" })).not.toBeInTheDocument();
     expect(within(index).queryByRole("checkbox", { name: "숨긴 결과 표시" })).not.toBeInTheDocument();
     expect(within(index).queryByRole("radiogroup")).not.toBeInTheDocument();
-    expect(within(screen.getByTestId("shared-titlebar")).getByRole("radio", { name: "카탈로그" })).toBeVisible();
+    expect(within(bar).getByRole("radio", { name: "카탈로그" })).toBeVisible();
+    expect(within(screen.getByTestId("shared-titlebar")).queryByRole("radiogroup")).not.toBeInTheDocument();
     expect(within(screen.getByTestId("shared-titlebar")).getByRole("heading", { name: "망가" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "창 닫기" })).toHaveLength(1);
     expect(screen.getByTestId("shared-titlebar")).toContainElement(screen.getByRole("toolbar"));
-    expect(within(screen.getByTestId("shared-titlebar")).getByRole("button", { name: "정렬" })).toBeVisible();
+    expect(within(bar).getByRole("button", { name: "언어" })).toBeVisible();
+    expect(within(screen.getByTestId("shared-titlebar")).queryByRole("button", { name: "정렬" })).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "온라인 만화 검색" })).not.toBeInTheDocument();
     await user.click(within(index).getByRole("button", { name: "온라인 만화 검색" }));
     const input = await screen.findByRole("combobox", { name: "온라인 만화 검색" });

@@ -536,6 +536,40 @@ select.ui-text-input {
   }
 }
 
+/* Section bar: one thin row of a tab's sections with its view controls at the right end. The bar
+   carries no edge mark of its own beyond the hairline under it; the segmented thumb shows the choice. */
+.ui-section-bar {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-1) var(--space-4);
+  border-bottom: var(--border-width) solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.ui-section-bar--pinned {
+  flex: none;
+}
+
+.ui-section-bar > .ui-segmented {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  height: var(--control-height-compact);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ui-section-bar__trailing {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
 .ui-tabs {
   display: flex;
   gap: var(--space-6);

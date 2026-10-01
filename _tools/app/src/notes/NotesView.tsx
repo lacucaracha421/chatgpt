@@ -6,7 +6,8 @@ import { ViewToolbar } from "../layout/ViewToolbar";
 import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Menu, type MenuItem } from "../shared/ui/Menu";
-import { SegmentedControl, type SegmentedOption } from "../shared/ui/SegmentedControl";
+import type { SegmentedOption } from "../shared/ui/SegmentedControl";
+import { SectionBar } from "../shared/ui/SectionBar";
 import { PlusIcon, BookmarkIcon, TrashIcon, EllipsisHorizontalIcon } from "../shared/ui/ArchiveIcons";
 import { MarkdownView } from "../shared/markdown/MarkdownView";
 import { MarkdownHelpButton } from "../shared/markdown/MarkdownHelp";
@@ -354,13 +355,10 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   const footer=!note?null:isSecret(note)?"암호 메모 · 이 PC의 PIN으로 잠김":kind==="checklist"&&!note.readOnly?`${(note.items??[]).filter(i=>i.checked).length}/${(note.items??[]).length} 완료`:`${note.body.length.toLocaleString()}자`;
   const pinnedNotes=scope==="all"?notes.filter(n=>n.pinned):[];
   const otherNotes=pinnedNotes.length?notes.filter(n=>!n.pinned):notes;
-  const filterRow=<div className="notes-filter-row" aria-label="메모 필터">
-    <SegmentedControl label="메모 종류" options={kindOptions} value={kindFilter} onChange={(value)=>setKindFilter(value)} className="notes-kind-filter" />
-    <div className="notes-filter-row__actions">
+  const filterRow=<SectionBar label="메모 종류" options={kindOptions} value={kindFilter} onChange={(value)=>setKindFilter(value)} trailing={<>
       <Menu label="새 메모" items={newItems} trigger={<PlusIcon aria-hidden="true"/>} triggerClassName="notes-new-trigger" />
       <Menu label={viewLabel==="보기"?"보기 · 모든 메모":`보기 · ${viewLabel}`} items={viewItems} trigger={<><span>{viewLabel}</span>{viewLabel==="보기"&&<span className="notes-view-trigger__count">{scopeCounts.all.toLocaleString()}</span>}<ChevronDownIcon aria-hidden="true"/></>} triggerClassName="notes-view-trigger" />
-    </div>
-  </div>;
+    </>}/>;
   const board=<div ref={boardRef} className="notes-board" aria-label="메모 목록">
     {pinnedNotes.length>0&&<><h2 className="workspace-section-label notes-board__label">고정됨</h2><NoteMasonry notes={pinnedNotes} all={state.notes} selected={selected} onOpen={open}/>
       {otherNotes.length>0&&<h2 className="workspace-section-label notes-board__label">최근</h2>}</>}

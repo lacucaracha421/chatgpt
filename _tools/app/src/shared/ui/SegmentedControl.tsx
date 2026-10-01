@@ -4,6 +4,8 @@ export type SegmentedOption<T extends string> = {
   value: T;
   label: string;
   count?: number;
+  /** Replaces the spoken name when the count needs words (e.g. "AV, 받은 품번 3개"). */
+  ariaLabel?: string;
 };
 
 export type SegmentedControlProps<T extends string> = {
@@ -272,7 +274,7 @@ export function SegmentedControl<T extends string>({ className, fullWidth = fals
           type="button"
           className="ui-segmented__cell"
           role="radio"
-          aria-label={`${option.label}${option.count !== undefined ? ` ${option.count.toLocaleString()}` : ""}`}
+          aria-label={option.ariaLabel ?? `${option.label}${option.count !== undefined ? ` ${option.count.toLocaleString()}` : ""}`}
           aria-checked={option.value === value}
           tabIndex={index === rovingIndex ? 0 : -1}
           data-segmented-active={index === activeIndex ? "true" : undefined}

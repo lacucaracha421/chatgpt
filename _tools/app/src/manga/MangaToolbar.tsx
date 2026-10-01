@@ -4,15 +4,16 @@ import { ViewToolbar } from "../layout/ViewToolbar";
 import type { ViewChromeSpec } from "../layout/WorkspaceChrome";
 import { Button } from "../shared/ui/Button";
 import { Menu } from "../shared/ui/Menu";
-import { SegmentedControl } from "../shared/ui/SegmentedControl";
+import { SectionBar } from "../shared/ui/SectionBar";
 import { displayDateTime } from "../shared/displayDate";
 
 export type MangaSource = "all" | "bookmarked" | "local";
 
-export function MangaSourceControl({ value, onChange, localCount, bookmarkCount }: {
-  value: MangaSource; onChange: (source: MangaSource) => void; localCount?: number; bookmarkCount?: number;
+/** The source switch as the section bar under the top bar; sort and language menus sit at its right end. */
+export function MangaSourceControl({ value, onChange, localCount, bookmarkCount, trailing }: {
+  value: MangaSource; onChange: (source: MangaSource) => void; localCount?: number; bookmarkCount?: number; trailing?: ReactNode;
 }) {
-  return <SegmentedControl label="망가 출처" value={value} onChange={onChange} options={[
+  return <SectionBar label="망가 출처" className="manga-section-bar" value={value} onChange={onChange} trailing={trailing} options={[
     { value: "all", label: "카탈로그" }, { value: "bookmarked", label: "북마크", count: bookmarkCount }, { value: "local", label: "로컬", count: localCount },
   ]} />;
 }
@@ -29,13 +30,15 @@ export function MangaToolbar({ source, onSourceChange, localCount, bookmarkCount
   countLabel?: string; controls?: ReactNode; refreshedAt?: string | null; refreshing?: boolean; onRefresh?: () => void;
   actions?: ReactNode; chrome?: ViewChromeSpec; ariaLabel?: string;
 }) {
-  return <ViewToolbar title="망가" ariaLabel={ariaLabel} titleAccessory={<>
-    {countLabel && <span className="manga-toolbar__count">{countLabel}</span>}
-    <div className="manga-toolbar__controls"><MangaSourceControl value={source} onChange={onSourceChange} localCount={localCount} bookmarkCount={bookmarkCount} />{controls}</div>
-    <div className="manga-toolbar__refresh">
-      {refreshedAt && <time dateTime={refreshedAt}>갱신 {displayDateTime(refreshedAt, new Date(), { withTime: true })}</time>}
-      {onRefresh && <Button variant="quiet" size="icon" aria-label="새로고침" disabled={refreshing} onClick={onRefresh}><ArrowPathIcon aria-hidden="true" /></Button>}
-      {actions}
-    </div>
-  </>} chrome={chrome} />;
+  return <>
+    <ViewToolbar title="망가" ariaLabel={ariaLabel} titleAccessory={<>
+      {countLabel && <span className="manga-toolbar__count">{countLabel}</span>}
+      <div className="manga-toolbar__refresh">
+        {refreshedAt && <time dateTime={refreshedAt}>갱신 {displayDateTime(refreshedAt, new Date(), { withTime: true })}</time>}
+        {onRefresh && <Button variant="quiet" size="icon" aria-label="새로고침" disabled={refreshing} onClick={onRefresh}><ArrowPathIcon aria-hidden="true" /></Button>}
+        {actions}
+      </div>
+    </>} chrome={chrome} />
+    <MangaSourceControl value={source} onChange={onSourceChange} localCount={localCount} bookmarkCount={bookmarkCount} trailing={controls} />
+  </>;
 }

@@ -57,7 +57,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const previousSource = useRef(displayedSource);
   useLayoutEffect(() => {
     if (previousSource.current !== displayedSource) {
-      document.querySelector<HTMLButtonElement>('.manga-toolbar__controls [role="radio"][aria-checked="true"]')?.focus();
+      document.querySelector<HTMLButtonElement>('.manga-section-bar [role="radio"][aria-checked="true"]')?.focus();
       previousSource.current = displayedSource;
     }
   }, [displayedSource]);

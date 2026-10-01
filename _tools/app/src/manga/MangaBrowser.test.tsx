@@ -140,7 +140,12 @@ describe("MangaBrowser", () => {
     await user.click(screen.getByRole("menuitemradio", { name: "페이지 많은 순" }));
     expect(container.querySelectorAll(".manga-card__title")[0]).toHaveTextContent("T1");
     expect(screen.queryByRole("slider", { name: "카드 크기" })).not.toBeInTheDocument();
-    expect(within(screen.getByTestId("shared-titlebar")).getByRole("radiogroup", { name: "망가 출처" })).toBeVisible();
+    // The source switch is the section bar under the top bar, with the sort menu at its right end.
+    const titlebar = within(screen.getByTestId("shared-titlebar"));
+    expect(titlebar.queryByRole("radiogroup", { name: "망가 출처" })).not.toBeInTheDocument();
+    const bar = screen.getByRole("radiogroup", { name: "망가 출처" }).closest(".ui-section-bar") as HTMLElement;
+    expect(within(bar).getByRole("button", { name: "정렬" })).toBeVisible();
+    expect(titlebar.queryByRole("button", { name: "정렬" })).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "로컬 2" })).toHaveAttribute("aria-checked", "true");
   });
 

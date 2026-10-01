@@ -20,6 +20,7 @@ import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Menu } from "../shared/ui/Menu";
+import { SectionBar } from "../shared/ui/SectionBar";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { CollectionCard } from "./CollectionCard";
@@ -71,8 +72,8 @@ export function collectionCoverUrl(collection: CollectionSummary): string | null
 }
 
 /**
- * The Collections browser. The workspace index holds types and news; the toolbar holds
- * sort, rating and view controls. The content shows a folding Showcase row
+ * The Collections browser. The section bar under the top bar holds the types with sort, rating and
+ * view controls at its right end; the workspace index holds news. The content shows a folding Showcase row
  * (전체 보기 drills into the paged exhibition) above the 전체 heading and the grid.
  */
 export function CollectionBrowser({
@@ -280,33 +281,25 @@ export function CollectionBrowser({
 
   const inbox = Boolean(releaseProvider) || releaseCalendar;
   const libraryView = !inbox && !showcase;
-  // The index: type rows and news rows as separate selected-slab sections, then the library's sort / 내 별점.
+  // The index holds the news rows; the type choice is the section bar under the top bar.
   const hasNewsNavigation = Boolean(tracking || calendarApi);
-  const indexNavigation = <>
-    <div className="collection-index">
-      <div className="collection-index__section">
-        <span className="workspace-section-label">작품 유형</span>
-        <div className="collection-index__types" role="group" aria-label="컬렉션 유형">
-          {TYPES.map(value => <button key={value} type="button" className={`workspace-index-link${value === "av" ? " collection-index__av" : ""}`}
-            aria-current={!inbox && value === typeFilter ? "page" : undefined}
-            aria-label={value === "av" && avInbox.items.length > 0 ? `AV, 받은 품번 ${avInbox.items.length.toLocaleString()}개` : undefined}
-            onClick={() => setTypeFilter(value)}>{TYPE_LABEL[value]}{value === "av" && avInbox.items.length > 0 && <span className="collection-index__count" aria-hidden="true">{avInbox.items.length.toLocaleString()}</span>}</button>)}
-        </div>
+  const indexNavigation = hasNewsNavigation ? <div className="collection-index">
+    <div className="collection-index__section">
+      <span className="workspace-section-label">소식</span>
+      <div className="collection-index__news" role="group" aria-label="컬렉션 소식">
+        {tracking && <button type="button" className="workspace-index-link collection-index__release" aria-current={releaseProvider ? "page" : undefined}
+          aria-label={unreadTotal > 0 ? `신간 보기, 새 알림 ${unreadTotal.toLocaleString()}개` : "신간 보기"}
+          onClick={() => { if (!releaseProvider) openInbox("kakao"); }}>신간{unreadTotal > 0 && <span className="collection-index__count" aria-hidden="true">{unreadTotal.toLocaleString()}</span>}</button>}
+        {calendarApi && <button type="button" className="workspace-index-link collection-index__calendar" aria-current={releaseCalendar ? "page" : undefined}
+          aria-label={wishlistUnread > 0 ? `발매 캘린더 보기, 관심 목록 새 알림 ${wishlistUnread.toLocaleString()}개` : "발매 캘린더 보기"}
+          onClick={() => { if (!releaseCalendar) openCalendar(); }}>발매 캘린더{wishlistUnread > 0 && <span className="collection-index__count" aria-hidden="true">{wishlistUnread.toLocaleString()}</span>}</button>}
       </div>
-      {hasNewsNavigation && <div className="collection-index__section">
-        <span className="workspace-section-label">소식</span>
-        <div className="collection-index__news" role="group" aria-label="컬렉션 소식">
-          {tracking && <button type="button" className="workspace-index-link collection-index__release" aria-current={releaseProvider ? "page" : undefined}
-            aria-label={unreadTotal > 0 ? `신간 보기, 새 알림 ${unreadTotal.toLocaleString()}개` : "신간 보기"}
-            onClick={() => { if (!releaseProvider) openInbox("kakao"); }}>신간{unreadTotal > 0 && <span className="collection-index__count" aria-hidden="true">{unreadTotal.toLocaleString()}</span>}</button>}
-          {calendarApi && <button type="button" className="workspace-index-link collection-index__calendar" aria-current={releaseCalendar ? "page" : undefined}
-            aria-label={wishlistUnread > 0 ? `발매 캘린더 보기, 관심 목록 새 알림 ${wishlistUnread.toLocaleString()}개` : "발매 캘린더 보기"}
-            onClick={() => { if (!releaseCalendar) openCalendar(); }}>발매 캘린더{wishlistUnread > 0 && <span className="collection-index__count" aria-hidden="true">{wishlistUnread.toLocaleString()}</span>}</button>}
-        </div>
-      </div>}
     </div>
-
-  </>;
+  </div> : undefined;
+  const avCount = avInbox.items.length;
+  const typeOptions = TYPES.map(value => value === "av" && avCount > 0
+    ? { value, label: TYPE_LABEL[value], count: avCount, ariaLabel: `AV, 받은 품번 ${avCount.toLocaleString()}개` }
+    : { value, label: TYPE_LABEL[value] });
 
   const showcaseOpen = libraryState.showcaseOpen ?? false;
   const toggleShowcaseRow = () => patchLibraryState({ showcaseOpen: !showcaseOpen });
@@ -329,7 +322,7 @@ export function CollectionBrowser({
   const emptyLibrary = filtered ? <EmptyState title="조건에 맞는 작품이 없습니다."><p>검색어나 별점 조건을 바꿔보세요.</p><Button onClick={() => patchLibraryState({ query: "", rating: "all" })}>검색·필터 초기화</Button></EmptyState>
     : <EmptyState title="컬렉션이 없습니다."><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : typeFilter === "game" ? setIgdbOpen(true) : typeFilter === "movie" ? setTmdbOpen(true) : setEditMode({ kind: "create", type: typeFilter })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : typeFilter === "game" ? "IGDB에서 게임 추가" : typeFilter === "movie" ? "TMDB에서 영화 추가" : "직접 입력"}</Button></EmptyState>;
 
-  const toolbarControls = libraryView ? <div className="collection-toolbar__controls">
+  const viewControls = libraryView ? <>
     <Menu label="정렬" align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<>정렬<ChevronDownIcon aria-hidden="true" /></>} items={[
       ...(typeFilter === "game" ? ([['device', '기기'], ['year', '발매 연도']] as const).map(([grouping, label]) => ({ id: grouping, label, group: "grouping", selected: viewSettings.grouping === grouping,
         onSelect: () => { patchViewSettings({ grouping }); if (grouping === "year") patchLibraryState({ sort: "media_date", direction: "desc" }); } })) : []),
@@ -342,6 +335,8 @@ export function CollectionBrowser({
       </div>} />
     <ViewOptionsMenu layout={viewSettings.layout} options={[{ value: "grid", label: "격자" }, { value: "shelf", label: "선반" }]}
       onLayoutChange={layout => patchViewSettings({ layout })} perRow={viewSettings.perRow} min={5} max={12} onPerRowChange={perRow => patchViewSettings({ perRow })} />
+  </> : undefined;
+  const toolbarControls = libraryView ? <div className="collection-toolbar__controls">
     <Menu label="컬렉션 검색" align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<><MagnifyingGlassIcon aria-hidden="true" /><span>검색</span></>}
       content={<div className="collection-toolbar__rating" onKeyDown={event => event.stopPropagation()}>
         <TextInput type="search" aria-label="제목 검색" placeholder="작품 제목 검색" autoFocus value={libraryState.query} onChange={event => patchLibraryState({ query: event.target.value })} />
@@ -376,6 +371,7 @@ export function CollectionBrowser({
         leadingAction={libraryView ? undefined : <Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={inbox ? closeInbox : () => setShowcase(false)}><ChevronLeftIcon aria-hidden="true" /></Button>}
         chrome={chrome}
       />}
+      {!inbox && <SectionBar label="컬렉션 유형" options={typeOptions} value={typeFilter} onChange={setTypeFilter} trailing={viewControls} />}
       {spineBatch.message && <Toast tone={spineBatch.error ? "error" : "status"} onDismiss={spineBatch.dismiss}>{spineBatch.message}</Toast>}
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <div className={`collection-browser__stage${showcase ? " collection-browser__stage--showcase" : ""}`}>

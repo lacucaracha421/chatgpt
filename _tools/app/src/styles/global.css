@@ -1466,7 +1466,8 @@ textarea:focus-visible {
 }
 
 /* Labelled toolbar menus (정렬 · 비율 · 보기) are quiet text buttons, not icon squares. */
-.view-toolbar .ui-menu__trigger.asset-toolbar__quiet-menu {
+.view-toolbar .ui-menu__trigger.asset-toolbar__quiet-menu,
+.ui-section-bar .ui-menu__trigger.asset-toolbar__quiet-menu {
   width: auto;
   height: var(--control-height-compact);
   min-height: var(--control-height-compact);
@@ -3299,30 +3300,28 @@ textarea:focus-visible {
 .manga-card__bookmark:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: -2px; }
 .manga-card--skeleton .manga-card__title { width: 80%; }
 .manga-card--skeleton .manga-card__artist { width: 40%; height: 1.5em; }
-.manga-toolbar__controls, .manga-toolbar__refresh { display: flex; align-items: center; gap: var(--space-2); }
-.manga-toolbar__controls, .manga-toolbar__refresh, .manga-toolbar__count { flex: none; }
-/* The toolbar sits in the window chrome beside the status chip and never runs into it. A search chip
-   (the only shrinking item) narrows first; then the toolbar sheds the refresh time, the menu labels,
-   the result count, and finally the source counts and menu chevrons; clipping is the last guard.
-   Breakpoints are the measured content widths (Pretendard) plus a few pixels of slack. */
-.view-toolbar:has(.manga-toolbar__controls) { container: manga-toolbar / inline-size; overflow-x: clip; }
-.view-toolbar:has(.manga-toolbar__controls) > h2 { flex: none; max-width: none; }
-@container manga-toolbar (max-width: 770px) { .manga-toolbar__refresh time { display: none; } }
-@container manga-toolbar (max-width: 706px) { .manga-toolbar__quiet-menu > span { display: none; } }
-@container manga-toolbar (max-width: 647px) { .manga-toolbar__count { display: none; } }
-@container manga-toolbar (max-width: 565px) { .manga-toolbar__controls .ui-segmented__count, .manga-toolbar__quiet-menu > svg { display: none; } }
-/* An applied search adds its chip (kept at least 96px): every step comes about 104px earlier, and the
-   chip itself goes before the source counts (the search mark on the rail still shows it is active). */
-.view-toolbar:has(.manga-toolbar__controls) .chrome-query { min-width: 96px; }
-@container manga-toolbar (max-width: 874px) { .view-toolbar:has(.chrome-query) .manga-toolbar__refresh time { display: none; } }
-@container manga-toolbar (max-width: 810px) { .view-toolbar:has(.chrome-query) .manga-toolbar__quiet-menu > span { display: none; } }
-@container manga-toolbar (max-width: 751px) { .view-toolbar:has(.chrome-query) .manga-toolbar__count { display: none; } }
-@container manga-toolbar (max-width: 669px) { .view-toolbar:has(.manga-toolbar__controls) > .chrome-context-status { display: none; } }
+.manga-toolbar__refresh { display: flex; align-items: center; gap: var(--space-2); }
+.manga-toolbar__refresh, .manga-toolbar__count { flex: none; }
+/* The top bar keeps the title, the result count and the refresh time beside the status chip and never
+   runs into it: a search chip (the only shrinking item) narrows first, then the bar sheds the refresh
+   time and the count; clipping is the last guard. The source switch and menus live in the section bar
+   below, which sheds its menu labels, then the source counts and menu chevrons. Breakpoints are
+   estimates from the earlier measured widths without the moved controls. */
+.view-toolbar:has(.manga-toolbar__refresh) { container: manga-toolbar / inline-size; overflow-x: clip; }
+.view-toolbar:has(.manga-toolbar__refresh) > h2 { flex: none; max-width: none; }
+@container manga-toolbar (max-width: 360px) { .manga-toolbar__refresh time { display: none; } }
+@container manga-toolbar (max-width: 260px) { .manga-toolbar__count { display: none; } }
+.view-toolbar:has(.manga-toolbar__refresh) .chrome-query { min-width: 96px; }
+@container manga-toolbar (max-width: 464px) { .view-toolbar:has(.chrome-query) .manga-toolbar__refresh time { display: none; } }
+@container manga-toolbar (max-width: 364px) { .view-toolbar:has(.chrome-query) .manga-toolbar__count { display: none; } }
 .manga-toolbar__refresh { margin-left: auto; order: 1; }
-.view-toolbar:has(.manga-toolbar__controls) .chrome-context-status { margin-left: 0; }
-.view-toolbar:has(.manga-toolbar__controls) .view-toolbar__actions { order: 2; }
+.view-toolbar:has(.manga-toolbar__refresh) .chrome-context-status { margin-left: 0; }
+.view-toolbar:has(.manga-toolbar__refresh) .view-toolbar__actions { order: 2; }
+.manga-section-bar { container: manga-section / inline-size; }
+@container manga-section (max-width: 560px) { .manga-toolbar__quiet-menu > span { display: none; } }
+@container manga-section (max-width: 440px) { .manga-section-bar .ui-segmented__count, .manga-toolbar__quiet-menu > svg { display: none; } }
 .manga-toolbar__count, .manga-toolbar__refresh time { color: var(--color-muted); font-size: var(--type-meta); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.view-toolbar .ui-menu__trigger.manga-toolbar__quiet-menu { display: inline-flex; align-items: center; gap: var(--space-1); width: auto; height: var(--control-height-compact); min-height: var(--control-height-compact); padding: 0 var(--space-2); white-space: nowrap; }
+.view-toolbar .ui-menu__trigger.manga-toolbar__quiet-menu, .ui-section-bar .ui-menu__trigger.manga-toolbar__quiet-menu { display: inline-flex; align-items: center; gap: var(--space-1); width: auto; height: var(--control-height-compact); min-height: var(--control-height-compact); padding: 0 var(--space-2); white-space: nowrap; }
 .manga-toolbar__quiet-menu b { color: var(--color-text); font-weight: 600; }
 .manga-toolbar__quiet-menu svg { width: var(--icon-sm); height: var(--icon-sm); }
 
