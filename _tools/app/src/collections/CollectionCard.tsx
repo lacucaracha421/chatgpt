@@ -37,6 +37,11 @@ export function CollectionCard({
   releaseCaption?: ReleaseCaption | null;
 }) {
   const [failedCoverUrl, setFailedCoverUrl] = useState<string | null>(null);
+  // The flat cover mounts once the card is first shown flat and then stays for layout changes; a card
+  // that has only been a shelf case never pays for it (hundreds of them on every type switch).
+  const flat = !(lightCase && shelf);
+  const [flatMounted, setFlatMounted] = useState(flat);
+  if (flat && !flatMounted) setFlatMounted(true);
   const { privacyMode } = usePrivacy();
   const visibleCoverUrl = coverUrl && coverUrl !== failedCoverUrl ? coverUrl : null;
   const date = meta ? collectionCardDate(collection) : "";
@@ -57,7 +62,7 @@ export function CollectionCard({
       onClick={onClick}
     >
       {lightCase && collection.type !== "manga" && <span className="collection-card__light" aria-hidden={!shelf}><CollectionShelfCase collection={collection} front={coverUrl} privacy={privacyMode} active={shelf} selected={selected} /></span>}
-      <span aria-hidden={lightCase && shelf} className={`collection-card__object collection-card__object--${collection.type}`}>
+      {flatMounted && <span aria-hidden={!flat} className={`collection-card__object collection-card__object--${collection.type}`}>
         <span className="collection-card__cover">
           {visibleCoverUrl && !privacyMode && (collection.type === "game" || collection.type === "av") ? <GameCase src={visibleCoverUrl} alt={collection.name} scope={scope} revision={collection.updatedAt} large={exhibition} onError={() => setFailedCoverUrl(visibleCoverUrl)} /> : visibleCoverUrl && !privacyMode && collection.type === "manga" ? (
             <PhysicalCover kind="book" src={visibleCoverUrl} alt={collection.name} scope={scope} revision={collection.updatedAt} large={exhibition} onError={() => setFailedCoverUrl(visibleCoverUrl)} />
@@ -75,7 +80,7 @@ export function CollectionCard({
             <span className="collection-card__placeholder" aria-hidden="true" />
           )}
         </span>
-      </span>
+      </span>}
       <span className="collection-card__meta">
         <span className="collection-card__name" aria-description={collection.name}>{collection.name}</span>
         <span className="collection-card__credit" aria-description={collectionCredit(collection) || undefined}>{collectionCredit(collection)}</span>

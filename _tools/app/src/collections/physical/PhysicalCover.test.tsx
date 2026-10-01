@@ -35,15 +35,17 @@ it("renders a neutral game shell only when no source is available", () => {
 it("never shows the flat source while a render is pending, then fades the render in", () => {
   const pending = capture();
   const { container } = render(<PhysicalCover kind="book" src="/cover/a" alt="Book" scope="library" revision="2" />);
-  const image = screen.getByRole("img", { name: "Book" });
+  const cover = container.querySelector(".physical-cover")!;
   const flat = coverSourceUrl({ src: "/cover/a", scope: "library", revision: "2" });
   expect(sources(container)).not.toContain(flat);
-  expect(image).not.toHaveAttribute("src");
-  expect(image.parentElement).toHaveAttribute("data-source", "pending");
-  expect(image.parentElement).toHaveAttribute("data-ready", "false");
-  expect(image).toHaveAttribute("crossorigin", "anonymous");
+  // No image element without a source: source-less images cost WebKitGTK a frame each.
+  expect(screen.queryByRole("img", { name: "Book" })).toBeNull();
+  expect(cover).toHaveAttribute("data-source", "pending");
+  expect(cover).toHaveAttribute("data-ready", "false");
   act(() => pending[0].notify({ url: "blob:rendered", width: 256, height: 368 }));
+  const image = screen.getByRole("img", { name: "Book" });
   expect(image).toHaveAttribute("src", "blob:rendered");
+  expect(image).toHaveAttribute("crossorigin", "anonymous");
   expect(image.parentElement).not.toHaveAttribute("data-instant");
   expect(image.parentElement).toHaveAttribute("data-ready", "false");
   fireEvent.load(image);
@@ -55,7 +57,7 @@ it("keeps the neutral case under a pending game cover instead of its flat artwor
   const { container } = render(<PhysicalCover kind="game" src="/game" alt="Game" />);
   const shell = pending.find(job => job.request.scope === "neutral-shell")!;
   act(() => shell.notify({ url: "blob:shell", width: 256, height: 362 }));
-  expect(sources(container)).toEqual(["blob:shell", null]);
+  expect(sources(container)).toEqual(["blob:shell"]);
   expect(container.querySelector(".physical-cover")).toHaveAttribute("data-shell", "true");
   act(() => pending.find(job => job.request.src === "/game")!.notify({ url: "blob:case", width: 256, height: 362 }));
   expect(screen.getByRole("img", { name: "Game" })).toHaveAttribute("src", "blob:case");
@@ -81,9 +83,9 @@ it("falls back to the flat source only when rendering fails, and rejects late ob
   const { rerender } = render(<PhysicalCover kind="book" src="/a" alt="Book" onError={onError} />);
   rerender(<PhysicalCover kind="book" src="/b" alt="Book" onError={onError} />);
   act(() => pending[0].notify({ url: "blob:obsolete", width: 256, height: 368 }));
-  const image = screen.getByRole("img", { name: "Book" });
-  expect(image).not.toHaveAttribute("src");
+  expect(screen.queryByRole("img", { name: "Book" })).toBeNull();
   act(() => pending[1].notify(null));
+  const image = screen.getByRole("img", { name: "Book" });
   expect(image).toHaveAttribute("src", "/b");
   expect(image.parentElement).toHaveAttribute("data-source", "fallback");
   fireEvent.error(image);

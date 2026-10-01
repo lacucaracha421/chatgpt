@@ -23,7 +23,8 @@ export function useAvLinkInbox({ enabled = true, poll = false, refreshKey = "", 
     if (!enabled) return;
     try {
       const next = await api.listInbox();
-      setItems(Array.isArray(next) ? next : []);
+      // An unchanged inbox keeps its array, so a re-read (every type switch) does not re-render the list.
+      setItems(current => { const value = Array.isArray(next) ? next : []; return JSON.stringify(value) === JSON.stringify(current) ? current : value; });
       setError(null);
     } catch (reason) {
       setError(errorMessage(reason, "받은 품번을 불러오지 못했습니다."));
@@ -34,7 +35,6 @@ export function useAvLinkInbox({ enabled = true, poll = false, refreshKey = "", 
 
   useEffect(() => {
     if (!enabled) { setItems([]); setLoading(false); return; }
-    setLoading(true);
     void refresh();
   }, [enabled, refresh, refreshKey]);
 

@@ -23,6 +23,13 @@ pub struct WorkRecord {
     pub my_score: Option<f64>,
     pub memo: Option<String>,
 }
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShelfCase {
+    pub collection_id: String,
+    pub owned_platform: Option<String>,
+    pub spine_artwork_id: Option<String>,
+}
 #[derive(Deserialize)]
 #[serde(tag = "field", rename_all = "camelCase")]
 pub enum WorkRecordEdit {
@@ -125,6 +132,30 @@ pub(crate) fn write_record_platform(
 impl Library {
     pub fn collection_work_record(&self, id: &str) -> Result<WorkRecord, LibraryError> {
         self.connection()?.query_row("SELECT p.status,p.owned_platform,c.my_score,c.description FROM collections c LEFT JOIN collection_pc_records p ON p.collection_id=c.id WHERE c.id=?1",[id],|r|Ok(WorkRecord{status:r.get(0)?,owned_platform:r.get(1)?,my_score:r.get(2)?,memo:r.get(3)?})).optional()?.ok_or(LibraryError::CollectionNotFound)
+    }
+    /// What each shelf case prints, for a whole list in one read: the owned device and the
+    /// spine artwork (the selected spine, else the oldest). Unknown ids are left out.
+    pub fn collection_shelf_cases(&self, ids: &[String]) -> Result<Vec<ShelfCase>, LibraryError> {
+        let ids = serde_json::to_string(ids).map_err(|_| rusqlite::Error::InvalidQuery)?;
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT c.id, p.owned_platform,
+                (SELECT a.id FROM collection_work_artworks a
+                 WHERE a.collection_id = c.id AND a.kind = 'spine'
+                 ORDER BY a.selected DESC, a.created_at, a.id LIMIT 1)
+             FROM collections c LEFT JOIN collection_pc_records p ON p.collection_id = c.id
+             WHERE c.id IN (SELECT value FROM json_each(?1))",
+        )?;
+        let cases = statement
+            .query_map([ids], |r| {
+                Ok(ShelfCase {
+                    collection_id: r.get(0)?,
+                    owned_platform: r.get(1)?,
+                    spine_artwork_id: r.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(cases)
     }
     pub fn save_collection_work_record(
         &self,
@@ -376,6 +407,36 @@ mod tests {
             l.collection_work_record("g").unwrap().memo.as_deref(),
             Some("changed")
         );
+    }
+    #[test]
+    fn collection_pc_shelf_cases_read_owned_device_and_chosen_spine_in_one_call() {
+        let (_t, l) = fixture();
+        l.connection().unwrap().execute_batch("INSERT INTO collections(id,name,type,created_at,updated_at) VALUES('h','Other','game','c','u'); INSERT INTO collection_work_artworks(id,collection_id,provider,provider_image_id,kind,relative_path,mime_type,width,height,selected,created_at,updated_at) VALUES('s-old','g','local','s-old','spine','a.png','image/png',40,600,0,'1','u'),('s-new','g','local','s-new','spine','b.png','image/png',40,600,0,'2','u'),('c','g','local','c','cover','c.png','image/png',400,600,1,'0','u'),('h-old','h','local','h-old','spine','d.png','image/png',40,600,0,'1','u'),('h-picked','h','local','h-picked','spine','e.png','image/png',40,600,1,'2','u');").unwrap();
+        l.save_collection_work_record(
+            "g",
+            WorkRecordEdit::OwnedPlatform {
+                value: Some("PS5".into()),
+            },
+        )
+        .unwrap();
+        let ids = ["g", "h", "m", "missing"].map(String::from);
+        let mut cases = l.collection_shelf_cases(&ids).unwrap();
+        cases.sort_by(|a, b| a.collection_id.cmp(&b.collection_id));
+        let case = |id: &str, owned: Option<&str>, spine: Option<&str>| ShelfCase {
+            collection_id: id.into(),
+            owned_platform: owned.map(Into::into),
+            spine_artwork_id: spine.map(Into::into),
+        };
+        // Oldest spine without a selection; the selected spine wins over an older one; no spine and no record read as none.
+        assert_eq!(
+            cases,
+            vec![
+                case("g", Some("PS5"), Some("s-old")),
+                case("h", None, Some("h-picked")),
+                case("m", None, None),
+            ]
+        );
+        assert!(l.collection_shelf_cases(&[]).unwrap().is_empty());
     }
     #[test]
     fn collection_pc_focus_stored_read_centre_and_stale_cover() {

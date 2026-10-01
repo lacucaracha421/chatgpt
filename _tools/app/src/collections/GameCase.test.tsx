@@ -20,14 +20,14 @@ it("uses shared snapshots without creating a canvas for every case",()=>{
   // The shared neutral case stays as the pending silhouette; the flat artwork is never shown first.
   expect(shell.release).not.toHaveBeenCalled();
   expect(pending.filter(job=>job.request.src==="")).toHaveLength(1);
-  expect(screen.getByRole("img")).not.toHaveAttribute("src");
+  expect(screen.queryByRole("img")).toBeNull();
   expect(view.container.querySelector(".physical-cover__shell")).toHaveAttribute("src","blob:shell");
   const obsolete=pending.find(job=>job.request.src==="first.jpg")!;
   view.rerender(<GameCase src="second.jpg" alt="게임 표지" />);
   expect(obsolete.release).toHaveBeenCalledOnce();
-  expect(screen.getByRole("img")).not.toHaveAttribute("src");
+  expect(screen.queryByRole("img")).toBeNull();
   act(()=>obsolete.notify({url:"blob:obsolete",width:256,height:362}));
-  expect(screen.getByRole("img")).not.toHaveAttribute("src","blob:obsolete");
+  expect(screen.queryByRole("img")).toBeNull();
   act(()=>pending.find(job=>job.request.src==="second.jpg")!.notify({url:"blob:current",width:256,height:362}));
   expect(screen.getByRole("img")).toHaveAttribute("src","blob:current");
 });

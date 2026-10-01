@@ -3864,6 +3864,19 @@ pub fn get_collection_work_record(
         .collection_work_record(&collection_id)
         .map_err(CommandError::from)
 }
+/// The shelf's per-case data in one read, off the main thread: a list of a few hundred cases
+/// asking one by one blocked the window's frames.
+#[tauri::command]
+pub async fn list_collection_shelf_cases(
+    collection_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::library::collection_pc::ShelfCase>, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.collection_shelf_cases(&collection_ids))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
 #[tauri::command]
 pub fn save_collection_work_record(
     collection_id: String,

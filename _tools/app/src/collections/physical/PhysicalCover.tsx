@@ -50,11 +50,13 @@ export function PhysicalCover({src,alt,kind,scope="",revision="",large=false,onE
   return <span ref={root} className={`physical-cover physical-cover--${kind}`} data-ready={ready} data-source={art?"rendered":fallback?"fallback":"pending"}
     data-shell={showShell||undefined} data-instant={(src&&current?.instant)||undefined}>
     {showShell&&<img className="physical-cover__shell" src={shell!.url} alt="" aria-hidden="true" decoding="async" draggable={false} />}
-    <img className="physical-cover__image" src={url??undefined} crossOrigin="anonymous" alt={alt} decoding="async" draggable={false}
+    {/* No <img> until there is a source: WebKitGTK spent ~70 ms a frame for most of a second on a
+        grid's worth of source-less images (the covers outside the near margin) after every mount. */}
+    {url!==null&&<img className="physical-cover__image" src={url} crossOrigin="anonymous" alt={alt} decoding="async" draggable={false}
       onLoad={()=>setLoadedUrl(url)}
       onError={()=>{
         if(src&&art) setResult({key,value:null,failed:true,instant:true});
         else latestError.current?.();
-      }} />
+      }} />}
   </span>;
 }

@@ -26,3 +26,6 @@ type ChromeContextValue = {
 // including consumers loaded later through React.lazy.
 export const ChromeContext = createContext<ChromeContextValue | null>(null);
 export const useWorkspaceChrome = () => useContext(ChromeContext);
+/** Whether a workspace chrome is present, without re-rendering when the view's published chrome changes. */
+export const ChromePresenceContext = createContext(false);
+export const useInWorkspaceChrome = () => useContext(ChromePresenceContext);

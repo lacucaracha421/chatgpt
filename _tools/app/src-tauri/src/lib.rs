@@ -584,6 +584,7 @@ pub fn run() {
             commands::list_collection_work_artworks,
             commands::list_collection_volumes,
             commands::get_collection_work_record,
+            commands::list_collection_shelf_cases,
             commands::save_collection_work_record,
             commands::list_collection_cover_focus,
             commands::start_collection_cover_focus,

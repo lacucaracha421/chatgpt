@@ -634,6 +634,7 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   listCollectionWorkArtworks: (collectionId) =>
     invoke<WorkArtworkSummary[]>("list_collection_work_artworks", { collectionId }),
   getCollectionWorkRecord: collectionId => invoke<CollectionWorkRecord>("get_collection_work_record", { collectionId }),
+  listCollectionShelfCases: collectionIds => invoke<import("./types").CollectionShelfCase[]>("list_collection_shelf_cases", { collectionIds }),
   saveCollectionWorkRecord: (collectionId, edit) => invoke<CollectionWorkRecord>("save_collection_work_record", { collectionId, edit }),
   listCollectionCoverFocus: collectionId => invoke<CollectionCoverFocus[]>("list_collection_cover_focus", { collectionId }),
   startCollectionCoverFocus: (collectionId, onFocus) => {

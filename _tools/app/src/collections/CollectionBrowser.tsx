@@ -6,7 +6,7 @@ import { commandErrorMessage } from "../library/errorMessage";
 import type { AssetView, CollectionSummary, CollectionType, CollectionUpdateProvider, CollectionVolumeRangeInput, CreateCollection, UpdateCollection } from "../library/types";
 import type { ViewChromeSpec } from "../layout/WorkspaceChrome";
 import { ViewToolbar } from "../layout/ViewToolbar";
-import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
+import { useInWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { Button } from "../shared/ui/Button";
 import { ViewOptionsMenu } from "../shared/ui/ViewOptionsMenu";
 import { useLaunchBoxSpineBatch } from "./launchBoxSpines";
@@ -91,7 +91,8 @@ export function CollectionBrowser({
   avLinkApi,
 }: CollectionBrowserProps) {
   const { gateway, library } = useLibrary();
-  const workspace = useWorkspaceChrome();
+  // Presence only: the chrome's published title changes with every type switch, and re-rendering the whole list for it cost a frame.
+  const workspace = useInWorkspaceChrome();
   const spineBatch = useLaunchBoxSpineBatch(gateway, library?.root ?? "");
   useAutoDismiss(spineBatch.message, spineBatch.dismiss);
   const [viewSettings, patchViewSettings] = useCollectionView(typeFilter);
@@ -153,7 +154,7 @@ export function CollectionBrowser({
   }, [scope, navigationMemory]);
 
   const showcaseItems = collections.filter((collection) => collection.type === typeFilter && collection.showcase).sort((a, b) => (a.showcaseOrder ?? Number.MAX_SAFE_INTEGER) - (b.showcaseOrder ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
-  const libraryItems = deriveCollectionLibrary(collections, typeFilter, libraryState);
+  const libraryItems = useMemo(() => deriveCollectionLibrary(collections, typeFilter, libraryState), [collections, typeFilter, libraryState]);
   const visible = showcase ? showcaseItems : viewSettings.layout === "shelf" && typeFilter === "game" ? shelfGroups(libraryItems, viewSettings.grouping).flatMap(group => group.items) : libraryItems;
   const filtered = Boolean(libraryState.query.trim()) || libraryState.rating !== "all";
   const matchingIds = new Set(libraryItems.map(item => item.id));
@@ -227,11 +228,16 @@ export function CollectionBrowser({
     else onViewChange({ kind: "collection", collectionId: collection.id });
   };
 
-  const collectionMenu = (collection: CollectionSummary) => [
+  // Cards call the latest handlers through this ref, so the list's render callback below changes only
+  // with what the cards show. Re-rendering a few hundred cards for an unrelated browser update (the chrome
+  // title on a type switch, the AV inbox, a toast) cost about a frame each.
+  const latest = useRef({ openCollection, toggleShowcase, showcaseRowItems, visible });
+  useLayoutEffect(() => { latest.current = { openCollection, toggleShowcase, showcaseRowItems, visible }; });
+  const collectionMenu = useCallback((collection: CollectionSummary) => [
     { id: "edit", label: "편집", onSelect: () => setEditMode({ kind: "edit", collection }) },
-    { id: "showcase", label: collection.showcase ? "쇼케이스에서 제거" : "쇼케이스에 추가", onSelect: () => void toggleShowcase(collection) },
+    { id: "showcase", label: collection.showcase ? "쇼케이스에서 제거" : "쇼케이스에 추가", onSelect: () => void latest.current.toggleShowcase(collection) },
     { id: "delete", label: "삭제", destructive: true, onSelect: () => setDeleteTarget(collection) },
-  ];
+  ], []);
   // 만화 · 선반: one bookcase row per work (MangaShelfList); 격자 keeps the cover cards.
   const mangaShelf = typeFilter === "manga" && viewSettings.layout === "shelf";
   const openMangaAt = (collection: CollectionSummary, volumeId: string | null) => {
@@ -241,8 +247,13 @@ export function CollectionBrowser({
   const mangaShelfList = (items: CollectionSummary[], label: string) => <MangaShelfList items={items} label={label} board={releases.data?.board}
     pick={mangaPick} onPick={setMangaPick} menu={collectionMenu} onOpen={openMangaAt} />;
 
-  const renderCollection = (collection: CollectionSummary, options: { meta?: boolean } = {}) => (
-            <ContextMenu
+  const libraryRoot = library?.root ?? "";
+  const board = releases.data?.board;
+  const viewLayout = viewSettings.layout;
+  const renderCollection = useCallback((collection: CollectionSummary, options: { meta?: boolean } = {}) => {
+    const work = collection.type === "game" || collection.type === "av" || collection.type === "movie";
+    const open = () => latest.current.openCollection(collection, options.meta === false ? latest.current.showcaseRowItems : latest.current.visible);
+    return <ContextMenu
               key={collection.id}
               items={collectionMenu(collection)}
             >
@@ -252,17 +263,17 @@ export function CollectionBrowser({
                 selected={pickedId === collection.id}
                 meta={options.meta}
                 lightCase={!showcase}
-                shelf={viewSettings.layout === "shelf" && !showcase && typeFilter !== "manga"}
-                releaseCaption={releaseCaption(collection, releases.data?.board.get(collection.id), inboxByWork.get(collection.id) ?? [], today)}
-                scope={library?.root ?? ""}
+                shelf={viewLayout === "shelf" && !showcase && typeFilter !== "manga"}
+                releaseCaption={releaseCaption(collection, board?.get(collection.id), inboxByWork.get(collection.id) ?? [], today)}
+                scope={libraryRoot}
                 exhibition={showcase}
-                onClick={() => { if (collection.type === "game" || collection.type === "av" || collection.type === "movie") setPickedId(collection.id); else openCollection(collection); }}
-                onDoubleClick={() => { if (collection.type === "game" || collection.type === "av" || collection.type === "movie") openCollection(collection, options.meta === false ? showcaseRowItems : visible); }}
-                onKeyDown={event => { if ((collection.type === "game" || collection.type === "av" || collection.type === "movie") && event.key === "Enter") { event.preventDefault(); openCollection(collection, options.meta === false ? showcaseRowItems : visible); } }}
+                onClick={() => { if (work) setPickedId(collection.id); else latest.current.openCollection(collection); }}
+                onDoubleClick={() => { if (work) open(); }}
+                onKeyDown={event => { if (work && event.key === "Enter") { event.preventDefault(); open(); } }}
               />
-            </ContextMenu>
-
-  );
+            </ContextMenu>;
+  }, [collectionMenu, pickedId, showcase, viewLayout, typeFilter, board, inboxByWork, today, libraryRoot]);
+  const renderShowcaseCollection = useCallback((collection: CollectionSummary) => renderCollection(collection, { meta: false }), [renderCollection]);
 
   const indexActions = (
           <>
@@ -311,7 +322,7 @@ export function CollectionBrowser({
       {showcaseOpen && <Button size="sm" variant="ghost" className="collection-browser__more" onClick={() => setShowcase(true)}>전체 보기<ChevronRightIcon aria-hidden="true" /></Button>}
     </div>
     {showcaseOpen && (mangaShelf ? mangaShelfList(showcaseRowItems, `${sectionLabel} 쇼케이스`)
-      : <CollectionList items={showcaseRowItems} view={viewSettings} showcase render={collection => renderCollection(collection, { meta: false })} label={`${sectionLabel} 쇼케이스`} onPick={setPickedId} />)}
+      : <CollectionList items={showcaseRowItems} view={viewSettings} showcase render={renderShowcaseCollection} label={`${sectionLabel} 쇼케이스`} onPick={setPickedId} />)}
 
   </section> : null;
   const sectionRow = <div className="collection-browser__section collection-browser__section--all">
@@ -399,7 +410,7 @@ export function CollectionBrowser({
           {!inbox && !showcase && <div ref={stageRef} className="collection-browser__list-scroll" data-cover-scroll-root="">
             {leading}
             {mangaShelf ? mangaShelfList(libraryItems, `${sectionLabel} 작품 목록`)
-              : <CollectionList items={libraryItems} view={viewSettings} render={collection => renderCollection(collection)} label={`${sectionLabel} 작품 목록`} onPick={setPickedId} />}
+              : <CollectionList items={libraryItems} view={viewSettings} render={renderCollection} label={`${sectionLabel} 작품 목록`} onPick={setPickedId} />}
             {visible.length === 0 && <div className="collection-browser__empty">{emptyLibrary}</div>}
           </div>}
 

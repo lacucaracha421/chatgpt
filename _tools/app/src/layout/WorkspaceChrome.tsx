@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import type { ChromeSearchSpec } from "./ChromeSearch";
 import "../styles/chrome.css";
-import { ChromeContext, useWorkspaceChrome, type Slot, type Targets, type ChromeMeta, type ChromeSearchActions, type ChromeSearchInfo } from "./WorkspaceChromeContext";
+import { ChromeContext, ChromePresenceContext, useWorkspaceChrome, type Slot, type Targets, type ChromeMeta, type ChromeSearchActions, type ChromeSearchInfo } from "./WorkspaceChromeContext";
 
 /** A view-specific search editor; `content` renders in the index head, `open` lets the 찾기 palette open it. */
 export type ChromeSearchSurfaceSpec = ChromeSearchSpec & { open: (draft: string) => void; content: ReactNode };
@@ -41,7 +41,7 @@ export function WorkspaceChromeProvider({ scope, children }: PropsWithChildren<{
   const openSearch = useCallback((draft: string) => { if (owner) searchActions.current.get(owner)?.open?.(draft); }, [owner]);
   const value = useMemo(() => ({ scope, targets, setTarget, publish, unpublish, meta, setSearchActions, applySearch, openSearch }),
     [scope, targets, setTarget, publish, unpublish, meta, setSearchActions, applySearch, openSearch]);
-  return <ChromeContext.Provider value={value}>{children}</ChromeContext.Provider>;
+  return <ChromeContext.Provider value={value}><ChromePresenceContext.Provider value>{children}</ChromePresenceContext.Provider></ChromeContext.Provider>;
 }
 
 /** Stable DOM destinations; view components keep their state and callbacks. */

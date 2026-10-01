@@ -8,11 +8,12 @@ import { CollectionBrowser } from "./CollectionBrowser";
 import { createDefaultCollectionLibraryState } from "./collectionLibrary";
 import { requestMissingGameSpine, useLaunchBoxSpineBatch } from "./launchBoxSpines";
 import { CollectionShelfCase } from "./case/LightCase";
-afterEach(cleanup);
+import { resetShelfCasesForTests } from "./case/shelfCaseInfo";
+afterEach(() => { cleanup(); resetShelfCasesForTests(); });
 const game = { id: "a", name: "게임", type: "game", updatedAt: "r", platforms: "Switch 2", unreadReleaseCount: 0, createdAt: "r", showcase: false } as CollectionSummary;
 const outcome = (id: string, status: LaunchBoxSpineOutcome["status"]): LaunchBoxSpineOutcome => ({ collectionId: id, status, reason: "", artworkId: null, databaseId: null, platform: null, fileName: null, region: null, cached: false });
 function setup() {
-  const gateway = { listCollectionWorkArtworks: vi.fn().mockResolvedValue([]), fetchLaunchBoxSpines: vi.fn<NonNullable<LibraryGateway["fetchLaunchBoxSpines"]>>() };
+  const gateway = { listCollectionWorkArtworks: vi.fn().mockResolvedValue([]), listCollectionShelfCases: vi.fn().mockResolvedValue([]), fetchLaunchBoxSpines: vi.fn<NonNullable<LibraryGateway["fetchLaunchBoxSpines"]>>() };
   const changed = vi.fn().mockResolvedValue(undefined);
   function Browser() {
     return <LibraryProvider gateway={gateway as unknown as LibraryGateway}><CollectionBrowser
@@ -44,7 +45,7 @@ it("follows the cursor, displays cumulative progress, prevents another batch and
   expect(gateway.fetchLaunchBoxSpines.mock.calls[0][0]).toMatchObject({ action: "run", limit: 50, informationOnly: true });
   expect(gateway.fetchLaunchBoxSpines.mock.calls[1][0]).toMatchObject({ action: "run", limit: 50 });
   expect(gateway.fetchLaunchBoxSpines.mock.calls[2][0]).toMatchObject({ action: "run", limit: 50, afterCollectionId: "a" });
-  expect(gateway.listCollectionWorkArtworks.mock.calls.map(args => args[0])).not.toContain("manga");
+  expect(gateway.listCollectionShelfCases.mock.calls.flatMap(args => args[0])).not.toContain("manga");
   act(() => report({ jobId: job, phase: "game_completed", processed: 1, total: 2, outcome: outcome("b", "no_match") }));
   expect(document.querySelector(".collection-toolbar__spine-status")).toHaveTextContent(/^책등 2\/5$/);
   await user.click(screen.getByRole("button", { name: "작품 관리" }));
@@ -79,12 +80,12 @@ it("uses the shared toast for command errors", async () => {
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 it("refreshes the matched light case without changing the collection timestamp", async () => {
-  const gateway = { listCollectionWorkArtworks: vi.fn().mockResolvedValue([]), fetchLaunchBoxSpine: vi.fn().mockResolvedValue(outcome("a", "matched")) } as unknown as LibraryGateway;
+  const gateway = { listCollectionShelfCases: vi.fn().mockResolvedValue([]), fetchLaunchBoxSpine: vi.fn().mockResolvedValue(outcome("a", "matched")) } as unknown as LibraryGateway;
   const { container } = render(<LibraryProvider gateway={gateway}><CollectionShelfCase collection={game} front={null} privacy={false} active selected={false} /></LibraryProvider>);
-  await waitFor(() => expect(gateway.listCollectionWorkArtworks).toHaveBeenCalledOnce());
-  vi.mocked(gateway.listCollectionWorkArtworks).mockResolvedValue([{ id: "spine", kind: "spine", selected: true }]);
+  await waitFor(() => expect(gateway.listCollectionShelfCases).toHaveBeenCalledOnce());
+  vi.mocked(gateway.listCollectionShelfCases!).mockResolvedValue([{ collectionId: "a", ownedPlatform: null, spineArtworkId: "spine" }]);
   await act(async () => { await requestMissingGameSpine(gateway, "", game, []); });
-  await waitFor(() => expect(gateway.listCollectionWorkArtworks).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(gateway.listCollectionShelfCases).toHaveBeenCalledTimes(2));
   const image = container.querySelector<HTMLImageElement>('img[src*="spine"]')!;
   expect(container.querySelector("[data-spine-template]")).not.toBeNull();
   await act(async () => fireEvent.load(image));
@@ -188,7 +189,24 @@ it("cancels the spine phase after information completes", async () => {
 });
 
 it("uses the owned device for light-case material and spine printing", async () => {
-  const gateway = { getCollectionWorkRecord: vi.fn().mockResolvedValue({ ownedPlatform: "PS5" }), listCollectionWorkArtworks: vi.fn().mockResolvedValue([]) } as unknown as LibraryGateway;
+  const gateway = { listCollectionShelfCases: vi.fn().mockResolvedValue([{ collectionId: "a", ownedPlatform: "PS5", spineArtworkId: null }]) } as unknown as LibraryGateway;
   const { container } = render(<LibraryProvider gateway={gateway}><CollectionShelfCase collection={{ ...game, platforms: "PC · Nintendo Switch 2" }} front={null} privacy={false} active selected={false} /></LibraryProvider>);
   await waitFor(() => expect(container.querySelector('[data-spine-template="ps5"]')).not.toBeNull());
 });
+
+it("reads a whole shelf of cases in one call and prints a remounted case at once", async () => {
+  const read = vi.fn().mockResolvedValue([{ collectionId: "g2", ownedPlatform: "PS5", spineArtworkId: null }]);
+  const gateway = { listCollectionShelfCases: read } as unknown as LibraryGateway;
+  const ids = Array.from({ length: 40 }, (_, index) => `g${index}`);
+  const shelf = () => <LibraryProvider gateway={gateway}>{ids.map(id => <CollectionShelfCase key={id} collection={{ ...game, id, platforms: "Nintendo Switch 2" }} front={null} privacy={false} active selected={false} />)}</LibraryProvider>;
+  const first = render(shelf());
+  await waitFor(() => expect(first.container.querySelector('[data-spine-template="ps5"]')).not.toBeNull());
+  // Performance lock: one command for the list, never one (or two) per case.
+  expect(read).toHaveBeenCalledOnce();
+  expect(read.mock.calls[0][0]).toEqual(ids);
+  first.unmount();
+  const again = render(shelf());
+  expect(again.container.querySelector('[data-spine-template="ps5"]')).not.toBeNull();
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+});
+

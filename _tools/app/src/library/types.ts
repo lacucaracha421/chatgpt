@@ -745,6 +745,8 @@ export type KakaoApplyRequest = {
 
 // PC-only data: kept separate from CollectionSummary/CollectionVolume replica shapes.
 export type CollectionWorkRecord = { status: string | null; ownedPlatform: string | null; myScore: number | null; memo: string | null };
+/** A shelf case's printing: the owned device and the chosen spine artwork. */
+export type CollectionShelfCase = { collectionId: string; ownedPlatform: string | null; spineArtworkId: string | null };
 export type CollectionRecordEdit = { field: "status" | "ownedPlatform" | "memo"; value: string | null } | { field: "myScore"; value: number | null };
 export type CollectionCoverFocus = { volumeId: string; coverArtworkId: string; focusX: number | null; method: "head" | "close-up" | "body" | "none" };
 export type CollectionFocusJobResult = { busy: boolean; processed: number; failed: number };
@@ -1539,6 +1541,8 @@ export interface LibraryGateway {
   fetchLaunchBoxSpines?(request: LaunchBoxSpineBatchRequest, onProgress?: (progress: LaunchBoxSpineProgress) => void): Promise<LaunchBoxSpineBatchResult>;
   listCollectionWorkArtworks(collectionId: string): Promise<WorkArtworkSummary[]>;
   getCollectionWorkRecord?(collectionId: string): Promise<CollectionWorkRecord>;
+  /** Many shelf cases in one read; ids that no longer exist are left out. */
+  listCollectionShelfCases?(collectionIds: string[]): Promise<CollectionShelfCase[]>;
   saveCollectionWorkRecord?(collectionId: string, edit: CollectionRecordEdit): Promise<CollectionWorkRecord>;
   listCollectionCoverFocus?(collectionId: string): Promise<CollectionCoverFocus[]>;
   startCollectionCoverFocus?(collectionId: string, onFocus: (focus: CollectionCoverFocus) => void): Promise<CollectionFocusJobResult>;

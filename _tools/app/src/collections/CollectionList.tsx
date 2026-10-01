@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { CollectionSummary, CollectionType } from "../library/types";
 import { casePlatform } from "./case/CollectionCase";
 
@@ -57,26 +57,32 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
     observer?.observe(element); return () => observer?.disconnect();
   }, []);
   const shelf = view.layout === "shelf" && items[0]?.type !== "manga";
-  const groups = shelf && !showcase ? shelfGroups(items, view.grouping) : [{ label: "", items }];
-  const ordered = groups.flatMap(group => group.items);
   const cellWidth = Math.max(1, (metrics.width - metrics.padding - metrics.gap * (view.perRow - 1)) / view.perRow);
   // Approved shelf geometry reserves the turned cover and the 22px spine.
   const height = Math.min(300, Math.max(1, (cellWidth - 13) / (.8 * (2 / 3))));
-  const children: ReactNode[] = [];
-  const positions: { row: number; column: number }[] = [];
-  let row = 1;
-  for (const group of groups) {
-    if (group.label) children.push(<div key={`group:${group.label}`} className="collection-list__group" style={{ gridRow: row++, gridColumn: "1 / -1" }}>{group.label}<span>{group.items.length.toLocaleString()}</span></div>);
-    group.items.forEach((item, index) => {
-      const itemIndex = positions.length;
-      positions.push({ row: showcase ? row : row + Math.floor(index / view.perRow), column: showcase ? index : index % view.perRow });
-      children.push(<div key={item.id} className={`collection-list__cell${index % view.perRow >= view.perRow - 2 ? " is-end" : ""}`} data-list-index={itemIndex} style={{ gridRow: showcase ? row : row + Math.floor(index / view.perRow), gridColumn: showcase ? index + 1 : index % view.perRow + 1 }}>{render(item)}</div>);
-    });
-    for (let index = 0; index < (showcase ? Math.min(1, group.items.length) : Math.ceil(group.items.length / view.perRow)); index++) {
-      children.push(<div key={`plank:${group.label}:${index}`} className="collection-list__plank" aria-hidden="true" style={{ gridRow: row + index, gridColumn: showcase ? `1 / ${Math.max(view.perRow, group.items.length) + 1}` : "1 / -1" }} />);
+  const perRow = view.perRow, grouping = view.grouping;
+  // The cells depend on the items, the columns and the card renderer only: a re-measure (the list's
+  // width) changes the container's custom properties without re-rendering every card.
+  const { children, positions, ordered } = useMemo(() => {
+    const groups = shelf && !showcase ? shelfGroups(items, grouping) : [{ label: "", items }];
+    const ordered = groups.flatMap(group => group.items);
+    const children: ReactNode[] = [];
+    const positions: { row: number; column: number }[] = [];
+    let row = 1;
+    for (const group of groups) {
+      if (group.label) children.push(<div key={`group:${group.label}`} className="collection-list__group" style={{ gridRow: row++, gridColumn: "1 / -1" }}>{group.label}<span>{group.items.length.toLocaleString()}</span></div>);
+      group.items.forEach((item, index) => {
+        const itemIndex = positions.length;
+        positions.push({ row: showcase ? row : row + Math.floor(index / perRow), column: showcase ? index : index % perRow });
+        children.push(<div key={item.id} className={`collection-list__cell${index % perRow >= perRow - 2 ? " is-end" : ""}`} data-list-index={itemIndex} style={{ gridRow: showcase ? row : row + Math.floor(index / perRow), gridColumn: showcase ? index + 1 : index % perRow + 1 }}>{render(item)}</div>);
+      });
+      for (let index = 0; index < (showcase ? Math.min(1, group.items.length) : Math.ceil(group.items.length / perRow)); index++) {
+        children.push(<div key={`plank:${group.label}:${index}`} className="collection-list__plank" aria-hidden="true" style={{ gridRow: row + index, gridColumn: showcase ? `1 / ${Math.max(perRow, group.items.length) + 1}` : "1 / -1" }} />);
+      }
+      row += Math.ceil(group.items.length / perRow);
     }
-    row += Math.ceil(group.items.length / view.perRow);
-  }
+    return { children, positions, ordered };
+  }, [items, shelf, showcase, grouping, perRow, render]);
   return <div ref={ref} className={`collection-list collection-list--${shelf ? "shelf" : "grid"}${showcase ? " collection-list--showcase" : ""}`} role="group" aria-label={label}
     data-per-row={view.perRow} style={{ "--columns": view.perRow, "--cell-width": `${cellWidth}px`, "--case-height": `${height}px` } as CSSProperties}
     onKeyDown={event => {

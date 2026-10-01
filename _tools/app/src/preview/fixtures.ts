@@ -300,6 +300,7 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "list_volume_ownership": return [];
     case "list_collection_covers": return Array.from({ length: 10 }, (_, index) => ({ fileName: `volume-${index + 1}.jpg`, shelf: 0, volumeLabel: `${index + 1}권` }));
     case "list_collection_volumes": return Array.from({ length: 12 }, (_, index) => ({ id: `volume-${index + 1}`, volumeNumber: index + 1, editionIndex: 0, displayLabel: `${index + 1}권`, coverArtworkId: `volume-art-${index + 1}`, localReleaseDate: `202${4 + Math.floor(index / 6)}-${String((index % 6) + 1).padStart(2, "0")}-12`, isbn13: `978890${String(index).padStart(7, "0")}`, releaseStatus: index > 9 ? "upcoming" : "released" }));
+    case "list_collection_shelf_cases": return (args.collectionIds as string[]).map(collectionId => ({ collectionId, ownedPlatform: null, spineArtworkId: null }));
     case "list_collection_work_artworks": return [{ id: `artwork-${args.collectionId}-cover`, kind: "cover", selected: true }, { id: `artwork-${args.collectionId}-hero`, kind: "hero", selected: true }];
     case "get_igdb_connection": return { collectionId: args.collectionId, gameId: 101, gameName: "Preview Game", updatedAt: "2026-09-28T00:00:00.000Z" };
     case "get_tmdb_connection": return null;
