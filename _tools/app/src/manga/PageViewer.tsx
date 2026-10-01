@@ -284,7 +284,8 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, artist, 
           </div>
           {edge("left")}
           {edge("right")}
-          {pageCount > 1 && <div className="asset-viewer__filmstrip manga-reader__bottom" dir={direction} {...chrome.hover}>
+          {/* Page 1 always sits at the left of the scrubber and strip, whatever the reading direction (user, 2026-10-01). */}
+          {pageCount > 1 && <div className="asset-viewer__filmstrip manga-reader__bottom" dir="ltr" {...chrome.hover}>
             <input
               type="range"
               className="manga-reader__scrubber"
