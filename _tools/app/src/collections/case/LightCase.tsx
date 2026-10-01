@@ -51,7 +51,7 @@ export function LightCase({ data, selected }: { data: CaseData; selected: boolea
 }
 
 function LightCaseFrame({ data, selected, ratio, children }: { data: CaseData; selected: boolean; ratio: number; children: ReactNode }) {
-  return <span className={`collection-light-case${data.platform === "book" ? " collection-light-case--book" : ""}`} data-front={selected || undefined} style={{ "--case-ratio": ratio, "--plastic": CASE_PLASTIC[data.platform], "--gloss": selected ? "50%" : "84%" } as CSSProperties}>
+  return <span className={`collection-light-case${data.platform === "book" ? " collection-light-case--book" : ""}`} data-front={selected || undefined} style={{ "--case-ratio": ratio, "--plastic": CASE_PLASTIC[data.platform], "--gloss": selected ? "50%" : "84%", ...(data.platform === "book" ? { "--spine-title-cells": Math.max(1, Array.from(data.title ?? "").length), "--spine-author-cells": Math.max(1, Array.from(data.author ?? "").length) } : {}) } as CSSProperties}>
     <span className="cs-box">{children}<span className="cs-top" /></span>
   </span>;
 }

@@ -44,3 +44,21 @@ it('keeps keyboard focus inside and returns to the shortcut without scrolling it
   view.rerender(<><button>바로가기</button><Overlay open={false} title="쇼케이스" onClose={onClose}><button>작품</button></Overlay></>);
   expect(document.activeElement).toBe(opener);
 });
+
+// jsdom lacks AnimationEvent; React selects its WebKit event alias.
+it('defers heavy content until rise ends, preserves it under a work, and resets on close',()=>{
+  const props={open:true,title:'쇼케이스',onClose:vi.fn(),deferContent:true};
+  const content=(ready:boolean)=>ready?<button>작품</button>:<p role="status">준비 중</p>;
+  const view=render(<Overlay {...props}>{content}</Overlay>);
+  expect(screen.queryByRole('button',{name:'작품'})).toBeNull();
+  fireEvent(document.querySelector('.mobile-overlay__header')!,Object.assign(new Event('webkitAnimationEnd',{bubbles:true}),{animationName:'mobile-overlay-rise'}));
+  expect(screen.queryByRole('button',{name:'작품'})).toBeNull();
+  fireEvent(document.querySelector('.mobile-overlay__panel')!,Object.assign(new Event('webkitAnimationEnd',{bubbles:true}),{animationName:'mobile-overlay-rise'}));
+  const work=screen.getByRole('button',{name:'작품'});
+  view.rerender(<Overlay {...props} covered>{content}</Overlay>);
+  view.rerender(<Overlay {...props}>{content}</Overlay>);
+  expect(screen.getByRole('button',{name:'작품'})).toBe(work);
+  view.rerender(<Overlay {...props} open={false}>{content}</Overlay>);
+  view.rerender(<Overlay {...props}>{content}</Overlay>);
+  expect(screen.queryByRole('button',{name:'작품'})).toBeNull();
+});

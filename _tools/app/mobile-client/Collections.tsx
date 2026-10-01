@@ -568,7 +568,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   // Both surfaces use the type's same layout, per-row setting and shared shelf geometry.
   const workList=(items:CollectionSummary[],kind:CollectionKind,label:string,workRevision:string,visible:boolean,arrivals:typeof mainArrivals)=>{
     const settings=viewOf(kind),order=items.map(work=>work.id);
-    if(settings.layout==='shelf')return <CollectionList items={items} view={{layout:'shelf',perRow:settings.perRow,grouping:'sort'}} label={label} onPick={setPicked}
+    if(settings.layout==='shelf')return <CollectionList items={items} view={{layout:'shelf',perRow:settings.perRow,grouping:'sort'}} label={label} onPick={setPicked} windowRows pickedId={picked}
       render={work=><ShelfTile item={card(work)} revision={workRevision} active={visible} privacy={privacyMode} picked={picked===work.id} onTap={tapWork(items)}/>}/>;
     if(settings.layout==='bookcase'&&kind==='manga')return <TabletMangaShelf items={items.map(card)} label={label} revision={workRevision} active={visible} privacy={privacyMode}
       owned={ownedOf} pick={mangaPick} onPick={setMangaPick} onOpen={(id,at)=>openWork(id,order,at)}/>;
@@ -634,18 +634,18 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
       <Scrubber scrollRef={listRef} total={main.items.length} sort={mainScrubberSort} hidden={!active||paused||!!selected||overlayOpen||!!performer||sheet!==null} onEndReached={main.loadMore}/>
     </div>
     {/* Always mounted so its pull-to-refresh gesture is attached; hidden until opened. */}
-    <Overlay open={showcaseAll} covered={!live||!!selected||!!performer} title="쇼케이스" count={showcaseCount} onClose={()=>setShowcaseAll(false)}>
-    <div ref={showcaseRef} className="collection-scroll" onScroll={event=>{if(nearEnd(event.currentTarget))showcase.loadMore();}}>{showcaseAll&&<>
+    <Overlay deferContent open={showcaseAll} covered={!live||!!selected||!!performer} title="쇼케이스" count={showcaseCount} onClose={()=>setShowcaseAll(false)}>
+    {ready=><div ref={showcaseRef} className="collection-scroll" onScroll={event=>{if(nearEnd(event.currentTarget))showcase.loadMore();}}>{showcaseAll&&<>
       {showcasePull}
       {showcase.busy&&!showcaseItems.length&&<p className="hint" role="status">쇼케이스를 불러오는 중…</p>}
       <p className="hint collection-showcase-note">PC에서 정한 순서대로 보여 줍니다.</p>
       {showcase.error&&<div className="error-message" role="alert">{showcase.error}<Button variant="ghost" onClick={showcase.reload}>처음부터 새로고침</Button></div>}
       {showcase.committed&&!showcase.busy&&!showcaseItems.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}
-      {unpublished(showcase)?unpublishedNotice:workList(showcaseItems,type,`${labels[type]} 쇼케이스 작품 목록`,showcasePage?.revision??'',showcaseActive,showcaseArrivals)}
+      {!ready?<p className="hint" role="status">쇼케이스를 준비하는 중…</p>:unpublished(showcase)?unpublishedNotice:workList(showcaseItems,type,`${labels[type]} 쇼케이스 작품 목록`,showcasePage?.revision??'',showcaseActive,showcaseArrivals)}
       {showcase.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
       {showcase.moreError&&<div className="inline-error" role="alert"><span>{showcase.moreError}</span><Button variant="ghost" onClick={showcase.retryMore}>다시 시도</Button></div>}
       <Scrubber scrollRef={showcaseRef} total={showcaseItems.length} sort={showcaseScrubberSort} hidden={!active||paused||!!selected||!showcaseAll} onEndReached={showcase.loadMore}/>
-    </>}</div>
+    </>}</div>}
     </Overlay>
     <Overlay open={calendarOpen} covered={!live||!!selected||!!performer} title="발매 캘린더" count={calendarInterestCount} onClose={()=>setCalendarOpen(false)}>
       {calendarOpen&&(tab==='game'||tab==='movie')&&<ReleaseCalendar embedded onSnapshot={setCalendarReply} initialKind={tab} onClose={()=>setCalendarOpen(false)}/>}

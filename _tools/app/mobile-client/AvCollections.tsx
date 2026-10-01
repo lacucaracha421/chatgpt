@@ -157,7 +157,7 @@ export function AvPerformerShelves({items,revision,active,privacy,perRow,picked,
       <span><b>{person.name}</b>{person.nameJa&&<small lang="ja">{person.nameJa}</small>}</span>
       <span className="muted numeric">{works.length.toLocaleString()}편</span><ChevronRightIcon aria-hidden="true"/>
     </button>
-    <CollectionList items={works} view={{layout:'shelf',perRow,grouping:'sort'}} showcase label={`${person.name} 작품 선반`} onPick={onTap}
+    <CollectionList items={works} view={{layout:'shelf',perRow,grouping:'sort'}} showcase windowRows pickedId={picked} label={`${person.name} 작품 선반`} onPick={onTap}
       render={work=><ShelfTile item={work} revision={revision} active={active} privacy={privacy} picked={picked===work.id} onTap={onTap}/>}/>
   </section>)}</div>;
 }

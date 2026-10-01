@@ -6,12 +6,19 @@
  * assertions only check that the scenario ran; the saturated cold start is a gate for the
  * visible-cover retry (harness before the fix: 4 of 16 covers shown and 12 failed at 30 s).
  */
-import {act, cleanup, render} from '@testing-library/react';
+import {act, cleanup, fireEvent, render} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import type {CollectionPage, CollectionSummary} from './collectionModel';
-const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
+const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn(),caseRenders:0}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:(reason:unknown)=>String(reason)}));
 vi.mock('./media',()=>({mediaTicket:vi.fn()}));
+vi.mock('../src/collections/case/LightCase',async importOriginal=>{
+  const actual=await importOriginal<typeof import('../src/collections/case/LightCase')>();
+  const {createElement}=await import('react');
+  return {...actual,LightCase:(props:Parameters<typeof actual.LightCase>[0])=>{
+    mocks.caseRenders++;return createElement(actual.LightCase,props);
+  }};
+});
 import {Collections} from './Collections';
 
 const digest=(n:number)=>n.toString(16).padStart(64,'0');
@@ -34,7 +41,16 @@ class FirstScreenObserver {
 }
 
 beforeEach(()=>{
-  observed=[];
+  observed=[];mocks.caseRenders=0;
+  // Deterministic S11 portrait fixture; jsdom does not lay out grid tracks.
+  vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(768);
+  vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('collection-scroll')?900:0;});
+  vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){
+    const list=this.closest<HTMLElement>('.collection-list'),root=this.closest<HTMLElement>('.collection-scroll');
+    const height=this.classList.contains('collection-list__cell')&&list?parseFloat(list.style.getPropertyValue('--case-height'))+64:900;
+    const top=this.classList.contains('collection-list__cell')?100+(Number(this.style.gridRow)-1)*(height+16)-(root?.scrollTop??0):0;
+    return {top,bottom:top+height,left:0,right:768,width:768,height,x:0,y:top,toJSON(){}};
+  });
   localStorage.clear();localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout:'grid',perRow:4}));
   vi.useFakeTimers();
   vi.stubGlobal('IntersectionObserver',FirstScreenObserver);
@@ -47,7 +63,7 @@ beforeEach(()=>{
     return {};
   });
 });
-afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();});
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.useRealTimers();vi.unstubAllGlobals();});
 
 async function coldCovers(latencyMs:number){
   let inFlight=0,peak=0;const finished:number[]=[];const started=Date.now();
@@ -195,4 +211,66 @@ it('idle Collections tab with the native status long-poll live: checks only what
   }finally{
     act(()=>{window.dispatchEvent(new CustomEvent('lakomics-sync-signals',{detail:{live:false,signals:null}}));});
   }
+});
+
+
+it('bounds shelf cases after prefetch, picking and opening showcase',async()=>{
+  const all=Array.from({length:192},(_,i)=>({...works[i%works.length],id:`large-${i}`,selectedWorkArtworkId:null,artworkVersions:{}}));
+  let finish:(value:CollectionPage)=>void=()=>{};
+  const rest=new Promise<CollectionPage>(resolve=>{finish=resolve;});
+  const base=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation((path:string)=>{
+    if(path.startsWith('/v1/collections?')){
+      if(path.includes('showcase=true'))return Promise.resolve({...page,items:all,totalCount:192});
+      if(path.includes('cursor='))return rest;
+      return Promise.resolve({...page,items:all.slice(0,48),nextCursor:'rest',totalCount:192});
+    }
+    return base(path);
+  });
+  localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout:'shelf',perRow:4}));
+  const view=render(<Collections active paused={false} backRef={{current:null}}/>);
+  await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
+  const count=()=>view.container.querySelectorAll('.collection-light-case').length;
+  const first=count();
+  await act(async()=>{finish({...page,items:all.slice(48),nextCursor:null});await vi.advanceTimersByTimeAsync(0);});
+  const prefetched=count();
+  let start=mocks.caseRenders;
+  fireEvent.click(view.container.querySelector('[data-collection-id="large-0"]')!);
+  const pick=mocks.caseRenders-start;
+  for(const id of ['large-1','large-0']){
+    start=mocks.caseRenders;
+    fireEvent.click(view.container.querySelector(`[data-collection-id="${id}"]`)!);
+    expect(mocks.caseRenders-start).toBeLessThanOrEqual(2);
+  }
+  start=mocks.caseRenders;
+  const read=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation((path:string)=>path.startsWith('/v1/collections/releases')?Promise.resolve({items:[],unreadCount:1,revision:'x2'}):read(path));
+  await act(async()=>{await vi.advanceTimersByTimeAsync(60_000);});
+  const countRenders=mocks.caseRenders-start;
+  start=mocks.caseRenders;
+  fireEvent.click(view.container.querySelector('.collection-shortcuts button')!);
+  await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
+  const open=count(),openRenders=mocks.caseRenders-start;
+  await act(async()=>{await vi.advanceTimersByTimeAsync(250);});
+  const settled=count(),settledRenders=mocks.caseRenders-start;
+  console.info(`[perf] S11 shelf 192: first=${first} prefetched=${prefetched} pickRenders=${pick} countRenders=${countRenders} overlayOpening=${open} overlayOpeningRenders=${openRenders} overlaySettled=${settled} overlaySettledRenders=${settledRenders}\n`);
+  // These caps only tighten after an improvement; do not relax them to accommodate regressions.
+  expect(first).toBeLessThanOrEqual(20);
+  expect(prefetched).toBeLessThanOrEqual(20);
+  expect(pick).toBeLessThanOrEqual(1);
+  expect(countRenders).toBe(0);
+  expect(open).toBeLessThanOrEqual(20);
+  expect(openRenders).toBe(0);
+  expect(settled).toBeLessThanOrEqual(40);
+  expect(settledRenders).toBeLessThanOrEqual(20);
+  expect(settled).toBeGreaterThan(prefetched); // Deferred content really arrived.
+  const root=view.container.querySelector<HTMLElement>('.mobile-collections > .collection-scroll')!;
+  const tracks=()=>[...root.querySelectorAll<HTMLElement>('.collection-list__cell')].map(cell=>[cell.style.gridRow,cell.style.height]);
+  const geometry=tracks();
+  root.scrollTop=6000;fireEvent.scroll(root);
+  expect(root.querySelector('[data-collection-id="large-64"]')).not.toBeNull();
+  expect(root.querySelector('[data-collection-id="large-0"]')).not.toBeNull(); // Pick survives window exit.
+  expect(tracks()).toEqual(geometry);
+  root.scrollTop=0;fireEvent.scroll(root);
+  expect(root.querySelector('[data-collection-id="large-4"]')).not.toBeNull();
 });

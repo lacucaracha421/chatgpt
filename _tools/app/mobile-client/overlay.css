@@ -16,3 +16,7 @@
 .mobile-overlay .mobile-scrubber { bottom:calc(var(--space-2) + env(safe-area-inset-bottom)); }
 .mobile-overlay__body > .collection-scroll { padding-bottom:calc(var(--touch-target) + var(--space-4)); }
 .mobile-overlay .release-calendar-scroll { padding-bottom:calc(var(--touch-target) + var(--space-4)); }
+
+/* Keep lifted content below the sheet's header, including after its transform animation ends. */
+.mobile-overlay__body { position: relative; z-index: 0; isolation: isolate; }
+.mobile-overlay__header { position: relative; z-index: 1; }

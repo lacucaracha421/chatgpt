@@ -269,16 +269,68 @@ describe('mobile catalog reads',()=>{
   it('switches between the catalog and bookmarks from the list\'s first row',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     const sources=screen.getByRole('radiogroup',{name:'카탈로그 출처'});
-    expect(sources.closest('.catalog-scroll > .ui-section-bar--inline')).toBeTruthy();
+    expect(sources.closest('.catalog-scroll > .section-shade-rows--inline')).toBeTruthy();
     expect(within(sources).getAllByRole('radio').map(radio=>radio.getAttribute('aria-label'))).toEqual(['카탈로그','북마크']);
     expect(within(sources).getByRole('radio',{name:'카탈로그'}).getAttribute('aria-checked')).toBe('true');
     expect(screen.queryByRole('button',{name:'북마크',exact:true})).toBeNull();
+  });
+  it.each(['inline','shade'] as const)('opens all view sheets from the %s section bar and retains filter badges',async(placement)=>{
+    localStorage.setItem('lakomics.catalog.preferences.',JSON.stringify({categories:null,excludedTags:[{namespace:'female',value:'scat'}]}));
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    const list=document.querySelector('.catalog-scroll') as HTMLElement;
+    const inline=list.querySelector(':scope > .section-shade-rows--inline') as HTMLElement;
+    expect(inline.classList.contains('section-shade-rows--inline')).toBe(true);
+    expect(within(inline).getByRole('radiogroup',{name:'카탈로그 출처'})).toBeTruthy();
+    expect(within(inline).getByRole('group',{name:'카탈로그 보기'})).toBe(inline.lastElementChild);
+    expect(list.querySelector('.catalog-chips')).toBeNull();
+    const controls=()=>{
+      if(placement==='shade'){
+        fireEvent.scroll(list,{target:{scrollTop:300}});
+        fireEvent.click(screen.getByRole('button',{name:'카탈로그 · 카탈로그'}));
+        const shade=document.querySelector('.section-shade') as HTMLElement;
+        expect(shade.classList.contains('is-open')).toBe(true);
+        expect(within(shade).getByRole('radiogroup',{name:'카탈로그 출처'})).toBeTruthy();
+        return within(shade).getByRole('group',{name:'카탈로그 보기'});
+      }
+      return within(inline).getByRole('group',{name:'카탈로그 보기'});
+    };
+    let row=controls();
+    expect(row.classList.contains('ui-segmented')).toBe(true);
+    expect(within(row).getAllByRole('button')).toHaveLength(3);
+    expect(within(row).getByRole('button',{name:'필터, 기본 회피 태그 1개'}).textContent).toBe('필터기본');
+    fireEvent.click(within(row).getByRole('button',{name:'카탈로그 언어 한국어'}));
+    let panel=await screen.findByRole('dialog',{name:'언어'});
+    expect(within(panel).getByRole('radio',{name:'한국어'}).getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(within(panel).getByRole('button',{name:'닫기'}));
+    row=controls();
+    fireEvent.click(within(row).getByRole('button',{name:'카탈로그 정렬 오늘 인기'}));
+    panel=await screen.findByRole('dialog',{name:'정렬'});
+    expect(within(panel).getByRole('radio',{name:'오늘 인기'}).getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(within(panel).getByRole('button',{name:'닫기'}));
+    row=controls();
+    fireEvent.click(within(row).getByRole('button',{name:'필터, 기본 회피 태그 1개'}));
+    panel=await screen.findByRole('dialog',{name:'필터'});
+    fireEvent.click(within(panel).getByRole('switch',{name:/차단 항목 보기/}));
+    fireEvent.click(within(panel).getByRole('button',{name:'적용'}));
+    await waitFor(()=>expect(searchParams(lastSearch()).get('revealBlocked')).toBe('true'));
+    row=controls();
+    expect(within(row).getByRole('button',{name:'필터 1개 적용'}).textContent).toBe('필터1');
+    expect(within(row).queryByText('기본')).toBeNull();
   });
   it('forces latest sort when bookmark scope is enabled',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     choose('카탈로그 정렬','views');await waitFor(()=>expect(screen.getByRole('button',{name:/^카탈로그 정렬/}).textContent).toBe(CHOICES['views']));
     fireEvent.click(within(screen.getByRole('radiogroup',{name:'카탈로그 출처'})).getByRole('radio',{name:'북마크'}));await waitFor(()=>expect(screen.getByRole('button',{name:/^카탈로그 정렬/}).textContent).toBe(CHOICES['latest']));
     expect(mocks.api.mock.calls.some(([path])=>path.includes('scope=bookmarked')&&path.includes('sort=latest'))).toBe(true);
+    expect((screen.getByRole('button',{name:'카탈로그 정렬 최신순'}) as HTMLButtonElement).disabled).toBe(true);
+    const list=document.querySelector('.catalog-scroll') as HTMLElement;
+    fireEvent.scroll(list,{target:{scrollTop:300}});
+    fireEvent.click(screen.getByRole('button',{name:'카탈로그 · 북마크'}));
+    const shade=document.querySelector('.section-shade') as HTMLElement;
+    const sort=within(shade).getByRole('button',{name:'카탈로그 정렬 최신순'}) as HTMLButtonElement;
+    expect(sort.disabled).toBe(true);
+    fireEvent.click(sort);
+    expect(screen.queryByRole('dialog',{name:'정렬'})).toBeNull();
   });
   it('uses a ready total without issuing the extra count request',async()=>{
     mocks.api.mockImplementation(async(path:string)=>path.includes('/status')?{publicationRevision:'p1'}:{...page,countToken:null,totalCount:1,countStatus:'ready'});
@@ -306,9 +358,9 @@ describe('mobile catalog reads',()=>{
     expect((screen.getByText('밤의 도서관').closest('button') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByText('밤의 도서관'));expect(screen.queryByText('상세 정보')).toBeNull();
   });
-  it('opens Catalog settings from the top bar and applies several categories in one request',async()=>{
+  it('opens Catalog settings from the section bar and applies several categories in one request',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    // Only the top-bar icon opens settings; the gallery has no second filter control.
+    // The section bar has one filter control; the gallery has no separate chip row.
     expect(screen.getAllByRole('button',{name:/^필터/})).toHaveLength(1);
     fireEvent.click(screen.getByRole('button',{name:/^필터/}));
     const panel=await screen.findByRole('dialog',{name:'필터'});
@@ -401,7 +453,21 @@ describe('mobile catalog reads',()=>{
     expect(list.scrollTop).toBe(140);
     expect(screen.getByText('밤의 도서관')).toBeTruthy();
   });
-  it('hides the settings icon while the detail or reader is open',async()=>{
+  it('keeps the detail cover and back action without a decorative backdrop',async()=>{
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path.includes('/status'))return capableStatus;
+      if(path.includes('/works/'))return {publicationRevision:'p1',item:{...item,thumbnailUrl:'https://example.invalid/cover.jpg',tagGroups:[],uploader:null,category:1,updated:null,fileSize:null,rating:null}};
+      if(path.includes('/editions?'))return {publicationRevision:'p1',groupId:'group',items:[item],nextCursor:null,totalCount:1};
+      return page;
+    });
+    render(<Catalog active paused={false} backRef={{current:null}}/>);
+    fireEvent.click(await screen.findByText('밤의 도서관'));await screen.findByText('40페이지 · 조회 1,200');
+    await waitFor(()=>expect(document.querySelector('.catalog-detail-cover img')).not.toBeNull());
+    expect(document.querySelector('.catalog-backdrop')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'카탈로그 목록으로'}));
+    expect(screen.getByRole('group',{name:'카탈로그 보기'})).toBeTruthy();
+  });
+  it('hides the view controls while the detail or reader is open',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     expect(screen.getByRole('button',{name:/^필터/})).toBeTruthy();
     fireEvent.click(screen.getByText('밤의 도서관'));await screen.findByText('40페이지 · 조회 1,200');
@@ -585,7 +651,7 @@ describe('mobile catalog layout',()=>{
     // The stale first page is not reloaded in a loop.
     await screen.findByText('목록이 갱신되었습니다. 당겨서 새로고침해 주세요.');
   });
-  it('counts active filters on the chip and applies the blocked switch from the filter sheet',async()=>{
+  it('counts active filters on the section bar and applies the blocked switch from the filter sheet',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     expect(screen.getByRole('button',{name:'필터'})).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'필터'}));await screen.findByRole('dialog',{name:'필터'});

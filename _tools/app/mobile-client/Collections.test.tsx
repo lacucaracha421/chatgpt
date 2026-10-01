@@ -13,6 +13,12 @@ const page:CollectionPage={ready:true,filterVersion:1,revision:'r1',publishedAt:
 const section=()=>screen.getByLabelText('컬렉션',{selector:'section'});
 const list=()=>section().querySelector('.collection-scroll') as HTMLElement;
 const detailPane=()=>section().querySelector('.collection-detail') as HTMLElement;
+/** Finish the native rise before exercising the deferred Showcase body. */
+const pressShowcase=(button:HTMLElement)=>{
+  fireEvent.click(button);
+  const panel=screen.getByRole('dialog',{name:'쇼케이스'});
+  fireEvent(panel,Object.assign(new Event('webkitAnimationEnd',{bubbles:true}),{animationName:'mobile-overlay-rise'}));
+};
 const pressTab=(name:string)=>fireEvent.click(screen.getByRole('radio',{name}));
 /** Search lives behind the top bar's magnifier; open it once, then use the field. */
 const searchBox=()=>{if(!screen.queryByRole('searchbox',{name:'컬렉션 검색'}))fireEvent.click(screen.getByRole('button',{name:'검색'}));return screen.getByRole('searchbox',{name:'컬렉션 검색'}) as HTMLInputElement;};
@@ -232,7 +238,7 @@ describe('background collection pages',()=>{
     });
     render(<Collections {...props}/>);
     await waitFor(()=>expect(calls(showcase)).toHaveLength(2));
-    if(showcase)fireEvent.click(screen.getByRole('button',{name:/^쇼케이스(?: \d+)?$/}));
+    if(showcase)pressShowcase(screen.getByRole('button',{name:/^쇼케이스(?: \d+)?$/}));
     const host=showcase?section().querySelectorAll<HTMLElement>('.collection-scroll')[1]:list();host.scrollTop=140;
     expect(calls(showcase)).toHaveLength(2);
     await act(async()=>next.resolve({...page,items:[second,item],nextCursor:'page-3'}));
@@ -246,7 +252,7 @@ describe('background collection pages',()=>{
     expect(calls(showcase).map(([path])=>new URL(path,'https://example.invalid').searchParams.get('cursor'))).toEqual([null,'page-2','page-3']);
     if(showcase)fireEvent.click(screen.getByRole('button',{name:'쇼케이스 닫기'}));
     pressTab('만화');await act(async()=>{});
-    pressTab('게임');if(showcase)fireEvent.click(screen.getByRole('button',{name:/^쇼케이스(?: \d+)?$/}));await screen.findByRole('button',{name:new RegExp(third.name)});
+    pressTab('게임');if(showcase)pressShowcase(screen.getByRole('button',{name:/^쇼케이스(?: \d+)?$/}));await screen.findByRole('button',{name:new RegExp(third.name)});
     expect(calls(showcase).filter(([path])=>path.includes('type=game'))).toHaveLength(3);
   });
 
@@ -312,7 +318,7 @@ describe('background collection pages',()=>{
       }
     });
     render(<Collections {...props}/>);
-    if(showcase)fireEvent.click(await screen.findByRole('button',{name:/^쇼케이스(?: \d+)?$/}));
+    if(showcase)pressShowcase(await screen.findByRole('button',{name:/^쇼케이스(?: \d+)?$/}));
     await screen.findByText(/page offline/);
     expect(screen.getByText(item.name)).toBeTruthy();expect(screen.getByText(second.name)).toBeTruthy();
     expect(calls(showcase)).toHaveLength(3);scrollToEnd(list());await act(async()=>{});
@@ -429,7 +435,7 @@ describe('read-only collections',()=>{
     await waitFor(()=>expect(showcaseCalls()).toHaveLength(1));
     expect(showcaseCalls()[0][0]).not.toMatch(/rating=|sort=/);
     expect(document.querySelector('.collection-showcase-fold')).toBeNull();
-    fireEvent.click(screen.getByRole('button',{name:'쇼케이스 1'}));
+    pressShowcase(screen.getByRole('button',{name:'쇼케이스 1'}));
     const overlay=screen.getByRole('dialog',{name:'쇼케이스'});
     expect(within(overlay).getByText('PC에서 정한 순서대로 보여 줍니다.')).toBeTruthy();
     expect(within(overlay).getByRole('button',{name:new RegExp(item.name)})).toBeTruthy();
@@ -447,7 +453,7 @@ describe('read-only collections',()=>{
     render(<Collections active paused={false} backRef={{current:null}}/>);
     await screen.findByRole('button',{name:'쇼케이스 1'});
     pressTab('만화');await screen.findByText('만화 작품');
-    fireEvent.click(screen.getByRole('button',{name:'쇼케이스'}));
+    pressShowcase(screen.getByRole('button',{name:'쇼케이스'}));
     const overlay=screen.getByRole('dialog',{name:'쇼케이스'});
     expect(within(overlay).queryByRole('button',{name:'게임 쇼케이스'})).toBeNull();
     expect(within(overlay).getByText('쇼케이스를 불러오는 중…').textContent).toContain('불러오는 중');
@@ -755,7 +761,7 @@ it('offers manga grid, shelf and bookcase, persists bookcase and opens its Showc
   expect(document.querySelector('.collection-light-case')).toBeNull();
   fireEvent.click(within(sheet).getByRole('button',{name:'닫기'}));
   await within(screen.getByRole('group',{name:'만화 작품 목록'})).findByRole('group',{name:`${item.name} 책장`});
-  fireEvent.click(screen.getByRole('button',{name:'쇼케이스 1'}));
+  pressShowcase(screen.getByRole('button',{name:'쇼케이스 1'}));
   expect(within(screen.getByRole('dialog',{name:'쇼케이스'})).getByRole('button',{name:new RegExp(item.name)})).toBeTruthy();
 });
 
@@ -1128,7 +1134,7 @@ describe('collection shortcut overlays',()=>{
     list().scrollTop=380;fireEvent.scroll(list());fireEvent.click(screen.getByRole('button',{name:'컬렉션 · 게임'}));
     const shade=document.querySelector('.section-shade') as HTMLElement;
     expect(within(shade).getByRole('radiogroup',{name:'컬렉션 유형'})).toBeTruthy();
-    fireEvent.click(within(shade).getByRole('button',{name:'쇼케이스 12'}));
+    pressShowcase(within(shade).getByRole('button',{name:'쇼케이스 12'}));
     expect(screen.getByRole('dialog',{name:'쇼케이스'})).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'쇼케이스 닫기'}));expect(list().scrollTop).toBe(380);
     expect(document.querySelector('.section-shade.is-open')).toBeNull();
@@ -1138,7 +1144,7 @@ describe('collection shortcut overlays',()=>{
     mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path==='/v1/home/upcoming'?{entries:[],wishlist:[]}:path.includes('showcase=true')?{...page,totalCount:1,items:[shown]}:path.startsWith('/v1/collections?')?page:{revision:'r1',item:shown});
     const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
     render(<Collections active paused={false} backRef={backRef} onReturnHome={home}/>);await screen.findByText(item.name);
-    list().scrollTop=350;fireEvent.scroll(list());fireEvent.click(screen.getByRole('button',{name:'쇼케이스 1'}));
+    list().scrollTop=350;fireEvent.scroll(list());pressShowcase(screen.getByRole('button',{name:'쇼케이스 1'}));
     const overlay=screen.getByRole('dialog',{name:'쇼케이스'}),scroll=overlay.querySelector('.collection-scroll') as HTMLElement;
     const image=await within(overlay).findByRole('img',{name:shown.name});scroll.scrollTop=240;fireEvent.scroll(scroll);
     const reads=mocks.api.mock.calls.filter(([path])=>path.includes('showcase=true')).length;
@@ -1157,7 +1163,7 @@ describe('collection shortcut overlays',()=>{
     const backRef:{current:(()=>boolean)|null}={current:null};
     render(<Collections active paused={false} backRef={backRef}/>);pressTab(label);
     await screen.findByRole('group',{name:`${label} 작품 목록`});
-    fireEvent.click(await screen.findByRole('button',{name:'쇼케이스 7'}));
+    pressShowcase(await screen.findByRole('button',{name:'쇼케이스 7'}));
     const overlay=screen.getByRole('dialog',{name:'쇼케이스'}),scroll=overlay.querySelector('.collection-scroll') as HTMLElement;
     const shelf=within(overlay).getByRole('group',{name:`${label} 쇼케이스 작품 목록`});
     expect(shelf.getAttribute('data-per-row')).toBe('6');
@@ -1178,7 +1184,7 @@ describe('collection shortcut overlays',()=>{
   it('uses the selected grid column count in Showcase',async()=>{
     localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout:'grid',perRow:6}));
     serve();render(<Collections active paused={false} backRef={{current:null}}/>);
-    fireEvent.click(await screen.findByRole('button',{name:'쇼케이스 12'}));
+    pressShowcase(await screen.findByRole('button',{name:'쇼케이스 12'}));
     const overlay=screen.getByRole('dialog',{name:'쇼케이스'});
     expect((overlay.querySelector('.collection-grid.is-counted') as HTMLElement).style.getPropertyValue('--columns')).toBe('6');
     expect(overlay.querySelector('.collection-light-case')).toBeNull();
@@ -1188,7 +1194,7 @@ describe('collection shortcut overlays',()=>{
     mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path==='/v1/home/upcoming'?{entries:[],wishlist:[]}:path.startsWith('/v1/collections?')?{...page,items:[mangaItem()]}:{revision:'r1',item:mangaItem()});
     const backRef:{current:(()=>boolean)|null}={current:null};
     render(<Collections active paused={false} backRef={backRef}/>);pressTab('만화');
-    fireEvent.click(await screen.findByRole('button',{name:'쇼케이스 1'}));
+    pressShowcase(await screen.findByRole('button',{name:'쇼케이스 1'}));
     const overlay=screen.getByRole('dialog',{name:'쇼케이스'});
     const shelf=within(overlay).getByRole('group',{name:'만화 쇼케이스 작품 목록'});
     expect(shelf.classList.contains('manga-shelf-list')).toBe(true);
@@ -1204,7 +1210,7 @@ describe('collection shortcut overlays',()=>{
     serve();const backRef:{current:(()=>boolean)|null}={current:null};
     render(<Collections active paused={false} backRef={backRef}/>);await within(shortcuts()).findByRole('button',{name:'쇼케이스 12'});
     fireEvent.change(searchBox(),{target:{value:'밤'}});fireEvent.submit(searchBox().closest('form')!);
-    fireEvent.click(screen.getByRole('button',{name:'쇼케이스 12'}));expect(screen.queryByRole('searchbox')).toBeNull();
+    pressShowcase(screen.getByRole('button',{name:'쇼케이스 12'}));expect(screen.queryByRole('searchbox')).toBeNull();
     act(()=>{expect(backRef.current?.()).toBe(true);});expect(screen.getByRole('searchbox').getAttribute('value')).toBe('밤');
   });
 });
@@ -1214,7 +1220,7 @@ it('retains the painted Showcase while its pull-to-refresh reads a replacement',
   const replacement=Promise.withResolvers<CollectionPage>();let reads=0;
   mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path==='/v1/home/upcoming'?{entries:[],wishlist:[]}:path.includes('showcase=true')?(++reads===1?page:replacement.promise):page);
   render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText(item.name);
-  fireEvent.click(screen.getByRole('button',{name:'쇼케이스 1'}));
+  pressShowcase(screen.getByRole('button',{name:'쇼케이스 1'}));
   const overlay=screen.getByRole('dialog',{name:'쇼케이스'}),host=overlay.querySelector('.collection-scroll') as HTMLElement;
   const tile=within(overlay).getByRole('button',{name:new RegExp(item.name)});
   pull(host);expect(reads).toBe(2);

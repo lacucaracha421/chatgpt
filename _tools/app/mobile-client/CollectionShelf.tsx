@@ -1,4 +1,4 @@
-import {useCallback, useRef, useState, type ReactNode} from 'react';
+import {memo, useCallback, useRef, useState, type ReactNode} from 'react';
 import {LightCase} from '../src/collections/case/LightCase';
 import {workCasePlatform, type CaseData} from '../src/collections/case/CollectionCase';
 import {PerRowControl} from '../src/shared/ui/PerRowControl';
@@ -50,6 +50,11 @@ export function workCaseData(item: CollectionSummary, urls: {front?: string | nu
     volumeNumber: volume?.volumeNumber === 1 ? 1 : null, publisher: item.publisher ?? null, platform: workCasePlatform(item.type, item.platforms, item.ownedPlatform), front: urls.front ?? null, spine: urls.spine ?? null, back: urls.back ?? null, privacy};
 }
 
+// Case data is all scalar. Parent picking/count updates must not redraw unchanged 3D faces.
+const ShelfObject = memo(LightCase, (before, after) => before.selected === after.selected &&
+  Object.keys(before.data).length === Object.keys(after.data).length &&
+  Object.entries(before.data).every(([key, value]) => value === after.data[key as keyof CaseData]));
+
 /**
  * One work on the shelf: the shared light case with its title under the plank. A first tap
  * turns the case to the front (picks it); a tap on the picked case opens the work.
@@ -64,7 +69,7 @@ export function ShelfTile({item, revision, active, privacy, picked, extra, onTap
   const spineId = item.type === 'manga' ? null : item.spineArtworkId;
   const spine = useCoverUrl(item, spineId, revision, active && !privacy && !!spineId && (front !== null || (!cover && !item.coverAssetId)), host);
   return <button ref={host} type="button" className="collection-card" data-collection-id={item.id} aria-selected={picked} aria-label={item.name} onClick={() => onTap(item.id)}>
-    <span className="collection-card__light"><LightCase data={workCaseData(item, {front, spine: spineId ? spine : null}, privacy)} selected={picked}/></span>
+    <span className="collection-card__light"><ShelfObject data={workCaseData(item, {front, spine: spineId ? spine : null}, privacy)} selected={picked}/></span>
     <span className="collection-card__meta"><span className="collection-card__name">{item.name}</span>{extra && <span className="collection-card__extra">{extra}</span>}</span>
   </button>;
 }

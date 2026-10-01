@@ -45,5 +45,9 @@
 .manga-jspine-author { flex: none; max-height: 18%; overflow: hidden; font-family: var(--font-ui); font-weight: 600; font-size: calc(var(--bd) * .3); line-height: 1; letter-spacing: .02em; }
 .manga-jspine-bar { flex: none; width: 46%; height: calc(var(--bd) * .16); margin: 6% 0 5%; background: var(--book-ink); }
 .collection-light-case--book { --bd: var(--cd); --book-paper: #f3f0e8; --book-ink: #15171a; }
-.collection-light-case--book .manga-jspine-title { text-overflow: ellipsis; }
+/* Only shelf books use CSS fitting: reserve whole glyphs within each print band.
+   Counts are conservative (combined digits count separately); no per-case layout effects. */
+.collection-light-case--book .manga-jspine { container-type: size; }
+.collection-light-case--book .manga-jspine-title { font-size: min(calc(var(--cd) * .66), calc(48cqh / (var(--spine-title-cells) * 1.2))); max-height: none; overflow: visible; }
+.collection-light-case--book .manga-jspine-author { font-size: min(calc(var(--cd) * .3), calc(16cqh / (var(--spine-author-cells) * 1.2))); max-height: none; overflow: visible; }
 .collection-light-case--book .manga-jspine-illustration img { display: block; width: 100%; height: 100%; }

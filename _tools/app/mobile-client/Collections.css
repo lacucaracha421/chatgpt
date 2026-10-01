@@ -225,3 +225,6 @@
 .collection-type-header .collection-chips{flex:none}
 .mobile-collections .av-showcase{display:none}
 @media(orientation:landscape){.collection-shelf{grid-auto-columns:calc((100% - 48px)/7)}}
+
+/* Bound all selected cells and their 3D faces below the section shade and overlays. */
+.mobile-collections > .collection-scroll { position: relative; z-index: 0; isolation: isolate; }

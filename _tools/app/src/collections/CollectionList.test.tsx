@@ -183,3 +183,34 @@ it("windows manga shelf rows with the same tracks as the other work cases", () =
   expect(container.querySelector('[data-collection-id="work-0"]')).toBeNull();
   expect(container.querySelector('[data-collection-id="work-48"]')).not.toBeNull();
 });
+
+it("windows opted-in horizontal performer shelves in the tablet scroll root", () => {
+  shelfGeometry();
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function(this: HTMLElement) {
+    return this.classList.contains("collection-scroll") ? 500 : 0;
+  });
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function(this: HTMLElement) {
+    const list = this.closest<HTMLElement>(".collection-list"), root = this.closest<HTMLElement>(".collection-scroll");
+    const cell = this.classList.contains("collection-list__cell");
+    const width = cell && list ? parseFloat(list.style.getPropertyValue("--cell-width")) : 1440;
+    const height = cell && list ? parseFloat(list.style.getPropertyValue("--case-height")) + 64 : 500;
+    const left = cell ? (Number(this.style.gridColumn) - 1) * (width + 16) - (list?.scrollLeft ?? 0) : 0;
+    const top = cell ? 16 - (root?.scrollTop ?? 0) : 0;
+    return { top, bottom: top + height, left, right: left + width, width, height, x: left, y: top, toJSON() {} };
+  });
+  const { container } = render(<div className="collection-scroll"><CollectionList items={largeShelf} windowRows showcase pickedId="work-160"
+    view={{ layout: "shelf", perRow: 8, grouping: "sort" }} label="배우" onPick={() => undefined} render={drawCase} /></div>);
+  const list = container.querySelector<HTMLElement>(".collection-list")!, root = container.firstElementChild as HTMLElement;
+  expect(container.querySelectorAll(".collection-list__cell")).toHaveLength(181);
+  expect(container.querySelectorAll(".collection-list__plank")).toHaveLength(1);
+  expect(container.querySelectorAll("[data-collection-id]").length).toBeLessThanOrEqual(24);
+  expect(container.querySelector('[data-collection-id="work-0"]')).not.toBeNull();
+  list.scrollLeft = 4000; fireEvent.scroll(list);
+  expect(container.querySelector('[data-collection-id="work-0"]')).toBeNull();
+  expect(container.querySelector('[data-collection-id="work-24"]')).not.toBeNull();
+  expect(container.querySelector('[data-collection-id="work-160"]')).not.toBeNull();
+  root.scrollTop = 2000; fireEvent.scroll(root);
+  expect(container.querySelectorAll("[data-collection-id]")).toHaveLength(1);
+  root.scrollTop = 0; list.scrollLeft = 0; fireEvent.scroll(root);
+  expect(container.querySelector('[data-collection-id="work-0"]')).not.toBeNull();
+});

@@ -144,7 +144,7 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
         </div>
       </div>
       <SegmentedControl label="역할" value={role} onChange={setRole} options={[{value: 'all', label: '전체'}, {value: 'solo', label: '단독'}, {value: 'joint', label: '공연'}]} fullWidth/>
-      <CollectionList items={shown} view={{layout: 'shelf', perRow, grouping: 'sort'}} label="배우 작품 선반" onPick={setPicked}
+      <CollectionList items={shown} view={{layout: 'shelf', perRow, grouping: 'sort'}} label="배우 작품 선반" onPick={setPicked} windowRows pickedId={picked}
         render={work => <ShelfTile item={work} revision={shelf!.revision} active={active} privacy={privacy} picked={picked === work.id} onTap={tap}
           extra={<>{work.id === currentId && <Badge>이 작품</Badge>}<small className="numeric">{[displayDate(work.av?.releaseDate ?? work.releaseDate), page.solo(work) ? null : '공연'].filter(Boolean).join(' · ')}</small></>}/>}/>
     </section>
