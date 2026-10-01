@@ -21,6 +21,15 @@ function api(overrides: Partial<AvLinkApi> = {}) {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("AvLinkInbox", () => {
+  it("shows received times with the shared clock format and an invalid-time fallback", () => {
+    render(<AvLinkInbox items={[
+      item("valid", "found", { receivedAt: "2026-09-27T00:02:00" }),
+      item("invalid", "found", { receivedAt: "invalid" }),
+    ]} collections={[]} api={api()} onRefresh={vi.fn()} onCollectionsChanged={vi.fn()} />);
+    expect(screen.getByText("00:02")).toBeInTheDocument();
+    expect(screen.getByText("--:--")).toBeInTheDocument();
+  });
+
   it("is absent when no non-final inbox item remains", () => {
     render(<AvLinkInbox items={[]} collections={[]} api={api()} onRefresh={vi.fn()} onCollectionsChanged={vi.fn()} />);
     expect(screen.queryByRole("region", { name: "받은 품번" })).not.toBeInTheDocument();

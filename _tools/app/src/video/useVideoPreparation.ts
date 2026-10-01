@@ -65,7 +65,9 @@ export function useVideoPreparation(options: Options) {
           ? "running"
           : "completed",
     });
-    return progress.remaining > 0;
+    // No progress can mean preparation is temporarily restricted. Wait for the
+    // next natural trigger instead of immediately polling the same work again.
+    return progress.processed > 0 && progress.remaining > 0;
   }, []);
 
   runRef.current = () => {

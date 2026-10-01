@@ -263,7 +263,9 @@ impl Library {
             progress.changed_asset_ids.push(asset_id);
         }
         progress.remaining = u32::try_from(self.connection()?.query_row(
-            "SELECT COUNT(*) FROM video_assets WHERE preparation_state = 'pending'",
+            "SELECT COUNT(*) FROM video_assets
+             JOIN assets ON assets.id = video_assets.asset_id
+             WHERE video_assets.preparation_state = 'pending' AND assets.status = 'normal'",
             [],
             |row| row.get::<_, i64>(0),
         )?)
@@ -1260,6 +1262,48 @@ mod tests {
         assert!(parse_probe(audio_only, "mp4").is_err());
         assert!(parse_probe(zero_duration, "mp4").is_err());
         assert!(parse_probe(zero_duration, "mkv").is_err());
+    }
+
+    #[test]
+    fn pending_video_preparation_counts_and_picks_only_normal_assets() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        for id in ["a-trashed", "normal-1", "normal-2"] {
+            insert_pending_video(&library, id, "mp4", "h264", Some("aac"), 2_000);
+        }
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE assets SET status = 'trash' WHERE id = 'a-trashed'",
+                [],
+            )
+            .unwrap();
+        let tool = FakeVideoTool::default();
+
+        let first = library.prepare_pending_videos_with(&tool, 1).unwrap();
+        assert_eq!((first.processed, first.remaining, first.failed), (1, 1, 0));
+        assert_eq!(first.changed_asset_ids, vec!["normal-1"]);
+        let second = library.prepare_pending_videos_with(&tool, 1).unwrap();
+        assert_eq!(
+            (second.processed, second.remaining, second.failed),
+            (1, 0, 0)
+        );
+        assert_eq!(second.changed_asset_ids, vec!["normal-2"]);
+        let idle = library.prepare_pending_videos_with(&tool, 1).unwrap();
+        assert_eq!((idle.processed, idle.remaining, idle.failed), (0, 0, 0));
+        assert!(idle.changed_asset_ids.is_empty());
+        let trashed_state: String = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT preparation_state FROM video_assets WHERE asset_id = 'a-trashed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(trashed_state, "pending");
+        assert!(!library.root().join("video-media/a-trashed").exists());
     }
 
     #[test]

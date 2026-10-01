@@ -2,6 +2,7 @@ import { ArrowPathIcon, ChevronDownIcon, ChevronUpIcon, ClockIcon, ExclamationCi
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CollectionSummary } from "../library/types";
 import { Button } from "../shared/ui/Button";
+import { displayTime } from "../shared/displayDate";
 import { avLinkClient, type AvLinkInboxItem } from "./avLinkClient";
 import { AvLinkChooserDialog } from "./AvLinkChooserDialog";
 import "./avLink.css";
@@ -187,9 +188,7 @@ function targetCopy(item: AvLinkInboxItem) {
 }
 
 function receivedTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "--:--";
-  return new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+  return displayTime(value) || "--:--";
 }
 
 export function errorMessage(reason: unknown, fallback: string) {

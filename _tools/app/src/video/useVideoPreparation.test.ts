@@ -45,6 +45,31 @@ it("prepares one pending video at a time until remaining is zero", async () => {
   expect(result.current.work?.status).toBe("completed");
 });
 
+it("waits for a natural trigger when remaining work makes no progress", async () => {
+  const prepare = vi
+    .fn()
+    .mockResolvedValueOnce({ processed: 0, remaining: 3, failed: 0, changedAssetIds: [] })
+    .mockResolvedValue({ processed: 1, remaining: 0, failed: 0, changedAssetIds: ["v1"] });
+  const onChanged = vi.fn();
+  const retry = vi.fn();
+  const { result, rerender } = renderHook(
+    ({ trigger }) => useVideoPreparation({ enabled: true, trigger, prepare, retry, onChanged }),
+    { initialProps: { trigger: 0 } },
+  );
+
+  await act(async () => {});
+  expect(prepare).toHaveBeenCalledTimes(1);
+  expect(onChanged).not.toHaveBeenCalled();
+  rerender({ trigger: 0 });
+  await act(async () => {});
+  expect(prepare).toHaveBeenCalledTimes(1);
+
+  rerender({ trigger: 1 });
+  await waitFor(() => expect(result.current.work?.status).toBe("completed"));
+  expect(prepare).toHaveBeenCalledTimes(2);
+  expect(onChanged).toHaveBeenCalledWith(["v1"]);
+});
+
 it("stops scheduling when unmounted", async () => {
   let resolve!: (value: {
     processed: number;
