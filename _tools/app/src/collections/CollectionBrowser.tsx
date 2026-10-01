@@ -1,4 +1,4 @@
-import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, EllipsisHorizontalIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, ChevronLeftIcon, MagnifyingGlassIcon, EllipsisHorizontalIcon, PlusIcon, StarIcon, CalendarIcon, BellIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
@@ -73,8 +73,8 @@ export function collectionCoverUrl(collection: CollectionSummary): string | null
 
 /**
  * The Collections browser. The section bar under the top bar holds the types with sort, rating and
- * view controls at its right end; the workspace index holds news. The content shows a folding Showcase row
- * (전체 보기 drills into the paged exhibition) above the 전체 heading and the grid.
+ * view controls at its right end and shortcuts in a second row. The list spans the workspace
+ * beside the rail; shortcuts open the existing news views and paged Showcase exhibition.
  */
 export function CollectionBrowser({
   releaseProvider,
@@ -129,7 +129,6 @@ export function CollectionBrowser({
   useAutoDismiss(message, setMessage);
   const stageRef = useRef<HTMLDivElement>(null);
   const [pageMemory, setPageMemory] = useState<{ scope: string; page: number } | null>(null);
-  // The Showcase row fold is not part of the scroll scope: unfolding it keeps the position.
   const scope = JSON.stringify([library?.root ?? "", typeFilter, showcase, libraryState.query, libraryState.sort, libraryState.direction, libraryState.rating, releaseProvider, releaseCalendar]);
   useLayoutEffect(() => {
     const stage = stageRef.current;
@@ -157,8 +156,6 @@ export function CollectionBrowser({
   const libraryItems = useMemo(() => deriveCollectionLibrary(collections, typeFilter, libraryState), [collections, typeFilter, libraryState]);
   const visible = showcase ? showcaseItems : viewSettings.layout === "shelf" && typeFilter === "game" ? shelfGroups(libraryItems, viewSettings.grouping).flatMap(group => group.items) : libraryItems;
   const filtered = Boolean(libraryState.query.trim()) || libraryState.rating !== "all";
-  const matchingIds = new Set(libraryItems.map(item => item.id));
-  const showcaseRowItems = filtered ? showcaseItems.filter(item => matchingIds.has(item.id)) : showcaseItems;
   const sectionLabel = TYPE_LABEL[typeFilter];
   const exhibition = exhibitionPage(visible.length, pageMemory?.scope === scope ? pageMemory.page : navigationMemory?.get(scope)?.page ?? 0);
   function changeExhibitionPage(page: number) {
@@ -231,8 +228,8 @@ export function CollectionBrowser({
   // Cards call the latest handlers through this ref, so the list's render callback below changes only
   // with what the cards show. Re-rendering a few hundred cards for an unrelated browser update (the chrome
   // title on a type switch, the AV inbox, a toast) cost about a frame each.
-  const latest = useRef({ openCollection, toggleShowcase, showcaseRowItems, visible });
-  useLayoutEffect(() => { latest.current = { openCollection, toggleShowcase, showcaseRowItems, visible }; });
+  const latest = useRef({ openCollection, toggleShowcase });
+  useLayoutEffect(() => { latest.current = { openCollection, toggleShowcase }; });
   const collectionMenu = useCallback((collection: CollectionSummary) => [
     { id: "edit", label: "편집", onSelect: () => setEditMode({ kind: "edit", collection }) },
     { id: "showcase", label: collection.showcase ? "쇼케이스에서 제거" : "쇼케이스에 추가", onSelect: () => void latest.current.toggleShowcase(collection) },
@@ -250,9 +247,9 @@ export function CollectionBrowser({
   const libraryRoot = library?.root ?? "";
   const board = releases.data?.board;
   const viewLayout = viewSettings.layout;
-  const renderCollection = useCallback((collection: CollectionSummary, options: { meta?: boolean } = {}) => {
+  const renderCollection = useCallback((collection: CollectionSummary) => {
     const work = collection.type !== "manga" || (viewLayout === "shelf" && !showcase);
-    const open = () => latest.current.openCollection(collection, options.meta === false ? latest.current.showcaseRowItems : latest.current.visible);
+    const open = () => latest.current.openCollection(collection);
     return <ContextMenu
               key={collection.id}
               items={collectionMenu(collection)}
@@ -261,7 +258,6 @@ export function CollectionBrowser({
                 collection={collection}
                 coverUrl={collectionCoverUrl(collection)}
                 selected={pickedId === collection.id}
-                meta={options.meta}
                 lightCase={!showcase}
                 shelf={viewLayout === "shelf" && !showcase}
                 releaseCaption={releaseCaption(collection, board?.get(collection.id), inboxByWork.get(collection.id) ?? [], today)}
@@ -273,9 +269,8 @@ export function CollectionBrowser({
               />
             </ContextMenu>;
   }, [collectionMenu, pickedId, showcase, viewLayout, typeFilter, board, inboxByWork, today, libraryRoot]);
-  const renderShowcaseCollection = useCallback((collection: CollectionSummary) => renderCollection(collection, { meta: false }), [renderCollection]);
 
-  const indexActions = (
+  const collectionActions = (
           <>
           <Menu
             label="새 컬렉션"
@@ -292,44 +287,29 @@ export function CollectionBrowser({
 
   const inbox = Boolean(releaseProvider) || releaseCalendar;
   const libraryView = !inbox && !showcase;
-  // The index holds the news rows; the type choice is the section bar under the top bar.
-  const hasNewsNavigation = Boolean(tracking || calendarApi);
-  const indexNavigation = hasNewsNavigation ? <div className="collection-index">
-    <div className="collection-index__section">
-      <span className="workspace-section-label">소식</span>
-      <div className="collection-index__news" role="group" aria-label="컬렉션 소식">
-        {tracking && <button type="button" className="workspace-index-link collection-index__release" aria-current={releaseProvider ? "page" : undefined}
-          aria-label={unreadTotal > 0 ? `신간 보기, 새 알림 ${unreadTotal.toLocaleString()}개` : "신간 보기"}
-          onClick={() => { if (!releaseProvider) openInbox("kakao"); }}>신간{unreadTotal > 0 && <span className="collection-index__count" aria-hidden="true">{unreadTotal.toLocaleString()}</span>}</button>}
-        {calendarApi && <button type="button" className="workspace-index-link collection-index__calendar" aria-current={releaseCalendar ? "page" : undefined}
-          aria-label={wishlistUnread > 0 ? `발매 캘린더 보기, 관심 목록 새 알림 ${wishlistUnread.toLocaleString()}개` : "발매 캘린더 보기"}
-          onClick={() => { if (!releaseCalendar) openCalendar(); }}>발매 캘린더{wishlistUnread > 0 && <span className="collection-index__count" aria-hidden="true">{wishlistUnread.toLocaleString()}</span>}</button>}
-      </div>
-    </div>
-  </div> : undefined;
+  const shortcuts = <div className="ui-segmented ui-segmented--full-width collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
+    <button type="button" className="ui-segmented__cell" aria-label={`쇼케이스 ${showcaseItems.length.toLocaleString()}`} onClick={() => setShowcase(true)}>
+      <StarIcon aria-hidden="true" />쇼케이스<span className="collection-shortcuts__count">{showcaseItems.length.toLocaleString()}</span>
+    </button>
+    {(typeFilter === "game" || typeFilter === "movie") && <button type="button" className="ui-segmented__cell"
+      aria-label={wishlistUnread > 0 ? `발매 캘린더 보기, 관심 목록 새 알림 ${wishlistUnread.toLocaleString()}개` : "발매 캘린더 보기"} onClick={openCalendar}>
+      <CalendarIcon aria-hidden="true" />발매 캘린더{wishlistUnread > 0 && <span className="collection-shortcuts__count is-new" aria-hidden="true">{wishlistUnread.toLocaleString()}</span>}
+    </button>}
+    {typeFilter === "manga" && <button type="button" className="ui-segmented__cell"
+      aria-label={unreadTotal > 0 ? `신간 보기, 새 알림 ${unreadTotal.toLocaleString()}개` : "신간 보기"} onClick={() => openInbox("kakao")}>
+      <BellIcon aria-hidden="true" />신간{unreadTotal > 0 && <span className="collection-shortcuts__count is-new" aria-hidden="true">{unreadTotal.toLocaleString()}</span>}
+    </button>}
+  </div>;
   const avCount = avInbox.items.length;
   const typeOptions = TYPES.map(value => value === "av" && avCount > 0
     ? { value, label: TYPE_LABEL[value], count: avCount, ariaLabel: `AV, 받은 품번 ${avCount.toLocaleString()}개` }
     : { value, label: TYPE_LABEL[value] });
 
-  const showcaseOpen = libraryState.showcaseOpen ?? false;
-  const toggleShowcaseRow = () => patchLibraryState({ showcaseOpen: !showcaseOpen });
-  const showcaseRow = !showcase && showcaseRowItems.length > 0 ? <section className="collection-browser__showcase-row" aria-label="쇼케이스">
-    <div className="collection-browser__section">
-      <button type="button" className="collection-browser__fold" aria-expanded={showcaseOpen} onClick={toggleShowcaseRow}>
-        <h3>쇼케이스<span className="collection-browser__total">{showcaseRowItems.length.toLocaleString()}</span></h3><ChevronDownIcon aria-hidden="true" />
-      </button>
-      {showcaseOpen && <Button size="sm" variant="ghost" className="collection-browser__more" onClick={() => setShowcase(true)}>전체 보기<ChevronRightIcon aria-hidden="true" /></Button>}
-    </div>
-    {showcaseOpen && (mangaBookcase ? mangaShelfList(showcaseRowItems, `${sectionLabel} 쇼케이스`)
-      : <CollectionList items={showcaseRowItems} view={viewSettings} showcase render={renderShowcaseCollection} label={`${sectionLabel} 쇼케이스`} onPick={setPickedId} />)}
-
-  </section> : null;
   const sectionRow = <div className="collection-browser__section collection-browser__section--all">
     <h3>{filtered ? "검색 결과" : "전체"}<span className="collection-browser__total" aria-label={`작품 ${visible.length.toLocaleString()}개`}>{visible.length.toLocaleString()}</span></h3>
   </div>;
   const leading = <>{typeFilter === "av" && <AvLinkInbox items={avInbox.items} collections={collections} api={avLinkApi} error={avInbox.error}
-    onRefresh={avInbox.refresh} onCollectionsChanged={onChanged} />}{showcaseRow}{sectionRow}</>;
+    onRefresh={avInbox.refresh} onCollectionsChanged={onChanged} />}{sectionRow}</>;
   const emptyLibrary = filtered ? <EmptyState title="조건에 맞는 작품이 없습니다."><p>검색어나 별점 조건을 바꿔보세요.</p><Button onClick={() => patchLibraryState({ query: "", rating: "all" })}>검색·필터 초기화</Button></EmptyState>
     : <EmptyState title="컬렉션이 없습니다."><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : typeFilter === "game" ? setIgdbOpen(true) : typeFilter === "movie" ? setTmdbOpen(true) : setEditMode({ kind: "create", type: typeFilter })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : typeFilter === "game" ? "IGDB에서 게임 추가" : typeFilter === "movie" ? "TMDB에서 영화 추가" : "직접 입력"}</Button></EmptyState>;
 
@@ -365,11 +345,10 @@ export function CollectionBrowser({
     </span>}
   </div> : undefined;
 
-  const sectionDrop = useSectionDrop({ label: "컬렉션 유형", options: typeOptions, value: typeFilter, onChange: setTypeFilter, trailing: viewControls }, !inbox, "컬렉션");
+  const sectionDrop = useSectionDrop({ label: "컬렉션 유형", options: typeOptions, value: typeFilter, onChange: setTypeFilter, trailing: viewControls, extra: shortcuts }, !inbox, "컬렉션");
 
   const chrome: ViewChromeSpec = {
-    actions: indexActions,
-    navigation: indexNavigation,
+    actions: collectionActions,
     summary: `${sortLabel(libraryState.sort, libraryState.direction)}${libraryState.rating !== "all" ? ` · 내 별점 ${ratingLabel(libraryState.rating)}` : ""}`,
     search: showcase ? undefined : { scope: releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
   };

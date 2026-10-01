@@ -6,28 +6,20 @@
 .collection-rating-filter .ui-slider input.is-idle { opacity: .45; }
 .collection-rating-filter .ui-button[aria-pressed="true"] { background: var(--color-filter-selected); border-color: var(--color-filter-border); color: var(--color-filter-text); }
 
-/* The index contains the news navigation; the types are the section bar. */
-.collection-index { display: flex; flex-direction: column; gap: var(--space-3); }
-.collection-index__section { display: flex; flex-direction: column; gap: var(--space-1); }
-.collection-index__news { display: flex; flex-direction: column; gap: var(--space-1); }
-.collection-index__release { margin-top: 0; }
-.collection-index__count { margin-left: auto; color: var(--color-text); font-family: var(--font-numeric); font-size: var(--type-meta); font-weight: 600; font-variant-numeric: tabular-nums; }
-.collection-index__release[aria-current=page] .collection-index__count, .collection-index__calendar[aria-current=page] .collection-index__count { color: inherit; }
-.collection-index__release[aria-current=page]:has(.collection-index__count)::after, .collection-index__calendar[aria-current=page]:has(.collection-index__count)::after { margin-left: 0; }
+/* Shortcuts share the tablet's segmented track and never carry selection fill. */
+.collection-shortcuts { height: var(--control-height-compact); }
+.collection-shortcuts .ui-segmented__cell { gap: var(--space-2); color: var(--color-text); }
+.collection-shortcuts .ui-segmented__cell + .ui-segmented__cell { border-left: 1px solid var(--color-border); }
+.collection-shortcuts .ui-segmented__cell:hover { background: var(--color-surface-hover); }
+.collection-shortcuts svg { flex: none; width: 16px; height: 16px; color: var(--color-faint); stroke-width: 1.5; }
+.collection-shortcuts__count { color: var(--color-faint); font-family: var(--font-numeric); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.collection-shortcuts__count.is-new { color: var(--color-accent); font-weight: 600; }
 
-/* Library: folding Showcase row, then the 전체 heading. */
+/* Library: the 전체 heading follows the two-row section bar. */
 .collection-browser__section { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 40px; }
 .collection-browser__section h3 { display: flex; align-items: baseline; gap: var(--space-2); margin: 0; color: var(--color-text); font-size: var(--type-body); font-weight: 600; }
 .collection-browser__total { color: var(--color-muted); font-family: var(--font-numeric); font-size: var(--type-meta); font-weight: 500; font-variant-numeric: tabular-nums; }
-.collection-browser__fold { display: inline-flex; align-items: center; gap: var(--space-2); padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
-.collection-browser__fold svg { width: 16px; height: 16px; color: var(--color-muted); transition: transform var(--motion-fast, 120ms) ease; }
-.collection-browser__fold[aria-expanded="true"] svg { transform: rotate(180deg); }
-.collection-browser__fold:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
-.collection-browser__more { color: var(--color-muted); }
-.collection-browser__more svg { width: 14px; height: 14px; }
-.collection-browser__showcase-row { margin-bottom: var(--space-3); }
 .collection-browser__section--all { border-top: 1px solid var(--color-border); padding-top: var(--space-2); }
-.collection-browser__showcase-row + .collection-browser__section--all { margin-top: 0; }
 
 .collection-browser__list-scroll { overflow: auto; flex: 1; min-height: 0; padding: 0 var(--space-3) var(--space-4); }
 .collection-list { display: grid; position: relative; grid-template-columns: repeat(var(--columns), minmax(0, 1fr)); gap: var(--space-4) var(--space-4); padding: var(--space-4) var(--space-6) var(--space-8); }

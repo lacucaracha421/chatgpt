@@ -51,3 +51,16 @@ describe("ViewToolbar", () => {
     expect(screen.getByRole("toolbar", { name: "자산 도구" })).toBeInTheDocument();
   });
 });
+
+it("keeps view actions in the titlebar when the area has no index action target", () => {
+  const view = (index: boolean) => <WorkspaceChromeProvider scope="collection">
+    <div data-testid="titlebar"><ChromeTarget name="header" /></div>
+    {index && <aside data-testid="index"><ChromeTarget name="actions" /></aside>}
+    <ViewToolbar title="컬렉션" chrome={{ actions: <button type="button">새 컬렉션</button> }} />
+  </WorkspaceChromeProvider>;
+  const { rerender } = render(view(false));
+  expect(screen.getByTestId("titlebar")).toContainElement(screen.getByRole("button", { name: "새 컬렉션" }));
+  rerender(view(true));
+  expect(screen.getByTestId("index")).toContainElement(screen.getByRole("button", { name: "새 컬렉션" }));
+  expect(screen.getAllByRole("button", { name: "새 컬렉션" })).toHaveLength(1);
+});

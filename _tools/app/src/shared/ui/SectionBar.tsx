@@ -7,7 +7,7 @@ import { SegmentedControl, type SegmentedOption } from "./SegmentedControl";
  * - `inline`: the first row inside a scrolling list, so it scrolls away with the list.
  * - `shade`: the same bar dropped over the list from the top bar; the host positions it and
  *   decides when it is open.
- * The bar itself only lays out its sections and trailing controls; placement styling is the host's.
+ * The bar itself lays out its sections, trailing controls and optional shortcuts; placement styling is the host's.
  */
 export type SectionBarPlacement = "pinned" | "inline" | "shade";
 
@@ -19,6 +19,9 @@ export type SectionBarProps<T extends string> = {
   onChange: (value: T) => void;
   /** View controls at the bar's right end (sort, filters, 보기). */
   trailing?: ReactNode;
+  /** Optional second row of shortcuts, shared by the inline and dropped copies. */
+  extra?: ReactNode;
+  onExtraClick?: () => void;
   placement?: SectionBarPlacement;
   /** Each section takes an equal share of the bar's width (the tablet's touch layout). */
   fullWidth?: boolean;
@@ -27,9 +30,10 @@ export type SectionBarProps<T extends string> = {
 };
 
 /** One thin bar holding a tab's sections, shared by the PC and the tablet. */
-export function SectionBar<T extends string>({ label, options, value, onChange, trailing, placement = "pinned", fullWidth = false, className, ref }: SectionBarProps<T>) {
+export function SectionBar<T extends string>({ label, options, value, onChange, trailing, extra, onExtraClick, placement = "pinned", fullWidth = false, className, ref }: SectionBarProps<T>) {
   return <div ref={ref} className={["ui-section-bar", `ui-section-bar--${placement}`, className].filter(Boolean).join(" ")}>
     <SegmentedControl label={label} options={options} value={value} onChange={onChange} fullWidth={fullWidth} />
     {trailing && <div className="ui-section-bar__trailing">{trailing}</div>}
+    {extra && <div className="ui-section-bar__extra" onClick={onExtraClick}>{extra}</div>}
   </div>;
 }

@@ -81,6 +81,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
     && !chrome?.meta?.navigation
     && !chrome?.meta?.actions
     && chrome?.meta?.search?.kind !== "surface";
+  const hideIndex = view.kind === "collections" || hideEmptyNotesIndex;
   const assetTotalCount = useAssetTotalCount(area === "assets");
   const artistOverview = useArtistOverview();
   const enterArea = (next: RailArea) => {
@@ -137,7 +138,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
         <MorePanel entries={moreEntries} current={area === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />
       </div>
     </nav>
-    {!hideEmptyNotesIndex && <aside className="workspace-index" style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
+    {!hideIndex && <aside className="workspace-index" style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
       <header className="workspace-index__head" aria-label={areaName} data-tauri-drag-region="deep">
         <span className="workspace-index__title" aria-hidden="true">{areaTitle}</span>
         <div className="workspace-index__head-actions">

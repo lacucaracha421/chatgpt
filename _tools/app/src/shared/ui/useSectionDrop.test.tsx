@@ -1,16 +1,16 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ViewToolbar } from "../../layout/ViewToolbar";
 import { ChromeTarget, WorkspaceChromeProvider } from "../../layout/WorkspaceChrome";
 import { Menu } from "./Menu";
 import { SectionDropMount, useSectionDrop } from "./useSectionDrop";
 
 const options = [{ value: "game", label: "게임" }, { value: "manga", label: "만화" }] as const;
-function Fixture({ portal = false }: { portal?: boolean }) {
+function Fixture({ portal = false, extra }: { portal?: boolean; extra?: ReactNode }) {
   const [value, setValue] = useState<"game" | "manga">("game");
-  const drop = useSectionDrop({ label: "유형", options, value, onChange: setValue,
+  const drop = useSectionDrop({ label: "유형", options, value, onChange: setValue, extra,
     trailing: <Menu label="정렬" trigger="정렬" items={[{ id: "sort", label: "제목순", onSelect: () => {} }]} /> });
   const content = <section className="test-host">
     <ViewToolbar title="컬렉션" sectionDrop={drop} chrome={{}} />
@@ -152,4 +152,21 @@ it("waits until the entire row is above the viewport and aligns the overlay with
   expect(document.querySelector(".ui-section-drop-anchor")).toHaveStyle({ left: "140px", top: "52px", width: "600px" });
   measure.mockReturnValue(rect(140, 14, 550, 38)); fireEvent.resize(window);
   expect(document.querySelector(".ui-section-drop-anchor")).toHaveStyle({ width: "550px" });
+});
+
+it("carries both rows in the hovered copy and closes it when a shortcut opens its destination", () => {
+  vi.useFakeTimers();
+  const onOpen = vi.fn();
+  render(<Fixture extra={<div role="group" aria-label="바로가기"><button type="button" onClick={onOpen}>쇼케이스 12</button></div>} />);
+  const list = screen.getByTestId("list");
+  fireEvent.click(within(list).getByRole("button", { name: "쇼케이스 12" }));
+  expect(onOpen).toHaveBeenCalledOnce();
+  away(); fireEvent.pointerEnter(screen.getByRole("toolbar")); tick(150);
+  expect(within(shade()).getByRole("radiogroup", { name: "유형" })).toBeInTheDocument();
+  expect(within(shade()).getByRole("group", { name: "바로가기" })).toBeInTheDocument();
+  const shortcut = within(shade()).getByRole("button", { name: "쇼케이스 12" });
+  act(() => shortcut.focus()); fireEvent.click(shortcut);
+  expect(onOpen).toHaveBeenCalledTimes(2);
+  expect(shade()).not.toHaveClass("is-open");
+  expect(title()).toHaveFocus();
 });

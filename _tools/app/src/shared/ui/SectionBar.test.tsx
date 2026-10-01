@@ -37,3 +37,16 @@ it("spreads the sections across the bar and hands the host its element", () => {
   expect(element).toBe(container.firstElementChild);
   expect(screen.getByRole("radiogroup", { name: "유형" })).toHaveClass("ui-segmented--full-width");
 });
+
+it("puts optional shortcuts after the sections and trailing controls without a second selection", async () => {
+  const onOpen = vi.fn();
+  const { container } = render(<SectionBar label="유형" options={options} value="game" onChange={vi.fn()}
+    trailing={<button type="button">정렬</button>}
+    extra={<div role="group" aria-label="바로가기"><button type="button" onClick={onOpen}>쇼케이스 12</button></div>} />);
+  const bar = container.firstElementChild as HTMLElement;
+  expect(bar.lastElementChild).toHaveClass("ui-section-bar__extra");
+  expect(bar.lastElementChild).toContainElement(screen.getByRole("button", { name: "쇼케이스 12" }));
+  expect(screen.getAllByRole("radiogroup")).toHaveLength(1);
+  await userEvent.click(screen.getByRole("button", { name: "쇼케이스 12" }));
+  expect(onOpen).toHaveBeenCalledOnce();
+});

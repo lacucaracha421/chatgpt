@@ -1620,17 +1620,14 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
-    const index = screen.getByRole("complementary", { name: "탐색 인덱스" });
-    // Types, sort and 내 별점 live in the section bar under the top bar; the index keeps news only.
+    expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
+    // The full-width list keeps its sections and view controls together.
     expect(await screen.findByRole("button", { name: /^정렬/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /^내 별점/ })).toBeVisible();
-    expect(within(index).queryByRole("slider", { name: "내 별점" })).not.toBeInTheDocument();
-    expect(within(index).queryByRole("combobox", { name: "정렬" })).not.toBeInTheDocument();
-    expect(within(index).queryByRole("button", { name: "게임" })).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "게임" })).toHaveAttribute("aria-checked", "true");
-    expect(within(index).queryByRole("button", { name: "라이브러리" })).not.toBeInTheDocument();
-    // Plain title search lives in the 찾기 palette; the index head has no separate magnifier.
-    expect(within(index).queryByRole("button", { name: "제목 검색" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "라이브러리" })).not.toBeInTheDocument();
+    // Plain title search still lives in the 찾기 palette.
+    expect(screen.queryByRole("button", { name: "제목 검색" })).not.toBeInTheDocument();
     await user.keyboard("{Control>}f{/Control}");
     const search = within(await screen.findByRole("dialog", { name: "찾기" })).getByRole("combobox");
     await user.type(search, "nier");
@@ -1741,8 +1738,8 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
-    await user.click(await screen.findByRole("button", { name: /쇼케이스/, expanded: false }));
-    await user.click(await screen.findByRole("button", { name: "전체 보기" }));
+    expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "쇼케이스 1" }));
     expect(await screen.findByRole("heading", { name: "게임 쇼케이스" })).toBeInTheDocument();
     await user.dblClick(await screen.findByText("Showcase Game"));
     await user.click(await screen.findByRole("button", { name: "목록으로" }));

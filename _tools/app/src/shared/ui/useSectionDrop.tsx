@@ -121,7 +121,7 @@ export function useSectionDrop<T extends string>(bar: SectionBarProps<T>, enable
       <div className="ui-section-drop-hotstrip" aria-hidden="true" onPointerEnter={() => { overShade.current = true; enter(true); }} onPointerLeave={() => { overShade.current = false; leave(); }} />
       <div ref={shade} id={id} className={`ui-section-drop${open ? " is-open" : ""}`} aria-hidden={!open || undefined} inert={!open || undefined}
         onPointerEnter={() => { overShade.current = true; clearTimeout(leaveTimer.current); }} onPointerLeave={() => { overShade.current = false; leave(); }} onFocusCapture={() => clearTimeout(leaveTimer.current)}>
-        <SectionBar {...bar} placement="shade" onChange={pick} />
+        <SectionBar {...bar} placement="shade" onChange={pick} onExtraClick={() => { close(); bar.onExtraClick?.(); }} />
       </div>
     </div>, document.body) : null,
   };

@@ -442,3 +442,21 @@ it("hides 비밀 from the rail while no vault USB is attached", () => {
   expect(within(rail).queryByRole("button", { name: "비밀" })).not.toBeInTheDocument();
   expect(within(rail).getByRole("button", { name: "전송" })).toBeInTheDocument();
 });
+
+it.each([
+  { kind: "collections", typeFilter: "game", showcase: false },
+  { kind: "collections", typeFilter: "movie", showcase: true },
+  { kind: "collections", typeFilter: "manga", showcase: false, releaseProvider: "kakao" },
+  { kind: "collections", typeFilter: "game", showcase: false, releaseCalendar: true },
+] as const)("uses only the rail for the collection list destination %j", view => {
+  const { rerender } = render(<WorkspaceNavigation {...baseProps} view={view} onNavigate={vi.fn()} />);
+  expect(screen.getByRole("navigation", { name: "주요 영역" })).toBeInTheDocument();
+  expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
+  expect(document.querySelector(".workspace-index")).toBeNull();
+  expect(document.querySelector(".workspace-navigation")?.children).toHaveLength(1);
+  expect(screen.queryByRole("separator", { name: "사이드바 너비 조절" })).not.toBeInTheDocument();
+  rerender(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} />);
+  expect(screen.getByRole("complementary", { name: "탐색 인덱스" })).toBeInTheDocument();
+  rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "collection", collectionId: "m1" }} onNavigate={vi.fn()} />);
+  expect(document.querySelector('[data-chrome-slot="details"]')).toBeInTheDocument();
+});

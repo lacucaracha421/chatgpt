@@ -33,6 +33,7 @@ export function ViewToolbar({ title, titleContent, leadingAction, titleAccessory
         {titleAccessory}
         <ChromeQueryBadge search={chrome.search} />
         <div className="chrome-context-status">{chrome.status}</div>
+        {!workspace.targets.actions && chrome.actions && <div className="view-toolbar__view-actions">{chrome.actions}</div>}
       </header>)}
     </>;
   }
