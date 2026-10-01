@@ -22,7 +22,8 @@ export type WorkActions = {
   onOpenPerson(id: string): void; onOpenCollection?(id: string): void; onCopyCode(code: string | null): void;
 };
 function samePresentation(left: CollectionWorkData, right: CollectionWorkData) {
-  return left.collection.id === right.collection.id && heroArtwork(left.collection) === heroArtwork(right.collection) && left.manga?.activeVolumeId === right.manga?.activeVolumeId && (["front", "spine", "back", "platform", "privacy"] as const).every(key => left.case[key] === right.case[key]);
+  // Game spine images keep their own painted slot, preserving the current case rotation.
+  return left.collection.id === right.collection.id && heroArtwork(left.collection) === heroArtwork(right.collection) && left.manga?.activeVolumeId === right.manga?.activeVolumeId && (["front", "spine", "back", "platform", "privacy"] as const).every(key => (key === "spine" && right.collection.type === "game") || left.case[key] === right.case[key]);
 }
 // The meta line names one device (the case the work is drawn as), not every platform it was released on.
 const DEVICE_NAMES: Partial<Record<CaseData["platform"], string>> = { sw2: "Switch 2", sw: "Switch", ps5: "PS5", pc: "PC" };

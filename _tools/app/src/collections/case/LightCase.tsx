@@ -3,12 +3,14 @@ import type { CollectionSummary } from "../../library/types";
 import { useLibrary } from "../../library/LibraryContext";
 import { workArtworkThumbnailUrl } from "../../assets/mediaUrl";
 import { StableImage } from "../../shared/ui/StableImage";
+import { useSpineArtworkRevision } from "../launchBoxSpines";
 import { avGateway } from "../avClient";
 import { CASE_PLASTIC, CaseSpine, casePlatform, spineInsertClass, type CaseData } from "./CollectionCase";
 import "./LightCase.css";
 
 export function CollectionShelfCase({ collection, front, privacy, active, selected }: { collection: CollectionSummary; front: string | null; privacy: boolean; active: boolean; selected: boolean }) {
-  const { gateway } = useLibrary();
+  const { gateway, library } = useLibrary();
+  const spineRevision = useSpineArtworkRevision(gateway, library?.root ?? "", collection.id);
   const [art, setArt] = useState<{ front?: string | null; spine: string | null }>({ spine: null });
   useEffect(() => {
     if (!active || privacy) return;
@@ -29,7 +31,7 @@ export function CollectionShelfCase({ collection, front, privacy, active, select
     };
     void load();
     return () => { current = false; };
-  }, [active, privacy, collection.id, collection.type, collection.updatedAt, gateway]);
+  }, [active, privacy, collection.id, collection.type, collection.updatedAt, gateway, spineRevision]);
   const data: CaseData = { title: collection.name, publisher: collection.publisher, platform: collection.type === "av" ? "av" : collection.type === "movie" ? "film" : casePlatform(collection.platforms), front: art.front ?? front, spine: art.spine, privacy };
   return <LightCase data={data} selected={selected} />;
 }
@@ -48,7 +50,7 @@ export function LightCase({ data, selected }: { data: CaseData; selected: boolea
         </span>
         {selected && <span className="ui-selection-check" aria-hidden="true" />}
       </span>
-      <span className="cs-spine"><span className={spineInsertClass(data)}><CaseSpine decorative data={data} real={data.spine ? <StableImage src={data.spine} alt="" draggable={false} /> : null} /></span></span>
+      <span className="cs-spine"><span className={spineInsertClass(data)}><CaseSpine decorative data={data} /></span></span>
       <span className="cs-top" />
     </span>
   </span>;

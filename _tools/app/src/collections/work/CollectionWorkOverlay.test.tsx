@@ -1,6 +1,6 @@
 // These fixtures exercise only the frontend command contracts, never a library on disk.
 vi.mock("../physical/collectibleRuntime", async importOriginal => ({ ...await importOriginal<typeof import("../physical/collectibleRuntime")>(), acquireCover: (_request: unknown, callback: (value: null) => void) => { callback(null); return () => undefined; } }));
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +18,7 @@ const base: CollectionSummary = { id: "a", name: "가 작품", type: "game", des
 function fixtures(type: "game" | "av" | "movie" = "game") {
   const items = [{ ...base, type }, { ...base, id: "b", name: "나 작품", type }];
   const records: Record<string, {status:string|null;ownedPlatform:string|null;myScore:number|null;memo:string|null}> = {};
-  const gateway = { getCollectionWorkRecord: vi.fn().mockImplementation(async (id: string) => records[id] ?? {status:null,ownedPlatform:null,myScore:3,memo:"기록"}), saveCollectionWorkRecord: vi.fn().mockImplementation(async (id: string, edit: {field:string;value:string|number|null}) => records[id] = {...(records[id] ?? {status:null,ownedPlatform:null,myScore:3,memo:"기록"}),[edit.field]:edit.value}), listCollectionWorkArtworks: vi.fn().mockResolvedValue([]), importCollectionArtworks: vi.fn().mockResolvedValue(0), getTmdbConnection: vi.fn().mockResolvedValue(null), getIgdbConnection: vi.fn().mockResolvedValue({ gameId: 1 }), updateCollection: vi.fn().mockResolvedValue(undefined), setCollectionShowcase: vi.fn().mockResolvedValue(undefined), deleteCollection: vi.fn().mockResolvedValue(undefined), refreshIgdbGame: vi.fn().mockResolvedValue(undefined) };
+  const gateway = { fetchLaunchBoxSpine: vi.fn().mockResolvedValue({ collectionId: "a", status: "no_match" }), getCollectionWorkRecord: vi.fn().mockImplementation(async (id: string) => records[id] ?? {status:null,ownedPlatform:null,myScore:3,memo:"기록"}), saveCollectionWorkRecord: vi.fn().mockImplementation(async (id: string, edit: {field:string;value:string|number|null}) => records[id] = {...(records[id] ?? {status:null,ownedPlatform:null,myScore:3,memo:"기록"}),[edit.field]:edit.value}), listCollectionWorkArtworks: vi.fn().mockResolvedValue([]), importCollectionArtworks: vi.fn().mockResolvedValue(0), getTmdbConnection: vi.fn().mockResolvedValue(null), getIgdbConnection: vi.fn().mockResolvedValue({ gameId: 1 }), updateCollection: vi.fn().mockResolvedValue(undefined), setCollectionShowcase: vi.fn().mockResolvedValue(undefined), deleteCollection: vi.fn().mockResolvedValue(undefined), refreshIgdbGame: vi.fn().mockResolvedValue(undefined) };
   const api = { getDetails: vi.fn().mockImplementation(async (id: string) => ({ collectionId: id, revision: 1, productCode: "ABC-123", titleJa: null, maker: "메이커", label: "레이블", series: null, releaseDate: "2026-09-01", genres: [], people: [{ id: "person", displayName: "배우", role: "performer", order: 0, creditName: null, nameJa: null, workCount: 1, portrait: null }], makerCount: 1, labelCount: 1, seriesCount: 0 })), getCoverSet: vi.fn().mockResolvedValue({ frontId: null, spineId: null, backId: null, revision: "r" }), getRelated: vi.fn().mockResolvedValue({ performers: [], series: null, label: null }), searchPeople: vi.fn().mockResolvedValue([]), getPerformer: vi.fn().mockResolvedValue({ person: { id: "person", displayName: "배우", nameJa: null, memo: null, portrait: null }, stats: { workCount: 1, firstRelease: null, lastRelease: null, averageScore: null }, works: [], coPerformers: [], labels: [] }), getPerformerProfile: vi.fn().mockResolvedValue(null), getStashdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }) };
   const exit = vi.fn(); const changed = vi.fn().mockResolvedValue(undefined);
   function Harness() {
@@ -32,6 +32,73 @@ function fixtures(type: "game" | "av" | "movie" = "game") {
   return { gateway, api, exit, changed, Harness };
 }
 describe("Collection work open path", () => {
+  it.each(["no_match", "ambiguous", "failed"])("asks once per session after %s, including reopening", async status => {
+    const { Harness, gateway } = fixtures();
+    gateway.fetchLaunchBoxSpine.mockResolvedValue({ collectionId: "a", status });
+    render(<Harness />); const user = userEvent.setup();
+    await user.dblClick(screen.getByRole("button", { name: /^가 작품/ }));
+    await waitFor(() => expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledExactlyOnceWith("a"));
+    await user.keyboard("{Escape}");
+    await user.dblClick(screen.getByRole("button", { name: /^가 작품/ }));
+    await screen.findByRole("article");
+    await act(async () => { await Promise.resolve(); });
+    expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+  it("uses a shared toast for a rejected spine command without a blocking dialog", async () => {
+    const { Harness, gateway } = fixtures();
+    gateway.fetchLaunchBoxSpine.mockRejectedValue(new Error("요청 실패"));
+    render(<Harness />); await userEvent.setup().dblClick(screen.getByRole("button", { name: /^가 작품/ }));
+    expect(await screen.findByRole("alert")).toHaveClass("ui-toast");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+  it("does not assume a spine is missing when artwork inspection fails", async () => {
+    const { Harness, gateway } = fixtures();
+    gateway.listCollectionWorkArtworks.mockRejectedValue(new Error("목록 실패"));
+    render(<Harness />); await userEvent.setup().dblClick(screen.getByRole("button", { name: /^가 작품/ }));
+    await screen.findByRole("article");
+    await act(async () => { await Promise.resolve(); });
+    expect(gateway.fetchLaunchBoxSpine).not.toHaveBeenCalled();
+  });
+  it.each(["av", "movie"] as const)("does not request a spine for %s", async type => {
+    const { Harness, gateway } = fixtures(type); render(<Harness />);
+    await userEvent.setup().dblClick(screen.getByRole("button", { name: /^가 작품/ }));
+    await screen.findByRole("article");
+    expect(gateway.fetchLaunchBoxSpine).not.toHaveBeenCalled();
+  });
+  it("does not request a game with a real spine", async () => {
+    const { Harness, gateway } = fixtures();
+    gateway.listCollectionWorkArtworks.mockResolvedValue([{ id: "existing", kind: "spine", selected: true }]);
+    render(<Harness />); await userEvent.setup().dblClick(screen.getByRole("button", { name: /^가 작품/ }));
+    await waitFor(() => expect(document.querySelector('img[src*="existing"]')).not.toBeNull());
+    expect(gateway.fetchLaunchBoxSpine).not.toHaveBeenCalled();
+  });
+  it("refreshes a matched game's spine and keeps the template until that image decodes", async () => {
+    const { Harness, gateway, changed } = fixtures();
+    let resolve!: (value: { collectionId: string; status: string }) => void;
+    gateway.fetchLaunchBoxSpine.mockImplementation(() => new Promise(r => { resolve = r; }));
+    render(<Harness />); await userEvent.setup().dblClick(screen.getByRole("button", { name: /^가 작품/ }));
+    await waitFor(() => expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledOnce());
+    const caseElement = document.querySelector(".collection-case");
+    expect(caseElement?.querySelector("[data-spine-template]")).not.toBeNull();
+    gateway.listCollectionWorkArtworks.mockResolvedValue([{ id: "received", kind: "spine", selected: true }]);
+    await act(async () => resolve({ collectionId: "a", status: "matched" }));
+    const image = await waitFor(() => {
+      const image = caseElement?.querySelector<HTMLImageElement>('img[src*="received"]');
+      expect(image).not.toBeNull(); return image!;
+    });
+    expect(image).not.toBeVisible();
+    let decode!: () => void;
+    Object.defineProperty(image, "decode", { value: () => new Promise<void>(r => { decode = r; }) });
+    fireEvent.load(image);
+    expect(caseElement?.querySelector("[data-spine-template]")).not.toBeNull();
+    await act(async () => decode());
+    expect(image).toBeVisible();
+    expect(caseElement?.querySelector("[data-spine-template]")).toBeNull();
+    expect(document.querySelector(".collection-case")).toBe(caseElement);
+    expect(changed).not.toHaveBeenCalled();
+  });
+
   it("keeps the actor page mounted when a co-performer opens, then returns to the work", async () => {
     const { Harness, api } = fixtures("av");
     const initial: PerformerData = {

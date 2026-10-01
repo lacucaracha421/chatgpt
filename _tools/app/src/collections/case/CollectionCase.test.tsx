@@ -9,8 +9,9 @@ function Case({ value = data }: { value?: CaseData }) {
   return <CollectionCase data={value} open={open} onOpenChange={setOpen} />;
 }
 describe("CollectionCase", () => {
-  it("uses an untouched real spine ahead of the platform template", () => {
+  it("uses an untouched real spine ahead of the platform template after decoding", async () => {
     const { container } = render(<Case value={{ ...data, spine: "/spine" }} />);
+    await act(async () => fireEvent.load(container.querySelector<HTMLImageElement>('img[src="/spine"]')!));
     expect(screen.getByRole("img", { name: "게임 책등" })).toHaveAttribute("src", "/spine");
     expect(container.querySelector("[data-spine-template]")).toBeNull();
   });
@@ -54,7 +55,7 @@ describe("CollectionCase", () => {
     render(<CollectionCase data={{ ...data, spine: "/spine", back: "/back" }} open={false} onOpenChange={vi.fn()} onReady={ready} />);
     const front = screen.getByRole("img", { name: "게임 앞면" });
     Object.defineProperties(front, { naturalWidth: { value: 600 }, naturalHeight: { value: 900 }, decode: { value: () => new Promise<void>(r => { resolve = r; }) } });
-    fireEvent.load(front); fireEvent.load(screen.getByRole("img", { name: "게임 책등" })); fireEvent.load(screen.getByRole("img", { name: "게임 뒷면" }));
+    fireEvent.load(front); fireEvent.load(document.querySelector<HTMLImageElement>('img[src="/spine"]')!); fireEvent.load(screen.getByRole("img", { name: "게임 뒷면" }));
     expect(ready).not.toHaveBeenCalled();
     await act(async () => resolve());
     expect(ready).toHaveBeenCalled();

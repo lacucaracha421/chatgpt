@@ -19,6 +19,9 @@ use std::{
 const BULK_URL: &str = "https://gamesdb.launchbox-app.com/Metadata.zip";
 const IMAGE_BASE: &str = "https://images.launchbox-app.com/";
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
+/// A failed or interrupted bulk download may be retried after this pause (user, 2026-10-01);
+/// a successful download still holds for a day.
+const RETRY_MS: u64 = 30 * 60 * 1000;
 const IMAGE_INTERVAL_MS: u64 = 1000;
 const MAX_BULK_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_XML_BYTES: u64 = 1024 * 1024 * 1024;
@@ -350,7 +353,10 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     Ok(())
 }
 fn fresh(now: u64, then: Option<u64>) -> bool {
-    then.is_some_and(|t| now.saturating_sub(t) < DAY_MS)
+    within(now, then, DAY_MS)
+}
+fn within(now: u64, then: Option<u64>, span: u64) -> bool {
+    then.is_some_and(|t| now.saturating_sub(t) < span)
 }
 fn cached_index(cache: &Path, state: &BulkState, cancel: &AtomicBool) -> Result<Index> {
     check_cancel(cancel)?;
@@ -380,14 +386,22 @@ fn ensure_index(cache: &Path, io: &impl Transport, cancel: &AtomicBool) -> Resul
     if fresh(io.now_ms(), state.downloaded_at) {
         return cached_index(cache, &state, cancel);
     }
-    if fresh(io.now_ms(), state.last_attempt_at) {
+    if within(io.now_ms(), state.last_attempt_at, RETRY_MS) {
         if state.generation.is_none() {
             return Err(Error::Http("bulk_download_cooldown".into()));
         }
         return cached_index(cache, &state, cancel);
     }
+    // Leftovers of a download the app did not finish (closed mid-way) are removed before retrying.
+    if let Ok(entries) = fs::read_dir(cache) {
+        for entry in entries.flatten() {
+            if entry.file_name().to_string_lossy().starts_with(".tmp") {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
     state.last_attempt_at = Some(io.now_ms());
-    write_json(&state_path, &state)?; // Even interrupted/failed requests consume the daily attempt.
+    write_json(&state_path, &state)?; // A failed attempt pauses retries for RETRY_MS.
     let previous = state.generation.clone();
     let attempt = (|| {
         let mut temp = tempfile::NamedTempFile::new_in(cache)?;

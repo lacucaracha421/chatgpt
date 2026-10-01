@@ -1,4 +1,4 @@
-import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, EllipsisHorizontalIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
@@ -8,6 +8,7 @@ import { ViewToolbar } from "../layout/ViewToolbar";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { Button } from "../shared/ui/Button";
 import { ViewOptionsMenu } from "../shared/ui/ViewOptionsMenu";
+import { useLaunchBoxSpineBatch } from "./launchBoxSpines";
 import { CollectionList, shelfGroups, useCollectionView } from "./CollectionList";
 import { TextInput } from "../shared/ui/TextInput";
 import { Slider } from "../shared/ui/Slider";
@@ -31,6 +32,7 @@ import { deriveCollectionLibrary, type CollectionLibrarySort, type CollectionLib
 import { AvLinkInbox, useAvLinkInbox, type AvLinkApi } from "./AvLinkInbox";
 import { KIND_LABEL } from "./collectionFormat";
 import "./CollectionBrowser.css";
+import "../styles/collectionSpines.css";
 
 const TYPE_LABEL: Record<CollectionType, string> = KIND_LABEL;
 const TYPES: CollectionType[] = ["game", "manga", "movie", "av"];
@@ -85,6 +87,8 @@ export function CollectionBrowser({
 }: CollectionBrowserProps) {
   const { gateway, library } = useLibrary();
   const workspace = useWorkspaceChrome();
+  const spineBatch = useLaunchBoxSpineBatch(gateway, library?.root ?? "");
+  useAutoDismiss(spineBatch.message, spineBatch.dismiss);
   const [viewSettings, patchViewSettings] = useCollectionView(typeFilter);
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
@@ -326,6 +330,13 @@ export function CollectionBrowser({
       content={<div className="collection-toolbar__rating" onKeyDown={event => event.stopPropagation()}>
         <TextInput type="search" aria-label="제목 검색" placeholder="작품 제목 검색" autoFocus value={libraryState.query} onChange={event => patchLibraryState({ query: event.target.value })} />
       </div>} />
+    {typeFilter === "game" && gateway.fetchLaunchBoxSpines && <Menu label="작품 관리" align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
+      { id: "spines", label: "책등 받기", disabled: spineBatch.running, onSelect: () => void spineBatch.run(collections, onChanged) },
+    ]} />}
+    {typeFilter === "game" && spineBatch.running && <span className="collection-toolbar__spine-progress">
+      <span role="status">책등 받는 중 {spineBatch.processed} / {spineBatch.total}</span>
+      <Button variant="quiet" size="sm" disabled={spineBatch.cancelling} onClick={() => void spineBatch.cancel()}>취소</Button>
+    </span>}
   </div> : undefined;
 
   return (
@@ -343,6 +354,7 @@ export function CollectionBrowser({
           search: showcase ? undefined : { scope: releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
         }}
       />
+      {spineBatch.message && <Toast tone={spineBatch.error ? "error" : "status"} onDismiss={spineBatch.dismiss}>{spineBatch.message}</Toast>}
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <div className={`collection-browser__stage${showcase ? " collection-browser__stage--showcase" : ""}`}>
         {!inbox && !workspace && <div className="collection-browser__heading">

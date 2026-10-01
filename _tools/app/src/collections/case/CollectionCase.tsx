@@ -82,18 +82,43 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
       <span className="k-floor">{data.platform === "sw" || data.platform === "sw2" ? <span className="cart-slot"><span className="cart" /></span> : <span className="holder"><span className="disc" /></span>}{note && <div className="note">{note}</div>}</span>
       <span className="k-edge" /><span className="k-cap k-top" /><span className="k-cap k-bottom" />
       <span className="k-hinge"><span className="k-spine"><span className={spineInsertClass(data)}>
-        <CaseSpine data={data} real={face(data.spine, "책등")} />
+        <CaseSpine data={data} onSettled={url => {
+          settled.current.add(url);
+          if (sources.every(source => settled.current.has(source))) readyRef.current?.();
+        }} />
       </span></span><span className="k-spine-in" /><span className="k-lid"><span className="k-front"><span className="ins">{face(data.front, "앞면")}</span></span><span className="k-inner">{inside}</span></span></span>
     </div>
   </div>;
 }
 
 /** Both the work case and the light shelf case use the same package printing. */
-export function CaseSpine({ data, real, decorative = false }: { data: CaseData; real?: ReactNode; decorative?: boolean }) {
+export function CaseSpine({ data, decorative = false, onSettled }: { data: CaseData; decorative?: boolean; onSettled?(url: string): void }) {
+  const [slots, setSlots] = useState<[string | null, string | null]>([data.spine ?? null, null]);
+  const [painted, setPainted] = useState<0 | 1 | null>(null);
+  const wanted = useRef(data.spine); wanted.current = data.spine;
+  useEffect(() => {
+    if (!data.spine || (painted !== null && slots[painted] === data.spine)) return;
+    const next = painted === 0 ? 1 : 0;
+    if (slots[next] === data.spine) return;
+    setSlots(current => next === 0 ? [data.spine ?? null, current[1]] : [current[0], data.spine ?? null]);
+  }, [data.spine, painted, slots]);
+  const hasPaintedSpine = Boolean(data.spine && painted !== null);
+
   const template = ["sw2", "sw", "ps5"].includes(data.platform);
   const title = <span className="spine-title" data-title={decorative ? data.title : undefined}>{decorative ? null : data.title}</span>;
-  return <span className="case-spine-art">{data.privacy ? <span className="case-mask" /> : data.spine ? real : template ?
+  return <span className="case-spine-art">{data.privacy ? <span className="case-mask" /> : <>
+    {slots.map((url, index) => url && <img key={index} className="cv" src={url} alt={decorative ? "" : `${data.title} 책등`} draggable={false}
+      style={hasPaintedSpine && painted === index ? undefined : { position: "absolute", visibility: "hidden", pointerEvents: "none" }}
+      aria-hidden={painted !== index || undefined}
+      onLoad={async event => {
+        const image = event.currentTarget;
+        try { await image.decode?.(); } catch { onSettled?.(url); return; }
+        if (image.isConnected && wanted.current === url) setPainted(index as 0 | 1);
+        onSettled?.(url);
+      }} onError={() => onSettled?.(url)} />)}
+    {!hasPaintedSpine && (template ?
     <span className={`tpl ${data.platform}`} data-spine-template={data.platform} data-nintendo={/nintendo|닌텐도/i.test(data.publisher ?? "") ? "" : undefined}>
       <span className="t-head" /><span className="t-band">{title}</span><span className="t-foot"><span className="t-pub">{data.publisher}</span></span>
-    </span> : title}</span>;
+    </span> : title)}
+  </>}</span>;
 }

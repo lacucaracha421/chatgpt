@@ -167,7 +167,7 @@ fn launchbox_bulk_reuses_daily_cache_and_preserves_good_copy_after_partial_failu
     assert_eq!(fs::read_dir(cache.path()).unwrap().count(), 3);
 }
 #[test]
-fn launchbox_failed_first_download_is_not_retried_within_a_day() {
+fn launchbox_failed_download_is_retried_after_a_short_pause_and_cleans_leftovers() {
     let cache = tempfile::tempdir().unwrap();
     let io = FakeHttp::new("<LaunchBox></LaunchBox>");
     io.fail_bulk.set(true);
@@ -175,9 +175,15 @@ fn launchbox_failed_first_download_is_not_retried_within_a_day() {
     assert!(ensure_index(cache.path(), &io, &cancel).is_err());
     assert!(ensure_index(cache.path(), &io, &cancel).is_err());
     assert_eq!(io.bulk_count(), 1);
-    io.now.set(io.now.get() + DAY_MS);
+    // A download the app did not finish (closed mid-way) leaves a temp file behind.
+    fs::write(cache.path().join(".tmpLeftover"), b"partial").unwrap();
+    io.now.set(io.now.get() + RETRY_MS - 1);
+    assert!(ensure_index(cache.path(), &io, &cancel).is_err());
+    assert_eq!(io.bulk_count(), 1);
+    io.now.set(io.now.get() + 1);
     assert!(ensure_index(cache.path(), &io, &cancel).is_err());
     assert_eq!(io.bulk_count(), 2);
+    assert!(!cache.path().join(".tmpLeftover").exists());
 }
 #[test]
 fn launchbox_matching_prefers_owned_platform_then_platform_order_and_region() {

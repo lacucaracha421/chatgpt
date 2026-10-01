@@ -6,6 +6,9 @@ import { usePrivacy } from "../../privacy/PrivacyContext";
 import { useBackHandler, useBackNavigationContext } from "../../shared/navigation/BackNavigation";
 import { Button } from "../../shared/ui/Button";
 import { Dialog } from "../../shared/ui/Dialog";
+import { Toast } from "../../shared/ui/Toast";
+import { useAutoDismiss } from "../../shared/ui/useAutoDismiss";
+import { requestMissingGameSpine, selectedSpine, useSpineArtworkRevision } from "../launchBoxSpines";
 import { Skeleton } from "../../shared/ui/Skeleton";
 import { avError, avGateway } from "../avClient";
 import type { AvGateway } from "../avTypes";
@@ -25,7 +28,10 @@ export type CollectionWorkOverlayProps = {
   onExit(): void; onChanged(): Promise<void>; onOpenSettings(): void; onOpenCollection?(id: string): void; api?: AvGateway;
 };
 export function CollectionWorkOverlay({ collection, collections, listOrder, initialTmdbSearch, onTmdbSearchConsumed, onExit, onChanged, onOpenSettings, onOpenCollection, api = avGateway }: CollectionWorkOverlayProps) {
-  const { gateway } = useLibrary();
+  const { gateway, library } = useLibrary();
+  const spineRevision = useSpineArtworkRevision(gateway, library?.root ?? "", collection.id);
+  const [spineError, setSpineError] = useState<string | null>(null);
+  useAutoDismiss(spineError, setSpineError);
   const { privacyMode } = usePrivacy();
   const personal = useWorkRecord(collection);
   const [provider, setProvider] = useState<{ id: string; connected: boolean }>({ id: collection.id, connected: false });
@@ -52,22 +58,26 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
     setError(null);
     void (async () => {
       try {
+        let artworkLoaded = true;
         const [av, covers, related, artworks] = await Promise.all([
           collection.type === "av" ? api.getDetails(collection.id) : Promise.resolve(null),
           collection.type === "av" ? api.getCoverSet(collection.id) : Promise.resolve(null),
           collection.type === "av" && typeof api.getRelated === "function" ? api.getRelated(collection.id) : Promise.resolve(null),
-          gateway.listCollectionWorkArtworks(collection.id).catch(() => []),
+          gateway.listCollectionWorkArtworks(collection.id).catch(() => { artworkLoaded = false; return []; }),
         ]);
         if (!active) return;
         const artworkUrl = (id: string | null) => id ? `${workArtworkUrl(id)}?v=${encodeURIComponent(covers?.revision ?? collection.updatedAt)}` : null;
+        const spine = collection.type === "game" ? selectedSpine(artworks) : null;
         const front = covers ? artworkUrl(covers.frontId) : collection.selectedWorkArtworkId ? workArtworkUrl(collection.selectedWorkArtworkId) : collection.coverAssetId ? assetUrl(collection.coverAssetId) : collection.sourcePath ? collectionSourcePreviewUrl(collection.id) : null;
         setLoaded(current => ({ collection, av, covers, related, tmdb: tmdbRef.current.id === collection.id ? tmdbRef.current.connection : current?.collection.id === collection.id ? current.tmdb : null, artworks: artworks.filter(item => !["cover", "spine", "back", "volume_cover"].includes(item.kind)), providerConnected: false, position: order.indexOf(collection.id) + 1, total: order.length,
-          case: { title: av?.titleJa?.trim() || collection.name, platform: collection.type === "av" ? "av" : collection.type === "movie" ? "film" : casePlatform(collection.platforms), publisher: collection.publisher, privacy: privacyMode, front, spine: covers ? artworkUrl(covers.spineId) : null, back: covers ? artworkUrl(covers.backId) : null },
+          case: { title: av?.titleJa?.trim() || collection.name, platform: collection.type === "av" ? "av" : collection.type === "movie" ? "film" : casePlatform(collection.platforms), publisher: collection.publisher, privacy: privacyMode, front, spine: covers ? artworkUrl(covers.spineId) : spine ? workArtworkUrl(spine.id) : null, back: covers ? artworkUrl(covers.backId) : null },
         }));
+        const request = artworkLoaded ? requestMissingGameSpine(gateway, library?.root ?? "", collection, artworks) : null;
+        if (request) void request.catch(reason => { if (active) setSpineError(avError(reason)); });
       } catch (reason) { if (active) setError(avError(reason)); }
     })();
     return () => { active = false; };
-  }, [api, gateway, collection, reload, privacyMode, orderKey]);
+  }, [api, gateway, collection, reload, privacyMode, orderKey, spineRevision, library?.root]);
   useEffect(() => {
     if (collection.type !== "movie") return;
     let active = true;
@@ -159,6 +169,7 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
   // Editors retain their exact target even if a route request changes behind them.
   return <>
     {screenData ? <CollectionWorkScreen data={screenData} pending={screenData.collection.id !== collection.id} actions={actions} /> : <div className="work-loading"><Skeleton label="작품 화면" /><Button onClick={onExit}>닫기</Button></div>}
+    {spineError && <Toast tone="error" onDismiss={() => setSpineError(null)}>{spineError}</Toast>}
     {error && <div className="work-error" role="alert">{error} <Button size="sm" onClick={() => setReload(value => value + 1)}>다시 시도</Button></div>}
     {panel?.kind === "edit" && <CollectionEditDialog open mode={{ kind: "edit", collection: panel.data.collection }} onClose={() => setPanel(null)} onSubmit={async input => { await gateway.updateCollection(panel.data.collection.id, input as UpdateCollection); await onChanged(); setReload(value => value + 1); }} />}
     {tmdbPanel && <TmdbMovieDialog open target={tmdbPanel} onClose={() => setTmdbPanel(null)} onOpenSettings={() => { setTmdbPanel(null); onOpenSettings(); }} onApplied={async () => { setTmdbPanel(null); await mutate(async () => undefined); }} />}

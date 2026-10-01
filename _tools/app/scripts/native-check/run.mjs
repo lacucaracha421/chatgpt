@@ -48,7 +48,9 @@ const env = {
   DBUS_SESSION_BUS_ADDRESS: busAddress,
   HTTP_PROXY: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9', ALL_PROXY: 'http://127.0.0.1:9',
   http_proxy: 'http://127.0.0.1:9', https_proxy: 'http://127.0.0.1:9', all_proxy: 'http://127.0.0.1:9',
-  NO_PROXY: 'localhost,127.0.0.1', no_proxy: 'localhost,127.0.0.1',
+  // NATIVE_CHECK_ALLOW_HOSTS (comma-separated) lets a run reach named hosts on purpose, e.g. the LaunchBox image host.
+  NO_PROXY: ['localhost', '127.0.0.1', ...(process.env.NATIVE_CHECK_ALLOW_HOSTS ?? '').split(',').filter(Boolean)].join(','),
+  no_proxy: ['localhost', '127.0.0.1', ...(process.env.NATIVE_CHECK_ALLOW_HOSTS ?? '').split(',').filter(Boolean)].join(','),
 };
 delete env.GNOME_KEYRING_CONTROL; delete env.SSH_AUTH_SOCK;
 
