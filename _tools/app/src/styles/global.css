@@ -2186,8 +2186,8 @@ textarea:focus-visible {
 .video-tile__status { inset: 50% auto auto 50%; transform: translate(-50%, -50%); white-space: nowrap; }
 .video-tile--pending,
 .video-tile--failed { background: var(--color-surface-elevated); }
-.video-tile--pending { display: grid; place-content: center; justify-items: center; gap: var(--space-2); }
-.video-tile--pending .video-tile__status { position: static; transform: none; padding: 0; background: transparent; color: var(--color-muted); font-size: var(--text-xs); }
+.video-tile--pending { display: grid; grid-template-columns: minmax(0, 1fr); place-content: center; justify-items: center; gap: var(--space-2); }
+.video-tile--pending .video-tile__status { position: static; transform: none; padding: 0 var(--space-2); max-width: 100%; height: auto; box-sizing: border-box; background: transparent; color: var(--color-muted); font-size: var(--type-meta); white-space: normal; text-align: center; }
 .video-tile__status-icon { width: 20px; height: 20px; color: var(--color-faint); }
 .video-tile--failed { display: grid; place-content: center; gap: var(--space-2); }
 .video-tile--failed .video-tile__status { position: static; transform: none; }
