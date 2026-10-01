@@ -1279,7 +1279,11 @@ impl FetchState {
             if let Ok(cached) = read_json::<CachedOutcome>(&outcome_path, 64 * 1024) {
                 if cached.fingerprint == fingerprint
                     && fresh(io.now_ms(), Some(cached.at))
-                    && cached.outcome.status != OutcomeStatus::Matched
+                    // A failure (network, download pause) is transient; only real "no match" answers are reused.
+                    && !matches!(
+                        cached.outcome.status,
+                        OutcomeStatus::Matched | OutcomeStatus::Failed
+                    )
                 {
                     let mut outcome = cached.outcome;
                     outcome.cached = true;

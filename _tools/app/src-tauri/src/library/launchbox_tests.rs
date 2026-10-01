@@ -188,6 +188,25 @@ fn launchbox_failed_download_is_retried_after_a_short_pause_and_cleans_leftovers
     assert!(!cache.path().join(".tmpLeftover").exists());
 }
 #[test]
+fn launchbox_failed_outcomes_are_not_reused_once_the_download_works() {
+    let (_temp, library, cache, io) = fixture();
+    insert(&library, ID1, "Example II: Adventure", "Switch");
+    let cancel = AtomicBool::new(false);
+    let g = load_game(&library, ID1).unwrap();
+    io.fail_bulk.set(true);
+    let out = FetchState::default()
+        .one_with(&library, cache.path(), &g, &io, &cancel, &mut None, &|_| {})
+        .unwrap();
+    assert_eq!(out.status, OutcomeStatus::Failed);
+    io.fail_bulk.set(false);
+    io.now.set(io.now.get() + RETRY_MS);
+    let out = FetchState::default()
+        .one_with(&library, cache.path(), &g, &io, &cancel, &mut None, &|_| {})
+        .unwrap();
+    assert_eq!(out.status, OutcomeStatus::Matched);
+    assert!(!out.cached);
+}
+#[test]
 fn launchbox_matching_prefers_owned_platform_then_platform_order_and_region() {
     let io = FakeHttp::new(&metadata(
         &[
