@@ -3300,7 +3300,24 @@ textarea:focus-visible {
 .manga-card--skeleton .manga-card__title { width: 80%; }
 .manga-card--skeleton .manga-card__artist { width: 40%; height: 1.5em; }
 .manga-toolbar__controls, .manga-toolbar__refresh { display: flex; align-items: center; gap: var(--space-2); }
-.manga-toolbar__controls { min-width: 0; }
+.manga-toolbar__controls, .manga-toolbar__refresh, .manga-toolbar__count { flex: none; }
+/* The toolbar sits in the window chrome beside the status chip and never runs into it. A search chip
+   (the only shrinking item) narrows first; then the toolbar sheds the refresh time, the menu labels,
+   the result count, and finally the source counts and menu chevrons; clipping is the last guard.
+   Breakpoints are the measured content widths (Pretendard) plus a few pixels of slack. */
+.view-toolbar:has(.manga-toolbar__controls) { container: manga-toolbar / inline-size; overflow-x: clip; }
+.view-toolbar:has(.manga-toolbar__controls) > h2 { flex: none; max-width: none; }
+@container manga-toolbar (max-width: 770px) { .manga-toolbar__refresh time { display: none; } }
+@container manga-toolbar (max-width: 706px) { .manga-toolbar__quiet-menu > span { display: none; } }
+@container manga-toolbar (max-width: 647px) { .manga-toolbar__count { display: none; } }
+@container manga-toolbar (max-width: 565px) { .manga-toolbar__controls .ui-segmented__count, .manga-toolbar__quiet-menu > svg { display: none; } }
+/* An applied search adds its chip (kept at least 96px): every step comes about 104px earlier, and the
+   chip itself goes before the source counts (the search mark on the rail still shows it is active). */
+.view-toolbar:has(.manga-toolbar__controls) .chrome-query { min-width: 96px; }
+@container manga-toolbar (max-width: 874px) { .view-toolbar:has(.chrome-query) .manga-toolbar__refresh time { display: none; } }
+@container manga-toolbar (max-width: 810px) { .view-toolbar:has(.chrome-query) .manga-toolbar__quiet-menu > span { display: none; } }
+@container manga-toolbar (max-width: 751px) { .view-toolbar:has(.chrome-query) .manga-toolbar__count { display: none; } }
+@container manga-toolbar (max-width: 669px) { .view-toolbar:has(.manga-toolbar__controls) > .chrome-context-status { display: none; } }
 .manga-toolbar__refresh { margin-left: auto; order: 1; }
 .view-toolbar:has(.manga-toolbar__controls) .chrome-context-status { margin-left: 0; }
 .view-toolbar:has(.manga-toolbar__controls) .view-toolbar__actions { order: 2; }
@@ -3377,24 +3394,20 @@ textarea:focus-visible {
   font-size: var(--text-xs);
 }
 
-.online-catalog__pagination {
+/* Load more: the next page arrives under the loaded cards; its skeletons use the same columns,
+   clipped to one row (rows after the first are 0 tall and the box has no bottom padding). */
+.manga-grid--more { grid-template-rows: auto; grid-auto-rows: 0; row-gap: 0; overflow: hidden; padding-top: var(--space-2); padding-bottom: 0; margin-bottom: var(--space-4); }
+.online-catalog__more-sentinel { height: 1px; }
+.online-catalog__list-end {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  flex: none;
-  min-height: 42px;
-  padding: var(--space-1) var(--space-3);
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: var(--control-height);
+  padding: 0 var(--space-4) var(--space-6);
   color: var(--color-muted);
-  background: var(--color-surface);
-  border-top: var(--border-width) solid var(--color-border);
-  font-size: var(--text-xs);
+  font-size: var(--type-meta);
   font-variant-numeric: tabular-nums;
-}
-
-.online-catalog__pagination > div { display: flex; gap: var(--space-2); }
-.online-catalog__pagination-loading {
-  color: var(--color-text);
-  font-style: normal;
 }
 
 .online-catalog__workspace { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; }

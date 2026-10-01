@@ -51,8 +51,9 @@ export function MangaCover({ src, title, privacyMode, className = "" }: { src: s
   </span>;
 }
 
-export function MangaSkeletonGrid() {
-  return <div className="manga-grid" aria-label="망가 불러오는 중">
+/** `more` is the row shown under loaded cards while the next page arrives: the same columns, one row tall. */
+export function MangaSkeletonGrid({ more = false }: { more?: boolean } = {}) {
+  return <div className={more ? "manga-grid manga-grid--more" : "manga-grid"} aria-label={more ? "다음 망가 불러오는 중" : "망가 불러오는 중"}>
     {Array.from({ length: 12 }, (_, index) => <div className="manga-card manga-card--skeleton" key={index}>
       <Skeleton className="manga-card__frame" label="표지" />
       <Skeleton className="manga-card__title" label="제목" />

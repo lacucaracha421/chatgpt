@@ -14,6 +14,7 @@ import { usePrivacy } from "../privacy/PrivacyContext";
 import type {
   CatalogLanguage,
   CatalogGroupedPage,
+  CatalogGroupedSearchEvent,
   CatalogGroupedWork,
   CatalogGroupEditionsPage,
   CatalogGroupEditionsQuery,
@@ -42,6 +43,21 @@ import { displayDateTime } from "../shared/displayDate";
 
 const CATALOG_PAGE_SIZE = 48;
 
+type CatalogView = { text: string; sort: CatalogSort; scope: CatalogScope; revealBlocked: boolean; language: CatalogLanguage };
+/** Every page loaded so far for one view, in order, without repeating a group. */
+type CatalogList = { works: CatalogGroupedWork[]; pages: number; complete: boolean };
+type PageStream = { first: Promise<CatalogGroupedPage | null>; done: Promise<void> };
+
+function viewKey(view: CatalogView | null): string {
+  return view ? JSON.stringify([view.text, view.sort, view.scope, view.revealBlocked, view.language]) : "";
+}
+
+function appendWorks(current: CatalogGroupedWork[], next: CatalogGroupedWork[]): CatalogGroupedWork[] {
+  // Rows can shift between page requests (new uploads, bookmark removals); a group is shown once.
+  const seen = new Set(current.map(work => `${work.provider}:${work.groupId}`));
+  return [...current, ...next.filter(work => !seen.has(`${work.provider}:${work.groupId}`))];
+}
+
 type OnlineCatalogBrowserProps = {
   onSwitchLocal: () => void;
   initialScope?: CatalogScope;
@@ -61,9 +77,11 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
   const [searchOpen, setSearchOpen] = useState(false);
   const [appliedQuery, setAppliedQuery] = useState("");
   const [status, setStatus] = useState<CatalogStatus | null>(null);
-  const [results, setResults] = useState<CatalogGroupedPage | null>(null);
+  const [results, setResults] = useState<CatalogList | null>(null);
   const gridScroll = useRef<HTMLDivElement>(null);
-  const displayedOrder = useRef<{ page: number; sort: CatalogSort } | null>(null);
+  const moreSentinel = useRef<HTMLDivElement>(null);
+  const displayedView = useRef<CatalogView | null>(null);
+  const loadedPages = useRef(0);
   const resetGridScroll = useRef(false);
   useLayoutEffect(() => {
     if (resetGridScroll.current && gridScroll.current) gridScroll.current.scrollTop = 0;
@@ -86,7 +104,10 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const suggestionsListboxId = useId();
   const [loading, setLoading] = useState(false);
-  const [quietRefresh, setQuietRefresh] = useState(false);
+  // Any search (quiet refresh included) still fetching its pages; appending waits for it.
+  const [searchPending, setSearchPending] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreFailed, setLoadMoreFailed] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [openingWorkKey, setOpeningWorkKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<CatalogWorkDetail | null>(null);
@@ -144,54 +165,114 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
     };
   }, [gateway]);
 
-  async function search(text: string, nextSort = sort, nextScope = scope, nextPage = 0, nextRevealBlocked = revealBlocked, nextLanguage = language, quiet = false) {
+  function applyCount(event: Exclude<CatalogGroupedSearchEvent, { type: "page" }>, view: CatalogView) {
+    if (event.type === "countError") { setTotalCount(null); setCountError(event.message); return; }
+    setTotalCount(event.totalCount); setCountError(null);
+    if (view.scope === "bookmarked" && !view.text && !view.revealBlocked) { setKnownBookmarkCount(event.totalCount); onBookmarkCount?.(event.totalCount); }
+  }
+
+  /** `first` settles with the page as soon as it streams in; `done` settles after its count. */
+  function streamPage(view: CatalogView, page: number, request: number): PageStream {
+    let deliver: (page: CatalogGroupedPage) => void = () => undefined;
+    const delivered = new Promise<CatalogGroupedPage>((resolve) => { deliver = resolve; });
+    const done = gateway.searchCatalogGroups({
+      provider: "kHentai",
+      language: view.language,
+      revealBlocked: view.revealBlocked,
+      text: view.text,
+      sort: view.sort,
+      scope: view.scope,
+      page,
+      pageSize: CATALOG_PAGE_SIZE,
+    }, (event) => {
+      if (request !== searchRequest.current) return;
+      if (event.type === "page") deliver(event.page);
+      else applyCount(event, view);
+    });
+    return { first: Promise.race([delivered, done.then(() => null)]), done };
+  }
+
+  /** Load a view from its first page. A refresh passes the number of pages shown, so appended cards keep their place. */
+  async function search(text: string, nextSort = sort, nextScope = scope, nextRevealBlocked = revealBlocked, nextLanguage = language, quiet = false, pages = 1) {
     if (!mounted.current) return false;
     setAppliedQuery(text);
     setSearchOpen(false);
     const request = ++searchRequest.current;
+    const view: CatalogView = { text, sort: nextSort, scope: nextScope, revealBlocked: nextRevealBlocked, language: nextLanguage };
     setLoading(!quiet);
-    setQuietRefresh(quiet);
+    setSearchPending(true);
+    setLoadingMore(false);
+    setLoadMoreFailed(false);
     if (!quiet) setTotalCount(null);
     setCountError(null);
-    refreshSearch.current = (quiet = false) => search(text, nextSort, nextScope, nextPage, nextRevealBlocked, nextLanguage, quiet);
+    refreshSearch.current = (quiet = false) => search(text, nextSort, nextScope, nextRevealBlocked, nextLanguage, quiet, Math.max(1, loadedPages.current));
     suggestionRequest.current += 1;
     setSuggestions([]);
     setActiveSuggestionIndex(-1);
+    let committed = false;
     try {
-      await gateway.searchCatalogGroups({
-        provider: "kHentai",
-        language: nextLanguage,
-        revealBlocked: nextRevealBlocked,
-        text,
-        sort: nextSort,
-        scope: nextScope,
-        page: nextPage,
-        pageSize: CATALOG_PAGE_SIZE,
-      }, (event) => {
-        if (request !== searchRequest.current) return;
-        if (event.type === "page") {
-          const previous = displayedOrder.current;
-          resetGridScroll.current = !quiet && (!previous || previous.page !== event.page.page || previous.sort !== nextSort);
-          displayedOrder.current = { page: event.page.page, sort: nextSort };
-          setResults(event.page); setLoading(false); setLoadError(false);
-          onReady?.(nextScope);
-        }
-        else if (event.type === "count") {
-          if (nextPage > 0 && nextPage * CATALOG_PAGE_SIZE >= event.totalCount) {
-            void search(text, nextSort, nextScope, Math.max(0, Math.ceil(event.totalCount / CATALOG_PAGE_SIZE) - 1), nextRevealBlocked, nextLanguage, quiet);
-            return;
-          }
-          setTotalCount(event.totalCount); setCountError(null);
-          if (nextScope === "bookmarked" && !text && !nextRevealBlocked) { setKnownBookmarkCount(event.totalCount); onBookmarkCount?.(event.totalCount); }
-        }
-        else { setTotalCount(null); setCountError(event.message); }
-      });
-      return request === searchRequest.current;
+      let works: CatalogGroupedWork[] = [];
+      let loaded = 0;
+      let complete = false;
+      let stream: PageStream | null = null;
+      // Each next request supersedes the previous page's count natively; only the last count matters.
+      for (let page = 0; page < pages && !complete; page += 1) {
+        stream = streamPage(view, page, request);
+        const next = await stream.first;
+        if (request !== searchRequest.current) return false;
+        if (!next) break;
+        works = appendWorks(works, next.works);
+        loaded = page + 1;
+        complete = next.works.length < next.pageSize;
+      }
+      if (loaded > 0) {
+        // The old cards stay (inert) until this moment, then the whole list swaps at once; a new view
+        // or a shorter reload starts at the top, a refresh in place keeps the scroll position.
+        resetGridScroll.current = !quiet && (viewKey(displayedView.current) !== viewKey(view) || loaded < loadedPages.current);
+        displayedView.current = view;
+        loadedPages.current = loaded;
+        setResults({ works, pages: loaded, complete });
+        setLoading(false); setSearchPending(false); setLoadError(false);
+        committed = true;
+        onReady?.(nextScope);
+      }
+      await stream?.done;
+      return committed;
     } catch (error) {
       if (request === searchRequest.current) { setMessage(commandErrorMessage(error, "온라인 카탈로그 검색에 실패했습니다")); setCountError("결과 수를 불러오지 못했습니다"); setLoadError(true); onReady?.(nextScope); }
       return false;
     } finally {
-      if (request === searchRequest.current) setLoading(false);
+      if (request === searchRequest.current) { setLoading(false); setSearchPending(false); }
+    }
+  }
+
+  /** Append the next page of the shown view. Its stream also carries the view's count. */
+  async function loadMore() {
+    const view = displayedView.current;
+    if (!mounted.current || !view || !results || results.complete || searchPending || loadingMore) return;
+    const request = ++searchRequest.current;
+    const page = results.pages;
+    let appended = false;
+    setLoadingMore(true);
+    setLoadMoreFailed(false);
+    try {
+      const stream = streamPage(view, page, request);
+      const next = await stream.first;
+      if (request !== searchRequest.current) return;
+      if (next) {
+        appended = true;
+        loadedPages.current = page + 1;
+        setResults(current => current && { works: appendWorks(current.works, next.works), pages: page + 1, complete: next.works.length < next.pageSize });
+      }
+      setLoadingMore(false);
+      await stream.done;
+    } catch (error) {
+      if (!mounted.current || request !== searchRequest.current) return;
+      setLoadingMore(false);
+      // Automatic loading stops after a failure; the quiet button at the end retries.
+      if (!appended) setLoadMoreFailed(true);
+      setMessage(commandErrorMessage(error, "다음 결과를 불러오지 못했습니다"));
+      if (totalCount === null) setCountError("결과 수를 불러오지 못했습니다");
     }
   }
 
@@ -393,7 +474,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
   function toggleRevealBlocked() {
     const next = !revealBlocked;
     setRevealBlocked(next);
-    void search(query.trim(), sort, scope, 0, next);
+    void search(query.trim(), sort, scope, next);
   }
 
   async function bookmarkWork(identity: CatalogWorkIdentity, bookmarked: boolean) {
@@ -460,7 +541,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
   function searchTag(nextQuery: string) {
     closeDetail();
     setQuery(nextQuery);
-    void search(nextQuery, sort, scope, 0);
+    void search(nextQuery, sort, scope);
   }
 
   function closeViewer() { setViewer(null); }
@@ -486,7 +567,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
       const next = await gateway.getOnlineCatalogStatus();
       setStatus(next);
       if (result.added > 0 && languageRef.current === updateLanguage) {
-        await search(query.trim(), sort, scope, 0, revealBlocked, updateLanguage);
+        await search(query.trim(), sort, scope, revealBlocked, updateLanguage);
       }
       if (result.reason !== "rateLimited" && result.reason !== "alreadyRunning") setRefreshedAt(new Date().toISOString());
       if (result.reason === "alreadyRunning") setMessage("카탈로그 갱신이 이미 진행 중입니다");
@@ -504,17 +585,17 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
     if (next === scope) return;
     const nextSort = next === "bookmarked" ? "latest" : sort;
     setScope(next); setSort(nextSort);
-    void search(query.trim(), nextSort, next, 0);
+    void search(query.trim(), nextSort, next);
   }
   const catalogControls = status?.installed ? <>
     <MangaChoiceMenu label="언어" value={language} options={[{ value: "korean", label: "한국어" }, { value: "japanese", label: "일본어" }]} onChange={nextLanguage => {
       languageRef.current = nextLanguage; setLanguage(nextLanguage);
       setKnownBookmarkCount(undefined); onBookmarkCount?.(undefined);
-      void search(query.trim(), sort, scope, 0, revealBlocked, nextLanguage);
+      void search(query.trim(), sort, scope, revealBlocked, nextLanguage);
     }} />
     <MangaChoiceMenu label="정렬" value={sort} options={[
       { value: "latest", label: "최신순" }, { value: "views", label: "조회순" }, { value: "hotDay", label: "오늘 인기" }, { value: "hotWeek", label: "주간 인기" }, { value: "hotMonth", label: "월간 인기" },
-    ]} onChange={nextSort => { setSort(nextSort); void search(appliedQuery, nextSort, scope, 0); }} />
+    ]} onChange={nextSort => { setSort(nextSort); void search(appliedQuery, nextSort, scope); }} />
   </> : undefined;
   // Rarely used catalog actions share one overflow menu in the top bar; the catalog also refreshes hourly on its own.
   const catalogMenu = status?.installed ? <Menu label="카탈로그 더보기" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
@@ -561,6 +642,23 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
         </form>);
 
   const searchScope = scope === "bookmarked" ? "망가 북마크" : "온라인 카탈로그";
+  const moreAvailable = Boolean(results && !results.complete && (totalCount === null || results.pages * CATALOG_PAGE_SIZE < totalCount));
+  const autoLoadSupported = typeof IntersectionObserver !== "undefined";
+  const canAutoLoad = moreAvailable && autoLoadSupported && active && requestedSource !== "local" && !loading && !searchPending && !loadingMore && !loadMoreFailed;
+  const loadMoreRef = useRef(loadMore);
+  loadMoreRef.current = loadMore;
+  useEffect(() => {
+    // Re-created after every append, so a sentinel still in reach keeps loading until the view is filled.
+    const target = moreSentinel.current;
+    if (!canAutoLoad || !target) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some(entry => entry.isIntersecting)) return;
+      observer.disconnect();
+      void loadMoreRef.current();
+    }, { root: gridScroll.current, rootMargin: "0px 0px 600px 0px" });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [canAutoLoad, results]);
   return <section className="manga-browser online-catalog" aria-label="온라인 망가">
     {active && <MangaToolbar source={requestedSource ?? scope} onSourceChange={selectSource} localCount={localCount} bookmarkCount={bookmarkCount ?? knownBookmarkCount}
       countLabel={totalCount !== null ? `${totalCount.toLocaleString()}개 결과` : status?.installed ? countError ? "결과 수 확인 실패" : "결과 수 계산 중…" : undefined}
@@ -597,25 +695,26 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
         </EmptyState>
         : loading && !results ? <MangaSkeletonGrid />
         : results?.works.length === 0 ? <EmptyState title="검색 결과가 없습니다">다른 제목이나 태그로 검색하세요.</EmptyState>
-        : <div className="manga-grid">
-          {results?.works.map((work) => <OnlineCatalogCard
-            key={`${work.provider}:${work.groupId}`}
-            work={work}
-            opening={openingWorkKey === catalogIdentityKey(work)}
-            selected={detailOpen && detailGroup?.provider === work.provider && detailGroup.groupId === work.groupId}
-            bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(work))}
-            onOpen={(selected, opener) => void openDetail(selected, work, opener)}
-            onBookmark={(identity, bookmarked) => void bookmarkWork(identity, bookmarked)}
-          />)}
-        </div>}
+        : results && <>
+          <div className="manga-grid">
+            {results.works.map((work) => <OnlineCatalogCard
+              key={`${work.provider}:${work.groupId}`}
+              work={work}
+              opening={openingWorkKey === catalogIdentityKey(work)}
+              selected={detailOpen && detailGroup?.provider === work.provider && detailGroup.groupId === work.groupId}
+              bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(work))}
+              onOpen={(selected, opener) => void openDetail(selected, work, opener)}
+              onBookmark={(identity, bookmarked) => void bookmarkWork(identity, bookmarked)}
+            />)}
+          </div>
+          {loadingMore && <MangaSkeletonGrid more />}
+          <div ref={moreSentinel} className="online-catalog__more-sentinel" aria-hidden="true" />
+          <footer className="online-catalog__list-end" aria-busy={loadingMore || totalCount === null}>
+            <span>{totalCount === null ? `${results.works.length.toLocaleString()}개` : `${results.works.length.toLocaleString()} / ${totalCount.toLocaleString()}`}</span>
+            {moreAvailable && !loadingMore && (loadMoreFailed || !autoLoadSupported) && <Button size="sm" variant="quiet" disabled={searchPending} onClick={() => void loadMore()}>더 불러오기</Button>}
+          </footer>
+        </>}
     </div>
-    {results && <footer className="online-catalog__pagination" aria-busy={loading || totalCount === null}>
-      <span>{totalCount === null ? countError ? "결과 수를 확인하지 못했습니다" : "페이지 표시 중" : totalCount === 0 ? "0 / 0" : `${(results.page * results.pageSize + 1).toLocaleString()}–${Math.min(totalCount, (results.page + 1) * results.pageSize).toLocaleString()} / ${totalCount.toLocaleString()}`}{loading && !quietRefresh && <em className="online-catalog__pagination-loading" role="status"> · 불러오는 중…</em>}</span>
-      <div>
-        <Button size="sm" disabled={loading || totalCount === null || results.page === 0} onClick={() => void search(query.trim(), sort, scope, results.page - 1)}>이전 결과</Button>
-        <Button size="sm" disabled={loading || totalCount === null || (results.page + 1) * results.pageSize >= totalCount} onClick={() => void search(query.trim(), sort, scope, results.page + 1)}>다음 결과</Button>
-      </div>
-    </footer>}
     <div ref={panelHost} className="online-catalog__panel-host">
       <OverlayPanel open={detailOpen} title="상세" ariaLabel="망가 상세" closeLabel="상세 닫기" width={380} returnFocusRef={detailReturnFocus}
         onOpenChange={(open) => { if (!open) closeDetail(); }} actions={detailGroup && detailGroup.versionCount >= 2 && <span onKeyDown={(event) => {
