@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC 에셋 정리 화면</title>
+<!-- Loads the app's real tokens and shared controls; only the frame and the proposed parts are local. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<style>
+/* Layout: one 1280×800 PC window (rail · sidebar · list · info panel) under a short decision header. */
+:root { --page: #0e0f10; color-scheme: dark; }
+body { margin: 0; background: var(--page); color: var(--color-text); font: 400 var(--type-body)/var(--line-ui) var(--font-ui); }
+.doc { max-width: 1320px; margin: 0 auto; padding-block: 32px 80px; padding-inline: 16px; display: flex; flex-direction: column; gap: 24px; }
+h1 { margin: 0; font-size: var(--text-title-large); line-height: var(--line-title-large); font-weight: 600; text-wrap: balance; }
+.lead { margin: 8px 0 0; color: var(--color-muted); max-width: 78ch; line-height: var(--line-copy); }
+.lead b, .notes b { color: var(--color-text); font-weight: 600; }
+.notes { margin: 0; padding-left: 20px; color: var(--color-muted); max-width: 84ch; line-height: var(--line-copy); display: flex; flex-direction: column; gap: 6px; }
+.notes .n { display: inline-block; min-width: 18px; color: var(--color-accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; color: var(--color-faint); font-size: var(--type-meta); }
+.pick { display: inline-flex; padding: 2px; background: var(--color-surface); border-radius: var(--radius-control); }
+.pick button { min-height: 26px; padding: 0 12px; border: 0; border-radius: var(--radius-mark); background: transparent; color: var(--color-muted); font: inherit; cursor: pointer; }
+.pick button[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+.stage { overflow-x: auto; padding-bottom: 4px; }
+
+/* Window */
+.win { position: relative; width: 1280px; height: 800px; display: grid; grid-template-columns: 64px var(--sidebar-width-default) minmax(0, 1fr); border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; background: var(--color-bg); }
+.rail { background: var(--color-sidebar); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 6px; color: var(--color-faint); font-size: 11px; }
+.rail .mark { width: 22px; height: 26px; margin-bottom: 10px; color: var(--color-accent); }
+.rail span { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 52px; padding: 6px 0; border-radius: var(--radius-control); }
+.rail span i { width: 18px; height: 16px; border: 1.5px solid currentColor; border-radius: 3px; }
+.rail span.on { color: var(--color-text); background: var(--color-surface); }
+
+.side { background: var(--color-sidebar); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; min-width: 0; }
+.side-head { height: var(--toolbar-height); display: flex; align-items: center; justify-content: space-between; padding: 0 12px; color: var(--color-muted); font-size: var(--type-meta); border-bottom: 1px solid var(--color-border); }
+.side-body { padding: 8px 6px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+.row { position: relative; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: var(--radius-mark); color: var(--color-text); font-size: var(--type-body); cursor: pointer; border: 0; background: transparent; font-family: inherit; text-align: left; width: 100%; }
+.row:hover { background: var(--color-sidebar-hover); }
+.row .ic { width: 14px; height: 14px; flex: none; border: 1.4px solid var(--color-faint); border-radius: 3px; }
+.row .ct { margin-left: auto; color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.row.on { background: var(--color-sidebar-selection); color: var(--color-on-accent); box-shadow: var(--selection-echo); }
+.row.on .ct { color: var(--color-on-accent); opacity: .7; }
+.row.on .ic { border-color: var(--color-on-accent); }
+.row.on::after { content: ""; position: absolute; right: 6px; width: 5px; height: 5px; background: var(--color-on-accent); }
+.row.on .ct { margin-right: 10px; }
+.label { display: flex; align-items: center; gap: 8px; margin: 12px 10px 4px; color: var(--color-faint); font-size: var(--type-meta); }
+.label::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+.label::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--color-border), transparent); }
+.row.todo .ct { color: var(--color-muted); }
+.row.new-part { outline: 1px dashed rgba(221,216,202,.35); outline-offset: -1px; }
+.tree .row { padding-left: 22px; }
+.tree .row .tri { position: absolute; left: 8px; width: 0; height: 0; border-left: 4px solid var(--color-faint); border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+
+.main { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.top { height: var(--toolbar-height); flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 16px; background: var(--color-toolbar); border-bottom: 1px solid var(--color-border); }
+.top .t { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.top .t::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); }
+.top .grow { flex: 1; }
+.top .issue { color: #e0807a; font-size: var(--type-meta); }
+.top .wc { display: flex; gap: 18px; color: var(--color-faint); margin-left: 12px; }
+.body { flex: 1; min-height: 0; display: flex; }
+.list { flex: 1; min-width: 0; overflow-y: auto; scrollbar-width: thin; }
+.sec { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--color-border); }
+.seg { display: inline-flex; padding: 2px; background: var(--color-surface); border-radius: var(--radius-control); }
+.seg button { min-height: 24px; padding: 0 12px; border: 0; border-radius: var(--radius-mark); background: transparent; color: var(--color-muted); font: inherit; font-size: var(--type-meta); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; box-shadow: 2px 2px 0 -1px var(--color-surface), 2px 2px 0 0 var(--color-selection-echo); }
+.sec .grow { flex: 1; }
+.size { display: inline-flex; align-items: center; gap: 8px; color: var(--color-faint); padding: 2px 6px; border-radius: var(--radius-control); }
+.size.new-part { outline: 1px dashed rgba(221,216,202,.35); }
+.size i { display: block; border: 1.4px solid currentColor; border-radius: 2px; }
+.size i.s { width: 9px; height: 9px; } .size i.l { width: 13px; height: 13px; }
+.size input { width: 96px; accent-color: var(--color-accent); }
+.tool { color: var(--color-muted); font-size: var(--type-meta); display: inline-flex; gap: 4px; align-items: center; padding: 4px 8px; border-radius: var(--radius-control); }
+.tool:hover { background: var(--color-surface-hover); }
+
+.day { display: flex; align-items: baseline; gap: 8px; padding: 14px 16px 8px; }
+.day b { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.day small { color: var(--color-faint); font-size: var(--type-meta); }
+.day hr { flex: 1; height: 1px; border: 0; background: var(--color-border); margin: 0 4px; align-self: center; }
+.day span { color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.jrow { display: flex; gap: 8px; padding: 0 16px 8px; }
+.tile { position: relative; flex: none; border-radius: var(--radius-media); background: linear-gradient(160deg, var(--c1), var(--c2)); cursor: pointer; border: 0; padding: 0; }
+.tile::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: radial-gradient(circle at 30% 25%, rgba(255,255,255,.16), transparent 55%); }
+.tile[aria-selected="true"] { box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 3.5px var(--color-text); }
+.tile .fav { position: absolute; right: 6px; bottom: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--color-heart); z-index: 1; }
+
+/* Info panel: floating (today) or pinned into the layout (proposed). */
+.info { width: var(--inspector-width); flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--color-sidebar); border-left: 1px solid var(--color-border); }
+.win.float .info { position: absolute; right: 12px; top: calc(var(--toolbar-height) + 50px); bottom: 12px; border: 1px solid var(--color-border-strong); box-shadow: var(--shadow-floating); z-index: 3; }
+.info-head { height: 36px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 6px 0 14px; border-bottom: 1px solid var(--color-border); font-size: var(--type-meta); color: var(--color-muted); }
+.info-head .grow { flex: 1; }
+.ibtn { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-faint); cursor: pointer; font: inherit; }
+.ibtn:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.ibtn[aria-pressed="true"] { color: var(--color-text); background: var(--color-surface); }
+.ibtn svg { width: 15px; height: 15px; }
+.info-body { flex: 1; overflow-y: auto; scrollbar-width: thin; padding: 14px; display: flex; flex-direction: column; gap: 16px; }
+.hero { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }
+.hero .pv { aspect-ratio: .75; border-radius: var(--radius-media); background: linear-gradient(160deg, var(--c1), var(--c2)); }
+.hero .who { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.hero .who strong { font-size: var(--type-body); font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.hero .who small { color: var(--color-faint); font-size: var(--type-meta); }
+.hero .acts { display: flex; gap: 4px; margin-top: auto; }
+.heart[aria-pressed="true"] { color: var(--color-heart); }
+dl { margin: 0; display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 6px 10px; font-size: var(--type-meta); }
+dt { color: var(--color-faint); }
+dd { margin: 0; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.grp { display: flex; flex-direction: column; gap: 8px; }
+.grp.new-part { outline: 1px dashed rgba(221,216,202,.35); outline-offset: 6px; border-radius: 2px; }
+.gl { display: flex; align-items: center; gap: 8px; color: var(--color-faint); font-size: var(--type-meta); }
+.gl::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); }
+.gl::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--color-border), transparent); }
+.gl span { font-variant-numeric: tabular-nums; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 4px 0 8px; border-radius: var(--radius-mark); background: var(--color-filter-selected); color: var(--color-filter-text); font-size: var(--type-meta); border: 0; font-family: inherit; }
+.chip button { width: 18px; height: 18px; display: grid; place-items: center; border: 0; background: transparent; color: var(--color-faint); cursor: pointer; border-radius: 2px; font-size: 13px; line-height: 1; padding: 0; }
+.chip button:hover { color: var(--color-text); background: var(--color-surface-hover); }
+.chip.auto { background: transparent; box-shadow: inset 0 0 0 1px var(--color-border-strong); color: var(--color-muted); padding-right: 8px; cursor: pointer; }
+.chip.auto em { font-style: normal; color: var(--color-faint); font-variant-numeric: tabular-nums; }
+.add { height: 24px; min-width: 24px; padding: 0 8px; border: 1px dashed var(--color-border-strong); border-radius: var(--radius-mark); background: transparent; color: var(--color-faint); font: inherit; font-size: var(--type-meta); cursor: pointer; }
+.add:hover { color: var(--color-text); border-color: var(--color-filter-border); }
+.strip { display: flex; gap: 4px; }
+.strip i { width: 44px; aspect-ratio: .75; border-radius: 2px; background: linear-gradient(160deg, var(--c1), var(--c2)); }
+.strip i.cur { box-shadow: 0 0 0 1.5px var(--color-text); }
+.toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 8px 14px; background: var(--color-surface-elevated); border: 1px solid var(--color-border-strong); font-size: var(--type-meta); z-index: 4; opacity: 0; transition: opacity 160ms var(--ease-standard); pointer-events: none; }
+.toast.on { opacity: 1; }
+.legend { display: flex; gap: 8px; align-items: center; color: var(--color-faint); font-size: var(--type-meta); }
+.legend i { width: 18px; height: 12px; outline: 1px dashed rgba(221,216,202,.5); }
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>PC 에셋 — Eagle에서 배운 네 가지</h1>
+    <p class="lead">지금 에셋 화면에 <b>네 가지만</b> 더한 시안입니다. 색과 모양은 지금 앱의 실제 스타일 파일을 그대로 씁니다. 점선 테두리는 <b>새로 생기는 부분</b> 표시이고 실제 화면에는 없습니다. 그림을 눌러 바꾸고, 칩의 ×와 +, 크기 막대, 왼쪽 「정리할 것」을 직접 눌러 보세요.</p>
+  </header>
+  <ol class="notes">
+    <li><span class="n">1</span><b>정보 패널 고정</b>: 패널 머리의 핀을 누르면 패널이 목록 옆에 붙고 그림들이 그만큼 좁혀 다시 놓입니다. 아무것도 가리지 않습니다. 핀을 풀면 지금처럼 떠 있는 패널(<code>i</code>)로 돌아갑니다. 고정 여부는 기억합니다.</li>
+    <li><span class="n">2</span><b>패널을 정리 도구로</b>: 폴더·캐릭터를 「이름 ×」 칩으로 보여 주고 <b>+</b>로 바로 더합니다. 자동 태그는 테두리만 있는 칩(점수 표시)으로 구분하고, 누르면 지금처럼 작은 창으로 자세히 봅니다. 즐겨찾기 하트는 미리보기 옆에 둡니다. 비어 있던 아래쪽에 같은 게시물 줄이 이어집니다.</li>
+    <li><span class="n">3</span><b>「정리할 것」</b>: 왼쪽 목록에 이미 있는 화면들(미분류, 작가 미상, 닮은 작가 후보, 휴지통)을 개수와 함께 모아 둡니다. 정리할 거리가 늘 한눈에 보입니다. 지금은 홈이나 다른 화면을 거쳐야 갑니다.</li>
+    <li><span class="n">4</span><b>크기 막대</b>: 「보기」 메뉴를 열지 않고 섹션 바에서 바로 그림 크기를 바꿉니다. 「보기」 메뉴의 나머지 설정은 그대로입니다.</li>
+    <li><b>이번에 넣지 않은 것</b>: 별점과 메모는 지금 에셋 데이터에 없는 항목이라 새 기능이 됩니다(원하시면 따로). 색 팔레트·색 검색은 그림마다 색을 뽑는 작업이 필요해 나중으로 둡니다.</li>
+  </ol>
+  <div class="controls">
+    <span>정보 패널</span><div class="pick" id="mode"><button type="button" aria-pressed="true" data-mode="pin">고정 (제안)</button><button type="button" aria-pressed="false" data-mode="float">떠 있음 (지금)</button><button type="button" aria-pressed="false" data-mode="off">닫힘</button></div>
+    <span class="legend"><i></i>새로 생기는 부분</span>
+  </div>
+  <div class="stage"><div class="win" id="win">
+    <nav class="rail" aria-label="화면">
+      <svg class="mark" viewBox="0 0 32 36" fill="none" aria-hidden="true"><path d="M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z" stroke="currentColor" stroke-width="1.3"/></svg>
+      <span><i></i>홈</span><span class="on"><i></i>에셋</span><span><i></i>컬렉션</span><span><i></i>망가</span><span><i></i>메모</span><span><i></i>전송</span>
+    </nav>
+    <aside class="side" aria-label="에셋 목록">
+      <div class="side-head"><span>에셋</span><span>+</span></div>
+      <div class="side-body" id="side"></div>
+    </aside>
+    <section class="main">
+      <div class="top"><span class="t" id="title">전체</span><span class="grow"></span><span class="issue">문제 1</span><span class="wc"><span>─</span><span>□</span><span>×</span></span></div>
+      <div class="body">
+        <div class="list" id="list">
+          <div class="sec">
+            <div class="seg" role="radiogroup" aria-label="종류"><button type="button" aria-pressed="true">전체</button><button type="button" aria-pressed="false">이미지</button><button type="button" aria-pressed="false">영상</button></div>
+            <span class="grow"></span>
+            <label class="size new-part" title=""><i class="s" aria-hidden="true"></i><input id="size" type="range" min="120" max="300" value="190" aria-label="그림 크기"><i class="l" aria-hidden="true"></i></label>
+            <span class="tool">⇅ 최신순 ⌄</span><span class="tool">▦ 보기 ⌄</span>
+          </div>
+          <div id="days"></div>
+        </div>
+        <aside class="info" id="info" aria-label="정보">
+          <div class="info-head"><span>정보</span><span class="grow"></span>
+            <button class="ibtn" id="pin" type="button" aria-pressed="true" aria-label="패널 고정"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M7 3h6l-1 5 3 3H5l3-3-1-5zM10 11v6"/></svg></button>
+            <button class="ibtn" id="close" type="button" aria-label="정보 닫기"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
+          </div>
+          <div class="info-body" id="ib"></div>
+        </aside>
+      </div>
+      <div class="toast" id="toast" role="status"></div>
+    </section>
+  </div></div>
+</div>
+<script>
+const P = ['#7b4b52', '#43566e', '#5c6b45', '#6c4f7a', '#7a6a43', '#3f6a68', '#6d5640', '#4b4f78', '#7a4a66', '#4f6a52'];
+const SIDE = [
+  { k: 'all', label: '전체', ct: '9,478', on: true }, { k: 'artists', label: '작가', ct: '43' }, { k: 'albums', label: '앨범', ct: '3' },
+  { label: '정리할 것', group: true, fresh: true },
+  { k: 'unsorted', label: '미분류', ct: '312', todo: true, fresh: true }, { k: 'unknown', label: '작가 미상', ct: '1,184', todo: true, fresh: true },
+  { k: 'style', label: '닮은 작가 후보', ct: '27', todo: true, fresh: true }, { k: 'trash', label: '휴지통', ct: '36', todo: true, fresh: true },
+  { label: '폴더', group: true },
+  { k: 'f1', label: '오리지널', ct: '947', tree: true }, { k: 'f2', label: '게임', ct: '5,931', tree: true, tri: true },
+  { k: 'f3', label: '만화', ct: '1,370', tree: true, tri: true }, { k: 'f4', label: '기타', ct: '1,230', tree: true, tri: true },
+];
+const side = document.getElementById('side');
+function renderSide() {
+  side.innerHTML = SIDE.map((s) => s.group ? `<div class="label">${s.label}</div>`
+    : `<button type="button" class="row${s.on ? ' on' : ''}${s.todo ? ' todo' : ''}${s.fresh ? ' new-part' : ''}${s.tree ? ' tree-row' : ''}" data-k="${s.k}" style="${s.tree ? 'padding-left:24px' : ''}">${s.tri ? '<span class="tri" style="position:absolute;left:9px;width:0;height:0;border-left:4px solid var(--color-faint);border-top:4px solid transparent;border-bottom:4px solid transparent"></span>' : ''}<span class="ic"></span>${s.label}<span class="ct">${s.ct}</span></button>`).join('');
+}
+side.addEventListener('click', (e) => {
+  const b = e.target.closest('.row'); if (!b) return;
+  SIDE.forEach((s) => { s.on = s.k === b.dataset.k; });
+  document.getElementById('title').textContent = SIDE.find((s) => s.on).label;
+  renderSide();
+});
+// Example items: aspect ratios from a real mixed library (portrait-heavy illustration, some landscape).
+const DAYS = [['10.1', '오늘', [.75, .72]], ['9.30', '수', [1.33, 1.1, .71, .75, .58, .62, .66, .7, .75, 1.5, .8]], ['9.29', '화', [.7, .66, 1.78, .75, .71, .8, .62]], ['9.28', '월', [.75, .71, .68, 1.2, .75, .7, .66, .75, 1.33]]];
+let id = 0;
+const items = DAYS.map(([d, w, rs]) => ({ d, w, list: rs.map((r) => ({ id: id++, r, fav: id % 7 === 3 })) }));
+let selected = 0;
+function pack(list, width, target) {
+  const rows = []; let row = [], sum = 0, gap = 8;
+  for (const it of list) {
+    row.push(it); sum += it.r;
+    const h = (width - gap * (row.length - 1)) / sum;
+    if (h < target) { rows.push({ row, h: Math.max(h, target * .7) }); row = []; sum = 0; }
+  }
+  if (row.length) rows.push({ row, h: target, last: true });
+  return rows;
+}
+function renderList() {
+  const list = document.getElementById('list');
+  const width = list.clientWidth - 32 - 8;
+  const target = +document.getElementById('size').value;
+  document.getElementById('days').innerHTML = items.map((g) => `<div class="day"><b>${g.d}</b><small>${g.w}</small><hr><span>${g.list.length}</span></div>`
+    + pack(g.list, width, target).map(({ row, h }) => `<div class="jrow">${row.map((it) => `<button type="button" class="tile" data-id="${it.id}" aria-selected="${it.id === selected}" aria-label="그림 ${it.id + 1}" style="width:${Math.floor(it.r * h)}px;height:${Math.floor(h)}px;--c1:${P[it.id % 10]};--c2:${P[(it.id + 4) % 10]}">${it.fav ? '<span class="fav"></span>' : ''}</button>`).join('')}</div>`).join('')).join('');
+}
+const INFO = { folders: ['만화 › 백합'], characters: ['아리스', '모모이'], auto: [['blonde_hair', .94], ['bunny_girl', .91], ['fishnets', .88], ['twintails', .83], ['2girls', .8]] };
+function chips(list, key) { return list.map((t, i) => `<span class="chip">${t}<button type="button" aria-label="${t} 빼기" data-del="${key}:${i}">×</button></span>`).join(''); }
+function renderInfo() {
+  const c1 = P[selected % 10], c2 = P[(selected + 4) % 10];
+  const it = items.flatMap((g) => g.list).find((x) => x.id === selected);
+  document.getElementById('ib').innerHTML = `
+    <div class="hero"><span class="pv" style="--c1:${c1};--c2:${c2}"></span><div class="who"><strong>neko_raa</strong><small>@neko_raa_ · X</small>
+      <div class="acts"><button class="ibtn heart" type="button" aria-pressed="${it.fav}" aria-label="즐겨찾기" data-fav><svg viewBox="0 0 20 20" fill="${it.fav ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M10 16.5s-6-3.6-6-8.2A3.3 3.3 0 0 1 10 6a3.3 3.3 0 0 1 6 2.3c0 4.6-6 8.2-6 8.2z"/></svg></button>
+      <button class="ibtn" type="button" aria-label="출처 정보 편집"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 16l1-4 8-8 3 3-8 8-4 1z"/></svg></button></div></div></div>
+    <dl><dt>게시물</dt><dd>x.com/neko_raa_/status/18…</dd><dt>게시</dt><dd>어제 18:53</dd><dt>파일</dt><dd>${it.r < 1 ? '1536×2048' : '2048×1536'} · 546 KB</dd><dt>가져옴</dt><dd>10:39 · 브라우저 확장</dd></dl>
+    <div class="grp new-part"><div class="gl">폴더 <span>${INFO.folders.length}</span></div><div class="chips">${chips(INFO.folders, 'folders')}<button class="add" type="button" data-add="folders">+</button></div></div>
+    <div class="grp new-part"><div class="gl">캐릭터 <span>${INFO.characters.length}</span></div><div class="chips">${chips(INFO.characters, 'characters')}<button class="add" type="button" data-add="characters">+</button></div></div>
+    <div class="grp new-part"><div class="gl">자동 태그 <span>${INFO.auto.length}</span></div><div class="chips">${INFO.auto.map(([t, s]) => `<button type="button" class="chip auto" data-tag="${t}">${t}<em>${s.toFixed(2)}</em></button>`).join('')}</div></div>
+    <div class="grp"><div class="gl">같은 게시물 <span>3</span></div><div class="strip"><i class="cur" style="--c1:${c1};--c2:${c2}"></i><i style="--c1:${P[(selected + 2) % 10]};--c2:${P[(selected + 7) % 10]}"></i><i style="--c1:${P[(selected + 5) % 10]};--c2:${P[(selected + 1) % 10]}"></i></div></div>`;
+}
+const toast = document.getElementById('toast'); let tt;
+function say(t) { toast.textContent = t; toast.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => toast.classList.remove('on'), 1400); }
+document.getElementById('ib').addEventListener('click', (e) => {
+  const del = e.target.closest('[data-del]'), add = e.target.closest('[data-add]'), tag = e.target.closest('[data-tag]'), fav = e.target.closest('[data-fav]');
+  if (del) { const [k, i] = del.dataset.del.split(':'); const [name] = INFO[k].splice(+i, 1); renderInfo(); say(`${name} 뺌`); }
+  else if (add) { const pool = add.dataset.add === 'folders' ? ['게임 › 블루 아카이브', '오리지널'] : ['유즈', '미도리']; const next = pool.find((x) => !INFO[add.dataset.add].includes(x)); if (next) { INFO[add.dataset.add].push(next); renderInfo(); say(`${next} 더함 (실제로는 검색 칸이 열림)`); } }
+  else if (tag) say(`${tag.dataset.tag}: 누르면 작은 창으로 자세히 (지금과 같음)`);
+  else if (fav) { const it = items.flatMap((g) => g.list).find((x) => x.id === selected); it.fav = !it.fav; renderInfo(); renderList(); }
+});
+document.getElementById('days').addEventListener('click', (e) => { const t = e.target.closest('.tile'); if (!t) return; selected = +t.dataset.id; if (mode === 'off') setMode(last); renderList(); renderInfo(); });
+let mode = 'pin', last = 'pin';
+function setMode(m) {
+  mode = m; if (m !== 'off') last = m;
+  const win = document.getElementById('win'), info = document.getElementById('info');
+  win.classList.toggle('float', m === 'float'); info.hidden = m === 'off';
+  document.getElementById('pin').setAttribute('aria-pressed', String(m === 'pin'));
+  document.querySelectorAll('#mode button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+  renderList();
+}
+document.getElementById('mode').addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b) setMode(b.dataset.mode); });
+document.getElementById('pin').addEventListener('click', () => setMode(mode === 'pin' ? 'float' : 'pin'));
+document.getElementById('close').addEventListener('click', () => setMode('off'));
+document.getElementById('size').addEventListener('input', renderList);
+renderSide(); renderInfo(); setMode('pin');
+</script>
+</body>
+</html>
