@@ -121,6 +121,32 @@ it('cold start on the shelf with a saturated native media lane: every first-scre
   expect(requests).toBeLessThanOrEqual(FIRST_SCREEN+12);
 });
 
+it('cold start on the shelf with published spines: covers first, then only the visible cases\' spines', async()=>{
+  // An upgraded server publishes `spineArtworkId`: each shelf case adds one spine ticket, but only
+  // after its own front is shown and only while it is near the viewport, so the first-screen
+  // covers keep the four-wide queue to themselves and off-screen cases ask for nothing.
+  const spined=works.map((work,i)=>({...work,spineArtworkId:'spine',artworkVersions:{...work.artworkVersions,spine:{thumbnail:digest(i+5000)}}}));
+  const base=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async(path:string)=>path.startsWith('/v1/collections?')&&!path.includes('showcase=true')?{...page,items:spined}:base(path));
+  const started=Date.now();const done:Record<string,number[]>={cover:[],spine:[]};
+  mocks.native.mockImplementation((op:string,payload:{artworkId?:string})=>{
+    if(op!=='collectionArtwork')return Promise.resolve({});
+    const kind=payload.artworkId==='spine'?'spine':'cover';
+    return new Promise(resolve=>setTimeout(()=>{done[kind]!.push(Date.now()-started);resolve({url:`https://app.lakomics.local/media-cache/0/${kind}`,expires_in:240});},2000));
+  });
+  localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout:'shelf',perRow:4}));
+  render(<Collections active paused={false} backRef={{current:null}}/>);
+  await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
+  for(let t=0;t<30;t++)await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});
+  const covers=done.cover!,spines=done.spine!;
+  console.info(`[perf] collections shelf with spines: firstScreen=${FIRST_SCREEN} coverRequests=${covers.length} spineRequests=${spines.length} allCoversMs=${covers[FIRST_SCREEN-1]??-1} firstSpineMs=${spines[0]??-1} allSpinesMs=${spines[FIRST_SCREEN-1]??-1}`);
+  // The covers arrive as fast as without spines (4 at a time, 2 s each: 8 s), and every spine follows.
+  expect(covers.length).toBe(FIRST_SCREEN);
+  expect(covers[FIRST_SCREEN-1]).toBeLessThanOrEqual(8000);
+  expect(spines.length).toBe(FIRST_SCREEN);
+  expect(document.querySelectorAll('.collection-light-case img[src$="/spine"]').length).toBeGreaterThan(0);
+});
+
 it('idle Collections tab: conditional polls per hour', async()=>{
   mocks.native.mockResolvedValue({url:'https://app.lakomics.local/media-cache/0/x',expires_in:240});
   render(<Collections active paused={false} backRef={{current:null}}/>);

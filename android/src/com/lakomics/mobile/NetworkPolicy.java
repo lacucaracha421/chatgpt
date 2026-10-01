@@ -63,6 +63,10 @@ final class NetworkPolicy {
   // and stay unreachable: `/releases/unread` and `/releases/reads` are two segments deep, so
   // the single-segment Collection read above does not match them either.
   get=get || p.equals("/v1/collections/releases");
+  // The AV performer page's published person (memo, favourite, StashDB profile text, portrait
+  // source): one id as a single segment, GET only. Two segments deep, so the single-segment
+  // Collection read above never matched it; nothing else under `/people/` is reachable.
+  get=get || p.matches("/v1/collections/people/[A-Za-z0-9_-]{1,128}");
   post=post || p.equals("/v1/collections/releases/acknowledge");
   // AV product-code lookup requests are the tablet's only AV write. The PC inbox read remains
   // publisher-only and is intentionally absent from the GET allowlist.

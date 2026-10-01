@@ -1,6 +1,6 @@
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {collectionCardCredit, collectionCardDate, collectionPath, editionVolumes, editions} from './collectionModel';
+import {collectionCardCredit, collectionCardDate, collectionPath, coverFocuses, editionVolumes, editions} from './collectionModel';
 import type {CollectionDetail, CollectionPage} from './collectionModel';
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:(reason:unknown)=>String(reason)}));
@@ -636,6 +636,20 @@ it('marks a pre-registered volume on the bookcase from its future release date',
   expect(screen.getByRole('button',{name:'2권 보기'}).classList.contains('manga-spine--upcoming')).toBe(true);
 });
 
+it('places a manga spine strip at the published cover focus, only for the current cover',async()=>{
+  const focused:CollectionDetail={...mangaItem(),volumes:[{id:'f1',volumeNumber:1,editionIndex:0,displayLabel:'1',coverArtworkId:'c1',coverFocusX:0},{id:'f2',volumeNumber:2,editionIndex:0,displayLabel:'2',coverArtworkId:'c2'}]};
+  expect(coverFocuses(focused.volumes)).toEqual([{volumeId:'f1',coverArtworkId:'c1',focusX:0,method:'head'}]);
+  expect(coverFocuses([{...focused.volumes[0]!,coverFocusX:1.5},{...focused.volumes[1]!,coverFocusX:.4,coverArtworkId:null}])).toEqual([]);
+  mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:[focused]}:{revision:'r1',item:focused});
+  render(<Collections active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText(item.name));
+  await screen.findByRole('group',{name:'권별 책장'});
+  const positions=(name:string)=>[...screen.getByRole('button',{name}).querySelectorAll('.manga-spine-strip img')].map(image=>(image as HTMLElement).style.objectPosition).filter(Boolean);
+  const strip=async(name:string)=>{await waitFor(()=>expect(positions(name).length).toBeGreaterThan(0));return [...new Set(positions(name))];};
+  // Focus 0 pins the strip to the cover's left edge; without a focus it stays at the shared default.
+  expect(await strip('1권 보기')).toEqual(['0% 50%']);
+  expect(await strip('2권 보기')).toEqual(['50% 50%']);
+});
+
 it('shows a manga 원제 small under the title only when it differs from the title',async()=>{
   const open=async(detail:CollectionDetail)=>{
     mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:[detail]}:{revision:'r1',item:detail});
@@ -795,6 +809,39 @@ describe('shelf view',()=>{
     fireEvent.pointerUp(stage,{pointerId:1,clientX:200,clientY:210});
     expect(await screen.findByRole('heading',{level:1,name:second.name})).toBeTruthy();
     expect(screen.getByText(/2 \/ 2/)).toBeTruthy();
+  });
+  it('shows the published spine on the shelf, a game case by its owned 기기, and 상태 · 기기 in 내 기록',async()=>{
+    const owned:CollectionDetail={...item,platforms:'PC · PS5',ownedPlatform:'Switch 2',status:'playing',spineArtworkId:'spine-1',artworkVersions:{'spine-1':{thumbnail:'spine-digest'}}};
+    mocks.api.mockImplementation(async(path:string)=>path.includes('type=av')?{...page,items:[]}:path.includes('/v1/collections/')?{revision:'r1',item:owned}:{...page,items:[owned,second]});
+    mocks.native.mockImplementation(async(_op:string,payload:{artworkId?:string})=>({url:`https://example.invalid/${payload.artworkId}`,expires_in:300}));
+    render(<Collections active paused={false} backRef={{current:null}}/>);
+    const shelf=await screen.findByRole('group',{name:'게임 작품 목록'});
+    await waitFor(()=>expect(shelf.querySelectorAll('.collection-light-case')).toHaveLength(2));
+    const tile=shelf.querySelector('[data-collection-id="manga-1"]') as HTMLElement;
+    // Switch 2 (owned) wins over the first listed platform (PC).
+    expect((tile.querySelector('.collection-light-case') as HTMLElement).style.getPropertyValue('--plastic')).toBe('rgba(206,44,54,.9)');
+    // The spine is asked for after the front, and only for the work that has one.
+    await waitFor(()=>expect(tile.querySelector('.cs-spine img[src="https://example.invalid/spine-1"]')).not.toBeNull());
+    const asked=mocks.native.mock.calls.filter(([op])=>op==='collectionArtwork').map(([,payload])=>payload.artworkId);
+    expect(asked.indexOf('spine-1')).toBeGreaterThan(asked.indexOf('cover'));
+    expect(asked.filter(id=>id==='spine-1')).toHaveLength(1);
+    expect(asked).not.toContain(null);
+    fireEvent.click(tile);fireEvent.click(tile);
+    const record=await screen.findByRole('region',{name:'내 기록'});
+    expect(within(record).getByText('상태').nextElementSibling?.textContent).toBe('하는 중');
+    expect(within(record).getByText('기기').nextElementSibling?.textContent).toBe('Switch 2');
+    // The case's 내 기록 slip reads 상태, 별점, 기기 as on the PC.
+    expect([...document.querySelectorAll('.slip dt')].map(node=>node.textContent)).toEqual(['상태','별점','기기']);
+  });
+  it('leaves 상태 and 기기 out when the PC did not publish them',async()=>{
+    render(<Collections active paused={false} backRef={{current:null}}/>);
+    const shelf=await screen.findByRole('group',{name:'게임 작품 목록'});
+    await waitFor(()=>expect(shelf.querySelectorAll('.collection-light-case')).toHaveLength(2));
+    const tile=shelf.querySelector('[data-collection-id="manga-1"]') as HTMLElement;
+    fireEvent.click(tile);fireEvent.click(tile);
+    const record=await screen.findByRole('region',{name:'내 기록'});
+    expect(within(record).queryByText('상태')).toBeNull();expect(within(record).queryByText('기기')).toBeNull();
+    expect([...document.querySelectorAll('.slip dt')].map(node=>node.textContent)).toEqual(['별점']);
   });
   it('changes 배치 and 한 줄에 N개 from the 보기 sheet and keeps them for the type',async()=>{
     render(<Collections active paused={false} backRef={{current:null}}/>);

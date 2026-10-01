@@ -109,12 +109,13 @@ export function useCoverUrl(item:CollectionSummary,id:string|null|undefined,revi
   const [shown,setShown]=useState<LoadedArtwork|null>(()=>{const url=memory?.get(source);return url?{source,url}:null;});
   const [visible,setVisible]=useState(false),[attempt,setAttempt]=useState(0);
   const retries=useRef<Retries>({source,failed:0,busy:0}),timer=useRef(0);
+  // Observed only while it may load (a case's spine waits for its front); the last answer stays meanwhile.
   useEffect(()=>{
-    const element=host.current;if(!element)return;
+    const element=host.current;if(!element||!active)return;
     if(!('IntersectionObserver' in window)){setVisible(true);return;}
     const observer=new IntersectionObserver(entries=>setVisible(entries.some(entry=>entry.isIntersecting)),{rootMargin:'120px'});
     observer.observe(element);return()=>observer.disconnect();
-  },[host]);
+  },[host,active]);
   useEffect(()=>()=>window.clearTimeout(timer.current),[]);
   useEffect(()=>{
     if(!active||!visible){retries.current={source,failed:0,busy:0};return;}

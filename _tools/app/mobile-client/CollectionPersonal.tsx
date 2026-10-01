@@ -4,7 +4,8 @@ import {SparklesIcon as SparklesSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {MEMO_LIMIT, memoLength, type CollectionEditField, type CollectionEditValue} from './collectionEditOutbox';
-import type {CollectionDetail} from './collectionModel';
+import {recordStates, statusLabel} from '../src/collections/work/WorkRecord';
+import type {CollectionDetail, CollectionSummary} from './collectionModel';
 import {OwnedSheet, ReleaseWatchAction, trackedEditions, TrackingRows} from './CollectionTracking';
 
 /** `owned-N` edits the owned-volume count of edition N. */
@@ -21,6 +22,16 @@ export type PersonalEdits = {
   resolveConflict(collectionId: string, field: CollectionEditField, choice: 'overwrite' | 'discard'): void;
   visible<T extends CollectionEditValue>(collectionId: string, field: CollectionEditField, authoritative: T): Visible<T>;
 };
+
+/**
+ * 상태 and 기기 from the PC's work record (an upgraded PC publishes them), with the PC's own
+ * labels; a row the PC did not publish is left out rather than shown as 미입력.
+ */
+export function workRecordFacts(item: CollectionSummary): [string, string][] {
+  const status = item.status && recordStates[item.type]?.some(([id]) => id === item.status) ? statusLabel(item.type, item.status) : null;
+  const platform = item.type === 'game' ? item.ownedPlatform?.trim() : null;
+  return [...(status ? [['상태', status] as [string, string]] : []), ...(platform ? [['기기', platform] as [string, string]] : [])];
+}
 
 export const scoreText = (score: number | null) => score === null ? '미평가' : `★ ${score.toFixed(1)} / 5`;
 const Pending = () => <span className="collection-personal-pending" role="status">전송 대기</span>;
@@ -46,6 +57,7 @@ export function PersonalRecord({item, edits, onSheet}: {item: CollectionDetail; 
           <span className="collection-personal-label">내 평점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span><PendingSlot shown={score.pending}/>
         </button>
       : <div className={`collection-personal-row${score.pending ? ' is-pending' : ''}`}><span className="collection-personal-label">내 평점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span>{score.pending && <Pending/>}</div>}
+    {workRecordFacts(item).map(([label, value]) => <div key={label} className="collection-personal-row"><span className="collection-personal-label">{label}</span><span className="collection-personal-value">{value}</span></div>)}
     <TrackingRows item={item} edits={edits} onOwned={edition => onSheet(`owned-${edition}`)}/>
     {anyPending && edits.failure && <p className="collection-personal-failure" role="alert">{edits.failure}</p>}
     {edits.notice && <p className="collection-personal-failure" role="alert">{edits.notice}</p>}

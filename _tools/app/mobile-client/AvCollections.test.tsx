@@ -1,4 +1,4 @@
-import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {CollectionDetail, CollectionPage, CollectionSummary} from './collectionModel';
 
@@ -168,6 +168,80 @@ describe('tablet AV collections',()=>{
     expect(list.querySelectorAll('li')).toHaveLength(5);
     expect(list.textContent).not.toContain('SSIS-001');
     expect(JSON.parse(localStorage.getItem('lakomics.mobile.avLookupRecent')!)).toHaveLength(5);
+  });
+
+  describe('the published person on the performer page',()=>{
+    const mioPerson={id:'p1',memo:'첫 작품부터 좋았다\n두 번째 줄',favorite:true,
+      profile:{source:'stashdb',name:'Hayase Mio',aliases:[],birthDate:'2000-03-04',heightCm:158,bandIn:34,waistIn:23,hipIn:34,cup:'E',breastType:'NATURAL',careerStart:2021,careerEnd:null,
+        urls:[{site:'Twitter',url:'https://x.com/mio'},{site:'Twitter',url:'https://x.com/mio'},{site:'Evil',url:'javascript:alert(1)'}]},
+      portrait:{source:'commons',author:'Photographer',license:'CC BY-SA 4.0',licenseUrl:null,sourceUrl:'https://commons.wikimedia.org/wiki/File:Mio.jpg'}};
+    const openMio=async()=>{
+      render(<Collections {...props}/>);
+      await openAv();
+      await screen.findByText('오후의 창가');
+      fireEvent.click(screen.getByRole('tab',{name:'배우별'}));
+      fireEvent.click(await screen.findByRole('button',{name:/하야세 미오/}));
+    };
+    const withPerson=(reply:(path:string)=>Promise<unknown>)=>{
+      const base=mocks.api.getMockImplementation()!;
+      mocks.api.mockImplementation(async(path:string)=>path.startsWith('/v1/collections/people/')?reply(path):base(path));
+    };
+
+    it('shows the favourite mark, portrait source, profile rows, links and 내 메모, read-only',async()=>{
+      withPerson(async path=>path==='/v1/collections/people/p1'?{person:mioPerson}:Promise.reject(Object.assign(new Error('없음'),{status:404})));
+      await openMio();
+      const profile=await screen.findByRole('region',{name:'프로필 정보'});
+      expect(mocks.api.mock.calls.some(([path])=>path==='/v1/collections/people/p1')).toBe(true);
+      expect(screen.getByRole('img',{name:'즐겨찾기한 배우'})).toBeTruthy();
+      expect(screen.getByText('Wikimedia Commons · Photographer · CC BY-SA 4.0')).toBeTruthy();
+      const rows=Object.fromEntries([...profile.querySelectorAll('dl > div')].map(row=>[row.querySelector('dt')?.textContent,row.querySelector('dd')?.textContent]));
+      expect(rows['생년월일']).toMatch(/^2000\.03\.04 만 \d+세$/);
+      expect(rows['키']).toBe('158 cm');
+      expect(rows['사이즈']).toBe('B86 (E) W58 H86');
+      expect(rows['가슴']).toContain('자연');
+      expect(rows['활동']).toMatch(/^2021 – 현역/);
+      // One button per safe, distinct link; it opens the browser.
+      const links=within(screen.getByLabelText('배우 링크')).getAllByRole('button');
+      expect(links.map(link=>link.textContent)).toEqual(['Twitter']);
+      fireEvent.click(links[0]!);
+      expect(mocks.native).toHaveBeenCalledWith('openExternal',{url:'https://x.com/mio'});
+      const memo=screen.getByRole('region',{name:'내 메모'});
+      expect(memo.querySelector('p')?.textContent).toBe('첫 작품부터 좋았다\n두 번째 줄');
+      expect(within(memo).queryByRole('button')).toBeNull();expect(within(memo).queryByRole('textbox')).toBeNull();
+    });
+
+    it('leaves the person parts out on a 404 from an older server, keeping the derived page',async()=>{
+      withPerson(()=>Promise.reject(Object.assign(new Error('없음'),{status:404})));
+      await openMio();
+      const profile=await screen.findByRole('region',{name:'프로필 정보'});
+      expect(profile.textContent).toContain('2편 · 단독 1');
+      expect(screen.queryByRole('img',{name:'즐겨찾기한 배우'})).toBeNull();
+      expect(screen.queryByRole('region',{name:'내 메모'})).toBeNull();
+      expect(screen.queryByLabelText('배우 링크')).toBeNull();
+      expect(profile.querySelectorAll('dl')).toHaveLength(1);
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    it('never pops the person parts in: the first load waits, and a switch keeps the shown performer until the next is ready',async()=>{
+      const pending=new Map<string,(value:unknown)=>void>();
+      withPerson(path=>new Promise(resolve=>pending.set(path,resolve)));
+      await openMio();
+      await waitFor(()=>expect(pending.has('/v1/collections/people/p1')).toBe(true));
+      expect(screen.queryByRole('region',{name:'프로필 정보'})).toBeNull();
+      await act(async()=>{pending.get('/v1/collections/people/p1')!({person:mioPerson});});
+      expect(await screen.findByRole('region',{name:'내 메모'})).toBeTruthy();
+      fireEvent.click(screen.getByRole('button',{name:'아마노 린 1편'}));
+      await waitFor(()=>expect(pending.has('/v1/collections/people/p2')).toBe(true));
+      // Still Mio, inert, with her memo; Rin's page replaces it in one step.
+      expect(screen.getByRole('heading',{level:1}).textContent).toBe('하야세 미오');
+      expect(screen.getByRole('article',{name:'AV 배우'}).hasAttribute('inert')).toBe(true);
+      expect(screen.getByRole('region',{name:'내 메모'})).toBeTruthy();
+      await act(async()=>{pending.get('/v1/collections/people/p2')!({person:{...mioPerson,id:'p2',memo:null,favorite:false,profile:null,portrait:null}});});
+      await waitFor(()=>expect(screen.getByRole('heading',{level:1}).textContent).toBe('아마노 린'));
+      expect(screen.getByRole('article',{name:'AV 배우'}).hasAttribute('inert')).toBe(false);
+      expect(screen.queryByRole('region',{name:'내 메모'})).toBeNull();
+      expect(screen.queryByRole('img',{name:'즐겨찾기한 배우'})).toBeNull();
+    });
   });
 
   it('persists the last-used 작품 · 배우별 view',async()=>{

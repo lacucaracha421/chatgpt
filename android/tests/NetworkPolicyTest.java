@@ -77,6 +77,10 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/collections/personal-edits","GET"));
  reject(()->NetworkPolicy.api("/v1/collections/personal-edits?libraryId=0123456789abcdef0123456789abcdef&after=0&limit=100","GET"));
  for(String method:new String[]{"PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/collections/personal-edits",method));
+ pass(()->NetworkPolicy.api("/v1/collections/people/person-1","GET"));
+ pass(()->NetworkPolicy.api("/v1/collections/people/0f8c2a6e-3b1d-4c55-9e7a-2d4b6f8a1c3e","GET"));
+ for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/collections/people/person-1",method));
+ for(String p:new String[]{"/v1/collections/people/","/v1/collections/people/person-1/","/v1/collections/people/person-1/portrait","/v1/collections/people/../replica","/v1/collections/people/%2e%2e","/v1/collections/people/a.b","/v1/collections/people/"+"a".repeat(129)})for(String method:new String[]{"GET","POST"})reject(()->NetworkPolicy.api(p,method));
  pass(()->NetworkPolicy.api("/v1/collections/releases","GET"));
  pass(()->NetworkPolicy.api("/v1/collections/releases?limit=1","GET"));
  pass(()->NetworkPolicy.api("/v1/collections/releases?state=unread&limit=50&cursor=MTcwMDAwMDAwMDAwMDox","GET"));

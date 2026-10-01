@@ -41,9 +41,9 @@ export function useShelfViews(): [(type: CollectionKind) => ShelfView, (type: Co
   return [type => views[type], update];
 }
 
-/** A work's case for the shared shelf and work case. Spines are not in the list publication, so the case prints its title. */
+/** A work's case for the shared shelf and work case: a game's case follows its owned 기기 first. Without a spine image the case prints its title. */
 export function workCaseData(item: CollectionSummary, urls: {front?: string | null; spine?: string | null; back?: string | null}, privacy: boolean): CaseData {
-  return {title: item.name, publisher: item.publisher ?? null, platform: workCasePlatform(item.type, item.platforms), front: urls.front ?? null, spine: urls.spine ?? null, back: urls.back ?? null, privacy};
+  return {title: item.name, publisher: item.publisher ?? null, platform: workCasePlatform(item.type, item.platforms, item.ownedPlatform), front: urls.front ?? null, spine: urls.spine ?? null, back: urls.back ?? null, privacy};
 }
 
 /**
@@ -53,9 +53,13 @@ export function workCaseData(item: CollectionSummary, urls: {front?: string | nu
 export function ShelfTile({item, revision, active, privacy, picked, extra, onTap}: {item: CollectionSummary; revision: string; active: boolean; privacy: boolean; picked: boolean;
   /** More meta under the title (the performer page's date and 이 작품). */extra?: ReactNode; onTap(id: string): void}) {
   const host = useRef<HTMLButtonElement>(null);
-  const front = useCoverUrl(item, collectionCover(item), revision, active && !privacy, host);
+  const cover = collectionCover(item);
+  const front = useCoverUrl(item, cover, revision, active && !privacy, host);
+  // The real spine (an upgraded server publishes `spineArtworkId`) waits for the front, so the
+  // visible covers keep the ticket queue first; until it decodes the case prints its title.
+  const spine = useCoverUrl(item, item.spineArtworkId, revision, active && !privacy && !!item.spineArtworkId && (front !== null || (!cover && !item.coverAssetId)), host);
   return <button ref={host} type="button" className="collection-card" data-collection-id={item.id} aria-selected={picked} aria-label={item.name} onClick={() => onTap(item.id)}>
-    <span className="collection-card__light"><LightCase data={workCaseData(item, {front}, privacy)} selected={picked}/></span>
+    <span className="collection-card__light"><LightCase data={workCaseData(item, {front, spine: item.spineArtworkId ? spine : null}, privacy)} selected={picked}/></span>
     <span className="collection-card__meta"><span className="collection-card__name">{item.name}</span>{extra && <span className="collection-card__extra">{extra}</span>}</span>
   </button>;
 }

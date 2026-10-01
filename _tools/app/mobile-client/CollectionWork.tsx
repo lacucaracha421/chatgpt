@@ -7,18 +7,26 @@ import {MangaBookcase, MangaStage, type MangaWorkData} from '../src/collections/
 import {MangaBook} from '../src/collections/work/MangaBook';
 import {insideFacts} from '../src/collections/work/workFacts';
 import {RecordStars} from '../src/collections/work/WorkRecord';
+import type {Fact} from '../src/collections/case/CollectionCase';
 import {selectedSpine} from '../src/collections/launchBoxSpines';
 import {StableImage} from '../src/shared/ui/StableImage';
 import type {CollectionVolume as SharedVolume} from '../src/library/types';
 import {Button} from './ui';
 import {useArtworkSet, type ArtworkRequest} from './collectionArtwork';
-import {collectionCover, type CollectionDetail, type CollectionVolume} from './collectionModel';
+import {collectionCover, coverFocuses, type CollectionDetail, type CollectionVolume} from './collectionModel';
 import {workCaseData} from './CollectionShelf';
+import {workRecordFacts} from './CollectionPersonal';
 import './collectionShelf.css';
 
 /** Artwork kinds that are the object itself; the strip lists the rest (screenshots, art). */
 const OBJECT_KINDS = ['cover', 'spine', 'back', 'volume_cover'];
 const SWIPE_PX = 64;
+
+/** The case's 내 기록 slip in the PC's order (상태, 별점, 기기); 상태 and 기기 only when the PC published them. */
+function caseRecord(item: CollectionDetail, stars: ReactNode): Fact[] {
+  const rows = workRecordFacts(item);
+  return [...rows.filter(([label]) => label === '상태'), ['별점', stars], ...rows.filter(([label]) => label === '기기')];
+}
 
 /** The kind's selected artwork, else its first. */
 function artworkOf(item: CollectionDetail, kind: string) {
@@ -129,7 +137,7 @@ export function CaseWork({item, revision, active, privacy, position, total, scor
       <div ref={stage} className="work-stage tablet-work__stage" {...swipe}>
         <div className="work-case-slot" style={isObject ? undefined : {...hidden, position: 'absolute', inset: 0}} inert={!isObject || undefined} aria-hidden={!isObject}>
           <CollectionCase key={work.id} data={data} large stageBox={stageBox} open={mode === 'open'} onOpenChange={open => pick(open ? 'open' : 'case')} frontReset={reset}
-            inside={<CaseInside record={[['별점', <RecordStars score={score(work)}/>]]} facts={insideFacts(work, work.av ?? null)}/>}
+            inside={<CaseInside record={caseRecord(work, <RecordStars score={score(work)}/>)} facts={insideFacts(work, work.av ?? null)}/>}
             note={people.length ? <><b>출연 · 감독</b><p className="work-names-note">{people.map(person => person.name).join(' · ')}</p></> : undefined}/>
         </div>
         {work.type === 'av' && <div className="work-flat-slot" style={mode === 'flat' ? undefined : hidden} aria-hidden={mode !== 'flat'} inert={mode !== 'flat' || undefined}>
@@ -179,7 +187,7 @@ export function MangaWork({item, revision, active, privacy, volumes, owned, late
   const step = (offset: -1 | 1) => { const next = volumes[(index < 0 ? 0 : index) + offset]; if (next) setWanted(next.id); };
   const swipe = useSwipe(step);
   const manga: MangaWorkData = {
-    volumes, activeVolumeId: shown?.id ?? null, editionIndex: volumes[0]?.editionIndex ?? 0, latestKoreanVolume: latestKorean, focuses: [],
+    volumes, activeVolumeId: shown?.id ?? null, editionIndex: volumes[0]?.editionIndex ?? 0, latestKoreanVolume: latestKorean, focuses: coverFocuses(item.volumes),
     ownedNumbers: owned === null ? null : volumes.filter(volume => volume.volumeNumber <= owned).map(volume => volume.volumeNumber),
     scope: '', revision, ownership: null, management: null,
   };

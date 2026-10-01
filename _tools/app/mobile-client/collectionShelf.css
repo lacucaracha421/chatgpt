@@ -87,6 +87,14 @@
 .tablet-performer__facts dl > div { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .tablet-performer__facts dt { color: var(--color-faint); font-size: var(--type-meta); }
 .tablet-performer__facts dd { margin: 0; overflow-wrap: anywhere; }
+/* The published person: favourite mark, portrait source, the shared StashDB profile rows, links and 내 메모 (all read-only). */
+.tablet-performer__favorite { display: inline-block; margin-left: var(--space-2); vertical-align: -2px; color: var(--color-accent); }
+.tablet-performer__favorite svg { display: block; width: 20px; height: 20px; }
+.tablet-performer__source { color: var(--color-faint); font-size: var(--type-meta); overflow-wrap: anywhere; }
+.tablet-performer__facts dd small, .tablet-performer__facts .av-profile__pill { color: var(--color-faint); font-size: var(--type-meta); }
+.tablet-performer__links { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.tablet-performer__memo { grid-column: 1 / -1; display: flex; flex-direction: column; gap: var(--space-2); }
+.tablet-performer__memo p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tablet-performer__works { display: flex; flex-direction: column; gap: var(--space-2); }
 .tablet-performer__related { display: flex; flex-direction: column; gap: var(--space-3); }
 .tablet-performer__co { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0 var(--space-4); }
