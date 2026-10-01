@@ -25,7 +25,10 @@ describe("CollectionCase", () => {
   it("derives the template from actual platform data", () => {
     expect(casePlatform("Nintendo Switch 2 · PC")).toBe("sw2");
     expect(casePlatform("Nintendo Switch")).toBe("sw");
-    expect(casePlatform("PC · PlayStation 5")).toBe("ps5");
+    expect(casePlatform("PC · PlayStation 5")).toBe("pc");
+    expect(casePlatform("PC · Nintendo Switch 2")).toBe("pc");
+    expect(casePlatform("PC · Nintendo Switch 2", "PS5")).toBe("ps5");
+    expect(casePlatform("Nintendo Switch 2", "Xbox One")).toBe("other");
     expect(casePlatform(null)).toBe("other");
   });
   it("rotates by keyboard, resets front, and folds open/closed", () => {

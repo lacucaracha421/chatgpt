@@ -1716,6 +1716,9 @@ export type LegacyPackageMigrationReport = {
 };
 
 export type LaunchBoxSpineOutcome = {
+  platformsFilled?: number;
+  informationError?: string | null;
+  informationUpdated?: boolean;
   matchedBy?: "steam" | "title" | "alternate" | "igdb" | null;
   collectionId: string;
   status: "matched" | "no_match" | "ambiguous" | "failed" | "skipped";
@@ -1729,15 +1732,16 @@ export type LaunchBoxSpineOutcome = {
 };
 export type LaunchBoxSpineProgress = {
   jobId: string;
-  phase: "started" | "loading_metadata" | "fetching_image" | "game_completed" | "completed" | "cancelled";
+  phase: "information" | "started" | "loading_metadata" | "fetching_image" | "game_completed" | "completed" | "cancelled";
   processed: number;
   total: number;
   outcome: LaunchBoxSpineOutcome | null;
 };
 export type LaunchBoxSpineBatchRequest =
-  | { action: "run"; jobId: string; limit: number; afterCollectionId?: string | null }
+  | { action: "run"; jobId: string; limit: number; afterCollectionId?: string | null; informationOnly?: boolean }
   | { action: "cancel"; jobId: string };
 export type LaunchBoxSpineBatchResult = {
+  platformsFilled?: number;
   jobId: string;
   cancelled: boolean;
   outcomes: LaunchBoxSpineOutcome[];

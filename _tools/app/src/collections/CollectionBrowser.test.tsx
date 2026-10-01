@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
-import type { CollectionSummary, CollectionTrackingGateway, CollectionUpdateProvider, LibraryGateway, ReleaseBoardEntry, ReleaseInboxItem, ReleaseCalendarGateway } from "../library/types";
+import type { LaunchBoxSpineBatchRequest, LaunchBoxSpineProgress, CollectionSummary, CollectionTrackingGateway, CollectionUpdateProvider, LibraryGateway, ReleaseBoardEntry, ReleaseInboxItem, ReleaseCalendarGateway } from "../library/types";
 import { CollectionBrowser } from "./CollectionBrowser";
 import { createDefaultCollectionLibraryState } from "./collectionLibrary";
 import { resetReleaseDataForTests } from "./releaseData";
@@ -65,8 +65,10 @@ function renderBrowser(props: {
   releaseCalendar?: boolean;
   calendarApi?: ReleaseCalendarGateway;
   avLinkApi?: AvLinkApi;
+  fetchLaunchBoxSpines?: LibraryGateway["fetchLaunchBoxSpines"];
 }) {
   const gateway = createGateway();
+  if (props.fetchLaunchBoxSpines) gateway.fetchLaunchBoxSpines = props.fetchLaunchBoxSpines;
   if (props.tracking) gateway.collectionTracking = props.tracking;
   if (props.calendarApi) gateway.releaseCalendar = props.calendarApi;
   function Harness() {
@@ -113,6 +115,27 @@ describe("CollectionBrowser", () => {
     await user.click(screen.getByRole("button", { name: "저장" }));
     await waitFor(() => expect(onViewChange).toHaveBeenCalledWith({ kind: "collection", collectionId: "new-tv", tmdbSearch: { query: "시리즈 제목", mediaType: "tv" } }));
     expect(onChanged).toHaveBeenCalledOnce();
+  });
+  it("shows the spine batch progress in steps that a narrow toolbar can shorten", async () => {
+    const user = userEvent.setup();
+    const fetchLaunchBoxSpines: LibraryGateway["fetchLaunchBoxSpines"] = vi.fn((request: LaunchBoxSpineBatchRequest, onProgress?: (progress: LaunchBoxSpineProgress) => void) => {
+      if (request.action === "run") onProgress?.({ jobId: request.jobId, phase: "information", processed: 12, total: 178, outcome: null });
+      return new Promise<never>(() => undefined);
+    });
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, fetchLaunchBoxSpines });
+    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await user.click(await screen.findByRole("menuitem", { name: "책등 받기" }));
+    const status = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>(".collection-toolbar__spine-status");
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    expect(status).toHaveAttribute("role", "status");
+    expect(status).toHaveTextContent("정보 12/178");
+    expect(status.querySelector(".collection-toolbar__spine-phase")).toHaveTextContent("정보");
+    expect(status.querySelector(".collection-toolbar__spine-count")).toHaveTextContent("12/178");
+    expect(status.querySelector(".collection-toolbar__spine-spinner")).toHaveAttribute("aria-hidden", "true");
+    expect(within(status.closest(".collection-toolbar__spine-progress") as HTMLElement).getByRole("button", { name: "취소" })).toBeInTheDocument();
   });
   it("keeps types in the index and moves sort, rating and view into the toolbar", async () => {
     const defaults = createDefaultCollectionLibraryState();

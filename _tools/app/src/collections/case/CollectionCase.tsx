@@ -4,11 +4,12 @@ import "./CaseMaterials.css";
 import { fitCollectionCase, type StageBox } from "./fitCaseStage";
 
 export type CasePlatform = "sw2" | "sw" | "ps5" | "pc" | "other" | "av" | "film";
-export function casePlatform(platforms: string | null): CasePlatform {
-  if (/switch\s*2/i.test(platforms ?? "")) return "sw2";
-  if (/switch/i.test(platforms ?? "")) return "sw";
-  if (/ps5|playstation\s*5/i.test(platforms ?? "")) return "ps5";
-  if (/pc|windows/i.test(platforms ?? "")) return "pc";
+export function casePlatform(platforms: string | null, ownedPlatform?: string | null): CasePlatform {
+  const platform = ownedPlatform?.trim() || platforms?.split("·")[0]?.trim() || "";
+  if (/switch\s*2/i.test(platform)) return "sw2";
+  if (/switch/i.test(platform)) return "sw";
+  if (/ps5|playstation\s*5/i.test(platform)) return "ps5";
+  if (/\b(pc|windows|linux|mac|macos)\b|steam deck/i.test(platform)) return "pc";
   return "other";
 }
 export const CASE_PLASTIC: Record<CasePlatform, string> = {

@@ -181,6 +181,155 @@ impl Library {
             .transpose()
     }
 
+    /// Uses the same credentials, pooled client and limiter as an explicit refresh.
+    pub(crate) fn fill_bound_igdb_games(
+        &self,
+        ids: &[String],
+        cancel: &std::sync::atomic::AtomicBool,
+        report: &dyn Fn(&str, Result<bool, LibraryError>),
+    ) -> Result<(), LibraryError> {
+        let mut credentials = None;
+        let client = self.igdb_client();
+        self.fill_bound_igdb_games_with(
+            ids,
+            cancel,
+            &mut |body| {
+                if credentials.is_none() {
+                    credentials = Some(credential::read_igdb_credentials_os()?);
+                }
+                client.query_games(credentials.as_ref().unwrap(), body)
+            },
+            report,
+        )
+    }
+
+    fn fill_bound_igdb_games_with(
+        &self,
+        ids: &[String],
+        cancel: &std::sync::atomic::AtomicBool,
+        query: &mut dyn FnMut(&str) -> Result<String, LibraryError>,
+        report: &dyn Fn(&str, Result<bool, LibraryError>),
+    ) -> Result<(), LibraryError> {
+        use std::sync::atomic::Ordering;
+        let mut bound = Vec::new();
+        for id in ids {
+            if let Some(binding) = self.get_igdb_connection(id)? {
+                let snapshot: Option<String> = self.connection()?.query_row("SELECT provider_data_json FROM collection_external_bindings WHERE collection_id=?1 AND provider='igdb'", [id], |r| r.get(0))?;
+                let has_name = snapshot
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                    .is_some_and(|v| {
+                        v.get("name")
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|s| !s.trim().is_empty())
+                    });
+                if has_name
+                    && self
+                        .get_collection(id)?
+                        .platforms
+                        .as_deref()
+                        .is_some_and(|s| !s.trim().is_empty())
+                {
+                    continue;
+                }
+                bound.push((id, binding.game_id));
+            }
+        }
+        // Stay below IGDB's 500-result ceiling and check cancellation between requests/writes.
+        for batch in bound.chunks(50) {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            let game_ids = batch
+                .iter()
+                .map(|(_, id)| id.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            let body = format!("where id = ({game_ids}); fields id,name,platforms.name,release_dates.date,release_dates.platform.name; limit 50;");
+            let values: Vec<serde_json::Value> = match query(&body).and_then(|json| {
+                serde_json::from_str(&json).map_err(|_| LibraryError::IgdbInvalidResponse)
+            }) {
+                Ok(values) => values,
+                Err(error) => {
+                    // Do not retry credentials or hammer a failing provider for every game.
+                    for (id, _) in batch {
+                        report(id, Err(LibraryError::IgdbUnavailable));
+                    }
+                    return Err(error);
+                }
+            };
+            for (id, game_id) in batch {
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                let result = values
+                    .iter()
+                    .find(|v| v.get("id").and_then(|v| v.as_i64()) == Some(*game_id))
+                    .ok_or(LibraryError::IgdbNotFound)
+                    .and_then(|value| self.fill_fetched_igdb_information(id, value));
+                report(id, result);
+            }
+        }
+        Ok(())
+    }
+
+    fn fill_fetched_igdb_information(
+        &self,
+        id: &str,
+        value: &serde_json::Value,
+    ) -> Result<bool, LibraryError> {
+        let game_id = value
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .ok_or(LibraryError::IgdbInvalidResponse)?;
+        let name = value
+            .get("name")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .ok_or(LibraryError::IgdbInvalidResponse)?;
+        let previous: Option<String> = self.connection()?.query_row(
+            "SELECT provider_data_json FROM collection_external_bindings WHERE collection_id=?1 AND provider='igdb'", [id], |r| r.get(0))?;
+        let mut snapshot: serde_json::Value = previous
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|_| LibraryError::IgdbInvalidResponse)?
+            .unwrap_or_else(|| serde_json::json!({}));
+        let object = snapshot
+            .as_object_mut()
+            .ok_or(LibraryError::IgdbInvalidResponse)?;
+        for key in ["id", "name", "platforms", "release_dates"] {
+            if let Some(v) = value.get(key) {
+                object.insert(key.into(), v.clone());
+            }
+        }
+        let snapshot_json = snapshot.to_string();
+        let data = provider_snapshot(Some(&snapshot_json))?;
+        let platforms = ordered_igdb_platforms(&snapshot_json, &[])?;
+        let before = self.get_collection(id)?.platforms;
+        let updated = self.refresh_fetched_igdb_game(
+            id,
+            IgdbRemoteGame {
+                id: game_id,
+                name: name.into(),
+                summary: data.overview,
+                release_date: data.release_date,
+                genres: data
+                    .genres
+                    .map(|s| s.split(" · ").map(str::to_owned).collect())
+                    .unwrap_or_default(),
+                platforms,
+                developer: data.developer,
+                publisher: data.publisher,
+                cover: None,
+                artworks: vec![],
+                screenshots: vec![],
+                snapshot_json,
+            },
+        )?;
+        Ok(before != updated.platforms)
+    }
+
     pub(crate) fn apply_fetched_igdb_game(
         &self,
         request: IgdbApplyRequest,
@@ -225,7 +374,10 @@ impl Library {
             .and_then(|year| year.parse::<i64>().ok());
         let developer = normalized_optional(fetched.developer.as_deref());
         let publisher = normalized_optional(fetched.publisher.as_deref());
-        let platforms = joined(&fetched.platforms);
+        let platforms = joined(&ordered_igdb_platforms(
+            &fetched.snapshot_json,
+            &fetched.platforms,
+        )?);
         let genres = joined(&fetched.genres);
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -398,7 +550,10 @@ impl Library {
         let developer = normalized_optional(fetched.developer.as_deref());
         let publisher = normalized_optional(fetched.publisher.as_deref());
         let release_date = normalized_optional(fetched.release_date.as_deref());
-        let platforms = joined(&fetched.platforms);
+        let platforms = joined(&ordered_igdb_platforms(
+            &fetched.snapshot_json,
+            &fetched.platforms,
+        )?);
         let genres = joined(&fetched.genres);
         let overview = normalized_optional(fetched.summary.as_deref());
         let now = chrono::Utc::now().to_rfc3339();
@@ -554,7 +709,8 @@ fn validated_selection<'a>(
         .as_deref()
         .map(|image_id| {
             igdb::IgdbClient::image_url(image_id, IgdbImageSize::Original)?;
-            fetched.artworks
+            fetched
+                .artworks
                 .iter()
                 .chain(fetched.screenshots.iter())
                 .find(|candidate| candidate.image_id == image_id)
@@ -583,7 +739,8 @@ fn validated_artwork_decisions<'a>(
         IgdbArtworkDecision::Select { image_id } => {
             igdb::IgdbClient::image_url(image_id, IgdbImageSize::Original)?;
             Some(
-                fetched.artworks
+                fetched
+                    .artworks
                     .iter()
                     .chain(fetched.screenshots.iter())
                     .find(|candidate| candidate.image_id == *image_id)
@@ -793,6 +950,88 @@ fn snapshot_date(value: &serde_json::Value) -> Option<String> {
     })
 }
 
+/// Unknown dates sort last. Same-day releases use the user's console preference.
+pub(crate) fn ordered_platforms(
+    values: impl IntoIterator<Item = (String, Option<i64>)>,
+) -> Vec<String> {
+    let mut dates = std::collections::BTreeMap::<String, Option<i64>>::new();
+    for (name, date) in values {
+        let name = name.trim().to_owned();
+        if name.is_empty() {
+            continue;
+        }
+        dates
+            .entry(name)
+            .and_modify(|old| {
+                if date.is_some() && (old.is_none() || date < *old) {
+                    *old = date;
+                }
+            })
+            .or_insert(date);
+    }
+    let mut values = dates.into_iter().collect::<Vec<_>>();
+    values.sort_by_key(|(name, date)| {
+        (
+            date.unwrap_or(i64::MAX),
+            platform_priority(name),
+            name.to_lowercase(),
+        )
+    });
+    values.into_iter().map(|(name, _)| name).collect()
+}
+fn platform_priority(name: &str) -> u8 {
+    let name = name.to_lowercase();
+    if name.contains("switch 2") {
+        0
+    } else if name.contains("switch") {
+        1
+    } else if name.contains("playstation 5") || name == "ps5" {
+        2
+    } else if name.contains("xbox series") {
+        3
+    } else if name.contains("xbox one") {
+        4
+    } else if matches!(name.as_str(), "pc" | "linux" | "mac" | "macos")
+        || name.contains("windows")
+        || name.contains("pc (microsoft")
+    {
+        5
+    } else {
+        6
+    }
+}
+fn ordered_igdb_platforms(json: &str, fallback: &[String]) -> Result<Vec<String>, LibraryError> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|_| LibraryError::IgdbInvalidResponse)?;
+    let mut values = fallback
+        .iter()
+        .cloned()
+        .map(|name| (name, None))
+        .collect::<Vec<_>>();
+    if let Some(platforms) = value.get("platforms").and_then(|v| v.as_array()) {
+        values.extend(
+            platforms.iter().filter_map(|v| {
+                Some((v.as_str().or_else(|| v.get("name")?.as_str())?.into(), None))
+            }),
+        );
+    }
+    if let Some(releases) = value.get("release_dates").and_then(|v| v.as_array()) {
+        values.extend(releases.iter().filter_map(|v| {
+            Some((
+                v.get("platform")?.get("name")?.as_str()?.into(),
+                v.get("date")
+                    .and_then(|v| v.as_i64())
+                    .map(|date| date.div_euclid(86400)),
+            ))
+        }));
+    }
+    // Old snapshots without dates keep their order rather than inventing a first release.
+    if value.get("release_dates").is_none() && !fallback.is_empty() {
+        return Ok(fallback.to_vec());
+    }
+    Ok(ordered_platforms(values))
+}
+
 fn snapshot_release_date_platforms(value: &serde_json::Value) -> Option<String> {
     let names = value
         .as_array()?
@@ -872,6 +1111,8 @@ fn normalized_snapshot(snapshot_json: &str) -> Result<String, LibraryError> {
 
 #[cfg(test)]
 mod tests {
+    use super::{ordered_igdb_platforms, ordered_platforms};
+    use rusqlite::params;
     use std::io::Cursor;
 
     use image::{DynamicImage, ImageFormat};
@@ -965,7 +1206,7 @@ mod tests {
                 remote(),
                 Some(&cover),
                 Some(&hero),
-            &[],
+                &[],
             )
             .unwrap();
 
@@ -1004,7 +1245,13 @@ mod tests {
         let shot_b = image_bytes(640, 360);
 
         let created = library
-            .apply_fetched_igdb_game(request(None, None), remote(), None, None, &[Some(shot_a), Some(shot_b)])
+            .apply_fetched_igdb_game(
+                request(None, None),
+                remote(),
+                None,
+                None,
+                &[Some(shot_a), Some(shot_b)],
+            )
             .unwrap();
 
         let shots: Vec<String> = library
@@ -1022,7 +1269,10 @@ mod tests {
         assert_eq!(shots, vec!["screenshot-1".to_string()]);
         // remote() fixture에는 스크린샷이 1장이므로 정확히 1행만 저장된다.
         assert_eq!(
-            library.list_collection_work_artworks(&created.id).unwrap().len(),
+            library
+                .list_collection_work_artworks(&created.id)
+                .unwrap()
+                .len(),
             1
         );
     }
@@ -1059,7 +1309,7 @@ mod tests {
                 remote(),
                 Some(&cover),
                 Some(&hero),
-            &[],
+                &[],
             );
 
             assert!(matches!(result, Err(LibraryError::InvalidIgdbIdentity)));
@@ -1077,7 +1327,9 @@ mod tests {
         let replacement = artwork_request(
             "collection-1",
             IgdbArtworkDecision::Keep,
-            IgdbArtworkDecision::Select { image_id: "screenshot-1".into() },
+            IgdbArtworkDecision::Select {
+                image_id: "screenshot-1".into(),
+            },
         );
         let (_, hero) = super::validated_artwork_decisions(&replacement, &fetched).unwrap();
         assert_eq!(hero.unwrap().image_id, "screenshot-1");
@@ -1097,7 +1349,7 @@ mod tests {
                 fetched,
                 None,
                 Some(&hero),
-            &[],
+                &[],
             )
             .unwrap();
 
@@ -1127,7 +1379,7 @@ mod tests {
                 remote(),
                 Some(&cover),
                 Some(&hero),
-            &[],
+                &[],
             )
             .unwrap();
         let files_before = artwork_file_count(&library);
@@ -1137,7 +1389,7 @@ mod tests {
             remote(),
             Some(&cover),
             Some(&hero),
-        &[],
+            &[],
         );
 
         assert!(matches!(
@@ -1167,7 +1419,7 @@ mod tests {
             remote(),
             Some(&cover),
             Some(&hero),
-        &[],
+            &[],
         );
 
         assert!(matches!(result, Err(LibraryError::DuplicateCollectionName)));
@@ -1194,7 +1446,7 @@ mod tests {
                 initial,
                 Some(&cover),
                 Some(&hero),
-            &[],
+                &[],
             )
             .unwrap();
         let updated = library
@@ -1298,7 +1550,7 @@ mod tests {
                 remote(),
                 Some(&cover),
                 Some(&hero),
-            &[],
+                &[],
             )
             .unwrap();
         let before = artwork_file_count(&library);
@@ -1321,7 +1573,7 @@ mod tests {
                 remote(),
                 Some(&cover),
                 Some(&hero),
-            &[],
+                &[],
             )
             .unwrap();
 
@@ -1357,7 +1609,7 @@ mod tests {
                 remote(),
                 Some(&cover),
                 Some(&hero),
-            &[],
+                &[],
             )
             .unwrap();
         let before: Vec<(String, String, String, i64)> = library
@@ -1418,7 +1670,7 @@ mod tests {
                 remote(),
                 Some(&cover),
                 Some(&hero),
-            &[],
+                &[],
             )
             .unwrap();
         let before_files = artwork_file_count(&library);
@@ -1522,7 +1774,13 @@ mod tests {
                 ("screenshot-2".into(), "screenshot".into(), 1),
             ]
         );
-        assert_eq!(library.list_collection_work_artworks(&created.id).unwrap().len(), 2);
+        assert_eq!(
+            library
+                .list_collection_work_artworks(&created.id)
+                .unwrap()
+                .len(),
+            2
+        );
         assert_eq!(artwork_file_count(&library), 2);
     }
 
@@ -1650,7 +1908,169 @@ mod tests {
             rows.iter()
                 .map(|(image, kind, _)| (image.as_str(), kind.as_str()))
                 .collect::<Vec<_>>(),
-            vec![("screenshot-1", "screenshot"), ("screenshot-2", "screenshot")]
+            vec![
+                ("screenshot-1", "screenshot"),
+                ("screenshot-2", "screenshot")
+            ]
         );
+    }
+    #[test]
+    fn igdb_information_batches_ids_and_reuses_refresh_storage_without_credentials() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let mut ids = Vec::new();
+        for game_id in 1..=51 {
+            let collection = library
+                .create_collection(CreateCollection {
+                    name: format!("Local {game_id}"),
+                    description: None,
+                    collection_type: CollectionType::Game,
+                })
+                .unwrap();
+            library.connection().unwrap().execute("INSERT INTO collection_external_bindings(collection_id,provider,external_id,provider_data_json,created_at,updated_at) VALUES(?1,'igdb',?2,?3,'2026','2026')",params![collection.id,game_id.to_string(),r#"{"summary":"Keep provider summary","cover":{"image_id":"old-cover"}}"#]).unwrap();
+            ids.push(collection.id);
+        }
+        library.connection().unwrap().execute("UPDATE collections SET platforms='My typed list',overview='My overview',developer='My studio' WHERE id=?1",[&ids[0]]).unwrap();
+        let mut queries = Vec::new();
+        let mut writes = 0;
+        library.fill_bound_igdb_games_with(&ids, &std::sync::atomic::AtomicBool::new(false), &mut |body| {
+            queries.push(body.to_owned());
+            assert!(body.contains("release_dates.platform.name"));
+            let raw = body.split("where id = (").nth(1).unwrap().split(')').next().unwrap();
+            let values = raw.split(',').map(|id| serde_json::json!({"id":id.parse::<i64>().unwrap(),"name":format!("English {id}"),"platforms":[{"name":"PC"},{"name":"Nintendo Switch 2"}],"release_dates":[{"date":86400,"platform":{"name":"PC"}},{"date":86401,"platform":{"name":"Nintendo Switch 2"}}]})).collect::<Vec<_>>();
+            Ok(serde_json::to_string(&values).unwrap())
+        }, &|_, result| { assert!(result.is_ok()); }).unwrap();
+        assert_eq!(queries.len(), 2);
+        assert!(queries[0].contains("where id = (1,2,3,"));
+        assert!(queries[1].contains("where id = (51)"));
+        for (index, id) in ids.iter().enumerate() {
+            let collection = library.get_collection(id).unwrap();
+            assert_eq!(collection.name, format!("Local {}", index + 1));
+            if index == 0 {
+                assert_eq!(collection.platforms.as_deref(), Some("My typed list"));
+                assert_eq!(collection.overview.as_deref(), Some("My overview"));
+                assert_eq!(collection.developer.as_deref(), Some("My studio"));
+            } else {
+                assert_eq!(
+                    collection.platforms.as_deref(),
+                    Some("Nintendo Switch 2 · PC")
+                );
+                writes += 1;
+            }
+            let snapshot: String = library.connection().unwrap().query_row("SELECT provider_data_json FROM collection_external_bindings WHERE collection_id=?1 AND provider='igdb'",[id],|r|r.get(0)).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&snapshot).unwrap();
+            assert_eq!(value["name"], format!("English {}", index + 1));
+            assert_eq!(value["cover"]["image_id"], "old-cover");
+            assert_eq!(value["summary"], "Keep provider summary");
+        }
+        assert_eq!(writes, 50);
+        assert_eq!(artwork_file_count(&library), 0);
+        library
+            .fill_bound_igdb_games_with(
+                &ids,
+                &std::sync::atomic::AtomicBool::new(false),
+                &mut |_| panic!("Completed information must not fetch again"),
+                &|_, _| {},
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn igdb_information_cancel_checks_before_requests_and_each_write() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = library
+            .apply_fetched_igdb_game(request(None, None), remote(), None, None, &[])
+            .unwrap();
+        library.connection().unwrap().execute("UPDATE collection_external_bindings SET provider_data_json='{}' WHERE collection_id=?1",[&created.id]).unwrap();
+        let cancel = std::sync::atomic::AtomicBool::new(true);
+        library
+            .fill_bound_igdb_games_with(
+                &[created.id.clone()],
+                &cancel,
+                &mut |_| panic!("cancelled query"),
+                &|_, _| panic!("cancelled write"),
+            )
+            .unwrap();
+        cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+        library
+            .fill_bound_igdb_games_with(
+                &[created.id.clone()],
+                &cancel,
+                &mut |_| {
+                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                    Ok(r#"[{"id":42,"name":"New English Name"}]"#.into())
+                },
+                &|_, _| panic!("cancelled write"),
+            )
+            .unwrap();
+        let snapshot:String=library.connection().unwrap().query_row("SELECT provider_data_json FROM collection_external_bindings WHERE collection_id=?1",[&created.id],|r|r.get(0)).unwrap();
+        assert_eq!(snapshot, "{}");
+    }
+
+    #[test]
+    fn igdb_platform_order_uses_earliest_day_ties_and_unknown_dates_last() {
+        let names = [
+            "Other",
+            "PC",
+            "Xbox One",
+            "Xbox Series X|S",
+            "PlayStation 5",
+            "Nintendo Switch",
+            "Nintendo Switch 2",
+        ];
+        assert_eq!(
+            ordered_platforms(names.iter().map(|s| (s.to_string(), Some(10)))),
+            vec![
+                "Nintendo Switch 2",
+                "Nintendo Switch",
+                "PlayStation 5",
+                "Xbox Series X|S",
+                "Xbox One",
+                "PC",
+                "Other"
+            ]
+        );
+        assert_eq!(
+            ordered_platforms(vec![
+                ("PC".into(), Some(10)),
+                ("Nintendo Switch".into(), None),
+                ("Dreamcast".into(), Some(1)),
+                ("PC".into(), Some(20))
+            ]),
+            vec!["Dreamcast", "PC", "Nintendo Switch"]
+        );
+        let json = r#"{"platforms":[{"name":"Nintendo Switch 2"}],"release_dates":[{"date":86400,"platform":{"name":"PC"}},{"date":86401,"platform":{"name":"PlayStation 5"}}]}"#;
+        assert_eq!(
+            ordered_igdb_platforms(json, &[]).unwrap(),
+            vec!["PlayStation 5", "PC", "Nintendo Switch 2"]
+        );
+    }
+
+    #[test]
+    fn igdb_platform_fill_preserves_a_user_cleared_list() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let mut initial = remote();
+        initial.snapshot_json =
+            r#"{"id":42,"name":"Jet Set Radio","platforms":[{"name":"Dreamcast"}]}"#.into();
+        let created = library
+            .apply_fetched_igdb_game(request(None, None), initial, None, None, &[])
+            .unwrap();
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE collections SET platforms=NULL WHERE id=?1",
+                [&created.id],
+            )
+            .unwrap();
+        assert!(!library
+            .fill_fetched_igdb_information(
+                &created.id,
+                &serde_json::json!({"id":42,"name":"Jet Set Radio","platforms":[{"name":"PC"}]})
+            )
+            .unwrap());
+        assert_eq!(library.get_collection(&created.id).unwrap().platforms, None);
     }
 }

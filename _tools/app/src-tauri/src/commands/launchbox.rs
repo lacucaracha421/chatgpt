@@ -57,7 +57,7 @@ pub async fn fetch_launchbox_spines(
     request: SpineBatchRequest,
     on_progress: tauri::ipc::Channel<SpineProgress>,
 ) -> Result<SpineBatchResult, CommandError> {
-    let (job_id, limit, after) = match request {
+    let (job_id, limit, after, information_only) = match request {
         SpineBatchRequest::Cancel { job_id } => {
             let cancelled = launchbox::cancel_job(&job_id);
             return Ok(SpineBatchResult {
@@ -66,13 +66,15 @@ pub async fn fetch_launchbox_spines(
                 outcomes: Vec::new(),
                 next_cursor: None,
                 has_more: false,
+                platforms_filled: 0,
             });
         }
         SpineBatchRequest::Run {
             job_id,
             limit,
             after_collection_id,
-        } => (job_id, limit, after_collection_id),
+            information_only,
+        } => (job_id, limit, after_collection_id, information_only),
     };
     let library = current_required(state)?;
     let cache = app
@@ -86,6 +88,12 @@ pub async fn fetch_launchbox_spines(
     let job = Job::register(job_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         let (mut runner, _lease) = launchbox::reserve(&cache)?;
+        let report = |progress| {
+            let _ = on_progress.send(progress);
+        };
+        if information_only {
+            return runner.fill_information(&library, &cache, &job, limit, after, &report);
+        }
         runner.fetch_batch(&library, &cache, &job, limit, after, &|progress| {
             let _ = on_progress.send(progress);
         })

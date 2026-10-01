@@ -26,9 +26,9 @@ const IMAGE_INTERVAL_MS: u64 = 1000;
 const MAX_BULK_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_XML_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
-const INDEX_VERSION: u32 = 2;
-// 3: games without a platform list match on any platform (2026-10-01).
-const MATCH_VERSION: u32 = 3;
+const INDEX_VERSION: u32 = 3;
+// 4: retry old misses after IGDB names and first-release platforms are filled.
+const MATCH_VERSION: u32 = 4;
 pub const MAX_BATCH: usize = 250;
 
 #[derive(Debug, thiserror::Error)]
@@ -92,6 +92,12 @@ pub struct SpineOutcome {
     #[serde(default)]
     pub matched_by: Option<MatchedBy>,
     pub cached: bool,
+    #[serde(default)]
+    pub platforms_filled: usize,
+    #[serde(default)]
+    pub information_error: Option<String>,
+    #[serde(default)]
+    pub information_updated: bool,
 }
 impl SpineOutcome {
     fn new(id: &str, status: OutcomeStatus, reason: &str) -> Self {
@@ -106,6 +112,9 @@ impl SpineOutcome {
             region: None,
             matched_by: None,
             cached: false,
+            platforms_filled: 0,
+            information_error: None,
+            information_updated: false,
         }
     }
 }
@@ -128,6 +137,7 @@ pub struct SpineBatchResult {
     /// Resume after this ID when hasMore is true. Cancelled work is not advanced past.
     pub next_cursor: Option<String>,
     pub has_more: bool,
+    pub platforms_filled: usize,
 }
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "camelCase")]
@@ -137,6 +147,8 @@ pub enum SpineBatchRequest {
         job_id: String,
         limit: usize,
         after_collection_id: Option<String>,
+        #[serde(default)]
+        information_only: bool,
     },
     #[serde(rename_all = "camelCase")]
     Cancel { job_id: String },
@@ -315,6 +327,8 @@ struct IndexedGame {
     database_id: String,
     title: String,
     platform: String,
+    #[serde(default)]
+    release_date: Option<i64>,
     #[serde(default)]
     steam_app_id: Option<String>,
     #[serde(default)]
@@ -523,6 +537,7 @@ fn scan_xml(
                         "DatabaseID"
                             | "Name"
                             | "Platform"
+                            | "ReleaseDate"
                             | "SteamAppId"
                             | "AlternateName"
                             | "Type"
@@ -707,6 +722,17 @@ fn parse_zip(path: &Path, cancel: &AtomicBool) -> Result<Index> {
                         database_id: id.into(),
                         title: title.into(),
                         platform: platform.into(),
+                        release_date: fields
+                            .get("ReleaseDate")
+                            .and_then(|s| s.trim().get(..10))
+                            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+                            .map(|d| {
+                                d.and_hms_opt(0, 0, 0)
+                                    .unwrap()
+                                    .and_utc()
+                                    .timestamp()
+                                    .div_euclid(86400)
+                            }),
                         steam_app_id: fields
                             .get("SteamAppId")
                             .map(|s| s.trim())
@@ -787,6 +813,12 @@ fn platform_key(name: &str) -> String {
         "sonyplaystation3" | "playstation3" | "ps3" => "ps3",
         "sonyplaystation2" | "playstation2" | "ps2" => "ps2",
         "nintendogamecube" | "gamecube" => "gamecube",
+        "microsoftxboxseriesxs"
+        | "xboxseriesxs"
+        | "microsoftxboxseriesx"
+        | "xboxseriesx"
+        | "xboxseriess" => "xboxseries",
+        "microsoftxboxone" | "xboxone" => "xboxone",
         _ => return key,
     }
     .into()
@@ -861,7 +893,7 @@ fn match_game<'a>(
         .platforms
         .as_deref()
         .unwrap_or("")
-        .split(['·', ',', ';', '|', '\n'])
+        .split(['·', ',', ';', '\n'])
         .filter(|p| !p.trim().is_empty())
         .map(platform_key)
         .collect();
@@ -888,6 +920,8 @@ fn match_game<'a>(
         }
         let rank = if owned.as_ref() == Some(&platform) {
             0
+        } else if let Some(position) = platforms.iter().position(|p| p == &platform) {
+            position + 1
         } else {
             match platform.as_str() {
                 "switch2" => 1,
@@ -974,6 +1008,50 @@ fn store_spine(
     prepared.commit();
     Ok(Some(id))
 }
+fn fill_launchbox_platforms(
+    library: &Library,
+    id: &str,
+    index: &Index,
+    cancel: &AtomicBool,
+) -> Result<bool> {
+    check_cancel(cancel)?;
+    let mut connection = library.connection()?;
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let game = load_game_on(&transaction, id)?;
+    if game
+        .platforms
+        .as_deref()
+        .is_some_and(|s| !s.trim().is_empty())
+    {
+        return Ok(false);
+    }
+    let bound: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM collection_external_bindings WHERE collection_id=?1 AND provider='igdb')", [id], |r| r.get(0))?;
+    if bound {
+        return Ok(false);
+    }
+    let Ok((name, _)) = resolve_name(&game, index) else {
+        return Ok(false);
+    };
+    let platforms = super::igdb_flow::ordered_platforms(
+        index
+            .games
+            .iter()
+            .filter(|g| normalise_title(&g.title, false) == name)
+            .map(|g| (g.platform.clone(), g.release_date)),
+    )
+    .join(" · ");
+    if platforms.is_empty() {
+        return Ok(false);
+    }
+    check_cancel(cancel)?;
+    // Identity and emptiness were checked under the same write transaction.
+    let changed = transaction.execute("UPDATE collections SET platforms=?1,updated_at=?2 WHERE id=?3 AND (platforms IS NULL OR trim(platforms)='')",
+        params![platforms,chrono::Utc::now().to_rfc3339(),id])?;
+    transaction.commit()?;
+    Ok(changed > 0)
+}
+
 impl FetchState {
     pub fn fetch_one(
         &mut self,
@@ -982,16 +1060,198 @@ impl FetchState {
         id: &str,
         cancel: &AtomicBool,
     ) -> Result<SpineOutcome> {
-        self.one_with(
+        let mut information_error = None;
+        let platforms_filled = std::cell::Cell::new(0);
+        let information_updated = std::cell::Cell::new(false);
+        if let Err(error) = library.fill_bound_igdb_games(&[id.to_owned()], cancel, &|_, result| {
+            if result.is_ok() {
+                information_updated.set(true);
+            }
+            if matches!(result, Ok(true)) {
+                platforms_filled.set(platforms_filled.get() + 1);
+            }
+        }) {
+            information_error = Some(error.to_string());
+        }
+        check_cancel(cancel)?;
+        let mut index = None;
+        if library.get_igdb_connection(id)?.is_none()
+            && load_game(library, id)?
+                .platforms
+                .as_deref()
+                .map_or(true, |s| s.trim().is_empty())
+        {
+            match ensure_index(cache, &Http::default(), cancel) {
+                Ok(loaded) => {
+                    index = Some(loaded);
+                    if fill_launchbox_platforms(library, id, index.as_ref().unwrap(), cancel)? {
+                        platforms_filled.set(platforms_filled.get() + 1);
+                    }
+                }
+                Err(Error::Cancelled) => return Err(Error::Cancelled),
+                Err(error) => information_error = Some(error.to_string()),
+            }
+        }
+        let mut outcome = self.one_with(
             library,
             cache,
             &load_game(library, id)?,
             &Http::default(),
             cancel,
-            &mut None,
+            &mut index,
             &|_| {},
+        )?;
+        outcome.platforms_filled = platforms_filled.get();
+        outcome.information_error = information_error;
+        outcome.information_updated = information_updated.get() || platforms_filled.get() > 0;
+        Ok(outcome)
+    }
+
+    pub fn fill_information(
+        &mut self,
+        library: &Library,
+        cache: &Path,
+        job: &Job,
+        limit: usize,
+        after: Option<String>,
+        report: &dyn Fn(SpineProgress),
+    ) -> Result<SpineBatchResult> {
+        self.information_with(
+            library,
+            cache,
+            &job.id,
+            limit,
+            after,
+            &Http::default(),
+            &job.cancel,
+            &mut |ids, cancel, callback| library.fill_bound_igdb_games(ids, cancel, callback),
+            report,
         )
     }
+
+    fn information_with(
+        &mut self,
+        library: &Library,
+        cache: &Path,
+        job_id: &str,
+        limit: usize,
+        after: Option<String>,
+        io: &impl Transport,
+        cancel: &AtomicBool,
+        fill: &mut dyn FnMut(
+            &[String],
+            &AtomicBool,
+            &dyn Fn(&str, std::result::Result<bool, super::error::LibraryError>),
+        ) -> std::result::Result<(), super::error::LibraryError>,
+        report: &dyn Fn(SpineProgress),
+    ) -> Result<SpineBatchResult> {
+        if limit == 0 || limit > MAX_BATCH {
+            return Err(Error::InvalidRequest);
+        }
+        if let Some(id) = &after {
+            uuid::Uuid::parse_str(id).map_err(|_| Error::InvalidRequest)?;
+        }
+        let connection = library.connection()?;
+        let total: i64 = connection.query_row("SELECT COUNT(*) FROM collections c LEFT JOIN collection_external_bindings i ON i.collection_id=c.id AND i.provider='igdb' WHERE c.type='game' AND (?1 IS NULL OR c.id>?1) AND ((c.platforms IS NULL OR trim(c.platforms)='') OR (i.external_id IS NOT NULL AND (i.provider_data_json IS NULL OR NOT json_valid(i.provider_data_json) OR trim(COALESCE(json_extract(CASE WHEN json_valid(i.provider_data_json) THEN i.provider_data_json ELSE '{}' END,'$.name'),''))='')))", [&after], |r| r.get(0))?;
+        let mut stmt = connection.prepare("SELECT c.id FROM collections c LEFT JOIN collection_external_bindings i ON i.collection_id=c.id AND i.provider='igdb' WHERE c.type='game' AND (?1 IS NULL OR c.id>?1) AND ((c.platforms IS NULL OR trim(c.platforms)='') OR (i.external_id IS NOT NULL AND (i.provider_data_json IS NULL OR NOT json_valid(i.provider_data_json) OR trim(COALESCE(json_extract(CASE WHEN json_valid(i.provider_data_json) THEN i.provider_data_json ELSE '{}' END,'$.name'),''))=''))) ORDER BY c.id LIMIT ?2")?;
+        let ids = stmt
+            .query_map(params![after, limit as i64], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let total = total as usize;
+        let more = total > limit;
+        drop(stmt);
+        drop(connection);
+        let mut result = SpineBatchResult {
+            job_id: job_id.into(),
+            cancelled: false,
+            outcomes: vec![],
+            next_cursor: after,
+            has_more: more,
+            platforms_filled: 0,
+        };
+        report(SpineProgress {
+            job_id: job_id.into(),
+            phase: "information".into(),
+            processed: 0,
+            total,
+            outcome: None,
+        });
+        let fetched = std::cell::RefCell::new(HashMap::new());
+        let information_processed = std::cell::Cell::new(0);
+        let error = fill(&ids, cancel, &|id, outcome| {
+            fetched.borrow_mut().insert(id.to_owned(), outcome);
+            information_processed.set(information_processed.get() + 1);
+            report(SpineProgress {
+                job_id: job_id.into(),
+                phase: "information".into(),
+                processed: information_processed.get(),
+                total,
+                outcome: None,
+            });
+        })
+        .err()
+        .map(|e| e.to_string());
+        result.platforms_filled = fetched
+            .borrow()
+            .values()
+            .filter(|v| matches!(v, Ok(true)))
+            .count();
+        let mut index = None;
+        for id in ids {
+            if cancel.load(Ordering::Relaxed) {
+                result.cancelled = true;
+                result.has_more = true;
+                break;
+            }
+            let mut outcome = SpineOutcome::new(&id, OutcomeStatus::Skipped, "information_checked");
+            match fetched.borrow_mut().remove(&id) {
+                Some(Ok(true)) => outcome.platforms_filled = 1,
+                Some(Err(e)) => outcome.information_error = Some(e.to_string()),
+                _ => {
+                    if library.get_igdb_connection(&id)?.is_some() {
+                        outcome.information_error = error.clone();
+                    }
+                }
+            }
+            if library.get_igdb_connection(&id)?.is_none()
+                && load_game(library, &id)?
+                    .platforms
+                    .as_deref()
+                    .map_or(true, |s| s.trim().is_empty())
+            {
+                let attempt = (|| {
+                    if index.is_none() {
+                        index = Some(ensure_index(cache, io, cancel)?);
+                    }
+                    fill_launchbox_platforms(library, &id, index.as_ref().unwrap(), cancel)
+                })();
+                match attempt {
+                    Ok(true) => {
+                        outcome.platforms_filled = 1;
+                        result.platforms_filled += 1;
+                    }
+                    Err(Error::Cancelled) => {
+                        result.cancelled = true;
+                        result.has_more = true;
+                        break;
+                    }
+                    Err(e) => outcome.information_error = Some(e.to_string()),
+                    _ => {}
+                }
+            }
+            result.next_cursor = Some(id);
+            result.outcomes.push(outcome.clone());
+            report(SpineProgress {
+                job_id: job_id.into(),
+                phase: "information".into(),
+                processed: result.outcomes.len().max(information_processed.get()),
+                total,
+                outcome: Some(outcome),
+            });
+        }
+        Ok(result)
+    }
+
     fn one_with(
         &mut self,
         library: &Library,
@@ -1152,7 +1412,7 @@ impl FetchState {
             uuid::Uuid::parse_str(id).map_err(|_| Error::InvalidRequest)?;
         }
         let connection = library.connection()?;
-        let mut stmt = connection.prepare("SELECT c.id FROM collections c WHERE c.type='game' AND (?1 IS NULL OR c.id>?1) AND NOT EXISTS(SELECT 1 FROM collection_work_artworks a WHERE a.collection_id=c.id AND a.kind='spine') ORDER BY c.id LIMIT ?2")?;
+        let mut stmt = connection.prepare("SELECT c.id FROM collections c WHERE c.type='game' AND (?1 IS NULL OR c.id>?1) ORDER BY c.id LIMIT ?2")?;
         let mut ids = stmt
             .query_map(params![after, (limit + 1) as i64], |r| {
                 r.get::<_, String>(0)
@@ -1169,6 +1429,7 @@ impl FetchState {
             outcomes: Vec::new(),
             next_cursor: after,
             has_more: more,
+            platforms_filled: 0,
         };
         let mut index = None;
         report(SpineProgress {

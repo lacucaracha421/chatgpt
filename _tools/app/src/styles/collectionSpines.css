@@ -1,3 +1,11 @@
+/* The list toolbar lives in the window chrome's header slot, next to the status chip. It must never
+ * spill into the chips beside it, so the header clips and the progress shortens as it narrows:
+ * full "책등 12/181" -> "12/181" -> spinner. The title and count never shrink. */
+.view-toolbar:has(.collection-toolbar__count) {
+  container: collection-toolbar / inline-size;
+  overflow-x: clip;
+}
+
 .collection-toolbar__spine-progress {
   display: flex;
   flex: none;
@@ -9,6 +17,25 @@
   font-variant-numeric: tabular-nums;
 }
 
+.collection-toolbar__spine-status {
+  display: inline-flex;
+  align-items: center;
+}
+
+.collection-toolbar__spine-spinner {
+  display: none;
+  width: 12px;
+  height: 12px;
+  margin-right: var(--space-2);
+  border: 2px solid var(--color-border-strong);
+  border-top-color: var(--color-text);
+  border-radius: 50%;
+  animation: collection-toolbar-spin .8s linear infinite;
+}
+
+@keyframes collection-toolbar-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .collection-toolbar__spine-spinner { animation: none; } }
+
 .view-toolbar:has(.collection-toolbar__count) > h2,
 .view-toolbar:has(.collection-toolbar__count) > .collection-toolbar__count {
   flex: none;
@@ -19,4 +46,17 @@
 .collection-toolbar__controls {
   flex: none;
   white-space: nowrap;
+}
+
+@container collection-toolbar (max-width: 679px) {
+  .collection-toolbar__spine-phase { display: none; }
+}
+
+@container collection-toolbar (max-width: 599px) {
+  .collection-toolbar__spine-count { display: none; }
+  .collection-toolbar__spine-spinner { display: inline-block; margin-right: 0; }
+}
+
+@container collection-toolbar (max-width: 519px) {
+  .collection-toolbar__controls .asset-toolbar__quiet-menu > span { display: none; }
 }

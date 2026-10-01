@@ -72,8 +72,8 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
         setLoaded(current => ({ collection, av, covers, related, tmdb: tmdbRef.current.id === collection.id ? tmdbRef.current.connection : current?.collection.id === collection.id ? current.tmdb : null, artworks: artworks.filter(item => !["cover", "spine", "back", "volume_cover"].includes(item.kind)), providerConnected: false, position: order.indexOf(collection.id) + 1, total: order.length,
           case: { title: av?.titleJa?.trim() || collection.name, platform: collection.type === "av" ? "av" : collection.type === "movie" ? "film" : casePlatform(collection.platforms), publisher: collection.publisher, privacy: privacyMode, front, spine: covers ? artworkUrl(covers.spineId) : spine ? workArtworkUrl(spine.id) : null, back: covers ? artworkUrl(covers.backId) : null },
         }));
-        const request = artworkLoaded ? requestMissingGameSpine(gateway, library?.root ?? "", collection, artworks) : null;
-        if (request) void request.catch(reason => { if (active) setSpineError(avError(reason)); });
+        const request = artworkLoaded ? requestMissingGameSpine(gateway, library?.root ?? "", collection, artworks, () => changedRef.current().catch(reason => { if (active) setError(avError(reason)); })) : null;
+        if (request) void request.then(outcome => { if (active && outcome.informationError) setSpineError(outcome.informationError); }).catch(reason => { if (active) setSpineError(avError(reason)); });
       } catch (reason) { if (active) setError(avError(reason)); }
     })();
     return () => { active = false; };
@@ -117,7 +117,7 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
     providerConnected: loaded.collection.type === "movie" ? tmdb.id === loaded.collection.id && Boolean(tmdb.connection) : provider.id === loaded.collection.id && provider.connected,
     tmdb: tmdb.id === loaded.collection.id ? tmdb.connection : loaded.tmdb,
     providerBusy: loaded.collection.type === "movie" && (tmdb.id !== loaded.collection.id || tmdb.loading || tmdbRefreshing),
-    case: { ...loaded.case, privacy: privacyMode },
+    case: { ...loaded.case, privacy: privacyMode, platform: loaded.collection.type === "game" ? casePlatform(loaded.collection.platforms, paintedRecord.current?.id === loaded.collection.id ? paintedRecord.current.record.ownedPlatform : loaded.record?.ownedPlatform) : loaded.case.platform },
   } : null, [loaded, provider, tmdb, tmdbRefreshing, privacyMode, personal.record, collection.id]);
   const canClose = !panel && !tmdbPanel && !performer;
   const navigation = useBackNavigationContext();

@@ -66,12 +66,13 @@ describe("Collection work open path", () => {
     await screen.findByRole("article");
     expect(gateway.fetchLaunchBoxSpine).not.toHaveBeenCalled();
   });
-  it("does not request a game with a real spine", async () => {
+  it("checks information for a game with a real spine and keeps that artwork", async () => {
     const { Harness, gateway } = fixtures();
     gateway.listCollectionWorkArtworks.mockResolvedValue([{ id: "existing", kind: "spine", selected: true }]);
     render(<Harness />); await userEvent.setup().dblClick(screen.getByRole("button", { name: /^가 작품/ }));
     await waitFor(() => expect(document.querySelector('img[src*="existing"]')).not.toBeNull());
-    expect(gateway.fetchLaunchBoxSpine).not.toHaveBeenCalled();
+    await waitFor(() => expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledExactlyOnceWith("a"));
+    expect(document.querySelector('img[src*="existing"]')).not.toBeNull();
   });
   it("refreshes a matched game's spine and keeps the template until that image decodes", async () => {
     const { Harness, gateway, changed } = fixtures();
@@ -164,4 +165,12 @@ describe("Collection work open path", () => {
     await user.click(screen.getByRole("button", { name: "작품 관리" })); await user.click(screen.getByRole("menuitem", { name: "컬렉션 삭제" })); const dialog = screen.getByRole("dialog", { name: "컬렉션 삭제" });
     expect(gateway.deleteCollection).not.toHaveBeenCalled(); await user.click(within(dialog).getByRole("button", { name: "삭제" })); await waitFor(() => expect(gateway.deleteCollection).toHaveBeenCalledWith("a"));
   });
+});
+
+it("uses the saved device in the work case and its spine template", async () => {
+  const { Harness, gateway } = fixtures();
+  gateway.getCollectionWorkRecord.mockResolvedValue({ status: null, ownedPlatform: "PS5", myScore: 3, memo: null });
+  render(<Harness />);
+  await userEvent.setup().dblClick(screen.getByRole("button", { name: /^가 작품/ }));
+  await waitFor(() => expect(document.querySelector('.collection-case [data-spine-template="ps5"]')).not.toBeNull());
 });

@@ -2,8 +2,8 @@ import { useSyncExternalStore } from "react";
 import type { LibraryGateway, LaunchBoxSpineOutcome, WorkArtworkSummary, CollectionSummary } from "../library/types";
 import { commandErrorMessage } from "../library/errorMessage";
 
-type BatchState = { running: boolean; cancelling: boolean; processed: number; total: number; message: string | null; error: boolean };
-const idle: BatchState = { running: false, cancelling: false, processed: 0, total: 0, message: null, error: false };
+type BatchState = { phase: "정보" | "책등"; running: boolean; cancelling: boolean; processed: number; total: number; message: string | null; error: boolean };
+const idle: BatchState = { phase: "책등", running: false, cancelling: false, processed: 0, total: 0, message: null, error: false };
 type Session = {
   batch: BatchState;
   listeners: Set<() => void>;
@@ -37,15 +37,17 @@ export function selectedSpine(artworks: WorkArtworkSummary[]) {
   const spines = artworks.filter(item => item.kind === "spine");
   return spines.find(item => item.selected) ?? spines[0];
 }
-/** Attempts (including rejected commands) survive work navigation for this library session. */
-export function requestMissingGameSpine(gateway: LibraryGateway, scope: string, collection: CollectionSummary, artworks: WorkArtworkSummary[]) {
-  if (collection.type !== "game" || selectedSpine(artworks) || !gateway.fetchLaunchBoxSpine) return null;
+/** Information is checked even with an existing spine; native storage preserves that artwork.
+ * Attempts (including rejected commands) survive work navigation for this library session. */
+export function requestMissingGameSpine(gateway: LibraryGateway, scope: string, collection: CollectionSummary, _artworks: WorkArtworkSummary[], onInformationChanged?: () => Promise<void>) {
+  if (collection.type !== "game" || !gateway.fetchLaunchBoxSpine) return null;
   const value = session(gateway, scope);
   let request = value.attempts.get(collection.id);
   if (!request) {
     const fetch = gateway.fetchLaunchBoxSpine;
     request = Promise.resolve().then(() => fetch(collection.id)).then(outcome => {
-      if (outcome.status === "matched") artworkChanged(value, collection.id);
+      if (outcome.status === "matched" || outcome.platformsFilled) artworkChanged(value, collection.id);
+      if (outcome.informationUpdated) void onInformationChanged?.();
       return outcome;
     });
     value.attempts.set(collection.id, request);
@@ -63,7 +65,31 @@ export function useLaunchBoxSpineBatch(gateway: LibraryGateway, scope: string) {
     update({ ...idle, running: true });
     const counts = { matched: 0, no_match: 0, ambiguous: 0, failed: 0, skipped: 0 };
     let processed = 0;
+    let platformsFilled = 0;
+    let informationFailures = 0;
     try {
+      update({ phase: "정보", total: 0 });
+      let infoCursor: string | null = null;
+      let infoProcessed = 0;
+      while (!value.cancelRequested) {
+        const jobId = crypto.randomUUID();
+        value.jobId = jobId;
+        const result = await gateway.fetchLaunchBoxSpines({ action: "run", jobId, limit: 50, informationOnly: true, ...(infoCursor ? { afterCollectionId: infoCursor } : {}) }, progress => {
+          if (progress.jobId !== jobId) return;
+          update({ processed: infoProcessed + progress.processed, total: Math.max(value.batch.total, infoProcessed + progress.total) });
+        });
+        value.jobId = null;
+        platformsFilled += result.platformsFilled ?? 0;
+        informationFailures += result.outcomes.filter(outcome => outcome.informationError).length;
+        infoProcessed += result.outcomes.length;
+        update({ processed: infoProcessed });
+        if (result.outcomes.length || result.platformsFilled) await onChanged();
+        if (result.cancelled) value.cancelRequested = true;
+        if (result.cancelled || !result.hasMore) break;
+        if (!result.nextCursor || result.nextCursor === infoCursor) throw new Error("정보 채우기를 이어갈 수 없습니다.");
+        infoCursor = result.nextCursor;
+      }
+      update({ phase: "책등", processed: 0 });
       // Every visited game produces an outcome, including games with an existing spine.
       let total = collections.filter(item => item.type === "game").length;
       update({ total });
@@ -103,7 +129,7 @@ export function useLaunchBoxSpineBatch(gateway: LibraryGateway, scope: string) {
         if (!result.nextCursor || result.nextCursor === cursor) throw new Error("책등 받기를 이어갈 수 없습니다.");
         cursor = result.nextCursor;
       }
-      update({ message: `책등 ${counts.matched}개 받음 · 못 찾음 ${counts.no_match} · 애매함 ${counts.ambiguous} · 실패 ${counts.failed}` });
+      update({ message: `책등 ${counts.matched}개 받음 · 못 찾음 ${counts.no_match} · 애매함 ${counts.ambiguous} · 실패 ${counts.failed} · 플랫폼 ${platformsFilled}개 채움${informationFailures ? ` · 정보 실패 ${informationFailures}` : ""}${value.cancelRequested ? " · 취소됨" : ""}` });
     } catch (error) {
       update({ error: true, message: commandErrorMessage(error, "책등을 받지 못했습니다.") });
     } finally {

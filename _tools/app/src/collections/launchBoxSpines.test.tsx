@@ -34,22 +34,24 @@ it("follows the cursor, displays cumulative progress, prevents another batch and
   let job = "";
   gateway.fetchLaunchBoxSpines.mockImplementation(async (request, progress) => {
     if (request.action === "cancel") throw new Error("unexpected cancel");
+    if (request.informationOnly) return { jobId: request.jobId, outcomes: [], nextCursor: null, hasMore: false, cancelled: false, platformsFilled: 0 };
     if (!request.afterCollectionId) return { jobId: request.jobId, outcomes: [outcome("a", "matched")], nextCursor: "a", hasMore: true, cancelled: false };
     job = request.jobId; report = progress!;
     return new Promise(resolve => { finish = resolve; });
   });
   render(<Browser />); const user = await start();
-  await waitFor(() => expect(gateway.fetchLaunchBoxSpines).toHaveBeenCalledTimes(2));
-  expect(gateway.fetchLaunchBoxSpines.mock.calls[0][0]).toMatchObject({ action: "run", limit: 50 });
-  expect(gateway.fetchLaunchBoxSpines.mock.calls[1][0]).toMatchObject({ action: "run", limit: 50, afterCollectionId: "a" });
+  await waitFor(() => expect(gateway.fetchLaunchBoxSpines).toHaveBeenCalledTimes(3));
+  expect(gateway.fetchLaunchBoxSpines.mock.calls[0][0]).toMatchObject({ action: "run", limit: 50, informationOnly: true });
+  expect(gateway.fetchLaunchBoxSpines.mock.calls[1][0]).toMatchObject({ action: "run", limit: 50 });
+  expect(gateway.fetchLaunchBoxSpines.mock.calls[2][0]).toMatchObject({ action: "run", limit: 50, afterCollectionId: "a" });
   expect(gateway.listCollectionWorkArtworks.mock.calls.map(args => args[0])).not.toContain("manga");
   act(() => report({ jobId: job, phase: "game_completed", processed: 1, total: 2, outcome: outcome("b", "no_match") }));
-  expect(screen.getByText("책등 2/5")).toBeInTheDocument();
+  expect(document.querySelector(".collection-toolbar__spine-status")).toHaveTextContent(/^책등 2\/5$/);
   await user.click(screen.getByRole("button", { name: "작품 관리" }));
   expect(screen.getByRole("menuitem", { name: "책등 받기" })).toHaveAttribute("aria-disabled", "true");
   await user.keyboard("{Escape}");
   await act(async () => finish({ jobId: job, outcomes: [outcome("b", "no_match"), outcome("c", "ambiguous"), outcome("d", "failed"), outcome("e", "skipped")], nextCursor: "e", hasMore: false, cancelled: false }));
-  expect(screen.getByText("책등 1개 받음 · 못 찾음 1 · 애매함 1 · 실패 1")).toBeInTheDocument();
+  expect(screen.getByText("책등 1개 받음 · 못 찾음 1 · 애매함 1 · 실패 1 · 플랫폼 0개 채움")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "취소" })).toBeNull();
   expect(changed).toHaveBeenCalledOnce();
 });
@@ -68,7 +70,7 @@ it("cancels the active job and stops before another cursor call", async () => {
   expect(screen.getByRole("button", { name: "취소" })).toBeDisabled();
   await act(async () => finish({ jobId: job, outcomes: [outcome("a", "matched")], cancelled: true, nextCursor: "a", hasMore: true }));
   expect(gateway.fetchLaunchBoxSpines).toHaveBeenCalledTimes(2);
-  expect(screen.getByText("책등 1개 받음 · 못 찾음 0 · 애매함 0 · 실패 0")).toBeInTheDocument();
+  expect(screen.getByText("책등 0개 받음 · 못 찾음 0 · 애매함 0 · 실패 0 · 플랫폼 0개 채움 · 취소됨")).toBeInTheDocument();
 });
 it("uses the shared toast for command errors", async () => {
   const { gateway, Browser } = setup(); gateway.fetchLaunchBoxSpines.mockRejectedValue(new Error("요청 실패"));
@@ -112,6 +114,7 @@ it("counts all visited games across cursor pages, including existing spines", as
   let job = "";
   gateway.fetchLaunchBoxSpines.mockImplementation(async (request, progress) => {
     if (request.action === "cancel") throw new Error("unexpected cancel");
+    if (request.informationOnly) return { jobId: request.jobId, outcomes: [], nextCursor: null, hasMore: false, cancelled: false, platformsFilled: 0 };
     if (!request.afterCollectionId) return { jobId: request.jobId, outcomes: [outcome("a", "skipped"), outcome("b", "no_match")], nextCursor: "b", hasMore: true, cancelled: false };
     job = request.jobId; report = progress!;
     return new Promise(resolve => { finish = resolve; });
@@ -120,7 +123,7 @@ it("counts all visited games across cursor pages, including existing spines", as
   const collections = ["a", "b", "c", "d", "e"].map(id => ({ ...game, id }));
   let running!: Promise<void>;
   act(() => { running = result.current.run([...collections, { ...game, id: "manga", type: "manga" }], vi.fn()); });
-  await waitFor(() => expect(gateway.fetchLaunchBoxSpines).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(gateway.fetchLaunchBoxSpines).toHaveBeenCalledTimes(3));
   expect(result.current).toMatchObject({ processed: 2, total: 5 });
   for (let processed = 1; processed <= 3; processed++) {
     act(() => report({ jobId: job, phase: "game_completed", processed, total: 3, outcome: outcome(collections[processed + 1].id, "skipped") }));
@@ -132,4 +135,60 @@ it("counts all visited games across cursor pages, including existing spines", as
     await running;
   });
   expect(result.current).toMatchObject({ processed: 5, total: 5, running: false });
+});
+
+it("fills information before spines, shows each phase and reports platform fills", async () => {
+  const { gateway } = setup();
+  let finishInfo!: (result: LaunchBoxSpineBatchResult) => void;
+  let reportInfo!: (progress: LaunchBoxSpineProgress) => void;
+  let infoJob = "";
+  let finishSpines!: (result: LaunchBoxSpineBatchResult) => void;
+  let spineJob = "";
+  const changed = vi.fn().mockResolvedValue(undefined);
+  gateway.fetchLaunchBoxSpines.mockImplementation(async (request, report) => {
+    if (request.action === "cancel") throw new Error("unexpected cancel");
+    if (request.informationOnly) {
+      infoJob = request.jobId; reportInfo = report!;
+      return new Promise(resolve => { finishInfo = resolve; });
+    }
+    spineJob = request.jobId;
+    return new Promise(resolve => { finishSpines = resolve; });
+  });
+  const { result } = renderHook(() => useLaunchBoxSpineBatch(gateway as unknown as LibraryGateway, "information-phase"));
+  let running!: Promise<void>;
+  act(() => { running = result.current.run([game], changed); });
+  await waitFor(() => expect(gateway.fetchLaunchBoxSpines).toHaveBeenCalledOnce());
+  act(() => reportInfo({ jobId: infoJob, phase: "information", processed: 12, total: 178, outcome: null }));
+  expect(result.current).toMatchObject({ phase: "정보", processed: 12, total: 178 });
+  await act(async () => finishInfo({ jobId: infoJob, outcomes: [{ ...outcome("a", "skipped"), platformsFilled: 1 }], platformsFilled: 1, cancelled: false, nextCursor: "a", hasMore: false }));
+  await waitFor(() => expect(gateway.fetchLaunchBoxSpines).toHaveBeenCalledTimes(2));
+  expect(result.current).toMatchObject({ phase: "책등", processed: 0, total: 1 });
+  expect(changed).toHaveBeenCalledOnce();
+  await act(async () => { finishSpines({ jobId: spineJob, outcomes: [outcome("a", "no_match")], cancelled: false, nextCursor: "a", hasMore: false }); await running; });
+  expect(result.current.message).toContain("플랫폼 1개 채움");
+});
+
+it("cancels the spine phase after information completes", async () => {
+  const { gateway } = setup();
+  let finish!: (result: LaunchBoxSpineBatchResult) => void;
+  let job = "";
+  gateway.fetchLaunchBoxSpines.mockImplementation(async request => {
+    if (request.action === "cancel") return { jobId: request.jobId, outcomes: [], cancelled: true, nextCursor: null, hasMore: false };
+    if (request.informationOnly) return { jobId: request.jobId, outcomes: [], cancelled: false, nextCursor: null, hasMore: false };
+    job = request.jobId; return new Promise(resolve => { finish = resolve; });
+  });
+  const { result } = renderHook(() => useLaunchBoxSpineBatch(gateway as unknown as LibraryGateway, "spine-cancel"));
+  let running!: Promise<void>;
+  act(() => { running = result.current.run([game], vi.fn()); });
+  await waitFor(() => expect(gateway.fetchLaunchBoxSpines).toHaveBeenCalledTimes(2));
+  await act(async () => { await result.current.cancel(); });
+  expect(gateway.fetchLaunchBoxSpines).toHaveBeenLastCalledWith({ action: "cancel", jobId: job });
+  await act(async () => { finish({ jobId: job, outcomes: [], cancelled: true, nextCursor: null, hasMore: true }); await running; });
+  expect(gateway.fetchLaunchBoxSpines).toHaveBeenCalledTimes(3);
+});
+
+it("uses the owned device for light-case material and spine printing", async () => {
+  const gateway = { getCollectionWorkRecord: vi.fn().mockResolvedValue({ ownedPlatform: "PS5" }), listCollectionWorkArtworks: vi.fn().mockResolvedValue([]) } as unknown as LibraryGateway;
+  const { container } = render(<LibraryProvider gateway={gateway}><CollectionShelfCase collection={{ ...game, platforms: "PC · Nintendo Switch 2" }} front={null} privacy={false} active selected={false} /></LibraryProvider>);
+  await waitFor(() => expect(container.querySelector('[data-spine-template="ps5"]')).not.toBeNull());
 });

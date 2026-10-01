@@ -11,6 +11,13 @@ import "./LightCase.css";
 export function CollectionShelfCase({ collection, front, privacy, active, selected }: { collection: CollectionSummary; front: string | null; privacy: boolean; active: boolean; selected: boolean }) {
   const { gateway, library } = useLibrary();
   const spineRevision = useSpineArtworkRevision(gateway, library?.root ?? "", collection.id);
+  const [owned, setOwned] = useState<{ id: string; platform: string | null } | null>(null);
+  useEffect(() => {
+    if (collection.type !== "game" || typeof gateway.getCollectionWorkRecord !== "function") return;
+    let current = true;
+    void gateway.getCollectionWorkRecord(collection.id).then(record => { if (current) setOwned({ id: collection.id, platform: record.ownedPlatform }); }, () => undefined);
+    return () => { current = false; };
+  }, [collection.id, collection.type, collection.updatedAt, gateway]);
   const [art, setArt] = useState<{ front?: string | null; spine: string | null }>({ spine: null });
   useEffect(() => {
     if (!active || privacy) return;
@@ -32,7 +39,7 @@ export function CollectionShelfCase({ collection, front, privacy, active, select
     void load();
     return () => { current = false; };
   }, [active, privacy, collection.id, collection.type, collection.updatedAt, gateway, spineRevision]);
-  const data: CaseData = { title: collection.name, publisher: collection.publisher, platform: collection.type === "av" ? "av" : collection.type === "movie" ? "film" : casePlatform(collection.platforms), front: art.front ?? front, spine: art.spine, privacy };
+  const data: CaseData = { title: collection.name, publisher: collection.publisher, platform: collection.type === "av" ? "av" : collection.type === "movie" ? "film" : casePlatform(collection.platforms, owned?.id === collection.id ? owned.platform : null), front: art.front ?? front, spine: art.spine, privacy };
   return <LightCase data={data} selected={selected} />;
 }
 

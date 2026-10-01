@@ -216,10 +216,10 @@ fn launchbox_matching_prefers_owned_platform_then_platform_order_and_region() {
     g.owned = Some("Switch".into());
     assert_eq!(match_game(&g, &index).unwrap().1.file_name, "kr.jpg");
     g.owned = None;
-    assert_eq!(match_game(&g, &index).unwrap().0.database_id, "3");
+    assert_eq!(match_game(&g, &index).unwrap().0.database_id, "1");
     g.title = "Korean title".into();
     g.original_title = Some("Example II: Adventure".into());
-    assert_eq!(match_game(&g, &index).unwrap().0.database_id, "3");
+    assert_eq!(match_game(&g, &index).unwrap().0.database_id, "1");
     g.platforms = Some("Xbox".into());
     assert!(matches!(
         match_game(&g, &index),
@@ -440,7 +440,7 @@ fn launchbox_batch_request_wire_fields_are_camel_case() {
     )
     .unwrap();
     assert!(
-        matches!(request,SpineBatchRequest::Run{job_id,limit:20,after_collection_id:Some(after)} if job_id==ID1 && after==ID2)
+        matches!(request,SpineBatchRequest::Run{job_id,limit:20,after_collection_id:Some(after),..} if job_id==ID1 && after==ID2)
     );
 }
 
@@ -554,6 +554,7 @@ fn launchbox_region_order_is_korea_japan_north_america_world_then_others() {
                 database_id: "1".into(),
                 title: "Game".into(),
                 platform: "Windows".into(),
+                release_date: None,
                 steam_app_id: None,
                 alternate_names: Vec::new(),
                 images: images.clone(),
@@ -786,7 +787,10 @@ fn launchbox_agreeing_sources_record_the_first_matching_key() {
 #[test]
 fn launchbox_old_index_rebuilds_from_cached_zip_even_when_refresh_is_due() {
     let cache = tempfile::tempdir().unwrap();
-    let io = FakeHttp::new(sekiro_metadata());
+    let io = FakeHttp::new(&sekiro_metadata().replace(
+        "<SteamAppId>814380",
+        "<ReleaseDate>2019-03-22</ReleaseDate><SteamAppId>814380",
+    ));
     let cancel = AtomicBool::new(false);
     ensure_index(cache.path(), &io, &cancel).unwrap();
     let state: BulkState = read_json(&cache.path().join("bulk-state.json"), 4096).unwrap();
@@ -795,7 +799,7 @@ fn launchbox_old_index_rebuilds_from_cached_zip_even_when_refresh_is_due() {
     let zip_path = cache.path().join(format!("Metadata-{generation}.zip"));
     let zip_before = fs::read(&zip_path).unwrap();
     // The old index contained only entries with images and had no identity fields.
-    write_json(&index_path, &serde_json::json!({"version":1,"games":[{
+    write_json(&index_path, &serde_json::json!({"version":2,"games":[{
         "database_id":"165025","title":"Sekiro: Shadows Die Twice",
         "platform":"Sony Playstation 4","images":[{"file_name":"sekiro-ps4.png","region":"Japan"}]
     }]})).unwrap();
@@ -804,6 +808,7 @@ fn launchbox_old_index_rebuilds_from_cached_zip_even_when_refresh_is_due() {
     assert_eq!(rebuilt.version, INDEX_VERSION);
     assert_eq!(rebuilt.games.len(), 2);
     assert_eq!(rebuilt.games[0].steam_app_id.as_deref(), Some("814380"));
+    assert_eq!(rebuilt.games[0].release_date, Some(17977));
     assert_eq!(rebuilt.games[0].alternate_names.len(), 3);
     assert_eq!(io.bulk_count(), 1);
     assert_eq!(fs::read(&zip_path).unwrap(), zip_before);
@@ -832,10 +837,13 @@ fn launchbox_old_no_match_outcome_is_retried_without_a_bulk_download() {
     let io = FakeHttp::new(sekiro_metadata());
     ensure_index(cache.path(), &io, &AtomicBool::new(false)).unwrap();
     let legacy_bytes = serde_json::to_vec(&(
+        3u32,
         &game.title,
         &game.original_title,
         &game.platforms,
         &game.owned,
+        &game.steam_app_id,
+        &game.igdb_name,
     ))
     .unwrap();
     let legacy_fingerprint: String = Sha256::digest(legacy_bytes)
@@ -904,4 +912,82 @@ fn launchbox_bindings_invalidate_outcomes_and_guard_in_flight_imports() {
     assert_eq!(outcome.status, OutcomeStatus::Matched);
     assert_eq!(outcome.matched_by, Some(MatchedBy::Steam));
     assert_eq!(io.bulk_count(), 1);
+}
+
+#[test]
+fn launchbox_information_fills_all_canonical_platforms_by_release_without_images() {
+    let (_temp, library, cache, _) = fixture();
+    insert(&library, ID1, "Example", "");
+    insert(&library, ID2, "User Example", "My own platforms");
+    let xml = "<LaunchBox><Game><DatabaseID>1</DatabaseID><Name>Example</Name><Platform>Windows</Platform><ReleaseDate>2001-01-01T00:00:00</ReleaseDate></Game><Game><DatabaseID>2</DatabaseID><Name>Example</Name><Platform>Nintendo Switch 2</Platform><ReleaseDate>2025-01-01</ReleaseDate></Game><Game><DatabaseID>3</DatabaseID><Name>Example</Name><Platform>PlayStation 5</Platform><ReleaseDate>2025-01-01</ReleaseDate></Game></LaunchBox>";
+    let io = FakeHttp::new(xml);
+    let mut no_igdb = |_: &[String],
+                       _: &AtomicBool,
+                       _: &dyn Fn(
+        &str,
+        std::result::Result<bool, super::super::error::LibraryError>,
+    )| Ok(());
+    let result = FetchState::default()
+        .information_with(
+            &library,
+            cache.path(),
+            "job",
+            50,
+            None,
+            &io,
+            &AtomicBool::new(false),
+            &mut no_igdb,
+            &|_| {},
+        )
+        .unwrap();
+    assert_eq!(result.platforms_filled, 1);
+    assert_eq!(
+        library.get_collection(ID1).unwrap().platforms.as_deref(),
+        Some("Windows · Nintendo Switch 2 · PlayStation 5")
+    );
+    assert_eq!(
+        library.get_collection(ID2).unwrap().platforms.as_deref(),
+        Some("My own platforms")
+    );
+    assert_eq!(io.bulk_count(), 1);
+    assert!(io.image_requests().is_empty());
+    assert!(!fill_launchbox_platforms(
+        &library,
+        ID2,
+        &ensure_index(cache.path(), &io, &AtomicBool::new(false)).unwrap(),
+        &AtomicBool::new(false)
+    )
+    .unwrap());
+}
+
+#[test]
+fn launchbox_information_cancel_never_fetches_launchbox_or_starts_spines() {
+    let (_temp, library, cache, io) = fixture();
+    insert(&library, ID1, "Example", "");
+    let cancel = AtomicBool::new(false);
+    let mut fill =
+        |_: &[String],
+         c: &AtomicBool,
+         _: &dyn Fn(&str, std::result::Result<bool, super::super::error::LibraryError>)| {
+            c.store(true, Ordering::Relaxed);
+            Ok(())
+        };
+    let result = FetchState::default()
+        .information_with(
+            &library,
+            cache.path(),
+            "job",
+            50,
+            None,
+            &io,
+            &cancel,
+            &mut fill,
+            &|_| {},
+        )
+        .unwrap();
+    assert!(result.cancelled);
+    assert!(result.outcomes.is_empty());
+    assert_eq!(result.next_cursor, None);
+    assert_eq!(io.bulk_count(), 0);
+    assert!(io.image_requests().is_empty());
 }

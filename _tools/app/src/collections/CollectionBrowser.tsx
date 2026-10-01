@@ -335,7 +335,11 @@ export function CollectionBrowser({
       { id: "spines", label: "책등 받기", disabled: spineBatch.running, onSelect: () => void spineBatch.run(collections, onChanged) },
     ]} />}
     {typeFilter === "game" && spineBatch.running && <span className="collection-toolbar__spine-progress">
-      <span role="status">책등 {spineBatch.processed}/{spineBatch.total}</span>
+      <span role="status" className="collection-toolbar__spine-status">
+        <span className="collection-toolbar__spine-spinner" aria-hidden="true" />
+        <span className="collection-toolbar__spine-phase">{spineBatch.phase}{" "}</span>
+        <span className="collection-toolbar__spine-count">{spineBatch.processed}/{spineBatch.total}</span>
+      </span>
       <Button variant="quiet" size="sm" disabled={spineBatch.cancelling} onClick={() => void spineBatch.cancel()}>취소</Button>
     </span>}
   </div> : undefined;
