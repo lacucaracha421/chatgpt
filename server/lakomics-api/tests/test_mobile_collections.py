@@ -446,7 +446,7 @@ class MobileCollectionsTests(unittest.TestCase):
 
     def test_status_advertises_replica_features(self):
         status = self.client.get("/v1/collections/status", headers=AUTH).json()
-        self.assertEqual(status["replicaFeatures"], ["workRecord", "coverFocus", "people"])
+        self.assertEqual(status["replicaFeatures"], ["workRecord", "coverFocus", "people", "portraitImage"])
 
     def test_legacy_payload_and_revision_are_byte_identical(self):
         item = {**work("legacy"), "volumes": [{"id": "volume", "volumeNumber": 2, "editionIndex": 1, "displayLabel": "2권"}]}
@@ -592,6 +592,109 @@ class MobileCollectionsTests(unittest.TestCase):
         self.assertEqual(self.client.get("/v1/collections/first", headers=AUTH).json()["item"]["spineArtworkId"], "spine-1")
         self.assertEqual(self.client.post("/v1/collections/selected/artworks/spine-b/media-ticket",
                                           headers=AUTH, json={}).status_code, 200)
+
+    # Portrait images (feature ``portraitImage``).
+
+    def portrait(self, data=b"portrait", **extra):
+        digest = hashlib.sha256(data).hexdigest()
+        fake_s3.objects["work-artwork/mobile/" + digest] = {"body": data, "content_type": "image/jpeg"}
+        return {"sha256": digest, "sizeBytes": len(data), "contentType": "image/jpeg",
+                "width": 300, "height": 400, **extra}
+
+    def av_work(self, id, image):
+        info = av_info()
+        info["people"][0]["portraitImage"] = image
+        return {**work(id, type="av"), "av": info}
+
+    def cover_ticket(self, sha):
+        return self.client.post(f"/v1/home/covers/{sha}/media-ticket", headers=AUTH)
+
+    def test_portrait_image_publishes_and_serves_through_home_cover_ticket(self):
+        image = self.portrait()
+        reply = self.publish([self.av_work("a", image), self.av_work("b", image)])
+        self.assertEqual(reply.status_code, 200, reply.text)
+        detail = self.client.get("/v1/collections/a", headers=AUTH).json()["item"]
+        self.assertEqual(detail["av"]["people"][0]["portraitImage"], image)
+        self.assertNotIn("portraitImage", detail["av"]["people"][1])
+        ticket = self.cover_ticket(image["sha256"])
+        self.assertEqual(ticket.status_code, 200, ticket.text)
+        self.assertEqual((ticket.json()["sha256"], ticket.json()["size_bytes"], ticket.json()["content_type"]),
+                         (image["sha256"], image["sizeBytes"], "image/jpeg"))
+        self.assertIn("work-artwork/mobile/" + image["sha256"], ticket.json()["url"])
+        self.assertEqual(self.client.post(f"/v1/home/covers/{image['sha256']}/media-ticket").status_code, 401)
+        # Another owner's Home cover refs survive every Collections publication.
+        other = blob(b"av-pick")
+        fake_s3.objects[other["objectKey"]] = {"body": b"av-pick", "content_type": "image/webp"}
+        upload = {k: v for k, v in other.items() if k != "objectKey"}
+        self.client.post("/v1/collections/artworks/prepare", headers=AUTH, json=upload)
+        with api_app.get_db() as db:
+            mobile_collections.home_publications.replace_cover_refs(
+                db, "avPick", [mobile_collections.home_publications.BlobCover(**upload)])
+            db.commit()
+        cleared = self.publish([self.av_work("a", None)], reply.json()["revision"])
+        self.assertEqual(cleared.status_code, 200, cleared.text)
+        self.assertEqual(self.cover_ticket(image["sha256"]).status_code, 404)
+        self.assertEqual(self.cover_ticket(other["sha256"]).status_code, 200)
+        with api_app.get_db() as db:
+            refs = db.execute("SELECT owner,sha256 FROM home_cover_refs ORDER BY owner").fetchall()
+        self.assertEqual([tuple(row) for row in refs], [("avPick", other["sha256"])])
+
+    def test_portrait_image_absent_keeps_payload_and_revision(self):
+        explicit = self.publish([self.av_work("a", None)])
+        self.assertEqual(explicit.status_code, 200, explicit.text)
+        # Digest of this replica as computed by the server before portraitImage existed.
+        self.assertEqual(explicit.json()["revision"], "9fa630de271918a791a89452e36755f9ed10cee805ad9a5137252f995ac13caa")
+        with api_app.get_db() as db:
+            payload = db.execute("SELECT payload FROM mobile_collections").fetchone()[0]
+            self.assertEqual(db.execute("SELECT count(*) FROM home_cover_refs").fetchone()[0], 0)
+        self.assertNotIn("portraitImage", payload)
+        omitted = self.publish([{**work("a", type="av"), "av": av_info()}], explicit.json()["revision"])
+        self.assertEqual(omitted.json()["revision"], explicit.json()["revision"])
+
+    def test_portrait_image_validation_and_same_descriptor_per_person(self):
+        image = self.portrait()
+        revision = self.publish([self.av_work("a", image)]).json()["revision"]
+        invalid = [self.portrait(contentType="image/gif"), self.portrait(sizeBytes=5 * 1024 * 1024 + 1),
+                   self.portrait(sizeBytes=0), self.portrait(width=0), self.portrait(height=-1),
+                   self.portrait(width=1.5), self.portrait(height=True), self.portrait(path="/private/p.jpg"),
+                   {**self.portrait(), "sha256": "bad"}, {k: v for k, v in self.portrait().items() if k != "height"}]
+        for bad in invalid:
+            with self.subTest(image=str(bad)[:80]):
+                reply = self.publish([self.av_work("a", bad)], revision)
+                self.assertEqual(reply.status_code, 422)
+                self.assertNotIn("/private/p.jpg", reply.text)
+        self.assertEqual(mobile_collections.AvPortraitImage.model_validate(
+            self.portrait(sizeBytes=5 * 1024 * 1024)).sizeBytes, 5 * 1024 * 1024)
+        other = self.portrait(b"other portrait")
+        for second in (other, None, {**image, "width": 301}):
+            with self.subTest(second=str(second)[:40]):
+                reply = self.publish([self.av_work("a", image), self.av_work("b", second)], revision)
+                self.assertEqual(reply.status_code, 422, reply.text)
+        # A portrait and an artwork naming the same bytes must agree on the manifest.
+        webp = {"sha256": image["sha256"], "sizeBytes": image["sizeBytes"], "contentType": "image/webp",
+                "objectKey": "work-artwork/mobile/" + image["sha256"]}
+        clash = {**self.av_work("a", image), "artworks": [
+            {"id": "cover", "kind": "cover", "selected": True, "thumbnail": webp, "original": None}]}
+        self.assertEqual(self.publish([clash], revision).status_code, 422)
+        self.assertEqual(self.listing().json()["revision"], revision)
+
+    def test_portrait_image_requires_uploaded_bytes(self):
+        image = self.portrait()
+        del fake_s3.objects["work-artwork/mobile/" + image["sha256"]]
+        item, _ = self.with_art()
+        missing_artwork = self.publish([item])
+        missing_portrait = self.publish([self.av_work("a", image)])
+        self.assertEqual(missing_portrait.status_code, 409)
+        self.assertEqual(missing_portrait.json(), missing_artwork.json())
+        self.assertFalse(self.listing().json()["ready"])
+        self.assertEqual(self.cover_ticket(image["sha256"]).status_code, 404)
+        # Confirmed through prepare, the commit needs no storage HEAD.
+        fake_s3.objects["work-artwork/mobile/" + image["sha256"]] = {"body": b"portrait", "content_type": "image/jpeg"}
+        upload = {k: image[k] for k in ("sha256", "sizeBytes", "contentType")}
+        self.assertIsNone(self.client.post("/v1/collections/artworks/prepare", headers=AUTH, json=upload).json()["uploadUrl"])
+        with mock.patch.object(fake_s3, "head_object", side_effect=AssertionError("unnecessary HEAD")):
+            self.assertEqual(self.publish([self.av_work("a", image)]).status_code, 200)
+        self.assertEqual(self.cover_ticket(image["sha256"]).status_code, 200)
 
     def test_storage_outage_does_not_publish_partial_metadata(self):
         revision = self.publish([work("old")]).json()["revision"]

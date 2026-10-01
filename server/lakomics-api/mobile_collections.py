@@ -26,6 +26,12 @@ below only when its feature is listed; a missing list means an older server that
 them. ``workRecord``: item ``status`` (per-type values) and ``ownedPlatform`` (games only).
 ``coverFocus``: volume ``coverFocusX`` in [0, 1]. ``people``: top-level ``people`` stored in
 ``mobile_collection_people`` and served by ``GET /v1/collections/people/{personId}``.
+``portraitImage``: ``av.people[].portraitImage`` = ``{sha256, sizeBytes, contentType, width,
+height}`` (jpeg/png/webp, <= 5 MiB), the chosen StashDB/Commons portrait bytes uploaded through
+the artwork flow (object ``work-artwork/mobile/<sha256>``). One person carries the same
+descriptor in every work. The blob joins the artwork confirm/HEAD barrier, and each commit
+replaces the ``home_publications`` cover refs of owner ``collectionPeople`` with the published
+portraits, so the tablet fetches them through ``POST /v1/home/covers/{sha256}/media-ticket``.
 Absent optional fields are never stored, so older payloads and revisions are unchanged.
 """
 from __future__ import annotations
@@ -48,6 +54,7 @@ import collection_bindings
 import collection_personal_edits as personal_edits
 import collection_releases
 import head_cache
+import home_publications
 
 MAX_SNAPSHOT_BYTES = 12 * 1024 * 1024
 MAX_ARTWORK_BYTES = 16 * 1024 * 1024
@@ -58,12 +65,15 @@ ImageMime = Literal["image/jpeg", "image/png", "image/webp", "image/gif", "image
 CollectionType = Literal["game", "manga", "movie", "av"]
 COLLECTION_TYPES = ("game", "manga", "movie", "av")
 #: Optional replica fields this server accepts (see the module docstring).
-REPLICA_FEATURES = ("workRecord", "coverFocus", "people")
+REPLICA_FEATURES = ("workRecord", "coverFocus", "people", "portraitImage")
 #: Allowed item ``status`` values per Collection type (feature ``workRecord``).
 ITEM_STATUSES = {"game": ("done", "playing", "unplayed"), "av": ("watched", "unwatched"),
                  "manga": ("collecting", "complete"), "movie": ("watched", "watching", "unwatched")}
 MAX_PEOPLE = 2000
 MAX_PERSON_BYTES = 64 * 1024
+MAX_PORTRAIT_BYTES = 5 * 1024 * 1024
+#: ``home_cover_refs`` owner of the published performer portraits (feature ``portraitImage``).
+PORTRAIT_OWNER = "collectionPeople"
 
 
 class StrictModel(BaseModel):
@@ -243,6 +253,15 @@ class AvPortraitCrop(StrictModel):
     h: float = Field(ge=0, le=1)
 
 
+class AvPortraitImage(StrictModel):
+    """Uploaded portrait bytes (feature ``portraitImage``); never stored as null."""
+    sha256: Digest
+    sizeBytes: StrictInt = Field(gt=0, le=MAX_PORTRAIT_BYTES)
+    contentType: Literal["image/jpeg", "image/png", "image/webp"]
+    width: StrictInt = Field(gt=0)
+    height: StrictInt = Field(gt=0)
+
+
 class AvPerson(StrictModel):
     id: ID
     name: str = Field(max_length=500)
@@ -250,6 +269,7 @@ class AvPerson(StrictModel):
     role: Literal["performer", "director"]
     order: StrictInt
     portraitCrop: AvPortraitCrop | None = None
+    portraitImage: AvPortraitImage | None = None
 
 
 class AvInfo(StrictModel):
@@ -397,6 +417,9 @@ def stored(item: Collection) -> dict:
     for volume in payload["volumes"]:
         if volume["coverFocusX"] is None:
             del volume["coverFocusX"]
+    for person in payload.get("av", {}).get("people", ()):
+        if person["portraitImage"] is None:
+            del person["portraitImage"]
     if "ownedVolumes" in payload:
         payload["ownedVolumes"].sort(key=lambda entry: entry["editionIndex"])
     return payload
@@ -478,6 +501,8 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             # Collections authority tables only; the domain stays inactive until an
             # explicit publisher activation.
             collection_authority.startup_db(db)
+            # Cover refs carry the published portraits (feature ``portraitImage``).
+            home_publications.startup_db(db)
             db.commit()
 
     lifecycle(app).on_startup(startup_collections)
@@ -617,6 +642,13 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                 for person in item.av.people:
                     if person.portraitCrop is not None and av_covers.get(person.portraitCrop.artworkId) != 1:
                         raise HTTPException(422, "Portrait crop requires a unique published AV cover")
+        portraits = {}
+        for item in snapshot.collections:
+            if item.av is not None:
+                for person in item.av.people:
+                    if portraits.setdefault(person.id, person.portraitImage) != person.portraitImage:
+                        raise HTTPException(422, "Conflicting portrait images for one person")
+        portraits = [image for image in portraits.values() if image is not None]
         with get_db() as db:
             if legacy_state(db)[0] != snapshot.baseRevision:
                 raise HTTPException(409, "Collection snapshot changed; refresh before publishing")
@@ -644,6 +676,13 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                 raise HTTPException(422, "Duplicate owned-volume editions")
             if len(encode(public_item(item.model_dump(), True)).encode()) > 3 * 1024 * 1024:
                 raise HTTPException(413, "Collection detail too large")
+        # Portrait bytes share the artwork store, so they pass the same upload barrier.
+        for image in portraits:
+            blob = ArtworkBlob(sha256=image.sha256, sizeBytes=image.sizeBytes,
+                               contentType=image.contentType, objectKey=artwork_key(image.sha256))
+            if blob.sha256 in blobs and blobs[blob.sha256] != blob:
+                raise HTTPException(422, "Conflicting artwork manifests")
+            blobs[blob.sha256] = blob
         # Preparation confirms each completed upload. Reuse those immutable hash
         # receipts so metadata publication does not repeat thousands of S3 calls.
         with get_db() as db:
@@ -680,6 +719,10 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             db.executemany("INSERT INTO mobile_collection_people VALUES (?,?)",
                            [(person["id"], encode(person)) for person in people or []])
             db.executemany("INSERT INTO mobile_collection_artwork VALUES (?,?,?) ON CONFLICT(sha256) DO UPDATE SET size_bytes=excluded.size_bytes,content_type=excluded.content_type", [(blob.sha256, blob.sizeBytes, blob.contentType) for blob in unconfirmed])
+            # After the receipts above, so every portrait is confirmed; none clears the refs.
+            home_publications.replace_cover_refs(db, PORTRAIT_OWNER, [
+                home_publications.BlobCover(sha256=image.sha256, sizeBytes=image.sizeBytes,
+                                            contentType=image.contentType) for image in portraits])
             db.executemany("INSERT INTO mobile_collections VALUES (?,?,?,?,?,?)", [
                 (item["id"], item["type"], item["name"], int(item["showcase"]), item["showcaseOrder"], encode(item)) for item in items
             ])
