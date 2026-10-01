@@ -3,9 +3,9 @@ import { SegmentedControl, type SegmentedOption } from "./SegmentedControl";
 
 /**
  * Where the host puts the bar (DESIGN.md §12, docs/prototypes/section-bar-20261001):
- * - `pinned`: a non-scrolling row directly under the top bar; the list scrolls beneath it (PC).
- * - `inline`: the first row inside a scrolling list, so it scrolls away with the list (tablet).
- * - `shade`: the same bar dropped over the list from the top bar (tablet); the host positions it and
+ * - `pinned`: a legacy non-scrolling row directly under the top bar.
+ * - `inline`: the first row inside a scrolling list, so it scrolls away with the list.
+ * - `shade`: the same bar dropped over the list from the top bar; the host positions it and
  *   decides when it is open.
  * The bar itself only lays out its sections and trailing controls; placement styling is the host's.
  */

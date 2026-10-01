@@ -5,17 +5,19 @@ import type { ViewChromeSpec } from "../layout/WorkspaceChrome";
 import { Button } from "../shared/ui/Button";
 import { Menu } from "../shared/ui/Menu";
 import { SectionBar } from "../shared/ui/SectionBar";
+import { SectionDropMount, useSectionDrop } from "../shared/ui/useSectionDrop";
 import { displayDateTime } from "../shared/displayDate";
 
 export type MangaSource = "all" | "bookmarked" | "local";
+const sourceOptions = (localCount?: number, bookmarkCount?: number) => [
+  { value: "all" as const, label: "카탈로그" }, { value: "bookmarked" as const, label: "북마크", count: bookmarkCount }, { value: "local" as const, label: "로컬", count: localCount },
+];
 
 /** The source switch as the section bar under the top bar; sort and language menus sit at its right end. */
 export function MangaSourceControl({ value, onChange, localCount, bookmarkCount, trailing }: {
   value: MangaSource; onChange: (source: MangaSource) => void; localCount?: number; bookmarkCount?: number; trailing?: ReactNode;
 }) {
-  return <SectionBar label="망가 출처" className="manga-section-bar" value={value} onChange={onChange} trailing={trailing} options={[
-    { value: "all", label: "카탈로그" }, { value: "bookmarked", label: "북마크", count: bookmarkCount }, { value: "local", label: "로컬", count: localCount },
-  ]} />;
+  return <SectionBar label="망가 출처" className="manga-section-bar" value={value} onChange={onChange} trailing={trailing} options={sourceOptions(localCount, bookmarkCount)} />;
 }
 
 export function MangaChoiceMenu<T extends string>({ label, value, options, onChange }: {
@@ -30,8 +32,9 @@ export function MangaToolbar({ source, onSourceChange, localCount, bookmarkCount
   countLabel?: string; controls?: ReactNode; refreshedAt?: string | null; refreshing?: boolean; onRefresh?: () => void;
   actions?: ReactNode; chrome?: ViewChromeSpec; ariaLabel?: string;
 }) {
+  const sectionDrop = useSectionDrop({ label: "망가 출처", className: "manga-section-bar", value: source, onChange: onSourceChange, trailing: controls, options: sourceOptions(localCount, bookmarkCount) });
   return <>
-    <ViewToolbar title="망가" ariaLabel={ariaLabel} titleAccessory={<>
+    <ViewToolbar sectionDrop={sectionDrop} title="망가" ariaLabel={ariaLabel} titleAccessory={<>
       {countLabel && <span className="manga-toolbar__count">{countLabel}</span>}
       <div className="manga-toolbar__refresh">
         {refreshedAt && <time dateTime={refreshedAt}>갱신 {displayDateTime(refreshedAt, new Date(), { withTime: true })}</time>}
@@ -39,6 +42,6 @@ export function MangaToolbar({ source, onSourceChange, localCount, bookmarkCount
         {actions}
       </div>
     </>} chrome={chrome} />
-    <MangaSourceControl value={source} onChange={onSourceChange} localCount={localCount} bookmarkCount={bookmarkCount} trailing={controls} />
+    <SectionDropMount host=".manga-browser" target=".manga-browser__content">{sectionDrop.inline}</SectionDropMount>
   </>;
 }

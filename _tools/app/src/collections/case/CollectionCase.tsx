@@ -3,7 +3,7 @@ import "./CollectionCase.css";
 import "./CaseMaterials.css";
 import { fitCollectionCase, type StageBox } from "./fitCaseStage";
 
-export type CasePlatform = "sw2" | "sw" | "ps5" | "pc" | "other" | "av" | "film";
+export type CasePlatform = "sw2" | "sw" | "ps5" | "pc" | "other" | "av" | "film" | "book";
 export function casePlatform(platforms: string | null, ownedPlatform?: string | null): CasePlatform {
   const platform = ownedPlatform?.trim() || platforms?.split("·")[0]?.trim() || "";
   if (/switch\s*2/i.test(platform)) return "sw2";
@@ -12,13 +12,13 @@ export function casePlatform(platforms: string | null, ownedPlatform?: string | 
   if (/\b(pc|windows|linux|mac|macos)\b|steam deck/i.test(platform)) return "pc";
   return "other";
 }
-/** The case a work is drawn as: AV and film cases by type, a game by its owned or first device. */
+/** The case a work is drawn as: books, AV and films by type, games by their owned or first device. */
 export function workCasePlatform(type: string, platforms: string | null | undefined, ownedPlatform?: string | null): CasePlatform {
-  return type === "av" ? "av" : type === "movie" ? "film" : casePlatform(platforms ?? null, ownedPlatform);
+  return type === "manga" ? "book" : type === "av" ? "av" : type === "movie" ? "film" : casePlatform(platforms ?? null, ownedPlatform);
 }
 export const CASE_PLASTIC: Record<CasePlatform, string> = {
   sw2: "rgba(206,44,54,.9)", sw: "rgba(214,222,230,.24)", ps5: "rgba(214,222,230,.24)",
-  pc: "rgba(120,128,136,.38)", other: "rgba(120,128,136,.38)", av: "rgba(10,10,11,.94)", film: "rgba(28,30,34,.92)",
+  pc: "rgba(120,128,136,.38)", other: "rgba(120,128,136,.38)", av: "rgba(10,10,11,.94)", film: "rgba(28,30,34,.92)", book: "rgb(236,231,220)",
 };
 export type CaseData = { title: string; publisher?: string | null; platform: CasePlatform; front: string | null; spine?: string | null; back?: string | null; privacy: boolean };
 export function spineInsertClass(data: CaseData) {

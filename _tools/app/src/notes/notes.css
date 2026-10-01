@@ -146,7 +146,8 @@
 .notes-main { flex: 1; min-height: 0; display: flex; }
 .notes-main--editor { overflow: auto; }
 .notes-board { flex: 1; min-width: 0; overflow-y: auto; padding: var(--space-3) var(--space-6) var(--space-8); box-sizing: border-box; }
-.notes-board > .notes-empty { min-height: 60%; }
+.notes-board__items { display: contents; }
+.notes-board__items > .notes-empty { min-height: 60%; }
 .notes-board__label { margin: var(--space-1) 0 var(--space-2); font-weight: 400; }
 .notes-board__label ~ .notes-board__label { margin-top: var(--space-6); }
 
@@ -162,3 +163,5 @@
 .notes-recovery-surface .notes-recovery-pin, .notes-recovery-surface .notes-recovery-qr { margin-top: var(--space-3); }
 
 .notes-rendered__empty svg { width:20px; height:20px; color:var(--color-faint); }
+
+.notes-board > .ui-section-bar { margin: calc(-1 * var(--space-3)) calc(-1 * var(--space-6)) var(--space-3); }

@@ -5,7 +5,10 @@ import { ChromeContribution, type ViewChromeSpec } from "./WorkspaceChrome";
 import { useWorkspaceChrome } from "./WorkspaceChromeContext";
 import { ChromeQueryBadge } from "./ChromeSearch";
 
+import type { SectionDrop } from "../shared/ui/useSectionDrop";
+
 type ViewToolbarProps = {
+  sectionDrop?: SectionDrop;
   title: string;
   titleContent?: ReactNode;
   leadingAction?: ReactNode;
@@ -16,26 +19,27 @@ type ViewToolbarProps = {
   chrome?: ViewChromeSpec;
 };
 
-export function ViewToolbar({ title, titleContent, leadingAction, titleAccessory, ariaLabel, children, actions, chrome }: ViewToolbarProps) {
+export function ViewToolbar({ title, titleContent, leadingAction, titleAccessory, ariaLabel, children, actions, chrome, sectionDrop }: ViewToolbarProps) {
   const workspace = useWorkspaceChrome();
   const place = (header: ReactNode) => workspace?.targets.header ? createPortal(header, workspace.targets.header) : header;
   if (workspace && chrome) {
     return <>
       <ChromeContribution title={title} spec={chrome} />
-      {place(<header className="view-toolbar view-toolbar--context" role="toolbar" aria-label={ariaLabel} data-tauri-drag-region="deep">
+      {sectionDrop?.overlay}
+      {place(<header ref={sectionDrop?.barRef} className="view-toolbar view-toolbar--context" role="toolbar" aria-label={ariaLabel} data-tauri-drag-region="deep">
         <span className="chrome-location-mark" aria-hidden="true" />
         {leadingAction}
-        <h2 aria-description={title}>{titleContent ?? title}</h2>
+        <h2 aria-description={title}>{sectionDrop ? sectionDrop.title(titleContent ?? title, sectionDrop.area ?? title) : titleContent ?? title}</h2>
         {titleAccessory}
         <ChromeQueryBadge search={chrome.search} />
         <div className="chrome-context-status">{chrome.status}</div>
       </header>)}
     </>;
   }
-  return place(
-    <header className="view-toolbar" role="toolbar" aria-label={ariaLabel} data-tauri-drag-region="deep">
+  return <>{sectionDrop?.overlay}{place(
+    <header ref={sectionDrop?.barRef} className="view-toolbar" role="toolbar" aria-label={ariaLabel} data-tauri-drag-region="deep">
       {leadingAction}
-      <h2>{titleContent ?? title}</h2>
+      <h2>{sectionDrop ? sectionDrop.title(titleContent ?? title, sectionDrop.area ?? title) : titleContent ?? title}</h2>
       {titleAccessory}
       {children && <div className="view-toolbar__content">{children}</div>}
       <div className="view-toolbar__actions">
@@ -43,5 +47,5 @@ export function ViewToolbar({ title, titleContent, leadingAction, titleAccessory
         {!workspace && <WindowControls />}
       </div>
     </header>
-  );
+  )}</>;
 }

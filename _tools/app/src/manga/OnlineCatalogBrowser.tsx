@@ -686,7 +686,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
     </div>}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     <div className="online-catalog__workspace">
-    <div ref={gridScroll} className="manga-browser__content online-catalog__content" inert={loading || requestedSource === "local"}>
+    <div ref={gridScroll} className="manga-browser__content online-catalog__content">
+      <div className="online-catalog__frame" style={{ display: "contents" }} inert={loading || requestedSource === "local"}>
       {loadError && !results ? <EmptyState title="온라인 카탈로그를 불러오지 못했습니다" />
         : !status ? <MangaSkeletonGrid />
         : !status.installed ? <EmptyState title="온라인 카탈로그가 없습니다">
@@ -714,6 +715,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
             {moreAvailable && !loadingMore && (loadMoreFailed || !autoLoadSupported) && <Button size="sm" variant="quiet" disabled={searchPending} onClick={() => void loadMore()}>더 불러오기</Button>}
           </footer>
         </>}
+      </div>
     </div>
     <div ref={panelHost} className="online-catalog__panel-host">
       <OverlayPanel open={detailOpen} title="상세" ariaLabel="망가 상세" closeLabel="상세 닫기" width={380} returnFocusRef={detailReturnFocus}

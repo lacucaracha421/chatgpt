@@ -61,7 +61,7 @@ export function CollectionCard({
       aria-description={captionText}
       onClick={onClick}
     >
-      {lightCase && collection.type !== "manga" && <span className="collection-card__light" aria-hidden={!shelf}><CollectionShelfCase collection={collection} front={coverUrl} privacy={privacyMode} active={shelf} selected={selected} /></span>}
+      {lightCase && <span className="collection-card__light" aria-hidden={!shelf}><CollectionShelfCase collection={collection} front={coverUrl} privacy={privacyMode} active={shelf} selected={selected} /></span>}
       {flatMounted && <span aria-hidden={!flat} className={`collection-card__object collection-card__object--${collection.type}`}>
         <span className="collection-card__cover">
           {visibleCoverUrl && !privacyMode && (collection.type === "game" || collection.type === "av") ? <GameCase src={visibleCoverUrl} alt={collection.name} scope={scope} revision={collection.updatedAt} large={exhibition} onError={() => setFailedCoverUrl(visibleCoverUrl)} /> : visibleCoverUrl && !privacyMode && collection.type === "manga" ? (

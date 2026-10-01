@@ -271,7 +271,8 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
         if (current?.queryKey !== queryKey) return current;
         const existing = new Set(current.items.map((asset) => asset.id));
         const fresh = result.items.filter((asset) => !existing.has(asset.id));
-        if (fresh.length === 0) return current;
+        // A terminal page can contain only overlap; it still ends pagination.
+        if (fresh.length === 0) return result.nextCursor === null ? { ...current, tailCursor: null } : current;
         return { sort: queryBase.sort, queryKey, items: [...current.items, ...fresh], headCursor: current.headCursor, tailCursor: result.nextCursor, totalCount: result.totalCount ?? current.totalCount };
       });
     }).catch((error: unknown) => { if (generation === generationRef.current) setNextError({ queryKey, message: commandErrorMessage(error, "다음 자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) { nextLoadingRef.current = false; setNextLoading(false); } });

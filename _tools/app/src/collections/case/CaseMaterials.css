@@ -19,3 +19,13 @@
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(90deg, rgba(0, 0, 0, .4), rgba(255, 255, 255, .12) 30%, rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, .35));
 }
+
+/* Paperback covers and exposed paper have no plastic rim, tint or gloss. */
+.collection-light-case--book {
+  --case-rim: 0px;
+  --case-front-radius: 0 2px 2px 0;
+  --case-material: var(--plastic);
+}
+.collection-light-case--book .cs-front::after, .collection-light-case--book .cs-spine::after { content: none; }
+.collection-light-case.collection-light-case--book .cs-top { background: color-mix(in srgb, var(--plastic) 90%, #000); }
+.collection-light-case--book .spine-title { color: rgba(24,22,20,.86); }

@@ -59,3 +59,8 @@
 .collection-toolbar__rating { width: 264px; padding: var(--space-3); }
 
 .collection-list--showcase { grid-template-columns: repeat(var(--columns), var(--cell-width)); grid-auto-columns: var(--cell-width); overflow-x: auto; scrollbar-width: thin; }
+
+/* The section row belongs to the list; its dropped copy reserves no space. */
+.collection-browser__list-scroll > .ui-section-bar { margin-inline: calc(-1 * var(--space-3)); }
+.collection-browser__showcase-scroll { flex: 1; min-height: 0; overflow: auto; }
+.collection-exhibition > .ui-section-drop-slot { margin: calc(-1 * var(--space-2)) calc(-1 * var(--space-3)) var(--space-2); }

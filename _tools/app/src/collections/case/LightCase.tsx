@@ -37,7 +37,7 @@ export function CollectionShelfCase({ collection, front, privacy, active, select
     return () => { current = false; };
   }, [active, privacy, collection.id, collection.type, collection.updatedAt]);
   const av = avArt?.id === collection.id ? avArt : null;
-  const spine = collection.type === "av" ? av?.spine ?? null : info?.spineArtworkId ? workArtworkThumbnailUrl(info.spineArtworkId) : null;
+  const spine = collection.type === "manga" ? null : collection.type === "av" ? av?.spine ?? null : info?.spineArtworkId ? workArtworkThumbnailUrl(info.spineArtworkId) : null;
   const data: CaseData = { title: collection.name, publisher: collection.publisher, platform: workCasePlatform(collection.type, collection.platforms, collection.type === "game" ? info?.ownedPlatform : null), front: av?.front ?? front, spine, privacy };
   return <LightCase data={data} selected={selected} />;
 }
@@ -46,7 +46,7 @@ export function CollectionShelfCase({ collection, front, privacy, active, select
 /** Selection is the lift alone (PC and tablet): no outline or check; the owning button shows keyboard focus. */
 export function LightCase({ data, selected }: { data: CaseData; selected: boolean }) {
   const [ratio, setRatio] = useState(.71);
-  return <span className="collection-light-case" data-front={selected || undefined} style={{ "--case-ratio": ratio, "--plastic": CASE_PLASTIC[data.platform], "--gloss": selected ? "50%" : "84%" } as CSSProperties}>
+  return <span className={`collection-light-case${data.platform === "book" ? " collection-light-case--book" : ""}`} data-front={selected || undefined} style={{ "--case-ratio": ratio, "--plastic": CASE_PLASTIC[data.platform], "--gloss": selected ? "50%" : "84%" } as CSSProperties}>
     <span className="cs-box">
       <span className="cs-front">
         <span className="ins">

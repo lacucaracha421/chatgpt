@@ -1,5 +1,5 @@
 import {act,cleanup,fireEvent,render,screen,within} from '@testing-library/react';
-import {useState} from 'react';
+import {useState,type ReactNode} from 'react';
 import {afterEach,expect,it,vi} from 'vitest';
 import {closeVisibleShade,useSectionShade} from './SectionShade';
 import {TopBar} from './TopBar';
@@ -9,9 +9,9 @@ afterEach(cleanup);
 type Kind='game'|'manga'|'movie';
 const OPTIONS=[{value:'game' as const,label:'게임'},{value:'manga' as const,label:'만화'},{value:'movie' as const,label:'영화'}];
 
-function Screen({onPick,onOutside}:{onPick?(value:Kind):void;onOutside?():void}) {
+function Screen({onPick,onOutside,extra}:{extra?:ReactNode;onPick?(value:Kind):void;onOutside?():void}) {
   const [value,setValue]=useState<Kind>('game');
-  const sections=useSectionShade<Kind>({label:'컬렉션 유형',options:OPTIONS,value,onChange:next=>{setValue(next);onPick?.(next);}});
+  const sections=useSectionShade<Kind>({label:'컬렉션 유형',options:OPTIONS,value,extra,onChange:next=>{setValue(next);onPick?.(next);}});
   return <section>
     <TopBar barRef={sections.barRef} title={sections.title('컬렉션')}/>
     {sections.shade}
@@ -128,6 +128,84 @@ it('does not count a pull that ends on the title as a tap',()=>{
   fireEvent.pointerDown(title,{pointerId:1,isPrimary:true,button:0,clientX:50,clientY:10});
   fireEvent.pointerMove(title,{pointerId:1,clientX:50,clientY:60});
   fireEvent.pointerUp(title,{pointerId:1,clientX:50,clientY:60});
-  fireEvent.click(title);
+  fireEvent.click(title,{detail:1});
   expect(shade()!.classList.contains('is-open')).toBe(true);
+});
+
+it('keeps the pulled position during release layout reads until opening commits',()=>{
+  render(<Screen/>);
+  scrollTo(300);
+  const panel=shade()!;
+  let releasing=false;
+  const releasePositions:string[]=[];
+  Object.defineProperty(panel,'offsetHeight',{configurable:true,get:()=>{
+    // A browser resolves styles on this layout read. With is-dragging still applied,
+    // clearing the inline transform would immediately resolve to the closed -100% position.
+    if(releasing&&!panel.classList.contains('is-open'))releasePositions.push(panel.style.transform);
+    return 40;
+  }});
+  fireEvent.pointerDown(topBar(),{pointerId:1,isPrimary:true,button:0,clientX:200,clientY:10});
+  fireEvent.pointerMove(topBar(),{pointerId:1,clientX:200,clientY:40});
+  expect(panel.style.transform).toBe('translateY(-10px)');
+  releasing=true;
+  fireEvent.pointerUp(topBar(),{pointerId:1,clientX:200,clientY:40});
+  expect(releasePositions).not.toContain('');
+  expect(panel.classList.contains('is-open')).toBe(true);
+  expect(panel.style.transform).toBe('');
+});
+
+it.each([false,true])('ignores a delayed pull click (scroll after release: %s) and allows the next title tap',scrollAfterPull=>{
+  vi.useFakeTimers();
+  try {
+    render(<Screen/>);
+    scrollTo(300);
+    Object.defineProperty(shade()!,'offsetHeight',{configurable:true,value:40});
+    const title=screen.getByRole('button',{name:'컬렉션 · 게임'});
+    fireEvent.pointerDown(title,{pointerId:1,isPrimary:true,button:0,clientX:50,clientY:10});
+    fireEvent.pointerMove(title,{pointerId:1,clientX:50,clientY:40});
+    fireEvent.pointerUp(title,{pointerId:1,clientX:50,clientY:40});
+    expect(shade()!.classList.contains('is-open')).toBe(true);
+    if(scrollAfterPull)scrollTo(320);
+    act(()=>{vi.advanceTimersByTime(300);});
+    fireEvent.click(title,{detail:1});
+    expect(shade()!.classList.contains('is-open')).toBe(!scrollAfterPull);
+    fireEvent.pointerDown(title,{pointerId:2,isPrimary:true,button:0,clientX:50,clientY:10});
+    fireEvent.pointerUp(title,{pointerId:2,clientX:50,clientY:10});
+    fireEvent.click(title,{detail:1});
+    expect(shade()!.classList.contains('is-open')).toBe(scrollAfterPull);
+  } finally {
+    cleanup();
+    vi.useRealTimers();
+  }
+});
+
+it('allows keyboard title activation after a pull that produces no click',()=>{
+  render(<Screen/>);
+  scrollTo(300);
+  Object.defineProperty(shade()!,'offsetHeight',{configurable:true,value:40});
+  fireEvent.pointerDown(topBar(),{pointerId:1,isPrimary:true,button:0,clientX:200,clientY:10});
+  fireEvent.pointerMove(topBar(),{pointerId:1,clientX:200,clientY:40});
+  fireEvent.pointerUp(topBar(),{pointerId:1,clientX:200,clientY:40});
+  const title=screen.getByRole('button',{name:'컬렉션 · 게임'});
+  fireEvent.click(title,{detail:0});
+  expect(shade()!.classList.contains('is-open')).toBe(false);
+  fireEvent.click(title,{detail:0});
+  expect(document.activeElement).toBe(shadeRadio('게임'));
+  fireEvent.keyDown(document,{key:'Escape'});
+  expect(document.activeElement).toBe(title);
+});
+
+
+it('carries the extra shortcut row in both copies and closes the shade when it opens a destination',()=>{
+  const onOpen=vi.fn();
+  render(<Screen extra={<div role="group" aria-label="바로가기"><button onClick={onOpen}>쇼케이스 12</button></div>}/>);
+  const bar=list().firstElementChild!;
+  expect(bar.classList.contains('section-shade-rows--inline')).toBe(true);
+  expect(within(bar as HTMLElement).getByRole('radiogroup',{name:'컬렉션 유형'})).toBeTruthy();
+  fireEvent.click(within(list()).getByRole('button',{name:'쇼케이스 12'}));expect(onOpen).toHaveBeenCalledTimes(1);
+  scrollTo(300);fireEvent.click(screen.getByRole('button',{name:'컬렉션 · 게임'}));
+  const shortcut=within(shade()!).getByRole('button',{name:'쇼케이스 12'});
+  fireEvent.click(shortcut);expect(onOpen).toHaveBeenCalledTimes(2);
+  expect(shade()!.classList.contains('is-open')).toBe(false);
+  expect(list().scrollTop).toBe(300);
 });

@@ -12,19 +12,20 @@ import type {MangaShelfPick} from '../src/collections/MangaShelfRow';
 import {AvPerformerScreen} from './AvPerformer';
 import {useCollectionEdits} from './useCollectionEdits';
 import {CollectionReleases} from './CollectionReleases';
-import {commitReleases, invalidateReleases, loadShelf, observePublication, releaseEpoch, releaseStore, subscribeReleases} from './releaseStore';
-import {allUnreadReleases, localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseBoardEntry, releaseCaption, releaseCounts, releaseRevision, type ReleaseCaption, type ReleaseCounts} from './collectionReleases';
-import {releaseRows} from './homeDashboard';
-import {normalizeReleaseCalendarReply, releaseDateLabel, releaseDaysUntil, type ReleaseCalendarEntry, type ReleaseCalendarReply} from './releaseCalendarModel';
+import {invalidateReleases, observePublication} from './releaseStore';
+import {localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseBoardEntry, releaseCaption, releaseCounts, releaseRevision, type ReleaseCaption, type ReleaseCounts} from './collectionReleases';
+import {normalizeReleaseCalendarReply, type ReleaseCalendarReply} from './releaseCalendarModel';
 import {FilmDetails} from './FilmDetails';
 import {CollectionBindings} from './CollectionBindings';
 import type {BindProvider} from './collectionBindings';
-import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent} from 'react';
+import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent} from 'react';
 import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,useSegmentMotion,type CardArrival} from './motion';
-import {ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon, XMarkIcon} from '@heroicons/react/24/outline';
+import {BellIcon, CalendarIcon, StarIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
-import {Badge, Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel} from './ui';
+import {Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel} from './ui';
 import {BottomSheet} from './BottomSheet';
+import {Overlay} from './Overlay';
+import {ReleaseCalendar} from './ReleaseCalendar';
 import {SearchButton,TopBar,TopBarSearch} from './TopBar';
 import {StepSlider} from './StepSlider';
 import {usePullToRefresh} from './usePullToRefresh';
@@ -35,14 +36,12 @@ import {usePrivacyMode} from './privacyMode';
 import {Scrubber} from './Scrubber';
 import type {ScrubberSort} from './scrubberModel';
 
-import {api, errorText, native} from './transport';
+import {api, errorText} from './transport';
 import {ARTWORK_BUSY_RETRIES, ARTWORK_BUSY_RETRY_MS, ARTWORK_RETRY_MS, ArtworkMemory, ArtworkMemoryContext, artworkSource, artworkTicket, artworkVersion, decoded, mediaBusy, validArtworkUrl, type LoadedArtwork, type Retries} from './collectionArtwork';
 import {collectionCardCredit, collectionCardDate, originalTitle, collectionCover, collectionPath, defaultCollectionFilters, editions, editionVolumes, ratingLabel, SORT_LABELS, sortDirectionLabels, volumeLabel, volumeReleaseLabel} from './collectionModel';
 import type {CollectionDetail, CollectionKind, CollectionPage, CollectionSummary, CollectionFilters as Filters} from './collectionModel';
-import type {Ticket} from './types';
 import {AvCast, AvLookupSender, AvPerformerShelves, AvRelatedWorks, AvViewTabs, type AvListView, AV_LIST_VIEW_KEY} from './AvCollections';
 import {KIND_LABEL} from '../src/collections/collectionFormat';
-import {ddayLabel} from '../src/shared/displayDate';
 import './library.css';
 import './Collections.css';
 
@@ -50,43 +49,6 @@ import './Collections.css';
 type CollectionTab = CollectionKind | 'av';
 const labels:Record<CollectionTab,string> = KIND_LABEL;
 const TABS:CollectionTab[] = ['game','manga','movie','av'];
-const COLLECTION_SECTIONS_KEY='lakomics.mobile.collectionSections.v1';
-type CollectionSection='showcase'|'news';
-type SectionPreferences=Record<CollectionTab,Record<CollectionSection,boolean>>;
-const defaultSectionPreferences=():SectionPreferences=>Object.fromEntries(TABS.map(tab=>[tab,{showcase:true,news:true}])) as SectionPreferences;
-function readSectionPreferences():SectionPreferences {
-  const fallback=defaultSectionPreferences();
-  try {
-    const parsed=JSON.parse(localStorage.getItem(COLLECTION_SECTIONS_KEY)??'null') as Partial<SectionPreferences>|null;
-    for(const tab of TABS)for(const section of ['showcase','news'] as const)if(typeof parsed?.[tab]?.[section]==='boolean')fallback[tab][section]=parsed[tab]![section];
-  } catch {/* Device preferences are optional. */}
-  return fallback;
-}
-function writeSectionPreferences(value:SectionPreferences) { try {localStorage.setItem(COLLECTION_SECTIONS_KEY,JSON.stringify(value));} catch {/* Keep the in-memory fold state. */} }
-
-/** One label per section: name, count, fold toggle and (when the section has a full view) the › that opens it. */
-function CollectionSectionLabel({name,count,open,onToggle,onOpen}:{name:string;count?:number;open:boolean;onToggle():void;onOpen?():void}) {
-  const ToggleIcon = open ? ChevronDownIcon : ChevronRightIcon;
-  return <SectionLabel title={name} count={count} onOpen={onOpen} actions={<Button type="button" size="icon" variant="ghost" aria-label={`${name} ${open ? '접기' : '펼치기'}`} aria-expanded={open} onClick={onToggle}><ToggleIcon aria-hidden="true" /></Button>} />;
-}
-
-function CalendarPreviewCover({entry,privacy,active}:{entry:ReleaseCalendarEntry;privacy:boolean;active:boolean}) {
-  const [url,setUrl]=useState('');
-  useEffect(()=>{
-    if(!active||privacy||!entry.cover){setUrl('');return;}
-    const controller=new AbortController();const cover=entry.cover;
-    if(cover.url&&/^https:\/\//.test(cover.url)){setUrl(cover.url);return()=>controller.abort();}
-    if(!cover.sha256)return()=>controller.abort();
-    void native<Ticket>('homeCover',{sha256:cover.sha256},controller.signal).then(ticket=>{if(!controller.signal.aborted&&validArtworkUrl(ticket.url))setUrl(ticket.url);},()=>{});
-    return()=>controller.abort();
-  },[active,entry.cover?.sha256,entry.cover?.url,privacy]);
-  if(privacy)return <span className="collection-news-cover-placeholder" aria-label="비공개 모드로 이미지 숨김"/>;
-  return url?<img src={url} alt="" loading="lazy" decoding="async" draggable={false}/>:<span className="collection-news-cover-placeholder" aria-label={`${entry.title} 표지 준비 중`}/>;
-}
-
-function ShowcaseCover({work,revision,active,onOpen}:{work:CollectionSummary;revision:string;active:boolean;onOpen(id:string):void}) {
-  return <button className="collection-showcase-tile" aria-label={work.name} onClick={()=>onOpen(work.id)}><Artwork item={work} id={collectionCover(work)} revision={revision} active={active} label=""/></button>;
-}
 /** A list query has settled on `key`: its first page (or its failure) is on screen. */
 const settledOn=(list:{key:string;busy:boolean},key:string)=>list.key===key&&!list.busy;
 // The detail pane names the work's own maker role rather than a generic "제작자".
@@ -288,26 +250,26 @@ function settleWithin(work:Promise<unknown>,ms:number){
  * `slot` (a Collection type) remembers its last committed query: switching back to a slot whose
  * query is unchanged shows it without a request, re-read in the background only when a newer
  * publication revision has been read since. A refresh (`key` changes), a new search or filter
- * within the slot, or a revision change mid-scroll reads the server as before.
+ * within the slot, or a revision change while fetching reads the server as before.
  */
 function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:boolean,{slot='',validate,prepare}:{slot?:string;validate?:(page:CollectionPage)=>void;prepare?:(page:CollectionPage,signal:AbortSignal)=>Promise<unknown>}={}) {
   const [state,setState]=useState<ListState>(EMPTY_LIST);
   const latest=useRef(state);latest.current=state;
-  const committed=useRef(''),more=useRef<AbortController|null>(null);
+  const committed=useRef('');
   const memory=useRef(new Map<string,ListState>()),shownSlot=useRef(slot),newest=useRef<string|null>(null);
-  const [nonce,setNonce]=useState(0);
+  const [nonce,setNonce]=useState(0),[revalidating,setRevalidating]=useState(false);
   const pathRef=useRef(path);pathRef.current=path;
   const validateRef=useRef(validate);validateRef.current=validate;
   const prepareRef=useRef(prepare);prepareRef.current=prepare;
   // Each slot remembers its committed query as it grows.
   useEffect(()=>{
     if(!state.page||state.busy||state.error||state.key!==committed.current||state.key!==key)return;
-    memory.current.set(slot,{...state,more:false,moreError:''});shownSlot.current=slot;
+    memory.current.set(slot,{...state,more:false});shownSlot.current=slot;
   },[state]);// eslint-disable-line react-hooks/exhaustive-deps
   useEffect(()=>{
+    setRevalidating(false);
     if(!enabled)return;
     if(committed.current===key){setState(current=>current.busy?{...current,busy:false}:current);return;}
-    more.current?.abort();
     const controller=new AbortController();
     const firstPage=()=>api<CollectionPage>(pathRef.current(null),controller.signal).then(result=>{validateRef.current?.(result);newest.current=result.revision;return result;});
     const commit=(result:CollectionPage)=>{committed.current=key;setState({key,items:result.items,page:result,next:result.nextCursor,busy:false,more:false,error:'',moreError:'',legacy:false});};
@@ -315,7 +277,11 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
     if(kept?.key===key){
       committed.current=key;setState(kept);
       // Shown at once; re-read quietly only if a newer publication was read since.
-      if(kept.page?.revision!==newest.current)void firstPage().then(result=>{if(!controller.signal.aborted)commit(result);}).catch(()=>{});
+      if(kept.page?.revision!==newest.current){
+        // A remembered partial list must not fetch its old cursor alongside this first page.
+        setRevalidating(true);
+        void firstPage().then(result=>{if(!controller.signal.aborted){commit(result);setRevalidating(false);}}).catch(()=>{if(!controller.signal.aborted)setRevalidating(false);});
+      }
       return()=>controller.abort();
     }
     const swapping=latest.current.items.length>0;
@@ -330,24 +296,39 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
     return()=>controller.abort();
   },[key,enabled,nonce]);
   const restart=useCallback(()=>{committed.current='';setNonce(n=>n+1);},[]);
-  const loadMore=useCallback(()=>{
-    const current=latest.current;
-    if(!enabled||current.busy||current.more||current.moreError||!current.next||current.key!==committed.current)return;
-    const controller=new AbortController();more.current=controller;
+  // This effect runs only after the first page has committed. Collections are small: keep
+  // the shown list stable while draining the cursor, then append in one render. On failure,
+  // publish the pages already received and retain the failed cursor for explicit retry.
+  useEffect(()=>{
+    if(!enabled||revalidating||state.busy||state.error||state.moreError||!state.next||state.key!==key||state.key!==committed.current)return;
+    const controller=new AbortController(),current=state;
+    const items=[...current.items],seen=new Set(items.map(work=>work.id));
+    let next=current.next;
+    const append=(moreError='')=>setState(value=>({...value,items,next,more:false,moreError}));
     setState(value=>({...value,more:true}));
-    void api<CollectionPage>(pathRef.current(current.next),controller.signal).then(result=>{
-      if(controller.signal.aborted||latest.current.key!==current.key)return;
-      validateRef.current?.(result);
-      if(result.revision!==current.page?.revision){newest.current=result.revision;restart();return;}
-      if(result.nextCursor&&result.nextCursor===current.next)throw new Error('목록 커서가 진행되지 않습니다.');
-      setState(value=>{const seen=new Set(value.items.map(work=>work.id));return {...value,items:[...value.items,...result.items.filter(work=>!seen.has(work.id))],next:result.nextCursor,more:false};});
-    }).catch(reason=>{if(!controller.signal.aborted)setState(value=>({...value,more:false,moreError:errorText(reason)}));});
-  },[enabled,restart]);
+    void (async()=>{
+      try {
+        while(next){
+          const result=await api<CollectionPage>(pathRef.current(next),controller.signal);
+          if(controller.signal.aborted)return;
+          validateRef.current?.(result);
+          if(result.revision!==current.page?.revision){newest.current=result.revision;restart();return;}
+          if(result.nextCursor===next)throw new Error('목록 커서가 진행되지 않습니다.');
+          for(const work of result.items)if(!seen.has(work.id)){seen.add(work.id);items.push(work);}
+          next=result.nextCursor;
+        }
+        append();
+      } catch(reason){if(!controller.signal.aborted)append(errorText(reason));}
+    })();
+    return()=>controller.abort();
+  },[key,enabled,nonce,revalidating,state.key,state.page,state.next,state.busy,state.error,state.moreError,restart]);
+  // Scroll and scrubber callers can still signal the end; the committed-page effect owns I/O.
+  const loadMore=useCallback(()=>{},[]);
   const retryMore=useCallback(()=>{setState(value=>({...value,moreError:''}));},[]);
   return {...state,reload:restart,loadMore,retryMore,committed:state.key===committed.current&&!!state.page};
 }
 /** The list's own rows, which a type switch slides; the section bar, refresh pill and scrubber stay put. */
-const listParts=(host:HTMLElement)=>[...host.children].filter((child):child is HTMLElement=>child instanceof HTMLElement&&!child.matches('.ui-section-bar,.pull-refresh,.mobile-scrubber'));
+const listParts=(host:HTMLElement)=>[...host.children].filter((child):child is HTMLElement=>child instanceof HTMLElement&&!child.matches('.ui-section-bar,.section-shade-rows,.pull-refresh,.mobile-scrubber'));
 const nearEnd=(element:HTMLElement)=>element.clientHeight>0&&element.scrollHeight-element.scrollTop-element.clientHeight<element.clientHeight;
 
 /** 내 별점 filter stops: 전체, then 0.5 … 5.0 (exact match, as the server applies it). */
@@ -377,7 +358,7 @@ function RatingFilterSlider({value,onChange}:{value:Filters['rating'];onChange(v
 export type CollectionsPlace={kind:'releases'}|{kind:'work';id:string};
 export type CollectionsRequest=CollectionsPlace&{key:number};
 /** `onReturnHome`: set while the screen was opened from Home; closing that entry level (신간 or the work opened) returns there. */
-export function Collections({active,paused,backRef,request,onReturnHome,onCalendar}:{active:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>;request?:CollectionsRequest|null;onReturnHome?:()=>void;/** Opens the type-filtered 발매 캘린더. */onCalendar?:(kind:'game'|'movie')=>void}) {
+export function Collections({active,paused,backRef,request,onReturnHome}:{active:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>;request?:CollectionsRequest|null;onReturnHome?:()=>void}) {
   const [tab,setTab]=useState<CollectionTab>('game'),[query,setQuery]=useState(''),[search,setSearch]=useState('');
   const [privacyMode]=usePrivacyMode();
   const [searchOpen,setSearchOpen]=useState(false);
@@ -387,7 +368,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   const [refresh,setRefresh]=useState(0);
   // What the server serves may have changed: the lists re-read, and so does the shared 신간 read on its next show.
   const bump=useCallback(()=>{invalidateReleases();setRefresh(n=>n+1);},[]);
-  const [sectionPreferences,setSectionPreferences]=useState<SectionPreferences>(readSectionPreferences),[showcaseAll,setShowcaseAll]=useState(false);
+  const [showcaseAll,setShowcaseAll]=useState(false),[calendarOpen,setCalendarOpen]=useState(false);
   const [sheet,setSheet]=useState<'sort'|'rating'|'view'|'performerSort'|null>(null);
   // 보기 per type (격자 · 선반, 한 줄에 N개), the case a tap turned to the front, and the order a work was opened from.
   const [viewOf,patchView]=useShelfViews();
@@ -418,12 +399,8 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   const live=active&&!paused;
   useEffect(()=>{if(privacyMode&&tab==='av'){setTab('game');setSelected(null);setPerformer(null);setDetail(null);}else if(privacyMode)setPerformer(null);},[privacyMode,tab]);
   const filtered=!!search||filters.rating!=='all';
-  const showcaseOpen=sectionPreferences[tab].showcase;
-  const newsOpen=sectionPreferences[tab].news;
-  const setSectionOpen=(section:CollectionSection,open:boolean)=>setSectionPreferences(current=>{const next={...current,[tab]:{...current[tab],[section]:open}};writeSectionPreferences(next);return next;});
-
-  const releaseData=useSyncExternalStore(subscribeReleases,()=>releaseStore.current);
-  const [calendarReply,setCalendarReply]=useState<ReleaseCalendarReply|null>(null),[calendarError,setCalendarError]=useState('');
+  const [calendarReply,setCalendarReply]=useState<ReleaseCalendarReply|null>(null);
+  const overlayOpen=showcaseAll||inboxOpen||calendarOpen;
 
   // Typing searches after a short pause; Enter applies at once.
   useEffect(()=>{const value=query.trim();if(value===search)return;const timer=window.setTimeout(()=>setSearch(value),350);return()=>clearTimeout(timer);},[query,search]);
@@ -433,12 +410,14 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   const mainKey=JSON.stringify([collectionPath(type,search,false,null,filters),refresh]);
   const main=useCollectionList(cursor=>collectionPath(type,search,false,cursor,filters),mainKey,live,
     {slot:type,prepare:prepareCovers,validate:result=>{if(result.ready&&result.filterVersion!==1)throw new Error('별점 필터와 정렬을 사용하려면 서버 업데이트가 필요합니다.');}});
-  const wantShowcase=live&&(!filtered||showcaseAll);
+  const wantShowcase=live;
   const showcaseKey=JSON.stringify([collectionPath(type,'',true,null),refresh]);
   const showcase=useCollectionList(cursor=>collectionPath(type,'',true,cursor),showcaseKey,wantShowcase,{slot:type,prepare:prepareCovers});
-  const showcaseItems=showcase.committed?showcase.items:[];
-  const showcasePage=showcase.committed?showcase.page:null;
-  const listPull=usePullToRefresh(listRef,bump,main.busy,!live||!!selected||showcaseAll||inboxOpen||!!performer);
+  // Refreshes retain this type's painted exhibition; a different type loads within the overlay.
+  const shownShowcase=showcase.committed||showcase.items[0]?.type===type;
+  const showcaseItems=shownShowcase?showcase.items:[];
+  const showcasePage=shownShowcase?showcase.page:null;
+  const listPull=usePullToRefresh(listRef,bump,main.busy,!live||!!selected||overlayOpen||!!performer);
   const showcasePull=usePullToRefresh(showcaseRef,bump,showcase.busy,!live||!showcaseAll||!!selected);
   const detailPull=usePullToRefresh(detailRef,()=>setDetailRefresh(n=>n+1),!!selected&&!detail&&!detailError,!active||paused||!selected);
   // An accepted personal edit changes what the server serves; re-read both views.
@@ -466,40 +445,22 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   // The shared conditional poll (60 s while visible) keeps the chip and badges current; a pull re-reads at once.
   usePublicationCheck(active&&!paused,RELEASE_COUNTS_PATH,undefined,takeReleaseCounts);
   useEffect(()=>{if(!refresh||!active||paused)return;const controller=new AbortController();void api(RELEASE_COUNTS_PATH,controller.signal,undefined,'GET',true).then(reply=>{if(!controller.signal.aborted)takeReleaseCounts(reply);},()=>{});return()=>controller.abort();},[refresh]);
-  // The fold preview shares the same manga shelf and unread event store as the full 신간 screen.
-  // A shelf is only needed when the existing count read says there is something to show.
-  useEffect(()=>{
-    if(!live||filtered||tab!=='manga'||releases.unread<=0)return;
-    const current=releaseStore.current,at=releaseEpoch();
-    const wantShelf=!current.shelf||current.shelfEpoch!==at;
-    const wantEvents=current.eventsEpoch!==at||current.eventsRevision!==releaseListRevision;
-    if(!wantShelf&&!wantEvents)return;
-    const controller=new AbortController();
-    void Promise.all([wantShelf?loadShelf(controller.signal):null,wantEvents?allUnreadReleases(controller.signal):null]).then(([shelf,events])=>{
-      if(controller.signal.aborted)return;
-      const next={...releaseStore.current,loaded:true};
-      if(shelf)Object.assign(next,{shelf,shelfEpoch:at});
-      if(events)Object.assign(next,{events:events.items,eventsEpoch:at,eventsRevision:events.revision});
-      commitReleases(next);
-    },()=>{});
-    return()=>controller.abort();
-  },[filtered,live,refresh,releaseListRevision,releases.unread,tab]);
   // Games and movies use the same upcoming snapshot as Home and the calendar screen.
   useEffect(()=>{
-    if(!live||filtered||(tab!=='game'&&tab!=='movie')||!onCalendar){setCalendarReply(null);setCalendarError('');return;}
-    const controller=new AbortController();setCalendarReply(null);setCalendarError('');
-    void api<unknown>('/v1/home/upcoming',controller.signal).then(value=>{if(!controller.signal.aborted)setCalendarReply(normalizeReleaseCalendarReply(value));},reason=>{if(!controller.signal.aborted)setCalendarError(errorText(reason));});
+    if(!live||(tab!=='game'&&tab!=='movie'))return;
+    const controller=new AbortController();
+    void api<unknown>('/v1/home/upcoming',controller.signal).then(value=>{if(!controller.signal.aborted)setCalendarReply(normalizeReleaseCalendarReply(value));},()=>{});
     return()=>controller.abort();
-  },[filtered,live,onCalendar,refresh,tab]);
+  },[live,refresh,tab]);
   usePublicationCheck(live&&coverIndex===null,'/v1/collections/status',main.page?.revision,(reply,changed)=>{edits.observeStatus(reply);if(!changed)return;bump();setDetailRefresh(n=>n+1);});
   // A list read under a newer publication than the kept 신간 shelf (read here or by Home) outdates it.
   useEffect(()=>observePublication(main.page?.revision),[main.page?.revision]);
   // Restore the list position when its committed query is shown again, before it is painted.
   // A remembered query (a type switched back to) commits without passing through loading.
-  useLayoutEffect(()=>{if(!selected&&!showcaseAll&&!inboxOpen&&!performer&&listRef.current&&main.committed)listRef.current.scrollTop=listScroll.current;},[selected,showcaseAll,inboxOpen,performer,main.committed,main.key,active]);
+  useLayoutEffect(()=>{if(!selected&&!overlayOpen&&!performer&&listRef.current&&main.committed)listRef.current.scrollTop=listScroll.current;},[selected,overlayOpen,performer,main.committed,main.key,active]);
 
   // A work opened over 신간 closes back to 신간; the entry level opened from Home closes back to Home.
-  const closeWork=useCallback(()=>{setSelected(null);if(!inboxOpen&&!performer)onReturnHome?.();},[inboxOpen,performer,onReturnHome]);
+  const closeWork=useCallback(()=>{setSelected(null);if(!overlayOpen&&!performer)onReturnHome?.();},[overlayOpen,performer,onReturnHome]);
   // The performer page returns to the work it was opened from.
   const closePerformer=useCallback(()=>{if(performer?.from)setSelected(performer.from);setPerformer(null);},[performer]);
   const closeInbox=useCallback(()=>{setInboxOpen(false);onReturnHome?.();},[onReturnHome]);
@@ -512,17 +473,18 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
     if(performer){closePerformer();return true;}
     if(inboxOpen){closeInbox();return true;}
     if(showcaseAll){setShowcaseAll(false);return true;}
+    if(calendarOpen){setCalendarOpen(false);return true;}
     return false;
-  },[coverIndex,sheet,personalSheet,bindSheet,selected,performer,inboxOpen,showcaseAll,closeWork,closePerformer,closeInbox]);
+  },[coverIndex,sheet,personalSheet,bindSheet,selected,performer,inboxOpen,showcaseAll,calendarOpen,closeWork,closePerformer,closeInbox]);
   useEffect(()=>{backRef.current=back;return()=>{backRef.current=null;};},[back,backRef]);
   useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&coverIndex===null&&!sheet&&!personalSheet&&!bindSheet){if(back())event.preventDefault();}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet,bindSheet]);
   useEffect(()=>{if(!active)setSheet(null);},[active]);
 
-  const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;setShowcaseAll(false);setQuery('');setSearch('');setPicked(null);setMangaPick(null);setTab(next);};
+  const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;setShowcaseAll(false);setCalendarOpen(false);setInboxOpen(false);setQuery('');setSearch('');setPicked(null);setMangaPick(null);setTab(next);};
   const chooseAvView=(next:AvListView)=>{setAvView(next);try{localStorage.setItem(AV_LIST_VIEW_KEY,next);}catch{/* optional device preference */}};
   const changeFilters=(next:Filters)=>{if(next.sort===filters.sort&&next.direction===filters.direction&&next.rating===filters.rating)return;listScroll.current=0;if(listRef.current)listRef.current.scrollTop=0;setFiltersByType(current=>({...current,[type]:next}));};
   /** Opens a work; `from` is the list it was opened in, which a swipe on the work steps through. */
-  const openWork=(id:string,from?:string[],at?:{volumeId:string;edition:number}|null)=>{if(listRef.current&&!showcaseAll&&!inboxOpen&&!performer)listScroll.current=listRef.current.scrollTop;setSheet(null);setOrder(from?.includes(id)?from:[id]);setOpenedVolume(at?{id,volumeId:at.volumeId}:null);if(at)setEdition(at.edition);setSelected(id);};
+  const openWork=(id:string,from?:string[],at?:{volumeId:string;edition:number}|null)=>{if(listRef.current&&!overlayOpen&&!performer)listScroll.current=listRef.current.scrollTop;setSheet(null);setOrder(from?.includes(id)?from:[id]);setOpenedVolume(at?{id,volumeId:at.volumeId}:null);if(at)setEdition(at.edition);setSelected(id);};
   const stepWork=(offset:-1|1)=>{const index=order.indexOf(selected??''),next=order[index+offset];if(index<0||!next)return;stepping.current=true;setSelected(next);};
   /** On the shelf a first tap turns the case to the front; a tap on the picked case opens it. */
   const tapWork=(items:CollectionSummary[])=>(id:string)=>{if(picked===id)openWork(id,items.map(work=>work.id));else setPicked(id);};
@@ -531,7 +493,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   // Home opens the 신간 screen or one work's detail here.
   useEffect(()=>{
     if(!request)return;
-    setSheet(null);setCoverIndex(null);setShowcaseAll(false);
+    setSheet(null);setCoverIndex(null);setShowcaseAll(false);setCalendarOpen(false);
     setPerformer(null);
     if(request.kind==='releases'){setSelected(null);setInboxOpen(true);}
     else {setInboxOpen(false);setOrder([request.id]);setSelected(request.id);}
@@ -545,18 +507,8 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
     const kakao=work.releaseSchedule?.kakao;
     return releaseCaption(work,unreadOf(work),kakao?ownedOf(work,kakao.editionIndex):null,watching(work),today);
   };
-  const mangaNews=useMemo(()=>{
-    const works=new Map((releaseData.shelf?.works??[]).map(work=>[work.id,work]));
-    return releaseRows(releaseData.shelf,releases).slice(0,6).flatMap(row=>{const work=works.get(row.id);return work?[{work,unread:row.unread}]:[];});
-  },[releaseData.shelf,releases]);
-  const calendarEntries=useMemo(()=>{
-    if(!calendarReply)return [];
-    return calendarReply.entries.filter(entry=>entry.kind===tab&&entry.date&&entry.precision!=='year'&&(releaseDaysUntil(entry.date)??-1)>=0)
-      .sort((left,right)=>(left.date??'9999').localeCompare(right.date??'9999')).slice(0,6);
-  },[calendarReply,tab]);
-  const calendarInterestCount=calendarReply?.wishlist.filter(entry=>entry.kind===tab).length??0;
-  const showcaseCount=showcasePage?.totalCount??(showcaseItems.length||undefined);
-  const hasShowcase=!showcase.committed||showcaseItems.length>0;
+  const calendarInterestCount=calendarReply?.wishlist.filter(entry=>entry.kind===tab).reduce((sum,entry)=>sum+entry.unread.length,0)??0;
+  const showcaseCount=showcasePage?.totalCount??(showcase.committed?showcaseItems.length:undefined);
 
   const item=detail?.item, volumes=item?editionVolumes(item.volumes,edition):[], editionOptions=item?editions(item.volumes):[];
   const covers=item?[{id:collectionCover(item),label:item.name},...volumes.map(v=>({id:v.coverArtworkId,label:[volumeLabel(v),volumeReleaseLabel(v)].filter(Boolean).join(' · ')}))]:[];
@@ -569,7 +521,13 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
 
   // The type switch is the list's first row; scrolled away, the top bar pulls it down as a shade.
   const typeOptions=TABS.filter(value=>!privacyMode||value!=='av').map(value=>({value,label:labels[value]}));
-  const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab},{active:live&&!selected&&!showcaseAll&&!inboxOpen&&!performer});
+  // Shortcut cells reuse the segmented track's shared shape, without a selection thumb.
+  const shortcuts=<div className="ui-segmented ui-segmented--full-width collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
+    <button type="button" className="ui-segmented__cell" aria-label={showcaseCount==null?'쇼케이스':`쇼케이스 ${showcaseCount.toLocaleString()}`} onClick={()=>setShowcaseAll(true)}><StarIcon aria-hidden="true"/>쇼케이스{showcaseCount!=null&&<span className="numeric collection-shortcuts__count">{showcaseCount.toLocaleString()}</span>}</button>
+    {(tab==='game'||tab==='movie')&&<button type="button" className="ui-segmented__cell" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>setCalendarOpen(true)}><CalendarIcon aria-hidden="true"/>발매 캘린더{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</button>}
+    {tab==='manga'&&<button type="button" className="ui-segmented__cell" aria-label={`신간${releases.unread>0?` ${releases.unread.toLocaleString()}`:''}`} onClick={openInbox}><BellIcon aria-hidden="true"/>신간{releases.unread>0&&<span className="numeric collection-shortcuts__count is-new">{releases.unread.toLocaleString()}</span>}</button>}
+  </div>;
+  const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,extra:shortcuts},{active:live&&!selected&&!overlayOpen&&!performer});
   // Search lives in the shared bar: a magnifier that opens the field, kept open while a query is set.
   const searching=searchOpen||!!query||!!search;
   const closeSearch=()=>{setQuery('');setSearch('');setSearchOpen(false);};
@@ -577,41 +535,19 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
     ?<TopBar back={{label:'뒤로',onClick:closeWork}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {inboxOpen?'신간':performer?'AV › 배우':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</span>} actions={item?<div style={{display:'contents'}} inert={item.id!==selected||undefined}><PersonalActions item={item} edits={edits}/></div>:undefined}/>
     :performer
       ?<TopBar back={{label:'뒤로',onClick:closePerformer}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › AV › 배우</span>}/>
-    :inboxOpen
-      ?<TopBar back={{label:'뒤로',onClick:closeInbox}} crumbs={<span className="top-bar__crumbs">컬렉션</span>} title="신간"/>
-    :showcaseAll
-      ?<TopBar loading={showcase.busy&&'쇼케이스 불러오는 중'} back={{label:'뒤로',onClick:()=>setShowcaseAll(false)}} crumbs={<span className="top-bar__crumbs">컬렉션 › {labels[type]}</span>} title={<>쇼케이스{showcasePage?.totalCount!=null&&<span className="numeric muted"> {showcasePage.totalCount.toLocaleString()}</span>}</>}/>
-      :searching&&tab!=='av'
+    :searching&&tab!=='av'&&!overlayOpen
         ?<TopBarSearch title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} onClose={closeSearch}><form className="top-bar__search collection-search" role="search" onSubmit={event=>{event.preventDefault();setSearch(query.trim());(document.activeElement as HTMLElement|null)?.blur();}}>
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
           {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
         </form></TopBarSearch>
         :<TopBar barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} actions={tab!=='av'?<SearchButton onClick={()=>setSearchOpen(true)}/>:undefined}/>;
-  const newsSection=tab==='manga'
-    ?<section className="collection-news-section" aria-label="소식">
-      <CollectionSectionLabel name="신간" count={releases.unread>0?releases.unread:undefined} open={newsOpen} onToggle={()=>setSectionOpen('news',!newsOpen)} onOpen={openInbox}/>
-      {newsOpen&&(mangaNews.length>0?<div className="collection-news-block-wrap">
-          <div className="collection-news-covers">{mangaNews.map(({work,unread})=><button key={work.id} className="collection-news-cover" aria-label={work.name} onClick={()=>openWork(work.id,mangaNews.map(entry=>entry.work.id))}><span><Artwork item={card(work)} id={collectionCover(work)} revision={releaseData.shelf?.revision??revision} active={live} label={work.name}/>{unread>0&&<Badge variant="accent" className="collection-news-new">NEW</Badge>}</span></button>)}</div>
-      </div>:<button className="collection-news-empty" onClick={openInbox}>새 신간 없음</button>)}
-    </section>
-    :tab==='game'||tab==='movie'
-      ?<section className="collection-news-section" aria-label="소식">
-        <CollectionSectionLabel name="발매 캘린더" count={calendarInterestCount>0?calendarInterestCount:undefined} open={newsOpen} onToggle={()=>setSectionOpen('news',!newsOpen)} onOpen={()=>onCalendar?.(tab)}/>
-        {newsOpen&&(calendarEntries.length>0?<div className="collection-news-block-wrap">
-          <div className="collection-calendar-covers">{calendarEntries.map(entry=>{const days=entry.precision==='exact'?releaseDaysUntil(entry.date):null,dday=ddayLabel(days);return <button key={entry.id} className="collection-calendar-cover" aria-label={`${entry.title} ${releaseDateLabel(entry.date,entry.precision)}`} onClick={()=>onCalendar?.(tab)}><span className="collection-calendar-date numeric">{releaseDateLabel(entry.date,entry.precision)}{dday&&<small className="numeric"> · {dday}</small>}</span><span className="collection-calendar-art"><CalendarPreviewCover entry={entry} privacy={privacyMode} active={live}/></span></button>})}</div>
-          {calendarError&&<span className="sr-only">발매 캘린더 정보를 불러오지 못했습니다.</span>}
-        </div>:<><button className="collection-news-empty" onClick={()=>onCalendar?.(tab)}>다가오는 발매 없음</button>{calendarError&&<span className="sr-only">발매 캘린더 정보를 불러오지 못했습니다.</span>}</>)}
-      </section>
-      :null;
-
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
   const unpublishedNotice=<EmptyState icon={RectangleStackIcon} title="컬렉션이 아직 공유되지 않았습니다" />;
 
-  // Opening a work or the whole Showcase is one level deeper; Back returns from the left.
-  useLevelMotion(sectionRef,active?`${selected??''}|${performer?.id??''}|${showcaseAll}|${inboxOpen}`:null,(selected?1:0)+(performer?1:0)+(showcaseAll||inboxOpen?1:0));
-  // A type switch swaps the list sideways once the new type's list (and its Showcase row, when
-  // open) has settled, so the old type's cards never slide in; the bar (its first row) stays still.
-  useSegmentMotion(listRef,tab==='av'||(settledOn(main,mainKey)&&(!wantShowcase||settledOn(showcase,showcaseKey)))?tab:null,(privacyMode?TABS.filter(value=>value!=='av'):TABS).indexOf(tab),listParts);
+  // Works and performers remain navigation levels; shortcuts use the overlay motion.
+  useLevelMotion(sectionRef,active?`${selected??''}|${performer?.id??''}`:null,(selected?1:0)+(performer?1:0));
+  // A type switch swaps the committed list sideways; both section-bar rows stay still.
+  useSegmentMotion(listRef,tab==='av'||settledOn(main,mainKey)?tab:null,(privacyMode?TABS.filter(value=>value!=='av'):TABS).indexOf(tab),listParts);
   // The grid keeps the layout of the type it shows until the new type's page commits.
   const shownType=main.items[0]?.type??type;
   // Cards appended by scrolling rise in once each; a committed first page (a type switch, a
@@ -626,27 +562,15 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       ?{kind:'date',values:main.items.map(work=>work.releaseDate??work.av?.releaseDate??work.createdAt??work.year)}
       :{kind:'fallback'},[avView,filters.sort,main.items,tab]);
   const showcaseScrubberSort=useMemo<ScrubberSort>(()=>({kind:'fallback'}),[]);
-  const view=viewOf(type);
-  // Games, films and AV stand on the shelf as cases; manga stands as bookcase rows (below).
-  const shelfMode=view.layout==='shelf'&&shownType!=='manga';
-  // Manga on the shelf: the PC's bookcase row per work (shared MangaShelfRow).
-  const mangaShelfMode=view.layout==='shelf'&&shownType==='manga';
+  const view=viewOf(shownType);
+  // Every type uses shared work cases on 선반; 책장 keeps manga's volume rows.
+  const shelfMode=view.layout==='shelf';
+  const mangaShelfMode=view.layout==='bookcase'&&shownType==='manga';
   const mangaShelf=(items:CollectionSummary[],label:string,workRevision:string)=><TabletMangaShelf items={items.map(card)} label={label} revision={workRevision} active={listActive} privacy={privacyMode}
     owned={ownedOf} pick={mangaPick} onPick={setMangaPick} onOpen={(id,at)=>openWork(id,items.map(work=>work.id),at)}/>;
   const shelfView={layout:'shelf' as const,perRow:view.perRow,grouping:'sort' as const};
-  const listActive=live&&!selected&&!inboxOpen&&!performer;
+  const listActive=live&&!selected&&!overlayOpen&&!performer;
   const shelfTile=(items:CollectionSummary[],workRevision:string)=>(work:CollectionSummary)=><ShelfTile item={card(work)} revision={workRevision} active={listActive} privacy={privacyMode} picked={picked===work.id} onTap={tapWork(items)}/>;
-  const showcaseRow=showcaseItems.slice(0,12);
-  const showcaseSection=!filtered&&hasShowcase&&<section className="collection-showcase-fold" aria-label="쇼케이스">
-    <CollectionSectionLabel name="쇼케이스" count={showcaseCount} open={showcaseOpen} onToggle={()=>setSectionOpen('showcase',!showcaseOpen)} onOpen={()=>setShowcaseAll(true)}/>
-    {showcaseOpen&&<div className="collection-news-block-wrap collection-showcase-block">
-      {showcase.busy&&!showcaseItems.length&&<p role="status" className="hint">쇼케이스를 불러오는 중…</p>}{showcase.error&&<p className="error-message" role="alert">{showcase.error}</p>}{showcase.committed&&!showcase.busy&&!showcaseItems.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}
-      {shelfMode&&showcaseRow.length>0
-        ?<CollectionList items={showcaseRow} view={shelfView} showcase label={`${labels[type]} 쇼케이스`} onPick={setPicked} render={shelfTile(showcaseRow,showcasePage?.revision??revision)}/>
-        :mangaShelfMode&&showcaseRow.length>0?mangaShelf(showcaseRow,`${labels[type]} 쇼케이스`,showcasePage?.revision??revision)
-        :<div className="collection-shelf">{showcaseRow.map(work=><ShowcaseCover key={work.id} work={card(work)} revision={showcasePage?.revision??revision} active={live&&!selected} onOpen={id=>openWork(id,showcaseRow.map(entry=>entry.id))}/>)}</div>}
-    </div>}
-  </section>;
   const collectionTypeLabel=<SectionLabel as="h2" className="collection-type-label" title={filtered?'검색 결과':labels[type]} count={!filtered&&main.page?.totalCount!=null ? main.page.totalCount : undefined} />;
   const filterControls=<div className="filter-chips collection-chips" role="group" aria-label="정렬과 필터">
     <button className="filter-chip" onClick={()=>setSheet('sort')}><ArrowsUpDownIcon aria-hidden="true"/>{sortLabel}<ChevronDownIcon aria-hidden="true"/></button>
@@ -684,16 +608,15 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       {koreanGenres(item.genres).length>0&&<ul className="collection-genres" aria-label="장르">{koreanGenres(item.genres).map(genre=><li key={genre}>{genre}</li>)}</ul>}</section>
   </>;
   return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
-    {header}
-    {!selected&&!showcaseAll&&!inboxOpen&&!performer&&!searching&&sections.shade}
-    <div ref={listRef} className="collection-scroll" style={{display:selected||showcaseAll||inboxOpen||performer?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
+    <div style={{display:'contents'}} inert={overlayOpen&&!selected&&!performer||undefined}>{header}</div>
+    {!selected&&!overlayOpen&&!performer&&!searching&&sections.shade}
+    <div ref={listRef} className="collection-scroll" inert={overlayOpen||undefined} aria-hidden={overlayOpen||undefined} style={{display:selected||performer?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
       {listPull}
       {sections.inline}
       {tab==='av'?<>
       <AvLookupSender/>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
       {unpublished(main)?unpublishedNotice:main.busy&&!main.committed?<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<EmptyState icon={RectangleStackIcon} title="PC 앱이 AV 작품을 아직 보내지 않았습니다" />:<>
-        {showcaseSection}
         <AvViewTabs view={avView} onView={chooseAvView}/>
         {avView==='works'?<>{typeHeader}{worksView}</>:<AvPerformerShelves items={main.items} revision={revision} active={listActive} privacy={privacyMode} perRow={view.perRow} picked={picked} onTap={tapWork(main.items)} onPerformer={openPerformer}/>}
       </>}
@@ -702,27 +625,35 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       </>:<>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
       {unpublished(main)?unpublishedNotice:<>
-        {showcaseSection}
-        {newsSection}
         {typeHeader}
         {main.committed&&!main.items.length&&<EmptyState icon={RectangleStackIcon} title={filtered?'조건에 맞는 작품이 없습니다':'아직 작품이 없습니다'} />}
         {worksView}
         {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
       {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
       </>}</>}
-      <Scrubber scrollRef={listRef} total={main.items.length} sort={mainScrubberSort} hidden={!active||paused||!!selected||showcaseAll||inboxOpen||!!performer||sheet!==null} onEndReached={main.loadMore}/>
+      <Scrubber scrollRef={listRef} total={main.items.length} sort={mainScrubberSort} hidden={!active||paused||!!selected||overlayOpen||!!performer||sheet!==null} onEndReached={main.loadMore}/>
     </div>
     {/* Always mounted so its pull-to-refresh gesture is attached; hidden until opened. */}
-    <div ref={showcaseRef} className="collection-scroll" style={{display:showcaseAll&&!selected?undefined:'none'}} onScroll={event=>{if(nearEnd(event.currentTarget))showcase.loadMore();}}>{showcaseAll&&<>
+    <Overlay open={showcaseAll} covered={!live||!!selected||!!performer} title="쇼케이스" count={showcaseCount} onClose={()=>setShowcaseAll(false)}>
+    <div ref={showcaseRef} className="collection-scroll" onScroll={event=>{if(nearEnd(event.currentTarget))showcase.loadMore();}}>{showcaseAll&&<>
       {showcasePull}
+      {showcase.busy&&!showcaseItems.length&&<p className="hint" role="status">쇼케이스를 불러오는 중…</p>}
       <p className="hint collection-showcase-note">PC에서 정한 순서대로 보여 줍니다.</p>
       {showcase.error&&<div className="error-message" role="alert">{showcase.error}<Button variant="ghost" onClick={showcase.reload}>처음부터 새로고침</Button></div>}
-      {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcaseItems.map(work=><WorkCard key={work.id} work={work} revision={showcasePage?.revision??''} active={live} meta={false} caption={captionOf(work)} onOpen={id=>openWork(id,showcaseItems.map(entry=>entry.id))} arriving={showcaseArrivals.arriving(work.id)} onArrived={showcaseArrivals.arrived}/>)}</div>}
+      {showcase.committed&&!showcase.busy&&!showcaseItems.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}
+      {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcaseItems.map(work=><WorkCard key={work.id} work={work} revision={showcasePage?.revision??''} active={live&&!selected&&!performer} meta={false} caption={captionOf(work)} onOpen={id=>openWork(id,showcaseItems.map(entry=>entry.id))} arriving={showcaseArrivals.arriving(work.id)} onArrived={showcaseArrivals.arrived}/>)}</div>}
       {showcase.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
+      {showcase.moreError&&<div className="inline-error" role="alert"><span>{showcase.moreError}</span><Button variant="ghost" onClick={showcase.retryMore}>다시 시도</Button></div>}
       <Scrubber scrollRef={showcaseRef} total={showcaseItems.length} sort={showcaseScrubberSort} hidden={!active||paused||!!selected||!showcaseAll} onEndReached={showcase.loadMore}/>
     </>}</div>
+    </Overlay>
+    <Overlay open={calendarOpen} covered={!live||!!selected||!!performer} title="발매 캘린더" count={calendarInterestCount} onClose={()=>setCalendarOpen(false)}>
+      {calendarOpen&&(tab==='game'||tab==='movie')&&<ReleaseCalendar embedded onSnapshot={setCalendarReply} initialKind={tab} onClose={()=>setCalendarOpen(false)}/>}
+    </Overlay>
+    <Overlay open={inboxOpen} covered={!live||!!selected||!!performer} title="신간" count={releases.unread} onClose={closeInbox}>
     {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={id=>openWork(id)} ownedOf={ownedOf} watching={watching}
       cover={(work,workRevision,name)=>work?<Artwork item={work} id={collectionCover(work)} revision={workRevision} active={active&&!paused&&!selected} label={name}/>:<span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>}/>}
+    </Overlay>
     <div ref={performerRef} className="collection-scroll collection-performer-pane" style={{display:performer&&!selected?undefined:'none'}}>{performer&&<AvPerformerScreen personId={performer.id} currentId={performer.from} active={active&&!paused&&!selected} privacy={privacyMode} perRow={viewOf('av').perRow} order={performerOrder}
       onOpen={(id,ids)=>openWork(id,ids)} onPerformer={id=>setPerformer(current=>({id,from:current?.from??null}))} onSort={()=>setSheet('performerSort')} onView={()=>setSheet('view')}/>}</div>
     <div ref={detailRef} className="collection-detail" style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item?(!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>)

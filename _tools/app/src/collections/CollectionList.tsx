@@ -3,14 +3,14 @@ import { flushSync } from "react-dom";
 import type { CollectionSummary, CollectionType } from "../library/types";
 import { casePlatform } from "./case/CollectionCase";
 
-export type CollectionViewSettings = { layout: "grid" | "shelf"; perRow: number; grouping: "device" | "year" | "sort" };
+export type CollectionViewSettings = { layout: "grid" | "shelf" | "bookcase"; perRow: number; grouping: "device" | "year" | "sort" };
 type ShelfItem = Pick<CollectionSummary, "id" | "type"> & Partial<Pick<CollectionSummary, "platforms" | "year" | "releaseDate">>;
 function initialViews(): Record<CollectionType, CollectionViewSettings> {
   return Object.fromEntries((["game", "manga", "movie", "av"] as const).map(type => {
     const fallback: CollectionViewSettings = { layout: "shelf", perRow: 8, grouping: "device" };
     try {
       const value = JSON.parse(localStorage.getItem(`lakomics.collections.view.${type}.v1`) ?? "null");
-      if (value) return [type, { layout: value.layout === "grid" || value.layout === "shelf" ? value.layout : fallback.layout, perRow: Number.isInteger(value.perRow) ? Math.max(5, Math.min(12, value.perRow)) : 8, grouping: ["device", "year", "sort"].includes(value.grouping) ? value.grouping : "device" }];
+      if (value) return [type, { layout: value.layout === "grid" || value.layout === "shelf" || (type === "manga" && value.layout === "bookcase") ? value.layout : fallback.layout, perRow: Number.isInteger(value.perRow) ? Math.max(5, Math.min(12, value.perRow)) : 8, grouping: ["device", "year", "sort"].includes(value.grouping) ? value.grouping : "device" }];
     } catch { /* Use the approved start state when storage is unavailable. */ }
     return [type, fallback];
   })) as Record<CollectionType, CollectionViewSettings>;
@@ -64,7 +64,7 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(element); return () => observer?.disconnect();
   }, []);
-  const shelf = view.layout === "shelf" && items[0]?.type !== "manga";
+  const shelf = view.layout === "shelf";
   const cellWidth = Math.max(1, (metrics.width - metrics.padding - metrics.gap * (view.perRow - 1)) / view.perRow);
   // Approved shelf geometry reserves the turned cover and the 22px spine.
   const height = Math.min(300, Math.max(1, (cellWidth - 13) / (.8 * (2 / 3))));

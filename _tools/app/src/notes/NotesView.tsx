@@ -8,7 +8,7 @@ import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Menu, type MenuItem } from "../shared/ui/Menu";
 import type { SegmentedOption } from "../shared/ui/SegmentedControl";
-import { SectionBar } from "../shared/ui/SectionBar";
+import { useSectionDrop } from "../shared/ui/useSectionDrop";
 import { PlusIcon, BookmarkIcon, TrashIcon, EllipsisHorizontalIcon } from "../shared/ui/ArchiveIcons";
 import { MarkdownView } from "../shared/markdown/MarkdownView";
 import { MarkdownHelpButton } from "../shared/markdown/MarkdownHelp";
@@ -356,18 +356,21 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   const footer=!note?null:isSecret(note)?"암호 메모 · 이 PC의 PIN으로 잠김":kind==="checklist"&&!note.readOnly?`${(note.items??[]).filter(i=>i.checked).length}/${(note.items??[]).length} 완료`:`${note.body.length.toLocaleString()}자`;
   const pinnedNotes=scope==="all"?notes.filter(n=>n.pinned):[];
   const otherNotes=pinnedNotes.length?notes.filter(n=>!n.pinned):notes;
-  const filterRow=<SectionBar label="메모 종류" options={kindOptions} value={kindFilter} onChange={(value)=>setKindFilter(value)} trailing={<>
+  const sectionDrop=useSectionDrop({label:"메모 종류", options:kindOptions, value:kindFilter, onChange:setKindFilter, trailing:<>
       <Menu label="새 메모" items={newItems} trigger={<PlusIcon aria-hidden="true"/>} triggerClassName="notes-new-trigger" />
       <Menu label={viewLabel==="보기"?"보기 · 모든 메모":`보기 · ${viewLabel}`} items={viewItems} trigger={<><span>{viewLabel}</span>{viewLabel==="보기"&&<span className="notes-view-trigger__count">{scopeCounts.all.toLocaleString()}</span>}<ChevronDownIcon aria-hidden="true"/></>} triggerClassName="notes-view-trigger" />
-    </>}/>;
-  const board=<div ref={boardRef} className="notes-board" aria-label="메모 목록">
+    </>}, state.unlocked&&!selected&&!creatingSecret);
+  const board=<div ref={boardRef} className="notes-board">
+    {sectionDrop.inline}
+    <div className="notes-board__items" aria-label="메모 목록">
     {pinnedNotes.length>0&&<><h2 className="workspace-section-label notes-board__label">고정됨</h2><NoteMasonry notes={pinnedNotes} all={state.notes} selected={selected} onOpen={open}/>
       {otherNotes.length>0&&<h2 className="workspace-section-label notes-board__label">최근</h2>}</>}
     {otherNotes.length>0&&<NoteMasonry notes={otherNotes} all={state.notes} selected={selected} onOpen={open}/>}
     {!!state.unreadable&&<p className="notes-list-empty" role="status">읽을 수 없는 메모 {state.unreadable}개는 목록에서 뺐습니다.</p>}
     {!notes.length&&<div className="notes-empty"><DocumentTextIcon className="notes-empty__icon" aria-hidden="true"/><p>{query?"검색 결과 없음":trash?"휴지통 비어 있음":scope==="archive"?"보관함 비어 있음":"메모 없음"}</p>{!trash&&scope!=="archive"&&!query&&<Button variant="ghost" onClick={()=>newNote()}>＋ 새 메모</Button>}</div>}
+    </div>
   </div>;
-  const listView=<div className="notes-list-view">{filterRow}{board}</div>;
+  const listView=<div className="notes-list-view">{board}</div>;
   const editor=!note?null:<article className={`notes-editor${noteColorValue(note.color)?" has-tint":""}`} style={tint(note.color)}>
       <div className="notes-editor-actions"><div className="notes-editor-actions__leading"><Button variant="quiet" className="notes-back-button" aria-label="메모 닫기" onClick={close}><ChevronLeftIcon aria-hidden="true"/>메모</Button><time dateTime={note.updatedAt}>{displayDateTime(note.updatedAt, new Date(), { withTime: true })}</time></div><div>
         <Button variant="quiet" className="notes-undo-button" disabled={!noteUndo.canUndo} onClick={()=>{noteUndo.undo();}}><ArrowUturnLeftIcon aria-hidden="true"/>되돌리기</Button>
@@ -417,7 +420,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
       if(mod&&key==="s"){e.preventDefault();void store.sync();}
       if(mod&&!e.shiftKey&&key==="e"&&note&&kind==="text"&&!note.readOnly&&!trash){e.preventDefault();editingBody?setEditingBody(false):startBodyEdit();}
       if(mod&&e.shiftKey&&key==="l"){e.preventDefault();convert();}}}>
-    <ViewToolbar title="메모" titleContent={notesSectionTitle} chrome={{search:state.unlocked?{scope:"메모",query,label:"메모 검색",placeholder:"제목, 본문, 라벨 검색",onApply:setQuery}:undefined,status:state.unlocked?<span className="notes-save-status" role="status" aria-description={state.lastSyncedAt?`마지막 동기화 ${displayDateTime(state.lastSyncedAt, new Date(), { withTime: true })}`:undefined}>{status}</span>:undefined}}/>
+    <ViewToolbar sectionDrop={sectionDrop} title="메모" titleContent={notesSectionTitle} chrome={{search:state.unlocked?{scope:"메모",query,label:"메모 검색",placeholder:"제목, 본문, 라벨 검색",onApply:setQuery}:undefined,status:state.unlocked?<span className="notes-save-status" role="status" aria-description={state.lastSyncedAt?`마지막 동기화 ${displayDateTime(state.lastSyncedAt, new Date(), { withTime: true })}`:undefined}>{status}</span>:undefined}}/>
     {state.error&&<div className="notes-error" role="alert"><span>{state.error}</span><Button size="sm" variant="ghost" disabled={state.syncing} onClick={()=>void (state.unlocked?store.sync():store.load())}>다시 시도</Button></div>}
     {main}
     {recoverySurface}

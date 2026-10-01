@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { AssetSort, AssetView, CollectionSummary } from "../library/types";
@@ -95,4 +95,20 @@ it("has no section bar where there is no kind choice and keeps sort and view in 
   const header = screen.getByRole("toolbar", { name: "자산 도구" });
   expect(within(header).getByRole("button", { name: "정렬" })).toBeVisible();
   expect(within(header).getByRole("button", { name: "보기" })).toBeVisible();
+});
+
+
+it("puts the section row first in the measured asset intro and names the section when it scrolls away", () => {
+  renderChrome(<section className="asset-browser"><AssetToolbar {...baseProps} mediaFilter="images" />
+    <div className="asset-browser__gallery"><div className="asset-gallery__scroll" data-testid="asset-scroll" style={{ overflowY: "auto" }}><div className="asset-gallery__intro"><p>Folder shelf</p></div><p>Assets</p></div></div>
+  </section>);
+  const bar = screen.getByRole("radiogroup", { name: "종류" }).closest<HTMLElement>(".ui-section-bar")!;
+  expect(document.querySelector(".asset-gallery__intro")!.firstElementChild).toContainElement(bar);
+  const scroller = screen.getByTestId("asset-scroll"); scroller.scrollTop = 100; fireEvent.scroll(scroller);
+  const toggle = screen.getByRole("button", { name: "에셋 · 이미지" });
+  fireEvent.click(toggle);
+  const copy = document.querySelector(".ui-section-drop") as HTMLElement;
+  expect(copy).toHaveClass("is-open");
+  expect(within(copy).getByRole("button", { name: "정렬" })).toBeInTheDocument();
+  expect(within(copy).getByRole("button", { name: "보기" })).toBeInTheDocument();
 });

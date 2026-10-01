@@ -36,7 +36,9 @@ it("keeps the kind filter and the new/view menus in the section bar under the to
   const store=new NotesStore((async()=>({unlocked:true,notes:[],lastSyncedAt:null})) as NotesRequest);surface(store);
   const kinds=await screen.findByRole("radiogroup",{name:"메모 종류"});
   const bar=kinds.closest(".ui-section-bar") as HTMLElement;
-  expect(bar).toHaveClass("ui-section-bar--pinned");
+  expect(bar).toHaveClass("ui-section-bar--inline");
+  expect(bar.parentElement).toHaveClass("notes-board");
+  expect(bar.parentElement!.firstElementChild).toBe(bar);
   expect(bar.querySelector(".ui-section-bar__trailing")).toContainElement(screen.getByRole("button",{name:"새 메모"}));
   expect(bar.querySelector(".ui-section-bar__trailing")).toContainElement(screen.getByRole("button",{name:/보기/}));
 });

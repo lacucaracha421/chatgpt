@@ -113,11 +113,15 @@ function CalendarBody({reply, kind, wishlistOnly, visibleIds, privacy, reference
 
 export type ReleaseCalendarProps = {
   onClose: () => void;
+  /** Collections supplies the overlay header and Back handling. */
+  embedded?: boolean;
+  /** Keeps the owning shortcut count current after loading or confirming calendar news. */
+  onSnapshot?: (reply: ReleaseCalendarReply) => void;
   backRef?: MutableRefObject<(() => boolean) | null>;
   initialKind?: Extract<KindFilter, 'game' | 'movie'>;
 };
 
-export function ReleaseCalendar({onClose, backRef, initialKind}: ReleaseCalendarProps) {
+export function ReleaseCalendar({onClose, backRef, initialKind, embedded=false, onSnapshot}: ReleaseCalendarProps) {
   const [privateMode] = usePrivacyMode();
   const [reply, setReply] = useState<ReleaseCalendarReply | null>(null);
   const [state, setState] = useState<ScreenState>('loading');
@@ -130,6 +134,7 @@ export function ReleaseCalendar({onClose, backRef, initialKind}: ReleaseCalendar
   const referenceYear = new Date().getFullYear();
 
   useEffect(() => { setKind(initialKind ?? 'all'); }, [initialKind]);
+  useEffect(() => { if (reply) onSnapshot?.(reply); }, [reply, onSnapshot]);
 
   useEffect(() => {
     if (!backRef) return;
@@ -221,7 +226,7 @@ export function ReleaseCalendar({onClose, backRef, initialKind}: ReleaseCalendar
 
   const header = <TopBar back={{label: '홈으로', onClick: onClose}} crumbs={<span className="top-bar__crumbs">홈 ›</span>} title="발매 캘린더" count={reply && reply.entries.length ? reply.entries.length.toLocaleString('ko-KR') : undefined} />;
   return <div className="release-calendar-screen">
-    {header}
+    {!embedded&&header}
     <div className="release-calendar-controls">
       <SegmentedControl className="release-calendar-segments" label="종류" options={kindOptions} value={kind} onChange={setKind} />
       <Button type="button" size="sm" variant="quiet" className={`release-calendar-interest${wishlistOnly ? ' is-selected' : ''}`} aria-label={`관심 목록 ${count.toLocaleString('ko-KR')}`} aria-pressed={wishlistOnly} onClick={() => setWishlistOnly(value => !value)}><BookmarkOutlineIcon aria-hidden="true" />관심 <span className="numeric">{count.toLocaleString('ko-KR')}</span></Button>

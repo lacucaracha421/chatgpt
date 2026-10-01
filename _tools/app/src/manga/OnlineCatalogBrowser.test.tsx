@@ -63,7 +63,7 @@ describe("OnlineCatalogBrowser", () => {
     vi.mocked(gateway.searchOnlineCatalog).mockReturnValueOnce(next.promise);
     await chooseMenu("언어", "일본어");
     expect(screen.getByText(work.title)).toBeVisible();
-    expect(container.querySelector(".online-catalog__content")).toHaveAttribute("inert");
+    expect(container.querySelector(".online-catalog__frame")).toHaveAttribute("inert");
     expect(container.querySelector(".manga-card--skeleton")).toBeNull();
     await act(async () => next.resolve({ works: [{ ...work, title: "다음 작품" }], totalCount: 1, page: 0, pageSize: 48 }));
     expect(await screen.findByText("다음 작품")).toBeVisible();
@@ -83,11 +83,11 @@ describe("OnlineCatalogBrowser", () => {
     await userEvent.click(screen.getByRole("radio", { name: "북마크" }));
     expect(screen.getByText(work.title)).toBeVisible();
     expect(screen.getByRole("radio", { name: "북마크" })).toHaveAttribute("aria-checked", "true");
-    expect(container.querySelector(".online-catalog__content")).toHaveAttribute("inert");
+    expect(container.querySelector(".online-catalog__frame")).toHaveAttribute("inert");
     expect(container.querySelector(".manga-card--skeleton")).toBeNull();
     await act(async () => next.resolve({ works: [{ ...work, bookmarked: true }], totalCount: 280, page: 0, pageSize: 48 }));
     expect(await screen.findByRole("radio", { name: "북마크 280" })).toHaveAttribute("aria-checked", "true");
-    expect(container.querySelector(".online-catalog__content")).not.toHaveAttribute("inert");
+    expect(container.querySelector(".online-catalog__frame")).not.toHaveAttribute("inert");
     expect(gateway.searchOnlineCatalog).toHaveBeenCalledTimes(2);
   });
 
@@ -1049,7 +1049,7 @@ it.each(["all", "bookmarked"] as const)("opens a %s card in the shared panel, se
   expect(card).toHaveAttribute("aria-pressed", "true");
   expect(card.querySelector(".ui-selectable-media")).toHaveAttribute("aria-selected", "true");
   expect(card.querySelector(".ui-selection-check")).not.toBeNull();
-  expect(grid).not.toHaveAttribute("inert");
+  expect(container.querySelector(".online-catalog__frame")).not.toHaveAttribute("inert");
   expect(grid.scrollTop).toBe(400);
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "닫기" })).not.toBeInTheDocument();
@@ -1335,7 +1335,7 @@ describe("load more", () => {
     expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "all", sort: "hotDay", language: "korean", text: "", page: 1, pageSize: 48 }), expect.any(Function));
     expect(screen.getByLabelText("다음 망가 불러오는 중")).toHaveClass("manga-grid", "manga-grid--more");
     expect(screen.getAllByRole("button", { name: /^작품 0-\d+ 상세 보기$/ })).toHaveLength(48);
-    expect(document.querySelector(".online-catalog__content")).not.toHaveAttribute("inert");
+    expect(document.querySelector(".online-catalog__frame")).not.toHaveAttribute("inert");
     // A second sentinel hit while the page is on its way does not request it twice.
     await io.reveal();
     expect(vi.mocked(gateway.searchOnlineCatalog).mock.calls.filter(([query]) => query.page === 1)).toHaveLength(1);
@@ -1392,7 +1392,7 @@ describe("load more", () => {
     expect(gateway.searchOnlineCatalog).toHaveBeenLastCalledWith(expect.objectContaining({ language: "japanese", page: 0 }));
     // The old 96 cards stay, inert and not dimmed, until the new first page is ready.
     expect(screen.getAllByRole("button", { name: /^작품 [01]-\d+ 상세 보기$/, hidden: true })).toHaveLength(96);
-    expect(grid).toHaveAttribute("inert");
+    expect(document.querySelector(".online-catalog__frame")).toHaveAttribute("inert");
     expect(document.querySelector(".manga-skeleton, .manga-card--skeleton")).toBeNull();
     expect(io.observing()).toBe(false);
 

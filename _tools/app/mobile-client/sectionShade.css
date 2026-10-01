@@ -18,9 +18,9 @@
 .section-shade.is-dragging { visibility:visible; transition:none; }
 
 /* The title once the bar has scrolled away: "컬렉션 · 게임 ⌄", a toggle for the shade. */
-.section-shade-title { display:inline-flex; align-items:baseline; gap:var(--space-1); min-width:0; max-width:100%; min-height:var(--touch-target); margin:0; padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
+.section-shade-title { display:inline-flex; align-items:center; gap:var(--space-1); min-width:0; max-width:100%; min-height:var(--touch-target); margin:0; padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
 .section-shade-title__now { color:var(--color-muted); font-weight:400; overflow:hidden; text-overflow:ellipsis; }
-.section-shade-title > svg { align-self:center; flex:none; width:16px; height:16px; color:var(--color-faint); transition:transform 140ms var(--ease-standard); }
+.section-shade-title > svg { flex:none; width:1em; height:1em; translate:0 -.05em; color:var(--color-faint); transition:transform 140ms var(--ease-standard); }
 .section-shade-title[aria-expanded=true] > svg { transform:rotate(180deg); }
 .section-shade-title__now, .section-shade-title > svg { animation:section-shade-title-in 140ms var(--ease-standard); }
 @keyframes section-shade-title-in { from { opacity:0; } }
@@ -29,3 +29,19 @@
   .section-shade, .section-shade.is-open, .section-shade-title > svg { transition:none; }
   .section-shade-title__now, .section-shade-title > svg { animation:none; }
 }
+
+/* Optional second row is part of the same scrolling/pulled bar. Shortcut cells use the shared
+   segmented track, without a selection thumb or selected fill. */
+.section-shade-rows { display:flex; flex-direction:column; gap:var(--space-2); }
+.section-shade-rows--inline { padding-block:var(--space-1); margin-bottom:var(--space-2); }
+.section-shade-rows--inline > .ui-section-bar--inline { margin:0; padding-block:0; }
+.section-shade:has(.section-shade-extra) { background:var(--color-toolbar); padding-block:var(--space-1) var(--space-2); }
+.section-shade-extra { padding:var(--space-2) var(--section-shade-gutter,var(--mobile-gutter)) 0; }
+.collection-shortcuts { flex:none; }
+.collection-shortcuts .ui-segmented__cell { gap:var(--space-2); color:var(--color-text); }
+.collection-shortcuts .ui-segmented__cell::before { content:''; position:absolute; inset:-4px 0; }
+.collection-shortcuts .ui-segmented__cell + .ui-segmented__cell { border-left:1px solid var(--color-border); }
+.collection-shortcuts .ui-segmented__cell:active { background:var(--color-control-pressed); }
+.collection-shortcuts svg { flex:none; width:16px; height:16px; color:var(--color-faint); stroke-width:1.5; }
+.collection-shortcuts__count { color:var(--color-faint); font-size:var(--type-meta); }
+.collection-shortcuts__count.is-new { color:var(--color-accent); font-weight:600; }

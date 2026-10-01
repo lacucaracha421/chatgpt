@@ -1,0 +1,18 @@
+/* The tablet's tall overlay leaves the approved 36px glimpse of the screen above it. */
+.mobile-overlay { position:fixed; inset:0; z-index:40; }
+.mobile-overlay__scrim { position:absolute; inset:0; background:color-mix(in srgb,var(--color-viewer-bg) 50%,transparent); animation:mobile-overlay-dim 200ms var(--ease-standard); }
+.mobile-overlay__panel { position:absolute; inset:calc(36px + env(safe-area-inset-top)) 0 0; display:flex; flex-direction:column; min-height:0; background:var(--color-bg); border-top:1px solid var(--color-border); border-radius:14px 14px 0 0; overflow:hidden; padding-bottom:env(safe-area-inset-bottom); animation:mobile-overlay-rise 200ms var(--ease-standard); }
+.mobile-overlay__header { flex:none; touch-action:pan-x; border-bottom:1px solid var(--color-border); }
+.mobile-overlay__grab { width:36px; height:4px; margin:var(--space-2) auto 0; border-radius:var(--radius-mark); background:var(--color-border-strong); }
+.mobile-overlay__title-row { display:flex; align-items:center; gap:var(--space-2); min-height:var(--touch-target); padding:var(--space-1) var(--mobile-gutter) var(--space-2); }
+.mobile-overlay__title-row h2 { margin:0; color:var(--color-text); font-size:var(--type-title); font-weight:600; }
+.mobile-overlay__title-row > span { font-size:var(--type-meta); }
+.mobile-overlay__title-row > button { margin-left:auto; }
+.mobile-overlay__body { display:flex; flex:1; flex-direction:column; min-height:0; overflow:hidden; }
+@keyframes mobile-overlay-rise { from { transform:translateY(100%); } }
+@keyframes mobile-overlay-dim { from { opacity:0; } }
+@media (prefers-reduced-motion:reduce) { .mobile-overlay__panel,.mobile-overlay__scrim { animation:none; } }
+/* This surface covers the bottom navigation, so its scrubber follows the sheet's bottom edge. */
+.mobile-overlay .mobile-scrubber { bottom:calc(var(--space-2) + env(safe-area-inset-bottom)); }
+.mobile-overlay__body > .collection-scroll { padding-bottom:calc(var(--touch-target) + var(--space-4)); }
+.mobile-overlay .release-calendar-scroll { padding-bottom:calc(var(--touch-target) + var(--space-4)); }

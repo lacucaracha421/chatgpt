@@ -157,7 +157,8 @@ describe("AssetBrowser", () => {
     );
     const { rerender } = render(renderView({ kind: "classification", classificationId: null }));
 
-    await user.click(screen.getByRole("radio", { name: "이미지" }));
+    await screen.findByRole("option", { name: "asset-0.png" });
+    await user.click(await screen.findByRole("radio", { name: "이미지" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
       expect.objectContaining({ mediaKind: "images", aspectRatio: null, after: null, aroundDate: null }),
     ));
@@ -253,7 +254,8 @@ describe("AssetBrowser", () => {
       </LibraryProvider>,
     );
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledOnce());
-    await userEvent.click(screen.getByRole("button", { name: "보기" }));
+    await screen.findByRole("option", { name: "asset-0.png" });
+    await userEvent.click(await screen.findByRole("button", { name: "보기" }));
 
     fireEvent.change(screen.getByRole("slider", { name: "한 줄에" }), { target: { value: "8" } });
 

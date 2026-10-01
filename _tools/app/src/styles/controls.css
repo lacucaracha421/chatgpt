@@ -805,3 +805,44 @@ select.ui-text-input {
 .ui-per-row .ui-slider { min-width: 0; }
 .ui-per-row .ui-slider input { min-width: 0; width: 100%; }
 .ui-per-row output { font-size: var(--type-meta); color: var(--color-text); font-variant-numeric: tabular-nums; }
+
+.ui-section-drop-slot { flex: none; }
+
+/* PC section drop: viewport overlay, clipped above the top bar's bottom edge. */
+.ui-section-drop-anchor {
+  position: fixed;
+  z-index: calc(var(--z-floating-menu) - 1);
+  pointer-events: none;
+  clip-path: inset(0 -100vw -100vh);
+}
+.ui-section-drop-hotstrip { position: absolute; inset: 0 0 auto; height: 6px; pointer-events: auto; }
+.ui-section-drop {
+  pointer-events: auto;
+  box-shadow: var(--shadow-floating);
+  transform: translateY(-100%);
+  visibility: hidden;
+  transition: transform 160ms var(--ease-standard), visibility 0s linear 160ms;
+}
+.ui-section-drop.is-open { transform: none; visibility: visible; transition: transform 160ms var(--ease-standard), visibility 0s; }
+.ui-section-drop-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  min-width: 0;
+  min-height: var(--control-height-compact);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ui-section-drop-title__now { color: var(--color-muted); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-section-drop-title > svg { flex: none; width: var(--icon-sm); height: var(--icon-sm); color: var(--color-faint); transition: transform 160ms var(--ease-standard); }
+.ui-section-drop-title[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.ui-section-drop-title:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .ui-section-drop, .ui-section-drop.is-open, .ui-section-drop-title > svg { transition: none; }
+}

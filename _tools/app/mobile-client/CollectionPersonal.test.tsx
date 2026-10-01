@@ -21,7 +21,8 @@ const page=():CollectionPage=>({ready:true,filterVersion:1,revision,publishedAt:
 const commands=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/personal-edits').map(([, ,body])=>body as Record<string,unknown>);
 
 beforeEach(()=>{setOutboxConnection(CONNECTION);
-  localStorage.clear();for(const kind of ['game','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));mocks.api.mockReset();mocks.native.mockReset();
+  // These detail tests use an explicit grid; the default shelf picks on the first tap.
+  localStorage.clear();for(const kind of ['game','manga','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));mocks.api.mockReset();mocks.native.mockReset();
   item={...base};revision='r1';capable=true;recordCapable=true;
   command=body=>{
     // A tiny server: apply, bump the revision, answer with a receipt.

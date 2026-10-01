@@ -1,4 +1,4 @@
-import {useCallback,useEffect,useId,useRef,useState,type MouseEvent as ReactMouseEvent,type ReactNode} from 'react';
+import {useCallback,useEffect,useId,useLayoutEffect,useRef,useState,type MouseEvent as ReactMouseEvent,type ReactNode} from 'react';
 import {ChevronDownIcon} from '@heroicons/react/24/outline';
 import {SectionBar} from '../src/shared/ui/SectionBar';
 import type {SegmentedOption} from '../src/shared/ui/SegmentedControl';
@@ -11,7 +11,7 @@ import './sectionShade.css';
  * tapping that title) drops a second copy from under the top bar like Android's notification
  * shade. Picking a section, a tap outside, Back, Escape or scrolling the list closes it.
  */
-export type SectionShadeBar<T extends string>={label:string;options:readonly SegmentedOption<T>[];value:T;onChange(value:T):void};
+export type SectionShadeBar<T extends string>={label:string;options:readonly SegmentedOption<T>[];value:T;onChange(value:T):void;extra?:ReactNode};
 export type SectionShade={
   /** The bar as the list's first row. */
   inline:ReactNode;
@@ -59,6 +59,9 @@ export function useSectionShade<T extends string>(bar:SectionShadeBar<T>,{active
   const close=useCallback(()=>setOpen(false),[]);
   const inlineRef=useCallback((element:HTMLDivElement|null)=>{inline.current=element;if(!element){setAway(false);setOpen(false);}},[]);
   const barRef=useCallback((element:HTMLElement|null)=>setTopBar(element),[]);
+  // Hand the finger's position to the committed open/closed class before clearing it. Clearing
+  // it in pointerup lets the release height read resolve the still-closed transform first.
+  useLayoutEffect(()=>{if(!dragging&&shade.current)shade.current.style.transform='';},[dragging,open]);
   // A hidden screen closes its shade.
   useEffect(()=>{if(!active)setOpen(false);},[active]);
   // Where the in-list bar is, read from its own scroller's scroll events; any scroll closes the shade.
@@ -82,7 +85,9 @@ export function useSectionShade<T extends string>(bar:SectionShadeBar<T>,{active
     const height=()=>shade.current?.offsetHeight??0;
     const follow=(dy:number)=>{const target=shade.current,full=height();if(target)target.style.transform=`translateY(${Math.max(0,Math.min(full,dy))-full}px)`;};
     const down=(event:PointerEvent)=>{
-      if(!state.current.away||state.current.open||event.isPrimary===false||event.button>0)return;
+      if(event.isPrimary===false||event.button>0)return;
+      swallowClick=false;
+      if(!state.current.away||state.current.open)return;
       drag={pointer:event.pointerId,x:event.clientX,y:event.clientY,pulling:false};
     };
     const move=(event:PointerEvent)=>{
@@ -102,13 +107,13 @@ export function useSectionShade<T extends string>(bar:SectionShadeBar<T>,{active
       const pulled=drag.pulling,dy=event.clientY-drag.y;drag=null;
       if(!pulled)return;
       // The click that ends a pull on the title (or an action) is not a tap.
-      swallowClick=true;window.setTimeout(()=>{swallowClick=false;},0);
+      // Keep the guard until that click or the next press, even when the WebView delays it.
+      swallowClick=true;
       element.releasePointerCapture?.(event.pointerId);
-      if(shade.current)shade.current.style.transform='';
       setDragging(false);
       setOpen(event.type==='pointerup'&&dy>height()/2);
     };
-    const click=(event:MouseEvent)=>{if(!swallowClick)return;swallowClick=false;event.preventDefault();event.stopPropagation();};
+    const click=(event:MouseEvent)=>{if(!swallowClick)return;swallowClick=false;if(event.detail===0)return;event.preventDefault();event.stopPropagation();};
     element.addEventListener('pointerdown',down);element.addEventListener('pointermove',move);element.addEventListener('pointerup',end);element.addEventListener('pointercancel',end);element.addEventListener('click',click,true);
     return()=>{element.style.touchAction=touchAction;element.removeEventListener('pointerdown',down);element.removeEventListener('pointermove',move);element.removeEventListener('pointerup',end);element.removeEventListener('pointercancel',end);element.removeEventListener('click',click,true);};
   },[topBar]);
@@ -137,10 +142,10 @@ export function useSectionShade<T extends string>(bar:SectionShadeBar<T>,{active
   const lifted=away||open;
   return {
     away,open,barRef,
-    inline:<SectionBar ref={inlineRef} placement="inline" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={bar.onChange}/>,
+    inline:bar.extra?<div ref={inlineRef} className="section-shade-rows section-shade-rows--inline"><SectionBar placement="inline" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={bar.onChange}/>{bar.extra}</div>:<SectionBar ref={inlineRef} placement="inline" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={bar.onChange}/>,
     shade:lifted?<div className="section-shade-anchor">
       <div ref={shade} id={id} className={`section-shade${open?' is-open':''}${dragging?' is-dragging':''}`} aria-hidden={!open||undefined} inert={!open||undefined}>
-        <SectionBar placement="shade" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={pick}/>
+        <SectionBar placement="shade" fullWidth label={bar.label} options={bar.options} value={bar.value} onChange={pick}/>{bar.extra&&<div className="section-shade-extra" onClick={close}>{bar.extra}</div>}
       </div>
     </div>:null,
     title:base=>lifted

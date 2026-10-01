@@ -65,8 +65,8 @@ describe('tab return retention',()=>{
     expect(artworkCalls('hero','original').length).toBeGreaterThan(0);expect(decode).toHaveBeenCalled();
   });
 
-  it('appends the next page on scroll, retains it on return and restarts after a query change',async()=>{
-    mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path.includes('cursor=')?{...page,nextCursor:null,items:[{...item,id:'second',name:'Second page'}]}:{...page,nextCursor:'page-2'});
+  it('prefetches the next page, retains it on return and restarts after a query change',async()=>{
+    mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path.includes('type=manga')?{...page,items:[mangaItem()]}:path.includes('cursor=')?{...page,nextCursor:null,items:[{...item,id:'second',name:'Second page'}]}:{...page,nextCursor:'page-2'});
     const props={active:true,paused:false,backRef:{current:null}};const view=render(<Collections {...props}/>);
     await screen.findByText(item.name);scrollToEnd(list());
     await screen.findByText('Second page');
@@ -81,12 +81,14 @@ describe('tab return retention',()=>{
   });
 
   it('restarts the list when a later page belongs to a newer publication',async()=>{
-    let revision='r1';
-    mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path.includes('cursor=')?{...page,revision:'r2',items:[{...item,id:'x',name:'mixed'}]}:{...page,revision,nextCursor:'page-2'});
+    const next=Promise.withResolvers<CollectionPage>();let firsts=0;
+    mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path.includes('showcase=true')?{...page,items:[]}:path.includes('cursor=')?next.promise:++firsts===1?{...page,nextCursor:'page-2'}:{...page,revision:'r2'});
     render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText(item.name);
-    revision='r2';scrollToEnd(list());
+    await waitFor(()=>expect(listCalls()).toHaveLength(2));
+    await act(async()=>next.resolve({...page,revision:'r2',nextCursor:'page-3',items:[{...item,id:'x',name:'mixed'}]}));
     await waitFor(()=>expect(listCalls()).toHaveLength(3));
     expect(listCalls().at(-1)?.[0]).not.toContain('cursor=');expect(screen.queryByText('mixed')).toBeNull();
+    expect(screen.getByText(item.name)).toBeTruthy();
   });
 
   it('does not start requests while initially paused and resumes interrupted list/detail loads',async()=>{
@@ -95,6 +97,7 @@ describe('tab return retention',()=>{
     let lists=0,details=0;
     mocks.api.mockImplementation((path:string)=>{
       if(path.endsWith('/status'))return Promise.resolve({revision:'r1'});
+      if(path==='/v1/home/upcoming')return Promise.resolve({entries:[],wishlist:[]});
       if(path.startsWith('/v1/collections/releases'))return Promise.resolve({revision:1,counts:{unread:0,collections:[]},items:[],nextCursor:null,hasMore:false});
       if(path.startsWith('/v1/collections?')&&path.includes('showcase=true'))return Promise.resolve(page);
       if(path.startsWith('/v1/collections?'))return ++lists===1?oldList.promise:Promise.resolve(page);
@@ -208,6 +211,119 @@ describe('tab return retention',()=>{
   });
 });
 
+describe('background collection pages',()=>{
+  const second={...item,id:'second',name:'Second page'},third={...item,id:'third',name:'Third page'};
+  const props={active:true,paused:false,backRef:{current:null}};
+  const calls=(showcase=false)=>mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/collections?')&&path.includes('showcase=true')===showcase);
+  const serve=(reply:(url:URL,signal:AbortSignal)=>CollectionPage|Promise<CollectionPage>)=>mocks.api.mockImplementation(async(path:string,signal:AbortSignal)=>{
+    if(path.startsWith('/v1/collections?'))return reply(new URL(path,'https://example.invalid'),signal);
+    return path.endsWith('/status')?{revision:'r1'}:page;
+  });
+
+  it.each([['main',false],['Showcase',true]] as const)('drains %s pages after the first screen commits, appends once and remembers the complete slot',async(_label,showcase)=>{
+    const next=Promise.withResolvers<CollectionPage>(),last=Promise.withResolvers<CollectionPage>();
+    serve((url)=>{
+      if(url.searchParams.get('type')!=='game'||(url.searchParams.get('showcase')==='true')!==showcase)return {...page,items:[]};
+      const cursor=url.searchParams.get('cursor');
+      if(!cursor)return {...page,nextCursor:'page-2'};
+      // No cursor request may start before the first page is actually in the DOM.
+      if(!showcase)expect(screen.queryAllByRole('button',{name:new RegExp(item.name)}).length).toBeGreaterThan(0);
+      return cursor==='page-2'?next.promise:last.promise;
+    });
+    render(<Collections {...props}/>);
+    await waitFor(()=>expect(calls(showcase)).toHaveLength(2));
+    if(showcase)fireEvent.click(screen.getByRole('button',{name:/^쇼케이스(?: \d+)?$/}));
+    const host=showcase?section().querySelectorAll<HTMLElement>('.collection-scroll')[1]:list();host.scrollTop=140;
+    expect(calls(showcase)).toHaveLength(2);
+    await act(async()=>next.resolve({...page,items:[second,item],nextCursor:'page-3'}));
+    expect(calls(showcase)).toHaveLength(3);
+    expect(screen.queryByText(second.name)).toBeNull();
+    expect(screen.queryAllByRole('button',{name:new RegExp(item.name)}).length).toBeGreaterThan(0);
+    await act(async()=>last.resolve({...page,items:[third,second]}));
+    await within(host).findByText(third.name);
+    expect(within(host).getAllByText(second.name)).toHaveLength(1);
+    expect(host.scrollTop).toBe(140);
+    expect(calls(showcase).map(([path])=>new URL(path,'https://example.invalid').searchParams.get('cursor'))).toEqual([null,'page-2','page-3']);
+    if(showcase)fireEvent.click(screen.getByRole('button',{name:'쇼케이스 닫기'}));
+    pressTab('만화');await act(async()=>{});
+    pressTab('게임');if(showcase)fireEvent.click(screen.getByRole('button',{name:/^쇼케이스(?: \d+)?$/}));await screen.findByRole('button',{name:new RegExp(third.name)});
+    expect(calls(showcase).filter(([path])=>path.includes('type=game'))).toHaveLength(3);
+  });
+
+  it('aborts on a key change and ignores an abandoned response without blanking the shown list',async()=>{
+    const next=Promise.withResolvers<CollectionPage>(),manga=Promise.withResolvers<CollectionPage>();
+    serve(url=>(url.searchParams.get('showcase')==='true')?{...page,items:[]}:url.searchParams.get('type')==='manga'?manga.promise:url.searchParams.has('cursor')?next.promise:{...page,nextCursor:'page-2'});
+    render(<Collections {...props}/>);
+    await waitFor(()=>expect(calls()).toHaveLength(2));
+    const signal=calls()[1][1] as AbortSignal;
+    pressTab('만화');expect(signal.aborted).toBe(true);
+    expect(screen.getByText(item.name)).toBeTruthy();
+    await act(async()=>next.resolve({...page,items:[second],nextCursor:'page-3'}));
+    expect(screen.queryByText(second.name)).toBeNull();
+    expect(calls().some(([path])=>path.includes('page-3'))).toBe(false);
+    await act(async()=>manga.resolve({...page,items:[{...item,type:'manga',name:'New type'}]}));
+    await screen.findByText('New type');
+  });
+
+  it('revalidates a remembered partial slot before fetching more when another slot read a newer revision',async()=>{
+    const old=Promise.withResolvers<CollectionPage>(),fresh=Promise.withResolvers<CollectionPage>();let games=0;
+    serve(url=>{
+      if(url.searchParams.get('showcase')==='true')return {...page,items:[]};
+      if(url.searchParams.get('type')==='manga')return {...page,revision:'r2',items:[{...item,type:'manga',name:'New type'}]};
+      if(url.searchParams.has('cursor'))return old.promise;
+      return ++games===1?{...page,nextCursor:'page-2'}:fresh.promise;
+    });
+    render(<Collections {...props}/>);await waitFor(()=>expect(calls()).toHaveLength(2));
+    pressTab('만화');await screen.findByText('New type');
+    pressTab('게임');await screen.findByText(item.name);
+    expect(calls().filter(([path])=>path.includes('type=game'))).toHaveLength(3);
+    await act(async()=>fresh.resolve({...page,revision:'r2',items:[second]}));
+    await screen.findByText(second.name);
+    expect(calls().filter(([path])=>path.includes('type=game'))).toHaveLength(3);
+    await act(async()=>old.resolve({...page,items:[third],nextCursor:'page-3'}));
+    expect(screen.queryByText(third.name)).toBeNull();
+  });
+
+  it.each(['inactive','paused','unmounted'] as const)('aborts prefetch when %s and resumes only when enabled',async(mode)=>{
+    const next=Promise.withResolvers<CollectionPage>();let requests=0;
+    serve(url=>(url.searchParams.get('showcase')==='true')?{...page,items:[]}:url.searchParams.has('cursor')?(++requests===1?next.promise:{...page,items:[second]}):{...page,nextCursor:'page-2'});
+    const view=render(<Collections {...props}/>);
+    await waitFor(()=>expect(calls()).toHaveLength(2));
+    const signal=calls()[1][1] as AbortSignal;
+    if(mode==='unmounted')view.unmount();else view.rerender(<Collections {...props} active={mode!=='inactive'} paused={mode==='paused'}/>);
+    expect(signal.aborted).toBe(true);
+    await act(async()=>next.resolve({...page,items:[third],nextCursor:'page-3'}));
+    expect(calls()).toHaveLength(2);
+    if(mode!=='unmounted'){
+      view.rerender(<Collections {...props}/>);await screen.findByText(second.name);
+      expect(calls()).toHaveLength(3);expect(screen.queryByText(third.name)).toBeNull();
+    }
+  });
+
+  it.each([['main',false],['Showcase',true]] as const)('stops %s on error, keeps received pages, and retry drains the remaining cursors without scrolling',async(_label,showcase)=>{
+    let fail=true;
+    serve(url=>{
+      if((url.searchParams.get('showcase')==='true')!==showcase)return {...page,items:[]};
+      switch(url.searchParams.get('cursor')){
+        case 'page-2':return {...page,items:[second],nextCursor:'page-3'};
+        case 'page-3':if(fail)throw new Error('page offline');return {...page,items:[third],nextCursor:'page-4'};
+        case 'page-4':return {...page,items:[{...item,id:'fourth',name:'Fourth page'}]};
+        default:return {...page,nextCursor:'page-2'};
+      }
+    });
+    render(<Collections {...props}/>);
+    if(showcase)fireEvent.click(await screen.findByRole('button',{name:/^쇼케이스(?: \d+)?$/}));
+    await screen.findByText(/page offline/);
+    expect(screen.getByText(item.name)).toBeTruthy();expect(screen.getByText(second.name)).toBeTruthy();
+    expect(calls(showcase)).toHaveLength(3);scrollToEnd(list());await act(async()=>{});
+    expect(calls(showcase)).toHaveLength(3);
+    fail=false;fireEvent.click(screen.getByRole('button',{name:'다시 시도'}));
+    await screen.findByText('Fourth page');expect(screen.queryByText(/page offline/)).toBeNull();
+    expect(calls(showcase).map(([path])=>new URL(path,'https://example.invalid').searchParams.get('cursor'))).toEqual([null,'page-2','page-3','page-3','page-4']);
+    expect(screen.getAllByText(second.name)).toHaveLength(1);
+  });
+});
+
 describe('visible artwork retries',()=>{
   const coverCalls=()=>mocks.native.mock.calls.filter(([op,payload])=>op==='collectionArtwork'&&payload.artworkId==='cover');
   const advance=(ms=0)=>act(async()=>{await vi.advanceTimersByTimeAsync(ms);});
@@ -272,7 +388,7 @@ describe('visible artwork retries',()=>{
 
 describe('read-only collections',()=>{
   it('sorts and filters the server list from chips, restarts the scroll and keeps per-type choices',async()=>{
-    mocks.api.mockResolvedValue({...page,nextCursor:'page-2'});
+    mocks.api.mockImplementation(async(path:string)=>path.includes('cursor=')||!path.startsWith('/v1/collections?')||!path.includes('rating=all')?page:{...page,nextCursor:'page-2'});
     render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     scrollToEnd(list());
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('cursor=page-2'));
@@ -306,42 +422,38 @@ describe('read-only collections',()=>{
     fireEvent.click(screen.getByRole('button',{name:'초기화'}));
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('rating=all'));
   });
-  it('preloads the Showcase count, keeps it folded until asked, and opens its full view',async()=>{
+  it('preloads the Showcase count and opens its existing full content as an overlay',async()=>{
     const backRef:{current:(()=>boolean)|null}={current:null};
-    render(<Collections active paused={false} backRef={backRef}/>);await screen.findByText('밤의 도서관');
+    render(<Collections active paused={false} backRef={backRef}/>);await screen.findByText(item.name);
     const showcaseCalls=()=>mocks.api.mock.calls.filter(([path])=>path.includes('showcase=true'));
-    const fold=screen.getByRole('region',{name:'쇼케이스'}).querySelector('.ui-section-label__actions button') as HTMLElement;
-    expect(fold.getAttribute('aria-expanded')).toBe('true');await waitFor(()=>expect(showcaseCalls()).toHaveLength(1));
-    fireEvent.click(fold);
-    expect(showcaseCalls()).toHaveLength(1);
+    await waitFor(()=>expect(showcaseCalls()).toHaveLength(1));
     expect(showcaseCalls()[0][0]).not.toMatch(/rating=|sort=/);
-    // Folded hides the shelf; the full view opens from the label's › either way.
-    expect(document.querySelector('.collection-showcase-block')).toBeNull();
-    fireEvent.click(fold);
-    fireEvent.click(screen.getByRole('button',{name:'쇼케이스 전체'}));
-    expect(await screen.findByText('PC에서 정한 순서대로 보여 줍니다.')).toBeTruthy();
+    expect(document.querySelector('.collection-showcase-fold')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'쇼케이스 1'}));
+    const overlay=screen.getByRole('dialog',{name:'쇼케이스'});
+    expect(within(overlay).getByText('PC에서 정한 순서대로 보여 줍니다.')).toBeTruthy();
+    expect(within(overlay).getByRole('button',{name:new RegExp(item.name)})).toBeTruthy();
     act(()=>{expect(backRef.current?.()).toBe(true);});
+    expect(screen.queryByRole('dialog',{name:'쇼케이스'})).toBeNull();
     expect(screen.getByRole('radio',{name:'게임'})).toBeTruthy();
     expect(showcaseCalls()).toHaveLength(1);
   });
-  it('updates Showcase per type and hides the previous type while the new list loads',async()=>{
-    let finishManga!:(value:CollectionPage)=>void;
+  it('updates the Showcase count per type and loads new content within its overlay',async()=>{
+    const manga=Promise.withResolvers<CollectionPage>();
     mocks.api.mockImplementation(async(path:string)=>{
-      if(path.includes('showcase=true')){
-        if(path.includes('type=manga'))return new Promise(resolve=>{finishManga=resolve;});
-        return {...page,totalCount:1,items:[{...item,id:'game-showcase',name:'게임 쇼케이스'}]};
-      }
-      if(path.includes('type=manga'))return {...page,items:[{...item,id:'manga-main',name:'만화 작품'}]};
-      return {...page,totalCount:1};
+      if(path.includes('showcase=true'))return path.includes('type=manga')?manga.promise:{...page,totalCount:1,items:[{...item,id:'game-showcase',name:'게임 쇼케이스'}]};
+      return path.includes('type=manga')?{...page,items:[{...item,id:'manga-main',name:'만화 작품'}]}:{...page,totalCount:1};
     });
     render(<Collections active paused={false} backRef={{current:null}}/>);
-    const fold=await waitFor(()=>screen.getByRole('region',{name:'쇼케이스'}).querySelector('.ui-section-label__actions button') as HTMLElement);await waitFor(()=>expect(screen.getByText('밤의 도서관')).toBeTruthy());
-    expect(await screen.findByRole('button',{name:'게임 쇼케이스'})).toBeTruthy();
+    await screen.findByRole('button',{name:'쇼케이스 1'});
     pressTab('만화');await screen.findByText('만화 작품');
-    expect(screen.queryByRole('button',{name:'게임 쇼케이스'})).toBeNull();
-    await act(async()=>finishManga({...page,totalCount:2,items:[{...item,id:'manga-showcase',name:'만화 쇼케이스'}]}));
-    expect(await screen.findByRole('button',{name:'만화 쇼케이스'})).toBeTruthy();
-    expect(screen.getByRole('region',{name:'쇼케이스'}).querySelector('.ui-section-label__count')?.textContent).toBe('2');
+    fireEvent.click(screen.getByRole('button',{name:'쇼케이스'}));
+    const overlay=screen.getByRole('dialog',{name:'쇼케이스'});
+    expect(within(overlay).queryByRole('button',{name:'게임 쇼케이스'})).toBeNull();
+    expect(within(overlay).getByText('쇼케이스를 불러오는 중…').textContent).toContain('불러오는 중');
+    await act(async()=>manga.resolve({...page,totalCount:2,items:[{...item,id:'manga-showcase',name:'만화 쇼케이스'}]}));
+    expect(await within(overlay).findByRole('button',{name:/만화 쇼케이스/})).toBeTruthy();
+    expect(overlay.querySelector('.mobile-overlay__title-row .numeric')?.textContent).toBe('2');
   });
   it('does not present unfiltered results from an older server as filtered results',async()=>{
     mocks.api.mockResolvedValue({...page,filterVersion:undefined});
@@ -365,8 +477,8 @@ describe('read-only collections',()=>{
     fireEvent.submit(searchBox().closest('form')!);
     await waitFor(()=>expect(listPaths().at(-1)).toContain('q=%EB%B0%A4'));
     expect(screen.getByText('검색 결과')).toBeTruthy();
-    // A filtered list hides the Showcase fold: it answers a different question.
-    expect(screen.queryByRole('button',{name:/쇼케이스/})).toBeNull();
+    // Shortcuts remain available while the main list is narrowed.
+    expect(screen.getByRole('button',{name:'쇼케이스 1'})).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'검색어 지우기'}));
     await waitFor(()=>expect(listPaths().at(-1)).not.toContain('q=%EB%B0%A4'));
     expect(searchBox().value).toBe('');
@@ -385,45 +497,6 @@ describe('read-only collections',()=>{
     pressTab('만화');await screen.findByText('밤의 도서관');
     await act(async()=>resolveOld({...page,items:[{...item,id:'stale',name:'오래된 게임'}]}));expect(screen.queryByText('오래된 게임')).toBeNull();
   });
-  it('shows the manga 신간 block, the game calendar block, and no AV news section',async()=>{
-    const manga={...item,id:'manga-news',type:'manga' as const,name:'신간 만화'};
-    mocks.api.mockImplementation(async(path:string)=>{
-      if(path.startsWith('/v1/collections/releases?limit=1'))return {revision:1,counts:{unread:1,collections:[{collectionId:manga.id,unread:1}]},items:[],nextCursor:null,hasMore:false};
-      if(path.startsWith('/v1/collections/releases?limit=100'))return {revision:1,counts:{unread:1,collections:[{collectionId:manga.id,unread:1}]},items:[],nextCursor:null,hasMore:false};
-      if(path.startsWith('/v1/home/upcoming'))return {entries:[{id:'game-release',kind:'game',title:'출시 예정 게임',date:'2099-01-01',precision:'day',cover:null}],wishlist:[]};
-      if(path.includes('type=manga'))return {...page,items:[manga]};
-      if(path.includes('type=av'))return {...page,items:[]};
-      return {...page,items:[item]};
-    });
-    const onCalendar=vi.fn();
-    render(<Collections active paused={false} backRef={{current:null}} onCalendar={onCalendar}/>);
-    await screen.findByText(item.name);
-    pressTab('만화');
-    await waitFor(()=>expect(screen.getByRole('region',{name:'소식'}).querySelector('.ui-section-label__open')).not.toBeNull());
-    pressTab('게임');
-    await waitFor(()=>expect(screen.getByRole('region',{name:'소식'}).querySelector('.ui-section-label__open')).not.toBeNull());
-    const calendarBlock=screen.getByRole('region',{name:'소식'}).querySelector('.ui-section-label__open') as HTMLElement;
-    expect(calendarBlock.getAttribute('aria-label')).toBe('발매 캘린더 전체');
-    fireEvent.click(calendarBlock);
-    expect(onCalendar).toHaveBeenCalledWith('game');
-    pressTab('AV');
-    await screen.findByText('PC 앱이 AV 작품을 아직 보내지 않았습니다');
-    expect(screen.queryByRole('region',{name:'소식'})).toBeNull();
-  });
-  it('remembers a folded section across a remount',async()=>{
-    const view=render(<Collections active paused={false} backRef={{current:null}}/>);
-    await screen.findByText(item.name);
-    const region=screen.getByRole('region',{name:'쇼케이스'});
-    const label=region.querySelector('.ui-section-label__actions button') as HTMLButtonElement;
-    expect(label.getAttribute('aria-expanded')).toBe('true');
-    fireEvent.click(label);
-    expect(label.getAttribute('aria-expanded')).toBe('false');
-    expect(region.querySelector('.collection-shelf')).toBeNull();
-    view.unmount();
-    render(<Collections active paused={false} backRef={{current:null}}/>);
-    await screen.findByText(item.name);
-    expect((screen.getByRole('region',{name:'쇼케이스'}).querySelector('.ui-section-label__actions button') as HTMLButtonElement).getAttribute('aria-expanded')).toBe('false');
-  });
   it('hides AV from the type switch in privacy mode',async()=>{
     localStorage.setItem('lakomics.mobile.privacyMode','1');
     render(<Collections active paused={false} backRef={{current:null}}/>);
@@ -438,7 +511,7 @@ describe('read-only collections',()=>{
     expect(switcher().closest('header.top-bar')).toBeNull();
     // The section bar is the scrolling list's first row (after the zero-height refresh pill).
     const firstRow=[...list().children].find(child=>!child.matches('.pull-refresh'));
-    expect(firstRow?.classList.contains('ui-section-bar--inline')).toBe(true);
+    expect(firstRow?.classList.contains('section-shade-rows--inline')).toBe(true);
     expect(firstRow?.contains(switcher())).toBe(true);
     expect(screen.getAllByRole('radiogroup',{name:'컬렉션 유형'})).toHaveLength(1);
     const listPaths=()=>mocks.api.mock.calls.map(([path])=>path as string).filter(path=>path.startsWith('/v1/collections?'));
@@ -485,7 +558,7 @@ describe('read-only collections',()=>{
       // The list's rows slide; its first row, the section bar, stays still.
       const moved=animate.mock.contexts as unknown as HTMLElement[];
       expect(moved.length).toBeGreaterThan(0);
-      expect(moved.every(element=>element.parentElement===list()&&!element.matches('.ui-section-bar,.pull-refresh,.mobile-scrubber'))).toBe(true);
+      expect(moved.every(element=>element.parentElement===list()&&!element.matches('.ui-section-bar,.section-shade-rows,.pull-refresh,.mobile-scrubber'))).toBe(true);
       expect(moves.every(move=>move[0][0].transform==='translateX(16px)')).toBe(true);
       // AV lies to the right as well; back to 게임 comes in from the left.
       pressTab('AV');await screen.findByText('PC 앱이 AV 작품을 아직 보내지 않았습니다');
@@ -646,8 +719,59 @@ it.each([['game','개발사','아주 긴 개발사 이름'],['manga','작가','�
   expect(row?.querySelector('dd')?.textContent).toBe(name);
 });
 
-it('stands manga on the shared bookcase rows: a tap picks a volume, a second tap opens the work there',async()=>{
+it('defaults manga to one LightCase book per work and picks before opening',async()=>{
   localStorage.removeItem('lakomics.mobile.collectionView.manga.v1');
+  const manga=mangaItem(),second:CollectionDetail={...manga,id:'manga-2',name:'두 번째 만화',showcase:false};
+  mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:path.includes('type=manga')?(path.includes('showcase=true')?[manga]:[manga,second]):[]}:path.endsWith('manga-2')?{revision:'r1',item:second}:{revision:'r1',item:manga});
+  render(<Collections active paused={false} backRef={{current:null}}/>);pressTab('만화');
+  const shelf=await screen.findByRole('group',{name:'만화 작품 목록'});
+  await waitFor(()=>expect(shelf.querySelectorAll('.collection-light-case--book')).toHaveLength(2));
+  expect(shelf.classList.contains('collection-list--shelf')).toBe(true);
+  expect(shelf.querySelector('.manga-shelf-row')).toBeNull();
+  expect(shelf.querySelector('.collection-list__group')).toBeNull();
+  const tile=within(shelf).getByRole('button',{name:item.name});
+  await waitFor(()=>expect(tile.querySelector('.cs-front img')?.getAttribute('src')).toBe('https://example.invalid/cover'));
+  expect(tile.querySelector('.cs-spine .spine-title')?.getAttribute('data-title')).toBe(item.name);
+  fireEvent.click(tile);expect(tile.getAttribute('aria-selected')).toBe('true');
+  expect(screen.queryByRole('heading',{level:1,name:item.name})).toBeNull();
+  fireEvent.click(tile);await screen.findByRole('heading',{level:1,name:item.name});
+});
+
+it('offers manga grid, shelf and bookcase, persists bookcase and opens its Showcase overlay',async()=>{
+  localStorage.setItem('lakomics.mobile.collectionView.manga.v1',JSON.stringify({layout:'shelf',perRow:4}));
+  const manga=mangaItem();
+  mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:path.includes('type=manga')?[manga]:[]}:{revision:'r1',item:manga});
+  render(<Collections active paused={false} backRef={{current:null}}/>);pressTab('만화');
+  const shelf=await screen.findByRole('group',{name:'만화 작품 목록'});
+  await waitFor(()=>expect(shelf.querySelectorAll('.collection-light-case--book')).toHaveLength(1));
+  fireEvent.click(screen.getByRole('button',{name:'보기'}));
+  const sheet=await screen.findByRole('dialog',{name:'보기'});
+  expect(within(sheet).getAllByRole('radio')).toHaveLength(3);
+  for(const name of ['격자','선반','책장'])expect(within(sheet).getByRole('radio',{name})).toBeTruthy();
+  fireEvent.click(within(sheet).getByRole('radio',{name:'격자'}));
+  expect(document.querySelector('.collection-grid-manga .collection-tile')).not.toBeNull();
+  fireEvent.click(within(sheet).getByRole('radio',{name:'책장'}));
+  expect(JSON.parse(localStorage.getItem('lakomics.mobile.collectionView.manga.v1')!)).toEqual({layout:'bookcase',perRow:4});
+  expect(document.querySelector('.collection-light-case')).toBeNull();
+  fireEvent.click(within(sheet).getByRole('button',{name:'닫기'}));
+  await within(screen.getByRole('group',{name:'만화 작품 목록'})).findByRole('group',{name:`${item.name} 책장`});
+  fireEvent.click(screen.getByRole('button',{name:'쇼케이스 1'}));
+  expect(within(screen.getByRole('dialog',{name:'쇼케이스'})).getByRole('button',{name:new RegExp(item.name)})).toBeTruthy();
+});
+
+it('ignores stored bookcase for games and offers only grid and shelf',async()=>{
+  localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout:'bookcase',perRow:4}));
+  render(<Collections active paused={false} backRef={{current:null}}/>);
+  const shelf=await screen.findByRole('group',{name:'게임 작품 목록'});
+  await waitFor(()=>expect(shelf.querySelectorAll('.collection-light-case')).toHaveLength(1));
+  fireEvent.click(screen.getByRole('button',{name:'보기'}));
+  const sheet=await screen.findByRole('dialog',{name:'보기'});
+  expect(within(sheet).getByRole('radio',{name:'선반'}).getAttribute('aria-checked')).toBe('true');
+  expect(within(sheet).queryByRole('radio',{name:'책장'})).toBeNull();
+});
+
+it('stands manga on the shared bookcase rows: a tap picks a volume, a second tap opens the work there',async()=>{
+  localStorage.setItem('lakomics.mobile.collectionView.manga.v1',JSON.stringify({layout:'bookcase',perRow:4}));
   const manga:CollectionDetail={...mangaItem(),showcase:false,ownedVolumes:[{editionIndex:0,count:1}]};
   mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:path.includes('type=manga')&&!path.includes('showcase=true')?[manga]:[]}:{revision:'r1',item:manga});
   render(<Collections active paused={false} backRef={{current:null}}/>);
@@ -762,6 +886,21 @@ describe('type switch continuity',()=>{
     expect(coverCalls('manga-cover')).toHaveLength(1);
   });
 
+  it('keeps the shown type and its layout while a manga bookcase page is pending',async()=>{
+    localStorage.setItem('lakomics.mobile.collectionView.manga.v1',JSON.stringify({layout:'bookcase',perRow:4}));
+    const next=Promise.withResolvers<CollectionPage>();
+    serve({game:page,manga:next.promise});
+    render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText(game.name);
+    const previous=grid();
+    pressTab('만화');await act(async()=>{});
+    expect(grid()).toBe(previous);
+    expect(screen.getByText(game.name)).toBeTruthy();
+    expect(document.querySelector('.manga-shelf-row')).toBeNull();
+    await act(async()=>next.resolve({...page,items:[manga]}));
+    await within(screen.getByRole('group',{name:'만화 작품 목록'})).findByRole('group',{name:`${manga.name} 책장`});
+    expect(document.querySelector('.collection-grid-game')).toBeNull();
+  });
+
   it('shows a type switched back to from memory without a request until a newer revision is read',async()=>{
     serve({game:page,manga:{...page,items:[manga]},movie:{...page,revision:'r2',items:[movie]}});
     render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText(game.name);
@@ -802,7 +941,8 @@ describe('appended card arrival',()=>{
   afterEach(()=>{vi.useRealTimers();delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
   const card=(name:string)=>screen.getByText(name).closest('.collection-tile') as HTMLElement;
   const cardAnimations=(name:string)=>animate.mock.calls.filter(([element])=>element===card(name));
-  const paged=()=>mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path.includes('cursor=')?{...page,nextCursor:null,items:[{...item,id:'second',name:'Second page',selectedWorkArtworkId:'cover-2'}]}:{...page,nextCursor:'page-2'});
+  const appendedPage={...page,nextCursor:null,items:[{...item,id:'second',name:'Second page',selectedWorkArtworkId:'cover-2'}]};
+  const paged=(next:CollectionPage|Promise<CollectionPage>=appendedPage)=>mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path.includes('cursor=')?next:{...page,nextCursor:'page-2'});
 
   it('holds a card appended by scrolling until its cover decodes, then rises the whole card in once',async()=>{
     paged();
@@ -826,13 +966,13 @@ describe('appended card arrival',()=>{
   });
 
   it('shows an appended card with a placeholder after the wait when its cover is slow',async()=>{
-    paged();
+    const next=Promise.withResolvers<CollectionPage>();paged(next.promise);
     let resolveCover!:(value:unknown)=>void;
     mocks.native.mockImplementation(async(_op:string,payload:{artworkId:string})=>payload.artworkId==='cover-2'?new Promise(resolve=>{resolveCover=resolve;}):{url:'https://example.invalid/cover',expires_in:300});
     render(<Collections active paused={false} backRef={{current:null}}/>);
     await screen.findByText(item.name);
     vi.useFakeTimers();
-    scrollToEnd(list());await act(async()=>{});await act(async()=>{});
+    await act(async()=>next.resolve(appendedPage));await act(async()=>{});
     expect(card('Second page').style.opacity).toBe('0');
     act(()=>{vi.advanceTimersByTime(600);});
     expect(card('Second page').style.opacity).toBe('');
@@ -924,4 +1064,111 @@ it('renders an empty tablet manga shelf when the detail reply has no item', asyn
   expect(within(shelf).getByText('이 판본의 표지가 없습니다.')).toBeTruthy();
   expect(within(shelf).queryByRole('button',{name:/권 보기$/})).toBeNull();
   expect(mocks.api).toHaveBeenCalledTimes(1);
+});
+
+// The accepted tablet shortcuts replace fold previews; all content opens above a retained list.
+describe('collection shortcut overlays',()=>{
+  const event=(id:string)=>({id,kind:'date_set',currentValue:'2099-01-01',readAt:null});
+  const game={id:'game-calendar',kind:'game',title:'게임 발매',date:'2099-01-01',precision:'exact',events:[event('g1'),event('g2')]};
+  const movie={id:'movie-calendar',kind:'movie',title:'영화 발매',date:'2099-02-01',precision:'exact',events:[event('m1')]};
+  const upcoming={publishedAt:'2026-10-01',entries:[game,movie],wishlist:[game,movie]};
+  const serve=()=>mocks.api.mockImplementation(async(path:string)=>{
+    if(path==='/v1/home/upcoming')return upcoming;
+    if(path.endsWith('/status'))return {revision:'r1'};
+    if(path.startsWith('/v1/collections/releases'))return {revision:1,counts:{unread:3,collections:[{collectionId:item.id,unread:3}]},items:[],nextCursor:null,hasMore:false};
+    if(path.startsWith('/v1/collections?')){
+      const type=new URL(path,'https://example.invalid').searchParams.get('type') as CollectionDetail['type'];
+      return {...page,totalCount:path.includes('showcase=true')?12:1,items:[{...item,type}]};
+    }
+    return {revision:'r1',item};
+  });
+  const shortcuts=()=>screen.getByRole('group',{name:'컬렉션 바로가기'});
+  it.each([['게임','발매 캘린더 2'],['영화','발매 캘린더 1'],['만화','신간 3'],['AV',null]] as const)('shows the %s shortcuts, counts and quiet segmented shape',async(type,other)=>{
+    serve();render(<Collections active paused={false} backRef={{current:null}}/>);
+    pressTab(type);
+    await within(shortcuts()).findByRole('button',{name:'쇼케이스 12'});
+    const buttons=within(shortcuts()).getAllByRole('button');expect(buttons).toHaveLength(other?2:1);
+    expect(shortcuts().classList.contains('ui-segmented--full-width')).toBe(true);
+    expect(buttons[0].querySelector('.collection-shortcuts__count')?.classList.contains('is-new')).toBe(false);
+    if(other){const shortcut=await within(shortcuts()).findByRole('button',{name:other});expect(shortcut.querySelector('.is-new')?.textContent).toBe(other.endsWith('3')?'3':other.endsWith('2')?'2':'1');}
+    for(const button of buttons){expect(button.getAttribute('aria-pressed')).toBeNull();expect(button.getAttribute('data-segmented-active')).toBeNull();expect(button.querySelector('svg')).toBeTruthy();}
+    expect(document.querySelector('.collection-showcase-fold,.collection-news-section')).toBeNull();
+    // Counts do not fetch the retired manga news preview.
+    expect(mocks.api.mock.calls.some(([path])=>path.startsWith('/v1/collections/releases?limit=100'))).toBe(false);
+  });
+  it.each(['게임','영화','만화'])('hides the zero news count for %s and retains the zero Showcase count',async(type)=>{
+    mocks.api.mockImplementation(async(path:string)=>path==='/v1/home/upcoming'?{entries:[],wishlist:[]}:path.startsWith('/v1/collections/releases')?{counts:{unread:0,collections:[]}}:{...page,totalCount:0,items:[]});
+    render(<Collections active paused={false} backRef={{current:null}}/>);pressTab(type);
+    await within(shortcuts()).findByRole('button',{name:'쇼케이스 0'});
+    const other=within(shortcuts()).getByRole('button',{name:type==='만화'?'신간':'발매 캘린더'});
+    expect(other.querySelector('.collection-shortcuts__count')).toBeNull();
+  });
+  it.each([['게임','쇼케이스','쇼케이스'],['게임','발매 캘린더','발매 캘린더'],['영화','발매 캘린더','발매 캘린더'],['만화','신간','신간']] as const)('opens %s %s over the retained list and Back closes it before leaving',async(type,shortcut,title)=>{
+    serve();const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
+    render(<Collections active paused={false} backRef={backRef} onReturnHome={home}/>);pressTab(type);await within(shortcuts()).findByRole('button',{name:'쇼케이스 12'});
+    const scroller=list(),cards=scroller.querySelector('.collection-grid');scroller.scrollTop=440;fireEvent.scroll(scroller);
+    fireEvent.click(within(shortcuts()).getByRole('button',{name:new RegExp(`^${shortcut}`)}));
+    const overlay=screen.getByRole('dialog',{name:title});
+    expect(scroller.style.display).toBe('');expect(scroller.scrollTop).toBe(440);expect(scroller.querySelector('.collection-grid')).toBe(cards);
+    expect(scroller.hasAttribute('inert')).toBe(true);
+    if(title==='발매 캘린더'){
+      await within(overlay).findByText(type==='게임'?'게임 발매':'영화 발매');
+      expect(within(overlay).queryByText(type==='게임'?'영화 발매':'게임 발매')).toBeNull();
+      expect(document.querySelector('.release-calendar-layer')).toBeNull();
+      expect(within(overlay).queryByRole('button',{name:'홈으로'})).toBeNull();
+    }
+    if(title==='신간')expect(within(overlay).getByRole('radiogroup',{name:'신간 지역'})).toBeTruthy();
+    act(()=>{expect(backRef.current?.()).toBe(true);});expect(screen.queryByRole('dialog',{name:title})).toBeNull();
+    expect(list()).toBe(scroller);expect(scroller.scrollTop).toBe(440);expect(scroller.querySelector('.collection-grid')).toBe(cards);
+    if(title!=='신간')expect(home).not.toHaveBeenCalled();
+    act(()=>{expect(backRef.current?.()).toBe(false);});
+  });
+  it('opens from the pulled shade, then restores the list and its two-row bar',async()=>{
+    serve();render(<Collections active paused={false} backRef={{current:null}}/>);await within(shortcuts()).findByRole('button',{name:'쇼케이스 12'});
+    list().scrollTop=380;fireEvent.scroll(list());fireEvent.click(screen.getByRole('button',{name:'컬렉션 · 게임'}));
+    const shade=document.querySelector('.section-shade') as HTMLElement;
+    expect(within(shade).getByRole('radiogroup',{name:'컬렉션 유형'})).toBeTruthy();
+    fireEvent.click(within(shade).getByRole('button',{name:'쇼케이스 12'}));
+    expect(screen.getByRole('dialog',{name:'쇼케이스'})).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'쇼케이스 닫기'}));expect(list().scrollTop).toBe(380);
+    expect(document.querySelector('.section-shade.is-open')).toBeNull();
+  });
+  it('keeps the Showcase scroll and artwork when a work stacks above it, and Back returns there first',async()=>{
+    const shown={...item,id:'showcase-work',name:'전시 작품'};
+    mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path==='/v1/home/upcoming'?{entries:[],wishlist:[]}:path.includes('showcase=true')?{...page,totalCount:1,items:[shown]}:path.startsWith('/v1/collections?')?page:{revision:'r1',item:shown});
+    const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
+    render(<Collections active paused={false} backRef={backRef} onReturnHome={home}/>);await screen.findByText(item.name);
+    list().scrollTop=350;fireEvent.scroll(list());fireEvent.click(screen.getByRole('button',{name:'쇼케이스 1'}));
+    const overlay=screen.getByRole('dialog',{name:'쇼케이스'}),scroll=overlay.querySelector('.collection-scroll') as HTMLElement;
+    const image=await within(overlay).findByRole('img',{name:shown.name});scroll.scrollTop=240;fireEvent.scroll(scroll);
+    const reads=mocks.api.mock.calls.filter(([path])=>path.includes('showcase=true')).length;
+    fireEvent.click(within(overlay).getByRole('button',{name:new RegExp(shown.name)}));await screen.findByRole('heading',{level:1,name:shown.name});
+    expect(screen.queryByRole('dialog',{name:'쇼케이스'})).toBeNull();
+    act(()=>{expect(backRef.current?.()).toBe(true);});
+    expect(screen.getByRole('dialog',{name:'쇼케이스'})).toBe(overlay);expect(scroll.scrollTop).toBe(240);
+    expect(within(overlay).getByRole('img',{name:shown.name})).toBe(image);expect(home).not.toHaveBeenCalled();
+    expect(mocks.api.mock.calls.filter(([path])=>path.includes('showcase=true'))).toHaveLength(reads);
+    act(()=>{expect(backRef.current?.()).toBe(true);});expect(list().scrollTop).toBe(350);expect(home).not.toHaveBeenCalled();
+  });
+  it('closes the overlay before a retained top-bar search can consume Back',async()=>{
+    serve();const backRef:{current:(()=>boolean)|null}={current:null};
+    render(<Collections active paused={false} backRef={backRef}/>);await within(shortcuts()).findByRole('button',{name:'쇼케이스 12'});
+    fireEvent.change(searchBox(),{target:{value:'밤'}});fireEvent.submit(searchBox().closest('form')!);
+    fireEvent.click(screen.getByRole('button',{name:'쇼케이스 12'}));expect(screen.queryByRole('searchbox')).toBeNull();
+    act(()=>{expect(backRef.current?.()).toBe(true);});expect(screen.getByRole('searchbox').getAttribute('value')).toBe('밤');
+  });
+});
+
+
+it('retains the painted Showcase while its pull-to-refresh reads a replacement',async()=>{
+  const replacement=Promise.withResolvers<CollectionPage>();let reads=0;
+  mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path==='/v1/home/upcoming'?{entries:[],wishlist:[]}:path.includes('showcase=true')?(++reads===1?page:replacement.promise):page);
+  render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText(item.name);
+  fireEvent.click(screen.getByRole('button',{name:'쇼케이스 1'}));
+  const overlay=screen.getByRole('dialog',{name:'쇼케이스'}),host=overlay.querySelector('.collection-scroll') as HTMLElement;
+  const tile=within(overlay).getByRole('button',{name:new RegExp(item.name)});
+  pull(host);expect(reads).toBe(2);
+  expect(within(overlay).getByRole('button',{name:new RegExp(item.name)})).toBe(tile);
+  await act(async()=>replacement.resolve({...page,revision:'r2'}));
+  expect(within(overlay).getByRole('button',{name:new RegExp(item.name)})).toBe(tile);
 });

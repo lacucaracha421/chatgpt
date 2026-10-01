@@ -155,3 +155,31 @@ it("remeasures restored scroll before the first animation-frame paint without a 
   expect(container.querySelector('[data-collection-id="work-40"]')).not.toBeNull();
   expect(container.querySelector('[data-collection-id="work-0"]')).toBeNull();
 });
+
+
+it("lays manga on the shared shelf in one group for every grouping choice", () => {
+  const manga = works.map(work => ({ ...work, type: "manga" as const }));
+  const draw = (grouping: "device" | "year" | "sort") => <CollectionList items={manga} view={{ layout: "shelf", perRow: 6, grouping }} label="만화" onPick={() => undefined} render={work => <button>{work.name}</button>} />;
+  const { container, rerender } = render(draw("device"));
+  for (const grouping of ["device", "year", "sort"] as const) {
+    rerender(draw(grouping));
+    expect(container.querySelector(".collection-list--shelf")).not.toBeNull();
+    expect(container.querySelector(".collection-list__group")).toBeNull();
+    expect(container.querySelectorAll(".collection-list__cell")).toHaveLength(24);
+    expect(container.querySelectorAll(".collection-list__plank")).toHaveLength(4);
+  }
+});
+
+it("windows manga shelf rows with the same tracks as the other work cases", () => {
+  shelfGeometry();
+  const manga = largeShelf.map(work => ({ ...work, type: "manga" as const }));
+  const { container } = render(<div className="collection-browser__list-scroll"><CollectionList items={manga} windowRows
+    view={{ layout: "shelf", perRow: 8, grouping: "device" }} label="만화" onPick={() => undefined} render={drawCase} /></div>);
+  expect(container.querySelectorAll(".collection-list__cell")).toHaveLength(181);
+  expect(container.querySelectorAll(".collection-list__plank")).toHaveLength(23);
+  expect(container.querySelectorAll("[data-collection-id]")).toHaveLength(24);
+  const root = container.firstElementChild as HTMLElement;
+  root.scrollTop = 2000; fireEvent.scroll(root);
+  expect(container.querySelector('[data-collection-id="work-0"]')).toBeNull();
+  expect(container.querySelector('[data-collection-id="work-48"]')).not.toBeNull();
+});

@@ -53,7 +53,7 @@ describe("MangaBrowser", () => {
     expect(await screen.findByText("카탈로그 작품")).toBeVisible();
     await userEvent.click(screen.getByRole("radio", { name: "로컬" }));
     expect(screen.getByText("카탈로그 작품")).toBeVisible();
-    expect(container.querySelector(".online-catalog__content")).toHaveAttribute("inert");
+    expect(container.querySelector(".online-catalog__frame")).toHaveAttribute("inert");
     expect(screen.getByRole("radio", { name: "로컬" })).toHaveAttribute("aria-checked", "true");
     await act(async () => finishLocal(series));
     expect(await screen.findByText("T1")).toBeVisible();

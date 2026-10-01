@@ -4,7 +4,7 @@ import { ArrowPathIcon, ArrowsUpDownIcon, ChevronDownIcon } from "@heroicons/rea
 import type { AlbumEntry, AssetAspectFilter, AssetMediaFilter, AssetSort, AssetView, ClassificationEntry, CollectionSummary } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { Menu } from "../shared/ui/Menu";
-import { SectionBar } from "../shared/ui/SectionBar";
+import { SectionDropMount, useSectionDrop } from "../shared/ui/useSectionDrop";
 import { GalleryViewMenu } from "./GalleryViewMenu";
 
 type AssetToolbarProps = {
@@ -67,12 +67,14 @@ export function AssetToolbar({
       inspectorOpen={inspectorOpen} inspectorAvailable={inspectorAvailable} onInspectorOpenChange={onInspectorOpenChange} />
   </>;
 
+  const sectionDrop = useSectionDrop({ label: "종류", options: MEDIA_OPTIONS, value: mediaFilter, onChange: onMediaFilterChange, trailing: viewControls }, filterable, "에셋");
+
   return <>
-    <ViewToolbar title={location} ariaLabel="자산 도구" titleAccessory={<>{registration}{titleAccessory}{!filterable && <div className="asset-toolbar__controls">{viewControls}</div>}</>} chrome={{
+    <ViewToolbar sectionDrop={sectionDrop} title={location} ariaLabel="자산 도구" titleAccessory={<>{registration}{titleAccessory}{!filterable && <div className="asset-toolbar__controls">{viewControls}</div>}</>} chrome={{
       summary: [sortLabel, galleryLayout === "masonry" ? "폭포수" : "같은 높이", filterable && (mediaFilter !== "all" || aspectFilter !== "all") ? `필터 ${Number(mediaFilter !== "all") + Number(aspectFilter !== "all")}` : "", privacyMode ? "비공개" : ""].filter(Boolean).join(" · "),
       status: privacyMode ? <span>비공개 모드</span> : undefined,
     }} />
-    {filterable && <SectionBar label="종류" options={MEDIA_OPTIONS} value={mediaFilter} onChange={onMediaFilterChange} trailing={viewControls} />}
+    <SectionDropMount host=".asset-browser" target=".asset-gallery__intro, .asset-browser__gallery">{sectionDrop.inline}</SectionDropMount>
   </>;
 }
 

@@ -1687,12 +1687,12 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
     await user.click(await screen.findByRole("radio", { name: "만화" }));
-    await user.click(await screen.findByText("던전밥"));
+    await user.dblClick(await screen.findByRole("button", { name: /^던전밥/ }));
     await user.click(await screen.findByRole("button", { name: "컬렉션으로 돌아가기" }));
 
     expect(await screen.findByRole("radio", { name: "만화" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByText("던전밥")).toBeInTheDocument();
-    await user.click(screen.getByText("던전밥"));
+    await user.dblClick(screen.getByRole("button", { name: /^던전밥/ }));
     await screen.findByRole("button", { name: "컬렉션으로 돌아가기" });
     fireEvent.mouseUp(window, { button: 3 });
     expect(await screen.findByRole("radio", { name: "만화" })).toHaveAttribute("aria-checked", "true");

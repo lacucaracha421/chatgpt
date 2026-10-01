@@ -1,4 +1,4 @@
-import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {setOutboxConnection} from './outboxConnection';
 import type {CollectionDetail, CollectionPage, CollectionSummary, ReleaseSchedule} from './collectionModel';
@@ -79,14 +79,12 @@ afterEach(()=>{cleanup();vi.useRealTimers();vi.restoreAllMocks();});
 const renderTab=(backRef:{current:(()=>boolean)|null}={current:null})=>render(<Collections active paused={false} backRef={backRef}/>);
 const type=(name:string)=>screen.getByRole('radio',{name});
 const selectManga=()=>fireEvent.click(type('만화'));
-const newsRegion=()=>screen.getByRole('region',{name:'소식'});
-const entry=()=>newsRegion().querySelector<HTMLButtonElement>('.ui-section-label__open');
+const shortcuts=()=>screen.getByRole('group',{name:'컬렉션 바로가기'});
 const waitForEntry=async(unread?:string)=>{
-  await waitFor(()=>expect(entry()).not.toBeNull());
-  if(unread!==undefined)await waitFor(()=>expect(newsRegion().querySelector('.ui-section-label__count')?.textContent).toBe(unread));
-  return entry()!;
+  const button=await within(shortcuts()).findByRole('button',{name:unread===undefined?/^신간(?: \d+)?$/:`신간 ${unread}`});
+  return button;
 };
-const emptyEntry=()=>within(newsRegion()).findByRole('button',{name:'새 신간 없음'});
+const emptyEntry=()=>within(shortcuts()).findByRole('button',{name:'신간'});
 /** A ledger row's cells: 소장, the chips of the volumes not owned, 날짜 and 상태. */
 const ledger=(row:HTMLElement)=>({
   owned:row.querySelector('.collection-releases__owned')!.textContent,
@@ -146,8 +144,8 @@ it('always shows the 신간 entry, with a count only while something is unread',
   selectManga();
   const button=await emptyEntry();
   await waitFor(()=>expect(releaseReads().length).toBeGreaterThan(0));
-  expect(button.textContent).toBe('새 신간 없음');
-  expect(newsRegion().querySelector('.ui-section-label__count')).toBeNull();
+  expect(button.textContent).toBe('신간');
+  expect(button.querySelector('.collection-shortcuts__count')).toBeNull();
   // Status changes count too: every read names all three kinds.
   expect(releaseReads().every(path=>new URLSearchParams(path.split('?')[1]).get('kinds')===KINDS.join(','))).toBe(true);
   cleanup();
@@ -160,7 +158,7 @@ it('always shows the 신간 entry, with a count only while something is unread',
 
 it('lists watched works as ledger rows with their unowned Korean volumes, new ones first',async()=>{
   await openReleases();
-  expect(screen.getByRole('heading',{level:1}).textContent).toBe('신간');
+  expect(screen.getByRole('dialog',{name:'신간'})).toBeTruthy();
   expect(tab('한국 정발').getAttribute('aria-checked')).toBe('true');
   // The volume counts above the ledger: new, out but not owned, pre-registered.
   expect(screen.getByLabelText('권별 집계').textContent).toBe('1새로 나옴2나왔지만 아직 없음2발매 예정');
@@ -192,8 +190,8 @@ it('confirms one work with all three kinds and keeps its release information',as
   expect(acks()).toEqual([{version:1,operationId:expect.any(String),collectionId:'sea',kinds:KINDS}]);
   expect(ledger(await workRow('바다의 시간')).chips).toEqual(['1권','2권']);
   expect(screen.queryByRole('button',{name:'바다의 시간 확인'})).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
-  await waitFor(()=>expect(newsRegion().querySelector('.ui-section-label__count')?.textContent).toBe('3'));
+  fireEvent.click(screen.getByRole('button',{name:'신간 닫기'}));
+  await waitForEntry('3');
 });
 
 it('confirms everything with the per-Collection form, the information staying',async()=>{
@@ -206,8 +204,8 @@ it('confirms everything with the per-Collection form, the information staying',a
   expect(ledger(await workRow('밤의 도서관')).chips).toEqual(['4권','5권 10.10','+1']);
   expect(screen.queryByText('NEW')).toBeNull();
   expect(screen.queryByRole('region',{name:'조용한 숲'})).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
-  await emptyEntry();await waitFor(()=>expect(newsRegion().querySelector('.ui-section-label__count')).toBeNull());
+  fireEvent.click(screen.getByRole('button',{name:'신간 닫기'}));
+  expect((await emptyEntry()).querySelector('.collection-shortcuts__count')).toBeNull();
 });
 
 it('opens a work, and a queued owned-count change updates the list when Back returns',async()=>{
@@ -221,9 +219,9 @@ it('opens a work, and a queued owned-count change updates the list when Back ret
   fireEvent.change(within(dialog).getByRole('textbox',{name:'소장 권수'}),{target:{value:'5'}});
   fireEvent.click(within(dialog).getByRole('button',{name:'저장'}));
   await screen.findByRole('button',{name:/소장 5권까지, 전송 대기/});
-  expect(backRef.current!()).toBe(true);
+  act(()=>{expect(backRef.current!()).toBe(true);});
   const night=await workRow('밤의 도서관');
-  expect(screen.getByRole('heading',{level:1}).textContent).toBe('신간');
+  expect(screen.getByRole('dialog',{name:'신간'})).toBeTruthy();
   expect(ledger(night)).toMatchObject({owned:'1–5 권',chips:['6권 미정']});
 });
 
@@ -318,7 +316,7 @@ it('reopens the 신간 screen from what it read, reading again only after the pu
   const view=await openReleases(backRef);
   await waitFor(()=>expect([shelfReads(),eventReads()]).toEqual([1,1]));
   const reopen=async()=>{
-    expect(backRef.current!()).toBe(true);
+    act(()=>{expect(backRef.current!()).toBe(true);});
     await waitFor(()=>expect(screen.queryByRole('row',{name:'밤의 도서관'})).toBeNull());
     fireEvent.click(await waitForEntry('4'));
     return workRow('밤의 도서관');
@@ -329,16 +327,17 @@ it('reopens the 신간 screen from what it read, reading again only after the pu
   expect(mocks.api.mock.calls.length).toBe(calls);
   // The PC publishes: the status check sees a new revision, and the next show reads once.
   const gridReads=()=>mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/collections?')&&String(path).includes('type=manga')&&String(path).includes('showcase=false')&&String(path).includes('sort=media_date')).length,grid=gridReads();
-  await waitFor(()=>expect(screen.queryByText('밤의 도서관',{selector:'.collection-grid .collection-title'})).not.toBeNull());
+  expect(view.container.querySelector('.collection-grid .collection-title')?.textContent).toBeTruthy();
+  expect(screen.queryByRole('group',{name:'컬렉션 바로가기'})).toBeNull();
   await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path==='/v1/collections/status')).toBe(true));
-  expect(backRef.current!()).toBe(true);
+  act(()=>{expect(backRef.current!()).toBe(true);});
   publication='r2';
-  // Returning to the active tab rechecks the changed publication; the manga home news block
-  // refreshes the shared shelf and events before the entry is opened.
+  // Returning to the active tab refreshes the shortcut count. The full inbox snapshot
+  // is read when its overlay opens again.
   view.rerender(<Collections active={false} paused={false} backRef={backRef}/>);
   view.rerender(<Collections active paused={false} backRef={backRef}/>);
   await waitFor(()=>expect(gridReads()).toBeGreaterThan(grid));
-  expect([shelfReads(),eventReads()]).toEqual([2,2]);
+  expect([shelfReads(),eventReads()]).toEqual([1,1]);
   fireEvent.click(await waitForEntry('4'));
   await workRow('밤의 도서관');
   await waitFor(()=>expect([shelfReads(),eventReads()]).toEqual([2,2]));
@@ -364,23 +363,23 @@ it('returns to Home from the entry level Home opened, after closing deeper level
   // 신간 → a work: Back closes the work back to 신간 and stays inside.
   fireEvent.click(within(await workRow('밤의 도서관')).getByRole('button',{name:'밤의 도서관'}));
   await screen.findByRole('heading',{level:1,name:'밤의 도서관'});
-  expect(backRef.current!()).toBe(true);
+  act(()=>{expect(backRef.current!()).toBe(true);});
   await workRow('밤의 도서관');
   expect(home).not.toHaveBeenCalled();
-  // 신간 itself was the entry: its on-screen back arrow returns Home.
-  fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
+  // The inbox opened from Home returns there when its overlay closes.
+  fireEvent.click(screen.getByRole('button',{name:'신간 닫기'}));
   expect(home).toHaveBeenCalledTimes(1);
   // A work opened directly from Home returns Home from the detail (Android Back).
   view.rerender(<Collections active paused={false} backRef={backRef} request={{kind:'work',id:'sea',key:2}} onReturnHome={home}/>);
   await screen.findByRole('heading',{level:1,name:'바다의 시간'});
-  expect(backRef.current!()).toBe(true);
+  act(()=>{expect(backRef.current!()).toBe(true);});
   expect(home).toHaveBeenCalledTimes(2);
 });
 
 it('keeps Collections Back inside the tab when the screen was not opened from Home',async()=>{
   const backRef:{current:(()=>boolean)|null}={current:null};
   await openReleases(backRef);
-  expect(backRef.current!()).toBe(true);
+  act(()=>{expect(backRef.current!()).toBe(true);});
   await waitForEntry('4');
   expect(backRef.current!()).toBe(false);
 });

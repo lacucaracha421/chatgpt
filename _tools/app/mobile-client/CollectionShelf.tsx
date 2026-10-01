@@ -10,7 +10,7 @@ import {useCoverUrl} from './collectionArtwork';
 import {collectionCover, type CollectionKind, type CollectionSummary} from './collectionModel';
 import './collectionShelf.css';
 
-export type ShelfLayout = 'grid' | 'shelf';
+export type ShelfLayout = 'grid' | 'shelf' | 'bookcase';
 export type ShelfView = {layout: ShelfLayout; perRow: number};
 /** Covers or cases per row. The PC offers 5–12; a portrait tablet is about half as wide. */
 export const SHELF_PER_ROW = {min: 3, max: 8, fallback: 4} as const;
@@ -24,7 +24,7 @@ function readView(type: CollectionKind): ShelfView {
     const value = JSON.parse(localStorage.getItem(viewKey(type)) ?? 'null') as Partial<ShelfView> | null;
     if (!value) return fallback;
     return {
-      layout: value.layout === 'grid' || value.layout === 'shelf' ? value.layout : fallback.layout,
+      layout: value.layout === 'grid' || value.layout === 'shelf' || (type === 'manga' && value.layout === 'bookcase') ? value.layout : fallback.layout,
       perRow: Number.isInteger(value.perRow) ? Math.max(SHELF_PER_ROW.min, Math.min(SHELF_PER_ROW.max, value.perRow!)) : fallback.perRow,
     };
   } catch { return fallback; }
@@ -57,16 +57,17 @@ export function ShelfTile({item, revision, active, privacy, picked, extra, onTap
   const front = useCoverUrl(item, cover, revision, active && !privacy, host);
   // The real spine (an upgraded server publishes `spineArtworkId`) waits for the front, so the
   // visible covers keep the ticket queue first; until it decodes the case prints its title.
-  const spine = useCoverUrl(item, item.spineArtworkId, revision, active && !privacy && !!item.spineArtworkId && (front !== null || (!cover && !item.coverAssetId)), host);
+  const spineId = item.type === 'manga' ? null : item.spineArtworkId;
+  const spine = useCoverUrl(item, spineId, revision, active && !privacy && !!spineId && (front !== null || (!cover && !item.coverAssetId)), host);
   return <button ref={host} type="button" className="collection-card" data-collection-id={item.id} aria-selected={picked} aria-label={item.name} onClick={() => onTap(item.id)}>
-    <span className="collection-card__light"><LightCase data={workCaseData(item, {front, spine: item.spineArtworkId ? spine : null}, privacy)} selected={picked}/></span>
+    <span className="collection-card__light"><LightCase data={workCaseData(item, {front, spine: spineId ? spine : null}, privacy)} selected={picked}/></span>
     <span className="collection-card__meta"><span className="collection-card__name">{item.name}</span>{extra && <span className="collection-card__extra">{extra}</span>}</span>
   </button>;
 }
 
 /** 보기: the same choices as the PC menu (배치, 한 줄에 N개), as a bottom sheet. */
-export function ShelfViewSheet({view, onChange, onClose}: {type: CollectionKind; view: ShelfView; onChange(patch: Partial<ShelfView>): void; onClose(): void}) {
-  const options: {value: ShelfLayout; label: string}[] = [{value: 'grid', label: '격자'}, {value: 'shelf', label: '선반'}];
+export function ShelfViewSheet({type, view, onChange, onClose}: {type: CollectionKind; view: ShelfView; onChange(patch: Partial<ShelfView>): void; onClose(): void}) {
+  const options: {value: ShelfLayout; label: string}[] = [{value: 'grid', label: '격자'}, {value: 'shelf', label: '선반'}, ...(type === 'manga' ? [{value: 'bookcase' as const, label: '책장'}] : [])];
   return <BottomSheet title="보기" onClose={onClose}><div className="ui-view-options__content shelf-view-sheet">
     <section className="ui-view-options__section"><span className="ui-view-options__label">배치</span>
       <SegmentedControl label="배치" options={options} value={view.layout} onChange={layout => onChange({layout})} fullWidth/>

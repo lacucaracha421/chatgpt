@@ -151,7 +151,9 @@ describe("CollectionBrowser", () => {
     expect(within(index).queryByRole("group", { name: "컬렉션 소식" })).not.toBeInTheDocument();
     const types = screen.getByRole("radiogroup", { name: "컬렉션 유형" });
     const bar = types.closest(".ui-section-bar") as HTMLElement;
-    expect(bar).toHaveClass("ui-section-bar--pinned");
+    expect(bar).toHaveClass("ui-section-bar--inline");
+    expect(bar.parentElement).toHaveClass("collection-browser__list-scroll");
+    expect(bar.parentElement!.firstElementChild).toBe(bar);
     expect(within(types).getAllByRole("radio").map(radio => radio.getAttribute("aria-label"))).toEqual(["게임", "만화", "영화", "AV"]);
     expect(within(types).getByRole("radio", { name: "게임" })).toHaveAttribute("aria-checked", "true");
     expect(within(types).getByRole("radio", { name: "만화" })).toHaveAttribute("aria-checked", "false");
@@ -709,7 +711,47 @@ describe("CollectionBrowser manga shelf", () => {
   const tracking = () => ({ listInbox: vi.fn().mockResolvedValue([]), acknowledge: vi.fn(), setOwnedCount: vi.fn(), listOwnership: vi.fn(), setOwnership: vi.fn(),
     releaseBoard: vi.fn().mockResolvedValue([{ collectionId: "m1", releaseWatch: { enabled: false, available: false }, ownedVolumes: [{ editionIndex: 0, count: 1 }], releaseSchedule: { kakao: null, mangadex: null } }]) }) as unknown as CollectionTrackingGateway;
 
-  it("stands each work's volumes on one shelf row, picks with a click and opens at the volume on double-click", async () => {
+  it("defaults manga to one paper book per work on the shared shelf and Showcase plank", async () => {
+    const onViewChange = vi.fn();
+    const gateway = renderBrowser({ collections: [manga("m1", "다이의 대모험", { selectedWorkArtworkId: "cover-m1", showcase: true }), manga("m2", "빈 작품")], typeFilter: "manga", showcase: false, onViewChange });
+    const list = screen.getByRole("group", { name: "만화 작품 목록" });
+    expect(list).toHaveClass("collection-list--shelf");
+    expect(list.querySelectorAll(".collection-light-case--book")).toHaveLength(2);
+    expect(list.querySelector(".manga-shelf-row")).toBeNull();
+    expect(list.querySelector(".collection-list__group")).toBeNull();
+    expect(list.querySelectorAll(".collection-list__plank")).toHaveLength(1);
+    expect(list.querySelector(".cs-front img")).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/cover-m1");
+    expect(list.querySelector('.cs-spine .spine-title')).toHaveAttribute("data-title", "다이의 대모험");
+    expect(gateway.listCollectionVolumes).not.toHaveBeenCalled();
+    const first = within(list).getByRole("button", { name: /다이의 대모험/ });
+    fireEvent.click(first);
+    expect(first).toHaveAttribute("aria-selected", "true");
+    expect(first.querySelector(".collection-light-case")).toHaveAttribute("data-front");
+    expect(onViewChange).not.toHaveBeenCalled();
+    fireEvent.doubleClick(first);
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collection", collectionId: "m1" });
+    fireEvent.keyDown(within(list).getByRole("button", { name: /빈 작품/ }), { key: "Enter" });
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collection", collectionId: "m2" });
+    const row = screen.getByRole("region", { name: "쇼케이스" });
+    fireEvent.click(within(row).getByRole("button", { name: /쇼케이스/ }));
+    const showcase = within(row).getByRole("group", { name: "만화 쇼케이스" });
+    expect(showcase).toHaveClass("collection-list--shelf", "collection-list--showcase");
+    expect(showcase.querySelectorAll(".collection-light-case--book")).toHaveLength(1);
+    expect(showcase.querySelectorAll(".collection-list__plank")).toHaveLength(1);
+    expect(showcase.querySelector(".manga-shelf-row")).toBeNull();
+  });
+
+  it("ignores stored bookcase for games and only offers grid and shelf", async () => {
+    localStorage.setItem("lakomics.collections.view.game.v1", JSON.stringify({ layout: "bookcase", perRow: 7, grouping: "device" }));
+    renderBrowser({ collections: [sample], typeFilter: "game", showcase: false });
+    expect(screen.getByRole("group", { name: "게임 작품 목록" })).toHaveClass("collection-list--shelf");
+    await userEvent.setup().click(screen.getByRole("button", { name: "보기" }));
+    expect(await screen.findByRole("radio", { name: "선반" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("radio", { name: "책장" })).toBeNull();
+  });
+
+  it("honours stored 책장 and keeps volume picking and opening on each work row", async () => {
+    localStorage.setItem("lakomics.collections.view.manga.v1", JSON.stringify({ layout: "bookcase", perRow: 8, grouping: "device" }));
     const onViewChange = vi.fn();
     const gateway = renderBrowser({ collections: [manga("m1", "다이의 대모험"), manga("m2", "빈 작품")], typeFilter: "manga", showcase: false, onViewChange, tracking: tracking(), patch: gateway => {
       vi.mocked(gateway.listCollectionVolumes).mockImplementation(async id => id === "m1" ? [volume("v2", 2), volume("v1", 1), volume("e1", 1, 1)] : []);
@@ -746,11 +788,18 @@ describe("CollectionBrowser manga shelf", () => {
     const user = userEvent.setup();
     renderBrowser({ collections: [manga("m1", "다이의 대모험")], typeFilter: "manga", showcase: false });
     expect(screen.getByRole("group", { name: "만화 작품 목록" })).toHaveClass("collection-list--grid");
+    const originalCard = screen.getByRole("group", { name: "만화 작품 목록" }).querySelector(".collection-card");
     await user.click(screen.getByRole("button", { name: "보기" }));
     fireEvent.change(screen.getByRole("slider", { name: "한 줄에" }), { target: { value: "6" } });
     expect(screen.getByRole("group", { name: "만화 작품 목록" })).toHaveAttribute("data-per-row", "6");
     await user.click(screen.getByRole("radio", { name: "선반" }));
+    const shelf = screen.getByRole("group", { name: "만화 작품 목록" });
+    expect(shelf).toHaveClass("collection-list--shelf");
+    expect(shelf.querySelector(".collection-card")).toBe(originalCard);
+    expect(shelf.querySelectorAll(".collection-light-case--book")).toHaveLength(1);
+    await user.click(screen.getByRole("radio", { name: "책장" }));
     expect(screen.getByRole("group", { name: "만화 작품 목록" })).toHaveClass("manga-shelf-list");
+    expect(JSON.parse(localStorage.getItem("lakomics.collections.view.manga.v1")!)).toMatchObject({ layout: "bookcase", perRow: 6 });
   });
 });
 
