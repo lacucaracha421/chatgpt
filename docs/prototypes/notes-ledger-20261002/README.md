@@ -1,6 +1,6 @@
 # 메모 · 가계부 (2026-10-02)
 
-Mockup for the 메모 and 가계부 redesign (backlog `PC-POLISH-20261002` items 10–11). Accepted by the user 2026-10-02 with one change: no quick-add field on the PC (write directly in the note); the tablet keeps it.
+Mockup for the 메모 and 가계부 redesign (backlog `PC-POLISH-20261002` items 10–11). Final, accepted by the user 2026-10-02: no quick-add field on the PC (write directly in the note); the tablet keeps its bottom field with the placeholder "메모 작성"; the move control is an icon; notes have 글 / 할 일 modes.
 
 - 메모 has two modes per note, switched at the top without changing content: 글 (plain lines, no circles — ideas) and 할 일 (a done
   circle per line — feedback, shopping); the current checklist note kind merges into 할 일. Section chips appear only with two or more

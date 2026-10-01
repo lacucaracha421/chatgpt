@@ -254,7 +254,7 @@ function memoHtml(tablet) {
       ${rows.map(row).join('')}<button type="button" class="add${todo ? '' : ' flat'}" data-add="${si}">+ ${todo ? '추가' : '줄 추가'}</button>
       ${todo && done.length ? `<button type="button" class="donefold" data-done="${si}">${foldedDone[si] === false ? '▾' : '▸'} 완료 ${done.length}</button>${foldedDone[si] === false ? done.map(row).join('') : ''}` : ''}</section>`;
   }).join('');
-  const quick = `<div class="quick">${named.length ? `<select aria-label="넣을 섹션" id="${tablet ? 'qs2' : 'qs'}">${named.map((s) => `<option${s.name === lastSect ? ' selected' : ''}>${s.name}</option>`).join('')}</select>` : ''}<input aria-label="빠른 추가" placeholder="${todo ? '한 줄 쓰고 엔터' : '이어서 쓰기'}" data-quick="${tablet ? 2 : 1}"></div>`;
+  const quick = `<div class="quick">${named.length ? `<select aria-label="넣을 섹션" id="${tablet ? 'qs2' : 'qs'}">${named.map((s) => `<option${s.name === lastSect ? ' selected' : ''}>${s.name}</option>`).join('')}</select>` : ''}<input aria-label="빠른 추가" placeholder="메모 작성" data-quick="${tablet ? 2 : 1}"></div>`;
   return `<div class="note"><div style="display:flex;align-items:center;gap:12px"><div class="note-title" contenteditable="true" style="flex:1">${cur}</div>${toggle}</div>${chips}${sects}</div>${tablet ? quick : ''}`;
 }
 function ledgerHtml(tablet) {
