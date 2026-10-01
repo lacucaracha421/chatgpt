@@ -6,7 +6,7 @@ export type CollectionViewSettings = { layout: "grid" | "shelf"; perRow: number;
 type ShelfItem = Pick<CollectionSummary, "id" | "type"> & Partial<Pick<CollectionSummary, "platforms" | "year" | "releaseDate">>;
 function initialViews(): Record<CollectionType, CollectionViewSettings> {
   return Object.fromEntries((["game", "manga", "movie", "av"] as const).map(type => {
-    const fallback: CollectionViewSettings = { layout: type === "manga" ? "grid" : "shelf", perRow: 8, grouping: "device" };
+    const fallback: CollectionViewSettings = { layout: "shelf", perRow: 8, grouping: "device" };
     try {
       const value = JSON.parse(localStorage.getItem(`lakomics.collections.view.${type}.v1`) ?? "null");
       if (value) return [type, { layout: value.layout === "grid" || value.layout === "shelf" ? value.layout : fallback.layout, perRow: Number.isInteger(value.perRow) ? Math.max(5, Math.min(12, value.perRow)) : 8, grouping: ["device", "year", "sort"].includes(value.grouping) ? value.grouping : "device" }];

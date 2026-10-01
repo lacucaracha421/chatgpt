@@ -6,7 +6,7 @@ import {useArtworkSet} from './collectionArtwork';
 import {coverFocuses, type CollectionDetail, type CollectionSummary} from './collectionModel';
 import {sharedVolume} from './CollectionWork';
 
-type Loaded = {key: string; revision: string; item: CollectionDetail};
+type Loaded = {key: string; revision: string; item: CollectionDetail | null};
 // List summaries carry no volumes: a row reads its work once it comes near the visible list,
 // two works at a time, and keeps the read for the list's publication revision.
 const details = new Map<string, Loaded>();
@@ -40,22 +40,22 @@ function TabletMangaRow({work, revision, active, privacy, owned, pick, onPick, o
     if (hit) { setShown(hit); return; }
     // A newer publication keeps the shown shelf until the work is read again.
     const controller = new AbortController();
-    void queued(() => api<{revision: string; item: CollectionDetail}>(`/v1/collections/${encodeURIComponent(work.id)}`, controller.signal), controller.signal).then(result => {
-      const value = {key, revision: result.revision, item: result.item};
+    void queued(() => api<{revision: string; item?: CollectionDetail}>(`/v1/collections/${encodeURIComponent(work.id)}`, controller.signal), controller.signal).then(result => {
+      const value = {key, revision: result.revision, item: result.item ?? null};
       details.set(key, value);
       if (!controller.signal.aborted) setShown(value);
     }, () => undefined);
     return () => controller.abort();
   }, [near, active, key, shown?.key, work.id]);
   const today = localDay();
-  const volumes = shown ? shelfEditionVolumes(shown.item.volumes).map(volume => sharedVolume(volume, today)) : [];
+  const volumes = shown?.item ? shelfEditionVolumes(shown.item.volumes).map(volume => sharedVolume(volume, today)) : [];
   const spines = useArtworkSet(shown?.item ?? null, privacy ? {} : Object.fromEntries(volumes.flatMap(volume => volume.coverArtworkId ? [[volume.coverArtworkId, {id: volume.coverArtworkId, original: false}]] : [])), shown?.revision ?? '', active && near, false);
   const edition = volumes[0]?.editionIndex ?? 0;
   const count = owned(edition);
   const picked = pick?.id === work.id ? pick.volumeId : null;
-  const manga = shown ? mangaShelfData(volumes, coverFocuses(shown.item.volumes), count, picked) : null;
+  const manga = shown ? mangaShelfData(volumes, shown.item ? coverFocuses(shown.item.volumes) : [], count, picked) : null;
   // A first tap picks the volume (its cover turns forward); a tap on the picked volume opens the work there.
-  return <MangaShelfRow id={work.id} title={work.name} owned={count} manga={manga} privacy={privacy} coverUrl={id => spines.urls[id] ?? null}
+  return <MangaShelfRow id={work.id} title={work.name} owned={count} manga={manga} privacy={privacy} coverUrl={id => spines.urls[id] ?? null} touchTargets
     onNear={() => setNear(true)} onPick={volumeId => volumeId === picked ? onOpen(work.id, {volumeId, edition}) : onPick({id: work.id, volumeId})}
     onOpen={volumeId => onOpen(work.id, volumeId ? {volumeId, edition} : null)}/>;
 }

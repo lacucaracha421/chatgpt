@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MangaBookcase, MANGA_SPINE_WIDTH, type MangaWorkData } from "./MangaBookcase";
 import { stripPosition } from "./coverStrip";
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const volumes=[1,2,3].map(n=>({id:`v${n}`,volumeNumber:n,editionIndex:0,displayLabel:String(n),coverArtworkId:`a${n}`,localReleaseDate:n===3?"2026-12-01":null,isbn13:null,releaseStatus:n===3?"upcoming" as const:"released" as const}));
 const manga:MangaWorkData={volumes,activeVolumeId:"v1",editionIndex:0,focuses:[],ownedNumbers:[1],scope:"",revision:"",ownership:null,management:null};
 describe("accepted cover-strip bookcase",()=>{
@@ -53,5 +53,56 @@ describe("accepted cover-strip bookcase",()=>{
     third.getBoundingClientRect=()=>({left:500,right:585,width:85,top:0,bottom:120,height:120,x:500,y:0,toJSON:()=>null});
     view.rerender(<MangaBookcase manga={{...manga,activeVolumeId:"v3"}} privacy={false} onPick={()=>undefined}/>);
     expect(scrollTo).toHaveBeenCalledWith({left:249,behavior:expect.any(String)});
+  });
+});
+
+// jsdom has no PointerEvent constructor or layout; declare the gesture coordinates.
+function pointer(node: HTMLElement, type: string, x: number, y = 8) {
+  const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 });
+  Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: "touch" }, isPrimary: { value: true } });
+  fireEvent(node, event);
+}
+function tabletBookcase(touchTargets = true) {
+  const onPick = vi.fn();
+  const view = render(<MangaBookcase touchTargets={touchTargets} manga={{ ...manga, activeVolumeId: null }} privacy={false} onPick={onPick} />);
+  screen.getAllByRole("button", { name: /권 보기$/ }).forEach((spine, index) => {
+    spine.getBoundingClientRect = () => ({ left: 24 + index * 32, width: 30, right: 54 + index * 32, top: 16, bottom: 136, height: 120, x: 24 + index * 32, y: 16, toJSON: () => null });
+  });
+  return { onPick, track: view.container.querySelector<HTMLElement>(".home-shelf__track")! };
+}
+describe("tablet book area taps", () => {
+  it.each([8, 150])("picks the nearest spine in a gap, above or below the books (y=%s)", y => {
+    const { onPick, track } = tabletBookcase();
+    pointer(track, "pointerdown", 55.5, y); pointer(track, "pointerup", 55.5, y);
+    fireEvent.click(track, { detail: 1 });
+    expect(onPick).toHaveBeenCalledExactlyOnceWith("v2");
+  });
+  it("does not pick after a swipe, even when it returns to the starting point", () => {
+    const { onPick, track } = tabletBookcase();
+    const spine = screen.getByRole("button", { name: "2권 보기" });
+    pointer(spine, "pointerdown", 70); pointer(track, "pointermove", 110); pointer(spine, "pointerup", 70);
+    fireEvent.click(spine, { detail: 1 });
+    expect(onPick).not.toHaveBeenCalled();
+  });
+  it("does not pick after scrolling or a cancelled gesture", () => {
+    const { onPick, track } = tabletBookcase();
+    pointer(track, "pointerdown", 55.5);
+    track.scrollLeft = 20; fireEvent.scroll(track); pointer(track, "pointerup", 55.5);
+    pointer(track, "pointerdown", 55.5); pointer(track, "pointercancel", 55.5); pointer(track, "pointerup", 55.5);
+    expect(onPick).not.toHaveBeenCalled();
+  });
+  it("picks a direct spine tap once and preserves keyboard activation", () => {
+    const { onPick } = tabletBookcase();
+    const spine = screen.getByRole("button", { name: "2권 보기" });
+    pointer(spine, "pointerdown", 70); pointer(spine, "pointerup", 70); fireEvent.click(spine, { detail: 1 });
+    expect(onPick).toHaveBeenCalledExactlyOnceWith("v2");
+    fireEvent.click(spine, { detail: 0 }); expect(onPick).toHaveBeenCalledTimes(2);
+  });
+  it("keeps PC gaps inactive and direct mouse clicks working", () => {
+    const { onPick, track } = tabletBookcase(false);
+    pointer(track, "pointerdown", 55.5); pointer(track, "pointerup", 55.5);
+    expect(onPick).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "2권 보기" }));
+    expect(onPick).toHaveBeenCalledExactlyOnceWith("v2");
   });
 });

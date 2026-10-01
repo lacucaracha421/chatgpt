@@ -42,10 +42,11 @@ function scrollParent(element: HTMLElement): HTMLElement | null {
 /** Rows this far beyond the list's visible edge already load, so scrolling meets ready shelves. */
 const NEAR_MARGIN = "600px 0px";
 
-export function MangaShelfRow({ id, title, owned, manga, privacy, coverUrl, onNear, onPick, onOpen, onEnlarge }: {
+export function MangaShelfRow({ id, title, owned, manga, privacy, coverUrl, onNear, onPick, onOpen, onEnlarge, touchTargets = false }: {
   id: string; title: string;
   /** Owned volumes in the shown edition; `null` when none is recorded. */owned: number | null;
   /** `null` until the row's volumes are loaded: the empty plank holds the row's place. */manga: MangaWorkData | null;
+  touchTargets?: boolean;
   privacy: boolean; coverUrl(artworkId: string): string | null;
   /** Called once, when the row first comes near the visible part of the list. */onNear(): void;
   onPick(volumeId: string): void;
@@ -77,7 +78,7 @@ export function MangaShelfRow({ id, title, owned, manga, privacy, coverUrl, onNe
     </div>
     <div className="manga-shelf-row__shelf" onKeyDown={keyDown}>
       {manga
-        ? <MangaBookcase list label={`${title} 책장`} manga={manga} privacy={privacy} coverUrl={coverUrl} onPick={onPick} onEnlarge={onEnlarge} />
+        ? <MangaBookcase touchTargets={touchTargets} list label={`${title} 책장`} manga={manga} privacy={privacy} coverUrl={coverUrl} onPick={onPick} onEnlarge={onEnlarge} />
         : <div className="manga-bookcase manga-bookcase--list" aria-hidden="true"><div className="manga-shelf-row__waiting"><div className="manga-bookcase-board" /></div></div>}
     </div>
   </section>;

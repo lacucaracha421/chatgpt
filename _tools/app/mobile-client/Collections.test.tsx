@@ -7,6 +7,7 @@ vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:(reason:
 vi.mock('./media',()=>({mediaTicket:vi.fn()}));
 import {Collections} from './Collections';
 import {resetReleaseStore} from './releaseStore';
+import {resetMangaShelfDetails, TabletMangaShelf} from './CollectionMangaShelf';
 const item:CollectionDetail={id:'manga-1',name:'밤의 도서관',type:'game',showcase:true,selectedWorkArtworkId:'cover',volumes:[{id:'v2',volumeNumber:2,editionIndex:0,displayLabel:'2권',coverArtworkId:'c2'},{id:'e1',volumeNumber:1,editionIndex:1,displayLabel:'특별판 1권',coverArtworkId:'e1'},{id:'v1',volumeNumber:1,editionIndex:0,displayLabel:'1',coverArtworkId:'c1'}],artworks:[]};
 const page:CollectionPage={ready:true,filterVersion:1,revision:'r1',publishedAt:null,items:[item],nextCursor:null};
 const section=()=>screen.getByLabelText('컬렉션',{selector:'section'});
@@ -23,7 +24,7 @@ const metadataBlock=()=>screen.getByRole('region',{name:'작품 정보'}).queryS
 /** The fixture as a manga, which opens on the shared book and bookcase instead of the case. */
 const mangaItem=():CollectionDetail=>({...item,type:'manga'});
 const bookcaseLabels=()=>within(screen.getByRole('group',{name:'권별 책장'})).getAllByRole('button').map(button=>button.getAttribute('aria-label'));
-beforeEach(()=>{localStorage.clear();for(const kind of ['game','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));resetReleaseStore();mocks.api.mockReset();mocks.native.mockReset();mocks.api.mockImplementation(async(path:string)=>path.includes('type=av')?{...page,items:[]}:path.includes('/v1/collections/')?{revision:'r1',item}:page);mocks.native.mockResolvedValue({url:'https://example.invalid/cover',expires_in:300});});
+beforeEach(()=>{localStorage.clear();for(const kind of ['game','manga','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));resetReleaseStore();resetMangaShelfDetails();mocks.api.mockReset();mocks.native.mockReset();mocks.api.mockImplementation(async(path:string)=>path.includes('type=av')?{...page,items:[]}:path.includes('/v1/collections/')?{revision:'r1',item}:page);mocks.native.mockResolvedValue({url:'https://example.invalid/cover',expires_in:300});});
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 describe('tab return retention',()=>{
   const listCalls=()=>mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/collections?')&&!path.includes('showcase=true'));
@@ -646,7 +647,7 @@ it.each([['game','개발사','아주 긴 개발사 이름'],['manga','작가','�
 });
 
 it('stands manga on the shared bookcase rows: a tap picks a volume, a second tap opens the work there',async()=>{
-  localStorage.setItem('lakomics.mobile.collectionView.manga.v1',JSON.stringify({layout:'shelf',perRow:4}));
+  localStorage.removeItem('lakomics.mobile.collectionView.manga.v1');
   const manga:CollectionDetail={...mangaItem(),showcase:false,ownedVolumes:[{editionIndex:0,count:1}]};
   mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:path.includes('type=manga')&&!path.includes('showcase=true')?[manga]:[]}:{revision:'r1',item:manga});
   render(<Collections active paused={false} backRef={{current:null}}/>);
@@ -656,12 +657,34 @@ it('stands manga on the shared bookcase rows: a tap picks a volume, a second tap
   const second=within(shelf).getByRole('button',{name:'2권 보기'});
   expect(second.classList.contains('manga-spine--missing')).toBe(true);
   expect(screen.getByLabelText('보유 1권').textContent).toBe('1권');
-  fireEvent.click(second);
+  within(shelf).getAllByRole('button').forEach((spine,index)=>{
+    spine.getBoundingClientRect=()=>({left:index*32,width:30,right:index*32+30,top:16,bottom:136,height:120,x:index*32,y:16,toJSON:()=>null});
+  });
+  const track=shelf.querySelector<HTMLElement>('.home-shelf__track')!;
+  const tapGap=()=>{
+    for(const type of ['pointerdown','pointerup']){
+      const event=new MouseEvent(type,{bubbles:true,clientX:31.5,clientY:8,button:0});
+      Object.defineProperties(event,{pointerId:{value:1},pointerType:{value:'touch'},isPrimary:{value:true}});
+      fireEvent(track,event);
+    }
+    fireEvent.click(track,{detail:1});
+  };
+  tapGap();
   expect(second.getAttribute('aria-pressed')).toBe('true');
   expect(detailPane().style.display).toBe('none');
-  fireEvent.click(second);
+  tapGap();
   const bookcase=await screen.findByRole('group',{name:'권별 책장'});
   await waitFor(()=>expect(within(bookcase).getByRole('button',{name:'2권 보기'}).getAttribute('aria-pressed')).toBe('true'));
+  within(bookcase).getAllByRole('button').forEach((spine,index)=>{
+    spine.getBoundingClientRect=()=>({left:index*32,width:30,right:index*32+30,top:16,bottom:136,height:120,x:index*32,y:16,toJSON:()=>null});
+  });
+  const workTrack=bookcase.querySelector<HTMLElement>('.home-shelf__track')!;
+  for(const type of ['pointerdown','pointerup']){
+    const event=new MouseEvent(type,{bubbles:true,clientX:30.5,clientY:150,button:0});
+    Object.defineProperties(event,{pointerId:{value:1},pointerType:{value:'touch'},isPrimary:{value:true}});
+    fireEvent(workTrack,event);
+  }
+  await waitFor(()=>expect(within(bookcase).getByRole('button',{name:'1권 보기'}).getAttribute('aria-pressed')).toBe('true'));
 });
 
 it('marks a pre-registered volume on the bookcase from its future release date',async()=>{
@@ -891,4 +914,14 @@ describe('shelf view',()=>{
     expect((document.querySelector('.collection-grid.is-counted') as HTMLElement).style.getPropertyValue('--columns')).toBe('6');
     expect(JSON.parse(localStorage.getItem('lakomics.mobile.collectionView.game.v1')!)).toEqual({layout:'grid',perRow:6});
   });
+});
+
+
+it('renders an empty tablet manga shelf when the detail reply has no item', async()=>{
+  mocks.api.mockResolvedValue({revision:'empty-detail'});
+  render(<TabletMangaShelf items={[mangaItem()]} label="만화 작품 목록" revision="empty-detail" active privacy={false} owned={()=>null} pick={null} onPick={vi.fn()} onOpen={vi.fn()}/>);
+  const shelf=await screen.findByRole('group',{name:`${item.name} 책장`});
+  expect(within(shelf).getByText('이 판본의 표지가 없습니다.')).toBeTruthy();
+  expect(within(shelf).queryByRole('button',{name:/권 보기$/})).toBeNull();
+  expect(mocks.api).toHaveBeenCalledTimes(1);
 });

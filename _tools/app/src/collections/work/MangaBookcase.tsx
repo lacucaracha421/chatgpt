@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import { ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 import type { CollectionVolume, CollectionCoverFocus } from "../../library/types";
 import { workArtworkThumbnailUrl, workArtworkUrl } from "../../assets/mediaUrl";
@@ -36,8 +36,37 @@ const SCROLL_MARGIN = 64;
  * `coverUrl` resolves a volume cover's thumbnail; each client passes its own (default: the PC's local artwork).
  * `list`: the Collections list row — the same books and plank, left-aligned under the row's label.
  */
-export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailUrl, list = false, label = "권별 책장", onPick, onEnlarge }: { manga: MangaWorkData; privacy: boolean; coverUrl?(artworkId: string): string | null; list?: boolean; label?: string; onPick(id: string): void; onEnlarge?(volumeId: string): void }) {
+export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailUrl, list = false, touchTargets = false, label = "권별 책장", onPick, onEnlarge }: { manga: MangaWorkData; privacy: boolean; coverUrl?(artworkId: string): string | null; list?: boolean; touchTargets?: boolean; label?: string; onPick(id: string): void; onEnlarge?(volumeId: string): void }) {
   const viewport = useRef<HTMLDivElement>(null);
+  // Tablet taps use the whole book area; native scrolling keeps ownership of swipes.
+  const tap = useRef<{ id: number; x: number; y: number; left: number; track: HTMLElement; moved: boolean } | null>(null);
+  const suppressClick = useRef(false);
+  const moved = (event: PointerEvent<HTMLDivElement>) => {
+    const start = tap.current;
+    if (start && start.id === event.pointerId && (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8 || start.track.scrollLeft !== start.left)) start.moved = true;
+  };
+  const pointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (!touchTargets || event.button !== 0 || event.isPrimary === false) return;
+    suppressClick.current = false;
+    const track = (event.target as HTMLElement).closest<HTMLElement>(".home-shelf__track");
+    if (!track) return;
+    suppressClick.current = true;
+    tap.current = { id: event.pointerId, x: event.clientX, y: event.clientY, left: track.scrollLeft, track, moved: false };
+  };
+  const pointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    moved(event);
+    const start = tap.current;
+    tap.current = null;
+    if (!start || start.id !== event.pointerId || start.moved) return;
+    const spines = [...start.track.querySelectorAll<HTMLButtonElement>("[data-volume-id]")];
+    let nearest: HTMLButtonElement | null = null, distance = Infinity;
+    for (const spine of spines) {
+      const box = spine.getBoundingClientRect();
+      const next = Math.abs(event.clientX - (box.left + box.width / 2));
+      if (next < distance) { nearest = spine; distance = next; }
+    }
+    if (nearest?.dataset.volumeId) onPick(nearest.dataset.volumeId);
+  };
   const placed = useRef(false);
   // Scroll only the shelf (never the page) so the current volume stays in view; centred shelves do not move.
   useLayoutEffect(() => {
@@ -55,7 +84,10 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
     if (track.scrollTo) track.scrollTo({ left, behavior: smooth ? "smooth" : "auto" });
     else track.scrollLeft = left;
   }, [manga.activeVolumeId]);
-  return <div ref={viewport} className={list ? "manga-bookcase manga-bookcase--list" : "work-strip manga-bookcase"} role="group" aria-label={label}><ShelfScroller previousLabel="책장 왼쪽 보기" nextLabel="책장 오른쪽 보기"><div className="manga-bookcase-board"><div className="manga-bookcase-spines">
+  return <div ref={viewport} onPointerDown={pointerDown} onPointerMove={touchTargets ? moved : undefined} onPointerUp={touchTargets ? pointerUp : undefined}
+    onScrollCapture={touchTargets ? () => { if (tap.current) tap.current.moved = true; } : undefined}
+    onPointerCancel={touchTargets ? () => { tap.current = null; } : undefined}
+    onClickCapture={touchTargets ? event => { if (suppressClick.current && event.detail !== 0) { event.preventDefault(); event.stopPropagation(); } suppressClick.current = false; } : undefined} className={list ? "manga-bookcase manga-bookcase--list" : "work-strip manga-bookcase"} role="group" aria-label={label}><ShelfScroller previousLabel="책장 왼쪽 보기" nextLabel="책장 오른쪽 보기"><div className="manga-bookcase-board"><div className="manga-bookcase-spines">
     {manga.volumes.map(volume => <Spine key={volume.id} volume={volume} latest={volume.volumeNumber === manga.latestKoreanVolume} picked={manga.activeVolumeId === volume.id} privacy={privacy} focus={manga.focuses.find(focus => focus.volumeId === volume.id && focus.coverArtworkId === volume.coverArtworkId)?.focusX ?? null} owned={manga.ownedNumbers === null ? null : manga.ownedNumbers.includes(volume.volumeNumber)} src={volume.coverArtworkId ? coverUrl(volume.coverArtworkId) : null} onPick={() => onPick(volume.id)} onEnlarge={onEnlarge && (() => onEnlarge(volume.id))} />)}
     {!manga.volumes.length && <span className="manga-cover-empty">이 판본의 표지가 없습니다.</span>}
   </div></div></ShelfScroller></div>;

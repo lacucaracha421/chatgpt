@@ -306,6 +306,7 @@ describe("CollectionBrowser", () => {
     ({ collectionId, collectionName: collectionId, provider, event: { id, kind: "new_volume", volumeNumber, previousValue: null, currentValue, detectedAt: "2026-09-20T00:00:00Z" } });
 
   it("shows the year, my stars and the 신간 marker on manga tiles by priority", async () => {
+    localStorage.setItem("lakomics.collections.view.manga.v1", JSON.stringify({ layout: "grid", perRow: 8, grouping: "device" }));
     const year = new Date().getFullYear();
     const past = `${year - 1}-12-31`, future = `${year + 1}-11-20`;
     const tracking = { ...trackingWith([event("new", "n1", 13, past), event("jp", "j1", 30, null, "mangadex")]), releaseBoard: vi.fn().mockResolvedValue([
@@ -709,7 +710,6 @@ describe("CollectionBrowser manga shelf", () => {
     releaseBoard: vi.fn().mockResolvedValue([{ collectionId: "m1", releaseWatch: { enabled: false, available: false }, ownedVolumes: [{ editionIndex: 0, count: 1 }], releaseSchedule: { kakao: null, mangadex: null } }]) }) as unknown as CollectionTrackingGateway;
 
   it("stands each work's volumes on one shelf row, picks with a click and opens at the volume on double-click", async () => {
-    localStorage.setItem("lakomics.collections.view.manga.v1", JSON.stringify({ layout: "shelf", perRow: 8, grouping: "device" }));
     const onViewChange = vi.fn();
     const gateway = renderBrowser({ collections: [manga("m1", "다이의 대모험"), manga("m2", "빈 작품")], typeFilter: "manga", showcase: false, onViewChange, tracking: tracking(), patch: gateway => {
       vi.mocked(gateway.listCollectionVolumes).mockImplementation(async id => id === "m1" ? [volume("v2", 2), volume("v1", 1), volume("e1", 1, 1)] : []);
@@ -742,6 +742,7 @@ describe("CollectionBrowser manga shelf", () => {
   });
 
   it("keeps 격자 with 한 줄에 N개 for manga", async () => {
+    localStorage.setItem("lakomics.collections.view.manga.v1", JSON.stringify({ layout: "grid", perRow: 8, grouping: "device" }));
     const user = userEvent.setup();
     renderBrowser({ collections: [manga("m1", "다이의 대모험")], typeFilter: "manga", showcase: false });
     expect(screen.getByRole("group", { name: "만화 작품 목록" })).toHaveClass("collection-list--grid");

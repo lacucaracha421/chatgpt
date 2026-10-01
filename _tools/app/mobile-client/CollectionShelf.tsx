@@ -15,11 +15,11 @@ export type ShelfView = {layout: ShelfLayout; perRow: number};
 /** Covers or cases per row. The PC offers 5–12; a portrait tablet is about half as wide. */
 export const SHELF_PER_ROW = {min: 3, max: 8, fallback: 4} as const;
 const viewKey = (type: CollectionKind) => `lakomics.mobile.collectionView.${type}.v1`;
-/** Manga starts on the cover grid, as on the PC; its 선반 is the bookcase rows (CollectionMangaShelf). */
-const fallbackView = (type: CollectionKind): ShelfView => ({layout: type === 'manga' ? 'grid' : 'shelf', perRow: SHELF_PER_ROW.fallback});
+/** Every type starts on the shelf; stored user choices take precedence. */
+const fallbackView = (): ShelfView => ({layout: 'shelf', perRow: SHELF_PER_ROW.fallback});
 
 function readView(type: CollectionKind): ShelfView {
-  const fallback = fallbackView(type);
+  const fallback = fallbackView();
   try {
     const value = JSON.parse(localStorage.getItem(viewKey(type)) ?? 'null') as Partial<ShelfView> | null;
     if (!value) return fallback;

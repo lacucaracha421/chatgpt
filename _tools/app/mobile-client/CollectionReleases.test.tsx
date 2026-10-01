@@ -51,7 +51,7 @@ const listReply=()=>{
 
 beforeEach(()=>{setOutboxConnection('https://a.example');resetReleaseStore();
   vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(2026,8,25,12));
-  localStorage.clear();for(const kind of ['game','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));mocks.api.mockReset();mocks.native.mockReset();offline=false;editsOffline=false;publication='r1';works=initialWorks();
+  localStorage.clear();for(const kind of ['game','manga','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));mocks.api.mockReset();mocks.native.mockReset();offline=false;editsOffline=false;publication='r1';works=initialWorks();
   events=[
     event('e1','night','kakao','new_volume',5,null,'2026-10-10'),
     event('e2','sea','kakao','release_status_changed',2,'upcoming','released'),
