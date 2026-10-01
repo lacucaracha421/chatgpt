@@ -53,3 +53,9 @@ describe("StatisticsPanel", () => {
     expect(gateway.measureLibraryDerivativeStorage).toHaveBeenCalledTimes(2);
   });
 });
+
+it("formats activity timestamps with shared dates and times", async () => {
+  gateway.getLibraryStatistics.mockResolvedValue({ ...stats, collectionAndDailyStartedAt: "2025-09-06T15:07:40" });
+  render(<StatisticsPanel />);
+  expect(await screen.findByText("컬렉션 열기·일별 집계 시작: 2025.9.6 15:07")).toBeInTheDocument();
+});

@@ -1,3 +1,4 @@
+import { displayDateTime } from "../shared/displayDate";
 import { useEffect, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -10,7 +11,7 @@ import "./statistics.css";
 
 const number = (value: number) => value.toLocaleString();
 const bytes = (value: number) => `${(value / 1024 ** 3).toLocaleString(undefined, { maximumFractionDigits: 3 })} GiB`;
-const date = (value: string) => new Date(value).toLocaleString();
+const date = (value: string) => displayDateTime(value, new Date(), { withTime: true });
 const kindLabel: Record<string, string> = { image: "이미지", gif: "GIF", video: "영상" };
 
 function CountTable({ title, definition, rows }: { title: string; definition: string; rows: StatisticCount[] }) {

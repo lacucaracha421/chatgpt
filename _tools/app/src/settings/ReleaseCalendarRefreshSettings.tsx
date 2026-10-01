@@ -1,3 +1,4 @@
+import { displayDateTime } from "../shared/displayDate";
 import { useEffect, useState } from "react";
 import { RELEASE_SOURCE_PROBLEM } from "../collections/releaseCalendarFormat";
 import { useLibrary } from "../library/LibraryContext";
@@ -43,7 +44,7 @@ export function ReleaseCalendarRefreshSettings() {
   return <dl className="settings-view__property">
     <dt>발매 캘린더</dt>
     {calendar?.sources.map(source => <dd key={source.provider} className="settings-view__row-note">
-      {SOURCE_LABEL[source.provider]} · {source.fetchedAt ? `마지막으로 받음 ${new Date(source.fetchedAt).toLocaleString("ko-KR")}` : "받은 기록 없음"}
+      {SOURCE_LABEL[source.provider]} · {source.fetchedAt ? `마지막으로 받음 ${displayDateTime(source.fetchedAt, new Date(), { withTime: true })}` : "받은 기록 없음"}
       {source.errorCode && ` · ${RELEASE_SOURCE_PROBLEM[source.errorCode] ?? "받지 못했습니다."}`}
     </dd>)}
     <dd className="settings-view__inline-controls"><Button size="sm" variant="quiet" disabled={busy} onClick={() => void refreshNow()}>{busy ? "받는 중…" : "새로 받기"}</Button></dd>

@@ -1,3 +1,4 @@
+import {displayDate} from '../src/shared/displayDate';
 import type {Asset, AssetFiltersValue, Page, PageWire, View} from './types';
 import {EMPTY_FILTERS, filterKey, filterVersionOf, withFilters} from './assetFilters';
 import {formatDuration} from '../src/assets/assetMetadata';
@@ -98,7 +99,7 @@ export function fitTransform(scale: number, x: number, y: number, width: number,
 export function dateLabel(asset: Asset) {
   const value = asset.collected_at ?? asset.created_at;
   const date = value ? new Date(value) : null;
-  return date && Number.isFinite(date.getTime()) ? date.toLocaleDateString('ko-KR', {year:'numeric', month:'2-digit',day:'2-digit'}) : '날짜 없음';
+  return date && Number.isFinite(date.getTime()) ? displayDate(value) : '날짜 없음';
 }
 /**
  * A video's playtime as `m:ss` / `h:mm:ss`, or an empty string when the server did

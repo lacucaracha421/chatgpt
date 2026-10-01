@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   batchLabel,
   creatorLabel,
   importSourceLabel,
+  localDate,
   localDateTime,
 } from "./assetMetadata";
 
@@ -39,4 +40,16 @@ describe("asset metadata formatting", () => {
     expect(batchLabel("short-id")).toBe("short-id");
     expect(batchLabel(null)).toBe("—");
   });
+});
+
+afterEach(() => vi.useRealTimers());
+it("uses shared dates and timestamp labels with unchanged fallbacks", () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 9, 1, 16));
+  expect(localDate("2026-10-01")).toBe("10.1");
+  expect(localDate("2025-10-01")).toBe("2025.10.1");
+  expect(localDate("invalid")).toBe("—");
+  expect(localDateTime("2026-10-01T15:07:40")).toBe("15:07");
+  expect(localDateTime("2026-09-30T15:07:40")).toBe("어제 15:07");
+  expect(localDateTime("2025-09-28T15:07:40")).toBe("2025.9.28 15:07");
 });

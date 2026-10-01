@@ -1,3 +1,4 @@
+import { displayDate, displayDateTime } from "../shared/displayDate";
 export { formatBytes } from "../shared/formatBytes";
 
 export function sourceLabel(sourceUrl: string | null): string {
@@ -12,7 +13,7 @@ export function sourceLabel(sourceUrl: string | null): string {
 
 export function localDate(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
+  return Number.isNaN(date.getTime()) ? "—" : displayDate(value);
 }
 
 export function creatorLabel(
@@ -38,7 +39,7 @@ export function importSourceLabel(value: ImportSource | null): string {
 export function localDateTime(value: string | null): string {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? "—" : displayDateTime(value, new Date(), { withTime: true });
 }
 
 export function batchLabel(value: string | null): string {

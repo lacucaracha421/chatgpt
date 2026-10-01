@@ -1,3 +1,4 @@
+import { displayDateTime } from "../shared/displayDate";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent } from "react";
 import { ArrowPathIcon, ArrowUturnLeftIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, DocumentTextIcon, ListBulletIcon, LockClosedIcon, PencilSquareIcon } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -368,7 +369,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   </div>;
   const listView=<div className="notes-list-view">{filterRow}{board}</div>;
   const editor=!note?null:<article className={`notes-editor${noteColorValue(note.color)?" has-tint":""}`} style={tint(note.color)}>
-      <div className="notes-editor-actions"><div className="notes-editor-actions__leading"><Button variant="quiet" className="notes-back-button" aria-label="메모 닫기" onClick={close}><ChevronLeftIcon aria-hidden="true"/>메모</Button><time dateTime={note.updatedAt}>{new Date(note.updatedAt).toLocaleString("ko-KR",{dateStyle:"medium",timeStyle:"short"})}</time></div><div>
+      <div className="notes-editor-actions"><div className="notes-editor-actions__leading"><Button variant="quiet" className="notes-back-button" aria-label="메모 닫기" onClick={close}><ChevronLeftIcon aria-hidden="true"/>메모</Button><time dateTime={note.updatedAt}>{displayDateTime(note.updatedAt, new Date(), { withTime: true })}</time></div><div>
         <Button variant="quiet" className="notes-undo-button" disabled={!noteUndo.canUndo} onClick={()=>{noteUndo.undo();}}><ArrowUturnLeftIcon aria-hidden="true"/>되돌리기</Button>
         {canConvert&&<Button size="icon" variant="ghost" aria-label={convertLabel} title={`${convertLabel} (Ctrl+Shift+L)`} onClick={convert}>{kind==="checklist"?<DocumentTextIcon/>:<ListBulletIcon/>}</Button>}
         {!trash&&kind==="text"&&!note.readOnly&&<MarkdownHelpButton/>}
@@ -416,7 +417,7 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
       if(mod&&key==="s"){e.preventDefault();void store.sync();}
       if(mod&&!e.shiftKey&&key==="e"&&note&&kind==="text"&&!note.readOnly&&!trash){e.preventDefault();editingBody?setEditingBody(false):startBodyEdit();}
       if(mod&&e.shiftKey&&key==="l"){e.preventDefault();convert();}}}>
-    <ViewToolbar title="메모" titleContent={notesSectionTitle} chrome={{search:state.unlocked?{scope:"메모",query,label:"메모 검색",placeholder:"제목, 본문, 라벨 검색",onApply:setQuery}:undefined,status:state.unlocked?<span className="notes-save-status" role="status" aria-description={state.lastSyncedAt?`마지막 동기화 ${new Date(state.lastSyncedAt).toLocaleString()}`:undefined}>{status}</span>:undefined}}/>
+    <ViewToolbar title="메모" titleContent={notesSectionTitle} chrome={{search:state.unlocked?{scope:"메모",query,label:"메모 검색",placeholder:"제목, 본문, 라벨 검색",onApply:setQuery}:undefined,status:state.unlocked?<span className="notes-save-status" role="status" aria-description={state.lastSyncedAt?`마지막 동기화 ${displayDateTime(state.lastSyncedAt, new Date(), { withTime: true })}`:undefined}>{status}</span>:undefined}}/>
     {state.error&&<div className="notes-error" role="alert"><span>{state.error}</span><Button size="sm" variant="ghost" disabled={state.syncing} onClick={()=>void (state.unlocked?store.sync():store.load())}>다시 시도</Button></div>}
     {main}
     {recoverySurface}

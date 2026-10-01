@@ -1,3 +1,4 @@
+import { displayDateTime } from "../shared/displayDate";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
@@ -19,6 +20,7 @@ it("creates, edits, pins, trashes and restores through the actual notes editor",
   fireEvent.change(screen.getByRole("textbox",{name:"메모 제목"}),{target:{value:"읽을 책"}});
   fireEvent.change(screen.getByRole("textbox",{name:"메모 본문"}),{target:{value:"내일 2장 읽기"}});
   await waitFor(()=>expect(store.snapshot().saving).toBe(false));
+  expect(document.querySelector("time")?.textContent).toBe(displayDateTime("2026-09-07T00:00:00Z", new Date(), { withTime: true }));
   await userEvent.click(screen.getByRole("button",{name:"메모 고정"}));
   await waitFor(()=>expect(store.snapshot().notes[0].pinned).toBe(true));
   await userEvent.click(screen.getByRole("button",{name:"메모를 휴지통으로"}));

@@ -112,3 +112,16 @@ it("opens the existing pairing card in QR mode", async () => {
   expect(await screen.findByRole("region", { name: /QR|태블릿/ })).toBeInTheDocument();
   expect(gateway.createExtensionPairing).toHaveBeenCalledTimes(1);
 });
+
+it("uses the shared fetched timestamp and backup date", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 9, 1, 16));
+  try {
+    const gateway = createGateway();
+    gateway.releaseCalendar!.calendar = vi.fn().mockResolvedValue({ generatedAt: "", rangeStart: "", rangeEnd: "", entries: [], sources: [{ provider: "igdb", fetchedAt: "2026-09-30T15:07:40", attemptedAt: null, errorCode: null, due: false }] });
+    renderSettings(gateway, { initialSection: "frequent" });
+    expect(await screen.findByText(/어제 15:07/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "고급" }));
+    expect(await screen.findByText("9.28")).toBeInTheDocument();
+  } finally { vi.useRealTimers(); }
+});

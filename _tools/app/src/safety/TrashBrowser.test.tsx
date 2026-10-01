@@ -309,3 +309,10 @@ it("does not request trash thumbnails in privacy mode", async () => {
   expect(document.querySelector("img")).toBeNull();
   expect(screen.getByRole("img", { name: "비공개 모드" })).toBeVisible();
 });
+
+it("renders the shared deletion date", async () => {
+  const gateway = createGateway();
+  vi.mocked(gateway.listTrash).mockResolvedValue({ items: [{ asset: asset(), trashedAt: "2025-07-20T12:00:00", purgeAt: null }], nextCursor: null, totalCount: 1, totalBytes: 1024 });
+  renderTrash(<TrashBrowser />, gateway);
+  expect(await screen.findByText("삭제: 2025.7.20")).toBeInTheDocument();
+});

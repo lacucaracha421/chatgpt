@@ -1,3 +1,4 @@
+import { displayTime } from "../shared/displayDate";
 import { ArrowTopRightOnSquareIcon, ArrowUturnLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
@@ -433,7 +434,7 @@ function isStale(reason: unknown) {
 function clockTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "--:--";
-  return new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+  return displayTime(date);
 }
 
 function errorMessage(reason: unknown, fallback: string) {

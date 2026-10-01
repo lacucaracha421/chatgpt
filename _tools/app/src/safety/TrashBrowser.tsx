@@ -1,3 +1,4 @@
+import { displayDate } from "../shared/displayDate";
 import { PhotoIcon } from "@heroicons/react/24/outline";
 import { trashThumbnailUrl } from "../assets/mediaUrl";
 import { usePrivacy } from "../privacy/PrivacyContext";
@@ -196,7 +197,7 @@ function remainingDays(purgeAt: string): number {
 
 function localDate(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+  return Number.isNaN(date.getTime()) ? value : displayDate(value);
 }
 
 function TrashThumbnail({ assetId, hidden }: { assetId: string; hidden: boolean }) {

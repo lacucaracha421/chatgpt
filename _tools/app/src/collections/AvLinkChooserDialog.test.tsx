@@ -121,3 +121,10 @@ describe("AvLinkChooserDialog", () => {
     expect(client.getCandidate).toHaveBeenLastCalledWith("inbox-1", "av-1");
   });
 });
+
+it("uses the shared 24-hour time for the source lookup", async () => {
+  const candidate = baseCandidate();
+  candidate.inbox.fetchedAt = "2026-10-01T00:07:40";
+  show(candidate);
+  expect(await screen.findByText("00:07")).toBeInTheDocument();
+});

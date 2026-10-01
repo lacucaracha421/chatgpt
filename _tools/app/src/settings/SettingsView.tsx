@@ -1,3 +1,4 @@
+import { displayDate, displayDateTime } from "../shared/displayDate";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
 import { StarIcon, ComputerDesktopIcon, FolderIcon, LinkIcon, GlobeAltIcon, LockClosedIcon, WrenchIcon } from "@heroicons/react/24/outline";
@@ -620,6 +621,6 @@ function calendarStatus(calendar: { sources: { provider: keyof typeof SOURCE_LAB
   const sources = calendar.sources.map(source => SOURCE_LABEL[source.provider]).join(" · ");
   return `${fetched ? localDateTime(fetched) : "받은 기록 없음"}${sources ? ` · ${sources}` : ""}${calendar.sources.some(source => source.errorCode) ? " · 일부 실패" : ""}`;
 }
-function localDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("ko-KR"); }
-function localDateTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString("ko-KR"); }
+function localDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : displayDate(value); }
+function localDateTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : displayDateTime(value, new Date(), { withTime: true }); }
 function kindLabel(kind: MetadataBackup["kind"]) { return kind === "pre_restore" ? "복구 전 보존" : kind === "pre_migration" ? "이전 전 보존" : "자동"; }

@@ -11,7 +11,7 @@ describe("date masonry", () => {
     const items = [item("a"), item("b"), item("c", 4)];
     const current = buildMasonryLayout(items, 640, 180, 20, true, true);
     expect(current.headings.map(heading => heading.label)).toEqual(["9.5", "9.4"]);
-    expect(collectedDate(items[0].collectedAt)).toMatchObject({ key: "2026.09.05", label: "9.5", time: "21:07" });
+    expect(collectedDate(items[0].collectedAt)).toMatchObject({ key: "2026.09.05", label: "9.5", time: "21:07", full: "9.5 21:07" });
     const fullDates = buildMasonryLayout(items, 640, 180, 20, true, true, true);
     expect(fullDates.headings.map(heading => heading.label)).toEqual(["9.5", "9.4"]);
     expect(fullDates.tiles).toEqual(current.tiles);
@@ -19,6 +19,7 @@ describe("date masonry", () => {
     const next = buildMasonryLayout(items, 640, 180, 20, true, true);
     expect(next.headings.map(heading => heading.label)).toEqual(["2026.9.5", "2026.9.4"]);
     expect(next.tiles).toEqual(current.tiles);
+    expect(collectedDate(items[0].collectedAt).full).toBe("2026.9.5 21:07");
     expect(next.headings.map(({ label: _label, ...heading }) => heading)).toEqual(current.headings.map(({ label: _label, ...heading }) => heading));
   });
   it("marks today and otherwise the local weekday, with the group count", () => {

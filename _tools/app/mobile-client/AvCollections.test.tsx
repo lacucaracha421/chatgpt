@@ -6,7 +6,7 @@ const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:(reason:unknown)=>String(reason)}));
 vi.mock('./media',()=>({mediaTicket:vi.fn()}));
 import {Collections} from './Collections';
-import {PersonPortrait} from './AvCollections';
+import {AvLookupSender, PersonPortrait} from './AvCollections';
 import {resetPortraitMemory} from './collectionArtwork';
 import {PRIVACY_MODE_KEY} from './privacyMode';
 
@@ -382,4 +382,21 @@ describe('tablet AV collections',()=>{
     await waitFor(()=>expect(screen.queryByRole('radio',{name:'AV'})).toBeNull());
     expect(screen.getByRole('radio',{name:'게임'})).toBeTruthy();
   });
+});
+
+it('formats recent sent timestamps with the shared helper and keeps invalid-time text',()=>{
+  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(2026,9,1,16));
+  try {
+    localStorage.setItem('lakomics.mobile.avLookupRecent',JSON.stringify([
+      {code:'SSIS-001',sentAt:'2026-10-01T15:07:40'},
+      {code:'SSIS-002',sentAt:'2026-09-30T15:07:40'},
+      {code:'SSIS-003',sentAt:'2025-09-28T15:07:40'},
+      {code:'SSIS-004',sentAt:'invalid'}]));
+    render(<AvLookupSender/>);
+    const list=screen.getByRole('list',{name:'최근 보낸 품번'});
+    expect(list.textContent).toContain('15:07');
+    expect(list.textContent).toContain('어제 15:07');
+    expect(list.textContent).toContain('2025.9.28 15:07');
+    expect(list.textContent).toContain('보낸 시간 알 수 없음');
+  } finally {vi.useRealTimers();}
 });

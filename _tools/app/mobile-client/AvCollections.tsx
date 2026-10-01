@@ -1,7 +1,7 @@
 import {useMemo, useRef, useState, type CSSProperties} from 'react';
 import {ChevronRightIcon} from '@heroicons/react/24/outline';
 import {CollectionList} from '../src/collections/CollectionList';
-import {displayDate} from '../src/shared/displayDate';
+import {displayDate, displayDateTime} from '../src/shared/displayDate';
 import {StableImage} from '../src/shared/ui/StableImage';
 import {useArtworkSet, usePortraitUrl} from './collectionArtwork';
 import {usePrivacyMode} from './privacyMode';
@@ -60,7 +60,7 @@ function lookupError(reason: unknown): Exclude<LookupFeedback['kind'], 'sent'> {
 function recentTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '보낸 시간 알 수 없음';
-  return date.toLocaleString('ko-KR', {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'});
+  return displayDateTime(value, new Date(), {withTime: true});
 }
 
 export function AvLookupSender() {

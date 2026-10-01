@@ -1,3 +1,4 @@
+import {displayDate} from '../src/shared/displayDate';
 import {visibleInterval} from './useVisibleInterval';
 import {useCallback, useEffect, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent} from 'react';
 import {ArrowLeftIcon, ArrowUturnLeftIcon, ChevronRightIcon, PauseIcon, PhotoIcon, PlayIcon, Square2StackIcon} from '@heroicons/react/24/outline';
@@ -198,7 +199,7 @@ function CompareStage({item, view, onView, mode, showB, wipe}: {item: Similarity
 
 function dateText(value: string | null) {
   const date = value ? new Date(value) : null;
-  return date && Number.isFinite(date.getTime()) ? date.toLocaleDateString('ko-KR', {year: 'numeric', month: '2-digit', day: '2-digit'}) : null;
+  return date && Number.isFinite(date.getTime()) ? displayDate(value) : null;
 }
 
 /** Resolution, size, format, source, date and classifications; the larger resolution/file is accented. */

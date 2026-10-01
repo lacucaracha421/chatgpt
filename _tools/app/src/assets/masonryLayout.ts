@@ -1,10 +1,9 @@
-import { displayDate } from "../shared/displayDate";
+import { displayDate, displayDateTime, displayTime } from "../shared/displayDate";
 import type { AssetSummary } from "../library/types";
 
 export type GalleryLayout = "masonry" | "justified";
 export type MasonryTile = { asset: AssetSummary; index: number; left: number; top: number; width: number; imageHeight: number; height: number };
 const DATE_HEADING_HEIGHT = 44;
-const fullDateFormat = new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "medium", hour12: false });
 function dateKey(date: Date) {
   return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
 }
@@ -26,7 +25,7 @@ export function collectedDate(value: string | null | undefined) {
   const date = value ? new Date(value) : null;
   if (!date || !Number.isFinite(date.getTime())) return { key: "unknown", label: "수집일 미상", time: "—", full: "수집 시각 없음" };
   const key = dateKey(date);
-  return { key, label: displayDate(date), time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`, full: fullDateFormat.format(date) };
+  return { key, label: displayDate(date), time: displayTime(date), full: displayDateTime(date, new Date(), { withTime: true }) };
 }
 
 export function buildMasonryLayout(items: AssetSummary[], width: number, targetWidth: number, gap: number, _captions: boolean, groupDates: boolean, _fullDateHeadings = false, perRow?: number) {

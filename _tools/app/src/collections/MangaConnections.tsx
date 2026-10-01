@@ -1,3 +1,4 @@
+import { displayDateTime } from "../shared/displayDate";
 import { CheckIcon, ChevronDownIcon, ChevronRightIcon, LinkIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
 import type { BookConnection, MangaDexConnection } from "../library/types";
@@ -29,7 +30,7 @@ export function MangaConnections({ mangaDex, kakao, mangaDexBusy, kakaoBusy, onC
   if (mangaDex === undefined || kakao === undefined) return null;
   const aladin = kakao?.provider === "aladin";
   const kakaoConnected = Boolean(kakao) && !aladin;
-  const synced = (value: string | null | undefined) => value ? `마지막 갱신 ${new Date(value).toLocaleDateString("ko-KR")}` : "아직 갱신 전";
+  const synced = (value: string | null | undefined) => value ? `마지막 갱신 ${displayDateTime(value, new Date(), { withTime: true })}` : "아직 갱신 전";
 
   if (hideConnectionPrompt && !kakaoConnected) return <section className="manga-connections is-folded" aria-label="연결">
     <button type="button" className="manga-connections__fold" aria-expanded={open} onClick={() => setOpen(value => !value)}>

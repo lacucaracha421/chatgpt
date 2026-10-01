@@ -47,10 +47,13 @@ beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();mocks.api.m
 
 describe('similarity review screen',()=>{
   it('shows A and B with metadata, accents the larger image, marks the recommendation and warms the next pairs',async()=>{
-    install(feed({counts:{open:3,pendingPc:4,skipped:2}}));mount();
+    const reply=feed({counts:{open:3,pendingPc:4,skipped:2}});
+    reply.items[0]!.a.collectedAt='2025-09-20T10:00:00';
+    install(reply);mount();
     expect(await screen.findByLabelText('A 정보')).toBeTruthy();
     expect(shown()).toContain('2,400 × 3,200');
     expect(shown()).toContain('PNG');
+    expect(shown()).toContain('2025.9.20');
     expect(shown()).toContain('권장');
     expect(screen.getByLabelText('A 정보').querySelectorAll('[data-accent]')).toHaveLength(2);
     expect(screen.getByLabelText('B 정보').querySelectorAll('[data-accent]')).toHaveLength(0);

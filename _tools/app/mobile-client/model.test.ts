@@ -1,5 +1,5 @@
-import {describe, expect, it} from 'vitest';
-import {imageNeighbours, justifiedRows, mapBounded, normalizePage, pagePath, RequestGate, fitTransform, rowHeight, validDensity} from './model';
+import {describe, expect, it, vi} from 'vitest';
+import {imageNeighbours, justifiedRows, mapBounded, normalizePage, pagePath, RequestGate, fitTransform, dateLabel, rowHeight, validDensity} from './model';
 import type {Asset} from './types';
 const assets: Asset[] = [0.4,1.5,1,3,0.6,2,1.4].map((ratio,index) => ({id:String(index),kind:'image',ratio}));
 describe('gallery geometry', () => {
@@ -51,4 +51,14 @@ it('keeps the stored thumbnail sizes and interpolates the half steps of the slid
   expect([0,1,2].map(value=>rowHeight(value,1000))).toEqual([290,220,150]);
   expect(rowHeight(1.5,1000)).toBe(185);
   expect([validDensity(0.5),validDensity(3),validDensity('2'),validDensity(1.25)]).toEqual([0.5,1,1,1]);
+});
+
+it('uses shared calendar dates and preserves the missing-date fallback',()=>{
+  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(2026,9,1));
+  try {
+    expect(dateLabel({id:'a',kind:'image',collected_at:'2026-10-01'})).toBe('10.1');
+    expect(dateLabel({id:'a',kind:'image',created_at:'2025-09-28'})).toBe('2025.9.28');
+    expect(dateLabel({id:'a',kind:'image'})).toBe('날짜 없음');
+    expect(dateLabel({id:'a',kind:'image',collected_at:'invalid'})).toBe('날짜 없음');
+  } finally {vi.useRealTimers();}
 });

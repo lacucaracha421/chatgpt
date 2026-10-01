@@ -1,3 +1,4 @@
+import {displayDateTime} from '../src/shared/displayDate';
 import {useVisibleInterval} from './useVisibleInterval';
 import {useState} from 'react';
 import {Button} from './ui';
@@ -18,7 +19,7 @@ export function PickerSettings({configured}:{configured:boolean}) {
         {status.selected ? ' · 사진 선택기에 연결됨' : status.eligible === false ? ' · 이 기기에서 공급자 등록이 필요합니다.' : ' · 사진 선택기에서 Lakomics를 선택해 주세요.'}</p>
       <div className="dialog-actions"><Button disabled={!configured || busy || status.syncing} onClick={() => {setBusy(true);setError('');void native<PickerStatus>('pickerRefresh').then(setStatus).catch(reason => setError(errorText(reason))).finally(() => setBusy(false));}}>{status.syncing ? '앨범 갱신 중' : '앨범 새로고침'}</Button>
         <Button variant="ghost" onClick={() => {void native('openPickerSettings').catch(() => setError('첨부 화면의 사진 선택기 메뉴에서 클라우드 미디어 앱 설정을 열어 주세요.'));}}>사진 선택기 설정</Button></div>
-      {!!status.lastSyncedAt && <p className="hint">마지막 갱신 {new Date(status.lastSyncedAt).toLocaleString('ko-KR')}</p>}
+      {!!status.lastSyncedAt && <p className="hint">마지막 갱신 {displayDateTime(status.lastSyncedAt, new Date(), {withTime: true})}</p>}
       {status.error && <p role="status">앨범을 갱신하지 못했습니다. 이전 목록은 유지됩니다. 연결을 확인하고 다시 시도해 주세요.</p>}
       <p className="hint">처음에는 목록을 준비할 시간이 필요합니다. 기존 Pick 앱의 수동 앨범 설정은 자동으로 옮겨지지 않습니다.</p>
     </>}
