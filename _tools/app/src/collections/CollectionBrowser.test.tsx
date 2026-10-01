@@ -17,6 +17,8 @@ import { CollectionBrowser } from "./CollectionBrowser";
 import { createDefaultCollectionLibraryState } from "./collectionLibrary";
 import { resetReleaseDataForTests } from "./releaseData";
 import type { AvLinkApi } from "./AvLinkInbox";
+import { resetMangaShelvesForTests } from "./MangaShelfList";
+import { forgetMangaVolume, requestedMangaVolume } from "./work/mangaVolumeRequest";
 
 afterEach(() => { cleanup(); localStorage.clear(); resetReleaseDataForTests(); });
 
@@ -66,8 +68,10 @@ function renderBrowser(props: {
   calendarApi?: ReleaseCalendarGateway;
   avLinkApi?: AvLinkApi;
   fetchLaunchBoxSpines?: LibraryGateway["fetchLaunchBoxSpines"];
+  patch?: (gateway: LibraryGateway) => void;
 }) {
   const gateway = createGateway();
+  props.patch?.(gateway);
   if (props.fetchLaunchBoxSpines) gateway.fetchLaunchBoxSpines = props.fetchLaunchBoxSpines;
   if (props.tracking) gateway.collectionTracking = props.tracking;
   if (props.calendarApi) gateway.releaseCalendar = props.calendarApi;
@@ -686,6 +690,58 @@ describe("CollectionBrowser", () => {
       "src",
       "http://lakomics.localhost/work-artwork-thumbnail/artwork-1",
     );
+  });
+});
+
+describe("CollectionBrowser manga shelf", () => {
+  afterEach(() => resetMangaShelvesForTests());
+  const manga = (id: string, name: string, extra: Partial<CollectionSummary> = {}): CollectionSummary => ({ ...sample, id, name, type: "manga", ...extra });
+  const volume = (id: string, volumeNumber: number, editionIndex = 0) => ({ id, volumeNumber, editionIndex, displayLabel: String(volumeNumber), coverArtworkId: `art-${id}`, localReleaseDate: null, isbn13: null, releaseStatus: "released" as const });
+  const tracking = () => ({ listInbox: vi.fn().mockResolvedValue([]), acknowledge: vi.fn(), setOwnedCount: vi.fn(), listOwnership: vi.fn(), setOwnership: vi.fn(),
+    releaseBoard: vi.fn().mockResolvedValue([{ collectionId: "m1", releaseWatch: { enabled: false, available: false }, ownedVolumes: [{ editionIndex: 0, count: 1 }], releaseSchedule: { kakao: null, mangadex: null } }]) }) as unknown as CollectionTrackingGateway;
+
+  it("stands each work's volumes on one shelf row, picks with a click and opens at the volume on double-click", async () => {
+    localStorage.setItem("lakomics.collections.view.manga.v1", JSON.stringify({ layout: "shelf", perRow: 8, grouping: "device" }));
+    const onViewChange = vi.fn();
+    const gateway = renderBrowser({ collections: [manga("m1", "다이의 대모험"), manga("m2", "빈 작품")], typeFilter: "manga", showcase: false, onViewChange, tracking: tracking(), patch: gateway => {
+      vi.mocked(gateway.listCollectionVolumes).mockImplementation(async id => id === "m1" ? [volume("v2", 2), volume("v1", 1), volume("e1", 1, 1)] : []);
+      gateway.listCollectionCoverFocus = vi.fn().mockResolvedValue([{ volumeId: "v1", coverArtworkId: "art-v1", focusX: .2, method: "head" }]);
+      gateway.startCollectionCoverFocus = vi.fn();
+    } });
+    const list = screen.getByRole("group", { name: "만화 작품 목록" });
+    const row = await within(list).findByRole("group", { name: "다이의 대모험 책장" });
+    // The 기본판 in volume order; the owned count marks volume 2 unowned.
+    const spines = within(row).getAllByRole("button");
+    expect(spines.map(spine => spine.getAttribute("aria-label"))).toEqual(["1권 보기", "2권 보기"]);
+    expect(spines[1]).toHaveClass("manga-spine--missing");
+    expect(spines[0].querySelector("img")).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/art-v1");
+    expect(within(list).getByLabelText("보유 1권")).toHaveTextContent("1권");
+    // The detector runs only on the work screen; the list reads the stored focus.
+    expect(gateway.startCollectionCoverFocus).not.toHaveBeenCalled();
+    fireEvent.click(spines[1]);
+    expect(spines[1]).toHaveAttribute("aria-pressed", "true");
+    expect(within(spines[1]).getByText("2", { selector: ".manga-picked-number" })).toBeInTheDocument();
+    expect(spines[1]).not.toHaveTextContent("미보유");
+    expect(onViewChange).not.toHaveBeenCalled();
+    fireEvent.doubleClick(spines[1]);
+    expect(onViewChange).toHaveBeenCalledWith({ kind: "collection", collectionId: "m1" });
+    expect(requestedMangaVolume("m1")).toBe("v2");
+    forgetMangaVolume("m1");
+    // A work without volumes still opens from its title.
+    fireEvent.click(within(list).getByRole("button", { name: "빈 작품" }));
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collection", collectionId: "m2" });
+    expect(requestedMangaVolume("m2")).toBeNull();
+  });
+
+  it("keeps 격자 with 한 줄에 N개 for manga", async () => {
+    const user = userEvent.setup();
+    renderBrowser({ collections: [manga("m1", "다이의 대모험")], typeFilter: "manga", showcase: false });
+    expect(screen.getByRole("group", { name: "만화 작품 목록" })).toHaveClass("collection-list--grid");
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    fireEvent.change(screen.getByRole("slider", { name: "한 줄에" }), { target: { value: "6" } });
+    expect(screen.getByRole("group", { name: "만화 작품 목록" })).toHaveAttribute("data-per-row", "6");
+    await user.click(screen.getByRole("radio", { name: "선반" }));
+    expect(screen.getByRole("group", { name: "만화 작품 목록" })).toHaveClass("manga-shelf-list");
   });
 });
 

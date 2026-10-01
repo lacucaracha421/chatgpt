@@ -13,6 +13,12 @@
 .mobile-collections .collection-card__meta { display: flex; flex-direction: column; min-width: 0; }
 .mobile-collections .collection-list--grid .collection-card__meta { padding-top: var(--space-1); }
 .mobile-collections .collection-card__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text); font-weight: 500; }
+/* 만화 · 선반: the shared bookcase rows (mangaShelf.css) run to the screen edge like the planks; titles keep the gutter. */
+.mobile-collections .manga-shelf-list { margin: 0 calc(var(--mobile-gutter) * -1); padding: var(--space-4) 0 var(--space-6); }
+.mobile-collections .manga-shelf-row__label { align-items: center; padding: 0 var(--mobile-gutter); }
+.mobile-collections .manga-shelf-row__title { min-height: var(--touch-target); }
+.mobile-collections .manga-bookcase.manga-bookcase--list .home-shelf__track, .mobile-collections .manga-shelf-row__waiting { padding-inline: var(--mobile-gutter); }
+.mobile-collections .manga-spine { border: 0; background: transparent; font: inherit; }
 .collection-grid.is-counted { grid-template-columns: repeat(var(--columns), minmax(0, 1fr)); }
 .shelf-view-sheet { padding: 0; }
 

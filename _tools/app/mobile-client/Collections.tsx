@@ -7,6 +7,8 @@ import {moreWorkFacts, workFacts} from '../src/collections/work/workFacts';
 import {latestKoreanRelease} from '../src/collections/releaseCaption';
 import {ShelfTile, ShelfViewSheet, useShelfViews} from './CollectionShelf';
 import {CaseWork, MangaWork, sharedVolume} from './CollectionWork';
+import {TabletMangaShelf} from './CollectionMangaShelf';
+import type {MangaShelfPick} from '../src/collections/MangaShelfRow';
 import {AvPerformerScreen} from './AvPerformer';
 import {useCollectionEdits} from './useCollectionEdits';
 import {CollectionReleases} from './CollectionReleases';
@@ -387,6 +389,8 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   // 보기 per type (격자 · 선반, 한 줄에 N개), the case a tap turned to the front, and the order a work was opened from.
   const [viewOf,patchView]=useShelfViews();
   const [picked,setPicked]=useState<string|null>(null),[order,setOrder]=useState<string[]>([]);
+  // 만화 · 선반: the picked spine, and the volume a shelf opened its work at.
+  const [mangaPick,setMangaPick]=useState<MangaShelfPick>(null),[openedVolume,setOpenedVolume]=useState<{id:string;volumeId:string}|null>(null);
   const stepping=useRef(false);
   // The AV performer page: `from` is the work it was opened from (Back returns there).
   const [performer,setPerformer]=useState<{id:string;from:string|null}|null>(null),[performerOrder,setPerformerOrder]=useState<'newest'|'oldest'>('newest');
@@ -511,11 +515,11 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&coverIndex===null&&!sheet&&!personalSheet&&!bindSheet){if(back())event.preventDefault();}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet,bindSheet]);
   useEffect(()=>{if(!active)setSheet(null);},[active]);
 
-  const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;setShowcaseAll(false);setQuery('');setSearch('');setPicked(null);setTab(next);};
+  const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;setShowcaseAll(false);setQuery('');setSearch('');setPicked(null);setMangaPick(null);setTab(next);};
   const chooseAvView=(next:AvListView)=>{setAvView(next);try{localStorage.setItem(AV_LIST_VIEW_KEY,next);}catch{/* optional device preference */}};
   const changeFilters=(next:Filters)=>{if(next.sort===filters.sort&&next.direction===filters.direction&&next.rating===filters.rating)return;listScroll.current=0;if(listRef.current)listRef.current.scrollTop=0;setFiltersByType(current=>({...current,[type]:next}));};
   /** Opens a work; `from` is the list it was opened in, which a swipe on the work steps through. */
-  const openWork=(id:string,from?:string[])=>{if(listRef.current&&!showcaseAll&&!inboxOpen&&!performer)listScroll.current=listRef.current.scrollTop;setSheet(null);setOrder(from?.includes(id)?from:[id]);setSelected(id);};
+  const openWork=(id:string,from?:string[],at?:{volumeId:string;edition:number}|null)=>{if(listRef.current&&!showcaseAll&&!inboxOpen&&!performer)listScroll.current=listRef.current.scrollTop;setSheet(null);setOrder(from?.includes(id)?from:[id]);setOpenedVolume(at?{id,volumeId:at.volumeId}:null);if(at)setEdition(at.edition);setSelected(id);};
   const stepWork=(offset:-1|1)=>{const index=order.indexOf(selected??''),next=order[index+offset];if(index<0||!next)return;stepping.current=true;setSelected(next);};
   /** On the shelf a first tap turns the case to the front; a tap on the picked case opens it. */
   const tapWork=(items:CollectionSummary[])=>(id:string)=>{if(picked===id)openWork(id,items.map(work=>work.id));else setPicked(id);};
@@ -620,8 +624,12 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       :{kind:'fallback'},[avView,filters.sort,main.items,tab]);
   const showcaseScrubberSort=useMemo<ScrubberSort>(()=>({kind:'fallback'}),[]);
   const view=viewOf(type);
-  // Games, films and AV stand on the shelf as cases; manga is always the cover grid.
+  // Games, films and AV stand on the shelf as cases; manga stands as bookcase rows (below).
   const shelfMode=view.layout==='shelf'&&shownType!=='manga';
+  // Manga on the shelf: the PC's bookcase row per work (shared MangaShelfRow).
+  const mangaShelfMode=view.layout==='shelf'&&shownType==='manga';
+  const mangaShelf=(items:CollectionSummary[],label:string,workRevision:string)=><TabletMangaShelf items={items.map(card)} label={label} revision={workRevision} active={listActive} privacy={privacyMode}
+    owned={ownedOf} pick={mangaPick} onPick={setMangaPick} onOpen={(id,at)=>openWork(id,items.map(work=>work.id),at)}/>;
   const shelfView={layout:'shelf' as const,perRow:view.perRow,grouping:'sort' as const};
   const listActive=live&&!selected&&!inboxOpen&&!performer;
   const shelfTile=(items:CollectionSummary[],workRevision:string)=>(work:CollectionSummary)=><ShelfTile item={card(work)} revision={workRevision} active={listActive} privacy={privacyMode} picked={picked===work.id} onTap={tapWork(items)}/>;
@@ -632,6 +640,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       {showcase.busy&&!showcaseItems.length&&<p role="status" className="hint">쇼케이스를 불러오는 중…</p>}{showcase.error&&<p className="error-message" role="alert">{showcase.error}</p>}{showcase.committed&&!showcase.busy&&!showcaseItems.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}
       {shelfMode&&showcaseRow.length>0
         ?<CollectionList items={showcaseRow} view={shelfView} showcase label={`${labels[type]} 쇼케이스`} onPick={setPicked} render={shelfTile(showcaseRow,showcasePage?.revision??revision)}/>
+        :mangaShelfMode&&showcaseRow.length>0?mangaShelf(showcaseRow,`${labels[type]} 쇼케이스`,showcasePage?.revision??revision)
         :<div className="collection-shelf">{showcaseRow.map(work=><ShowcaseCover key={work.id} work={card(work)} revision={showcasePage?.revision??revision} active={live&&!selected} onOpen={id=>openWork(id,showcaseRow.map(entry=>entry.id))}/>)}</div>}
     </div>}
   </section>;
@@ -646,6 +655,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   const mainOrder=main.items.map(work=>work.id);
   const worksView=shelfMode
     ?<CollectionList items={main.items} view={shelfView} label={`${labels[type]} 작품 목록`} onPick={setPicked} render={shelfTile(main.items,revision)}/>
+    :mangaShelfMode?mangaShelf(main.items,`${labels[type]} 작품 목록`,revision)
     :<div className={`collection-grid collection-grid-${shownType} is-counted`} style={{'--columns':view.perRow} as CSSProperties}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={listActive} caption={captionOf(work)} onOpen={id=>openWork(id,mainOrder)} arriving={mainArrivals.arriving(work.id)} onArrived={mainArrivals.arrived}/>)}</div>;
   // The opened work as the shared work screen, its information as the section below the stage.
   const visibleScore=(work:CollectionDetail)=>edits.visible(work.id,'myScore',work.myScore??null).value;
@@ -712,7 +722,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       onOpen={(id,ids)=>openWork(id,ids)} onPerformer={id=>setPerformer(current=>({id,from:current?.from??null}))} onSort={()=>setSheet('performerSort')} onView={()=>setSheet('view')}/>}</div>
     <div ref={detailRef} className="collection-detail" style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item?(!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>)
       :item.type==='manga'
-        ?<MangaWork key={item.id} item={item} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} volumes={editionVolumesShared} owned={ownedOf(item,edition)}
+        ?<MangaWork key={item.id} item={item} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} volumes={editionVolumesShared} owned={ownedOf(item,edition)} initialVolumeId={openedVolume?.id===item.id?openedVolume.volumeId:null}
           latestKorean={latestKoreanRelease(releaseBoardEntry(item,ownedOf,watching),edition,today)} onEnlarge={id=>setCoverIndex(volumes.findIndex(volume=>volume.id===id)+1)} info={mangaInfo}/>
         :<CaseWork item={item} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} position={Math.max(1,order.indexOf(item.id)+1)} total={Math.max(1,order.length)} score={visibleScore} onStep={stepWork} info={workInfo}/>}</>}</div>
     {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}>

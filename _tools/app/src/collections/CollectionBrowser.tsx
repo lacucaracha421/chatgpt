@@ -11,6 +11,9 @@ import { Button } from "../shared/ui/Button";
 import { ViewOptionsMenu } from "../shared/ui/ViewOptionsMenu";
 import { useLaunchBoxSpineBatch } from "./launchBoxSpines";
 import { CollectionList, shelfGroups, useCollectionView } from "./CollectionList";
+import { MangaShelfList } from "./MangaShelfList";
+import type { MangaShelfPick } from "./MangaShelfRow";
+import { requestMangaVolume } from "./work/mangaVolumeRequest";
 import { TextInput } from "../shared/ui/TextInput";
 import { Slider } from "../shared/ui/Slider";
 import { ContextMenu } from "../shared/ui/ContextMenu";
@@ -92,6 +95,7 @@ export function CollectionBrowser({
   useAutoDismiss(spineBatch.message, spineBatch.dismiss);
   const [viewSettings, patchViewSettings] = useCollectionView(typeFilter);
   const [pickedId, setPickedId] = useState<string | null>(null);
+  const [mangaPick, setMangaPick] = useState<MangaShelfPick>(null);
   const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
   const [mangaDexOpen, setMangaDexOpen] = useState(false);
   const [igdbOpen, setIgdbOpen] = useState(false);
@@ -222,14 +226,24 @@ export function CollectionBrowser({
     else onViewChange({ kind: "collection", collectionId: collection.id });
   };
 
+  const collectionMenu = (collection: CollectionSummary) => [
+    { id: "edit", label: "편집", onSelect: () => setEditMode({ kind: "edit", collection }) },
+    { id: "showcase", label: collection.showcase ? "쇼케이스에서 제거" : "쇼케이스에 추가", onSelect: () => void toggleShowcase(collection) },
+    { id: "delete", label: "삭제", destructive: true, onSelect: () => setDeleteTarget(collection) },
+  ];
+  // 만화 · 선반: one bookcase row per work (MangaShelfList); 격자 keeps the cover cards.
+  const mangaShelf = typeFilter === "manga" && viewSettings.layout === "shelf";
+  const openMangaAt = (collection: CollectionSummary, volumeId: string | null) => {
+    if (volumeId) requestMangaVolume(collection.id, volumeId);
+    openCollection(collection);
+  };
+  const mangaShelfList = (items: CollectionSummary[], label: string) => <MangaShelfList items={items} label={label} board={releases.data?.board}
+    pick={mangaPick} onPick={setMangaPick} menu={collectionMenu} onOpen={openMangaAt} />;
+
   const renderCollection = (collection: CollectionSummary, options: { meta?: boolean } = {}) => (
             <ContextMenu
               key={collection.id}
-              items={[
-                { id: "edit", label: "편집", onSelect: () => setEditMode({ kind: "edit", collection }) },
-                { id: "showcase", label: collection.showcase ? "쇼케이스에서 제거" : "쇼케이스에 추가", onSelect: () => void toggleShowcase(collection) },
-                { id: "delete", label: "삭제", destructive: true, onSelect: () => setDeleteTarget(collection) },
-              ]}
+              items={collectionMenu(collection)}
             >
               <CollectionCard
                 collection={collection}
@@ -303,7 +317,8 @@ export function CollectionBrowser({
       </button>
       {showcaseOpen && <Button size="sm" variant="ghost" className="collection-browser__more" onClick={() => setShowcase(true)}>전체 보기<ChevronRightIcon aria-hidden="true" /></Button>}
     </div>
-    {showcaseOpen && <CollectionList items={showcaseRowItems} view={viewSettings} showcase render={collection => renderCollection(collection, { meta: false })} label={`${sectionLabel} 쇼케이스`} onPick={setPickedId} />}
+    {showcaseOpen && (mangaShelf ? mangaShelfList(showcaseRowItems, `${sectionLabel} 쇼케이스`)
+      : <CollectionList items={showcaseRowItems} view={viewSettings} showcase render={collection => renderCollection(collection, { meta: false })} label={`${sectionLabel} 쇼케이스`} onPick={setPickedId} />)}
 
   </section> : null;
   const sectionRow = <div className="collection-browser__section collection-browser__section--all">
@@ -325,7 +340,7 @@ export function CollectionBrowser({
       content={<div className="collection-toolbar__rating" onKeyDown={event => event.stopPropagation()}><RatingFilter rating={libraryState.rating} onChange={rating => patchLibraryState({ rating })} />
         {libraryState.rating !== "all" && <Button size="sm" variant="ghost" onClick={() => patchLibraryState({ rating: "all" })}>초기화</Button>}
       </div>} />
-    <ViewOptionsMenu layout={typeFilter === "manga" ? "grid" : viewSettings.layout} options={typeFilter === "manga" ? [{ value: "grid", label: "격자" }] : [{ value: "grid", label: "격자" }, { value: "shelf", label: "선반" }]}
+    <ViewOptionsMenu layout={viewSettings.layout} options={[{ value: "grid", label: "격자" }, { value: "shelf", label: "선반" }]}
       onLayoutChange={layout => patchViewSettings({ layout })} perRow={viewSettings.perRow} min={5} max={12} onPerRowChange={perRow => patchViewSettings({ perRow })} />
     <Menu label="컬렉션 검색" align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<><MagnifyingGlassIcon aria-hidden="true" /><span>검색</span></>}
       content={<div className="collection-toolbar__rating" onKeyDown={event => event.stopPropagation()}>
@@ -373,7 +388,7 @@ export function CollectionBrowser({
         <div
           className="collection-browser__content-final"
           onContextMenu={(event) => {
-            if (inbox || (event.target as HTMLElement).closest(".collection-card")) return;
+            if (inbox || (event.target as HTMLElement).closest(".collection-card, .manga-shelf-row")) return;
             event.preventDefault();
             setEditMode({ kind: "create", type: typeFilter });
           }}
@@ -387,7 +402,8 @@ export function CollectionBrowser({
           {!inbox && showcase && visible.length === 0 && <div className="collection-browser__empty"><EmptyState title="쇼케이스에 컬렉션이 없습니다.">라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다.</EmptyState></div>}
           {!inbox && !showcase && <div ref={stageRef} className="collection-browser__list-scroll" data-cover-scroll-root="">
             {leading}
-            <CollectionList items={libraryItems} view={viewSettings} render={collection => renderCollection(collection)} label={`${sectionLabel} 작품 목록`} onPick={setPickedId} />
+            {mangaShelf ? mangaShelfList(libraryItems, `${sectionLabel} 작품 목록`)
+              : <CollectionList items={libraryItems} view={viewSettings} render={collection => renderCollection(collection)} label={`${sectionLabel} 작품 목록`} onPick={setPickedId} />}
             {visible.length === 0 && <div className="collection-browser__empty">{emptyLibrary}</div>}
           </div>}
 

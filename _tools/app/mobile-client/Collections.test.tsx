@@ -627,6 +627,25 @@ it.each([['game','개발사','아주 긴 개발사 이름'],['manga','작가','�
   expect(row?.querySelector('dd')?.textContent).toBe(name);
 });
 
+it('stands manga on the shared bookcase rows: a tap picks a volume, a second tap opens the work there',async()=>{
+  localStorage.setItem('lakomics.mobile.collectionView.manga.v1',JSON.stringify({layout:'shelf',perRow:4}));
+  const manga:CollectionDetail={...mangaItem(),showcase:false,ownedVolumes:[{editionIndex:0,count:1}]};
+  mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:path.includes('type=manga')&&!path.includes('showcase=true')?[manga]:[]}:{revision:'r1',item:manga});
+  render(<Collections active paused={false} backRef={{current:null}}/>);
+  pressTab('만화');
+  const shelf=await screen.findByRole('group',{name:`${item.name} 책장`});
+  expect(within(shelf).getAllByRole('button').map(button=>button.getAttribute('aria-label'))).toEqual(['1권 보기','2권 보기']);
+  const second=within(shelf).getByRole('button',{name:'2권 보기'});
+  expect(second.classList.contains('manga-spine--missing')).toBe(true);
+  expect(screen.getByLabelText('보유 1권').textContent).toBe('1권');
+  fireEvent.click(second);
+  expect(second.getAttribute('aria-pressed')).toBe('true');
+  expect(detailPane().style.display).toBe('none');
+  fireEvent.click(second);
+  const bookcase=await screen.findByRole('group',{name:'권별 책장'});
+  await waitFor(()=>expect(within(bookcase).getByRole('button',{name:'2권 보기'}).getAttribute('aria-pressed')).toBe('true'));
+});
+
 it('marks a pre-registered volume on the bookcase from its future release date',async()=>{
   const dated:CollectionDetail={...mangaItem(),volumes:[{id:'d1',volumeNumber:1,editionIndex:0,displayLabel:'1',coverArtworkId:'c1',localReleaseDate:'2024-03-05'},{id:'d2',volumeNumber:2,editionIndex:0,displayLabel:'2',coverArtworkId:'c2',localReleaseDate:'2999-01-02'}]};
   mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:[dated]}:{revision:'r1',item:dated});

@@ -15,7 +15,7 @@ export type ShelfView = {layout: ShelfLayout; perRow: number};
 /** Covers or cases per row. The PC offers 5–12; a portrait tablet is about half as wide. */
 export const SHELF_PER_ROW = {min: 3, max: 8, fallback: 4} as const;
 const viewKey = (type: CollectionKind) => `lakomics.mobile.collectionView.${type}.v1`;
-/** Manga has no case: it is always the cover grid, as on the PC. */
+/** Manga starts on the cover grid, as on the PC; its 선반 is the bookcase rows (CollectionMangaShelf). */
 const fallbackView = (type: CollectionKind): ShelfView => ({layout: type === 'manga' ? 'grid' : 'shelf', perRow: SHELF_PER_ROW.fallback});
 
 function readView(type: CollectionKind): ShelfView {
@@ -24,7 +24,7 @@ function readView(type: CollectionKind): ShelfView {
     const value = JSON.parse(localStorage.getItem(viewKey(type)) ?? 'null') as Partial<ShelfView> | null;
     if (!value) return fallback;
     return {
-      layout: type !== 'manga' && (value.layout === 'grid' || value.layout === 'shelf') ? value.layout : fallback.layout,
+      layout: value.layout === 'grid' || value.layout === 'shelf' ? value.layout : fallback.layout,
       perRow: Number.isInteger(value.perRow) ? Math.max(SHELF_PER_ROW.min, Math.min(SHELF_PER_ROW.max, value.perRow!)) : fallback.perRow,
     };
   } catch { return fallback; }
@@ -65,8 +65,8 @@ export function ShelfTile({item, revision, active, privacy, picked, extra, onTap
 }
 
 /** 보기: the same choices as the PC menu (배치, 한 줄에 N개), as a bottom sheet. */
-export function ShelfViewSheet({type, view, onChange, onClose}: {type: CollectionKind; view: ShelfView; onChange(patch: Partial<ShelfView>): void; onClose(): void}) {
-  const options: {value: ShelfLayout; label: string}[] = type === 'manga' ? [{value: 'grid', label: '격자'}] : [{value: 'grid', label: '격자'}, {value: 'shelf', label: '선반'}];
+export function ShelfViewSheet({view, onChange, onClose}: {type: CollectionKind; view: ShelfView; onChange(patch: Partial<ShelfView>): void; onClose(): void}) {
+  const options: {value: ShelfLayout; label: string}[] = [{value: 'grid', label: '격자'}, {value: 'shelf', label: '선반'}];
   return <BottomSheet title="보기" onClose={onClose}><div className="ui-view-options__content shelf-view-sheet">
     <section className="ui-view-options__section"><span className="ui-view-options__label">배치</span>
       <SegmentedControl label="배치" options={options} value={view.layout} onChange={layout => onChange({layout})} fullWidth/>

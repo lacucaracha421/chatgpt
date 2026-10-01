@@ -168,13 +168,14 @@ export function sharedVolume(volume: CollectionVolume, today: string): SharedVol
  * bookcase of the edition's volumes; a swipe or the stage edges change the volume, a double tap
  * on a spine opens the cover viewer. The information follows below the stage.
  */
-export function MangaWork({item, revision, active, privacy, volumes, owned, latestKorean, onEnlarge, info}: {
+export function MangaWork({item, revision, active, privacy, volumes, owned, latestKorean, initialVolumeId = null, onEnlarge, info}: {
   item: CollectionDetail; revision: string; active: boolean; privacy: boolean;
+  /** The volume a list shelf opened the work at. */initialVolumeId?: string | null;
   /** The edition's volumes in order. */volumes: SharedVolume[];
   /** The edition's owned count (a queued edit included), or null when none is recorded. */owned: number | null;
   latestKorean: number | null; onEnlarge(volumeId: string): void; info: ReactNode;
 }) {
-  const [wanted, setWanted] = useState<string | null>(null);
+  const [wanted, setWanted] = useState<string | null>(initialVolumeId);
   const requested = volumes.find(volume => volume.id === wanted) ?? volumes[0] ?? null;
   // An edition without volumes still has the work's own cover; the book shows that.
   const book = useArtworkSet(item, privacy ? {} : {book: requested ? {id: requested.coverArtworkId, original: true} : {id: collectionCover(item), original: true, asset: true}}, revision, active);

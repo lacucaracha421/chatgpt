@@ -9,7 +9,7 @@ function initialViews(): Record<CollectionType, CollectionViewSettings> {
     const fallback: CollectionViewSettings = { layout: type === "manga" ? "grid" : "shelf", perRow: 8, grouping: "device" };
     try {
       const value = JSON.parse(localStorage.getItem(`lakomics.collections.view.${type}.v1`) ?? "null");
-      if (value) return [type, { layout: value.layout === "grid" ? "grid" : fallback.layout, perRow: Number.isInteger(value.perRow) ? Math.max(5, Math.min(12, value.perRow)) : 8, grouping: ["device", "year", "sort"].includes(value.grouping) ? value.grouping : "device" }];
+      if (value) return [type, { layout: value.layout === "grid" || value.layout === "shelf" ? value.layout : fallback.layout, perRow: Number.isInteger(value.perRow) ? Math.max(5, Math.min(12, value.perRow)) : 8, grouping: ["device", "year", "sort"].includes(value.grouping) ? value.grouping : "device" }];
     } catch { /* Use the approved start state when storage is unavailable. */ }
     return [type, fallback];
   })) as Record<CollectionType, CollectionViewSettings>;

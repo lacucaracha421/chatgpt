@@ -30,6 +30,7 @@ import { SectionLabel } from "../shared/ui/SectionLabel";
 import { CollectionWorkScreen, type CollectionWorkData } from "./work/CollectionWorkScreen";
 import { useWorkRecord } from "./work/useWorkRecord";
 import { useCoverFocus } from "./work/useCoverFocus";
+import { forgetMangaVolume, requestedMangaVolume } from "./work/mangaVolumeRequest";
 import { CollectionWorkOverlay } from "./work/CollectionWorkOverlay";
 
 type CollectionOverlayProps = {
@@ -146,8 +147,11 @@ function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged,
         setVolumeImport(null);
         setVolumes(initial);
         setVolumesCollectionId(collectionId);
-        setEditionIndex(0);
-        setSelectedVolumeId(firstVolumeId(initial, 0));
+        // A list shelf may have asked for the volume it opened the work at.
+        const requested = initial.find(volume => volume.id === requestedMangaVolume(collectionId));
+        forgetMangaVolume(collectionId);
+        setEditionIndex(requested?.editionIndex ?? 0);
+        setSelectedVolumeId(requested?.id ?? firstVolumeId(initial, 0));
       } catch (error) {
         if (active) {
           setVolumes([]); // no-flash-ok: failed incoming work settles as an empty result

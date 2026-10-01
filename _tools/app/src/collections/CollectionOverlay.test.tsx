@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { CollectionSummary, LibraryGateway, ReleaseWatchEvent } from "../library/types";
 import { CollectionOverlay } from "./CollectionOverlay";
+import { requestMangaVolume, requestedMangaVolume } from "./work/mangaVolumeRequest";
 import { BackNavigationProvider, useBackHandler } from "../shared/navigation/BackNavigation";
 import { avGateway } from "./avClient";
 
@@ -316,6 +317,16 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+
+  it("opens on the volume a list shelf asked for, then forgets it", async () => {
+    requestMangaVolume("collection-1", "v2");
+    renderOverlay({ listCollectionVolumes: vi.fn().mockResolvedValue([1,2,3].map(n => ({ id: `v${n}`, volumeNumber: n, editionIndex: 0, displayLabel: String(n), coverArtworkId: `art-${n}` }))) });
+    const root = await screen.findByRole("article", { name: "만화 작품 화면" });
+    expect(screen.getByRole("button", { name: "2권 보기" })).toHaveAttribute("aria-pressed", "true");
+    await settleManga();
+    expect(root.querySelector(".asset-viewer__position")).toHaveTextContent("2 / 3");
+    expect(requestedMangaVolume("collection-1")).toBeNull();
+  });
 
   it("enables release watch for a connected Kakao manga", async () => {
     const user = userEvent.setup();
