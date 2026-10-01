@@ -945,7 +945,7 @@ Keep VCK/kHentai as the default provider. If Heliotrope is revisited, isolate it
 
 # Desktop UI consistency
 
-## PC-POLISH-20261002 — PC polish requests for the 잔손질 round
+## PC-POLISH-20261002 — Polish requests for the 잔손질 round (PC first, tablet where noted)
 
 Status: `TODO` — requested by the user 2026-10-02 (while trying the release build of `4542a6b9`); part of the polish round after 망가 slice 6. Each item needs a short look at the current screen first; visual changes get a mockup when the direction is not obvious.
 
@@ -956,6 +956,10 @@ Status: `TODO` — requested by the user 2026-10-02 (while trying the release bu
 5. **Thorough performance pass on the PC app** ("빡세게 최적화"): measure first per `docs/agents/implementation.md` (Performance work) — screen entry, type/section switches, scrolling long lists, viewer open/close, idle CPU — then fix the largest costs and lock them with ratchet checks.
 6. **PC 컬렉션 without the sidebar (user, 2026-10-02):** drop the 컬렉션 sidebar index so the list uses the full width; 신간 (한국 정발 / 일본), 발매 캘린더 and 쇼케이스 move into a second section-bar row matching the tablet's shortcut row (`COLLECTION-SHORTCUTS-20261001`), and the 쇼케이스 fold row goes away — aligned with the tablet (user confirmed). On PC the cells open the existing views (no overlay). A ready worker brief exists in the session notes; not started.
 7. **PC 망가 sidebar can be hidden (user, 2026-10-02):** a toggle that hides the 망가 index sidebar (고정 · 자주 찾는 태그 · 작가 / 로컬 folders) so the grid uses the full width, remembered per area; the index stays reachable (toggle in the top bar or the section bar). Check whether the workspace already has a sidebar collapse to reuse.
+8. **Zoom the 3D object in the Collection work screen (user, 2026-10-02):** mouse wheel zooms the case/book in and out on PC, pinch zoom on the tablet; keep drag-to-turn, reset with the existing 정면으로 control.
+9. **Less plain manga work screen:** a faint, blurred version of the shown volume's cover behind the stage (both clients), kept quiet so the book stays the subject. AV: the user also wants something there but has no direction yet — bring two or three options (e.g. a faint package art backdrop, performer portraits, a dimmed sample frame) before building.
+10. **메모 editing usability (tablet and PC):** review the editing screen for visibility and convenience (where the caret is, toolbar reach, line/checklist editing, save state) after the IME/Backspace fixes land; propose changes with a mockup.
+11. **가계부 cleanup — HOLD for the user's plan:** subscription price confirmation and other flows have grown complex; the user will reorganise the ledger themselves first. Do not change the ledger until that plan arrives.
 
 
 ## ASSET-EAGLE-20261001 — PC Asset screen candidates from the Eagle comparison
