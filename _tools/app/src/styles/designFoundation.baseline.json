@@ -61,10 +61,10 @@
       "legacyToken": 1
     },
     "_tools/app/src/collections/CollectionBrowser.css": {
-      "offScaleSpacing": 2,
+      "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 3
+      "legacyToken": 0
     },
     "_tools/app/src/collections/SeriesSeasons.css": {
       "offScaleSpacing": 0,

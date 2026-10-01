@@ -3,6 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
 import { AssetGallery } from "./AssetGallery";
+import { GalleryViewMenu } from "./GalleryViewMenu";
+import { useState } from "react";
+
+// Width 840 rounds to 848; six square items, 6px gaps, one date heading.
+const MEASURED_EIGHT = 2 * ((848 - 5 * 6) / 6) + 44 + 6;
+const RESERVED_HUNDRED = Math.ceil(100 / 4) * (MEASURED_EIGHT / 2);
 
 beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
   offsetWidth: { configurable: true, get: () => 900 }, clientWidth: { configurable: true, get: () => 840 }, offsetHeight: { configurable: true, get: () => 600 }, clientHeight: { configurable: true, get: () => 600 },
@@ -10,6 +16,7 @@ beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
 }));
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -154,7 +161,7 @@ describe("AssetGallery", () => {
     computedStyle.mockRestore();
 
     const unit = await waitFor(() => container.querySelector(".asset-gallery__justified-unit") as HTMLElement);
-    const tile = unit.querySelector(".asset-gallery__asset") as HTMLElement;
+    const tile = container.querySelector(".asset-gallery__asset") as HTMLElement;
     expect(Number.parseFloat(unit.style.height)).toBe(Number.parseFloat(tile.style.height) + 44 + 6);
   });
 
@@ -455,7 +462,7 @@ describe("AssetGallery", () => {
     const tile = await screen.findByRole("option", { name: "asset-1.png" });
     tile.focus();
     fireEvent.keyDown(tile, { key: "ArrowDown" });
-    expect(onMoveFocus).toHaveBeenLastCalledWith(5, false);
+    expect(onMoveFocus).toHaveBeenLastCalledWith(6, false);
   });
 
   it("gives re-mounted tiles the same cacheable thumbnail URL until the content revision changes", () => {
@@ -549,7 +556,7 @@ describe("AssetGallery", () => {
     const space = await waitFor(() =>
       container.querySelector(".asset-gallery__virtual-space") as HTMLElement,
     );
-    expect(space.style.height).toBe("4935px");
+    expect(Number.parseFloat(space.style.height)).toBeCloseTo(RESERVED_HUNDRED);
   });
 
   it("sizes the virtual space from measured rows without a total count", async () => {
@@ -560,7 +567,7 @@ describe("AssetGallery", () => {
     const space = await waitFor(() =>
       container.querySelector(".asset-gallery__virtual-space") as HTMLElement,
     );
-    expect(space.style.height).toBe("394.8px");
+    expect(Number.parseFloat(space.style.height)).toBeCloseTo(MEASURED_EIGHT);
   });
 
   it("loads the next page when scrolled deep into the reserved range", async () => {
@@ -617,10 +624,10 @@ describe("AssetGallery", () => {
     fireEvent.scroll(scroller);
 
     const thumb = container.querySelector(".asset-gallery__scrollbar-thumb") as HTMLElement;
-    // Reserved 4935px, viewport 600px: the heading is part of the scroll range.
-    expect(Number.parseFloat(thumb.style.height)).toBeCloseTo(72.95, 0);
+    // The count-derived reserved range includes the date heading; the viewport is 600px.
+    expect(Number.parseFloat(thumb.style.height)).toBeCloseTo(600 * 600 / RESERVED_HUNDRED, 0);
     const top = Number.parseFloat(thumb.style.transform.replace("translateY(", ""));
-    expect(top).toBeCloseTo(230, 0);
+    expect(top).toBeCloseTo(1892.5 * 600 / RESERVED_HUNDRED, 0);
   });
 
   it("drags the overlay thumb to scroll", async () => {
@@ -640,7 +647,7 @@ describe("AssetGallery", () => {
     fireEvent.pointerMove(thumb, { pointerId: 7, clientY: 200 });
     fireEvent.pointerUp(thumb, { pointerId: 7 });
 
-    expect(scroller.scrollTop).toBeCloseTo(822.5, 0);
+    expect(scroller.scrollTop).toBeCloseTo(RESERVED_HUNDRED / 6, 0);
   });
 
   it("ignores hovers after a release outside the thumb", async () => {
@@ -658,14 +665,14 @@ describe("AssetGallery", () => {
     const thumb = container.querySelector(".asset-gallery__scrollbar-thumb") as HTMLElement;
     fireEvent.pointerDown(thumb, { pointerId: 7, clientY: 100 });
     fireEvent.pointerMove(thumb, { pointerId: 7, clientY: 200 });
-    expect(scroller.scrollTop).toBeCloseTo(822.5, 0);
+    expect(scroller.scrollTop).toBeCloseTo(RESERVED_HUNDRED / 6, 0);
 
     // The release lands outside the thumb (missed capture): later hovers
     // must not keep scrolling as if still grabbed.
     fireEvent.pointerUp(window, { pointerId: 7 });
     fireEvent.pointerMove(thumb, { pointerId: 7, clientY: 400, buttons: 0 });
 
-    expect(scroller.scrollTop).toBeCloseTo(822.5, 0);
+    expect(scroller.scrollTop).toBeCloseTo(RESERVED_HUNDRED / 6, 0);
   });
 
   it("ignores a thumb drag started with a non-primary button", async () => {
@@ -719,7 +726,7 @@ describe("AssetGallery", () => {
     await screen.findByRole("option", { name: "asset-0.png" });
     const space = () =>
       container.querySelector(".asset-gallery__virtual-space") as HTMLElement;
-    expect(space().style.height).toBe("4935px");
+    expect(Number.parseFloat(space().style.height)).toBeCloseTo(RESERVED_HUNDRED);
 
     rerender(
       <AssetGallery
@@ -732,7 +739,7 @@ describe("AssetGallery", () => {
     );
     await screen.findByRole("option", { name: "asset-0.png" });
 
-    expect(space().style.height).not.toBe("4935px");
+    expect(Number.parseFloat(space().style.height)).not.toBeCloseTo(RESERVED_HUNDRED);
   });
 
   it("falls back to the measured range without a total count", async () => {
@@ -747,7 +754,7 @@ describe("AssetGallery", () => {
     await screen.findByRole("option", { name: "asset-0.png" });
     const space = () =>
       container.querySelector(".asset-gallery__virtual-space") as HTMLElement;
-    expect(space().style.height).toBe("4935px");
+    expect(Number.parseFloat(space().style.height)).toBeCloseTo(RESERVED_HUNDRED);
 
     rerender(
       <AssetGallery
@@ -757,7 +764,7 @@ describe("AssetGallery", () => {
       />,
     );
 
-    expect(space().style.height).toBe("394.8px");
+    expect(Number.parseFloat(space().style.height)).toBeCloseTo(MEASURED_EIGHT);
   });
 
   it("jumps the track click to the matching scroll position", async () => {
@@ -778,7 +785,7 @@ describe("AssetGallery", () => {
     const scroller = container.querySelector(".asset-gallery__scroll") as HTMLElement;
     fireEvent.pointerDown(track, { clientY: 400 });
 
-    expect(scroller.scrollTop).toBeCloseTo(2167.5, 0);
+    expect(scroller.scrollTop).toBeCloseTo((RESERVED_HUNDRED - 600) / 2, 0);
   });
 
   it("keeps the overlay thumb steady when pages append at the same offset", async () => {
@@ -868,4 +875,38 @@ it("keeps series header controls outside the asset list and their keys out of se
   fireEvent.keyDown(await screen.findByRole("option", {name:"asset-0.png"}), {key:"a",ctrlKey:true});
   expect(selectAll).toHaveBeenCalledTimes(1);
   expect(container.querySelectorAll(".asset-gallery__scroll")).toHaveLength(1);
+});
+
+it("keeps painted asset cells and images mounted when N, layout and width change", async () => {
+  let resize: ResizeObserverCallback | undefined;
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(private readonly callback: ResizeObserverCallback) {}
+    observe(element: HTMLElement) { if (element.classList.contains("asset-gallery__scroll")) resize = this.callback; }
+    disconnect() {} unobserve() {}
+  });
+  const items = Array.from({ length: 12 }, (_, index) => asset(index));
+  function Harness() {
+    const [layout, setLayout] = useState<"masonry" | "justified">("masonry");
+    return <><GalleryViewMenu galleryLayout={layout} onGalleryLayoutChange={setLayout} thumbnailRowHeight={180} onThumbnailRowHeightChange={vi.fn()} />
+      <AssetGallery layout={layout} items={items} groupDates={false} /></>;
+  }
+  const { container } = render(<Harness />);
+  const cell = screen.getByRole("option", { name: "asset-0.png" });
+  const image = cell.querySelector("img");
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "보기" }));
+  fireEvent.change(screen.getByRole("slider", { name: "한 줄에" }), { target: { value: "9" } });
+  expect(container.querySelector(".asset-gallery")).toHaveAttribute("data-per-row", "9");
+  expect(new Set([...container.querySelectorAll<HTMLElement>("[data-gallery-cell]")].map(tile => tile.style.left)).size).toBe(9);
+  expect(screen.getByRole("option", { name: "asset-0.png" })).toBe(cell);
+  expect(cell.querySelector("img")).toBe(image);
+  await user.click(screen.getByRole("radio", { name: "같은 높이" }));
+  expect(screen.getByRole("option", { name: "asset-0.png" })).toBe(cell);
+  expect(cell.querySelector("img")).toBe(image);
+  expect(container.querySelector(".asset-gallery")).toHaveClass("asset-gallery--justified");
+  const oldHeight = cell.style.height;
+  act(() => resize?.([{ contentRect: { width: 600, height: 600 } } as ResizeObserverEntry], {} as ResizeObserver));
+  expect(cell.style.height).not.toBe(oldHeight);
+  expect(screen.getByRole("option", { name: "asset-0.png" })).toBe(cell);
+  expect(cell.querySelector("img")).toBe(image);
 });

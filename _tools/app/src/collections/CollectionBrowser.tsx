@@ -1,4 +1,4 @@
-import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
@@ -7,7 +7,9 @@ import type { AssetView, CollectionSummary, CollectionType, CollectionUpdateProv
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { Button } from "../shared/ui/Button";
-import { Select } from "../shared/ui/Select";
+import { ViewOptionsMenu } from "../shared/ui/ViewOptionsMenu";
+import { CollectionList, shelfGroups, useCollectionView } from "./CollectionList";
+import { TextInput } from "../shared/ui/TextInput";
 import { Slider } from "../shared/ui/Slider";
 import { ContextMenu } from "../shared/ui/ContextMenu";
 import { Dialog } from "../shared/ui/Dialog";
@@ -16,7 +18,6 @@ import { Menu } from "../shared/ui/Menu";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { CollectionCard } from "./CollectionCard";
-import { VirtualCoverGrid } from "./physical/VirtualCoverGrid";
 import { CollectionExhibition, exhibitionPage } from "./physical/CollectionExhibition";
 import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
 import { MangaDexImportDialog } from "./MangaDexImportDialog";
@@ -64,8 +65,8 @@ export function collectionCoverUrl(collection: CollectionSummary): string | null
 }
 
 /**
- * The Collections browser. The workspace index holds the type list, the 신간 row and the sort /
- * 내 별점 controls; the header holds only the title. The content shows a folding Showcase row
+ * The Collections browser. The workspace index holds types and news; the toolbar holds
+ * sort, rating and view controls. The content shows a folding Showcase row
  * (전체 보기 drills into the paged exhibition) above the 전체 heading and the grid.
  */
 export function CollectionBrowser({
@@ -84,6 +85,7 @@ export function CollectionBrowser({
 }: CollectionBrowserProps) {
   const { gateway, library } = useLibrary();
   const workspace = useWorkspaceChrome();
+  const [viewSettings, patchViewSettings] = useCollectionView(typeFilter);
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
   const [mangaDexOpen, setMangaDexOpen] = useState(false);
@@ -141,8 +143,11 @@ export function CollectionBrowser({
   }, [scope, navigationMemory]);
 
   const showcaseItems = collections.filter((collection) => collection.type === typeFilter && collection.showcase).sort((a, b) => (a.showcaseOrder ?? Number.MAX_SAFE_INTEGER) - (b.showcaseOrder ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
-  const visible = showcase ? showcaseItems : deriveCollectionLibrary(collections, typeFilter, libraryState);
+  const libraryItems = deriveCollectionLibrary(collections, typeFilter, libraryState);
+  const visible = showcase ? showcaseItems : viewSettings.layout === "shelf" && typeFilter === "game" ? shelfGroups(libraryItems, viewSettings.grouping).flatMap(group => group.items) : libraryItems;
   const filtered = Boolean(libraryState.query.trim()) || libraryState.rating !== "all";
+  const matchingIds = new Set(libraryItems.map(item => item.id));
+  const showcaseRowItems = filtered ? showcaseItems.filter(item => matchingIds.has(item.id)) : showcaseItems;
   const sectionLabel = TYPE_LABEL[typeFilter];
   const exhibition = exhibitionPage(visible.length, pageMemory?.scope === scope ? pageMemory.page : navigationMemory?.get(scope)?.page ?? 0);
   function changeExhibitionPage(page: number) {
@@ -226,12 +231,14 @@ export function CollectionBrowser({
                 coverUrl={collectionCoverUrl(collection)}
                 selected={pickedId === collection.id}
                 meta={options.meta}
+                lightCase={!showcase}
+                shelf={viewSettings.layout === "shelf" && !showcase && typeFilter !== "manga"}
                 releaseCaption={releaseCaption(collection, releases.data?.board.get(collection.id), inboxByWork.get(collection.id) ?? [], today)}
                 scope={library?.root ?? ""}
                 exhibition={showcase}
                 onClick={() => { if (collection.type === "game" || collection.type === "av" || collection.type === "movie") setPickedId(collection.id); else openCollection(collection); }}
-                onDoubleClick={() => { if (collection.type === "game" || collection.type === "av" || collection.type === "movie") openCollection(collection, options.meta === false ? showcaseItems : visible); }}
-                onKeyDown={event => { if ((collection.type === "game" || collection.type === "av" || collection.type === "movie") && event.key === "Enter") { event.preventDefault(); openCollection(collection, options.meta === false ? showcaseItems : visible); } }}
+                onDoubleClick={() => { if (collection.type === "game" || collection.type === "av" || collection.type === "movie") openCollection(collection, options.meta === false ? showcaseRowItems : visible); }}
+                onKeyDown={event => { if ((collection.type === "game" || collection.type === "av" || collection.type === "movie") && event.key === "Enter") { event.preventDefault(); openCollection(collection, options.meta === false ? showcaseRowItems : visible); } }}
               />
             </ContextMenu>
 
@@ -254,7 +261,6 @@ export function CollectionBrowser({
 
   const inbox = Boolean(releaseProvider) || releaseCalendar;
   const libraryView = !inbox && !showcase;
-  const sortValue = `${libraryState.sort}:${libraryState.direction}`;
   // The index: type rows and news rows as separate selected-slab sections, then the library's sort / 내 별점.
   const hasNewsNavigation = Boolean(tracking || calendarApi);
   const indexNavigation = <>
@@ -280,30 +286,20 @@ export function CollectionBrowser({
         </div>
       </div>}
     </div>
-    {libraryView && <div className="chrome-index-controls chrome-settings-controls collection-index__controls">
-      <fieldset className="chrome-settings-group"><legend>정렬 · 필터</legend>
-        <Select label="정렬" value={sortValue} onChange={(event) => {
-          const [sort, direction] = event.target.value.split(":") as [CollectionLibrarySort, "asc" | "desc"];
-          patchLibraryState({ sort, direction });
-        }}>{SORT_OPTIONS.map(([sort, direction, label]) => <option key={`${sort}:${direction}`} value={`${sort}:${direction}`}>{label}</option>)}</Select>
-        <RatingFilter rating={libraryState.rating} onChange={rating => patchLibraryState({ rating })} />
-        {libraryState.rating !== "all" && <Button size="sm" variant="ghost" className="collection-index__reset" onClick={() => patchLibraryState({ rating: "all" })}>초기화</Button>}
-      </fieldset>
-    </div>}
+
   </>;
 
   const showcaseOpen = libraryState.showcaseOpen ?? false;
   const toggleShowcaseRow = () => patchLibraryState({ showcaseOpen: !showcaseOpen });
-  const showcaseRow = !showcase && !filtered && showcaseItems.length > 0 ? <section className="collection-browser__showcase-row" aria-label="쇼케이스">
+  const showcaseRow = !showcase && showcaseRowItems.length > 0 ? <section className="collection-browser__showcase-row" aria-label="쇼케이스">
     <div className="collection-browser__section">
       <button type="button" className="collection-browser__fold" aria-expanded={showcaseOpen} onClick={toggleShowcaseRow}>
-        <h3>쇼케이스<span className="collection-browser__total">{showcaseItems.length.toLocaleString()}</span></h3><ChevronDownIcon aria-hidden="true" />
+        <h3>쇼케이스<span className="collection-browser__total">{showcaseRowItems.length.toLocaleString()}</span></h3><ChevronDownIcon aria-hidden="true" />
       </button>
       {showcaseOpen && <Button size="sm" variant="ghost" className="collection-browser__more" onClick={() => setShowcase(true)}>전체 보기<ChevronRightIcon aria-hidden="true" /></Button>}
     </div>
-    {showcaseOpen && <div className="collection-browser__shelf" role="group" aria-label={`${sectionLabel} 쇼케이스`}>
-      {showcaseItems.map(collection => <div key={collection.id} className={`collection-browser__shelf-item collection-browser__shelf-item--${collection.type}`}>{renderCollection(collection, { meta: false })}</div>)}
-    </div>}
+    {showcaseOpen && <CollectionList items={showcaseRowItems} view={viewSettings} showcase render={collection => renderCollection(collection, { meta: false })} label={`${sectionLabel} 쇼케이스`} onPick={setPickedId} />}
+
   </section> : null;
   const sectionRow = <div className="collection-browser__section collection-browser__section--all">
     <h3>{filtered ? "검색 결과" : "전체"}<span className="collection-browser__total" aria-label={`작품 ${visible.length.toLocaleString()}개`}>{visible.length.toLocaleString()}</span></h3>
@@ -313,11 +309,31 @@ export function CollectionBrowser({
   const emptyLibrary = filtered ? <EmptyState title="조건에 맞는 작품이 없습니다."><p>검색어나 별점 조건을 바꿔보세요.</p><Button onClick={() => patchLibraryState({ query: "", rating: "all" })}>검색·필터 초기화</Button></EmptyState>
     : <EmptyState title="컬렉션이 없습니다."><p>새 컬렉션을 만들어 작품을 모아보세요.</p><Button type="button" onClick={() => typeFilter === "manga" ? setMangaDexOpen(true) : typeFilter === "game" ? setIgdbOpen(true) : typeFilter === "movie" ? setTmdbOpen(true) : setEditMode({ kind: "create", type: typeFilter })}>{typeFilter === "manga" ? "MangaDex에서 만화 추가" : typeFilter === "game" ? "IGDB에서 게임 추가" : typeFilter === "movie" ? "TMDB에서 영화 추가" : "직접 입력"}</Button></EmptyState>;
 
+  const toolbarControls = libraryView ? <div className="collection-toolbar__controls">
+    <Menu label="정렬" align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<>정렬<ChevronDownIcon aria-hidden="true" /></>} items={[
+      ...(typeFilter === "game" ? ([['device', '기기'], ['year', '발매 연도']] as const).map(([grouping, label]) => ({ id: grouping, label, group: "grouping", selected: viewSettings.grouping === grouping,
+        onSelect: () => { patchViewSettings({ grouping }); if (grouping === "year") patchLibraryState({ sort: "media_date", direction: "desc" }); } })) : []),
+      ...SORT_OPTIONS.map(([sort, direction, label]) => ({ id: `${sort}:${direction}`, label, group: "sort", selected: libraryState.sort === sort && libraryState.direction === direction,
+        onSelect: () => { patchLibraryState({ sort, direction }); patchViewSettings({ grouping: "sort" }); } })),
+    ]} />
+    <Menu label="내 별점" align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<>내 별점<ChevronDownIcon aria-hidden="true" /></>}
+      content={<div className="collection-toolbar__rating" onKeyDown={event => event.stopPropagation()}><RatingFilter rating={libraryState.rating} onChange={rating => patchLibraryState({ rating })} />
+        {libraryState.rating !== "all" && <Button size="sm" variant="ghost" onClick={() => patchLibraryState({ rating: "all" })}>초기화</Button>}
+      </div>} />
+    <ViewOptionsMenu layout={typeFilter === "manga" ? "grid" : viewSettings.layout} options={typeFilter === "manga" ? [{ value: "grid", label: "격자" }] : [{ value: "grid", label: "격자" }, { value: "shelf", label: "선반" }]}
+      onLayoutChange={layout => patchViewSettings({ layout })} perRow={viewSettings.perRow} min={5} max={12} onPerRowChange={perRow => patchViewSettings({ perRow })} />
+    <Menu label="컬렉션 검색" align="end" triggerClassName="asset-toolbar__quiet-menu" trigger={<><MagnifyingGlassIcon aria-hidden="true" /><span>검색</span></>}
+      content={<div className="collection-toolbar__rating" onKeyDown={event => event.stopPropagation()}>
+        <TextInput type="search" aria-label="제목 검색" placeholder="작품 제목 검색" autoFocus value={libraryState.query} onChange={event => patchLibraryState({ query: event.target.value })} />
+      </div>} />
+  </div> : undefined;
+
   return (
     <section className="collection-browser" aria-label="컬렉션">
       <ViewToolbar
         title={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : `${sectionLabel} 컬렉션`}
         titleContent={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : sectionLabel}
+        titleAccessory={<>{!inbox && <span className="collection-toolbar__count">{visible.length.toLocaleString()}</span>}{toolbarControls}</>}
         ariaLabel="컬렉션 도구"
         leadingAction={libraryView ? undefined : <Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={inbox ? closeInbox : () => setShowcase(false)}><ChevronLeftIcon aria-hidden="true" /></Button>}
         chrome={{
@@ -350,9 +366,12 @@ export function CollectionBrowser({
           {!inbox && showcase && visible.length > 0 &&
             <CollectionExhibition items={visible} page={exhibition.page} onPageChange={changeExhibitionPage} render={collection => renderCollection(collection)} scrollRef={stageRef} />}
           {!inbox && showcase && visible.length === 0 && <div className="collection-browser__empty"><EmptyState title="쇼케이스에 컬렉션이 없습니다.">라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다.</EmptyState></div>}
-          {!inbox && !showcase &&
-            <VirtualCoverGrid items={visible} itemKey={collection => collection.id} render={collection => renderCollection(collection)} legacyMetrics={typeFilter !== "manga"} metadataHeight={56} label={`${sectionLabel} 작품 목록`} scrollRef={stageRef}
-              leading={leading} trailing={visible.length === 0 ? <div className="collection-browser__empty">{emptyLibrary}</div> : null} />}
+          {!inbox && !showcase && <div ref={stageRef} className="collection-browser__list-scroll" data-cover-scroll-root="">
+            {leading}
+            <CollectionList items={libraryItems} view={viewSettings} render={collection => renderCollection(collection)} label={`${sectionLabel} 작품 목록`} onPick={setPickedId} />
+            {visible.length === 0 && <div className="collection-browser__empty">{emptyLibrary}</div>}
+          </div>}
+
         </div>
       </div>
       {editMode && (

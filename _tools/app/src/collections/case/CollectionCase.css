@@ -80,27 +80,32 @@
 .collection-case--large .k-spine .ins { inset: 3px 0; }
 .collection-case--large .k-back .ins { inset: 3px 0 3px 3px; }
 .collection-case .ins.bare { background: transparent; display: flex; align-items: center; justify-content: center; }
-.collection-case .spine-title { display: block; max-height: 92%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; writing-mode: vertical-rl; text-orientation: sideways; font-family: var(--font-spine); font-weight: 700; font-size: calc(var(--cd) * .5); line-height: 1; letter-spacing: .02em; color: rgba(255,255,255,.92); }
+.case-spine-art .spine-title { display: block; max-height: 92%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; writing-mode: vertical-rl; text-orientation: sideways; font-family: var(--font-spine); font-weight: 700; font-size: calc(var(--cd) * .5); line-height: 1; letter-spacing: .02em; color: rgba(255,255,255,.92); }
 .collection-case .ins.full { background: transparent; }
-.collection-case .tpl { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; }
-.collection-case .t-head { flex: none; width: 100%; }
-.collection-case .t-band { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 6% 0; }
-.collection-case .t-band .spine-title { max-height: 100%; }
-.collection-case .t-foot { flex: none; width: 100%; display: flex; align-items: center; justify-content: center; padding: 45% 0 55%; }
-.collection-case .t-pub { white-space: nowrap; writing-mode: vertical-rl; text-orientation: sideways; font-family: var(--font-spine); font-weight: 700; font-size: calc(var(--cd) * .28); line-height: 1; color: #fff; }
-.collection-case .sw2 .t-head { aspect-ratio: 96 / 203; background: url("./marks/switch2-head.png") center / 100% 100% no-repeat, rgb(230,72,45); }
-.collection-case .sw2 .t-band { background: var(--color-surface); }
-.collection-case .sw2 .t-foot { background: rgb(230,72,45); }
-.collection-case .sw .t-head { aspect-ratio: 96 / 92; background: url("./marks/switch-head.png") center / 100% 100% no-repeat; }
-.collection-case .sw { background: rgb(218,24,32); }
-.collection-case .ps5 .t-head { aspect-ratio: 96 / 271; background: url("./marks/ps5-head.png") center / 100% 100% no-repeat, #fff; box-shadow: 0 2px 0 #2a4fb0; }
-.collection-case .ps5 .t-band, .collection-case .ps5 .t-foot { background: #050505; }
+.case-spine-art .tpl { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; }
+.case-spine-art .t-head { flex: none; width: 100%; }
+.case-spine-art .t-band { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 6% 0; }
+.case-spine-art .t-band .spine-title { max-height: 100%; }
+.case-spine-art .t-foot { flex: none; width: 100%; display: flex; align-items: center; justify-content: center; padding: 45% 0 55%; }
+.case-spine-art .t-pub { white-space: nowrap; writing-mode: vertical-rl; text-orientation: sideways; font-family: var(--font-spine); font-weight: 700; font-size: calc(var(--cd) * .28); line-height: 1; color: #fff; }
+.case-spine-art .sw2 .t-head { aspect-ratio: 96 / 203; background: url("./marks/switch2-head.png") center / 100% 100% no-repeat, rgb(230,72,45); }
+.case-spine-art .sw2 .t-band { background: var(--color-surface); }
+.case-spine-art .sw2 .t-foot { background: rgb(230,72,45); }
+.case-spine-art .sw .t-head { aspect-ratio: 96 / 92; background: url("./marks/switch-head.png") center / 100% 100% no-repeat; }
+.case-spine-art .sw { background: rgb(218,24,32); }
+.case-spine-art .ps5 .t-head { aspect-ratio: 96 / 271; background: url("./marks/ps5-head.png") center / 100% 100% no-repeat, #fff; box-shadow: 0 2px 0 #2a4fb0; }
+.case-spine-art .ps5 .t-band, .case-spine-art .ps5 .t-foot { background: #050505; }
 @media (prefers-reduced-motion: reduce) { .collection-case .kase, .collection-case .k-hinge, .collection-case .k-lid, .collection-case .floor-shadow { transition: none; } }
 /* Platform marks are cut from real package spines (user decision, 2026-10-01). A Nintendo-published Switch 2 game carries the publisher oval at the foot. */
-.collection-case .sw2[data-nintendo] .t-foot { aspect-ratio: 96 / 198; padding: 0; background: url("./marks/switch2-nintendo.png") center / 100% 100% no-repeat; }
-.collection-case .sw2[data-nintendo] .t-pub { display: none; }
+.case-spine-art .sw2[data-nintendo] .t-foot { aspect-ratio: 96 / 198; padding: 0; background: url("./marks/switch2-nintendo.png") center / 100% 100% no-repeat; }
+.case-spine-art .sw2[data-nintendo] .t-pub { display: none; }
 
 /* Films have no printed back insert; the moulded plastic remains visible. */
 .collection-case--film .k-back .ins { background: transparent; }
 .collection-case .note { max-height: 20%; overflow: hidden; }
 .collection-case .work-names-note { margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+
+.case-spine-art { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.case-spine-art > img { width: 100%; height: 100%; object-fit: fill; }
+
+.case-spine-art .spine-title[data-title]::before { content: attr(data-title); }

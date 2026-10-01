@@ -1,27 +1,24 @@
 /* 내 별점 filter: a stepped slider (전체, 0.5 … 5.0) with the value and a separate 미평가 toggle. */
 .collection-rating-filter { display: grid; gap: var(--space-1); }
-.collection-rating-filter__row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding-left: 80px; }
-.collection-rating-filter__value { font-size: var(--text-sm); color: var(--color-text); font-variant-numeric: tabular-nums; }
+.collection-rating-filter__row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding-left: 0; }
+.collection-rating-filter__value { font-size: var(--type-meta); color: var(--color-text); font-variant-numeric: tabular-nums; }
 .collection-rating-filter .ui-slider input { width: 100%; }
 .collection-rating-filter .ui-slider input.is-idle { opacity: .45; }
 .collection-rating-filter .ui-button[aria-pressed="true"] { background: var(--color-filter-selected); border-color: var(--color-filter-border); color: var(--color-filter-text); }
 
-/* Index (2026-09-26): type and news rows are separate selected-slab sections (mark on the right,
-   no outside cursor), then the library's 정렬 · 필터 controls. */
+/* The index contains only type and news navigation. */
 .collection-index { display: flex; flex-direction: column; gap: var(--space-3); }
 .collection-index__section { display: flex; flex-direction: column; gap: var(--space-1); }
 .collection-index__types, .collection-index__news { display: flex; flex-direction: column; gap: var(--space-1); }
 .collection-index__release { margin-top: 0; }
-.collection-index__count { margin-left: auto; color: var(--color-text); font-family: var(--font-numeric); font-size: var(--text-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
+.collection-index__count { margin-left: auto; color: var(--color-text); font-family: var(--font-numeric); font-size: var(--type-meta); font-weight: 600; font-variant-numeric: tabular-nums; }
 .collection-index__release[aria-current=page] .collection-index__count, .collection-index__calendar[aria-current=page] .collection-index__count, .collection-index__av[aria-current=page] .collection-index__count { color: inherit; }
 .collection-index__release[aria-current=page]:has(.collection-index__count)::after, .collection-index__calendar[aria-current=page]:has(.collection-index__count)::after, .collection-index__av[aria-current=page]:has(.collection-index__count)::after { margin-left: 0; }
-.collection-index__controls .collection-index__reset { align-self: flex-end; }
 
 /* Library: folding Showcase row, then the 전체 heading. */
-.virtual-cover-grid__leading { padding: 0 0 var(--space-3); }
 .collection-browser__section { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 40px; }
-.collection-browser__section h3 { display: flex; align-items: baseline; gap: var(--space-2); margin: 0; color: var(--color-text); font-size: var(--text-md); font-weight: 600; }
-.collection-browser__total { color: var(--color-muted); font-family: var(--font-numeric); font-size: var(--text-sm); font-weight: 500; font-variant-numeric: tabular-nums; }
+.collection-browser__section h3 { display: flex; align-items: baseline; gap: var(--space-2); margin: 0; color: var(--color-text); font-size: var(--type-body); font-weight: 600; }
+.collection-browser__total { color: var(--color-muted); font-family: var(--font-numeric); font-size: var(--type-meta); font-weight: 500; font-variant-numeric: tabular-nums; }
 .collection-browser__fold { display: inline-flex; align-items: center; gap: var(--space-2); padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 .collection-browser__fold svg { width: 16px; height: 16px; color: var(--color-muted); transition: transform var(--motion-fast, 120ms) ease; }
 .collection-browser__fold[aria-expanded="true"] svg { transform: rotate(180deg); }
@@ -29,10 +26,35 @@
 .collection-browser__more { color: var(--color-muted); }
 .collection-browser__more svg { width: 14px; height: 14px; }
 .collection-browser__showcase-row { margin-bottom: var(--space-3); }
-.collection-browser__shelf { display: flex; gap: var(--space-5, 20px); overflow-x: auto; padding: var(--space-2) 0 var(--space-3); scrollbar-width: thin; }
-.collection-browser__shelf-item { flex: none; width: 148px; }
-.collection-browser__shelf-item--game, .collection-browser__shelf-item--av, .collection-browser__shelf-item--movie { width: 132px; }
-.collection-browser__shelf-item .collection-card { width: 100%; }
 .collection-browser__section--all { border-top: 1px solid var(--color-border); padding-top: var(--space-2); }
 .collection-browser__showcase-row + .collection-browser__section--all { margin-top: 0; }
-.virtual-cover-grid__leading > .collection-browser__section--all:first-child { border-top: 0; padding-top: 0; }
+
+.collection-browser__list-scroll { overflow: auto; flex: 1; min-height: 0; padding: 0 var(--space-3) var(--space-4); }
+.collection-list { display: grid; position: relative; grid-template-columns: repeat(var(--columns), minmax(0, 1fr)); gap: var(--space-4) var(--space-4); padding: var(--space-4) var(--space-6) var(--space-8); }
+.collection-list__cell { min-width: 0; position: relative; z-index: 1; }
+.collection-list__cell:has(.collection-card[aria-selected="true"]) { z-index: 2; }
+.collection-list__cell .collection-card { width: 100%; }
+.collection-list__group { display: flex; align-items: center; gap: var(--space-2); font-size: var(--type-meta); color: var(--color-faint); }
+.collection-list__group::before { content: ""; width: 5px; height: 5px; background: var(--color-muted); }
+.collection-list__group::after { content: ""; height: 1px; flex: 1; background: linear-gradient(90deg, var(--color-border), transparent); }
+.collection-list__plank { display: none; }
+.collection-card__light { display: none; }
+.collection-list--shelf .collection-card { position: relative; overflow: visible; height: calc(var(--case-height) + 64px); background: transparent; }
+.collection-list--shelf .collection-card__light { display: block; }
+.collection-list--shelf .collection-card__object { display: none; }
+.collection-list--shelf .collection-card__meta { position: absolute; top: calc(var(--case-height) + 32px); left: 0; right: 0; }
+.collection-list--shelf .collection-card__credit, .collection-list--shelf .collection-card__line { display: none; }
+.collection-list--shelf .collection-card__name { font-size: var(--type-meta); line-height: var(--line-meta); color: var(--color-muted); }
+.collection-list--shelf .collection-card[aria-selected="true"] { z-index: 2; }
+.collection-list--shelf .collection-card[aria-selected="true"] .collection-card__meta { right: auto; width: max-content; max-width: min(300px, 80vw); z-index: 3; padding: 0 var(--space-2); background: var(--color-bg); box-shadow: 8px 0 8px var(--color-bg); }
+.collection-list--shelf .collection-card[aria-selected="true"] .collection-card__name { display: block; -webkit-line-clamp: unset; white-space: normal; color: var(--color-text); font-weight: 600; overflow-wrap: anywhere; }
+.collection-list--shelf .collection-list__cell.is-end .collection-card[aria-selected="true"] .collection-card__meta { left: auto; right: 0; }
+.collection-list--shelf .collection-list__plank { display: block; pointer-events: none; align-self: start; position: relative; height: 36px; margin-top: calc(var(--case-height) - 12px); margin-left: calc(var(--space-6) * -1); margin-right: calc(var(--space-6) * -1); }
+.collection-list__plank::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 25px; clip-path: polygon(16px 0, calc(100% - 16px) 0, 100% 100%, 0 100%); background: linear-gradient(180deg, color-mix(in srgb, var(--color-text) 4%, var(--color-bg)), color-mix(in srgb, var(--color-text) 15%, var(--color-bg))); }
+.collection-list__plank::after { content: ""; position: absolute; left: 0; right: 0; top: 25px; height: 10px; border-radius: 0 0 2px 2px; background: linear-gradient(180deg, color-mix(in srgb, var(--color-text) 38%, var(--color-bg)) 0 1px, color-mix(in srgb, var(--color-text) 19%, var(--color-bg)) 1px, color-mix(in srgb, var(--color-text) 9%, var(--color-bg))); box-shadow: 0 16px 20px -8px rgba(0,0,0,.7); }
+.collection-list--grid .collection-card__object { width: 100%; }
+.collection-toolbar__count { font-size: var(--type-meta); color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.collection-toolbar__controls { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
+.collection-toolbar__rating { width: 264px; padding: var(--space-3); }
+
+.collection-list--showcase { grid-template-columns: repeat(var(--columns), var(--cell-width)); grid-auto-columns: var(--cell-width); overflow-x: auto; scrollbar-width: thin; }

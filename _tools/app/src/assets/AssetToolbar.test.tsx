@@ -31,7 +31,7 @@ it("puts kind, sort, and view controls in the toolbar and removes sidebar view s
   expect(screen.queryByRole("button", { name: "보기 설정" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "보기" }));
   expect(screen.getByRole("radiogroup", { name: "배치" })).toBeVisible();
-  expect(screen.getByLabelText("미리보기 크기")).toBeVisible();
+  expect(screen.getByRole("slider", { name: "한 줄에" })).toBeVisible();
   expect(screen.getByRole("switch", { name: "정보" })).toBeVisible();
   expect(screen.queryByRole("switch", { name: "정보 숨기기" })).not.toBeInTheDocument();
   expect(screen.queryByRole("switch", { name: "비공개 모드" })).not.toBeInTheDocument();

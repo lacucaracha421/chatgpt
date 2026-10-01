@@ -14,12 +14,11 @@ import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import type { CollectionSummary, CollectionTrackingGateway, CollectionUpdateProvider, LibraryGateway, ReleaseBoardEntry, ReleaseInboxItem, ReleaseCalendarGateway } from "../library/types";
 import { CollectionBrowser } from "./CollectionBrowser";
-import { coverSourceUrl } from "./physical/collectibleRuntime";
 import { createDefaultCollectionLibraryState } from "./collectionLibrary";
 import { resetReleaseDataForTests } from "./releaseData";
 import type { AvLinkApi } from "./AvLinkInbox";
 
-afterEach(() => { cleanup(); resetReleaseDataForTests(); });
+afterEach(() => { cleanup(); localStorage.clear(); resetReleaseDataForTests(); });
 
 const sample: CollectionSummary = {
   id: "c1",
@@ -115,7 +114,7 @@ describe("CollectionBrowser", () => {
     await waitFor(() => expect(onViewChange).toHaveBeenCalledWith({ kind: "collection", collectionId: "new-tv", tmdbSearch: { query: "시리즈 제목", mediaType: "tv" } }));
     expect(onChanged).toHaveBeenCalledOnce();
   });
-  it("puts the type rows and the sort / 내 별점 controls in the index, with only the title in the header", async () => {
+  it("keeps types in the index and moves sort, rating and view into the toolbar", async () => {
     const defaults = createDefaultCollectionLibraryState();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, libraryState: defaults.game });
     const index = screen.getByRole("complementary", { name: "index" });
@@ -130,14 +129,19 @@ describe("CollectionBrowser", () => {
     expect(screen.queryByRole("tablist", { name: "컬렉션 유형" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "정렬과 필터" })).not.toBeInTheDocument();
     const header = screen.getByRole("toolbar", { name: "컬렉션 도구" });
-    expect(within(header).queryAllByRole("button")).toHaveLength(0);
+    expect(within(header).getByRole("button", { name: "정렬" })).toBeVisible();
+    expect(within(header).getByRole("button", { name: "내 별점" })).toBeVisible();
+    expect(within(header).getByRole("button", { name: "보기" })).toBeVisible();
+    expect(within(header).getByRole("button", { name: "컬렉션 검색" })).toBeVisible();
+    expect(within(index).queryByRole("combobox", { name: "정렬" })).not.toBeInTheDocument();
+    expect(within(index).queryByRole("slider", { name: "내 별점" })).not.toBeInTheDocument();
     expect(screen.getByTestId("search-label")).toHaveTextContent("제목 검색");
-    expect(within(index).getByRole("combobox", { name: "정렬" })).toHaveValue("media_date:desc");
-    const rating = within(index).getByRole("slider", { name: "내 별점" });
-    expect(rating).toHaveValue("0");expect(rating).toHaveAttribute("aria-valuetext", "전체");
-    expect(rating).toHaveAttribute("min", "0");expect(rating).toHaveAttribute("max", "10");
-    expect(within(index).getByRole("button", { name: "미평가" })).toHaveAttribute("aria-pressed", "false");
-    expect(within(index).queryByRole("button", { name: "초기화" })).not.toBeInTheDocument();
+    await userEvent.click(within(header).getByRole("button", { name: "내 별점" }));
+    const rating = screen.getByRole("slider", { name: "내 별점" });
+    expect(rating).toHaveValue("0"); expect(rating).toHaveAttribute("aria-valuetext", "전체");
+    expect(rating).toHaveAttribute("min", "0"); expect(rating).toHaveAttribute("max", "10");
+    expect(screen.getByRole("button", { name: "미평가" })).toHaveAttribute("aria-pressed", "false");
+
   });
 
   it("shows the received-code count on the AV index row and the ledger only in the AV library", async () => {
@@ -158,6 +162,7 @@ describe("CollectionBrowser", () => {
   it("shows a saved rating outside the presets as the selected option", async () => {
     const defaults = createDefaultCollectionLibraryState();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, libraryState: { ...defaults.game, rating: 0 } });
+    await userEvent.click(screen.getByRole("button", { name: "내 별점" }));
     const rating = screen.getByRole("slider", { name: "내 별점" });
     expect(rating).toHaveAttribute("aria-valuetext", "★ 0.0");
     expect(rating).toHaveValue("1");
@@ -172,20 +177,24 @@ describe("CollectionBrowser", () => {
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, query: "nier" });
   });
 
-  it("sets sort and direction from one index select and filters rating with a slider and a 미평가 toggle", async () => {
+  it("sets sort and filters rating from the toolbar menus", async () => {
     const onLibraryStateChange = vi.fn();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, onLibraryStateChange });
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByRole("combobox", { name: "정렬" }), "제목 · 가나다순");
+    await user.click(screen.getByRole("button", { name: "정렬" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "제목 · 가나다순" }));
     expect(onLibraryStateChange).toHaveBeenLastCalledWith({ ...createDefaultCollectionLibraryState().game, sort: "name", direction: "asc" });
+    await user.click(screen.getByRole("button", { name: "내 별점" }));
     const rating = screen.getByRole("slider", { name: "내 별점" });
     expect(rating).toHaveValue("0");
     fireEvent.change(rating, { target: { value: "9" } });
     expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "name", direction: "asc", rating: 4.5 }));
     expect(rating).toHaveValue("9");expect(rating).toHaveAttribute("aria-valuetext", "★ 4.5");
+    expect(screen.queryByRole("button", { name: /Astral Chain/ })).not.toBeInTheDocument();
     // The keyboard steps one half-star at a time, like any range input.
     fireEvent.change(rating, { target: { value: "10" } });
     expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ rating: 5 }));
+    expect(screen.getByRole("button", { name: /Astral Chain/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "미평가" }));
     expect(onLibraryStateChange).toHaveBeenLastCalledWith(expect.objectContaining({rating:"unrated"}));
     expect(screen.getByRole("button", { name: "미평가" })).toHaveAttribute("aria-pressed", "true");
@@ -372,6 +381,70 @@ describe("CollectionBrowser", () => {
     expect(screen.getByRole("heading", { name: /전체/ })).toHaveTextContent("전체2");
   });
 
+  it("applies toolbar filters to the first showcase shelf as well", async () => {
+    const defaults = createDefaultCollectionLibraryState();
+    renderBrowser({ collections: [{ ...sample, showcase: true }, { ...sample, id: "other", name: "다른 작품", showcase: true, myScore: 4.5 }], typeFilter: "game", showcase: false, libraryState: { ...defaults.game, showcaseOpen: true } });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "내 별점" }));
+    fireEvent.change(screen.getByRole("slider", { name: "내 별점" }), { target: { value: "10" } });
+    const showcase = screen.getByRole("group", { name: "게임 쇼케이스" });
+    expect(within(showcase).getByRole("button", { name: /Astral Chain/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /다른 작품/ })).not.toBeInTheDocument();
+  });
+
+  it("searches titles from the list toolbar", async () => {
+    renderBrowser({ collections: [sample, { ...sample, id: "other", name: "다른 작품" }], typeFilter: "game", showcase: false });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "컬렉션 검색" }));
+    await user.type(screen.getByRole("searchbox", { name: "제목 검색" }), "Astral");
+    expect(screen.getByRole("button", { name: /Astral Chain/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /다른 작품/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps case and image nodes mounted across N and layout changes, with showcase first", async () => {
+    const works = Array.from({ length: 14 }, (_, index) => ({ ...sample, id: `count-${index}`, name: `작품 ${index}`, coverAssetId: `cover-${index}`, showcase: index === 0 }));
+    renderBrowser({ collections: works, typeFilter: "game", showcase: false, libraryState: { ...createDefaultCollectionLibraryState().game, showcaseOpen: true } });
+    const user = userEvent.setup();
+    const showcase = screen.getByRole("group", { name: "게임 쇼케이스" });
+    const list = screen.getByRole("group", { name: "게임 작품 목록" });
+    expect(showcase.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(showcase.querySelectorAll("[data-collection-id]")).toHaveLength(1);
+    const card = list.querySelector('[data-collection-id="count-0"]');
+    const image = card?.querySelector(".cs-front img");
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    fireEvent.change(screen.getByRole("slider", { name: "한 줄에" }), { target: { value: "6" } });
+    expect(list).toHaveAttribute("data-per-row", "6");
+    const cells = [...list.querySelectorAll<HTMLElement>(".collection-list__cell")];
+    const counts = new Map<string, number>();
+    cells.forEach(cell => counts.set(cell.style.gridRow, (counts.get(cell.style.gridRow) ?? 0) + 1));
+    expect([...counts.values()]).toEqual([6, 6, 2]);
+    expect(list.querySelector('[data-collection-id="count-0"]')).toBe(card);
+    expect(card?.querySelector(".cs-front img")).toBe(image);
+    await user.click(screen.getByRole("radio", { name: "격자" }));
+    expect(list).toHaveClass("collection-list--grid");
+    expect(list.querySelector('[data-collection-id="count-0"]')).toBe(card);
+    expect(card?.querySelector(".cs-front img")).toBe(image);
+    expect([...list.querySelectorAll<HTMLElement>(".collection-list__cell")].filter(cell => cell.style.gridRow === "1")).toHaveLength(6);
+  });
+
+  it("picks with click and arrows, then opens with Enter or double-click", async () => {
+    const onOpenWork = vi.fn();
+    const works = Array.from({ length: 10 }, (_, index) => ({ ...sample, id: `key-${index}`, name: `작품 ${index}` }));
+    renderBrowser({ collections: works, typeFilter: "game", showcase: false, onOpenWork });
+    const user = userEvent.setup();
+    const first = screen.getByRole("button", { name: /작품 0/ });
+    await user.click(first);
+    expect(first).toHaveAttribute("aria-selected", "true");
+    expect(onOpenWork).not.toHaveBeenCalled();
+    await user.keyboard("{ArrowDown}");
+    const eighth = screen.getByRole("button", { name: /작품 8/ });
+    expect(eighth).toHaveFocus(); expect(eighth).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Enter}");
+    expect(onOpenWork).toHaveBeenLastCalledWith("key-8", works.map(work => work.id));
+    await user.dblClick(first);
+    expect(onOpenWork).toHaveBeenLastCalledWith("key-0", works.map(work => work.id));
+  });
+
   it("renders a grid of collection cards", () => {
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false });
     expect(screen.getByText("Astral Chain")).toBeInTheDocument();
@@ -405,7 +478,7 @@ describe("CollectionBrowser", () => {
 
     expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
       "src",
-      coverSourceUrl({ src: "http://lakomics.localhost/collection-source-thumbnail/c1", scope: "", revision: sample.updatedAt }),
+      "http://lakomics.localhost/collection-source-thumbnail/c1",
     );
   });
 
@@ -418,7 +491,7 @@ describe("CollectionBrowser", () => {
 
     expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
       "src",
-      coverSourceUrl({ src: "http://lakomics.localhost/thumbnail/asset-1", scope: "", revision: sample.updatedAt }),
+      "http://lakomics.localhost/thumbnail/asset-1",
     );
   });
 
@@ -584,7 +657,7 @@ describe("CollectionBrowser", () => {
 
     expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
       "src",
-      coverSourceUrl({ src: "http://lakomics.localhost/work-artwork-thumbnail/artwork-1", scope: "", revision: sample.updatedAt }),
+      "http://lakomics.localhost/work-artwork-thumbnail/artwork-1",
     );
   });
 });

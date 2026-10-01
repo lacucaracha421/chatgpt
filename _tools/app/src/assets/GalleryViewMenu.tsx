@@ -1,7 +1,5 @@
-import { Squares2X2Icon } from "@heroicons/react/24/outline";
-import { Menu } from "../shared/ui/Menu";
-import { SegmentedControl } from "../shared/ui/SegmentedControl";
-import { Slider } from "../shared/ui/Slider";
+import { ViewOptionsMenu } from "../shared/ui/ViewOptionsMenu";
+import { useGalleryCount } from "./galleryCount";
 import { Switch } from "../shared/ui/Switch";
 import type { AssetAspectFilter } from "../library/types";
 
@@ -29,27 +27,17 @@ export function GalleryViewMenu({
   galleryLayout,
   onGalleryLayoutChange,
   thumbnailRowHeight,
-  onThumbnailRowHeightChange,
+  onThumbnailRowHeightChange: _onThumbnailRowHeightChange,
   aspectFilter = "all",
   onAspectFilterChange,
   inspectorOpen,
   inspectorAvailable = true,
   onInspectorOpenChange,
 }: GalleryViewMenuProps) {
-  return <Menu
-    label="보기"
-    align="end"
-    triggerClassName="asset-toolbar__quiet-menu"
-    trigger={<><Squares2X2Icon aria-hidden="true" /><span>보기</span></>}
-    contentClassName="asset-view-menu"
-    content={<div className="asset-view-menu__content" onKeyDown={(event) => event.stopPropagation()}>
-      <section className="asset-view-menu__section">
-        <span className="asset-view-menu__label">배치</span>
-        <SegmentedControl label="배치" options={[{ value: "masonry", label: "폭포수" }, { value: "justified", label: "같은 높이" }]} value={galleryLayout} onChange={(value) => onGalleryLayoutChange?.(value)} fullWidth />
-      </section>
-      <section className="asset-view-menu__section">
-        <Slider label="크기" aria-label="미리보기 크기" min={96} max={320} step={8} value={thumbnailRowHeight} onChange={(event) => onThumbnailRowHeightChange(Number(event.target.value))} />
-      </section>
+  const [perRow, setPerRow] = useGalleryCount(thumbnailRowHeight);
+  return <ViewOptionsMenu
+    layout={galleryLayout} options={[{ value: "masonry", label: "폭포수" }, { value: "justified", label: "같은 높이" }]}
+    onLayoutChange={value => onGalleryLayoutChange?.(value)} perRow={perRow} min={3} max={12} onPerRowChange={setPerRow}>
       {onAspectFilterChange && <section className="asset-view-menu__section">
         <span className="asset-view-menu__label" id="asset-view-menu-aspect">비율</span>
         <div className="asset-view-menu__aspects" role="radiogroup" aria-labelledby="asset-view-menu-aspect">
@@ -57,6 +45,5 @@ export function GalleryViewMenu({
         </div>
       </section>}
       {onInspectorOpenChange && <Switch label="정보" checked={Boolean(inspectorOpen)} disabled={!inspectorAvailable} onChange={(event) => onInspectorOpenChange(event.target.checked)} />}
-    </div>}
-  />;
+  </ViewOptionsMenu>;
 }

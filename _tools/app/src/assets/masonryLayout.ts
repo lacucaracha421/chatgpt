@@ -29,11 +29,11 @@ export function collectedDate(value: string | null | undefined) {
   return { key, label: displayDate(date), time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`, full: fullDateFormat.format(date) };
 }
 
-export function buildMasonryLayout(items: AssetSummary[], width: number, targetWidth: number, gap: number, _captions: boolean, groupDates: boolean, _fullDateHeadings = false) {
+export function buildMasonryLayout(items: AssetSummary[], width: number, targetWidth: number, gap: number, _captions: boolean, groupDates: boolean, _fullDateHeadings = false, perRow?: number) {
   const tiles: MasonryTile[] = [];
   const headings: Array<{ key: string; label: string; weekday: string; count: number; top: number; left: number; width: number }> = [];
   if (width <= 0 || targetWidth <= 0) return { tiles, headings, height: 0 };
-  const columns = Math.max(1, Math.floor((width + gap) / (targetWidth + gap)));
+  const columns = perRow === undefined ? Math.max(1, Math.floor((width + gap) / (targetWidth + gap))) : Math.max(1, Math.round(perRow));
   const tileWidth = (width - gap * (columns - 1)) / columns;
   const groups: Array<{ start: number; key: string; items: AssetSummary[] }> = [];
   items.forEach((asset, index) => {

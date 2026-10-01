@@ -11,7 +11,7 @@ import { AssetBrowser, type AssetBrowserStatus, type AssetNavigationMemory } fro
 
 const classifications: ClassificationEntry[] = [];
 
-afterEach(() => { vi.useRealTimers(); cleanup(); });
+afterEach(() => { vi.useRealTimers(); cleanup(); localStorage.clear(); });
 beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
   offsetWidth: { configurable: true, get: () => 900 },
   clientWidth: { configurable: true, get: () => 840 },
@@ -255,9 +255,10 @@ describe("AssetBrowser", () => {
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledOnce());
     await userEvent.click(screen.getByRole("button", { name: "보기" }));
 
-    fireEvent.change(screen.getByRole("slider", { name: "미리보기 크기" }), { target: { value: "240" } });
+    fireEvent.change(screen.getByRole("slider", { name: "한 줄에" }), { target: { value: "8" } });
 
-    expect(onThumbnailRowHeightChange).toHaveBeenCalledWith(240);
+    expect(screen.getByRole("slider", { name: "한 줄에" })).toHaveValue("8");
+    expect(onThumbnailRowHeightChange).not.toHaveBeenCalled();
     expect(gateway.listAssets).toHaveBeenCalledOnce();
   });
 
@@ -581,7 +582,7 @@ describe("AssetBrowser", () => {
     expect((container.querySelector(".asset-gallery__scroll") as HTMLElement).scrollTop).toBe(0);
 
     rerender(browserElement(gateway, { view: { kind: "classification", classificationId: "classification-a" } }));
-    expect(await screen.findByRole("option", { name: "Item-0" })).toBeVisible();
+    await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(3));
     expect((container.querySelector(".asset-gallery__scroll") as HTMLElement).scrollTop).toBe(900);
   });
   it("pages the destination scope with its own classification and cursor", async () => {
@@ -628,7 +629,7 @@ describe("AssetBrowser", () => {
     expect(await screen.findByRole("option", { name: "A-0" })).toBeVisible();
 
     const scrollElement = container.querySelector(".asset-gallery__scroll") as HTMLElement;
-    scrollElement.scrollTop = 4000;
+    scrollElement.scrollTop = 2000;
     fireEvent.scroll(scrollElement);
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
     await act(async () => { await new Promise<void>((resolve) => { setTimeout(resolve, 0); }); });

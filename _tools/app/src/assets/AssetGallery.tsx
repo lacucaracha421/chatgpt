@@ -7,6 +7,7 @@ import { artistHandle } from "../artists/format";
 import { assetDragIds, type InternalDragPayload } from "../shared/interaction/pointerDrag";
 import { Skeleton } from "../shared/ui/Skeleton";
 import type { SelectionGesture } from "./selection";
+import { galleryRowHeight, useGalleryCount } from "./galleryCount";
 import { buildJustifiedRows } from "./justifiedRows";
 import { buildJustifiedGalleryRows, type JustifiedGalleryRow } from "./galleryRows";
 import { buildMasonryLayout, collectedDate, masonryMove, type GalleryLayout } from "./masonryLayout";
@@ -65,7 +66,7 @@ type AssetGalleryProps = {
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
-export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, totalCount = null, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, totalCount = null, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   void _metadataVisible;
   const scrollRef = useRef<HTMLDivElement>(null);
   const introRef = useRef<HTMLDivElement>(null);
@@ -85,10 +86,13 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [quickPreview, setQuickPreview] = useState<QuickPreviewState | null>(null);
   const { width, gap, height: viewportHeight } = useGalleryMetrics(scrollRef, layout);
+  const [perRow] = useGalleryCount(legacyRowHeight);
+  const targetRowHeight = galleryRowHeight(items, width, gap, perRow);
   const [scrollTop, setScrollTop] = useState(0);
-  const masonry = useMemo(() => buildMasonryLayout(layout === "masonry" ? items : [], width, targetRowHeight, gap, false, groupDates, fullDateHeadings), [layout, items, width, targetRowHeight, gap, groupDates, fullDateHeadings]);
+  const masonry = useMemo(() => buildMasonryLayout(layout === "masonry" ? items : [], width, targetRowHeight, gap, false, groupDates, fullDateHeadings, perRow), [layout, items, width, targetRowHeight, gap, groupDates, fullDateHeadings, perRow]);
   const rows = useMemo<JustifiedGalleryRow[]>(() => buildJustifiedGalleryRows(layout === "justified" ? items : [], width, targetRowHeight, gap, groupDates, fullDateHeadings), [layout, gap, groupDates, fullDateHeadings, items, targetRowHeight, width]);
   const rowVirtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => scrollRef.current, estimateSize: (index) => (rows[index]?.height ?? targetRowHeight) + (rows[index]?.dateHeadings?.length ? DATE_HEADING_HEIGHT : 0), getItemKey: (index) => rows[index]?.items[0]?.id ?? index, gap, scrollMargin: introHeight, overscan: VIRTUAL_OVERSCAN_ROWS });
+  useLayoutEffect(() => { rowVirtualizer.measure(); }, [rowVirtualizer, targetRowHeight, width, layout]);
   const lastScopeKeyRef = useRef<string | null>(scopeKey ?? null);
   const scrollMemoryRef = useRef(new Map<string, number>());
   const pendingRestoreRef = useRef<{ scopeKey: string | null; offset: number } | null>(null);
@@ -263,7 +267,36 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
       ?.focus();
     if ([...(scrollRef.current?.querySelectorAll<HTMLElement>("[data-asset-id]") ?? [])].some((entry) => entry.dataset.assetId === focusAssetId)) focusRequestedRef.current = false;
   }, [focusAssetId, scrollTop, layout, masonry, viewportHeight, introHeight]);
-  return <div className={`asset-gallery asset-gallery--${layout}`}>
+  const positionedTiles = useMemo(() => {
+    if (layout === "masonry") return masonry.tiles;
+    let top = 0, index = 0;
+    return rows.flatMap(row => {
+      const headingHeight = row.dateHeadings?.length ? DATE_HEADING_HEIGHT : 0;
+      const packed = row.dateHeadings && row.dateHeadings.length > 1 ? row.dateHeadings : null;
+      let left = 0, offset = 0;
+      const tiles = row.items.map(asset => {
+        if (packed && offset === 0) left = packed[0].left;
+        if (packed) {
+          let start = 0;
+          for (const heading of packed) { if (offset === start) left = heading.left; start += heading.count; }
+        }
+        const tile = { asset, index: index++, left, top: top + headingHeight, width: asset.width, height: row.height, imageHeight: row.height };
+        left += asset.width + gap; offset++;
+        return tile;
+      });
+      top += row.height + headingHeight + gap;
+      return tiles;
+    });
+  }, [layout, masonry, rows, gap]);
+  // Reflow may move a painted tile just outside overscan. Retain those cells until the next
+  // scroll/scope change, so a count or layout change never reloads their media elements.
+  const paintedRef = useRef({ scopeKey, scrollTop, ids: new Set<string>() });
+  const inRange = positionedTiles.filter(tile => tile.top + tile.height >= scrollTop - 400 && tile.top < scrollTop + viewportHeight + 400 || tile.asset.id === focusAssetId);
+  const retainedIds = paintedRef.current.scopeKey === scopeKey && paintedRef.current.scrollTop === scrollTop ? paintedRef.current.ids : new Set<string>();
+  const inRangeIds = new Set(inRange.map(tile => tile.asset.id));
+  const mountedTiles = positionedTiles.filter(tile => retainedIds.has(tile.asset.id) || inRangeIds.has(tile.asset.id));
+  useLayoutEffect(() => { paintedRef.current = { scopeKey, scrollTop, ids: new Set(mountedTiles.map(tile => tile.asset.id)) }; });
+  return <div className={`asset-gallery asset-gallery--${layout}`} data-per-row={perRow}>
     <div
       ref={scrollRef}
       className="asset-gallery__scroll"
@@ -275,7 +308,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
         cancelQuickPreview();
         if (layoutUnits === 0) return;
         const element = event.currentTarget;
-        if (layout === "masonry") setScrollTop(Math.max(0, element.scrollTop - introHeight));
+        setScrollTop(Math.max(0, element.scrollTop - introHeight));
         if (hasNextPage && onLoadNextPage && element.clientHeight > 0
           && measuredTotal + introHeight - (element.scrollTop + element.clientHeight)
             <= element.clientHeight * NEXT_PAGE_PREFETCH_VIEWPORTS) {
@@ -333,27 +366,17 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
       {intro && <div ref={introRef} className="asset-gallery__intro" onKeyDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>{intro}</div>}
       <div className="asset-gallery__virtual-space" role={intro ? "listbox" : undefined} aria-label={intro ? "자산" : undefined} aria-multiselectable={intro ? true : undefined} style={{ height: reservedTotal }}>
         {layout === "masonry" && masonry.headings.filter((heading) => heading.top >= scrollTop - 500 && heading.top < scrollTop + viewportHeight + 500).map((heading) => <div key={heading.key} className="asset-gallery__date" role="presentation" style={{ left: heading.left, width: heading.width, transform: `translateY(${heading.top}px)` }}><span className="asset-gallery__date-day">{heading.label}</span>{heading.weekday && <span className="asset-gallery__date-weekday">{heading.weekday}</span>}<span className="asset-gallery__date-rule" aria-hidden="true" />{heading.count > 1 && <span className="asset-gallery__date-count">{heading.count.toLocaleString()}</span>}</div>)}
-        {layout === "masonry" && masonry.tiles.filter((tile) => tile.top + tile.height >= scrollTop - 400 && tile.top < scrollTop + viewportHeight + 400).map((tile) => <div key={tile.asset.id} className="asset-gallery__masonry-cell" style={{ left: tile.left, top: tile.top, width: tile.width, height: tile.height }}>
-          <AssetTile asset={{ ...tile.asset, width: tile.width }} height={tile.imageHeight} selected={selectedAssetIds.has(tile.asset.id)} selectedAssetIds={selectedAssetIds} focused={focusAssetId ? focusAssetId === tile.asset.id : tile.index === 0} focusVisible={Boolean(focusAssetId) && focusAssetId === tile.asset.id} captionLabel={captionLabel?.(tile.asset)} privacyMode={privacyMode} thumbnailCacheKey={thumbnailCacheKey} mediaSource={mediaSource} activePreview={activePreviewId === tile.asset.id} onRequestPreview={() => setActivePreviewId(tile.asset.id)} onReleasePreview={() => setActivePreviewId((current) => current === tile.asset.id ? null : current)} onRequestQuickPreview={requestQuickPreview} onCancelQuickPreview={cancelQuickPreview} onRetryVideo={onRetryVideo} onSelectionGesture={onSelectionGesture} onFocusAsset={onFocusAsset} onOpen={onOpen} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />
-        </div>)}
-        {layout === "justified" && virtualRows.map((virtualRow) => {
+        {layout === "justified" && virtualRows.map(virtualRow => {
           const row = rows[virtualRow.index]; if (!row) return null;
-          const hasDateHeadings = Boolean(row.dateHeadings?.length);
-          const packedHeadings = row.dateHeadings && row.dateHeadings.length > 1 ? row.dateHeadings : null;
-          const renderAssetTile = (asset: AssetSummary, index: number) => <AssetTile key={asset.id} asset={asset} height={row.height} selected={selectedAssetIds.has(asset.id)} selectedAssetIds={selectedAssetIds} focused={focusAssetId ? focusAssetId === asset.id : virtualRow.index === 0 && index === 0} focusVisible={Boolean(focusAssetId) && focusAssetId === asset.id} captionLabel={captionLabel?.(asset)} privacyMode={privacyMode} thumbnailCacheKey={thumbnailCacheKey} mediaSource={mediaSource} activePreview={activePreviewId === asset.id} onRequestPreview={() => setActivePreviewId(asset.id)} onReleasePreview={() => setActivePreviewId((current) => current === asset.id ? null : current)} onRequestQuickPreview={requestQuickPreview} onCancelQuickPreview={cancelQuickPreview} onRetryVideo={onRetryVideo} onSelectionGesture={onSelectionGesture} onFocusAsset={onFocusAsset} onOpen={onOpen} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />;
-          let itemOffset = 0;
-          const tileContent = packedHeadings
-            ? packedHeadings.map((heading) => {
-              const start = itemOffset;
-              itemOffset += heading.count;
-              return <div key={`${heading.label}-${heading.left}`} className="asset-gallery__row-segment" style={{ width: heading.width, gap }}>{row.items.slice(start, start + heading.count).map((asset, index) => renderAssetTile(asset, start + index))}</div>;
-            })
-            : row.items.map(renderAssetTile);
-          return <div key={virtualRow.key} className="asset-gallery__justified-unit" style={{ height: row.height + (hasDateHeadings ? DATE_HEADING_HEIGHT : 0) + gap, transform: `translateY(${virtualRow.start - introHeight}px)` }}>
-            {row.dateHeadings?.map((heading) => <div key={`${heading.label}-${heading.left}`} className="asset-gallery__date asset-gallery__date-segment" role="presentation" style={{ position: "absolute", left: heading.left, top: 0, width: heading.width }}><span className="asset-gallery__date-day">{heading.label}</span>{heading.weekday && <span className="asset-gallery__date-weekday">{heading.weekday}</span>}<span className="asset-gallery__date-rule" aria-hidden="true" />{heading.count > 1 && <span className="asset-gallery__date-count">{heading.count.toLocaleString()}</span>}</div>)}
-            <div className="asset-gallery__row" style={{ gap: packedHeadings ? gap * 4 : gap, top: hasDateHeadings ? DATE_HEADING_HEIGHT : 0, height: row.height, backgroundColor: "var(--color-bg)" }}>{tileContent}</div>
+          const headingHeight = row.dateHeadings?.length ? DATE_HEADING_HEIGHT : 0;
+          return <div key={`row:${virtualRow.key}`} className="asset-gallery__justified-unit" style={{ height: row.height + headingHeight + gap, transform: `translateY(${virtualRow.start - introHeight}px)`, pointerEvents: "none" }}>
+            {row.dateHeadings?.map(heading => <div key={`${heading.label}-${heading.left}`} className="asset-gallery__date asset-gallery__date-segment" role="presentation" style={{ position: "absolute", left: heading.left, top: 0, width: heading.width }}><span className="asset-gallery__date-day">{heading.label}</span>{heading.weekday && <span className="asset-gallery__date-weekday">{heading.weekday}</span>}<span className="asset-gallery__date-rule" aria-hidden="true" />{heading.count > 1 && <span className="asset-gallery__date-count">{heading.count.toLocaleString()}</span>}</div>)}
+            <div className="asset-gallery__row" style={{ gap, top: headingHeight, height: row.height, backgroundColor: "var(--color-bg)" }} />
           </div>;
         })}
+        {mountedTiles.map(tile => <div key={tile.asset.id} className="asset-gallery__masonry-cell" data-gallery-cell="" style={{ left: tile.left, top: tile.top, width: tile.width, height: tile.height }}>
+          <AssetTile asset={{ ...tile.asset, width: tile.width }} height={tile.imageHeight} selected={selectedAssetIds.has(tile.asset.id)} selectedAssetIds={selectedAssetIds} focused={focusAssetId ? focusAssetId === tile.asset.id : tile.index === 0} focusVisible={Boolean(focusAssetId) && focusAssetId === tile.asset.id} captionLabel={captionLabel?.(tile.asset)} privacyMode={privacyMode} thumbnailCacheKey={thumbnailCacheKey} mediaSource={mediaSource} activePreview={activePreviewId === tile.asset.id} onRequestPreview={() => setActivePreviewId(tile.asset.id)} onReleasePreview={() => setActivePreviewId((current) => current === tile.asset.id ? null : current)} onRequestQuickPreview={requestQuickPreview} onCancelQuickPreview={cancelQuickPreview} onRetryVideo={onRetryVideo} onSelectionGesture={onSelectionGesture} onFocusAsset={onFocusAsset} onOpen={onOpen} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />
+        </div>)}
       </div>
     </div>
     {quickPreview && !privacyMode && <div className="asset-gallery__quick-preview" style={quickPreviewLayout(quickPreview)}><img src={mediaSource === "vault" ? vaultAssetUrl(quickPreview.asset.id) : assetUrl(quickPreview.asset.id)} alt={`${quickPreview.asset.title || quickPreview.asset.originalName} 빠른 미리보기`} draggable={false} onError={cancelQuickPreview} /></div>}

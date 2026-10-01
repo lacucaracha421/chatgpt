@@ -87,3 +87,12 @@ describe("date masonry", () => {
     expect(masonryMove(result.tiles, "c", -1)).toBe(-2);
   });
 });
+
+it("uses exactly the requested number of columns regardless of the pixel target", () => {
+  const items = Array.from({ length: 24 }, (_, index) => ({ id: String(index), width: 100, height: 100, collectedAt: "2026-10-01" })) as Parameters<typeof buildMasonryLayout>[0];
+  for (const count of [3, 6, 12]) {
+    const layout = buildMasonryLayout(items, 1200, 180, 2, false, false, false, count);
+    expect(new Set(layout.tiles.map(tile => tile.left)).size).toBe(count);
+    expect(layout.tiles[0].width * count + 2 * (count - 1)).toBeCloseTo(1200);
+  }
+});

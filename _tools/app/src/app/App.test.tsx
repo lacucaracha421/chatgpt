@@ -1621,9 +1621,11 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
     const index = screen.getByRole("complementary", { name: "탐색 인덱스" });
-    // Sort and 내 별점 sit in the index with the type rows; there is no Library/Showcase mode.
-    expect(await within(index).findByRole("slider", { name: "내 별점" })).toBeVisible();
-    expect(within(index).getByRole("combobox", { name: "정렬" })).toBeVisible();
+    // Sort and 내 별점 moved to the list toolbar (2026-10-01); the index keeps only types and news.
+    expect(await screen.findByRole("button", { name: /^정렬/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^내 별점/ })).toBeVisible();
+    expect(within(index).queryByRole("slider", { name: "내 별점" })).not.toBeInTheDocument();
+    expect(within(index).queryByRole("combobox", { name: "정렬" })).not.toBeInTheDocument();
     expect(within(index).getByRole("button", { name: "게임" })).toHaveAttribute("aria-current", "page");
     expect(within(index).queryByRole("button", { name: "라이브러리" })).not.toBeInTheDocument();
     // Plain title search lives in the 찾기 palette; the index head has no separate magnifier.

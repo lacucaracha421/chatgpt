@@ -10,7 +10,7 @@ export function casePlatform(platforms: string | null): CasePlatform {
   if (/pc|windows/i.test(platforms ?? "")) return "pc";
   return "other";
 }
-const PLASTIC: Record<CasePlatform, string> = {
+export const CASE_PLASTIC: Record<CasePlatform, string> = {
   sw2: "rgba(206,44,54,.9)", sw: "rgba(214,222,230,.24)", ps5: "rgba(214,222,230,.24)",
   pc: "rgba(120,128,136,.38)", other: "rgba(120,128,136,.38)", av: "rgba(10,10,11,.94)", film: "rgba(28,30,34,.92)",
 };
@@ -57,9 +57,9 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
       if (sources.every(source => settled.current.has(source))) readyRef.current?.();
     }} />;
   }
-  const template = ["sw2", "sw", "ps5"].includes(data.platform);
+
   const fit = stageBox ? fitCollectionCase(stageBox, ratio, open) : null;
-  return <div className={`collection-case${data.platform === "film" ? " collection-case--film" : ""}${large ? " collection-case--large" : ""}${fit ? " collection-case--fitted" : ""}${open ? " is-open" : ""}`} style={{ "--ratio": ratio, "--plastic": PLASTIC[data.platform], ...(fit ? { "--ch": `${fit.height}px`, "--case-scale": fit.scale } : {}) } as CSSProperties}>
+  return <div className={`collection-case${data.platform === "film" ? " collection-case--film" : ""}${large ? " collection-case--large" : ""}${fit ? " collection-case--fitted" : ""}${open ? " is-open" : ""}`} style={{ "--ratio": ratio, "--plastic": CASE_PLASTIC[data.platform], ...(fit ? { "--ch": `${fit.height}px`, "--case-scale": fit.scale } : {}) } as CSSProperties}>
     <span className="floor-shadow" aria-hidden="true" />
     {/* This control is the physical media object, with rotation distinct from screen navigation. */}
     <div className={`kase${dragging ? " is-dragging" : ""}`} tabIndex={0} role="group" aria-label="케이스" aria-expanded={open} data-angle={angle} style={{ "--ry": `${angle}deg`, "--open": open ? 1 : 0, "--gloss": `${50 + angle}%` } as CSSProperties}
@@ -77,9 +77,19 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
       <span className="k-back"><span className="ins">{face(data.back, "뒷면")}</span></span>
       <span className="k-floor">{data.platform === "sw" || data.platform === "sw2" ? <span className="cart-slot"><span className="cart" /></span> : <span className="holder"><span className="disc" /></span>}{note && <div className="note">{note}</div>}</span>
       <span className="k-edge" /><span className="k-cap k-top" /><span className="k-cap k-bottom" />
-      <span className="k-hinge"><span className="k-spine"><span className={`ins${data.spine || data.privacy ? "" : template ? " full" : " bare"}`}>
-        {data.spine || data.privacy ? face(data.spine, "책등") : template ? <span className={`tpl ${data.platform}`} data-spine-template={data.platform} data-nintendo={/nintendo|닌텐도/i.test(data.publisher ?? "") ? "" : undefined}><span className="t-head" /><span className="t-band"><span className="spine-title">{data.title}</span></span><span className="t-foot"><span className="t-pub">{data.publisher}</span></span></span> : <span className="spine-title">{data.title}</span>}
+      <span className="k-hinge"><span className="k-spine"><span className={`ins${data.spine || data.privacy ? "" : ["sw2", "sw", "ps5"].includes(data.platform) ? " full" : " bare"}`}>
+        <CaseSpine data={data} real={face(data.spine, "책등")} />
       </span></span><span className="k-spine-in" /><span className="k-lid"><span className="k-front"><span className="ins">{face(data.front, "앞면")}</span></span><span className="k-inner">{inside}</span></span></span>
     </div>
   </div>;
+}
+
+/** Both the work case and the light shelf case use the same package printing. */
+export function CaseSpine({ data, real, decorative = false }: { data: CaseData; real?: ReactNode; decorative?: boolean }) {
+  const template = ["sw2", "sw", "ps5"].includes(data.platform);
+  const title = <span className="spine-title" data-title={decorative ? data.title : undefined}>{decorative ? null : data.title}</span>;
+  return <span className="case-spine-art">{data.privacy ? <span className="case-mask" /> : data.spine ? real : template ?
+    <span className={`tpl ${data.platform}`} data-spine-template={data.platform} data-nintendo={/nintendo|닌텐도/i.test(data.publisher ?? "") ? "" : undefined}>
+      <span className="t-head" /><span className="t-band">{title}</span><span className="t-foot"><span className="t-pub">{data.publisher}</span></span>
+    </span> : title}</span>;
 }
