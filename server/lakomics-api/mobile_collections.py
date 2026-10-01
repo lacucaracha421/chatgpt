@@ -19,6 +19,14 @@ This capability describes the replica schema only. Collections authority still
 excludes AV and fences replica writes when active; its baseline completeness guard
 must reject activation that would drop published AV rows. Manga releases, bindings
 and tracking edits do not apply to AV; ordinary personal edits remain available.
+
+Replica features (2026-10-01 publication contract): ``/v1/collections/status`` also
+advertises ``replicaFeatures`` (``REPLICA_FEATURES``). The PC sends each optional field
+below only when its feature is listed; a missing list means an older server that rejects
+them. ``workRecord``: item ``status`` (per-type values) and ``ownedPlatform`` (games only).
+``coverFocus``: volume ``coverFocusX`` in [0, 1]. ``people``: top-level ``people`` stored in
+``mobile_collection_people`` and served by ``GET /v1/collections/people/{personId}``.
+Absent optional fields are never stored, so older payloads and revisions are unchanged.
 """
 from __future__ import annotations
 
@@ -31,7 +39,7 @@ from typing import Annotated, Literal
 from botocore.exceptions import ClientError
 from app_lifecycle import lifecycle
 from fastapi import Header, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StringConstraints, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StringConstraints, ValidationError, field_validator, model_validator
 from starlette.concurrency import run_in_threadpool
 
 import authority
@@ -49,6 +57,13 @@ Digest = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 ImageMime = Literal["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif", "image/bmp", "image/heic", "image/heif"]
 CollectionType = Literal["game", "manga", "movie", "av"]
 COLLECTION_TYPES = ("game", "manga", "movie", "av")
+#: Optional replica fields this server accepts (see the module docstring).
+REPLICA_FEATURES = ("workRecord", "coverFocus", "people")
+#: Allowed item ``status`` values per Collection type (feature ``workRecord``).
+ITEM_STATUSES = {"game": ("done", "playing", "unplayed"), "av": ("watched", "unwatched"),
+                 "manga": ("collecting", "complete"), "movie": ("watched", "watching", "unwatched")}
+MAX_PEOPLE = 2000
+MAX_PERSON_BYTES = 64 * 1024
 
 
 class StrictModel(BaseModel):
@@ -86,6 +101,8 @@ class Volume(StrictModel):
     localReleaseDate: str | None = Field(default=None, max_length=100)
     isbn13: str | None = Field(default=None, max_length=100)
     releaseStatus: str | None = Field(default=None, max_length=100)
+    # Horizontal cover focus (feature ``coverFocus``); never stored as null.
+    coverFocusX: float | None = Field(default=None, ge=0, le=1)
 
 
 class Episode(StrictModel):
@@ -253,6 +270,45 @@ class AvInfo(StrictModel):
         return value
 
 
+class PersonUrl(StrictModel):
+    site: str = Field(max_length=200)
+    url: str = Field(max_length=2000)
+
+
+class PersonProfile(StrictModel):
+    source: str = Field(max_length=100)
+    name: str | None = Field(default=None, max_length=500)
+    aliases: list[Annotated[str, StringConstraints(max_length=500)]] = Field(default_factory=list, max_length=200)
+    birthDate: str | None = Field(default=None, max_length=100)
+    heightCm: float | None = None
+    bandIn: float | None = None
+    waistIn: float | None = None
+    hipIn: float | None = None
+    cup: str | None = Field(default=None, max_length=50)
+    breastType: str | None = Field(default=None, max_length=100)
+    careerStart: int | None = None
+    careerEnd: int | None = None
+    urls: list[PersonUrl] = Field(default_factory=list, max_length=100)
+
+
+class PersonPortrait(StrictModel):
+    """Attribution only: portrait paths, URLs to bytes and image bytes are never accepted."""
+    source: Literal["stashdb", "commons", "cover"]
+    author: str | None = Field(default=None, max_length=2000)
+    license: str | None = Field(default=None, max_length=500)
+    licenseUrl: str | None = Field(default=None, max_length=2000)
+    sourceUrl: str | None = Field(default=None, max_length=2000)
+
+
+class Person(StrictModel):
+    """A performer related to a published AV work (feature ``people``)."""
+    id: ID
+    memo: str | None = Field(default=None, max_length=20000)
+    favorite: StrictBool = False
+    profile: PersonProfile | None = None
+    portrait: PersonPortrait | None = None
+
+
 class Collection(StrictModel):
     id: ID
     name: str = Field(min_length=1, max_length=2000)
@@ -293,11 +349,18 @@ class Collection(StrictModel):
     releaseWatch: ReleaseWatch | None = None
     ownedVolumes: list[OwnedVolumes] | None = Field(default=None, max_length=4)
     releaseSchedule: ReleaseSchedule | None = None
+    # Work record (feature ``workRecord``); never stored as null.
+    status: str | None = Field(default=None, max_length=40)
+    ownedPlatform: str | None = Field(default=None, max_length=200)
 
     @model_validator(mode="after")
     def av_type(self):
         if self.av is not None and self.type != "av":
             raise ValueError("AV details require an AV collection")
+        if self.status is not None and self.status not in ITEM_STATUSES[self.type]:
+            raise ValueError("Unknown status for this collection type")
+        if self.ownedPlatform is not None and self.type != "game":
+            raise ValueError("ownedPlatform requires a game collection")
         return self
 
 
@@ -309,6 +372,8 @@ class Replica(StrictModel):
     personalEditVersion: Literal[1, 2] | None = None
     libraryId: personal_edits.LIBRARY | None = None
     personalEditCursor: int | None = Field(default=None, ge=0, le=personal_edits.MAX_CURSOR)
+    # Feature ``people``. Absent = no people (the table is cleared like any replaced row).
+    people: list[Person] | None = Field(default=None, max_length=MAX_PEOPLE)
 
 
 class TicketRequest(StrictModel):
@@ -324,11 +389,14 @@ def encode(value) -> str:
 
 
 def stored(item: Collection) -> dict:
-    """Omit absent tracking and AV blocks to preserve older replica payloads."""
+    """Omit absent optional blocks and fields to preserve older replica payloads."""
     payload = item.model_dump()
-    for key in ("releaseWatch", "ownedVolumes", "releaseSchedule", "av"):
+    for key in ("releaseWatch", "ownedVolumes", "releaseSchedule", "av", "status", "ownedPlatform"):
         if payload[key] is None:
             del payload[key]
+    for volume in payload["volumes"]:
+        if volume["coverFocusX"] is None:
+            del volume["coverFocusX"]
     if "ownedVolumes" in payload:
         payload["ownedVolumes"].sort(key=lambda entry: entry["editionIndex"])
     return payload
@@ -337,6 +405,13 @@ def stored(item: Collection) -> dict:
 def public_item(item: dict, detail: bool = False) -> dict:
     result = {key: value for key, value in item.items() if key not in ("volumes", "artworks", "series", "film")}
     visible = None if detail else {item.get("selectedWorkArtworkId"), item.get("selectedHeroArtworkId"), item.get("selectedBackdropArtworkId")}
+    # List shelves draw a spine: the selected spine artwork, else the first one.
+    spines = [art for art in item["artworks"] if art["kind"] == "spine"]
+    spine = next((art for art in spines if art["selected"]), spines[0] if spines else None)
+    if spine is not None:
+        result["spineArtworkId"] = spine["id"]
+        if visible is not None:
+            visible.add(spine["id"])
     result["artworkVersions"] = {art["id"]: {variant: (art.get(variant) or {}).get("sha256") for variant in ("thumbnail", "original")} for art in item["artworks"] if visible is None or art["id"] in visible}
     if detail:
         result["series"] = item.get("series")
@@ -391,6 +466,9 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                     ON mobile_collections(type, name COLLATE NOCASE, id);
                 CREATE TABLE IF NOT EXISTS mobile_collection_artwork (
                     sha256 TEXT PRIMARY KEY, size_bytes INTEGER NOT NULL, content_type TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS mobile_collection_people (
+                    id TEXT PRIMARY KEY, payload TEXT NOT NULL
                 );
             """)
             db.executescript(personal_edits.DDL)
@@ -527,6 +605,13 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                 for art in item.artworks:
                     if art.kind == "cover" and (art.thumbnail is not None or art.original is not None):
                         av_covers[art.id] = av_covers.get(art.id, 0) + 1
+        people = None
+        if snapshot.people is not None:
+            people = [person.model_dump() for person in sorted(snapshot.people, key=lambda person: person.id)]
+            if len({person["id"] for person in people}) != len(people):
+                raise HTTPException(422, "Duplicate person IDs")
+            if any(len(encode(person).encode()) > MAX_PERSON_BYTES for person in people):
+                raise HTTPException(413, "Person too large")
         for item in snapshot.collections:
             if item.av is not None:
                 for person in item.av.people:
@@ -585,8 +670,15 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                 identity = {"collections": items, "libraryId": snapshot.libraryId,
                             "personalEditCursor": snapshot.personalEditCursor,
                             "lastPersonalEditSequence": personal_edits.last_sequence(db)}
+            if people is not None:
+                # Only when present, so replicas without people keep their revision.
+                identity = {**identity, "people": people} if isinstance(identity, dict) else {"collections": items, "people": people}
             revision = hashlib.sha256(encode(identity).encode()).hexdigest()
             db.execute("DELETE FROM mobile_collections")
+            # Replaced with the collections in this transaction; absent people clear it.
+            db.execute("DELETE FROM mobile_collection_people")
+            db.executemany("INSERT INTO mobile_collection_people VALUES (?,?)",
+                           [(person["id"], encode(person)) for person in people or []])
             db.executemany("INSERT INTO mobile_collection_artwork VALUES (?,?,?) ON CONFLICT(sha256) DO UPDATE SET size_bytes=excluded.size_bytes,content_type=excluded.content_type", [(blob.sha256, blob.sizeBytes, blob.contentType) for blob in unconfirmed])
             db.executemany("INSERT INTO mobile_collections VALUES (?,?,?,?,?,?)", [
                 (item["id"], item["type"], item["name"], int(item["showcase"]), item["showcaseOrder"], encode(item)) for item in items
@@ -675,7 +767,18 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                                  "libraryId": active["libraryId"]}
         return {"revision": revision, "publishedAt": published, **advertisement,
                 "collectionTypes": COLLECTION_TYPES,
+                "replicaFeatures": REPLICA_FEATURES,
                 "collectionBindings": collection_bindings.capabilities()}
+
+    @app.get("/v1/collections/people/{person_id}")
+    def get_person(person_id: ID, authorization: str | None = Header(default=None)):
+        require_auth(authorization)
+        # The last PC replica's people; Collections authority does not carry people.
+        with get_db() as db:
+            row = db.execute("SELECT payload FROM mobile_collection_people WHERE id=?", (person_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Person is not published")
+        return {"person": json.loads(row["payload"])}
 
     @app.get("/v1/collections/{collection_id}")
     def get_collection(collection_id: ID, authorization: str | None = Header(default=None)):

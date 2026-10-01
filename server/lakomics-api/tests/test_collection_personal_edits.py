@@ -580,8 +580,10 @@ class CollectionReleaseScheduleTests(unittest.TestCase):
                     mobile_collections.Replica.model_validate({'version': 1, 'baseRevision': None,
                                                                'collections': legacy}).collections}
         for payload in expected.values():
-            for key in ('releaseSchedule', 'releaseWatch', 'ownedVolumes', 'av'):
+            for key in ('releaseSchedule', 'releaseWatch', 'ownedVolumes', 'av', 'status', 'ownedPlatform'):
                 del payload[key]
+            for volume in payload['volumes']:
+                del volume['coverFocusX']
         self.assertEqual(self.publish(self.body(legacy, upgraded=False), headers=AUTH).status_code, 200)
         rows = self.stored_rows()
         self.assertEqual(rows, expected)

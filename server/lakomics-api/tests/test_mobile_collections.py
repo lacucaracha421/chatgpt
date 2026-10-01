@@ -426,6 +426,173 @@ class MobileCollectionsTests(unittest.TestCase):
         with mock.patch.object(fake_s3, "head_object", side_effect=AssertionError("unnecessary HEAD")):
             self.assertEqual(self.publish([item]).status_code, 200)
 
+    # 2026-10-01 publication contract: replicaFeatures, work record, cover focus,
+    # people and list spines.
+
+    def person(self, id="person", **extra):
+        return {"id": id, "memo": "메모", "favorite": True,
+                "profile": {"source": "stashdb", "name": "Performer", "aliases": ["Alias"],
+                            "birthDate": "1990-01-02", "heightCm": 160, "bandIn": 32, "waistIn": 24,
+                            "hipIn": 34, "cup": "C", "breastType": "natural",
+                            "careerStart": 2010, "careerEnd": None,
+                            "urls": [{"site": "twitter", "url": "https://example.invalid/p"}]},
+                "portrait": {"source": "commons", "author": "Author", "license": "CC BY 4.0",
+                             "licenseUrl": "https://example.invalid/l", "sourceUrl": None},
+                **extra}
+
+    def publish_people(self, items, people, revision=None):
+        return self.client.put("/v1/collections/replica", headers=AUTH, json={
+            "version": 1, "baseRevision": revision, "collections": items, "people": people})
+
+    def test_status_advertises_replica_features(self):
+        status = self.client.get("/v1/collections/status", headers=AUTH).json()
+        self.assertEqual(status["replicaFeatures"], ["workRecord", "coverFocus", "people"])
+
+    def test_legacy_payload_and_revision_are_byte_identical(self):
+        item = {**work("legacy"), "volumes": [{"id": "volume", "volumeNumber": 2, "editionIndex": 1, "displayLabel": "2권"}]}
+        reply = self.publish([item])
+        self.assertEqual(reply.status_code, 200, reply.text)
+        # Digest of this replica as computed by the server before these fields existed.
+        self.assertEqual(reply.json()["revision"], "52eee664b1ac232251945ba989206da28ff782cc9de97856e55210f48c950d0e")
+        with api_app.get_db() as db:
+            payload = db.execute("SELECT payload FROM mobile_collections").fetchone()[0]
+            self.assertEqual(db.execute("SELECT count(*) FROM mobile_collection_people").fetchone()[0], 0)
+        for key in ("status", "ownedPlatform", "coverFocusX", "spineArtworkId", "people"):
+            self.assertNotIn(f'"{key}"', payload)
+        self.assertNotIn("spineArtworkId", self.listing().json()["items"][0])
+        self.assertNotIn("coverFocusX", self.client.get("/v1/collections/legacy", headers=AUTH).json()["item"]["volumes"][0])
+
+    def test_work_record_status_per_type_and_owned_platform_games_only(self):
+        items = [{**work("game", type="game"), "status": "playing", "ownedPlatform": "Nintendo Switch"},
+                 {**work("manga"), "status": "complete"},
+                 {**work("movie", type="movie"), "status": "watching"},
+                 {**work("av", type="av"), "status": "unwatched"}]
+        reply = self.publish(items)
+        self.assertEqual(reply.status_code, 200, reply.text)
+        listed = {row["id"]: row for row in self.listing().json()["items"]}
+        self.assertEqual(listed["game"]["status"], "playing")
+        self.assertEqual(listed["game"]["ownedPlatform"], "Nintendo Switch")
+        self.assertNotIn("ownedPlatform", listed["manga"])
+        detail = self.client.get("/v1/collections/movie", headers=AUTH).json()["item"]
+        self.assertEqual(detail["status"], "watching")
+        revision = reply.json()["revision"]
+        for kind, extra in (("manga", {"status": "done"}), ("av", {"status": "watching"}),
+                            ("game", {"status": "watched"}), ("movie", {"status": "complete"}),
+                            ("game", {"status": "unknown"}), ("manga", {"ownedPlatform": "PS5"}),
+                            ("movie", {"ownedPlatform": "PS5"}), ("av", {"ownedPlatform": "PS5"}),
+                            ("game", {"ownedPlatform": "x" * 201}), ("game", {"status": 1})):
+            with self.subTest(kind=kind, extra=str(extra)[:40]):
+                self.assertEqual(self.publish([{**work(type=kind), **extra}], revision).status_code, 422)
+        self.assertEqual(self.listing().json()["revision"], revision)
+
+    def test_volume_cover_focus_bounds(self):
+        item, media = self.with_art()
+        fake_s3.objects[media["objectKey"]] = {"body": b"image", "content_type": "image/webp"}
+        revision = None
+        for value in (0, 0.25, 1):
+            item["volumes"][0]["coverFocusX"] = value
+            reply = self.publish([item], revision)
+            self.assertEqual(reply.status_code, 200, reply.text)
+            revision = reply.json()["revision"]
+            volume = self.client.get("/v1/collections/work", headers=AUTH).json()["item"]["volumes"][0]
+            self.assertEqual(volume["coverFocusX"], value)
+        for value in (-0.01, 1.01, "0.5x"):
+            item["volumes"][0]["coverFocusX"] = value
+            with self.subTest(value=value):
+                self.assertEqual(self.publish([item], revision).status_code, 422)
+        self.assertEqual(self.publish([item], revision).status_code, 422)
+        with self.assertRaises(ValueError):
+            mobile_collections.Volume.model_validate({"id": "v", "volumeNumber": 1, "editionIndex": 0,
+                                                      "displayLabel": "1", "coverFocusX": float("nan")})
+
+    def test_people_publish_route_and_replacement(self):
+        status = self.client.get("/v1/collections/status", headers=AUTH).json()
+        self.assertIsNone(status["revision"])
+        bare = self.publish([work(type="av")])
+        self.assertEqual(bare.status_code, 200, bare.text)
+        reply = self.publish_people([work(type="av")], [self.person("b"), self.person("a", profile=None, portrait=None, memo=None, favorite=False)], bare.json()["revision"])
+        self.assertEqual(reply.status_code, 200, reply.text)
+        # People change the revision only when present.
+        self.assertNotEqual(reply.json()["revision"], bare.json()["revision"])
+        person = self.client.get("/v1/collections/people/b", headers=AUTH)
+        self.assertEqual(person.status_code, 200)
+        self.assertEqual(person.json(), {"person": self.person("b")})
+        self.assertEqual(self.client.get("/v1/collections/people/a", headers=AUTH).json()["person"],
+                         {"id": "a", "memo": None, "favorite": False, "profile": None, "portrait": None})
+        self.assertEqual(self.client.get("/v1/collections/people/absent", headers=AUTH).status_code, 404)
+        self.assertEqual(self.client.get("/v1/collections/people/b").status_code, 401)
+        self.assertEqual(self.client.get("/v1/collections/people/b", headers={"Authorization": "Bearer wrong"}).status_code, 401)
+        self.assertEqual(self.client.get("/v1/collections/people/bad.id", headers=AUTH).status_code, 422)
+        # A complete replacement drops people that are no longer published.
+        revision = self.publish_people([work(type="av")], [self.person("c")], reply.json()["revision"]).json()["revision"]
+        self.assertEqual(self.client.get("/v1/collections/people/b", headers=AUTH).status_code, 404)
+        self.assertEqual(self.client.get("/v1/collections/people/c", headers=AUTH).status_code, 200)
+        cleared = self.publish([work(type="av")], revision)
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual(cleared.json()["revision"], bare.json()["revision"])
+        self.assertEqual(self.client.get("/v1/collections/people/c", headers=AUTH).status_code, 404)
+
+    def test_people_validation_limits(self):
+        revision = self.publish_people([work(type="av")], [self.person()]).json()["revision"]
+        too_many = [{"id": f"p{index}", "favorite": False} for index in range(mobile_collections.MAX_PEOPLE + 1)]
+        oversized = self.person(memo="x" * 20000)
+        oversized["profile"]["aliases"] = ["x" * 500] * 200
+        invalid = [[self.person(), self.person()], too_many, [self.person(imagesJson="[]")],
+                   [self.person(candidatesJson="[]")], [self.person(id="../escape")],
+                   [self.person(favorite="yes")], [self.person(memo="x" * 20001)],
+                   [{**self.person(), "portrait": {**self.person()["portrait"], "source": "local"}}],
+                   [{**self.person(), "portrait": {**self.person()["portrait"], "path": "/private/p.jpg"}}],
+                   [{**self.person(), "profile": {**self.person()["profile"], "images": []}}],
+                   [{**self.person(), "profile": {**self.person()["profile"], "heightCm": "tall"}}],
+                   [oversized]]
+        for people in invalid:
+            with self.subTest(people=str(people)[:80]):
+                reply = self.publish_people([work(type="av")], people, revision)
+                self.assertIn(reply.status_code, (413, 422))
+                self.assertNotIn("/private/p.jpg", reply.text)
+        self.assertEqual(self.publish_people([work(type="av")], too_many[:-1], revision).status_code, 200)
+
+    def test_people_replace_with_collections_in_one_transaction(self):
+        revision = self.publish_people([work("old", type="av")], [self.person("old")]).json()["revision"]
+        with mock.patch.object(mobile_collections.personal_edits, "acknowledge_publication",
+                               side_effect=RuntimeError("late failure")):
+            with self.assertRaises(RuntimeError):
+                self.publish_people([work("new", type="av")], [self.person("new")], revision)
+        self.assertEqual(self.client.get("/v1/collections/people/old", headers=AUTH).status_code, 200)
+        self.assertEqual(self.client.get("/v1/collections/people/new", headers=AUTH).status_code, 404)
+        self.assertEqual([row["id"] for row in self.listing().json()["items"]], ["old"])
+        # A stale publisher changes neither collections nor people.
+        self.assertEqual(self.publish_people([work("new", type="av")], [self.person("new")]).status_code, 409)
+        self.assertEqual(self.client.get("/v1/collections/people/new", headers=AUTH).status_code, 404)
+
+    def test_list_spine_is_selected_else_first_and_ticketable(self):
+        spine_media = blob(b"spine")
+        cover_media = blob()
+        def art(id, kind, selected, media):
+            return {"id": id, "kind": kind, "selected": selected, "thumbnail": media, "original": media}
+        selected = {**work("selected", type="game"), "selectedWorkArtworkId": "cover", "artworks": [
+            art("cover", "cover", True, cover_media), art("spine-a", "spine", False, spine_media),
+            art("spine-b", "spine", True, spine_media)]}
+        first = {**work("first", type="game"), "artworks": [
+            art("back", "back", False, cover_media), art("spine-1", "spine", False, spine_media),
+            art("spine-2", "spine", False, spine_media)]}
+        none = {**work("none", type="game"), "selectedWorkArtworkId": "cover", "artworks": [art("cover", "cover", True, cover_media)]}
+        for media in (spine_media, cover_media):
+            fake_s3.objects[media["objectKey"]] = {"body": b"spine" if media is spine_media else b"image", "content_type": "image/webp"}
+        reply = self.publish([selected, first, none])
+        self.assertEqual(reply.status_code, 200, reply.text)
+        listed = {row["id"]: row for row in self.listing().json()["items"]}
+        self.assertEqual(listed["selected"]["spineArtworkId"], "spine-b")
+        self.assertEqual(set(listed["selected"]["artworkVersions"]), {"cover", "spine-b"})
+        self.assertEqual(listed["selected"]["artworkVersions"]["spine-b"]["thumbnail"], spine_media["sha256"])
+        self.assertEqual(listed["first"]["spineArtworkId"], "spine-1")
+        self.assertEqual(set(listed["first"]["artworkVersions"]), {"spine-1"})
+        self.assertNotIn("spineArtworkId", listed["none"])
+        self.assertEqual(set(listed["none"]["artworkVersions"]), {"cover"})
+        self.assertEqual(self.client.get("/v1/collections/first", headers=AUTH).json()["item"]["spineArtworkId"], "spine-1")
+        self.assertEqual(self.client.post("/v1/collections/selected/artworks/spine-b/media-ticket",
+                                          headers=AUTH, json={}).status_code, 200)
+
     def test_storage_outage_does_not_publish_partial_metadata(self):
         revision = self.publish([work("old")]).json()["revision"]
         item, _ = self.with_art()
