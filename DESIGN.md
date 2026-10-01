@@ -31,7 +31,9 @@ Lakomics는 Windows와 Linux PC, Android tablet에서 장시간 사용하는 개
 PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 
 - 가장 왼쪽은 에셋·컬렉션·망가 같은 큰 영역을 바꾸는 좁은 area rail이다.
-- Next to it is the persistent contextual index for the current area: Classification and Albums for Assets; for Collections, the `작품 유형` list (게임/만화/영화/AV) with the `신간` and `발매 캘린더` rows, then sort and 내 별점 for the library grid; the matching browsing context for Manga. Collections have no Library/Showcase mode: the Showcase is a collapsible `쇼케이스` row in the content above `전체`.
+- Next to the area rail is the persistent contextual index: Classification and Albums for Assets; 쇼케이스, 신간 and 발매 캘린더 shortcuts for Collections; the matching browsing context for Manga. Collection types, Asset kinds, Manga sources and Notes kinds use the shared section bar. Collections have no Library/Showcase mode.
+- **Section bar (user, 2026-10-01):** the shared bar sits at the start of the list and scrolls away on both PC and tablet. Once off screen, the top-bar title reads `<area> · <section> ⌄`. On PC, resting the pointer on the top bar for 150 ms drops the bar below it; it closes 300 ms after the pointer leaves both the top bar and the section bar. Clicking the title toggles it. Sort/view controls remain at the bar's right. Merging the section bar into the top bar as one row was considered and declined; scroll-direction auto-hide remains rejected.
+- **Tablet shade (user, 2026-10-01):** pull down the top bar or tap its title to reveal the section bar; picking a section or scrolling the list closes it. The pull-down shade is retained without bounce. An optional second row in the same segmented track carries shortcuts, not selected tabs: Collections uses 쇼케이스 with a work count, game/movie 발매 캘린더 with a new-event count, manga 신간 with an unread count, and AV 쇼케이스 only. Both rows travel together in the shade. PC keeps these shortcuts in its sidebar index. References: `docs/prototypes/section-bar-20261001/README.md` and `docs/prototypes/collection-shortcuts-20261001/README.md`.
 - 본문 위에는 얇은 위치/창 영역만 남기고 예전의 전체 수평 toolbar를 중복하지 않는다.
 - 검색은 평소 돋보기 아이콘만 보인다. 검색을 지원하는 화면에서만 실제 입력 surface를 연다.
 - 에셋의 보기 설정은 인덱스 하단에서 필요할 때만 오른쪽 non-modal panel로 연다. 단순 개폐로 갤러리 폭·스크롤·선택을 바꾸지 않는다.
@@ -91,7 +93,9 @@ PC 자산 기본 보기는 **수집일별 masonry/waterfall**이다. justified r
 모든 매체를 같은 카드 효과로 만들지 않는다.
 
 - **게임**: 접합부가 보이는 닫힌 neutral case. 앞표지가 주인공이며 플랫폼 띠·가짜 책등·가짜 뒷표지를 만들지 않는다.
-- **만화**: 승인된 Paperback FINAL의 얇은 단행본을 사용한다. 목록은 정적 렌더 캐시, 큰 표지 감상창의 한 권만 실시간 3D로 표시한다. 권 순서·선택권의 작은 lift·가리지 않는 하단 표지 스트립을 유지한다. 선반은 support cue이지 가구 시뮬레이션이 아니다.
+- **Manga:** use the approved Paperback FINAL thin paperback model; lists use static renders and the appreciation view has one live book. Keep volume order, the selected volume's small lift and the unobstructed bottom cover strip. A shelf is a support cue, not furniture.
+- **Manga layouts (user, 2026-10-01, PC and tablet):** 보기 has 격자 (grid), 선반 (one paperback book case per work, like game/film shelf cases, with the title printed on a matte paper spine), and 책장 (per-work volume-spine rows, layout value `bookcase`). Default: 선반. The volume-spine rows belong to 책장, not 선반.
+- **Shelf case proportion (user, 2026-10-01):** depth follows the face height at about 8%, rather than a fixed 22px. Keep spine marks (including PS5/Switch heads) and spine text in real package proportions as cases shrink on the tablet.
 - **영화/영상**: 일반 목록은 평면 poster archive다. 게임 케이스나 책 물성을 강제하지 않는다.
 - **상세**: 원본 hero/backdrop 뒤에 표지를 겹치고 하단을 넓게 fade한다. 표지에는 fade를 걸지 않는다.
 - 배경이 없으면 가짜 blurred background를 만들지 않고 상단 공간을 접어 compact 정보 배치로 전환한다.
@@ -220,6 +224,8 @@ Use a toggle for a single setting that applies immediately; use checkboxes to pi
 | Immediate choice (sort, view, more) | menu/popover next to its button | bottom sheet (thumb reach, swipe down to close) |
 | Hard-to-undo confirmation, multi-field settings | dialog | dialog (delete confirmations only) |
 | Full screen | viewer, reader, note editor only | same |
+
+- **Tablet bottom overlay (user, 2026-10-01):** Collections shortcuts open a surface rising from the bottom, leaving about 36px at the top of the screen visible and dimmed. Swipe down, tap outside, ✕ or Back closes it; the underlying list keeps its position. A work opened from the overlay stacks above it and returns to it on Back. The former fold rows above the list are removed.
 
 Menus, popovers and dialogs are square (radius 0) with the NieR corner brackets: 8px L-shapes in `--color-accent`, 2px thick, just inside the 1px border at the top-left and bottom-right corners (drawn as backgrounds so scrolling dialogs do not clip them). A menu may start with a section label (5px square + hairline); items carry a 16px icon, the current choice is weight 600 with a 5px accent square at the right (no slab inside menus), shortcuts sit right-aligned in `--color-faint`, and a related toggle (e.g. newest/oldest) may sit as a segmented control at the bottom. A destructive dialog shows what it affects (up to two overlapping thumbnails) beside a short title; the verb is the button label ("휴지통으로"). Menus open in 140 ms (fade + 4px rise), no bounce.
 

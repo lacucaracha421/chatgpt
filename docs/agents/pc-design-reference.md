@@ -43,7 +43,7 @@ Typography (user-approved 2026-09-28, replaces the 2026-09-06 SUIT + Barlow pair
 ### Contextual index
 
 - **Assets**: broad scopes, Classification tree, Album tree, folder counts and user appearance.
-- **Collections** (sidebar since 2026-09-26, replacing the earlier header tabs): the new-collection menu, then a vertical `작품 유형` list (게임/만화/영화/AV) followed by the `신간 N` and `발매 캘린더` rows, all as selected-slab links (§7); a row is current while its view is open. Below them, for the library grid only, `정렬 · 필터` holds 정렬 and 내 별점 (slider, 미평가, 초기화). There is no Library/Showcase mode: the Showcase is the collapsible `쇼케이스` row above `전체 N` in the content, and its `전체 보기` drills into the paged exhibition with a back button. The header holds only the title (plus back in the 신간, 발매 캘린더 and Showcase drill-downs). An open work replaces type navigation with its title, concise metadata, personal/external rating, management/provider menu and manga edition selector at the top of the index; long descriptions and artwork stay in the body. The detail owns state and callbacks through the shared chrome portal.
+- **Collections** (2026-10-01 section bar supersedes the earlier sidebar type list): the new-collection menu and 쇼케이스, 신간 and 발매 캘린더 shortcuts stay in the sidebar index. Types (게임/만화/영화/AV) use the shared section bar, with sort/view at its right; 내 별점 remains a contextual filter. There is no Library/Showcase mode. The header shows the title/current section and a back action in drill-downs. An open work replaces type navigation with its title, concise metadata, personal/external rating, management/provider menu and manga edition selector at the top of the index; long descriptions and artwork stay in the body. The detail owns state and callbacks through the shared chrome portal.
 - **Manga**: local/online/catalog context and controls owned by the corresponding browser.
 - Do not merge a user Classification named “만화”, Collection type `manga`, local Manga Root, and Online Catalog into one concept (`CONTEXT.md`).
 
@@ -55,6 +55,8 @@ Typography (user-approved 2026-09-28, replaces the 2026-09-06 SUIT + Barlow pair
 - Selection-only commands stay in selection/context surfaces. Exception (CHAR-UI-002~006, 2026-09-09): the series/character review screen may expose selection accessories (count, clear, exclude, review entry) as `titleAccessory`; this is not a license to spread selection commands to other headers.
 - One-time setup and rare management actions live in the owning `… 더보기` menu or panel (e.g. `폴더 더보기`, `시리즈 더보기`, `캐릭터 더보기`), not as persistent header buttons. Frequent actions may keep a labeled button (e.g. `캐릭터 만들기`).
 - Do not add persistent refresh buttons: background updates refresh the view automatically; error retry and a context-menu refresh remain for recovery.
+- **Section bar (user, 2026-10-01):** the shared bar sits at the start of the list and scrolls away on both PC and tablet. Once off screen, the top-bar title reads `<area> · <section> ⌄`. On PC, resting the pointer on the top bar for 150 ms drops the bar below it; it closes 300 ms after the pointer leaves both the top bar and the section bar. Clicking the title toggles it. Sort/view controls remain at the bar's right. Merging the section bar into the top bar as one row was considered and declined; scroll-direction auto-hide remains rejected.
+- **Tablet shade (user, 2026-10-01):** pull down the top bar or tap its title to reveal the section bar; picking a section or scrolling the list closes it. The pull-down shade is retained without bounce. An optional second row in the same segmented track carries shortcuts, not selected tabs: Collections uses 쇼케이스 with a work count, game/movie 발매 캘린더 with a new-event count, manga 신간 with an unread count, and AV 쇼케이스 only. Both rows travel together in the shade. PC keeps these shortcuts in its sidebar index. References: `docs/prototypes/section-bar-20261001/README.md` and `docs/prototypes/collection-shortcuts-20261001/README.md`.
 
 ## 4. View settings
 
@@ -147,6 +149,7 @@ This covers Collection cards/info/details, TV seasons/episodes and Asset date he
 - 자동 태그 chip details open in a small popover on click or keyboard activation; they never appear on hover, and the same text may remain in `aria-description`.
 - Keep `aria-label` and keyboard-accessible naming; supplementary text may use `aria-description`. Keep real headings and dialog titles.
 - Focus, selected, disabled, open, destructive and hover states must remain distinguishable without color alone.
+- **Tablet bottom overlay (user, 2026-10-01):** Collections shortcuts open a surface rising from the bottom, leaving about 36px at the top of the screen visible and dimmed. Swipe down, tap outside, ✕ or Back closes it; the underlying list keeps its position. A work opened from the overlay stacks above it and returns to it on Back. The former fold rows above the list are removed.
 
 ## 10. Collection / Works presentation
 
@@ -163,8 +166,10 @@ A game is a **closed, seam-side case**, inspired by a closed steelbook/package b
 
 ### Manga
 
-Manga uses the approved **Paperback FINAL** model and volume-centered shelf grammar: separate thin covers, a recessed page block, satin print and unprinted spine/back. The supplied final artifact is the visual baseline (depth `.12`, right binding, live pose `.13/.34/.005`, static paper-side angle `.40`); these are local renderer parameters, not a claim about a real edition. A shelf is a contact cue, not furniture.
+Manga uses the approved **Paperback FINAL** model: separate thin covers, a recessed page block and satin print. The Collections 선반 work case has a matte paper spine printed with the work title (user, 2026-10-01); the earlier unprinted spine/back treatment is not its list contract. The supplied final artifact is the visual baseline (depth `.12`, right binding, live pose `.13/.34/.005`, static paper-side angle `.40`); these are local appreciation-renderer parameters, not the shelf case depth rule decided below or a claim about a real edition. A shelf is a contact cue, not furniture.
 
+- **Manga layouts (user, 2026-10-01, PC and tablet):** 보기 has 격자 (grid), 선반 (one paperback book case per work, like game/film shelf cases, with the title printed on a matte paper spine), and 책장 (per-work volume-spine rows, layout value `bookcase`). Default: 선반. The volume-spine rows belong to 책장, not 선반.
+- **Shelf case proportion (user, 2026-10-01):** depth follows the face height at about 8%, rather than a fixed 22px. Keep spine marks (including PS5/Switch heads) and spine text in real package proportions as cases shrink on the tablet.
 - Library and volume lists show cached static renders; only the appreciation view has one live book with on-demand cursor tilt. Its footer owns same-edition thumbnails, position and original-image mode and never overlays the large cover.
 - While a render is pending the cover shows a neutral placeholder in the final shape and fades in, never the flat source; the flat image is only the failure fallback.
 - Showcase keeps manual membership/order per media type. Cover-only pages use 3×3 for up to 9 works, 4×4 from 10, and pagination beyond 16, packed around the objects rather than spread across the viewport.

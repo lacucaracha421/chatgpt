@@ -17,7 +17,7 @@ Updated 2026-09-30: the design foundation, Home/Settings/calendar redesigns, art
 Updated 2026-10-01 against `main` through `9262468d` and controller-confirmed rollout/device facts; concurrent performance changes remain in progress. The active redesign order is PC 에셋 (source and tablet port complete), 망가, then 컬렉션; each round is PC first and tablet in the same round. Remaining work, in priority order:
 
 1. **망가 redesign** — active round. Design record and 2026-09-30 decisions: `docs/prototypes/pc-manga-20260929/README.md` (A–D, no resume, 판본 in the PC detail, tablet sheet/reader). Slices, PC first: (1) toolbar + shared card, (2) detail overlay panel and (3) one immersive reader for local and online (source-implemented `4962f9bf`), (4) load more instead of the pager (source-implemented `bdbfbfd2`), (5) sidebar index — frequent tags/artists from bookmarks plus pins stored in the library (user, 2026-09-30: a new migration; production migration needs its own approval and backup) and local folders with counts plus the vanished-folder cleanup (production write, approval when reached), (6) tablet. Mockups from now on are plain HTML under `docs/prototypes/` that load the app's real CSS. Sharing follows `DESIGN.md` §12 ("What PC and tablet share"); the ratchet `src/shared/sharedLayers.test.ts` fails on new tablet copies (baseline 24 exports, 4 control classes — shrink it as copies are replaced).
-2. **컬렉션 redesign** — `IN_PROGRESS` (pulled ahead of 망가 slices 2–6 on 2026-09-30). Earlier PC source/native checks (test library): one case model and merged work screen (`e7186580`, `4296bafa`, `e658ea56`), shelf list/shared 한 줄에 N개 menu (`615c32cd`), AV performer page (`faf55fd8`), migration 0116 for 상태 · 기기 and cover focus. Implemented since: 신간 dense ledger G (`16a45c87`); tablet shelf/cases, work screen, performer page and ledger (`c552ff7d`); manga spine typography/fixed-width scrolling bookcase (`0f566ed2`); manga 보기 = 선반 gives one bookcase row per work on PC/tablet (`00e7e054`, 격자 remains the manga default). LaunchBox matching is implemented (`12618a42`, `7c0012d2`); controller confirmed the production batch completed 2026-10-01 with 85 spines and IGDB first-release platforms filled, and 345 Collections published to the server. Transient LaunchBox failures are no longer cached for 24 h (`a2c179cc`). Publication of 상태 · 기기, cover focus and people/portraits is implemented (`0d6667a1`, `cd248fe1`, `4cc5b223`, `b9a592ec`, `ea8e72e0`, `d997b208`); controller confirmed the replica features deployed ~15:00 KST. Tablet 상태 · 기기 editing is implemented as personal-edit v3 (`4e4163a0`); server deployed ~17:00 KST and tablet 0.8.89 installed (controller-confirmed), enabled after a v3 PC publishes once. Still open: PC stutter on entering 컬렉션/type switch (user report 2026-10-01; measurement/fix in progress for per-case work-record IPC batching and case rendering cost, uncommitted); native PC manga 선반 check; tablet manga spines are 30 px, below the 44 px touch target; ledger G native/device acceptance remains unverified. Resume the remaining 망가 work after this round (slices 2–4 are now source-implemented in `4962f9bf`, `bdbfbfd2`; sidebar/tablet follow-up remains unverified).
+2. **컬렉션 redesign** — `IN_PROGRESS` (pulled ahead of 망가 slices 2–6 on 2026-09-30). Earlier PC source/native checks (test library): one case model and merged work screen (`e7186580`, `4296bafa`, `e658ea56`), shelf list/shared 한 줄에 N개 menu (`615c32cd`), AV performer page (`faf55fd8`), migration 0116 for 상태 · 기기 and cover focus. Implemented since: 신간 dense ledger G (`16a45c87`); tablet shelf/cases, work screen, performer page and ledger (`c552ff7d`); manga spine typography/fixed-width scrolling bookcase (`0f566ed2`); the earlier manga 보기 = 선반 volume-row implementation (`00e7e054`) is superseded by the 2026-10-01 three-layout decision in `COLLECTION-VIEW-20261001`: 선반 is now the default work-case shelf; 책장 (`bookcase`) keeps the volume-spine rows on PC/tablet. LaunchBox matching is implemented (`12618a42`, `7c0012d2`); controller confirmed the production batch completed 2026-10-01 with 85 spines and IGDB first-release platforms filled, and 345 Collections published to the server. Transient LaunchBox failures are no longer cached for 24 h (`a2c179cc`). Publication of 상태 · 기기, cover focus and people/portraits is implemented (`0d6667a1`, `cd248fe1`, `4cc5b223`, `b9a592ec`, `ea8e72e0`, `d997b208`); controller confirmed the replica features deployed ~15:00 KST. Tablet 상태 · 기기 editing is implemented as personal-edit v3 (`4e4163a0`); server deployed ~17:00 KST and tablet 0.8.89 installed (controller-confirmed), enabled after a v3 PC publishes once. Still open: PC stutter on entering 컬렉션/type switch (user report 2026-10-01; measurement/fix in progress for per-case work-record IPC batching and case rendering cost, uncommitted); native PC/tablet acceptance of the revised manga layouts and shelf proportions (`COLLECTION-VIEW-20261001`); tablet manga spines are 30 px, below the 44 px touch target; ledger G native/device acceptance remains unverified. Resume the remaining 망가 work after this round (slices 2–4 are now source-implemented in `4962f9bf`, `bdbfbfd2`; sidebar/tablet follow-up remains unverified).
 3. **USER-REQ-20260924 / USER-REQ-20260926B** — start Collections authority slice 1, then implement tablet Collection creation; tablet character creation remains dropped by the PC-only decision.
 4. **USER-REQ-20260927 / HOME-DASH-001** — record native PC acceptance for the current Home, artist, AV and calendar source; keep the release calendar PC-sourced.
 5. **PC-RELEASE-FEEDBACK-20260929** — release-check character-folder picker items 4–5; late calendar covers remain `HOLD` by the user's decision.
@@ -226,17 +226,35 @@ Status: `VERIFY` — items 1–3 and 6–13 were checked by the user in the 2026
 
 ## SECTION-BAR-20261001 — Section bar on PC and tablet
 
-Status: `PARTIAL` — accepted design at `docs/prototypes/section-bar-20261001/` (`f3b28e57`), implemented on PC/tablet; remaining device/responsive checks and design documentation.
+Status: `VERIFY` — accepted design at `docs/prototypes/section-bar-20261001/` (`f3b28e57`, revised 2026-10-01); latest PC hover-drop and tablet bounce fixes are source-implemented in the uncommitted worktree, awaiting native/device and responsive checks. Design rules recorded in `DESIGN.md` and `docs/agents/pc-design-reference.md` on 2026-10-01.
 
-- **Accepted:** PC always-visible pinned bar under the top bar, with sort/view at its right. Tablet inline first row of the list scrolls away; top-bar title becomes e.g. "컬렉션 · 게임 ⌄", with a pull-down shade. Scroll-direction auto-hide was rejected.
+- **Accepted revision (user, 2026-10-01):** on PC the bar also scrolls away with the list. Once off screen the title reads `<area> · <section> ⌄`; hovering the top bar for 150 ms drops it below the top bar, and it closes 300 ms after the pointer leaves both bars. Clicking the title toggles it; sort/view stays at the right. Merging both bars into one row was considered and declined. Tablet retains the pull-down shade, with bounce fixed in source. Scroll-direction auto-hide remains rejected.
 - **Implemented:** PC `8d209c63` — 컬렉션 types, 에셋 종류, 망가 출처 and 메모 kinds. Tablet `5f9788ea` — 컬렉션, 에셋 gallery/characters 종류, 에셋 root 분류/앨범/작가, 카탈로그·북마크 and 메모. Tablet 0.8.89 installed (`9262468d`; controller-confirmed); user says the PC bar is fine in use.
-- **Remaining:** tablet device check of the pull gesture and bar thickness; PC narrow-window manga toolbar/bar breakpoints are estimates and need acceptance. `DESIGN.md` and `docs/agents/pc-design-reference.md` do not describe the bar yet.
+- **Remaining:** native PC hover/drop, title toggle and narrow-window manga toolbar/bar acceptance; tablet device check of the pull gesture, bounce fix, bar thickness and optional shortcut row (`COLLECTION-SHORTCUTS-20261001`). The earlier PC acceptance covered the pinned bar, not this revision.
+
+## COLLECTION-SHORTCUTS-20261001 — Tablet Collections shortcut row and overlays
+
+Status: `VERIFY` — accepted by the user 2026-10-01 and source-implemented in the uncommitted worktree; tablet device acceptance remains pending. Spec: `docs/prototypes/collection-shortcuts-20261001/README.md`.
+
+- A second row in the section bar's same segmented track replaces the fold rows above the list: 쇼케이스 + work count; game/movie 발매 캘린더 + new-event count; manga 신간 + unread count; AV 쇼케이스 only. Shortcuts are actions, never selected tabs (no accent fill); new-event counts use accent and hide at zero. The pull-down shade carries both rows.
+- Shortcuts open a bottom overlay, leaving about 36px at the top of the screen visible and dimmed. Swipe down, tap outside, ✕ or Back closes it; the underlying list keeps its place. Opening a work stacks it above the overlay; returning from the work restores the overlay.
+- PC stays unchanged: its sidebar index holds these shortcuts. Verify tablet touch dismissal, Back stacking and list-position retention.
 
 ## TABLET-FEEDBACK-20261001 — Tablet scrubber feedback
 
 Status: `VERIFY` — option B implemented in `c4d1819e`, mockup at `docs/prototypes/tablet-scrubber-20261001/` (`60d1429d`); installed in tablet 0.8.89 (controller-confirmed). Device check pending.
 
 - One rail thickens in place on touch, with thinned year labels and a compact date label; verify touch use on the tablet. PC/tablet Notes sync-on-finish is recorded under `USER-FEEDBACK-20260928B`.
+- **Collections pagination (user, 2026-10-01):** after the first page, tablet Collections fetches all remaining pages in the background so the scrubber no longer re-scales. Source-implemented in the uncommitted worktree; awaiting device acceptance of scale stability while pages arrive. This is separate from the next-round asset TOC plan (`ASSET-TOC-20261001`).
+
+## ASSET-TOC-20261001 — Query TOC and stable tablet scrubber seeks
+
+Status: `IN_PROGRESS` — user decision 2026-10-01 for the next round; phase 1 server work is in progress in a separate lane. Tablet integration and native/device acceptance remain pending. Server deployment requires separate approval.
+
+- On existing list routes, opt-in `toc=1` returns per-month counts and seek cursors for the current query. Use the same filters and one snapshot; carry `listGeneration` so the TOC and list share a generation.
+- Draw the tablet scrubber from this TOC and seek by bucket, using estimated-height spacers for unloaded ranges. No flash: keep the current viewport until the destination is ready.
+- Phase 1: library assets, folders and albums (server part in progress). Phase 2: creator, revisit, characters and trash. Phase 3: catalog, with rank-ordered buckets and signed cursors.
+- Verify stable scrubber scale, filter/snapshot consistency and destination readiness before device acceptance; server source work is not deployment or production verification.
 
 ## HOME-OPT-001 — Home optimisation and debugging pass (PC and tablet)
 
@@ -244,7 +262,7 @@ Status: `VERIFY` — findings (1)–(8) are fixed in source (finding (1) in `8fa
 
 - Measure first: time to first useful Home paint and number/size of requests on PC (dev and release) and on the tablet (cold and warm start), and which sections wait on which reads (overview, calendar, wishlist, revisit slate, artist today, AV pick, memos, exchange).
 - Look for Home bugs the redesign may have introduced: layout shifts while sections load, stale counts after returning from another screen, shelf scroll/drag edge cases, privacy mode, empty states, offline/server-down behaviour, one-screen fit on the tablet with long names.
-- **Test flakiness (2026-10-01):** under the default parallel Vitest run two `src/app/App.test.tsx` cases fail on alternating runs and pass alone or with `--maxWorkers=2`; they are timing-sensitive, not a product bug. Make them deterministic or run the app suite with fewer workers.
+- **Open test debt (user, 2026-10-01):** two `src/app/App.test.tsx` cases are timing-flaky under the default parallel Vitest run and pass alone or with `--maxWorkers=2`; make them deterministic or evaluate fewer workers. Class (c) in `/tmp/lakomics-test-failure-report.md` also records transient failures observed once in `mobile-client/Albums.test.tsx`, `mobile-client/assetFilterUi.test.tsx` and `src/assets/AssetGallery.test.tsx`, plus the App library-root-switch case. Focused/baseline and final suite passes support the intermittent classification; the exact scheduling cause remains unmeasured, and a passing rerun does not close this debt.
 - **Server test flakiness (2026-10-01, controller-confirmed):** `tests.test_mobile_catalog_refresh.RefreshTests.test_server_added_work_can_be_refreshed_and_survive_stale_pc` failed intermittently (2 of 3 isolated runs on the VPS stage); the file is unchanged since `b5245df4`. Cause unverified; investigate without treating it as a confirmed product regression.
 - Read-only audit 2026-09-29, rechecked against current source (not device/native checks). Fixed: tablet 관심 목록 removal from the Home sheet did not hide the title and a second tap re-added it (`8b3d3177`); finding (1), the tablet 신간 shelf overflow, is resolved in source by `8fa77090` (`_tools/app/mobile-client/home.css` now uses `overflow-x:auto`), but device reachability is not recorded. Remaining, most severe first: (2) tablet AV placeholder never resolves when the pick read fails offline (`homeDashboard.ts` `useHomeAvPick` rethrows non-404), and a 404 day drops the AV column after the placeholder showed (layout shift); (3) PC `get_home_overview` fails as a whole when any sub-read (tagger counts, AV pick, server status) errors, and HomeView swallows it, leaving 자산 현황 / AV 배우 / 태거 / 처리 대기 blank with no retry; (4) PC layout shifts while loading: AV 배우 section and 자산 현황 mount only after the overview, the empty shelf reserves 256px vs 280px game cards, and "새 신간 없음" shows while releases are still loading; (5) PC "모두 확인함" can flash before slower 검토 counts arrive; (6) PC Home open past midnight keeps yesterday's date, D-days and 오늘 +N until something else re-renders; (7) PC privacy mode race can show the AV 품번 count if privacy turns on during a pending count read (`AvLinkInbox.tsx`); (8) tablet offline banner treats any non-`ApiError` (e.g. a parse error) as offline and misses proxy 5xx. **Fixed in source 2026-09-30:** (2) the tablet AV section ends in a failed/empty state in place with 다시 시도; (3) optional overview reads degrade per field (`failed` list) and each section retries; (4) sections reserve their final size with skeletons and empty wording waits for the read; (5) 모두 확인함 waits for every count; (6) one timer at local midnight (`src/shared/useLocalDayClock.ts`); (7) stale AV 품번 count replies are ignored under privacy mode; (8) only connect/timeout failures count as offline, server errors show 서버가 요청을 처리하지 못했습니다. Known weak point: the tablet offline test matches the Android error sentences literally (`MainActivity.java` message mapping).
 - Fix what the measurements and checks show; no speculative rewrites (see docs/agents/implementation.md, Performance work).
@@ -892,6 +910,14 @@ Linear PDQ candidate scanning remains the default. Reopen only if historical dis
 
 # Works / Collections
 
+## COLLECTION-VIEW-20261001 — Manga layouts and shelf case proportions
+
+Status: `VERIFY` — user decisions 2026-10-01, source-implemented in the uncommitted worktree; native PC and tablet device acceptance remain pending.
+
+- PC and tablet manga 보기 has three layouts: 격자 (grid), 선반 (one paperback book case per work on the shelf, like games/films, with the title printed on a matte paper spine), and 책장 (per-work volume-spine rows, layout value `bookcase`). Default: 선반. This supersedes the earlier 선반 volume-row label and 격자 default.
+- Shelf case depth follows the face height at about 8%, rather than a fixed 22px, preserving real package proportions for spine marks (PS5/Switch heads) and text on small tablet cases.
+- Verify the default and switching between all three layouts on PC/tablet, matte spine/title rendering and small-case proportions in native/device use. Keep the existing volume-spine touch-target gap in Current priority item 2 open.
+
 ## LONG-001 — AV metadata/cover acquisition and candidate selection
 
 Status: `PARTIAL`
@@ -918,6 +944,17 @@ Status: `TODO` — low priority / optional.
 Keep VCK/kHentai as the default provider. If Heliotrope is revisited, isolate its cache and never assume metadata availability implies a valid page resolver. Provider disable/cache clear must preserve bookmarks/progress.
 
 # Desktop UI consistency
+
+## ASSET-EAGLE-20261001 — PC Asset screen candidates from the Eagle comparison
+
+Status: `TODO` — user decision 2026-10-01; PC mockup required before implementation. Comparison reference: Eagle (`eagle.cool`); these are candidate priorities, not implemented features.
+
+1. Add an info-panel pin option: dock the panel and reflow the grid instead of covering tiles with the overlay.
+2. Fill the info panel with folder / character / tag chips (`name ×` and `+`), rating and memo.
+3. Add sidebar triage entries with counts under 전체 / 작가 / 앨범, e.g. 폴더 없음 and 캐릭터 미지정.
+4. Put a thumbnail-size slider in the top bar beside sort.
+
+Later: colour palette and colour search. Keep date group headings with counts (absent in the Eagle comparison). Avoid decorative gradient backgrounds and accent-outline selection marks. Start with a PC mockup; implementation and native acceptance are still open.
 
 ## PC-UI-001 — PC UI consistency pass
 
