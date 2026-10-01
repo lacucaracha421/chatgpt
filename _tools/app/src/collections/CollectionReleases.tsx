@@ -148,15 +148,20 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
     return <span className="collection-releases__cover">{url ? <StableImage src={url} alt="" loading="lazy" decoding="async" draggable={false} /> : <span aria-hidden="true" />}</span>;
   };
   const confirm = (key: string, name: string, items: ReleaseInboxItem[]) => <Button size="sm" variant="quiet" disabled={busy || loading} aria-label={`${name} 확인`} onClick={event => { event.stopPropagation(); void acknowledge(key, items); }}>{working === key ? "확인 중…" : "확인"}</Button>;
-  const renderRow = (row: ReleaseLedgerRow) => <tr key={row.work.id} aria-label={row.work.name} onClick={() => { if (!loading) onOpen(row.work.id); }}>
+  const renderRow = (row: ReleaseLedgerRow) => {
+    const chips = row.chips.slice(0, 2);
+    const fresh = row.chips.find(chip => chip.kind === "new");
+    if (fresh && !chips.includes(fresh)) chips[1] = fresh;
+    return <tr key={row.work.id} aria-label={row.work.name} onClick={() => { if (!loading) onOpen(row.work.id); }}>
     <td>{cover(row.work)}</td>
     <td className="collection-releases__name"><Button variant="quiet" size="sm" disabled={loading} data-collection-id={row.work.id} onClick={event => { event.stopPropagation(); onOpen(row.work.id); }}><strong className="collection-releases__work-title">{row.work.name}</strong></Button></td>
     <td className="collection-releases__owned">{row.owned === null ? "기록 없음" : row.owned === 0 ? "0권" : row.owned === 1 ? "1권" : `1–${displayCount(row.owned)} 권`}</td>
     <td><div className="collection-releases__chips" aria-label={`${row.work.name} ${provider === "mangadex" ? "일본" : "정발"} 권`}>
-      {row.chips.map(chip => chip.kind === "upcoming"
+      {chips.map(chip => chip.kind === "upcoming"
         // Upcoming volumes are a dated ledger cell with a line cue; released volumes use shared badges.
-        ? <span key={chip.volumeNumber} className="collection-releases__upcoming" data-chip-kind={chip.kind}>{chip.label}</span>
-        : <Badge key={chip.volumeNumber} variant={chip.kind === "new" ? "accent" : "plain"} data-chip-kind={chip.kind}>{chip.label}</Badge>)}
+        ? <span key={chip.volumeNumber} className="collection-releases__upcoming" data-chip-kind={chip.kind}><span>{chip.label}</span></span>
+        : <Badge key={chip.volumeNumber} variant={chip.kind === "new" ? "accent" : "plain"} data-chip-kind={chip.kind}><span>{chip.label}</span></Badge>)}
+      {row.chips.length > 2 && <Badge aria-label={`추가 ${row.chips.length - 2}권`}>+{row.chips.length - 2}</Badge>}
       {!row.chips.length && <span className="collection-releases__muted">—</span>}
     </div></td>
     <td className="collection-releases__date">{row.date ? displayDate(row.date) : "—"}</td>
@@ -165,6 +170,7 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
       {row.ahead && <small>{row.ahead}</small>}
     </div>{row.items.length > 0 && confirm(row.work.id, row.work.name, row.items)}</div></td>
   </tr>;
+  };
 
   return <section className="collection-releases" aria-label="신간">
     <ViewToolbar title="신간" titleContent={<span className="collection-releases__heading">신간</span>} ariaLabel="컬렉션 도구" chrome={chrome}
@@ -172,7 +178,7 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
       titleAccessory={<><span className="collection-toolbar__count">{displayCount(rows.length + others.length)}</span><div className="collection-releases__actions">
         <SegmentedControl label="신간 지역" options={[{ value: "kakao", label: "한국 정발", count: korean.length }, { value: "mangadex", label: "일본", count: japan.length }]} value={provider} onChange={onProviderChange} />
         {checkedAt && <span className="collection-releases__checked">{displayDateTime(checkedAt)} 확인</span>}
-        {api?.runUpdates && <Button size="sm" variant="quiet" aria-label={working === "check" ? "처리 중…" : waiting ? "재시도 대기" : "새로고침"} disabled={busy || waiting || restricted || loading} onClick={() => void check()}><ArrowPathIcon aria-hidden="true" /></Button>}
+        {api?.runUpdates && <Button size="sm" variant="quiet" aria-label={working === "check" ? "처리 중…" : waiting ? "재시도 대기" : "새로고침"} aria-description={checkedAt ? `${displayDateTime(checkedAt)} 확인` : undefined} disabled={busy || waiting || restricted || loading} onClick={() => void check()}><ArrowPathIcon aria-hidden="true" /></Button>}
         <Button size="sm" variant="quiet" disabled={busy || loading || inbox.length === 0} onClick={() => setConfirmAll(true)}>모두 확인</Button>
       </div></>}
     />

@@ -64,14 +64,14 @@ export function useLaunchBoxSpineBatch(gateway: LibraryGateway, scope: string) {
     const counts = { matched: 0, no_match: 0, ambiguous: 0, failed: 0, skipped: 0 };
     let processed = 0;
     try {
-      // The backend progress total is page-local; count eligible games for the whole toolbar job.
-      const games = collections.filter(item => item.type === "game");
-      let total = 0;
-      for (let offset = 0; offset < games.length && !value.cancelRequested; offset += 50) {
-        const artwork = await Promise.all(games.slice(offset, offset + 50).map(item => gateway.listCollectionWorkArtworks(item.id)));
-        total += artwork.filter(items => !selectedSpine(items)).length;
-      }
+      // Every visited game produces an outcome, including games with an existing spine.
+      let total = collections.filter(item => item.type === "game").length;
       update({ total });
+      const updateProgress = (visited: number) => {
+        // Include additional games if the library changes after the initial snapshot.
+        total = Math.max(total, visited);
+        update({ processed: visited, total });
+      };
       let cursor: string | null = null;
       while (!value.cancelRequested) {
         // A page owns a fresh backend job; the UI lock covers the entire cursor loop.
@@ -87,7 +87,7 @@ export function useLaunchBoxSpineBatch(gateway: LibraryGateway, scope: string) {
         };
         const result = await gateway.fetchLaunchBoxSpines({ action: "run", jobId, limit: 50, ...(cursor ? { afterCollectionId: cursor } : {}) }, progress => {
           if (progress.jobId !== jobId) return;
-          update({ processed: base + progress.processed });
+          updateProgress(base + progress.processed);
           if (progress.outcome) refresh(progress.outcome);
         });
         value.jobId = null;
@@ -97,7 +97,7 @@ export function useLaunchBoxSpineBatch(gateway: LibraryGateway, scope: string) {
           refresh(outcome);
         }
         processed += result.outcomes.length;
-        update({ processed });
+        updateProgress(processed);
         if (refreshed.size) await onChanged();
         if (result.cancelled || value.cancelRequested || !result.hasMore) break;
         if (!result.nextCursor || result.nextCursor === cursor) throw new Error("책등 받기를 이어갈 수 없습니다.");

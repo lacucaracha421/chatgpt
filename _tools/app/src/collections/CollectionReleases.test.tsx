@@ -79,14 +79,15 @@ it("renders one shared toolbar, volume counts, chip kinds, dates and status cell
   expect(screen.getByText("15:20 확인")).toBeInTheDocument();
   expect(screen.getByRole("radio", { name: "한국 정발 4" })).toHaveAttribute("aria-checked", "true");
   expect(screen.getByRole("button", { name: "새로고침" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "새로고침" })).toHaveAttribute("aria-description", "15:20 확인");
   expect(screen.queryByRole("button", { name: "저장" })).not.toBeInTheDocument();
   const counts = screen.getByLabelText("권별 집계");
   expect(counts).toHaveTextContent("1새로 나옴3나왔지만 아직 없음3발매 예정");
   const fresh = screen.getByRole("row", { name: "새 권" });
   expect(within(fresh).getByText("1–23 권")).toBeInTheDocument();
-  expect(within(fresh).getByText("24권")).toHaveClass("ui-badge--accent");
-  expect(within(fresh).getByText("25권 2027.1.5")).toHaveAttribute("data-chip-kind", "upcoming");
-  expect(within(screen.getByRole("row", { name: "지난 미보유" })).getByText("4권")).toHaveClass("ui-badge--plain");
+  expect(within(fresh).getByText("24권").parentElement).toHaveClass("ui-badge--accent");
+  expect(within(fresh).getByText("25권 2027.1.5").parentElement).toHaveAttribute("data-chip-kind", "upcoming");
+  expect(within(screen.getByRole("row", { name: "지난 미보유" })).getByText("4권").parentElement).toHaveClass("ui-badge--plain");
   expect(screen.getByText("D-1")).toBeInTheDocument();
   expect(screen.getByText("D-22")).toBeInTheDocument();
   expect(screen.getByText("미보유 3")).toBeInTheDocument();
@@ -145,4 +146,27 @@ it("keeps the real cached ledger until an invalidated read completes", async () 
   expect(screen.getByRole("table").closest(".collection-releases__body")).toHaveAttribute("inert");
   act(() => complete([]));
   await waitFor(() => expect(screen.queryByRole("table")).not.toBeInTheDocument());
+});
+
+it("shows +N instead of scrolling when volume chips exceed the two-chip limit", () => {
+  const { props, wrap } = setup();
+  const volumes: [number, string | null, "released" | "upcoming" | null][] = [1, 2, 3, 4, 5].map(number => [number, "2026-09-01", "released"]);
+  const releaseData = { board: new Map([["many", entry("many", 0, volumes)]]), inbox: [] };
+  const view = render(wrap(<CollectionReleases {...props} collections={[work("many")]} data={releaseData} />));
+  const chips = screen.getByLabelText("many 정발 권");
+  expect(chips.querySelectorAll("[data-chip-kind]")).toHaveLength(2);
+  expect(within(chips).getByLabelText("추가 3권")).toHaveTextContent("+3");
+  expect(within(chips).queryByText("3권")).not.toBeInTheDocument();
+  view.rerender(wrap(<CollectionReleases {...props} collections={[work("many")]} data={{ board: new Map([["many", entry("many", 3, volumes)]]), inbox: [] }} />));
+  expect(screen.getByLabelText("many 정발 권").querySelectorAll("[data-chip-kind]")).toHaveLength(2);
+  expect(screen.queryByText(/^\+\d+$/)).not.toBeInTheDocument();
+});
+
+it("keeps a new volume visible when earlier unowned chips overflow", () => {
+  const { props, wrap } = setup();
+  const volumes: [number, string | null, "released" | "upcoming" | null][] = [1, 2, 3, 4, 5].map(number => [number, "2026-09-01", "released"]);
+  render(wrap(<CollectionReleases {...props} collections={[work("many")]} data={{ board: new Map([["many", entry("many", 0, volumes)]]), inbox: [notice("many", 5)] }} />));
+  const chips = screen.getByLabelText("many 정발 권");
+  expect(within(chips).getByText("5권").parentElement).toHaveAttribute("data-chip-kind", "new");
+  expect(within(chips).getByLabelText("추가 3권")).toHaveTextContent("+3");
 });

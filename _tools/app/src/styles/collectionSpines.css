@@ -1,8 +1,22 @@
 .collection-toolbar__spine-progress {
   display: flex;
+  flex: none;
+  white-space: nowrap;
   align-items: center;
   gap: var(--space-2);
   color: var(--color-muted);
   font-size: var(--type-meta);
   font-variant-numeric: tabular-nums;
+}
+
+.view-toolbar:has(.collection-toolbar__count) > h2,
+.view-toolbar:has(.collection-toolbar__count) > .collection-toolbar__count {
+  flex: none;
+  max-width: none;
+  white-space: nowrap;
+}
+
+.collection-toolbar__controls {
+  flex: none;
+  white-space: nowrap;
 }

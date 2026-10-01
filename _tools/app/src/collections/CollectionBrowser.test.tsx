@@ -314,8 +314,8 @@ describe("CollectionBrowser", () => {
     expect(within(segments).getByRole("radio", { name: /한국 정발/ })).toHaveAttribute("aria-checked", "true");
     const group = await screen.findByRole("row", { name: "가 작품" });
     expect(within(group).getByText("1–2 권")).toBeInTheDocument();
-    expect(within(group).getByText("3권")).toHaveAttribute("data-chip-kind", "new");
-    expect(within(group).getByText(`4권 ${year + 1}.10.10`)).toHaveAttribute("data-chip-kind", "upcoming");
+    expect(within(group).getByText("3권").parentElement).toHaveAttribute("data-chip-kind", "new");
+    expect(within(group).getByText(`4권 ${year + 1}.10.10`).parentElement).toHaveAttribute("data-chip-kind", "upcoming");
     expect(within(group).getByLabelText("새 알림 1개")).toHaveTextContent("NEW");
     await userEvent.setup().click(within(group).getByText("3권"));
     expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collection", collectionId: "a" });
@@ -330,7 +330,7 @@ describe("CollectionBrowser", () => {
     const japan = await screen.findByRole("row", { name: "나 작품" });
     expect(within(japan).getByText("9권")).toBeInTheDocument();
     expect(within(japan).getByText("한국보다 6권 앞섬")).toBeInTheDocument();
-    expect(within(japan).getByLabelText("나 작품 일본 권")).toHaveTextContent("4권5권6권7권8권9권");
+    expect(within(japan).getByLabelText("나 작품 일본 권")).toHaveTextContent("4권9권+4");
     expect(screen.getByRole("row", { name: "가 작품" })).toHaveTextContent("한국보다 2권 앞섬");
     // Reopening with the same Collection list reuses the shared data instead of reading again.
     expect(tracking.releaseBoard).toHaveBeenCalledTimes(1);

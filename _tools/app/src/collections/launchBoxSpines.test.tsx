@@ -1,12 +1,12 @@
 vi.mock("./physical/collectibleRuntime", async importOriginal => ({ ...await importOriginal<typeof import("./physical/collectibleRuntime")>(), acquireCover: (_request: unknown, callback: (value: null) => void) => { callback(null); return () => undefined; } }));
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { CollectionSummary, LibraryGateway, LaunchBoxSpineBatchResult, LaunchBoxSpineProgress, LaunchBoxSpineOutcome } from "../library/types";
 import { CollectionBrowser } from "./CollectionBrowser";
 import { createDefaultCollectionLibraryState } from "./collectionLibrary";
-import { requestMissingGameSpine } from "./launchBoxSpines";
+import { requestMissingGameSpine, useLaunchBoxSpineBatch } from "./launchBoxSpines";
 import { CollectionShelfCase } from "./case/LightCase";
 afterEach(cleanup);
 const game = { id: "a", name: "게임", type: "game", updatedAt: "r", platforms: "Switch 2", unreadReleaseCount: 0, createdAt: "r", showcase: false } as CollectionSummary;
@@ -44,7 +44,7 @@ it("follows the cursor, displays cumulative progress, prevents another batch and
   expect(gateway.fetchLaunchBoxSpines.mock.calls[1][0]).toMatchObject({ action: "run", limit: 50, afterCollectionId: "a" });
   expect(gateway.listCollectionWorkArtworks.mock.calls.map(args => args[0])).not.toContain("manga");
   act(() => report({ jobId: job, phase: "game_completed", processed: 1, total: 2, outcome: outcome("b", "no_match") }));
-  expect(screen.getByText("책등 받는 중 2 / 5")).toBeInTheDocument();
+  expect(screen.getByText("책등 2/5")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "작품 관리" }));
   expect(screen.getByRole("menuitem", { name: "책등 받기" })).toHaveAttribute("aria-disabled", "true");
   await user.keyboard("{Escape}");
@@ -102,4 +102,34 @@ it("retains rejected single commands as attempts for the rest of the session", a
   await expect(requestMissingGameSpine(gateway, "", game, [])).rejects.toThrow("요청 실패");
   await expect(requestMissingGameSpine(gateway, "", game, [])).rejects.toThrow("요청 실패");
   expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledOnce();
+});
+
+it("counts all visited games across cursor pages, including existing spines", async () => {
+  const { gateway } = setup();
+  gateway.listCollectionWorkArtworks.mockResolvedValue([{ id: "existing", kind: "spine", selected: true }]);
+  let finish!: (value: LaunchBoxSpineBatchResult) => void;
+  let report!: (value: LaunchBoxSpineProgress) => void;
+  let job = "";
+  gateway.fetchLaunchBoxSpines.mockImplementation(async (request, progress) => {
+    if (request.action === "cancel") throw new Error("unexpected cancel");
+    if (!request.afterCollectionId) return { jobId: request.jobId, outcomes: [outcome("a", "skipped"), outcome("b", "no_match")], nextCursor: "b", hasMore: true, cancelled: false };
+    job = request.jobId; report = progress!;
+    return new Promise(resolve => { finish = resolve; });
+  });
+  const { result } = renderHook(() => useLaunchBoxSpineBatch(gateway as unknown as LibraryGateway, "count-test"));
+  const collections = ["a", "b", "c", "d", "e"].map(id => ({ ...game, id }));
+  let running!: Promise<void>;
+  act(() => { running = result.current.run([...collections, { ...game, id: "manga", type: "manga" }], vi.fn()); });
+  await waitFor(() => expect(gateway.fetchLaunchBoxSpines).toHaveBeenCalledTimes(2));
+  expect(result.current).toMatchObject({ processed: 2, total: 5 });
+  for (let processed = 1; processed <= 3; processed++) {
+    act(() => report({ jobId: job, phase: "game_completed", processed, total: 3, outcome: outcome(collections[processed + 1].id, "skipped") }));
+    expect(result.current).toMatchObject({ processed: 2 + processed, total: 5 });
+    expect(result.current.processed).toBeLessThanOrEqual(result.current.total);
+  }
+  await act(async () => {
+    finish({ jobId: job, outcomes: collections.slice(2).map(item => outcome(item.id, "skipped")), nextCursor: "e", hasMore: false, cancelled: false });
+    await running;
+  });
+  expect(result.current).toMatchObject({ processed: 5, total: 5, running: false });
 });
