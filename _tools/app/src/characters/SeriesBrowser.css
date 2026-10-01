@@ -32,7 +32,8 @@
 /* Quiet until the card is pointed at or keyboard-focused; the action keeps its accessible name. */
 .series-character__info:not(:focus-visible) { opacity: 0; }
 .series-character:hover > .series-character__info, .series-character:focus-within > .series-character__info { opacity: 1; }
-.series-character > .series-character__info { transition: opacity var(--motion-fast) var(--ease-standard); }
+/* Reserve the hover action's opacity layer before its fade to avoid compositing changes beside the filtered suggestion images. */
+.series-character > .series-character__info { will-change: opacity; transition: opacity var(--motion-fast) var(--ease-standard); }
 .series-character__open:hover img, .series-character__open:hover .series-character__placeholder { border-color: var(--color-border-strong); }
 .series-character__open:active img, .series-character__open:active .series-character__placeholder { border-color: var(--color-accent); opacity: .88; }
 .series-character__open:focus-visible { outline: none; }

@@ -14,6 +14,7 @@ import { s36PublicationApi } from "./S36Publication";
 import { FaultGameProvider } from "../games/FaultGame";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { suggestionApi } from "./suggestions/client";
+import * as suggestionComponents from "./suggestions/CharacterSuggestions";
 
 vi.mock("./suggestions/client", async importOriginal => {
   const actual = await importOriginal<typeof import("./suggestions/client")>();
@@ -191,6 +192,53 @@ it("renders characters, suggestions, and folders in one shelf with the label act
   expect(within(shelf).queryByRole("navigation", { name: "캐릭터·폴더 페이지" })).not.toBeInTheDocument();
   expect(screen.getByRole("radiogroup", { name: "시리즈 이미지 필터" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "제안 숨기기" })).toBeInTheDocument();
+});
+
+it("keeps suggestion nodes, images and render counts stable when folder icons are hovered", async () => {
+  const list = vi.spyOn(suggestionApi, "list").mockResolvedValue([{
+    tag: "new_character", imageCount: 16, bothCount: 16, pixaiCount: 16, canaryCount: 16,
+    sampleAssetIds: ["sample-1", "sample-2"], seriesId: "series", seriesName: "블루 아카이브", insideCount: 16,
+  }]);
+  const tileRender = vi.spyOn(suggestionComponents, "CharacterSuggestionTile");
+  const { browse } = await mount(undefined, false, [
+    { id: "group", name: "그룹", seriesId: "series", revision: 1, targetIds: ["kisaki"] },
+  ], undefined, false, { folders: [{ classificationId: "machines", thumbnailAssetId: "asset-5" }] });
+  const suggestion = await screen.findByRole("button", { name: /제안 16장/ });
+  const images = [...suggestion.querySelectorAll("img")];
+  const sources = images.map(image => image.src);
+  const renderCount = tileRender.mock.calls.length;
+  expect(renderCount).toBeGreaterThan(0);
+  const listCount = list.mock.calls.length;
+  const browseCount = browse.mock.calls.length;
+  const mutations: MutationRecord[] = [];
+  const observer = new MutationObserver(records => mutations.push(...records));
+  observer.observe(suggestion.closest(".folder-shelf")!, { subtree: true, childList: true, attributes: true });
+  try {
+    const user = userEvent.setup();
+    for (const name of ["히나 열기", "그룹 그룹 열기", "기체 폴더 열기"]) {
+      const folder = screen.getByRole("button", { name });
+      for (const icon of [folder.querySelector("strong svg")!, folder.querySelector("img")!]) {
+        fireEvent.pointerEnter(icon, { pointerType: "mouse" });
+        fireEvent.mouseOver(icon);
+        await user.hover(icon);
+        expect(screen.getByRole("button", { name: /제안 16장/ })).toBe(suggestion);
+        expect(suggestion).toBeVisible();
+        const currentImages = [...suggestion.querySelectorAll("img")];
+        expect(currentImages).toHaveLength(images.length);
+        images.forEach((image, index) => {
+          expect(currentImages[index]).toBe(image);
+          expect(image).toBeVisible();
+          expect(image.src).toBe(sources[index]);
+        });
+        await user.unhover(icon);
+      }
+    }
+    mutations.push(...observer.takeRecords());
+    expect(mutations).toEqual([]);
+    expect(tileRender).toHaveBeenCalledTimes(renderCount);
+    expect(list).toHaveBeenCalledTimes(listCount);
+    expect(browse).toHaveBeenCalledTimes(browseCount);
+  } finally { observer.disconnect(); }
 });
 
 it("shows legacy series recovery only when legacy state exists", async () => {
