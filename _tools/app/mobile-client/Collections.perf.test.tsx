@@ -35,6 +35,7 @@ class FirstScreenObserver {
 
 beforeEach(()=>{
   observed=[];
+  localStorage.clear();localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout:'grid',perRow:4}));
   vi.useFakeTimers();
   vi.stubGlobal('IntersectionObserver',FirstScreenObserver);
   mocks.api.mockReset();mocks.native.mockReset();
@@ -91,6 +92,30 @@ it('cold start with a saturated native media lane: every first-screen cover show
   const failed=[...document.querySelectorAll('.collection-art-placeholder')].filter(node=>node.textContent==='이미지를 불러오지 못했습니다').length;
   console.info(`[perf] collections saturated cold start: firstScreen=${FIRST_SCREEN} requested=${requests} shownAt30s=${shown} failedAt30s=${failed}`);
   expect(failed).toBe(0);
+  expect(shown).toBe(FIRST_SCREEN);
+  // 16 covers, 8 busy and 4 failed replies each retried once: never a retry storm.
+  expect(requests).toBeLessThanOrEqual(FIRST_SCREEN+12);
+});
+
+it('cold start on the shelf with a saturated native media lane: every first-screen case shows its cover within 30 s', async()=>{
+  // Gate (MOBILE-PERF-002): the first 8 cover requests meet a full native queue ("media_busy")
+  // and the next 4 fail outright (a bridge timeout or native "Media busy"); the rest take 2 s.
+  // Before the retry, those 12 covers stayed blank until the tab changed.
+  let requests=0;
+  mocks.native.mockImplementation((op:string)=>{
+    if(op!=='collectionArtwork')return Promise.resolve({});
+    const n=++requests;
+    if(n<=8)return Promise.reject(Object.assign(new Error('요청이 많습니다. 잠시 후 다시 시도해 주세요.'),{status:null,details:{code:'media_busy'}}));
+    if(n<=12)return new Promise((_,reject)=>setTimeout(()=>reject(new Error('Media busy')),500));
+    return new Promise(resolve=>setTimeout(()=>resolve({url:'https://app.lakomics.local/media-cache/0/x',expires_in:240}),2000));
+  });
+  localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout:'shelf',perRow:4}));
+  render(<Collections active paused={false} backRef={{current:null}}/>);
+  await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
+  for(let t=0;t<30;t++)await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});
+  // The shared light case shows the cover through StableImage; a case still without one shows its material.
+  const shown=[...document.querySelectorAll('.collection-light-case .cs-front img')].filter(image=>(image as HTMLElement).style.visibility!=='hidden').length;
+  console.info(`[perf] collections shelf saturated cold start: firstScreen=${FIRST_SCREEN} requested=${requests} shownAt30s=${shown}`);
   expect(shown).toBe(FIRST_SCREEN);
   // 16 covers, 8 busy and 4 failed replies each retried once: never a retry storm.
   expect(requests).toBeLessThanOrEqual(FIRST_SCREEN+12);

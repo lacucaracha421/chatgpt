@@ -5,7 +5,7 @@ import { workArtworkThumbnailUrl } from "../../assets/mediaUrl";
 import { StableImage } from "../../shared/ui/StableImage";
 import { useSpineArtworkRevision } from "../launchBoxSpines";
 import { avGateway } from "../avClient";
-import { CASE_PLASTIC, CaseSpine, casePlatform, spineInsertClass, type CaseData } from "./CollectionCase";
+import { CASE_PLASTIC, CaseSpine, spineInsertClass, workCasePlatform, type CaseData } from "./CollectionCase";
 import "./LightCase.css";
 
 export function CollectionShelfCase({ collection, front, privacy, active, selected }: { collection: CollectionSummary; front: string | null; privacy: boolean; active: boolean; selected: boolean }) {
@@ -39,7 +39,7 @@ export function CollectionShelfCase({ collection, front, privacy, active, select
     void load();
     return () => { current = false; };
   }, [active, privacy, collection.id, collection.type, collection.updatedAt, gateway, spineRevision]);
-  const data: CaseData = { title: collection.name, publisher: collection.publisher, platform: collection.type === "av" ? "av" : collection.type === "movie" ? "film" : casePlatform(collection.platforms, owned?.id === collection.id ? owned.platform : null), front: art.front ?? front, spine: art.spine, privacy };
+  const data: CaseData = { title: collection.name, publisher: collection.publisher, platform: workCasePlatform(collection.type, collection.platforms, owned?.id === collection.id ? owned.platform : null), front: art.front ?? front, spine: art.spine, privacy };
   return <LightCase data={data} selected={selected} />;
 }
 

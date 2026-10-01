@@ -291,8 +291,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/Collections.css": {
-      "offScaleSpacing": 51,
-      "offRoleFontSize": 29,
+      "offScaleSpacing": 33,
+      "offRoleFontSize": 22,
       "pillRadius": 0,
       "legacyToken": 0
     },
@@ -321,8 +321,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/avCollections.css": {
-      "offScaleSpacing": 33,
-      "offRoleFontSize": 24,
+      "offScaleSpacing": 9,
+      "offRoleFontSize": 9,
       "pillRadius": 0,
       "legacyToken": 0
     },

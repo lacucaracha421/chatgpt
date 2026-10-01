@@ -21,7 +21,7 @@ const page=():CollectionPage=>({ready:true,filterVersion:1,revision,publishedAt:
 const commands=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/personal-edits').map(([, ,body])=>body as Record<string,unknown>);
 
 beforeEach(()=>{setOutboxConnection(CONNECTION);
-  localStorage.clear();mocks.api.mockReset();mocks.native.mockReset();
+  localStorage.clear();for(const kind of ['game','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));mocks.api.mockReset();mocks.native.mockReset();
   item={...base};revision='r1';capable=true;
   command=body=>{
     // A tiny server: apply, bump the revision, answer with a receipt.
@@ -171,7 +171,8 @@ it('does not show an edit the device could not store as queued',async()=>{
 });
 
 describe('artwork across a confirmed Showcase edit',()=>{
-  const artwork=()=>[...document.querySelectorAll<HTMLImageElement>('.collection-grid:not(.collection-showcase) .collection-art img, .collection-detail .collection-art img')];
+  // The list card's cover, then the work screen's book (its front face).
+  const artwork=()=>[...document.querySelectorAll<HTMLImageElement>('.collection-grid:not(.collection-showcase) .collection-art img, .collection-detail .manga-bb-front img')];
   const detailCalls=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/w');
   const artworkCalls=()=>mocks.native.mock.calls.filter(([op])=>op==='collectionArtwork');
   /** The list card loads before the detail opens (a hidden list does not load artwork). */
@@ -184,7 +185,7 @@ describe('artwork across a confirmed Showcase edit',()=>{
   }
 
   it('keeps the same image elements and URLs when only the publication revision moved',async()=>{
-    item={...base,selectedWorkArtworkId:'cover',artworkVersions:{cover:{thumbnail:'a'.repeat(64)}}};
+    item={...base,selectedWorkArtworkId:'cover',artworkVersions:{cover:{thumbnail:'a'.repeat(64),original:'b'.repeat(64)}}};
     // Native answers a digest-keyed cache URL, which does not depend on the revision.
     mocks.native.mockImplementation(async(_op:string,payload:{digest:string})=>({url:`https://app.lakomics.local/media-cache/1/${payload.digest.slice(0,8)}`}));
     await openWithArtwork();
@@ -219,7 +220,7 @@ describe('artwork across a confirmed Showcase edit',()=>{
     expect(artwork()[0].getAttribute('src')).toBe('https://example.invalid/r1');
     fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
     await waitFor(()=>expect(artwork()[0].getAttribute('src')).toBe('https://example.invalid/r2'));
-    expect(document.querySelector('.collection-list .collection-art-placeholder')).toBeNull();
+    expect(document.querySelector('.collection-scroll .collection-art-placeholder')).toBeNull();
     artwork().slice(0,1).forEach((image,index)=>expect(image).toBe(before[index]));
   });
 });
@@ -257,18 +258,19 @@ it('moves the Showcase switch once: no flip back between the server receipt and 
 describe('manga detail layout',()=>{
   const manga:CollectionDetail={...base,author:'서유진',publisher:'대원씨아이',year:2021,genres:'Action, Romance, isekai, Slice of Life, Action',
     volumes:[1,2,3,4].map(n=>({id:`v${n}`,volumeNumber:n,editionIndex:0,displayLabel:`${n}권`})),releaseWatch:{enabled:true,available:true},ownedVolumes:[{editionIndex:0,count:2}]};
-  const column=()=>document.querySelector('.collection-detail-intro .collection-detail-identity') as HTMLElement;
+  const column=()=>document.querySelector('.collection-detail .tablet-work__info') as HTMLElement;
 
-  it('puts facts, Korean genres, my rating and owned volumes beside the cover, with no separate info section',async()=>{
+  it('puts the facts, Korean genres, my rating and owned volumes in the information below the book',async()=>{
     item={...manga};
     await openDetail();
     const info=within(column());
     expect(info.getByRole('heading',{level:1,name:'밤의 도서관'})).toBeTruthy();
-    expect(info.getByText('작가 · 서유진')).toBeTruthy();
-    expect(within(info.getByLabelText('작품 정보',{selector:'dl'})).getByText('대원씨아이')).toBeTruthy();
-    expect(info.getByText('2021')).toBeTruthy();
+    const facts=info.getByRole('region',{name:'작품 정보'});
+    expect(within(facts).getByText('서유진')).toBeTruthy();
+    expect(within(facts).getByText('대원씨아이')).toBeTruthy();
+    expect(within(facts).getByText('2021')).toBeTruthy();
     expect(within(info.getByRole('list',{name:'장르'})).getAllByRole('listitem').map(li=>li.textContent)).toEqual(['액션','로맨스','이세계','일상']);
-    // 내 기록 lives inside the column: rating and owned volumes, both editable.
+    // 내 기록 lives in the information: rating and owned volumes, both editable.
     expect(column().contains(personal())).toBe(true);
     fireEvent.click(within(personal()).getByRole('button',{name:/내 평점 ★ 3.0 \/ 5/}));
     expect(await screen.findByRole('dialog',{name:'내 평점'})).toBeTruthy();
@@ -277,13 +279,14 @@ describe('manga detail layout',()=>{
     // The top bar carries Showcase (off) and 신간 알림 (on) as toggles.
     expect(within(actions()).getByRole('button',{name:'쇼케이스'}).getAttribute('aria-pressed')).toBe('false');
     expect(within(actions()).getByRole('button',{name:'신간 알림'}).getAttribute('aria-pressed')).toBe('true');
+    // The bookcase marks the volumes not owned; the provider overview stays hidden.
+    expect(screen.getByRole('button',{name:'3권 보기'}).classList.contains('manga-spine--missing')).toBe(true);
+    expect(screen.getByRole('button',{name:'2권 보기'}).classList.contains('manga-spine--missing')).toBe(false);
+    expect(screen.queryByText('provider')).toBeNull();
     const owned=within(personal()).getByRole('button',{name:'소장 2권까지, 바꾸기'});
     expect(owned.textContent).toContain('2권까지 / 전체 4권');
     fireEvent.click(owned);
     expect(await screen.findByRole('dialog',{name:'소장 권수'})).toBeTruthy();
-    // Nothing is repeated below: no 작품 정보 section, and the provider overview stays hidden.
-    expect(screen.queryByRole('region',{name:'작품 정보 영역'})).toBeNull();
-    expect(screen.queryByText('provider')).toBeNull();
   });
 
   it('shows Showcase membership read-only in the bar while the server lacks the capability',async()=>{

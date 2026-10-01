@@ -40,6 +40,10 @@ beforeEach(()=>{
 afterEach(()=>{cleanup();vi.unstubAllGlobals();delete window.LakomicsNative;});
 it('opens Home 작가 전체 in the 에셋 작가 segment instead of the detail overlay',async()=>{
  render(<App/>);
+ // Without a saved connection the start settles on the 에셋 root once the first library page
+ // loads (the startup root read); Home is opened from there, not from the transient first frame.
+ await screen.findByRole('heading',{name:'에셋'});
+ fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name:'홈'}));
  fireEvent.click(await screen.findByRole('button',{name:'작가 전체'}));
  expect(await screen.findByRole('radio',{name:'작가'})).toBeTruthy();
  expect(screen.queryByRole('heading',{name:'작가'})).toBeNull();

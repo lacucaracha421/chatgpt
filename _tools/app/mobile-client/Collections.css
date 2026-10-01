@@ -2,7 +2,7 @@
    continuously scrolled grid. The same layout serves portrait and landscape; wider
    screens only add grid columns. */
 .mobile-collections{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;background:var(--color-bg)}
-.collection-list,.collection-detail{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:0 var(--mobile-gutter) 28px}
+.collection-scroll,.collection-detail{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:0 var(--mobile-gutter) 28px}
 .collection-segments{margin-top:4px}
 .collection-search{margin-bottom:8px}
 .collection-search .ui-button--icon{width:40px;min-height:40px;padding:8px}
@@ -29,7 +29,7 @@
 .collection-more-status{text-align:center;padding:16px 0}
 .collection-releases__skeleton-row{width:min(420px,100%);height:48px;margin:16px auto}
 .collection-tile{display:flex;flex-direction:column;min-width:0;background:none;border:0;color:inherit;text-align:left;padding:0;cursor:pointer;font:inherit}
-.collection-tile:focus-visible,.collection-detail-cover:focus-visible,.collection-live-book:focus-visible{outline:2px solid var(--color-focus);outline-offset:4px}
+.collection-tile:focus-visible{outline:2px solid var(--color-focus);outline-offset:4px}
 .collection-tile:active .collection-art{opacity:.8}
 .collection-title{font-size:14px;font-weight:500;line-height:1.35;margin-top:8px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .collection-credit{font-size:12px;color:var(--color-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
@@ -57,31 +57,9 @@
 
 /* Work detail */
 .collection-detail{padding-top:0}
-.collection-backdrop{height:230px;position:relative;margin:0 calc(-1*var(--mobile-gutter))}
-.collection-backdrop .collection-art{height:100%;aspect-ratio:auto;border-radius:0;background:transparent}
-.collection-backdrop img{object-fit:cover}
-.collection-backdrop:after{content:'';position:absolute;inset:0;background:linear-gradient(transparent 30%,var(--color-bg))}
-.collection-hero-original{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-.collection-detail-intro{display:flex;align-items:flex-end;gap:18px;position:relative;padding-top:8px}
-.collection-detail-intro.has-backdrop{margin-top:-150px}
-.collection-detail-cover{width:38%;max-width:180px;flex-shrink:0;background:none;border:0;padding:0;cursor:zoom-in}
-.collection-detail-identity{display:flex;flex-direction:column;gap:4px;min-width:0;padding-bottom:4px}
-.collection-detail-kind{color:var(--color-muted);font-size:12px}
-.collection-detail-identity h1{font-size:22px;line-height:1.25;margin:0;overflow-wrap:anywhere;text-wrap:balance}
-.collection-detail-credit{color:var(--color-muted);font-size:14px;overflow-wrap:anywhere}
-.collection-detail-original{color:var(--color-muted);font-size:13px;line-height:1.3;margin-top:-2px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.collection-facts{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;font-size:13px;color:var(--color-muted)}
-.collection-facts .collection-score{font-size:13px}
-.collection-live-book{position:relative;width:100%;aspect-ratio:2/3;touch-action:pan-y;cursor:zoom-in;outline:none}
-.collection-live-book__canvas{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
-.collection-live-book.is-ready .collection-live-book__canvas canvas{display:block}
-.collection-live-book>.collection-art{position:absolute;inset:0;height:100%}
 .collection-block{margin-top:28px}
 .collection-block>h2{margin-bottom:12px}
 .collection-editions{padding:0 0 12px}
-.collection-volume-shelf{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px 10px}
-@media(min-width:700px){.collection-volume-shelf{grid-template-columns:repeat(6,minmax(0,1fr))}}
-.collection-volume-shelf .collection-tile>span:last-child{font-size:12px;color:var(--color-muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .collection-season-strip{display:flex;gap:10px;overflow-x:auto;margin:0 calc(-1*var(--mobile-gutter));padding:0 var(--mobile-gutter) 4px;scrollbar-width:none}
 .collection-season{width:120px;flex-shrink:0;display:flex;flex-direction:column;gap:4px;padding:4px;background:none;border:0;border-radius:var(--radius-sm);color:inherit;text-align:left;font:inherit;cursor:pointer}
 .collection-season[aria-pressed=true]{background:var(--color-selected)}
@@ -103,11 +81,6 @@
 .collection-film-subtitle{color:var(--color-muted);font-size:13px;margin:-6px 0 4px}
 .collection-overview{margin:0;line-height:1.6;max-width:65ch;white-space:pre-line}
 .collection-overview.is-clamped{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.collection-information .collection-overview-toggle{min-height:36px;padding:4px 0;color:var(--color-muted);font-size:13px}
-.collection-metadata{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;margin:14px 0 0;font-size:14px}
-.collection-metadata div{display:contents}
-.collection-metadata dt{color:var(--color-muted)}
-.collection-metadata dd{margin:0;overflow-wrap:anywhere}
 
 /* Sheets */
 .collection-sheet-label{margin:14px 4px 2px;font-size:12px;color:var(--color-muted)}
@@ -138,7 +111,6 @@
 .collection-turnable canvas{width:100%;height:100%;display:block;opacity:0}
 .collection-turnable.is-ready canvas{opacity:1}
 .collection-turnable__status{position:absolute}
-.collection-volume-date{color:var(--color-muted)}
 /* Personal fields: my rating, Showcase membership and memo (editable when the server allows). */
 .collection-personal{display:grid;gap:0;border-top:1px solid var(--color-border)}
 .collection-personal-row{display:flex;align-items:center;gap:12px;width:100%;min-height:var(--touch,44px);padding:10px 2px;background:transparent;border:0;border-bottom:1px solid var(--color-border);color:inherit;font:inherit;text-align:left}
@@ -188,31 +160,9 @@
 .collection-release-line.is-out::before{content:none}
 .collection-release-line.is-ahead{color:var(--color-muted);font-weight:500}
 .collection-release-line.is-ahead::before{background:transparent;box-shadow:inset 0 0 0 1px var(--color-muted)}
-/* The 신간 screen: region tabs, then one block per work (cover, name, what matters, volumes). */
-.collection-releases-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;margin-top:4px}
-.collection-releases-head .hint{margin:0}
+/* The 신간 screen (the shared ledger is placed in collectionShelf.css). */
 .collection-release-note{margin:8px 2px}
 .collection-releases-all,.collection-release-action{min-height:var(--touch,44px);color:var(--color-muted);font-size:13px;flex-shrink:0}
-.collection-release-group{border-top:1px solid var(--color-border);padding:12px 0 8px}
-.collection-release-group__head{display:flex;align-items:center;gap:8px}
-.collection-release-group__open{display:flex;align-items:center;gap:12px;flex:1;min-width:0;min-height:64px;padding:0;background:none;border:0;color:inherit;font:inherit;text-align:left;cursor:pointer}
-.collection-release-group__cover{width:52px;flex-shrink:0}
-.collection-release-group__cover .collection-art-placeholder svg{width:16px}
-.collection-release-group__title{display:flex;flex-direction:column;gap:3px;flex:1;min-width:0}
-.collection-release-group__title strong{font-weight:500;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.collection-release-group__title small{font-size:13px;color:var(--color-muted)}
-.collection-release-group__title small.is-ahead{color:var(--color-text)}
-.collection-release-tag{flex-shrink:0;padding:0 6px;border:1px solid var(--color-border);border-radius:var(--radius-sm);color:var(--color-muted);font-size:11px;line-height:1.6}
-.collection-release-volumes{list-style:none;margin:6px 0 0;padding:0 0 0 64px}
-.collection-release-volumes li{display:flex;align-items:center;gap:8px;min-height:40px;border-top:1px solid var(--color-border);font-size:14px}
-.collection-release-volumes li>span:first-child{flex:1;min-width:0;overflow-wrap:anywhere}
-.collection-release-volumes li.is-new>span:first-child{font-weight:600}
-.collection-release-chips{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:8px 0 0;padding:0 0 0 64px}
-.collection-release-chips li{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 10px;border:1px solid var(--color-border);border-radius:var(--radius-sm);font-size:13px}
-.collection-release-chips li.is-new{border-color:var(--color-accent)}
-.collection-release-chips li.is-more{color:var(--color-muted);border-style:dashed}
-.collection-release-others{margin:20px 2px 4px;font-size:13px;font-weight:500;color:var(--color-muted)}
-.collection-release-group__open:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
 /* Tracking rows continue the 내 기록 list; the reason under a disabled switch stays short. */
 .collection-personal-row:disabled{cursor:default}
 .collection-personal-row:disabled .collection-personal-value,.collection-personal-row:disabled .collection-personal-switch{opacity:.45}
@@ -228,19 +178,9 @@
 .collection-owned-value input{width:4.2ch;min-height:56px;padding:0 6px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-sm);color:inherit;font:inherit;font-size:28px;text-align:center}
 .collection-owned-value span{color:var(--color-muted);font-size:14px}
 .collection-owned-shortcuts{justify-content:center}
-/* Detail intro: the cover on the left, the info column on its right (identity, facts, Korean
-   genre chips, then 내 기록: my rating and owned volumes). Manga has no separate info section. */
-.collection-detail-intro:not(.has-backdrop){align-items:flex-start}
-.collection-detail-identity{flex:1}
-@media(min-width:700px){.collection-detail-cover{max-width:220px}}
-.collection-detail-facts{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:8px 0 0;font-size:13px}
-.collection-detail-facts div{display:contents}
-.collection-detail-facts dt{color:var(--color-muted)}
-.collection-detail-facts dd{margin:0;overflow-wrap:anywhere}
+/* Manga 작품 정보: the Korean genre chips under the shared fact rows. */
 .collection-genres{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:10px 0 0;padding:0}
 .collection-genres li{padding:2px 8px;border:1px solid var(--color-border);border-radius:var(--radius-sm);font-size:12px;line-height:1.5}
-.collection-detail-identity .collection-personal{margin-top:14px}
-.collection-detail-identity .collection-personal-row{padding:8px 2px}
 /* Showcase and 신간 알림 as top-bar icon toggles: filled and brighter when on; a dot marks 전송 대기. */
 .collection-bar-actions{display:flex;align-items:center;gap:2px}
 .collection-bar-action{position:relative}
@@ -252,12 +192,12 @@
 .collection-bar-pending{position:absolute;top:9px;right:9px;width:6px;height:6px;border-radius:50%;background:transparent;pointer-events:none}
 .collection-bar-action.is-pending .collection-bar-pending{background:var(--color-text)}
 .collection-toast{position:fixed;z-index:190;left:50%;transform:translateX(-50%);bottom:calc(72px + env(safe-area-inset-bottom));width:max-content;max-width:calc(100vw - 2*var(--mobile-gutter,16px));margin:0;padding:10px 14px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-sidebar);color:var(--color-text);box-shadow:var(--shadow-dialog);font-size:13px}
-.collection-list{padding-top:6px}
+.collection-scroll{padding-top:6px}
 
 /* Tablet collections A: the type switch is below the bar and the page reads as sections. */
 .mobile-collections>.collection-type-switch{flex-shrink:0;padding:16px 24px 0}
 .mobile-collections>.collection-type-switch .ui-segmented{min-height:44px}
-.mobile-collections>.collection-list{padding-inline:24px}
+.mobile-collections>.collection-scroll{padding-inline:24px}
 .collection-shelf{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 32px)/5);gap:8px;overflow-x:auto;margin:8px 0 8px;padding:0 0 4px;scrollbar-width:none}
 .collection-shelf::-webkit-scrollbar{display:none}
 .collection-shelf>.collection-showcase-tile{width:auto;min-width:0}

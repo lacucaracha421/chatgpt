@@ -22,7 +22,7 @@ const props={active:true,paused:false,backRef:{current:null}};
 const openAv=async()=>fireEvent.click(await screen.findByRole('radio',{name:'AV'}));
 
 beforeEach(()=>{
-    localStorage.clear();mocks.api.mockReset();mocks.native.mockReset();
+    localStorage.clear();for(const kind of ['game','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));mocks.api.mockReset();mocks.native.mockReset();
   mocks.native.mockImplementation(async(_operation,payload)=>({url:`https://example.invalid/${payload.artworkId??'asset'}-${payload.variant}`}));
   mocks.api.mockImplementation(async(path:string)=>{
     if(path==='/v1/collections/status')return {revision:'r1'};
@@ -35,17 +35,61 @@ beforeEach(()=>{
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
 
 describe('tablet AV collections',()=>{
-  it('renders the 작품 grid and the 배우별 shelves from the same fixture',async()=>{
+  it('renders the 작품 list and the 배우별 shelves from the same fixture, and opens the performer page',async()=>{
     render(<Collections {...props}/>);
     await openAv();
-    expect(await screen.findByText('LMNS-123')).toBeTruthy();
-    expect(document.querySelector('.av-grid')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button',{name:'배우'}));
-    fireEvent.click(screen.getByRole('radio',{name:/아마노 린/}));
-    expect(document.querySelectorAll('.av-grid .av-work-card')).toHaveLength(1);
+    expect(await screen.findByText('오후의 창가')).toBeTruthy();
+    expect(document.querySelector('.collection-grid')).toBeTruthy();
     fireEvent.click(screen.getByRole('tab',{name:'배우별'}));
-    expect(await screen.findByText('하야세 미오')).toBeTruthy();
     expect(document.querySelector('.av-performer-list')).toBeTruthy();
+    const mio=await screen.findByRole('button',{name:/하야세 미오/});
+    expect(screen.getByRole('group',{name:'하야세 미오 작품 선반'}).querySelectorAll('.collection-light-case')).toHaveLength(2);
+    // The performer page: header band, 프로필 counts from the published works, the shelf, co-performers and labels.
+    fireEvent.click(mio);
+    const profile=await screen.findByRole('region',{name:'프로필 정보'});
+    expect(screen.getByRole('heading',{level:1,name:'하야세 미오'})).toBeTruthy();
+    expect(profile.textContent).toContain('2편 · 단독 1');
+    expect(profile.textContent).toContain('8.14');
+    expect(profile.textContent).toContain('4.0');
+    expect(screen.getByRole('button',{name:'아마노 린 1편'})).toBeTruthy();
+    expect(screen.getByRole('region',{name:'레이블'}).textContent).toContain('루미너스·프리미엄');
+    fireEvent.click(screen.getByRole('radio',{name:'단독'}));
+    await waitFor(()=>expect(screen.getByRole('group',{name:'배우 작품 선반'}).querySelectorAll('.collection-card')).toHaveLength(1));
+    fireEvent.click(screen.getByRole('radio',{name:'전체'}));
+    // A first tap turns the case to the front; a second opens the work, and Back returns to the performer.
+    const work=()=>screen.getByRole('group',{name:'배우 작품 선반'}).querySelector('[data-collection-id="av-a"]') as HTMLElement;
+    await waitFor(()=>expect(work()).toBeTruthy());
+    fireEvent.click(work());expect(work().getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(work());
+    expect(await screen.findByRole('article',{name:'AV 작품 화면'})).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
+    expect(await screen.findByRole('region',{name:'프로필 정보'})).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
+    expect(await screen.findByRole('tab',{name:'배우별'})).toBeTruthy();
+  });
+
+  it('stands AV works on the shelf as cases: a tap picks, a second tap opens the work screen with its flat jacket',async()=>{
+    localStorage.setItem('lakomics.mobile.collectionView.av.v1',JSON.stringify({layout:'shelf',perRow:4}));
+    const base=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async(path:string)=>path==='/v1/collections/av-b'?{revision:'r1',item:{...detail,...avB,type:'av',artworks:[]}}:base(path));
+    render(<Collections {...props}/>);
+    await openAv();
+    const list=await screen.findByRole('group',{name:'AV 작품 목록'});
+    const tile=list.querySelector('[data-collection-id="av-a"]') as HTMLElement;
+    fireEvent.click(tile);
+    expect(tile.getAttribute('aria-selected')).toBe('true');
+    expect(screen.queryByRole('article',{name:'AV 작품 화면'})).toBeNull();
+    fireEvent.click(tile);
+    const screenArticle=await screen.findByRole('article',{name:'AV 작품 화면'});
+    expect(screen.getByRole('heading',{level:1,name:'午後の窓辺と、ひとりの時間'})).toBeTruthy();
+    // Front, spine and back come from the published artworks; the strip offers the flat jacket.
+    await waitFor(()=>expect(screenArticle.querySelectorAll('.kase img.cv')).toHaveLength(3));
+    expect(screen.getByRole('button',{name:'펼친 표지'})).toBeTruthy();
+    expect(screen.getByText(/LMNS-123 · 8\.14 · 1 \/ 2/)).toBeTruthy();
+    // The next work replaces this one once its faces are ready.
+    fireEvent.click(screen.getByRole('button',{name:'다음 작품'}));
+    await waitFor(()=>expect(screen.getByText(/LMNS-124 · 8\.14 · 2 \/ 2/)).toBeTruthy());
+    expect((screen.getByRole('button',{name:'다음 작품'}) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('normalizes a typed code, sends the tablet client request, and records the sent code',async()=>{
@@ -129,7 +173,7 @@ describe('tablet AV collections',()=>{
   it('persists the last-used 작품 · 배우별 view',async()=>{
     const first=render(<Collections {...props}/>);
     await openAv();
-    await screen.findByText('LMNS-123');
+    await screen.findByText('오후의 창가');
     fireEvent.click(screen.getByRole('tab',{name:'배우별'}));
     expect(localStorage.getItem('lakomics.mobile.avListView')).toBe('performers');
     first.unmount();
@@ -156,7 +200,7 @@ describe('tablet AV collections',()=>{
     });
     render(<Collections {...props}/>);
     await openAv();
-    fireEvent.click(await screen.findByText('LMNS-123'));
+    fireEvent.click(await screen.findByText('오후의 창가'));
     expect(await screen.findByRole('heading',{name:'午後の窓辺と、ひとりの時間'})).toBeTruthy();
     expect(screen.queryByLabelText('같은 배우의 다른 작품')).toBeNull();
     expect(screen.queryByLabelText('같은 시리즈')).toBeNull();

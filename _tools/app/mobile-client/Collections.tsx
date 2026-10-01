@@ -1,19 +1,25 @@
 import {usePublicationCheck} from './usePublicationCheck';
-import {CollectionMetadata} from './CollectionMetadata';
 import {CollectionPersonal,PersonalActions,PersonalRecord,type PersonalSheet} from './CollectionPersonal';
 import {koreanGenres} from '../src/collections/genreNames';
+import {CollectionList} from '../src/collections/CollectionList';
+import {CaseFacts} from '../src/collections/case/CollectionCase';
+import {moreWorkFacts, workFacts} from '../src/collections/work/workFacts';
+import {latestKoreanRelease} from '../src/collections/releaseCaption';
+import {ShelfTile, ShelfViewSheet, useShelfViews} from './CollectionShelf';
+import {CaseWork, MangaWork, sharedVolume} from './CollectionWork';
+import {AvPerformerScreen} from './AvPerformer';
 import {useCollectionEdits} from './useCollectionEdits';
 import {CollectionReleases} from './CollectionReleases';
 import {commitReleases, invalidateReleases, loadShelf, observePublication, releaseEpoch, releaseStore, subscribeReleases} from './releaseStore';
-import {allUnreadReleases, localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCounts, releaseRevision, type ReleaseCaption, type ReleaseCounts} from './collectionReleases';
+import {allUnreadReleases, localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseBoardEntry, releaseCaption, releaseCounts, releaseRevision, type ReleaseCaption, type ReleaseCounts} from './collectionReleases';
 import {releaseRows} from './homeDashboard';
 import {normalizeReleaseCalendarReply, releaseDateLabel, releaseDaysUntil, type ReleaseCalendarEntry, type ReleaseCalendarReply} from './releaseCalendarModel';
 import {FilmDetails} from './FilmDetails';
 import {CollectionBindings} from './CollectionBindings';
 import type {BindProvider} from './collectionBindings';
-import {createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent} from 'react';
+import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent} from 'react';
 import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,useSegmentMotion,type CardArrival} from './motion';
-import {ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, XMarkIcon} from '@heroicons/react/24/outline';
+import {ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
 import {Badge, Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel, SegmentedControl} from './ui';
 import {BottomSheet} from './BottomSheet';
@@ -22,18 +28,16 @@ import {StepSlider} from './StepSlider';
 import {usePullToRefresh} from './usePullToRefresh';
 import {PhysicalCover} from '../src/collections/physical/PhysicalCover';
 import {PaperbackEngine, type BookTexture} from '../src/collections/physical/PaperbackEngine';
-import {loadCoverImage} from '../src/collections/physical/loadCoverImage';
-import {drawGameCase, GAME_CASE_REST} from '../src/collections/drawGameCase';
 import {usePrivacyMode} from './privacyMode';
 import {Scrubber} from './Scrubber';
 import type {ScrubberSort} from './scrubberModel';
 
 import {api, errorText, native} from './transport';
-import {mediaTicket} from './media';
+import {ARTWORK_BUSY_RETRIES, ARTWORK_BUSY_RETRY_MS, ARTWORK_RETRY_MS, ArtworkMemory, ArtworkMemoryContext, artworkSource, artworkTicket, artworkVersion, decoded, mediaBusy, validArtworkUrl, type LoadedArtwork, type Retries} from './collectionArtwork';
 import {collectionCardCredit, collectionCardDate, originalTitle, collectionCover, collectionPath, defaultCollectionFilters, editions, editionVolumes, ratingLabel, SORT_LABELS, sortDirectionLabels, volumeLabel, volumeReleaseLabel} from './collectionModel';
 import type {CollectionDetail, CollectionKind, CollectionPage, CollectionSummary, CollectionFilters as Filters} from './collectionModel';
 import type {Ticket} from './types';
-import {AvCollectionDetail, AvCollectionList, AvLookupSender, type AvListView, AV_LIST_VIEW_KEY} from './AvCollections';
+import {AvCast, AvLookupSender, AvPerformerShelves, AvRelatedWorks, AvViewTabs, type AvListView, AV_LIST_VIEW_KEY} from './AvCollections';
 import {KIND_LABEL} from '../src/collections/collectionFormat';
 import {ddayLabel} from '../src/shared/displayDate';
 import './library.css';
@@ -84,104 +88,7 @@ function ShowcaseCover({work,revision,active,onOpen}:{work:CollectionSummary;rev
 const settledOn=(list:{key:string;busy:boolean},key:string)=>list.key===key&&!list.busy;
 // The detail pane names the work's own maker role rather than a generic "제작자".
 const makerLabels:Record<CollectionKind,string> = {game:'개발사',manga:'작가',movie:'제작사',av:'메이커'};
-/** Manga facts beside the cover: publisher, year and status, then the genres as Korean chips. */
-function MangaFacts({item}:{item:CollectionDetail}) {
-  const rows=([['출판사',item.publisher],['출간년도',item.year],['상태',item.series?.status]] as const).filter(([,value])=>value!=null&&value!=='');
-  const genres=koreanGenres(item.genres);
-  return <>
-    {rows.length>0&&<dl className="collection-detail-facts" aria-label="작품 정보">{rows.map(([label,value])=><div key={label}><dt>{label}</dt><dd className={typeof value==='number'?'numeric':undefined}>{value}</dd></div>)}</dl>}
-    {genres.length>0&&<ul className="collection-genres" aria-label="장르">{genres.map(genre=><li key={genre}>{genre}</li>)}</ul>}
-  </>;
-}
-const detailMaker = (item:CollectionDetail) => (item.type==='game'?item.developer:item.type==='manga'?item.author:item.type==='movie'?item.productionCompany:item.av?.maker)?.trim() ?? '';
 
-// Only visible artwork requests enter this small queue; native owns the disk cache.
-let artworkActive=0;
-const artworkQueue:(()=>void)[]=[];
-export function artworkTicket(item:CollectionSummary, artworkId:string|undefined|null, revision:string, original:boolean, signal:AbortSignal):Promise<Ticket> {
-  return new Promise((resolve,reject)=>{
-    const cancel=()=>{const index=artworkQueue.indexOf(start);if(index>=0)artworkQueue.splice(index,1);reject(new DOMException('Cancelled','AbortError'));};
-    const start=()=>{if(signal.aborted){cancel();return;} artworkActive++;
-      const promise=artworkId ? native<Ticket>('collectionArtwork',{collectionId:item.id,artworkId,variant:original?'original':'thumbnail',revision,digest:item.artworkVersions?.[artworkId]?.[original?'original':'thumbnail']??''},signal) : mediaTicket({id:item.coverAssetId!,kind:'image'},original?'original':'thumbnail',signal);
-      void promise.then(resolve,reject).finally(()=>{signal.removeEventListener('abort',cancel);artworkActive--;while(artworkActive<4&&artworkQueue.length)artworkQueue.shift()!();});
-    };
-    signal.addEventListener('abort',cancel,{once:true}); if(artworkActive<4)start();else artworkQueue.push(start);
-  });
-}
-/**
- * What identifies an artwork's bytes. A published digest names them exactly, and native keys its
- * cache by it, so a publication revision alone (every personal edit, such as Showcase, bumps it)
- * is not a new image. Without a digest the revision is the only version there is.
- */
-function artworkVersion(item:CollectionSummary,id:string|null|undefined,revision:string,original:boolean) {
-  return id?item.artworkVersions?.[id]?.[original?'original':'thumbnail']||revision:'';
-}
-function artworkSource(item:CollectionSummary,id:string|null|undefined,revision:string,original:boolean) {
-  return JSON.stringify([item.id,id??null,item.coverAssetId??null,original?'original':'thumbnail',artworkVersion(item,id,revision,original)]);
-}
-/** Resolves once `url` is decoded (or cannot be), so a replacement never blanks the old image. */
-async function decoded(url:string) {
-  const image=new Image();image.src=url;
-  try{await image.decode?.();}catch{/* the element's own onError reports it */}
-}
-const validArtworkUrl=(url:string)=>/^https:\/\//.test(url)||(import.meta.env.DEV&&url.startsWith('data:image/'));
-type LoadedArtwork = {source:string;url:string};
-/** A decoded list cover is reused for this long unless its ticket says otherwise. */
-const ARTWORK_KEEP_MS=4*60_000;
-/**
- * The Collections screen's decoded list covers, by artwork source. A card that mounts again
- * (a type switched back, a list re-read) shows its cover in its first frame, and the covers a
- * type swap pre-decodes are handed to the cards instead of being requested twice.
- */
-class ArtworkMemory {
-  private urls=new Map<string,{url:string;until:number}>();
-  private loads=new Map<string,Promise<string>>();
-  get(source:string){const hit=this.urls.get(source);if(hit&&hit.until>Date.now())return hit.url;this.urls.delete(source);return null;}
-  put(source:string,ticket:Ticket){this.urls.set(source,{url:ticket.url,until:Date.now()+(ticket.expires_in?ticket.expires_in*1000:ARTWORK_KEEP_MS)});}
-  forget(source:string){this.urls.delete(source);}
-  /** A pre-decode of `source` still under way, if any. */
-  pending(source:string){return this.loads.get(source)??null;}
-  /** Join the first visible request too, so the list and Showcase do not fetch the same cover twice. */
-  request(item:CollectionSummary,id:string|null|undefined,revision:string,original:boolean,signal:AbortSignal):Promise<Ticket>{
-    const source=artworkSource(item,id,revision,original),remembered=this.get(source);
-    if(remembered)return Promise.resolve({url:remembered});
-    let load=this.loads.get(source);
-    if(!load){
-      load=artworkTicket(item,id,revision,original,signal).then(async ticket=>{
-        if(!validArtworkUrl(ticket.url))throw new Error('Invalid artwork');
-        await decoded(ticket.url);this.put(source,ticket);return ticket.url;
-      }).finally(()=>{if(this.loads.get(source)===load)this.loads.delete(source);});
-      this.loads.set(source,load);
-    }
-    const detach=()=>{if(this.loads.get(source)===load)this.loads.delete(source);};
-    signal.addEventListener('abort',detach,{once:true});
-    return load.then(url=>({url})).finally(()=>signal.removeEventListener('abort',detach));
-  }
-  /** Requests and decodes the list covers of `items` that are not ready yet. */
-  preload(items:CollectionSummary[],revision:string,signal:AbortSignal){
-    return Promise.all(items.map(item=>{
-      const id=collectionCover(item),source=artworkSource(item,id,revision,false);
-      if((!id&&!item.coverAssetId)||this.get(source))return undefined;
-      const running=this.loads.get(source);if(running)return running.catch(()=>undefined);
-      const load=artworkTicket(item,id,revision,false,signal).then(async ticket=>{
-        if(!validArtworkUrl(ticket.url))throw new Error('Invalid artwork');
-        await decoded(ticket.url);this.put(source,ticket);return ticket.url;
-      }).finally(()=>{if(this.loads.get(source)===load)this.loads.delete(source);});
-      this.loads.set(source,load);
-      return load.catch(()=>undefined);
-    }));
-  }
-}
-const ArtworkMemoryContext=createContext<ArtworkMemory|null>(null);
-/**
- * A visible artwork that failed tries again after these delays, then stays failed until its tab
- * or visibility changes. A full native media queue ("media_busy") never started the request, so
- * it has its own, longer budget and is not shown as broken while it waits.
- */
-const ARTWORK_RETRY_MS=[1000,3000,10_000] as const;
-const ARTWORK_BUSY_RETRY_MS=2000, ARTWORK_BUSY_RETRIES=10;
-const mediaBusy=(error:unknown)=>(error as {details?:{code?:unknown}|null}|null)?.details?.code==='media_busy';
-type Retries={source:string;failed:number;busy:number};
 /**
  * One artwork image. `physical` renders the shared PC collectible (the game case) from
  * the same ticket, and falls back to the flat image if that renderer cannot draw it; list
@@ -239,10 +146,9 @@ export function Artwork({item,id,revision,original=false,active=true,label,physi
 type Pose={rx:number;ry:number};
 type View={pose:Pose;zoom:number;x:number;y:number};
 const clamp=(value:number,min:number,max:number)=>Math.max(min,Math.min(max,value));
-/** Turning limits keep the printed front in view: neither physical form has spine or back art. */
+/** Turning limits keep the printed front in view: the book has no spine or back art. */
 const BOOK_LIMITS={rest:{rx:.13,ry:.34},rx:[-.35,.45],ry:[-.2,.95]} as const;
-const CASE_LIMITS={rest:GAME_CASE_REST,rx:[-.4,.4],ry:[-.85,.85]} as const;
-type Limits=typeof BOOK_LIMITS|typeof CASE_LIMITS;
+type Limits=typeof BOOK_LIMITS;
 const MAX_ZOOM=3;
 /**
  * The cover viewer's touch model: one finger turns the object inside its limits, two fingers
@@ -318,43 +224,11 @@ function TurnableBook({url,label,onFail}:{url:string;label:string;onFail():void}
     <canvas ref={canvas} aria-hidden="true"/>{!ready&&<span className="collection-turnable__status" role="status">입체 표지를 준비하는 중…</span>}
   </div>;
 }
-/** The game cover as the PC's case, re-projected by its own renderer at the touched angle. */
-function TurnableCase({url,label,onFail}:{url:string;label:string;onFail():void}) {
-  const host=useRef<HTMLDivElement>(null),canvas=useRef<HTMLCanvasElement>(null),image=useRef<HTMLImageElement|null>(null),frame=useRef(0);
-  const current=useRef<View>({pose:{...CASE_LIMITS.rest},zoom:1,x:0,y:0}),settle=useRef(0);
-  const [ready,setReady]=useState(false);
-  const failed=useRef(onFail);failed.current=onFail;
-  // A lighter raster while the finger moves, then a sharp one once it rests.
-  const draw=useCallback((sharp:boolean)=>{
-    frame.current=0;const box=host.current?.getBoundingClientRect(),element=canvas.current,view=current.current;
-    if(!box||!element||!image.current||box.width<1)return;
-    const cssWidth=Math.min(box.width,box.height*184/260);
-    // `width` is in CSS pixels; the renderer applies the device pixel ratio itself.
-    const detail=sharp?Math.min(view.zoom,2):1;
-    if(!drawGameCase(element,image.current,cssWidth*detail/2,undefined,{...view.pose,maxRatio:16})){failed.current();return;}
-    element.style.width=`${cssWidth}px`;element.style.height=`${cssWidth*260/184}px`;
-    element.style.transform=`translate(${view.x}px,${view.y}px) scale(${view.zoom})`;
-  },[]);
-  const request=useCallback(()=>{
-    if(!frame.current)frame.current=requestAnimationFrame(()=>draw(false));
-    clearTimeout(settle.current);settle.current=window.setTimeout(()=>draw(true),160);
-  },[draw]);
-  const gesture=useTurnGesture(CASE_LIMITS,view=>{current.current=view;request();});
-  useEffect(()=>{
-    const controller=new AbortController();
-    void loadCoverImage(url,controller.signal).then(value=>{if(controller.signal.aborted){value.src='';return;}image.current=value;setReady(true);draw(true);},()=>{if(!controller.signal.aborted)failed.current();});
-    const resize=typeof ResizeObserver==='undefined'?null:new ResizeObserver(()=>draw(true));if(host.current)resize?.observe(host.current);
-    return()=>{controller.abort();resize?.disconnect();if(frame.current)cancelAnimationFrame(frame.current);clearTimeout(settle.current);if(image.current)image.current.src='';image.current=null;};
-  },[url,draw]);
-  return <div ref={host} className={`collection-turnable ${ready?'is-ready':''}`} role="img" aria-label={`${label} 입체 케이스`} {...gesture.handlers}>
-    <canvas ref={canvas} aria-hidden="true"/>{!ready&&<span className="collection-turnable__status" role="status">입체 케이스를 준비하는 중…</span>}
-  </div>;
-}
-/** The cover viewer's body: the flat artwork, or the type's physical form when switched on. */
+/** The manga cover viewer's body: the flat artwork, or the paperback when switched on. */
 function CoverStage({item,id,revision,label,mode,onFlat}:{item:CollectionDetail;id:string|null|undefined;revision:string;label:string;mode:'3d'|'flat';onFlat():void}) {
   const [url,setUrl]=useState<{source:string;url:string}|null>(null);
   const source=artworkSource(item,id,revision,true);
-  const physical=mode==='3d'&&(item.type==='manga'||item.type==='game');
+  const physical=mode==='3d'&&item.type==='manga';
   useEffect(()=>{
     if(!physical||(!id&&!item.coverAssetId)||url?.source===source)return;
     const controller=new AbortController();
@@ -363,23 +237,7 @@ function CoverStage({item,id,revision,label,mode,onFlat}:{item:CollectionDetail;
   },[physical,source]);
   if(!physical)return <Artwork item={item} id={id} revision={revision} label={label} original/>;
   if(url?.source!==source)return <span className="collection-turnable" role="status">입체 표지를 준비하는 중…</span>;
-  return item.type==='manga'?<TurnableBook key={source} url={url.url} label={label} onFail={onFlat}/>:<TurnableCase key={source} url={url.url} label={label} onFail={onFlat}/>;
-}
-function HeroArtwork({item,id,revision,active}:{item:CollectionDetail;id:string;revision:string;active:boolean}) {
-  const [original,setOriginal]=useState<LoadedArtwork|null>(null),loaded=useRef<string|null>(null);
-  const available=item.artworks.find(art=>art.id===id)?.originalAvailable===true;
-  const source=JSON.stringify([artworkSource(item,id,revision,true),available]);
-  useEffect(()=>{
-    if(!active||!available||loaded.current===source)return;
-    const controller=new AbortController();
-    void artworkTicket(item,id,revision,true,controller.signal).then(async ticket=>{
-      if(controller.signal.aborted)return;
-      const image=new Image();image.src=ticket.url;await image.decode();
-      if(!controller.signal.aborted){loaded.current=source;setOriginal({source,url:ticket.url});}
-    // A failed replacement stops showing an original that no longer matches this artwork.
-    }).catch(()=>{if(!controller.signal.aborted)setOriginal(current=>current?.source===source?current:null);});return()=>controller.abort();
-  },[source,active]);
-  return <div className="collection-backdrop"><Artwork item={item} id={id} revision={revision} active={active}/>{available&&original&&<img className="collection-hero-original" src={original.url} alt="" onError={()=>{loaded.current=null;setOriginal(null);}}/>}</div>;
+  return <TurnableBook key={source} url={url.url} label={label} onFail={onFlat}/>;
 }
 function SeriesDetails({item,revision,active}:{item:CollectionDetail;revision:string;active:boolean}) {
   const seasons=item.series?.seasons??[];
@@ -525,7 +383,13 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   // What the server serves may have changed: the lists re-read, and so does the shared 신간 read on its next show.
   const bump=useCallback(()=>{invalidateReleases();setRefresh(n=>n+1);},[]);
   const [sectionPreferences,setSectionPreferences]=useState<SectionPreferences>(readSectionPreferences),[showcaseAll,setShowcaseAll]=useState(false);
-  const [sheet,setSheet]=useState<'sort'|'rating'|null>(null);
+  const [sheet,setSheet]=useState<'sort'|'rating'|'view'|'performerSort'|null>(null);
+  // 보기 per type (격자 · 선반, 한 줄에 N개), the case a tap turned to the front, and the order a work was opened from.
+  const [viewOf,patchView]=useShelfViews();
+  const [picked,setPicked]=useState<string|null>(null),[order,setOrder]=useState<string[]>([]);
+  const stepping=useRef(false);
+  // The AV performer page: `from` is the work it was opened from (Back returns there).
+  const [performer,setPerformer]=useState<{id:string;from:string|null}|null>(null),[performerOrder,setPerformerOrder]=useState<'newest'|'oldest'>('newest');
   const [personalSheet,setPersonalSheet]=useState<PersonalSheet>(null);
   // MangaDex / 카카오 연결: the open search sheet in the manga detail.
   const [bindSheet,setBindSheet]=useState<BindProvider|null>(null);
@@ -539,13 +403,13 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   const takeReleaseCounts=useCallback((reply:unknown)=>{setReleases(releaseCounts(reply));setReleaseListRevision(releaseRevision(reply));},[]);
   const [selected,setSelected]=useState<string|null>(null),[detail,setDetail]=useState<{revision:string;item:CollectionDetail}|null>(null),[detailError,setDetailError]=useState(''),[detailRefresh,setDetailRefresh]=useState(0);
   const [avView,setAvView]=useState<AvListView>(()=>{try{return localStorage.getItem(AV_LIST_VIEW_KEY)==='performers'?'performers':'works';}catch{return 'works';}});
-  const [edition,setEdition]=useState(0),[coverIndex,setCoverIndex]=useState<number|null>(null),[volumeLimit,setVolumeLimit]=useState(96),[overview,setOverview]=useState(false);
+  const [edition,setEdition]=useState(0),[coverIndex,setCoverIndex]=useState<number|null>(null),[overview,setOverview]=useState(false);
   // The viewer opens covers in their physical form; the choice holds while browsing.
   const [coverMode,setCoverMode]=useState<'3d'|'flat'>('3d');
-  const sectionRef=useRef<HTMLElement>(null),listRef=useRef<HTMLDivElement>(null),showcaseRef=useRef<HTMLDivElement>(null),detailRef=useRef<HTMLDivElement>(null);
+  const sectionRef=useRef<HTMLElement>(null),listRef=useRef<HTMLDivElement>(null),showcaseRef=useRef<HTMLDivElement>(null),detailRef=useRef<HTMLDivElement>(null),performerRef=useRef<HTMLDivElement>(null);
   const listScroll=useRef(0);
   const live=active&&!paused;
-  useEffect(()=>{if(privacyMode&&tab==='av'){setTab('game');setSelected(null);setDetail(null);}},[privacyMode,tab]);
+  useEffect(()=>{if(privacyMode&&tab==='av'){setTab('game');setSelected(null);setPerformer(null);setDetail(null);}else if(privacyMode)setPerformer(null);},[privacyMode,tab]);
   const filtered=!!search||filters.rating!=='all';
   const showcaseOpen=sectionPreferences[tab].showcase;
   const newsOpen=sectionPreferences[tab].news;
@@ -567,7 +431,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   const showcase=useCollectionList(cursor=>collectionPath(type,'',true,cursor),showcaseKey,wantShowcase,{slot:type,prepare:prepareCovers});
   const showcaseItems=showcase.committed?showcase.items:[];
   const showcasePage=showcase.committed?showcase.page:null;
-  const listPull=usePullToRefresh(listRef,bump,main.busy,!live||!!selected||showcaseAll||inboxOpen);
+  const listPull=usePullToRefresh(listRef,bump,main.busy,!live||!!selected||showcaseAll||inboxOpen||!!performer);
   const showcasePull=usePullToRefresh(showcaseRef,bump,showcase.busy,!live||!showcaseAll||!!selected);
   const detailPull=usePullToRefresh(detailRef,()=>setDetailRefresh(n=>n+1),!!selected&&!detail&&!detailError,!active||paused||!selected);
   // An accepted personal edit changes what the server serves; re-read both views.
@@ -576,9 +440,11 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   const detailKey=JSON.stringify([selected,detailRefresh]);
   const committedDetail=useRef('');
   useEffect(()=>{
-    committedDetail.current='';setDetail(current=>current?.item.id===selected?current:null);
-    setDetailError('');setCoverIndex(null);setOverview(false);setVolumeLimit(96);setPersonalSheet(null);setBindSheet(null);
-    if(detailRef.current)detailRef.current.scrollTop=0;
+    // A step to the previous/next work keeps the shown work (inert) until the next one is ready.
+    const step=stepping.current;stepping.current=false;
+    committedDetail.current='';if(!step)setDetail(current=>current?.item.id===selected?current:null);
+    setDetailError('');setCoverIndex(null);setOverview(false);setPersonalSheet(null);setBindSheet(null);
+    if(!step&&detailRef.current)detailRef.current.scrollTop=0;
   },[selected]);
   useEffect(()=>{
     if(!active||paused||!selected||committedDetail.current===detailKey)return;
@@ -623,10 +489,12 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   useEffect(()=>observePublication(main.page?.revision),[main.page?.revision]);
   // Restore the list position when its committed query is shown again, before it is painted.
   // A remembered query (a type switched back to) commits without passing through loading.
-  useLayoutEffect(()=>{if(!selected&&!showcaseAll&&!inboxOpen&&listRef.current&&main.committed)listRef.current.scrollTop=listScroll.current;},[selected,showcaseAll,inboxOpen,main.committed,main.key,active]);
+  useLayoutEffect(()=>{if(!selected&&!showcaseAll&&!inboxOpen&&!performer&&listRef.current&&main.committed)listRef.current.scrollTop=listScroll.current;},[selected,showcaseAll,inboxOpen,performer,main.committed,main.key,active]);
 
   // A work opened over 신간 closes back to 신간; the entry level opened from Home closes back to Home.
-  const closeWork=useCallback(()=>{setSelected(null);if(!inboxOpen)onReturnHome?.();},[inboxOpen,onReturnHome]);
+  const closeWork=useCallback(()=>{setSelected(null);if(!inboxOpen&&!performer)onReturnHome?.();},[inboxOpen,performer,onReturnHome]);
+  // The performer page returns to the work it was opened from.
+  const closePerformer=useCallback(()=>{if(performer?.from)setSelected(performer.from);setPerformer(null);},[performer]);
   const closeInbox=useCallback(()=>{setInboxOpen(false);onReturnHome?.();},[onReturnHome]);
   const back=useCallback(()=>{
     if(coverIndex!==null){setCoverIndex(null);return true;}
@@ -634,25 +502,32 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
     if(personalSheet){setPersonalSheet(null);return true;}
     if(bindSheet){setBindSheet(null);return true;}
     if(selected){closeWork();return true;}
+    if(performer){closePerformer();return true;}
     if(inboxOpen){closeInbox();return true;}
     if(showcaseAll){setShowcaseAll(false);return true;}
     return false;
-  },[coverIndex,sheet,personalSheet,bindSheet,selected,inboxOpen,showcaseAll,closeWork,closeInbox]);
+  },[coverIndex,sheet,personalSheet,bindSheet,selected,performer,inboxOpen,showcaseAll,closeWork,closePerformer,closeInbox]);
   useEffect(()=>{backRef.current=back;return()=>{backRef.current=null;};},[back,backRef]);
   useEffect(()=>{if(!active||paused)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&coverIndex===null&&!sheet&&!personalSheet&&!bindSheet){if(back())event.preventDefault();}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[active,paused,back,coverIndex,sheet,personalSheet,bindSheet]);
   useEffect(()=>{if(!active)setSheet(null);},[active]);
 
-  const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;setShowcaseAll(false);setQuery('');setSearch('');setTab(next);};
+  const chooseTab=(next:CollectionTab)=>{if(next===tab)return;listScroll.current=0;setShowcaseAll(false);setQuery('');setSearch('');setPicked(null);setTab(next);};
   const chooseAvView=(next:AvListView)=>{setAvView(next);try{localStorage.setItem(AV_LIST_VIEW_KEY,next);}catch{/* optional device preference */}};
   const changeFilters=(next:Filters)=>{if(next.sort===filters.sort&&next.direction===filters.direction&&next.rating===filters.rating)return;listScroll.current=0;if(listRef.current)listRef.current.scrollTop=0;setFiltersByType(current=>({...current,[type]:next}));};
-  const openWork=(id:string)=>{if(listRef.current&&!showcaseAll&&!inboxOpen)listScroll.current=listRef.current.scrollTop;setSheet(null);setSelected(id);};
+  /** Opens a work; `from` is the list it was opened in, which a swipe on the work steps through. */
+  const openWork=(id:string,from?:string[])=>{if(listRef.current&&!showcaseAll&&!inboxOpen&&!performer)listScroll.current=listRef.current.scrollTop;setSheet(null);setOrder(from?.includes(id)?from:[id]);setSelected(id);};
+  const stepWork=(offset:-1|1)=>{const index=order.indexOf(selected??''),next=order[index+offset];if(index<0||!next)return;stepping.current=true;setSelected(next);};
+  /** On the shelf a first tap turns the case to the front; a tap on the picked case opens it. */
+  const tapWork=(items:CollectionSummary[])=>(id:string)=>{if(picked===id)openWork(id,items.map(work=>work.id));else setPicked(id);};
+  const openPerformer=(id:string)=>{setSheet(null);setPerformer(current=>({id,from:selected??current?.from??null}));setSelected(null);};
   const openInbox=()=>{if(listRef.current&&!showcaseAll)listScroll.current=listRef.current.scrollTop;setSheet(null);setInboxOpen(true);};
   // Home opens the 신간 screen or one work's detail here.
   useEffect(()=>{
     if(!request)return;
     setSheet(null);setCoverIndex(null);setShowcaseAll(false);
+    setPerformer(null);
     if(request.kind==='releases'){setSelected(null);setInboxOpen(true);}
-    else {setInboxOpen(false);setSelected(request.id);}
+    else {setInboxOpen(false);setOrder([request.id]);setSelected(request.id);}
   },[request]);
   const unreadOf=(work:CollectionSummary)=>releases.byCollection[work.id]??0;
   // The 신간 screen reads owned counts and 신간 알림 through the edit outbox, so a queued change shows at once.
@@ -678,14 +553,10 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
 
   const item=detail?.item, volumes=item?editionVolumes(item.volumes,edition):[], editionOptions=item?editions(item.volumes):[];
   const covers=item?[{id:collectionCover(item),label:item.name},...volumes.map(v=>({id:v.coverArtworkId,label:[volumeLabel(v),volumeReleaseLabel(v)].filter(Boolean).join(' · ')}))]:[];
-  const physical=item?.type==='manga'||item?.type==='game';
-  const background=item?(item.type==='game'?item.selectedHeroArtworkId:item.selectedBackdropArtworkId):null;
-  const maker=item?detailMaker(item):'';
+  const physical=item?.type==='manga';
   const revision=main.page?.revision??'';
   // The release-date sort reads as just 최신순/오래된순 (user request, 2026-09-25).
   const sortLabel=filters.sort==='media_date'?sortDirectionLabels(filters.sort)[filters.direction]:`${SORT_LABELS[filters.sort]} · ${sortDirectionLabels(filters.sort)[filters.direction]}`;
-  // The memo (`description`) has its own section; manga overviews are imported provider text.
-  const description=item&&item.type!=='manga'?item.overview:null;
   // A queued rating shows on the cards too, until the list re-reads the server.
   const card=(work:CollectionSummary)=>{const value=edits.visible(work.id,'myScore',work.myScore??null).value;return value===(work.myScore??null)?work:{...work,myScore:value};};
 
@@ -693,7 +564,9 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   const searching=searchOpen||!!query||!!search;
   const closeSearch=()=>{setQuery('');setSearch('');setSearchOpen(false);};
   const header=selected
-    ?<TopBar back={{label:'뒤로',onClick:closeWork}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {inboxOpen?'신간':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</span>} actions={item&&item.id===selected?<PersonalActions item={item} edits={edits}/>:undefined}/>
+    ?<TopBar back={{label:'뒤로',onClick:closeWork}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › {inboxOpen?'신간':performer?'AV › 배우':`${labels[type]}${showcaseAll?' › 쇼케이스':''}`}</span>} actions={item?<div style={{display:'contents'}} inert={item.id!==selected||undefined}><PersonalActions item={item} edits={edits}/></div>:undefined}/>
+    :performer
+      ?<TopBar back={{label:'뒤로',onClick:closePerformer}} crumbs={<span className="top-bar__crumbs is-alone">컬렉션 › AV › 배우</span>}/>
     :inboxOpen
       ?<TopBar back={{label:'뒤로',onClick:closeInbox}} crumbs={<span className="top-bar__crumbs">컬렉션</span>} title="신간"/>
     :showcaseAll
@@ -711,7 +584,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
     ?<section className="collection-news-section" aria-label="소식">
       <CollectionSectionLabel name="신간" count={releases.unread>0?releases.unread:undefined} open={newsOpen} onToggle={()=>setSectionOpen('news',!newsOpen)} onOpen={openInbox}/>
       {newsOpen&&(mangaNews.length>0?<div className="collection-news-block-wrap">
-          <div className="collection-news-covers">{mangaNews.map(({work,unread})=><button key={work.id} className="collection-news-cover" aria-label={work.name} onClick={()=>openWork(work.id)}><span><Artwork item={card(work)} id={collectionCover(work)} revision={releaseData.shelf?.revision??revision} active={live} label={work.name}/>{unread>0&&<Badge variant="accent" className="collection-news-new">NEW</Badge>}</span></button>)}</div>
+          <div className="collection-news-covers">{mangaNews.map(({work,unread})=><button key={work.id} className="collection-news-cover" aria-label={work.name} onClick={()=>openWork(work.id,mangaNews.map(entry=>entry.work.id))}><span><Artwork item={card(work)} id={collectionCover(work)} revision={releaseData.shelf?.revision??revision} active={live} label={work.name}/>{unread>0&&<Badge variant="accent" className="collection-news-new">NEW</Badge>}</span></button>)}</div>
       </div>:<button className="collection-news-empty" onClick={openInbox}>새 신간 없음</button>)}
     </section>
     :tab==='game'||tab==='movie'
@@ -728,7 +601,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   const unpublishedNotice=<EmptyState icon={RectangleStackIcon} title="컬렉션이 아직 공유되지 않았습니다" />;
 
   // Opening a work or the whole Showcase is one level deeper; Back returns from the left.
-  useLevelMotion(sectionRef,active?`${selected??''}|${showcaseAll}|${inboxOpen}`:null,(selected?1:0)+(showcaseAll||inboxOpen?1:0));
+  useLevelMotion(sectionRef,active?`${selected??''}|${performer?.id??''}|${showcaseAll}|${inboxOpen}`:null,(selected?1:0)+(performer?1:0)+(showcaseAll||inboxOpen?1:0));
   // A type switch swaps the list sideways once the new type's list (and its Showcase row, when
   // open) has settled, so the old type's cards never slide in; the bar stays still.
   useSegmentMotion(listRef,tab==='av'||(settledOn(main,mainKey)&&(!wantShowcase||settledOn(showcase,showcaseKey)))?tab:null,(privacyMode?TABS.filter(value=>value!=='av'):TABS).indexOf(tab));
@@ -746,10 +619,20 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       ?{kind:'date',values:main.items.map(work=>work.releaseDate??work.av?.releaseDate??work.createdAt??work.year)}
       :{kind:'fallback'},[avView,filters.sort,main.items,tab]);
   const showcaseScrubberSort=useMemo<ScrubberSort>(()=>({kind:'fallback'}),[]);
+  const view=viewOf(type);
+  // Games, films and AV stand on the shelf as cases; manga is always the cover grid.
+  const shelfMode=view.layout==='shelf'&&shownType!=='manga';
+  const shelfView={layout:'shelf' as const,perRow:view.perRow,grouping:'sort' as const};
+  const listActive=live&&!selected&&!inboxOpen&&!performer;
+  const shelfTile=(items:CollectionSummary[],workRevision:string)=>(work:CollectionSummary)=><ShelfTile item={card(work)} revision={workRevision} active={listActive} privacy={privacyMode} picked={picked===work.id} onTap={tapWork(items)}/>;
+  const showcaseRow=showcaseItems.slice(0,12);
   const showcaseSection=!filtered&&hasShowcase&&<section className="collection-showcase-fold" aria-label="쇼케이스">
     <CollectionSectionLabel name="쇼케이스" count={showcaseCount} open={showcaseOpen} onToggle={()=>setSectionOpen('showcase',!showcaseOpen)} onOpen={()=>setShowcaseAll(true)}/>
     {showcaseOpen&&<div className="collection-news-block-wrap collection-showcase-block">
-      <div className="collection-shelf">{showcase.busy&&!showcaseItems.length&&<p role="status" className="hint">쇼케이스를 불러오는 중…</p>}{showcase.error&&<p className="error-message" role="alert">{showcase.error}</p>}{showcase.committed&&!showcase.busy&&!showcaseItems.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}{showcaseItems.slice(0,12).map(work=><ShowcaseCover key={work.id} work={card(work)} revision={showcasePage?.revision??revision} active={live&&!selected} onOpen={openWork}/>)}</div>
+      {showcase.busy&&!showcaseItems.length&&<p role="status" className="hint">쇼케이스를 불러오는 중…</p>}{showcase.error&&<p className="error-message" role="alert">{showcase.error}</p>}{showcase.committed&&!showcase.busy&&!showcaseItems.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}
+      {shelfMode&&showcaseRow.length>0
+        ?<CollectionList items={showcaseRow} view={shelfView} showcase label={`${labels[type]} 쇼케이스`} onPick={setPicked} render={shelfTile(showcaseRow,showcasePage?.revision??revision)}/>
+        :<div className="collection-shelf">{showcaseRow.map(work=><ShowcaseCover key={work.id} work={card(work)} revision={showcasePage?.revision??revision} active={live&&!selected} onOpen={id=>openWork(id,showcaseRow.map(entry=>entry.id))}/>)}</div>}
     </div>}
   </section>;
   const collectionTypeLabel=<SectionLabel as="h2" className="collection-type-label" title={filtered?'검색 결과':labels[type]} count={!filtered&&main.page?.totalCount!=null ? main.page.totalCount : undefined} />;
@@ -757,16 +640,48 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
     <button className="filter-chip" onClick={()=>setSheet('sort')}><ArrowsUpDownIcon aria-hidden="true"/>{sortLabel}<ChevronDownIcon aria-hidden="true"/></button>
     <button className={`filter-chip ${filters.rating!=='all'?'selected':''}`} onClick={()=>setSheet('rating')}>{filters.rating==='all'?'내 별점':ratingLabel(filters.rating)}<ChevronDownIcon aria-hidden="true"/></button>
     {filters.rating!=='all'&&<button className="filter-chip" onClick={()=>changeFilters({...filters,rating:'all'})}>초기화</button>}
+    <button className="filter-chip" onClick={()=>setSheet('view')}><Squares2X2Icon aria-hidden="true"/>보기<ChevronDownIcon aria-hidden="true"/></button>
   </div>;
+  const typeHeader=<div className="collection-section collection-all"><div className="collection-type-header">{collectionTypeLabel}{filterControls}</div></div>;
+  const mainOrder=main.items.map(work=>work.id);
+  const worksView=shelfMode
+    ?<CollectionList items={main.items} view={shelfView} label={`${labels[type]} 작품 목록`} onPick={setPicked} render={shelfTile(main.items,revision)}/>
+    :<div className={`collection-grid collection-grid-${shownType} is-counted`} style={{'--columns':view.perRow} as CSSProperties}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={listActive} caption={captionOf(work)} onOpen={id=>openWork(id,mainOrder)} arriving={mainArrivals.arriving(work.id)} onArrived={mainArrivals.arrived}/>)}</div>;
+  // The opened work as the shared work screen, its information as the section below the stage.
+  const visibleScore=(work:CollectionDetail)=>edits.visible(work.id,'myScore',work.myScore??null).value;
+  const workInfo=(work:CollectionDetail)=><>
+    <PersonalRecord item={work} edits={edits} onSheet={setPersonalSheet}/>
+    <CollectionPersonal item={work} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
+    <section className="work-info" aria-label="작품 정보"><SectionLabel title="작품 정보"/><CaseFacts rows={[...workFacts(work,work.av??null),...moreWorkFacts(work,work.av??null,work.series?{status:work.series.status}:null)]}/></section>
+    {work.type==='movie'&&work.overview?.trim()&&<section className="work-info" aria-label="개요"><SectionLabel title="개요"/><p className={`collection-overview ${overview?'':'is-clamped'}`}>{work.overview}</p><Button variant="ghost" className="collection-overview-toggle" aria-expanded={overview} onClick={()=>setOverview(open=>!open)}>{overview?'접기':'더 보기'}</Button></section>}
+    {work.type==='movie'&&work.series&&<SeriesDetails item={work} revision={detail?.revision??''} active={active&&!paused}/>}
+    {work.type==='movie'&&work.film&&<FilmDetails key={work.id} film={work.film}/>}
+    {work.type==='av'&&<><AvCast item={work} items={main.items} complete={tab==='av'&&!filtered&&main.committed&&!main.next} revision={revision} onPerson={openPerformer}/><AvRelatedWorks item={work} items={main.items} onOpen={id=>openWork(id,mainOrder)}/></>}
+  </>;
+  const editionVolumesShared=item?.type==='manga'?volumes.map(volume=>sharedVolume(volume,today)):[];
+  const mangaInfo=item?.type==='manga'&&<>
+    <header className="tablet-work__identity"><h1>{item.name}</h1>{originalTitle(item)&&<small>{originalTitle(item)}</small>}</header>
+    <PersonalRecord item={item} edits={edits} onSheet={setPersonalSheet}/>
+    {editionOptions.length>1&&<div className="filter-chips collection-editions" role="radiogroup" aria-label="판본">{editionOptions.map(value=><button key={value} role="radio" aria-checked={edition===value} className={`filter-chip ${edition===value?'selected':''}`} onClick={()=>{setEdition(value);setCoverIndex(null);}}>{value===0?'기본판':`판본 ${value+1}`}</button>)}</div>}
+    <CollectionBindings key={item.id} item={item} active={active&&!paused} refreshKey={`${detailRefresh}:${detail!.revision}`} sheet={bindSheet} onSheet={setBindSheet} panelHost={bindHost}/>
+    <div ref={setBindHost} className="collection-bind-host"/>
+    <CollectionPersonal item={item} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
+    <section className="work-info" aria-label="작품 정보"><SectionLabel title="작품 정보"/><CaseFacts rows={[...workFacts(item,null),...moreWorkFacts(item,null,null)]}/>
+      {koreanGenres(item.genres).length>0&&<ul className="collection-genres" aria-label="장르">{koreanGenres(item.genres).map(genre=><li key={genre}>{genre}</li>)}</ul>}</section>
+  </>;
   return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
     {header}
-    {!selected&&!showcaseAll&&!inboxOpen&&typeSwitch}
-    <div ref={listRef} className="collection-list" style={{display:selected||showcaseAll||inboxOpen?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
+    {!selected&&!showcaseAll&&!inboxOpen&&!performer&&typeSwitch}
+    <div ref={listRef} className="collection-scroll" style={{display:selected||showcaseAll||inboxOpen||performer?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
       {listPull}
       {tab==='av'?<>
       <AvLookupSender/>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
-      {unpublished(main)?unpublishedNotice:main.busy&&!main.committed?<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<EmptyState icon={RectangleStackIcon} title="PC 앱이 AV 작품을 아직 보내지 않았습니다" />:<>{showcaseSection}{collectionTypeLabel}<AvCollectionList items={main.items} showcase={showcaseItems} showcaseOpen={false} onShowcase={()=>{}} revision={revision} active={live&&!selected} view={avView} onView={chooseAvView} onOpen={openWork} total={main.page?.totalCount} filters={filters} sortLabel={sortLabel} onSort={()=>setSheet('sort')} onRating={()=>setSheet('rating')} onReset={()=>changeFilters({...filters,rating:'all'})}/></>}
+      {unpublished(main)?unpublishedNotice:main.busy&&!main.committed?<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<EmptyState icon={RectangleStackIcon} title="PC 앱이 AV 작품을 아직 보내지 않았습니다" />:<>
+        {showcaseSection}
+        <AvViewTabs view={avView} onView={chooseAvView}/>
+        {avView==='works'?<>{typeHeader}{worksView}</>:<AvPerformerShelves items={main.items} revision={revision} active={listActive} privacy={privacyMode} perRow={view.perRow} picked={picked} onTap={tapWork(main.items)} onPerformer={openPerformer}/>}
+      </>}
       {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
       {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
       </>:<>
@@ -774,52 +689,41 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       {unpublished(main)?unpublishedNotice:<>
         {showcaseSection}
         {newsSection}
-        <div className="collection-section collection-all"><div className="collection-type-header">{collectionTypeLabel}{filterControls}</div></div>
+        {typeHeader}
         {main.committed&&!main.items.length&&<EmptyState icon={RectangleStackIcon} title={filtered?'조건에 맞는 작품이 없습니다':'아직 작품이 없습니다'} />}
-        <div className={`collection-grid collection-grid-${shownType}`}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={live&&!selected&&!inboxOpen} caption={captionOf(work)} onOpen={openWork} arriving={mainArrivals.arriving(work.id)} onArrived={mainArrivals.arrived}/>)}</div>
+        {worksView}
         {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
       {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
       </>}</>}
-      <Scrubber scrollRef={listRef} total={main.items.length} sort={mainScrubberSort} hidden={!active||paused||!!selected||showcaseAll||inboxOpen||sheet!==null} onEndReached={main.loadMore}/>
+      <Scrubber scrollRef={listRef} total={main.items.length} sort={mainScrubberSort} hidden={!active||paused||!!selected||showcaseAll||inboxOpen||!!performer||sheet!==null} onEndReached={main.loadMore}/>
     </div>
     {/* Always mounted so its pull-to-refresh gesture is attached; hidden until opened. */}
-    <div ref={showcaseRef} className="collection-list" style={{display:showcaseAll&&!selected?undefined:'none'}} onScroll={event=>{if(nearEnd(event.currentTarget))showcase.loadMore();}}>{showcaseAll&&<>
+    <div ref={showcaseRef} className="collection-scroll" style={{display:showcaseAll&&!selected?undefined:'none'}} onScroll={event=>{if(nearEnd(event.currentTarget))showcase.loadMore();}}>{showcaseAll&&<>
       {showcasePull}
       <p className="hint collection-showcase-note">PC에서 정한 순서대로 보여 줍니다.</p>
       {showcase.error&&<div className="error-message" role="alert">{showcase.error}<Button variant="ghost" onClick={showcase.reload}>처음부터 새로고침</Button></div>}
-      {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcaseItems.map(work=><WorkCard key={work.id} work={work} revision={showcasePage?.revision??''} active={live} meta={false} caption={captionOf(work)} onOpen={openWork} arriving={showcaseArrivals.arriving(work.id)} onArrived={showcaseArrivals.arrived}/>)}</div>}
+      {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcaseItems.map(work=><WorkCard key={work.id} work={work} revision={showcasePage?.revision??''} active={live} meta={false} caption={captionOf(work)} onOpen={id=>openWork(id,showcaseItems.map(entry=>entry.id))} arriving={showcaseArrivals.arriving(work.id)} onArrived={showcaseArrivals.arrived}/>)}</div>}
       {showcase.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
       <Scrubber scrollRef={showcaseRef} total={showcaseItems.length} sort={showcaseScrubberSort} hidden={!active||paused||!!selected||!showcaseAll} onEndReached={showcase.loadMore}/>
     </>}</div>
-    {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={openWork} ownedOf={ownedOf} watching={watching}
+    {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={id=>openWork(id)} ownedOf={ownedOf} watching={watching}
       cover={(work,workRevision,name)=>work?<Artwork item={work} id={collectionCover(work)} revision={workRevision} active={active&&!paused&&!selected} label={name}/>:<span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>}/>}
-    <div ref={detailRef} className="collection-detail" style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item?(!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>):item.type==='av'?<><AvCollectionDetail item={item} items={main.items} revision={detail!.revision} active={active&&!paused} onOpen={openWork} personal={<PersonalRecord item={item} edits={edits} onSheet={setPersonalSheet}/>}/><CollectionPersonal item={item} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/></>:<>
-      {background&&<HeroArtwork item={item} id={background} revision={detail!.revision} active={active&&!paused}/>}
-      <div className={`collection-detail-intro ${background?'has-backdrop':''}`}>
-        <button className="collection-detail-cover" aria-label={`${item.name} 표지 감상`} onClick={()=>setCoverIndex(0)}><Artwork item={item} id={collectionCover(item)} revision={detail!.revision} active={active&&!paused}/></button>
-        <div className="collection-detail-identity"><span className="collection-detail-kind">{labels[item.type]}</span><h1>{item.name}</h1>{item.type==='manga'&&originalTitle(item)&&<span className="collection-detail-original">{originalTitle(item)}</span>}{maker&&<span className="collection-detail-credit">{makerLabels[item.type]} · {maker}</span>}
-          {item.type==='manga'?<MangaFacts item={item}/>:<span className="collection-facts">{collectionCardDate(item)&&<span className="numeric">{collectionCardDate(item)}</span>}{item.series?.status&&<span>{item.series.status}</span>}{item.platforms&&<span>{item.platforms}</span>}</span>}
-          <PersonalRecord item={item} edits={edits} onSheet={setPersonalSheet}/>
-          {item.type==='manga'&&<CollectionBindings key={item.id} item={item} active={active&&!paused} refreshKey={`${detailRefresh}:${detail!.revision}`} sheet={bindSheet} onSheet={setBindSheet} panelHost={bindHost}/>}</div>
-      </div>
-      {item.type==='manga'&&<div ref={setBindHost} className="collection-bind-host"/>}
-      <CollectionPersonal item={item} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
-      {volumes.length>0&&<section className="collection-block collection-volume-section" aria-label="권별 표지"><h2>{volumes.length}권</h2>
-        {editionOptions.length>1&&<div className="filter-chips collection-editions" role="radiogroup" aria-label="판본">{editionOptions.map(value=><button key={value} role="radio" aria-checked={edition===value} className={`filter-chip ${edition===value?'selected':''}`} onClick={()=>{setEdition(value);setVolumeLimit(96);setCoverIndex(null);}}>{value===0?'기본판':`판본 ${value+1}`}</button>)}</div>}
-        <div className="collection-volume-shelf">{volumes.slice(0,volumeLimit).map((volume,index)=><button key={volume.id} className="collection-tile" onClick={()=>setCoverIndex(index+1)}><Artwork item={item} id={volume.coverArtworkId} revision={detail!.revision} active={active&&!paused} label={volumeLabel(volume)}/><span>{volumeLabel(volume)}{volumeReleaseLabel(volume)&&<span className="collection-volume-date numeric"> · {volumeReleaseLabel(volume)}</span>}</span></button>)}</div>
-        {volumes.length>volumeLimit&&<Button variant="ghost" onClick={()=>setVolumeLimit(n=>n+96)}>표지 더 보기</Button>}</section>}
-      {item.type==='movie'&&item.series&&<SeriesDetails item={item} revision={detail!.revision} active={active&&!paused}/>}
-      {item.type==='movie'&&item.film&&<FilmDetails key={item.id} film={item.film}/>}
-      {/* Manga shows its information beside the cover; the other types keep this section. */}
-      {item.type!=='manga'&&<section className="collection-block collection-information" aria-label="작품 정보 영역"><h2>작품 정보</h2>
-        {description&&<><p className={`collection-overview ${overview?'':'is-clamped'}`}>{description}</p><Button variant="ghost" className="collection-overview-toggle" aria-expanded={overview} onClick={()=>setOverview(open=>!open)}>{overview?'접기':'더 보기'}</Button></>}
-        <CollectionMetadata item={item}/></section>}
-    </>}</>}</div>
+    <div ref={performerRef} className="collection-scroll collection-performer-pane" style={{display:performer&&!selected?undefined:'none'}}>{performer&&<AvPerformerScreen personId={performer.id} currentId={performer.from} active={active&&!paused&&!selected} privacy={privacyMode} perRow={viewOf('av').perRow} order={performerOrder}
+      onOpen={(id,ids)=>openWork(id,ids)} onPerformer={id=>setPerformer(current=>({id,from:current?.from??null}))} onSort={()=>setSheet('performerSort')} onView={()=>setSheet('view')}/>}</div>
+    <div ref={detailRef} className="collection-detail" style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item?(!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>)
+      :item.type==='manga'
+        ?<MangaWork key={item.id} item={item} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} volumes={editionVolumesShared} owned={ownedOf(item,edition)}
+          latestKorean={latestKoreanRelease(releaseBoardEntry(item,ownedOf,watching),edition,today)} onEnlarge={id=>setCoverIndex(volumes.findIndex(volume=>volume.id===id)+1)} info={mangaInfo}/>
+        :<CaseWork item={item} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} position={Math.max(1,order.indexOf(item.id)+1)} total={Math.max(1,order.length)} score={visibleScore} onStep={stepWork} info={workInfo}/>}</>}</div>
     {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}>
       <p className="collection-sheet-label">기준</p><div role="radiogroup" aria-label="정렬 기준">{(Object.keys(SORT_LABELS) as Filters['sort'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.sort===value} onClick={()=>changeFilters({...filters,sort:value})}>{SORT_LABELS[value]}<span className="radio-dot"/></button>)}</div>
       <p className="collection-sheet-label">순서</p><div role="radiogroup" aria-label="정렬 순서">{(['desc','asc'] as const).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.direction===value} onClick={()=>changeFilters({...filters,direction:value})}>{sortDirectionLabels(filters.sort)[value]}<span className="radio-dot"/></button>)}</div>
     </BottomSheet>}
+    {sheet==='performerSort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}>
+      <div role="radiogroup" aria-label="정렬 순서">{([['newest','발매일 최신순'],['oldest','발매일 오래된순']] as const).map(([value,label])=><button key={value} className="sheet-option" role="radio" aria-checked={performerOrder===value} onClick={()=>setPerformerOrder(value)}>{label}<span className="radio-dot"/></button>)}</div>
+    </BottomSheet>}
     {sheet==='rating'&&<BottomSheet title="내 별점" onClose={()=>setSheet(null)}><RatingFilterSlider value={filters.rating} onChange={rating=>changeFilters({...filters,rating})}/></BottomSheet>}
+    {sheet==='view'&&<ShelfViewSheet type={performer&&!selected?'av':type} view={viewOf(performer&&!selected?'av':type)} onChange={patch=>patchView(performer&&!selected?'av':type,patch)} onClose={()=>setSheet(null)}/>}
     {active&&!paused&&coverIndex!==null&&item&&covers[coverIndex]&&<Dialog open title={covers[coverIndex].label} onClose={()=>setCoverIndex(null)} variant="wide"><div className="collection-appreciation"><DialogDescription className="sr-only">선택한 표지를 크게 감상합니다.</DialogDescription>
       <div className="dialog-header">{physical&&<div className="collection-cover-mode" role="radiogroup" aria-label="표지 보기 방식">{(['3d','flat'] as const).map(value=><button key={value} role="radio" aria-checked={coverMode===value} onClick={()=>setCoverMode(value)}>{value==='3d'?'입체':'평면'}</button>)}</div>}<IconButton label="표지 감상 닫기" icon={XMarkIcon} onClick={()=>setCoverIndex(null)}/></div>
       <div className="collection-cover-stage"><CoverStage key={`${edition}:${coverIndex}:${coverMode}`} item={item} id={covers[coverIndex].id} revision={detail!.revision} label={covers[coverIndex].label} mode={physical?coverMode:'flat'} onFlat={()=>setCoverMode('flat')}/></div>

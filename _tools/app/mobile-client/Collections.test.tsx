@@ -10,7 +10,7 @@ import {resetReleaseStore} from './releaseStore';
 const item:CollectionDetail={id:'manga-1',name:'밤의 도서관',type:'game',showcase:true,selectedWorkArtworkId:'cover',volumes:[{id:'v2',volumeNumber:2,editionIndex:0,displayLabel:'2권',coverArtworkId:'c2'},{id:'e1',volumeNumber:1,editionIndex:1,displayLabel:'특별판 1권',coverArtworkId:'e1'},{id:'v1',volumeNumber:1,editionIndex:0,displayLabel:'1',coverArtworkId:'c1'}],artworks:[]};
 const page:CollectionPage={ready:true,filterVersion:1,revision:'r1',publishedAt:null,items:[item],nextCursor:null};
 const section=()=>screen.getByLabelText('컬렉션',{selector:'section'});
-const list=()=>section().querySelector('.collection-list') as HTMLElement;
+const list=()=>section().querySelector('.collection-scroll') as HTMLElement;
 const detailPane=()=>section().querySelector('.collection-detail') as HTMLElement;
 const pressTab=(name:string)=>fireEvent.click(screen.getByRole('radio',{name}));
 /** Search lives behind the top bar's magnifier; open it once, then use the field. */
@@ -19,8 +19,11 @@ const searchBox=()=>{if(!screen.queryByRole('searchbox',{name:'컬렉션 검색'
 function pull(element:HTMLElement){fireEvent.touchStart(element,{touches:[{clientX:0,clientY:0}]});fireEvent.touchMove(element,{touches:[{clientX:0,clientY:200}]});fireEvent.touchEnd(element);}
 /** jsdom has no layout, so the scroller's geometry is declared before the scroll event. */
 function scrollToEnd(element:HTMLElement){Object.defineProperty(element,'clientHeight',{configurable:true,value:500});Object.defineProperty(element,'scrollHeight',{configurable:true,value:600});element.scrollTop=100;fireEvent.scroll(element);}
-const metadataBlock=()=>screen.getByLabelText('작품 정보',{selector:'dl'});
-beforeEach(()=>{localStorage.clear();resetReleaseStore();mocks.api.mockReset();mocks.native.mockReset();mocks.api.mockImplementation(async(path:string)=>path.includes('type=av')?{...page,items:[]}:path.includes('/v1/collections/')?{revision:'r1',item}:page);mocks.native.mockResolvedValue({url:'https://example.invalid/cover',expires_in:300});});
+const metadataBlock=()=>screen.getByRole('region',{name:'작품 정보'}).querySelector('dl') as HTMLElement;
+/** The fixture as a manga, which opens on the shared book and bookcase instead of the case. */
+const mangaItem=():CollectionDetail=>({...item,type:'manga'});
+const bookcaseLabels=()=>within(screen.getByRole('group',{name:'권별 책장'})).getAllByRole('button').map(button=>button.getAttribute('aria-label'));
+beforeEach(()=>{localStorage.clear();for(const kind of ['game','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));resetReleaseStore();mocks.api.mockReset();mocks.native.mockReset();mocks.api.mockImplementation(async(path:string)=>path.includes('type=av')?{...page,items:[]}:path.includes('/v1/collections/')?{revision:'r1',item}:page);mocks.native.mockResolvedValue({url:'https://example.invalid/cover',expires_in:300});});
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 describe('tab return retention',()=>{
   const listCalls=()=>mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/collections?')&&!path.includes('showcase=true'));
@@ -43,22 +46,21 @@ describe('tab return retention',()=>{
   });
 
   it.each(['inactive','paused'] as const)('retains detail edition, expanded volumes and hero after %s return',async(mode)=>{
-    const work:CollectionDetail={...item,selectedHeroArtworkId:'hero',artworks:[{id:'hero',kind:'hero',selected:true,thumbnailAvailable:true,originalAvailable:true}],volumes:[...item.volumes,...Array.from({length:100},(_,i)=>({id:`extra-${i}`,volumeNumber:i+2,editionIndex:1,displayLabel:`특별판 ${i+2}권`}))]};
+    const work:CollectionDetail={...mangaItem(),selectedHeroArtworkId:'hero',artworks:[{id:'hero',kind:'hero',selected:true,thumbnailAvailable:true,originalAvailable:true}],volumes:[...item.volumes,...Array.from({length:100},(_,i)=>({id:`extra-${i}`,volumeNumber:i+2,editionIndex:1,displayLabel:`특별판 ${i+2}권`}))]};
     mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path.includes('showcase=true')?{...page,items:[]}:path.startsWith('/v1/collections?')?page:{revision:'r1',item:work});
     const decode=vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('Image',class {src='';decode=decode;});
     const props={active:true,paused:false,backRef:{current:null}};
     const view=render(<Collections {...props}/>);fireEvent.click(await screen.findByText(item.name));
     fireEvent.click(await screen.findByRole('radio',{name:'판본 2'}));
-    fireEvent.click(screen.getByRole('button',{name:'표지 더 보기'}));
-    await waitFor(()=>expect(document.querySelector('.collection-hero-original')).not.toBeNull());
-    const hero=document.querySelector('.collection-hero-original');
+    await waitFor(()=>expect(document.querySelector('.work-hero-band img')).not.toBeNull());
+    const hero=document.querySelector('.work-hero-band img');
     view.rerender(<Collections {...props} active={mode!=='inactive'} paused={mode==='paused'}/>);
     view.rerender(<Collections {...props}/>);await act(async()=>{});
     expect(listCalls()).toHaveLength(1);expect(detailCalls()).toHaveLength(1);
     expect(screen.getByRole('radio',{name:'판본 2'}).getAttribute('aria-checked')).toBe('true');
-    expect(within(screen.getByRole('region',{name:'권별 표지'})).getAllByRole('button').filter(button=>button.classList.contains('collection-tile'))).toHaveLength(101);
-    expect(document.querySelector('.collection-hero-original')).toBe(hero);
+    expect(bookcaseLabels()).toHaveLength(101);
+    expect(document.querySelector('.work-hero-band img')).toBe(hero);
     expect(artworkCalls('hero','original').length).toBeGreaterThan(0);expect(decode).toHaveBeenCalled();
   });
 
@@ -189,22 +191,19 @@ describe('tab return retention',()=>{
     expect(artworkCalls('cover')).toHaveLength(2);
   });
 
-  it('retries hero decode failures and reloads an original when its digest or availability changes',async()=>{
+  it('shows the hero band from the original and reloads it when its digest or availability changes',async()=>{
     let work:CollectionDetail={...item,selectedHeroArtworkId:'hero',artworkVersions:{hero:{original:'one'}},artworks:[{id:'hero',kind:'hero',selected:true,thumbnailAvailable:true,originalAvailable:true}]};
     mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path.startsWith('/v1/collections?')?page:{revision:'r1',item:work});
     mocks.native.mockImplementation(async(_op,payload)=>({url:`https://example.invalid/${payload.artworkId}-${payload.variant}-${payload.digest}`}));
-    let originalAttempt=0;const decode=vi.fn(function(this:{src:string}){if(this.src.includes('-original-')&&originalAttempt++===0)return Promise.reject(new Error('decode failed'));return Promise.resolve();});
-    vi.stubGlobal('Image',class {src='';decode=decode;});
-    const props={active:true,paused:false,backRef:{current:null}};const view=render(<Collections {...props}/>);
-    fireEvent.click(await screen.findByText(item.name));await waitFor(()=>expect(decode).toHaveBeenCalledTimes(1));
-    await act(async()=>{});expect(document.querySelector('.collection-hero-original')).toBeNull();
-    view.rerender(<Collections {...props} paused/>);view.rerender(<Collections {...props}/>);
-    await waitFor(()=>expect(document.querySelector('.collection-hero-original')).not.toBeNull());
-    expect(artworkCalls('hero','original')).toHaveLength(2);
+    render(<Collections active paused={false} backRef={{current:null}}/>);
+    fireEvent.click(await screen.findByText(item.name));
+    const band=()=>document.querySelector('.work-hero-band img')?.getAttribute('src');
+    await waitFor(()=>expect(band()).toBe('https://example.invalid/hero-original-one'));
     work={...work,artworkVersions:{hero:{original:'two'}}};pull(detailPane());
-    await waitFor(()=>expect(document.querySelector('.collection-hero-original')?.getAttribute('src')).toContain('-two'));
+    await waitFor(()=>expect(band()).toContain('-two'));
+    // A hero published without its original falls back to its thumbnail.
     work={...work,artworks:work.artworks.map(art=>({...art,originalAvailable:false}))};pull(detailPane());
-    await waitFor(()=>expect(document.querySelector('.collection-hero-original')).toBeNull());
+    await waitFor(()=>expect(band()).toContain('hero-thumbnail'));
   });
 });
 
@@ -495,28 +494,34 @@ describe('read-only collections',()=>{
     expect(screen.queryByRole('radio',{name:'게임'})).toBeNull();
     expect(screen.getByRole('button',{name:'뒤로'})).toBeTruthy();
     expect(screen.getByText('컬렉션 › 게임')).toBeTruthy();
-    expect(screen.getByRole('region',{name:'권별 표지'})).toBeTruthy();
-    expect(screen.getByRole('button',{name:'밤의 도서관 표지 감상'})).toBeTruthy();
+    // The shared work screen: the case on its stage, the strip of views, the information below.
+    expect(screen.getByRole('article',{name:'게임 작품 화면'})).toBeTruthy();
+    expect(screen.getByRole('group',{name:'케이스'})).toBeTruthy();
+    expect(screen.getByLabelText('작품 보기')).toBeTruthy();
     // Work information is shown, not hidden behind a disclosure.
     expect(metadataBlock().tagName).toBe('DL');
     act(()=>{expect(backRef.current?.()).toBe(true);});
-    expect(screen.queryAllByRole('region',{name:'권별 표지'})).toHaveLength(0);
+    expect(screen.queryAllByRole('article',{name:'게임 작품 화면'})).toHaveLength(0);
     expect(screen.getByRole('radio',{name:'게임'})).toBeTruthy();
     act(()=>{expect(backRef.current?.()).toBe(false);});
   });
-  it('opens ordered edition covers, requests only the opened original, and backs out one level',async()=>{
+  it('opens the edition on the bookcase, requests only the shown volume\'s original, and backs out one level',async()=>{
+    mocks.api.mockImplementation(async(path:string)=>path.includes('type=av')?{...page,items:[]}:path.includes('/v1/collections/')?{revision:'r1',item:mangaItem()}:{...page,items:[mangaItem()]});
     const backRef:{current:(()=>boolean)|null}={current:null};render(<Collections active paused={false} backRef={backRef}/>);
     fireEvent.click(await screen.findByText('밤의 도서관'));
     await screen.findByRole('radio',{name:'기본판'});
-    const volumeLabels=()=>within(screen.getByRole('region',{name:'권별 표지'})).getAllByRole('button').filter(button=>button.classList.contains('collection-tile')).map(el=>el.lastElementChild?.textContent);
-    expect(volumeLabels()).toEqual(['1권','2권']);
-    expect(mocks.native.mock.calls.some(([,payload])=>payload.variant==='original')).toBe(false);
-    fireEvent.click(screen.getByText('1권'));await screen.findByRole('dialog');await waitFor(()=>expect(mocks.native).toHaveBeenCalledWith('collectionArtwork',expect.objectContaining({artworkId:'c1',variant:'original',revision:'r1'}),expect.any(AbortSignal)));
-    expect(within(screen.getByRole('dialog')).getAllByText('1권')).toHaveLength(1);
-    expect(within(screen.getByRole('dialog')).getByText('2 / 3')).toBeTruthy();
+    expect(bookcaseLabels()).toEqual(['1권 보기','2권 보기']);
+    // The book shows the first volume's full cover; no other volume's original is read.
+    await waitFor(()=>expect(mocks.native).toHaveBeenCalledWith('collectionArtwork',expect.objectContaining({artworkId:'c1',variant:'original',revision:'r1'}),expect.any(AbortSignal)));
+    expect(mocks.native.mock.calls.filter(([,payload])=>payload.variant==='original').map(([,payload])=>payload.artworkId)).toEqual(['c1']);
+    // A double tap on the picked volume opens the cover viewer.
+    await waitFor(()=>expect(screen.getByRole('button',{name:'1권 보기'}).getAttribute('aria-pressed')).toBe('true'));
+    fireEvent.doubleClick(screen.getByRole('button',{name:'1권 보기'}));
+    expect(within(await screen.findByRole('dialog')).getByText('2 / 3')).toBeTruthy();
     act(()=>{expect(backRef.current?.()).toBe(true);});expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.click(screen.getByRole('radio',{name:'판본 2'}));expect(screen.queryByText('2권')).toBeNull();expect(screen.getByText('특별판 1권')).toBeTruthy();
-    act(()=>{expect(backRef.current?.()).toBe(true);});expect(screen.queryAllByRole('heading',{level:1,name:item.name})).toHaveLength(0);expect(mocks.api.mock.calls.every(([, ,body])=>body===undefined)).toBe(true);
+    fireEvent.click(screen.getByRole('radio',{name:'판본 2'}));
+    await waitFor(()=>expect(bookcaseLabels()).toEqual(['특별판 1권 보기']));
+    act(()=>{expect(backRef.current?.()).toBe(true);});expect(screen.queryAllByRole('article',{name:'만화 작품 화면'})).toHaveLength(0);expect(mocks.api.mock.calls.every(([, ,body])=>body===undefined)).toBe(true);
     expect(screen.queryAllByRole('button',{name:/편집|삭제|가져오기|게시/})).toHaveLength(0);
   });
 });
@@ -526,8 +531,9 @@ it('shows personal and provider metadata, hides manga imported descriptions, and
  mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:[manga]}:{revision:'r1',item:manga});
  const view=render(<Collections active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText(item.name));
  await screen.findAllByText('★ 4.5 / 5');expect(screen.queryByText('English provider overview')).toBeNull();expect(screen.getAllByText('모험').length).toBeGreaterThan(0);
- // The detail cover is flat; the viewer opens it as a turnable book and can switch back to flat.
- fireEvent.click(screen.getByRole('button',{name:'밤의 도서관 표지 감상'}));
+ // A double tap on a spine opens the viewer as a turnable book; it can switch back to flat.
+ await waitFor(()=>expect(screen.getByRole('button',{name:'1권 보기'}).getAttribute('aria-pressed')).toBe('true'));
+ fireEvent.doubleClick(screen.getByRole('button',{name:'1권 보기'}));
  const dialog=await screen.findByRole('dialog');
  expect(within(dialog).getByRole('radio',{name:'입체'}).getAttribute('aria-checked')).toBe('true');
  // jsdom has no WebGL2, so the book falls back to the flat cover on its own.
@@ -551,7 +557,7 @@ describe('film details',()=>{
   const open=async(detail:CollectionDetail)=>{
     mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:[detail]}:{revision:'r1',item:detail});
     render(<Collections active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText(detail.name));
-    await screen.findByLabelText('작품 정보',{selector:'dl'});
+    await screen.findByRole('region',{name:'작품 정보'});
   };
   it('shows cast, KR plus earliest releases with a full-list toggle, and unlinked related works',async()=>{
     await open({...item,type:'movie',film});
@@ -609,28 +615,25 @@ it('bounds every card caption without dropping the full work value',async()=>{
   expect((await screen.findByRole('heading',{level:1,name:long.name})).textContent).toBe(long.name);
   expect(metadataBlock().textContent).toContain(long.developer);
 });
-/** The detail identity names each type's own maker role, so the grid caption never has to. */
-it.each([['game','개발사','아주 긴 개발사 이름'],['manga','작가','아주 긴 작가 이름'],['movie','제작사','아주 긴 제작사 이름']] as const)('names the %s maker role in the detail identity',async(type,role,name)=>{
+/** The work information names each type's own maker role (the shared fact rows), so the grid caption never has to. */
+it.each([['game','개발사','아주 긴 개발사 이름'],['manga','작가','아주 긴 작가 이름'],['movie','제작사','아주 긴 제작사 이름']] as const)('names the %s maker role in the work information',async(type,role,name)=>{
   const fields=type==='game'?{developer:name}:type==='manga'?{author:name}:{productionCompany:name};
   const work={...item,...fields,type};
   mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:[work]}:{revision:'r1',item:work});
   render(<Collections active paused={false} backRef={{current:null}}/>);
   fireEvent.click(await screen.findByText(item.name));
-  expect(await screen.findByText(`${role} · ${name}`)).toBeTruthy();
-  // Manga shows its facts beside the cover and does not repeat the maker in a second section.
-  if(type==='manga')expect(screen.queryByRole('region',{name:'작품 정보 영역'})).toBeNull();
-  else expect(metadataBlock().textContent).toContain(name);
+  await screen.findByRole('region',{name:'작품 정보'});
+  const row=[...metadataBlock().querySelectorAll('dl > div')].find(entry=>entry.querySelector('dt')?.textContent===role);
+  expect(row?.querySelector('dd')?.textContent).toBe(name);
 });
 
-it('shows each volume release date beside its number when the publication has one',async()=>{
-  const dated:CollectionDetail={...item,volumes:[{id:'d1',volumeNumber:1,editionIndex:0,displayLabel:'1',coverArtworkId:'c1',localReleaseDate:'2024-03-05'},{id:'d2',volumeNumber:2,editionIndex:0,displayLabel:'2',coverArtworkId:'c2',localReleaseDate:null}]};
-  mocks.api.mockImplementation(async(path:string)=>path.includes('?')?page:{revision:'r1',item:dated});
+it('marks a pre-registered volume on the bookcase from its future release date',async()=>{
+  const dated:CollectionDetail={...mangaItem(),volumes:[{id:'d1',volumeNumber:1,editionIndex:0,displayLabel:'1',coverArtworkId:'c1',localReleaseDate:'2024-03-05'},{id:'d2',volumeNumber:2,editionIndex:0,displayLabel:'2',coverArtworkId:'c2',localReleaseDate:'2999-01-02'}]};
+  mocks.api.mockImplementation(async(path:string)=>path.includes('?')?{...page,items:[dated]}:{revision:'r1',item:dated});
   render(<Collections active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText(item.name));
-  const region=await screen.findByRole('region',{name:'권별 표지'});
-  const labels=[...region.querySelectorAll('.collection-tile>span:last-child')].map(el=>el.textContent);
-  expect(labels).toEqual(['1권 · 2024.3.5','2권']);
-  fireEvent.click(region.querySelector('.collection-tile')!);
-  expect(within(await screen.findByRole('dialog')).getByText('1권 · 2024.3.5')).toBeTruthy();
+  await screen.findByRole('group',{name:'권별 책장'});
+  expect(screen.getByRole('button',{name:'1권 보기'}).classList.contains('manga-spine--upcoming')).toBe(false);
+  expect(screen.getByRole('button',{name:'2권 보기'}).classList.contains('manga-spine--upcoming')).toBe(true);
 });
 
 it('shows a manga 원제 small under the title only when it differs from the title',async()=>{
@@ -642,12 +645,12 @@ it('shows a manga 원제 small under the title only when it differs from the tit
   };
   const manga:CollectionDetail={...item,type:'manga',originalTitle:'夜の図書館'};
   let view=await open(manga);
-  const line=document.querySelector('.collection-detail-identity h1 + .collection-detail-original');
+  const line=document.querySelector('.tablet-work__identity h1 + small');
   expect(line?.textContent).toBe('夜の図書館');
   view.unmount();
   for(const originalTitle of [null,'  ',' 밤의 도서관 ']){
     view=await open({...manga,originalTitle});
-    expect(document.querySelector('.collection-detail-original')).toBeNull();
+    expect(document.querySelector('.tablet-work__identity h1 + small')).toBeNull();
     view.unmount();
   }
 });
@@ -765,5 +768,43 @@ describe('appended card arrival',()=>{
     await act(async()=>{resolveCover({url:'https://example.invalid/late',expires_in:300});});
     expect(screen.getByRole('img',{name:'Second page'}).classList.contains('collection-art-arrive')).toBe(true);
     expect(cardAnimations('Second page')).toHaveLength(1);
+  });
+});
+
+describe('shelf view',()=>{
+  const second:CollectionDetail={...item,id:'second',name:'두 번째 게임',selectedWorkArtworkId:'cover-2'};
+  beforeEach(()=>{
+    localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout:'shelf',perRow:4}));
+    mocks.api.mockImplementation(async(path:string)=>path.includes('type=av')?{...page,items:[]}:path==='/v1/collections/second'?{revision:'r1',item:second}:path.includes('/v1/collections/')?{revision:'r1',item}:{...page,items:[item,second]});
+  });
+  it('stands games as light cases N per row; a tap picks, a second tap opens, a swipe steps to the next work',async()=>{
+    render(<Collections active paused={false} backRef={{current:null}}/>);
+    const shelf=await screen.findByRole('group',{name:'게임 작품 목록'});
+    // The list group is there before its first page commits; wait for the cases.
+    await waitFor(()=>expect(shelf.querySelectorAll('.collection-light-case')).toHaveLength(2));
+    expect(shelf.getAttribute('data-per-row')).toBe('4');
+    const tile=shelf.querySelector('[data-collection-id="manga-1"]') as HTMLElement;
+    fireEvent.click(tile);
+    expect(tile.getAttribute('aria-selected')).toBe('true');
+    expect(screen.queryByRole('article',{name:'게임 작품 화면'})).toBeNull();
+    fireEvent.click(tile);
+    await screen.findByRole('heading',{level:1,name:item.name});
+    // A horizontal swipe on the stage, outside the case, steps through the list it was opened from.
+    const stage=document.querySelector('.tablet-work__stage') as HTMLElement;
+    fireEvent.pointerDown(stage,{pointerId:1,clientX:400,clientY:200});
+    fireEvent.pointerUp(stage,{pointerId:1,clientX:200,clientY:210});
+    expect(await screen.findByRole('heading',{level:1,name:second.name})).toBeTruthy();
+    expect(screen.getByText(/2 \/ 2/)).toBeTruthy();
+  });
+  it('changes 배치 and 한 줄에 N개 from the 보기 sheet and keeps them for the type',async()=>{
+    render(<Collections active paused={false} backRef={{current:null}}/>);
+    await screen.findByRole('group',{name:'게임 작품 목록'});
+    fireEvent.click(screen.getByRole('button',{name:'보기'}));
+    const sheet=await screen.findByRole('dialog',{name:'보기'});
+    fireEvent.change(within(sheet).getByRole('slider',{name:'한 줄에'}),{target:{value:'6'}});
+    expect(document.querySelector('[aria-label="게임 작품 목록"]')?.getAttribute('data-per-row')).toBe('6');
+    fireEvent.click(within(sheet).getByRole('radio',{name:'격자'}));
+    expect((document.querySelector('.collection-grid.is-counted') as HTMLElement).style.getPropertyValue('--columns')).toBe('6');
+    expect(JSON.parse(localStorage.getItem('lakomics.mobile.collectionView.game.v1')!)).toEqual({layout:'grid',perRow:6});
   });
 });

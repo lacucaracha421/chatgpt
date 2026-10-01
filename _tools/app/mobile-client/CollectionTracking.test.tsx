@@ -25,7 +25,7 @@ const commands=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/collections
 const conflict=(current:unknown)=>new ApiError('다른 기기에서 값이 바뀌었습니다.',409,{detail:{code:'collectionPersonalConflict',message:'다른 기기에서 값이 바뀌었습니다.',current}});
 
 beforeEach(()=>{setOutboxConnection(CONNECTION);
-  localStorage.clear();mocks.api.mockReset();mocks.native.mockReset();
+  localStorage.clear();for(const kind of ['game','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));mocks.api.mockReset();mocks.native.mockReset();
   item={...base};revision='r1';personal=true;tracking=true;
   command=body=>{
     // A tiny server applying tracking fields like collection_personal_edits.patch.
