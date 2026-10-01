@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {buildScrubberModel,generateScrubberTicks,koreanInitial,scrubberIndexAt,scrubberLabelAt} from './scrubberModel';
+import {buildScrubberModel,generateScrubberTicks,koreanInitial,scrubberIndexAt,scrubberLabelAt,clampScrubberTag,thinScrubberLabels} from './scrubberModel';
 
 describe('scrubber model',()=>{
   it('maps the scrubber edges to the first and last item',()=>{
@@ -31,5 +31,21 @@ describe('scrubber model',()=>{
     expect(model.ticks).toHaveLength(11);
     expect(model.ticks.map(tick=>tick.position)).toEqual([0,.1,.2,.3,.4,.5,.6,.7,.8,.9,1]);
     expect(model.labelAt(50)).toBeNull();
+  });
+
+  it('thins year labels to 44px apart and always keeps the first and last',()=>{
+    for (const width of [320,600,984,1400]) for (const count of [3,8,20,27]) {
+      const marks=Array.from({length:count},(_,k)=>({key:k,label:String(2026-k),x:(k/(count-1))*width}));
+      const kept=thinScrubberLabels(marks);
+      expect(kept[0]).toBe(marks[0]);expect(kept[kept.length-1]).toBe(marks[count-1]);
+      kept.slice(1).forEach((mark,i)=>expect(mark.x-kept[i].x).toBeGreaterThanOrEqual(44));
+    }
+  });
+  it('prefers years divisible by five over others when labels compete',()=>{
+    const marks=[2027,2026,2025,2024,2023].map((year,k)=>({key:k,label:String(year),x:k*30}));
+    expect(thinScrubberLabels(marks).map(mark=>mark.label)).toEqual(['2027','2025','2023']);
+  });
+  it('keeps the floating label inside the bar',()=>{
+    expect(clampScrubberTag(0,400,100)).toBe(50);expect(clampScrubberTag(400,400,100)).toBe(350);expect(clampScrubberTag(200,400,100)).toBe(200);
   });
 });

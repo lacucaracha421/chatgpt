@@ -405,8 +405,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/scrubber.css": {
-      "offScaleSpacing": 3,
-      "offRoleFontSize": 1,
+      "offScaleSpacing": 2,
+      "offRoleFontSize": 3,
       "pillRadius": 0,
       "legacyToken": 0
     },

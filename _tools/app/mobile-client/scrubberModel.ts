@@ -111,3 +111,28 @@ export function buildScrubberModel(sort: ScrubberSort, total = sort.kind === 'fa
   const count = Math.max(0, total);
   return {total: count, ticks: generateScrubberTicks(sort, count), labelAt: index => scrubberLabelAt(sort, index)};
 }
+
+export type ScrubberLabelMark = {key: string | number; label: string; x: number};
+
+/** Minimum distance between two shown labels, in px. */
+export const SCRUBBER_LABEL_GAP = 44;
+
+/**
+ * Keep only the labels that fit: first and last win, then years divisible by 5, then the rest;
+ * every kept label is at least `gap` px from every other. Marks must be in track order.
+ */
+export function thinScrubberLabels<T extends ScrubberLabelMark>(marks: readonly T[], gap = SCRUBBER_LABEL_GAP): T[] {
+  const last = marks.length - 1;
+  const rank = (mark: T, order: number) => order === 0 || order === last ? 3 : /^\d+$/.test(mark.label) && Number(mark.label) % 5 === 0 ? 2 : 1;
+  const kept: T[] = [];
+  marks.map((mark, order) => ({mark, order, rank: rank(mark, order)})).sort((a, b) => b.rank - a.rank || a.order - b.order).forEach(({mark}) => {
+    if (kept.every(other => Math.abs(other.x - mark.x) >= gap)) kept.push(mark);
+  });
+  return kept.sort((a, b) => a.x - b.x);
+}
+
+/** Center of the floating label: above the thumb, clamped so it stays inside the bar's ends. */
+export function clampScrubberTag(thumbX: number, trackWidth: number, tagWidth: number): number {
+  const half = tagWidth / 2;
+  return Math.max(half, Math.min(Math.max(half, trackWidth - half), thumbX));
+}
