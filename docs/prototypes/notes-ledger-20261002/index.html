@@ -80,7 +80,9 @@ h2 { margin: 0; font-size: var(--type-title); font-weight: 600; }
 .item.done .tick { background: var(--color-muted); border-color: var(--color-muted); }
 .item .txt { outline: none; line-height: 1.6; min-height: 1.6em; overflow-wrap: anywhere; }
 .item.done .txt { color: var(--color-faint); text-decoration: line-through; text-decoration-color: var(--color-border-strong); }
-.item .mv { opacity: 0; border: 0; background: transparent; color: var(--color-faint); cursor: pointer; font: inherit; font-size: var(--type-meta); padding: 2px 6px; }
+.item .mv { opacity: 0; width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-faint); cursor: pointer; padding: 0; }
+.item .mv svg { width: 16px; height: 16px; }
+.item .mv:hover { background: var(--color-surface-hover); color: var(--color-text); }
 .item:hover .mv, .item:focus-within .mv { opacity: 1; }
 .add { display: flex; align-items: center; gap: 4px; padding: 4px 0 0 30px; color: var(--color-faint); font-size: var(--type-meta); cursor: text; border: 0; background: transparent; font-family: inherit; text-align: left; }
 .add:hover { color: var(--color-text); }
@@ -187,7 +189,7 @@ h2 { margin: 0; font-size: var(--type-title); font-weight: 600; }
     <li><b>섹션만 보기</b>: 위 칩 줄에서 하나를 누르면 그 섹션만 보입니다. 숫자는 남은 항목 수.</li>
     <li><b>한 줄 = 한 항목</b>: 앞의 동그라미를 누르면 완료. 완료 항목은 섹션 끝 「완료 N」으로 접힙니다.</li>
     <li><b>추가</b>: PC는 메모에 바로 씁니다 — 섹션 끝 「+ 추가」나 항목 끝에서 엔터. 태블릿만 엄지 닿는 아래에 빠른 추가 칸(섹션 고르기, 마지막 섹션 기억).</li>
-    <li><b>옮기기 · 복사</b>: 항목 오른쪽 「옮기기」(태블릿은 길게 누르기)로 다른 섹션에. 섹션 제목 줄의 「복사」는 <b>남은 항목만</b> 목록 글자로 복사합니다 — Claude에게 넘길 때 그대로 붙여 넣기.</li>
+    <li><b>옮기기 · 복사</b>: 항목 오른쪽 옮기기 아이콘(⇄, 마우스를 올리면 나타남; 태블릿은 길게 누르기)로 다른 섹션에. 섹션 제목 줄의 「복사」는 <b>남은 항목만</b> 목록 글자로 복사합니다 — Claude에게 넘길 때 그대로 붙여 넣기.</li>
     <li><b>지우기</b>: 빈 항목에서 백스페이스 → 윗줄로 합쳐짐. 섹션 제목은 백스페이스로 사라지지 않고 「섹션 풀기」로만.</li>
   </ol>
   <ol class="notes" id="ledgerNotes" hidden>
@@ -227,7 +229,7 @@ function memoHtml(tablet) {
   const chips = `<div class="chipbar"><button type="button" class="chip" aria-pressed="${filter === null}" data-f="">전체 <small>${SECTS.reduce((a, s) => a + left(s), 0)}</small></button>${SECTS.map((s) => `<button type="button" class="chip" aria-pressed="${filter === s.name}" data-f="${s.name}">${s.name} <small>${left(s)}</small></button>`).join('')}</div>`;
   const sects = SECTS.filter((s) => !filter || s.name === filter).map((s) => {
     const si = SECTS.indexOf(s), open = s.items.map((it, i) => [it, i]).filter(([[, d]]) => !d), done = s.items.map((it, i) => [it, i]).filter(([[, d]]) => d);
-    const row = ([[t, d], i]) => `<div class="item${d ? ' done' : ''}"><button type="button" class="tick" aria-label="${d ? '완료 취소' : '완료'}" data-tick="${si}:${i}"></button><div class="txt" contenteditable="true" spellcheck="false">${t}</div>${tablet ? '' : `<button type="button" class="mv" data-move="${si}:${i}">옮기기</button>`}</div>`;
+    const row = ([[t, d], i]) => `<div class="item${d ? ' done' : ''}"><button type="button" class="tick" aria-label="${d ? '완료 취소' : '완료'}" data-tick="${si}:${i}"></button><div class="txt" contenteditable="true" spellcheck="false">${t}</div>${tablet ? '' : `<button type="button" class="mv" aria-label="다른 섹션으로 옮기기" data-move="${si}:${i}"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 7h11m0 0-3-3m3 3-3 3M16 13H5m0 0 3-3m-3 3 3 3" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`}</div>`;
     return `<section class="sect"><div class="sect-head"><b>${s.name}</b><small class="num">${left(s)}개 남음</small><span class="grow"></span><button type="button" class="btn ghost" data-copy="${si}">복사</button><button type="button" class="btn ghost">⋯</button></div>
       ${open.map(row).join('')}<button type="button" class="add" data-add="${si}">+ 추가</button>
       ${done.length ? `<button type="button" class="donefold" data-done="${si}">${foldedDone[si] === false ? '▾' : '▸'} 완료 ${done.length}</button>${foldedDone[si] === false ? done.map(row).join('') : ''}` : ''}</section>`;
