@@ -955,6 +955,7 @@ Status: `TODO` — requested by the user 2026-10-02 (while trying the release bu
 4. **더보기 and 찾기 redesign:** the rail's 더보기 menu opens in an awkward position — re-anchor it; redesign the 찾기 (Ctrl K) surface.
 5. **Thorough performance pass on the PC app** ("빡세게 최적화"): measure first per `docs/agents/implementation.md` (Performance work) — screen entry, type/section switches, scrolling long lists, viewer open/close, idle CPU — then fix the largest costs and lock them with ratchet checks.
 6. **PC 컬렉션 without the sidebar (user, 2026-10-02):** drop the 컬렉션 sidebar index so the list uses the full width; 신간 (한국 정발 / 일본), 발매 캘린더 and 쇼케이스 move into a second section-bar row matching the tablet's shortcut row (`COLLECTION-SHORTCUTS-20261001`), and the 쇼케이스 fold row goes away — aligned with the tablet (user confirmed). On PC the cells open the existing views (no overlay). A ready worker brief exists in the session notes; not started.
+7. **PC 망가 sidebar can be hidden (user, 2026-10-02):** a toggle that hides the 망가 index sidebar (고정 · 자주 찾는 태그 · 작가 / 로컬 folders) so the grid uses the full width, remembered per area; the index stays reachable (toggle in the top bar or the section bar). Check whether the workspace already has a sidebar collapse to reuse.
 
 
 ## ASSET-EAGLE-20261001 — PC Asset screen candidates from the Eagle comparison
