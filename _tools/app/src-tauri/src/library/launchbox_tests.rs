@@ -108,6 +108,8 @@ fn game(id: &str, title: &str, platforms: &str, owned: Option<&str>) -> Game {
         original_title: None,
         platforms: Some(platforms.into()),
         owned: owned.map(Into::into),
+        steam_app_id: None,
+        igdb_name: None,
     }
 }
 fn insert(library: &Library, id: &str, title: &str, platform: &str) {
@@ -191,7 +193,7 @@ fn launchbox_matching_prefers_owned_platform_then_platform_order_and_region() {
         &[
             ("1", "Example II: Adventure", "Nintendo Switch"),
             ("2", "Example 2: Adventure", "Sony Playstation 5"),
-            ("3", "Example II", "Nintendo Switch 2"),
+            ("3", "Example II: Adventure", "Nintendo Switch 2"),
         ],
         &[
             ("1", "us.jpg", "North America"),
@@ -225,7 +227,7 @@ fn launchbox_matching_prefers_owned_platform_then_platform_order_and_region() {
     ));
 }
 #[test]
-fn launchbox_matching_rejects_ambiguous_titles_and_subtitle_collisions() {
+fn launchbox_matching_rejects_ambiguous_titles_and_does_not_guess_subtitles() {
     let io = FakeHttp::new(&metadata(
         &[
             ("1", "Example II: Adventure", "Windows"),
@@ -239,7 +241,7 @@ fn launchbox_matching_rejects_ambiguous_titles_and_subtitle_collisions() {
     let g = game(ID1, "Example 2", "PC", None);
     assert!(matches!(
         match_game(&g, &index),
-        Err((_, OutcomeStatus::Ambiguous))
+        Err((_, OutcomeStatus::NoMatch))
     ));
     let g = game(ID1, "Example 2: Adventure", "PC", None);
     assert_eq!(match_game(&g, &index).unwrap().0.database_id, "1");
@@ -301,7 +303,7 @@ fn launchbox_imports_spine_and_never_replaces_an_existing_user_choice() {
     assert_eq!(io.image_requests().len(), 1);
     // Simulate a user import after matching, while the remote image is being fetched.
     let index = ensure_index(cache.path(), &io, &cancel).unwrap();
-    let (c, i) = match_game(&g, &index).unwrap();
+    let (c, i, _) = match_game(&g, &index).unwrap();
     assert!(store_spine(&library, &g, c, i, &io.image)
         .unwrap()
         .is_none());
@@ -443,9 +445,10 @@ fn launchbox_batch_request_wire_fields_are_camel_case() {
 }
 
 #[test]
-fn launchbox_missing_platform_does_not_download_bulk() {
+fn launchbox_game_without_platforms_matches_on_any_platform() {
     let (_temp, library, cache, io) = fixture();
-    insert(&library, ID1, "Game", "");
+    // Most library games have no platform list; the title still finds the Switch entry.
+    insert(&library, ID1, "Example II: Adventure", "");
     let mut runner = FetchState::default();
     let game = load_game(&library, ID1).unwrap();
     let outcome = runner
@@ -459,9 +462,8 @@ fn launchbox_missing_platform_does_not_download_bulk() {
             &|_| {},
         )
         .unwrap();
-    assert_eq!(outcome.status, OutcomeStatus::NoMatch);
-    assert_eq!(outcome.reason, "missing_platform");
-    assert!(io.requests.borrow().is_empty());
+    assert_eq!(outcome.status, OutcomeStatus::Matched);
+    assert_eq!(outcome.platform.as_deref(), Some("Nintendo Switch"));
 }
 
 #[test]
@@ -547,11 +549,13 @@ fn launchbox_region_order_is_korea_japan_north_america_world_then_others() {
         "other.png",
     ] {
         let index = Index {
-            version: 1,
+            version: INDEX_VERSION,
             games: vec![IndexedGame {
                 database_id: "1".into(),
                 title: "Game".into(),
                 platform: "Windows".into(),
+                steam_app_id: None,
+                alternate_names: Vec::new(),
                 images: images.clone(),
             }],
         };
@@ -601,4 +605,303 @@ fn launchbox_normalises_punctuation_trademarks_and_canonical_roman_numerals() {
     );
     assert_eq!(roman_number("mmmcmxcix"), Some(3999));
     assert_eq!(roman_number("iiii"), None);
+}
+
+fn sekiro_metadata() -> &'static str {
+    r#"<LaunchBox>
+      <Game><DatabaseID>164149</DatabaseID><Name>Sekiro: Shadows Die Twice</Name><Platform>Windows</Platform><SteamAppId>814380</SteamAppId></Game>
+      <Game><DatabaseID>165025</DatabaseID><Name>Sekiro: Shadows Die Twice</Name><Platform>Sony Playstation 4</Platform></Game>
+      <GameAlternateName><AlternateName>세키로: 섀도우 다이 트와이스</AlternateName><DatabaseID>164149</DatabaseID><Region>Korea</Region></GameAlternateName>
+      <GameAlternateName><AlternateName>セキロ</AlternateName><DatabaseID>164149</DatabaseID><Region>Japan</Region></GameAlternateName>
+      <GameAlternateName><AlternateName>Sekiro Alternate</AlternateName><DatabaseID>164149</DatabaseID><Region>Europe</Region></GameAlternateName>
+      <GameAlternateName><AlternateName>Sekiro™ Alternate</AlternateName><DatabaseID>164149</DatabaseID><Region>World</Region></GameAlternateName>
+      <GameImage><DatabaseID>165025</DatabaseID><FileName>sekiro-ps4.png</FileName><Type>Box - Spine</Type><Region>Japan</Region></GameImage>
+    </LaunchBox>"#
+}
+fn parse_fixture(xml: &str) -> Index {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("fixture.zip");
+    fs::write(&path, FakeHttp::new(xml).bulk).unwrap();
+    parse_zip(&path, &AtomicBool::new(false)).unwrap()
+}
+fn binding(library: &Library, id: &str, provider: &str, external_id: &str, data: Option<&str>) {
+    library.connection().unwrap().execute(
+        "INSERT INTO collection_external_bindings(collection_id,provider,external_id,provider_data_json,created_at,updated_at) VALUES(?1,?2,?3,?4,'2026','2026')",
+        params![id,provider,external_id,data],
+    ).unwrap();
+}
+fn fetch_fixture(library: &Library, cache: &Path, io: &FakeHttp, id: &str) -> SpineOutcome {
+    FetchState::default()
+        .one_with(
+            library,
+            cache,
+            &load_game(library, id).unwrap(),
+            io,
+            &AtomicBool::new(false),
+            &mut None,
+            &|_| {},
+        )
+        .unwrap()
+}
+
+#[test]
+fn launchbox_steam_id_resolves_a_spine_on_another_platform() {
+    let (_temp, library, cache, _) = fixture();
+    insert(
+        &library,
+        ID1,
+        "세키로: 섀도우 다이 트와이스",
+        "PC (Microsoft Windows) · PlayStation 4",
+    );
+    binding(&library, ID1, "steam", "814380", None);
+    let io = FakeHttp::new(sekiro_metadata());
+    let outcome = fetch_fixture(&library, cache.path(), &io, ID1);
+    assert_eq!(outcome.status, OutcomeStatus::Matched);
+    assert_eq!(outcome.matched_by, Some(MatchedBy::Steam));
+    assert_eq!(outcome.database_id.as_deref(), Some("165025"));
+    assert_eq!(outcome.platform.as_deref(), Some("Sony Playstation 4"));
+    assert_eq!(
+        io.image_requests()[0].0,
+        format!("{IMAGE_BASE}sekiro-ps4.png")
+    );
+    assert_eq!(
+        serde_json::to_value(&outcome).unwrap()["matchedBy"],
+        "steam"
+    );
+}
+
+#[test]
+fn launchbox_korean_japanese_and_other_alternates_resolve_canonical_name() {
+    let index = parse_fixture(sekiro_metadata());
+    assert_eq!(index.games.len(), 2);
+    assert!(index.games[0].images.is_empty());
+    assert_eq!(index.games[0].steam_app_id.as_deref(), Some("814380"));
+    assert_eq!(index.games[0].alternate_names.len(), 3);
+    for title in [
+        "세키로: 섀도우 다이 트와이스",
+        "セキロ",
+        "SEKIRO Alternate®",
+    ] {
+        let game = game(ID1, title, "PlayStation 4", None);
+        let (candidate, _, matched_by) = match_game(&game, &index).unwrap();
+        assert_eq!(candidate.database_id, "165025");
+        assert_eq!(matched_by, MatchedBy::Alternate);
+    }
+    let (_temp, library, cache, _) = fixture();
+    insert(
+        &library,
+        ID1,
+        "세키로: 섀도우 다이 트와이스",
+        "PlayStation 4",
+    );
+    let outcome = fetch_fixture(
+        &library,
+        cache.path(),
+        &FakeHttp::new(sekiro_metadata()),
+        ID1,
+    );
+    assert_eq!(outcome.status, OutcomeStatus::Matched);
+    assert_eq!(outcome.matched_by, Some(MatchedBy::Alternate));
+}
+
+#[test]
+fn launchbox_igdb_binding_name_resolves_a_korean_library_title() {
+    let (_temp, library, cache, _) = fixture();
+    insert(&library, ID1, "이름을 찾을 수 없는 게임", "PlayStation 4");
+    binding(
+        &library,
+        ID1,
+        "igdb",
+        "104745",
+        Some(r#"{"name":"Sekiro: Shadows Die Twice"}"#),
+    );
+    let io = FakeHttp::new(sekiro_metadata());
+    let outcome = fetch_fixture(&library, cache.path(), &io, ID1);
+    assert_eq!(outcome.status, OutcomeStatus::Matched);
+    assert_eq!(outcome.matched_by, Some(MatchedBy::Igdb));
+    assert_eq!(outcome.database_id.as_deref(), Some("165025"));
+}
+
+#[test]
+fn launchbox_conflicting_identity_sources_are_ambiguous_before_platform_selection() {
+    let xml = sekiro_metadata().replace("</LaunchBox>", r#"
+      <Game><DatabaseID>9</DatabaseID><Name>Another Game</Name><Platform>Nintendo Switch 2</Platform><SteamAppId>999</SteamAppId></Game>
+      <GameAlternateName><DatabaseID>9</DatabaseID><AlternateName>다른 게임</AlternateName><Region>Korea</Region></GameAlternateName>
+      <GameImage><DatabaseID>9</DatabaseID><FileName>other.png</FileName><Type>Box - Spine</Type><Region>Korea</Region></GameImage>
+    </LaunchBox>"#);
+    let index = parse_fixture(&xml);
+    for title in ["Another Game", "다른 게임"] {
+        let mut game = game(ID1, title, "PlayStation 4", Some("PlayStation 4"));
+        game.steam_app_id = Some("814380".into());
+        assert!(matches!(
+            match_game(&game, &index),
+            Err(("conflicting_canonical_names", OutcomeStatus::Ambiguous))
+        ));
+    }
+    let mut game = game(ID1, "세키로: 섀도우 다이 트와이스", "PlayStation 4", None);
+    game.igdb_name = Some("Another Game".into());
+    assert!(matches!(
+        match_game(&game, &index),
+        Err((_, OutcomeStatus::Ambiguous))
+    ));
+    game.igdb_name = None;
+    game.original_title = Some("Another Game".into());
+    assert!(matches!(
+        match_game(&game, &index),
+        Err((_, OutcomeStatus::Ambiguous))
+    ));
+    game.original_title = None;
+    game.steam_app_id = Some("999".into());
+    game.igdb_name = Some("Sekiro: Shadows Die Twice".into());
+    assert!(matches!(
+        match_game(&game, &index),
+        Err((_, OutcomeStatus::Ambiguous))
+    ));
+
+    let (_temp, library, cache, _) = fixture();
+    insert(&library, ID1, "다른 게임", "PlayStation 4");
+    binding(&library, ID1, "steam", "814380", None);
+    let io = FakeHttp::new(&xml);
+    let outcome = fetch_fixture(&library, cache.path(), &io, ID1);
+    assert_eq!(outcome.status, OutcomeStatus::Ambiguous);
+    assert!(io.image_requests().is_empty());
+}
+
+#[test]
+fn launchbox_agreeing_sources_record_the_first_matching_key() {
+    let index = parse_fixture(sekiro_metadata());
+    let mut game = game(ID1, "세키로: 섀도우 다이 트와이스", "PlayStation 4", None);
+    game.steam_app_id = Some("814380".into());
+    game.igdb_name = Some("Sekiro: Shadows Die Twice".into());
+    assert_eq!(match_game(&game, &index).unwrap().2, MatchedBy::Steam);
+    game.steam_app_id = None;
+    assert_eq!(match_game(&game, &index).unwrap().2, MatchedBy::Alternate);
+    game.original_title = Some("Sekiro: Shadows Die Twice".into());
+    assert_eq!(match_game(&game, &index).unwrap().2, MatchedBy::Title);
+    game.original_title = None;
+    game.title = "unknown".into();
+    assert_eq!(match_game(&game, &index).unwrap().2, MatchedBy::Igdb);
+}
+
+#[test]
+fn launchbox_old_index_rebuilds_from_cached_zip_even_when_refresh_is_due() {
+    let cache = tempfile::tempdir().unwrap();
+    let io = FakeHttp::new(sekiro_metadata());
+    let cancel = AtomicBool::new(false);
+    ensure_index(cache.path(), &io, &cancel).unwrap();
+    let state: BulkState = read_json(&cache.path().join("bulk-state.json"), 4096).unwrap();
+    let generation = state.generation.as_ref().unwrap();
+    let index_path = cache.path().join(format!("index-{generation}.json"));
+    let zip_path = cache.path().join(format!("Metadata-{generation}.zip"));
+    let zip_before = fs::read(&zip_path).unwrap();
+    // The old index contained only entries with images and had no identity fields.
+    write_json(&index_path, &serde_json::json!({"version":1,"games":[{
+        "database_id":"165025","title":"Sekiro: Shadows Die Twice",
+        "platform":"Sony Playstation 4","images":[{"file_name":"sekiro-ps4.png","region":"Japan"}]
+    }]})).unwrap();
+    io.now.set(io.now.get() + DAY_MS);
+    let rebuilt = ensure_index(cache.path(), &io, &cancel).unwrap();
+    assert_eq!(rebuilt.version, INDEX_VERSION);
+    assert_eq!(rebuilt.games.len(), 2);
+    assert_eq!(rebuilt.games[0].steam_app_id.as_deref(), Some("814380"));
+    assert_eq!(rebuilt.games[0].alternate_names.len(), 3);
+    assert_eq!(io.bulk_count(), 1);
+    assert_eq!(fs::read(&zip_path).unwrap(), zip_before);
+    let after: BulkState = read_json(&cache.path().join("bulk-state.json"), 4096).unwrap();
+    assert_eq!(after.downloaded_at, state.downloaded_at);
+    assert_eq!(after.last_attempt_at, state.last_attempt_at);
+    assert_eq!(
+        read_json::<Index>(&index_path, MAX_INDEX_BYTES)
+            .unwrap()
+            .version,
+        INDEX_VERSION
+    );
+}
+
+#[test]
+fn launchbox_old_no_match_outcome_is_retried_without_a_bulk_download() {
+    let (_temp, library, cache, _) = fixture();
+    insert(
+        &library,
+        ID1,
+        "세키로: 섀도우 다이 트와이스",
+        "PlayStation 4",
+    );
+    binding(&library, ID1, "steam", "814380", None);
+    let game = load_game(&library, ID1).unwrap();
+    let io = FakeHttp::new(sekiro_metadata());
+    ensure_index(cache.path(), &io, &AtomicBool::new(false)).unwrap();
+    let legacy_bytes = serde_json::to_vec(&(
+        &game.title,
+        &game.original_title,
+        &game.platforms,
+        &game.owned,
+    ))
+    .unwrap();
+    let legacy_fingerprint: String = Sha256::digest(legacy_bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let outcome_path = cache
+        .path()
+        .join("outcomes")
+        .join(library.library_id().unwrap())
+        .join(format!("{ID1}.json"));
+    let mut old = serde_json::to_value(SpineOutcome::new(
+        ID1,
+        OutcomeStatus::NoMatch,
+        "no_title_platform_match",
+    ))
+    .unwrap();
+    old.as_object_mut().unwrap().remove("matchedBy");
+    write_json(
+        &outcome_path,
+        &serde_json::json!({"fingerprint":legacy_fingerprint,"at":io.now_ms(),"outcome":old}),
+    )
+    .unwrap();
+    // Ensure legacy outcomes deserialize so invalidation really comes from the fingerprint.
+    assert_eq!(
+        read_json::<CachedOutcome>(&outcome_path, 64 * 1024)
+            .unwrap()
+            .outcome
+            .status,
+        OutcomeStatus::NoMatch
+    );
+    let outcome = fetch_fixture(&library, cache.path(), &io, ID1);
+    assert_eq!(outcome.status, OutcomeStatus::Matched);
+    assert!(!outcome.cached);
+    assert_eq!(outcome.matched_by, Some(MatchedBy::Steam));
+    assert_eq!(io.bulk_count(), 1);
+    assert_eq!(io.image_requests().len(), 1);
+}
+
+#[test]
+fn launchbox_bindings_invalidate_outcomes_and_guard_in_flight_imports() {
+    let (_temp, library, cache, _) = fixture();
+    insert(&library, ID1, "unmatched", "PlayStation 4");
+    let io = FakeHttp::new(sekiro_metadata());
+    assert_eq!(
+        fetch_fixture(&library, cache.path(), &io, ID1).status,
+        OutcomeStatus::NoMatch
+    );
+    assert!(fetch_fixture(&library, cache.path(), &io, ID1).cached);
+    binding(
+        &library,
+        ID1,
+        "igdb",
+        "104745",
+        Some(r#"{"name":"Sekiro: Shadows Die Twice"}"#),
+    );
+    let old = load_game(&library, ID1).unwrap();
+    let index = parse_fixture(sekiro_metadata());
+    let (candidate, image, _) = match_game(&old, &index).unwrap();
+    binding(&library, ID1, "steam", "814380", None);
+    assert!(matches!(
+        store_spine(&library, &old, candidate, image, &io.image),
+        Err(Error::InvalidRequest)
+    ));
+    let outcome = fetch_fixture(&library, cache.path(), &io, ID1);
+    assert_eq!(outcome.status, OutcomeStatus::Matched);
+    assert_eq!(outcome.matched_by, Some(MatchedBy::Steam));
+    assert_eq!(io.bulk_count(), 1);
 }

@@ -26,6 +26,9 @@ const IMAGE_INTERVAL_MS: u64 = 1000;
 const MAX_BULK_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_XML_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
+const INDEX_VERSION: u32 = 2;
+// 3: games without a platform list match on any platform (2026-10-01).
+const MATCH_VERSION: u32 = 3;
 pub const MAX_BATCH: usize = 250;
 
 #[derive(Debug, thiserror::Error)]
@@ -66,6 +69,15 @@ pub enum OutcomeStatus {
     Skipped,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MatchedBy {
+    Steam,
+    Title,
+    Alternate,
+    Igdb,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpineOutcome {
@@ -77,6 +89,8 @@ pub struct SpineOutcome {
     pub platform: Option<String>,
     pub file_name: Option<String>,
     pub region: Option<String>,
+    #[serde(default)]
+    pub matched_by: Option<MatchedBy>,
     pub cached: bool,
 }
 impl SpineOutcome {
@@ -90,6 +104,7 @@ impl SpineOutcome {
             platform: None,
             file_name: None,
             region: None,
+            matched_by: None,
             cached: false,
         }
     }
@@ -300,6 +315,10 @@ struct IndexedGame {
     database_id: String,
     title: String,
     platform: String,
+    #[serde(default)]
+    steam_app_id: Option<String>,
+    #[serde(default)]
+    alternate_names: Vec<String>,
     images: Vec<SpineImage>,
 }
 #[derive(Serialize, Deserialize)]
@@ -320,14 +339,19 @@ struct Game {
     original_title: Option<String>,
     platforms: Option<String>,
     owned: Option<String>,
+    steam_app_id: Option<String>,
+    igdb_name: Option<String>,
 }
 impl Game {
     fn fingerprint(&self) -> String {
         let bytes = serde_json::to_vec(&(
+            MATCH_VERSION,
             &self.title,
             &self.original_title,
             &self.platforms,
             &self.owned,
+            &self.steam_app_id,
+            &self.igdb_name,
         ))
         .unwrap();
         Sha256::digest(bytes)
@@ -365,7 +389,7 @@ fn cached_index(cache: &Path, state: &BulkState, cancel: &AtomicBool) -> Result<
     let bulk_path = cache.join(format!("Metadata-{generation}.zip"));
     let index_path = cache.join(format!("index-{generation}.json"));
     if let Ok(index) = read_json::<Index>(&index_path, MAX_INDEX_BYTES) {
-        if index.version == 1 && bulk_path.is_file() {
+        if index.version == INDEX_VERSION && bulk_path.is_file() {
             return Ok(index);
         }
     }
@@ -383,6 +407,17 @@ fn ensure_index(cache: &Path, io: &impl Transport, cancel: &AtomicBool) -> Resul
     } else {
         BulkState::default()
     };
+    // An index upgrade uses the existing ZIP even when its daily refresh is due.
+    if let Some(generation) = state.generation.as_deref() {
+        uuid::Uuid::parse_str(generation).map_err(|_| Error::InvalidMetadata)?;
+        let index_path = cache.join(format!("index-{generation}.json"));
+        if cache.join(format!("Metadata-{generation}.zip")).is_file()
+            && read_json::<Index>(&index_path, MAX_INDEX_BYTES)
+                .map_or(true, |index| index.version != INDEX_VERSION)
+        {
+            return cached_index(cache, &state, cancel);
+        }
+    }
     if fresh(io.now_ms(), state.downloaded_at) {
         return cached_index(cache, &state, cancel);
     }
@@ -485,7 +520,14 @@ fn scan_xml(
                     let name = e.name().as_ref().to_owned();
                     field = matches!(
                         name.as_str(),
-                        "DatabaseID" | "Name" | "Platform" | "Type" | "FileName" | "Region"
+                        "DatabaseID"
+                            | "Name"
+                            | "Platform"
+                            | "SteamAppId"
+                            | "AlternateName"
+                            | "Type"
+                            | "FileName"
+                            | "Region"
                     )
                     .then_some(name);
                 }
@@ -612,6 +654,34 @@ fn parse_zip(path: &Path, cancel: &AtomicBool) -> Result<Index> {
             },
         )?;
     }
+    let mut alternate_names: HashMap<String, Vec<String>> = HashMap::new();
+    {
+        let xml = archive
+            .by_name("Metadata.xml")
+            .map_err(|_| Error::InvalidMetadata)?;
+        scan_xml(
+            BufReader::new(xml.take(MAX_XML_BYTES + 1)),
+            "GameAlternateName",
+            cancel,
+            |fields| {
+                if let (Some(id), Some(name)) =
+                    (fields.get("DatabaseID"), fields.get("AlternateName"))
+                {
+                    let name = normalise_title(name, false);
+                    if !name.is_empty() {
+                        let names = alternate_names.entry(id.trim().into()).or_default();
+                        if !names.contains(&name) {
+                            names.push(name);
+                        }
+                    }
+                    if alternate_names.len() > 250_000 {
+                        return Err(Error::InvalidMetadata);
+                    }
+                }
+                Ok(())
+            },
+        )?;
+    }
     let mut games = Vec::new();
     {
         let xml = archive
@@ -623,25 +693,40 @@ fn parse_zip(path: &Path, cancel: &AtomicBool) -> Result<Index> {
             cancel,
             |fields| {
                 if let Some(id) = fields.get("DatabaseID").map(|s| s.trim()) {
-                    if let Some(spines) = images.remove(id) {
-                        let title = fields.get("Name").ok_or(Error::InvalidMetadata)?.trim();
-                        let platform = fields.get("Platform").ok_or(Error::InvalidMetadata)?.trim();
-                        if title.is_empty() || platform.is_empty() {
-                            return Err(Error::InvalidMetadata);
-                        }
-                        games.push(IndexedGame {
-                            database_id: id.into(),
-                            title: title.into(),
-                            platform: platform.into(),
-                            images: spines,
-                        });
+                    let title = fields.get("Name").ok_or(Error::InvalidMetadata)?.trim();
+                    let platform = fields.get("Platform").ok_or(Error::InvalidMetadata)?.trim();
+                    if id.is_empty()
+                        || !id.bytes().all(|b| b.is_ascii_digit())
+                        || title.is_empty()
+                        || platform.is_empty()
+                    {
+                        return Err(Error::InvalidMetadata);
+                    }
+                    // Identity sources (notably Windows Steam IDs) may have no spine.
+                    games.push(IndexedGame {
+                        database_id: id.into(),
+                        title: title.into(),
+                        platform: platform.into(),
+                        steam_app_id: fields
+                            .get("SteamAppId")
+                            .map(|s| s.trim())
+                            .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+                            .map(Into::into),
+                        alternate_names: alternate_names.remove(id).unwrap_or_default(),
+                        images: images.remove(id).unwrap_or_default(),
+                    });
+                    if games.len() > 250_000 {
+                        return Err(Error::InvalidMetadata);
                     }
                 }
                 Ok(())
             },
         )?;
     }
-    Ok(Index { version: 1, games })
+    Ok(Index {
+        version: INDEX_VERSION,
+        games,
+    })
 }
 
 fn roman_number(word: &str) -> Option<u16> {
@@ -715,10 +800,63 @@ fn region_rank(region: &str) -> u8 {
         _ => 4,
     }
 }
+fn resolve_name(
+    game: &Game,
+    index: &Index,
+) -> std::result::Result<(String, MatchedBy), (&'static str, OutcomeStatus)> {
+    let titles: Vec<_> = [
+        &game.title[..],
+        game.original_title.as_deref().unwrap_or(""),
+    ]
+    .into_iter()
+    .map(|title| normalise_title(title, false))
+    .filter(|title| !title.is_empty())
+    .collect();
+    let mut names = Vec::new();
+    if let Some(steam_id) = game.steam_app_id.as_deref() {
+        for candidate in &index.games {
+            if candidate.steam_app_id.as_deref() == Some(steam_id) {
+                names.push((normalise_title(&candidate.title, false), MatchedBy::Steam));
+            }
+        }
+    }
+    for candidate in &index.games {
+        let name = normalise_title(&candidate.title, false);
+        if titles.contains(&name) {
+            names.push((name, MatchedBy::Title));
+        }
+    }
+    for candidate in &index.games {
+        if candidate
+            .alternate_names
+            .iter()
+            .any(|name| titles.contains(name))
+        {
+            names.push((
+                normalise_title(&candidate.title, false),
+                MatchedBy::Alternate,
+            ));
+        }
+    }
+    if let Some(name) = game.igdb_name.as_deref() {
+        let name = normalise_title(name, false);
+        if !name.is_empty() {
+            names.push((name, MatchedBy::Igdb));
+        }
+    }
+    let first = names
+        .first()
+        .ok_or(("no_title_platform_match", OutcomeStatus::NoMatch))?;
+    if names.iter().any(|(name, _)| name != &first.0) {
+        return Err(("conflicting_canonical_names", OutcomeStatus::Ambiguous));
+    }
+    Ok(first.clone())
+}
 fn match_game<'a>(
     game: &Game,
     index: &'a Index,
-) -> std::result::Result<(&'a IndexedGame, &'a SpineImage), (&'static str, OutcomeStatus)> {
+) -> std::result::Result<(&'a IndexedGame, &'a SpineImage, MatchedBy), (&'static str, OutcomeStatus)>
+{
     let mut platforms: Vec<String> = game
         .platforms
         .as_deref()
@@ -735,34 +873,19 @@ fn match_game<'a>(
     if let Some(p) = &owned {
         platforms.push(p.clone());
     }
-    if platforms.is_empty() {
-        return Err(("missing_platform", OutcomeStatus::NoMatch));
-    }
-    let titles = [
-        &game.title[..],
-        game.original_title.as_deref().unwrap_or(""),
-    ];
+    // Most library games have no platform list (user's library, 2026-10-01: 378 of 388).
+    // Then every platform is allowed and the usual order (owned, Switch 2 … PC) decides.
+    let any_platform = platforms.is_empty();
+    let (canonical_name, matched_by) = resolve_name(game, index)?;
     let mut candidates = Vec::new();
     for candidate in &index.games {
         let platform = platform_key(&candidate.platform);
-        if !platforms.contains(&platform) {
+        if (!any_platform && !platforms.contains(&platform))
+            || candidate.images.is_empty()
+            || normalise_title(&candidate.title, false) != canonical_name
+        {
             continue;
         }
-        let full = normalise_title(&candidate.title, false);
-        let base = normalise_title(&candidate.title, true);
-        let tier = if titles
-            .iter()
-            .any(|t| !t.is_empty() && normalise_title(t, false) == full)
-        {
-            0
-        } else if titles
-            .iter()
-            .any(|t| !t.is_empty() && !base.is_empty() && normalise_title(t, true) == base)
-        {
-            1
-        } else {
-            continue;
-        };
         let rank = if owned.as_ref() == Some(&platform) {
             0
         } else {
@@ -775,8 +898,7 @@ fn match_game<'a>(
                 _ => 6,
             }
         };
-        // Owned/platform preference also applies when only the subtitle-normalised title matches.
-        candidates.push(((rank, tier), candidate));
+        candidates.push((rank, candidate));
     }
     let best = candidates
         .iter()
@@ -797,7 +919,7 @@ fn match_game<'a>(
         .iter()
         .min_by_key(|i| (region_rank(&i.region), &i.file_name))
         .ok_or(("no_spine_image", OutcomeStatus::NoMatch))?;
-    Ok((candidate, image))
+    Ok((candidate, image, matched_by))
 }
 
 fn load_game(library: &Library, id: &str) -> Result<Game> {
@@ -805,10 +927,21 @@ fn load_game(library: &Library, id: &str) -> Result<Game> {
     load_game_on(&*library.connection()?, id)
 }
 fn load_game_on(connection: &rusqlite::Connection, id: &str) -> Result<Game> {
-    connection.query_row(
-        "SELECT c.id,c.name,c.original_title,c.platforms,p.owned_platform FROM collections c LEFT JOIN collection_pc_records p ON p.collection_id=c.id WHERE c.id=?1 AND c.type='game'",
-        [id], |r| Ok(Game { id:r.get(0)?,title:r.get(1)?,original_title:r.get(2)?,platforms:r.get(3)?,owned:r.get(4)? }))
-        .optional()?.ok_or(Error::InvalidRequest)
+    let mut game = connection.query_row(
+        "SELECT c.id,c.name,c.original_title,c.platforms,p.owned_platform,s.external_id,i.provider_data_json FROM collections c LEFT JOIN collection_pc_records p ON p.collection_id=c.id LEFT JOIN collection_external_bindings s ON s.collection_id=c.id AND s.provider='steam' LEFT JOIN collection_external_bindings i ON i.collection_id=c.id AND i.provider='igdb' WHERE c.id=?1 AND c.type='game'",
+        [id], |r| Ok(Game { id:r.get(0)?,title:r.get(1)?,original_title:r.get(2)?,platforms:r.get(3)?,owned:r.get(4)?,steam_app_id:r.get(5)?,igdb_name:r.get(6)? }))
+        .optional()?.ok_or(Error::InvalidRequest)?;
+    game.steam_app_id = game.steam_app_id.map(|id| id.trim().to_owned());
+    game.igdb_name = game
+        .igdb_name
+        .as_deref()
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+        .and_then(|data| {
+            data.get("name")
+                .and_then(|name| name.as_str())
+                .map(str::to_owned)
+        });
+    Ok(game)
 }
 fn has_spine(library: &Library, id: &str) -> Result<bool> {
     Ok(library.connection()?.query_row("SELECT EXISTS(SELECT 1 FROM collection_work_artworks WHERE collection_id=?1 AND kind='spine')",[id],|r|r.get(0))?)
@@ -895,18 +1028,10 @@ impl FetchState {
             }
         }
         let attempt = (|| {
-            // Missing local identity/platform information does not need the 108 MB bulk file.
-            if game.platforms.as_deref().unwrap_or("").trim().is_empty()
-                && game.owned.as_deref().unwrap_or("").trim().is_empty()
-            {
-                return Ok(SpineOutcome::new(
-                    &game.id,
-                    OutcomeStatus::NoMatch,
-                    "missing_platform",
-                ));
-            }
             if normalise_title(&game.title, false).is_empty()
                 && normalise_title(game.original_title.as_deref().unwrap_or(""), false).is_empty()
+                && game.steam_app_id.as_deref().unwrap_or("").is_empty()
+                && normalise_title(game.igdb_name.as_deref().unwrap_or(""), false).is_empty()
             {
                 return Ok(SpineOutcome::new(
                     &game.id,
@@ -918,7 +1043,7 @@ impl FetchState {
                 phase("loading_metadata");
                 *index = Some(ensure_index(cache, io, cancel)?);
             }
-            let (candidate, image) = match match_game(game, index.as_ref().unwrap()) {
+            let (candidate, image, matched_by) = match match_game(game, index.as_ref().unwrap()) {
                 Ok(found) => found,
                 Err((reason, status)) => return Ok(SpineOutcome::new(&game.id, status, reason)),
             };
@@ -966,6 +1091,7 @@ impl FetchState {
                 ));
             };
             let mut outcome = SpineOutcome::new(&game.id, OutcomeStatus::Matched, "spine_imported");
+            outcome.matched_by = Some(matched_by);
             outcome.artwork_id = Some(id);
             outcome.database_id = Some(candidate.database_id.clone());
             outcome.platform = Some(candidate.platform.clone());

@@ -1716,6 +1716,7 @@ export type LegacyPackageMigrationReport = {
 };
 
 export type LaunchBoxSpineOutcome = {
+  matchedBy?: "steam" | "title" | "alternate" | "igdb" | null;
   collectionId: string;
   status: "matched" | "no_match" | "ambiguous" | "failed" | "skipped";
   reason: string;
