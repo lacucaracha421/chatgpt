@@ -1,0 +1,345 @@
+{
+  "baseRevision": null,
+  "collections": [
+    {
+      "artworks": [],
+      "assetCount": 0,
+      "author": null,
+      "coverAssetId": null,
+      "createdAt": "t",
+      "description": null,
+      "developer": null,
+      "director": null,
+      "externalScore": null,
+      "genres": null,
+      "id": "mv",
+      "myScore": null,
+      "name": "Movie",
+      "originalTitle": null,
+      "overview": null,
+      "platforms": null,
+      "productionCompany": null,
+      "publisher": null,
+      "releaseDate": null,
+      "runtimeMinutes": null,
+      "selectedBackdropArtworkId": null,
+      "selectedHeroArtworkId": null,
+      "selectedWorkArtworkId": null,
+      "series": null,
+      "showcase": false,
+      "showcaseOrder": null,
+      "type": "movie",
+      "unreadReleaseCount": 0,
+      "updatedAt": "t",
+      "volumes": [],
+      "year": null
+    },
+    {
+      "artworks": [
+        {
+          "id": "art",
+          "kind": "volume_cover",
+          "original": null,
+          "selected": false,
+          "thumbnail": null
+        },
+        {
+          "id": "art2",
+          "kind": "volume_cover",
+          "original": null,
+          "selected": false,
+          "thumbnail": null
+        }
+      ],
+      "assetCount": 0,
+      "author": null,
+      "coverAssetId": null,
+      "createdAt": "t",
+      "description": null,
+      "developer": null,
+      "director": null,
+      "externalScore": null,
+      "genres": null,
+      "id": "m",
+      "myScore": null,
+      "name": "Manga",
+      "originalTitle": null,
+      "overview": null,
+      "platforms": null,
+      "productionCompany": null,
+      "publisher": null,
+      "releaseDate": null,
+      "runtimeMinutes": null,
+      "selectedBackdropArtworkId": null,
+      "selectedHeroArtworkId": null,
+      "selectedWorkArtworkId": "art",
+      "series": null,
+      "showcase": false,
+      "showcaseOrder": null,
+      "status": "collecting",
+      "type": "manga",
+      "unreadReleaseCount": 0,
+      "updatedAt": "t",
+      "volumes": [
+        {
+          "coverArtworkId": "art",
+          "coverFocusX": 0.25,
+          "displayLabel": "1",
+          "editionIndex": 0,
+          "id": "v",
+          "isbn13": null,
+          "localReleaseDate": null,
+          "releaseStatus": null,
+          "volumeNumber": 1
+        },
+        {
+          "coverArtworkId": "art2",
+          "displayLabel": "2",
+          "editionIndex": 0,
+          "id": "w",
+          "isbn13": null,
+          "localReleaseDate": null,
+          "releaseStatus": null,
+          "volumeNumber": 2
+        }
+      ],
+      "year": null
+    },
+    {
+      "artworks": [],
+      "assetCount": 0,
+      "author": null,
+      "coverAssetId": null,
+      "createdAt": "t",
+      "description": null,
+      "developer": null,
+      "director": null,
+      "externalScore": null,
+      "genres": null,
+      "id": "g",
+      "myScore": null,
+      "name": "Game",
+      "originalTitle": null,
+      "overview": null,
+      "ownedPlatform": "PS5",
+      "platforms": null,
+      "productionCompany": null,
+      "publisher": null,
+      "releaseDate": null,
+      "runtimeMinutes": null,
+      "selectedBackdropArtworkId": null,
+      "selectedHeroArtworkId": null,
+      "selectedWorkArtworkId": null,
+      "series": null,
+      "showcase": false,
+      "showcaseOrder": null,
+      "status": "playing",
+      "type": "game",
+      "unreadReleaseCount": 0,
+      "updatedAt": "t",
+      "volumes": [],
+      "year": null
+    },
+    {
+      "artworks": [],
+      "assetCount": 0,
+      "author": null,
+      "av": {
+        "genres": [],
+        "label": null,
+        "maker": null,
+        "people": [
+          {
+            "id": "n",
+            "name": "No profile",
+            "nameJa": null,
+            "order": 0,
+            "portraitCrop": null,
+            "role": "performer"
+          },
+          {
+            "id": "p",
+            "name": "Performer",
+            "nameJa": null,
+            "order": 1,
+            "portraitCrop": null,
+            "portraitImage": {
+              "contentType": "image/png",
+              "height": 2,
+              "sha256": "d69a9f2730d7401602a05feb2bee51e2b1483c5ef115206fa1d5d0e6ffe1a521",
+              "sizeBytes": 88,
+              "width": 3
+            },
+            "role": "performer"
+          }
+        ],
+        "productCode": null,
+        "releaseDate": null,
+        "series": null,
+        "titleJa": null
+      },
+      "coverAssetId": null,
+      "createdAt": "t",
+      "description": null,
+      "developer": null,
+      "director": null,
+      "externalScore": null,
+      "genres": null,
+      "id": "av2",
+      "myScore": null,
+      "name": "AV 2",
+      "originalTitle": null,
+      "overview": null,
+      "platforms": null,
+      "productionCompany": null,
+      "publisher": null,
+      "releaseDate": null,
+      "runtimeMinutes": null,
+      "selectedBackdropArtworkId": null,
+      "selectedHeroArtworkId": null,
+      "selectedWorkArtworkId": null,
+      "series": null,
+      "showcase": false,
+      "showcaseOrder": null,
+      "type": "av",
+      "unreadReleaseCount": 0,
+      "updatedAt": "t",
+      "volumes": [],
+      "year": null
+    },
+    {
+      "artworks": [
+        {
+          "id": "front",
+          "kind": "cover",
+          "original": null,
+          "selected": true,
+          "thumbnail": null
+        }
+      ],
+      "assetCount": 0,
+      "author": null,
+      "av": {
+        "genres": [],
+        "label": null,
+        "maker": null,
+        "people": [
+          {
+            "id": "p",
+            "name": "Performer",
+            "nameJa": null,
+            "order": 0,
+            "portraitCrop": null,
+            "portraitImage": {
+              "contentType": "image/png",
+              "height": 2,
+              "sha256": "d69a9f2730d7401602a05feb2bee51e2b1483c5ef115206fa1d5d0e6ffe1a521",
+              "sizeBytes": 88,
+              "width": 3
+            },
+            "role": "performer"
+          },
+          {
+            "id": "q",
+            "name": "Quiet",
+            "nameJa": null,
+            "order": 1,
+            "portraitCrop": null,
+            "role": "performer"
+          }
+        ],
+        "productCode": null,
+        "releaseDate": null,
+        "series": null,
+        "titleJa": null
+      },
+      "coverAssetId": null,
+      "createdAt": "t",
+      "description": null,
+      "developer": null,
+      "director": null,
+      "externalScore": null,
+      "genres": null,
+      "id": "av",
+      "myScore": null,
+      "name": "AV",
+      "originalTitle": null,
+      "overview": null,
+      "platforms": null,
+      "productionCompany": null,
+      "publisher": null,
+      "releaseDate": null,
+      "runtimeMinutes": null,
+      "selectedBackdropArtworkId": null,
+      "selectedHeroArtworkId": null,
+      "selectedWorkArtworkId": "front",
+      "series": null,
+      "showcase": false,
+      "showcaseOrder": null,
+      "status": "watched",
+      "type": "av",
+      "unreadReleaseCount": 0,
+      "updatedAt": "t",
+      "volumes": [],
+      "year": null
+    }
+  ],
+  "people": [
+    {
+      "favorite": true,
+      "id": "p",
+      "memo": "memo",
+      "portrait": {
+        "author": "Author",
+        "license": "CC BY 4.0",
+        "licenseUrl": "https://license.test",
+        "source": "commons",
+        "sourceUrl": "https://commons.test/p"
+      },
+      "profile": {
+        "aliases": [
+          "A1",
+          "A2"
+        ],
+        "bandIn": 32,
+        "birthDate": "1999-01-02",
+        "breastType": "NATURAL",
+        "careerEnd": 2022,
+        "careerStart": 2018,
+        "cup": "C",
+        "heightCm": 160,
+        "hipIn": 34,
+        "name": "Stash Name",
+        "source": "stashdb",
+        "urls": [
+          {
+            "site": "Twitter",
+            "url": "https://x.test/p"
+          }
+        ],
+        "waistIn": 24
+      }
+    },
+    {
+      "favorite": false,
+      "id": "n",
+      "memo": null,
+      "portrait": {
+        "author": null,
+        "license": null,
+        "licenseUrl": null,
+        "source": "cover",
+        "sourceUrl": null
+      },
+      "profile": null
+    },
+    {
+      "favorite": false,
+      "id": "q",
+      "memo": null,
+      "portrait": null,
+      "profile": null
+    }
+  ],
+  "version": 1
+}

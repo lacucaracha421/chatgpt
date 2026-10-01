@@ -1997,7 +1997,8 @@ impl CloudClient {
                     _ => LibraryError::CloudObjectKeyConflict,
                 });
             }
-            status => return Err(map_registration_error(ureq::Error::StatusCode(status))),
+            // A rejected snapshot (e.g. a 422 validation failure) is not an asset registration.
+            status => return Err(map_api_error(ureq::Error::StatusCode(status), LibraryError::CloudCollectionsPublishRejected)),
         }
         let result: Published = read_json(&mut response)?;
         if result.revision.is_empty() { return Err(LibraryError::InvalidCloudResponse); }

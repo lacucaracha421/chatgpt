@@ -592,3 +592,116 @@ fn an_advertising_server_receives_the_portrait_through_the_artwork_flow() {
     );
     assert!(sent.get("people").is_none());
 }
+
+/// The PC-built body with every feature, checked in at `tests/fixtures/collections-replica-pc.json`
+/// and published through the server's real route by
+/// `server/lakomics-api/tests/test_mobile_collections.py`, so a key the server's
+/// `extra="forbid"` models reject cannot ship unnoticed. Regenerate the file with
+/// `LAKOMICS_UPDATE_WIRE_FIXTURES=1` after an intended contract change.
+#[test]
+fn the_full_feature_body_is_the_server_cross_check_sample() {
+    let (_temp, library, _) = portrait_fixture();
+    // Desktop-only summary state (2026-10-01 production 422: `minVolume`, `maxVolume` and
+    // `hideConnectionPrompt` were sent and the server rejected the whole snapshot).
+    library
+        .connection()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO collection_volume_ranges(collection_id,min_volume,max_volume,hide_connection_prompt,updated_at)
+             VALUES('m',1,2,1,'t');",
+        )
+        .unwrap();
+    let value: Value = serde_json::from_str(&body(&library, ALL)).unwrap();
+    let accepted: Vec<&str> = PUBLISHED_SUMMARY_KEYS
+        .iter()
+        .copied()
+        .chain([
+            "volumes",
+            "series",
+            "film",
+            "av",
+            "artworks",
+            "releaseWatch",
+            "ownedVolumes",
+            "releaseSchedule",
+            "status",
+            "ownedPlatform",
+        ])
+        .collect();
+    for collection in value["collections"].as_array().unwrap() {
+        for key in collection.as_object().unwrap().keys() {
+            assert!(
+                accepted.contains(&key.as_str()),
+                "{key} is not a replica field"
+            );
+        }
+        for key in [
+            "id",
+            "name",
+            "type",
+            "createdAt",
+            "updatedAt",
+            "showcase",
+            "assetCount",
+        ] {
+            assert!(
+                collection.get(key).is_some(),
+                "{key} must still be published"
+            );
+        }
+    }
+    // The range itself is applied to the published volumes.
+    let volumes: Vec<_> = item(&value, "m")["volumes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["id"].clone())
+        .collect();
+    assert_eq!(volumes, [json!("v"), json!("w")]);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../tests/fixtures/collections-replica-pc.json");
+    if std::env::var_os("LAKOMICS_UPDATE_WIRE_FIXTURES").is_some() {
+        std::fs::write(&path, serde_json::to_string_pretty(&value).unwrap() + "\n").unwrap();
+    }
+    let sample: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        value,
+        sample,
+        "regenerate {} if this change is intended",
+        path.display()
+    );
+}
+
+#[test]
+fn a_rejected_replica_is_reported_as_a_collection_publication_failure() {
+    use crate::library::collection_personal_edits::tests::{configure, scripted};
+    let (_temp, library) = fixture();
+    let (base, handle) = scripted(vec![
+        (
+            "/v1/collections/status",
+            200,
+            json!({"revision": "r1"}).to_string(),
+        ),
+        (
+            "/v1/collections?limit=1",
+            200,
+            json!({"revision": "r1"}).to_string(),
+        ),
+        (
+            "/v1/collections/replica",
+            422,
+            json!({"detail": "Invalid collection snapshot"}).to_string(),
+        ),
+    ]);
+    configure(&library, &base);
+    let client = CloudClient::new(&base).unwrap();
+    let error = library
+        .push_cloud_collections_with(&client, &base, "shared", None, &|_| {})
+        .unwrap_err();
+    handle.join().unwrap();
+    assert!(
+        matches!(error, LibraryError::CloudCollectionsPublishRejected(422)),
+        "{error:?}"
+    );
+    assert!(error.to_string().contains("모바일 컬렉션"), "{error}");
+}

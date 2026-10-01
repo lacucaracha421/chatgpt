@@ -1,6 +1,7 @@
 """Isolated replica tests: no real library, storage or provider requests."""
 import copy
 import hashlib
+import json
 import sys
 import tempfile
 import unittest
@@ -15,6 +16,7 @@ import mobile_collections
 from fastapi.testclient import TestClient
 
 AUTH = {"Authorization": "Bearer collections-test"}
+PC_REPLICA = Path(__file__).resolve().parents[3] / "tests/fixtures/collections-replica-pc.json"
 
 
 def work(id="work", name="작품", type="manga"):
@@ -695,6 +697,29 @@ class MobileCollectionsTests(unittest.TestCase):
         with mock.patch.object(fake_s3, "head_object", side_effect=AssertionError("unnecessary HEAD")):
             self.assertEqual(self.publish([self.av_work("a", image)]).status_code, 200)
         self.assertEqual(self.cover_ticket(image["sha256"]).status_code, 200)
+
+    def test_pc_built_full_feature_body_publishes(self):
+        """The PC's own body (every feature), checked in by the Rust test
+        ``the_full_feature_body_is_the_server_cross_check_sample``. On 2026-10-01 the PC sent
+        desktop-only summary keys and this route rejected the whole snapshot with 422."""
+        body = json.loads(PC_REPLICA.read_text(encoding="utf-8"))
+        images = {person["portraitImage"]["sha256"]: person["portraitImage"]
+                  for item in body["collections"] for person in (item.get("av") or {}).get("people", [])
+                  if person.get("portraitImage")}
+        self.assertTrue(images and body["people"])
+        for digest, image in images.items():
+            fake_s3.objects["work-artwork/mobile/" + digest] = {
+                "body": b"\0" * image["sizeBytes"], "content_type": image["contentType"]}
+        reply = self.client.put("/v1/collections/replica", headers=AUTH, json=body)
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(reply.json()["collections"], len(body["collections"]))
+        for person in body["people"]:
+            served = self.client.get(f"/v1/collections/people/{person['id']}", headers=AUTH)
+            self.assertEqual(served.json(), {"person": person})
+        # The models stay strict: an unknown key still rejects the snapshot.
+        body["baseRevision"] = reply.json()["revision"]
+        body["collections"][0]["minVolume"] = 1
+        self.assertEqual(self.client.put("/v1/collections/replica", headers=AUTH, json=body).status_code, 422)
 
     def test_storage_outage_does_not_publish_partial_metadata(self):
         revision = self.publish([work("old")]).json()["revision"]

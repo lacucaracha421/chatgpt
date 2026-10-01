@@ -89,9 +89,28 @@ pub(crate) struct ReplicaVolume {
     #[serde(rename = "coverFocusX", skip_serializing_if = "Option::is_none")]
     cover_focus_x: Option<f64>,
 }
+/// `CollectionSummary` keys the replica server's `Collection` model accepts. The summary
+/// also carries desktop-only state (e.g. the volume range, already applied to `volumes`),
+/// and the server rejects the whole snapshot on any unknown key, so only these cross. A new
+/// published field needs a server change and, for older servers, a `ReplicaFeatures` gate.
+const PUBLISHED_SUMMARY_KEYS: &[&str] = &[
+    "seasonDateRange", "id", "name", "description", "type", "coverAssetId",
+    "selectedWorkArtworkId", "selectedHeroArtworkId", "selectedBackdropArtworkId",
+    "assetCount", "unreadReleaseCount", "year", "originalTitle", "runtimeMinutes", "author",
+    "director", "developer", "publisher", "platforms", "productionCompany", "releaseDate",
+    "externalScore", "myScore", "genres", "overview", "showcase", "showcaseOrder",
+    "createdAt", "updatedAt",
+];
+fn published_summary<S: serde::Serializer>(summary: &CollectionSummary, serializer: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::Error;
+    let serde_json::Value::Object(fields) = serde_json::to_value(summary).map_err(S::Error::custom)? else {
+        return Err(S::Error::custom("collection summary is not an object"));
+    };
+    serializer.collect_map(fields.into_iter().filter(|(key, _)| PUBLISHED_SUMMARY_KEYS.contains(&key.as_str())))
+}
 #[derive(Debug, Serialize)]
 pub(crate) struct ReplicaCollection {
-    #[serde(flatten)]
+    #[serde(flatten, serialize_with = "published_summary")]
     summary: CollectionSummary,
     volumes: Vec<ReplicaVolume>,
     series: Option<serde_json::Value>,
