@@ -536,7 +536,7 @@ select.ui-text-input {
   }
 }
 
-/* Section bar: one thin row of a tab's sections with its view controls at the right end. The bar
+/* Section bar: a tab's sections with view controls at the right and an optional shortcut row. The bar
    carries no edge mark of its own beyond the hairline under it; the segmented thumb shows the choice. */
 .ui-section-bar {
   box-sizing: border-box;
@@ -561,6 +561,9 @@ select.ui-text-input {
   overflow-x: auto;
   scrollbar-width: none;
 }
+
+.ui-section-bar:has(> .ui-section-bar__extra) { flex-wrap: wrap; }
+.ui-section-bar__extra { flex: 1 0 100%; min-width: 0; }
 
 .ui-section-bar__trailing {
   display: flex;
