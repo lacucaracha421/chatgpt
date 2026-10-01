@@ -105,7 +105,14 @@ class MobileCatalogApiTests(unittest.TestCase):
         self.client = TestClient(self.app)
         self.data, self.digest, self.users = fixture_projection()
     def tearDown(self):
-        self.client.close(); self.temp.cleanup()
+        self.client.close()
+        # PC publications can start an index rebuild even without app lifespan.
+        # Let its SQLite writes finish before removing the fixture directory.
+        thread = self.app.state.catalog_duplicate_index.thread
+        if thread is not None:
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive(), "Catalog title index rebuild did not finish")
+        self.temp.cleanup()
     def publish(self, base=None, users=None):
         uploaded = self.client.put("/v1/mobile-catalog/replicas/" + self.digest, headers=AUTH, content=self.data)
         self.assertEqual(uploaded.status_code, 200, uploaded.text)
