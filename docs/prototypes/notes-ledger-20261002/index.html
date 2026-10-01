@@ -78,6 +78,9 @@ h2 { margin: 0; font-size: var(--type-title); font-weight: 600; }
 .tick { width: 18px; height: 18px; margin: 3px 4px 0; border-radius: 50%; border: 1.5px solid var(--color-border-strong); background: transparent; cursor: pointer; padding: 0; }
 .tick:hover { border-color: var(--color-muted); }
 .item.done .tick { background: var(--color-muted); border-color: var(--color-muted); }
+.item.plain { grid-template-columns: 0 minmax(0, 1fr) auto; gap: 0; }
+.item.plain .txt { padding-left: 2px; }
+.tab .item.plain { grid-template-columns: 0 minmax(0, 1fr); }
 .item .txt { outline: none; line-height: 1.6; min-height: 1.6em; overflow-wrap: anywhere; }
 .item.done .txt { color: var(--color-faint); text-decoration: line-through; text-decoration-color: var(--color-border-strong); }
 .item .mv { opacity: 0; width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-faint); cursor: pointer; padding: 0; }
@@ -86,6 +89,7 @@ h2 { margin: 0; font-size: var(--type-title); font-weight: 600; }
 .item:hover .mv, .item:focus-within .mv { opacity: 1; }
 .add { display: flex; align-items: center; gap: 4px; padding: 4px 0 0 30px; color: var(--color-faint); font-size: var(--type-meta); cursor: text; border: 0; background: transparent; font-family: inherit; text-align: left; }
 .add:hover { color: var(--color-text); }
+.add.flat { padding-left: 2px; }
 .donefold { padding: 6px 0 0 30px; border: 0; background: transparent; color: var(--color-faint); font: inherit; font-size: var(--type-meta); cursor: pointer; text-align: left; }
 .quick { position: sticky; bottom: 0; margin-top: auto; display: flex; gap: 8px; align-items: center; padding: 10px 16px; background: var(--color-toolbar); border-top: 1px solid var(--color-border); }
 .quick input { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-bg); color: var(--color-text); font: inherit; }
@@ -184,6 +188,7 @@ h2 { margin: 0; font-size: var(--type-title); font-weight: 600; }
   </header>
   <div class="controls"><span>보기</span><div class="pick" id="modePick"><button type="button" aria-pressed="true" data-mode="memo">메모</button><button type="button" aria-pressed="false" data-mode="ledger">가계부</button></div></div>
   <ol class="notes" id="memoNotes">
+    <li><b>글 / 할 일</b>: 메모마다 위쪽 전환으로 고릅니다(내용은 그대로). <b>글</b>은 동그라미 없는 그냥 글(아이디어), <b>할 일</b>은 줄마다 완료 동그라미(피드백, 장보기). 지금의 체크리스트 메모는 할 일로 합쳐집니다. 섹션이 2개 이상일 때만 섹션 칩 줄이 나옵니다. 왼쪽 목록에서 장보기·아이디어를 눌러 보세요.</li>
     <li><b>마크다운 없음</b>: 쓴 그대로 보이고 읽기/편집 화면 구분이 없습니다. 열면 바로 커서가 마지막 항목 끝에 있습니다.</li>
     <li><b>섹션은 칸</b>: 「모바일 앱」「PC 앱」처럼 제목 줄로만 보입니다(#기호 없음). 아무 줄에서 「섹션으로 만들기」를 하면 그 줄이 섹션 제목이 됩니다 — 지금의 「한 줄 고정」을 대신합니다. 저장은 지금처럼 글자라 PC·기존 메모와 호환됩니다.</li>
     <li><b>섹션만 보기</b>: 위 칩 줄에서 하나를 누르면 그 섹션만 보입니다. 숫자는 남은 항목 수.</li>
@@ -215,27 +220,42 @@ h2 { margin: 0; font-size: var(--type-title); font-weight: 600; }
   </div>
 </div>
 <script>
-const SECTS = [
+const FEEDBACK = [
   { name: '모바일 앱', items: [['섹션 바 내려올 때 한 번 더 들어갔다 나옴', 1], ['메모 수정 중 상단바 저장 중 깜빡임', 1], ['한글 자모 분리되어 적힘', 0], ['열자마자 백스페이스 안 됨', 0], ['쇼케이스 열 때 끊김', 1], ['검색 기능 추가 — 기존 태그 활용', 0], ['카탈로그 필터를 섹션 바로', 1]] },
   { name: 'PC 앱', items: [['스크롤바 모바일처럼', 0], ['에셋 창 복잡도 줄이기', 0], ['메모 상단바에만 네모 있음', 0], ['더보기 창 위치, 찾기 창 리디자인', 0], ['캐릭터 폴더 아이콘 호버 시 제안 폴더 깜빡임', 0], ['컬렉션 사이드바 없애기', 1]] },
   { name: 'NovelAI', items: [['태블릿 터치패드 감도 ×0.5', 1], ['프롬프트 칸 줄바꿈 유지', 0], ['생성 기록 정렬', 0]] },
   { name: '확장 프로그램', items: [['X GIF 저장 확인', 0], ['다이얼 회전 관성 약하게', 0]] },
 ];
+const NOTES = {
+  피드백: { mode: 'todo', sects: FEEDBACK, sub: '모바일 앱 · PC 앱 · NovelAI · 확장' },
+  장보기: { mode: 'todo', sects: [{ name: null, items: [['우유', 0], ['계란 30구', 0], ['휴지', 1], ['세제 리필', 0]] }], sub: '우유, 계란 30구, 세제 리필' },
+  아이디어: { mode: 'text', sects: [
+    { name: null, items: [['떠오르는 대로 적어 두는 메모. 동그라미도, 완료 접기도 없습니다.', 0]] },
+    { name: 'Lakomics', items: [['홈은 바로 알아야 하는 것만 남기고 나머지는 각 화면으로.', 0], ['리디자인 끝나면 버그 고치면서 정보량을 조금씩 줄이기.', 0]] },
+    { name: '여행', items: [['11월 교토 — 단풍 시기 숙소 먼저 알아보기.', 0], ['JR 패스 가격 다시 확인.', 0]] },
+  ], sub: '떠오르는 대로 적어 두는 메모…' },
+};
+let cur = '피드백'; let SECTS = NOTES[cur].sects;
+
 let filter = null, foldedDone = {}, mode = 'memo', lastSect = 'PC 앱';
 const toast = document.getElementById('toast'); let tt;
 function say(t) { toast.textContent = t; toast.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => toast.classList.remove('on'), 2200); }
 const left = (s) => s.items.filter(([, d]) => !d).length;
 function memoHtml(tablet) {
-  const chips = `<div class="chipbar"><button type="button" class="chip" aria-pressed="${filter === null}" data-f="">전체 <small>${SECTS.reduce((a, s) => a + left(s), 0)}</small></button>${SECTS.map((s) => `<button type="button" class="chip" aria-pressed="${filter === s.name}" data-f="${s.name}">${s.name} <small>${left(s)}</small></button>`).join('')}</div>`;
-  const sects = SECTS.filter((s) => !filter || s.name === filter).map((s) => {
+  const note = NOTES[cur], todo = note.mode === 'todo', named = SECTS.filter((s) => s.name);
+  const toggle = `<div class="pick" role="radiogroup" aria-label="메모 방식" style="align-self:flex-start"><button type="button" aria-pressed="${!todo}" data-nmode="text">글</button><button type="button" aria-pressed="${todo}" data-nmode="todo">할 일</button></div>`;
+  const chips = named.length >= 2 ? `<div class="chipbar"><button type="button" class="chip" aria-pressed="${filter === null}" data-f="">전체${todo ? ` <small>${SECTS.reduce((a, s) => a + left(s), 0)}</small>` : ''}</button>${named.map((s) => `<button type="button" class="chip" aria-pressed="${filter === s.name}" data-f="${s.name}">${s.name}${todo ? ` <small>${left(s)}</small>` : ''}</button>`).join('')}</div>` : '';
+  const sects = SECTS.filter((s) => !filter || s.name === filter || (!s.name && !filter)).map((s) => {
     const si = SECTS.indexOf(s), open = s.items.map((it, i) => [it, i]).filter(([[, d]]) => !d), done = s.items.map((it, i) => [it, i]).filter(([[, d]]) => d);
-    const row = ([[t, d], i]) => `<div class="item${d ? ' done' : ''}"><button type="button" class="tick" aria-label="${d ? '완료 취소' : '완료'}" data-tick="${si}:${i}"></button><div class="txt" contenteditable="true" spellcheck="false">${t}</div>${tablet ? '' : `<button type="button" class="mv" aria-label="다른 섹션으로 옮기기" data-move="${si}:${i}"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 7h11m0 0-3-3m3 3-3 3M16 13H5m0 0 3-3m-3 3 3 3" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`}</div>`;
-    return `<section class="sect"><div class="sect-head"><b>${s.name}</b><small class="num">${left(s)}개 남음</small><span class="grow"></span><button type="button" class="btn ghost" data-copy="${si}">복사</button><button type="button" class="btn ghost">⋯</button></div>
-      ${open.map(row).join('')}<button type="button" class="add" data-add="${si}">+ 추가</button>
-      ${done.length ? `<button type="button" class="donefold" data-done="${si}">${foldedDone[si] === false ? '▾' : '▸'} 완료 ${done.length}</button>${foldedDone[si] === false ? done.map(row).join('') : ''}` : ''}</section>`;
+    const row = ([[t, d], i]) => `<div class="item${d ? ' done' : ''}${todo ? '' : ' plain'}">${todo ? `<button type="button" class="tick" aria-label="${d ? '완료 취소' : '완료'}" data-tick="${si}:${i}"></button>` : '<span></span>'}<div class="txt" contenteditable="true" spellcheck="false">${t}</div>${tablet ? '' : `<button type="button" class="mv" aria-label="다른 섹션으로 옮기기" data-move="${si}:${i}"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 7h11m0 0-3-3m3 3-3 3M16 13H5m0 0 3-3m-3 3 3 3" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`}</div>`;
+    const head = s.name ? `<div class="sect-head"><b>${s.name}</b>${todo ? `<small class="num">${left(s)}개 남음</small>` : ''}<span class="grow"></span><button type="button" class="btn ghost" data-copy="${si}">복사</button><button type="button" class="btn ghost">⋯</button></div>` : '';
+    const rows = todo ? open : s.items.map((it, i) => [it, i]);
+    return `<section class="sect">${head}
+      ${rows.map(row).join('')}<button type="button" class="add${todo ? '' : ' flat'}" data-add="${si}">+ ${todo ? '추가' : '줄 추가'}</button>
+      ${todo && done.length ? `<button type="button" class="donefold" data-done="${si}">${foldedDone[si] === false ? '▾' : '▸'} 완료 ${done.length}</button>${foldedDone[si] === false ? done.map(row).join('') : ''}` : ''}</section>`;
   }).join('');
-  const quick = `<div class="quick"><select aria-label="넣을 섹션" id="${tablet ? 'qs2' : 'qs'}">${SECTS.map((s) => `<option${s.name === lastSect ? ' selected' : ''}>${s.name}</option>`).join('')}</select><input aria-label="빠른 추가" placeholder="피드백 한 줄 쓰고 엔터" data-quick="${tablet ? 2 : 1}"></div>`;
-  return `<div class="note"><div class="note-title" contenteditable="true">피드백</div>${chips}${sects}</div>${tablet ? quick : ''}`;
+  const quick = `<div class="quick">${named.length ? `<select aria-label="넣을 섹션" id="${tablet ? 'qs2' : 'qs'}">${named.map((s) => `<option${s.name === lastSect ? ' selected' : ''}>${s.name}</option>`).join('')}</select>` : ''}<input aria-label="빠른 추가" placeholder="${todo ? '한 줄 쓰고 엔터' : '이어서 쓰기'}" data-quick="${tablet ? 2 : 1}"></div>`;
+  return `<div class="note"><div style="display:flex;align-items:center;gap:12px"><div class="note-title" contenteditable="true" style="flex:1">${cur}</div>${toggle}</div>${chips}${sects}</div>${tablet ? quick : ''}`;
 }
 function ledgerHtml(tablet) {
   const subs = [
@@ -280,19 +300,21 @@ function render() {
   document.getElementById('memoNotes').hidden = mode !== 'memo';
   document.getElementById('ledgerNotes').hidden = mode !== 'ledger';
   document.querySelectorAll('#modePick button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
-  document.getElementById('nlist').innerHTML = [['피드백', '모바일 앱 · PC 앱 · NovelAI · 확장', mode === 'memo'], ['가계부', '10월 · 남은 돈 ₩557,400', mode === 'ledger'], ['장보기', '우유, 계란, 휴지', false], ['읽을 것', '던전밥 14권, 귀멸 외전', false]].map(([t, s, on]) => `<div class="nrow${on ? ' on' : ''}"><b>${t}</b><small>${s}</small></div>`).join('');
-  document.getElementById('pcMain').innerHTML = `<div class="top"><span class="t">${mode === 'memo' ? '피드백' : '가계부'}</span><span class="grow"></span><span class="quiet">${mode === 'memo' ? '저장됨' : ''}</span><span class="wc"><span>─</span><span>□</span><span>×</span></span></div><div class="pane" style="display:flex;flex-direction:column">${mode === 'memo' ? memoHtml(false) : ledgerHtml(false)}</div>`;
-  document.getElementById('tabTitle').innerHTML = `${mode === 'memo' ? '피드백' : '가계부'}<small>${mode === 'memo' ? '저장됨' : '10월'}</small>`;
+  document.getElementById('nlist').innerHTML = [...Object.keys(NOTES).map((k) => [k, NOTES[k].sub, mode === 'memo' && cur === k, `${NOTES[k].mode === 'todo' ? '할 일' : '글'}`]), ['가계부', '10월 · 남은 돈 ₩557,400', mode === 'ledger', '가계부']].map(([t, s, on, kind]) => `<div class="nrow${on ? ' on' : ''}" data-note="${t}"><b>${t} <small style="font-weight:400">· ${kind}</small></b><small>${s}</small></div>`).join('');
+  document.getElementById('pcMain').innerHTML = `<div class="top"><span class="t">${mode === 'memo' ? cur : '가계부'}</span><span class="grow"></span><span class="quiet">${mode === 'memo' ? '저장됨' : ''}</span><span class="wc"><span>─</span><span>□</span><span>×</span></span></div><div class="pane" style="display:flex;flex-direction:column">${mode === 'memo' ? memoHtml(false) : ledgerHtml(false)}</div>`;
+  document.getElementById('tabTitle').innerHTML = `${mode === 'memo' ? cur : '가계부'}<small>${mode === 'memo' ? '저장됨' : '10월'}</small>`;
   document.getElementById('tabBody').innerHTML = `<div style="display:flex;flex-direction:column;min-height:100%">${mode === 'memo' ? memoHtml(true) : ledgerHtml(true)}</div>`;
   document.getElementById('tabCap').textContent = mode === 'memo' ? '같은 메모를 태블릿에서. 항목은 손가락 크기, 옮기기는 길게 누르기, 빠른 추가는 엄지 닿는 아래.' : '태블릿은 한 줄로 쌓입니다: 요약 → 결제 예정 → 구독 → 사고 싶은 것 → 지출.';
 }
 document.addEventListener('click', (e) => {
   const t = e.target;
   const m = t.closest('[data-mode]'); if (m) { mode = m.dataset.mode; render(); return; }
+  const nr = t.closest('[data-note]'); if (nr) { const k = nr.dataset.note; if (k === '가계부') mode = 'ledger'; else { mode = 'memo'; cur = k; SECTS = NOTES[cur].sects; filter = null; lastSect = (SECTS.find((x) => x.name) || {}).name; } render(); return; }
+  const nm = t.closest('[data-nmode]'); if (nm) { NOTES[cur].mode = nm.dataset.nmode; render(); say(nm.dataset.nmode === 'todo' ? '할 일로 — 줄마다 완료 동그라미, 내용은 그대로' : '글로 — 동그라미 없이 그냥 글, 내용은 그대로'); return; }
   const f = t.closest('[data-f]'); if (f) { filter = f.dataset.f || null; render(); return; }
   const tk = t.closest('[data-tick]'); if (tk) { const [s, i] = tk.dataset.tick.split(':').map(Number); SECTS[s].items[i][1] = SECTS[s].items[i][1] ? 0 : 1; render(); return; }
   const dn = t.closest('[data-done]'); if (dn) { const s = +dn.dataset.done; foldedDone[s] = foldedDone[s] === false; render(); return; }
-  const cp = t.closest('[data-copy]'); if (cp) { const s = SECTS[+cp.dataset.copy]; say(`복사됨 — ${s.name} 남은 ${left(s)}개\n${s.items.filter(([, d]) => !d).map(([x]) => `- ${x}`).join('\n')}`); return; }
+  const cp = t.closest('[data-copy]'); if (cp) { const s = SECTS[+cp.dataset.copy]; const todo = NOTES[cur].mode === 'todo'; say(todo ? `복사됨 — ${s.name} 남은 ${left(s)}개\n${s.items.filter(([, d]) => !d).map(([x]) => `- ${x}`).join('\n')}` : `복사됨 — ${s.name}\n${s.items.map(([x]) => x).join('\n')}`); return; }
   const mv = t.closest('[data-move]'); if (mv) { const [s, i] = mv.dataset.move.split(':').map(Number); const to = (s + 1) % SECTS.length; const [it] = SECTS[s].items.splice(i, 1); SECTS[to].items.unshift(it); render(); say(`「${it[0]}」 → ${SECTS[to].name} (실제로는 섹션을 고르는 메뉴)`); return; }
   const ad = t.closest('[data-add]'); if (ad) { const s = +ad.dataset.add; SECTS[s].items.push(['', 0]); lastSect = SECTS[s].name; render(); const txts = document.querySelectorAll('#pcMain .sect')[filter ? 0 : s]?.querySelectorAll('.item:not(.done) .txt'); txts?.[txts.length - 1]?.focus(); return; }
   const sb = t.closest('[data-sub]'); if (sb) { const dlg = t.closest('.tab') ? 'subDlg2' : 'subDlg1'; document.getElementById(dlg).hidden = false; return; }
@@ -302,7 +324,7 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   const q = e.target.closest?.('[data-quick]'); if (!q || e.key !== 'Enter' || e.isComposing || !q.value.trim()) return;
-  const sel = document.getElementById(q.dataset.quick === '2' ? 'qs2' : 'qs'); const s = SECTS.find((x) => x.name === sel.value); s.items.push([q.value.trim(), 0]); lastSect = s.name; render(); say(`${s.name}에 추가`);
+  const sel = document.getElementById(q.dataset.quick === '2' ? 'qs2' : 'qs'); const s = sel ? SECTS.find((x) => x.name === sel.value) : SECTS[SECTS.length - 1]; s.items.push([q.value.trim(), 0]); lastSect = s.name; render(); say(`${s.name || cur}에 추가`);
   document.querySelector(`[data-quick="${q.dataset.quick}"]`)?.focus();
 });
 render();

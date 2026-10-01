@@ -2,6 +2,9 @@
 
 Mockup for the 메모 and 가계부 redesign (backlog `PC-POLISH-20261002` items 10–11). Accepted by the user 2026-10-02 with one change: no quick-add field on the PC (write directly in the note); the tablet keeps it.
 
+- 메모 has two modes per note, switched at the top without changing content: 글 (plain lines, no circles — ideas) and 할 일 (a done
+  circle per line — feedback, shopping); the current checklist note kind merges into 할 일. Section chips appear only with two or more
+  named sections; in 글 mode section copy copies the whole section text. Note kinds become 메모 (글/할 일), 가계부, 암호 메모.
 - 메모: no Markdown; one editing surface (no read/edit split, caret at the end on open). Sections are blocks shown as title rows (stored as
   text so existing notes and the PC stay compatible); "섹션으로 만들기" replaces the current one-line pin. Section chips filter to one
   section; each line is an item with a done circle, done items fold into "완료 N"; "+ 추가" per section (and Enter at the end of an item); the tablet also has a quick-add field with a section
