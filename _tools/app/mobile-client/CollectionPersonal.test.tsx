@@ -16,21 +16,21 @@ import {readCollectionEdit, readCollectionEdits} from './collectionEditOutbox';
 
 const LIBRARY='e'.repeat(32);
 const base:CollectionDetail={id:'w',name:'밤의 도서관',type:'manga',showcase:false,myScore:3,description:'PC 메모',overview:'provider',volumes:[],artworks:[]};
-let item:CollectionDetail, revision:string, capable:boolean, command:(body:Record<string,unknown>)=>unknown;
+let item:CollectionDetail, revision:string, capable:boolean, recordCapable:boolean, command:(body:Record<string,unknown>)=>unknown;
 const page=():CollectionPage=>({ready:true,filterVersion:1,revision,publishedAt:null,items:[item],nextCursor:null});
 const commands=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/personal-edits').map(([, ,body])=>body as Record<string,unknown>);
 
 beforeEach(()=>{setOutboxConnection(CONNECTION);
   localStorage.clear();for(const kind of ['game','movie','av'])localStorage.setItem(`lakomics.mobile.collectionView.${kind}.v1`,JSON.stringify({layout:'grid',perRow:4}));mocks.api.mockReset();mocks.native.mockReset();
-  item={...base};revision='r1';capable=true;
+  item={...base};revision='r1';capable=true;recordCapable=true;
   command=body=>{
     // A tiny server: apply, bump the revision, answer with a receipt.
-    const key=body.field==='memo'?'description':body.field as 'myScore'|'showcase';
+    const key=body.field==='memo'?'description':body.field as 'myScore'|'showcase'|'status'|'ownedPlatform';
     item={...item,[key]:body.value};revision='r2';
     return {version:1,operationId:body.operationId,collectionId:body.collectionId,field:body.field,value:body.value,sequence:1,revision,changed:true};
   };
   mocks.api.mockImplementation(async(path:string,_signal:unknown,body?:Record<string,unknown>)=>{
-    if(path==='/v1/collections/status')return capable?{revision,capabilities:{collectionPersonalEdit:true,collectionTrackingEdit:true},libraryId:LIBRARY}:{revision,capabilities:{collectionPersonalEdit:false}};
+    if(path==='/v1/collections/status')return capable?{revision,capabilities:{collectionPersonalEdit:true,collectionTrackingEdit:true,collectionRecordEdit:recordCapable},libraryId:LIBRARY}:{revision,capabilities:{collectionPersonalEdit:false}};
     if(path==='/v1/collections/personal-edits'){const reply=command(body!);if(reply instanceof Error)throw reply;return reply;}
     if(path.startsWith('/v1/collections?'))return page();
     return {revision,item};
@@ -253,6 +253,79 @@ it('moves the Showcase switch once: no flip back between the server receipt and 
   observer.disconnect();
   expect(pressed.every(value=>value==='true')).toBe(true);
   expect(button.getAttribute('aria-pressed')).toBe('true');
+});
+
+describe('work record (상태 · 기기)',()=>{
+  const game:CollectionDetail={...base,type:'game',platforms:'PC · PS5',status:'unplayed',ownedPlatform:'PC'};
+  const row=(name:RegExp)=>within(personal()).getByRole('button',{name});
+
+  it('edits 상태 from a sheet with the PC labels and keeps the chosen value without a flip back',async()=>{
+    item={...game};
+    await openDetail();
+    const button=await within(personal()).findByRole('button',{name:'상태 안 함, 바꾸기'});
+    fireEvent.click(button);
+    const sheet=await screen.findByRole('dialog',{name:'상태'});
+    expect(within(sheet).getAllByRole('radio').map(node=>node.textContent)).toEqual(['미입력','다 함','하는 중','안 함']);
+    expect(within(sheet).getByRole('radio',{name:'안 함'}).getAttribute('aria-checked')).toBe('true');
+    // The refreshed detail arrives late: the row must never show 안 함 again in between.
+    let release!:()=>void;const late=new Promise<void>(resolve=>{release=resolve;});
+    const fallback=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async(path:string,signal:unknown,body?:Record<string,unknown>)=>{if(path==='/v1/collections/w')await late;return fallback(path,signal,body);});
+    const seen:string[]=[];
+    const observer=new MutationObserver(()=>seen.push(button.getAttribute('aria-label')??''));
+    observer.observe(button,{attributes:true,attributeFilter:['aria-label']});
+    fireEvent.click(within(sheet).getByRole('radio',{name:'하는 중'}));
+    expect(button.getAttribute('aria-label')).toBe('상태 하는 중, 전송 대기, 바꾸기');
+    await waitFor(()=>expect(commands()).toHaveLength(1));
+    expect(commands()[0]).toMatchObject({version:1,libraryId:LIBRARY,collectionId:'w',field:'status',value:'playing',expected:'unplayed'});
+    await waitFor(()=>expect(readCollectionEdits()).toEqual({}));
+    expect(button.getAttribute('aria-label')).toBe('상태 하는 중, 바꾸기');
+    await act(async()=>{release();});
+    await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/w').length).toBeGreaterThan(1));
+    observer.disconnect();
+    expect(seen.every(label=>label.startsWith('상태 하는 중'))).toBe(true);
+    expect(row(/^상태/)).toBe(button);
+    // The case's 내 기록 slip shows the same value.
+    expect([...document.querySelectorAll('.slip dd')].map(node=>node.textContent)).toContain('하는 중');
+    // 미입력 is a real choice and clears the record.
+    fireEvent.click(button);
+    fireEvent.click(within(await screen.findByRole('dialog',{name:'상태'})).getByRole('radio',{name:'미입력'}));
+    await waitFor(()=>expect(commands().at(-1)).toMatchObject({field:'status',value:null,expected:'playing'}));
+    await waitFor(()=>expect(row(/^상태 미입력/)).toBeTruthy());
+  });
+
+  it('edits 기기 from the shared platform list, for games only',async()=>{
+    item={...game};
+    await openDetail();
+    fireEvent.click(await within(personal()).findByRole('button',{name:'기기 PC, 바꾸기'}));
+    const sheet=await screen.findByRole('dialog',{name:'기기'});
+    // The work's listed platforms first, then the common consoles, without duplicates.
+    expect(within(sheet).getAllByRole('radio').map(node=>node.textContent)).toEqual(['미입력','PC','PS5','Switch','Switch 2','PS4','Xbox One','Xbox Series X/S','Steam Deck']);
+    fireEvent.click(within(sheet).getByRole('radio',{name:'Switch 2'}));
+    await waitFor(()=>expect(commands()[0]).toMatchObject({field:'ownedPlatform',value:'Switch 2',expected:'PC'}));
+    await waitFor(()=>expect(readCollectionEdits()).toEqual({}));
+    expect(row(/^기기 Switch 2, 바꾸기/)).toBeTruthy();
+    cleanup();
+    // A manga has 상태 (editable, 미입력 when the PC recorded none) but no 기기 row.
+    item={...base};
+    await openDetail();
+    expect(await within(personal()).findByRole('button',{name:'상태 미입력, 바꾸기'})).toBeTruthy();
+    expect(within(personal()).queryByRole('button',{name:/^기기/})).toBeNull();
+    fireEvent.click(within(personal()).getByRole('button',{name:'상태 미입력, 바꾸기'}));
+    expect(within(await screen.findByRole('dialog',{name:'상태'})).getAllByRole('radio').map(node=>node.textContent)).toEqual(['미입력','모으는 중','다 모음']);
+  });
+
+  it('shows the published 상태 and 기기 read-only while the PC is not on version 3',async()=>{
+    item={...game};recordCapable=false;
+    await openDetail();
+    await act(async()=>{});
+    expect(within(personal()).queryByRole('button',{name:/^상태/})).toBeNull();
+    expect(within(personal()).getByText('상태').nextElementSibling?.textContent).toBe('안 함');
+    expect(within(personal()).getByText('기기').nextElementSibling?.textContent).toBe('PC');
+    // My rating is still editable, and nothing was sent.
+    expect(within(personal()).getByRole('button',{name:/내 평점/})).toBeTruthy();
+    expect(commands()).toHaveLength(0);
+  });
 });
 
 describe('manga detail layout',()=>{

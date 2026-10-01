@@ -317,7 +317,7 @@ Folded-in scope (2026-09-26; completed portions are archived):
 - `PC-POLL-002` (remaining desktop pollers) and `BIND-POLL-001` (tablet connect-request pickup) — archived as done.
 - Re-verify lightweight processing mode (`05b18b6`) against everything added since — source gate is present; measured acceptance is unverified.
 - Covers load slowly right after the app starts (USER-REQ-20260926) — bounded warm-up fix is archived; reopen only for a new measured regression.
-- Move PC sync state kept in `notes_state` (Collections release sync, personal-edit v2 receipts, binding sync) into a proper table at the next planned migration (0098).
+- Move PC sync state kept in `notes_state` (Collections release sync, personal-edit v2/v3 receipts, binding sync) into a proper table at the next planned migration (0098).
 
 # Future-work notes — 2026-09-21
 

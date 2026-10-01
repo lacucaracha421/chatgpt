@@ -1175,7 +1175,7 @@ mod tests {
             )
             .unwrap();
             let mut bodies = vec![legacy];
-            for edit_version in [1, 2] {
+            for edit_version in [1, 2, 3] {
                 let feature = PersonalEditFeature {
                     endpoint: endpoint.into(),
                     library_id: library_id.clone(),
@@ -1311,6 +1311,13 @@ mod tests {
             serde_json::to_value(&library.cloud_collections_snapshot_with_feature(None, Some(&feature), false, &|_| {}).unwrap().replica).unwrap()
         };
         let find = |value: &serde_json::Value, id: &str| value["collections"].as_array().unwrap().iter().find(|c| c["id"] == id).unwrap().clone();
+        // Version 3 (work record edits) carries the same manga keys under its own number.
+        let v3 = snapshot(3);
+        assert_eq!(v3["personalEditVersion"], 3);
+        assert_eq!(
+            find(&v3, "c")["releaseWatch"],
+            json!({"enabled":true,"available":true})
+        );
         let v2 = snapshot(2);
         assert_eq!(v2["personalEditVersion"], 2);
         let manga = find(&v2, "c");

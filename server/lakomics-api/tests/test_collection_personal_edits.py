@@ -77,7 +77,8 @@ class CollectionPersonalEditTests(unittest.TestCase):
     def test_unsupported_until_an_upgraded_pc_publishes(self):
         legacy = self.publish(self.body(upgraded=False), headers=AUTH)
         self.assertEqual(legacy.status_code, 200, legacy.text)
-        self.assertEqual(self.status()['capabilities'], {'collectionPersonalEdit': False, 'collectionTrackingEdit': False})
+        self.assertEqual(self.status()['capabilities'], {'collectionPersonalEdit': False, 'collectionTrackingEdit': False,
+                                                         'collectionRecordEdit': False})
         self.assertNotIn('libraryId', self.status())
         reply = self.edit(self.command())
         self.assertEqual((reply.status_code, self.code(reply)), (409, 'collectionPersonalEditUnsupported'))
@@ -86,7 +87,8 @@ class CollectionPersonalEditTests(unittest.TestCase):
         self.assertEqual(self.feed(after=1).status_code, 409)
         self.ready()
         status = self.status()
-        self.assertEqual(status['capabilities'], {'collectionPersonalEdit': True, 'collectionTrackingEdit': False})
+        self.assertEqual(status['capabilities'], {'collectionPersonalEdit': True, 'collectionTrackingEdit': False,
+                                                  'collectionRecordEdit': False})
         self.assertEqual((status['libraryId'], status['personalEditCursor'], status['appliedPersonalEditCursor']),
                          (LIBRARY, 0, 0))
 
@@ -517,6 +519,143 @@ class CollectionTrackingEditTests(unittest.TestCase):
         self.ready2()
         self.assertTrue(self.status()['capabilities']['collectionTrackingEdit'])
 
+
+
+class CollectionRecordEditTests(unittest.TestCase):
+    """Personal-edit version 3: the PC work record's 상태 and 기기."""
+    base = CollectionPersonalEditTests
+    tearDown = base.tearDown
+    body, publish, status, ready = base.body, base.publish, base.status, base.ready
+    command, edit, detail, feed, code = base.command, base.edit, base.detail, base.feed, base.code
+    listing = base.listing
+
+    def setUp(self):
+        self.base.setUp(self)
+        game = work('g', '라', 'game')
+        game.update(status='unplayed', ownedPlatform='PC', platforms='PC · PS5')
+        self.items[0].update(status='collecting', releaseWatch={'enabled': False, 'available': True})
+        self.items.append(game)
+
+    def ready3(self, cursor=0, items=None, edit_version=3):
+        reply = self.publish(self.body(items, cursor, self.status()['revision'], edit_version=edit_version))
+        self.assertEqual(reply.status_code, 200, reply.text)
+        return reply.json()['revision']
+
+    def test_handshake_version_three_turns_the_capability_on_and_off(self):
+        self.ready()
+        self.assertFalse(self.status()['capabilities']['collectionRecordEdit'])
+        reply = self.edit(self.command('status', 'complete', 'collecting'))
+        self.assertEqual((reply.status_code, self.code(reply)), (409, 'collectionPersonalEditUnsupported'))
+        self.ready3(edit_version=2)
+        self.assertEqual(self.status()['capabilities'], {'collectionPersonalEdit': True, 'collectionTrackingEdit': True,
+                                                         'collectionRecordEdit': False})
+        self.assertEqual(self.code(self.edit(self.command('ownedPlatform', 'PS5', 'PC', 'g'))), 'collectionPersonalEditUnsupported')
+        self.ready3()
+        self.assertEqual(self.status()['capabilities'], {'collectionPersonalEdit': True, 'collectionTrackingEdit': True,
+                                                         'collectionRecordEdit': True})
+        self.assertEqual(self.edit(self.command('status', 'complete', 'collecting')).status_code, 200)
+        # A version-2 publication turns it off again, and the version is refused beyond 3.
+        self.ready3(cursor=1, edit_version=2)
+        self.assertFalse(self.status()['capabilities']['collectionRecordEdit'])
+        self.assertEqual(self.publish(self.body(cursor=1, base=self.status()['revision'], edit_version=4)).status_code, 422)
+
+    def test_status_and_platform_edits_reach_detail_and_list_and_the_log(self):
+        old = self.ready3()
+        status = self.edit(self.command('status', 'complete', 'collecting'))
+        self.assertEqual(status.status_code, 200, status.text)
+        self.assertEqual((status.json()['value'], status.json()['changed'], status.json()['sequence']), ('complete', True, 1))
+        self.assertNotEqual(self.status()['revision'], old)
+        self.assertEqual(self.detail()['status'], 'complete')
+        self.assertEqual({i['id']: i.get('status') for i in self.listing(type='manga').json()['items']}, {'a': 'complete', 's': None})
+        platform = self.edit(self.command('ownedPlatform', '  Switch 2  ', 'PC', 'g'))
+        self.assertEqual(platform.status_code, 200, platform.text)
+        self.assertEqual(platform.json()['value'], 'Switch 2')
+        self.assertEqual(self.detail('g')['ownedPlatform'], 'Switch 2')
+        # 미입력: the key leaves the served row instead of being stored as null.
+        self.assertEqual(self.edit(self.command('status', None, 'unplayed', 'g')).status_code, 200)
+        self.assertNotIn('status', self.detail('g'))
+        self.assertEqual(self.edit(self.command('ownedPlatform', '', 'Switch 2', 'g')).json()['value'], None)
+        self.assertNotIn('ownedPlatform', self.detail('g'))
+        self.assertEqual(self.detail('g')['platforms'], 'PC · PS5')
+        # A status on a work the PC published without one: expected null.
+        self.assertEqual(self.edit(self.command('status', 'watched', None, 'm')).status_code, 200)
+        self.assertEqual(self.detail('m')['status'], 'watched')
+        items = self.feed(editVersion=3).json()['items']
+        self.assertEqual([(i['collectionId'], i['field'], i['value'], i['previous']) for i in items], [
+            ('a', 'status', 'complete', 'collecting'), ('g', 'ownedPlatform', 'Switch 2', 'PC'),
+            ('g', 'status', None, 'unplayed'), ('g', 'ownedPlatform', None, 'Switch 2'), ('m', 'status', 'watched', None)])
+        # Same value again is a no-op without a log row.
+        self.assertFalse(self.edit(self.command('status', 'complete', 'x')).json()['changed'])
+        self.assertEqual(self.feed(editVersion=3).json()['nextCursor'], 5)
+
+    def test_validation_follows_the_type_and_the_pc_limits(self):
+        self.ready3()
+        for command in (self.command('status', 'playing', 'collecting'),  # a game status on manga
+                        self.command('status', 'watched', 'unplayed', 'g'),
+                        self.command('status', 3, 'collecting'),
+                        self.command('status', 'x' * 41, 'collecting'),
+                        self.command('ownedPlatform', 'x' * 201, 'PC', 'g'), self.command('ownedPlatform', 5, 'PC', 'g')):
+            reply = self.edit(command)
+            self.assertEqual((reply.status_code, self.code(reply)), (422, 'invalidCollectionPersonalEdit'), command)
+        for collection in ('a', 'm'):
+            reply = self.edit(self.command('ownedPlatform', 'PC', None, collection))
+            self.assertEqual((reply.status_code, self.code(reply)), (409, 'collectionRecordUnavailable'))
+        # AV takes a status like the PC panel.
+        self.items[2].update(type='av', av=fixtures.av_info())
+        self.ready3()
+        self.assertEqual(self.edit(self.command('status', 'watched', None, 'm')).status_code, 200)
+        self.assertEqual(self.detail('m')['status'], 'watched')
+        with api_app.get_db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM mobile_collection_edits').fetchone()[0], 1)
+
+    def test_conflict_reports_the_current_value(self):
+        self.ready3()
+        reply = self.edit(self.command('status', 'complete', None))
+        self.assertEqual((reply.status_code, self.code(reply), reply.json()['detail']['current']),
+                         (409, 'collectionPersonalConflict', 'collecting'))
+        reply = self.edit(self.command('ownedPlatform', 'PS5', 'Switch', 'g'))
+        self.assertEqual((self.code(reply), reply.json()['detail']['current']), ('collectionPersonalConflict', 'PC'))
+        # An expected null against a published value conflicts too; a padded expected does not.
+        self.assertEqual(self.code(self.edit(self.command('ownedPlatform', 'PS5', None, 'g'))), 'collectionPersonalConflict')
+        self.assertEqual(self.edit(self.command('ownedPlatform', 'PS5', ' PC ', 'g')).status_code, 200)
+
+    def test_version_two_pc_never_receives_record_entries(self):
+        self.ready3()
+        self.assertEqual(self.edit(self.command('status', 'complete', 'collecting')).status_code, 200)
+        for version in (1, 2):
+            reply = self.feed(editVersion=version)
+            self.assertEqual((reply.status_code, self.code(reply)), (409, 'collectionPersonalEditUpgradeRequired'), version)
+        self.assertEqual(self.feed(editVersion=3).status_code, 200)
+        self.assertEqual(self.feed(editVersion=4).status_code, 422)
+        # A version-2 entry before it is still paged to a version-2 PC; the page that would
+        # include the record entry is refused.
+        self.assertEqual(self.edit(self.command('releaseWatch', True, False)).status_code, 200)
+        self.assertEqual(self.feed(editVersion=2, after=1).status_code, 200)
+        self.assertEqual(self.feed(editVersion=2, after=0, limit=1).status_code, 409)
+
+    def test_stale_snapshot_replays_record_edits_unless_the_type_changed(self):
+        self.ready3()
+        self.assertEqual(self.edit(self.command('status', 'complete', 'collecting')).status_code, 200)
+        self.assertEqual(self.edit(self.command('ownedPlatform', 'PS5', 'PC', 'g')).status_code, 200)
+        self.assertEqual(self.edit(self.command('status', None, 'unplayed', 'g')).status_code, 200)
+        # The PC has not applied them: its snapshot still carries the old values.
+        self.ready3(cursor=0)
+        self.assertEqual((self.detail()['status'], self.detail('g')['ownedPlatform']), ('complete', 'PS5'))
+        self.assertNotIn('status', self.detail('g'))
+        # Received everything: the PC's publication is authoritative again.
+        self.ready3(cursor=3)
+        self.assertEqual((self.detail()['status'], self.detail('g')['ownedPlatform'], self.detail('g')['status']),
+                         ('collecting', 'PC', 'unplayed'))
+        # A pending edit is not replayed onto a work whose type no longer takes it.
+        self.assertEqual(self.edit(self.command('status', 'complete', 'collecting')).status_code, 200)
+        self.assertEqual(self.edit(self.command('ownedPlatform', 'PS5', 'PC', 'g')).status_code, 200)
+        items = copy.deepcopy(self.items)
+        items[0].update(type='av', av=fixtures.av_info()); items[0].pop('status')
+        items[3].update(type='movie'); items[3].pop('ownedPlatform'); items[3]['status'] = 'watched'
+        self.assertEqual(self.publish(self.body(items, cursor=3, base=self.status()['revision'], edit_version=3)).status_code, 200)
+        self.assertNotIn('status', self.detail())
+        self.assertNotIn('ownedPlatform', self.detail('g'))
+        self.assertEqual(self.detail('g')['status'], 'watched')
 
 
 SCHEDULE = {

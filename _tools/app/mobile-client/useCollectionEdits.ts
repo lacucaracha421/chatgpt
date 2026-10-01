@@ -9,7 +9,7 @@ import {onVisible} from './useVisibleInterval';
 
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {usePendingRetry} from './useBookmarks';
-import {flushCollectionEdits, personalEditLibrary, trackingEditAllowed, type CollectionEditStatus} from './collectionEditDelivery';
+import {flushCollectionEdits, personalEditLibrary, recordEditAllowed, trackingEditAllowed, type CollectionEditStatus} from './collectionEditDelivery';
 import {
   COLLECTION_EDITS_EVENT,
   SAVE_FAILED,
@@ -30,6 +30,8 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
   const [supported, setSupported] = useState(false);
   /** 신간 알림 / owned volumes: the server advertises `collectionTrackingEdit` (a version-2 PC). */
   const [trackingSupported, setTrackingSupported] = useState(false);
+  /** 상태 / 기기: the server advertises `collectionRecordEdit` (a version-3 PC). */
+  const [recordSupported, setRecordSupported] = useState(false);
   const [failure, setFailure] = useState('');
   const [notice, setNotice] = useState('');
   /**
@@ -84,6 +86,7 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
     library.current = personalEditLibrary(reply as CollectionEditStatus);
     setSupported(library.current !== null);
     setTrackingSupported(trackingEditAllowed(reply as CollectionEditStatus));
+    setRecordSupported(recordEditAllowed(reply as CollectionEditStatus));
   }, []);
 
   const edit = useCallback((collectionId: string, field: CollectionEditField, value: CollectionEditValue, authoritative: CollectionEditValue) => {
@@ -123,7 +126,7 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
   const pending = Object.values(intents).some(intent => !intent.conflict);
   usePendingRetry(active, pending, flush);
 
-  return {supported, trackingSupported, failure, notice, edit, resolveConflict, visible, observeStatus, flush};
+  return {supported, trackingSupported, recordSupported, failure, notice, edit, resolveConflict, visible, observeStatus, flush};
 }
 
 /** App-level delivery: on start and on returning to the foreground, whatever screen is open. */

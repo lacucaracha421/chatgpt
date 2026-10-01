@@ -1853,14 +1853,20 @@ impl CloudClient {
     /// One page of the ordered personal-edit log (publisher token), or `None` when the
     /// route is absent. A coded `409` distinguishes "server library not linked"
     /// (`collectionPersonalEditUnsupported`) from a cursor/library rejection.
+    ///
+    /// `edit_version` is the personal-edit version negotiated from the capabilities (1..=3):
+    /// the server refuses a page holding an entry this PC could not apply, and bounds the
+    /// parameter to the versions it knows, so a newer PC never sends a number an older server
+    /// rejects.
     pub(crate) fn collection_personal_edits(
         &self,
         token: &str,
         library_id: &str,
         after: i64,
         limit: i64,
+        edit_version: u8,
     ) -> Result<Option<crate::library::collection_personal_edits::PersonalEditPage>, LibraryError> {
-        if !crate::library::is_valid_library_id(library_id) || after < 0 || !(1..=100).contains(&limit) {
+        if !crate::library::is_valid_library_id(library_id) || after < 0 || !(1..=100).contains(&limit) || !(1..=3).contains(&edit_version) {
             return Err(LibraryError::InvalidCloudResponse);
         }
         let agent = crate::http_agent::agent(
@@ -1870,8 +1876,8 @@ impl CloudClient {
                 .timeout_global(Some(SHORT_NETWORK_TIMEOUT))
                 .build(),
         );
-        // `editVersion=2`: this PC applies the manga tracking fields (an older server ignores it).
-        let path = format!("/v1/collections/personal-edits?libraryId={library_id}&after={after}&limit={limit}&editVersion=2");
+        // A version-1 server has no `editVersion` parameter and ignores it.
+        let path = format!("/v1/collections/personal-edits?libraryId={library_id}&after={after}&limit={limit}&editVersion={edit_version}");
         let mut response = agent.get(self.endpoint(&path)?).header("Authorization", bearer(token)?).call()
             .map_err(|error| match error {
                 ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut,
@@ -3840,6 +3846,10 @@ pub(crate) struct CollectionsCapabilities {
     /// tracking fields); absent on an older one.
     #[serde(default)]
     pub collection_tracking_edit: Option<bool>,
+    /// Present (either value) on a server that understands personal-edit version 3 (the
+    /// work record's 상태 and 기기); absent on an older one.
+    #[serde(default)]
+    pub collection_record_edit: Option<bool>,
 }
 
 fn bearer(token: &str) -> Result<String, LibraryError> {

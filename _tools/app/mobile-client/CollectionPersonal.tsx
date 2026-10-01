@@ -4,17 +4,19 @@ import {SparklesIcon as SparklesSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {MEMO_LIMIT, memoLength, type CollectionEditField, type CollectionEditValue} from './collectionEditOutbox';
-import {recordStates, statusLabel} from '../src/collections/work/WorkRecord';
+import {platformOptions, recordStates, statusLabel} from '../src/collections/work/WorkRecord';
 import type {CollectionDetail, CollectionSummary} from './collectionModel';
 import {OwnedSheet, ReleaseWatchAction, trackedEditions, TrackingRows} from './CollectionTracking';
 
-/** `owned-N` edits the owned-volume count of edition N. */
-export type PersonalSheet = 'rating' | 'memo' | 'conflict' | `owned-${number}` | null;
+/** `owned-N` edits the owned-volume count of edition N; `status` / `platform` the PC work record. */
+export type PersonalSheet = 'rating' | 'memo' | 'conflict' | 'status' | 'platform' | `owned-${number}` | null;
 type Visible<T> = {value: T; pending: boolean; conflict: {current: CollectionEditValue} | null};
 export type PersonalEdits = {
   supported: boolean;
   /** 신간 알림 and owned volumes may be edited (`capabilities.collectionTrackingEdit`). */
   trackingSupported: boolean;
+  /** 상태 and 기기 may be edited (`capabilities.collectionRecordEdit`, a version-3 PC). */
+  recordSupported: boolean;
   failure: string;
   /** A short message about an edit that was not kept. */
   notice: string;
@@ -23,14 +25,37 @@ export type PersonalEdits = {
   visible<T extends CollectionEditValue>(collectionId: string, field: CollectionEditField, authoritative: T): Visible<T>;
 };
 
+/** The published 상태 id, or null; the server value a record edit is composed against. */
+const publishedStatus = (item: CollectionSummary) => item.status && recordStates[item.type]?.some(([id]) => id === item.status) ? item.status : null;
+/** The published 기기 (games only), trimmed like the server compares it, or null. */
+const publishedPlatform = (item: CollectionSummary) => item.type === 'game' ? item.ownedPlatform?.trim() || null : null;
+
 /**
  * 상태 and 기기 from the PC's work record (an upgraded PC publishes them), with the PC's own
- * labels; a row the PC did not publish is left out rather than shown as 미입력.
+ * labels; a row the PC did not publish is left out rather than shown as 미입력. With `edits`,
+ * a queued or just-confirmed tablet value is shown in place of the published one.
  */
-export function workRecordFacts(item: CollectionSummary): [string, string][] {
-  const status = item.status && recordStates[item.type]?.some(([id]) => id === item.status) ? statusLabel(item.type, item.status) : null;
-  const platform = item.type === 'game' ? item.ownedPlatform?.trim() : null;
+export function workRecordFacts(item: CollectionSummary, edits?: Pick<PersonalEdits, 'visible'>): [string, string][] {
+  const statusId = edits ? edits.visible(item.id, 'status', publishedStatus(item)).value : publishedStatus(item);
+  const status = statusId ? statusLabel(item.type, statusId) : null;
+  const platform = edits ? edits.visible(item.id, 'ownedPlatform', publishedPlatform(item)).value : publishedPlatform(item);
   return [...(status ? [['상태', status] as [string, string]] : []), ...(platform ? [['기기', platform] as [string, string]] : [])];
+}
+
+/**
+ * 상태 and, for games, 기기 as rows of 내 기록. Editable (a tap opens the sheet, 미입력 shown
+ * for an empty record) only while the server advertises `collectionRecordEdit`; otherwise the
+ * published values are shown read-only, as `workRecordFacts` lists them.
+ */
+function RecordRows({item, edits, onSheet}: {item: CollectionDetail; edits: PersonalEdits; onSheet(sheet: PersonalSheet): void}) {
+  if (!edits.recordSupported) return <>{workRecordFacts(item, edits).map(([label, value]) => <div key={label} className="collection-personal-row"><span className="collection-personal-label">{label}</span><span className="collection-personal-value">{value}</span></div>)}</>;
+  const status = edits.visible(item.id, 'status', publishedStatus(item));
+  const platform = edits.visible(item.id, 'ownedPlatform', publishedPlatform(item));
+  const rows: [string, PersonalSheet, string, boolean][] = [['상태', 'status', statusLabel(item.type, status.value), status.pending]];
+  if (item.type === 'game') rows.push(['기기', 'platform', platform.value ?? '미입력', platform.pending]);
+  return <>{rows.map(([label, sheet, text, pending]) => <button key={label} className={`collection-personal-row${pending ? ' is-pending' : ''}`} aria-label={`${label} ${text}${pending ? ', 전송 대기' : ''}, 바꾸기`} onClick={() => onSheet(sheet)}>
+    <span className="collection-personal-label">{label}</span><span className="collection-personal-value">{text}</span><PendingSlot shown={pending}/>
+  </button>)}</>;
 }
 
 export const scoreText = (score: number | null) => score === null ? '미평가' : `★ ${score.toFixed(1)} / 5`;
@@ -50,14 +75,15 @@ export function PersonalRecord({item, edits, onSheet}: {item: CollectionDetail; 
   const memo = edits.visible(item.id, 'memo', item.description ?? null);
   const trackingPending = item.type === 'manga' && ((item.releaseWatch && edits.visible(item.id, 'releaseWatch', item.releaseWatch.enabled).pending)
     || trackedEditions(item).some(editionIndex => edits.visible(item.id, 'ownedVolumes', {editionIndex, count: item.ownedVolumes?.find(entry => entry.editionIndex === editionIndex)?.count ?? null}).pending));
-  const anyPending = score.pending || showcase.pending || memo.pending || !!trackingPending;
+  const recordPending = edits.visible(item.id, 'status', publishedStatus(item)).pending || edits.visible(item.id, 'ownedPlatform', publishedPlatform(item)).pending;
+  const anyPending = score.pending || showcase.pending || memo.pending || !!trackingPending || recordPending;
   return <section className="collection-personal" aria-label="내 기록">
     {edits.supported
       ? <button className={`collection-personal-row${score.pending ? ' is-pending' : ''}`} aria-label={`내 평점 ${scoreText(score.value)}${score.pending ? ', 전송 대기' : ''}, 바꾸기`} onClick={() => onSheet('rating')}>
           <span className="collection-personal-label">내 평점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span><PendingSlot shown={score.pending}/>
         </button>
       : <div className={`collection-personal-row${score.pending ? ' is-pending' : ''}`}><span className="collection-personal-label">내 평점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span>{score.pending && <Pending/>}</div>}
-    {workRecordFacts(item).map(([label, value]) => <div key={label} className="collection-personal-row"><span className="collection-personal-label">{label}</span><span className="collection-personal-value">{value}</span></div>)}
+    <RecordRows item={item} edits={edits} onSheet={onSheet}/>
     <TrackingRows item={item} edits={edits} onOwned={edition => onSheet(`owned-${edition}`)}/>
     {anyPending && edits.failure && <p className="collection-personal-failure" role="alert">{edits.failure}</p>}
     {edits.notice && <p className="collection-personal-failure" role="alert">{edits.notice}</p>}
@@ -87,12 +113,14 @@ export function PersonalActions({item, edits}: {item: CollectionDetail; edits: P
 }
 
 /**
- * My memo section plus the personal sheets (rating, owned count, memo, memo conflict). The
- * memo is editable only while the server advertises `collectionPersonalEdit`.
+ * My memo section plus the personal sheets (rating, 상태, 기기, owned count, memo, memo
+ * conflict). The memo is editable only while the server advertises `collectionPersonalEdit`.
  */
 export function CollectionPersonal({item, edits, sheet, onSheet}: {item: CollectionDetail; edits: PersonalEdits; sheet: PersonalSheet; onSheet(sheet: PersonalSheet): void}) {
   const score = edits.visible(item.id, 'myScore', item.myScore ?? null);
   const memo = edits.visible(item.id, 'memo', item.description ?? null);
+  const status = edits.visible(item.id, 'status', publishedStatus(item));
+  const platform = edits.visible(item.id, 'ownedPlatform', publishedPlatform(item));
   const editable = edits.supported;
   const ownedEdition = sheet?.startsWith('owned-') ? Number(sheet.slice(6)) : null;
   // A memo conflict asks once when it appears; the banner keeps it reachable.
@@ -110,6 +138,16 @@ export function CollectionPersonal({item, edits, sheet, onSheet}: {item: Collect
       <div role="radiogroup" aria-label="내 평점">
         <button className="sheet-option" role="radio" aria-checked={score.value === null} onClick={() => { edits.edit(item.id, 'myScore', null, item.myScore ?? null); onSheet(null); }}>미평가<span className="radio-dot"/></button>
         <div className="collection-star-grid">{Array.from({length: 11}, (_, i) => (10 - i) / 2).map(value => <button key={value} role="radio" aria-checked={score.value === value} aria-label={`${value.toFixed(1)}점`} onClick={() => { edits.edit(item.id, 'myScore', value, item.myScore ?? null); onSheet(null); }}><StarIcon aria-hidden="true"/><span className="numeric">{value.toFixed(1)}</span></button>)}</div>
+      </div>
+    </BottomSheet>}
+    {sheet === 'status' && <BottomSheet title="상태" onClose={() => onSheet(null)}>
+      <div role="radiogroup" aria-label="상태">
+        {[['', '미입력'], ...(recordStates[item.type] ?? [])].map(([id, label]) => <button key={id} className="sheet-option" role="radio" aria-checked={(status.value ?? '') === id} onClick={() => { edits.edit(item.id, 'status', id || null, publishedStatus(item)); onSheet(null); }}>{label}<span className="radio-dot"/></button>)}
+      </div>
+    </BottomSheet>}
+    {sheet === 'platform' && item.type === 'game' && <BottomSheet title="기기" onClose={() => onSheet(null)}>
+      <div role="radiogroup" aria-label="기기">
+        {['', ...platformOptions(item.platforms, platform.value)].map(value => <button key={value} className="sheet-option" role="radio" aria-checked={(platform.value ?? '') === value} onClick={() => { edits.edit(item.id, 'ownedPlatform', value || null, publishedPlatform(item)); onSheet(null); }}>{value || '미입력'}<span className="radio-dot"/></button>)}
       </div>
     </BottomSheet>}
     {ownedEdition !== null && item.type === 'manga' && <OwnedSheet key={ownedEdition} item={item} edition={ownedEdition} edits={edits} onClose={() => onSheet(null)}/>}

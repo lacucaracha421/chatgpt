@@ -1,5 +1,5 @@
 import {usePublicationCheck} from './usePublicationCheck';
-import {CollectionPersonal,PersonalActions,PersonalRecord,type PersonalSheet} from './CollectionPersonal';
+import {CollectionPersonal,PersonalActions,PersonalRecord,workRecordFacts,type PersonalSheet} from './CollectionPersonal';
 import {koreanGenres} from '../src/collections/genreNames';
 import {CollectionList} from '../src/collections/CollectionList';
 import {CaseFacts} from '../src/collections/case/CollectionCase';
@@ -659,6 +659,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
     :<div className={`collection-grid collection-grid-${shownType} is-counted`} style={{'--columns':view.perRow} as CSSProperties}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={listActive} caption={captionOf(work)} onOpen={id=>openWork(id,mainOrder)} arriving={mainArrivals.arriving(work.id)} onArrived={mainArrivals.arrived}/>)}</div>;
   // The opened work as the shared work screen, its information as the section below the stage.
   const visibleScore=(work:CollectionDetail)=>edits.visible(work.id,'myScore',work.myScore??null).value;
+  const visibleRecord=(work:CollectionDetail)=>workRecordFacts(work,edits);
   const workInfo=(work:CollectionDetail)=><>
     <PersonalRecord item={work} edits={edits} onSheet={setPersonalSheet}/>
     <CollectionPersonal item={work} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
@@ -724,7 +725,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
       :item.type==='manga'
         ?<MangaWork key={item.id} item={item} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} volumes={editionVolumesShared} owned={ownedOf(item,edition)} initialVolumeId={openedVolume?.id===item.id?openedVolume.volumeId:null}
           latestKorean={latestKoreanRelease(releaseBoardEntry(item,ownedOf,watching),edition,today)} onEnlarge={id=>setCoverIndex(volumes.findIndex(volume=>volume.id===id)+1)} info={mangaInfo}/>
-        :<CaseWork item={item} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} position={Math.max(1,order.indexOf(item.id)+1)} total={Math.max(1,order.length)} score={visibleScore} onStep={stepWork} info={workInfo}/>}</>}</div>
+        :<CaseWork item={item} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} position={Math.max(1,order.indexOf(item.id)+1)} total={Math.max(1,order.length)} score={visibleScore} record={visibleRecord} onStep={stepWork} info={workInfo}/>}</>}</div>
     {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}>
       <p className="collection-sheet-label">기준</p><div role="radiogroup" aria-label="정렬 기준">{(Object.keys(SORT_LABELS) as Filters['sort'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.sort===value} onClick={()=>changeFilters({...filters,sort:value})}>{SORT_LABELS[value]}<span className="radio-dot"/></button>)}</div>
       <p className="collection-sheet-label">순서</p><div role="radiogroup" aria-label="정렬 순서">{(['desc','asc'] as const).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.direction===value} onClick={()=>changeFilters({...filters,direction:value})}>{sortDirectionLabels(filters.sort)[value]}<span className="radio-dot"/></button>)}</div>

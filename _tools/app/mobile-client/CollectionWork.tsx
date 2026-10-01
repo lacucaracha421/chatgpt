@@ -22,9 +22,8 @@ import './collectionShelf.css';
 const OBJECT_KINDS = ['cover', 'spine', 'back', 'volume_cover'];
 const SWIPE_PX = 64;
 
-/** The case's 내 기록 slip in the PC's order (상태, 별점, 기기); 상태 and 기기 only when the PC published them. */
-function caseRecord(item: CollectionDetail, stars: ReactNode): Fact[] {
-  const rows = workRecordFacts(item);
+/** The case's 내 기록 slip in the PC's order (상태, 별점, 기기); 상태 and 기기 only when recorded. */
+function caseRecord(rows: [string, string][], stars: ReactNode): Fact[] {
   return [...rows.filter(([label]) => label === '상태'), ['별점', stars], ...rows.filter(([label]) => label === '기기')];
 }
 
@@ -94,9 +93,10 @@ type Shown = {item: CollectionDetail; revision: string; urls: Record<string, str
  * the strip of views and artworks, then the information as a section below the stage (`info`).
  * Switching works keeps the shown work, inert, until the next one's faces are decoded.
  */
-export function CaseWork({item, revision, active, privacy, position, total, score, onStep, info}: {
+export function CaseWork({item, revision, active, privacy, position, total, score, record = workRecordFacts, onStep, info}: {
   item: CollectionDetail; revision: string; active: boolean; privacy: boolean; position: number; total: number;
   /** My rating as shown (a queued edit included) for the slip inside the case. */score(item: CollectionDetail): number | null;
+  /** 상태 and 기기 as shown (a queued edit included); the published values by default. */record?(item: CollectionDetail): [string, string][];
   onStep(offset: -1 | 1): void; info(item: CollectionDetail): ReactNode;
 }) {
   const faces = useArtworkSet(item, privacy ? {} : {
@@ -137,7 +137,7 @@ export function CaseWork({item, revision, active, privacy, position, total, scor
       <div ref={stage} className="work-stage tablet-work__stage" {...swipe}>
         <div className="work-case-slot" style={isObject ? undefined : {...hidden, position: 'absolute', inset: 0}} inert={!isObject || undefined} aria-hidden={!isObject}>
           <CollectionCase key={work.id} data={data} large stageBox={stageBox} open={mode === 'open'} onOpenChange={open => pick(open ? 'open' : 'case')} frontReset={reset}
-            inside={<CaseInside record={caseRecord(work, <RecordStars score={score(work)}/>)} facts={insideFacts(work, work.av ?? null)}/>}
+            inside={<CaseInside record={caseRecord(record(work), <RecordStars score={score(work)}/>)} facts={insideFacts(work, work.av ?? null)}/>}
             note={people.length ? <><b>출연 · 감독</b><p className="work-names-note">{people.map(person => person.name).join(' · ')}</p></> : undefined}/>
         </div>
         {work.type === 'av' && <div className="work-flat-slot" style={mode === 'flat' ? undefined : hidden} aria-hidden={mode !== 'flat'} inert={mode !== 'flat' || undefined}>

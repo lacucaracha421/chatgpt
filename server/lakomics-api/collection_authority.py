@@ -928,8 +928,9 @@ def build_payload(db, library_id, row):
         "SELECT provider,external_id,bound,snapshot FROM collection_authority_bindings"
         " WHERE library_id=? AND work_id=?", [library_id, work_id]).fetchall()
     # Not carried by authority yet (2026-10-01 publication contract): item `status` /
-    # `ownedPlatform`, volume `coverFocusX` and replica `people` exist only in the PC
-    # replica, so activating authority silently drops them from the served projection.
+    # `ownedPlatform` (and their personal-edit version-3 mobile edits, which the shim
+    # refuses), volume `coverFocusX` and replica `people` exist only in the PC replica, so
+    # activating authority silently drops them from the served projection.
     # `spineArtworkId` is derived at read time from artwork kinds and survives.
     payload = {
         "id": work_id, "name": state["name"], "type": state["type"],

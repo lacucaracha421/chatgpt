@@ -56,8 +56,71 @@ pub(crate) fn allowed_statuses(kind: &str) -> &'static [&'static str] {
         _ => &[],
     }
 }
+/// The owned-platform limit (characters), shared with the replica server and the tablet.
+pub(crate) const MAX_PLATFORM_CHARS: usize = 200;
 static FOCUS_JOB: Mutex<()> = Mutex::new(());
 const BATCH_SIZE: usize = 16;
+
+/// Record a work's 상태 for a Collection of type `kind`; returns whether the row changed.
+/// A value the type does not take is refused. The PC panel and a mobile edit (personal-edit
+/// version 3) both write through here, so an unchanged value never dirties the publication.
+pub(crate) fn write_record_status(
+    connection: &rusqlite::Connection,
+    id: &str,
+    kind: &str,
+    value: Option<&str>,
+) -> Result<bool, LibraryError> {
+    if !matches!(kind, "game" | "av" | "manga" | "movie") {
+        return Err(LibraryError::InvalidCollectionType);
+    }
+    if value.is_some_and(|v| !allowed_statuses(kind).contains(&v)) {
+        return Err(LibraryError::InvalidCollectionMetadata);
+    }
+    let changed = match value {
+        // Clearing never creates a row: an absent record already reads as 미입력.
+        None => connection.execute(
+            "UPDATE collection_pc_records SET status=NULL WHERE collection_id=?1 AND status IS NOT NULL",
+            [id],
+        )?,
+        Some(value) => connection.execute(
+            "INSERT INTO collection_pc_records(collection_id,status) VALUES(?1,?2)
+             ON CONFLICT(collection_id) DO UPDATE SET status=excluded.status WHERE status IS NOT excluded.status",
+            params![id, value],
+        )?,
+    };
+    Ok(changed > 0)
+}
+
+/// Record a game's owned 기기 (trimmed, at most [`MAX_PLATFORM_CHARS`], empty clears).
+pub(crate) fn write_record_platform(
+    connection: &rusqlite::Connection,
+    id: &str,
+    kind: &str,
+    value: Option<String>,
+) -> Result<bool, LibraryError> {
+    if kind != "game" {
+        return Err(LibraryError::InvalidCollectionType);
+    }
+    let value = normalized_description(value)?;
+    if value
+        .as_ref()
+        .is_some_and(|v| v.chars().count() > MAX_PLATFORM_CHARS)
+    {
+        return Err(LibraryError::InvalidCollectionMetadata);
+    }
+    let changed = match value {
+        None => connection.execute(
+            "UPDATE collection_pc_records SET owned_platform=NULL WHERE collection_id=?1 AND owned_platform IS NOT NULL",
+            [id],
+        )?,
+        Some(value) => connection.execute(
+            "INSERT INTO collection_pc_records(collection_id,owned_platform) VALUES(?1,?2)
+             ON CONFLICT(collection_id) DO UPDATE SET owned_platform=excluded.owned_platform WHERE owned_platform IS NOT excluded.owned_platform",
+            params![id, value],
+        )?,
+    };
+    Ok(changed > 0)
+}
 
 impl Library {
     pub fn collection_work_record(&self, id: &str) -> Result<WorkRecord, LibraryError> {
@@ -81,23 +144,10 @@ impl Library {
         }
         match edit {
             WorkRecordEdit::Status { value } => {
-                if value
-                    .as_deref()
-                    .is_some_and(|v| !allowed_statuses(&kind).contains(&v))
-                {
-                    return Err(LibraryError::InvalidCollectionMetadata);
-                }
-                tx.execute("INSERT INTO collection_pc_records(collection_id,status) VALUES(?1,?2) ON CONFLICT(collection_id) DO UPDATE SET status=excluded.status",params![id,value])?;
+                write_record_status(&tx, id, &kind, value.as_deref())?;
             }
             WorkRecordEdit::OwnedPlatform { value } => {
-                if kind != "game" {
-                    return Err(LibraryError::InvalidCollectionType);
-                }
-                let value = normalized_description(value)?;
-                if value.as_ref().is_some_and(|v| v.len() > 200) {
-                    return Err(LibraryError::InvalidCollectionMetadata);
-                }
-                tx.execute("INSERT INTO collection_pc_records(collection_id,owned_platform) VALUES(?1,?2) ON CONFLICT(collection_id) DO UPDATE SET owned_platform=excluded.owned_platform",params![id,value])?;
+                write_record_platform(&tx, id, &kind, value)?;
             }
             // Existing personal fields keep their existing sync handshake and triggers.
             WorkRecordEdit::MyScore { value } => {

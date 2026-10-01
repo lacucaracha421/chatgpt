@@ -23,7 +23,8 @@ and tracking edits do not apply to AV; ordinary personal edits remain available.
 Replica features (2026-10-01 publication contract): ``/v1/collections/status`` also
 advertises ``replicaFeatures`` (``REPLICA_FEATURES``). The PC sends each optional field
 below only when its feature is listed; a missing list means an older server that rejects
-them. ``workRecord``: item ``status`` (per-type values) and ``ownedPlatform`` (games only).
+them. ``workRecord``: item ``status`` (per-type values) and ``ownedPlatform`` (games only);
+a tablet edits both through personal-edit version 3 (``collection_personal_edits``).
 ``coverFocus``: volume ``coverFocusX`` in [0, 1]. ``people``: top-level ``people`` stored in
 ``mobile_collection_people`` and served by ``GET /v1/collections/people/{personId}``.
 ``portraitImage``: ``av.people[].portraitImage`` = ``{sha256, sizeBytes, contentType, width,
@@ -66,9 +67,9 @@ CollectionType = Literal["game", "manga", "movie", "av"]
 COLLECTION_TYPES = ("game", "manga", "movie", "av")
 #: Optional replica fields this server accepts (see the module docstring).
 REPLICA_FEATURES = ("workRecord", "coverFocus", "people", "portraitImage")
-#: Allowed item ``status`` values per Collection type (feature ``workRecord``).
-ITEM_STATUSES = {"game": ("done", "playing", "unplayed"), "av": ("watched", "unwatched"),
-                 "manga": ("collecting", "complete"), "movie": ("watched", "watching", "unwatched")}
+#: Allowed item ``status`` values per Collection type (feature ``workRecord``); the same
+#: list validates a mobile ``status`` edit (personal-edit version 3).
+ITEM_STATUSES = personal_edits.ITEM_STATUSES
 MAX_PEOPLE = 2000
 MAX_PERSON_BYTES = 64 * 1024
 MAX_PORTRAIT_BYTES = 5 * 1024 * 1024
@@ -389,7 +390,7 @@ class Replica(StrictModel):
     baseRevision: Digest | None
     collections: list[Collection] = Field(max_length=10000)
     # Personal-edit handshake from an upgraded PC (see collection_personal_edits).
-    personalEditVersion: Literal[1, 2] | None = None
+    personalEditVersion: Literal[1, 2, 3] | None = None
     libraryId: personal_edits.LIBRARY | None = None
     personalEditCursor: int | None = Field(default=None, ge=0, le=personal_edits.MAX_CURSOR)
     # Feature ``people``. Absent = no people (the table is cleared like any replaced row).
@@ -806,7 +807,8 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                 # Installed APKs keep sending personal edits; the server translates them
                 # into `updateWork`, so the capability no longer depends on the PC.
                 advertisement = {**advertisement, "capabilities": {"collectionPersonalEdit": True,
-                                                                     "collectionTrackingEdit": False},
+                                                                     "collectionTrackingEdit": False,
+                                                                     "collectionRecordEdit": False},
                                  "libraryId": active["libraryId"]}
         return {"revision": revision, "publishedAt": published, **advertisement,
                 "collectionTypes": COLLECTION_TYPES,

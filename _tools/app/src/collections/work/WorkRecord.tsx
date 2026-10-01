@@ -20,6 +20,10 @@ export function statusLabel(type: string, status: string | null) {
 export function defaultRecord(collection: CollectionSummary): CollectionWorkRecord {
   return { status: null, ownedPlatform: null, myScore: collection.myScore, memo: collection.description };
 }
+/** The 기기 choices: the work's listed platforms, the one already recorded, then the common consoles. Shared with the tablet. */
+export function platformOptions(platforms: string | null | undefined, owned: string | null | undefined): string[] {
+  return [...new Set([...(platforms ?? "").split(/\s*[,·|]\s*/).filter(Boolean), ...(owned ? [owned] : []), "PC", "Switch", "Switch 2", "PS4", "PS5", "Xbox One", "Xbox Series X/S", "Steam Deck"])];
+}
 export function RecordStars({ score, onChange, disabled = false }: { score: number | null; onChange?(score: number | null): void; disabled?: boolean }) {
   // Stars are the personal rating control; a half already stored remains visible.
   return <span className="work-stars" role={onChange ? "group" : "img"} aria-label={`별점 ${score ?? "미평가"}`}>
@@ -99,7 +103,7 @@ export function WorkRecordEditor({ collection, record, onSave }: { collection: C
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => { timer.current = null; save({ field: "memo", value: value || null }); }, 600);
   }
-  const platforms = [...new Set([...(collection.platforms ?? "").split(/\s*[,·|]\s*/).filter(Boolean), ...(draft.ownedPlatform ? [draft.ownedPlatform] : []), "PC", "Switch", "Switch 2", "PS4", "PS5", "Xbox One", "Xbox Series X/S", "Steam Deck"])];
+  const platforms = platformOptions(collection.platforms, draft.ownedPlatform);
   return <section className="work-record"><SectionLabel title="내 기록" /><dl>
     <div><dt>들인 날</dt><dd>{displayDate(collection.createdAt)}</dd></div>
     <div><dt>상태</dt><dd><Menu label="상태" triggerClassName="work-record-menu" disabled={busy} trigger={<>{statusLabel(collection.type, draft.status)}<ChevronDownIcon /></>} items={[["", "미입력"], ...(recordStates[collection.type] ?? [])].map(([id, label]) => ({ id, label, group: "status", selected: (draft.status ?? "") === id, onSelect: () => { setDraft(current => ({ ...current, status: id || null })); save({ field: "status", value: id || null }); } }))} /></dd></div>

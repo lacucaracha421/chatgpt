@@ -1,7 +1,8 @@
 /**
  * Durable mobile edits of personal Collection fields: my rating, Showcase
- * membership, the memo and, for manga, 신간 알림 (`releaseWatch`) and the owned-volume
- * count per edition (`ownedVolumes`, one intent per edition). The rules are the bookmark outbox's
+ * membership, the memo, for manga 신간 알림 (`releaseWatch`) and the owned-volume count per
+ * edition (`ownedVolumes`, one intent per edition), and the PC work record's 상태 (`status`)
+ * and, for games, 기기 (`ownedPlatform`). The rules are the bookmark outbox's
  * (`bookmarkOutbox.ts`), with storage in the same `localStorage`:
  *
  * 1. **One intent per `collectionId:field`, minted once.** The operation id is
@@ -28,15 +29,20 @@
 
 import {connectionOutbox, outboxKey} from './outboxConnection';
 
-export type CollectionEditField = 'myScore' | 'showcase' | 'memo' | 'releaseWatch' | 'ownedVolumes';
+export type CollectionEditField = 'myScore' | 'showcase' | 'memo' | 'releaseWatch' | 'ownedVolumes' | 'status' | 'ownedPlatform';
 /** One edition's owned-volume count; an `expected` count is null while the edition is not tracked. */
 export type OwnedVolumesValue = {editionIndex: number; count: number | null};
 export type CollectionEditValue = number | boolean | string | null | OwnedVolumesValue;
 /** Manga tracking fields: sent only while the server advertises `collectionTrackingEdit`. */
 export const TRACKING_FIELDS: readonly CollectionEditField[] = ['releaseWatch', 'ownedVolumes'];
-const FIELDS: readonly CollectionEditField[] = ['myScore', 'showcase', 'memo', ...TRACKING_FIELDS];
+/** Work record fields (personal-edit version 3): sent only while the server advertises `collectionRecordEdit`. */
+export const RECORD_FIELDS: readonly CollectionEditField[] = ['status', 'ownedPlatform'];
+const FIELDS: readonly CollectionEditField[] = ['myScore', 'showcase', 'memo', ...TRACKING_FIELDS, ...RECORD_FIELDS];
 /** The PC's limit (`set_owned_volume_count`). */
 export const MAX_OWNED_COUNT = 2000;
+/** The PC's limits (`collection_pc.rs`): a status id, and the owned 기기 text. */
+const MAX_STATUS_CHARS = 40;
+export const MAX_PLATFORM_CHARS = 200;
 
 export type CollectionEditIntent = {
   /** The library the edit was composed against; null only for an intent queued before this was recorded. */
@@ -96,9 +102,12 @@ export function normalizeCollectionEdit(field: CollectionEditField, value: Colle
     return {editionIndex: owned.editionIndex, count: owned.count};
   }
   if (value === null) return null;
-  if (typeof value !== 'string') throw new Error('메모를 확인할 수 없습니다.');
+  if (typeof value !== 'string') throw new Error(field === 'status' ? '상태 값을 확인할 수 없습니다.' : field === 'ownedPlatform' ? '기기 값을 확인할 수 없습니다.' : '메모를 확인할 수 없습니다.');
   const trimmed = value.trim();
-  if (memoLength(trimmed) > MEMO_LIMIT) throw new Error(`메모는 ${MEMO_LIMIT.toLocaleString()}자까지 쓸 수 있습니다.`);
+  // A status id is one of the PC's per-type ids (`recordStates`); the server checks the type.
+  if (field === 'status' && memoLength(trimmed) > MAX_STATUS_CHARS) throw new Error('상태 값을 확인할 수 없습니다.');
+  if (field === 'ownedPlatform' && memoLength(trimmed) > MAX_PLATFORM_CHARS) throw new Error(`기기는 ${MAX_PLATFORM_CHARS}자까지 쓸 수 있습니다.`);
+  if (field === 'memo' && memoLength(trimmed) > MEMO_LIMIT) throw new Error(`메모는 ${MEMO_LIMIT.toLocaleString()}자까지 쓸 수 있습니다.`);
   return trimmed || null;
 }
 

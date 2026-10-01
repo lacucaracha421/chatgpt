@@ -312,7 +312,7 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
     return {revision,items:selected.slice(offset,offset+limit),totalCount:selected.length,sourceCount:selected.length,has_more:offset+limit<selected.length,next_cursor:offset+limit<selected.length?String(offset+limit):null};
   }
   if(url.pathname.startsWith('/v1/collections/bindings/'))return demoBindings(url,payload);
-  if(url.pathname==='/v1/collections/status')return {revision:'demo-1',capabilities:{collectionPersonalEdit:true,collectionTrackingEdit:true},libraryId:demoLibraryId};
+  if(url.pathname==='/v1/collections/status')return {revision:'demo-1',capabilities:{collectionPersonalEdit:true,collectionTrackingEdit:true,collectionRecordEdit:true},libraryId:demoLibraryId};
   if(url.pathname==='/v1/collections/releases')return demoReleaseList();
   if(url.pathname==='/v1/collections/releases/acknowledge'){
     const body=payload.body as {operationId:string;eventIds?:string[];collectionId?:string};

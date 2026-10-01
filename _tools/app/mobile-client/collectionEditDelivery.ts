@@ -16,7 +16,8 @@
  *   transport failure ends the pass, since every other send would fail too;
  * * nothing is sent until `/v1/collections/status` advertises
  *   `collectionPersonalEdit`; 신간 알림 and owned-volume edits also wait for
- *   `collectionTrackingEdit` (a PC that publishes personal-edit version 2);
+ *   `collectionTrackingEdit` (a PC that publishes personal-edit version 2), and 상태 /
+ *   기기 edits for `collectionRecordEdit` (version 3);
  * * 신간 알림 / owned volumes resolve a `collectionPersonalConflict` like a rating
  *   (adopt `current`, retry once); a Collection that cannot be tracked, or 신간 알림
  *   without an Aladin/Kakao binding, is dropped with a short message;
@@ -38,6 +39,7 @@ import {
   confirmCollectionEdit,
   markCollectionEditConflict,
   sameEditValue,
+  RECORD_FIELDS,
   TRACKING_FIELDS,
   readCollectionEdits,
   rebaseCollectionEdit,
@@ -63,12 +65,13 @@ const REJECTED = new Map<unknown, string>([
   ['invalidCollectionPersonalEdit', '서버가 이 변경을 받지 않아 되돌렸습니다.'],
   ['collectionTrackingUnavailable', '이 작품은 신간 알림과 소장 권수를 바꿀 수 없어 되돌렸습니다.'],
   ['releaseWatchUnavailable', '알라딘이나 카카오와 연결된 만화만 신간 알림을 켤 수 있어 되돌렸습니다.'],
+  ['collectionRecordUnavailable', '게임만 기기를 기록할 수 있어 되돌렸습니다.'],
 ]);
 
 export type CollectionEditStatus = {
   revision?: string | null;
   libraryId?: string | null;
-  capabilities?: {collectionPersonalEdit?: boolean; collectionTrackingEdit?: boolean};
+  capabilities?: {collectionPersonalEdit?: boolean; collectionTrackingEdit?: boolean; collectionRecordEdit?: boolean};
 };
 
 /** The library id edits may be sent under, or null when no send is legal. */
@@ -79,6 +82,11 @@ export function personalEditLibrary(status: CollectionEditStatus | null | undefi
 /** Whether 신간 알림 / owned-volume edits may be sent (a version-2 PC published). */
 export function trackingEditAllowed(status: CollectionEditStatus | null | undefined): boolean {
   return personalEditLibrary(status) !== null && status?.capabilities?.collectionTrackingEdit === true;
+}
+
+/** Whether 상태 / 기기 edits may be sent (a version-3 PC published). */
+export function recordEditAllowed(status: CollectionEditStatus | null | undefined): boolean {
+  return personalEditLibrary(status) !== null && status?.capabilities?.collectionRecordEdit === true;
 }
 
 let running: Promise<CollectionEditReport> | null = null;
@@ -101,6 +109,7 @@ async function pass(signal?: AbortSignal): Promise<CollectionEditReport> {
   const status = await apiOn<CollectionEditStatus>(endpoint, '/v1/collections/status', signal);
   const libraryId = personalEditLibrary(status);
   const tracking = trackingEditAllowed(status);
+  const record = recordEditAllowed(status);
   if (!libraryId) {
     // Queued edits wait: the server or PC may be upgraded later.
     report.unsupported = true;
@@ -120,6 +129,7 @@ async function pass(signal?: AbortSignal): Promise<CollectionEditReport> {
     if (intent.conflict) { report.outcomes.push({key, outcome: 'conflict'}); continue; }
     // A tracking edit waits, still queued, until the PC is upgraded again.
     if (!tracking && TRACKING_FIELDS.includes(intent.field)) { report.outcomes.push({key, outcome: 'withheld'}); continue; }
+    if (!record && RECORD_FIELDS.includes(intent.field)) { report.outcomes.push({key, outcome: 'withheld'}); continue; }
     try {
       const outcome = await deliver(intent, endpoint, 1, signal);
       report.outcomes.push(typeof outcome === 'string' ? {key, outcome} : {key, ...outcome});

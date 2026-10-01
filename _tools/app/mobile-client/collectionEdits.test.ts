@@ -63,6 +63,15 @@ describe('collection edit outbox',()=>{
     expect(()=>normalizeCollectionEdit('memo','가'.repeat(2001))).toThrow('2,000자');
     expect(()=>commitCollectionEdit('a','myScore',7,3,LIBRARY)).toThrow();
     expect(readCollectionEdits()).toEqual({});
+    // Work record (version 3): a status id, and the owned 기기 trimmed like the memo.
+    expect(normalizeCollectionEdit('status','playing')).toBe('playing');
+    expect(normalizeCollectionEdit('status',null)).toBeNull();
+    expect(normalizeCollectionEdit('ownedPlatform','  Switch 2  ')).toBe('Switch 2');
+    expect(normalizeCollectionEdit('ownedPlatform','')).toBeNull();
+    expect(normalizeCollectionEdit('ownedPlatform','가'.repeat(200))).toHaveLength(200);
+    expect(()=>normalizeCollectionEdit('ownedPlatform','가'.repeat(201))).toThrow('200자');
+    expect(()=>normalizeCollectionEdit('status',3)).toThrow();
+    expect(()=>normalizeCollectionEdit('status','x'.repeat(41))).toThrow();
   });
   it('reports an edit the device could not store instead of pretending it is queued',()=>{
     const first=commitCollectionEdit('a','myScore',4,3,LIBRARY)!;
@@ -85,6 +94,29 @@ describe('collection edit delivery',()=>{
     // An older server without the field is the same answer.
     install(()=>{throw new Error('must not send');},{revision:'r1'});
     expect((await flushCollectionEdits()).unsupported).toBe(true);
+  });
+  it('withholds 상태 and 기기 edits until the server advertises collectionRecordEdit',async()=>{
+    commitCollectionEdit('a','status','playing','unplayed',LIBRARY);
+    commitCollectionEdit('a','ownedPlatform','PS5',null,LIBRARY);
+    commitCollectionEdit('a','myScore',4,3,LIBRARY);
+    // A version-2 PC: the rating still goes, the record edits wait, still queued.
+    install(body=>body.field==='myScore'?receipt(body):new Error('must not send a record edit'),{...ready,capabilities:{collectionPersonalEdit:true,collectionTrackingEdit:true}});
+    const report=await flushCollectionEdits();
+    expect(report.outcomes.map(o=>o.outcome).sort()).toEqual(['confirmed','withheld','withheld']);
+    expect(sent().map(body=>body.field)).toEqual(['myScore']);
+    expect(Object.keys(readCollectionEdits()).sort()).toEqual(['a:ownedPlatform','a:status']);
+    // A version-3 PC published: they go out in order with the composed `expected`.
+    install(receipt,{...ready,capabilities:{collectionPersonalEdit:true,collectionTrackingEdit:true,collectionRecordEdit:true}});
+    mocks.api.mockClear();
+    expect((await flushCollectionEdits()).outcomes.map(o=>o.outcome)).toEqual(['confirmed','confirmed']);
+    expect(sent()).toEqual([expect.objectContaining({field:'status',value:'playing',expected:'unplayed'}),expect.objectContaining({field:'ownedPlatform',value:'PS5',expected:null})]);
+    expect(readCollectionEdits()).toEqual({});
+    // A platform on a non-game can never succeed: dropped with a message, like a deleted work.
+    commitCollectionEdit('m','ownedPlatform','PC',null,LIBRARY);
+    install(()=>new ApiError('x',409,{detail:{code:'collectionRecordUnavailable',message:'m'}}),{...ready,capabilities:{collectionPersonalEdit:true,collectionRecordEdit:true}});
+    const [dropped]=(await flushCollectionEdits()).outcomes;
+    expect([dropped.outcome,dropped.message]).toEqual(['rejected','게임만 기기를 기록할 수 있어 되돌렸습니다.']);
+    expect(readCollectionEdits()).toEqual({});
   });
   it('sends nothing, not even status, when the queue is empty',async()=>{
     install(()=>null);

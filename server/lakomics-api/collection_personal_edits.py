@@ -52,6 +52,33 @@ collectionPersonalEditUpgradeRequired``, so a version-1 PC fails closed instead 
 skipping an entry. Do not downgrade the PC to a version-1 build once tracking edits exist:
 it stops at that error until it is upgraded again. Once Collections authority is active, tracking fields are refused
 (``409 collectionPersonalEditUnsupported``); authority clients use its own commands.
+
+Work record fields (personal-edit version 3, 2026-10-01)
+--------------------------------------------------------
+Mobile may also edit the PC work record (`collection_pc_records`, PC panel 내 기록) that the
+``workRecord`` replica feature publishes:
+
+* ``field: "status"`` - ``value``/``expected`` are null (미입력) or one of ``ITEM_STATUSES``
+  for the Collection's published type (any other string is ``422``). Every published type
+  has a list (games, manga, films and AV).
+* ``field: "ownedPlatform"`` - games only (``409 collectionRecordUnavailable`` otherwise);
+  ``value``/``expected`` are null or a trimmed string of at most 200 characters (an empty
+  string clears, like the memo).
+
+The PC applies both with the same upsert as its own 내 기록 panel; a status no longer valid
+for the Collection's type, or a platform on a Collection that is no longer a game, is
+recorded as applied without change. The served row drops the key when the value is null,
+so a null is never stored (``mobile_collections.stored``).
+
+Handshake: same rules as version 2 with the number 3: a PC that understands these fields
+publishes ``personalEditVersion: 3`` and reads the log with ``editVersion=3``; a log read
+with a lower ``editVersion`` whose page would contain a version-3 entry is refused with
+``409 collectionPersonalEditUpgradeRequired``; ``/v1/collections/status`` advertises
+``capabilities.collectionRecordEdit`` only while the latest handshake publication had
+version 3, and record edits are refused (``409 collectionPersonalEditUnsupported``) until
+then. The PC sends the ``editVersion`` it negotiated from the capabilities, so an older
+server (whose ``editVersion`` bound is lower) keeps working. Under Collections authority the
+record fields are refused like the tracking fields.
 """
 import hashlib
 import json
@@ -73,10 +100,20 @@ MAX_CURSOR = 9_007_199_254_740_991
 MAX_MEMO_CHARS = 2000
 # Room for a 2000-character Hangul memo as both `value` and `expected` (~6 KB each).
 MAX_COMMAND_BYTES = 32 * 1024
-FIELDS = ("myScore", "showcase", "memo", "releaseWatch", "ownedVolumes")
+FIELDS = ("myScore", "showcase", "memo", "releaseWatch", "ownedVolumes", "status", "ownedPlatform")
 TRACKING_FIELDS = ("releaseWatch", "ownedVolumes")
-EDIT_VERSION = 2  # the handshake version that understands TRACKING_FIELDS
+RECORD_FIELDS = ("status", "ownedPlatform")
+#: The handshake version a PC needs to receive each field (version 1 for the rest).
+FIELD_VERSIONS = {"releaseWatch": 2, "ownedVolumes": 2, "status": 3, "ownedPlatform": 3}
+TRACKING_VERSION = 2
+RECORD_VERSION = 3
+EDIT_VERSION = 3  # the newest handshake version this server understands
 MAX_OWNED_COUNT = 2000  # library/collection_tracking.rs set_owned_volume_count
+# PC limits (library/collection_pc.rs): statuses per Collection type, platform length.
+ITEM_STATUSES = {"game": ("done", "playing", "unplayed"), "av": ("watched", "unwatched"),
+                 "manga": ("collecting", "complete"), "movie": ("watched", "watching", "unwatched")}
+MAX_STATUS_CHARS = 40
+MAX_PLATFORM_CHARS = 200
 ID = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 LIBRARY = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{32}$")]
 DDL = """
@@ -95,7 +132,8 @@ CREATE TABLE IF NOT EXISTS mobile_collection_edit_noops (
 """
 # Payload key per command field.
 PAYLOAD_KEYS = {"myScore": "myScore", "showcase": "showcase", "memo": "description",
-                "releaseWatch": "releaseWatch", "ownedVolumes": "ownedVolumes"}
+                "releaseWatch": "releaseWatch", "ownedVolumes": "ownedVolumes",
+                "status": "status", "ownedPlatform": "ownedPlatform"}
 
 
 def migrate(db):
@@ -111,7 +149,7 @@ class Edit(BaseModel):
     libraryId: LIBRARY
     operationId: Annotated[str, StringConstraints(min_length=36, max_length=36)]
     collectionId: ID
-    field: Literal["myScore", "showcase", "memo", "releaseWatch", "ownedVolumes"]
+    field: Literal["myScore", "showcase", "memo", "releaseWatch", "ownedVolumes", "status", "ownedPlatform"]
     # Both are required (null is a real value); their shape depends on `field`.
     value: Any
     expected: Any
@@ -134,7 +172,12 @@ def _small_int(value, high):
 def normalized(field, value, *, limit=MAX_MEMO_CHARS, expected=False):
     """The PC's own validation: score null or 0–5 in 0.5 steps, bool Showcase, trimmed memo,
     bool release watch, ``{"editionIndex": 0-3, "count": 0-2000}`` (an expected count may
-    be null: edition not tracked)."""
+    be null: edition not tracked), and the trimmed record strings (a status is checked
+    against the Collection's type in ``record_guard``)."""
+    if field == "status" and limit is not None:
+        limit = MAX_STATUS_CHARS
+    if field == "ownedPlatform" and limit is not None:
+        limit = MAX_PLATFORM_CHARS
     if field == "ownedVolumes":
         if not isinstance(value, dict) or set(value) != {"editionIndex", "count"}:
             invalid()
@@ -202,13 +245,31 @@ def check_library(db, library_id):
 
 def tracking_guard(current, payload, field, value):
     """Tracking edits need a version-2 PC and a manga Collection published with the key."""
-    if current["edit_version"] < EDIT_VERSION:
+    if current["edit_version"] < TRACKING_VERSION:
         fail(409, "collectionPersonalEditUnsupported", "PC 앱을 업데이트한 뒤 컬렉션을 게시해 주세요.")
     state_value = payload.get(PAYLOAD_KEYS[field])
     if payload.get("type") != "manga" or state_value is None:
         fail(409, "collectionTrackingUnavailable", "이 작품은 신간 알림과 보유 권수를 관리할 수 없습니다.")
     if field == "releaseWatch" and value and not state_value.get("available"):
         fail(409, "releaseWatchUnavailable", "알라딘 또는 카카오와 연결된 만화만 신간 알림을 켤 수 있습니다.")
+
+
+def record_allowed(payload, field, value):
+    """Whether the PC would store this record value for the Collection's published type."""
+    kind = payload.get("type")
+    if field == "status":
+        return value is None or value in ITEM_STATUSES.get(kind, ())
+    return kind == "game"
+
+
+def record_guard(current, payload, field, value):
+    """Record edits need a version-3 PC; a status must fit the type, a platform needs a game."""
+    if current["edit_version"] < RECORD_VERSION:
+        fail(409, "collectionPersonalEditUnsupported", "PC 앱을 업데이트한 뒤 컬렉션을 게시해 주세요.")
+    if field == "ownedPlatform" and payload.get("type") != "game":
+        fail(409, "collectionRecordUnavailable", "게임만 기기를 기록할 수 있습니다.")
+    if not record_allowed(payload, field, value):
+        invalid()
 
 
 def validate_handshake(snapshot):
@@ -252,6 +313,15 @@ def patch(db, collection_id, field, value):
         else:
             others = [entry for entry in current if entry["editionIndex"] != value["editionIndex"]]
             payload["ownedVolumes"] = sorted([*others, value], key=lambda entry: entry["editionIndex"])
+    elif field in RECORD_FIELDS:
+        # A replayed record edit must not reach a work whose type no longer takes it; a
+        # null is dropped rather than stored, as the PC publishes it.
+        if not record_allowed(payload, field, value):
+            return True
+        if value is None:
+            payload.pop(PAYLOAD_KEYS[field], None)
+        else:
+            payload[PAYLOAD_KEYS[field]] = value
     elif field == "showcase":
         if value and not showcase:
             # PC rule: append after the current maximum within the Collection type.
@@ -303,9 +373,11 @@ status_head = last_sequence
 def advertisement(db):
     current = state(db)
     if current is None:
-        return {"capabilities": {"collectionPersonalEdit": False, "collectionTrackingEdit": False}}
+        return {"capabilities": {"collectionPersonalEdit": False, "collectionTrackingEdit": False,
+                                 "collectionRecordEdit": False}}
     return {"capabilities": {"collectionPersonalEdit": True,
-                             "collectionTrackingEdit": current["edit_version"] >= EDIT_VERSION},
+                             "collectionTrackingEdit": current["edit_version"] >= TRACKING_VERSION,
+                             "collectionRecordEdit": current["edit_version"] >= RECORD_VERSION},
             "libraryId": current["library_id"],
             "personalEditCursor": current["last_sequence"],
             "appliedPersonalEditCursor": current["applied_cursor"]}
@@ -346,7 +418,7 @@ def register(app, get_db, require_client, require_publisher, replica_revision):
                         fail(409, "operationConflict", "다른 내용으로 편집 요청을 재사용할 수 없습니다.")
                     return json.loads(receipt["result_json"])
             if active is not None:
-                if command.field in TRACKING_FIELDS:
+                if command.field in TRACKING_FIELDS or command.field in RECORD_FIELDS:
                     fail(409, "collectionPersonalEditUnsupported", "이 편집은 지금 지원되지 않습니다.")
                 result = collection_authority.personal_edit(
                     db, active, command, value, expected, collection_authority.now_iso())
@@ -360,6 +432,8 @@ def register(app, get_db, require_client, require_publisher, replica_revision):
             payload = json.loads(row["payload"])
             if command.field in TRACKING_FIELDS:
                 tracking_guard(current, payload, command.field, value)
+            if command.field in RECORD_FIELDS:
+                record_guard(current, payload, command.field, value)
             present = current_value(command.field, payload, value)
             result = {"version": 1, "operationId": command.operationId, "collectionId": command.collectionId,
                       "field": command.field, "value": value}
@@ -415,7 +489,7 @@ def register(app, get_db, require_client, require_publisher, replica_revision):
                               (after, limit + 1)).fetchall()
             more = len(rows) > limit
             rows = rows[:limit]
-            if editVersion < EDIT_VERSION and any(r["field"] in TRACKING_FIELDS for r in rows):
+            if any(editVersion < FIELD_VERSIONS.get(r["field"], 1) for r in rows):
                 fail(409, "collectionPersonalEditUpgradeRequired", "모바일 편집을 받으려면 PC 앱을 업데이트해 주세요.")
             return {"version": 1, "libraryId": libraryId, "after": after,
                     "nextCursor": rows[-1]["sequence"] if rows else after, "hasMore": more,

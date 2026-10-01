@@ -1,6 +1,6 @@
-//! Personal Collection edits (my rating, Showcase membership, memo, and - personal-edit
-//! version 2 - a manga Collection's 신간 알림 and owned-volume count) accepted by the mobile
-//! server while the PC was off.
+//! Personal Collection edits (my rating, Showcase membership, memo; personal-edit version 2:
+//! a manga Collection's 신간 알림 and owned-volume count; version 3: the work record's 상태 and
+//! 기기) accepted by the mobile server while the PC was off.
 //!
 //! The PC owns every Collection. The server accepts a mobile edit, reflects it in what
 //! mobile reads and appends it to an ordered log. This module pulls that log and applies
@@ -21,13 +21,22 @@
 //!   ownership panel (`write_release_watch`, `write_owned_volume_count`). Turning 신간 알림 on
 //!   without an Aladin/Kakao binding, or a tracking edit for a Collection that is no longer
 //!   manga, is recorded as applied without change; the next publication shows the real state.
+//! * Version 3 (`status`, `ownedPlatform`) writes `collection_pc_records` through the same
+//!   upserts as the PC's 내 기록 panel (`collection_pc::write_record_status`,
+//!   `write_record_platform`); the 0117 triggers then dirty the publication. A status the
+//!   Collection's current type does not take, or a platform on a Collection that is no
+//!   longer a game, is applied without change.
+//! * The version is negotiated from `/v1/collections/status` capabilities (3 when
+//!   `collectionRecordEdit` is present, 2 with `collectionTrackingEdit`, else 1), published
+//!   in the handshake and sent as `editVersion` when reading the log, so an older server is
+//!   never asked for a version it does not know.
 use std::sync::OnceLock;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 
 use super::{error::LibraryError, Library};
-use crate::cloud::client::{CloudClient, CollectionsStatus};
+use crate::cloud::client::{CloudClient, CollectionsCapabilities, CollectionsStatus};
 use crate::library::credential;
 
 /// The server bounds this to 1..=100.
@@ -76,10 +85,14 @@ pub(crate) struct PageOutcome {
 pub(crate) struct PersonalEditFeature {
     pub endpoint: String,
     pub library_id: String,
-    /// The handshake version to publish: 2 (with the manga tracking payload keys) when the
-    /// server understands the tracking fields, else 1.
+    /// The handshake version to publish and read the log with: 3 when the server understands
+    /// the work record fields, 2 (with the manga tracking payload keys) when it understands
+    /// the tracking fields, else 1.
     pub edit_version: u8,
 }
+
+/// The newest personal-edit version this PC applies.
+pub(crate) const EDIT_VERSION: u8 = 3;
 
 /// A validated value for one field.
 #[derive(Debug, Clone, PartialEq)]
@@ -89,6 +102,19 @@ enum EditValue {
     Memo(Option<String>),
     ReleaseWatch(bool),
     OwnedVolumes { edition_index: u8, count: i64 },
+    Status(Option<String>),
+    OwnedPlatform(Option<String>),
+}
+
+/// The handshake version the capabilities allow (see the module notes).
+pub(crate) fn negotiated_edit_version(capabilities: &CollectionsCapabilities) -> u8 {
+    if capabilities.collection_record_edit.is_some() {
+        EDIT_VERSION
+    } else if capabilities.collection_tracking_edit.is_some() {
+        2
+    } else {
+        1
+    }
 }
 
 type Listener = Box<dyn Fn() + Send + Sync>;
@@ -172,7 +198,41 @@ fn parse_value(field: &str, value: &serde_json::Value) -> Result<EditValue, Libr
                 .map(EditValue::Memo)
                 .map_err(|_| LibraryError::CollectionPersonalEditInvalid)
         }
+        ("status", serde_json::Value::Null) => Ok(EditValue::Status(None)),
+        // A status of any Collection type; the type it must fit is checked at write time.
+        ("status", serde_json::Value::String(text)) => {
+            let known = ["game", "av", "manga", "movie"]
+                .iter()
+                .any(|kind| super::collection_pc::allowed_statuses(kind).contains(&text.as_str()));
+            if known {
+                Ok(EditValue::Status(Some(text.clone())))
+            } else {
+                Err(invalid)
+            }
+        }
+        ("ownedPlatform", serde_json::Value::Null) => Ok(EditValue::OwnedPlatform(None)),
+        ("ownedPlatform", serde_json::Value::String(text)) => {
+            let value = super::collection::normalized_description(Some(text.clone()))
+                .map_err(|_| LibraryError::CollectionPersonalEditInvalid)?;
+            if value
+                .as_ref()
+                .is_some_and(|v| v.chars().count() > super::collection_pc::MAX_PLATFORM_CHARS)
+            {
+                return Err(invalid);
+            }
+            Ok(EditValue::OwnedPlatform(value))
+        }
         _ => Err(invalid),
+    }
+}
+
+/// A record write whose value the Collection's current type does not take is applied
+/// without change (the server already validated against the published type).
+fn record_write(result: Result<bool, LibraryError>) -> Result<usize, LibraryError> {
+    match result {
+        Ok(changed) => Ok(usize::from(changed)),
+        Err(LibraryError::InvalidCollectionType | LibraryError::InvalidCollectionMetadata) => Ok(0),
+        Err(error) => Err(error),
     }
 }
 
@@ -239,8 +299,37 @@ fn write_field(
             Err(LibraryError::InvalidCollectionType) => 0,
             Err(error) => return Err(error),
         },
+        EditValue::Status(status) => {
+            let kind = collection_kind(connection, collection_id)?;
+            record_write(super::collection_pc::write_record_status(
+                connection,
+                collection_id,
+                &kind,
+                status.as_deref(),
+            ))?
+        }
+        EditValue::OwnedPlatform(platform) => {
+            let kind = collection_kind(connection, collection_id)?;
+            record_write(super::collection_pc::write_record_platform(
+                connection,
+                collection_id,
+                &kind,
+                platform.clone(),
+            ))?
+        }
     };
     Ok(changed > 0)
+}
+
+fn collection_kind(connection: &Connection, collection_id: &str) -> Result<String, LibraryError> {
+    Ok(connection
+        .query_row(
+            "SELECT type FROM collections WHERE id = ?1",
+            [collection_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or_default())
 }
 
 /// Mark the Collection publication dirty (for tables without a 0074 trigger).
@@ -332,7 +421,7 @@ impl Library {
             };
         };
         let library_id = self.library_id()?;
-        let edit_version = if capabilities.collection_tracking_edit.is_some() { 2 } else { 1 };
+        let edit_version = negotiated_edit_version(capabilities);
         if active && status.library_id.as_deref() != Some(library_id.as_str()) {
             return Err(LibraryError::CollectionPersonalEditCursorRejected);
         }
@@ -343,7 +432,8 @@ impl Library {
         } else {
             self.adopt_collection_personal_edit_library(endpoint, &library_id)?;
         }
-        match self.receive_collection_personal_edits_with(client, publisher, endpoint) {
+        match self.receive_collection_personal_edits_with(client, publisher, endpoint, edit_version)
+        {
             Ok(_) => Ok(Some(PersonalEditFeature {
                 endpoint: endpoint.to_string(),
                 library_id,
@@ -416,13 +506,15 @@ impl Library {
         Ok(())
     }
 
-    /// Pull and apply pending edits for the adopted endpoint, up to [`MAX_PAGES`] pages.
-    /// Returns the durable cursor, or `None` when the endpoint is not configured/adopted.
+    /// Pull and apply pending edits for the adopted endpoint, up to [`MAX_PAGES`] pages,
+    /// reading the log at the negotiated `edit_version`. Returns the durable cursor, or
+    /// `None` when the endpoint is not configured/adopted.
     pub(crate) fn receive_collection_personal_edits_with(
         &self,
         client: &CloudClient,
         publisher_token: &str,
         endpoint: &str,
+        edit_version: u8,
     ) -> Result<Option<i64>, LibraryError> {
         let config = self.cloud_sync_config()?;
         if !config.enabled || config.api_base_url.as_deref() != Some(endpoint) {
@@ -435,7 +527,13 @@ impl Library {
         let mut changed = 0;
         for _ in 0..MAX_PAGES {
             let page = client
-                .collection_personal_edits(publisher_token, &library_id, cursor, PAGE_LIMIT)?
+                .collection_personal_edits(
+                    publisher_token,
+                    &library_id,
+                    cursor,
+                    PAGE_LIMIT,
+                    edit_version,
+                )?
                 .ok_or(LibraryError::CollectionPersonalEditUnsupported)?;
             changed += self
                 .apply_collection_personal_edit_page(endpoint, &library_id, &page.items)?
@@ -524,7 +622,7 @@ impl Library {
                     outcome.skipped += 1;
                     "skipped"
                 };
-                if is_tracking_field(&item.field) {
+                if uses_state_receipt(&item.field) {
                     insert_tracking_receipt(&transaction, item, &value_json, endpoint, library_id, result, &now)?;
                 } else {
                     transaction.execute(
@@ -571,12 +669,17 @@ impl Library {
     }
 }
 
-/// Version-2 fields. Their receipts cannot use `mobile_collection_personal_edit_receipts`,
-/// whose 0091 CHECK allows only the three version-1 fields, so (without a migration) they
-/// are kept as one JSON row each in the key/value table `notes_state` with the same
-/// content and the same divergence rules.
+/// Version-2 fields (manga only; never applied to AV).
 fn is_tracking_field(field: &str) -> bool {
     matches!(field, "releaseWatch" | "ownedVolumes")
+}
+
+/// Version-2 and version-3 fields. Their receipts cannot use
+/// `mobile_collection_personal_edit_receipts`, whose 0091 CHECK allows only the three
+/// version-1 fields, so (without a migration) they are kept as one JSON row each in the
+/// key/value table `notes_state` with the same content and the same divergence rules.
+fn uses_state_receipt(field: &str) -> bool {
+    is_tracking_field(field) || matches!(field, "status" | "ownedPlatform")
 }
 
 fn tracking_receipt_key(endpoint: &str, library_id: &str, operation_id: &str) -> String {
@@ -1374,7 +1477,7 @@ pub(crate) mod tests {
         let client = CloudClient::new(&base).unwrap();
         let before = NOTIFIED.load(Ordering::SeqCst);
         let received = library
-            .receive_collection_personal_edits_with(&client, "publisher-token", &base)
+            .receive_collection_personal_edits_with(&client, "publisher-token", &base, 1)
             .unwrap();
         let seen = handle.join().unwrap();
         assert_eq!(received, Some(2));
@@ -1462,31 +1565,211 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_tracking_capable_server_gets_version_two_and_the_log_is_read_with_edit_version_two() {
+    fn the_handshake_version_follows_the_server_capabilities_and_the_log_is_read_with_it() {
         let (_temp, library) = fixture();
         let id = library.library_id().unwrap();
         let empty = page_body(&id, 0, 0, false, "");
         let (base, handle) = scripted(vec![
-            ("/v1/collections/personal-edits?libraryId=", 200, empty.clone()),
+            (
+                "/v1/collections/personal-edits?libraryId=",
+                200,
+                empty.clone(),
+            ),
+            (
+                "/v1/collections/personal-edits?libraryId=",
+                200,
+                empty.clone(),
+            ),
             ("/v1/collections/personal-edits?libraryId=", 200, empty),
         ]);
         configure(&library, &base);
         let client = CloudClient::new(&base).unwrap();
-        let upgraded = status(
-            r#"{"capabilities":{"collectionPersonalEdit":false,"collectionTrackingEdit":false}}"#,
-        );
-        let feature = library
-            .prepare_collection_personal_edits(&client, &base, &upgraded, Some("publisher"))
-            .unwrap()
-            .unwrap();
-        assert_eq!(feature.edit_version, 2);
-        let older = status(r#"{"capabilities":{"collectionPersonalEdit":false}}"#);
-        let feature = library
-            .prepare_collection_personal_edits(&client, &base, &older, Some("publisher"))
-            .unwrap()
-            .unwrap();
-        assert_eq!(feature.edit_version, 1);
+        let expected = [
+            (
+                r#"{"capabilities":{"collectionPersonalEdit":false,"collectionTrackingEdit":false,"collectionRecordEdit":false}}"#,
+                3,
+            ),
+            (
+                r#"{"capabilities":{"collectionPersonalEdit":false,"collectionTrackingEdit":false}}"#,
+                2,
+            ),
+            (r#"{"capabilities":{"collectionPersonalEdit":false}}"#, 1),
+        ];
+        for (reply, version) in expected {
+            let feature = library
+                .prepare_collection_personal_edits(
+                    &client,
+                    &base,
+                    &status(reply),
+                    Some("publisher"),
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(feature.edit_version, version);
+        }
         let seen = handle.join().unwrap();
-        assert!(seen.iter().all(|(url, _, _)| url.ends_with("&editVersion=2")));
+        let versions: Vec<_> = seen
+            .iter()
+            .map(|(url, _, _)| url.rsplit("&editVersion=").next().unwrap().to_string())
+            .collect();
+        assert_eq!(versions, ["3", "2", "1"]);
+    }
+
+    // --- Version 3: the work record (상태, 기기) -------------------------------------
+
+    fn record(library: &Library, id: &str) -> Option<(Option<String>, Option<String>)> {
+        library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT status, owned_platform FROM collection_pc_records WHERE collection_id=?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .unwrap()
+    }
+
+    #[test]
+    fn version_three_applies_status_and_platform_like_the_pc_panel() {
+        let (_temp, library) = fixture();
+        let id = adopt(&library, ENDPOINT);
+        mark_published(&library);
+        let outcome = library
+            .apply_collection_personal_edit_page(
+                ENDPOINT,
+                &id,
+                &[
+                    entry(1, "a", "status", serde_json::json!("complete")),
+                    entry(2, "g", "ownedPlatform", serde_json::json!("  Switch 2  ")),
+                    entry(3, "g", "status", serde_json::json!("playing")),
+                    entry(4, "av", "status", serde_json::json!("watched")),
+                    // A game status on manga, a platform on manga: applied without change.
+                    entry(5, "a", "status", serde_json::json!("playing")),
+                    entry(6, "a", "ownedPlatform", serde_json::json!("PC")),
+                    // Deleted: skipped, PC deletion wins.
+                    entry(7, "gone", "status", serde_json::json!("done")),
+                ],
+            )
+            .unwrap();
+        assert_eq!((outcome.changed, outcome.skipped), (4, 1));
+        assert_eq!(
+            receipts(&library)
+                .iter()
+                .map(|r| r.1.as_str())
+                .collect::<Vec<_>>(),
+            ["applied", "applied", "applied", "applied", "applied", "applied", "skipped"]
+        );
+        assert_eq!(record(&library, "a"), Some((Some("complete".into()), None)));
+        assert_eq!(
+            record(&library, "g"),
+            Some((Some("playing".into()), Some("Switch 2".into())))
+        );
+        assert_eq!(record(&library, "av"), Some((Some("watched".into()), None)));
+        assert_eq!(
+            library
+                .collection_work_record("g")
+                .unwrap()
+                .owned_platform
+                .as_deref(),
+            Some("Switch 2")
+        );
+        assert!(
+            dirty(&library),
+            "the 0117 triggers and the cursor schedule a republish"
+        );
+        assert_eq!(cursor(&library, ENDPOINT), 7);
+        // 미입력 clears; a value already in place and a clear of an absent record change nothing.
+        mark_published(&library);
+        let outcome = library
+            .apply_collection_personal_edit_page(
+                ENDPOINT,
+                &id,
+                &[
+                    entry(8, "g", "ownedPlatform", serde_json::json!(null)),
+                    entry(9, "g", "status", serde_json::json!("playing")),
+                    entry(10, "s", "status", serde_json::json!(null)),
+                ],
+            )
+            .unwrap();
+        assert_eq!(outcome.changed, 1);
+        assert_eq!(record(&library, "g"), Some((Some("playing".into()), None)));
+        assert_eq!(
+            record(&library, "s"),
+            None,
+            "clearing never creates a record row"
+        );
+        // The PC panel reads the mobile value and keeps writing through the same path.
+        library
+            .save_collection_work_record(
+                "g",
+                crate::library::collection_pc::WorkRecordEdit::Status { value: None },
+            )
+            .unwrap();
+        assert_eq!(record(&library, "g"), Some((None, None)));
+    }
+
+    #[test]
+    fn record_receipts_make_replays_harmless_and_malformed_entries_fail_closed() {
+        let (_temp, library) = fixture();
+        let id = adopt(&library, ENDPOINT);
+        let page = [
+            entry(1, "g", "status", serde_json::json!("done")),
+            entry(2, "g", "ownedPlatform", serde_json::json!("PS5")),
+        ];
+        library
+            .apply_collection_personal_edit_page(ENDPOINT, &id, &page)
+            .unwrap();
+        // The PC changes both itself; a stale replay must not undo that.
+        library
+            .save_collection_work_record(
+                "g",
+                crate::library::collection_pc::WorkRecordEdit::Status {
+                    value: Some("unplayed".into()),
+                },
+            )
+            .unwrap();
+        library
+            .save_collection_work_record(
+                "g",
+                crate::library::collection_pc::WorkRecordEdit::OwnedPlatform {
+                    value: Some("PC".into()),
+                },
+            )
+            .unwrap();
+        let replay = library
+            .apply_collection_personal_edit_page(ENDPOINT, &id, &page)
+            .unwrap();
+        assert_eq!((replay.already_consumed, replay.changed), (2, 0));
+        assert_eq!(
+            record(&library, "g"),
+            Some((Some("unplayed".into()), Some("PC".into())))
+        );
+        let forged = entry(2, "g", "ownedPlatform", serde_json::json!("Xbox"));
+        assert!(matches!(
+            library.apply_collection_personal_edit_page(ENDPOINT, &id, &[forged]),
+            Err(LibraryError::CollectionPersonalEditInvalid)
+        ));
+        for (field, value) in [
+            ("status", serde_json::json!("finished")),
+            ("status", serde_json::json!("")),
+            ("status", serde_json::json!(3)),
+            ("ownedPlatform", serde_json::json!("x".repeat(201))),
+            ("ownedPlatform", serde_json::json!(true)),
+        ] {
+            let page = [entry(3, "g", field, value)];
+            assert!(
+                matches!(
+                    library.apply_collection_personal_edit_page(ENDPOINT, &id, &page),
+                    Err(LibraryError::CollectionPersonalEditInvalid)
+                ),
+                "{field}"
+            );
+            assert_eq!(cursor(&library, ENDPOINT), 2);
+        }
+        assert_eq!(
+            record(&library, "g"),
+            Some((Some("unplayed".into()), Some("PC".into())))
+        );
     }
 }
