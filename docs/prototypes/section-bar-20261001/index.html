@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lakomics 분류 막대 시안</title>
+<!-- Loads the app's real tokens and shared controls; only the frames are local. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<style>
+:root { --page: #0e0f10; }
+body { margin: 0; background: var(--page); color: var(--color-text); font: 400 var(--type-body)/var(--line-ui) var(--font-ui); }
+.doc { max-width: 1500px; margin: 0 auto; padding-block: 32px 80px; padding-inline: 24px; display: flex; flex-direction: column; gap: 28px; }
+h1 { margin: 0; font-size: var(--text-title-large); line-height: var(--line-title-large); font-weight: 600; }
+.lead { color: var(--color-muted); max-width: 76ch; line-height: var(--line-copy); margin: 8px 0 0; }
+.lead b, .notes b { color: var(--color-text); font-weight: 600; }
+.notes { color: var(--color-muted); max-width: 80ch; line-height: var(--line-copy); padding-left: 20px; margin: 0; }
+.pick { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; color: var(--color-faint); font-size: var(--type-meta); }
+.seg { display: inline-flex; padding: 2px; background: var(--color-surface); border-radius: var(--radius-control); }
+.seg button { min-height: 26px; padding: 0 12px; border: 0; border-radius: var(--radius-mark); background: transparent; color: var(--color-muted); font: inherit; font-size: var(--type-meta); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+.row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+.col { display: flex; flex-direction: column; gap: 10px; }
+.col h2 { margin: 0; font-size: var(--type-title); font-weight: 600; }
+.col p { margin: 0; color: var(--color-faint); font-size: var(--type-meta); max-width: 60ch; }
+
+/* Frames */
+.frame { position: relative; overflow: hidden; border: 1px solid var(--color-border); background: var(--color-bg); }
+.tablet { width: 400px; height: 640px; border-radius: 18px; }
+.pc { width: 860px; height: 540px; border-radius: 8px; display: grid; grid-template-columns: 52px 168px minmax(0, 1fr); }
+.top { position: absolute; left: 0; right: 0; top: 0; height: 44px; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--color-toolbar); border-bottom: 1px solid var(--color-border); font-weight: 600; }
+.top small { color: var(--color-faint); font-weight: 400; font-size: var(--type-meta); }
+.top .grow { flex: 1; }
+.top .q { color: var(--color-muted); font-weight: 400; font-size: var(--type-meta); }
+.scroll { position: absolute; left: 0; right: 0; top: 44px; bottom: 0; overflow-y: auto; scrollbar-width: none; }
+.tablet .scroll { bottom: 52px; }
+.nav { position: absolute; left: 0; right: 0; bottom: 0; height: 52px; z-index: 3; display: flex; justify-content: space-around; align-items: center; border-top: 1px solid var(--color-border); background: var(--color-toolbar); color: var(--color-faint); font-size: 11px; }
+.nav b { color: var(--color-text); font-weight: 600; }
+/* The section bar: sticky under the top bar, thin, hides on scroll down and comes back on scroll up or at the top. */
+.sec { position: relative; padding: 6px 12px; background: var(--color-bg); }
+/* The shade: the same bar, dropped from under the top bar like Android's notification shade. */
+.sec.shade { position: absolute; left: 0; right: 0; top: 44px; z-index: 2; border-bottom: 1px solid var(--color-border); box-shadow: 0 10px 24px rgba(0,0,0,.35); transform: translateY(calc(-100% - 1px)); transition: transform 240ms var(--ease-standard); visibility: hidden; }
+.sec.shade.open { transform: none; visibility: visible; }
+.sec.shade.dragging { transition: none; visibility: visible; }
+.top .now { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; margin-left: -8px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-text); font: inherit; cursor: pointer; }
+.top .now span { color: var(--color-muted); font-weight: 400; opacity: 0; transition: opacity 160ms var(--ease-standard); }
+.frame.away .top .now span { opacity: 1; }
+.top .now i { width: 6px; height: 6px; border-right: 1.5px solid var(--color-faint); border-bottom: 1.5px solid var(--color-faint); transform: translateY(-2px) rotate(45deg); opacity: 0; transition: opacity 160ms var(--ease-standard); }
+.frame.away .top .now i { opacity: 1; }
+.top { touch-action: none; }
+.sec .seg { width: 100%; display: flex; }
+.sec .seg button { flex: 1; min-height: 30px; font-size: 14px; }
+.pc .sec { padding: 6px 16px; }
+/* PC: the bar stays put under the top bar — wide screens have room, and a mouse cannot pull. */
+.pc .scroll > .sec { position: sticky; top: 0; z-index: 2; border-bottom: 1px solid var(--color-border); }
+.pc .sec .seg { width: auto; display: inline-flex; }
+.pc .sec .seg button { flex: none; min-height: 26px; font-size: var(--type-meta); padding: 0 14px; }
+.sec .side { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); display: none; gap: 12px; color: var(--color-muted); font-size: var(--type-meta); }
+.pc .sec .side { display: flex; }
+.grid { display: grid; gap: 12px 10px; padding: 12px; }
+.tablet .grid { grid-template-columns: repeat(4, 1fr); }
+.pc .grid { grid-template-columns: repeat(7, 1fr); padding: 12px 16px; }
+.grid i { display: block; aspect-ratio: .7; border-radius: 2px; background: linear-gradient(160deg, var(--c1), var(--c2)); opacity: .85; }
+.grid i.wide { aspect-ratio: 1.3; }
+/* PC rails */
+.rail { background: var(--color-sidebar); border-right: 1px solid var(--color-border); }
+.index { background: var(--color-sidebar); border-right: 1px solid var(--color-border); padding: 52px 10px 10px; display: flex; flex-direction: column; gap: 4px; color: var(--color-muted); font-size: var(--type-meta); }
+.index b { color: var(--color-text); font-weight: 400; padding: 5px 8px; border-radius: var(--radius-control); }
+.index b.on { background: var(--color-sidebar-selection); color: var(--color-on-accent); }
+.main { position: relative; overflow: hidden; }
+.cap { color: var(--color-faint); font-size: var(--type-meta); }
+.shots { display: flex; gap: 16px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>분류 막대 — 목록과 함께 올라가고, 위에서 끌어내리면 나오기</h1>
+    <p class="lead">2안. 분류 막대는 <b>목록 맨 위에 붙어 있어 스크롤하면 목록과 함께 자연스럽게 올라가고</b>, 스크롤 방향에 따라 저절로 나타났다 사라지지 않습니다. 내려간 상태에서 분류를 바꾸고 싶으면 <b>상단바를 아래로 쓸어내리면</b> 안드로이드 상태창처럼 막대가 내려옵니다(상단바의 제목을 눌러도 됨). 고르거나 목록을 다시 스크롤하면 올라갑니다. 각 화면 안을 <b>스크롤하고, 상단바를 끌어내려 보세요</b>.</p>
+    <div class="pick" style="margin-top:12px"><span>탭</span><div class="seg" id="tab-pick"></div></div>
+  </header>
+  <ul class="notes">
+    <li><b>얇게</b>: 지금 태블릿 분류 줄은 위아래 여백 포함 약 60px입니다. 시안은 <b>42px</b>(버튼 30px + 위아래 6px)입니다. 손가락으로 누르기에는 버튼 전체 폭을 쓰므로 충분합니다.</li>
+    <li><b>움직임 없음</b>: 1안처럼 스크롤 방향을 따라 막대가 들락날락하지 않습니다. 막대는 목록의 일부라 목록과 같이 움직일 뿐입니다.</li>
+    <li><b>지금 분류 표시</b>: 막대가 화면 밖으로 나가면 상단바 제목이 <b>컬렉션 · 게임 ⌄</b>로 바뀌어 지금 어느 분류인지 보이고, 끌어내릴 수 있다는 표시가 됩니다.</li>
+    <li><b>끌어내리기</b>: 태블릿은 상단바를 손가락으로 끌어내리면 막대가 손을 따라 내려오고, 절반 넘게 끌면 열립니다. 제목을 눌러도 열립니다.</li>
+    <li><b>PC는 항상 보임</b>: 화면이 넓고 마우스로는 끌어내릴 수 없으니, PC는 막대가 상단바 아래에 <b>고정</b>되어 스크롤해도 그대로 있습니다. 높이 38px의 얇은 줄이고, 정렬·보기가 오른쪽에 함께 있어 상단바 역할을 나눠 맡습니다.</li>
+    <li><b>PC</b>: 지금 컬렉션 유형은 왼쪽 사이드바 목록에, 에셋 종류(전체/이미지/영상)와 망가 출처는 상단바 안에 끼어 있습니다. 시안은 둘 다 <b>같은 막대로 옮기고</b>, 정렬·보기를 막대 오른쪽에 둡니다. 사이드바에는 쇼케이스·발매 캘린더 같은 나머지 항목만 남습니다. </li>
+    <li><b>적용 범위</b>: 분류가 있는 화면만 — 컬렉션(게임·만화·영화·AV), 에셋(전체·이미지·영상), 망가(카탈로그·북마크·로컬), 메모(종류). 분류가 없는 홈·설정에는 막대가 없습니다. 위 <b>탭</b> 버튼으로 각 화면을 바꿔 볼 수 있습니다.</li>
+  </ul>
+  <div class="row" id="row"></div>
+  <div class="col"><h2>멈춘 화면 (끌 수 없는 환경용)</h2><p>왼쪽: 맨 위 — 막대가 목록 위에 있음. 가운데: 스크롤해서 내려감 — 상단바에 지금 분류 표시. 오른쪽: 상단바를 끌어내려 막대가 내려온 상태.</p><div class="shots" id="shots"></div></div>
+</div>
+<script>
+const TABS = {
+  collections: { name: '컬렉션', seg: ['게임', '만화', '영화', 'AV'], side: ['정렬 발매일', '내 별점', '보기'], wide: false, nav: '컬렉션', index: ['쇼케이스', '발매 캘린더', '업데이트 받은 편지함'] },
+  assets: { name: '에셋', seg: ['전체', '이미지', '영상'], side: ['최신순', '보기'], wide: true, nav: '에셋', index: ['전체 에셋', '작가', '앨범', '폴더'] },
+  manga: { name: '망가', seg: ['카탈로그', '북마크', '로컬'], side: ['한국어', '최신순', '보기'], wide: false, nav: '카탈로그', index: ['이어 읽기', '최근 추가'] },
+  notes: { name: '메모', seg: ['전체', '고정', '보관함'], side: ['라벨'], wide: true, nav: '메모', index: ['라벨 없음', '여행', '작업'] },
+};
+let tab = 'collections';
+const palette = ['#7b4b52', '#43566e', '#5c6b45', '#6c4f7a', '#7a6a43', '#3f6a68', '#6d5640', '#4b4f78'];
+const cells = (n, wide) => Array.from({ length: n }, (_, i) => `<i class="${wide && i % 3 === 1 ? 'wide' : ''}" style="--c1:${palette[i % 8]};--c2:${palette[(i + 3) % 8]}"></i>`).join('');
+const segHtml = (list) => `<div class="seg">${list.map((s, k) => `<button aria-pressed="${k === 0}">${s}</button>`).join('')}</div>`;
+const navHtml = (on) => `<div class="nav">${['홈', '에셋', '컬렉션', '카탈로그', '메모'].map((n) => n === on ? `<b>${n}</b>` : `<span>${n}</span>`).join('')}</div>`;
+// state: 'top' (bar in the list), 'away' (scrolled past it), 'shade' (pulled down over the list)
+const title = (t) => `<button class="now" type="button">${t.name}<span>· ${t.seg[0]}</span><i></i></button>`;
+function tablet(t, state = 'top') {
+  return `<div class="frame tablet${state !== 'top' ? ' away' : ''}"${state === 'away' || state === 'shade' ? ' data-away="1"' : ''}><div class="top">${title(t)}<span class="grow"></span><span class="q">검색</span></div>
+    <div class="scroll"><div class="sec">${segHtml(t.seg)}</div><div class="grid">${cells(64, t.wide)}</div></div>
+    <div class="sec shade${state === 'shade' ? ' open' : ''}">${segHtml(t.seg)}</div>${navHtml(t.nav)}</div>`;
+}
+function pc(t) {
+  return `<div class="frame pc"><div class="rail"></div><div class="index"><span class="cap">${t.name}</span>${t.index.map((s) => `<b>${s}</b>`).join('')}</div>
+    <div class="main"><div class="top">${t.name} <small>181</small><span class="grow"></span><span class="q">검색</span></div>
+    <div class="scroll"><div class="sec">${segHtml(t.seg)}<div class="side">${t.side.map((s) => `<span>${s}</span>`).join('')}</div></div><div class="grid">${cells(84, t.wide)}</div></div>
+    </div></div>`;
+}
+function wire(frame) {
+  const sc = frame.querySelector('.scroll'), inList = sc.querySelector('.sec'), shade = frame.querySelector('.sec.shade'), top = frame.querySelector('.top');
+  const close = () => shade.classList.remove('open');
+  // Past the in-list bar, the title shows the current section; scrolling closes an open shade.
+  sc.addEventListener('scroll', () => { frame.classList.toggle('away', sc.scrollTop > inList.offsetHeight - 4); if (sc.scrollTop > 0) close(); }, { passive: true });
+  frame.querySelector('.now').addEventListener('click', () => { if (frame.classList.contains('away')) shade.classList.toggle('open'); });
+  // Pull the top bar down: the shade follows the finger and opens past half its height.
+  let start = null;
+  top.addEventListener('pointerdown', (e) => { if (!frame.classList.contains('away') || e.target.closest('.now')) return; start = e.clientY; shade.classList.add('dragging'); top.setPointerCapture(e.pointerId); });
+  top.addEventListener('pointermove', (e) => { if (start === null) return; const h = shade.offsetHeight, d = Math.max(0, Math.min(h, e.clientY - start)); shade.style.transform = `translateY(${d - h - 1}px)`; });
+  const end = (e) => { if (start === null) return; const open = e.clientY - start > shade.offsetHeight / 2; start = null; shade.classList.remove('dragging'); shade.style.transform = ''; shade.classList.toggle('open', open); };
+  top.addEventListener('pointerup', end); top.addEventListener('pointercancel', end);
+  // Picking a section in either bar updates both, and the title; the shade closes.
+  frame.querySelectorAll('.sec .seg button').forEach((b) => b.addEventListener('click', () => {
+    const k = [...b.parentElement.children].indexOf(b);
+    frame.querySelectorAll('.sec .seg').forEach((seg) => [...seg.children].forEach((x, i) => x.setAttribute('aria-pressed', String(i === k))));
+    frame.querySelector('.now span').textContent = `· ${b.textContent}`; setTimeout(close, 120);
+  }));
+}
+function render() {
+  const t = TABS[tab];
+  document.getElementById('tab-pick').innerHTML = Object.entries(TABS).map(([k, v]) => `<button aria-pressed="${k === tab}" data-tab="${k}">${v.name}</button>`).join('');
+  document.getElementById('row').innerHTML = `<div class="col"><h2>태블릿</h2>${tablet(t)}</div><div class="col"><h2>PC</h2>${pc(t)}</div>`;
+  document.getElementById('shots').innerHTML = `${tablet(t)}${tablet(t, 'away')}${tablet(t, 'shade')}`;
+  document.querySelectorAll('#row .frame.tablet').forEach(wire);
+  document.querySelectorAll('#row .frame.pc .sec .seg button').forEach((b) => b.addEventListener('click', () => [...b.parentElement.children].forEach((x) => x.setAttribute('aria-pressed', String(x === b)))));
+  document.querySelectorAll('#shots .frame[data-away]').forEach((f) => { f.querySelector('.scroll').scrollTop = 200; });
+}
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) { tab = b.dataset.tab; render(); } });
+render();
+</script>
+</body>
+</html>
