@@ -29,7 +29,7 @@ export function BarProgress({label}:{label:string|false|undefined}) {
 export function TopBar({title,count,crumbs,back,actions,className='',loading,barRef}:{title?:ReactNode;count?:ReactNode;crumbs?:ReactNode;back?:{label:string;onClick():void};actions?:ReactNode;className?:string;/** Accessible name of a running page/scope load; shows the bar's progress line. */loading?:string|false;/** The bar element, for a section shade's pull (SectionShade.tsx). */barRef?:Ref<HTMLElement>}) {
   return <header ref={barRef} className={`top-bar${className?` ${className}`:''}`}>
     {back?<IconButton label={back.label} icon={ArrowLeftIcon} onClick={back.onClick}/>:<span className="top-bar__brand"><Mark/></span>}
-    <div className="top-bar__titles">{crumbs}{title!=null&&<div className="top-bar__title"><h1>{title}</h1>{count!=null&&count!==''&&<span className="numeric muted top-bar__count">{count}</span>}</div>}</div>
+    <div className={`top-bar__titles${crumbs!=null&&title!=null?' top-bar__titles--stacked':''}`}>{crumbs}{title!=null&&<div className="top-bar__title"><h1>{title}</h1>{count!=null&&count!==''&&<span className="numeric muted top-bar__count">{count}</span>}</div>}</div>
     <span className="top-bar__space"/>{actions}<BarProgress label={loading}/>
   </header>;
 }

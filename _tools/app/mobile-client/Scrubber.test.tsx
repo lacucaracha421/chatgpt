@@ -42,7 +42,7 @@ describe('Scrubber',()=>{
   it('fades after release and shows a hairline for one second after ordinary scrolling',()=>{
     vi.useFakeTimers();const {list}=mount();const zone=document.querySelector('.mobile-scrubber-zone')!;
     fireEvent.pointerDown(zone,{pointerId:1,pointerType:'touch',clientX:40,clientY:10});fireEvent.pointerMove(zone,{pointerId:1,pointerType:'touch',clientX:300,clientY:10});fireEvent.pointerUp(zone,{pointerId:1,pointerType:'touch',clientX:300,clientY:10});
-    expect(document.querySelector('.mobile-scrubber-rail')).not.toBeNull();act(()=>vi.advanceTimersByTime(800));expect(document.querySelector('.mobile-scrubber.is-fading')).not.toBeNull();act(()=>vi.advanceTimersByTime(220));expect(document.querySelector('.mobile-scrubber-rail')).toBeNull();
+    expect(document.querySelector('.mobile-scrubber-rail')).not.toBeNull();act(()=>vi.advanceTimersByTime(300));expect(document.querySelector('.mobile-scrubber.is-fading')).not.toBeNull();act(()=>vi.advanceTimersByTime(220));expect(document.querySelector('.mobile-scrubber-rail')).toBeNull();
     fireEvent.scroll(list);expect(document.querySelector('.mobile-scrubber-rail')).not.toBeNull();act(()=>vi.advanceTimersByTime(1000));expect(document.querySelector('.mobile-scrubber-rail')).toBeNull();
   });
 

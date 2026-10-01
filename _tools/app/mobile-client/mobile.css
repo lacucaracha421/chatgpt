@@ -324,9 +324,10 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .top-bar__title { display:flex; align-items:baseline; gap:8px; min-width:0; }
 .top-bar h1 { display:flex; align-items:baseline; gap:8px; margin:0; font-size:var(--type-title); font-weight:600; line-height:1.2; letter-spacing:-.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .top-bar h1 .numeric, .top-bar__count { font-size:var(--type-meta); font-weight:500; color:var(--color-muted); white-space:nowrap; }
-.top-bar__titles:has(> :first-child:not(.top-bar__title)) h1 { font-size:var(--type-body); }
+.top-bar__titles--stacked { gap:var(--space-1); }
+.top-bar__titles--stacked h1 { font-size:var(--type-body); }
 .top-bar__crumbs.is-alone { font-size:var(--type-body); color:var(--color-text); }
-.top-bar__crumbs { font-size:var(--type-meta); color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.top-bar__crumbs { line-height:1.2; font-size:var(--type-meta); color:var(--color-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .top-bar .library-breadcrumb button { min-height:20px; padding:0 4px 0 0; font-size:11px; }
 .top-bar .library-breadcrumb>span>span { padding-right:4px; font-size:11px; }
 .top-bar__space { flex:1; min-width:4px; }

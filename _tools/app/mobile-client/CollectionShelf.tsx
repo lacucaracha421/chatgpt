@@ -43,7 +43,11 @@ export function useShelfViews(): [(type: CollectionKind) => ShelfView, (type: Co
 
 /** A work's case for the shared shelf and work case: a game's case follows its owned 기기 first. Without a spine image the case prints its title. */
 export function workCaseData(item: CollectionSummary, urls: {front?: string | null; spine?: string | null; back?: string | null}, privacy: boolean): CaseData {
-  return {title: item.name, publisher: item.publisher ?? null, platform: workCasePlatform(item.type, item.platforms, item.ownedPlatform), front: urls.front ?? null, spine: urls.spine ?? null, back: urls.back ?? null, privacy};
+  const cover = collectionCover(item);
+  const volume = item.type === 'manga' && cover ? item.volumes?.find(volume => volume.coverArtworkId === cover) : null;
+  const focus = volume?.coverFocusX;
+  return {title: item.name, author: item.author ?? null, coverFocus: typeof focus === 'number' && focus >= 0 && focus <= 1 ? focus : null,
+    volumeNumber: volume?.volumeNumber === 1 ? 1 : null, publisher: item.publisher ?? null, platform: workCasePlatform(item.type, item.platforms, item.ownedPlatform), front: urls.front ?? null, spine: urls.spine ?? null, back: urls.back ?? null, privacy};
 }
 
 /**

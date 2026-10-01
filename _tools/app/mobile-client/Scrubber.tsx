@@ -4,7 +4,7 @@ import './scrubber.css';
 
 const DRAG_THRESHOLD = 8;
 const HINT_MS = 1000;
-const RELEASE_MS = 800;
+const RELEASE_MS = 300;
 /** A tap on the bottom band shows the bar this long without a drag. */
 const SUMMON_MS = 2600;
 const FADE_MS = 220;

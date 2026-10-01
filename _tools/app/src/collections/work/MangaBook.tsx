@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
+import "../case/CaseMaterials.css";
 import { stripPosition } from "./coverStrip";
 import { fitSpineTitle, spineTitleSplits, verticalSpineRuns, verticalSpineText, SPINE_TITLE_SCALE, type SpineTitleFit } from "./verticalText";
 
@@ -7,6 +8,24 @@ const TITLE_SHARE = .52;
 /** Upright vertical type: mapped punctuation, upright one- or two-digit numbers. */
 function Vertical({ text }: { text: string }) {
   return <>{verticalSpineRuns(verticalSpineText(text)).map((run, index) => run.upright ? <span key={index} className="manga-jspine-tcy">{run.text}</span> : <Fragment key={index}>{run.text}</Fragment>)}</>;
+}
+
+/** Shared print; only the work book supplies fitted columns and a measuring ruler. */
+export function MangaSpineFace({ title, author, volumeNumber, illustration, titleFit, spineRef, illustrationRef, children }: {
+  title: string; author?: string | null; volumeNumber?: number | null; illustration: ReactNode;
+  titleFit?: SpineTitleFit; spineRef?: Ref<HTMLSpanElement>; illustrationRef?: Ref<HTMLSpanElement>; children?: ReactNode;
+}) {
+  const fit = titleFit ?? { scale: SPINE_TITLE_SCALE.base, columns: [title], clipped: false };
+  return <span ref={spineRef} className="manga-jspine" style={{ "--title-share": TITLE_SHARE, "--title-base": SPINE_TITLE_SCALE.base } as CSSProperties}>
+    <span className={`manga-jspine-title${fit.columns.length > 1 ? " manga-jspine-title--columns" : ""}`} style={{ "--title-scale": fit.scale } as CSSProperties}>
+      {fit.columns.map((column, index) => <span key={index} className="manga-jspine-column"><Vertical text={column} /></span>)}
+    </span>
+    {volumeNumber != null && <span className="manga-jspine-number">{volumeNumber}</span>}
+    <span ref={illustrationRef} className="manga-jspine-illustration">{illustration}</span>
+    {author && <span className="manga-jspine-author"><Vertical text={author} /></span>}
+    <span className="manga-jspine-bar" />
+    {children}
+  </span>;
 }
 
 // The work surface retains the old book until every visible face of this one decodes.
@@ -123,16 +142,9 @@ export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus
         event.preventDefault(); event.stopPropagation();
       }}>
       <span className="manga-bb-back">{cover("back")}</span>
-      <span className="manga-bb-spine">{privacy ? <span className="privacy-mask" aria-label="비공개 모드" /> : <span ref={spine} className="manga-jspine" style={{ "--title-share": TITLE_SHARE, "--title-base": SPINE_TITLE_SCALE.base } as CSSProperties}>
-        <span className={`manga-jspine-title${shownTitle.columns.length > 1 ? " manga-jspine-title--columns" : ""}`} style={{ "--title-scale": shownTitle.scale } as CSSProperties}>
-          {shownTitle.columns.map((column, index) => <span key={index} className="manga-jspine-column"><Vertical text={column} /></span>)}
-        </span>
-        {volumeNumber !== null && <span className="manga-jspine-number">{volumeNumber}</span>}
-        <span ref={illustration} className="manga-jspine-illustration">{cover("illustration")}</span>
-        {author && <span className="manga-jspine-author"><Vertical text={author} /></span>}
-        <span className="manga-jspine-bar" />
+      <span className="manga-bb-spine">{privacy ? <span className="privacy-mask" aria-label="비공개 모드" /> : <MangaSpineFace title={title} author={author} volumeNumber={volumeNumber} illustration={cover("illustration")} titleFit={shownTitle} spineRef={spine} illustrationRef={illustration}>
         <span ref={ruler} className="manga-jspine-ruler" aria-hidden="true">{rulerTexts.map(text => <span key={text} data-text={text}><Vertical text={text} /></span>)}</span>
-      </span>}</span>
+      </MangaSpineFace>}</span>
       <span className="manga-bb-pages" aria-hidden="true" /><span className="manga-bb-top" aria-hidden="true" />
       <span className="manga-bb-front">{cover("front")}{!privacy && !src && <span className="manga-cover-empty">표지가 없습니다.</span>}</span>
     </div>

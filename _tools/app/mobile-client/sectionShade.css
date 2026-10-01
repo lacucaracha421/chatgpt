@@ -45,3 +45,8 @@
 .collection-shortcuts svg { flex:none; width:16px; height:16px; color:var(--color-faint); stroke-width:1.5; }
 .collection-shortcuts__count { color:var(--color-faint); font-size:var(--type-meta); }
 .collection-shortcuts__count.is-new { color:var(--color-accent); font-weight:600; }
+
+/* A crumb and title fit as one centred block; retain the title's 44px tap area. */
+.top-bar__titles--stacked h1:has(.section-shade-title) { overflow:visible; }
+.top-bar__titles--stacked .section-shade-title { position:relative; min-height:0; overflow:visible; }
+.top-bar__titles--stacked .section-shade-title::before { content:''; position:absolute; inset:calc((1.2em - var(--touch-target)) / 2) 0; }

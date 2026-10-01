@@ -49,7 +49,7 @@ it('names the current section in the title once the bar has scrolled away',()=>{
   expect(screen.getByRole('heading',{name:'컬렉션'})).toBeTruthy();
 });
 
-it('opens the shade from the title and closes it on a pick',()=>{
+it('opens the shade from the title and keeps it open for repeated section picks',()=>{
   const onPick=vi.fn();
   render(<Screen onPick={onPick}/>);
   scrollTo(300);
@@ -59,10 +59,15 @@ it('opens the shade from the title and closes it on a pick',()=>{
   expect(screen.getByRole('button',{name:'컬렉션 · 게임'}).getAttribute('aria-expanded')).toBe('true');
   fireEvent.click(shadeRadio('만화'));
   expect(onPick).toHaveBeenCalledWith('manga');
-  expect(shade()!.classList.contains('is-open')).toBe(false);
+  expect(shade()!.classList.contains('is-open')).toBe(true);
   expect(screen.getByRole('button',{name:'컬렉션 · 만화'})).toBeTruthy();
+  scrollTo(0); // The new section resets the list without a user gesture.
+  expect(shade()!.classList.contains('is-open')).toBe(true);
+  fireEvent.click(shadeRadio('영화'));
+  expect(onPick).toHaveBeenLastCalledWith('movie');
+  expect(shade()!.classList.contains('is-open')).toBe(true);
   // Both copies show the same section.
-  expect(within(list()).getByRole('radio',{name:'만화'}).getAttribute('aria-checked')).toBe('true');
+  expect(within(list()).getByRole('radio',{name:'영화'}).getAttribute('aria-checked')).toBe('true');
 });
 
 it('closes on a list scroll, a tap outside, Escape and Back',()=>{
@@ -71,7 +76,7 @@ it('closes on a list scroll, a tap outside, Escape and Back',()=>{
   scrollTo(300);
   const open=()=>{fireEvent.click(screen.getByRole('button',{name:/컬렉션 · /}));expect(shade()!.classList.contains('is-open')).toBe(true);};
   const closed=()=>expect(shade()!.classList.contains('is-open')).toBe(false);
-  open();scrollTo(320);closed();
+  open();fireEvent.wheel(list(),{deltaY:64});scrollTo(364);closed();
   // The closing tap does nothing else; the next one does.
   open();fireEvent.pointerDown(screen.getByRole('button',{name:'바깥'}));closed();
   fireEvent.click(screen.getByRole('button',{name:'바깥'}));expect(onOutside).not.toHaveBeenCalled();
@@ -165,7 +170,7 @@ it.each([false,true])('ignores a delayed pull click (scroll after release: %s) a
     fireEvent.pointerMove(title,{pointerId:1,clientX:50,clientY:40});
     fireEvent.pointerUp(title,{pointerId:1,clientX:50,clientY:40});
     expect(shade()!.classList.contains('is-open')).toBe(true);
-    if(scrollAfterPull)scrollTo(320);
+    if(scrollAfterPull){fireEvent.wheel(list(),{deltaY:64});scrollTo(364);}
     act(()=>{vi.advanceTimersByTime(300);});
     fireEvent.click(title,{detail:1});
     expect(shade()!.classList.contains('is-open')).toBe(!scrollAfterPull);
@@ -208,4 +213,57 @@ it('carries the extra shortcut row in both copies and closes the shade when it o
   fireEvent.click(shortcut);expect(onOpen).toHaveBeenCalledTimes(2);
   expect(shade()!.classList.contains('is-open')).toBe(false);
   expect(list().scrollTop).toBe(300);
+});
+
+
+it('ignores automatic scroll, then closes at 64px cumulative user movement',()=>{
+  render(<Screen/>);scrollTo(300);
+  fireEvent.click(screen.getByRole('button',{name:'컬렉션 · 게임'}));
+  scrollTo(0);scrollTo(180); // Content reset/restoration never arms scroll dismissal.
+  expect(shade()!.classList.contains('is-open')).toBe(true);
+  fireEvent.wheel(list(),{deltaY:20});scrollTo(200);
+  fireEvent.wheel(list(),{deltaY:-20});scrollTo(180);
+  fireEvent.wheel(list(),{deltaY:23});scrollTo(203);
+  expect(shade()!.classList.contains('is-open')).toBe(true);
+  fireEvent.wheel(list(),{deltaY:1});scrollTo(204);
+  expect(shade()!.classList.contains('is-open')).toBe(false);
+});
+
+it('ignores a section reset even after a recent user scroll',()=>{
+  render(<Screen/>);scrollTo(300);
+  fireEvent.click(screen.getByRole('button',{name:'컬렉션 · 게임'}));
+  fireEvent.wheel(list(),{deltaY:20});scrollTo(320);
+  fireEvent.click(shadeRadio('만화'));scrollTo(0);
+  expect(shade()!.classList.contains('is-open')).toBe(true);
+  fireEvent.wheel(list(),{deltaY:43});scrollTo(43);
+  expect(shade()!.classList.contains('is-open')).toBe(true);
+  fireEvent.wheel(list(),{deltaY:1});scrollTo(44);
+  expect(shade()!.classList.contains('is-open')).toBe(false);
+});
+
+it('distinguishes a list tap from a touch scroll and counts its momentum',()=>{
+  render(<Screen/>);scrollTo(300);
+  const open=()=>fireEvent.click(screen.getByRole('button',{name:/컬렉션 · /}));
+  open();
+  fireEvent.pointerDown(list(),{pointerId:1,clientX:100,clientY:200});
+  expect(shade()!.classList.contains('is-open')).toBe(true);
+  fireEvent.pointerMove(list(),{pointerId:1,clientX:100,clientY:160});scrollTo(340);
+  fireEvent.pointerUp(list(),{pointerId:1,clientX:100,clientY:160});
+  expect(shade()!.classList.contains('is-open')).toBe(true);
+  scrollTo(364); // Inertial continuation of that gesture.
+  expect(shade()!.classList.contains('is-open')).toBe(false);
+  open();fireEvent.pointerDown(list(),{pointerId:2,clientX:100,clientY:100});
+  fireEvent.pointerUp(list(),{pointerId:2,clientX:100,clientY:100});
+  expect(shade()!.classList.contains('is-open')).toBe(false);
+  fireEvent.click(list()); // Consume the closing tap before the next test.
+});
+
+
+it('counts native pan scroll after the browser cancels the touch pointer',()=>{
+  render(<Screen/>);scrollTo(300);
+  fireEvent.click(screen.getByRole('button',{name:'컬렉션 · 게임'}));
+  fireEvent.pointerDown(list(),{pointerId:1,clientX:100,clientY:200});
+  fireEvent.pointerCancel(list(),{pointerId:1,clientX:100,clientY:190});
+  scrollTo(363);expect(shade()!.classList.contains('is-open')).toBe(true);
+  scrollTo(364);expect(shade()!.classList.contains('is-open')).toBe(false);
 });

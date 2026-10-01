@@ -536,7 +536,7 @@ describe('read-only collections',()=>{
     expect(shade.classList.contains('is-open')).toBe(true);
     const listPaths=()=>mocks.api.mock.calls.map(([path])=>path as string).filter(path=>path.startsWith('/v1/collections?'));
     fireEvent.click(within(shade).getByRole('radio',{name:'만화'}));
-    expect(shade.classList.contains('is-open')).toBe(false);
+    expect(shade.classList.contains('is-open')).toBe(true);
     await waitFor(()=>expect(listPaths().at(-1)).toContain('type=manga'));
     expect(within(list()).getByRole('radio',{name:'만화'}).getAttribute('aria-checked')).toBe('true');
   });
@@ -731,7 +731,7 @@ it('defaults manga to one LightCase book per work and picks before opening',asyn
   expect(shelf.querySelector('.collection-list__group')).toBeNull();
   const tile=within(shelf).getByRole('button',{name:item.name});
   await waitFor(()=>expect(tile.querySelector('.cs-front img')?.getAttribute('src')).toBe('https://example.invalid/cover'));
-  expect(tile.querySelector('.cs-spine .spine-title')?.getAttribute('data-title')).toBe(item.name);
+  expect(tile.querySelector('.cs-spine .manga-jspine-title')?.textContent).toBe(item.name);
   fireEvent.click(tile);expect(tile.getAttribute('aria-selected')).toBe('true');
   expect(screen.queryByRole('heading',{level:1,name:item.name})).toBeNull();
   fireEvent.click(tile);await screen.findByRole('heading',{level:1,name:item.name});
@@ -1149,6 +1149,56 @@ describe('collection shortcut overlays',()=>{
     expect(within(overlay).getByRole('img',{name:shown.name})).toBe(image);expect(home).not.toHaveBeenCalled();
     expect(mocks.api.mock.calls.filter(([path])=>path.includes('showcase=true'))).toHaveLength(reads);
     act(()=>{expect(backRef.current?.()).toBe(true);});expect(list().scrollTop).toBe(350);expect(home).not.toHaveBeenCalled();
+  });
+  it.each([['게임','game'],['만화','manga'],['영화','movie'],['AV','av']] as const)('uses the %s shelf and per-row choice in Showcase, and returns from the work',async(label,type)=>{
+    localStorage.setItem(`lakomics.mobile.collectionView.${type}.v1`,JSON.stringify({layout:'shelf',perRow:6}));
+    const shown={...item,type};
+    mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path==='/v1/home/upcoming'?{entries:[],wishlist:[]}:path.startsWith('/v1/collections?')?{...page,items:Array.from({length:7},(_,i)=>({...shown,id:i===0?item.id:`extra-${i}`,name:i===0?item.name:`작품 ${i}`}))}:{revision:'r1',item:shown});
+    const backRef:{current:(()=>boolean)|null}={current:null};
+    render(<Collections active paused={false} backRef={backRef}/>);pressTab(label);
+    await screen.findByRole('group',{name:`${label} 작품 목록`});
+    fireEvent.click(await screen.findByRole('button',{name:'쇼케이스 7'}));
+    const overlay=screen.getByRole('dialog',{name:'쇼케이스'}),scroll=overlay.querySelector('.collection-scroll') as HTMLElement;
+    const shelf=within(overlay).getByRole('group',{name:`${label} 쇼케이스 작품 목록`});
+    expect(shelf.getAttribute('data-per-row')).toBe('6');
+    expect(shelf.classList.contains('collection-list--shelf')).toBe(true);
+    expect(shelf.querySelectorAll('.collection-light-case')).toHaveLength(7);
+    expect(shelf.querySelectorAll('.collection-list__plank')).toHaveLength(2);
+    expect(shelf.querySelector('.collection-list--showcase')).toBeNull();
+    const tile=within(shelf).getByRole('button',{name:item.name});
+    await waitFor(()=>expect(mocks.native.mock.calls.some(([op,payload])=>op==='collectionArtwork'&&payload.artworkId==='cover')).toBe(true));
+    scroll.scrollTop=180;fireEvent.scroll(scroll);
+    fireEvent.click(tile);expect(tile.getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('dialog',{name:'쇼케이스'})).toBe(overlay);
+    fireEvent.click(tile);await screen.findByRole('heading',{level:1,name:item.name});
+    act(()=>{expect(backRef.current?.()).toBe(true);});
+    expect(screen.getByRole('dialog',{name:'쇼케이스'})).toBe(overlay);
+    expect(scroll.scrollTop).toBe(180);expect(within(shelf).getByRole('button',{name:item.name})).toBe(tile);
+  });
+  it('uses the selected grid column count in Showcase',async()=>{
+    localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout:'grid',perRow:6}));
+    serve();render(<Collections active paused={false} backRef={{current:null}}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'쇼케이스 12'}));
+    const overlay=screen.getByRole('dialog',{name:'쇼케이스'});
+    expect((overlay.querySelector('.collection-grid.is-counted') as HTMLElement).style.getPropertyValue('--columns')).toBe('6');
+    expect(overlay.querySelector('.collection-light-case')).toBeNull();
+  });
+  it('uses manga bookcase rows in Showcase and returns after opening a volume',async()=>{
+    localStorage.setItem('lakomics.mobile.collectionView.manga.v1',JSON.stringify({layout:'bookcase',perRow:4}));
+    mocks.api.mockImplementation(async(path:string)=>path.endsWith('/status')?{revision:'r1'}:path==='/v1/home/upcoming'?{entries:[],wishlist:[]}:path.startsWith('/v1/collections?')?{...page,items:[mangaItem()]}:{revision:'r1',item:mangaItem()});
+    const backRef:{current:(()=>boolean)|null}={current:null};
+    render(<Collections active paused={false} backRef={backRef}/>);pressTab('만화');
+    fireEvent.click(await screen.findByRole('button',{name:'쇼케이스 1'}));
+    const overlay=screen.getByRole('dialog',{name:'쇼케이스'});
+    const shelf=within(overlay).getByRole('group',{name:'만화 쇼케이스 작품 목록'});
+    expect(shelf.classList.contains('manga-shelf-list')).toBe(true);
+    const row=await within(shelf).findByRole('group',{name:`${item.name} 책장`});
+    const volume=await within(row).findByRole('button',{name:/1.*권 보기$/});
+    fireEvent.click(volume);fireEvent.click(volume);
+    await screen.findByRole('heading',{level:1,name:item.name});
+    act(()=>{expect(backRef.current?.()).toBe(true);});
+    expect(screen.getByRole('dialog',{name:'쇼케이스'})).toBe(overlay);
+    expect(within(shelf).getByRole('group',{name:`${item.name} 책장`})).toBe(row);
   });
   it('closes the overlay before a retained top-bar search can consume Back',async()=>{
     serve();const backRef:{current:(()=>boolean)|null}={current:null};

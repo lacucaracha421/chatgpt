@@ -1691,12 +1691,12 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "컬렉션으로 돌아가기" }));
 
     expect(await screen.findByRole("radio", { name: "만화" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByText("던전밥")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^던전밥/ })).toBeInTheDocument();
     await user.dblClick(screen.getByRole("button", { name: /^던전밥/ }));
     await screen.findByRole("button", { name: "컬렉션으로 돌아가기" });
     fireEvent.mouseUp(window, { button: 3 });
     expect(await screen.findByRole("radio", { name: "만화" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByText("던전밥")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^던전밥/ })).toBeInTheDocument();
   });
 
   it.each(["game", "movie"] as const)("returns to the list after stepping between merged %s works", async type => {

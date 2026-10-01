@@ -9,7 +9,7 @@ import './sectionShade.css';
  * first row of the screen's scrolling list and scrolls away with it. Once it is off screen the
  * top-bar title names the current section ("컬렉션 · 게임 ⌄"), and pulling the top bar down (or
  * tapping that title) drops a second copy from under the top bar like Android's notification
- * shade. Picking a section, a tap outside, Back, Escape or scrolling the list closes it.
+ * shade. Section picks keep it open; a tap outside, Back, Escape or 64px of user scroll closes it.
  */
 export type SectionShadeBar<T extends string>={label:string;options:readonly SegmentedOption<T>[];value:T;onChange(value:T):void;extra?:ReactNode};
 export type SectionShade={
@@ -27,6 +27,7 @@ export type SectionShade={
 
 /** Movement before a press on the top bar becomes a pull (and no longer a tap). */
 const PULL_SLOP=8;
+const SCROLL_CLOSE_DISTANCE=64;
 /** Open shades, so the system Back closes the visible one before navigating. */
 const openShades=new Set<{element():HTMLElement|null;close():void}>();
 /** A retained tab is hidden with an inline `display:none`; its shade does not count. */
@@ -56,6 +57,8 @@ export function useSectionShade<T extends string>(bar:SectionShadeBar<T>,{active
   const inline=useRef<HTMLDivElement|null>(null),shade=useRef<HTMLDivElement|null>(null),toggleButton=useRef<HTMLButtonElement|null>(null);
   const state=useRef({away,open});state.current={away,open};
   const focusOnOpen=useRef(false);
+  const listScroller=useRef<HTMLElement|null>(null);
+  const scrolling=useRef({top:0,distance:0,userUntil:0,pointer:false});
   const close=useCallback(()=>setOpen(false),[]);
   const inlineRef=useCallback((element:HTMLDivElement|null)=>{inline.current=element;if(!element){setAway(false);setOpen(false);}},[]);
   const barRef=useCallback((element:HTMLElement|null)=>setTopBar(element),[]);
@@ -64,13 +67,19 @@ export function useSectionShade<T extends string>(bar:SectionShadeBar<T>,{active
   useLayoutEffect(()=>{if(!dragging&&shade.current)shade.current.style.transform='';},[dragging,open]);
   // A hidden screen closes its shade.
   useEffect(()=>{if(!active)setOpen(false);},[active]);
-  // Where the in-list bar is, read from its own scroller's scroll events; any scroll closes the shade.
+  // Content swaps/reset scroll without user input. Only accumulate movement from a list gesture.
   useEffect(()=>{
     const scrolled=(event:Event)=>{
       const scroller=event.target,bar=inline.current;
       if(!(scroller instanceof HTMLElement)||!bar||!scroller.contains(bar))return;
+      listScroller.current=scroller;
       setAway(scrolledPast(scroller,bar));
-      if(state.current.open)setOpen(false);
+      const tracking=scrolling.current,delta=Math.abs(scroller.scrollTop-tracking.top);
+      tracking.top=scroller.scrollTop;
+      if(state.current.open&&(tracking.pointer||Date.now()<tracking.userUntil)){
+        tracking.distance+=delta;tracking.userUntil=Date.now()+200;
+        if(tracking.distance>=SCROLL_CLOSE_DISTANCE)setOpen(false);
+      }
     };
     document.addEventListener('scroll',scrolled,true);
     return()=>document.removeEventListener('scroll',scrolled,true);
@@ -120,16 +129,36 @@ export function useSectionShade<T extends string>(bar:SectionShadeBar<T>,{active
   // While open: a tap outside, Escape and Back close it.
   useEffect(()=>{
     if(!open)return;
+    scrolling.current={top:listScroller.current?.scrollTop??0,distance:0,userUntil:0,pointer:false};
     const entry={element:()=>shade.current,close};
     openShades.add(entry);
+    let press:{id:number;x:number;y:number;moved:boolean}|null=null;
+    const inList=(target:Node|null)=>!!target&&!!inline.current&&!!listScroller.current?.contains(target);
     const outside=(event:PointerEvent)=>{
       const target=event.target as Node|null;
       if(!target||shade.current?.contains(target)||topBar?.contains(target))return;
+      if(inList(target)){scrolling.current.top=listScroller.current!.scrollTop;press={id:event.pointerId,x:event.clientX,y:event.clientY,moved:false};return;}
       close();swallowNextClick();
     };
-    const key=(event:KeyboardEvent)=>{if(event.key!=='Escape')return;event.preventDefault();event.stopPropagation();close();};
-    document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',key,true);
-    return()=>{openShades.delete(entry);document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',key,true);};
+    const move=(event:PointerEvent)=>{
+      if(!press||press.id!==event.pointerId)return;
+      if(Math.hypot(event.clientX-press.x,event.clientY-press.y)<PULL_SLOP)return;
+      press.moved=true;scrolling.current.pointer=true;
+    };
+    const end=(event:PointerEvent)=>{
+      if(!press||press.id!==event.pointerId)return;
+      scrolling.current.pointer=false;
+      if(press.moved||event.type==='pointercancel')scrolling.current.userUntil=Date.now()+200;
+      else if(event.type==='pointerup'){close();swallowNextClick();}
+      press=null;
+    };
+    const wheel=(event:WheelEvent)=>{if(inList(event.target as Node)&&event.deltaY!==0){scrolling.current.top=listScroller.current!.scrollTop;scrolling.current.userUntil=Date.now()+200;}};
+    const key=(event:KeyboardEvent)=>{
+      if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();return;}
+      if(inList(event.target as Node)&&['ArrowDown','ArrowUp','PageDown','PageUp','Home','End',' '].includes(event.key))scrolling.current.userUntil=Date.now()+200;
+    };
+    document.addEventListener('pointerdown',outside,true);document.addEventListener('pointermove',move,true);document.addEventListener('pointerup',end,true);document.addEventListener('pointercancel',end,true);document.addEventListener('wheel',wheel,true);document.addEventListener('keydown',key,true);
+    return()=>{openShades.delete(entry);document.removeEventListener('pointerdown',outside,true);document.removeEventListener('pointermove',move,true);document.removeEventListener('pointerup',end,true);document.removeEventListener('pointercancel',end,true);document.removeEventListener('wheel',wheel,true);document.removeEventListener('keydown',key,true);};
   },[open,close,topBar]);
   // Keyboard: opening from the title moves focus to the current section; closing returns it.
   useEffect(()=>{
@@ -137,7 +166,7 @@ export function useSectionShade<T extends string>(bar:SectionShadeBar<T>,{active
     if(!open&&shade.current?.contains(document.activeElement))toggleButton.current?.focus();
   },[open]);
   const toggle=(event:ReactMouseEvent<HTMLButtonElement>)=>{focusOnOpen.current=!open&&event.detail===0;setOpen(value=>!value);};
-  const pick=(value:T)=>{bar.onChange(value);setOpen(false);};
+  const pick=(value:T)=>{scrolling.current.userUntil=0;scrolling.current.pointer=false;bar.onChange(value);};
   const current=bar.options.find(option=>option.value===bar.value)?.label;
   const lifted=away||open;
   return {

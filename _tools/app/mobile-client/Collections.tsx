@@ -563,14 +563,17 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
       :{kind:'fallback'},[avView,filters.sort,main.items,tab]);
   const showcaseScrubberSort=useMemo<ScrubberSort>(()=>({kind:'fallback'}),[]);
   const view=viewOf(shownType);
-  // Every type uses shared work cases on 선반; 책장 keeps manga's volume rows.
-  const shelfMode=view.layout==='shelf';
-  const mangaShelfMode=view.layout==='bookcase'&&shownType==='manga';
-  const mangaShelf=(items:CollectionSummary[],label:string,workRevision:string)=><TabletMangaShelf items={items.map(card)} label={label} revision={workRevision} active={listActive} privacy={privacyMode}
-    owned={ownedOf} pick={mangaPick} onPick={setMangaPick} onOpen={(id,at)=>openWork(id,items.map(work=>work.id),at)}/>;
-  const shelfView={layout:'shelf' as const,perRow:view.perRow,grouping:'sort' as const};
   const listActive=live&&!selected&&!overlayOpen&&!performer;
-  const shelfTile=(items:CollectionSummary[],workRevision:string)=>(work:CollectionSummary)=><ShelfTile item={card(work)} revision={workRevision} active={listActive} privacy={privacyMode} picked={picked===work.id} onTap={tapWork(items)}/>;
+  const showcaseActive=live&&!selected&&!performer&&showcaseAll;
+  // Both surfaces use the type's same layout, per-row setting and shared shelf geometry.
+  const workList=(items:CollectionSummary[],kind:CollectionKind,label:string,workRevision:string,visible:boolean,arrivals:typeof mainArrivals)=>{
+    const settings=viewOf(kind),order=items.map(work=>work.id);
+    if(settings.layout==='shelf')return <CollectionList items={items} view={{layout:'shelf',perRow:settings.perRow,grouping:'sort'}} label={label} onPick={setPicked}
+      render={work=><ShelfTile item={card(work)} revision={workRevision} active={visible} privacy={privacyMode} picked={picked===work.id} onTap={tapWork(items)}/>}/>;
+    if(settings.layout==='bookcase'&&kind==='manga')return <TabletMangaShelf items={items.map(card)} label={label} revision={workRevision} active={visible} privacy={privacyMode}
+      owned={ownedOf} pick={mangaPick} onPick={setMangaPick} onOpen={(id,at)=>openWork(id,order,at)}/>;
+    return <div className={`collection-grid collection-grid-${kind} is-counted`} style={{'--columns':settings.perRow} as CSSProperties}>{items.map(work=><WorkCard key={work.id} work={card(work)} revision={workRevision} active={visible} caption={captionOf(work)} onOpen={id=>openWork(id,order)} arriving={arrivals.arriving(work.id)} onArrived={arrivals.arrived}/>)}</div>;
+  };
   const collectionTypeLabel=<SectionLabel as="h2" className="collection-type-label" title={filtered?'검색 결과':labels[type]} count={!filtered&&main.page?.totalCount!=null ? main.page.totalCount : undefined} />;
   const filterControls=<div className="filter-chips collection-chips" role="group" aria-label="정렬과 필터">
     <button className="filter-chip" onClick={()=>setSheet('sort')}><ArrowsUpDownIcon aria-hidden="true"/>{sortLabel}<ChevronDownIcon aria-hidden="true"/></button>
@@ -580,10 +583,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   </div>;
   const typeHeader=<div className="collection-section collection-all"><div className="collection-type-header">{collectionTypeLabel}{filterControls}</div></div>;
   const mainOrder=main.items.map(work=>work.id);
-  const worksView=shelfMode
-    ?<CollectionList items={main.items} view={shelfView} label={`${labels[type]} 작품 목록`} onPick={setPicked} render={shelfTile(main.items,revision)}/>
-    :mangaShelfMode?mangaShelf(main.items,`${labels[type]} 작품 목록`,revision)
-    :<div className={`collection-grid collection-grid-${shownType} is-counted`} style={{'--columns':view.perRow} as CSSProperties}>{main.items.map(work=><WorkCard key={work.id} work={card(work)} revision={revision} active={listActive} caption={captionOf(work)} onOpen={id=>openWork(id,mainOrder)} arriving={mainArrivals.arriving(work.id)} onArrived={mainArrivals.arrived}/>)}</div>;
+  const worksView=workList(main.items,shownType,`${labels[type]} 작품 목록`,revision,listActive,mainArrivals);
   // The opened work as the shared work screen, its information as the section below the stage.
   const visibleScore=(work:CollectionDetail)=>edits.visible(work.id,'myScore',work.myScore??null).value;
   const visibleRecord=(work:CollectionDetail)=>workRecordFacts(work,edits);
@@ -641,7 +641,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
       <p className="hint collection-showcase-note">PC에서 정한 순서대로 보여 줍니다.</p>
       {showcase.error&&<div className="error-message" role="alert">{showcase.error}<Button variant="ghost" onClick={showcase.reload}>처음부터 새로고침</Button></div>}
       {showcase.committed&&!showcase.busy&&!showcaseItems.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}
-      {unpublished(showcase)?unpublishedNotice:<div className={`collection-grid collection-showcase collection-grid-${type}`}>{showcaseItems.map(work=><WorkCard key={work.id} work={work} revision={showcasePage?.revision??''} active={live&&!selected&&!performer} meta={false} caption={captionOf(work)} onOpen={id=>openWork(id,showcaseItems.map(entry=>entry.id))} arriving={showcaseArrivals.arriving(work.id)} onArrived={showcaseArrivals.arrived}/>)}</div>}
+      {unpublished(showcase)?unpublishedNotice:workList(showcaseItems,type,`${labels[type]} 쇼케이스 작품 목록`,showcasePage?.revision??'',showcaseActive,showcaseArrivals)}
       {showcase.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
       {showcase.moreError&&<div className="inline-error" role="alert"><span>{showcase.moreError}</span><Button variant="ghost" onClick={showcase.retryMore}>다시 시도</Button></div>}
       <Scrubber scrollRef={showcaseRef} total={showcaseItems.length} sort={showcaseScrubberSort} hidden={!active||paused||!!selected||!showcaseAll} onEndReached={showcase.loadMore}/>

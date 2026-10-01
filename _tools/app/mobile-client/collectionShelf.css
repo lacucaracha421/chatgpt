@@ -63,7 +63,7 @@
 
 /* 신간: the PC ledger (collectionReleases.css) in the tablet scroller; rows with a cover take the two-line height. */
 .release-ledger__bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-top: var(--space-1); }
-.release-ledger__bar .collection-segments { flex: 1 1 320px; min-width: 0; margin-top: 0; }
+.release-ledger__bar .collection-segments { flex: 0 0 auto; width: max-content; margin-top: 0; }
 .mobile-collections .collection-releases__counts { margin: var(--space-6) 0 var(--space-4); flex-wrap: wrap; gap: var(--space-2) var(--space-6); }
 .mobile-collections .collection-releases__ledger td { height: var(--row-height-2); }
 .mobile-collections .collection-releases__cover-col { width: 48px; }

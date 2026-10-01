@@ -721,7 +721,7 @@ describe("CollectionBrowser manga shelf", () => {
     expect(list.querySelector(".collection-list__group")).toBeNull();
     expect(list.querySelectorAll(".collection-list__plank")).toHaveLength(1);
     expect(list.querySelector(".cs-front img")).toHaveAttribute("src", "http://lakomics.localhost/work-artwork-thumbnail/cover-m1");
-    expect(list.querySelector('.cs-spine .spine-title')).toHaveAttribute("data-title", "다이의 대모험");
+    expect(list.querySelector('.cs-spine .manga-jspine-title')).toHaveTextContent("다이의 대모험");
     expect(gateway.listCollectionVolumes).not.toHaveBeenCalled();
     const first = within(list).getByRole("button", { name: /다이의 대모험/ });
     fireEvent.click(first);
