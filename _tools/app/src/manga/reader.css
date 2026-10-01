@@ -1,0 +1,144 @@
+/* PC manga reader (screen C, docs/prototypes/pc-manga-20260929). One reader for local and online works.
+   The chrome is the 에셋 viewer's (asset-viewer__topbar, __edge, __filmstrip and its idle fade); these
+   rules only fit it to pages: a taller bottom bar with the page scrubber, half-screen page-turn areas,
+   and page-shaped boxes that hold a placeholder until the page has loaded. */
+
+.manga-reader {
+  --reader-top: 56px;
+  --reader-bottom: 104px;
+}
+
+.manga-reader__canvas {
+  position: absolute;
+  top: var(--reader-top);
+  right: 0;
+  bottom: var(--reader-bottom);
+  left: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.manga-reader .manga-viewer__buffer { background: var(--color-viewer-bg); }
+
+.manga-reader__spread {
+  --reader-slot: 100cqw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  container-type: size;
+}
+
+.manga-reader__spread--double { --reader-slot: calc((100cqw - var(--reader-gap, 0px)) / 2); }
+
+/* Sized like `object-fit: contain` from the page's aspect ratio, so a page that is still loading
+   already has its final shape. */
+.manga-reader__page {
+  position: relative;
+  display: block;
+  flex: none;
+  width: min(var(--reader-slot), calc(100cqh * var(--reader-page-ratio, 0.7)));
+  aspect-ratio: var(--reader-page-ratio, 0.7);
+}
+
+/* Children fill the page box, whose size comes from its width and aspect ratio alone. */
+.manga-reader__image,
+.manga-reader__mask,
+.manga-reader__page-error {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.manga-reader__image {
+  display: block;
+  object-fit: contain;
+}
+
+.manga-reader__placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.manga-reader__placeholder-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-tile);
+}
+
+.manga-reader__placeholder-text {
+  position: relative;
+  color: var(--color-faint);
+  font-size: var(--type-meta);
+  animation: ui-skeleton-in 400ms ease-out 300ms both;
+}
+
+.manga-reader__page-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  box-sizing: border-box;
+  padding: var(--space-4);
+  color: var(--color-muted);
+  font-size: var(--type-body);
+  text-align: center;
+  background: var(--color-surface);
+  border-radius: var(--radius-tile);
+}
+
+/* Each half of the screen turns a page; the chevron sits at the outer edge. */
+.manga-reader .asset-viewer__stage .manga-reader__edge {
+  top: var(--reader-top);
+  bottom: var(--reader-bottom);
+  width: 50%;
+  padding: 0 var(--space-6);
+  background: transparent;
+}
+
+.manga-reader .asset-viewer__stage .asset-viewer__edge--left { justify-content: flex-start; }
+.manga-reader .asset-viewer__stage .asset-viewer__edge--right { justify-content: flex-end; }
+
+/* Clicking keeps turning pages while the bars are faded out. */
+.manga-reader.asset-viewer--chrome-hidden .asset-viewer__stage .manga-reader__edge { pointer-events: auto; }
+
+.manga-reader .asset-viewer__stage .manga-reader__bottom {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  height: var(--reader-bottom);
+  padding: 0 var(--space-8);
+}
+
+.manga-reader__scrubber {
+  display: block;
+  width: 100%;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.manga-reader__strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-width: 0;
+  height: 64px;
+  overflow: hidden;
+}
+
+.manga-reader .manga-viewer__overview { z-index: 4; }
+
+@media (prefers-reduced-motion: reduce) {
+  .manga-reader__placeholder-text { animation: none; }
+}

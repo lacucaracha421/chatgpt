@@ -9,7 +9,7 @@ it("keeps the painted spread above the same decoded pending image through two pa
   const css = readFileSync("src/styles/global.css", "utf8");
   const style = document.createElement("style");
   style.dataset.readerTestStyle = "";
-  style.textContent = css.slice(css.indexOf(".manga-viewer__buffers {"), css.indexOf(".manga-viewer__spread--double"));
+  style.textContent = css.slice(css.indexOf(".manga-viewer__buffers {"), css.indexOf(".manga-viewer__preload {"));
   document.head.append(style);
   vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(false);
   let nextFrame = 0;

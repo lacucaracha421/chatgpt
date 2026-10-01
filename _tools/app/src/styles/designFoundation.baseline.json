@@ -265,10 +265,10 @@
       "legacyToken": 0
     },
     "_tools/app/src/styles/global.css": {
-      "offScaleSpacing": 10,
+      "offScaleSpacing": 9,
       "offRoleFontSize": 0,
-      "pillRadius": 3,
-      "legacyToken": 85
+      "pillRadius": 2,
+      "legacyToken": 78
     },
     "_tools/app/src/styles/tokens.css": {
       "offScaleSpacing": 0,

@@ -1,6 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
 import { mangaPageUrl } from "../assets/mediaUrl";
+import { Button } from "../shared/ui/Button";
 import { PageViewer } from "./PageViewer";
 
 type MangaViewerProps = {
@@ -8,10 +9,12 @@ type MangaViewerProps = {
   title: string;
   pageCount: number;
   galleryId: string | null;
+  artist?: string | null;
   onClose: () => void;
 };
 
-export function MangaViewer({ seriesId, title, pageCount, galleryId, onClose }: MangaViewerProps) {
+/** Local manga in the shared reader. No resume: a work always opens at page 1. */
+export function MangaViewer({ seriesId, title, pageCount, galleryId, artist, onClose }: MangaViewerProps) {
   const pageUrls = Array.from({ length: pageCount }, (_, index) => mangaPageUrl(seriesId, index + 1));
   return <PageViewer
     key={seriesId}
@@ -19,13 +22,14 @@ export function MangaViewer({ seriesId, title, pageCount, galleryId, onClose }: 
     pageUrls={pageUrls}
     initialPage={1}
     sourceLabel="로컬"
-    onPageChange={() => undefined}
+    artist={artist}
     onClose={onClose}
-    actions={galleryId ? <button
-      type="button"
-      className="ui-button ui-button--ghost"
+    actions={galleryId ? <Button
+      className="asset-viewer__vbtn"
+      size="icon"
+      variant="ghost"
       aria-label="kHentai에서 열기"
       onClick={() => void openUrl(`https://k-hentai.org/r/${galleryId}`)}
-    ><ArrowTopRightOnSquareIcon aria-hidden="true" />kHentai에서 열기</button> : undefined}
+    ><ArrowTopRightOnSquareIcon aria-hidden="true" /></Button> : undefined}
   />;
 }

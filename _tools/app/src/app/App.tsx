@@ -239,7 +239,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [reviewCount, setReviewCount] = useState(0);
   const [videoReviewAssetIds, setVideoReviewAssetIds] = useState<string[]>([]);
   const [trashCount, setTrashCount] = useState(0);
-  const [mangaViewer, setMangaViewer] = useState<{ seriesId: string; title: string; pageCount: number; galleryId: string | null } | null>(null);
+  const [mangaViewer, setMangaViewer] = useState<{ seriesId: string; title: string; pageCount: number; galleryId: string | null; artist: string } | null>(null);
   const [videoPreparationTrigger, setVideoPreparationTrigger] = useState(0);
   const settingsReturnViewRef = useRef<AssetView>({ kind: "classification", classificationId: null });
   const similarityIndex = useSimilarityIndex(gateway.indexMissingSimilarityHashes);
@@ -890,7 +890,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                   />
                 ) : view.kind === "manga" ? (
                   <MangaBrowser
-                    onOpenSeries={(series) => setMangaViewer({ seriesId: series.id, title: series.title, pageCount: series.pageCount, galleryId: series.galleryId })}
+                    onOpenSeries={(series) => setMangaViewer({ seriesId: series.id, title: series.title, pageCount: series.pageCount, galleryId: series.galleryId, artist: series.author })}
                   />
                 ) : view.kind === "collection" ? (
                   <CollectionOverlay
@@ -981,7 +981,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
       </div>
       <DropOverlay over={dropState.over} destinationName={entries.find((entry) => entry.id === dropClassificationId)?.name ?? "미분류"} />
       <DragLayer state={dragState} />
-      {mangaViewer && <Suspense fallback={null}><MangaViewer seriesId={mangaViewer.seriesId} title={mangaViewer.title} pageCount={mangaViewer.pageCount} galleryId={mangaViewer.galleryId} onClose={() => setMangaViewer(null)} /></Suspense>}
+      {mangaViewer && <Suspense fallback={null}><MangaViewer seriesId={mangaViewer.seriesId} title={mangaViewer.title} pageCount={mangaViewer.pageCount} galleryId={mangaViewer.galleryId} artist={mangaViewer.artist} onClose={() => setMangaViewer(null)} /></Suspense>}
       </FaultGameProvider>
     </PrivacyProvider>
   );

@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { BookOpenIcon, ChevronLeftIcon, ChevronRightIcon, Cog6ToothIcon, Squares2X2Icon, XMarkIcon } from "@heroicons/react/24/outline";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { BookmarkIcon, BookOpenIcon, ChevronLeftIcon, ChevronRightIcon, Cog6ToothIcon, Squares2X2Icon, XMarkIcon } from "@heroicons/react/24/outline";
+import { BookmarkIcon as BookmarkSolidIcon } from "@heroicons/react/24/solid";
+import { VIEWER_CHROME_IDLE_MS } from "../assets/AssetViewer";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { loadUiPreferences, saveUiPreferences } from "../preferences/uiPreferences";
 import type { MangaViewerGap, MangaViewerMargin } from "../preferences/uiPreferences";
@@ -7,16 +9,29 @@ import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { DEFAULT_PAGE_RATIO, ReaderPage, ReaderPageBox } from "./ReaderPage";
 import { ReaderSpread } from "./ReaderSpread";
 import { arrowAdvance, displayOrder, edgeAdvance, nextSpreadStart, prevSpreadStart, spreadForPage } from "./readerSpread";
+import "./reader.css";
+
+type ReaderBookmark = {
+  bookmarked: boolean;
+  disabled?: boolean;
+  onToggle: () => void;
+};
 
 type PageViewerProps = {
   title: string;
   pageUrls: string[];
   initialPage: number;
+  /** 로컬, or the online catalog's name. */
   sourceLabel: string;
+  artist?: string | null;
+  /** Online works only: the bookmark toggle in the top bar. */
+  bookmark?: ReaderBookmark;
   onPageChange?: (page: number) => void;
   onClose: () => void;
+  /** Extra top-bar buttons (use the `asset-viewer__vbtn` look). */
   actions?: ReactNode;
   onRetryPage?: () => Promise<void>;
 };
@@ -27,7 +42,11 @@ const VIEWER_GAP_PX: Record<MangaViewerGap, number> = { none: 0, narrow: 8, wide
 const MARGIN_LABEL: Record<MangaViewerMargin, string> = { compact: "좁게", normal: "보통", wide: "넓게" };
 const GAP_LABEL: Record<MangaViewerGap, string> = { none: "없음", narrow: "좁게", wide: "넓게" };
 
-export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageChange, onClose, actions, onRetryPage }: PageViewerProps) {
+/** Pages shown on each side of the current page in the bottom thumbnail strip. */
+const STRIP_RADIUS = 8;
+
+/** The one immersive manga reader for local and online works. */
+export function PageViewer({ title, pageUrls, initialPage, sourceLabel, artist, bookmark, onPageChange, onClose, actions, onRetryPage }: PageViewerProps) {
   const { privacyMode } = usePrivacy();
   const pageCount = pageUrls.length;
   const [page, setPage] = useState(() => Math.max(1, Math.min(pageCount, initialPage)));
@@ -42,6 +61,14 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
     finally { setRetryingPages(current => { const next = new Set(current); next.delete(value); return next; }); }
   }
   const [failedPages, setFailedPages] = useState<Set<number>>(() => new Set());
+  const markFailed = (value: number) => setFailedPages((current) => current.has(value) ? current : new Set(current).add(value));
+  const [ratios, setRatios] = useState<Record<number, number>>({});
+  const recordRatio = useCallback((value: number, ratio: number) => {
+    setRatios((current) => Math.abs((current[value] ?? 0) - ratio) < 0.001 ? current : { ...current, [value]: ratio });
+  }, []);
+  // Pages of one work usually share a shape: guess from the first page seen until a page has its own.
+  const typicalRatio = Object.values(ratios)[0] ?? DEFAULT_PAGE_RATIO;
+  const ratioFor = (value: number) => ratios[value] ?? typicalRatio;
   const [readerPrefs, setReaderPrefs] = useState(() => {
     const stored = loadUiPreferences();
     return {
@@ -58,6 +85,7 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
   const overviewCurrentRef = useRef<HTMLButtonElement>(null);
   const overviewOpenedOnceRef = useRef(false);
   const overviewGridRef = useRef<HTMLDivElement>(null);
+  const chrome = useIdleChrome();
 
   const { direction, mode, coverSingle, margin, gap } = readerPrefs;
   const spread = mode === "double";
@@ -84,9 +112,9 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
   };
   const goNext = () => move(spread ? nextSpreadStart(page, pageCount, coverSingle) : Math.min(pageCount, page + 1));
   const goPrev = () => move(spread ? prevSpreadStart(page, pageCount, coverSingle) : Math.max(1, page - 1));
+  const goTo = (target: number) => move(spread ? (spreadForPage(target, pageCount, coverSingle)[0] ?? target) : target);
   const jumpTo = (target: number) => {
-    const resolved = spread ? (spreadForPage(target, pageCount, coverSingle)[0] ?? target) : target;
-    move(resolved);
+    goTo(target);
     setOverviewOpen(false);
     setOverviewFocus(null);
   };
@@ -112,7 +140,10 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
     ...prevViewPages,
     ...Array.from({ length: 5 }, (_, index) => page + index + 1).filter((value) => value <= pageCount),
   ])].filter((value) => !currentSpread.has(value));
-  const progress = logicalSpread.length === 2 ? `${logicalSpread[0]}-${logicalSpread[1]} / ${pageCount}` : `${logicalSpread[0]} / ${pageCount}`;
+  const position = logicalSpread.length === 2 ? `${logicalSpread[0]}-${logicalSpread[1]}` : `${logicalSpread[0]}`;
+  const subtitle = [artist?.trim(), sourceLabel].filter(Boolean).join(" · ");
+  const stripStart = Math.max(1, Math.min(page - STRIP_RADIUS, pageCount - 2 * STRIP_RADIUS));
+  const stripPages = Array.from({ length: Math.min(pageCount, 2 * STRIP_RADIUS + 1) }, (_, index) => stripStart + index);
 
   useEffect(() => {
     if (!overviewOpen) return;
@@ -171,7 +202,41 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
     })),
   ];
 
+  const renderPage = (value: number) => {
+    const ratio = ratioFor(value);
+    if (failedPages.has(value)) {
+      return <ReaderPageBox key={value} ratio={ratio}>
+        <span className="manga-reader__page-error">{value}페이지를 불러오지 못했습니다<Button disabled={retryingPages.has(value)} onClick={() => void retryPage(value)}>{retryingPages.has(value) ? "재시도 중…" : "다시 시도"}</Button></span>
+      </ReaderPageBox>;
+    }
+    if (privacyMode) {
+      return <ReaderPageBox key={value} ratio={ratio}><Skeleton className="privacy-mask manga-reader__mask" label="비공개 모드" /></ReaderPageBox>;
+    }
+    return <ReaderPage key={`${value}:${pageUrls[value - 1]}`} src={pageUrls[value - 1] ?? ""} alt={`${title} ${value}페이지`} ratio={ratio}
+      onRatio={(next) => recordRatio(value, next)} onError={() => markFailed(value)} />;
+  };
+
+  const edge = (side: "left" | "right") => {
+    const advance = edgeAdvance(side, direction);
+    const atBoundary = advance === "next" ? page >= pageCount : page <= 1;
+    if (atBoundary) return null;
+    return <button
+      key={side}
+      type="button"
+      tabIndex={-1}
+      className={`asset-viewer__edge asset-viewer__edge--${side} manga-reader__edge`}
+      aria-label={advance === "next" ? "다음 페이지" : "이전 페이지"}
+      // Pointer-only: keyboard readers use the arrow keys, so a click never parks focus here.
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={advance === "next" ? goNext : goPrev}
+    >{side === "left" ? <ChevronLeftIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}</button>;
+  };
+
   return <Dialog open variant="fullscreen" title={title} onClose={overviewOpen ? closeOverview : onClose} onKeyDown={(event) => {
+    if (event.key === "Tab") chrome.keyboardFocus.current = true;
+    chrome.reveal();
+    // The page scrubber moves with its own arrow keys.
+    if (event.target instanceof HTMLInputElement) return;
     const advance = arrowAdvance(event.key, direction);
     if (advance) {
       event.preventDefault();
@@ -182,50 +247,72 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
     if (event.key.toLowerCase() === "v") { event.preventDefault(); updatePrefs({ mode: spread ? "single" : "double" }); return; }
     if (event.key.toLowerCase() === "t") { event.preventDefault(); setOverviewOpen((value) => !value); }
   }}>
-    <div className="manga-viewer">
-      <div className="manga-viewer__controls">
-        {actions}
-        <span className="manga-viewer__source">{sourceLabel}</span>
-        <span className="manga-viewer__progress">{progress}</span>
-        <Button size="icon" variant="ghost" aria-label="페이지 목록" aria-description="페이지 목록 (T)" aria-pressed={overviewOpen} onClick={() => setOverviewOpen((value) => !value)} ref={overviewToggleRef}><Squares2X2Icon aria-hidden="true" /></Button>
-        <Button size="icon" variant="ghost" aria-label={spread ? "단면 보기" : "양면 보기"} aria-description={spread ? "단면 보기 (V)" : "양면 보기 (V)"} aria-pressed={spread} onClick={() => updatePrefs({ mode: spread ? "single" : "double" })}><BookOpenIcon aria-hidden="true" /></Button>
-        <Button size="icon" variant="ghost" aria-label="이전 페이지" aria-description="이전 페이지" disabled={page <= 1} onClick={goPrev}><ChevronLeftIcon aria-hidden="true" /></Button>
-        <Button size="icon" variant="ghost" aria-label="다음 페이지" aria-description="다음 페이지" disabled={page >= pageCount} onClick={goNext}><ChevronRightIcon aria-hidden="true" /></Button>
-        <Menu label="읽기 설정" trigger={<Cog6ToothIcon aria-hidden="true" />} items={settingsItems} />
-        <Button size="icon" variant="ghost" aria-label="망가 뷰어 닫기" aria-description="망가 뷰어 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
-      </div>
-      <div className="manga-viewer__stage">
-        <ReaderSpread key={privacyMode ? "private" : "visible"} identity={JSON.stringify([pages, pages.map(value => pageUrls[value - 1]), mode, direction, margin, gap])}>
-        <div
-          className={`manga-viewer__spread${spread ? " manga-viewer__spread--double" : ""}`}
-          style={{ boxSizing: "border-box", padding: VIEWER_MARGIN_PX[margin], columnGap: VIEWER_GAP_PX[gap] }}
-        >
-          {pages.map((value) => failedPages.has(value)
-            ? <span key={value} className="manga-viewer__page-error">{value}페이지를 불러오지 못했습니다<Button disabled={retryingPages.has(value)} onClick={() => void retryPage(value)}>{retryingPages.has(value) ? "재시도 중…" : "다시 시도"}</Button></span>
-            : privacyMode
-              ? <Skeleton key={value} className="privacy-mask manga-viewer__page" label="비공개 모드" />
-              : <img key={value} className="manga-viewer__page" src={pageUrls[value - 1]} alt={`${title} ${value}페이지`} referrerPolicy="no-referrer" draggable={false} onError={() => setFailedPages((current) => new Set(current).add(value))} />)}
+    <div
+      className={`asset-viewer manga-reader${chrome.visible ? "" : " asset-viewer--chrome-hidden"}`}
+      data-chrome-visible={chrome.visible}
+      onPointerMove={() => { chrome.keyboardFocus.current = false; chrome.reveal(); }}
+      onPointerDown={() => { chrome.keyboardFocus.current = false; }}
+    >
+      <div className="asset-viewer__stage asset-viewer__stage--filmstrip manga-reader__stage">
+        <div className="manga-reader__canvas">
+          <ReaderSpread key={privacyMode ? "private" : "visible"} identity={JSON.stringify([pages, pages.map(value => pageUrls[value - 1]), mode, direction, margin, gap])}>
+            <div
+              className={`manga-reader__spread${spread ? " manga-reader__spread--double" : ""}`}
+              style={{ padding: VIEWER_MARGIN_PX[margin], columnGap: VIEWER_GAP_PX[gap], "--reader-gap": `${VIEWER_GAP_PX[gap]}px` } as CSSProperties}
+            >
+              {pages.map(renderPage)}
+            </div>
+          </ReaderSpread>
+          {!privacyMode && preloadPages.filter((value) => !failedPages.has(value)).map((value) => <img key={`preload-${value}`} className="manga-viewer__preload" src={pageUrls[value - 1]} alt="" referrerPolicy="no-referrer" aria-hidden="true"
+            onLoad={(event) => { const image = event.currentTarget; if (image.naturalWidth > 0 && image.naturalHeight > 0) recordRatio(value, image.naturalWidth / image.naturalHeight); }} />)}
         </div>
-        </ReaderSpread>
-        {!privacyMode && preloadPages.filter((value) => !failedPages.has(value)).map((value) => <img key={`preload-${value}`} className="manga-viewer__preload" src={pageUrls[value - 1]} alt="" referrerPolicy="no-referrer" aria-hidden="true" />)}
-      </div>
-      <div className="manga-viewer__edges" aria-hidden="true">
-        {(["left", "right"] as const).map((side) => {
-          const advance = edgeAdvance(side, direction);
-          const go = advance === "next" ? goNext : goPrev;
-          const atBoundary = advance === "next" ? page >= pageCount : page <= 1;
-          return <div
-            key={side}
-            className="manga-viewer__edge"
-            data-disabled={atBoundary ? "true" : undefined}
-            onClick={() => { if (!atBoundary) go(); }}
-          />;
-        })}
+        <div ref={chrome.ref} className="asset-viewer__chrome" onFocusCapture={chrome.reveal} onBlurCapture={chrome.reveal}>
+          <div className="asset-viewer__topbar" {...chrome.hover}>
+            <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="뒤로" onClick={onClose}><ChevronLeftIcon aria-hidden="true" /></Button>
+            <span className="asset-viewer__position"><b>{position}</b> / {pageCount}</span>
+            <span className="asset-viewer__title">
+              <strong>{title}</strong>
+              {subtitle && <small>{subtitle}</small>}
+            </span>
+            <span className="asset-viewer__spacer" />
+            {actions}
+            <Button className={`asset-viewer__vbtn asset-viewer__vbtn--text${spread ? " asset-viewer__vbtn--on" : ""}`} variant="ghost" aria-label="두 쪽 보기" aria-description="두 쪽 보기 (V)" aria-pressed={spread} onClick={() => updatePrefs({ mode: spread ? "single" : "double" })}><BookOpenIcon aria-hidden="true" /><span>두 쪽</span></Button>
+            <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="페이지 목록" aria-description="페이지 목록 (T)" aria-pressed={overviewOpen} onClick={() => setOverviewOpen((value) => !value)} ref={overviewToggleRef}><Squares2X2Icon aria-hidden="true" /></Button>
+            {bookmark && <Button className={`asset-viewer__vbtn${bookmark.bookmarked ? " asset-viewer__vbtn--on" : ""}`} size="icon" variant="ghost" aria-label="북마크" aria-pressed={bookmark.bookmarked} disabled={bookmark.disabled} onClick={bookmark.onToggle}>{bookmark.bookmarked ? <BookmarkSolidIcon aria-hidden="true" /> : <BookmarkIcon aria-hidden="true" />}</Button>}
+            <Menu label="읽기 설정" align="end" trigger={<Cog6ToothIcon aria-hidden="true" />} items={settingsItems} />
+            <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="망가 뷰어 닫기" aria-description="망가 뷰어 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
+          </div>
+          {edge("left")}
+          {edge("right")}
+          {pageCount > 1 && <div className="asset-viewer__filmstrip manga-reader__bottom" dir={direction} {...chrome.hover}>
+            <input
+              type="range"
+              className="manga-reader__scrubber"
+              aria-label="페이지 위치"
+              aria-valuetext={`${logicalSpread[0]}페이지`}
+              min={1}
+              max={pageCount}
+              step={1}
+              value={logicalSpread[0]}
+              onChange={(event) => goTo(Number(event.currentTarget.value))}
+            />
+            <div className="manga-reader__strip">{stripPages.map((value) => {
+              const current = currentSpread.has(value);
+              return <button key={value} type="button" className={`asset-viewer__filmstrip-button${current ? " asset-viewer__filmstrip-button--current" : ""}`}
+                aria-label={`${value}페이지 보기`} aria-current={current ? "true" : undefined} onClick={() => goTo(value)}>
+                {privacyMode || failedPages.has(value)
+                  ? <span className="asset-viewer__filmstrip-placeholder" aria-hidden="true" />
+                  : <img src={pageUrls[value - 1]} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" draggable={false}
+                    onLoad={(event) => { const image = event.currentTarget; if (image.naturalWidth > 0 && image.naturalHeight > 0) recordRatio(value, image.naturalWidth / image.naturalHeight); }} />}
+              </button>;
+            })}</div>
+          </div>}
+        </div>
       </div>
       {overviewOpen && <div className="manga-viewer__overview" role="dialog" aria-label="페이지 목록">
         <div className="manga-viewer__overview-header">
           <Button variant="ghost" onClick={closeOverview}><ChevronLeftIcon aria-hidden="true" />뷰어로 돌아가기</Button>
-          <span>{progress}</span>
+          <span>{position} / {pageCount}</span>
         </div>
         <div
           ref={overviewGridRef}
@@ -262,7 +349,7 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
             >
               {privacyMode || failedPages.has(value)
                 ? <span className="manga-viewer__overview-placeholder" aria-hidden="true">{value}</span>
-                : <img className="manga-viewer__overview-thumb" src={pageUrls[value - 1]} alt="" loading="lazy" draggable={false} />}
+                : <img className="manga-viewer__overview-thumb" src={pageUrls[value - 1]} alt="" loading="lazy" referrerPolicy="no-referrer" draggable={false} />}
               <span className="manga-viewer__overview-number" aria-hidden="true">{value}</span>
             </button>;
           })}
@@ -270,4 +357,38 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, onPageCh
       </div>}
     </div>
   </Dialog>;
+}
+
+/**
+ * The reader's bars fade after the shared viewer idle time and come back on pointer movement or a key
+ * press, like the 에셋 viewer; they stay while the pointer rests on them or a Tab-focused control is inside.
+ */
+function useIdleChrome() {
+  const [visible, setVisible] = useState(true);
+  const ref = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<number | null>(null);
+  const pointerOverRef = useRef(false);
+  const keyboardFocus = useRef(false);
+  const reveal = useCallback(() => {
+    setVisible(true);
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null;
+      if (pointerOverRef.current) return;
+      if (keyboardFocus.current && ref.current?.contains(document.activeElement)) return;
+      setVisible(false);
+    }, VIEWER_CHROME_IDLE_MS);
+  }, []);
+  useEffect(() => {
+    reveal();
+    return () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    };
+  }, [reveal]);
+  const hover = {
+    onPointerEnter: () => { pointerOverRef.current = true; setVisible(true); },
+    onPointerLeave: () => { pointerOverRef.current = false; reveal(); },
+  };
+  return { visible, reveal, hover, ref, keyboardFocus };
 }

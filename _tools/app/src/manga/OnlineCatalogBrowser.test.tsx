@@ -10,6 +10,9 @@ import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome
 import { displayDateTime } from "../shared/displayDate";
 import { lazy, Suspense } from "react";
 import { WindowControls } from "../layout/WindowControls";
+import { CATALOG_BOOKMARKS_CHANGED_EVENT } from "../app/useCatalogBookmarkSync";
+import { existsSync, readFileSync } from "node:fs";
+import { PrivacyProvider } from "../privacy/PrivacyContext";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 afterEach(() => { cleanup(); vi.useRealTimers(); });
@@ -419,9 +422,9 @@ describe("OnlineCatalogBrowser", () => {
     renderBrowser(gateway);
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
     await userEvent.click(await screen.findByRole("button", { name: "읽기" }));
-    await userEvent.click(screen.getByRole("button", { name: "닫기" }));
+    await userEvent.click(screen.getByRole("button", { name: "상세 닫기" }));
     await act(async () => gallery.resolve(resolvedGallery()));
-    expect(screen.queryByText("1 / 3")).not.toBeInTheDocument();
+    expect(readerPosition()).not.toBeInTheDocument();
   });
 
   it("returns to the previous bookmarked page after removing its last work", async () => {
@@ -492,7 +495,7 @@ describe("OnlineCatalogBrowser", () => {
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
     await userEvent.click(await screen.findByRole("button", { name: "읽기" }));
     expect(gateway.resolveOnlineCatalogWork).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
-    expect(await screen.findByText("1 / 3")).toBeVisible();
+    expect(await findReaderPosition("1 / 3")).toBeVisible();
   });
 
   it("closes the viewer back to its detail instead of dropping two layers", async () => {
@@ -504,9 +507,9 @@ describe("OnlineCatalogBrowser", () => {
     await userEvent.keyboard("{Escape}");
 
     expect(screen.getByRole("button", { name: "읽기" })).toBeVisible();
-    expect(screen.queryByText("1 / 3")).not.toBeInTheDocument();
+    expect(readerPosition()).not.toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
-    expect(screen.queryByRole("button", { name: "읽기" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "망가 상세" })).not.toBeInTheDocument());
   });
 
   it("keeps valid search results visible and reports the refresh failure detail", async () => {
@@ -552,7 +555,7 @@ describe("OnlineCatalogBrowser", () => {
     const card = cover.closest("article")!;
     expect(cover).toHaveAttribute("src", work.thumbnailUrl);
     expect(within(card).getByText("오래된 제독")).not.toHaveAttribute("title");
-    // Mobile-like tile: cover, title and artist only; views and series live in the detail dialog.
+    // Mobile-like tile: cover, title and artist only; views and series live in the detail panel.
     expect(within(card).getByText("artist")).toBeVisible();
     expect(within(card).queryByText(/series/)).not.toBeInTheDocument();
     expect(within(card).queryByText(/조회/)).not.toBeInTheDocument();
@@ -651,10 +654,10 @@ describe("OnlineCatalogBrowser", () => {
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
     await userEvent.click(await screen.findByRole("button", { name: "읽기" }));
     expect(gateway.resolveOnlineCatalogWork).toHaveBeenCalledWith({ provider: "kHentai", providerWorkId: "3" });
-    expect(await screen.findByText("1 / 3")).toBeVisible();
-    expect(screen.getByText("K-Hentai")).toBeVisible();
+    expect(await findReaderPosition("1 / 3")).toBeVisible();
+    expect(within(screen.getByRole("dialog")).getByText(/카탈로그$/)).toBeVisible();
     await userEvent.keyboard("{ArrowRight}");
-    await screen.findByText("2 / 3");
+    await findReaderPosition("2 / 3");
     expect(gateway.saveRemoteReadingProgress).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "망가 뷰어 닫기" }));
     expect(gateway.saveRemoteReadingProgress).not.toHaveBeenCalled();
@@ -719,7 +722,7 @@ describe("OnlineCatalogBrowser", () => {
     renderBrowser(gateway);
     await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
     await userEvent.click(await screen.findByRole("button", { name: "읽기" }));
-    await screen.findByText("1 / 3");
+    await findReaderPosition("1 / 3");
     vi.useFakeTimers();
 
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowRight" });
@@ -754,6 +757,15 @@ it("quietly refreshes when background bookmark reconciliation changes local stat
 async function catalogMenuItem(name: string, role: "menuitem" | "menuitemcheckbox" = "menuitem") {
   if (!screen.queryByRole("menu")) await userEvent.click(await screen.findByRole("button", { name: "카탈로그 더보기" }));
   return screen.findByRole(role, { name });
+}
+
+function readerPosition(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(".asset-viewer__position");
+}
+
+async function findReaderPosition(text: string): Promise<HTMLElement> {
+  await waitFor(() => expect(readerPosition()?.textContent).toBe(text));
+  return readerPosition()!;
 }
 
 function renderBrowser(gateway: LibraryGateway, initialScope: "all" | "bookmarked" = "all") {
@@ -880,10 +892,13 @@ function resolvedGallery(): ResolvedGallery {
   };
 }
 
-/** Editions open from the work's detail dialog (the card no longer shows the count). */
-async function openEditions(title: string, count: number) {
-  await userEvent.click(await screen.findByRole("button", { name: `${title} 상세 보기` }));
-  await userEvent.click(await screen.findByRole("button", { name: `판본 ${count}개 보기` }));
+/** Representative management stays reachable from the detail header. */
+async function openEditions(title: string) {
+  if (!screen.queryByRole("complementary", { name: "망가 상세" })) {
+    await userEvent.click(await screen.findByRole("button", { name: `${title} 상세 보기` }));
+  }
+  await userEvent.click(await screen.findByRole("button", { name: "상세 더보기" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: "대표 판본 바꾸기" }));
 }
 
 it("hides editions for a single-edition work and keeps its bookmark action", async () => {
@@ -891,9 +906,10 @@ it("hides editions for a single-edition work and keeps its bookmark action", asy
   renderBrowser(gateway);
   expect(await screen.findByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: `${work.title} 상세 보기` }));
-  await screen.findByRole("dialog");
-  expect(screen.queryByRole("button", { name: /^판본 \d+개 보기$/ })).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "닫기" }));
+  const panel = await screen.findByRole("complementary", { name: "망가 상세" });
+  expect(within(panel).queryByRole("region", { name: "판본" })).not.toBeInTheDocument();
+  expect(within(panel).queryByRole("button", { name: "상세 더보기" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "상세 닫기" }));
   expect(screen.getByRole("button", { name: `${work.title} 북마크` })).toBeVisible();
 });
 
@@ -926,7 +942,7 @@ it("shows grouped cards before exact count and rejects stale counts and failures
 });
 
 
-it("loads editions only on request in bounded pages and persists manual and automatic selection", async () => {
+it("loads representative management in bounded pages and persists manual and automatic selection", async () => {
   const gateway = createGateway(true);
   gateway.searchCatalogGroups = vi.fn().mockImplementation(async (_query, emit) => {
     emit({ type: "page", page: { works: [{ ...work, groupId: "uuid", versionCount: 104, hasBookmarkedVersion: true }], page: 0, pageSize: 48 } });
@@ -938,20 +954,21 @@ it("loads editions only on request in bounded pages and persists manual and auto
   renderBrowser(gateway);
   await screen.findByRole("button", { name: `${work.title} 상세 보기` });
   expect(gateway.getCatalogGroupEditions).not.toHaveBeenCalled();
-  await openEditions(work.title, 104);
+  await openEditions(work.title);
+  const dialog = await screen.findByRole("dialog", { name: "작품 판본" });
   expect(await screen.findByRole("button", { name: "판본 0 열기" })).toBeVisible();
   expect(gateway.getCatalogGroupEditions).toHaveBeenLastCalledWith({ provider: "kHentai", groupId: "uuid", language: "korean", revealBlocked: false, page: 0, pageSize: 40 });
-  await userEvent.click(screen.getByRole("button", { name: "판본 더 보기" }));
+  await userEvent.click(within(dialog).getByRole("button", { name: "판본 더 보기" }));
   expect(await screen.findByRole("button", { name: "판본 1 열기" })).toBeVisible();
   expect(gateway.getCatalogGroupEditions).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, pageSize: 40 }));
-  await userEvent.click(screen.getByRole("button", { name: "판본 더 보기" }));
+  await userEvent.click(within(dialog).getByRole("button", { name: "판본 더 보기" }));
   expect(await screen.findByRole("button", { name: "판본 2 열기" })).toBeVisible();
   expect(gateway.getCatalogGroupEditions).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, pageSize: 40 }));
-  expect(screen.queryByRole("button", { name: "판본 더 보기" })).not.toBeInTheDocument();
+  expect(within(dialog).queryByRole("button", { name: "판본 더 보기" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "판본 0 대표로 지정" }));
   expect(gateway.setCatalogGroupRepresentative).toHaveBeenLastCalledWith({ provider: "kHentai", groupId: "uuid", selectedProviderWorkId: "10" });
   await userEvent.click(screen.getByRole("button", { name: "닫기" }));
-  await openEditions(work.title, 104);
+  await openEditions(work.title);
   expect(await screen.findByRole("button", { name: "판본 0 대표로 지정" })).toHaveAttribute("aria-pressed", "true");
   await userEvent.click(screen.getByRole("button", { name: "자동 선택" }));
   expect(gateway.setCatalogGroupRepresentative).toHaveBeenLastCalledWith({ provider: "kHentai", groupId: "uuid", selectedProviderWorkId: null });
@@ -1001,7 +1018,7 @@ it("refreshes the grouped card when a representative save finishes after closing
   gateway.getCatalogGroupEditions = vi.fn().mockResolvedValue({ groupId: "uuid", works: [{ ...work, title: "새 대표 판본" }], totalCount: 1, page: 0, pageSize: 40, selectedProviderWorkId: null });
   gateway.setCatalogGroupRepresentative = vi.fn().mockReturnValue(save.promise);
   renderBrowser(gateway);
-  await openEditions(work.title, 2);
+  await openEditions(work.title);
   await userEvent.click(await screen.findByRole("button", { name: "새 대표 판본 대표로 지정" }));
   await userEvent.click(screen.getByRole("button", { name: "닫기" }));
   title = "새 대표 판본";
@@ -1013,3 +1030,243 @@ async function chooseMenu(label: string, option: string) {
   await userEvent.click(screen.getByRole("button", { name: label }));
   await userEvent.click(await screen.findByRole("menuitemradio", { name: option }));
 }
+
+it.each(["all", "bookmarked"] as const)("opens a %s card in the shared panel, selects its cover and leaves the grid scrollable", async scope => {
+  const gateway = createGateway(true);
+  const { container } = renderBrowser(gateway, scope);
+  const card = await screen.findByRole("button", { name: `${work.title} 상세 보기` });
+  const grid = container.querySelector<HTMLElement>(".online-catalog__content")!;
+  grid.scrollTop = 400;
+  await userEvent.click(card);
+  const panel = await screen.findByRole("complementary", { name: "망가 상세" });
+  expect(panel).toHaveClass("ui-overlay-panel");
+  expect(panel).toContainElement(document.activeElement as HTMLElement);
+  expect(card).toHaveAttribute("aria-pressed", "true");
+  expect(card.querySelector(".ui-selectable-media")).toHaveAttribute("aria-selected", "true");
+  expect(card.querySelector(".ui-selection-check")).not.toBeNull();
+  expect(grid).not.toHaveAttribute("inert");
+  expect(grid.scrollTop).toBe(400);
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "닫기" })).not.toBeInTheDocument();
+  expect(readFileSync("src/styles/global.css", "utf8")).toMatch(/\.online-catalog__workspace\s*\{[^}]*position: relative/);
+  expect(existsSync("src/manga/OnlineCatalogDetailDialog.tsx")).toBe(false);
+  expect(readFileSync("src/styles/global.css", "utf8")).not.toContain("online-catalog-detail");
+});
+
+it("swaps cards without unmounting the panel and holds inert old content until the next detail arrives", async () => {
+  const gateway = createGateway(true);
+  const second = deferred<CatalogWorkDetail>();
+  vi.mocked(gateway.getOnlineCatalogWorkDetail).mockResolvedValueOnce(detail).mockReturnValueOnce(second.promise);
+  renderBrowser(gateway);
+  const firstCard = await screen.findByRole("button", { name: `${work.title} 상세 보기` });
+  await userEvent.click(firstCard);
+  const panel = await screen.findByRole("complementary", { name: "망가 상세" });
+  await waitFor(() => expect(panel).toHaveAttribute("data-state", "open"));
+  const secondCard = screen.getByRole("button", { name: "함대 일지 상세 보기" });
+  await userEvent.click(secondCard);
+  expect(screen.getByRole("complementary", { name: "망가 상세" })).toBe(panel);
+  expect(panel).toHaveAttribute("data-state", "open");
+  expect(within(panel).getByRole("heading", { name: work.title })).toBeInTheDocument();
+  expect(panel.querySelector("[inert]")).not.toBeNull();
+  expect(firstCard).toHaveAttribute("aria-pressed", "true");
+  await act(async () => second.resolve({ ...detail, providerWorkId: "4", title: "함대 일지" }));
+  expect(screen.getByRole("complementary", { name: "망가 상세" })).toBe(panel);
+  expect(within(panel).getByRole("heading", { name: "함대 일지" })).toBeInTheDocument();
+  expect(within(panel).queryByRole("heading", { name: work.title })).not.toBeInTheDocument();
+  expect(panel.querySelector("[inert]")).toBeNull();
+  expect(secondCard).toHaveAttribute("aria-pressed", "true");
+  expect(firstCard).toHaveAttribute("aria-pressed", "false");
+  expect(panel).toContainElement(document.activeElement as HTMLElement);
+  await userEvent.keyboard("{Escape}");
+  expect(panel).toHaveAttribute("data-state", "closed");
+  expect(within(panel).getByRole("heading", { name: "함대 일지" })).toBeInTheDocument();
+  await waitFor(() => expect(panel).not.toBeInTheDocument());
+  expect(secondCard).toHaveFocus();
+});
+
+it.each(["Escape", "outside", "X"])("closes on %s and returns focus to the card after one continuous exit", async action => {
+  const gateway = createGateway(true);
+  renderBrowser(gateway);
+  const card = await screen.findByRole("button", { name: `${work.title} 상세 보기` });
+  await userEvent.click(card);
+  const panel = await screen.findByRole("complementary", { name: "망가 상세" });
+  if (action === "Escape") await userEvent.keyboard("{Escape}");
+  else if (action === "outside") fireEvent.pointerDown(document.body);
+  else await userEvent.click(screen.getByRole("button", { name: "상세 닫기" }));
+  expect(panel).toHaveAttribute("data-state", "closed");
+  expect(within(panel).getByRole("heading", { name: work.title })).toBeInTheDocument();
+  expect(card).toHaveAttribute("aria-pressed", "false");
+  await waitFor(() => expect(panel).not.toBeInTheDocument());
+  expect(card).toHaveFocus();
+});
+
+it("swaps an edition in the same panel, outlines the open cover and returns focus to its group card", async () => {
+  const gateway = createGateway(true);
+  const alternative = { ...work, providerWorkId: "4", title: "다른 판본", fileCount: 56 };
+  gateway.searchCatalogGroups = vi.fn().mockImplementation(async (_query, emit) => {
+    emit({ type: "page", page: { works: [{ ...work, groupId: "group", versionCount: 2, hasBookmarkedVersion: false }], page: 0, pageSize: 48 } });
+    emit({ type: "count", totalCount: 1 });
+  });
+  gateway.getCatalogGroupEditions = vi.fn().mockResolvedValue({ groupId: "group", works: [work, alternative], totalCount: 2, page: 0, pageSize: 40, selectedProviderWorkId: null });
+  const next = deferred<CatalogWorkDetail>();
+  vi.mocked(gateway.getOnlineCatalogWorkDetail).mockResolvedValueOnce(detail).mockReturnValueOnce(next.promise);
+  renderBrowser(gateway);
+  const card = await screen.findByRole("button", { name: `${work.title} 상세 보기` });
+  await userEvent.click(card);
+  const panel = await screen.findByRole("complementary", { name: "망가 상세" });
+  expect(screen.getByRole("button", { name: `${work.title} 판본 열기` })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByText("56p · 한국어")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "다른 판본 판본 열기" }));
+  expect(within(panel).getByRole("heading", { name: work.title })).toBeInTheDocument();
+  expect(panel.querySelector("[inert]")).not.toBeNull();
+  await act(async () => next.resolve({ ...detail, ...alternative }));
+  expect(screen.getByRole("complementary", { name: "망가 상세" })).toBe(panel);
+  expect(screen.getByRole("button", { name: "다른 판본 판본 열기" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: `${work.title} 판본 열기` })).toHaveAttribute("aria-pressed", "false");
+  expect(gateway.getCatalogGroupEditions).toHaveBeenCalledTimes(1);
+  await userEvent.keyboard("{Escape}");
+  await waitFor(() => expect(panel).not.toBeInTheDocument());
+  expect(card).toHaveFocus();
+});
+
+it("searches a tag and closes the panel, without resolving page addresses", async () => {
+  const gateway = createGateway(true);
+  renderBrowser(gateway);
+  await userEvent.click(await screen.findByRole("button", { name: `${work.title} 상세 보기` }));
+  const panel = await screen.findByRole("complementary", { name: "망가 상세" });
+  await userEvent.click(screen.getByRole("button", { name: "character:teitoku 검색" }));
+  expect(panel).toHaveAttribute("data-state", "closed");
+  await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ text: "character:teitoku", page: 0 }), expect.any(Function)));
+  expect(gateway.resolveOnlineCatalogWork).not.toHaveBeenCalled();
+  await waitFor(() => expect(panel).not.toBeInTheDocument());
+});
+
+it("keeps the resolving read action busy in the panel and opens page 1, including after a bookmark sync event", async () => {
+  const gateway = createGateway(true);
+  const resolve = deferred<ResolvedGallery>();
+  vi.mocked(gateway.resolveOnlineCatalogWork).mockReturnValue(resolve.promise);
+  renderBrowser(gateway);
+  await userEvent.click(await screen.findByRole("button", { name: `${work.title} 상세 보기` }));
+  const panel = await screen.findByRole("complementary", { name: "망가 상세" });
+  const read = screen.getByRole("button", { name: "읽기" });
+  await userEvent.click(read);
+  expect(screen.getByRole("button", { name: "불러오는 중…" })).toBe(read);
+  expect(read).toBeDisabled();
+  vi.mocked(gateway.getOnlineCatalogWorkDetail).mockResolvedValue({ ...detail, bookmarked: true });
+  act(() => window.dispatchEvent(new Event(CATALOG_BOOKMARKS_CHANGED_EVENT)));
+  expect(await within(panel).findByRole("button", { name: "북마크 해제" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("complementary", { name: "망가 상세" })).toBe(panel);
+  await act(async () => resolve.resolve(resolvedGallery()));
+  expect(await findReaderPosition("1 / 3")).toBeInTheDocument();
+  expect(gateway.getRemoteReadingProgress).not.toHaveBeenCalled();
+});
+
+it("rejects stale card responses and bookmark refreshes during a card switch", async () => {
+  const gateway = createGateway(true);
+  const old = deferred<CatalogWorkDetail>();
+  const latest = deferred<CatalogWorkDetail>();
+  vi.mocked(gateway.getOnlineCatalogWorkDetail).mockResolvedValueOnce(detail).mockReturnValueOnce(old.promise).mockReturnValueOnce(latest.promise);
+  renderBrowser(gateway);
+  await userEvent.click(await screen.findByRole("button", { name: `${work.title} 상세 보기` }));
+  const panel = await screen.findByRole("complementary", { name: "망가 상세" });
+  await userEvent.click(screen.getByRole("button", { name: "함대 일지 상세 보기" }));
+  act(() => window.dispatchEvent(new Event(CATALOG_BOOKMARKS_CHANGED_EVENT)));
+  expect(gateway.getOnlineCatalogWorkDetail).toHaveBeenCalledTimes(2);
+  await userEvent.click(screen.getByRole("button", { name: "제독의 하루 상세 보기" }));
+  await act(async () => latest.resolve({ ...detail, providerWorkId: "5", title: "제독의 하루" }));
+  await act(async () => old.resolve({ ...detail, providerWorkId: "4", title: "함대 일지" }));
+  expect(within(panel).getByRole("heading", { name: "제독의 하루" })).toBeInTheDocument();
+  expect(within(panel).queryByRole("heading", { name: "함대 일지" })).not.toBeInTheDocument();
+});
+
+it("retains the current panel on a failed card switch and shows the error toast", async () => {
+  const gateway = createGateway(true);
+  vi.mocked(gateway.getOnlineCatalogWorkDetail).mockResolvedValueOnce(detail).mockRejectedValueOnce({ message: "다음 작품 실패" });
+  renderBrowser(gateway);
+  await userEvent.click(await screen.findByRole("button", { name: `${work.title} 상세 보기` }));
+  const panel = await screen.findByRole("complementary", { name: "망가 상세" });
+  await userEvent.click(screen.getByRole("button", { name: "함대 일지 상세 보기" }));
+  expect(await screen.findByText("다음 작품 실패")).toBeInTheDocument();
+  expect(within(panel).getByRole("heading", { name: work.title })).toBeInTheDocument();
+  expect(panel.querySelector("[inert]")).toBeNull();
+  expect(screen.getByRole("button", { name: "읽기" })).toBeEnabled();
+});
+
+it("masks card, detail and edition covers through the screen's privacy setting", async () => {
+  const gateway = createGateway(true);
+  gateway.searchCatalogGroups = vi.fn().mockImplementation(async (_query, emit) => {
+    emit({ type: "page", page: { works: [{ ...work, groupId: "group", versionCount: 2, hasBookmarkedVersion: false }], page: 0, pageSize: 48 } });
+    emit({ type: "count", totalCount: 1 });
+  });
+  gateway.getCatalogGroupEditions = vi.fn().mockResolvedValue({ groupId: "group", works: [work], totalCount: 1, page: 0, pageSize: 40, selectedProviderWorkId: null });
+  const { container } = render(<LibraryProvider gateway={gateway}><PrivacyProvider privacyMode setPrivacyMode={vi.fn()}>
+    <OnlineCatalogBrowser onSwitchLocal={vi.fn()} />
+  </PrivacyProvider></LibraryProvider>);
+  await userEvent.click(await screen.findByRole("button", { name: `${work.title} 상세 보기` }));
+  await screen.findByRole("complementary", { name: "망가 상세" });
+  expect(container.querySelector("img")).toBeNull();
+  expect(screen.getAllByLabelText("비공개 모드")).toHaveLength(3);
+});
+
+it("keeps the panel when Escape closes its overflow menu, then closes the panel on the next Escape", async () => {
+  const gateway = createGateway(true);
+  gateway.searchCatalogGroups = vi.fn().mockImplementation(async (_query, emit) => {
+    emit({ type: "page", page: { works: [{ ...work, groupId: "group", versionCount: 2, hasBookmarkedVersion: false }], page: 0, pageSize: 48 } });
+    emit({ type: "count", totalCount: 1 });
+  });
+  gateway.getCatalogGroupEditions = vi.fn().mockResolvedValue({ groupId: "group", works: [work], totalCount: 1, page: 0, pageSize: 40, selectedProviderWorkId: null });
+  renderBrowser(gateway);
+  await userEvent.click(await screen.findByRole("button", { name: `${work.title} 상세 보기` }));
+  const panel = await screen.findByRole("complementary", { name: "망가 상세" });
+  await userEvent.click(screen.getByRole("button", { name: "상세 더보기" }));
+  await screen.findByRole("menuitem", { name: "대표 판본 바꾸기" });
+  await userEvent.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  expect(panel).not.toHaveAttribute("data-state", "closed");
+  await userEvent.keyboard("{Escape}");
+  expect(panel).toHaveAttribute("data-state", "closed");
+});
+
+it("keeps edition covers during pagination failure and retries that same bounded page", async () => {
+  const gateway = createGateway(true);
+  gateway.searchCatalogGroups = vi.fn().mockImplementation(async (_query, emit) => {
+    emit({ type: "page", page: { works: [{ ...work, groupId: "group", versionCount: 41, hasBookmarkedVersion: false }], page: 0, pageSize: 48 } });
+    emit({ type: "count", totalCount: 1 });
+  });
+  gateway.getCatalogGroupEditions = vi.fn()
+    .mockResolvedValueOnce({ groupId: "group", works: [work], totalCount: 41, page: 0, pageSize: 40, selectedProviderWorkId: null })
+    .mockRejectedValueOnce({ message: "판본 실패" })
+    .mockResolvedValueOnce({ groupId: "group", works: [{ ...work, providerWorkId: "4", title: "마지막 판본" }], totalCount: 41, page: 1, pageSize: 40, selectedProviderWorkId: null });
+  renderBrowser(gateway);
+  await userEvent.click(await screen.findByRole("button", { name: `${work.title} 상세 보기` }));
+  await userEvent.click(await screen.findByRole("button", { name: "판본 더 보기" }));
+  expect(await screen.findByText("판본 실패")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: `${work.title} 판본 열기` })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  expect(await screen.findByRole("button", { name: "마지막 판본 판본 열기" })).toBeInTheDocument();
+  expect(gateway.getCatalogGroupEditions).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, pageSize: 40 }));
+  expect(screen.queryByRole("button", { name: "판본 더 보기" })).not.toBeInTheDocument();
+});
+
+it("keeps the old work and its editions until both parts of the next work arrive", async () => {
+  const gateway = createGateway(true);
+  const nextEditions = deferred<Awaited<ReturnType<LibraryGateway["getCatalogGroupEditions"]>>>();
+  const nextDetail = deferred<CatalogWorkDetail>();
+  gateway.searchCatalogGroups = vi.fn().mockImplementation(async (_query, emit) => {
+    emit({ type: "page", page: { works: [work, { ...work, providerWorkId: "4", title: "다음 작품" }].map(w => ({ ...w, groupId: w.providerWorkId, versionCount: 2, hasBookmarkedVersion: false })), page: 0, pageSize: 48 } });
+    emit({ type: "count", totalCount: 2 });
+  });
+  gateway.getCatalogGroupEditions = vi.fn().mockResolvedValueOnce({ groupId: "3", works: [work], totalCount: 1, page: 0, pageSize: 40, selectedProviderWorkId: null }).mockReturnValueOnce(nextEditions.promise);
+  vi.mocked(gateway.getOnlineCatalogWorkDetail).mockResolvedValueOnce(detail).mockReturnValueOnce(nextDetail.promise);
+  renderBrowser(gateway);
+  await userEvent.click(await screen.findByRole("button", { name: `${work.title} 상세 보기` }));
+  const panel = await screen.findByRole("complementary", { name: "망가 상세" });
+  await userEvent.click(screen.getByRole("button", { name: "다음 작품 상세 보기" }));
+  await act(async () => nextDetail.resolve({ ...detail, providerWorkId: "4", title: "다음 작품" }));
+  expect(within(panel).getByRole("heading", { name: work.title })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: `${work.title} 판본 열기` })).toBeInTheDocument();
+  await act(async () => nextEditions.resolve({ groupId: "4", works: [{ ...work, providerWorkId: "4", title: "다음 작품" }], totalCount: 1, page: 0, pageSize: 40, selectedProviderWorkId: null }));
+  expect(within(panel).getByRole("heading", { name: "다음 작품" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "다음 작품 판본 열기" })).toBeInTheDocument();
+  expect(panel).toContainElement(document.activeElement as HTMLElement);
+});

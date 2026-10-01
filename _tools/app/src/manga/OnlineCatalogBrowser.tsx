@@ -9,10 +9,14 @@ import { useLibrary } from "../library/LibraryContext";
 import { CATALOG_BOOKMARKS_CHANGED_EVENT } from "../app/useCatalogBookmarkSync";
 import { catalogStreamStatus, latestCatalogUpdate } from "../library/catalogStreams";
 import { commandErrorMessage } from "../library/errorMessage";
+import { nativeMediaUrl } from "../assets/mediaUrl";
+import { usePrivacy } from "../privacy/PrivacyContext";
 import type {
   CatalogLanguage,
   CatalogGroupedPage,
   CatalogGroupedWork,
+  CatalogGroupEditionsPage,
+  CatalogGroupEditionsQuery,
   CatalogScope,
   CatalogSort,
   CatalogStatus,
@@ -29,7 +33,8 @@ import { PageViewer } from "./PageViewer";
 import { CatalogEditionsDialog } from "./CatalogEditionsDialog";
 import { CatalogReviewDialog } from "./CatalogReviewDialog";
 import { OnlineCatalogCard } from "./OnlineCatalogCard";
-import { OnlineCatalogDetailDialog } from "./OnlineCatalogDetailDialog";
+import { MangaDetail } from "./MangaDetail";
+import { OverlayPanel } from "../shared/ui/OverlayPanel";
 import { catalogIdentityKey, catalogIdentityOf } from "./catalogIdentity";
 import { MangaSkeletonGrid } from "./MangaCard";
 import { MangaToolbar, MangaChoiceMenu, type MangaSource } from "./MangaToolbar";
@@ -51,6 +56,7 @@ type OnlineCatalogBrowserProps = {
 
 export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requestedSource, active = true, onSourceChange, onReady, localCount, bookmarkCount, onBookmarkCount }: OnlineCatalogBrowserProps) {
   const { gateway } = useLibrary();
+  const { privacyMode } = usePrivacy();
   const workspace = useWorkspaceChrome();
   const [searchOpen, setSearchOpen] = useState(false);
   const [appliedQuery, setAppliedQuery] = useState("");
@@ -84,7 +90,15 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
   const [updating, setUpdating] = useState(false);
   const [openingWorkKey, setOpeningWorkKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<CatalogWorkDetail | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const [detailGroup, setDetailGroup] = useState<CatalogGroupedWork | null>(null);
+  const [detailEditions, setDetailEditions] = useState<CatalogGroupEditionsPage | null>(null);
+  const [editionsLoading, setEditionsLoading] = useState(false);
+  const [editionsError, setEditionsError] = useState(false);
+  const editionQuery = useRef<CatalogGroupEditionsQuery | null>(null);
+  const editionRequest = useRef(0);
+  const detailReturnFocus = useRef<HTMLElement | null>(null);
+  const panelHost = useRef<HTMLDivElement>(null);
   const [bookmarkPendingKeys, setBookmarkPendingKeys] = useState<Set<string>>(() => new Set());
   const [reading, setReading] = useState(false);
   const [viewer, setViewer] = useState<{
@@ -94,10 +108,12 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
     pageCount: number;
     pageUrls: string[];
     initialPage: number;
+    artist: string | null;
   } | null>(null);
   const searchRequest = useRef(0);
   const suggestionRequest = useRef(0);
   const detailRequest = useRef(0);
+  const readRequest = useRef(0);
   const bookmarkRequests = useRef(new Set<string>());
   const [message, setMessage] = useState<string | null>(null);
   useAutoDismiss(message, setMessage);
@@ -123,6 +139,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
       searchRequest.current += 1;
       void gateway.cancelCatalogSearch?.();
       detailRequest.current += 1;
+      editionRequest.current += 1;
+      readRequest.current += 1;
     };
   }, [gateway]);
 
@@ -194,7 +212,8 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
     const refreshBookmarks = () => {
       setKnownBookmarkCount(undefined); onBookmarkCount?.(undefined);
       void refreshSearch.current(true);
-      if (!detail) return;
+      // A pending card switch owns the next detail; never replace it with the old work.
+      if (!detail || !detailOpen || openingWorkKey) return;
       const request = ++detailRequest.current;
       const identity = catalogIdentityOf(detail);
       void gateway.getOnlineCatalogWorkDetail(identity).then((next) => {
@@ -203,7 +222,33 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
     };
     window.addEventListener(CATALOG_BOOKMARKS_CHANGED_EVENT, refreshBookmarks);
     return () => window.removeEventListener(CATALOG_BOOKMARKS_CHANGED_EVENT, refreshBookmarks);
-  }, [gateway, detail, onBookmarkCount]);
+  }, [gateway, detail, detailOpen, openingWorkKey, onBookmarkCount]);
+
+  useEffect(() => {
+    if (!detailOpen || viewer || editions) return;
+    const outside = (event: PointerEvent) => {
+      if (!(event.target instanceof Element)) return;
+      if (panelHost.current?.contains(event.target) || event.target.closest(".ui-menu, [role='dialog']")) return;
+      // Opening another card swaps the same panel, without an exit/entry cycle.
+      if (gridScroll.current?.contains(event.target) && event.target.closest(".manga-card__body")) return;
+      closeDetail();
+    };
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      closeDetail();
+    };
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [detailOpen, viewer, editions]);
+
+  useEffect(() => {
+    if (!active) closeDetail();
+  }, [active]);
 
   useEffect(() => {
     const request = ++suggestionRequest.current;
@@ -284,21 +329,64 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
     void search(query.trim());
   }
 
-  /** `group` is the search result the work came from; its edition count shows in the detail. */
-  async function openDetail(work: CatalogWork, group: CatalogGroupedWork | null = null) {
+  /** Commit the detail and its edition row together, retaining the previous body meanwhile. */
+  async function openDetail(work: CatalogWork, group: CatalogGroupedWork | null = null, opener?: HTMLButtonElement) {
     const request = ++detailRequest.current;
-    setDetailGroup(group);
+    editionRequest.current += 1;
+    readRequest.current += 1;
+    setReading(false);
+    setEditionsLoading(false);
     const identity = catalogIdentityOf(work);
     setOpeningWorkKey(catalogIdentityKey(identity));
+    const reuseEditions = Boolean(detailOpen && group && group.versionCount >= 2 && editionQuery.current
+      && group.provider === detailGroup?.provider && group.groupId === detailGroup.groupId);
+    const nextEditionQuery: CatalogGroupEditionsQuery | null = group && group.versionCount >= 2
+      ? reuseEditions ? editionQuery.current : { provider: group.provider, groupId: group.groupId, language, revealBlocked, page: 0, pageSize: 40 }
+      : null;
     try {
-      const nextDetail = await gateway.getOnlineCatalogWorkDetail(identity);
-      if (request === detailRequest.current) setDetail(nextDetail);
+      const [nextDetail, editionResult] = await Promise.all([
+        gateway.getOnlineCatalogWorkDetail(identity),
+        nextEditionQuery && !reuseEditions
+          ? gateway.getCatalogGroupEditions(nextEditionQuery).then(page => ({ page, error: null })).catch(error => ({ page: null, error }))
+          : Promise.resolve({ page: reuseEditions ? detailEditions : null, error: null }),
+      ]);
+      if (!mounted.current || request !== detailRequest.current) return;
+      setDetail(nextDetail);
+      setDetailGroup(group);
+      setDetailEditions(editionResult.page);
+      setEditionsError(Boolean(editionResult.error) || (reuseEditions && editionsError));
+      editionQuery.current = nextEditionQuery;
+      if (editionResult.error) setMessage(commandErrorMessage(editionResult.error, "판본을 불러오지 못했습니다"));
+      if (opener) detailReturnFocus.current = opener;
+      setDetailOpen(true);
+      // The panel itself stays mounted, so a card switch explicitly moves focus back in.
+      if (detailOpen) panelHost.current?.querySelector<HTMLElement>(".ui-overlay-panel__header button:not(:disabled)")?.focus({ preventScroll: true });
     } catch (error) {
-      if (request === detailRequest.current) {
+      if (mounted.current && request === detailRequest.current) {
         setMessage(commandErrorMessage(error, "작품 정보를 불러오지 못했습니다"));
       }
     } finally {
-      if (request === detailRequest.current) setOpeningWorkKey(null);
+      if (mounted.current && request === detailRequest.current) setOpeningWorkKey(null);
+    }
+  }
+
+  async function loadMoreDetailEditions() {
+    if (!editionQuery.current || editionsLoading) return;
+    const request = ++editionRequest.current;
+    const query = { ...editionQuery.current, page: detailEditions ? detailEditions.page + 1 : 0 };
+    setEditionsLoading(true);
+    setEditionsError(false);
+    try {
+      const next = await gateway.getCatalogGroupEditions(query);
+      if (!mounted.current || request !== editionRequest.current) return;
+      setDetailEditions(current => ({ ...next, works: [...(current?.works ?? []), ...next.works] }));
+    } catch (error) {
+      if (mounted.current && request === editionRequest.current) {
+        setEditionsError(true);
+        setMessage(commandErrorMessage(error, "판본을 불러오지 못했습니다"));
+      }
+    } finally {
+      if (mounted.current && request === editionRequest.current) setEditionsLoading(false);
     }
   }
 
@@ -336,33 +424,37 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
   }
 
   async function bookmarkDetail(bookmarked: boolean) {
-    if (!detail) return;
+    if (!detail || !detailOpen || openingWorkKey) return;
     await bookmarkWork(catalogIdentityOf(detail), bookmarked);
   }
 
   async function readDetail() {
-    if (!detail || reading) return;
-    const request = ++detailRequest.current;
+    if (!detail || !detailOpen || openingWorkKey || reading) return;
+    const request = ++readRequest.current;
     const selectedDetail = detail;
     setReading(true);
     try {
       const gallery = await gateway.resolveOnlineCatalogWork(catalogIdentityOf(selectedDetail));
-      if (request !== detailRequest.current) return;
-      setViewer({ title: selectedDetail.title, ...gallery, initialPage: 1 });
+      if (!mounted.current || request !== readRequest.current) return;
+      const artist = selectedDetail.tagGroups.find(group => group.namespace === "artist")?.values.join(" · ") || null;
+      setViewer({ title: selectedDetail.title, ...gallery, initialPage: 1, artist });
     } catch (error) {
-      if (request === detailRequest.current) {
+      if (mounted.current && request === readRequest.current) {
         setMessage(commandErrorMessage(error, "온라인 작품을 열지 못했습니다"));
       }
     } finally {
-      if (request === detailRequest.current) setReading(false);
+      if (mounted.current && request === readRequest.current) setReading(false);
     }
   }
 
   function closeDetail() {
     detailRequest.current += 1;
+    editionRequest.current += 1;
+    readRequest.current += 1;
     setOpeningWorkKey(null);
     setReading(false);
-    setDetail(null);
+    setDetailOpen(false);
+    // Retain the body during the shared panel's single exit animation.
   }
 
   function searchTag(nextQuery: string) {
@@ -372,6 +464,15 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
   }
 
   function closeViewer() { setViewer(null); }
+
+  // The reader's bookmark follows the same state the detail panel shows; the detail row is the reader's own work.
+  const viewerIdentity: CatalogWorkIdentity | null = viewer ? { provider: viewer.provider, providerWorkId: viewer.providerWorkId } : null;
+  const viewerKey = viewerIdentity ? catalogIdentityKey(viewerIdentity) : null;
+  const viewerBookmark = viewerIdentity && viewerKey ? {
+    bookmarked: Boolean(detail && catalogIdentityKey(detail) === viewerKey && detail.bookmarked),
+    disabled: bookmarkPendingKeys.has(viewerKey) || !detail || catalogIdentityKey(detail) !== viewerKey,
+    onToggle: () => { if (detail) void bookmarkWork(viewerIdentity, !detail.bookmarked); },
+  } : undefined;
 
   async function updateCatalog() {
     if (updating) return;
@@ -486,6 +587,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
         : !workspace && <span className="online-catalog__sync-status">아직 갱신 기록이 없습니다</span>}
     </div>}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
+    <div className="online-catalog__workspace">
     <div ref={gridScroll} className="manga-browser__content online-catalog__content" inert={loading || requestedSource === "local"}>
       {loadError && !results ? <EmptyState title="온라인 카탈로그를 불러오지 못했습니다" />
         : !status ? <MangaSkeletonGrid />
@@ -500,8 +602,9 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
             key={`${work.provider}:${work.groupId}`}
             work={work}
             opening={openingWorkKey === catalogIdentityKey(work)}
+            selected={detailOpen && detailGroup?.provider === work.provider && detailGroup.groupId === work.groupId}
             bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(work))}
-            onOpen={(selected) => void openDetail(selected, work)}
+            onOpen={(selected, opener) => void openDetail(selected, work, opener)}
             onBookmark={(identity, bookmarked) => void bookmarkWork(identity, bookmarked)}
           />)}
         </div>}
@@ -513,25 +616,38 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
         <Button size="sm" disabled={loading || totalCount === null || (results.page + 1) * results.pageSize >= totalCount} onClick={() => void search(query.trim(), sort, scope, results.page + 1)}>다음 결과</Button>
       </div>
     </footer>}
+    <div ref={panelHost} className="online-catalog__panel-host">
+      <OverlayPanel open={detailOpen} title="상세" ariaLabel="망가 상세" closeLabel="상세 닫기" width={380} returnFocusRef={detailReturnFocus}
+        onOpenChange={(open) => { if (!open) closeDetail(); }} actions={detailGroup && detailGroup.versionCount >= 2 && <span onKeyDown={(event) => {
+          // Escape belongs to the portalled menu before the panel beneath it.
+          if (event.key === "Escape" && event.target instanceof Element && event.target.closest("[role='menu']")) event.stopPropagation();
+        }}><Menu label="상세 더보기" align="end"
+          disabled={Boolean(openingWorkKey)} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
+            { id: "representative", label: "대표 판본 바꾸기", onSelect: () => setEditions(detailGroup) },
+          ]} /></span>}>
+        {detail && <div inert={Boolean(openingWorkKey) || !detailOpen} aria-busy={Boolean(openingWorkKey)}>
+          <MangaDetail detail={{ ...detail, thumbnailUrl: detail.thumbnailUrl ? nativeMediaUrl(detail.thumbnailUrl) : null }} privacyMode={privacyMode}
+            bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(detail))} reading={reading}
+            onBookmark={(bookmarked) => void bookmarkDetail(bookmarked)} onTagSearch={searchTag} onRead={() => void readDetail()}
+            editionCount={detailGroup?.versionCount ?? 0} editions={(detailEditions?.works ?? []).map(edition => ({ ...edition,
+              thumbnailUrl: edition.thumbnailUrl ? nativeMediaUrl(edition.thumbnailUrl) : null, language: editionQuery.current?.language ?? language }))}
+            editionsLoading={editionsLoading} editionsError={editionsError}
+            hasMoreEditions={Boolean(detailEditions && (detailEditions.page + 1) * detailEditions.pageSize < detailEditions.totalCount)}
+            onEdition={(edition) => void openDetail(edition, detailGroup)} onMoreEditions={() => void loadMoreDetailEditions()} />
+        </div>}
+      </OverlayPanel>
+    </div>
+    </div>
     {editions && <CatalogEditionsDialog work={editions} language={language} revealBlocked={revealBlocked}
       onClose={() => setEditions(null)} onOpen={(work) => { const group = editions; setEditions(null); void openDetail(work, group); }}
       onRepresentativeChange={async () => { await refreshSearch.current(); }} />}
-    {detail && <OnlineCatalogDetailDialog
-      detail={detail}
-      bookmarkPending={bookmarkPendingKeys.has(catalogIdentityKey(detail))}
-      reading={reading}
-      onBookmark={(bookmarked) => void bookmarkDetail(bookmarked)}
-      onTagSearch={searchTag}
-      onRead={() => void readDetail()}
-      editionCount={detailGroup?.versionCount ?? 0}
-      onEditions={() => { const group = detailGroup; closeDetail(); if (group) setEditions(group); }}
-      onClose={closeDetail}
-    />}
     {viewer && <PageViewer
       title={viewer.title}
       pageUrls={viewer.pageUrls}
       initialPage={viewer.initialPage}
-      sourceLabel="K-Hentai"
+      sourceLabel="카탈로그"
+      artist={viewer.artist}
+      bookmark={viewerBookmark}
       onRetryPage={async () => {
         const owner = viewer;
         const gallery = await gateway.resolveOnlineCatalogWork({ provider: owner.provider, providerWorkId: owner.providerWorkId });

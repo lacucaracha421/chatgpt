@@ -626,11 +626,6 @@ textarea:focus-visible {
   height: 52vh;
 }
 
-.manga-viewer__page.privacy-mask {
-  width: 100%;
-  height: 100%;
-}
-
 .manga-cover-viewer__cover-mask {
   width: min(72vw, 620px);
   height: calc(100vh - 88px);
@@ -3402,95 +3397,8 @@ textarea:focus-visible {
   font-style: normal;
 }
 
-.online-catalog-detail {
-  display: grid;
-  min-height: 0;
-  gap: var(--space-3);
-}
-
-.online-catalog-detail__summary {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  align-items: start;
-  gap: var(--space-4);
-}
-
-.online-catalog-detail__cover {
-  display: block;
-  width: 100%;
-  max-height: 70vh;
-  aspect-ratio: 2 / 3;
-  object-fit: contain;
-  background: var(--color-bg);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-
-.online-catalog-detail__info { display: flex; flex-direction: column; min-width: 0; align-self: stretch; gap: var(--space-3); }
-.online-catalog-detail__info > .online-catalog-detail__actions { margin-top: auto; flex-wrap: wrap; }
-.online-catalog-detail__facts { min-width: 0; }
-.online-catalog-detail__essentials { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-3); margin: 0 0 var(--space-4); }
-.online-catalog-detail__essentials strong { font-family: var(--font-numeric); font-size: 1.5rem; font-weight: 500; }
-.online-catalog-detail__editions { padding: 2px 10px; color: var(--color-accent); font-size: var(--text-sm); background: transparent; border: 1px solid var(--color-border-strong); border-radius: 999px; cursor: pointer; }
-.online-catalog-detail__editions:hover { color: var(--color-text); border-color: var(--color-accent); }
-.online-catalog-detail__editions:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: 1px; }
-.online-catalog-detail__essentials span { color: var(--color-muted); font-size: var(--text-sm); }
-.online-catalog-detail__extra { border-top: var(--border-width) solid var(--color-border); padding-top: var(--space-3); }
-.online-catalog-detail__extra > summary { color: var(--color-muted); font-size: var(--text-sm); cursor: pointer; padding: var(--space-1) 0; }
-.online-catalog-detail__extra[open] > summary { margin-bottom: var(--space-2); }
-
-.online-catalog-detail__facts dl { margin: 0; }
-.online-catalog-detail__facts dl > div {
-  display: grid;
-  grid-template-columns: 5rem minmax(0, 1fr);
-  gap: var(--space-2);
-  padding: var(--space-1) 0;
-  border-bottom: var(--border-width) solid var(--color-border);
-  font-size: var(--text-sm);
-}
-
-.online-catalog-detail__facts dt { color: var(--color-muted); }
-.online-catalog-detail__facts dd { margin: 0; overflow-wrap: anywhere; }
-
-.online-catalog-detail__tags {
-  display: grid;
-  max-height: 16rem;
-  gap: var(--space-3);
-  padding: var(--space-3) 0;
-  overflow-y: auto;
-  border-top: var(--border-width) solid var(--color-border);
-}
-
-.online-catalog-detail__tags section { display: grid; grid-template-columns: 4rem minmax(0, 1fr); align-items: baseline; gap: var(--space-2); }
-.online-catalog-detail__identity { border: 0; padding: 0; max-height: none; }
-.online-catalog-detail__tags h3 {
-  margin: 0;
-  color: var(--color-muted);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  text-transform: uppercase;
-}
-.online-catalog-detail__tags section > div { display: flex; flex-wrap: wrap; gap: var(--space-1); }
-.online-catalog-detail__tags button {
-  min-height: 28px;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  padding: var(--space-1) var(--space-2);
-  color: var(--color-text);
-  background: var(--color-surface);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: 2px;
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.online-catalog-detail__tags button:hover,
-.online-catalog-detail__tags button:focus-visible { border-color: var(--color-focus); }
-.online-catalog-detail__actions { justify-content: flex-end; }
-
-@media (max-width: 720px) {
-  .online-catalog-detail__summary { grid-template-columns: 1fr; }
-  .online-catalog-detail__cover { width: min(100%, 24rem); justify-self: center; }
-}
+.online-catalog__workspace { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.online-catalog__panel-host { display: contents; }
 
 .manga-viewer {
   position: relative;
@@ -3500,64 +3408,11 @@ textarea:focus-visible {
   min-height: 0;
 }
 
-.manga-viewer__controls {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-}
-
-.manga-viewer__progress {
-  margin-right: auto;
-  color: var(--color-muted);
-  font-size: var(--text-sm);
-}
-
-.manga-viewer__source {
-  color: var(--color-muted);
-  font-size: var(--text-xs);
-}
-
-.manga-viewer__stage {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
 .manga-viewer__buffers { position: relative; isolation: isolate; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .manga-viewer__buffer { position: absolute; inset: 0; background: var(--color-bg); }
 .manga-viewer__buffer[data-reader-buffer="active"] { z-index: 2; }
 .manga-viewer__buffer[data-reader-buffer="pending"] { z-index: 1; pointer-events: none; }
 .manga-viewer__buffer[data-reader-buffer="retiring"] { z-index: 3; pointer-events: none; }
-
-.manga-viewer__spread {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-}
-
-.manga-viewer__spread--double .manga-viewer__page {
-  max-width: 50%;
-}
-
-.manga-viewer__page {
-  max-width: 100%;
-  max-height: 100%;
-  min-width: 0;
-  min-height: 0;
-  object-fit: contain;
-}
 
 .manga-viewer__preload {
   position: absolute;
@@ -3567,23 +3422,6 @@ textarea:focus-visible {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
-
-.manga-viewer__edges {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  pointer-events: none;
-}
-
-.manga-viewer__edge {
-  pointer-events: auto;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-}
-
-.manga-viewer__edge[data-disabled="true"] { cursor: default; }
 
 .manga-viewer__overview {
   position: absolute;
@@ -3745,17 +3583,6 @@ textarea:focus-visible {
   color: var(--color-text);
   background: var(--color-surface-hover);
   border-color: var(--color-border);
-}
-
-.manga-viewer__page-error {
-  display: grid;
-  place-items: center;
-  min-width: min(24rem, 80%);
-  min-height: 12rem;
-  color: var(--color-muted);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
 }
 
 .collection-browser__stage {

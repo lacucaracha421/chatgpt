@@ -1,5 +1,5 @@
 import { XMarkIcon } from "@heroicons/react/24/outline";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { Button } from "./Button";
 
 const EXIT_MS = 220;
@@ -13,10 +13,12 @@ type OverlayPanelProps = {
   actions?: ReactNode;
   children: ReactNode;
   width?: number | string;
+  /** A surface that swaps items in place can return focus to the latest opener. */
+  returnFocusRef?: RefObject<HTMLElement | null>;
 };
 
 /** A non-modal side panel that overlays a reflowing surface without changing its width. */
-export function OverlayPanel({ open, onOpenChange, title, ariaLabel, closeLabel, actions, children, width = 320 }: OverlayPanelProps) {
+export function OverlayPanel({ open, onOpenChange, title, ariaLabel, closeLabel, actions, children, width = 320, returnFocusRef }: OverlayPanelProps) {
   const [mounted, setMounted] = useState(open);
   const [entered, setEntered] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
@@ -41,13 +43,13 @@ export function OverlayPanel({ open, onOpenChange, title, ariaLabel, closeLabel,
     const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     const finish = () => {
       setMounted(false);
-      restoreFocusRef.current?.focus({ preventScroll: true });
+      (returnFocusRef?.current ?? restoreFocusRef.current)?.focus({ preventScroll: true });
       restoreFocusRef.current = null;
     };
     if (reduced) { finish(); return; }
     const timer = window.setTimeout(finish, EXIT_MS);
     return () => window.clearTimeout(timer);
-  }, [mounted, open]);
+  }, [mounted, open, returnFocusRef]);
 
   useLayoutEffect(() => {
     if (!open || !mounted) return;

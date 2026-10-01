@@ -27,47 +27,69 @@ beforeEach(() => {
 
 afterEach(() => { cleanup(); openUrl.mockClear(); progressApi.get.mockReset(); progressApi.save.mockReset(); localStorage.clear(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
+function position(): string {
+  return document.querySelector(".asset-viewer__position")?.textContent ?? "";
+}
+
 describe("MangaViewer", () => {
   it("shows the title and page progress", async () => {
     render(<MangaViewer seriesId="s1" galleryId={null} title="Batsu Kano" pageCount={60} onClose={vi.fn()} />);
     expect(await screen.findByRole("heading", { name: "Batsu Kano" })).toBeInTheDocument();
-    expect(screen.getByText("1 / 60")).toBeVisible();
+    expect(document.querySelector(".asset-viewer__title strong")).toHaveTextContent("Batsu Kano");
+    expect(position()).toBe("1 / 60");
+  });
+
+  it("uses the shared reader chrome with 로컬 as the source and no bookmark", () => {
+    render(<MangaViewer seriesId="s1" galleryId={null} title="T" artist="tatsuwaipu" pageCount={60} onClose={vi.fn()} />);
+    expect(document.querySelector(".manga-reader.asset-viewer")).not.toBeNull();
+    expect(screen.getByText("tatsuwaipu · 로컬")).toBeVisible();
+    for (const name of ["뒤로", "두 쪽 보기", "페이지 목록", "읽기 설정", "망가 뷰어 닫기"]) expect(screen.getByRole("button", { name })).toBeVisible();
+    expect(screen.getByRole("slider", { name: "페이지 위치" })).toHaveValue("1");
+    expect(screen.queryByRole("button", { name: "북마크" })).not.toBeInTheDocument();
+  });
+
+  it("closes on Escape", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={onClose} />);
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("moves to the next page with the right arrow", async () => {
     const user = userEvent.setup();
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
-    await screen.findByText("1 / 60");
+    await waitFor(() => expect(position()).toBe("1 / 60"));
     await user.keyboard("{ArrowRight}");
-    expect(screen.getByText("2 / 60")).toBeVisible();
+    expect(position()).toBe("2 / 60");
   });
 
   it("moves to the previous page with the left arrow", async () => {
     const user = userEvent.setup();
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
-    await screen.findByText("1 / 60");
+    await waitFor(() => expect(position()).toBe("1 / 60"));
     await user.keyboard("{ArrowRight}");
     await user.keyboard("{ArrowRight}");
     await user.keyboard("{ArrowLeft}");
-    expect(screen.getByText("2 / 60")).toBeVisible();
+    expect(position()).toBe("2 / 60");
   });
 
   it("stops at the first and last page", async () => {
     const user = userEvent.setup();
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={2} onClose={vi.fn()} />);
-    await screen.findByText("1 / 2");
+    await waitFor(() => expect(position()).toBe("1 / 2"));
     await user.keyboard("{ArrowLeft}");
-    expect(screen.getByText("1 / 2")).toBeVisible();
+    expect(position()).toBe("1 / 2");
     await user.keyboard("{ArrowRight}");
     await user.keyboard("{ArrowRight}");
-    expect(screen.getByText("2 / 2")).toBeVisible();
+    expect(position()).toBe("2 / 2");
   });
 
   it("closes with the close button", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={onClose} />);
-    await screen.findByText("1 / 60");
+    await waitFor(() => expect(position()).toBe("1 / 60"));
     await user.click(screen.getByRole("button", { name: "망가 뷰어 닫기" }));
     expect(progressApi.save).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledOnce();
@@ -76,40 +98,40 @@ describe("MangaViewer", () => {
   it("toggles spread mode with the button and shows two pages", async () => {
     const user = userEvent.setup();
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
-    await screen.findByText("1 / 60");
-    await user.click(screen.getByRole("button", { name: "양면 보기" }));
-    expect(screen.getByText("1 / 60")).toBeVisible();
+    await waitFor(() => expect(position()).toBe("1 / 60"));
+    await user.click(screen.getByRole("button", { name: "두 쪽 보기" }));
+    expect(position()).toBe("1 / 60");
     await user.keyboard("{ArrowRight}");
-    expect(screen.getByText("2-3 / 60")).toBeVisible();
+    expect(position()).toBe("2-3 / 60");
     expect(screen.getAllByRole("img", { name: /페이지/ })).toHaveLength(2);
   });
 
   it("toggles spread mode with the V key", async () => {
     const user = userEvent.setup();
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
-    await screen.findByText("1 / 60");
+    await waitFor(() => expect(position()).toBe("1 / 60"));
     await user.keyboard("v");
     await user.keyboard("{ArrowRight}");
-    expect(screen.getByText("2-3 / 60")).toBeVisible();
+    expect(position()).toBe("2-3 / 60");
     await user.keyboard("v");
-    expect(screen.getByText("2 / 60")).toBeVisible();
+    expect(position()).toBe("2 / 60");
   });
 
   it("shows the last odd page alone in spread mode", async () => {
     const user = userEvent.setup();
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={6} onClose={vi.fn()} />);
-    await screen.findByText("1 / 6");
-    await user.click(screen.getByRole("button", { name: "양면 보기" }));
+    await waitFor(() => expect(position()).toBe("1 / 6"));
+    await user.click(screen.getByRole("button", { name: "두 쪽 보기" }));
     await user.keyboard("{ArrowRight}");
     await user.keyboard("{ArrowRight}");
     await user.keyboard("{ArrowRight}");
-    expect(screen.getByText("6 / 6")).toBeVisible();
+    expect(position()).toBe("6 / 6");
     expect(screen.getAllByRole("img", { name: /페이지/ })).toHaveLength(1);
   });
 
   it("preloads the next and previous pages without showing them", async () => {
     render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
-    await screen.findByText("1 / 60");
+    await waitFor(() => expect(position()).toBe("1 / 60"));
     const preloads = document.querySelectorAll(".manga-viewer__preload");
     expect(preloads.length).toBeGreaterThan(0);
     expect(preloads[0]).toHaveAttribute("src", expect.stringContaining("/manga-page/s1/2"));
@@ -120,11 +142,11 @@ describe("MangaViewer", () => {
     const onClose = vi.fn();
     const { unmount } = render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={onClose} />);
 
-    expect(screen.getByText("1 / 60")).toBeVisible();
+    expect(position()).toBe("1 / 60");
     await act(async () => undefined);
     expect(progressApi.get).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
-    expect(screen.getByText("2 / 60")).toBeVisible();
+    expect(position()).toBe("2 / 60");
     fireEvent.click(screen.getByRole("button", { name: "망가 뷰어 닫기" }));
     unmount();
     expect(onClose).toHaveBeenCalledOnce();
@@ -134,10 +156,10 @@ describe("MangaViewer", () => {
   it("starts a different series at page one when the viewer stays mounted", () => {
     const { rerender } = render(<MangaViewer seriesId="s1" galleryId={null} title="T" pageCount={60} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
-    expect(screen.getByText("2 / 60")).toBeVisible();
+    expect(position()).toBe("2 / 60");
 
     rerender(<MangaViewer seriesId="s2" galleryId={null} title="Other" pageCount={20} onClose={vi.fn()} />);
-    expect(screen.getByText("1 / 20")).toBeVisible();
+    expect(position()).toBe("1 / 20");
     expect(progressApi.get).not.toHaveBeenCalled();
     expect(progressApi.save).not.toHaveBeenCalled();
   });

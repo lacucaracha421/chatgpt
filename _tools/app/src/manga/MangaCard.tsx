@@ -12,7 +12,8 @@ export type MangaCardProps = {
   coverUrl: string | null;
   privacyMode?: boolean;
   opening?: boolean;
-  onOpen: () => void;
+  onOpen: (opener: HTMLButtonElement) => void;
+  selected?: boolean;
   bookmarked?: boolean;
   savedEdition?: boolean;
   bookmarkPending?: boolean;
@@ -20,12 +21,13 @@ export type MangaCardProps = {
 };
 
 /** Shared cover object: the corner bookmark and page badge belong to the artwork. */
-export function MangaCard({ title, displayTitle = title, artist, pageCount, coverUrl, privacyMode, opening, onOpen, bookmarked, savedEdition, bookmarkPending, onBookmark }: MangaCardProps) {
+export function MangaCard({ title, displayTitle = title, artist, pageCount, coverUrl, privacyMode, opening, onOpen, selected, bookmarked, savedEdition, bookmarkPending, onBookmark }: MangaCardProps) {
   return <article className="manga-card">
-    <button type="button" className="manga-card__body" aria-label={`${title} 상세 보기`} disabled={opening} onClick={onOpen}>
-      <span className="manga-card__frame">
+    <button type="button" className="manga-card__body" aria-label={`${title} 상세 보기`} aria-pressed={selected} disabled={opening} onClick={(event) => onOpen(event.currentTarget)}>
+      <span className="manga-card__frame ui-selectable-media" aria-selected={selected ?? false}>
         <MangaCover src={coverUrl} title={title} privacyMode={privacyMode} className="manga-card__cover" />
         <Badge variant="scrim" className="manga-card__pages">{pageCount}p</Badge>
+        {selected && <span className="ui-selection-check" aria-hidden="true" />}
       </span>
       <strong className="manga-card__title" aria-description={displayTitle !== title ? title : undefined}>{displayTitle}</strong>
       <span className="manga-card__artist">{artist?.trim() || "작가 미상"}</span>

@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
+import { VIEWER_CHROME_IDLE_MS } from "../assets/AssetViewer";
 import { PageViewer } from "./PageViewer";
 import { BackNavigationProvider, useBackRequest } from "../shared/navigation/BackNavigation";
 
@@ -41,9 +42,13 @@ function viewerProps(overrides: object = {}) {
 
 function shownImages(): string[] {
   return Array.from(
-    document.querySelectorAll('[data-reader-buffer="active"] .manga-viewer__page'),
+    document.querySelectorAll('[data-reader-buffer="active"] .manga-reader__image'),
     (element) => element.getAttribute("alt") ?? "",
   ).filter((alt) => alt.endsWith("페이지"));
+}
+
+function position(): string {
+  return document.querySelector(".asset-viewer__position")?.textContent ?? "";
 }
 
 describe("PageViewer", () => {
@@ -69,7 +74,7 @@ describe("PageViewer", () => {
       onPageChange={vi.fn()}
       onClose={vi.fn()}
     />);
-    expect(screen.getByText("2 / 3")).toBeVisible();
+    expect(position()).toBe("2 / 3");
     expect(screen.getByText("K-Hentai")).toBeVisible();
     expect(screen.getByRole("img", { name: "Remote 2페이지" })).toHaveAttribute("src", "page-2");
   });
@@ -90,7 +95,7 @@ describe("PageViewer", () => {
     expect(screen.getByText("2페이지를 불러오지 못했습니다")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "다시 시도" }));
     expect(screen.getByRole("img", { name: "Remote 2페이지" })).toHaveAttribute("src", "page-2");
-    expect(screen.getByText("2 / 2")).toBeVisible();
+    expect(position()).toBe("2 / 2");
   });
 
   it("keeps a failed page retryable until its URL resolver succeeds", async () => {
@@ -128,12 +133,12 @@ describe("PageViewer", () => {
       onPageChange={vi.fn()}
       onClose={vi.fn()}
     />);
-    const nextEdge = document.querySelectorAll<HTMLElement>(".manga-viewer__edge")[1]!;
+    const nextEdge = document.querySelector<HTMLElement>(".asset-viewer__edge--right")!;
 
     await user.click(nextEdge);
 
     expect(document.activeElement).not.toBe(nextEdge);
-    expect(screen.getByText("2 / 2")).toBeVisible();
+    expect(position()).toBe("2 / 2");
   });
 
   it("masks pages and skips preloading in privacy mode", () => {
@@ -159,14 +164,14 @@ describe("PageViewer", () => {
     render(<PageViewer {...viewerProps({ onPageChange })} />);
 
     await user.keyboard("v");
-    expect(screen.getByText("1 / 6")).toBeVisible();
+    expect(position()).toBe("1 / 6");
     await user.keyboard("{ArrowRight}");
-    expect(screen.getByText("2-3 / 6")).toBeVisible();
+    expect(position()).toBe("2-3 / 6");
     expect(onPageChange).toHaveBeenLastCalledWith(2);
     await user.keyboard("{ArrowRight}");
-    expect(screen.getByText("4-5 / 6")).toBeVisible();
+    expect(position()).toBe("4-5 / 6");
     await user.keyboard("{ArrowRight}");
-    expect(screen.getByText("6 / 6")).toBeVisible();
+    expect(position()).toBe("6 / 6");
     expect(onPageChange).toHaveBeenLastCalledWith(6);
   });
 
@@ -185,25 +190,27 @@ describe("PageViewer", () => {
 
     await user.keyboard("v");
     expect(shownImages()).toEqual(["Remote 3페이지", "Remote 2페이지"]);
-    expect(screen.getByText("2-3 / 6")).toBeVisible();
+    expect(position()).toBe("2-3 / 6");
   });
 
   it("navigates physical edges per direction", async () => {
     const user = userEvent.setup();
     const { unmount } = render(<PageViewer {...viewerProps({ initialPage: 2 })} />);
-    const edges = () => document.querySelectorAll<HTMLElement>(".manga-viewer__edge");
+    const edge = (side: "left" | "right") => document.querySelector<HTMLElement>(`.manga-reader__edge.asset-viewer__edge--${side}`);
 
-    await user.click(edges()[0]!);
-    expect(screen.getByText("1 / 6")).toBeVisible();
-    await user.click(edges()[1]!);
-    expect(screen.getByText("2 / 6")).toBeVisible();
+    await user.click(edge("left")!);
+    expect(position()).toBe("1 / 6");
+    expect(edge("left")).toBeNull();
+    await user.click(edge("right")!);
+    expect(position()).toBe("2 / 6");
     unmount();
 
     seedReaderPrefs({ mangaReadingDirection: "rtl" });
     render(<PageViewer {...viewerProps({ initialPage: 1 })} />);
-    const rtlEdges = () => document.querySelectorAll<HTMLElement>(".manga-viewer__edge");
-    await user.click(rtlEdges()[0]!);
-    expect(screen.getByText("2 / 6")).toBeVisible();
+    expect(edge("right")).toBeNull();
+    expect(edge("left")).toHaveAccessibleName("다음 페이지");
+    await user.click(edge("left")!);
+    expect(position()).toBe("2 / 6");
   });
 
   it("maps arrow keys per direction", async () => {
@@ -236,7 +243,7 @@ describe("PageViewer", () => {
     await user.click(screen.getByRole("button", { name: "읽기 설정" }));
     await user.click(screen.getByRole("menuitemcheckbox", { name: "오른쪽에서 왼쪽으로 읽기" }));
     expect(shownImages()).toEqual(["Remote 3페이지", "Remote 2페이지"]);
-    expect(screen.getByText("2-3 / 6")).toBeVisible();
+    expect(position()).toBe("2-3 / 6");
     expect(onPageChange).not.toHaveBeenCalled();
     expect(JSON.parse(localStorage.getItem(UI_PREFERENCES_KEY) ?? "{}").mangaReadingDirection).toBe("rtl");
   });
@@ -252,7 +259,7 @@ describe("PageViewer", () => {
 
     await user.click(screen.getByRole("button", { name: "4페이지로 이동" }));
     expect(onPageChange).toHaveBeenLastCalledWith(4);
-    expect(screen.getByText("4 / 6")).toBeVisible();
+    expect(position()).toBe("4 / 6");
     expect(screen.queryByRole("dialog", { name: "페이지 목록" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "페이지 목록" })).toHaveFocus();
   });
@@ -267,7 +274,7 @@ describe("PageViewer", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "페이지 목록" })).not.toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
-    expect(screen.getByText("1 / 6")).toBeVisible();
+    expect(position()).toBe("1 / 6");
   });
 
   it("returns from the overview before closing the viewer through shared back navigation", async () => {
@@ -281,7 +288,7 @@ describe("PageViewer", () => {
     act(() => { requestBack(); });
     expect(screen.queryByRole("dialog", { name: "페이지 목록" })).not.toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
-    expect(screen.getByText("3 / 6")).toBeVisible();
+    expect(position()).toBe("3 / 6");
     await user.click(screen.getByRole("button", { name: "페이지 목록" }));
     await user.click(screen.getByRole("button", { name: "뷰어로 돌아가기" }));
     expect(onClose).not.toHaveBeenCalled();
@@ -328,7 +335,7 @@ describe("PageViewer", () => {
     seedReaderPrefs({ mangaReadingDirection: "rtl", mangaPageMode: "double" });
     render(<PageViewer {...viewerProps({ initialPage: 2 })} />);
 
-    expect(await screen.findByText("2-3 / 6")).toBeVisible();
+    expect(position()).toBe("2-3 / 6");
     expect(shownImages()).toEqual(["Remote 3페이지", "Remote 2페이지"]);
   });
 
@@ -341,7 +348,7 @@ describe("PageViewer", () => {
     await user.click(screen.getByRole("button", { name: "읽기 설정" }));
     await user.click(screen.getByRole("menuitemradio", { name: "페이지 간격: 넓게" }));
 
-    const spread = document.querySelector('[data-reader-buffer="active"] .manga-viewer__spread') as HTMLElement;
+    const spread = document.querySelector('[data-reader-buffer="active"] .manga-reader__spread') as HTMLElement;
     expect(spread.style.padding).toBe("48px");
     expect(spread.style.columnGap).toBe("24px");
   });
@@ -351,7 +358,7 @@ describe("PageViewer", () => {
       pageUrls: Array.from({ length: 10 }, (_, index) => `page-${index + 1}`),
       initialPage: 2,
     })} />);
-    fireEvent.click(screen.getByRole("button", { name: "양면 보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "두 쪽 보기" }));
 
     expect(Array.from(document.querySelectorAll(".manga-viewer__preload"), (image) => image.getAttribute("src")))
       .toEqual(["page-1", "page-4", "page-5", "page-6", "page-7"]);
@@ -363,7 +370,7 @@ describe("PageViewer", () => {
       pageUrls: Array.from({ length: 10 }, (_, index) => `page-${index + 1}`),
       initialPage: 2,
     })} />);
-    fireEvent.click(screen.getByRole("button", { name: "양면 보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "두 쪽 보기" }));
 
     expect(Array.from(document.querySelectorAll(".manga-viewer__preload"), (image) => image.getAttribute("src")))
       .toEqual(["page-1", "page-4", "page-5", "page-6", "page-7"]);
@@ -408,5 +415,97 @@ describe("PageViewer", () => {
     await user.keyboard("{Enter}");
     expect(onPageChange).toHaveBeenLastCalledWith(6);
     expect(screen.queryByRole("dialog", { name: "페이지 목록" })).not.toBeInTheDocument();
+  });
+
+  it("shows the immersive chrome: position, title, artist · source, and the bookmark only when given", async () => {
+    const user = userEvent.setup();
+    const onToggle = vi.fn();
+    const { unmount } = render(<PageViewer {...viewerProps({ initialPage: 4, artist: "tatsuwaipu", bookmark: { bookmarked: false, onToggle } })} />);
+
+    expect(position()).toBe("4 / 6");
+    expect(document.querySelector(".asset-viewer__title strong")).toHaveTextContent("Remote");
+    expect(screen.getByText("tatsuwaipu · K-Hentai")).toBeVisible();
+    for (const name of ["뒤로", "두 쪽 보기", "페이지 목록", "읽기 설정", "망가 뷰어 닫기"]) expect(screen.getByRole("button", { name })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "북마크" }));
+    expect(onToggle).toHaveBeenCalledOnce();
+    unmount();
+
+    render(<PageViewer {...viewerProps()} />);
+    expect(screen.queryByRole("button", { name: "북마크" })).not.toBeInTheDocument();
+    expect(screen.getByText("K-Hentai")).toBeVisible();
+  });
+
+  it("jumps with the page scrubber and the thumbnail strip", async () => {
+    const user = userEvent.setup();
+    const onPageChange = vi.fn();
+    render(<PageViewer {...viewerProps({ onPageChange })} />);
+
+    fireEvent.change(screen.getByRole("slider", { name: "페이지 위치" }), { target: { value: "5" } });
+    expect(position()).toBe("5 / 6");
+    expect(onPageChange).toHaveBeenLastCalledWith(5);
+    expect(screen.getByRole("button", { name: "5페이지 보기" })).toHaveAttribute("aria-current", "true");
+
+    await user.click(screen.getByRole("button", { name: "2페이지 보기" }));
+    expect(position()).toBe("2 / 6");
+    expect(shownImages()).toEqual(["Remote 2페이지"]);
+    expect(screen.getByRole("slider", { name: "페이지 위치" })).toHaveValue("2");
+  });
+
+  it("keeps the thumbnail strip to nearby pages", () => {
+    render(<PageViewer {...viewerProps({ pageUrls: Array.from({ length: 40 }, (_, index) => `page-${index + 1}`), initialPage: 20 })} />);
+    const labels = Array.from(document.querySelectorAll(".manga-reader__strip button"), (button) => button.getAttribute("aria-label"));
+    expect(labels).toHaveLength(17);
+    expect(labels[0]).toBe("12페이지 보기");
+    expect(labels[16]).toBe("28페이지 보기");
+  });
+
+  it("fades the bars after idle time and brings them back on pointer movement or a key", () => {
+    vi.useFakeTimers();
+    try {
+      render(<PageViewer {...viewerProps()} />);
+      const reader = document.querySelector<HTMLElement>(".manga-reader")!;
+      expect(reader).toHaveAttribute("data-chrome-visible", "true");
+
+      act(() => { vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS); });
+      expect(reader).toHaveAttribute("data-chrome-visible", "false");
+      expect(reader).toHaveClass("asset-viewer--chrome-hidden");
+
+      fireEvent.pointerMove(reader);
+      expect(reader).toHaveAttribute("data-chrome-visible", "true");
+      act(() => { vi.advanceTimersByTime(VIEWER_CHROME_IDLE_MS); });
+      expect(reader).toHaveAttribute("data-chrome-visible", "false");
+
+      fireEvent.keyDown(reader, { key: "ArrowRight" });
+      expect(reader).toHaveAttribute("data-chrome-visible", "true");
+      expect(position()).toBe("2 / 6");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a page-shaped placeholder while a page loads and keeps the previous page until the next is ready", async () => {
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(false);
+    vi.spyOn(HTMLImageElement.prototype, "naturalHeight", "get").mockReturnValue(200);
+    const user = userEvent.setup();
+    render(<PageViewer {...viewerProps()} />);
+
+    const first = screen.getByRole("img", { name: "Remote 1페이지" });
+    expect(screen.getByRole("status", { name: "불러오는 중" })).toBeInTheDocument();
+    expect(first).toHaveStyle({ opacity: "0" });
+    expect(first.closest(".manga-reader__page")).toHaveStyle({ "--reader-page-ratio": "0.7" });
+
+    fireEvent.load(first);
+    expect(screen.queryByRole("status", { name: "불러오는 중" })).not.toBeInTheDocument();
+    expect(first).not.toHaveStyle({ opacity: "0" });
+    expect(first.closest(".manga-reader__page")).toHaveStyle({ "--reader-page-ratio": "0.5" });
+
+    await user.keyboard("{ArrowRight}");
+    // Page 1 stays painted on top; page 2 waits in the hidden buffer with a placeholder of the known shape.
+    expect(shownImages()).toEqual(["Remote 1페이지"]);
+    const active = document.querySelector('[data-reader-buffer="active"]')!;
+    expect(active.querySelector(".manga-reader__placeholder")).toBeNull();
+    const pending = document.querySelector('[data-reader-buffer="pending"]')!;
+    expect(pending.querySelector(".manga-reader__placeholder")).not.toBeNull();
+    expect(pending.querySelector(".manga-reader__page")).toHaveStyle({ "--reader-page-ratio": "0.5" });
   });
 });

@@ -4,12 +4,12 @@ import { CatalogThumbnail } from "./CatalogThumbnail";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 
 afterEach(cleanup);
-const props = { src: "https://example.com/cover.jpg", title: "작품", className: "online-catalog-detail__cover" };
+const props = { src: "https://example.com/cover.jpg", title: "작품", className: "manga-detail__cover" };
 
 it("reserves a quiet surface while loading and on failure", () => {
   const { container } = render(<CatalogThumbnail {...props} />);
   const surface = container.firstElementChild;
-  expect(surface).toHaveClass("manga-cover", "online-catalog-detail__cover");
+  expect(surface).toHaveClass("manga-cover", "manga-detail__cover");
   expect(surface).toHaveAttribute("aria-busy", "true");
   const cover = screen.getByAltText("작품 표지");
   expect(cover).not.toBeVisible();
