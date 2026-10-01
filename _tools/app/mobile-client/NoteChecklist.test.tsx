@@ -2,7 +2,7 @@ import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/reac
 import {afterEach,it,expect,vi} from 'vitest';
 import {useState} from 'react';
 import {NoteChecklist,DRAG_HOLD_MS} from './NoteChecklist';
-import {SecretGate} from './NoteSecret';
+import {SecretEditor,SecretGate,REVEAL_MS} from './NoteSecret';
 import {byOrder,type ChecklistItem} from '../src/notes/model';
 import type {NotesStore} from '../src/notes/store';
 vi.mock('./transport',()=>({native:vi.fn(),errorText:(e:Error)=>e.message}));
@@ -61,4 +61,53 @@ it('sets a PIN on first use and resets a forgotten PIN with the recovery key',as
  fireEvent.change(screen.getByLabelText('새 PIN'),{target:{value:'9999'}});fireEvent.change(screen.getByLabelText('PIN 확인'),{target:{value:'9999'}});
  fireEvent.click(screen.getByRole('button',{name:'PIN 설정'}));
  await waitFor(()=>expect(openSecrets).toHaveBeenCalledWith('secretResetPin',{recoveryKey:'0'.repeat(64),pin:'9999'}));
+});
+
+it('opens at the last unfinished item and permits immediate native Backspace',()=>{
+ render(<Harness/>);const field=document.activeElement as HTMLInputElement;
+ expect(field).toBe(screen.getAllByRole('textbox',{name:'체크리스트 항목'})[2]);
+ expect(field.selectionStart).toBe(2);
+ fireEvent.keyDown(field,{key:'Backspace'});fireEvent.input(field,{target:{value:field.value.slice(0,field.selectionStart!-1)}});
+ expect(openTexts()).toEqual(['우유','빵','달']);
+});
+it('holds jamo locally during composition and ignores Enter and Backspace without native composition flags',()=>{
+ render(<Harness/>);const field=screen.getAllByRole('textbox',{name:'체크리스트 항목'})[0]!;
+ fireEvent.compositionStart(field);fireEvent.compositionUpdate(field,{data:'ㅎ'});
+ fireEvent.input(field,{target:{value:'ㅎ'},isComposing:true});
+ expect(openTexts()[0]).toBe('우유');
+ fireEvent.keyDown(field,{key:'Enter'});expect(openTexts()).toHaveLength(3);
+ fireEvent.input(field,{target:{value:''},isComposing:true});fireEvent.keyDown(field,{key:'Backspace'});
+ expect(openTexts()).toHaveLength(3);
+ fireEvent.compositionUpdate(field,{data:'하'});fireEvent.input(field,{target:{value:'하'},isComposing:true});
+ fireEvent.input(field,{target:{value:'한'},isComposing:true});fireEvent.compositionEnd(field,{data:'한'});
+ expect(openTexts()[0]).toBe('한');
+});
+
+
+it.each(['항목 이름','계정 값','암호 메모 본문'])('protects composition in secret %s from incoming values',name=>{
+ const change=vi.fn();const props={fields:[{id:'f',label:'계정',value:'기존',order:'V'}],memo:'메모',onChange:change};
+ const view=render(<SecretEditor {...props}/>);const field=screen.getByLabelText(name) as HTMLInputElement|HTMLTextAreaElement;
+ act(()=>field.focus());fireEvent.compositionStart(field);fireEvent.compositionUpdate(field,{data:'ㅎ'});
+ fireEvent.input(field,{target:{value:'ㅎ'},isComposing:true});
+ const setter=vi.spyOn(field,'value','set');
+ view.rerender(<SecretEditor {...props} fields={[{...props.fields[0]!,value:'saved',label:'계정'}]} memo="saved"/>);
+ expect(field.value).toBe('ㅎ');expect(setter).not.toHaveBeenCalled();expect(change).not.toHaveBeenCalled();setter.mockRestore();
+ fireEvent.compositionUpdate(field,{data:'하'});fireEvent.input(field,{target:{value:'하'},isComposing:true});
+ fireEvent.input(field,{target:{value:'한'},isComposing:true});fireEvent.compositionEnd(field,{data:'한'});
+ expect(change).toHaveBeenCalledTimes(1);
+ expect(JSON.stringify(change.mock.calls[0])).toContain('한');expect(field.value).toBe('한');
+});
+it('opens a secret memo at its end for immediate native Backspace',()=>{
+ const change=vi.fn();render(<SecretEditor fields={[]} memo="메모" onChange={change}/>);
+ const field=document.activeElement as HTMLTextAreaElement;expect(field).toBe(screen.getByLabelText('암호 메모 본문'));expect(field.selectionStart).toBe(2);
+ fireEvent.keyDown(field,{key:'Backspace'});fireEvent.input(field,{target:{value:field.value.slice(0,field.selectionStart!-1)}});
+ expect(change).toHaveBeenCalledWith({memo:'메'});
+});
+it('does not change a revealed secret input type while its IME is composing',()=>{
+ vi.useFakeTimers();render(<SecretEditor fields={[{id:'f',label:'계정',value:'기존',order:'V'}]} memo="" onChange={()=>{}}/>);
+ fireEvent.click(screen.getByRole('button',{name:'값 보기'}));const field=screen.getByLabelText('계정 값') as HTMLInputElement;
+ act(()=>field.focus());fireEvent.compositionStart(field);
+ act(()=>vi.advanceTimersByTime(REVEAL_MS));expect(field.type).toBe('text');
+ fireEvent.input(field,{target:{value:'한'},isComposing:true});fireEvent.compositionEnd(field,{data:'한'});
+ act(()=>vi.advanceTimersByTime(250));expect(field.type).toBe('password');
 });

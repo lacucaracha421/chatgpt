@@ -1,5 +1,6 @@
 import {useState,type ReactNode} from 'react';
 import {BackspaceIcon,CalendarIcon,XMarkIcon} from '@heroicons/react/24/outline';
+import {useNoteEditor} from './noteCaret';
 import {Button,Dialog,DialogDescription,IconButton} from './ui';
 import {addDays,addMonths,localToday,nextCharges} from '../src/notes/ledger/cycle';
 import {LEDGER_LIMITS,monthLabel,won,type LedgerEntry,type LedgerUnit,type Planned,type Recurring} from '../src/notes/ledger/model';
@@ -51,6 +52,7 @@ export type EntryDraft=Partial<LedgerEntry>;
  * charge keeps that link; 저장하고 하나 더 keeps the date and direction for the next one.
  */
 export function EntrySheet({initial,names,error,onSave,onDelete,onClose}:{initial:EntryDraft;names:string[];error?:string|null;onSave(entry:LedgerEntry):Promise<boolean>;onDelete?():void;onClose():void}) {
+  const editor=useNoteEditor();
   const today=localToday();
   const [digits,setDigits]=useState(digitsOf(initial.amount)),[name,setName]=useState(initial.name??''),[date,setDate]=useState(initial.date??today),[income,setIncome]=useState(!!initial.in);
   const [busy,setBusy]=useState(false);
@@ -74,7 +76,7 @@ export function EntrySheet({initial,names,error,onSave,onDelete,onClose}:{initia
       <Segment label="돈의 방향" value={income?'in':'out'} options={[['out','나간 돈'],['in','들어온 돈']]} onChange={value=>setIncome(value==='in')}/>
       <AmountDisplay digits={digits} label="금액"/>
     </div>
-    <label className="ledger-field"><span>이름</span><input value={name} maxLength={LEDGER_LIMITS.nameChars} placeholder="이름 (선택)" enterKeyHint="done" onChange={event=>setName(event.target.value)} onKeyDown={event=>{if(event.nativeEvent.isComposing||event.keyCode===229)return;if(event.key==='Enter')(event.target as HTMLInputElement).blur();}}/></label>
+    <label className="ledger-field"><span>이름</span><input {...editor.bind(name,setName)} maxLength={LEDGER_LIMITS.nameChars} placeholder="이름 (선택)" enterKeyHint="done" onKeyDown={event=>{if(editor.isComposing(event.currentTarget)||event.nativeEvent.isComposing||event.keyCode===229)return;if(event.key==='Enter')(event.target as HTMLInputElement).blur();}}/></label>
     {chips.length>0&&<div className="ledger-chips" role="group" aria-label="최근 이름">{chips.map(entry=><button key={entry} type="button" className="filter-chip" onClick={()=>setName(entry)}>{entry}</button>)}<small>최근</small></div>}
     <div className="ledger-field is-row"><span>날짜</span><div className="ledger-chips">
       <button type="button" className="filter-chip" aria-pressed={date===today} onClick={()=>setDate(today)}>오늘 <small className="numeric">{dotDate(today)}</small></button>
@@ -128,6 +130,7 @@ function Stepper({value,onChange,label,max=LEDGER_LIMITS.everyMax}:{value:number
 
 /** 고정·구독 추가/고치기: 이름, 금액, 주기 (N주/개월/년), 첫 결제일, 체험 중, 만료일, 메모. */
 export function RecurringSheet({initial,order,error,onSave,onDelete,onClose}:{initial:Recurring|null;order:string;error?:string|null;onSave(item:Recurring):Saved;onDelete?():Saved;onClose():void}) {
+  const editor=useNoteEditor();
   const today=localToday();
   const [name,setName]=useState(initial?.name??''),[amount,setAmount]=useState(digitsOf(initial?.amount)),[every,setEvery]=useState(initial?.every??1),[unit,setUnit]=useState<LedgerUnit>(initial?.unit??'month');
   const [start,setStart]=useState(initial?.start??today),[trial,setTrial]=useState(initial?.trial??false),[until,setUntil]=useState(initial?.until??''),[memo,setMemo]=useState(initial?.memo??'');
@@ -140,7 +143,7 @@ export function RecurringSheet({initial,order,error,onSave,onDelete,onClose}:{in
   const cancelAt=nextCharges({every,unit,start,until:null},today,1)[0]??today;
   return <Sheet title={initial?'고정·구독 고치기':'고정·구독 추가'} onClose={onClose} error={error}>
     <div className="ledger-form">
-      <label className="ledger-field"><span>이름</span><input value={name} maxLength={LEDGER_LIMITS.nameChars} placeholder="넷플릭스, 월세, 보험…" onChange={event=>setName(event.target.value)}/></label>
+      <label className="ledger-field"><span>이름</span><input {...editor.bind(name,setName)} maxLength={LEDGER_LIMITS.nameChars} placeholder="넷플릭스, 월세, 보험…"/></label>
       <label className="ledger-field"><span>금액</span><input className="numeric" inputMode="numeric" value={amount?won(amountOf(amount)):''} placeholder="₩0" aria-label="금액" onChange={event=>setAmount(numberText(event.target.value))}/></label>
       <div className="ledger-field is-row"><span>주기</span><div className="ledger-cycle"><Stepper label="주기" value={every} onChange={setEvery}/><Segment<LedgerUnit> label="주기 단위" value={unit} options={UNITS.map(([key,text]):[LedgerUnit,string]=>[key,every===1?{week:'매주',month:'매월',year:'매년'}[key]:`${text}마다`])} onChange={setUnit}/></div></div>
       <label className="ledger-field"><span>첫 결제일</span><input type="date" value={start} max="9999-12-31" onChange={event=>{if(event.target.value)setStart(event.target.value);}}/></label>
@@ -150,7 +153,7 @@ export function RecurringSheet({initial,order,error,onSave,onDelete,onClose}:{in
         {until?<Button variant="ghost" onClick={()=>setUntil('')}>만료 없음</Button>:initial&&<Button variant="ghost" onClick={()=>setUntil(cancelAt)}>해지 ({longDate(cancelAt)}부터 결제 없음)</Button>}
       </div></div>
       {until&&until<=start&&<p className="notes-limit" role="alert">만료일은 첫 결제일보다 뒤여야 합니다.</p>}
-      <label className="ledger-field"><span>메모</span><input value={memo} maxLength={LEDGER_LIMITS.memoChars} placeholder="선택" onChange={event=>setMemo(event.target.value)}/></label>
+      <label className="ledger-field"><span>메모</span><input {...editor.bind(memo,setMemo)} maxLength={LEDGER_LIMITS.memoChars} placeholder="선택"/></label>
     </div>
     <div className="ledger-sheet__actions">
       {onDelete?<Button variant="ghost" className="is-danger" onClick={async()=>{if(await onDelete())onClose();}}>삭제</Button>:<span/>}
@@ -161,6 +164,7 @@ export function RecurringSheet({initial,order,error,onSave,onDelete,onClose}:{in
 
 /** 계획 추가/고치기: 이름, 금액, 달 (언젠가 or a month), 메모, 안 사기로 함. */
 export function PlanSheet({initial,month,order,error,onSave,onDelete,onClose}:{initial:Planned|null;month:string;order:string;error?:string|null;onSave(plan:Planned):Saved;onDelete?():Saved;onClose():void}) {
+  const editor=useNoteEditor();
   const [name,setName]=useState(initial?.name??''),[amount,setAmount]=useState(digitsOf(initial?.amount)),[when,setWhen]=useState<string>(initial?initial.month??'':month),[memo,setMemo]=useState(initial?.memo??'');
   const current=localToday().slice(0,7);
   const months=Array.from({length:14},(_,i)=>addMonths(current,i-1));
@@ -173,10 +177,10 @@ export function PlanSheet({initial,month,order,error,onSave,onDelete,onClose}:{i
   }
   return <Sheet title={initial?'계획 고치기':'계획 추가'} onClose={onClose} error={error}>
     <div className="ledger-form">
-      <label className="ledger-field"><span>이름</span><input value={name} maxLength={LEDGER_LIMITS.nameChars} placeholder="사고 싶은 것" onChange={event=>setName(event.target.value)}/></label>
+      <label className="ledger-field"><span>이름</span><input {...editor.bind(name,setName)} maxLength={LEDGER_LIMITS.nameChars} placeholder="사고 싶은 것"/></label>
       <label className="ledger-field"><span>금액</span><input className="numeric" inputMode="numeric" aria-label="금액" value={amount?won(amountOf(amount)):''} placeholder="₩0" onChange={event=>setAmount(numberText(event.target.value))}/></label>
       <label className="ledger-field"><span>언제</span><select value={when} aria-label="언제" onChange={event=>setWhen(event.target.value)}><option value="">언젠가</option>{months.map(m=><option key={m} value={m}>{monthLabel(m)}</option>)}</select></label>
-      <label className="ledger-field"><span>메모</span><input value={memo} maxLength={LEDGER_LIMITS.memoChars} placeholder="선택" onChange={event=>setMemo(event.target.value)}/></label>
+      <label className="ledger-field"><span>메모</span><input {...editor.bind(memo,setMemo)} maxLength={LEDGER_LIMITS.memoChars} placeholder="선택"/></label>
     </div>
     <div className="ledger-sheet__actions">
       {initial&&onDelete&&<Button variant="ghost" className="is-danger" onClick={async()=>{if(await onDelete())onClose();}}>삭제</Button>}

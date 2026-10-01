@@ -1,3 +1,5 @@
+import {useRef,type ChangeEvent,type CompositionEvent,type FocusEvent,type MutableRefObject} from 'react';
+
 /** Room kept between the caret and the visible bottom (the keyboard's top edge). */
 const MARGIN=24;
 const COPIED=['boxSizing','width','paddingTop','paddingRight','paddingBottom','paddingLeft','borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth','fontFamily','fontSize','fontWeight','fontStyle','letterSpacing','lineHeight','textTransform','wordSpacing','textIndent','tabSize'] as const;
@@ -54,4 +56,34 @@ export function revealCaret(pane:HTMLElement|null) {
   }else{const rect=field.getBoundingClientRect();top=rect.top;bottom=rect.bottom;}
   if(bottom>box.bottom-MARGIN)pane.scrollTop+=bottom-(box.bottom-MARGIN);
   else if(top<box.top+MARGIN)pane.scrollTop-=box.top+MARGIN-top;
+}
+
+type NoteField=HTMLInputElement|HTMLTextAreaElement;
+/** The focused DOM owns its text. Save acknowledgements only update unfocused fields;
+ * composition commits once, after the IME has finished its syllable. */
+export function useNoteEditor(){
+  const composing=useRef(new WeakSet<NoteField>());
+  const committed=useRef(new WeakMap<NoteField,string>());
+  const isComposing=(field:NoteField)=>composing.current.has(field);
+  function bind(value:string,change:(value:string)=>void,externalRef?:MutableRefObject<NoteField|null>){
+    const commit=(field:NoteField)=>{if(committed.current.get(field)===field.value)return;committed.current.set(field,field.value);change(field.value);};
+    return {
+      ref:(field:NoteField|null)=>{
+        if(externalRef)externalRef.current=field;
+        if(!field||isComposing(field)||document.activeElement===field)return;
+        if(field.value!==value)field.value=value;
+        committed.current.set(field,value);
+      },
+      onChange:(event:ChangeEvent<NoteField>)=>{if(!isComposing(event.currentTarget)&&!(event.nativeEvent as InputEvent).isComposing)commit(event.currentTarget);},
+      onCompositionStart:(event:CompositionEvent<NoteField>)=>{composing.current.add(event.currentTarget);},
+      onCompositionEnd:(event:CompositionEvent<NoteField>)=>{composing.current.delete(event.currentTarget);commit(event.currentTarget);},
+      onBlur:(event:FocusEvent<NoteField>)=>{if(!isComposing(event.currentTarget))commit(event.currentTarget);},
+    };
+  }
+  return {bind,isComposing};
+}
+
+export function focusNoteEnd(field:NoteField|null){
+  if(!field)return;
+  field.focus();field.setSelectionRange(field.value.length,field.value.length);
 }

@@ -1,5 +1,6 @@
 import {Bars3Icon,ChevronDownIcon,ChevronRightIcon,PlusIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {useEffect,useLayoutEffect,useRef,useState,type KeyboardEvent,type PointerEvent} from 'react';
+import {focusNoteEnd,useNoteEditor} from './noteCaret';
 import {byOrder,keyBetween,NOTE_LIMITS,placeInGroup,type ChecklistItem} from '../src/notes/model';
 
 /** Touch hold on the handle before a row starts moving, so a quick swipe still scrolls. */
@@ -13,6 +14,7 @@ const EDGE=56;
  * moved item's order key, as on the PC.
  */
 export function NoteChecklist({items,readOnly=false,onChange}:{items:ChecklistItem[];readOnly?:boolean;onChange(items:ChecklistItem[]):void}) {
+  const editor=useNoteEditor();
   const open=items.filter(item=>!item.checked).sort(byOrder);
   const done=items.filter(item=>item.checked).sort(byOrder);
   const [doneOpen,setDoneOpen]=useState(true);
@@ -26,6 +28,7 @@ export function NoteChecklist({items,readOnly=false,onChange}:{items:ChecklistIt
     const input=listRef.current?.parentElement?.querySelector<HTMLInputElement>(`input[data-item-id="${target.id}"]`);if(!input)return;
     input.focus();const at=target.caret==='end'?input.value.length:0;input.setSelectionRange(at,at);
   });
+  useLayoutEffect(()=>{if(!readOnly)focusNoteEnd(listRef.current?.parentElement?.querySelector<HTMLInputElement>('li:last-child .notes-check__text')??null);},[]);
   useEffect(()=>()=>{if(hold.current)clearTimeout(hold.current.timer);cancelAnimationFrame(scroller.current??0);},[]);
   const update=(id:string,change:Partial<ChecklistItem>)=>onChange(items.map(item=>item.id===id?{...item,...change}:item));
   function insertAfter(index:number){
@@ -42,9 +45,9 @@ export function NoteChecklist({items,readOnly=false,onChange}:{items:ChecklistIt
     onChange(items.filter(entry=>entry.id!==item.id));
   }
   function keyDown(event:KeyboardEvent<HTMLInputElement>,item:ChecklistItem,index:number){
-    if(event.nativeEvent.isComposing||event.keyCode===229)return;
+    if(editor.isComposing(event.currentTarget)||event.nativeEvent.isComposing||event.keyCode===229)return;
     if(event.key==='Enter'&&!item.checked){event.preventDefault();insertAfter(index);}
-    else if(event.key==='Backspace'&&item.text===''){event.preventDefault();remove(item,true);}
+    else if(event.key==='Backspace'&&event.currentTarget.value===''){event.preventDefault();remove(item,true);}
   }
   function dropIndex(clientY:number){
     const rows=[...(listRef.current?.querySelectorAll<HTMLElement>('li[data-row]')??[])];
@@ -87,8 +90,8 @@ export function NoteChecklist({items,readOnly=false,onChange}:{items:ChecklistIt
       onPointerDown={event=>pointerDown(event,item,index)} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={()=>{if(hold.current){clearTimeout(hold.current.timer);hold.current=null;}cancelAnimationFrame(scroller.current??0);setDrag(null);}}
       onContextMenu={event=>event.preventDefault()}><Bars3Icon aria-hidden="true"/></button>:<span className="notes-check__handle" aria-hidden="true"/>}
     <label className="notes-check__box"><input type="checkbox" checked={item.checked} disabled={readOnly} aria-label={`${item.text.trim()||'빈 항목'} 완료`} onChange={event=>update(item.id,{checked:event.currentTarget.checked})}/></label>
-    <input className="notes-check__text" data-item-id={item.id} aria-label="체크리스트 항목" value={item.text} readOnly={readOnly} maxLength={NOTE_LIMITS.itemChars} placeholder="항목" enterKeyHint="next"
-      onChange={event=>update(item.id,{text:event.currentTarget.value.replace(/[\r\n]+/g,' ')})} onKeyDown={event=>keyDown(event,item,index)}/>
+    <input className="notes-check__text" data-item-id={item.id} aria-label="체크리스트 항목" {...editor.bind(item.text,value=>update(item.id,{text:value.replace(/[\r\n]+/g,' ')}))} readOnly={readOnly} maxLength={NOTE_LIMITS.itemChars} placeholder="항목" enterKeyHint="next"
+      onKeyDown={event=>keyDown(event,item,index)}/>
     {!readOnly&&<button type="button" className="notes-check__remove" aria-label="항목 삭제" onClick={()=>remove(item,false)}><XMarkIcon aria-hidden="true"/></button>}
   </li>;
   return <div className="notes-checklist">

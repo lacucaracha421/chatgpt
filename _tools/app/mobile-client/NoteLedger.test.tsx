@@ -280,3 +280,16 @@ it('the 가계부 option restores a ledger from the trash instead of creating a 
   await waitFor(()=>expect(saves().some(p=>p.id===LEDGER_ID&&p.deleted===false)).toBe(true));
   expect(saves().filter(p=>p.type==='ledger'&&p.id!==LEDGER_ID)).toHaveLength(0);
 });
+
+
+it('keeps the ledger entry name composing when Enter arrives without a native composition flag',async()=>{
+ renderNotes();await openLedger();fireEvent.click(screen.getByRole('button',{name:'기록'}));
+ const s=await sheet();const field=s.getByPlaceholderText('이름 (선택)') as HTMLInputElement;
+ act(()=>field.focus());fireEvent.compositionStart(field);fireEvent.compositionUpdate(field,{data:'ㅎ'});fireEvent.input(field,{target:{value:'ㅎ'},isComposing:true});
+ const setter=vi.spyOn(field,'value','set');fireEvent.keyDown(field,{key:'Enter'});
+ expect(document.activeElement).toBe(field);expect(field.value).toBe('ㅎ');expect(setter).not.toHaveBeenCalled();setter.mockRestore();
+ fireEvent.compositionUpdate(field,{data:'하'});fireEvent.input(field,{target:{value:'하'},isComposing:true});
+ fireEvent.input(field,{target:{value:'한'},isComposing:true});fireEvent.compositionEnd(field,{data:'한'});
+ fireEvent.click(s.getByRole('button',{name:'1'}));fireEvent.click(s.getByRole('button',{name:'저장'}));
+ await waitFor(()=>expect((lastSave(monthId('2026-09'))?.entries as LedgerEntry[]|undefined)?.some(entry=>entry.name==='한')).toBe(true));
+});

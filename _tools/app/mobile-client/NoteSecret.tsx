@@ -2,6 +2,7 @@ import {ClipboardDocumentIcon,EyeIcon,EyeSlashIcon,FingerPrintIcon,LockClosedIco
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {byOrder,keyBetween,NOTE_LIMITS,type SecretField} from '../src/notes/model';
 import type {NotesStore,SecretStatus} from '../src/notes/store';
+import {focusNoteEnd,useNoteEditor} from './noteCaret';
 import {native} from './transport';
 import {Button,IconButton} from './ui';
 
@@ -70,11 +71,13 @@ export function SecretGate({store,onOpened,onCancel}:{store:NotesStore;onOpened(
 
 /** Unlocked secret note: masked values with 보기 (10 s) and 복사, plus the free-text memo. */
 export function SecretEditor({fields,memo,readOnly,onChange}:{fields:SecretField[];memo:string;readOnly?:boolean;onChange(change:{fields?:SecretField[];memo?:string}):void}) {
+  const editor=useNoteEditor(),memoRef=useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(()=>{if(readOnly)return;const values=listRef.current?.querySelectorAll<HTMLInputElement>('.notes-secret__value');focusNoteEnd(memo?memoRef.current:values?.[values.length-1]??memoRef.current);},[]);
   const sorted=[...fields].sort(byOrder);
   const [revealed,setRevealed]=useState<string|null>(null);
   const [copied,setCopied]=useState<string|null>(null),[copyError,setCopyError]=useState('');
   const focus=useRef<string|null>(null);const listRef=useRef<HTMLUListElement>(null);
-  useEffect(()=>{if(!revealed)return;const timer=setTimeout(()=>setRevealed(null),REVEAL_MS);return()=>clearTimeout(timer);},[revealed]);
+  useEffect(()=>{if(!revealed)return;let timer:ReturnType<typeof setTimeout>;const hide=()=>{if((document.activeElement as HTMLElement|null)?.dataset.fieldValue===revealed&&editor.isComposing(document.activeElement as HTMLInputElement))timer=setTimeout(hide,250);else setRevealed(null);};timer=setTimeout(hide,REVEAL_MS);return()=>clearTimeout(timer);},[revealed]);
   useEffect(()=>{if(!copied)return;const timer=setTimeout(()=>setCopied(null),3000);return()=>clearTimeout(timer);},[copied]);
   useLayoutEffect(()=>{if(!focus.current)return;listRef.current?.querySelector<HTMLInputElement>(`input[data-field-label="${focus.current}"]`)?.focus();focus.current=null;});
   const update=(id:string,change:Partial<SecretField>)=>onChange({fields:fields.map(field=>field.id===id?{...field,...change}:field)});
@@ -90,9 +93,9 @@ export function SecretEditor({fields,memo,readOnly,onChange}:{fields:SecretField
   return <div className="notes-secret">
     <ul ref={listRef} className="notes-secret__fields" aria-label="암호 항목">
       {sorted.map(field=>{const shown=revealed===field.id;return <li key={field.id} className="notes-secret__field">
-        <input className="notes-secret__label" data-field-label={field.id} aria-label="항목 이름" placeholder="항목 이름" value={field.label} readOnly={readOnly} maxLength={NOTE_LIMITS.fieldLabelChars} onChange={event=>update(field.id,{label:event.currentTarget.value})}/>
+        <input className="notes-secret__label" data-field-label={field.id} aria-label="항목 이름" placeholder="항목 이름" {...editor.bind(field.label,value=>update(field.id,{label:value}))} readOnly={readOnly} maxLength={NOTE_LIMITS.fieldLabelChars}/>
         <div className="notes-secret__row">
-          <input className="notes-secret__value" aria-label={`${field.label||'항목'} 값`} placeholder="값" type={shown?'text':'password'} autoComplete="off" autoCapitalize="none" spellCheck={false} value={field.value} readOnly={readOnly} maxLength={NOTE_LIMITS.fieldValueChars} onChange={event=>update(field.id,{value:event.currentTarget.value})}/>
+          <input className="notes-secret__value" data-field-value={field.id} aria-label={`${field.label||'항목'} 값`} placeholder="값" type={shown?'text':'password'} autoComplete="off" autoCapitalize="none" spellCheck={false} {...editor.bind(field.value,value=>update(field.id,{value}))} readOnly={readOnly} maxLength={NOTE_LIMITS.fieldValueChars}/>
           <IconButton label={shown?'값 가리기':'값 보기'} icon={shown?EyeSlashIcon:EyeIcon} active={shown} onClick={()=>setRevealed(shown?null:field.id)}/>
           <IconButton label="값 복사" icon={ClipboardDocumentIcon} disabled={!field.value} onClick={()=>void copy(field)}/>
           {!readOnly&&<IconButton label="항목 삭제" icon={XMarkIcon} onClick={()=>onChange({fields:fields.filter(entry=>entry.id!==field.id)})}/>}
@@ -101,6 +104,6 @@ export function SecretEditor({fields,memo,readOnly,onChange}:{fields:SecretField
     </ul>
     <p className="notes-secret__copied" role="status">{copyError||(copied?'복사했습니다 · 30초 뒤 클립보드에서 지웁니다':'')}</p>
     {!readOnly&&<button type="button" className="notes-checklist__add" disabled={fields.length>=NOTE_LIMITS.fields} onClick={add}><PlusIcon aria-hidden="true"/>항목 추가</button>}
-    <textarea className="notes-secret__memo" aria-label="암호 메모 본문" placeholder="메모" value={memo} readOnly={readOnly} spellCheck={false} onChange={event=>onChange({memo:event.target.value})}/>
+    <textarea className="notes-secret__memo" aria-label="암호 메모 본문" placeholder="메모" {...editor.bind(memo,value=>onChange({memo:value}),memoRef)} readOnly={readOnly} spellCheck={false}/>
   </div>;
 }
