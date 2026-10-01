@@ -9,11 +9,7 @@ import { SectionLabel } from "../shared/ui/SectionLabel";
 import { mangaIndexKey } from "./mangaIndexModel";
 import type { MangaSource } from "./MangaToolbar";
 import "./MangaIndex.css";
-
-/** A pushpin (heroicons has only a map pin, which reads as a location). */
-function PinIcon({ solid = false }: { solid?: boolean }) {
-  return <svg viewBox="0 0 20 20" fill={solid ? "currentColor" : "none"} stroke="currentColor" strokeWidth={1.5} aria-hidden="true"><path d="M7 3h6l-1 5 3 3H5l3-3-1-5zM10 11v6" strokeLinejoin="round" /></svg>;
-}
+import { MangaPinIcon as PinIcon } from "./MangaPinIcon";
 
 type Props = {
   source: MangaSource;

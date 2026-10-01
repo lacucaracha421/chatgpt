@@ -34,6 +34,7 @@ import authority
 import conditional
 from app_lifecycle import lifecycle
 from fastapi import Header, HTTPException, Request
+import manga_index
 from starlette.concurrency import run_in_threadpool
 
 PREFIX = "/v1/sync"
@@ -148,6 +149,9 @@ def register_sync_status(app, get_db, require_client, exchange_status=None, *,
             db.execute("BEGIN")
             try:
                 domains = authority.active_domains(db)
+                pin_domain = manga_index.sync_domain(db, domains)
+                if pin_domain is not None:
+                    domains.append(pin_domain)
                 # File exchange arrivals ride on this poll instead of a poll of their own.
                 if exchange_status is not None:
                     exchange = exchange_status(db, principal)

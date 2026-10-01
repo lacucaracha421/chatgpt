@@ -8,7 +8,7 @@ import {EXCLUDED_TAG_MAX,catalogPreferencesFit,parseExcludedTagInput,validExclud
 const ALL_CATEGORY_IDS:number[]=catalogCategories.map(category=>category.id);
 
 // Keep edits local until Apply, avoiding a server search for every checkbox tap.
-export function CatalogSettings({open,preferences,revealBlocked,capability,onClose,onApply,onReset,tools}:{
+export function CatalogSettings({open,preferences,revealBlocked,capability,onClose,onApply,onReset,tools,index}:{
   open:boolean;
   preferences:CatalogPreferences;
   revealBlocked:boolean;
@@ -19,6 +19,7 @@ export function CatalogSettings({open,preferences,revealBlocked,capability,onClo
   onReset():void;
   /** Catalog tools that are not filters (the duplicate-edition review entry). */
   tools?:ReactNode;
+  index?:ReactNode;
 }){
   const supported=capability==='supported';
   const [categories,setCategories]=useState<number[]|null>(preferences.categories);
@@ -61,6 +62,7 @@ export function CatalogSettings({open,preferences,revealBlocked,capability,onClo
   const allChecked=categories===null||ALL_CATEGORY_IDS.every(id=>selected.has(id));
 
   return <Dialog open={open} title="필터" onClose={onClose}><div className="library-sheet catalog-filter-sheet">
+    {index}
     <header className="catalog-settings-heading"><DialogDescription className="hint">이 기기에만 적용됩니다. PC 설정은 유지됩니다.</DialogDescription><IconButton label="필터 닫기" icon={XMarkIcon} onClick={onClose}/></header>
     {capability==='unsupported'&&<p className="catalog-settings-warning" role="alert">서버 업데이트 후 사용할 수 있습니다.</p>}
     {capability==='checking'&&<p role="status">서버 지원 여부 확인 중…</p>}

@@ -4,13 +4,16 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 118;
+pub(crate) const SCHEMA_VERSION: i64 = 119;
 
-/// Test helper: undoes migrations 0103 through 0118 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0119 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP TABLE manga_index_pin_outbox;
+    DROP TABLE manga_index_pin_revisions;
+    DROP TABLE manga_index_pin_sync;
     DROP TABLE manga_index_pins;
     DROP TRIGGER mobile_collection_pc_records_insert; DROP TRIGGER mobile_collection_pc_records_update; DROP TRIGGER mobile_collection_pc_records_delete;
     DROP TRIGGER mobile_collection_volume_cover_focus_insert; DROP TRIGGER mobile_collection_volume_cover_focus_update; DROP TRIGGER mobile_collection_volume_cover_focus_delete;
@@ -707,6 +710,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 117 {
             transaction.execute_batch(include_str!("../../migrations/0118_manga_index_pins.sql"))?;
+        }
+        if version <= 118 {
+            transaction.execute_batch(include_str!("../../migrations/0119_manga_index_pin_sync.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
@@ -4861,7 +4867,7 @@ mod manga_index_migration_tests {
         assert_eq!(
             c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            118
+            SCHEMA_VERSION
         );
         assert_eq!(
             c.query_row("SELECT work_id FROM online_catalog_bookmarks", [], |r| {

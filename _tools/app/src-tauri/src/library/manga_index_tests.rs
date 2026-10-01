@@ -1,4 +1,5 @@
 use super::*;
+use rusqlite::params;
 fn fixture() -> (tempfile::TempDir, Library, PathBuf) {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path().join("library")).unwrap();
@@ -54,7 +55,7 @@ fn migration_and_pins_are_library_data_and_idempotent() {
             .unwrap()
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        118
+        super::super::db::SCHEMA_VERSION
     );
     let a = pin("female", "same");
     library.add_manga_index_pin(a.clone()).unwrap();

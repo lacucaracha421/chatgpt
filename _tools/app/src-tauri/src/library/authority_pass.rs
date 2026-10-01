@@ -402,6 +402,20 @@ impl Library {
             Err(error) => outcome.failed(&error),
         }
 
+        // An old server without this domain leaves PC pins and its queue untouched.
+        if let Ok(status) = read_status() {
+            if let Some(domain) = status.domains.iter().find(|d| d.domain == super::manga_index_sync::DOMAIN) {
+                match self.sync_manga_index_pins_with(client, token, domain) {
+                    Ok(pins) => {
+                        // The index listens to the catalog invalidation event.
+                        outcome.bookmarks |= pins.changed;
+                        outcome.sent |= pins.sent;
+                    }
+                    Err(error) => outcome.failed(&error),
+                }
+            }
+        }
+
         // Always read once, even when every lane above deferred, so the Asset lane
         // has a status to work from.
         let status = match read_status() {

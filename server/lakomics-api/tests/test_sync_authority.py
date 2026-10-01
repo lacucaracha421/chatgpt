@@ -312,7 +312,9 @@ class AppLevelIntegrationTests(unittest.TestCase):
         self.assertEqual(body["domains"], [{"domain": catalog_bookmarks.DOMAIN,
                                             "libraryId": LIBRARY, "epoch": 1,
                                             "contractVersion": catalog_bookmarks.CONTRACT_VERSION,
-                                            "cursor": 4}])
+                                            "cursor": 4},
+                                           {"domain": "manga-index-pins", "libraryId": LIBRARY,
+                                            "epoch": 1, "contractVersion": 1, "cursor": 0}])
 
     def test_shipped_routes_still_answer_unchanged(self):
         """Adding the aggregate route must not fence or alter an inactive domain."""

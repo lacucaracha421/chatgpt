@@ -56,6 +56,10 @@ pub(crate) struct Probe {
 /// Every domain whose locally adopted state a whole-database swap would corrupt.
 pub(crate) const PROBES: &[Probe] = &[
     Probe {
+        domain: "manga-index-pins",
+        adopted: manga_index_pins_adopted,
+    },
+    Probe {
         domain: "catalog-bookmarks",
         adopted: catalog_bookmarks_adopted,
     },
@@ -72,6 +76,12 @@ pub(crate) const PROBES: &[Probe] = &[
         adopted: assets_adopted,
     },
 ];
+
+fn manga_index_pins_adopted(connection: &Connection) -> Result<bool, LibraryError> {
+    let exists: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='manga_index_pin_sync')", [], |row| row.get(0))?;
+    if !exists { return Ok(false); }
+    Ok(connection.query_row("SELECT EXISTS(SELECT 1 FROM manga_index_pin_sync WHERE singleton=1)", [], |row| row.get(0))?)
+}
 
 /// The bookmark domain's adoption marker.
 ///

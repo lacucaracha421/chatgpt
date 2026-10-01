@@ -16,6 +16,7 @@ from fastapi import Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 import api_auth
 import catalog_bookmarks
+import manga_index
 import catalog_duplicates
 import conditional
 import mobile_catalog_replica as replica
@@ -192,6 +193,7 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
     def startup():
         replica.startup(get_db)
         catalog_bookmarks.startup(get_db)
+        manga_index.startup(get_db)
         api_auth.startup(get_db)
     lifecycle(app).on_startup(startup)
     def root():
@@ -719,4 +721,5 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
     if refresh_fetcher is not None:
         from mobile_catalog_refresh import register_refresh
         register_refresh(app, get_db, root, require_client, refresh_fetcher, on_published=pruner.trigger)
+    manga_index.register(app, get_db, require_client, root, normalize, budget, unavailable)
     return startup

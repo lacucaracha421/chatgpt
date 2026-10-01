@@ -994,6 +994,23 @@ pub(crate) struct CloudClient {
 }
 
 impl CloudClient {
+    pub(crate) fn manga_index_pin_snapshot(&self, library_id: &str, epoch: i64, token: &str) -> Result<crate::library::manga_index_sync::PinSnapshot, LibraryError> {
+        if !crate::library::is_valid_library_id(library_id) || epoch < 1 { return Err(LibraryError::InvalidCloudResponse); }
+        let body = self.conditional_get_bounded(&format!("/v1/mobile-catalog/index/pins?libraryId={library_id}&epoch={epoch}"),token,|error|map_bookmark_read_error(error,LibraryError::CatalogBookmarkAuthorityMismatch),3*1024*1024)?;
+        serde_json::from_slice(&body).map_err(|_|LibraryError::InvalidCloudResponse)
+    }
+    pub(crate) fn manga_index_pin_command(&self, identity: &crate::library::manga_index::MangaIndexIdentity, command: &serde_json::Value, token: &str) -> Result<crate::library::manga_index_sync::PinReply, LibraryError> {
+        use crate::library::manga_index_sync::{PinReply,PinResult,PinState};
+        let agent=crate::http_agent::agent(ureq::Agent::config_builder().max_redirects(0).http_status_as_error(false).timeout_global(Some(SHORT_NETWORK_TIMEOUT)).build());
+        let body=serde_json::to_vec(command).map_err(|_|LibraryError::InvalidCloudResponse)?;
+        let mut response=agent.put(self.endpoint(&format!("/v1/mobile-catalog/index/pins/{}/{}",identity.kind,identity.namespace))?).header("Authorization",bearer(token)?).content_type("application/json").send(&body).map_err(map_bookmark_command_error)?;
+        let status=response.status().as_u16();
+        if status!=200 && status!=409 { return Err(map_bookmark_command_error(ureq::Error::StatusCode(status))); }
+        let value=read_json::<serde_json::Value>(&mut response)?;
+        if status==200 { return serde_json::from_value::<PinResult>(value).map(PinReply::Applied).map_err(|_|LibraryError::InvalidCloudResponse); }
+        if status==409 && value["detail"]["code"]=="revisionConflict" { return serde_json::from_value::<PinState>(value["detail"]["current"].clone()).map(PinReply::Conflict).map_err(|_|LibraryError::InvalidCloudResponse); }
+        Err(map_bookmark_command_error(ureq::Error::StatusCode(status)))
+    }
     /// Aggregate sync status: which domains are server-authoritative right now.
     ///
     /// Fails closed in every direction, because the only current caller decides
@@ -1114,6 +1131,16 @@ impl CloudClient {
         token: &str,
         map_error: fn(ureq::Error) -> LibraryError,
     ) -> Result<Vec<u8>, LibraryError> {
+        self.conditional_get_bounded(path, token, map_error, MAX_RESPONSE_BYTES)
+    }
+
+    fn conditional_get_bounded(
+        &self,
+        path: &str,
+        token: &str,
+        map_error: fn(ureq::Error) -> LibraryError,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, LibraryError> {
         let scope = conditional_scope(&self.base_url, token);
         let cached = conditional_cache().lookup(&scope, path);
         let mut request = self
@@ -1141,7 +1168,7 @@ impl CloudClient {
             .get("etag")
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
-        let body = read_body_bounded(&mut response, MAX_RESPONSE_BYTES)?;
+        let body = read_body_bounded(&mut response, max_bytes)?;
         conditional_cache().store(&scope, path, etag, &body);
         Ok(body)
     }

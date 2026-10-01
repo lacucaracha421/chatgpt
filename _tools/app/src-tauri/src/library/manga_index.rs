@@ -3,7 +3,7 @@ use super::{
     backup, catalog_visibility::append_visibility_predicates, error::LibraryError, manga,
     online_catalog::translated_detail_tag, Library,
 };
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -56,10 +56,14 @@ pub struct MangaFolderPurgeResult {
     pub removed_series_count: usize,
     pub backup_path: String,
 }
-fn validate_identity(identity: &MangaIndexIdentity) -> Result<(), LibraryError> {
+pub(super) fn validate_identity(identity: &MangaIndexIdentity) -> Result<(), LibraryError> {
     if identity.value.trim().is_empty()
         || identity.label.trim().is_empty()
         || identity.namespace.trim().is_empty()
+        || identity.namespace.len() > 32
+        || identity.value.len() > 200
+        || identity.label.len() > 400
+        || identity.value.chars().chain(identity.label.chars()).any(|c| c.is_control())
         || !identity.namespace.chars().all(|c| c.is_ascii_lowercase())
         || !((identity.kind == "artist" && identity.namespace == "artist")
             || (identity.kind == "tag" && identity.namespace != "artist"))
@@ -171,16 +175,18 @@ impl Library {
     }
     pub fn add_manga_index_pin(&self, identity: MangaIndexIdentity) -> Result<(), LibraryError> {
         validate_identity(&identity)?;
-        self.connection()?.execute("INSERT INTO manga_index_pins(kind,namespace,value,label,created_at) VALUES(?1,?2,?3,?4,?5) ON CONFLICT DO NOTHING",
-            params![identity.kind, identity.namespace, identity.value, identity.label, chrono::Utc::now().to_rfc3339()])?;
+        let mut c = self.connection()?;
+        let t = c.transaction()?;
+        super::manga_index_sync::enqueue(&t, &identity, true)?;
+        t.commit()?;
         Ok(())
     }
     pub fn remove_manga_index_pin(&self, identity: MangaIndexIdentity) -> Result<(), LibraryError> {
         validate_identity(&identity)?;
-        self.connection()?.execute(
-            "DELETE FROM manga_index_pins WHERE kind=?1 AND namespace=?2 AND value=?3",
-            params![identity.kind, identity.namespace, identity.value],
-        )?;
+        let mut c = self.connection()?;
+        let t = c.transaction()?;
+        super::manga_index_sync::enqueue(&t, &identity, false)?;
+        t.commit()?;
         Ok(())
     }
     pub fn manga_local_index(&self) -> Result<MangaLocalIndex, LibraryError> {

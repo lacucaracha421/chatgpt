@@ -101,6 +101,9 @@ final class NetworkPolicy {
   // nothing else. The id charset excludes `/`, `.`, `%` and `?`, so the segment
   // cannot traverse or re-encode into a different entity.
   boolean bookmarkPut=p.matches("/v1/mobile-catalog/bookmarks/(kHentai|heliotrope)/[0-9A-Za-z_-]{1,64}");
+  // Pin values stay in the JSON body, never in path segments.
+  get=get || p.equals("/v1/mobile-catalog/index/pins") || p.equals("/v1/mobile-catalog/index/frequent");
+  boolean pinPut=p.equals("/v1/mobile-catalog/index/pins/artist/artist") || p.matches("/v1/mobile-catalog/index/pins/tag/(?!artist$)[a-z]{1,32}");
   boolean albumPut=p.equals("/v1/albums/commands");
   // Mobile Library Trash: the trash read, and the Asset lifecycle command route written by
   // `AssetLifecycleOutbox`, which constructs `trashAsset`/`restoreAsset` only. The server
@@ -118,7 +121,7 @@ final class NetworkPolicy {
   post=post || p.equals("/v1/exchange/transfers") || p.matches("/v1/exchange/transfers/"+exchangeId+"/(complete|ticket|ack)");
   boolean exchangePut=p.matches("/v1/exchange/devices/"+exchangeId);
   boolean delete=p.matches("/v1/exchange/transfers/"+exchangeId);
-  boolean put=bookmarkPut || albumPut || classificationPut || lifecyclePut || exchangePut || p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
+  boolean put=pinPut || bookmarkPut || albumPut || classificationPut || lifecyclePut || exchangePut || p.matches("/v1/notes/[a-f0-9]{64}/[a-f0-9-]{32,64}");
   if(!(method.equals("PUT") && put) && !(method.equals("GET") && get) && !(method.equals("POST") && post) && !(method.equals("DELETE") && delete))throw new IllegalArgumentException("Unsupported read operation");
  }
 }

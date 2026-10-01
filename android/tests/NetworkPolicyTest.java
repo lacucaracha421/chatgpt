@@ -28,7 +28,19 @@ public final class NetworkPolicyTest {
  for(String method:new String[]{"GET","POST"})pass(()->NetworkPolicy.api("/v1/mobile-catalog/refresh",method));
  for(String method:new String[]{"PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/mobile-catalog/refresh",method));
  reject(()->NetworkPolicy.api("/v1/mobile-catalog/refresh/anything","POST"));
- // B7: the catalog bookmark command is the only catalog write, and only as PUT.
+ // Manga index: exact GETs and one PUT scoped to kind/namespace; value is JSON.
+ for(String path:new String[]{"/v1/mobile-catalog/index/pins?libraryId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&epoch=1","/v1/mobile-catalog/index/frequent?language=korean"}){
+  pass(()->NetworkPolicy.api(path,"GET"));
+  for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ }
+ for(String path:new String[]{"/v1/mobile-catalog/index/pins/tag/female","/v1/mobile-catalog/index/pins/artist/artist"}){
+  pass(()->NetworkPolicy.api(path,"PUT"));
+  for(String method:new String[]{"GET","POST","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ }
+ for(String path:new String[]{"/v1/mobile-catalog/index","/v1/mobile-catalog/index/pins/","/v1/mobile-catalog/index/pins/tag","/v1/mobile-catalog/index/pins/tag/artist","/v1/mobile-catalog/index/pins/artist/female","/v1/mobile-catalog/index/pins/tag/Female","/v1/mobile-catalog/index/pins/tag/female/value","/v1/mobile-catalog/index/pins/tag/../female","/v1/mobile-catalog/index/pins/tag/%66emale","/v1/mobile-catalog/index/frequent/extra","/v1/mobile-catalog/index/pins/tag/"+"a".repeat(33)}){
+  for(String method:new String[]{"GET","POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));
+ }
+ // B7: the catalog bookmark command is scoped per work, and only as PUT.
  pass(()->NetworkPolicy.api("/v1/mobile-catalog/bookmarks/kHentai/42","PUT"));
  pass(()->NetworkPolicy.api("/v1/mobile-catalog/bookmarks/kHentai/03","PUT"));
  pass(()->NetworkPolicy.api("/v1/mobile-catalog/bookmarks/heliotrope/42","PUT"));

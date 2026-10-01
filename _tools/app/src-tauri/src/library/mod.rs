@@ -131,6 +131,7 @@ pub(crate) mod machine_settings;
 pub(crate) mod auto_tag_inbox;
 mod manga;
 pub mod manga_index;
+pub(crate) mod manga_index_sync;
 pub(crate) mod mangadex;
 mod mangadex_flow;
 pub mod metadata_import;

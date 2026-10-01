@@ -15,6 +15,10 @@ import {usePullToRefresh} from './usePullToRefresh';
 import {useSectionShade} from './SectionShade';
 import {Scrubber} from './Scrubber';
 import {CatalogSettings} from './CatalogSettings';
+import {CatalogIndex} from './CatalogIndex';
+import {useMangaIndex} from './useMangaIndex';
+import {mangaIndexQuery,withMangaIndexQuery} from '../src/manga/mangaIndexModel';
+import type {MangaIndexIdentity} from '../src/library/types';
 import {CatalogDuplicates,DuplicateReviewEntry,useDuplicateCount} from './CatalogDuplicates';
 import {useBookmarks,usePendingRetry} from './useBookmarks';
 import {BOOKMARK_CONTRACT_VERSION,type BookmarkAuthority} from './bookmarkOutbox';
@@ -45,6 +49,7 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
   const [preferences,setPreferences]=useState<CatalogPreferences>(()=>readCatalogPreferences(endpoint));
   const [query,setQuery]=useState<CatalogQuery>(()=>({...DEFAULT_CATALOG_QUERY,...preferences})),[draft,setDraft]=useState('');
   const [settings,setSettings]=useState(false);
+  const [indexFilter,setIndexFilter]=useState<MangaIndexIdentity|null>(null);
   const [duplicates,setDuplicates]=useState(false);
   useEffect(()=>{if(openDuplicates)setDuplicates(true);},[openDuplicates]);
   const closeDuplicates=useCallback(()=>{setDuplicates(false);onReturnHome?.();},[onReturnHome]);
@@ -122,6 +127,8 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
     onError:()=>setCapability(current=>current==='checking'?'failed':current),
   });
   const bookmarks=useBookmarks({active:active&&!paused,authority});
+  const index=useMangaIndex({active:active&&!paused,open:settings,authority,query,revision:refresh});
+  const catalogQuery={...query,text:withMangaIndexQuery(query.text,mangaIndexQuery(indexFilter)),sort:indexFilter?'latest' as const:query.sort};
   const pendingWork=selected?bookmarks.hasPending(selected.provider,selected.providerWorkId):false;
   usePendingRetry(active&&!paused,pendingWork,bookmarks.flush);
   const pageCache=useRef(new Map<string,CatalogPage>()),detailCache=useRef(new Map<string,CatalogDetail>()),editionCache=useRef(new Map<string,CatalogEditions>()),readerCache=useRef(new Map<string,CatalogReaderManifest>());
@@ -132,10 +139,10 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
   const prefetches=useRef(new Map<string,AbortController>()),readerRequest=useRef<AbortController|null>(null),readerPrefetch=useRef<ReaderPrefetch|null>(null);
   // A setting this server cannot honor must not become an unfiltered list.
   const preferencesBlocked=activePreferences&&capability==='unsupported';
-  const path=catalogPath(query,null,{searchMode}),key=`${path}:${refresh}`;
+  const path=catalogPath(catalogQuery,null,{searchMode}),key=`${path}:${refresh}`;
   // A composed request the server or the native transport would reject is reported
   // instead of sent, so an over-long filter cannot fail silently.
-  const wireIssue=catalogPathIssue(query,{searchMode});
+  const wireIssue=catalogPathIssue(catalogQuery,{searchMode});
 
   // The list waits for the capability decision, so it is fetched once with the right
   // search mode. Ordinary browsing also waits, but only for this one reply.
@@ -155,7 +162,7 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
     if(revision)publication.current=revision;
   };
   const prefetchNext=(result:CatalogPage)=>{
-    if(!result.nextCursor||!result.publicationRevision)return;const next=catalogPath(query,result.nextCursor,{searchMode});
+    if(!result.nextCursor||!result.publicationRevision)return;const next=catalogPath(catalogQuery,result.nextCursor,{searchMode});
     if(pageCache.current.has(next)||prefetches.current.has(next))return;
     const controller=new AbortController();prefetches.current.set(next,controller);
     void api<CatalogPage>(next,controller.signal).then(value=>{if(!controller.signal.aborted&&value.publicationRevision===result.publicationRevision)lruSet(pageCache.current,next,value,12);}).catch(()=>{}).finally(()=>prefetches.current.delete(next));
@@ -307,7 +314,7 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
   const nextCursor=more?more.nextCursor:page?.nextCursor??null;
   function loadMore(){
     if(!active||paused||!listReady||!page?.ready||!nextCursor||moreRequest.current||busy||committed.current!==key||moreError)return;
-    const revision=page.publicationRevision,owner=key,requestPath=catalogPath(query,nextCursor,{searchMode});
+    const revision=page.publicationRevision,owner=key,requestPath=catalogPath(catalogQuery,nextCursor,{searchMode});
     const accept=(result:CatalogPage)=>{
       if(result.publicationRevision!==revision){
         // Restart once per newer publication; a server that keeps answering the first
@@ -378,7 +385,7 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
   const arrivals=useAppendArrivals(page?.items,items.map(item=>`${item.provider}:${item.groupId}`));
   // Saved 회피 태그 are the user's default, so they keep the chip neutral; only a narrowed
   // category set or the blocked switch differs from that default and lights the chip.
-  const filterCount=(preferences.categories!==null?1:0)+(query.revealBlocked?1:0);
+  const filterCount=(preferences.categories!==null?1:0)+(query.revealBlocked?1:0)+(indexFilter?1:0);
   const defaultTags=preferences.excludedTags.length;
   const nearEnd=(element:HTMLElement)=>element.scrollTop+element.clientHeight>=element.scrollHeight-600;
   // A first page shorter than the screen cannot be scrolled, so it asks for the next page itself.
@@ -388,7 +395,7 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
   const bookmarkScope=query.scope==='bookmarked';
   const viewControls=<div className="ui-segmented ui-segmented--full-width catalog-view-controls" role="group" aria-label="카탈로그 보기">
     <button type="button" className="ui-segmented__cell" aria-haspopup="dialog" aria-label={`카탈로그 언어 ${LANGUAGES[query.language]}`} onClick={()=>setSheet('language')}>{LANGUAGES[query.language]}<ChevronDownIcon aria-hidden="true"/></button>
-    <button type="button" className="ui-segmented__cell" aria-haspopup="dialog" aria-label={`카탈로그 정렬 ${bookmarkScope?'최신순':SORTS[query.sort]}`} disabled={bookmarkScope} onClick={()=>setSheet('sort')}>{bookmarkScope?'최신순':SORTS[query.sort]}<ChevronDownIcon aria-hidden="true"/></button>
+    <button type="button" className="ui-segmented__cell" aria-haspopup="dialog" aria-label={`카탈로그 정렬 ${bookmarkScope?'최신순':SORTS[catalogQuery.sort]}`} disabled={bookmarkScope||!!indexFilter} onClick={()=>setSheet('sort')}>{bookmarkScope?'최신순':SORTS[catalogQuery.sort]}<ChevronDownIcon aria-hidden="true"/></button>
     <button type="button" className={`ui-segmented__cell${filterCount?' is-active':''}`} aria-haspopup="dialog" aria-label={filterCount?`필터 ${filterCount}개 적용`:defaultTags?`필터, 기본 회피 태그 ${defaultTags}개`:'필터'} disabled={!active} onClick={openSettings}><FunnelIcon aria-hidden="true"/>필터{filterCount>0?<span className="catalog-view-count numeric">{filterCount}</span>:defaultTags>0&&<span className="catalog-view-default">기본</span>}</button>
   </div>;
   // 카탈로그 · 북마크 is the list's first row; scrolled away, the top bar pulls it down. 북마크 lists newest first.
@@ -417,6 +424,7 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
       <div ref={list} className="catalog-scroll" onScroll={event=>{scroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))loadMore();}}>
         {listPull}
         {sources.inline}
+        {indexFilter&&<div className="catalog-index-token"><span>{indexFilter.label}</span><button type="button" aria-label={`${indexFilter.label} 필터 해제`} onClick={()=>setIndexFilter(null)}>×</button></div>}
         <CatalogRefreshBanner state={refreshState}/>
         {browseSort!==null&&browseSort!=='latest'&&query.sort==='latest'&&!bookmarkScope&&<p className="catalog-search-note muted" style={{margin:'0 0 8px',fontSize:12}}>검색 중에는 최신순으로 표시합니다</p>}
         {error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{committed.current='';setRefresh(n=>n+1);}}>다시 시도</Button></div>}{countError&&<div className="catalog-count-error">개수를 확인하지 못했습니다.<Button size="sm" variant="ghost" onClick={()=>setCountRetry(n=>n+1)}>다시 시도</Button></div>}
@@ -440,7 +448,7 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
     {reader&&selected&&<CatalogReader manifest={reader} title={catalogDisplayTitle(detail?.title??selected.title)} onClose={closeReader} onRefresh={()=>loadReader(true)} refreshing={readerBusy}/>}
     {sheet==='language'&&<BottomSheet title="언어" onClose={()=>setSheet(null)}><div role="radiogroup" aria-label="카탈로그 언어">{(Object.keys(LANGUAGES) as CatalogQuery['language'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={query.language===value} onClick={()=>{setSheet(null);if(query.language!==value)change({language:value});}}>{LANGUAGES[value]}<span className="radio-dot"/></button>)}</div></BottomSheet>}
     {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}><div role="radiogroup" aria-label="카탈로그 정렬">{(Object.keys(SORTS) as CatalogQuery['sort'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={query.sort===value} onClick={()=>{setSheet(null);if(query.sort!==value)change({sort:value});}}>{SORTS[value]}<span className="radio-dot"/></button>)}</div></BottomSheet>}
-    <CatalogSettings key={preferenceCheck} open={settings} preferences={preferences} revealBlocked={query.revealBlocked} capability={capability} onClose={()=>setSettings(false)} onApply={applyPreferences} onReset={resetPreferences} tools={<DuplicateReviewEntry count={duplicateCount} onOpen={()=>{setSettings(false);setDuplicates(true);}}/>}/>
+    <CatalogSettings key={preferenceCheck} open={settings} preferences={preferences} revealBlocked={query.revealBlocked} capability={capability} onClose={()=>setSettings(false)} onApply={applyPreferences} onReset={resetPreferences} index={<CatalogIndex index={index} filter={indexFilter} onFilter={row=>{setIndexFilter(row);setSettings(false);}}/>} tools={<DuplicateReviewEntry count={duplicateCount} onOpen={()=>{setSettings(false);setDuplicates(true);}}/>}/>
     {duplicates&&<CatalogDuplicates context={page?.context??null} active={active&&!paused} onClose={closeDuplicates}/>}
   </section>;
 }
