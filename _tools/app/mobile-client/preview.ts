@@ -286,6 +286,7 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   if (op !== 'api') return {};
   const url = new URL(String(payload.path),'https://preview.invalid');
   if(homeDemo==='offline'&&/^\/v1\/(captures|collections|library\/(characters\/review|similarity)|library\/summary|mobile-catalog\/(duplicates|refresh))/.test(url.pathname))throw new ApiError('연결을 확인한 뒤 다시 시도해 주세요.',null,null);
+  if(url.pathname==='/v1/library/list-generation')return {generation:'a'.repeat(64),filterVersion:1};
   if(url.pathname==='/v1/library/summary'){
     // Home ⑤ 자산 현황: calm has nothing today and nothing unclassified.
     const midnight=new Date();midnight.setHours(0,0,0,0);const monday=new Date(midnight);monday.setDate(monday.getDate()-(monday.getDay()+6)%7);
@@ -385,17 +386,34 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   if (url.pathname.endsWith('/classifications')) return {items:[{id:'game',name:'게임',parent_id:null,asset_count:120},{id:'wuthering',name:'명조',parent_id:'game',asset_count:48},{id:'reverse',name:'리버스',parent_id:'game',asset_count:52},{id:'zenless',name:'젠레스',parent_id:'game',asset_count:20},{id:'art',name:'일러스트',parent_id:null,asset_count:36},{id:'landscape',name:'풍경',parent_id:'art',asset_count:24},{id:'design',name:'디자인',parent_id:'art',asset_count:12}]};
   // Album contents come from the authority projection, not from a client-side list, so
   // the preview exercises the same paged read the device does.
-  if (url.pathname === '/v1/albums/assets') {
-    const start=Number(url.searchParams.get('cursor')??0),size=Number(url.searchParams.get('limit')??40);
-    const page=assets.slice(start,start+size);
-    return {libraryId:url.searchParams.get('libraryId'),epoch:1,contractVersion:1,albumId:url.searchParams.get('albumId'),items:page,hasMore:start+size<assets.length,nextCursor:start+size<assets.length?String(start+size):null};
-  }
   if (url.pathname.endsWith('/revisit')) return {bundles:[{kind:'date',title:'과거의 이날',items:assets.slice(0,8)},{kind:'creator',title:'다시 만난 작가',groups:[{creator_key:'bluealex1203',creator_name:'bluealex1203',asset_count:24,items:assets.slice(0,4)}]}]};
   if (url.pathname.includes('/captures')) return {captures:[]};
   const offset = Number(url.searchParams.get('cursor') ?? 0), limit = Number(url.searchParams.get('limit') ?? 40);
   const ranges:Record<string,[number,number]> = {game:[0,120],wuthering:[0,48],reverse:[48,100],zenless:[100,120],art:[0,36],landscape:[0,24],design:[24,36]};
   const range = ranges[url.searchParams.get('classification_id') ?? ''];
-  const selected = range ? assets.slice(...range) : assets;
+  const selected = (url.pathname==='/v1/albums/assets'?assets:range?assets.slice(...range):assets).filter(asset=>{
+    const kind=url.searchParams.get('media_kind'),aspect=url.searchParams.get('aspect_ratio'),r=Number(asset.width)/Number(asset.height);
+    if(kind&&asset.kind!==(kind==='videos'?'video':'image'))return false;
+    if(aspect&&(aspect==='square'?r<.9||r>1.1:aspect==='landscape'?r<=1.1:r>=.9))return false;
+    const min=Number(url.searchParams.get('duration_ms_min')??0),max=Number(url.searchParams.get('duration_ms_max')??Infinity);
+    return (!min&&max===Infinity)||(asset.duration_ms!=null&&asset.duration_ms>=min&&asset.duration_ms<max);
+  }).sort((a,b)=>{
+    const direction=url.searchParams.get('sort')==='oldest'?1:-1;
+    return direction*((a.collected_at??a.created_at??'').localeCompare(b.collected_at??b.created_at??'')||a.id.localeCompare(b.id));
+  });
+  const listGeneration='a'.repeat(64);
+  if(url.searchParams.get('toc')==='1') {
+    if(url.searchParams.has('cursor'))throw new Error('TOC and cursor are mutually exclusive');
+    const utcOffsetMinutes=Number(url.searchParams.get('utcOffsetMinutes')??0),buckets:{key:string;startIndex:number;count:number;startCursor:string|null}[]=[];
+    selected.forEach((asset,index)=>{
+      const date=new Date(Date.parse(asset.collected_at??asset.created_at??'')+utcOffsetMinutes*60_000);
+      const key=Number.isFinite(date.getTime())?date.toISOString().slice(0,7):'undated',previous=buckets[buckets.length-1];
+      if(previous?.key===key)previous.count++;
+      else buckets.push({key,startIndex:index,count:1,startCursor:index?String(index):null});
+    });
+    return {tocVersion:1,listGeneration,totalCount:selected.length,sort:url.searchParams.get('sort')==='oldest'?'oldest':'newest',utcOffsetMinutes,buckets};
+  }
+  if(url.pathname==='/v1/albums/assets')return {libraryId:url.searchParams.get('libraryId'),epoch:1,contractVersion:1,albumId:url.searchParams.get('albumId'),filterVersion:1,listGeneration,items:selected.slice(offset,offset+limit),hasMore:offset+limit<selected.length,nextCursor:offset+limit<selected.length?String(offset+limit):null};
   // Exercise both upgraded dimension metadata and older rows whose dimensions are unknown.
-  return {items:selected.slice(offset,offset+limit).map(({preview,ratio,...asset},i) => ({...asset,...(i%2?{width:null,height:null}:{}),...(i===0?{source_url:'https://example.invalid/artwork/123456789',source_published_at:'2026-09-01T12:34:00Z'}:{})})),has_more:offset+limit<selected.length,next_cursor:offset+limit<selected.length?String(offset+limit):null};
+  return {listGeneration,filterVersion:1,items:selected.slice(offset,offset+limit).map(({preview,ratio,...asset},i) => ({...asset,...(i%2?{width:null,height:null}:{}),...(i===0?{source_url:'https://example.invalid/artwork/123456789',source_published_at:'2026-09-01T12:34:00Z'}:{})})),has_more:offset+limit<selected.length,next_cursor:offset+limit<selected.length?String(offset+limit):null};
 }

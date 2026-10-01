@@ -40,3 +40,4 @@
   .mobile-scrubber.is-fading .mobile-scrubber-rail,.mobile-scrubber.is-fading .mobile-scrubber-years,.mobile-scrubber.is-fading .mobile-scrubber-bubble,.mobile-scrubber.is-fading .mobile-scrubber-dim { opacity:0; }
 }
 .exchange-overlay .mobile-scrubber { bottom:calc(82px + env(safe-area-inset-bottom)); }
+.mobile-scrubber-month { position:absolute; bottom:0; width:1px; height:3px; background:currentColor; opacity:.35; }

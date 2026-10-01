@@ -2,6 +2,7 @@ import type {ReactNode} from 'react';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
+import type {SparseGallerySource} from './assetToc';
 import type {HomeProps} from './Home';
 import type {ExchangeSnapshot} from './exchange';
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
@@ -9,7 +10,7 @@ vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:()=> 'co
   ApiError:class ApiError extends Error{status:number|null;details:unknown;constructor(message:string,status:number|null,details:unknown){super(message);this.status=status;this.details=details;}}}));
 vi.mock('./media',()=>({clearMediaCache:vi.fn(),loadThumbnail:vi.fn(async(a)=>a),prepareAssets:()=>new Promise(()=>{})}));
 vi.mock('./Home',()=>({Home:({items,onRecent,onArtists}:HomeProps)=><div><button onClick={onRecent}>전체 보기</button><button onClick={onArtists}>작가 전체</button>{items.slice(0,12).map(a=><span key={a.id}>{`tile-${a.id}`}</span>)}</div>}));
-vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,restoreScroll,onScroll}:{intro?:ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll?:number;onScroll?(top:number):void})=><div aria-label="자산 목록" data-restore-scroll={restoreScroll} onScroll={()=>{onNearEnd();onScroll?.(420);}}>{intro}{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}</div>}));
+vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,restoreScroll,onScroll,sparse}:{sparse?:SparseGallerySource;intro?:ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll?:number;onScroll?(top:number):void})=><div aria-label="자산 목록" data-restore-scroll={restoreScroll} data-toc-total={sparse?.toc.totalCount} onScroll={()=>{onNearEnd();onScroll?.(420);}}>{intro}{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}{sparse&&<button onClick={()=>void sparse.load(2,2,new AbortController().signal)}>seek bucket</button>}</div>}));
 vi.mock('./Viewer',()=>({Viewer:({items,index,onIndex,onClose}:{items:Asset[];index:number;onIndex(i:number):void;onClose():void})=><div><span>{`viewer-${items[index].id}`}</span><button onClick={()=>onIndex(1)}>viewer next</button><button onClick={onClose}>viewer close</button></div>}));
 import {App} from './App';
 import {ApiError} from './transport';
@@ -38,6 +39,66 @@ beforeEach(()=>{
   });
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();delete window.LakomicsNative;});
+describe('asset TOC list wiring',()=>{
+  const G='a'.repeat(64),G2='b'.repeat(64);
+  const table=(generation=G)=>({tocVersion:1,listGeneration:generation,totalCount:4,sort:'newest',buckets:[{key:'2026-09',startIndex:0,count:2,startCursor:null},{key:'2025-12',startIndex:2,count:2,startCursor:'bucket-b'}]});
+  it('does not bless an optimistic legacy page with a generation observed only after it was read',async()=>{
+    const original=mocks.api.getMockImplementation()!;let generation=G,opening=false,pageReads=0;
+    mocks.api.mockImplementation((path:string)=>{
+      if(path==='/v1/library/list-generation')return Promise.resolve({generation});
+      const url=new URL(path,'https://test');
+      if(url.pathname==='/v1/library/assets'&&url.searchParams.has('toc')){opening=true;return Promise.reject(new ApiError('old server',400,null));}
+      if(url.pathname==='/v1/library/assets'&&opening){
+        pageReads++;generation=G2;
+        return Promise.resolve({items:pageReads===1?a:b,has_more:false,next_cursor:null});
+      }
+      return original(path);
+    });
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
+    await screen.findByText('tile-b1');expect(screen.queryByText('tile-a1')).toBeNull();expect(pageReads).toBe(2);
+  });
+  it('starts the first page alongside the optional TOC and shows cursor content until TOC arrives',async()=>{
+    const original=mocks.api.getMockImplementation()!;
+    let resolveToc!:(value:unknown)=>void,resolvePage!:(value:unknown)=>void;
+    mocks.api.mockImplementation((path:string)=>{
+      const url=new URL(path,'https://test');
+      if(url.pathname==='/v1/library/assets'&&url.searchParams.has('toc'))return new Promise(resolve=>{resolveToc=resolve;});
+      if(url.pathname==='/v1/library/assets'&&resolveToc)return new Promise(resolve=>{resolvePage=resolve;});
+      return original(path);
+    });
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
+    await waitFor(()=>{expect(resolveToc).toBeDefined();expect(resolvePage).toBeDefined();});
+    await act(async()=>{resolvePage({items:a,has_more:true,next_cursor:'bucket-b',listGeneration:G});});
+    await screen.findByText('tile-a1');expect(screen.getByLabelText('자산 목록').getAttribute('data-toc-total')).toBeNull();
+    await act(async()=>{resolveToc(table());});
+    await waitFor(()=>expect(screen.getByLabelText('자산 목록').getAttribute('data-toc-total')).toBe('4'));
+  });
+  it('refetches TOC and first page after a changed seek generation while retaining current content',async()=>{
+    const original=mocks.api.getMockImplementation()!;let generation=G,firstReads=0,tocReads=0;
+    let refreshPage!:(value:unknown)=>void,refreshToc!:(value:unknown)=>void;
+    mocks.api.mockImplementation((path:string)=>{
+      const url=new URL(path,'https://test');
+      if(url.pathname==='/v1/library/assets'&&url.searchParams.has('toc')){
+        tocReads++;return generation===G?Promise.resolve(table()):new Promise(resolve=>{refreshToc=resolve;});
+      }
+      if(url.pathname==='/v1/library/assets'&&url.searchParams.get('cursor')==='bucket-b'){
+        generation=G2;return Promise.resolve({items:b,has_more:false,next_cursor:null,listGeneration:G2});
+      }
+      if(url.pathname==='/v1/library/assets'&&tocReads){
+        firstReads++;return generation===G?Promise.resolve({items:a,has_more:true,next_cursor:'bucket-b',listGeneration:G}):new Promise(resolve=>{refreshPage=resolve;});
+      }
+      return original(path);
+    });
+    render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
+    fireEvent.click(await screen.findByRole('button',{name:'seek bucket'}));
+    await waitFor(()=>{expect(refreshPage).toBeDefined();expect(refreshToc).toBeDefined();});
+    expect(screen.getByText('tile-a1')).toBeTruthy();expect(screen.queryByText('tile-b1')).toBeNull();
+    expect(firstReads).toBe(2);expect(tocReads).toBe(2);
+    await act(async()=>{refreshToc(table(G2));refreshPage({items:b,has_more:true,next_cursor:'tail',listGeneration:G2});});
+    await screen.findByText('tile-b1');expect(screen.queryByText('tile-a1')).toBeNull();
+    await waitFor(()=>expect(screen.getByLabelText('자산 목록').getAttribute('data-toc-total')).toBe('4'));
+  });
+});
 it('opens Home 작가 전체 in the 에셋 작가 segment instead of the detail overlay',async()=>{
  render(<App/>);
  // Without a saved connection the start settles on the 에셋 root once the first library page
@@ -614,7 +675,7 @@ describe('pages that carry their own list generation',()=>{
     });
     return {bump(){revision++;}};
   }
-  const pageReads=()=>mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/assets?')).length;
+  const pageReads=()=>mocks.api.mock.calls.filter(([path])=>String(path).startsWith('/v1/library/assets?')&&!String(path).includes('toc=1')).length;
   const generationReads=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/library/list-generation').length;
   async function settle(){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});}
 

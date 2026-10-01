@@ -143,7 +143,7 @@ describe('asset filters',()=>{
     let generation='a'.repeat(64), filteredReads=0;
     mocks.api.mockImplementation((path:string)=>{
       if(path==='/v1/library/list-generation')return Promise.resolve({generation,filterVersion:1});
-      if(path.startsWith('/v1/library/assets')&&path.includes('media_kind')){
+      if(path.startsWith('/v1/library/assets')&&!path.includes('toc=1')&&path.includes('media_kind')){
         filteredReads++;
         generation='b'.repeat(64);
         return Promise.resolve(filteredReads===1 ? page(['first']) : page(['unchecked'],{filterVersion:undefined}));
@@ -298,7 +298,7 @@ describe('asset filters',()=>{
   it('keeps the previous page and its filter identity when a narrowed load fails, and retries the attempt',async()=>{
     let narrowed=0;
     mocks.api.mockImplementation((path:string)=>{
-      if(path.startsWith('/v1/library/assets')&&path.includes('media_kind')){
+      if(path.startsWith('/v1/library/assets')&&!path.includes('toc=1')&&path.includes('media_kind')){
         narrowed++;
         return narrowed===1?Promise.reject(new Error('narrowing failed')):Promise.resolve(page(['f1']));
       }
@@ -390,11 +390,15 @@ describe('asset filters',()=>{
     await screen.findByText('tile-a1');
     openFilters();chooseIn('미디어','영상');
     await waitFor(()=>expect(lastPagePath()).toContain('media_kind=videos'));
-    // Returning to All must not hand back the filtered page under an unfiltered identity.
+    await waitFor(()=>expect(screen.getByLabelText('자산 목록').getAttribute('data-identity')).toContain('media_kind=videos'));
+    // Tab restoration keeps the filtered place; explicitly selecting All starts unfiltered.
     fireEvent.click(screen.getByRole('button',{name:'홈'}));
-    await screen.findByText('tile-a1');
+    await waitFor(()=>expect(screen.queryByLabelText('자산 목록')).toBeNull());
     fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name:'에셋'}));
-    await waitFor(()=>expect(lastPagePath()).not.toContain('media_kind=videos'));
+    await waitFor(()=>expect(screen.getByLabelText('자산 목록').getAttribute('data-identity')).toContain('media_kind=videos'));
+    fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name:'에셋'}));
+    fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
+    await waitFor(()=>expect(screen.getByLabelText('자산 목록').getAttribute('data-identity')).not.toContain('media_kind=videos'));
   });
 
   it('drops the filter set when the connection changes, so it cannot outlive its server',async()=>{

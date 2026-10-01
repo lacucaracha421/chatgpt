@@ -2,6 +2,7 @@ export type ScrubberDateValue = string | number | Date | null | undefined;
 
 export type ScrubberSort =
   | {kind: 'date'; values: readonly ScrubberDateValue[]}
+  | {kind: 'toc'; totalCount:number; buckets:readonly {key:string; startIndex:number; count:number}[]}
   | {kind: 'name'; values: readonly (string | null | undefined)[]}
   | {kind: 'fallback'};
 
@@ -90,14 +91,29 @@ function fallbackTicks(total: number): ScrubberTick[] {
   return Array.from({length: 11}, (_, step) => ({position: step / 10, major: true, index: scrubberIndexAt(step / 10, total)}));
 }
 
-export function generateScrubberTicks(sort: ScrubberSort, total = sort.kind === 'fallback' ? 0 : sort.values.length): ScrubberTick[] {
+function sortTotal(sort:ScrubberSort) {return sort.kind==='toc'?sort.totalCount:sort.kind==='fallback'?0:sort.values.length;}
+
+export function generateScrubberTicks(sort: ScrubberSort, total = sortTotal(sort)): ScrubberTick[] {
   const count = Math.max(0, total);
+  if(sort.kind==='toc') {
+    const years=new Set<string>();
+    return sort.buckets.map(bucket=>{
+      const year=/^(\d{4})-\d{2}$/.exec(bucket.key)?.[1],major=!!year&&!years.has(year);
+      if(year)years.add(year);
+      return {position:positionOf(bucket.startIndex,count),index:bucket.startIndex,major,...(major?{label:year}:{})};
+    });
+  }
   if (sort.kind === 'date') return dateTicks(sort.values, count);
   if (sort.kind === 'name') return nameTicks(sort.values, count);
   return fallbackTicks(count);
 }
 
 export function scrubberLabelAt(sort: ScrubberSort, index: number): string | null {
+  if(sort.kind==='toc') {
+    const bucket=sort.buckets.find(bucket=>index>=bucket.startIndex&&index<bucket.startIndex+bucket.count);
+    const parts=bucket&&/^(\d{4})-(\d{2})$/.exec(bucket.key);
+    return parts?`${parts[1]}년 ${Number(parts[2])}월`:'날짜 없음';
+  }
   const value = sort.kind === 'fallback' ? null : sort.values[clampIndex(index, sort.values.length)];
   if (sort.kind === 'date') {
     const parts = dateParts(value);
@@ -107,7 +123,7 @@ export function scrubberLabelAt(sort: ScrubberSort, index: number): string | nul
   return null;
 }
 
-export function buildScrubberModel(sort: ScrubberSort, total = sort.kind === 'fallback' ? 0 : sort.values.length): ScrubberModel {
+export function buildScrubberModel(sort: ScrubberSort, total = sortTotal(sort)): ScrubberModel {
   const count = Math.max(0, total);
   return {total: count, ticks: generateScrubberTicks(sort, count), labelAt: index => scrubberLabelAt(sort, index)};
 }

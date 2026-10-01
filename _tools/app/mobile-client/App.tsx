@@ -38,6 +38,7 @@ import {albumAncestors,albumPage,albumView,type AlbumAssetPage} from './albumMod
 import {LIBRARY_ROOT,mergeLibraryEntries,ancestorsOf,entryView} from './libraryModel';
 import './library.css';
 import {Gallery} from './Gallery';
+import {readAssetToc, supportsAssetToc, useAssetToc, type AssetTocPage} from './assetToc';
 import {AlbumBatchSheet} from './AlbumBatchSheet';
 import {SelectionBar} from '../src/assets/SelectionBar';
 import {Home} from './Home';
@@ -80,7 +81,7 @@ async function readPage(view:View,cursor:string|null,filters:AssetFiltersValue,s
 }
 function store(key: string, value: unknown) { try {localStorage.setItem(key, JSON.stringify(value));} catch { /* Optional device preference. */ } }
 type HomeOrigin = {area:'collections'|'notes'|'catalog'} | {area:'library';entry:string;scroll:number};
-type Committed = Page & {generation:string|null; view: View; cursor: string | null; previous: (string | null)[]; version: number; restoreScroll: number; filters: AssetFiltersValue};
+type Committed = Page & AssetTocPage & {generation:string|null; view: View; cursor: string | null; previous: (string | null)[]; version: number; restoreScroll: number; filters: AssetFiltersValue};
 export function App() {
   const [area,setArea] = useState<'assets'|'collections'|'catalog'|'notes'>('assets');
   const [focusedCharacter,setFocusedCharacter]=useState<string|null>(null);
@@ -234,6 +235,10 @@ export function App() {
       // synthetic empty page is a placeholder that carries no contract. It is therefore
       // never validated against the filter version below.
       const synthetic = !!view.characters;
+      const firstGeneration = observedGeneration.current;
+      const tocRequest = supportsAssetToc(view) && cursor===null ? readAssetToc(view,nextFilters,request.signal) : undefined;
+      const firstRead = tocRequest ? readPage(view,cursor,nextFilters,request.signal) : undefined;
+      void firstRead?.catch(()=>{});
       const key = `${viewKey(view, nextFilters)}:${cursor}`;
       let generation: string|null = null;
       let cached: Committed|undefined;
@@ -242,7 +247,7 @@ export function App() {
       // bracketing reads. A cached candidate still asks the cheap endpoint first, since
       // only that can tell whether the cache is current without refetching the page.
       if (!synthetic && pageGenerations.current && (fresh || !viewCache.current.has(key))) {
-        const reply = await readPage(view,cursor,nextFilters,request.signal);
+        const reply = await (firstRead ?? readPage(view,cursor,nextFilters,request.signal));
         if (!gate.current.current(request.id)) return;
         // A page without the field means the server went back to an older build: forget
         // the capability and redo this load the bracketed way below.
@@ -259,7 +264,9 @@ export function App() {
         if (generation !== null && generation !== observedGeneration.current) {viewCache.current.clear(); observedGeneration.current = generation;}
         const candidate = fresh ? undefined : viewCache.current.get(key);
         cached = generation && candidate?.generation === generation ? candidate : undefined;
-        response = synthetic ? {items:[],has_more:false,next_cursor:null} : cached ?? await readPage(view,cursor,nextFilters,request.signal);
+        // A legacy page started before the generation probe cannot inherit a newer snapshot.
+        const optimistic = firstRead && (!generation || generation===firstGeneration) ? firstRead : undefined;
+        response = synthetic ? {items:[],has_more:false,next_cursor:null} : cached ?? await (optimistic ?? readPage(view,cursor,nextFilters,request.signal));
         // A page that asked for filters but came back without the contract was answered by a
         // server that ignored the parameters, so it is refused rather than shown as filtered.
         if (filtered && !synthetic && !cached && response.filter_version !== ASSET_FILTER_VERSION) throw new Error('자산 필터 응답을 확인할 수 없습니다. 서버를 업데이트해 주세요.');
@@ -290,7 +297,7 @@ export function App() {
       const restored = cached && restore === 0 ? cached.restoreScroll : restore;
       scroll.current = restored;
       setFilters(nextFilters);setFiltersOpen(null);
-      setPage({ ...response, items, view, cursor, previous, restoreScroll:restored, generation, version:request.id, filters:nextFilters });
+      setPage({ ...response, items, view, cursor, previous, restoreScroll:restored, generation, version:request.id, filters:nextFilters, tocRequest, ...(cached?.assetRanges?{assetRanges:cached.assetRanges}:{}) });
     } catch (reason) { if (gate.current.current(request.id)) {
       // The previous page stays mounted and committed on failure: an error must not
       // discard a usable gallery, and it must not leave the heading claiming filters
@@ -300,6 +307,19 @@ export function App() {
     } }
     finally { if (gate.current.current(request.id)) setBusy(false); }
   }, [cancelMore,clearSelection,closeAlbumBatch]);
+  const sparse = useAssetToc(page,setPage,()=>{const current=latest.current.page;void load(current.view,null,[],0,true,current.filters);},setMoreError);
+  useEffect(()=>{if(page.assetRanges)cancelMore();},[page.assetRanges?.toc,cancelMore]);
+  useEffect(()=>{
+    if(!page.assetRanges)return;
+    setViewer(current=>{
+      if(current?.source!=='library')return current;
+      const id=current.items[current.index]?.id;
+      const range=page.assetRanges?.ranges.find(range=>range.items.some(item=>item.id===id));
+      const byId=new Map(visibleItems.map(item=>[item.id,item]));
+      const items=range?.items.flatMap(item=>byId.has(item.id)?[byId.get(item.id)!]:[])??visibleItems,index=items.findIndex(item=>item.id===id);
+      return index<0?current:{...current,items,index};
+    });
+  },[page.assetRanges,visibleItems]);
   useEffect(() => {
     if (!status.configured) return;
     let running=false, active=true;
@@ -341,10 +361,20 @@ export function App() {
     if (viewCache.current.size > 4) viewCache.current.delete(viewCache.current.keys().next().value!);
     // Prefetch the next page of the same filtered query, so appended pages keep the
     // filter set rather than reverting to an unfiltered continuation.
-    if (page.view.tab === 'library' && !page.view.root && page.has_more && page.next_cursor) void nextPage(page.view,page.next_cursor,page.filters).catch(() => {});
+    if (!page.assetRanges && page.view.tab === 'library' && !page.view.root && page.has_more && page.next_cursor) void nextPage(page.view,page.next_cursor,page.filters).catch(() => {});
   }, [page, nextPage]);
   const append = useCallback(async () => {
     const current = latest.current.page;
+    if(current.assetRanges && sparse) {
+      if(morePending.current)return;
+      const tail=latest.current.viewer?.source==='library'?latest.current.viewer.items[latest.current.viewer.items.length-1]?.id:undefined;
+      const range=(tail?current.assetRanges.ranges.find(range=>range.items.some(item=>item.id===tail)):undefined)??current.assetRanges.ranges[current.assetRanges.ranges.length-1],index=range?range.startIndex+range.items.length:0;
+      if(index>=current.assetRanges.toc.totalCount)return;
+      morePending.current=true;setLoadingMore(true);
+      const request=moreGate.current.begin();
+      try {await sparse.load(index,40,request.signal);} finally {if(moreGate.current.current(request.id)){morePending.current=false;setLoadingMore(false);}}
+      return;
+    }
     if (morePending.current || !current.has_more || !current.next_cursor || (latest.current.viewer&&latest.current.viewer.source!=='library')) return;
     morePending.current = true; setLoadingMore(true); setMoreError('');
     const request = moreGate.current.begin();
@@ -386,7 +416,7 @@ export function App() {
       });
     } catch (reason) {if (moreGate.current.current(request.id)) setMoreError(errorText(reason));}
     finally {if (moreGate.current.current(request.id)) {morePending.current = false; setLoadingMore(false);}}
-  }, [nextPage,load]);
+  }, [nextPage,load,sparse]);
   const nearEnd = useCallback(() => {
     // The committed page is what supplies the cursor, so a failed filter change must not be
     // continued: appending would extend the previous result set under the new filters.
@@ -643,7 +673,11 @@ export function App() {
     // Opening the still-visible gallery cancels its uncommitted replacement.
     gate.current.cancel(); cancelMore(); setBusy(false); setError('');
     lastIntent.current = {view:page.view,cursor:page.cursor,previous:page.previous,filters:page.filters};
-    setViewer({items:visibleItems,index,source:'library'});
+    const id=visibleItems[index]?.id,range=page.assetRanges?.ranges.find(range=>range.items.some(item=>item.id===id));
+    if(range) {
+      const byId=new Map(visibleItems.map(item=>[item.id,item])),items=range.items.flatMap(item=>byId.has(item.id)?[byId.get(item.id)!]:[]);
+      setViewer({items,index:items.findIndex(item=>item.id===id),source:'library'});
+    } else setViewer({items:visibleItems,index,source:'library'});
   };
   const updateStatus = (next: Status) => {
     gate.current.cancel(); secondaryGate.current.cancel(); cancelMore(); viewCache.current.clear(); observedGeneration.current=null; clearMediaCache();
@@ -740,7 +774,7 @@ export function App() {
           onReview={() => {}} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
           onDuplicates={() => {setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
           onReleases={() => openCalendar()} onWork={id => {setHomeOrigin({area:'collections'});openCollections({kind:'work',id});}}/> : <>
-        <Gallery items={visibleItems} intro={filterable?<>{kindShade.inline}{intro}</>:intro} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings || !!filtersOpen} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onClearSelection={clearSelection}/>
+        <Gallery sparse={sparse} privacy={privacyMode} items={visibleItems} intro={filterable?<>{kindShade.inline}{intro}</>:intro} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings || !!filtersOpen} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onClearSelection={clearSelection}/>
         {selectionGallery&&<SelectionBar selectedCount={selectedIds.size} batchPending={albumBatchOpen} onAddToAlbum={openAlbumBatch} onClearSelection={clearSelection}/>}
         <LoadingLine label={loadingMore&&'다음 자산을 불러오는 중'} className="is-bottom"/>
         </>}

@@ -167,7 +167,7 @@ it('revalidates an album filter response after a generation retry',async()=>{
  let generation='b'.repeat(64),filtered=0;
  mocks.api.mockImplementation(async(path:string)=>{
   if(path==='/v1/library/list-generation')return {generation,filterVersion:1};
-  if(path.includes('/v1/albums/assets')&&path.includes('media_kind')){filtered++;generation='c'.repeat(64);return filtered===1?page('first'):{items:[asset('unchecked')],hasMore:false,nextCursor:null};}
+  if(path.includes('/v1/albums/assets')&&!path.includes('toc=1')&&path.includes('media_kind')){filtered++;generation='c'.repeat(64);return filtered===1?page('first'):{items:[asset('unchecked')],hasMore:false,nextCursor:null};}
   return baseApi(path);
  });
  await openRootAlbum();await choose();await screen.findAllByText(/서버를 업데이트해 주세요/);expect(filtered).toBe(2);expect(screen.queryByText('unchecked')).toBeNull();expect(screen.getByText('a1')).toBeTruthy();
