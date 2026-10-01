@@ -1,4 +1,5 @@
-//! PC-only work records and bounded, resumable cover focus. Replica DTOs stay unchanged.
+//! PC work records and bounded, resumable cover focus. The Collections replica publishes
+//! them only to servers that advertise the matching replica feature.
 use super::{
     character_worker::RuntimeConfig,
     collection::{normalized_description, validated_personal_rating},
@@ -45,6 +46,16 @@ pub struct FocusJobResult {
     pub processed: usize,
     pub failed: usize,
 }
+/// Work-record statuses per Collection type; the Collections replica server checks the same lists.
+pub(crate) fn allowed_statuses(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "game" => &["done", "playing", "unplayed"],
+        "av" => &["watched", "unwatched"],
+        "movie" => &["watched", "watching", "unwatched"],
+        "manga" => &["collecting", "complete"],
+        _ => &[],
+    }
+}
 static FOCUS_JOB: Mutex<()> = Mutex::new(());
 const BATCH_SIZE: usize = 16;
 
@@ -70,13 +81,10 @@ impl Library {
         }
         match edit {
             WorkRecordEdit::Status { value } => {
-                let allowed: &[&str] = match kind.as_str() {
-                    "game" => &["done", "playing", "unplayed"],
-                    "av" => &["watched", "unwatched"],
-                    "movie" => &["watched", "watching", "unwatched"],
-                    _ => &["collecting", "complete"],
-                };
-                if value.as_deref().is_some_and(|v| !allowed.contains(&v)) {
+                if value
+                    .as_deref()
+                    .is_some_and(|v| !allowed_statuses(&kind).contains(&v))
+                {
                     return Err(LibraryError::InvalidCollectionMetadata);
                 }
                 tx.execute("INSERT INTO collection_pc_records(collection_id,status) VALUES(?1,?2) ON CONFLICT(collection_id) DO UPDATE SET status=excluded.status",params![id,value])?;

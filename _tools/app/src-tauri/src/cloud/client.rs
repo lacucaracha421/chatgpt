@@ -3815,11 +3815,18 @@ pub(crate) struct CollectionsStatus {
     pub capabilities: Option<CollectionsCapabilities>,
     #[serde(default)]
     pub library_id: Option<String>,
+    /// Optional replica fields this server accepts (`workRecord`, `coverFocus`, `people`).
+    /// Absent on older servers, which reject unknown replica fields.
+    #[serde(default)]
+    pub replica_features: Vec<String>,
 }
 
 impl CollectionsStatus {
     pub(crate) fn supports_av_collections(&self) -> bool {
         self.collection_types.iter().any(|kind| kind == "av")
+    }
+    pub(crate) fn supports_replica_feature(&self, feature: &str) -> bool {
+        self.replica_features.iter().any(|name| name == feature)
     }
 }
 

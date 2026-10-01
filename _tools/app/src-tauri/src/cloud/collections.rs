@@ -10,6 +10,9 @@ mod av_tests;
 #[cfg(test)]
 #[path = "collections_launchbox_tests.rs"]
 mod launchbox_tests;
+#[cfg(test)]
+#[path = "collections_features_tests.rs"]
+mod features_tests;
 use super::publication::{report, Reporter};
 use super::client::CloudClient;
 use crate::library::{
@@ -56,11 +59,39 @@ pub(crate) struct ReplicaArtwork {
     thumbnail: Option<ArtworkBlob>,
     original: Option<ArtworkBlob>,
 }
+/// Optional replica fields, each sent only when `/v1/collections/status` advertises it
+/// (`replicaFeatures`), plus the older AV gate (`collectionTypes`). Older servers reject
+/// unknown fields, so a missing feature must leave the body exactly as before.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ReplicaFeatures {
+    pub av: bool,
+    pub work_record: bool,
+    pub cover_focus: bool,
+    pub people: bool,
+}
+impl ReplicaFeatures {
+    pub(crate) fn from_status(status: &super::client::CollectionsStatus) -> Self {
+        Self {
+            av: status.supports_av_collections(),
+            work_record: status.supports_replica_feature("workRecord"),
+            cover_focus: status.supports_replica_feature("coverFocus"),
+            people: status.supports_replica_feature("people"),
+        }
+    }
+}
+/// A published volume: the PC volume, plus `coverFocusX` (feature `coverFocus`).
+#[derive(Debug, Serialize)]
+pub(crate) struct ReplicaVolume {
+    #[serde(flatten)]
+    volume: CollectionVolume,
+    #[serde(rename = "coverFocusX", skip_serializing_if = "Option::is_none")]
+    cover_focus_x: Option<f64>,
+}
 #[derive(Debug, Serialize)]
 pub(crate) struct ReplicaCollection {
     #[serde(flatten)]
     summary: CollectionSummary,
-    volumes: Vec<CollectionVolume>,
+    volumes: Vec<ReplicaVolume>,
     series: Option<serde_json::Value>,
     // Omitted rather than null so a server without Film details still accepts film-less replicas.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -77,6 +108,11 @@ pub(crate) struct ReplicaCollection {
     /// Read-only Kakao/MangaDex volume schedule, same gating as the tracking keys.
     #[serde(rename = "releaseSchedule", skip_serializing_if = "Option::is_none")]
     release_schedule: Option<ReleaseSchedulePayload>,
+    /// PC work record (feature `workRecord`); each omitted when unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<String>,
+    #[serde(rename = "ownedPlatform", skip_serializing_if = "Option::is_none")]
+    owned_platform: Option<String>,
 }
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub(crate) struct ReleaseWatchPayload {
@@ -135,6 +171,9 @@ pub(crate) struct CollectionReplica {
     version: u8,
     pub base_revision: Option<String>,
     collections: Vec<ReplicaCollection>,
+    /// Performer records of published AV works (feature `people`); omitted otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    people: Option<Vec<av::PublishedPerson>>,
     /// Personal-edit handshake: all present or all absent (absent = legacy snapshot).
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     personal_edit: Option<PersonalEditHandshake>,
@@ -209,8 +248,8 @@ impl Library {
         // publisher must result in a conflict, never silently overwrite its snapshot. Mobile
         // edits also move it, so it is read after receiving.
         let base_revision = client.collections_revision(token)?;
-        let include_av = status.supports_av_collections();
-        let mut snapshot = self.cloud_collections_snapshot_with_feature(base_revision, feature.as_ref(), include_av, progress)?;
+        let features = ReplicaFeatures::from_status(&status);
+        let mut snapshot = self.cloud_collections_snapshot_with_features(base_revision, feature.as_ref(), features, progress)?;
         let Some(publisher) = snapshot.replica.personal_edit.as_ref().and(publisher) else {
             snapshot.replica.personal_edit = None;
             return publish_snapshot_as(client, token, token, &snapshot, progress);
@@ -237,11 +276,23 @@ impl Library {
         self.cloud_collections_snapshot_with_feature(base_revision, None, false, progress)
     }
 
+    #[cfg(test)]
     fn cloud_collections_snapshot_with_feature(
         &self,
         base_revision: Option<String>,
         feature: Option<&PersonalEditFeature>,
         include_av: bool,
+        progress: Reporter<'_>,
+    ) -> Result<Snapshot, LibraryError> {
+        let features = ReplicaFeatures { av: include_av, ..ReplicaFeatures::default() };
+        self.cloud_collections_snapshot_with_features(base_revision, feature, features, progress)
+    }
+
+    fn cloud_collections_snapshot_with_features(
+        &self,
+        base_revision: Option<String>,
+        feature: Option<&PersonalEditFeature>,
+        features: ReplicaFeatures,
         progress: Reporter<'_>,
     ) -> Result<Snapshot, LibraryError> {
         let root = self
@@ -252,7 +303,7 @@ impl Library {
         let mut connection = rusqlite::Connection::open_with_flags(
             self.root().join("library.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
-        snapshot_from_connection_with_feature(&root, &mut connection, base_revision, feature, include_av, progress)
+        snapshot_from_connection_with_feature(&root, &mut connection, base_revision, feature, features, progress)
     }
 }
 
@@ -325,10 +376,11 @@ fn upload_local_blob(client: &CloudClient, token: &str, local: &LocalBlob) -> Re
 
 #[cfg(test)]
 fn snapshot_from_connection(root: &Path, connection: &mut rusqlite::Connection, base_revision: Option<String>, progress: Reporter<'_>) -> Result<Snapshot, LibraryError> {
-    snapshot_from_connection_with_feature(root, connection, base_revision, None, false, progress)
+    snapshot_from_connection_with_feature(root, connection, base_revision, None, ReplicaFeatures::default(), progress)
 }
 
-fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite::Connection, base_revision: Option<String>, feature: Option<&PersonalEditFeature>, include_av: bool, progress: Reporter<'_>) -> Result<Snapshot, LibraryError> {
+fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite::Connection, base_revision: Option<String>, feature: Option<&PersonalEditFeature>, features: ReplicaFeatures, progress: Reporter<'_>) -> Result<Snapshot, LibraryError> {
+        let include_av = features.av;
         let transaction = connection.transaction()?;
         // The received cursor is read in the same read transaction as the rows, so the
         // snapshot never advertises edits its rows do not reflect. An adopted feature with
@@ -420,12 +472,35 @@ fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite:
             } else {
                 (None, None, None)
             };
+            let (status, owned_platform) = if features.work_record {
+                committed_work_record(&transaction, &summary.id)?
+            } else {
+                (None, None)
+            };
+            let focus = if features.cover_focus {
+                committed_cover_focus(&transaction, &summary.id)?
+            } else {
+                BTreeMap::new()
+            };
+            let volumes = volumes
+                .into_iter()
+                .map(|volume| {
+                    // Only a focus measured on the cover this volume publishes applies.
+                    let cover_focus_x = focus
+                        .get(&volume.id)
+                        .filter(|(artwork, _)| volume.cover_artwork_id.as_deref() == Some(artwork.as_str()))
+                        .map(|(_, x)| *x);
+                    ReplicaVolume { volume, cover_focus_x }
+                })
+                .collect();
             let collection = ReplicaCollection {
                 series,
                 film,
                 av: None,
                 summary,
                 volumes,
+                status,
+                owned_platform,
                 artworks,
                 release_watch,
                 owned_volumes,
@@ -455,6 +530,17 @@ fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite:
                 collection.av = Some(info);
             }
         }
+        let people = if features.people {
+            let people = av::committed_people(&transaction, &collections)?;
+            metadata_bytes += serde_json::to_vec(&people)
+                .map_err(|_| LibraryError::InvalidCloudResponse)?.len() + 10;
+            if metadata_bytes > MAX_METADATA_BYTES {
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+            Some(people)
+        } else {
+            None
+        };
         // Keep the single committed SQLite view during extraction, release it before HTTP.
         transaction.commit()?;
         // The read transaction already fixes the committed metadata snapshot. An
@@ -465,10 +551,43 @@ fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite:
                 version: 1,
                 base_revision,
                 collections,
+                people,
                 personal_edit,
             },
             files,
         })
+}
+
+/// PC work record (`collection_pc_records`), published only with values the replica server
+/// accepts: a status from the type's list, an owned platform on games only.
+fn committed_work_record(db: &rusqlite::Connection, id: &str) -> Result<(Option<String>, Option<String>), LibraryError> {
+    use rusqlite::OptionalExtension;
+    let row: Option<(String, Option<String>, Option<String>)> = db
+        .query_row(
+            "SELECT c.type, p.status, p.owned_platform FROM collection_pc_records p JOIN collections c ON c.id=p.collection_id WHERE p.collection_id=?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    let Some((kind, status, owned_platform)) = row else { return Ok((None, None)) };
+    let status = status.filter(|value| crate::library::collection_pc::allowed_statuses(&kind).contains(&value.as_str()));
+    let owned_platform = owned_platform
+        .filter(|value| kind == "game" && !value.trim().is_empty() && value.chars().count() <= 200);
+    Ok((status, owned_platform))
+}
+
+/// Measured cover focus per volume id: (the cover artwork it was measured on, x in [0, 1]).
+fn committed_cover_focus(db: &rusqlite::Connection, id: &str) -> Result<BTreeMap<String, (String, f64)>, LibraryError> {
+    let focus = db
+        .prepare(
+            "SELECT f.volume_id, f.cover_artwork_id, f.focus_x FROM collection_volume_cover_focus f
+             JOIN collection_volumes v ON v.id=f.volume_id
+             WHERE v.collection_id=?1 AND f.method<>'none' AND f.focus_x IS NOT NULL",
+        )?
+        .query_map([id], |r| Ok((r.get::<_, String>(0)?, (r.get::<_, String>(1)?, r.get::<_, f64>(2)?))))?
+        .filter(|row| row.as_ref().map_or(true, |(_, (_, x))| x.is_finite() && (0.0..=1.0).contains(x)))
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    Ok(focus)
 }
 
 fn available_artwork(artworks: &[ReplicaArtwork], id: Option<&str>) -> bool {
@@ -730,8 +849,8 @@ mod tests {
         assert_eq!(game.summary.selected_work_artwork_id.as_deref(),Some(source_id("artwork/g/collection-sources/book/games/game/covers/preferred.png").as_str()));
         let manga = first.replica.collections.iter().find(|c|c.summary.id=="m").unwrap();
         assert_eq!(manga.volumes.len(),3);
-        assert_eq!(manga.volumes.iter().find(|v|v.volume_number==1&&v.edition_index==0).unwrap().id,"retained-volume");
-        assert!(manga.volumes.iter().all(|v|available_artwork(&manga.artworks,v.cover_artwork_id.as_deref())));
+        assert_eq!(manga.volumes.iter().find(|v|v.volume.volume_number==1&&v.volume.edition_index==0).unwrap().volume.id,"retained-volume");
+        assert!(manga.volumes.iter().all(|v|available_artwork(&manga.artworks,v.volume.cover_artwork_id.as_deref())));
         for collection in &first.replica.collections {
             assert!(collection.summary.source_path.is_none());
             for art in &collection.artworks {
@@ -890,7 +1009,7 @@ mod tests {
             assert_eq!(request.url(), "/v1/collections/replica");
             request.respond(Response::from_string(json!({"revision":"published"}).to_string())).unwrap();
         });
-        let snapshot = Snapshot { files, replica: CollectionReplica {version:1,base_revision:None,collections:vec![],personal_edit:None} };
+        let snapshot = Snapshot { files, replica: CollectionReplica {version:1,base_revision:None,collections:vec![],people:None,personal_edit:None} };
         let events = std::sync::Mutex::new(Vec::new());
         assert_eq!(publish_snapshot(&client, "test-token", snapshot, &|event| events.lock().unwrap().push(event)).unwrap().revision, "published");
         let events = events.into_inner().unwrap();
@@ -915,7 +1034,7 @@ mod tests {
             assert_eq!(request.url(),"/v1/collections/replica");
             request.respond(Response::from_string(r#"{"revision":"published"}"#)).unwrap();
         });
-        let snapshot=Snapshot{files,replica:CollectionReplica{version:1,base_revision:None,collections:vec![],personal_edit:None}};
+        let snapshot=Snapshot{files,replica:CollectionReplica{version:1,base_revision:None,collections:vec![],people:None,personal_edit:None}};
         assert_eq!(publish_snapshot(&client,"test-token",snapshot,&|_|{}).unwrap().uploaded,0);
         worker.join().unwrap();
     }
@@ -1076,7 +1195,7 @@ mod tests {
         assert_eq!(
             snapshot(),
             before,
-            "PC edits leave the entire published replica unchanged"
+            "without replica features PC edits leave the entire published replica unchanged"
         );
         let after: i64 = library
             .connection()
@@ -1087,9 +1206,12 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
+        // Three record writes and one focus write, each marked by the 0117 triggers so a
+        // server with the replica features receives them.
         assert_eq!(
-            after, generation,
-            "PC-local edits do not schedule publication"
+            after,
+            generation + 4,
+            "PC record and focus edits schedule publication"
         );
         let encoded = serde_json::to_string(&before).unwrap();
         for field in [
