@@ -367,13 +367,12 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .asset-topbar { flex-wrap:nowrap; }
 .asset-topbar .top-bar__titles { flex:1 1 auto; min-width:0; overflow:hidden; }
 .asset-topbar .top-bar__space { flex:0 0 4px; }
-.asset-topbar__kind-control { display:flex; align-items:center; flex:none; }
 .asset-topbar .filter-chips { flex:none; }
 /* Compact toolbar buttons share one look: body size, weight 400, muted (DESIGN.md §12 Controls). */
 .asset-topbar__sort, .asset-topbar__sort.ui-button { flex:none; gap:5px; white-space:nowrap; color:var(--color-muted); font-size:var(--type-body); font-weight:400; }
 .asset-topbar__sort svg { width:16px; height:16px; color:var(--color-muted); }
-/* One centre line for every bar control: the segmented track is 44px (its cells fill it), the
-   compact buttons sit centred at 36px with their own 44px hit area. */
+/* One centre line for every bar control: the compact buttons sit centred at 36px with their own
+   44px hit area. */
 .asset-topbar > *, .asset-topbar .filter-chips--toolbar { align-self:center; }
 .asset-topbar .filter-chip--toolbar, .asset-topbar__sort { line-height:1; }
 .asset-topbar .top-bar__title h1 { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

@@ -194,9 +194,7 @@
 .collection-toast{position:fixed;z-index:190;left:50%;transform:translateX(-50%);bottom:calc(72px + env(safe-area-inset-bottom));width:max-content;max-width:calc(100vw - 2*var(--mobile-gutter,16px));margin:0;padding:10px 14px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-sidebar);color:var(--color-text);box-shadow:var(--shadow-dialog);font-size:13px}
 .collection-scroll{padding-top:6px}
 
-/* Tablet collections A: the type switch is below the bar and the page reads as sections. */
-.mobile-collections>.collection-type-switch{flex-shrink:0;padding:16px 24px 0}
-.mobile-collections>.collection-type-switch .ui-segmented{min-height:44px}
+/* Tablet collections A: the type switch is the list's first row (SectionShade.tsx) and the page reads as sections. */
 .mobile-collections>.collection-scroll{padding-inline:24px}
 .collection-shelf{display:grid;grid-auto-flow:column;grid-auto-columns:calc((100% - 32px)/5);gap:8px;overflow-x:auto;margin:8px 0 8px;padding:0 0 4px;scrollbar-width:none}
 .collection-shelf::-webkit-scrollbar{display:none}

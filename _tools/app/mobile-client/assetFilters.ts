@@ -38,6 +38,8 @@ export function filterVersionOf(reply: unknown): number | null {
 }
 
 export const MEDIA_LABELS: Record<AssetMediaFilter, string> = {all:'전체', images:'이미지', videos:'영상'};
+/** 종류 as the section bar's options (전체 · 이미지 · 영상). */
+export const MEDIA_SECTIONS = (Object.keys(MEDIA_LABELS) as AssetMediaFilter[]).map(value => ({value, label:MEDIA_LABELS[value]}));
 export const ASPECT_LABELS: Record<AssetAspectFilter, string> = {all:'전체', square:'정사각형', landscape:'가로형', portrait:'세로형'};
 /** Duration buckets, in ascending order. `over_5m` is left open above its minimum. */
 export const DURATION_LABELS: Record<AssetDurationFilter, string> = {

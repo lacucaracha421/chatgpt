@@ -12,6 +12,7 @@ import {CatalogReader} from './CatalogReader';
 import {CatalogRefreshBanner,CatalogRefreshControl,useCatalogRefresh,useNow} from './CatalogRefresh';
 import {BottomSheet} from './BottomSheet';
 import {usePullToRefresh} from './usePullToRefresh';
+import {useSectionShade} from './SectionShade';
 import {Scrubber} from './Scrubber';
 import {CatalogSettings} from './CatalogSettings';
 import {CatalogDuplicates,DuplicateReviewEntry,useDuplicateCount} from './CatalogDuplicates';
@@ -35,6 +36,7 @@ function ArrivingCard({arriving,onArrived,disabled,onClick,children}:{arriving:b
 type ReaderPrefetch={cacheKey:string;owner:string;controller:AbortController;promise:Promise<CatalogReaderManifest>};
 function readerCacheKey(item:Pick<CatalogItem,'provider'|'providerWorkId'>,revision:string,filterKey:string){return `${revision}:${filterKey}:${item.provider}:${item.providerWorkId}`;}
 
+const SOURCES:readonly {value:CatalogQuery['scope'];label:string}[]=[{value:'all',label:'카탈로그'},{value:'bookmarked',label:'북마크'}];
 export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onReturnHome}:{active:boolean;paused:boolean;backRef:MutableRefObject<(()=>boolean)|null>;endpoint?:string;
   /** Bumped by Home's 중복 판본 tile: opens the duplicate-edition review. */
   openDuplicates?:number;
@@ -386,6 +388,8 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
   const LANGUAGES:Record<CatalogQuery['language'],string>={korean:'한국어',japanese:'일본어',all:'전체 언어'};
   const SORTS:Record<CatalogQuery['sort'],string>={latest:'최신순',views:'조회순',hotDay:'오늘 인기',hotWeek:'이번 주 인기',hotMonth:'이번 달 인기'};
   const bookmarkScope=query.scope==='bookmarked';
+  // 카탈로그 · 북마크 is the list's first row; scrolled away, the top bar pulls it down. 북마크 lists newest first.
+  const sources=useSectionShade<CatalogQuery['scope']>({label:'카탈로그 출처',options:SOURCES,value:query.scope,onChange:scope=>{if(scope!==query.scope)change(scope==='bookmarked'?{scope,sort:'latest'}:{scope});}},{active:active&&!paused&&!selected&&!reader&&!settings&&!duplicates});
   const revision=page?.publicationRevision??'0'.repeat(64);
   const scrubberSort=useMemo(()=>query.sort==='latest' ? {kind:'date' as const,values:items.map(item=>item.posted)} : {kind:'fallback' as const},[items,query.sort]);
 
@@ -404,15 +408,16 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
   return <section ref={section} className="mobile-catalog" style={{display:active?'flex':'none'}} aria-label="만화 카탈로그">
     <div className="catalog-content" style={{display:selected?'none':undefined}}>
       {searching?<TopBarSearch title="카탈로그" loading={busy&&'카탈로그 불러오는 중'} onClose={closeSearch}>{searchForm}</TopBarSearch>
-      :<TopBar loading={busy&&'카탈로그 불러오는 중'} title={<>카탈로그{page?.countStatus==='ready'&&page.totalCount!=null&&<span className="numeric muted catalog-total">{page.totalCount.toLocaleString()}</span>}</>}
+      :<TopBar barRef={sources.barRef} loading={busy&&'카탈로그 불러오는 중'} title={<>{sources.title('카탈로그')}{page?.countStatus==='ready'&&page.totalCount!=null&&<span className="numeric muted catalog-total">{page.totalCount.toLocaleString()}</span>}</>}
         actions={<>{!selected&&<CatalogRefreshControl state={refreshState} publishedAt={page?.publishedAt} now={now} onReload={reload} reloadBusy={busy}/>}<SearchButton onClick={()=>setSearchOpen(true)}/></>}/>}
+      {!searching&&sources.shade}
       <div ref={list} className="catalog-scroll" onScroll={event=>{scroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))loadMore();}}>
         {listPull}
+        {sources.inline}
         <CatalogRefreshBanner state={refreshState}/>
         <div className="filter-chips catalog-chips" role="group" aria-label="카탈로그 보기">
           <button className="filter-chip" aria-haspopup="dialog" aria-label={`카탈로그 언어 ${LANGUAGES[query.language]}`} onClick={()=>setSheet('language')}>{LANGUAGES[query.language]}<ChevronDownIcon aria-hidden="true"/></button>
           <button className="filter-chip" aria-haspopup="dialog" aria-label={`카탈로그 정렬 ${bookmarkScope?'최신순':SORTS[query.sort]}`} disabled={bookmarkScope} onClick={()=>setSheet('sort')}>{bookmarkScope?'최신순':SORTS[query.sort]}<ChevronDownIcon aria-hidden="true"/></button>
-          <button className={`filter-chip ${bookmarkScope?'selected':''}`} aria-pressed={bookmarkScope} onClick={()=>change(bookmarkScope?{scope:'all'}:{scope:'bookmarked',sort:'latest'})}><BookmarkIcon aria-hidden="true"/>북마크</button>
           <button className={`filter-chip ${filterCount?'selected':''}`} aria-haspopup="dialog" aria-label={filterCount?`필터 ${filterCount}개 적용`:defaultTags?`필터, 기본 회피 태그 ${defaultTags}개`:'필터'} disabled={!active} onClick={openSettings}><FunnelIcon aria-hidden="true"/>필터{filterCount>0?<span className="catalog-chip-count numeric">{filterCount}</span>:defaultTags>0&&<span className="filter-chip__default">기본</span>}</button>
         </div>
         {browseSort!==null&&browseSort!=='latest'&&query.sort==='latest'&&!bookmarkScope&&<p className="catalog-search-note muted" style={{margin:'0 0 8px',fontSize:12}}>검색 중에는 최신순으로 표시합니다</p>}

@@ -79,7 +79,7 @@ it('shows the three asset segments and lazily browses pinned artists with search
  mocks.api.mockImplementation(async(path:string,signal?:AbortSignal)=>path==='/v1/library/artists'?{artists}:original(path,signal));
  function Root(){const [segment,onSegment]=useState<'folders'|'albums'|'artists'>('folders');return <LibraryRoot {...props} segment={segment} onSegment={onSegment}/>;}
  render(<Root/>);
- expect(screen.getByRole('radiogroup',{name:'에셋 보기'})).toBeTruthy();
+ expect(screen.getByRole('radiogroup',{name:'에셋 보기'}).closest('.library-root-scroll > .ui-section-bar--inline')).toBeTruthy();
  expect(screen.getAllByRole('radio')).toHaveLength(3);
  fireEvent.click(screen.getByRole('radio',{name:'작가'}));
  await waitFor(()=>expect(mocks.api).toHaveBeenCalledWith('/v1/library/artists',expect.anything()));

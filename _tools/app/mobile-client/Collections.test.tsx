@@ -431,12 +431,14 @@ describe('read-only collections',()=>{
     expect(types.queryByRole('radio',{name:'AV'})).toBeNull();
     expect(types.getAllByRole('radio').map(radio=>radio.getAttribute('aria-label'))).toEqual(['게임','만화','영화']);
   });
-  it('keeps the type switch below the top bar, including while searching',async()=>{
+  it('keeps the type switch as the list\'s first row, including while searching',async()=>{
     render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     const switcher=()=>screen.getByRole('radiogroup',{name:'컬렉션 유형'});
     expect(switcher().closest('header.top-bar')).toBeNull();
-    expect(switcher().closest('.collection-type-switch')).toBeTruthy();
-    expect(list().querySelector('[role=radiogroup]')).toBeNull();
+    // The section bar is the scrolling list's first row (after the zero-height refresh pill).
+    const firstRow=[...list().children].find(child=>!child.matches('.pull-refresh'));
+    expect(firstRow?.classList.contains('ui-section-bar--inline')).toBe(true);
+    expect(firstRow?.contains(switcher())).toBe(true);
     expect(screen.getAllByRole('radiogroup',{name:'컬렉션 유형'})).toHaveLength(1);
     const listPaths=()=>mocks.api.mock.calls.map(([path])=>path as string).filter(path=>path.startsWith('/v1/collections?'));
     fireEvent.change(searchBox(),{target:{value:'밤'}});fireEvent.submit(searchBox().closest('form')!);
@@ -449,6 +451,20 @@ describe('read-only collections',()=>{
     expect(searchBox().value).toBe('');
     expect(screen.getByRole('radio',{name:'만화'}).getAttribute('aria-checked')).toBe('true');
     expect(screen.getByRole('radio',{name:'게임'}).getAttribute('aria-checked')).toBe('false');
+  });
+  it('pulls the type switch down from the top bar once the list has scrolled past it',async()=>{
+    render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    expect(screen.queryByRole('button',{name:'컬렉션 · 게임'})).toBeNull();
+    list().scrollTop=400;fireEvent.scroll(list());
+    const title=screen.getByRole('button',{name:'컬렉션 · 게임'});
+    fireEvent.click(title);
+    const shade=section().querySelector('.section-shade') as HTMLElement;
+    expect(shade.classList.contains('is-open')).toBe(true);
+    const listPaths=()=>mocks.api.mock.calls.map(([path])=>path as string).filter(path=>path.startsWith('/v1/collections?'));
+    fireEvent.click(within(shade).getByRole('radio',{name:'만화'}));
+    expect(shade.classList.contains('is-open')).toBe(false);
+    await waitFor(()=>expect(listPaths().at(-1)).toContain('type=manga'));
+    expect(within(list()).getByRole('radio',{name:'만화'}).getAttribute('aria-checked')).toBe('true');
   });
   it('swaps the list sideways toward the chosen type only once its page commits',async()=>{
     const animate=vi.fn(()=>({cancel(){}}));(HTMLElement.prototype as unknown as {animate:unknown}).animate=animate;
@@ -465,9 +481,11 @@ describe('read-only collections',()=>{
       await act(async()=>resolveManga({...page,items:[{...item,id:'manga-2',type:'manga',name:'새 만화'}]}));
       await screen.findByText('새 만화');
       const moves=animate.mock.calls as unknown as [Keyframe[],KeyframeAnimationOptions][];
-      expect(moves).toHaveLength(1);
-      expect((animate.mock.contexts as HTMLElement[])[0]).toBe(list());
-      expect(moves[0][0][0].transform).toBe('translateX(16px)');
+      // The list's rows slide; its first row, the section bar, stays still.
+      const moved=animate.mock.contexts as unknown as HTMLElement[];
+      expect(moved.length).toBeGreaterThan(0);
+      expect(moved.every(element=>element.parentElement===list()&&!element.matches('.ui-section-bar,.pull-refresh,.mobile-scrubber'))).toBe(true);
+      expect(moves.every(move=>move[0][0].transform==='translateX(16px)')).toBe(true);
       // AV lies to the right as well; back to 게임 comes in from the left.
       pressTab('AV');await screen.findByText('PC 앱이 AV 작품을 아직 보내지 않았습니다');
       expect(moves.at(-1)![0][0].transform).toBe('translateX(16px)');

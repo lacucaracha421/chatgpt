@@ -4,6 +4,9 @@
 .library-root-scroll h2,.folder-intro h2 { font-size:15px; font-weight:500; margin:24px 0 12px; }
 .library-segments { width:100%; margin:var(--space-3) 0 var(--space-2); }
 .library-segments .ui-segmented__cell { min-height:42px; }
+/* Asset galleries (folders, albums, characters) have a 16px side gutter; their shade matches it. */
+.library-main { --section-shade-gutter:16px; }
+.library-root { --section-shade-gutter:var(--mobile-gutter); }
 .library-search { display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--color-border); margin-bottom:16px; }
 .library-search svg { width:20px; color:var(--color-muted); }
 .library-search input { flex:1; min-width:0; min-height:48px; border:0; background:transparent; color:inherit; font:inherit; }
@@ -116,7 +119,7 @@
 .library-root.is-fit .library-root-scroll { scroll-snap-type:y proximity; scroll-padding-bottom:32px; padding-bottom:0; }
 .library-root.is-fit .library-root-folders { padding-bottom:24px; }
 .library-root.is-fit .library-root-folders .library-folder { scroll-snap-align:end; }
-.library-root.is-fit .library-segments { scroll-snap-align:start; }
+.library-root.is-fit .library-root-scroll > .ui-section-bar--inline { scroll-snap-align:start; }
 /* Sticks to the bottom of the first screen and covers the gap where the next row would begin. */
 .library-end-line { position:sticky; bottom:0; z-index:1; display:flex; align-items:center; justify-content:center; gap:8px; height:32px; margin:0; font-size:12px; color:var(--color-muted); background:var(--color-bg); }
 .library-end-line svg { width:14px; height:14px; }

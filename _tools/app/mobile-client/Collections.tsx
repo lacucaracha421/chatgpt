@@ -23,11 +23,12 @@ import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, us
 import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,useSegmentMotion,type CardArrival} from './motion';
 import {ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
-import {Badge, Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel, SegmentedControl} from './ui';
+import {Badge, Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {SearchButton,TopBar,TopBarSearch} from './TopBar';
 import {StepSlider} from './StepSlider';
 import {usePullToRefresh} from './usePullToRefresh';
+import {useSectionShade} from './SectionShade';
 import {PhysicalCover} from '../src/collections/physical/PhysicalCover';
 import {PaperbackEngine, type BookTexture} from '../src/collections/physical/PaperbackEngine';
 import {usePrivacyMode} from './privacyMode';
@@ -345,6 +346,8 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
   const retryMore=useCallback(()=>{setState(value=>({...value,moreError:''}));},[]);
   return {...state,reload:restart,loadMore,retryMore,committed:state.key===committed.current&&!!state.page};
 }
+/** The list's own rows, which a type switch slides; the section bar, refresh pill and scrubber stay put. */
+const listParts=(host:HTMLElement)=>[...host.children].filter((child):child is HTMLElement=>child instanceof HTMLElement&&!child.matches('.ui-section-bar,.pull-refresh,.mobile-scrubber'));
 const nearEnd=(element:HTMLElement)=>element.clientHeight>0&&element.scrollHeight-element.scrollTop-element.clientHeight<element.clientHeight;
 
 /** 내 별점 filter stops: 전체, then 0.5 … 5.0 (exact match, as the server applies it). */
@@ -564,6 +567,9 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   // A queued rating shows on the cards too, until the list re-reads the server.
   const card=(work:CollectionSummary)=>{const value=edits.visible(work.id,'myScore',work.myScore??null).value;return value===(work.myScore??null)?work:{...work,myScore:value};};
 
+  // The type switch is the list's first row; scrolled away, the top bar pulls it down as a shade.
+  const typeOptions=TABS.filter(value=>!privacyMode||value!=='av').map(value=>({value,label:labels[value]}));
+  const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab},{active:live&&!selected&&!showcaseAll&&!inboxOpen&&!performer});
   // Search lives in the shared bar: a magnifier that opens the field, kept open while a query is set.
   const searching=searchOpen||!!query||!!search;
   const closeSearch=()=>{setQuery('');setSearch('');setSearchOpen(false);};
@@ -580,10 +586,7 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
           {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
         </form></TopBarSearch>
-        :<TopBar title="컬렉션" loading={main.busy&&'컬렉션 불러오는 중'} actions={tab!=='av'?<SearchButton onClick={()=>setSearchOpen(true)}/>:undefined}/>;
-
-  const typeOptions=TABS.filter(value=>!privacyMode||value!=='av').map(value=>({value,label:labels[value]}));
-  const typeSwitch=<div className="collection-type-switch"><SegmentedControl label="컬렉션 유형" options={typeOptions} value={tab} onChange={chooseTab} fullWidth/></div>;
+        :<TopBar barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} actions={tab!=='av'?<SearchButton onClick={()=>setSearchOpen(true)}/>:undefined}/>;
   const newsSection=tab==='manga'
     ?<section className="collection-news-section" aria-label="소식">
       <CollectionSectionLabel name="신간" count={releases.unread>0?releases.unread:undefined} open={newsOpen} onToggle={()=>setSectionOpen('news',!newsOpen)} onOpen={openInbox}/>
@@ -607,8 +610,8 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   // Opening a work or the whole Showcase is one level deeper; Back returns from the left.
   useLevelMotion(sectionRef,active?`${selected??''}|${performer?.id??''}|${showcaseAll}|${inboxOpen}`:null,(selected?1:0)+(performer?1:0)+(showcaseAll||inboxOpen?1:0));
   // A type switch swaps the list sideways once the new type's list (and its Showcase row, when
-  // open) has settled, so the old type's cards never slide in; the bar stays still.
-  useSegmentMotion(listRef,tab==='av'||(settledOn(main,mainKey)&&(!wantShowcase||settledOn(showcase,showcaseKey)))?tab:null,(privacyMode?TABS.filter(value=>value!=='av'):TABS).indexOf(tab));
+  // open) has settled, so the old type's cards never slide in; the bar (its first row) stays still.
+  useSegmentMotion(listRef,tab==='av'||(settledOn(main,mainKey)&&(!wantShowcase||settledOn(showcase,showcaseKey)))?tab:null,(privacyMode?TABS.filter(value=>value!=='av'):TABS).indexOf(tab),listParts);
   // The grid keeps the layout of the type it shows until the new type's page commits.
   const shownType=main.items[0]?.type??type;
   // Cards appended by scrolling rise in once each; a committed first page (a type switch, a
@@ -682,9 +685,10 @@ export function Collections({active,paused,backRef,request,onReturnHome,onCalend
   </>;
   return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
     {header}
-    {!selected&&!showcaseAll&&!inboxOpen&&!performer&&typeSwitch}
+    {!selected&&!showcaseAll&&!inboxOpen&&!performer&&!searching&&sections.shade}
     <div ref={listRef} className="collection-scroll" style={{display:selected||showcaseAll||inboxOpen||performer?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
       {listPull}
+      {sections.inline}
       {tab==='av'?<>
       <AvLookupSender/>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}

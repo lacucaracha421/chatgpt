@@ -90,6 +90,12 @@ it('retains a failed draft and retries it explicitly',async()=>{
 
 const pinned:MobileNote={...note,id:'b'.repeat(32),title:'고정한 메모',pinned:true};
 const trashed:MobileNote={...note,id:'c'.repeat(32),title:'지운 메모',deleted:true};
+it('puts the note kinds first in the list, above the search',async()=>{
+ render(<Notes active backRef={{current:null}}/>);await screen.findByText('제목');
+ const kinds=screen.getByRole('radiogroup',{name:'메모 종류'}).closest('.notes-scroll > .ui-section-bar--inline') as HTMLElement;
+ expect(kinds).toBeTruthy();
+ expect(kinds.compareDocumentPosition(screen.getByLabelText('메모 검색'))&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
 it('groups pinned notes, keeps the trash behind a small link and returns with Back',async()=>{
  mock.native.mockImplementation(state([note,pinned,trashed]));
  const backRef:{current:(()=>boolean)|null}={current:null};

@@ -19,14 +19,15 @@ import {Exchange} from './Exchange';
 import {useExchange} from './useExchange';
 import {sendingSummary} from './homeDashboard';
 
-import {Button, IconButton, Mark, SegmentedControl} from './ui';
+import {Button, IconButton, Mark} from './ui';
+import {closeVisibleShade,useSectionShade} from './SectionShade';
 import {api, errorText, native} from './transport';
 import {clearMediaCache} from './media';
 import {resetWarmProgress, startThumbnailWarm} from './thumbnailWarm';
 import {DEFAULT_DENSITY, DENSITIES, densityIndex, densityOf, normalizePage, pagePath, RequestGate, validDensity, viewKey} from './model';
 import {StepSlider} from './StepSlider';
 import type {Asset, AssetFiltersValue, Classification, Page, SavedPosition, Status, View} from './types';
-import {EMPTY_FILTERS, ASSET_FILTER_VERSION, ASSET_SORTS, SORT_LABELS, hasActiveFilters, sameFilters, sortOf, type AssetSort} from './assetFilters';
+import {EMPTY_FILTERS, ASSET_FILTER_VERSION, ASSET_SORTS, MEDIA_SECTIONS, SORT_LABELS, hasActiveFilters, sameFilters, sortOf, type AssetSort} from './assetFilters';
 import {FilterChips,type FilterGroup} from './FilterChips';
 import {BarProgress,LoadingLine,TopBar,closeVisibleSearch} from './TopBar';
 import {BottomSheet} from './BottomSheet';
@@ -520,6 +521,8 @@ export function App() {
       else if (state.viewer) setViewer(null);
       // An open top-bar search closes (and clears) before Back navigates anywhere.
       else if (closeVisibleSearch()) { /* The search bar consumed back. */ }
+      // A section bar pulled down over a list closes before Back navigates.
+      else if (closeVisibleShade()) { /* The section shade consumed back. */ }
       else if (state.calendarOpen) {if (!calendarBack.current?.()) setCalendarOpen(false);}
       else if (state.artistsOpen) {if (!artistsBack.current?.()) closeArtists();}
       else if (state.area === 'collections') {if (!collectionBack.current?.()) returnHome();}
@@ -664,6 +667,8 @@ export function App() {
     return()=>controller.abort();
   },[status.endpoint,status.configured,indexRevision]);
   const filterable = area==='assets' && page.view.tab==='library' && !page.view.root && !page.view.characters && !page.view.revisit;
+  // 종류 (전체 · 이미지 · 영상) is the gallery's first row; scrolled away, the top bar pulls it down.
+  const kindShade = useSectionShade<AssetFiltersValue['media']>({label:'종류',options:MEDIA_SECTIONS,value:filters.media,onChange:applyMedia},{active:filterable&&!settings&&!viewer});
   const selectionGallery = filterable;
   const currentEntry=entries.find(item=>item.id===page.view.classification);
   const childEntries=entries.filter(item=>item.parent_id===currentEntry?.id);
@@ -710,9 +715,8 @@ export function App() {
   const openPending = () => { if (captures?.length) setViewer({items: captures, index: 0, pending: true}); else void refreshSecondary(true); };
   const libraryCount=hasActiveFilters(page.filters)?`${page.items.length}${page.has_more?'+':''}`:currentEntry?.asset_count??currentAlbum?.assetCount??`${page.items.length}${page.has_more?'+':''}`;
   const libraryCrumbNode=<nav className="library-breadcrumb" aria-label="현재 위치">{crumbs.map((crumb,i)=><span key={crumb.id}>{i>0&&<span aria-hidden="true">›</span>}<button type="button" onClick={crumb.onSelect}>{crumb.name}</button></span>)}</nav>;
-  const assetToolbar=page.view.tab==='library'&&!page.view.root&&!page.view.characters&&!page.view.revisit&&<TopBar className="library-header asset-topbar" loading={busy&&'목록 불러오는 중'} back={{label:'뒤로',onClick:()=>window.dispatchEvent(new Event('lakomics-back'))}} crumbs={libraryCrumbNode} title={page.view.title} count={libraryCount}
+  const assetToolbar=page.view.tab==='library'&&!page.view.root&&!page.view.characters&&!page.view.revisit&&<TopBar barRef={kindShade.barRef} className="library-header asset-topbar" loading={busy&&'목록 불러오는 중'} back={{label:'뒤로',onClick:()=>window.dispatchEvent(new Event('lakomics-back'))}} crumbs={libraryCrumbNode} title={kindShade.title(page.view.title)} count={libraryCount}
     actions={<>
-      <div className="asset-topbar__kind-control"><SegmentedControl<AssetFiltersValue['media']> label="종류" options={[{value:'all',label:'전체'},{value:'images',label:'이미지'},{value:'videos',label:'영상'}]} value={filters.media} onChange={applyMedia}/></div>
       <FilterChips media={false} sheet={false} variant="toolbar" showReset={false} value={filters} applied={filters} onChange={applyFilters} open={null} onOpen={setFiltersOpen}/>
       {!page.view.album&&<Button type="button" size="sm" variant="ghost" className="asset-topbar__sort" aria-label={`정렬 ${SORT_LABELS[sortOf(filters)]}`} onClick={()=>setSortOpen(true)}><ArrowsUpDownIcon aria-hidden="true"/><span>{SORT_LABELS[sortOf(filters)]}</span></Button>}
       <Button type="button" size="icon" variant="ghost" className="top-bar__options" aria-label="보기 옵션" onClick={()=>{setOptionsScope(page.view.album?page.items:[]);setSortOpen(false);setViewSettings(true);}}><Squares2X2Icon aria-hidden="true"/></Button>
@@ -724,7 +728,7 @@ export function App() {
     {status.configured ? <div className="app-body" data-active-tab={area==='assets'?page.view.tab:area}>
       <main className="library-main" ref={mainRef} style={{display:area!=='assets'||artistsOpen?'none':undefined}}>
         {page.view.tab==='home'&&<HeaderTools active={area==='assets'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2></div></HeaderTools>}
-        {assetToolbar}{revisitToolbar}
+        {assetToolbar}{assetToolbar&&kindShade.shade}{revisitToolbar}
         {/* The Library root stays mounted while a folder is open, so going back shows its folders,
             covers and position at once instead of rebuilding them. */}
         <LibraryRoot key={`root:${status.endpoint}`} active={rootShown} entries={entries} characters={characterIndex} items={rootPage.current.items} total={rootPage.current.total} onTrash={trash.available?()=>trash.setOpen(true):undefined} paused={paused||!rootShown} busy={busy} revision={indexRevision+1} onSelect={select} onOpenArtist={openArtist} onRefresh={refresh} albumTree={albumTree} albumError={albumError} segment={librarySegment} onSegment={setLibrarySegment} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} similarity={{enabled:true,refreshKey:similarityClosed,scope:status.endpoint,onOpen:()=>setSimilarity(true)}}/>
@@ -736,7 +740,7 @@ export function App() {
           onReview={() => {}} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
           onDuplicates={() => {setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
           onReleases={() => openCalendar()} onWork={id => {setHomeOrigin({area:'collections'});openCollections({kind:'work',id});}}/> : <>
-        <Gallery items={visibleItems} intro={intro} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings || !!filtersOpen} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onClearSelection={clearSelection}/>
+        <Gallery items={visibleItems} intro={filterable?<>{kindShade.inline}{intro}</>:intro} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings || !!filtersOpen} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onClearSelection={clearSelection}/>
         {selectionGallery&&<SelectionBar selectedCount={selectedIds.size} batchPending={albumBatchOpen} onAddToAlbum={openAlbumBatch} onClearSelection={clearSelection}/>}
         <LoadingLine label={loadingMore&&'다음 자산을 불러오는 중'} className="is-bottom"/>
         </>}

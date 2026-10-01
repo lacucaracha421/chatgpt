@@ -1,10 +1,11 @@
 import {useVisibleInterval} from './useVisibleInterval';
 import {SIGNAL_FALLBACK_MS,useSyncSignal} from './syncSignals';
 import {TopBar} from './TopBar';
+import {useSectionShade} from './SectionShade';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type CSSProperties,type MouseEvent,type MutableRefObject} from 'react';
 import {TagIcon,ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,ChevronRightIcon,DocumentTextIcon,EllipsisHorizontalIcon,EyeIcon,EyeSlashIcon,KeyIcon,ListBulletIcon,LockClosedIcon,MagnifyingGlassIcon,PencilSquareIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {PinIcon} from './PinIcon';
-import {Button,IconButton,SectionLabel,SegmentedControl,TextInput} from './ui';
+import {Button,IconButton,SectionLabel,TextInput} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {usePullToRefresh} from './usePullToRefresh';
 import {native,errorText} from './transport';
@@ -282,6 +283,8 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   const filterable=listed.filter(n=>(trash?n.deleted:!n.deleted&&(scope==='archive'?!!n.archived:!n.archived))&&(trash||!label||(n.labels??[]).some(l=>labelKey(l)===labelKey(label)))&&noteMatches(n,trash?'':query));
   const kindOptions=[{value:'all' as const,label:'전체'},...NOTE_KIND_DEFINITIONS.filter(([value])=>filterable.some(n=>noteKind(n)===value)||kindFilter===value).map(([value,label])=>({value,label}))];
   const visible=sortNotes(filterable.filter(n=>kindFilter==='all'||noteKind(n)===kindFilter));
+  // The kinds are the list's first row; scrolled away, the top bar pulls them down.
+  const kinds=useSectionShade<NoteKindFilter>({label:'메모 종류',options:kindOptions,value:kindFilter,onChange:setKindFilter},{active:active&&state.ready&&state.unlocked&&!editing});
   const pinned=scope!=='all'?[]:visible.filter(n=>n.pinned),recent=scope!=='all'?visible:visible.filter(n=>!n.pinned);
   const trashed=listed.filter(n=>n.deleted).length,archived=listed.filter(n=>!n.deleted&&n.archived).length;
   const status=state.error?'확인 필요':state.saving?'저장 중':state.syncing?'동기화 중':pending?'동기화 대기':'동기화됨';
@@ -339,16 +342,15 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
     {/* Always mounted once unlocked so its pull-to-refresh gesture stays attached. */}
     <div className="notes-list-view" style={{display:state.ready&&state.unlocked&&!editing?undefined:'none'}}>
       {scope!=='all'
-        ?<header className="notes-top is-sub"><IconButton label="메모 목록으로" icon={ArrowLeftIcon} onClick={()=>setScope('all')}/><h1>{trash?'휴지통':'보관함'}<span className="numeric muted">{trash?trashed:archived}</span></h1></header>
-        :<TopBar title="메모" actions={<><span className="notes-save-state" role="status">{status}</span>{syncButton}<IconButton label="메모 목록 더보기" icon={EllipsisHorizontalIcon} onClick={()=>setSheet('list')}/></>}/>}
+        ?<header ref={kinds.barRef} className="notes-top is-sub"><IconButton label="메모 목록으로" icon={ArrowLeftIcon} onClick={()=>setScope('all')}/><h1>{kinds.title(trash?'휴지통':'보관함')}<span className="numeric muted">{trash?trashed:archived}</span></h1></header>
+        :<TopBar barRef={kinds.barRef} title={kinds.title('메모')} actions={<><span className="notes-save-state" role="status">{status}</span>{syncButton}<IconButton label="메모 목록 더보기" icon={EllipsisHorizontalIcon} onClick={()=>setSheet('list')}/></>}/>}
+      {kinds.shade}
       <div ref={list} className="notes-scroll">
         {pull}
+        {kinds.inline}
         {trash?<p className="hint notes-trash-hint">열어서 복원할 수 있습니다.</p>:<form className="notes-search" role="search" onSubmit={event=>{event.preventDefault();(document.activeElement as HTMLElement|null)?.blur();}}><TextInput className="notes-search__input" icon={MagnifyingGlassIcon} aria-label="메모 검색" placeholder="제목, 본문, 라벨 검색" value={query} onChange={event=>setQuery(event.target.value)}/>{query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>setQuery('')}/>}</form>}
-        <div className="notes-filter-bar">
-        <SegmentedControl<NoteKindFilter> label="메모 종류" options={kindOptions} value={kindFilter} onChange={setKindFilter} className="notes-kind-filter" />
-        {/* Labels are the user's own tags, not kinds: they sit on the same row after a divider and a tag mark. */}
-        {!trash&&allLabels.length>0&&<><span className="notes-filter-divider" aria-hidden="true"/><TagIcon className="notes-filter-tag" aria-hidden="true"/><div className="filter-chips notes-label-filter" role="group" aria-label="라벨">{allLabels.map(l=>{const on=!!label&&labelKey(label)===labelKey(l.label);return <button key={labelKey(l.label)} type="button" className={`filter-chip${on?' selected':''}`} aria-pressed={on} onClick={()=>setLabel(on?null:l.label)}>{l.label}<span className="numeric">{l.count}</span></button>;})}</div></>}
-        </div>
+        {/* Labels are the user's own tags, not kinds: they sit on their own row after a tag mark. */}
+        {!trash&&allLabels.length>0&&<div className="notes-filter-bar"><TagIcon className="notes-filter-tag" aria-hidden="true"/><div className="filter-chips notes-label-filter" role="group" aria-label="라벨">{allLabels.map(l=>{const on=!!label&&labelKey(label)===labelKey(l.label);return <button key={labelKey(l.label)} type="button" className={`filter-chip${on?' selected':''}`} aria-pressed={on} onClick={()=>setLabel(on?null:l.label)}>{l.label}<span className="numeric">{l.count}</span></button>;})}</div></div>}
         {pinned.length>0&&<><SectionLabel as="h2" className="notes-board__label" title="고정됨"/><div className="notes-grid">{pinned.map(card)}</div></>}
         {recent.length>0&&<>{pinned.length>0&&<SectionLabel as="h2" className="notes-board__label" title="최근"/>}<div className="notes-grid">{recent.map(card)}</div></>}
         {!visible.length&&<div className="empty-state"><h2>{trash?'휴지통이 비어 있습니다':scope==='archive'?'보관한 메모가 없습니다':query||label?'찾는 메모가 없습니다':'아직 메모가 없습니다'}</h2>{scope==='all'&&!query&&!label&&<p>아래 버튼으로 첫 메모를 써 보세요.</p>}</div>}

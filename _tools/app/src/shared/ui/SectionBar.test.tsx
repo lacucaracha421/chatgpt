@@ -30,3 +30,10 @@ it("names a counted section by its own label and changes the section", async () 
   await userEvent.click(av);
   expect(onChange).toHaveBeenCalledWith("av");
 });
+
+it("spreads the sections across the bar and hands the host its element", () => {
+  let element: HTMLDivElement | null = null;
+  const { container } = render(<SectionBar label="유형" options={options} value="game" onChange={vi.fn()} placement="inline" fullWidth ref={(node) => { element = node; }} />);
+  expect(element).toBe(container.firstElementChild);
+  expect(screen.getByRole("radiogroup", { name: "유형" })).toHaveClass("ui-segmented--full-width");
+});

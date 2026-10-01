@@ -5,6 +5,7 @@ import {useCallback,useEffect,useId,useRef,useState,type MutableRefObject} from 
 import {ArrowLeftIcon,ChevronUpIcon,InformationCircleIcon,PhotoIcon,Squares2X2Icon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
 import {BarProgress} from './TopBar';
+import {useSectionShade} from './SectionShade';
 import {Button,IconButton,SegmentedControl} from './ui';
 import {api,errorText} from './transport';
 import {loadThumbnail} from './media';
@@ -12,7 +13,7 @@ import {readyFirstScreen} from './firstScreen';
 import {Gallery} from './Gallery';
 import {RequestGate} from './model';
 import type {Asset,AssetFiltersValue,AssetMediaFilter} from './types';
-import {ASSET_FILTER_VERSION,EMPTY_FILTERS,MEDIA_LABELS,filterKey,filterVersionOf,hasActiveFilters,sameFilters} from './assetFilters';
+import {ASSET_FILTER_VERSION,EMPTY_FILTERS,MEDIA_SECTIONS,filterKey,filterVersionOf,hasActiveFilters,sameFilters} from './assetFilters';
 import {characterChildren,characterExclusion,characterExclusionTarget,characterPath,validCharacterIndex,type CharacterFilter,type CharacterIndex,type CharacterNode,type CharacterPage} from './characterModel';
 import {FolderShelf} from './FolderCards';
 import {FolderIcon,PeopleIcon,PersonIcon} from '../src/shared/ui/ArchiveIcons';
@@ -316,24 +317,26 @@ export function CharacterBrowser({hostBusy=false,entryKey=0,onOptions=()=>{},onL
     {scope&&scope.sourceCount>scope.totalCount&&<p className="character-description">서버에 보관된 {scope.totalCount}개를 표시합니다. 아직 공유되지 않은 자산 {scope.sourceCount-scope.totalCount}개가 있습니다.</p>}
     {index?.ready&&!busy&&!error&&(!where.node&&!children.length||where.node&&page?.items.length===0)&&<div className="empty-state"><h3>{where.node?(filterPending?'조건에 맞는 자산이 없습니다':node?.kind==='series'&&where.filter==='unclassified'?'미분류 이미지가 없습니다':hasActiveFilters(shown?.filters??EMPTY_FILTERS)?'조건에 맞는 자산이 없습니다':'이 보기에 자산이 없습니다'):'등록된 시리즈가 없습니다'}</h3></div>}
   </>;
+  // 종류 is the gallery's first row; scrolled away, the current crumb names it and the bar pulls down.
+  const kindShade=useSectionShade<AssetMediaFilter>({label:'종류',options:MEDIA_SECTIONS,value:where.filters.media,onChange:applyMedia},{active:active&&!paused&&!!where.node});
   const breadcrumbNodes=node?[...ancestors,node]:[];
-  const characterHeader=<header className="top-bar library-header asset-topbar character-header">
+  const characterHeader=<header ref={where.node?kindShade.barRef:undefined} className="top-bar library-header asset-topbar character-header">
     <IconButton label="뒤로" icon={ArrowLeftIcon} onClick={goUp}/>
     <div className="top-bar__titles">
       <nav className="character-breadcrumb" aria-label="현재 위치">
-        {breadcrumbNodes.length?breadcrumbNodes.map((item,itemIndex)=><span key={item.id}>{itemIndex>0&&<span className="character-breadcrumb__separator" aria-hidden="true">›</span>}{itemIndex<breadcrumbNodes.length-1?<button type="button" onClick={()=>enterInside({node:item.id,filter:defaultCharacterFilter(item.id,index)})}>{item.name}</button>:<span className="character-breadcrumb__current" aria-current="page">{item.name}</span>}</span>):<span className="character-breadcrumb__current" aria-current="page">시리즈</span>}
+        {breadcrumbNodes.length?breadcrumbNodes.map((item,itemIndex)=><span key={item.id}>{itemIndex>0&&<span className="character-breadcrumb__separator" aria-hidden="true">›</span>}{itemIndex<breadcrumbNodes.length-1?<button type="button" onClick={()=>enterInside({node:item.id,filter:defaultCharacterFilter(item.id,index)})}>{item.name}</button>:<span className="character-breadcrumb__current" aria-current="page">{where.node?kindShade.title(item.name):item.name}</span>}</span>):<span className="character-breadcrumb__current" aria-current="page">시리즈</span>}
       </nav>
       <h1 className="sr-only" aria-label={node?.name??'시리즈'}/>
     </div>
     <span className="top-bar__space"/>
-    {where.node&&<div className="asset-topbar__kind-control"><SegmentedControl<AssetMediaFilter> label="종류" options={(Object.keys(MEDIA_LABELS) as AssetMediaFilter[]).map(media=>({value:media,label:MEDIA_LABELS[media]}))} value={where.filters.media} onChange={applyMedia}/></div>}
     {where.node&&<FilterChips media={false} sheet={false} variant="toolbar" showReset={false} value={where.filters} applied={where.filters} onChange={applyFilters} open={null} onOpen={setFiltersOpen}/>}
     <Button type="button" size="icon" variant="ghost" className="top-bar__options" aria-label="보기 옵션" onClick={()=>onOptions(page?.items??[])}><Squares2X2Icon aria-hidden="true"/></Button>
     <BarProgress label={(busy||hostBusy)&&'캐릭터 보기 불러오는 중'}/>
   </header>;
   return <section className={`character-browser${landscape?' character-browser-landscape':''}`} style={{display:active?undefined:'none'}} aria-label="시리즈·캐릭터" ref={host}>
     {characterHeader}
-    <Gallery items={galleryItems} stale={stale} intro={overview} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null}/>
+    {where.node&&kindShade.shade}
+    <Gallery items={galleryItems} stale={stale} intro={where.node?<>{kindShade.inline}{overview}</>:overview} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null}/>
     {where.node&&<FilterChips media={false} row={false} value={where.filters} applied={where.filters} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}
     {more&&<div className="loading-line is-bottom" role="status" aria-label="다음 캐릭터 자산 불러오는 중"/>}
     {moreError&&<div className="inline-error" role="alert">{moreError}<Button onClick={()=>void append()}>다시 시도</Button><Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}

@@ -1,5 +1,5 @@
 import {afterEach,beforeEach,describe,it,expect,vi} from 'vitest';
-import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {Catalog} from './Catalog';
 import {suggestionQuery,type CatalogItem,type CatalogPage} from './catalogModel';
@@ -190,7 +190,7 @@ describe('mobile catalog reads',()=>{
     choose('카탈로그 언어','japanese');await waitFor(()=>expect(searches).toBe(2));
     choose('카탈로그 언어','all');await screen.findByText('밤의 도서관');
     await act(async()=>resolve({...page,items:[{...item,title:'오래된 결과'}]}));expect(screen.queryByText('오래된 결과')).toBeNull();
-    fireEvent.click(screen.getByRole('button',{name:'북마크',exact:true}));await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path.includes('scope=bookmarked'))).toBe(true));
+    fireEvent.click(within(screen.getByRole('radiogroup',{name:'카탈로그 출처'})).getByRole('radio',{name:'북마크'}));await waitFor(()=>expect(mocks.api.mock.calls.some(([path])=>path.includes('scope=bookmarked'))).toBe(true));
     expect(mocks.api.mock.calls.every(([, ,body])=>body===undefined)).toBe(true);
   });
   it('opens detail and editions, keeps list state, and backs out one level',async()=>{
@@ -266,10 +266,18 @@ describe('mobile catalog reads',()=>{
     await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>path.includes('/reader?'))).toHaveLength(2));
     await new Promise(resolve=>setTimeout(resolve,20));expect(mocks.api.mock.calls.filter(([path])=>path.includes('/reader?'))).toHaveLength(2);
   });
+  it('switches between the catalog and bookmarks from the list\'s first row',async()=>{
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    const sources=screen.getByRole('radiogroup',{name:'카탈로그 출처'});
+    expect(sources.closest('.catalog-scroll > .ui-section-bar--inline')).toBeTruthy();
+    expect(within(sources).getAllByRole('radio').map(radio=>radio.getAttribute('aria-label'))).toEqual(['카탈로그','북마크']);
+    expect(within(sources).getByRole('radio',{name:'카탈로그'}).getAttribute('aria-checked')).toBe('true');
+    expect(screen.queryByRole('button',{name:'북마크',exact:true})).toBeNull();
+  });
   it('forces latest sort when bookmark scope is enabled',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
     choose('카탈로그 정렬','views');await waitFor(()=>expect(screen.getByRole('button',{name:/^카탈로그 정렬/}).textContent).toBe(CHOICES['views']));
-    fireEvent.click(screen.getByRole('button',{name:'북마크',exact:true}));await waitFor(()=>expect(screen.getByRole('button',{name:/^카탈로그 정렬/}).textContent).toBe(CHOICES['latest']));
+    fireEvent.click(within(screen.getByRole('radiogroup',{name:'카탈로그 출처'})).getByRole('radio',{name:'북마크'}));await waitFor(()=>expect(screen.getByRole('button',{name:/^카탈로그 정렬/}).textContent).toBe(CHOICES['latest']));
     expect(mocks.api.mock.calls.some(([path])=>path.includes('scope=bookmarked')&&path.includes('sort=latest'))).toBe(true);
   });
   it('uses a ready total without issuing the extra count request',async()=>{

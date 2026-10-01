@@ -1,0 +1,31 @@
+/* Tablet section bar (docs/prototypes/section-bar-20261001): the shared bar as the list's first row,
+   and the same bar dropped from under the top bar. About 40px tall; each full-width segment keeps a
+   44px touch target through an invisible hit area. */
+.ui-section-bar--inline,
+.ui-section-bar--shade { padding-block:2px; }
+.ui-section-bar--inline { margin-block:var(--space-1) var(--space-2); padding-inline:0; border-bottom:0; background:transparent; }
+.ui-section-bar--shade { padding-inline:var(--section-shade-gutter, var(--mobile-gutter)); }
+.ui-section-bar--inline > .ui-segmented,
+.ui-section-bar--shade > .ui-segmented { flex:1 1 auto; overflow:visible; }
+.ui-section-bar--inline .ui-segmented__cell::before,
+.ui-section-bar--shade .ui-segmented__cell::before { content:''; position:absolute; inset:-8px 0; }
+
+/* The shade hangs from a zero-height anchor right under the top bar, which (z-index 3) covers it
+   while it is pulled up out of sight. */
+.section-shade-anchor { position:relative; z-index:2; height:0; flex:none; }
+.section-shade { position:absolute; inset:0 0 auto; box-shadow:var(--shadow-floating); transform:translateY(-100%); visibility:hidden; transition:transform 140ms var(--ease-standard), visibility 0s linear 140ms; }
+.section-shade.is-open { transform:none; visibility:visible; transition:transform 140ms var(--ease-standard), visibility 0s; }
+.section-shade.is-dragging { visibility:visible; transition:none; }
+
+/* The title once the bar has scrolled away: "컬렉션 · 게임 ⌄", a toggle for the shade. */
+.section-shade-title { display:inline-flex; align-items:baseline; gap:var(--space-1); min-width:0; max-width:100%; min-height:var(--touch-target); margin:0; padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
+.section-shade-title__now { color:var(--color-muted); font-weight:400; overflow:hidden; text-overflow:ellipsis; }
+.section-shade-title > svg { align-self:center; flex:none; width:16px; height:16px; color:var(--color-faint); transition:transform 140ms var(--ease-standard); }
+.section-shade-title[aria-expanded=true] > svg { transform:rotate(180deg); }
+.section-shade-title__now, .section-shade-title > svg { animation:section-shade-title-in 140ms var(--ease-standard); }
+@keyframes section-shade-title-in { from { opacity:0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .section-shade, .section-shade.is-open, .section-shade-title > svg { transition:none; }
+  .section-shade-title__now, .section-shade-title > svg { animation:none; }
+}

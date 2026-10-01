@@ -61,4 +61,6 @@
 .character-header .character-breadcrumb button,
 .character-header .character-breadcrumb__current { display:inline-flex; align-items:center; min-height:44px; max-width:160px; overflow:hidden; padding:0 4px; border:0; background:transparent; color:var(--color-muted); font-size:var(--type-meta); text-overflow:ellipsis; white-space:nowrap; }
 .character-header .character-breadcrumb__current { max-width:220px; color:var(--color-text); font-size:var(--type-title); font-weight:600; }
+/* Scrolled past the 종류 bar, the current crumb is the section-shade toggle (SectionShade.tsx); it keeps the crumb's look. */
+.character-header .character-breadcrumb__current .section-shade-title { max-width:none; padding:0; color:inherit; font:inherit; }
 .character-header .character-breadcrumb__separator { display:inline-flex; align-items:center; min-height:44px; padding:0 2px; color:var(--color-faint); font-size:var(--type-meta); }

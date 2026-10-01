@@ -1,5 +1,5 @@
 import {ArrowLeftIcon,MagnifyingGlassIcon} from '@heroicons/react/24/outline';
-import {useEffect,useRef,type ReactNode} from 'react';
+import {useEffect,useRef,type ReactNode,type Ref} from 'react';
 import {IconButton,Mark} from './ui';
 import {useDelayedPresence} from './motion';
 /**
@@ -26,8 +26,8 @@ export function LoadingLine({label,className=''}:{label:string|false|undefined;c
 export function BarProgress({label}:{label:string|false|undefined}) {
   return <LoadingLine label={label} className="top-bar__progress"/>;
 }
-export function TopBar({title,count,crumbs,back,actions,className='',loading}:{title?:ReactNode;count?:ReactNode;crumbs?:ReactNode;back?:{label:string;onClick():void};actions?:ReactNode;className?:string;/** Accessible name of a running page/scope load; shows the bar's progress line. */loading?:string|false}) {
-  return <header className={`top-bar${className?` ${className}`:''}`}>
+export function TopBar({title,count,crumbs,back,actions,className='',loading,barRef}:{title?:ReactNode;count?:ReactNode;crumbs?:ReactNode;back?:{label:string;onClick():void};actions?:ReactNode;className?:string;/** Accessible name of a running page/scope load; shows the bar's progress line. */loading?:string|false;/** The bar element, for a section shade's pull (SectionShade.tsx). */barRef?:Ref<HTMLElement>}) {
+  return <header ref={barRef} className={`top-bar${className?` ${className}`:''}`}>
     {back?<IconButton label={back.label} icon={ArrowLeftIcon} onClick={back.onClick}/>:<span className="top-bar__brand"><Mark/></span>}
     <div className="top-bar__titles">{crumbs}{title!=null&&<div className="top-bar__title"><h1>{title}</h1>{count!=null&&count!==''&&<span className="numeric muted top-bar__count">{count}</span>}</div>}</div>
     <span className="top-bar__space"/>{actions}<BarProgress label={loading}/>

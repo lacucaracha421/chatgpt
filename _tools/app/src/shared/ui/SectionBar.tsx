@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { SegmentedControl, type SegmentedOption } from "./SegmentedControl";
 
 /**
@@ -20,13 +20,16 @@ export type SectionBarProps<T extends string> = {
   /** View controls at the bar's right end (sort, filters, 보기). */
   trailing?: ReactNode;
   placement?: SectionBarPlacement;
+  /** Each section takes an equal share of the bar's width (the tablet's touch layout). */
+  fullWidth?: boolean;
   className?: string;
+  ref?: Ref<HTMLDivElement>;
 };
 
 /** One thin bar holding a tab's sections, shared by the PC and the tablet. */
-export function SectionBar<T extends string>({ label, options, value, onChange, trailing, placement = "pinned", className }: SectionBarProps<T>) {
-  return <div className={["ui-section-bar", `ui-section-bar--${placement}`, className].filter(Boolean).join(" ")}>
-    <SegmentedControl label={label} options={options} value={value} onChange={onChange} />
+export function SectionBar<T extends string>({ label, options, value, onChange, trailing, placement = "pinned", fullWidth = false, className, ref }: SectionBarProps<T>) {
+  return <div ref={ref} className={["ui-section-bar", `ui-section-bar--${placement}`, className].filter(Boolean).join(" ")}>
+    <SegmentedControl label={label} options={options} value={value} onChange={onChange} fullWidth={fullWidth} />
     {trailing && <div className="ui-section-bar__trailing">{trailing}</div>}
   </div>;
 }
