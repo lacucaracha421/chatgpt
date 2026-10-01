@@ -52,8 +52,16 @@ export type Snapshot = NotesState & {ready:boolean; saving:boolean; syncing:bool
   /** A stale draft moved to a keep-both copy; the editor follows it. */ moved?:{from:string;to:string}|null};
 export type NotesRequest = <T>(operation:string,input?:unknown)=>Promise<T>;
 export const NOTES_REFRESH_INTERVAL = 5 * 60_000;
-const AUTO_SYNC_IDLE = 10_000;
+/**
+ * Notes do not sync while they are being edited. The user finishing a note (closing it, switching,
+ * leaving Notes, backgrounding the app: `finish()`) or pressing 동기화 syncs once. Safety net only:
+ * an edit that nobody finished (a note left open, a crash) is still pushed after this quiet time.
+ */
+const AUTO_SYNC_IDLE = 5 * 60_000;
+/** Background (non-user) syncs, including the safety net and failure retries, are at least this far apart. */
 const AUTO_SYNC_MIN_INTERVAL = 60_000;
+/** true: user-triggered, always runs. "background": pulls others' changes, but waits out an edit in progress. false: also rate-limited (periodic refresh, focus, safety net). */
+export type SyncMode = boolean | "background";
 const message=(error:unknown)=>typeof error === "string" ? error : "메모 작업을 완료하지 못했습니다. 작성 내용은 유지됩니다.";
 
 /** Lives beyond area navigation; immediate serialized local writes never depend on a debounce. */
@@ -178,14 +186,16 @@ export class NotesStore {
     })().finally(()=>{this.running=null;this.patch({saving:this.queue.size>0});if(!this.queue.size)this.scheduleSync();});
     return this.running;
   }
+  /** Arms the safety net: a sync after a long quiet period, never while the user is typing (edit() disarms it). */
   private scheduleSync(){
     clearTimeout(this.timer);
-    const delay=Math.max(AUTO_SYNC_IDLE, this.lastEdit+AUTO_SYNC_IDLE-Date.now(), this.lastSyncAttempt+AUTO_SYNC_MIN_INTERVAL-Date.now());
+    const delay=Math.max(0, this.lastEdit+AUTO_SYNC_IDLE-Date.now(), this.lastSyncAttempt+AUTO_SYNC_MIN_INTERVAL-Date.now());
     this.timer=setTimeout(()=>void this.sync(false),delay);
   }
-  async sync(manual=true){
+  async sync(mode:SyncMode=true){
     if(this.current.syncing || !this.current.unlocked)return;
-    if(!manual && (Date.now()-this.lastSyncAttempt<AUTO_SYNC_MIN_INTERVAL || Date.now()-this.lastEdit<AUTO_SYNC_IDLE))return;
+    if(mode!==true && Date.now()-this.lastEdit<AUTO_SYNC_IDLE)return;
+    if(mode===false && Date.now()-this.lastSyncAttempt<AUTO_SYNC_MIN_INTERVAL)return;
     clearTimeout(this.timer);
     // Claim the sync before awaiting local saves so focus/manual/timer requests cannot overlap.
     this.patch({syncing:true});
@@ -207,6 +217,12 @@ export class NotesStore {
     catch(e){this.patch({error:message(e)});}
   }
   async flush(){if(this.queue.size||this.running)await this.drain();return !this.queue.size;}
+  /** The user is done with a note (closed, switched, left Notes, app backgrounded): save, then sync once if anything waits. */
+  async finish(){
+    if(!await this.flush())return;
+    this.lastEdit=-Infinity;
+    if(this.current.unlocked&&this.current.notes.some(n=>n.pending&&!n.conflict))await this.sync(true);
+  }
   async backup(operation:"export"|"import"){
     if(!await this.flush())return;
     try{const result=await this.request<NotesState|null|boolean>(operation);if(result&&typeof result==="object")this.merge(result);this.patch({error:null});}
@@ -217,4 +233,8 @@ const stores=new Map<string,NotesStore>();
 export function notesStore(root:string){let store=stores.get(root);if(!store){store=new NotesStore((operation,input={})=>invoke("notes_request",{root,operation,input}));stores.set(root,store);}return store;}
 export function hasUnsavedNotes(){return [...stores.values()].some(store=>store.snapshot().saving);}
 export async function lockAllSecrets(){await Promise.all([...stores.values()].filter(store=>store.snapshot().unlocked).map(store=>store.lockSecrets()));}
+/** Finishes every store, but never waits longer than `limitMs` for the network. */
+export async function finishNotes(limitMs=3000){
+  await Promise.race([Promise.all([...stores.values()].map(store=>store.finish())),new Promise(resolve=>setTimeout(resolve,limitMs))]);
+}
 export async function flushNotes(){return (await Promise.all([...stores.values()].map(store=>store.flush()))).every(Boolean);}

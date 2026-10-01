@@ -117,10 +117,10 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   const pending=state.notes.some(n=>n.pending);
   const [retryDelay,setRetryDelay]=useState(2000);
   useEffect(()=>{setRetryDelay(2000);},[pending]);
-  const notesSignalled=useSyncSignal('notes',()=>void store.sync(),active&&state.unlocked&&!pending);
-  useVisibleInterval(()=>void store.sync(),active&&state.unlocked&&!pending?(notesSignalled?SIGNAL_FALLBACK_MS:60_000):null,true);
-  useVisibleInterval(()=>{void store.sync().finally(()=>setRetryDelay(delay=>Math.min(60_000,delay*2)));},active&&state.unlocked&&pending?retryDelay:null);
-  useEffect(()=>{const leave=()=>{if(document.visibilityState==='hidden')void store.flush();};document.addEventListener('visibilitychange',leave);return()=>document.removeEventListener('visibilitychange',leave);},[store]);
+  const notesSignalled=useSyncSignal('notes',()=>void store.sync('background'),active&&state.unlocked&&!pending);
+  useVisibleInterval(()=>void store.sync('background'),active&&state.unlocked&&!pending?(notesSignalled?SIGNAL_FALLBACK_MS:60_000):null,true);
+  useVisibleInterval(()=>{void store.sync('background').finally(()=>setRetryDelay(delay=>Math.min(60_000,delay*2)));},active&&state.unlocked&&pending?retryDelay:null);
+  useEffect(()=>{const leave=()=>{if(document.visibilityState==='hidden')void store.finish();};document.addEventListener('visibilitychange',leave);return()=>document.removeEventListener('visibilitychange',leave);},[store]);
   // ---- Secret notes lock after 5 idle minutes, when the app goes to the background (native
   // locks in onStop and tells the page), when Notes is left, and when the note is closed.
   const revealed=state.notes.some(n=>isSecret(n)&&!n.redacted);
@@ -134,21 +134,25 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   },[revealed,lockSecrets,store]);
   useEffect(()=>{window.addEventListener('lakomics-notes-locked',lockSecrets);return()=>window.removeEventListener('lakomics-notes-locked',lockSecrets);},[lockSecrets]);
   useEffect(()=>{if(!active&&revealed)lockSecrets();},[active,revealed,lockSecrets]);
+  // Leaving the 메모 screen finishes the work: one sync of what was edited.
+  useEffect(()=>{if(!active)void store.finish();},[active,store]);
   useEffect(()=>()=>{void store.lockSecrets();},[store]);
   const notesRef=useRef(state.notes);notesRef.current=state.notes;
   const previous=useRef<string|null>(null);
   useEffect(()=>{
     const before=notesRef.current.find(n=>n.id===previous.current),now=notesRef.current.find(n=>n.id===selected);
+    // Closing a note or switching to another one is the moment to sync it.
+    if(previous.current&&previous.current!==selected)void store.finish();
     previous.current=selected;
     // Moving straight to another secret note keeps the session.
     if(before&&isSecret(before)&&before.id!==selected&&!(now&&isSecret(now)))lockSecrets();
-  },[selected,lockSecrets]);
+  },[selected,lockSecrets,store]);
   useEffect(()=>{if(!state.moved)return;if(selected===state.moved.from)setSelected(state.moved.to);store.clearMoved();},[state.moved,selected,store]);
   // ---- Navigation
   const select=(id:string|null,editBody=false)=>{setCreatingSecret(false);setSelected(id);setEditingBody(editBody);setEditingSectionKey(null);setRenamingSectionKey(null);setSectionActionKey(null);setLimitError(null);};
   // Home opens a note by id (its pinned rows); each request opens once.
   useEffect(()=>{if(request){setSheet(null);setScope('all');setLabel(null);setQuery('');select(request.id);}},[request?.key]);
-  const leave=()=>{select(null);void store.flush();};
+  const leave=()=>{select(null);void store.finish();};
   // Back and the list arrow: a note opened from Home goes back to Home, not to the list.
   const close=()=>{leave();onReturnHome?.();};
   // Trashing leaves the user on the list; a note opened from there later closes back to it.

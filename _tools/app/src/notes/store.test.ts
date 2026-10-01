@@ -21,24 +21,49 @@ it("a stale sync response never replaces a newer completed local edit",async()=>
   const store=new NotesStore(request);await store.load();const sync=store.sync();store.edit({...note,title:"newer"});await vi.advanceTimersByTimeAsync(0);
   finish({unlocked:true,notes:[note],lastSyncedAt:"now"});await sync;expect(store.snapshot().notes[0].title).toBe("newer");
 });
-it("batches automatic syncs while preserving immediate local saves and manual sync",async()=>{
+const syncs=(request:NotesRequest)=>vi.mocked(request).mock.calls.filter(c=>c[0]==="sync").length;
+function syncingStore(){
   vi.useFakeTimers();let saved=note;
   const request=vi.fn(async(op:string,input:any)=>{if(op==="save"){saved={...saved,...input,localRevision:saved.localRevision+1,pending:true};return saved;}if(op==="sync")saved={...saved,pending:false};return{unlocked:true,notes:[saved],lastSyncedAt:null};}) as NotesRequest;
-  const store=new NotesStore(request);await store.load();
-  store.edit({...note,title:"one"});await vi.advanceTimersByTimeAsync(5000);
-  expect(vi.mocked(request).mock.calls.filter(c=>c[0]==="save")).toHaveLength(1);
-  expect(vi.mocked(request).mock.calls.filter(c=>c[0]==="sync")).toHaveLength(0);
-  store.edit({...saved,title:"two"});await vi.advanceTimersByTimeAsync(9999);
-  expect(vi.mocked(request).mock.calls.filter(c=>c[0]==="sync")).toHaveLength(0);
-  await vi.advanceTimersByTimeAsync(1);
-  expect(vi.mocked(request).mock.calls.filter(c=>c[0]==="sync")).toHaveLength(1);
-  await store.sync(false);await store.sync(false);
-  expect(vi.mocked(request).mock.calls.filter(c=>c[0]==="sync")).toHaveLength(1);
-  store.edit({...saved,title:"three"});await vi.advanceTimersByTimeAsync(59000);
-  expect(vi.mocked(request).mock.calls.filter(c=>c[0]==="sync")).toHaveLength(1);
-  await vi.advanceTimersByTimeAsync(1000);
-  expect(vi.mocked(request).mock.calls.filter(c=>c[0]==="sync")).toHaveLength(2);
-  await store.sync();expect(vi.mocked(request).mock.calls.filter(c=>c[0]==="sync")).toHaveLength(3);
+  return {request,store:new NotesStore(request),saved:()=>saved};
+}
+it("does not sync while a note is being typed, but saves locally at once and syncs manually",async()=>{
+  const {request,store,saved}=syncingStore();await store.load();
+  store.edit({...note,title:"one"});await vi.advanceTimersByTimeAsync(60_000);
+  store.edit({...saved(),title:"two"});await vi.advanceTimersByTimeAsync(4 * 60_000);
+  expect(vi.mocked(request).mock.calls.filter(c=>c[0]==="save")).toHaveLength(2);
+  expect(syncs(request)).toBe(0);
+  await store.sync(false);await store.sync("background");expect(syncs(request)).toBe(0);
+  await store.sync();expect(syncs(request)).toBe(1);
+});
+it("syncs once when the user finishes a note, and not again when nothing changed",async()=>{
+  const {request,store,saved}=syncingStore();await store.load();
+  store.edit({...note,title:"one"});store.edit({...saved(),title:"two"});await store.finish();
+  expect(syncs(request)).toBe(1);expect(store.snapshot().notes[0].title).toBe("two");
+  await store.finish();expect(syncs(request)).toBe(1);
+  // After finishing, background refreshes may pull again (rate-limited for the periodic kind).
+  await store.sync("background");expect(syncs(request)).toBe(2);
+});
+it("pushes an unfinished note after a long quiet period as a safety net",async()=>{
+  const {request,store,saved}=syncingStore();await store.load();
+  store.edit({...note,title:"one"});await vi.advanceTimersByTimeAsync(4 * 60_000 + 59_000);
+  expect(syncs(request)).toBe(0);
+  store.edit({...saved(),title:"two"});await vi.advanceTimersByTimeAsync(4 * 60_000 + 59_000);
+  expect(syncs(request)).toBe(0);
+  await vi.advanceTimersByTimeAsync(1000);expect(syncs(request)).toBe(1);
+});
+it("a periodic refresh never pushes a note edited within the quiet period",async()=>{
+  const {request,store,saved}=syncingStore();await store.load();
+  store.edit({...note,title:"one"});await vi.advanceTimersByTimeAsync(2 * 60_000);
+  await store.sync(false);expect(syncs(request)).toBe(0);
+  await vi.advanceTimersByTimeAsync(3 * 60_000);void saved;
+  expect(syncs(request)).toBe(1);
+});
+it("finish keeps an unsaved draft local and does not sync",async()=>{
+  vi.useFakeTimers();
+  const request=vi.fn(async(op:string)=>{if(op==="save")throw"disk full";return{unlocked:true,notes:[note],lastSyncedAt:null};}) as NotesRequest;
+  const store=new NotesStore(request);await store.load();store.edit({...note,title:"draft"});
+  await store.finish();expect(syncs(request)).toBe(0);expect(store.snapshot().notes[0].title).toBe("draft");
 });
 it("coalesces sync requests that arrive while waiting for a local save",async()=>{
   vi.useFakeTimers();let finish!:(n:Note)=>void;

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lakomics 태블릿 스크러버 시안</title>
+<!-- Loads the app's real tokens; only the scrubber variants are local. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<style>
+:root { --page: #0e0f10; }
+body { margin: 0; background: var(--page); color: var(--color-text); font: 400 var(--type-body)/var(--line-ui) var(--font-ui); font-variant-numeric: tabular-nums; }
+.doc { max-width: 1500px; margin: 0 auto; padding-block: 32px 80px; padding-inline: 24px; display: flex; flex-direction: column; gap: 32px; }
+.doc h1 { margin: 0; font-size: var(--text-title-large); line-height: var(--line-title-large); font-weight: 600; }
+.lead { color: var(--color-muted); max-width: 74ch; line-height: var(--line-copy); margin: 8px 0 0; }
+.lead b { color: var(--color-text); font-weight: 600; }
+.row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+.col { display: flex; flex-direction: column; gap: 10px; width: 400px; max-width: 100%; }
+.col h2 { margin: 0; font-size: var(--type-title); line-height: var(--line-title); font-weight: 600; display: flex; gap: 10px; align-items: center; }
+.col h2 .k { display: inline-grid; place-items: center; min-width: 26px; height: 26px; background: var(--color-accent); color: var(--color-on-accent); font-size: var(--type-body); }
+.col p { margin: 0; color: var(--color-muted); line-height: var(--line-copy); font-size: var(--type-meta); }
+.col p b { color: var(--color-text); font-weight: 600; }
+
+/* A tablet in portrait: list of cases, bottom nav. */
+.tab { position: relative; width: 400px; height: 640px; max-width: 100%; overflow: hidden; border: 1px solid var(--color-border); border-radius: 18px; background: var(--color-bg); touch-action: none; user-select: none; }
+.tab .bar { height: 44px; display: flex; align-items: center; padding: 0 14px; font-weight: 600; border-bottom: 1px solid var(--color-border); background: var(--color-toolbar); }
+.tab .list { position: absolute; left: 0; right: 0; top: 44px; bottom: 52px; overflow: hidden; }
+.tab .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px 10px; padding: 12px; transition: transform 90ms linear; }
+.tab .grid i { display: block; aspect-ratio: .7; border-radius: 2px; background: linear-gradient(160deg, var(--c1), var(--c2)); opacity: .85; }
+.tab .nav { position: absolute; left: 0; right: 0; bottom: 0; height: 52px; display: flex; justify-content: space-around; align-items: center; border-top: 1px solid var(--color-border); background: var(--color-toolbar); color: var(--color-faint); font-size: 11px; }
+.tab .dim { position: absolute; left: 0; right: 0; top: 44px; bottom: 52px; background: rgba(0,0,0,.28); opacity: 0; transition: opacity 180ms var(--ease-standard); pointer-events: none; }
+.tab.active .dim { opacity: 1; }
+
+/* A — Photos-style: a grabber on the right edge, a capsule label beside it. No year list. */
+.a .grab { position: absolute; right: 4px; width: 6px; height: 44px; border-radius: 3px; background: color-mix(in srgb, var(--color-text) 38%, transparent); transition: width 160ms var(--ease-standard), right 160ms var(--ease-standard), background 160ms; }
+.a.active .grab { width: 10px; right: 6px; background: var(--color-accent); }
+.a .zone { position: absolute; right: 0; width: 44px; top: 44px; bottom: 52px; }
+.a .cap { position: absolute; right: 26px; transform: translateY(-50%) scale(.92); transform-origin: right center; padding: 6px 12px; border-radius: 999px; background: color-mix(in srgb, var(--color-surface) 92%, transparent); border: 1px solid var(--color-border-strong); font-size: 15px; font-weight: 600; white-space: nowrap; opacity: 0; transition: opacity 140ms, transform 160ms var(--ease-standard); box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+.a .cap small { color: var(--color-faint); font-weight: 500; font-size: 12px; margin-left: 6px; }
+.a.active .cap { opacity: 1; transform: translateY(-50%) scale(1); }
+
+/* B — the bottom timeline, refined: rest line and active bar share one baseline and the same ends,
+   so the handle grows in place under the finger; year labels are thinned to fit; a small label. */
+.b .rail { position: absolute; left: 20px; right: 20px; bottom: 64px; height: 36px; }
+.b .track { position: absolute; left: 0; right: 0; bottom: 8px; height: 2px; border-radius: 1px; background: rgba(255,255,255,.10); transition: height 180ms var(--ease-standard), bottom 180ms var(--ease-standard); }
+.b .fill { position: absolute; left: 0; bottom: 8px; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--color-accent) 70%, transparent); transition: height 180ms var(--ease-standard), bottom 180ms var(--ease-standard); }
+.b .thumb { position: absolute; bottom: 5px; width: 34px; height: 8px; margin-left: -17px; border-radius: 4px; background: color-mix(in srgb, var(--color-accent) 80%, transparent); transition: height 180ms var(--ease-standard), width 180ms var(--ease-standard), margin 180ms var(--ease-standard), bottom 180ms var(--ease-standard); }
+.b.active .thumb { width: 8px; margin-left: -4px; height: 22px; bottom: -1px; background: var(--color-accent); }
+.b .years { position: absolute; left: 0; right: 0; bottom: 18px; height: 16px; opacity: 0; transition: opacity 160ms var(--ease-standard); }
+.b.active .years { opacity: 1; }
+.b .years span { position: absolute; transform: translateX(-50%); font-size: 11px; color: var(--color-faint); white-space: nowrap; }
+.b .years span::after { content: ""; position: absolute; left: 50%; top: 15px; width: 1px; height: 6px; background: rgba(255,255,255,.18); }
+.b .tag { position: absolute; bottom: 46px; transform: translateX(-50%) translateY(6px) scale(.94); padding: 5px 10px; border-radius: 8px; background: var(--color-surface); border: 1px solid var(--color-border-strong); font-size: 15px; font-weight: 600; white-space: nowrap; opacity: 0; transition: opacity 140ms, transform 160ms var(--ease-standard); box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+.b .tag small { color: var(--color-faint); font-weight: 500; font-size: 12px; margin-left: 6px; }
+.b.active .tag { opacity: 1; transform: translateX(-50%); }
+.b .zone { position: absolute; left: 8px; right: 8px; bottom: 52px; height: 52px; }
+
+/* C — Contacts-style index on the right edge: years top to bottom, compressed with dots when they do not fit. */
+.c .index { position: absolute; right: 2px; top: 56px; bottom: 64px; width: 34px; display: flex; flex-direction: column; justify-content: space-between; align-items: center; font-size: 10px; color: var(--color-muted); font-weight: 600; }
+.c .index b { display: block; line-height: 1; padding: 1px 0; }
+.c .index b.dot { color: var(--color-faint); }
+.c.active .index b.on { color: var(--color-accent); transform: scale(1.25); }
+.c .zone { position: absolute; right: 0; width: 44px; top: 44px; bottom: 52px; }
+.c .cap { position: absolute; right: 50px; transform: translateY(-50%); padding: 8px 14px; border-radius: 10px; background: var(--color-surface); border: 1px solid var(--color-border-strong); font-size: 20px; font-weight: 600; opacity: 0; transition: opacity 140ms; box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+.c.active .cap { opacity: 1; }
+.note { color: var(--color-faint); font-size: var(--type-meta); }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>태블릿 스크러버 (빠른 이동 막대)</h1>
+    <p class="lead">지금 막대는 연도가 많으면 아래 글자가 겹치고, 연도 말풍선이 너무 큽니다. Apple의 사진 앱(오른쪽 끝 손잡이 + 작은 날짜 캡슐), 연락처(오른쪽 색인), 그리고 <b>지금 막대를 다듬은 안</b>을 나란히 그렸습니다. 각 화면에서 <b>막대를 직접 끌어 보세요</b>(마우스나 손가락). 같은 자료(181개, 2007–2026년)입니다.</p>
+  </header>
+  <div class="row" id="row"></div>
+  <p class="note">셋 다 에셋 · 컬렉션 · 카탈로그 등 스크러버를 쓰는 모든 태블릿 화면에 똑같이 적용됩니다. 끌 때 목록이 살짝 어두워지는 것과 놓으면 사라지는 움직임은 지금과 같습니다.</p>
+</div>
+<script>
+// Same data for all three: 181 items, newest first, spread over 2026 → 2007 with gaps like the real list.
+const items = [];
+const years = [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015, 2014, 2013, 2012, 2011, 2010, 2009, 2008, 2007];
+const weights = [12, 18, 22, 20, 24, 14, 12, 10, 9, 8, 7, 5, 4, 4, 3, 2, 2, 2, 2, 1];
+years.forEach((y, k) => { const n = weights[k]; for (let i = 0; i < n; i++) items.push({ y, m: 12 - Math.floor(i * 12 / n) }); });
+const total = items.length;
+const palette = ['#7b4b52', '#43566e', '#5c6b45', '#6c4f7a', '#7a6a43', '#3f6a68', '#6d5640', '#4b4f78'];
+const cell = (i) => `<i style="--c1:${palette[i % 8]};--c2:${palette[(i + 3) % 8]}"></i>`;
+const grid = () => `<div class="grid">${Array.from({ length: 64 }, (_, i) => cell(i)).join('')}</div>`;
+const frame = (cls, inner) => `<div class="tab ${cls}" data-variant="${cls}"><div class="bar">컬렉션 · 게임</div><div class="list">${grid()}</div><div class="dim"></div>${inner}<div class="nav"><span>홈</span><span>에셋</span><span>컬렉션</span><span>카탈로그</span><span>메모</span></div></div>`;
+const label = (i) => { const it = items[Math.min(total - 1, Math.max(0, i))]; return `${it.y}년 ${it.m}월`; };
+
+// B: thin the year labels so neighbours keep at least 44 px apart; first and last always win.
+function bYears(width) {
+  const firstIndex = new Map(); items.forEach((it, i) => { if (!firstIndex.has(it.y)) firstIndex.set(it.y, i); });
+  const marks = [...firstIndex.entries()].map(([y, i]) => ({ y, x: (i / (total - 1)) * width }));
+  const kept = []; const gap = 44;
+  const priority = (m, k) => (k === 0 || k === marks.length - 1 ? 3 : m.y % 5 === 0 ? 2 : 1);
+  [...marks.map((m, k) => ({ ...m, p: priority(m, k) }))].sort((a, b) => b.p - a.p).forEach((m) => { if (kept.every((o) => Math.abs(o.x - m.x) >= gap)) kept.push(m); });
+  return kept.sort((a, b) => a.x - b.x).map((m) => `<span style="left:${m.x}px">${m.y}</span>`).join('');
+}
+// C: fit the years top to bottom; when they do not fit, keep every other one and put a dot between.
+function cIndex(height) {
+  const per = 14, fits = Math.floor(height / per);
+  if (years.length <= fits) return years.map((y) => `<b data-y="${y}">${String(y).slice(2)}</b>`).join('');
+  const step = Math.ceil(years.length / Math.ceil(fits / 2));
+  return years.map((y, k) => (k % step === 0 || k === years.length - 1 ? `<b data-y="${y}">${String(y).slice(2)}</b>` : (k % step === 1 ? '<b class="dot">•</b>' : ''))).join('');
+}
+
+const row = document.getElementById('row');
+row.innerHTML = [
+  ['a', 'A', '사진 앱 방식', '<b>오른쪽 끝 손잡이</b>를 위아래로 끕니다. 손잡이 옆에 작은 캡슐로 <b>“2022년 7월 · 44/181”</b>만 보입니다. 연도 목록이 없어서 겹칠 일이 없고, 아래 탐색 막대와도 떨어져 있습니다. 가만히 있을 때는 스크롤할 때만 얇게 나타납니다.', '<div class="zone"></div><div class="grab"></div><div class="cap"></div>'],
+  ['b', 'B', '지금 막대 다듬기 (추천)', '지금처럼 아래 막대지만, <b>쉴 때의 선과 끌 때의 막대가 같은 자리·같은 양 끝</b>이라 손가락 아래에서 그대로 커집니다. 연도는 <b>서로 44px 이상 떨어지게 자동으로 솎아</b> 2026 · 2020 · 2015 … 처럼만 보이고, 말풍선은 <b>15px 한 줄</b>로 작아집니다.', '<div class="zone"></div><div class="rail"><div class="track"></div><div class="fill"></div><div class="years"></div><div class="thumb"></div><div class="tag"></div></div>'],
+  ['c', 'C', '연락처 색인 방식', '<b>오른쪽에 연도 색인</b>(26, 25, 24 …)이 세로로 늘어서고, 많으면 <b>•</b>로 줄입니다. 손가락을 대면 그 연도로 바로 갑니다. 연도로 바로 가기는 가장 빠르지만, 월 단위로 세밀하게 움직이기는 어렵습니다.', '<div class="zone"></div><div class="index"></div><div class="cap"></div>'],
+].map(([cls, k, title, text, inner]) => `<div class="col"><h2><span class="k">${k}</span>${title}</h2><p>${text}</p>${frame(cls, inner)}</div>`).join('');
+
+document.querySelectorAll('.tab').forEach((tab) => {
+  const v = tab.dataset.variant, zone = tab.querySelector('.zone'), gridEl = tab.querySelector('.grid');
+  const set = (p, active) => {
+    p = Math.max(0, Math.min(1, p)); const i = Math.round(p * (total - 1));
+    tab.classList.toggle('active', active);
+    gridEl.style.transform = `translateY(${-p * 900}px)`;
+    if (v === 'a') {
+      const top = 44 + 6, span = tab.clientHeight - 44 - 52 - 12 - 44, y = top + p * span;
+      tab.querySelector('.grab').style.top = `${y}px`;
+      const cap = tab.querySelector('.cap'); cap.style.top = `${y + 22}px`; cap.innerHTML = `${label(i)}<small>${i + 1} / ${total}</small>`;
+    } else if (v === 'b') {
+      const rail = tab.querySelector('.rail'), w = rail.clientWidth, x = p * w;
+      rail.querySelector('.thumb').style.left = `${x}px`; rail.querySelector('.fill').style.width = `${x}px`;
+      const tag = rail.querySelector('.tag'); tag.innerHTML = `${label(i)}<small>${i + 1} / ${total}</small>`;
+      const half = tag.offsetWidth / 2; tag.style.left = `${Math.max(half, Math.min(w - half, x))}px`;
+    } else {
+      const idx = tab.querySelector('.index'), y = items[i].y;
+      idx.querySelectorAll('b').forEach((b) => b.classList.toggle('on', Number(b.dataset.y) === y));
+      const r = idx.getBoundingClientRect(), t = tab.getBoundingClientRect();
+      const cap = tab.querySelector('.cap'); cap.textContent = `${y}년`; cap.style.top = `${r.top - t.top + p * r.height}px`;
+    }
+  };
+  if (v === 'b') tab.querySelector('.years').innerHTML = bYears(tab.querySelector('.rail').clientWidth);
+  if (v === 'c') tab.querySelector('.index').innerHTML = cIndex(tab.querySelector('.index').clientHeight);
+  const toP = (e) => {
+    const r = zone.getBoundingClientRect();
+    if (v === 'b') { const rail = tab.querySelector('.rail').getBoundingClientRect(); return (e.clientX - rail.left) / rail.width; }
+    return (e.clientY - r.top - 22) / (r.height - 44);
+  };
+  let dragging = false, last = 0.3;
+  zone.addEventListener('pointerdown', (e) => { dragging = true; zone.setPointerCapture(e.pointerId); last = toP(e); set(last, true); });
+  zone.addEventListener('pointermove', (e) => { if (dragging) { last = toP(e); set(last, true); } });
+  const end = () => { dragging = false; set(last, false); };
+  zone.addEventListener('pointerup', end); zone.addEventListener('pointercancel', end);
+  set(0.24, location.hash === '#active');
+});
+</script>
+</body>
+</html>

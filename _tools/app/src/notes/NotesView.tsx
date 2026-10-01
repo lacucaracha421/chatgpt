@@ -139,6 +139,13 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   },[state.syncing]);
   useEffect(()=>{void store.load();},[store]);
   useEffect(()=>{if(!state.unlocked)return;const refresh=()=>{if(!document.hidden)void store.sync(false);};refresh();window.addEventListener("focus",refresh);const timer=setInterval(refresh,NOTES_REFRESH_INTERVAL);return()=>{window.removeEventListener("focus",refresh);clearInterval(timer);};},[store,state.unlocked]);
+  // Leaving the window or the Notes screen finishes the work: one sync of what was edited.
+  useEffect(()=>{
+    const finish=()=>{void store.finish();};
+    const hidden=()=>{if(document.hidden)finish();};
+    window.addEventListener("blur",finish);document.addEventListener("visibilitychange",hidden);
+    return()=>{window.removeEventListener("blur",finish);document.removeEventListener("visibilitychange",hidden);finish();};
+  },[store]);
   // Opening Notes is the one user action allowed to show the keyring password dialog.
   const keyringPrompted=useRef(false);
   useEffect(()=>{if(!state.keyringLocked||keyringPrompted.current)return;keyringPrompted.current=true;setKeyringBusy(true);void store.unlockKeyring().finally(()=>setKeyringBusy(false));},[store,state.keyringLocked]);
@@ -161,10 +168,12 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
   const previous=useRef<string|null>(null);
   useEffect(()=>{
     const before=notesRef.current.find(n=>n.id===previous.current);const now=notesRef.current.find(n=>n.id===selected);
+    // Closing a note or switching to another one is the moment to sync it.
+    if(previous.current&&previous.current!==selected)void store.finish();
     previous.current=selected;
     // Closing a secret note locks; moving straight to another secret note keeps the session.
     if(before&&isSecret(before)&&before.id!==selected&&!(now&&isSecret(now)))lockSecrets();
-  },[selected,lockSecrets]);
+  },[selected,lockSecrets,store]);
 
   const allLabels=useMemo(()=>{const map=new Map<string,{label:string;count:number}>();for(const n of state.notes)if(!n.deleted)for(const l of n.labels??[]){const k=labelKey(l);const e=map.get(k);if(e)e.count++;else map.set(k,{label:l,count:1});}return [...map.values()].sort((a,b)=>a.label.localeCompare(b.label,"ko"));},[state.notes]);
   // Ledger month notes are internal to their ledger (design §4.1): never listed, searched or counted.
