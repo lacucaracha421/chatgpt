@@ -4,13 +4,14 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 117;
+pub(crate) const SCHEMA_VERSION: i64 = 118;
 
-/// Test helper: undoes migrations 0103 through 0117 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0118 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP TABLE manga_index_pins;
     DROP TRIGGER mobile_collection_pc_records_insert; DROP TRIGGER mobile_collection_pc_records_update; DROP TRIGGER mobile_collection_pc_records_delete;
     DROP TRIGGER mobile_collection_volume_cover_focus_insert; DROP TRIGGER mobile_collection_volume_cover_focus_update; DROP TRIGGER mobile_collection_volume_cover_focus_delete;
     DROP TRIGGER mobile_collection_people_insert; DROP TRIGGER mobile_collection_people_update; DROP TRIGGER mobile_collection_people_delete;
@@ -703,6 +704,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
             transaction.execute_batch(include_str!(
                 "../../migrations/0117_collection_publication_triggers.sql"
             ))?;
+        }
+        if version <= 117 {
+            transaction.execute_batch(include_str!("../../migrations/0118_manga_index_pins.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
@@ -4802,7 +4806,7 @@ mod collection_publication_migration_tests {
         for (t, expected) in tables.iter().zip(before) {
             assert_eq!(rows(&c, t), expected, "{t}");
         }
-        assert_eq!(c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 117);
+        assert_eq!(c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), SCHEMA_VERSION);
         assert_eq!(c.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0)).unwrap(), "ok");
         assert!(!c.prepare("PRAGMA foreign_key_check").unwrap().exists([]).unwrap());
 
@@ -4837,5 +4841,56 @@ mod collection_publication_migration_tests {
                 "{write}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod manga_index_migration_tests {
+    use super::*;
+    #[test]
+    fn manga_index_upgrade_from_117_preserves_data_and_rejects_duplicate_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut c = open_database(&temp.path().join("library.sqlite")).unwrap();
+        tests::historical_schema(&mut c, 117);
+        c.execute(
+            "INSERT INTO online_catalog_bookmarks VALUES('kHentai','42','now')",
+            [],
+        )
+        .unwrap();
+        migrate_to_latest(&mut c, 117).unwrap();
+        assert_eq!(
+            c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            118
+        );
+        assert_eq!(
+            c.query_row("SELECT work_id FROM online_catalog_bookmarks", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
+            "42"
+        );
+        c.execute(
+            "INSERT INTO manga_index_pins VALUES('tag','female','same','label','now')",
+            [],
+        )
+        .unwrap();
+        assert!(c
+            .execute(
+                "INSERT INTO manga_index_pins VALUES('tag','female','same','other','now')",
+                []
+            )
+            .is_err());
+        assert!(c
+            .execute(
+                "INSERT INTO manga_index_pins VALUES('artist','female','same','label','now')",
+                []
+            )
+            .is_err());
+        assert_eq!(
+            c.pragma_query_value(None, "quick_check", |r| r.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
     }
 }

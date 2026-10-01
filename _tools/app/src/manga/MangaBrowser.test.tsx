@@ -67,6 +67,42 @@ describe("MangaBrowser", () => {
     expect(screen.queryByLabelText("망가 불러오는 중")).not.toBeInTheDocument();
   });
 
+  it("combines an index pick with typed search, holds the old grid, and clears only the index token", async () => {
+    const gateway = createGateway({ root: "C:\\manga", series });
+    gateway.suggestOnlineCatalog = vi.fn().mockResolvedValue([]);
+    gateway.getMangaFrequentIndex = vi.fn().mockResolvedValue({ bookmarkCount: 1, tagLimit: 8, artistLimit: 5, tags: [{ kind: "tag", namespace: "female", value: "tag", label: "태그", count: 1 }], artists: [] });
+    gateway.listMangaIndexPins = vi.fn().mockResolvedValue([]);
+    gateway.getOnlineCatalogStatus = vi.fn().mockResolvedValue({ installed: true, workCount: 1 });
+    const work = { provider: "kHentai" as const, providerWorkId: "1", groupId: "1", versionCount: 1, hasBookmarkedVersion: false, title: "원래 작품", titleJpn: null, artists: [], series: [], thumbnailUrl: null, bookmarked: false, fileCount: 20, views: 0, posted: 1 };
+    gateway.searchCatalogGroups = vi.fn(async (_query, onEvent) => { onEvent({ type: "page", page: { works: [work], page: 0, pageSize: 48 } }); onEvent({ type: "count", totalCount: 1 }); });
+    const { container } = renderBrowser(gateway);
+    await screen.findByText("원래 작품");
+    await userEvent.click(screen.getByRole("button", { name: "팔레트 검색 b" }));
+    await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ text: "b" }), expect.any(Function)));
+    let finish!: () => void;
+    vi.mocked(gateway.searchCatalogGroups).mockImplementationOnce(async (_query, onEvent) => { await new Promise<void>(resolve => { finish = resolve; }); onEvent({ type: "page", page: { works: [{ ...work, title: "새 작품" }], page: 0, pageSize: 48 } }); });
+    await userEvent.click(await screen.findByRole("button", { name: "태그 1" }));
+    expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ text: '(b) AND female:"tag"' }), expect.any(Function));
+    expect(screen.getByText("원래 작품")).toBeVisible();
+    expect(container.querySelector(".online-catalog__frame")).toHaveAttribute("inert");
+    await act(async () => finish());
+    expect(await screen.findByText("새 작품")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "태그 필터 해제" }));
+    expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ text: "b" }), expect.any(Function));
+  });
+
+  it("filters the local grid by folder series identities", async () => {
+    const gateway = createGateway({ root: "C:\\manga", series });
+    gateway.getMangaLocalIndex = vi.fn().mockResolvedValue({ folders: [{ name: "A", relativePath: "A", seriesCount: 1, seriesIds: ["s1"] }], vanished: [] });
+    renderBrowser(gateway);
+    await userEvent.click(await screen.findByRole("radio", { name: /^로컬/ }));
+    await screen.findByText("T2");
+    await userEvent.click(await screen.findByRole("button", { name: "A 1" }));
+    expect(screen.getByText("T1")).toBeVisible(); expect(screen.queryByText("T2")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "전체 2" }));
+    expect(screen.getByText("T2")).toBeVisible();
+  });
+
   it("scans and shows the cover grid when the root is set", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     const { container } = renderBrowser(gateway);

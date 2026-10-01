@@ -1,7 +1,10 @@
+import { createPortal } from "react-dom";
+import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
+import { MangaIndex } from "./MangaIndex";
 import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useMemo, useLayoutEffect, useRef, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
-import type { CatalogScope, MangaCatalogRecoveryPreview, MangaSeries } from "../library/types";
+import type { CatalogScope, MangaCatalogRecoveryPreview, MangaSeries, MangaIndexIdentity, MangaLocalIndex } from "../library/types";
 import { mangaCoverUrl } from "../assets/mediaUrl";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
@@ -27,6 +30,12 @@ function initialMangaSource(): "local" | "online" {
 
 export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const { gateway } = useLibrary();
+  const workspace = useWorkspaceChrome();
+  const [bookmarkRevision, setBookmarkRevision] = useState(0);
+  const [indexFilter, setIndexFilter] = useState<MangaIndexIdentity | null>(null);
+  const [localFolder, setLocalFolder] = useState<string | null>(null);
+  const [localIndex, setLocalIndex] = useState<MangaLocalIndex | null>(null);
+  const receiveLocalIndex = useCallback((index: MangaLocalIndex) => setLocalIndex(index), []);
   const { privacyMode, setPrivacyMode } = usePrivacy();
   const [root, setRoot] = useState<string | null | undefined>(undefined);
   const [series, setSeries] = useState<MangaSeries[] | null>(null);
@@ -66,7 +75,8 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const visibleSeries = useMemo(() => {
     if (!series) return [];
     const matches = createKoreanMatcher(query);
-    const filtered = query.trim() ? series.filter((entry) => matches([entry.title, entry.author])) : series;
+    const folderIds = localFolder ? new Set(localIndex?.folders.find(folder => folder.relativePath === localFolder)?.seriesIds ?? []) : null;
+    const filtered = series.filter(entry => (!folderIds || folderIds.has(entry.id)) && (!query.trim() || matches([entry.title, entry.author])));
     if (sort === "recent") return filtered;
     return [...filtered].sort((left, right) => {
       if (sort === "pages_desc") return right.pageCount - left.pageCount;
@@ -74,7 +84,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
       const rightValue = sort === "author_asc" ? right.author : right.title;
       return leftValue.localeCompare(rightValue, "ko", { numeric: true, sensitivity: "base" });
     });
-  }, [query, series, sort]);
+  }, [query, series, sort, localFolder, localIndex]);
 
   async function refreshSeries(active = () => true) {
     if (!active()) return;
@@ -161,14 +171,29 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gateway, source]);
 
-  const countLabel = query.trim() && visibleSeries.length !== series?.length
+  const countLabel = (query.trim() || localFolder) && visibleSeries.length !== series?.length
     ? `${visibleSeries.length} / ${series?.length ?? 0}개 작품`
     : `${series?.length ?? 0}개 작품`;
 
   const localActive = displayedSource === "local";
+  const index = <MangaIndex source={source === "local" ? "local" : onlineScope} filter={indexFilter} onFilter={setIndexFilter}
+    folder={localFolder} onFolder={setLocalFolder} localCount={series?.length ?? 0} revision={`${refreshedAt}:${bookmarkRevision}`}
+    onLocalIndex={receiveLocalIndex} onPurge={async () => {
+      // Folder metadata and the grid swap together after cleanup; a removed active
+      // folder must not briefly empty the old grid while its replacement is loading.
+      const [nextSeries, nextIndex] = await Promise.all([gateway.listMangaSeries(), gateway.getMangaLocalIndex?.()]);
+      setSeries(nextSeries);
+      if (nextIndex) {
+        setLocalIndex(nextIndex);
+        if (localFolder && !nextIndex.folders.some(folder => folder.relativePath === localFolder)) setLocalFolder(null);
+      }
+      setRefreshedAt(new Date().toISOString());
+    }} />;
   return <>
+    {workspace?.targets.navigation && createPortal(index, workspace.targets.navigation)}
     {onlineVisited && <div className="manga-browser__screen" style={{ display: displayedSource === "online" ? undefined : "none" }}>
       <OnlineCatalogBrowser initialScope={onlineScope} requestedSource={source === "local" ? "local" : onlineScope}
+        onBookmarksChanged={() => setBookmarkRevision(n => n + 1)} indexFilter={indexFilter} onClearIndexFilter={() => setIndexFilter(null)}
         active={displayedSource === "online"} onSourceChange={selectSource} onSwitchLocal={() => selectSource("local")}
         onReady={onlineReady} localCount={series?.length} bookmarkCount={bookmarkCount} onBookmarkCount={setBookmarkCount} />
     </div>}

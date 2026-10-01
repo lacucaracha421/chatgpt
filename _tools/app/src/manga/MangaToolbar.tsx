@@ -27,14 +27,15 @@ export function MangaChoiceMenu<T extends string>({ label, value, options, onCha
     items={options.map(option => ({ id: option.value, label: option.label, group: label, selected: value === option.value, onSelect: () => onChange(option.value) }))} />;
 }
 
-export function MangaToolbar({ source, onSourceChange, localCount, bookmarkCount, countLabel, controls, refreshedAt, refreshing, onRefresh, actions, chrome, ariaLabel = "망가 도구" }: {
+export function MangaToolbar({ source, onSourceChange, localCount, bookmarkCount, countLabel, filterToken, controls, refreshedAt, refreshing, onRefresh, actions, chrome, ariaLabel = "망가 도구" }: {
   source: MangaSource; onSourceChange: (source: MangaSource) => void; localCount?: number; bookmarkCount?: number;
-  countLabel?: string; controls?: ReactNode; refreshedAt?: string | null; refreshing?: boolean; onRefresh?: () => void;
+  countLabel?: string; filterToken?: ReactNode; controls?: ReactNode; refreshedAt?: string | null; refreshing?: boolean; onRefresh?: () => void;
   actions?: ReactNode; chrome?: ViewChromeSpec; ariaLabel?: string;
 }) {
   const sectionDrop = useSectionDrop({ label: "망가 출처", className: "manga-section-bar", value: source, onChange: onSourceChange, trailing: controls, options: sourceOptions(localCount, bookmarkCount) });
   return <>
     <ViewToolbar sectionDrop={sectionDrop} title="망가" ariaLabel={ariaLabel} titleAccessory={<>
+      {filterToken}
       {countLabel && <span className="manga-toolbar__count">{countLabel}</span>}
       <div className="manga-toolbar__refresh">
         {refreshedAt && <time dateTime={refreshedAt}>갱신 {displayDateTime(refreshedAt, new Date(), { withTime: true })}</time>}

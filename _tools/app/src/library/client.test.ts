@@ -525,3 +525,19 @@ it("sends the edit dialog's personal base with a collection update", async () =>
   await libraryGateway.updateCollection("c", input);
   expect(invoke).toHaveBeenLastCalledWith("update_collection", { id: "c", request: input });
 });
+
+it("routes Manga index identities and selected folder paths through the library gateway", async () => {
+  await libraryGateway.getMangaFrequentIndex?.();
+  expect(invoke).toHaveBeenLastCalledWith("get_manga_frequent_index", { tagLimit: undefined, artistLimit: undefined });
+  await libraryGateway.listMangaIndexPins?.();
+  expect(invoke).toHaveBeenLastCalledWith("list_manga_index_pins");
+  const identity = { kind: "tag" as const, namespace: "female", value: "same", label: "태그" };
+  await libraryGateway.addMangaIndexPin?.(identity);
+  expect(invoke).toHaveBeenLastCalledWith("add_manga_index_pin", { identity });
+  await libraryGateway.removeMangaIndexPin?.(identity);
+  expect(invoke).toHaveBeenLastCalledWith("remove_manga_index_pin", { identity });
+  await libraryGateway.getMangaLocalIndex?.();
+  expect(invoke).toHaveBeenLastCalledWith("get_manga_local_index");
+  await libraryGateway.purgeVanishedMangaFolders?.(["selected"]);
+  expect(invoke).toHaveBeenLastCalledWith("purge_vanished_manga_folders", { paths: ["selected"] });
+});

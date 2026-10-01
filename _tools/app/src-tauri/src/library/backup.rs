@@ -572,7 +572,7 @@ thread_local! {
 }
 
 #[cfg(test)]
-fn set_before_verify_hook(hook: impl FnOnce() + 'static) {
+pub(super) fn set_before_verify_hook(hook: impl FnOnce() + 'static) {
     BEFORE_VERIFY_HOOK.with(|stored_hook| *stored_hook.borrow_mut() = Some(Box::new(hook)));
 }
 

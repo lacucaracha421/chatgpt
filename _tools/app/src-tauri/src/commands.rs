@@ -1,3 +1,6 @@
+use crate::library::manga_index::{
+    MangaFolderPurgeResult, MangaFrequentIndex, MangaIndexIdentity, MangaLocalIndex,
+};
 #[cfg(target_os = "linux")]
 mod linux_drag;
 use std::sync::RwLock;
@@ -450,6 +453,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidEncryptedVaultTitle => "invalid_encrypted_vault_title",
             LibraryError::WriteAsset { .. } => "write_asset_failed",
             LibraryError::MangaRootNotSet => "manga_root_not_set",
+            LibraryError::InvalidMangaIndexRequest => "invalid_manga_index_request",
             LibraryError::MachineSettings { .. } => "machine_settings_failed",
             LibraryError::CollectionSourceRootNotSet => "collection_source_root_not_set",
             LibraryError::CollectionSourcePathNotSet => "collection_source_path_not_set",
@@ -1984,6 +1988,74 @@ pub async fn scan_manga(state: State<'_, AppState>) -> Result<u64, CommandError>
 pub fn list_manga_series(state: State<'_, AppState>) -> Result<Vec<MangaSeries>, CommandError> {
     let library = current_required(state)?;
     library.list_manga_series().map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_manga_frequent_index(
+    tag_limit: Option<usize>,
+    artist_limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<MangaFrequentIndex, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.manga_frequent_index(tag_limit, artist_limit)
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn list_manga_index_pins(
+    state: State<'_, AppState>,
+) -> Result<Vec<MangaIndexIdentity>, CommandError> {
+    let library = current_required(state)?;
+    library.list_manga_index_pins().map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn add_manga_index_pin(
+    identity: MangaIndexIdentity,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    library
+        .add_manga_index_pin(identity)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn remove_manga_index_pin(
+    identity: MangaIndexIdentity,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let library = current_required(state)?;
+    library
+        .remove_manga_index_pin(identity)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_manga_local_index(
+    state: State<'_, AppState>,
+) -> Result<MangaLocalIndex, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.manga_local_index())
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn purge_vanished_manga_folders(
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<MangaFolderPurgeResult, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.purge_vanished_manga_folders(paths))
+        .await
+        .map_err(|_| background_task_error())?
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]

@@ -1,0 +1,26 @@
+.manga-index { padding: var(--space-2); min-width: 0; }
+.manga-index .ui-section-label { margin: var(--space-3) var(--space-2) var(--space-1); }
+.manga-index__row { position: relative; }
+.manga-index__row .classification-sidebar__quick-view-surface { padding-right: calc(var(--space-8) + var(--space-3)); }
+.manga-index .classification-sidebar__quick-view-label { flex: 1; }
+.manga-index__count { margin-left: auto; color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.manga-index [aria-current="page"] .manga-index__count { color: var(--color-on-accent); }
+.manga-index__pin { position: absolute; right: var(--space-3); top: 50%; transform: translateY(-50%); width: var(--space-6); height: var(--space-6); padding: var(--space-1); display: grid; place-items: center; border: 0; border-radius: var(--radius-mark); background: transparent; color: var(--color-muted); opacity: 0; cursor: pointer; }
+.manga-index__row:hover .manga-index__pin, .manga-index__row:focus-within .manga-index__pin, .manga-index__row--pinned .manga-index__pin { opacity: 1; }
+.manga-index__pin:hover { background: var(--color-surface-hover); }
+.manga-index__pin svg { width: 100%; height: 100%; }
+.manga-index__row:has([aria-current="page"]) .manga-index__pin { color: var(--color-on-accent); }
+.manga-index__pin:focus-visible, .manga-index__more:focus-visible, .manga-index-token button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.manga-index__more { margin: var(--space-1) var(--space-2); padding: var(--space-1) 0; border: 0; background: transparent; color: var(--color-faint); font: inherit; font-size: var(--type-meta); cursor: pointer; }
+.manga-index__more:hover { color: var(--color-text); }
+.manga-index__note { margin: var(--space-2); font-size: var(--type-meta); color: var(--color-faint); line-height: var(--line-copy); }
+.manga-index__gone { margin: var(--space-3) var(--space-2); display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); font-size: var(--type-meta); color: var(--color-muted); }
+.manga-index__vanished { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) 0; border-top: 1px solid var(--color-border); }
+.manga-index__vanished small { display: block; color: var(--color-faint); font-size: var(--type-meta); overflow-wrap: anywhere; }
+.manga-index__vanished input { accent-color: var(--color-accent); }
+.manga-index-token { display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); border-radius: var(--radius-mark); color: var(--color-filter-text); background: var(--color-filter-selected); font-size: var(--type-meta); white-space: nowrap; }
+.manga-index-token button { border: 0; background: transparent; color: var(--color-muted); cursor: pointer; font: inherit; }
+.manga-index .classification-sidebar__quick-view[aria-current="page"] > .classification-sidebar__quick-view-surface::after { content: ""; position: absolute; right: var(--space-1); top: 50%; transform: translateY(-50%); width: var(--selection-mark-size); height: var(--selection-mark-size); background: var(--color-on-accent); }
+
+/* Folder rows: keep the count clear of the selected row's square mark. */
+.manga-index > .classification-sidebar__quick-view .classification-sidebar__quick-view-surface { padding-right: var(--space-6); }

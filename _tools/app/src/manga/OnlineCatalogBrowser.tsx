@@ -39,17 +39,20 @@ import { OverlayPanel } from "../shared/ui/OverlayPanel";
 import { catalogIdentityKey, catalogIdentityOf } from "./catalogIdentity";
 import { MangaSkeletonGrid } from "./MangaCard";
 import { MangaToolbar, MangaChoiceMenu, type MangaSource } from "./MangaToolbar";
+import { MangaIndexToken } from "./MangaIndex";
+import { mangaIndexQuery, withMangaIndexQuery } from "./mangaIndexModel";
+import type { MangaIndexIdentity } from "../library/types";
 import { displayDateTime } from "../shared/displayDate";
 
 const CATALOG_PAGE_SIZE = 48;
 
-type CatalogView = { text: string; sort: CatalogSort; scope: CatalogScope; revealBlocked: boolean; language: CatalogLanguage };
+type CatalogView = { indexQuery: string; text: string; sort: CatalogSort; scope: CatalogScope; revealBlocked: boolean; language: CatalogLanguage };
 /** Every page loaded so far for one view, in order, without repeating a group. */
 type CatalogList = { works: CatalogGroupedWork[]; pages: number; complete: boolean };
 type PageStream = { first: Promise<CatalogGroupedPage | null>; done: Promise<void> };
 
 function viewKey(view: CatalogView | null): string {
-  return view ? JSON.stringify([view.text, view.sort, view.scope, view.revealBlocked, view.language]) : "";
+  return view ? JSON.stringify([view.text, view.indexQuery, view.sort, view.scope, view.revealBlocked, view.language]) : "";
 }
 
 function appendWorks(current: CatalogGroupedWork[], next: CatalogGroupedWork[]): CatalogGroupedWork[] {
@@ -59,6 +62,9 @@ function appendWorks(current: CatalogGroupedWork[], next: CatalogGroupedWork[]):
 }
 
 type OnlineCatalogBrowserProps = {
+  indexFilter?: MangaIndexIdentity | null;
+  onClearIndexFilter?: () => void;
+  onBookmarksChanged?: () => void;
   onSwitchLocal: () => void;
   initialScope?: CatalogScope;
   requestedSource?: MangaSource;
@@ -70,7 +76,7 @@ type OnlineCatalogBrowserProps = {
   onBookmarkCount?: (count: number | undefined) => void;
 };
 
-export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requestedSource, active = true, onSourceChange, onReady, localCount, bookmarkCount, onBookmarkCount }: OnlineCatalogBrowserProps) {
+export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, onBookmarksChanged, onSwitchLocal, initialScope = "all", requestedSource, active = true, onSourceChange, onReady, localCount, bookmarkCount, onBookmarkCount }: OnlineCatalogBrowserProps) {
   const { gateway } = useLibrary();
   const { privacyMode } = usePrivacy();
   const workspace = useWorkspaceChrome();
@@ -179,7 +185,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
       provider: "kHentai",
       language: view.language,
       revealBlocked: view.revealBlocked,
-      text: view.text,
+      text: withMangaIndexQuery(view.text, view.indexQuery),
       sort: view.sort,
       scope: view.scope,
       page,
@@ -198,7 +204,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
     setAppliedQuery(text);
     setSearchOpen(false);
     const request = ++searchRequest.current;
-    const view: CatalogView = { text, sort: nextSort, scope: nextScope, revealBlocked: nextRevealBlocked, language: nextLanguage };
+    const view: CatalogView = { indexQuery: mangaIndexQuery(indexFilter), text, sort: nextSort, scope: nextScope, revealBlocked: nextRevealBlocked, language: nextLanguage };
     setLoading(!quiet);
     setSearchPending(true);
     setLoadingMore(false);
@@ -275,6 +281,16 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
       if (totalCount === null) setCountError("결과 수를 불러오지 못했습니다");
     }
   }
+
+  const indexQuery = mangaIndexQuery(indexFilter);
+  const previousIndexQuery = useRef(indexQuery);
+  useEffect(() => {
+    if (previousIndexQuery.current === indexQuery) return;
+    previousIndexQuery.current = indexQuery;
+    if (status?.installed) void search(appliedQuery);
+    // The applied typed search remains separate; an index pick adds a single AND clause.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [indexQuery, status?.installed]);
 
   const initialSearch = useRef(() => search(""));
   initialSearch.current = () => search("");
@@ -492,6 +508,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
       // Updating only the representative briefly invents a saved-other-edition state.
       setDetail((current) => current && catalogIdentityKey(current) === identityKey ? { ...current, bookmarked } : current);
       await refreshSearch.current(true);
+      onBookmarksChanged?.();
       return true;
     } catch {
       if (!mounted.current) return false;
@@ -667,6 +684,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
   }, [canAutoLoad, results]);
   return <section className="manga-browser online-catalog" aria-label="온라인 망가">
     {active && <MangaToolbar source={requestedSource ?? scope} onSourceChange={selectSource} localCount={localCount} bookmarkCount={bookmarkCount ?? knownBookmarkCount}
+      filterToken={<MangaIndexToken filter={indexFilter} onClear={() => onClearIndexFilter?.()} />}
       countLabel={totalCount !== null ? `${totalCount.toLocaleString()}개 결과` : status?.installed ? countError ? "결과 수 확인 실패" : "결과 수 계산 중…" : undefined}
       controls={catalogControls} refreshedAt={refreshedAt ?? latestUpdate} refreshing={loading} onRefresh={status?.installed ? () => { void refreshSearch.current().then(success => { if (success) setRefreshedAt(new Date().toISOString()); }); } : undefined}
       ariaLabel="온라인 망가 도구" actions={catalogMenu} chrome={{

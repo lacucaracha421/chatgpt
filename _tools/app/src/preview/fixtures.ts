@@ -1,7 +1,10 @@
-import type { AssetQuery, AssetSummary, CollectionSummary, ReleaseTitle } from "../library/types.ts";
+import type { AssetQuery, AssetSummary, CollectionSummary, ReleaseTitle, MangaIndexIdentity } from "../library/types.ts";
 import type { ArtistSummary } from "../artists/types.ts";
 
 export const PREVIEW_FIXTURE_MARKER = "lakomics-preview-fixture-20260929";
+
+let mangaPins: MangaIndexIdentity[] = [];
+let vanishedPreview = [{ name: "옛 폴더", relativePath: "옛 폴더", seriesCount: 2, seriesIds: [] as string[] }];
 
 const isoDays = [
   "2026-09-29", "2026-09-28", "2026-09-27", "2026-09-25", "2026-09-22",
@@ -309,6 +312,12 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "get_release_watch_status": return { enabled: true, lastCheckedAt: "2026-09-29T03:00:00.000Z" };
     case "take_unread_release_changes": return [];
     case "get_collection_source_root": return "/preview/collections";
+    case "get_manga_frequent_index": return { bookmarkCount: 18, tagLimit: 8, artistLimit: 5, tags: ["네토라레", "풀컬러", "안경", "로맨스", "단편", "판타지", "일상", "모험", "코미디"].map((label, index) => ({ kind: "tag", namespace: "female", value: ["netorare", "full color", "glasses", "romance", "short", "fantasy", "everyday", "adventure", "comedy"][index], label, count: 18 - index })), artists: creatorNames.slice(0, 6).map((name, index) => ({ kind: "artist", namespace: "artist", value: name, label: name, count: 8 - index })) };
+    case "list_manga_index_pins": return [...mangaPins];
+    case "add_manga_index_pin": { const pin = args.identity as MangaIndexIdentity; if (!mangaPins.some(p => p.kind === pin.kind && p.namespace === pin.namespace && p.value === pin.value)) mangaPins.push(pin); return; }
+    case "remove_manga_index_pin": { const pin = args.identity as MangaIndexIdentity; mangaPins = mangaPins.filter(p => !(p.kind === pin.kind && p.namespace === pin.namespace && p.value === pin.value)); return; }
+    case "get_manga_local_index": return { folders: creatorNames.map((name, index) => ({ name, relativePath: name, seriesCount: index < 8 ? 2 : 1, seriesIds: Array.from({ length: 18 }, (_, i) => i).filter(i => i % creatorNames.length === index).map(i => `manga-${i + 1}`) })), vanished: [...vanishedPreview] };
+    case "purge_vanished_manga_folders": { const paths = args.paths as string[]; const removedFolders = vanishedPreview.filter(f => paths.includes(f.relativePath)); vanishedPreview = vanishedPreview.filter(f => !paths.includes(f.relativePath)); return { removedFolders, removedSeriesCount: removedFolders.reduce((sum, f) => sum + f.seriesCount, 0), backupPath: "/preview/library/backups/test.sqlite" }; }
     case "get_manga_root": return "/preview/manga";
     case "get_other_machine_manga_root": return null;
     case "scan_manga": return 0;

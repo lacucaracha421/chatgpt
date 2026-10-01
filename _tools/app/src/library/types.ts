@@ -1092,6 +1092,13 @@ export type PurgeSummary = {
   failedAssetIds: string[];
 };
 
+export type MangaIndexIdentity = { kind: "tag" | "artist"; namespace: string; value: string; label: string };
+export type MangaIndexEntry = MangaIndexIdentity & { count: number };
+export type MangaFrequentIndex = { bookmarkCount: number; tags: MangaIndexEntry[]; artists: MangaIndexEntry[]; tagLimit: number; artistLimit: number };
+export type MangaLocalFolder = { name: string; relativePath: string; seriesCount: number; seriesIds: string[] };
+export type MangaLocalIndex = { folders: MangaLocalFolder[]; vanished: MangaLocalFolder[] };
+export type MangaFolderPurgeResult = { removedFolders: MangaLocalFolder[]; removedSeriesCount: number; backupPath: string };
+
 export type MangaSeries = {
   id: string;
   title: string;
@@ -1520,6 +1527,12 @@ export interface LibraryGateway {
   getOtherMachineMangaRoot?(): Promise<string | null>;
   setMangaRoot(path: string | null): Promise<void>;
   scanManga(): Promise<number>;
+  getMangaFrequentIndex?(tagLimit?: number, artistLimit?: number): Promise<MangaFrequentIndex>;
+  listMangaIndexPins?(): Promise<MangaIndexIdentity[]>;
+  addMangaIndexPin?(identity: MangaIndexIdentity): Promise<void>;
+  removeMangaIndexPin?(identity: MangaIndexIdentity): Promise<void>;
+  getMangaLocalIndex?(): Promise<MangaLocalIndex>;
+  purgeVanishedMangaFolders?(paths: string[]): Promise<MangaFolderPurgeResult>;
   listMangaSeries(): Promise<MangaSeries[]>;
   previewMangaCatalogRecovery?(): Promise<MangaCatalogRecoveryPreview>;
   refreshMangaCatalogRecoveryRemote?(): Promise<MangaCatalogRecoveryRemoteResult>;
