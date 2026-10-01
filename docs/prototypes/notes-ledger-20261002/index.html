@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>메모와 가계부</title>
+<!-- Loads the app's real tokens and shared controls; only the frames and the proposed parts are local. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<style>
+/* Layout: decision header, a 메모/가계부 switch, then the PC window and the tablet beside it. */
+:root { --page: #0e0f10; color-scheme: dark; }
+body { margin: 0; background: var(--page); color: var(--color-text); font: 400 var(--type-body)/var(--line-ui) var(--font-ui); }
+.doc { max-width: 1560px; margin: 0 auto; padding-block: 32px 80px; padding-inline: 16px; display: flex; flex-direction: column; gap: 22px; }
+h1 { margin: 0; font-size: var(--text-title-large); line-height: var(--line-title-large); font-weight: 600; text-wrap: balance; }
+h2 { margin: 0; font-size: var(--type-title); font-weight: 600; }
+.lead { margin: 8px 0 0; color: var(--color-muted); max-width: 80ch; line-height: var(--line-copy); }
+.lead b, .notes b { color: var(--color-text); font-weight: 600; }
+.notes { margin: 0; padding-left: 20px; color: var(--color-muted); max-width: 90ch; line-height: var(--line-copy); display: flex; flex-direction: column; gap: 5px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; color: var(--color-faint); font-size: var(--type-meta); }
+.pick { display: inline-flex; padding: 2px; background: var(--color-surface); border-radius: var(--radius-control); }
+.pick button { min-height: 28px; padding: 0 14px; border: 0; border-radius: var(--radius-mark); background: transparent; color: var(--color-muted); font: inherit; cursor: pointer; }
+.pick button[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+.stage { display: flex; gap: 24px; align-items: flex-start; overflow-x: auto; padding-bottom: 4px; }
+.col { display: flex; flex-direction: column; gap: 10px; flex: none; }
+.col p { margin: 0; color: var(--color-faint); font-size: var(--type-meta); max-width: 420px; }
+[hidden] { display: none !important; }
+
+/* Shared frame bits */
+.win { position: relative; width: 1080px; height: 780px; display: grid; grid-template-columns: 64px 240px minmax(0, 1fr); border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; background: var(--color-bg); }
+.rail { background: var(--color-sidebar); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 6px; color: var(--color-faint); font-size: 11px; }
+.rail .mark { width: 22px; height: 26px; margin-bottom: 10px; color: var(--color-accent); }
+.rail span { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 52px; padding: 6px 0; border-radius: var(--radius-control); }
+.rail span i { width: 18px; height: 16px; border: 1.5px solid currentColor; border-radius: 3px; }
+.rail span.on { color: var(--color-text); background: var(--color-surface); }
+.list { background: var(--color-sidebar); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; min-width: 0; }
+.list-head { height: var(--toolbar-height); flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; color: var(--color-muted); font-size: var(--type-meta); border-bottom: 1px solid var(--color-border); }
+.list-body { padding: 8px; display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
+.nrow { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--radius-mark); cursor: pointer; }
+.nrow b { font-weight: 500; font-size: var(--type-body); }
+.nrow small { color: var(--color-faint); font-size: var(--type-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nrow.on { background: var(--color-sidebar-selection); color: var(--color-on-accent); box-shadow: var(--selection-echo); }
+.nrow.on small { color: var(--color-on-accent); opacity: .7; }
+.main { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.top { height: var(--toolbar-height); flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 16px; background: var(--color-toolbar); border-bottom: 1px solid var(--color-border); }
+.top .t { font-weight: 600; }
+.top .grow { flex: 1; }
+.top .quiet { color: var(--color-faint); font-size: var(--type-meta); }
+.top .wc { display: flex; gap: 18px; color: var(--color-faint); margin-left: 12px; }
+.pane { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.label { display: flex; align-items: center; gap: 8px; color: var(--color-faint); font-size: var(--type-meta); }
+.label::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+.label::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--color-border), transparent); }
+.chipbar { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-mark); background: transparent; color: var(--color-muted); font: inherit; font-size: var(--type-meta); cursor: pointer; box-shadow: inset 0 0 0 1px var(--color-border); }
+.chip small { color: var(--color-faint); font-variant-numeric: tabular-nums; }
+.chip[aria-pressed="true"] { background: var(--color-filter-selected); color: var(--color-filter-text); font-weight: 600; box-shadow: none; }
+.btn { min-height: 28px; padding: 0 12px; border: 0; border-radius: var(--radius-control); background: var(--color-control); color: var(--color-text); font: inherit; font-size: var(--type-meta); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.btn:hover { background: var(--color-control-hover); }
+.btn.primary { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+.btn.ghost { background: transparent; color: var(--color-muted); }
+.btn.ghost:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 8px 14px; background: var(--color-surface-elevated); border: 1px solid var(--color-border-strong); font-size: var(--type-meta); z-index: 6; opacity: 0; transition: opacity 160ms var(--ease-standard); pointer-events: none; white-space: pre-line; max-width: 80%; }
+.toast.on { opacity: 1; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* 메모: sections are blocks, lines are items */
+.note { max-width: 720px; margin: 0 auto; padding: 20px 28px 60px; display: flex; flex-direction: column; gap: 18px; }
+.note-title { font-size: 22px; font-weight: 600; outline: none; }
+.sect { display: flex; flex-direction: column; gap: 2px; }
+.sect-head { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--color-border); }
+.sect-head .fold { width: 22px; height: 22px; border: 0; background: transparent; color: var(--color-faint); cursor: pointer; font: inherit; }
+.sect-head b { font-weight: 600; font-size: var(--type-body); }
+.sect-head small { color: var(--color-faint); font-size: var(--type-meta); }
+.sect-head .grow { flex: 1; }
+.item { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: start; gap: 4px; padding: 3px 0; border-radius: 2px; }
+.item:hover { background: color-mix(in srgb, var(--color-surface) 55%, transparent); }
+.tick { width: 18px; height: 18px; margin: 3px 4px 0; border-radius: 50%; border: 1.5px solid var(--color-border-strong); background: transparent; cursor: pointer; padding: 0; }
+.tick:hover { border-color: var(--color-muted); }
+.item.done .tick { background: var(--color-muted); border-color: var(--color-muted); }
+.item .txt { outline: none; line-height: 1.6; min-height: 1.6em; overflow-wrap: anywhere; }
+.item.done .txt { color: var(--color-faint); text-decoration: line-through; text-decoration-color: var(--color-border-strong); }
+.item .mv { opacity: 0; border: 0; background: transparent; color: var(--color-faint); cursor: pointer; font: inherit; font-size: var(--type-meta); padding: 2px 6px; }
+.item:hover .mv, .item:focus-within .mv { opacity: 1; }
+.add { display: flex; align-items: center; gap: 4px; padding: 4px 0 0 30px; color: var(--color-faint); font-size: var(--type-meta); cursor: text; border: 0; background: transparent; font-family: inherit; text-align: left; }
+.add:hover { color: var(--color-text); }
+.donefold { padding: 6px 0 0 30px; border: 0; background: transparent; color: var(--color-faint); font: inherit; font-size: var(--type-meta); cursor: pointer; text-align: left; }
+.quick { position: sticky; bottom: 0; margin-top: auto; display: flex; gap: 8px; align-items: center; padding: 10px 16px; background: var(--color-toolbar); border-top: 1px solid var(--color-border); }
+.quick input { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-bg); color: var(--color-text); font: inherit; }
+.quick select { height: 32px; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: var(--type-meta); padding: 0 8px; }
+
+/* 가계부 */
+.ledger { padding: 18px 24px 40px; display: flex; flex-direction: column; gap: 22px; }
+.month { display: flex; align-items: baseline; gap: 12px; }
+.month b { font-size: 24px; font-weight: 600; }
+.month small { color: var(--color-faint); font-size: var(--type-meta); }
+.budget { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+.budget div { padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+.budget div + div { border-left: 1px solid var(--color-border); }
+.budget span { color: var(--color-faint); font-size: var(--type-meta); }
+.budget strong { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.budget strong.left { color: var(--color-accent); }
+.meter { position: relative; height: 8px; background: var(--color-surface); border-radius: 1px; overflow: hidden; display: flex; }
+.meter i { display: block; height: 100%; }
+.meter .fix { background: color-mix(in srgb, var(--color-muted) 70%, transparent); }
+.meter .spent { background: var(--color-text); opacity: .75; }
+.meter .plan { background: repeating-linear-gradient(135deg, var(--color-accent) 0 4px, transparent 4px 8px); }
+.meterkey { display: flex; gap: 14px; color: var(--color-faint); font-size: var(--type-meta); }
+.meterkey i { display: inline-block; width: 10px; height: 8px; margin-right: 5px; vertical-align: 0; }
+.two { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 24px; }
+.tbl { display: flex; flex-direction: column; }
+.sub { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 10px 0; border-bottom: 1px solid var(--color-border); cursor: pointer; }
+.sub:hover { background: color-mix(in srgb, var(--color-surface) 45%, transparent); }
+.sub b { font-weight: 500; }
+.sub .amt { text-align: right; font-variant-numeric: tabular-nums; }
+.sub .meta { color: var(--color-faint); font-size: var(--type-meta); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.sub .next { text-align: right; color: var(--color-muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.pill { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: var(--radius-mark); font-size: 11px; font-weight: 600; background: var(--color-surface); color: var(--color-muted); }
+.pill.trial { background: color-mix(in srgb, var(--color-accent) 22%, transparent); color: var(--color-accent); }
+.pill.cancel { background: color-mix(in srgb, var(--color-danger) 18%, transparent); color: #e7a3a0; }
+.pill.soon { background: var(--color-filter-selected); color: var(--color-filter-text); }
+.want { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--color-border); }
+.want .pri { color: var(--color-faint); font-size: 12px; letter-spacing: -1px; }
+.want .pri.hi { color: var(--color-accent); }
+.want b { font-weight: 500; }
+.want small { grid-column: 2; color: var(--color-faint); font-size: var(--type-meta); }
+.want .amt { font-variant-numeric: tabular-nums; text-align: right; }
+.want .acts { grid-column: 2 / 4; display: none; gap: 6px; padding-top: 6px; }
+.want.open .acts { display: flex; }
+.fit { font-size: var(--type-meta); color: var(--color-muted); }
+.fit b { color: var(--color-text); font-weight: 600; }
+.spend { display: grid; grid-template-columns: 54px minmax(0, 1fr) auto; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--color-border); font-size: var(--type-body); }
+.spend .d { color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; padding-top: 2px; }
+.spend .amt { font-variant-numeric: tabular-nums; }
+.timeline { display: flex; gap: 0; border: 1px solid var(--color-border); }
+.timeline div { flex: 1; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; font-size: var(--type-meta); color: var(--color-faint); }
+.timeline div + div { border-left: 1px solid var(--color-border); }
+.timeline b { color: var(--color-text); font-weight: 500; font-size: var(--type-body); }
+.timeline .num { color: var(--color-muted); }
+.sheet-scrim { position: absolute; inset: 0; background: var(--color-overlay); display: grid; place-items: center; z-index: 5; }
+.dialog { position: relative; width: 420px; background: var(--color-surface-elevated); border: 1px solid var(--color-border-strong); box-shadow: var(--shadow-dialog); padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+.dialog::before, .dialog::after { content: ""; position: absolute; width: 10px; height: 10px; border-color: var(--color-section-mark); border-style: solid; }
+.dialog::before { left: -1px; top: -1px; border-width: 1px 0 0 1px; }
+.dialog::after { right: -1px; bottom: -1px; border-width: 0 1px 1px 0; }
+.field { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; align-items: center; font-size: var(--type-meta); color: var(--color-faint); }
+.field .val { color: var(--color-text); font-size: var(--type-body); }
+.dialog .seg2 { display: flex; flex-wrap: wrap; gap: 4px; }
+.dialog .seg2 span { padding: 3px 9px; border-radius: var(--radius-mark); box-shadow: inset 0 0 0 1px var(--color-border); font-size: var(--type-meta); color: var(--color-muted); }
+.dialog .seg2 span.on { background: var(--color-filter-selected); color: var(--color-filter-text); box-shadow: none; font-weight: 600; }
+
+/* Tablet */
+.tab { position: relative; width: 400px; height: 780px; border: 1px solid var(--color-border); border-radius: 18px; overflow: hidden; background: var(--color-bg); display: flex; flex-direction: column; }
+.tab .tb { height: 52px; flex: none; display: flex; align-items: center; padding: 0 16px; gap: 10px; background: var(--color-toolbar); border-bottom: 1px solid var(--color-border); font-weight: 600; }
+.tab .tb small { margin-left: auto; color: var(--color-faint); font-weight: 400; font-size: var(--type-meta); }
+.tab .tbody { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.tab .note { padding: 14px 16px 24px; }
+.tab .item { grid-template-columns: 34px minmax(0, 1fr); min-height: 40px; align-items: center; }
+.tab .tick { width: 22px; height: 22px; margin: 0 6px; }
+.tab .item .mv { display: none; }
+.tab .chipbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.tab .chip { min-height: 36px; flex: none; }
+.tab .quick { padding: 10px 12px; }
+.tab .quick input { height: 40px; }
+.tab .quick select { height: 40px; }
+.tab .ledger { padding: 14px 16px 24px; gap: 18px; }
+.tab .budget { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.tab .budget div:nth-child(3) { border-left: 0; border-top: 1px solid var(--color-border); }
+.tab .budget div:nth-child(4) { border-top: 1px solid var(--color-border); }
+.tab .two { grid-template-columns: 1fr; }
+.tab .timeline { overflow-x: auto; scrollbar-width: none; }
+.tab .timeline div { flex: 0 0 116px; }
+.nav { height: 52px; flex: none; display: flex; justify-content: space-around; align-items: center; border-top: 1px solid var(--color-border); background: var(--color-toolbar); color: var(--color-faint); font-size: 11px; }
+.nav b { color: var(--color-text); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>메모 · 가계부 다듬기</h1>
+    <p class="lead">메모는 <b>마크다운 없이 쉽게 쓰고 지우는 섹션 메모</b>, 가계부는 <b>구독 · 사고 싶은 것 · 예산</b>이 한눈에 보이는 화면입니다. 위에서 메모/가계부를 바꿔 보고, 화면 안을 직접 눌러 보세요(완료 표시, 섹션 골라 보기, 섹션 복사, 항목 옮기기, 구독 눌러 상세).</p>
+  </header>
+  <div class="controls"><span>보기</span><div class="pick" id="modePick"><button type="button" aria-pressed="true" data-mode="memo">메모</button><button type="button" aria-pressed="false" data-mode="ledger">가계부</button></div></div>
+  <ol class="notes" id="memoNotes">
+    <li><b>마크다운 없음</b>: 쓴 그대로 보이고 읽기/편집 화면 구분이 없습니다. 열면 바로 커서가 마지막 항목 끝에 있습니다.</li>
+    <li><b>섹션은 칸</b>: 「모바일 앱」「PC 앱」처럼 제목 줄로만 보입니다(#기호 없음). 아무 줄에서 「섹션으로 만들기」를 하면 그 줄이 섹션 제목이 됩니다 — 지금의 「한 줄 고정」을 대신합니다. 저장은 지금처럼 글자라 PC·기존 메모와 호환됩니다.</li>
+    <li><b>섹션만 보기</b>: 위 칩 줄에서 하나를 누르면 그 섹션만 보입니다. 숫자는 남은 항목 수.</li>
+    <li><b>한 줄 = 한 항목</b>: 앞의 동그라미를 누르면 완료. 완료 항목은 섹션 끝 「완료 N」으로 접힙니다.</li>
+    <li><b>추가</b>: PC는 메모에 바로 씁니다 — 섹션 끝 「+ 추가」나 항목 끝에서 엔터. 태블릿만 엄지 닿는 아래에 빠른 추가 칸(섹션 고르기, 마지막 섹션 기억).</li>
+    <li><b>옮기기 · 복사</b>: 항목 오른쪽 「옮기기」(태블릿은 길게 누르기)로 다른 섹션에. 섹션 제목 줄의 「복사」는 <b>남은 항목만</b> 목록 글자로 복사합니다 — Claude에게 넘길 때 그대로 붙여 넣기.</li>
+    <li><b>지우기</b>: 빈 항목에서 백스페이스 → 윗줄로 합쳐짐. 섹션 제목은 백스페이스로 사라지지 않고 「섹션 풀기」로만.</li>
+  </ol>
+  <ol class="notes" id="ledgerNotes" hidden>
+    <li><b>맨 위 한 줄 요약</b>: 이번 달 예산 → 고정(구독) → 쓴 돈 → 남은 돈. 막대에 사고 싶은 것을 이번 달에 사면 얼마나 차는지 빗금으로 겹쳐 보여 줍니다.</li>
+    <li><b>구독은 상태로</b>: 매달 · N달마다 · 1년 갱신 · 처음 N달 무료 · 해지 예약(낸 기간 끝까지 사용)을 꼬리표로 표시하고, 오른쪽엔 <b>다음 결제일과 금액</b>. 1년 구독은 월 환산도 함께. 지금 데이터(주기·무료·종료일)로 대부분 표현되고, 가격 변경 이력만 새로 필요합니다.</li>
+    <li><b>이번 달 결제 예정</b>: 날짜순 띠로 보여 주고, 무료 끝나는 날·갱신 전날에 알림.</li>
+    <li><b>사고 싶은 것</b>: 가격·살 곳·중요도·목표 달. 누르면 「이번 달에 사면 남는 돈」을 보여 주고 「샀음」 한 번이면 지출로 기록됩니다.</li>
+    <li><b>지출</b>: 직접 입력은 그대로(외부 가져오기 없음). 오른쪽 아래 목록, 빠른 입력 한 줄.</li>
+  </ol>
+  <div class="stage">
+    <div class="col"><h2>PC</h2>
+      <div class="win" id="win">
+        <nav class="rail" aria-label="화면"><svg class="mark" viewBox="0 0 32 36" fill="none" aria-hidden="true"><path d="M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z" stroke="currentColor" stroke-width="1.3"/></svg>
+          <span><i></i>홈</span><span><i></i>에셋</span><span><i></i>컬렉션</span><span><i></i>망가</span><span class="on"><i></i>메모</span><span><i></i>전송</span></nav>
+        <aside class="list"><div class="list-head"><span>메모</span><span>+</span></div><div class="list-body" id="nlist"></div></aside>
+        <section class="main" id="pcMain"></section>
+        <div class="toast" id="toast" role="status"></div>
+      </div>
+    </div>
+    <div class="col"><h2>태블릿</h2><p id="tabCap">같은 메모를 태블릿에서. 항목은 손가락 크기, 옮기기는 길게 누르기.</p>
+      <div class="tab"><div class="tb" id="tabTitle">피드백<small>저장됨</small></div><div class="tbody" id="tabBody"></div><div class="nav"><span>홈</span><span>에셋</span><span>컬렉션</span><span>카탈로그</span><b>메모</b></div></div>
+    </div>
+  </div>
+</div>
+<script>
+const SECTS = [
+  { name: '모바일 앱', items: [['섹션 바 내려올 때 한 번 더 들어갔다 나옴', 1], ['메모 수정 중 상단바 저장 중 깜빡임', 1], ['한글 자모 분리되어 적힘', 0], ['열자마자 백스페이스 안 됨', 0], ['쇼케이스 열 때 끊김', 1], ['검색 기능 추가 — 기존 태그 활용', 0], ['카탈로그 필터를 섹션 바로', 1]] },
+  { name: 'PC 앱', items: [['스크롤바 모바일처럼', 0], ['에셋 창 복잡도 줄이기', 0], ['메모 상단바에만 네모 있음', 0], ['더보기 창 위치, 찾기 창 리디자인', 0], ['캐릭터 폴더 아이콘 호버 시 제안 폴더 깜빡임', 0], ['컬렉션 사이드바 없애기', 1]] },
+  { name: 'NovelAI', items: [['태블릿 터치패드 감도 ×0.5', 1], ['프롬프트 칸 줄바꿈 유지', 0], ['생성 기록 정렬', 0]] },
+  { name: '확장 프로그램', items: [['X GIF 저장 확인', 0], ['다이얼 회전 관성 약하게', 0]] },
+];
+let filter = null, foldedDone = {}, mode = 'memo', lastSect = 'PC 앱';
+const toast = document.getElementById('toast'); let tt;
+function say(t) { toast.textContent = t; toast.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => toast.classList.remove('on'), 2200); }
+const left = (s) => s.items.filter(([, d]) => !d).length;
+function memoHtml(tablet) {
+  const chips = `<div class="chipbar"><button type="button" class="chip" aria-pressed="${filter === null}" data-f="">전체 <small>${SECTS.reduce((a, s) => a + left(s), 0)}</small></button>${SECTS.map((s) => `<button type="button" class="chip" aria-pressed="${filter === s.name}" data-f="${s.name}">${s.name} <small>${left(s)}</small></button>`).join('')}</div>`;
+  const sects = SECTS.filter((s) => !filter || s.name === filter).map((s) => {
+    const si = SECTS.indexOf(s), open = s.items.map((it, i) => [it, i]).filter(([[, d]]) => !d), done = s.items.map((it, i) => [it, i]).filter(([[, d]]) => d);
+    const row = ([[t, d], i]) => `<div class="item${d ? ' done' : ''}"><button type="button" class="tick" aria-label="${d ? '완료 취소' : '완료'}" data-tick="${si}:${i}"></button><div class="txt" contenteditable="true" spellcheck="false">${t}</div>${tablet ? '' : `<button type="button" class="mv" data-move="${si}:${i}">옮기기</button>`}</div>`;
+    return `<section class="sect"><div class="sect-head"><b>${s.name}</b><small class="num">${left(s)}개 남음</small><span class="grow"></span><button type="button" class="btn ghost" data-copy="${si}">복사</button><button type="button" class="btn ghost">⋯</button></div>
+      ${open.map(row).join('')}<button type="button" class="add" data-add="${si}">+ 추가</button>
+      ${done.length ? `<button type="button" class="donefold" data-done="${si}">${foldedDone[si] === false ? '▾' : '▸'} 완료 ${done.length}</button>${foldedDone[si] === false ? done.map(row).join('') : ''}` : ''}</section>`;
+  }).join('');
+  const quick = `<div class="quick"><select aria-label="넣을 섹션" id="${tablet ? 'qs2' : 'qs'}">${SECTS.map((s) => `<option${s.name === lastSect ? ' selected' : ''}>${s.name}</option>`).join('')}</select><input aria-label="빠른 추가" placeholder="피드백 한 줄 쓰고 엔터" data-quick="${tablet ? 2 : 1}"></div>`;
+  return `<div class="note"><div class="note-title" contenteditable="true">피드백</div>${chips}${sects}</div>${tablet ? quick : ''}`;
+}
+function ledgerHtml(tablet) {
+  const subs = [
+    ['YouTube Premium', 14900, '매달', '', '다음 10.14', ''],
+    ['NovelAI Opus', 37000, '매달', '', '다음 10.21', ''],
+    ['ChatGPT Plus', 29000, '매달', 'cancel', '10.18까지 사용', '해지 예약'],
+    ['Claude Max', 145000, '매달', '', '다음 10.09', ''],
+    ['Netflix', 0, '처음 3달 무료', 'trial', '11.02부터 ₩17,000', '무료 D-31'],
+    ['iCloud 200GB', 4400, '매달', '', '다음 10.27', ''],
+    ['Adobe Lightroom', 141900, '1년 갱신', 'soon', '2027.03.04 · 월 ₩11,825', ''],
+    ['MEGA Pro I', 32500, '3달마다', '', '다음 12.15', ''],
+  ];
+  const fixed = 14900 + 37000 + 29000 + 145000 + 4400, budget = 1200000, spent = 412300, leftover = budget - fixed - spent;
+  const wants = [['스위치 2 프로 컨트롤러', 89800, '쿠팡 · 10월', 2], ['갤럭시 탭 S11 키보드 커버', 239000, '삼성 닷컴 · 언젠가', 1], ['만화 「던전밥」 완결 세트', 98000, '알라딘 · 11월', 2], ['외장 SSD 2TB', 189000, '다나와 최저가 · 언젠가', 1]];
+  const spends = [['10.01', '점심 (편의점)', 6800], ['10.01', '교통', 2900], ['09.30', '카페', 5500], ['09.29', '책 — 신간 2권', 16200], ['09.28', '저녁 배달', 23400]];
+  const pct = (n) => `${(n / budget * 100).toFixed(1)}%`;
+  return `<div class="ledger">
+    <div class="month"><b>10월</b><small>예산 ₩1,200,000 · 월급일 25일</small></div>
+    <div class="budget"><div><span>예산</span><strong class="num">₩${budget.toLocaleString()}</strong></div><div><span>고정 (구독 5개)</span><strong class="num">₩${fixed.toLocaleString()}</strong></div><div><span>쓴 돈</span><strong class="num">₩${spent.toLocaleString()}</strong></div><div><span>남은 돈</span><strong class="num left" id="leftAmt${tablet ? 2 : 1}">₩${leftover.toLocaleString()}</strong></div></div>
+    <div><div class="meter"><i class="fix" style="width:${pct(fixed)}"></i><i class="spent" style="width:${pct(spent)}"></i><i class="plan" id="planBar${tablet ? 2 : 1}" style="width:0%"></i></div>
+      <div class="meterkey" style="margin-top:6px"><span><i class="fix" style="background:color-mix(in srgb,var(--color-muted) 70%,transparent)"></i>고정</span><span><i style="background:var(--color-text);opacity:.75"></i>쓴 돈</span><span><i style="background:repeating-linear-gradient(135deg,var(--color-accent) 0 3px,transparent 3px 6px)"></i>사고 싶은 것 (고른 것)</span></div></div>
+    <div><div class="label" style="margin-bottom:8px">이번 달 결제 예정</div><div class="timeline"><div><span class="num">10.09</span><b>Claude Max</b><span class="num">₩145,000</span></div><div><span class="num">10.14</span><b>YouTube</b><span class="num">₩14,900</span></div><div><span class="num">10.18</span><b>ChatGPT 끝남</b><span>해지 예약</span></div><div><span class="num">10.21</span><b>NovelAI</b><span class="num">₩37,000</span></div><div><span class="num">10.27</span><b>iCloud</b><span class="num">₩4,400</span></div></div></div>
+    <div class="two">
+      <div><div class="label" style="margin-bottom:4px">구독</div><div class="tbl">${subs.map(([n, a, cyc, k, next, pill], i) => `<div class="sub" data-sub="${i}"><b>${n}</b><span class="amt">${a ? `₩${a.toLocaleString()}` : '무료'}</span><span class="meta"><span class="pill">${cyc}</span>${pill ? `<span class="pill ${k}">${pill}</span>` : ''}</span><span class="next">${next}</span></div>`).join('')}</div>
+        <button type="button" class="add" style="padding-left:0">+ 구독 추가</button></div>
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <div><div class="label" style="margin-bottom:4px">사고 싶은 것</div>${wants.map(([n, a, where, p], i) => `<div class="want" data-want="${i}"><span class="pri${p > 1 ? ' hi' : ''}">${p > 1 ? '★★' : '★'}</span><b>${n}</b><span class="amt num">₩${a.toLocaleString()}</span><small>${where}</small><div class="acts"><span class="fit">이번 달에 사면 남는 돈 <b class="num">₩${(leftover - a).toLocaleString()}</b></span><span style="flex:1"></span><button type="button" class="btn primary" data-bought="${i}">샀음</button></div></div>`).join('')}<button type="button" class="add" style="padding-left:0">+ 사고 싶은 것</button></div>
+        <div><div class="label" style="margin-bottom:4px">지출</div>${spends.map(([d, n, a]) => `<div class="spend"><span class="d">${d}</span><span>${n}</span><span class="amt">₩${a.toLocaleString()}</span></div>`).join('')}<div class="quick" style="position:static;padding:8px 0;background:transparent;border:0"><input aria-label="지출 빠른 입력" placeholder="예: 점심 8000"></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="sheet-scrim" id="subDlg${tablet ? 2 : 1}" hidden><div class="dialog"><b style="font-size:var(--type-title)">Netflix</b>
+    <div class="field"><span>주기</span><div class="seg2"><span>매달</span><span class="on">N달마다</span><span>1년</span></div></div>
+    <div class="field"><span>시작</span><div class="seg2"><span class="on">처음 3달 무료</span><span>바로 결제</span></div></div>
+    <div class="field"><span>가격</span><span class="val num">₩17,000 <small style="color:var(--color-faint)">· 9.15에 ₩13,500에서 올림</small></span></div>
+    <div class="field"><span>첫 결제</span><span class="val num">2026.11.02</span></div>
+    <div class="field"><span>알림</span><span class="val">무료 끝나기 3일 전</span></div>
+    <div class="field"><span>해지</span><div class="seg2"><span class="on">계속</span><span>갱신 전에 해지 예약</span><span>바로 끝남</span></div></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px"><button type="button" class="btn ghost" data-close>닫기</button><button type="button" class="btn primary" data-close>저장</button></div></div></div>`;
+}
+function render() {
+  document.getElementById('memoNotes').hidden = mode !== 'memo';
+  document.getElementById('ledgerNotes').hidden = mode !== 'ledger';
+  document.querySelectorAll('#modePick button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+  document.getElementById('nlist').innerHTML = [['피드백', '모바일 앱 · PC 앱 · NovelAI · 확장', mode === 'memo'], ['가계부', '10월 · 남은 돈 ₩557,400', mode === 'ledger'], ['장보기', '우유, 계란, 휴지', false], ['읽을 것', '던전밥 14권, 귀멸 외전', false]].map(([t, s, on]) => `<div class="nrow${on ? ' on' : ''}"><b>${t}</b><small>${s}</small></div>`).join('');
+  document.getElementById('pcMain').innerHTML = `<div class="top"><span class="t">${mode === 'memo' ? '피드백' : '가계부'}</span><span class="grow"></span><span class="quiet">${mode === 'memo' ? '저장됨' : ''}</span><span class="wc"><span>─</span><span>□</span><span>×</span></span></div><div class="pane" style="display:flex;flex-direction:column">${mode === 'memo' ? memoHtml(false) : ledgerHtml(false)}</div>`;
+  document.getElementById('tabTitle').innerHTML = `${mode === 'memo' ? '피드백' : '가계부'}<small>${mode === 'memo' ? '저장됨' : '10월'}</small>`;
+  document.getElementById('tabBody').innerHTML = `<div style="display:flex;flex-direction:column;min-height:100%">${mode === 'memo' ? memoHtml(true) : ledgerHtml(true)}</div>`;
+  document.getElementById('tabCap').textContent = mode === 'memo' ? '같은 메모를 태블릿에서. 항목은 손가락 크기, 옮기기는 길게 누르기, 빠른 추가는 엄지 닿는 아래.' : '태블릿은 한 줄로 쌓입니다: 요약 → 결제 예정 → 구독 → 사고 싶은 것 → 지출.';
+}
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  const m = t.closest('[data-mode]'); if (m) { mode = m.dataset.mode; render(); return; }
+  const f = t.closest('[data-f]'); if (f) { filter = f.dataset.f || null; render(); return; }
+  const tk = t.closest('[data-tick]'); if (tk) { const [s, i] = tk.dataset.tick.split(':').map(Number); SECTS[s].items[i][1] = SECTS[s].items[i][1] ? 0 : 1; render(); return; }
+  const dn = t.closest('[data-done]'); if (dn) { const s = +dn.dataset.done; foldedDone[s] = foldedDone[s] === false; render(); return; }
+  const cp = t.closest('[data-copy]'); if (cp) { const s = SECTS[+cp.dataset.copy]; say(`복사됨 — ${s.name} 남은 ${left(s)}개\n${s.items.filter(([, d]) => !d).map(([x]) => `- ${x}`).join('\n')}`); return; }
+  const mv = t.closest('[data-move]'); if (mv) { const [s, i] = mv.dataset.move.split(':').map(Number); const to = (s + 1) % SECTS.length; const [it] = SECTS[s].items.splice(i, 1); SECTS[to].items.unshift(it); render(); say(`「${it[0]}」 → ${SECTS[to].name} (실제로는 섹션을 고르는 메뉴)`); return; }
+  const ad = t.closest('[data-add]'); if (ad) { const s = +ad.dataset.add; SECTS[s].items.push(['', 0]); lastSect = SECTS[s].name; render(); const txts = document.querySelectorAll('#pcMain .sect')[filter ? 0 : s]?.querySelectorAll('.item:not(.done) .txt'); txts?.[txts.length - 1]?.focus(); return; }
+  const sb = t.closest('[data-sub]'); if (sb) { const dlg = t.closest('.tab') ? 'subDlg2' : 'subDlg1'; document.getElementById(dlg).hidden = false; return; }
+  if (t.closest('[data-close]')) { document.querySelectorAll('.sheet-scrim').forEach((x) => { x.hidden = true; }); return; }
+  const w = t.closest('[data-want]'); if (w && !t.closest('[data-bought]')) { const open = !w.classList.contains('open'); w.parentElement.querySelectorAll('.want').forEach((x) => x.classList.remove('open')); w.classList.toggle('open', open); const host = t.closest('.tab') ? 2 : 1; const amt = [89800, 239000, 98000, 189000][+w.dataset.want]; document.getElementById(`planBar${host}`).style.width = open ? `${(amt / 1200000 * 100).toFixed(1)}%` : '0%'; return; }
+  const bo = t.closest('[data-bought]'); if (bo) { say('샀음 → 오늘 지출로 기록, 목록에서 빠짐'); return; }
+});
+document.addEventListener('keydown', (e) => {
+  const q = e.target.closest?.('[data-quick]'); if (!q || e.key !== 'Enter' || e.isComposing || !q.value.trim()) return;
+  const sel = document.getElementById(q.dataset.quick === '2' ? 'qs2' : 'qs'); const s = SECTS.find((x) => x.name === sel.value); s.items.push([q.value.trim(), 0]); lastSect = s.name; render(); say(`${s.name}에 추가`);
+  document.querySelector(`[data-quick="${q.dataset.quick}"]`)?.focus();
+});
+render();
+</script>
+</body>
+</html>
