@@ -1,0 +1,21 @@
+/* The shelf and work screen are the same package exterior at different sizes. */
+.collection-case, .collection-light-case {
+  --case-rim: 3px;
+  --case-front-radius: 3px 6px 6px 3px;
+  --case-material: linear-gradient(var(--plastic), var(--plastic)), #1b1c1e;
+  --case-contact: rgba(0, 0, 0, .85);
+  --case-contact-spread: rgba(0, 0, 0, .5);
+}
+.collection-light-case .cs-front { border-radius: var(--case-front-radius); }
+.collection-light-case .ins { position: absolute; inset: var(--case-rim) var(--case-rim) var(--case-rim) 0; overflow: hidden; border-radius: 0 2px 2px 0; display: block; background: var(--color-surface); }
+.collection-light-case .cs-spine .ins { inset: var(--case-rim) 0; border-radius: 0; }
+.collection-light-case .ins.bare, .collection-light-case .ins.full { background: transparent; }
+.collection-case .k-front::after, .collection-light-case .cs-front::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(104deg, rgba(255, 255, 255, 0) 38%, rgba(255, 255, 255, .2) 47%, rgba(255, 255, 255, .05) 53%, rgba(255, 255, 255, 0) 60%) var(--gloss) 0 / 260% 100% no-repeat,
+    linear-gradient(90deg, rgba(0, 0, 0, .34), rgba(0, 0, 0, 0) 5%, rgba(255, 255, 255, .1) 6.5%, rgba(0, 0, 0, 0) 9%);
+}
+.collection-case .k-spine::after, .collection-light-case .cs-spine::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(90deg, rgba(0, 0, 0, .4), rgba(255, 255, 255, .12) 30%, rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, .35));
+}

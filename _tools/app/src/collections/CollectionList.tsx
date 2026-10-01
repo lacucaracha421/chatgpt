@@ -3,6 +3,7 @@ import type { CollectionSummary, CollectionType } from "../library/types";
 import { casePlatform } from "./case/CollectionCase";
 
 export type CollectionViewSettings = { layout: "grid" | "shelf"; perRow: number; grouping: "device" | "year" | "sort" };
+type ShelfItem = Pick<CollectionSummary, "id" | "type"> & Partial<Pick<CollectionSummary, "platforms" | "year" | "releaseDate">>;
 function initialViews(): Record<CollectionType, CollectionViewSettings> {
   return Object.fromEntries((["game", "manga", "movie", "av"] as const).map(type => {
     const fallback: CollectionViewSettings = { layout: type === "manga" ? "grid" : "shelf", perRow: 8, grouping: "device" };
@@ -22,13 +23,13 @@ export function useCollectionView(type: CollectionType) {
   }
   return [views[type], update] as const;
 }
-export function shelfGroups(items: CollectionSummary[], grouping: CollectionViewSettings["grouping"]): { label: string; items: CollectionSummary[] }[] {
+export function shelfGroups<T extends ShelfItem>(items: T[], grouping: CollectionViewSettings["grouping"]): { label: string; items: T[] }[] {
   if (items[0]?.type !== "game" || grouping === "sort") return [{ label: "", items }];
   if (grouping === "device") {
-    const nintendo = (item: CollectionSummary) => ["sw", "sw2"].includes(casePlatform(item.platforms)) || /nintendo|닌텐도|wii|gamecube/i.test(item.platforms ?? "");
+    const nintendo = (item: T) => ["sw", "sw2"].includes(casePlatform(item.platforms ?? null)) || /nintendo|닌텐도|wii|gamecube/i.test(item.platforms ?? "");
     return [{ label: "닌텐도", items: items.filter(nintendo) }, { label: "PS · Xbox · PC", items: items.filter(item => !nintendo(item)) }].filter(group => group.items.length);
   }
-  const groups = new Map<string, CollectionSummary[]>();
+  const groups = new Map<string, T[]>();
   for (const item of items) {
     const label = item.releaseDate?.slice(0, 4) ?? (item.year ? String(item.year) : "발매일 없음");
     const group = groups.get(label) ?? []; group.push(item); groups.set(label, group);
@@ -36,8 +37,8 @@ export function shelfGroups(items: CollectionSummary[], grouping: CollectionView
   return [...groups].map(([label, works]) => ({ label, items: works }));
 }
 /** Flat, keyed cells keep their media mounted when columns or the layout change. */
-export function CollectionList({ items, view, render, label, onPick, showcase = false }: {
-  items: CollectionSummary[]; view: CollectionViewSettings; render(item: CollectionSummary): ReactNode; label: string;
+export function CollectionList<T extends ShelfItem>({ items, view, render, label, onPick, showcase = false }: {
+  items: T[]; view: CollectionViewSettings; render(item: T): ReactNode; label: string;
   onPick(id: string): void; showcase?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);

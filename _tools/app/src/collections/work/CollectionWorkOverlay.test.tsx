@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../../library/LibraryContext";
 import { PrivacyProvider } from "../../privacy/PrivacyContext";
 import type { CollectionSummary, LibraryGateway } from "../../library/types";
-import type { AvGateway } from "../avTypes";
+import type { AvGateway, AvPerformerPage as PerformerData } from "../avTypes";
 import { BackNavigationProvider } from "../../shared/navigation/BackNavigation";
 import { CollectionBrowser } from "../CollectionBrowser";
 import { createDefaultCollectionLibraryState, type CollectionLibraryState } from "../collectionLibrary";
@@ -32,6 +32,30 @@ function fixtures(type: "game" | "av" | "movie" = "game") {
   return { gateway, api, exit, changed, Harness };
 }
 describe("Collection work open path", () => {
+  it("keeps the actor page mounted when a co-performer opens, then returns to the work", async () => {
+    const { Harness, api } = fixtures("av");
+    const initial: PerformerData = {
+      person: { id: "person", displayName: "배우", nameJa: null, memo: null, portrait: null, wikidataId: null, fanzaActressId: null },
+      stats: { workCount: 1, firstRelease: null, lastRelease: null, averageScore: null }, works: [], labels: [],
+      coPerformers: [{ id: "co", displayName: "동료 배우", count: 2, portrait: null }],
+    };
+    let release!: (value: PerformerData) => void;
+    const next = new Promise<PerformerData>(resolve => { release = resolve; });
+    api.getPerformer.mockImplementation((id: string) => id === "person" ? Promise.resolve(initial) : next);
+    render(<Harness />); const user = userEvent.setup();
+    await user.dblClick(screen.getByRole("button", { name: /^가 작품/ }));
+    await user.click(await screen.findByRole("button", { name: /배우.*내 라이브러리/ }));
+    const actor = await screen.findByRole("article", { name: "AV 배우 상세" });
+    await user.click(await within(actor).findByRole("button", { name: "동료 배우 2편" }));
+    expect(screen.getByRole("article", { name: "AV 배우 상세" })).toBe(actor);
+    expect(within(actor).getByRole("heading", { name: "배우", level: 1 })).toBeVisible();
+    expect(actor.querySelector("[inert]")).not.toBeNull();
+    await act(async () => release({ ...initial, person: { ...initial.person, id: "co", displayName: "동료 배우" } }));
+    expect(within(actor).getByRole("heading", { name: "동료 배우", level: 1 })).toBeVisible();
+    await user.click(within(actor).getByRole("button", { name: "작품으로 돌아가기" }));
+    expect(screen.queryByRole("article", { name: "AV 배우 상세" })).toBeNull();
+    expect(screen.getByRole("article", { name: "AV 작품 화면" })).toBeInTheDocument();
+  });
   it.each(["game", "av", "movie"] as const)("opens %s by double-click / Enter with the actual list position, and Escape returns", async type => {
     const { Harness, exit } = fixtures(type); render(<Harness />); const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /^가 작품/ })); expect(screen.queryByRole("article")).toBeNull();

@@ -27,10 +27,6 @@
     "blankingReset": 2,
     "hiddenImage": 0
   },
-  "src/collections/av/AvPerformerPage.tsx": {
-    "blankingReset": 1,
-    "hiddenImage": 0
-  },
   "src/external-vault/ExternalVaultBrowser.tsx": {
     "blankingReset": 1,
     "hiddenImage": 0

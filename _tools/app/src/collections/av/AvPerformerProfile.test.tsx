@@ -107,6 +107,6 @@ it("keeps a stored StashDB portrait visible on the performer page", async () => 
   render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPerformerPage personId="p" api={api} onBack={vi.fn()} /></PrivacyProvider>);
   expect(await screen.findByRole("img", { name: "배우 대표 이미지" })).toHaveAttribute("src", "data:image/jpeg;base64,stored");
   expect(screen.getByRole("button", { name: "대표 이미지 출처 열기" })).toBeVisible();
-  expect(screen.getByRole("button", { name: "바꾸기" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "사진 바꾸기" })).toBeVisible();
   expect(screen.getByText("별점 평균")).toBeVisible();
 });

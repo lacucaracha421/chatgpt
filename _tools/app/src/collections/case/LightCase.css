@@ -1,14 +1,12 @@
 /* Physical geometry from the approved cover-led shelf; ordinary controls use role tokens. */
 .collection-light-case { --face-height: min(var(--case-height), calc((var(--cell-width) + var(--space-4)) / var(--case-ratio))); --W: calc(var(--face-height) * var(--case-ratio)); --d: 22px; --cd: var(--d); --lead: calc(var(--d) * .6); position: relative; display: block; height: var(--case-height); perspective: 480px; perspective-origin: 35% 30%; }
-.collection-light-case::after { content: ""; position: absolute; left: 2px; right: 0; top: calc(var(--case-height) - 4px); height: 12px; background: rgba(0,0,0,.8); filter: blur(6px); border-radius: 50%; }
+.collection-light-case::after { content: ""; position: absolute; left: var(--lead); top: calc(var(--case-height) - 3px); width: calc(var(--W) * 1.02); height: 10px; background: var(--case-contact); filter: blur(5px); box-shadow: 0 calc(var(--face-height) * .03) calc(var(--face-height) * .09) calc(var(--face-height) * .035) var(--case-contact-spread); border-radius: 50%; }
 .collection-light-case .cs-box { position: absolute; z-index: 1; left: var(--lead); top: calc(var(--case-height) - var(--face-height)); width: var(--W); height: var(--face-height); transform-style: preserve-3d; transform-origin: 0 100%; transform: rotateX(-6deg) rotateY(34deg); transition: transform var(--motion-screen) var(--ease-standard), left var(--motion-screen) var(--ease-standard); }
-.collection-card[aria-selected="true"] .cs-box { transform: translateY(-6px) translateZ(34px) rotateX(0deg) rotateY(0deg); left: 0; }
-.collection-light-case .cs-front, .collection-light-case .cs-spine, .collection-light-case .cs-top { position: absolute; overflow: hidden; backface-visibility: hidden; background: linear-gradient(var(--plastic), var(--plastic)), var(--color-surface); display: block; }
-.collection-light-case .cs-front { inset: 0; padding: 2px 2px 2px 0; border-radius: 0 2px 2px 0; }
-.collection-light-case .cs-front > img { width: 100%; height: 100%; object-fit: fill; }
-.collection-light-case .cs-front::before { content: ""; position: absolute; z-index: 1; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(255,255,255,.34), rgba(255,255,255,.06) 1.6%, transparent 22%, rgba(0,0,0,.34)), linear-gradient(180deg, rgba(255,255,255,.1), transparent 18%); }
-.collection-card[aria-selected="true"] .cs-front::before { opacity: .25; }
+.collection-light-case[data-front] .cs-box { transform: translateY(-6px) translateZ(34px) rotateX(0deg) rotateY(0deg); left: 0; }
+.collection-light-case .cs-front, .collection-light-case .cs-spine, .collection-light-case .cs-top { position: absolute; overflow: hidden; backface-visibility: hidden; background: var(--case-material); display: block; }
+.collection-light-case .cs-front { inset: 0; }
+.collection-light-case .ins > img { width: 100%; height: 100%; object-fit: fill; }
 .collection-light-case .cs-spine { left: calc(var(--d) * -1); top: 0; width: var(--d); height: 100%; transform-origin: 100% 50%; transform: rotateY(-90deg); }
-.collection-light-case .cs-top { left: 0; top: calc(var(--d) * -1); width: 100%; height: var(--d); transform-origin: 50% 100%; transform: rotateX(90deg); background: color-mix(in srgb, var(--color-text) 34%, var(--color-surface)); }
+.collection-light-case .cs-top { left: 0; top: calc(var(--d) * -1); width: 100%; height: var(--d); transform-origin: 50% 100%; transform: rotateX(90deg); background: var(--case-material); }
 .collection-light-case .case-mask { display: block; width: 100%; height: 100%; background: var(--color-surface); }
 @media (prefers-reduced-motion: reduce) { .collection-light-case .cs-box { transition: none; } }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import "./CollectionCase.css";
+import "./CaseMaterials.css";
 import { fitCollectionCase, type StageBox } from "./fitCaseStage";
 
 export type CasePlatform = "sw2" | "sw" | "ps5" | "pc" | "other" | "av" | "film";
@@ -15,6 +16,9 @@ export const CASE_PLASTIC: Record<CasePlatform, string> = {
   pc: "rgba(120,128,136,.38)", other: "rgba(120,128,136,.38)", av: "rgba(10,10,11,.94)", film: "rgba(28,30,34,.92)",
 };
 export type CaseData = { title: string; publisher?: string | null; platform: CasePlatform; front: string | null; spine?: string | null; back?: string | null; privacy: boolean };
+export function spineInsertClass(data: CaseData) {
+  return `ins${data.spine || data.privacy ? "" : ["sw2", "sw", "ps5"].includes(data.platform) ? " full" : " bare"}`;
+}
 export type Fact = [string, ReactNode];
 export function CaseFacts({ rows }: { rows: Fact[] }) {
   return <dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
@@ -77,7 +81,7 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
       <span className="k-back"><span className="ins">{face(data.back, "뒷면")}</span></span>
       <span className="k-floor">{data.platform === "sw" || data.platform === "sw2" ? <span className="cart-slot"><span className="cart" /></span> : <span className="holder"><span className="disc" /></span>}{note && <div className="note">{note}</div>}</span>
       <span className="k-edge" /><span className="k-cap k-top" /><span className="k-cap k-bottom" />
-      <span className="k-hinge"><span className="k-spine"><span className={`ins${data.spine || data.privacy ? "" : ["sw2", "sw", "ps5"].includes(data.platform) ? " full" : " bare"}`}>
+      <span className="k-hinge"><span className="k-spine"><span className={spineInsertClass(data)}>
         <CaseSpine data={data} real={face(data.spine, "책등")} />
       </span></span><span className="k-spine-in" /><span className="k-lid"><span className="k-front"><span className="ins">{face(data.front, "앞면")}</span></span><span className="k-inner">{inside}</span></span></span>
     </div>

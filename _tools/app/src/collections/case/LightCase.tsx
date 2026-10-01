@@ -4,7 +4,7 @@ import { useLibrary } from "../../library/LibraryContext";
 import { workArtworkThumbnailUrl } from "../../assets/mediaUrl";
 import { StableImage } from "../../shared/ui/StableImage";
 import { avGateway } from "../avClient";
-import { CASE_PLASTIC, CaseSpine, casePlatform, type CaseData } from "./CollectionCase";
+import { CASE_PLASTIC, CaseSpine, casePlatform, spineInsertClass, type CaseData } from "./CollectionCase";
 import "./LightCase.css";
 
 export function CollectionShelfCase({ collection, front, privacy, active, selected }: { collection: CollectionSummary; front: string | null; privacy: boolean; active: boolean; selected: boolean }) {
@@ -37,16 +37,18 @@ export function CollectionShelfCase({ collection, front, privacy, active, select
 /** Client-independent shelf object; only its data adapter reads local artwork. */
 export function LightCase({ data, selected }: { data: CaseData; selected: boolean }) {
   const [ratio, setRatio] = useState(.71);
-  return <span className="collection-light-case" style={{ "--case-ratio": ratio, "--plastic": CASE_PLASTIC[data.platform] } as CSSProperties}>
+  return <span className="collection-light-case" data-front={selected || undefined} style={{ "--case-ratio": ratio, "--plastic": CASE_PLASTIC[data.platform], "--gloss": selected ? "50%" : "84%" } as CSSProperties}>
     <span className="cs-box">
       <span className="cs-front ui-selectable-media" aria-selected={selected}>
-        {!data.privacy && data.front ? <StableImage src={data.front} alt={data.title} draggable={false} onLoad={event => {
-          const image = event.currentTarget;
-          if (image.naturalWidth && image.naturalHeight) setRatio(Math.max(.4, Math.min(1.4, image.naturalWidth / image.naturalHeight)));
-        }} /> : <span className="case-mask" />}
+        <span className="ins">
+          {!data.privacy && data.front ? <StableImage src={data.front} alt={data.title} draggable={false} onLoad={event => {
+            const image = event.currentTarget;
+            if (image.naturalWidth && image.naturalHeight) setRatio(Math.max(.4, Math.min(1.4, image.naturalWidth / image.naturalHeight)));
+          }} /> : <span className="case-mask" />}
+        </span>
         {selected && <span className="ui-selection-check" aria-hidden="true" />}
       </span>
-      <span className="cs-spine"><CaseSpine decorative data={data} real={data.spine ? <StableImage src={data.spine} alt="" draggable={false} /> : null} /></span>
+      <span className="cs-spine"><span className={spineInsertClass(data)}><CaseSpine decorative data={data} real={data.spine ? <StableImage src={data.spine} alt="" draggable={false} /> : null} /></span></span>
       <span className="cs-top" />
     </span>
   </span>;

@@ -1,0 +1,101 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, expect, it, vi } from "vitest";
+import { PrivacyProvider } from "../../privacy/PrivacyContext";
+import type { AvGateway, AvPerformerPage as PerformerData, AvPerformerProfile } from "../avTypes";
+import { AvPerformerPage } from "./AvPerformerPage";
+
+vi.mock("../../library/client", () => ({ libraryGateway: { listAvFavorites: vi.fn().mockResolvedValue([]), setAvFavorite: vi.fn().mockResolvedValue(undefined) } }));
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn().mockResolvedValue(undefined) }));
+afterEach(() => { cleanup(); localStorage.clear(); vi.clearAllMocks(); });
+const profile: AvPerformerProfile = {
+  personId: "p", source: "stashdb", status: "matched", stashdbId: "stash-p", name: "배우", aliases: [], birthDate: "2000-04-12", heightCm: 158, bandIn: null, waistIn: null, hipIn: null, cup: null, breastType: "NATURAL", careerStart: 2024, careerEnd: null, urls: [], images: [], candidates: [], fetchedAt: "2026-09-30T00:00:00Z",
+};
+function performer(id = "p"): PerformerData {
+  return {
+    person: { id, displayName: id === "p" ? "배우" : "다음 배우", nameJa: "日本名", portrait: null, memo: "기존 메모", fanzaActressId: "123", wikidataId: "Q123" },
+    stats: { workCount: 14, firstRelease: "2024-01-01", lastRelease: "2026-09-30", averageScore: 4 },
+    works: Array.from({ length: 14 }, (_, index) => ({ collectionId: `work-${index}`, name: `작품 ${index}`, productCode: `CODE-${index}`, releaseDate: `2026-09-${String(30 - index).padStart(2, "0")}`, frontArtworkId: `front-${index}`, spineArtworkId: `spine-${index}`, backArtworkId: null, coverRevision: "r1", role: "performer", solo: index % 2 === 0 })),
+    coPerformers: [{ id: "co", displayName: "함께 나온 배우", count: 3, portrait: null }], labels: [{ name: "레이블 이름", count: 5 }],
+  };
+}
+function gateway(overrides: Partial<AvGateway> = {}): AvGateway {
+  return {
+    getPerformer: vi.fn().mockResolvedValue(performer()), getPerformerProfile: vi.fn().mockResolvedValue(profile), getStashdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
+    savePersonMemo: vi.fn().mockImplementation(async (_id, memo) => ({ ...performer(), person: { ...performer().person, memo } })), ...overrides,
+  } as unknown as AvGateway;
+}
+function page(api: AvGateway, props: Partial<Parameters<typeof AvPerformerPage>[0]> = {}) {
+  return <PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><AvPerformerPage personId="p" currentCollectionId="work-0" api={api} onBack={vi.fn()} {...props} /></PrivacyProvider>;
+}
+it("puts identity, facts and editable memo in the header band, retaining metadata and actions", async () => {
+  const api = gateway({ getStashdbCredentialStatus: vi.fn().mockResolvedValue({ configured: true }), refreshPerformerProfile: vi.fn().mockResolvedValue(profile) });
+  const back = vi.fn(); const { container } = render(page(api, { onBack: back }));
+  const header = (await screen.findByRole("heading", { name: "배우", level: 1 })).closest("header")!;
+  expect(within(header).getByText("日本名")).toBeVisible();
+  expect(await within(header).findByText("158 cm")).toBeVisible();
+  expect(within(header).getByText("14편 · 단독 7")).toBeVisible();
+  expect(within(header).getByText("기존 메모")).toBeVisible();
+  expect(within(header).getByRole("button", { name: "사진 바꾸기" })).toBeVisible();
+  fireEvent.click(within(header).getByText("기존 메모"));
+  const memo = within(header).getByRole("textbox", { name: "배우 메모" });
+  expect(header).toContainElement(memo);
+  fireEvent.change(memo, { target: { value: "바꾼 메모" } }); fireEvent.click(within(header).getByRole("button", { name: "저장" }));
+  await waitFor(() => expect(api.savePersonMemo).toHaveBeenCalledWith("p", "바꾼 메모"));
+  expect(await within(header).findByText("바꾼 메모")).toBeVisible();
+  fireEvent.click(within(header).getByRole("button", { name: "배우 메모 편집" }));
+  fireEvent.change(within(header).getByRole("textbox"), { target: { value: "취소할 메모" } }); fireEvent.click(within(header).getByRole("button", { name: "취소" }));
+  expect(within(header).getByText("바꾼 메모")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "작품으로 돌아가기" })); expect(back).toHaveBeenCalledOnce();
+  expect(container.querySelector(".av-performer-page__layout")).toBeNull();
+});
+it("uses the shared per-row menu and plank rows without remounting covers; filters solo and joint roles", async () => {
+  const { container } = render(page(gateway())); const user = userEvent.setup();
+  const shelf = await screen.findByRole("group", { name: "배우 작품 선반" });
+  const first = shelf.querySelector('[data-collection-id="work-0"]'); const cover = first?.querySelector(".cs-front img");
+  await user.click(screen.getByRole("button", { name: "보기" }));
+  for (let count = 5; count <= 12; count++) {
+    fireEvent.change(screen.getByRole("slider", { name: "한 줄에" }), { target: { value: String(count) } });
+    expect(shelf).toHaveAttribute("data-per-row", String(count));
+    const rows = new Map<string, number>();
+    shelf.querySelectorAll<HTMLElement>(".collection-list__cell").forEach(cell => rows.set(cell.style.gridRow, (rows.get(cell.style.gridRow) ?? 0) + 1));
+    expect([...rows.values()].slice(0, -1).every(value => value === count)).toBe(true);
+    expect(shelf.querySelectorAll(".collection-list__plank")).toHaveLength(Math.ceil(14 / count));
+    expect(shelf.querySelector('[data-collection-id="work-0"]')).toBe(first);
+    expect(first?.querySelector(".cs-front img")).toBe(cover);
+  }
+  await user.keyboard("{Escape}");
+  fireEvent.click(screen.getByRole("radio", { name: "단독" })); expect(shelf.querySelectorAll("[data-collection-id]")).toHaveLength(7);
+  expect(shelf.querySelector('[data-collection-id="work-1"]')).toBeNull();
+  fireEvent.click(screen.getByRole("radio", { name: "공연" })); expect(shelf.querySelectorAll("[data-collection-id]")).toHaveLength(7);
+  expect(within(shelf).getAllByText(/· 공연/)).toHaveLength(7);
+  fireEvent.click(screen.getByRole("radio", { name: "전체" })); expect(shelf.querySelectorAll("[data-collection-id]")).toHaveLength(14);
+  expect(container.querySelector(".dvd-case__stage")).toBeNull();
+});
+it("marks the originating work beside its code, turns on click, opens on double-click or Enter, and navigates co-performers", async () => {
+  const open = vi.fn(), co = vi.fn(); render(page(gateway(), { onOpenCollection: open, onOpenPerformer: co }));
+  const work = await screen.findByRole("button", { name: "작품 0 CODE-0" });
+  expect(within(work).getByText("이 작품").parentElement).toContainElement(within(work).getByText("CODE-0"));
+  const realSpine = work.querySelector(".cs-spine img"); expect(realSpine?.getAttribute("src")).toContain("spine-0");
+  fireEvent.click(work); expect(open).not.toHaveBeenCalled(); expect(work).toHaveAttribute("aria-selected", "true"); expect(work.querySelector(".collection-light-case")).toHaveAttribute("data-front", "true");
+  fireEvent.doubleClick(work); expect(open).toHaveBeenCalledWith("work-0");
+  fireEvent.keyDown(work, { key: "Enter" }); expect(open).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole("button", { name: "함께 나온 배우 3편" })); expect(co).toHaveBeenCalledWith("co");
+  expect(screen.getByText("레이블 이름")).toBeVisible();
+});
+it("sorts by release date through the shared menu", async () => {
+  render(page(gateway())); const user = userEvent.setup();
+  const shelf = await screen.findByRole("group", { name: "배우 작품 선반" });
+  await user.click(screen.getByRole("button", { name: "정렬" })); await user.click(screen.getByRole("menuitemradio", { name: "발매일 오래된순" }));
+  expect(shelf.querySelector("[data-collection-id]")).toHaveAttribute("data-collection-id", "work-13");
+});
+it("holds the previous performer inert until the next response", async () => {
+  let resolveNext!: (value: PerformerData) => void;
+  const pending = new Promise<PerformerData>(resolve => { resolveNext = resolve; });
+  const api = gateway({ getPerformer: vi.fn().mockImplementation(id => id === "p" ? Promise.resolve(performer()) : pending) });
+  const { rerender } = render(page(api)); const shelf = await screen.findByRole("group", { name: "배우 작품 선반" });
+  rerender(page(api, { personId: "q" }));
+  expect(screen.getByRole("heading", { name: "배우", level: 1 })).toBeVisible(); expect(shelf.closest("[inert]")).not.toBeNull();
+  await act(async () => resolveNext(performer("q")));
+  expect(screen.getByRole("heading", { name: "다음 배우", level: 1 })).toBeVisible(); expect(shelf.closest("[inert]")).toBeNull();
+});

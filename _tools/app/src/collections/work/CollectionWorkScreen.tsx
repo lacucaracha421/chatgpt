@@ -24,6 +24,12 @@ export type WorkActions = {
 function samePresentation(left: CollectionWorkData, right: CollectionWorkData) {
   return left.collection.id === right.collection.id && heroArtwork(left.collection) === heroArtwork(right.collection) && left.manga?.activeVolumeId === right.manga?.activeVolumeId && (["front", "spine", "back", "platform", "privacy"] as const).every(key => left.case[key] === right.case[key]);
 }
+// The meta line names one device (the case the work is drawn as), not every platform it was released on.
+const DEVICE_NAMES: Partial<Record<CaseData["platform"], string>> = { sw2: "Switch 2", sw: "Switch", ps5: "PS5", pc: "PC" };
+function deviceLabel(data: CollectionWorkData) {
+  if (data.collection.type !== "game") return null;
+  return DEVICE_NAMES[data.case.platform] ?? data.collection.platforms?.split(/\s*[·,]\s*/)[0] ?? null;
+}
 function heroArtwork(collection: CollectionSummary) {
   return collection.selectedHeroArtworkId || (collection.type === "movie" ? collection.selectedBackdropArtworkId : null);
 }
@@ -59,7 +65,7 @@ export function CollectionWorkScreen({ data, pending, actions }: { data: Collect
     <header className="asset-viewer__topbar">
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label={visible.manga ? "컬렉션으로 돌아가기" : "목록으로"} onClick={actions.onClose}><ChevronLeftIcon /></Button>
       <span className="asset-viewer__position"><b>{visible.position}</b> / {visible.total}</span>
-      <span className="asset-viewer__title"><strong role="heading" aria-level={1}>{title}</strong><small>{visible.manga ? editionName(visible.manga.editionIndex) : [visible.collection.type === "movie" ? visible.collection.director : visible.av?.productCode ?? visible.collection.platforms, displayDate(visible.av?.releaseDate || visible.collection.releaseDate)].filter(Boolean).join(" · ")}</small></span>
+      <span className="asset-viewer__title"><strong role="heading" aria-level={1}>{title}</strong><small>{visible.manga ? editionName(visible.manga.editionIndex) : [visible.collection.type === "movie" ? visible.collection.director : visible.av?.productCode ?? deviceLabel(visible), displayDate(visible.av?.releaseDate || visible.collection.releaseDate)].filter(Boolean).join(" · ")}</small></span>
       <span className="asset-viewer__spacer" />
       <Button className="asset-viewer__vbtn asset-viewer__favorite" size="icon" variant="ghost" aria-label="쇼케이스" aria-pressed={visible.collection.showcase} disabled={waiting} onClick={() => actions.onShowcase(visible.collection)}><StarIcon /></Button>
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="편집" disabled={waiting} onClick={() => actions.onEdit(visible.collection)}><PencilIcon /></Button>

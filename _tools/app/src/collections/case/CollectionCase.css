@@ -2,7 +2,7 @@
 .collection-case { --ch: 330px; --cw: calc(var(--ch) * var(--ratio)); --cd: 24px; position: relative; width: 100%; height: 100%; display: grid; place-items: center; perspective: 2200px; }
 .collection-case--large { --ch: min(520px, calc(100vh - 280px)); --cd: 34px; }
 .collection-case::before { content: ""; position: absolute; border-top: 0; top: calc(50% + var(--ch) / 2 - var(--ch) * .16); height: calc(var(--ch) * .34); left: 50%; width: calc(var(--ch) * 2.6); transform: translateX(-50%); background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, var(--color-text) 9%, transparent), color-mix(in srgb, var(--color-text) 3%, transparent) 45%, transparent 70%); }
-.collection-case .floor-shadow { position: absolute; left: 50%; transform: translateX(-50%); border-radius: 50%; top: calc(50% + var(--ch) / 2 - 3px); height: 10px; width: calc(var(--cw) * 1.02); background: rgba(0,0,0,.85); filter: blur(5px); box-shadow: 0 calc(var(--ch) * .03) calc(var(--ch) * .09) calc(var(--ch) * .035) rgba(0,0,0,.5); }
+.collection-case .floor-shadow { position: absolute; left: 50%; transform: translateX(-50%); border-radius: 50%; top: calc(50% + var(--ch) / 2 - 3px); height: 10px; width: calc(var(--cw) * 1.02); background: var(--case-contact); filter: blur(5px); box-shadow: 0 calc(var(--ch) * .03) calc(var(--ch) * .09) calc(var(--ch) * .035) var(--case-contact-spread); }
 .collection-case.is-open .floor-shadow { width: calc(var(--cw) * 2.05); }
 .collection-case .floor-shadow { transition: width 560ms var(--ease-standard); }
 .collection-case .kase { --ry: 32deg; --open: 0; --gloss: 50%; position: relative; width: var(--cw); height: var(--ch); transform-style: preserve-3d;
@@ -20,8 +20,8 @@
 .collection-case .kase > .k-hinge { backface-visibility: visible; left: 0; top: 0; width: var(--cd); height: 100%; transform-style: preserve-3d; transform-origin: 0 50%; transform: translateZ(calc(var(--cd) / -2)) rotateY(calc(-90deg - var(--open) * 90deg)); }
 .collection-case .k-hinge > .k-lid { backface-visibility: visible; left: 100%; top: 0; width: var(--cw); height: 100%; transform-style: preserve-3d; transform-origin: 0 50%; transform: rotateY(calc(90deg - var(--open) * 86deg)); }
 /* plastic: a tint over a dark base so nothing shows through */
-.collection-case .k-front, .collection-case .k-back, .collection-case .k-spine, .collection-case .k-edge, .collection-case .k-cap { background: linear-gradient(var(--plastic), var(--plastic)), #1b1c1e; }
-.collection-case .k-front, .collection-case .k-inner { inset: 0; border-radius: 3px 6px 6px 3px; }
+.collection-case .k-front, .collection-case .k-back, .collection-case .k-spine, .collection-case .k-edge, .collection-case .k-cap { background: var(--case-material); }
+.collection-case .k-front, .collection-case .k-inner { inset: 0; border-radius: var(--case-front-radius); }
 .collection-case .k-back { inset: 0; border-radius: 6px 3px 3px 6px; transform: rotateY(180deg) translateZ(calc(var(--cd) / 2)); }
 .collection-case .k-floor { inset: 3px; border-radius: 3px; transform: translateZ(calc(var(--cd) / -2 + 3px)); background: #111213; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05), inset 0 0 18px rgba(0, 0, 0, .8); }
 .collection-case .k-inner { transform: rotateY(180deg); background: #161719; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05); }
@@ -32,16 +32,12 @@
 .collection-case .k-top { transform: rotateX(90deg) translateZ(calc(var(--ch) / 2)); }
 .collection-case .k-bottom { transform: rotateX(-90deg) translateZ(calc(var(--ch) / 2)); }
 /* the paper insert under the plastic */
-.collection-case .ins { position: absolute; inset: 2px 2px 2px 0; overflow: hidden; border-radius: 0 2px 2px 0; display: block; background: var(--color-surface); }
+.collection-case .ins { position: absolute; inset: var(--case-rim) var(--case-rim) var(--case-rim) 0; overflow: hidden; border-radius: 0 2px 2px 0; display: block; background: var(--color-surface); }
 .collection-case .ins > .art, .ins > .cv, .ins > .scene { width: 100%; height: 100%; border-radius: 0; }
-.collection-case .k-spine .ins { inset: 2px 0; border-radius: 0; }
+.collection-case .k-spine .ins { inset: var(--case-rim) 0; border-radius: 0; }
 .collection-case .k-spine .ins > .art { position: absolute; left: 50%; top: 0; width: var(--cw); margin-left: calc(var(--cw) / -2); }
-.collection-case .k-back .ins { inset: 2px 0 2px 2px; border-radius: 2px 0 0 2px; }
+.collection-case .k-back .ins { inset: var(--case-rim) 0 var(--case-rim) var(--case-rim); border-radius: 2px 0 0 2px; }
 /* gloss follows the turn; hinge and lip are moulded details */
-.collection-case .k-front::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  background: linear-gradient(104deg, rgba(255, 255, 255, 0) 38%, rgba(255, 255, 255, .2) 47%, rgba(255, 255, 255, .05) 53%, rgba(255, 255, 255, 0) 60%) var(--gloss) 0 / 260% 100% no-repeat,
-    linear-gradient(90deg, rgba(0, 0, 0, .34), rgba(0, 0, 0, 0) 5%, rgba(255, 255, 255, .1) 6.5%, rgba(0, 0, 0, 0) 9%); }
-.collection-case .k-spine::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(0, 0, 0, .4), rgba(255, 255, 255, .12) 30%, rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, .35)); }
 .collection-case .k-edge::after { content: ""; position: absolute; left: 25%; right: 25%; top: 42%; height: 16%; border-radius: 3px; background: rgba(255, 255, 255, .14); }
 /* inside: media in the tray, the personal record as a slip under the clips */
 .collection-case .holder { position: absolute; left: 50%; top: 50%; width: 84%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07); }
@@ -76,9 +72,6 @@
 .collection-case .holder { top: 42%; width: min(84%, calc(var(--ch) * .6)); }
 .collection-case--large .slip { font-size: var(--type-body); line-height: var(--line-ui); padding: var(--space-4); }
 .collection-case--large .slip b { font-size: var(--type-title); line-height: var(--line-title); }
-.collection-case--large .ins { inset: 3px 3px 3px 0; }
-.collection-case--large .k-spine .ins { inset: 3px 0; }
-.collection-case--large .k-back .ins { inset: 3px 0 3px 3px; }
 .collection-case .ins.bare { background: transparent; display: flex; align-items: center; justify-content: center; }
 .case-spine-art .spine-title { display: block; max-height: 92%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; writing-mode: vertical-rl; text-orientation: sideways; font-family: var(--font-spine); font-weight: 700; font-size: calc(var(--cd) * .5); line-height: 1; letter-spacing: .02em; color: rgba(255,255,255,.92); }
 .collection-case .ins.full { background: transparent; }
