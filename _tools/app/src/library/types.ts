@@ -743,6 +743,12 @@ export type KakaoApplyRequest = {
   groups: KakaoGroupSelection[];
 };
 
+// PC-only data: kept separate from CollectionSummary/CollectionVolume replica shapes.
+export type CollectionWorkRecord = { status: string | null; ownedPlatform: string | null; myScore: number | null; memo: string | null };
+export type CollectionRecordEdit = { field: "status" | "ownedPlatform" | "memo"; value: string | null } | { field: "myScore"; value: number | null };
+export type CollectionCoverFocus = { volumeId: string; coverArtworkId: string; focusX: number | null; method: "head" | "close-up" | "body" | "none" };
+export type CollectionFocusJobResult = { busy: boolean; processed: number; failed: number };
+
 export type CollectionVolume = {
   id: string;
   volumeNumber: number;
@@ -1530,6 +1536,10 @@ export interface LibraryGateway {
   listCollectionCovers(collectionId: string): Promise<CollectionCover[]>;
   importCollectionArtworks(collectionId: string): Promise<number>;
   listCollectionWorkArtworks(collectionId: string): Promise<WorkArtworkSummary[]>;
+  getCollectionWorkRecord?(collectionId: string): Promise<CollectionWorkRecord>;
+  saveCollectionWorkRecord?(collectionId: string, edit: CollectionRecordEdit): Promise<CollectionWorkRecord>;
+  listCollectionCoverFocus?(collectionId: string): Promise<CollectionCoverFocus[]>;
+  startCollectionCoverFocus?(collectionId: string, onFocus: (focus: CollectionCoverFocus) => void): Promise<CollectionFocusJobResult>;
   listCollectionVolumes(
     collectionId: string,
     onProgress?: (progress: VolumeImportProgress) => void,

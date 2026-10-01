@@ -3,6 +3,7 @@ import { useState } from "react";
 import { workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import type { TmdbSeriesData } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
+import { SectionLabel } from "../shared/ui/SectionLabel";
 import { Button } from "../shared/ui/Button";
 import { WorkArtworkGallery } from "./WorkArtworkGallery";
 import "./SeriesSeasons.css";
@@ -17,7 +18,7 @@ export function SeriesSeasons({ series }: { series: TmdbSeriesData }) {
   const lastPage = Math.max(0, Math.ceil((selected?.episodes.length ?? 0) / 50) - 1);
   const currentPage = Math.min(page, lastPage);
   return <section className="series-seasons" aria-label="시즌과 에피소드">
-    <h2>시즌</h2>
+    <SectionLabel title="시즌" />
     {series.seasons.length === 0 ? <p>등록된 시즌이 없습니다.</p> : <>
       <div className="series-seasons__posters">
         {series.seasons.map((season) => <button type="button" className="series-seasons__season" key={season.id}

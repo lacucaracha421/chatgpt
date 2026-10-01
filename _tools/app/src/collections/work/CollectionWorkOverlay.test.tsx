@@ -15,9 +15,10 @@ import { CollectionWorkOverlay } from "./CollectionWorkOverlay";
 
 afterEach(cleanup);
 const base: CollectionSummary = { id: "a", name: "가 작품", type: "game", description: "기록", coverAssetId: null, selectedWorkArtworkId: null, selectedHeroArtworkId: null, selectedBackdropArtworkId: null, assetCount: 0, unreadReleaseCount: 0, year: 2026, originalTitle: null, runtimeMinutes: null, author: null, developer: "개발", publisher: "배급", platforms: "Switch 2", productionCompany: null, releaseDate: "2026-09-01", director: null, externalScore: null, myScore: 3, genres: null, overview: null, showcase: false, showcaseOrder: null, createdAt: "2026-09-02T00:00:00Z", updatedAt: "r" };
-function fixtures(type: "game" | "av" = "game") {
+function fixtures(type: "game" | "av" | "movie" = "game") {
   const items = [{ ...base, type }, { ...base, id: "b", name: "나 작품", type }];
-  const gateway = { listCollectionWorkArtworks: vi.fn().mockResolvedValue([]), importCollectionArtworks: vi.fn().mockResolvedValue(0), getIgdbConnection: vi.fn().mockResolvedValue({ gameId: 1 }), updateCollection: vi.fn().mockResolvedValue(undefined), setCollectionShowcase: vi.fn().mockResolvedValue(undefined), deleteCollection: vi.fn().mockResolvedValue(undefined), refreshIgdbGame: vi.fn().mockResolvedValue(undefined) };
+  const records: Record<string, {status:string|null;ownedPlatform:string|null;myScore:number|null;memo:string|null}> = {};
+  const gateway = { getCollectionWorkRecord: vi.fn().mockImplementation(async (id: string) => records[id] ?? {status:null,ownedPlatform:null,myScore:3,memo:"기록"}), saveCollectionWorkRecord: vi.fn().mockImplementation(async (id: string, edit: {field:string;value:string|number|null}) => records[id] = {...(records[id] ?? {status:null,ownedPlatform:null,myScore:3,memo:"기록"}),[edit.field]:edit.value}), listCollectionWorkArtworks: vi.fn().mockResolvedValue([]), importCollectionArtworks: vi.fn().mockResolvedValue(0), getTmdbConnection: vi.fn().mockResolvedValue(null), getIgdbConnection: vi.fn().mockResolvedValue({ gameId: 1 }), updateCollection: vi.fn().mockResolvedValue(undefined), setCollectionShowcase: vi.fn().mockResolvedValue(undefined), deleteCollection: vi.fn().mockResolvedValue(undefined), refreshIgdbGame: vi.fn().mockResolvedValue(undefined) };
   const api = { getDetails: vi.fn().mockImplementation(async (id: string) => ({ collectionId: id, revision: 1, productCode: "ABC-123", titleJa: null, maker: "메이커", label: "레이블", series: null, releaseDate: "2026-09-01", genres: [], people: [{ id: "person", displayName: "배우", role: "performer", order: 0, creditName: null, nameJa: null, workCount: 1, portrait: null }], makerCount: 1, labelCount: 1, seriesCount: 0 })), getCoverSet: vi.fn().mockResolvedValue({ frontId: null, spineId: null, backId: null, revision: "r" }), getRelated: vi.fn().mockResolvedValue({ performers: [], series: null, label: null }), searchPeople: vi.fn().mockResolvedValue([]), getPerformer: vi.fn().mockResolvedValue({ person: { id: "person", displayName: "배우", nameJa: null, memo: null, portrait: null }, stats: { workCount: 1, firstRelease: null, lastRelease: null, averageScore: null }, works: [], coPerformers: [], labels: [] }), getPerformerProfile: vi.fn().mockResolvedValue(null), getStashdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }) };
   const exit = vi.fn(); const changed = vi.fn().mockResolvedValue(undefined);
   function Harness() {
@@ -31,18 +32,18 @@ function fixtures(type: "game" | "av" = "game") {
   return { gateway, api, exit, changed, Harness };
 }
 describe("Collection work open path", () => {
-  it.each(["game", "av"] as const)("opens %s by double-click / Enter with the actual list position, and Escape returns", async type => {
+  it.each(["game", "av", "movie"] as const)("opens %s by double-click / Enter with the actual list position, and Escape returns", async type => {
     const { Harness, exit } = fixtures(type); render(<Harness />); const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /^가 작품/ })); expect(screen.queryByRole("article")).toBeNull();
     await user.dblClick(screen.getByRole("button", { name: /^가 작품/ }));
-    const root = await screen.findByRole("article", { name: type === "game" ? "게임 작품 화면" : "AV 작품 화면" });
+    const root = await screen.findByRole("article", { name: type === "game" ? "게임 작품 화면" : type === "movie" ? "영화 작품 화면" : "AV 작품 화면" });
     expect(root.querySelector(".asset-viewer__position")).toHaveTextContent("1 / 2");
     await user.keyboard("{Escape}"); expect(exit).toHaveBeenCalledOnce();
     const second = screen.getByRole("button", { name: /^나 작품/ }); second.focus(); await user.keyboard("{Enter}");
     expect((await screen.findByRole("article")).querySelector(".asset-viewer__position")).toHaveTextContent("2 / 2");
   });
-  it("holds the old work through a delayed command and steps without unmounting the screen", async () => {
-    const { Harness, gateway } = fixtures(); let release!: (items: []) => void;
+  it.each(["game", "movie"] as const)("holds the old %s through a delayed command and steps without unmounting", async type => {
+    const { Harness, gateway } = fixtures(type); let release!: (items: []) => void;
     gateway.listCollectionWorkArtworks.mockImplementation((id: string) => id === "b" ? new Promise(resolve => { release = resolve; }) : Promise.resolve([]));
     render(<Harness />); const user = userEvent.setup(); await user.dblClick(screen.getByRole("button", { name: /^가 작품/ }));
     const root = await screen.findByRole("article");
@@ -51,11 +52,15 @@ describe("Collection work open path", () => {
     await act(async () => release([]));
     await screen.findByRole("heading", { name: /^나 작품/ }); expect(screen.getByRole("article")).toBe(root);
   });
-  it("saves only existing personal fields through the established collection command", async () => {
-    const { Harness, gateway } = fixtures(); render(<Harness />); const user = userEvent.setup(); await user.dblClick(screen.getByRole("button", { name: /^가 작품/ }));
-    const score = await screen.findByRole("spinbutton", { name: "별점" }); await user.clear(score); await user.type(score, "4.5");
-    await user.click(screen.getByRole("button", { name: "저장" }));
-    await waitFor(() => expect(gateway.updateCollection).toHaveBeenCalledWith("a", expect.objectContaining({ myScore: 4.5, description: "기록", personalBase: { myScore: 3, description: "기록" } })));
+  it("saves each personal field through the PC command without a stale full-work write", async () => {
+    const {Harness,gateway}=fixtures(); render(<Harness/>); const user=userEvent.setup();
+    await user.dblClick(screen.getByRole("button",{name:/^가 작품/}));
+    await user.click(await screen.findByRole("button",{name:"별점 5점"}));
+    await waitFor(()=>expect(gateway.saveCollectionWorkRecord).toHaveBeenCalledWith("a",{field:"myScore",value:5}));
+    const memo=screen.getByRole("textbox",{name:"메모"}); await user.clear(memo); await user.type(memo,"새 기록"); await user.tab();
+    await waitFor(()=>expect(gateway.saveCollectionWorkRecord).toHaveBeenCalledWith("a",{field:"memo",value:"새 기록"}));
+    expect(gateway.updateCollection).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button",{name:"저장"})).toBeNull();
   });
   it("keeps AV information editing, artwork selection, performers, Showcase and delete reachable", async () => {
     const { Harness, api, gateway } = fixtures("av"); render(<Harness />); const user = userEvent.setup(); await user.dblClick(screen.getByRole("button", { name: /^가 작품/ }));

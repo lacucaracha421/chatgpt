@@ -14,6 +14,17 @@ export { localDay } from "../shared/displayDate";
 
 const validDate = (value: string | null | undefined) => (value && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : null);
 
+/** The newest released Korean volume, independent of ownership and unread/watch state. */
+export function latestKoreanRelease(entry: ReleaseBoardEntry | undefined, editionIndex: number, today: string): number | null {
+  const schedule = entry?.releaseSchedule.kakao;
+  if (!schedule || schedule.editionIndex !== editionIndex) return null;
+  const released = schedule.volumes.filter(volume => {
+    const date = validDate(volume.date);
+    return Number.isInteger(volume.volumeNumber) && volume.volumeNumber > 0 && (date ? date <= today : volume.status === "released");
+  });
+  return released.length ? Math.max(...released.map(volume => volume.volumeNumber)) : null;
+}
+
 /** A short caption date: `9.24` this year, `2027.1.5` otherwise. */
 export function shortReleaseDate(date: string, today: string): string {
   const [year, month, day] = date.split("-").map(Number);

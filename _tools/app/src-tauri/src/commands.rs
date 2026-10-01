@@ -3852,3 +3852,51 @@ pub async fn sync_asset_authority(state: State<'_, AppState>) -> Result<crate::l
     let library=current_required(state)?;
     tauri::async_runtime::spawn_blocking(move ||library.sync_asset_authority()).await.map_err(|_|background_task_error())?.map_err(CommandError::from)
 }
+
+#[tauri::command]
+pub fn get_collection_work_record(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::library::collection_pc::WorkRecord, CommandError> {
+    current_required(state)?
+        .collection_work_record(&collection_id)
+        .map_err(CommandError::from)
+}
+#[tauri::command]
+pub fn save_collection_work_record(
+    collection_id: String,
+    edit: crate::library::collection_pc::WorkRecordEdit,
+    state: State<'_, AppState>,
+) -> Result<crate::library::collection_pc::WorkRecord, CommandError> {
+    current_required(state)?
+        .save_collection_work_record(&collection_id, edit)
+        .map_err(CommandError::from)
+}
+#[tauri::command]
+pub fn list_collection_cover_focus(
+    collection_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::library::collection_pc::CoverFocus>, CommandError> {
+    current_required(state)?
+        .collection_cover_focus(&collection_id)
+        .map_err(CommandError::from)
+}
+#[tauri::command]
+pub async fn start_collection_cover_focus(
+    collection_id: String,
+    on_focus: tauri::ipc::Channel<crate::library::collection_pc::CoverFocus>,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::library::collection_pc::FocusJobResult, CommandError> {
+    let library = current_required(state)?;
+    let (script, settings) = characters::runtime_paths(&app)?;
+    let config = crate::library::character_worker::RuntimeConfig::configured(script, &settings)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library.compute_collection_cover_focus(&collection_id, &config, &|focus| {
+            let _ = on_focus.send(focus);
+        })
+    })
+    .await
+    .map_err(|_| background_task_error())?
+    .map_err(CommandError::from)
+}

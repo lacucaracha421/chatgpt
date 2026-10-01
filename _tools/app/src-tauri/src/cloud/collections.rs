@@ -985,6 +985,121 @@ mod tests {
     }
 
     #[test]
+    fn collection_pc_records_and_focus_do_not_change_published_payload() {
+        use crate::library::collection_pc::{CoverFocus, WorkRecordEdit};
+        let (_temp, library) = personal_edit_fixture();
+        library.connection().unwrap().execute_batch("INSERT INTO collections(id,name,type,created_at,updated_at) VALUES('g','Game','game','c','u');
+            INSERT INTO collection_work_artworks(id,collection_id,provider,provider_image_id,kind,relative_path,mime_type,width,height,created_at,updated_at) VALUES('art','c','local','art','volume_cover','missing.png','image/png',400,600,'c','u');
+            INSERT INTO collection_volumes(id,collection_id,volume_number,edition_index,sort_order,cover_artwork_id,created_at,updated_at) VALUES('v','c',1,0,10,'art','c','u');").unwrap();
+        let endpoint = "https://sync.example.test";
+        let library_id = library.library_id().unwrap();
+        library
+            .adopt_collection_personal_edit_library(endpoint, &library_id)
+            .unwrap();
+        let snapshot = || {
+            let legacy = serde_json::to_value(
+                library
+                    .cloud_collections_snapshot(None, &|_| {})
+                    .unwrap()
+                    .replica,
+            )
+            .unwrap();
+            let mut bodies = vec![legacy];
+            for edit_version in [1, 2] {
+                let feature = PersonalEditFeature {
+                    endpoint: endpoint.into(),
+                    library_id: library_id.clone(),
+                    edit_version,
+                };
+                bodies.push(
+                    serde_json::to_value(
+                        &library
+                            .cloud_collections_snapshot_with_feature(
+                                None,
+                                Some(&feature),
+                                false,
+                                &|_| {},
+                            )
+                            .unwrap()
+                            .replica,
+                    )
+                    .unwrap(),
+                );
+            }
+            bodies
+        };
+        let before = snapshot();
+        let generation: i64 = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT generation FROM mobile_publication_state WHERE kind='collections'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        library
+            .save_collection_work_record(
+                "g",
+                WorkRecordEdit::Status {
+                    value: Some("playing".into()),
+                },
+            )
+            .unwrap();
+        library
+            .save_collection_work_record(
+                "g",
+                WorkRecordEdit::OwnedPlatform {
+                    value: Some("PS5".into()),
+                },
+            )
+            .unwrap();
+        library
+            .save_collection_work_record(
+                "c",
+                WorkRecordEdit::Status {
+                    value: Some("collecting".into()),
+                },
+            )
+            .unwrap();
+        library
+            .store_cover_focus(&CoverFocus {
+                volume_id: "v".into(),
+                cover_artwork_id: "art".into(),
+                focus_x: Some(0.2),
+                method: "head".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            snapshot(),
+            before,
+            "PC edits leave the entire published replica unchanged"
+        );
+        let after: i64 = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT generation FROM mobile_publication_state WHERE kind='collections'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            after, generation,
+            "PC-local edits do not schedule publication"
+        );
+        let encoded = serde_json::to_string(&before).unwrap();
+        for field in [
+            "ownedPlatform",
+            "focusX",
+            "focus_x",
+            "collection_pc_records",
+        ] {
+            assert!(!encoded.contains(field));
+        }
+    }
+
+    #[test]
     fn handshake_snapshot_reads_the_cursor_in_the_same_transaction_as_the_rows() {
         let (_temp, library) = personal_edit_fixture();
         let endpoint = "https://sync.example.test";

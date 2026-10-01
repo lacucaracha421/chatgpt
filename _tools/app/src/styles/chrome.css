@@ -203,7 +203,6 @@ body .ui-menu { border-color: var(--chrome-border); border-radius: var(--chrome-
 .collection-detail-sidebar .collection-overlay__info-row { min-width: 0; }
 .collection-detail-sidebar .collection-overlay__info-row dd { overflow-wrap: anywhere; }
 .collection-detail-sidebar .collection-overlay__shelves { margin-top: var(--space-4); }
-.collection-detail-sidebar .movie-collection-detail__actions { justify-content: flex-start; margin: 0; }
 .collection-detail-sidebar .ui-menu__trigger { max-width: 100%; }
 .collection-detail-description {
   flex: none;

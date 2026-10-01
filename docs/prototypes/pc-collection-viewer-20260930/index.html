@@ -496,6 +496,33 @@ svg.i.s { width: var(--icon-sm); height: var(--icon-sm); }
 .v-shelf .board::before { content: ""; position: absolute; left: 4%; right: 4%; top: calc(100% - 10px); height: 22px; background: radial-gradient(ellipse 50% 50% at 50% 50%, rgba(0, 0, 0, .55), transparent 72%); pointer-events: none; }
 .v-shelf .spines { position: relative; }
 .v-shelf { padding-bottom: var(--space-5); }
+/* Hero art behind the case (2026-10-01). A: the hero as a band across the top of the stage, fading into the floor; the case stands in front of its lower edge.
+   B: the hero fills the stage, darkened toward the floor and the info panel. C: the hero only as blurred coloured light behind the case. */
+.v-hero { position: absolute; left: 0; right: var(--info); top: 56px; bottom: 112px; overflow: hidden; pointer-events: none; z-index: 0; }
+.v-hero img { position: absolute; left: 0; width: 100%; object-fit: cover; display: block; }
+.v-hero.band img { top: 0; height: 62%; -webkit-mask-image: linear-gradient(180deg, #000 0, #000 55%, transparent 100%); mask-image: linear-gradient(180deg, #000 0, #000 55%, transparent 100%); opacity: .9; }
+.v-hero.band::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--color-viewer-bg) 55%, transparent), transparent 28%, transparent 72%, color-mix(in srgb, var(--color-viewer-bg) 55%, transparent)); }
+.v-hero.full img { top: 0; height: 100%; opacity: .7; }
+.v-hero.full::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse 46% 52% at 50% 52%, color-mix(in srgb, var(--color-viewer-bg) 35%, transparent), transparent 70%), linear-gradient(180deg, transparent 40%, var(--color-viewer-bg) 100%); }
+.v-hero.glow img { top: -10%; height: 120%; filter: blur(60px) saturate(1.3); opacity: .55; transform: scale(1.1); }
+.v-hero.glow::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 50%, var(--color-viewer-bg) 100%); }
+.viewer .v-stage, .viewer .v-strip, .viewer .v-bar, .viewer .v-info, .viewer .v-edge { z-index: 1; }
+/* Manga book turns freely like the cases (user, 2026-10-01: the lean was too weak). Drag or arrow keys; it rests facing front. */
+.v-book .bigbook { --bd: 34px; cursor: grab; transition: transform 520ms var(--ease-standard); }
+.v-book .bigbook.dragging { transition: none; cursor: grabbing; }
+.bb-back .cv { filter: brightness(.55) saturate(.8); }
+/* Spine decoration (user, 2026-10-01): follows the real Jump Comics spine, top to bottom — label mark, title, volume number, an illustration, author
+   (a 2019 survey of manga spines found this order on 9 of 10 Jump titles). Everything is solid: no translucent bands. The illustration is the volume's
+   own cover cut at the figure's head; the label mark is left out because the app has no label logos (nothing invented). Only the big book carries it; the bookcase keeps
+   plain cover strips. */
+.jspine { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; background: var(--jg); color: var(--jt); font-family: var(--spine-font); font-weight: var(--spine-weight); }
+.jspine .lab { flex: none; width: 62%; aspect-ratio: 1; margin-top: 7%; border-radius: 50%; border: 2px solid var(--jt); opacity: .9; }
+.jspine .ttl { flex: none; margin-top: 12%; writing-mode: vertical-rl; text-orientation: mixed; font-size: calc(var(--sw) * .66); line-height: 1; letter-spacing: -.02em; white-space: nowrap; }
+.jspine .num { flex: none; margin-top: 6%; width: 78%; aspect-ratio: 1; display: grid; place-items: center; border-radius: 50%; background: var(--jn); color: var(--jni); font-family: var(--font-ui); font-weight: 800; font-size: calc(var(--sw) * .42); line-height: 1; }
+.jspine .ill { flex: 1; align-self: stretch; margin: 7% 0; min-height: 0; overflow: hidden; position: relative; }
+.jspine .ill img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.jspine .by { flex: none; writing-mode: vertical-rl; text-orientation: mixed; font-family: var(--font-ui); font-weight: 600; font-size: calc(var(--sw) * .3); line-height: 1; letter-spacing: .02em; white-space: nowrap; }
+.jspine .pub { flex: none; width: 46%; height: calc(var(--sw) * .16); margin: 6% 0 5%; background: var(--jt); opacity: .8; }
 </style>
 </head>
 <body>
@@ -503,7 +530,7 @@ svg.i.s { width: var(--icon-sm); height: var(--icon-sm); }
   <header class="doc-head">
     <h1>컬렉션 작품 화면</h1>
     <p class="lead">목록에서 작품을 <b>두 번 누르면 바로 이 화면</b>입니다. 예전의 작품 상세와 크게 보기를 하나로 합쳤습니다(2026-09-30 결정). 에셋 뷰어와 같은 몰입형 구성이고, 케이스는 목록 · 이 화면이 <b>같은 모델</b>을 씁니다. 표지는 색 블록이고 작품 설명은 예시입니다.</p>
-    <div class="pick"><span>예시 작품</span><div class="seg" role="group" aria-label="예시 작품" id="work-pick"></div><span>기기</span><div class="seg" role="group" aria-label="기기" id="device-pick"></div><span>책등 글자</span><div class="seg" role="group" aria-label="책등 글자" id="font-pick"></div></div>
+    <div class="pick"><span>예시 작품</span><div class="seg" role="group" aria-label="예시 작품" id="work-pick"></div><span>기기</span><div class="seg" role="group" aria-label="기기" id="device-pick"></div><span>만화 책등</span><div class="seg" role="group" aria-label="만화 책등" id="deco-pick"></div><span>배경 그림</span><div class="seg" role="group" aria-label="배경 그림" id="hero-pick"></div><span>책등 글자</span><div class="seg" role="group" aria-label="책등 글자" id="font-pick"></div></div>
   </header>
 
   <section class="topic" id="vgame">
@@ -606,6 +633,12 @@ function spineTemplate(kind, name, publisher, band) {
   if (kind === 'ps5') return `<span class="tpl ps5" style="--t-band:#050505;--t-ink:#fff;--t-foot:linear-gradient(#050505,#050505);--t-pub:#b9bcc0">${head('96 / 271', '#fff')}<span class="t-band"><span class="spine-title">${name}</span></span><span class="t-foot text">${pub}</span></span>`;
   return null;
 }
+// Hero art behind the case (user, 2026-10-01: the old detail's hero art was missed). The private build injects real hero art.
+const HEROES = window.LAKOMICS_REAL_HEROES || {};
+const HERO_MODES = [['band', 'A 위쪽 띠'], ['full', 'B 무대 전체'], ['glow', 'C 은은한 빛'], ['none', '없음']];
+let heroMode = 'band';
+const heroOf = (w) => HEROES[w.name] ?? null;
+const heroLayer = (w) => { const h = heroOf(w); if (!h || heroMode === 'none') return ''; return `<div class="v-hero ${heroMode}" aria-hidden="true"><img src="${h}" alt=""></div>`; };
 const REAL_GAMES = window.LAKOMICS_REAL_GAMES || null;
 for (const w of WORKS) w.ratio = 0.667;
 if (REAL_GAMES) {
@@ -690,7 +723,7 @@ function viewer(id, w, o) {
   const stage = artIndex >= 0 ? `<div class="v-art">${scene(scenes[artIndex], '', artIndex)}</div>`
     : m === 'flat' ? `<div class="v-flat"><div class="sheet"><span class="face-back" style="width:${Math.round(520 * o.ratio)}px">${o.backFlat ?? `${scene(w.scenes[0], '', 3)}<i style="width:86%"></i><i style="width:70%"></i><i style="width:78%"></i><i style="width:52%"></i><i style="width:64%"></i>`}</span><span style="width:40px">${o.spineFlat}</span><span style="width:${Math.round(520 * o.ratio)}px">${cover(w)}</span></div></div><div class="v-names"><span style="width:${Math.round(520 * o.ratio)}px">뒷면</span><span style="width:40px">책등</span><span style="width:${Math.round(520 * o.ratio)}px">앞면</span></div>`
     : kase(id, w, o);
-  return `<div class="viewer${info[id] ? ' with-info' : ''}" style="--work:${w.work};--work-deep:${w.deep};--ratio:${o.ratio}">
+  return `<div class="viewer${info[id] ? ' with-info' : ''}" style="--work:${w.work};--work-deep:${w.deep};--ratio:${o.ratio}">${heroLayer(w)}
     <div class="v-stage">${stage}</div>
     <span class="v-edge" style="left:0" ${o.step ? 'data-work-step="-1"' : ''}>${ic('left')}</span><span class="v-edge" style="right:var(--info);transform:scaleX(-1)" ${o.step ? 'data-work-step="1"' : ''}>${ic('left')}</span>
     <header class="v-bar"><button class="vbtn" aria-label="목록으로">${ic('left')}</button><span class="pos"><b>${o.index}</b> / ${o.total}</span><span class="who"><b>${w.name}</b><small>${o.meta}</small></span><span class="grow"></span>
@@ -727,6 +760,13 @@ function frameVAv() {
 }
 // manga: the accepted shelf as the strip; real covers in the private build
 const REAL_MANGA = window.LAKOMICS_REAL_COVERS ? window.LAKOMICS_REAL_COVERS[0] : null;
+const DECO_MODES = [['paper', '점프식 · 흰 바탕'], ['tint', '점프식 · 표지색 바탕'], ['plain', '꾸밈 없음']];
+let decoMode = 'paper', bookAngle = 0;
+const inkFor = (c) => { const m = String(c).match(/\d+/g); if (!m) return '#fff'; const [r, g, b] = m.map(Number); return r * 0.299 + g * 0.587 + b * 0.114 > 150 ? '#15171a' : '#fff'; };
+const jumpSpine = (x, m, sw, img) => { if (decoMode === 'plain') return ''; const c = x.c ?? '#6f6a80';
+  const paper = decoMode === 'paper', ground = paper ? '#f3f0e8' : c, text = paper ? `color-mix(in srgb, ${c} 70%, #111)` : inkFor(c);
+  const numBg = paper ? `color-mix(in srgb, ${c} 80%, #000)` : (inkFor(c) === '#fff' ? '#f3f0e8' : '#15171a');
+  return `<span class="jspine" style="--sw:${sw}px;--jg:${ground};--jt:${text};--jn:${numBg};--jni:${paper || numBg === '#15171a' ? '#fff' : '#15171a'}"><span class="ttl">${m.name}</span><span class="num">${x.n}</span><span class="ill">${img}</span><span class="by">${m.author ?? ''}</span><span class="pub"></span></span>`; };
 const MOCK_MANGA = { name: '위치 워치', vols: Array.from({ length: 24 }, (_, k) => ({ n: k + 1, w: 279, own: k < 23, c: `hsl(${268 + ((k * 37) % 9 - 4) * 5} 42% ${72 + (k % 3) * 3}%)`, fig: `--hx:${[50, 34, 62, 44, 70, 28, 56][k % 7]}%;--hy:${[22, 14, 30, 18, 26][k % 5]}%` })) };
 let volume = 17;
 function frameVManga() {
@@ -741,7 +781,7 @@ function frameVManga() {
     <div class="record">${label('내 기록')}<dl><dt>들인 날</dt><dd>2023.6.18</dd><dt>상태</dt><dd><button class="menu-q">모으는 중${ic('down', 's')}</button></dd><dt>별점</dt><dd>${stars(4)}</dd><dt>메모</dt><dd class="memo">예시 메모</dd></dl></div>
     <div class="sec">${label('작품 정보')}<dl class="facts"><dt>작가</dt><dd>${m.author ?? '시노하라 켄타'}</dd><dt>연도</dt><dd>${m.year ?? 2021}</dd><dt>발매 정보</dt><dd>카카오 · MangaDex</dd></dl></div>`;
   return `<div class="viewer${info['v-manga'] ? ' with-info' : ''}" style="--work:${v.c};--work-deep:color-mix(in srgb, ${v.c} 55%, #000);--ratio:${(v.w / 392).toFixed(4)}">
-    <div class="v-book" style="--bh:560px"><span class="book-shadow"></span><div class="bigbook" id="bigbook"><span class="bb-back"></span><span class="bb-spine">${face({ ...v, own: true }, `object-position:${Math.round((v.fx ?? 0.5) * 100)}% 50%`)}</span><span class="bb-pages"></span><span class="bb-top"></span><span class="bb-front">${face({ ...v, own: true })}</span></div></div>
+    <div class="v-book" style="--bh:560px"><span class="book-shadow"></span><div class="bigbook" id="bigbook" tabindex="0" role="group" aria-label="책. 끌어서 돌립니다" style="--ty:${bookAngle}deg"><span class="bb-back">${face({ ...v, own: true })}</span><span class="bb-spine">${face({ ...v, own: true }, `object-position:${Math.round((v.fx ?? 0.5) * 100)}% 50%`)}${jumpSpine(v, m, 34, face({ ...v, own: true }, `object-position:${Math.round((v.fx ?? 0.5) * 100)}% 30%`))}</span><span class="bb-pages"></span><span class="bb-top"></span><span class="bb-front">${face({ ...v, own: true })}</span></div></div>
     <span class="v-edge" style="left:0;bottom:168px" data-step="-1">${ic('left')}</span><span class="v-edge" style="right:var(--info);bottom:168px;transform:scaleX(-1)" data-step="1">${ic('left')}</span>
     <header class="v-bar"><button class="vbtn" aria-label="목록으로">${ic('left')}</button><span class="pos"><b>${v.n}</b> / ${vols.length}</span><span class="who"><b>${m.name} ${v.n}권</b><small>${v.own ? '기본판' : '기본판 · 아직 없음'}</small></span><span class="grow"></span>
       ${barActions('v-manga', false)}${infoButton('v-manga')}${closeButton}</header>
@@ -757,6 +797,8 @@ function renderPicker() {
   document.getElementById('work-pick').innerHTML = WORKS.map((w) => `<button aria-pressed="${w === work}" data-work="${w.key}">${w.name}</button>`).join('');
   document.getElementById('font-pick').innerHTML = SPINE_FONTS.map(([key, name]) => `<button aria-pressed="${key === spineFont}" data-spine-font="${key}">${name}</button>`).join('');
   applySpineFont();
+  document.getElementById('deco-pick').innerHTML = DECO_MODES.map(([key, name]) => `<button aria-pressed="${key === decoMode}" data-deco-mode="${key}">${name}</button>`).join('');
+  document.getElementById('hero-pick').innerHTML = HERO_MODES.map(([key, name]) => `<button aria-pressed="${key === heroMode}" data-hero-mode="${key}">${name}</button>`).join('');
   document.getElementById('device-pick').innerHTML = Object.entries(DEVICES).map(([key, d]) => `<button aria-pressed="${key === device}" data-device="${key}">${d.name}</button>`).join('');
 }
 // The big book leans toward the pointer, as the app's live 3D book does.
@@ -764,14 +806,22 @@ function bindBook() {
   const element = document.getElementById('bigbook');
   if (!element) return;
   const host = element.parentElement;
-  host.onpointermove = (event) => { const r = host.getBoundingClientRect(); element.style.setProperty('--ty', `${((event.clientX - r.left) / r.width - .5) * 32}deg`); element.style.setProperty('--tx', `${((event.clientY - r.top) / r.height - .5) * -12}deg`); };
-  host.onpointerleave = () => { element.style.setProperty('--ty', '0deg'); element.style.setProperty('--tx', '0deg'); };
+  let drag = null;
+  const set = (a) => { bookAngle = ((a + 180) % 360 + 360) % 360 - 180; element.style.setProperty('--ty', `${bookAngle}deg`); };
+  element.onpointerdown = (event) => { drag = { x: event.clientX, a: bookAngle }; element.setPointerCapture(event.pointerId); element.classList.add('dragging'); };
+  element.onpointermove = (event) => { if (drag) set(drag.a + (event.clientX - drag.x) * .6); };
+  element.onpointerup = element.onpointercancel = () => { drag = null; element.classList.remove('dragging'); };
+  element.onkeydown = (event) => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { set(bookAngle + (event.key === 'ArrowLeft' ? -15 : 15)); event.preventDefault(); event.stopPropagation(); } else if (event.key === 'Home') set(0); };
 }
 
 const frameOf = { 'v-game': 'vgame', 'v-av': 'vav' };
 document.addEventListener('click', (event) => {
   const fontButton = event.target.closest('[data-spine-font]');
   if (fontButton) { spineFont = fontButton.dataset.spineFont; renderPicker(); return; }
+  const decoButton = event.target.closest('[data-deco-mode]');
+  if (decoButton) { decoMode = decoButton.dataset.decoMode; renderPicker(); render(); return; }
+  const heroButton = event.target.closest('[data-hero-mode]');
+  if (heroButton) { heroMode = heroButton.dataset.heroMode; renderPicker(); render(); return; }
   const target = event.target.closest('[data-work], [data-device], [data-mode], [data-front], [data-vol], [data-step], [data-info], [data-work-step]');
   if (!target) return;
   if (target.dataset.mode) {

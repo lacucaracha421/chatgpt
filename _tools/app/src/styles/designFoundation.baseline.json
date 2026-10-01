@@ -70,7 +70,7 @@
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 1
+      "legacyToken": 0
     },
     "_tools/app/src/collections/av/avPerformerPage.css": {
       "offScaleSpacing": 3,
@@ -271,10 +271,10 @@
       "legacyToken": 0
     },
     "_tools/app/src/styles/global.css": {
-      "offScaleSpacing": 12,
+      "offScaleSpacing": 10,
       "offRoleFontSize": 0,
       "pillRadius": 3,
-      "legacyToken": 90
+      "legacyToken": 85
     },
     "_tools/app/src/styles/tokens.css": {
       "offScaleSpacing": 0,

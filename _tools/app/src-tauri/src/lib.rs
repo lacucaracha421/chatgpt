@@ -581,6 +581,10 @@ pub fn run() {
             commands::import_collection_artworks,
             commands::list_collection_work_artworks,
             commands::list_collection_volumes,
+            commands::get_collection_work_record,
+            commands::save_collection_work_record,
+            commands::list_collection_cover_focus,
+            commands::start_collection_cover_focus,
             commands::sync_mangadex_volume_covers,
         ])
         .run(tauri::generate_context!())

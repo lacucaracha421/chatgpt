@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import "./CollectionCase.css";
+import { fitCollectionCase, type StageBox } from "./fitCaseStage";
 
-export type CasePlatform = "sw2" | "sw" | "ps5" | "pc" | "other" | "av";
+export type CasePlatform = "sw2" | "sw" | "ps5" | "pc" | "other" | "av" | "film";
 export function casePlatform(platforms: string | null): CasePlatform {
   if (/switch\s*2/i.test(platforms ?? "")) return "sw2";
   if (/switch/i.test(platforms ?? "")) return "sw";
@@ -11,24 +12,25 @@ export function casePlatform(platforms: string | null): CasePlatform {
 }
 const PLASTIC: Record<CasePlatform, string> = {
   sw2: "rgba(206,44,54,.9)", sw: "rgba(214,222,230,.24)", ps5: "rgba(214,222,230,.24)",
-  pc: "rgba(120,128,136,.38)", other: "rgba(120,128,136,.38)", av: "rgba(10,10,11,.94)",
+  pc: "rgba(120,128,136,.38)", other: "rgba(120,128,136,.38)", av: "rgba(10,10,11,.94)", film: "rgba(28,30,34,.92)",
 };
 export type CaseData = { title: string; publisher?: string | null; platform: CasePlatform; front: string | null; spine?: string | null; back?: string | null; privacy: boolean };
-export type Fact = [string, string];
+export type Fact = [string, ReactNode];
 export function CaseFacts({ rows }: { rows: Fact[] }) {
   return <dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
 }
-export function CaseInside({ record, facts, memo }: { record: Fact[]; facts: Fact[]; memo?: string | null }) {
-  return <><span className="clip clip-one" /><span className="clip clip-two" /><div className="slip"><b>내 기록</b><CaseFacts rows={record} />{memo && <p>{memo}</p>}</div><div className="card2"><b>작품 정보</b><CaseFacts rows={facts} /></div></>;
+export function CaseInside({ record, facts }: { record: Fact[]; facts: Fact[] }) {
+  return <><span className="clip clip-one" /><span className="clip clip-two" /><div className="slip"><b>내 기록</b><CaseFacts rows={record} /></div><div className="card2"><b>작품 정보</b><CaseFacts rows={facts} /></div></>;
 }
-export function CollectionCase({ data, open, onOpenChange, frontReset = 0, inside, note, onReady, large = false }: {
+export function CollectionCase({ data, open, onOpenChange, frontReset = 0, inside, note, onReady, large = false, stageBox }: {
   data: CaseData; open: boolean; onOpenChange(open: boolean): void; frontReset?: number;
-  inside?: ReactNode; note?: ReactNode; onReady?(): void; large?: boolean;
+  inside?: ReactNode; note?: ReactNode; onReady?(): void; large?: boolean; stageBox?: StageBox;
 }) {
   const [angle, setAngle] = useState(open ? -10 : 28);
   const [ratio, setRatio] = useState(.71);
   const savedAngle = useRef(28);
-  const drag = useRef<{ x: number; angle: number } | null>(null);
+  const drag = useRef<{ x: number; angle: number; moved: boolean } | null>(null);
+  const [dragging, setDragging] = useState(false);
   const settled = useRef(new Set<string>());
   const readyRef = useRef(onReady); readyRef.current = onReady;
   const sources = data.privacy ? [] : [data.front, data.spine, data.back].filter((url): url is string => Boolean(url));
@@ -56,14 +58,15 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
     }} />;
   }
   const template = ["sw2", "sw", "ps5"].includes(data.platform);
-  return <div className={`collection-case${large ? " collection-case--large" : ""}${open ? " is-open" : ""}`} style={{ "--ratio": ratio, "--plastic": PLASTIC[data.platform] } as CSSProperties}>
+  const fit = stageBox ? fitCollectionCase(stageBox, ratio, open) : null;
+  return <div className={`collection-case${data.platform === "film" ? " collection-case--film" : ""}${large ? " collection-case--large" : ""}${fit ? " collection-case--fitted" : ""}${open ? " is-open" : ""}`} style={{ "--ratio": ratio, "--plastic": PLASTIC[data.platform], ...(fit ? { "--ch": `${fit.height}px`, "--case-scale": fit.scale } : {}) } as CSSProperties}>
     <span className="floor-shadow" aria-hidden="true" />
     {/* This control is the physical media object, with rotation distinct from screen navigation. */}
-    <div className="kase" tabIndex={0} role="group" aria-label="케이스" aria-expanded={open} data-angle={angle} style={{ "--ry": `${angle}deg`, "--open": open ? 1 : 0, "--gloss": `${50 + angle}%` } as CSSProperties}
-      onPointerDown={event => { if (event.button !== 0) return; drag.current = { x: event.clientX, angle }; event.currentTarget.setPointerCapture?.(event.pointerId); }}
-      onPointerMove={event => { if (drag.current) turn(drag.current.angle + (event.clientX - drag.current.x) * .6); }}
-      onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}
-      onDoubleClick={() => onOpenChange(!open)} onKeyDown={event => {
+    <div className={`kase${dragging ? " is-dragging" : ""}`} tabIndex={0} role="group" aria-label="케이스" aria-expanded={open} data-angle={angle} style={{ "--ry": `${angle}deg`, "--open": open ? 1 : 0, "--gloss": `${50 + angle}%` } as CSSProperties}
+      onPointerDown={event => { if (event.button !== 0) return; drag.current = { x: event.clientX, angle, moved: false }; event.currentTarget.setPointerCapture?.(event.pointerId); }}
+      onPointerMove={event => { const start = drag.current; if (!start) return; if (!start.moved && Math.abs(event.clientX - start.x) < 4) return; if (!start.moved) { start.moved = true; setDragging(true); } turn(start.angle + (event.clientX - start.x) * .6); }}
+      onPointerUp={() => { const click = drag.current && !drag.current.moved; drag.current = null; setDragging(false); if (click) onOpenChange(!open); }} onPointerCancel={() => { drag.current = null; setDragging(false); }}
+      onKeyDown={event => {
         if (event.key === "ArrowLeft") turn(angle - 15);
         else if (event.key === "ArrowRight") turn(angle + 15);
         else if (event.key === "Home") setAngle(0);
@@ -75,7 +78,7 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
       <span className="k-floor">{data.platform === "sw" || data.platform === "sw2" ? <span className="cart-slot"><span className="cart" /></span> : <span className="holder"><span className="disc" /></span>}{note && <div className="note">{note}</div>}</span>
       <span className="k-edge" /><span className="k-cap k-top" /><span className="k-cap k-bottom" />
       <span className="k-hinge"><span className="k-spine"><span className={`ins${data.spine || data.privacy ? "" : template ? " full" : " bare"}`}>
-        {data.spine || data.privacy ? face(data.spine, "책등") : template ? <span className={`tpl ${data.platform}`} data-spine-template={data.platform}><span className="t-head" /><span className="t-band"><span className="spine-title">{data.title}</span></span><span className="t-foot"><span className="t-pub">{data.publisher}</span></span></span> : <span className="spine-title">{data.title}</span>}
+        {data.spine || data.privacy ? face(data.spine, "책등") : template ? <span className={`tpl ${data.platform}`} data-spine-template={data.platform} data-nintendo={/nintendo|닌텐도/i.test(data.publisher ?? "") ? "" : undefined}><span className="t-head" /><span className="t-band"><span className="spine-title">{data.title}</span></span><span className="t-foot"><span className="t-pub">{data.publisher}</span></span></span> : <span className="spine-title">{data.title}</span>}
       </span></span><span className="k-spine-in" /><span className="k-lid"><span className="k-front"><span className="ins">{face(data.front, "앞면")}</span></span><span className="k-inner">{inside}</span></span></span>
     </div>
   </div>;

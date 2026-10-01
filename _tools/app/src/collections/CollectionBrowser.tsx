@@ -208,7 +208,7 @@ export function CollectionBrowser({
 
   const openCollection = (collection: CollectionSummary, order = visible) => {
     navigationMemory?.set(scope, { scrollTop: stageRef.current?.scrollTop ?? 0, focusId: collection.id, page: exhibition.page });
-    if (onOpenWork && (collection.type === "game" || collection.type === "av")) onOpenWork(collection.id, order.map(item => item.id));
+    if (onOpenWork && (collection.type === "game" || collection.type === "av" || collection.type === "movie")) onOpenWork(collection.id, order.map(item => item.id));
     else onViewChange({ kind: "collection", collectionId: collection.id });
   };
 
@@ -229,9 +229,9 @@ export function CollectionBrowser({
                 releaseCaption={releaseCaption(collection, releases.data?.board.get(collection.id), inboxByWork.get(collection.id) ?? [], today)}
                 scope={library?.root ?? ""}
                 exhibition={showcase}
-                onClick={() => { if (collection.type === "game" || collection.type === "av") setPickedId(collection.id); else openCollection(collection); }}
-                onDoubleClick={() => { if (collection.type === "game" || collection.type === "av") openCollection(collection, options.meta === false ? showcaseItems : visible); }}
-                onKeyDown={event => { if ((collection.type === "game" || collection.type === "av") && event.key === "Enter") { event.preventDefault(); openCollection(collection, options.meta === false ? showcaseItems : visible); } }}
+                onClick={() => { if (collection.type === "game" || collection.type === "av" || collection.type === "movie") setPickedId(collection.id); else openCollection(collection); }}
+                onDoubleClick={() => { if (collection.type === "game" || collection.type === "av" || collection.type === "movie") openCollection(collection, options.meta === false ? showcaseItems : visible); }}
+                onKeyDown={event => { if ((collection.type === "game" || collection.type === "av" || collection.type === "movie") && event.key === "Enter") { event.preventDefault(); openCollection(collection, options.meta === false ? showcaseItems : visible); } }}
               />
             </ContextMenu>
 

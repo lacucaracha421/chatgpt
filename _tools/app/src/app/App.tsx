@@ -902,7 +902,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onOpenSettings={() => navigateView({ kind: "settings", section: "catalog" })}
                     onOpenCollection={(collectionId) => {
                       const current = collections.find(item => item.id === view.collectionId);
-                      if (current?.type === "game" || current?.type === "av") setView({ kind: "collection", collectionId });
+                      if (current?.type === "game" || current?.type === "av" || current?.type === "movie") setView({ kind: "collection", collectionId });
                       else navigateView({ kind: "collection", collectionId });
                     }}
                     onExit={() => {

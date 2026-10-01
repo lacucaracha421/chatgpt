@@ -92,6 +92,7 @@ pub(crate) mod classification_reconciliation;
 mod classification_reconciliation_tests;
 pub mod cloud_preflight;
 pub(crate) mod collection;
+pub mod collection_pc;
 pub(crate) mod collection_personal_edits;
 pub(crate) mod collection_binding_sync;
 pub(crate) mod collection_release_sync;

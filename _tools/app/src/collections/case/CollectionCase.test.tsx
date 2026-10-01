@@ -35,7 +35,9 @@ describe("CollectionCase", () => {
     fireEvent.keyDown(object, { key: "Home" }); expect(object).toHaveAttribute("data-angle", "0");
     fireEvent.keyDown(object, { key: "Enter" }); expect(object).toHaveAttribute("aria-expanded", "true");
     fireEvent.keyDown(object, { key: "Enter" }); expect(object).toHaveAttribute("aria-expanded", "false");
-    fireEvent.doubleClick(object); expect(object).toHaveAttribute("aria-expanded", "true");
+    // One click (no drag) opens; a drag never toggles.
+    fireEvent.pointerDown(object, { button: 0, clientX: 100 }); fireEvent.pointerUp(object, { clientX: 100 }); expect(object).toHaveAttribute("aria-expanded", "true");
+    fireEvent.pointerDown(object, { button: 0, clientX: 100 }); fireEvent.pointerMove(object, { clientX: 160 }); fireEvent.pointerUp(object, { clientX: 160 }); expect(object).toHaveAttribute("aria-expanded", "true");
   });
   it("turns freely during a drag and stops on release", () => {
     render(<Case />);

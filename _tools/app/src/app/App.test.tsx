@@ -1696,12 +1696,12 @@ describe("App", () => {
     expect(screen.getByText("던전밥")).toBeInTheDocument();
   });
 
-  it("returns to the list after stepping between merged game works", async () => {
+  it.each(["game", "movie"] as const)("returns to the list after stepping between merged %s works", async type => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
-    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ collectionType: "game" }));
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ collectionType: type }));
     const libraryGateway = gateway();
     const work = {
-      id: "showcase-game", name: "Showcase Game", description: null, type: "game",
+      id: "showcase-game", name: "Showcase Game", description: null, type,
       coverAssetId: null, selectedWorkArtworkId: null, selectedHeroArtworkId: null, selectedBackdropArtworkId: null, assetCount: 0, unreadReleaseCount: 0,
       year: 2020, originalTitle: null, runtimeMinutes: null, author: null, developer: null, publisher: null, platforms: null, productionCompany: null, releaseDate: null,
       director: null, externalScore: null, myScore: null, genres: null, overview: null,
@@ -1712,14 +1712,14 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
     await user.dblClick(await screen.findByText("Showcase Game"));
-    const root = await screen.findByRole("article", { name: "게임 작품 화면" });
+    const root = await screen.findByRole("article", { name: type === "movie" ? "영화 작품 화면" : "게임 작품 화면" });
     const position = root.querySelector(".asset-viewer__position")!.textContent!;
     await user.click(screen.getByRole("button", { name: position.startsWith("1") ? "다음 작품" : "이전 작품" }));
     await screen.findByRole("heading", { name: "다음 게임" });
-    expect(screen.getByRole("article", { name: "게임 작품 화면" })).toBe(root);
+    expect(screen.getByRole("article", { name: type === "movie" ? "영화 작품 화면" : "게임 작품 화면" })).toBe(root);
     await user.click(screen.getByRole("button", { name: "목록으로" }));
     expect(await screen.findByRole("region", { name: "컬렉션" })).toBeInTheDocument();
-    expect(screen.queryByRole("article", { name: "게임 작품 화면" })).toBeNull();
+    expect(screen.queryByRole("article", { name: type === "movie" ? "영화 작품 화면" : "게임 작품 화면" })).toBeNull();
   });
 
   it("returns from a Showcase detail to the whole Showcase it was opened from", async () => {

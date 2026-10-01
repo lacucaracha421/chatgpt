@@ -8,7 +8,9 @@
 .work-stage { position: absolute; inset: 0 0 112px; overflow: hidden; }
 .work-surface--info .work-stage, .work-surface--info .work-strip { right: 340px; }
 .work-case-slot { width: 100%; height: 100%; }
-.work-stage .asset-viewer__edge { top: 0; bottom: 0; width: 96px; }
+/* Previous/next targets stay narrow and short so they never cover the case (user, 2026-10-01). */
+.work-stage .asset-viewer__edge { top: 30%; bottom: 30%; width: 56px; background: transparent; }
+.work-stage .asset-viewer__edge:hover { background: transparent; }
 .work-stage .asset-viewer__edge:disabled { visibility: hidden; }
 .work-strip { position: absolute; bottom: 0; left: 0; right: 0; height: 112px; display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding: 0 var(--space-6); overflow-x: auto; background: transparent; }
 /* These object-view tiles are the media viewer's strip, not ordinary buttons. */
@@ -40,10 +42,10 @@
 .work-art img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .work-art .privacy-mask { width: 100%; height: 100%; }
 .work-flat-slot { position: absolute; inset: 0; }
-.work-flat { position: absolute; inset: var(--space-8) 96px; display: grid; place-items: center; }
-.work-flat-sheet { --flat-ratio: .71; display: flex; height: min(520px, calc(100vh - 280px)); max-width: 100%; box-shadow: var(--shadow-dialog); }
-.work-flat-sheet figure { position: relative; height: 100%; width: calc(min(520px, calc(100vh - 280px)) * var(--flat-ratio)); margin: 0; background: var(--color-surface); }
-.work-flat-sheet .work-flat-spine { width: 40px; flex: none; }
+.work-flat { position: absolute; inset: 0; display: grid; place-items: center; }
+.work-flat-sheet { --flat-height: min(520px, calc(100vh - 280px)); --flat-spine: 40px; --flat-ratio: .71; display: flex; height: var(--flat-height); box-shadow: var(--shadow-dialog); }
+.work-flat-sheet figure { position: relative; flex: none; height: 100%; width: calc(var(--flat-height) * var(--flat-ratio)); margin: 0; background: var(--color-surface); }
+.work-flat-sheet .work-flat-spine { width: var(--flat-spine); }
 .work-flat-sheet figure + figure { box-shadow: inset 1px 0 0 var(--color-border); }
 .work-flat-sheet img, .work-flat-sheet .privacy-mask { width: 100%; height: 100%; object-fit: fill; display: block; }
 .work-flat-sheet figcaption { position: absolute; top: calc(100% + var(--space-3)); width: 100%; text-align: center; font-size: var(--type-meta); color: var(--color-faint); }
@@ -53,7 +55,76 @@
 @media (max-width: 900px) {
   .work-surface--info .work-stage, .work-surface--info .work-strip { right: 280px; }
   .work-dock { width: 280px; }
-  .work-stage .collection-case--large { --ch: min(400px, calc(100vh - 280px)); }
   .work-stage .asset-viewer__edge { width: 48px; }
   .work-strip { justify-content: flex-start; }
 }
+.work-record-menu { min-height: var(--control-height-compact); padding: 0; border: 0; background: transparent; color: var(--color-text); gap: var(--space-1); }
+.work-record-menu svg { width: var(--icon-sm); height: var(--icon-sm); color: var(--color-faint); }
+/* Saving locks choices without dimming the text that remains painted. */
+.work-record button:disabled { opacity: 1; }
+.work-record-memo.ui-text-input { width: 100%; padding: 0; border-color: transparent; background: transparent; min-height: var(--control-height-compact); }
+.work-record-memo.ui-text-input:focus { border-color: var(--color-focus); }
+.work-stars { display: inline-flex; gap: var(--space-1); color: var(--color-muted); }
+/* A rating star is a screen-specific personal-record control, not a text button. */
+.work-stars .work-star { position: relative; width: var(--icon-sm); height: var(--control-height-compact); display: grid; align-items: center; padding: 0; }
+.work-stars svg { width: var(--icon-sm); height: var(--icon-sm); }
+.work-stars .work-star > span { position: absolute; left: 0; overflow: hidden; display: flex; color: var(--color-accent); pointer-events: none; }
+.work-stars .work-star > span svg { flex: none; fill: currentColor; }
+.work-badges { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.work-manga-ownership, .work-manga-management { display: flex; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-6); }
+.work-manga-management { margin-top: var(--space-6); }
+.work-own-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.work-own-row small, .collection-ownership--work p { font-size: var(--type-meta); line-height: var(--line-meta); color: var(--color-faint); }
+.work-owned-stepper { display: inline-flex; align-items: center; gap: var(--space-1); }
+.work-owned-stepper b { min-width: var(--space-6); text-align: center; font-weight: 500; }
+.collection-ownership--work { display: flex; flex-direction: column; gap: var(--space-2); }
+.work-own-row .ui-choice { display: flex; gap: var(--space-3); }
+.manga-work-stage.work-stage { bottom: 184px; }
+.manga-work-book { position: absolute; inset: var(--space-4) 96px var(--space-8); display: flex; align-items: center; justify-content: center; }
+.manga-work-book > img, .manga-work-book .paperback-live[data-front-facing] > .paperback-live__original { display: block; width: 90%; height: 90%; object-fit: contain; }
+.manga-work-book > .privacy-mask { width: 60%; height: 100%; }
+.manga-live-layer { position: absolute; inset: 0; }
+.manga-cover-empty { color: var(--color-faint); }
+/* Approved physical bookshelf: no band/recess; only real cover strips and a fading plank. */
+.manga-bookcase.work-strip { height: 184px; padding: var(--space-8); display: block; overflow-y: hidden; }
+.manga-bookcase-board { position: relative; width: max-content; min-width: 100%; height: 120px; }
+.manga-bookcase-board::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 6px; background: linear-gradient(color-mix(in srgb, var(--color-text) 20%, transparent), color-mix(in srgb, var(--color-text) 7%, transparent)); mask-image: linear-gradient(90deg, transparent, black 9%, black 91%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, black 9%, black 91%, transparent); pointer-events: none; }
+.manga-bookcase-board::before { content: ""; position: absolute; left: 4%; right: 4%; top: calc(100% - 10px); height: 22px; background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, black 55%, transparent), transparent 72%); pointer-events: none; }
+.manga-bookcase-spines { position: relative; display: flex; justify-content: center; align-items: flex-end; gap: 2px; height: 100%; }
+.manga-spine { position: relative; flex: none; width: var(--spine-width); height: 120px; padding: 0; color: var(--color-text); }
+.manga-spine[aria-pressed="true"] { width: var(--cover-width); z-index: 1; }
+.manga-spine-strip, .manga-spine-front { position: absolute; inset: 0; display: block; overflow: hidden; background: var(--color-surface); }
+.manga-spine-strip { border-radius: var(--radius-mark); box-shadow: var(--shadow-floating); }
+.manga-spine-strip::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, color-mix(in srgb, black 45%, transparent), color-mix(in srgb, white 20%, transparent) 25%, transparent 45%, color-mix(in srgb, black 40%, transparent)); pointer-events: none; }
+.manga-spine img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.manga-spine-front { transform: translateY(-6px); }
+.manga-spine-front img { object-fit: fill; }
+.manga-spine-empty { display: block; width: 100%; height: 100%; background: var(--color-surface); }
+.manga-spine-number { position: absolute; left: 2px; right: 2px; bottom: 2px; display: grid; place-items: center; font-size: var(--type-meta); line-height: var(--line-meta); background: var(--color-cover-scrim); z-index: 1; }
+.manga-picked-number { position: absolute; top: calc(100% + var(--space-2)); left: 0; right: 0; text-align: center; font-size: var(--type-meta); line-height: var(--line-meta); }
+.manga-spine--missing .manga-spine-strip, .manga-spine--missing .manga-spine-front { outline: 1px dashed var(--color-border-strong); outline-offset: -1px; }
+.manga-spine--missing img { opacity: .35; }
+.manga-spine--upcoming { color: var(--color-faint); }
+.manga-upcoming-date { position: absolute; top: calc(100% + var(--space-2)); left: 50%; transform: translateX(-50%); font-size: var(--type-meta); line-height: var(--line-meta); white-space: nowrap; }
+.manga-latest-label { position: absolute; bottom: calc(100% + var(--space-1)); left: 50%; transform: translateX(-50%); font-size: var(--type-meta); line-height: var(--line-meta); color: var(--color-muted); white-space: nowrap; }
+.manga-spine[aria-pressed="true"] .manga-latest-label { bottom: calc(100% + var(--space-2)); }
+@media (max-width: 900px) { .manga-work-book { left: var(--space-4); right: var(--space-4); } }
+
+.collection-case .slip .work-stars, .collection-case .slip .work-star > span { color: var(--color-on-accent); }
+.collection-case .card2 .ui-badge { color: inherit; background: color-mix(in srgb, var(--color-on-accent) 10%, transparent); }
+
+.work-overview { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.work-film-section-heading { display: flex; align-items: center; gap: var(--space-3); }
+.work-film-section-heading .ui-section-label { flex: 1; }
+.work-film-cast, .work-film-releases, .work-film-related { list-style: none; padding: 0; margin: 0; }
+.work-film-cast { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.work-film-cast span, .work-film-related-subtitle, .work-film-related-part small { color: var(--color-muted); font-size: var(--type-meta); }
+.work-film-related-subtitle { margin: 0; }
+.work-film-releases li { display: flex; flex-wrap: wrap; gap: var(--space-2); padding-block: var(--space-1); }
+.work-film-releases time { font-variant-numeric: tabular-nums; }
+.work-film-related { display: flex; gap: var(--space-3); overflow-x: auto; }
+.work-film-related-part { flex: 0 0 112px; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); overflow-wrap: anywhere; }
+.work-film-related-open.ui-button { height: auto; padding: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); white-space: normal; text-align: left; }
+.work-film-related-part--external { color: var(--color-muted); }
+.work-film-related-poster { width: 112px; aspect-ratio: 2 / 3; display: grid; place-items: center; background: var(--color-surface); overflow: hidden; color: var(--color-faint); font-size: var(--type-meta); }
+.work-film-related-poster img { width: 100%; height: 100%; object-fit: cover; }

@@ -1,9 +1,9 @@
 import { ChevronLeftIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { assetUrl, collectionCoverUrl, collectionSourcePreviewUrl, workArtworkUrl } from "../assets/mediaUrl";
+import { collectionCoverUrl, workArtworkUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { BookConnection, CollectionCover, CollectionSummary, CollectionVolume, CollectionVolumeRangeInput, CreateCollection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, TmdbConnection, UpdateCollection, VolumeImportProgress } from "../library/types";
+import type { BookConnection, CollectionCover, CollectionSummary, CollectionVolume, CollectionVolumeRangeInput, CreateCollection, MangaDexConnection, ReleaseWatchEvent, ReleaseWatchStatus, UpdateCollection, VolumeImportProgress, VolumeOwnership } from "../library/types";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { CollectionSidebarSection } from "./CollectionSidebarSection";
@@ -12,7 +12,6 @@ import { Button } from "../shared/ui/Button";
 import { Dialog } from "../shared/ui/Dialog";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { useBackHandler, useBackNavigationContext } from "../shared/navigation/BackNavigation";
-import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Toast } from "../shared/ui/Toast";
 import { CollectionCoverGrid } from "./CollectionCoverGrid";
@@ -25,11 +24,13 @@ import { MangaDexImportDialog } from "./MangaDexImportDialog";
 import { ReleaseWatchSummary } from "./ReleaseWatchSummary";
 import { CollectionOwnershipPanel } from "./CollectionOwnershipPanel";
 import { MangaConnections } from "./MangaConnections";
-import { invalidateReleaseData } from "./releaseData";
+import { invalidateReleaseData, useReleaseData } from "./releaseData";
+import { latestKoreanRelease, localDay } from "./releaseCaption";
+import { SectionLabel } from "../shared/ui/SectionLabel";
+import { CollectionWorkScreen, type CollectionWorkData } from "./work/CollectionWorkScreen";
+import { useWorkRecord } from "./work/useWorkRecord";
+import { useCoverFocus } from "./work/useCoverFocus";
 import { CollectionWorkOverlay } from "./work/CollectionWorkOverlay";
-import { MovieCollectionDetail } from "./MovieCollectionDetail";
-
-import { TmdbMovieDialog, type TmdbMovieTarget } from "./TmdbMovieDialog";
 
 type CollectionOverlayProps = {
   collectionId: string;
@@ -45,16 +46,20 @@ type CollectionOverlayProps = {
 
 export function CollectionOverlay(props: CollectionOverlayProps) {
   const collection = props.collections.find(item => item.id === props.collectionId);
-  if (collection && (collection.type === "game" || collection.type === "av")) return <CollectionWorkOverlay collection={collection} collections={props.collections} listOrder={props.listOrder} onExit={props.onExit} onChanged={props.onChanged} onOpenSettings={props.onOpenSettings} onOpenCollection={props.onOpenCollection} />;
+  if (collection && (collection.type === "game" || collection.type === "av" || collection.type === "movie")) return <CollectionWorkOverlay collection={collection} collections={props.collections} listOrder={props.listOrder} initialTmdbSearch={props.initialTmdbSearch} onTmdbSearchConsumed={props.onTmdbSearchConsumed} onExit={props.onExit} onChanged={props.onChanged} onOpenSettings={props.onOpenSettings} onOpenCollection={props.onOpenCollection} />;
   return <LegacyCollectionOverlay {...props} />;
 }
 
-function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearchConsumed, collections, onExit, onChanged, onOpenSettings, onOpenCollection }: CollectionOverlayProps) {
+function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged, onOpenCollection }: CollectionOverlayProps) {
   const sidebar = Boolean(useWorkspaceChrome());
   const { gateway, library } = useLibrary();
   const { privacyMode } = usePrivacy();
   const [covers, setCovers] = useState<CollectionCover[] | null>(null);
   const [volumes, setVolumes] = useState<CollectionVolume[] | null>(null);
+  const [volumesCollectionId, setVolumesCollectionId] = useState<string | null>(null);
+  const [volumeGridOpen, setVolumeGridOpen] = useState(false);
+  const [ownership, setOwnership] = useState<{ id: string; rows: VolumeOwnership[] } | null>(null);
+  const lastMangaData = useRef<CollectionWorkData | null>(null);
   const [volumeImport, setVolumeImport] = useState<VolumeImportProgress | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [selectedVolumeId, setSelectedVolumeId] = useState<string | null>(null);
@@ -63,17 +68,13 @@ function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearch
   const [editionIndex, setEditionIndex] = useState(0);
   const [mangaDexConnection, setMangaDexConnection] = useState<MangaDexConnection | null | undefined>(undefined);
   const [kakaoConnection, setBookConnection] = useState<BookConnection | null | undefined>(undefined);
-  const [tmdbConnection, setTmdbConnection] = useState<TmdbConnection | null | undefined>(undefined);
   const [importOpen, setImportOpen] = useState(false);
   const [kakaoOpen, setKakaoOpen] = useState(false);
-  const [tmdbTarget, setTmdbTarget] = useState<TmdbMovieTarget | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [kakaoRefreshing, setKakaoRefreshing] = useState(false);
-  const [tmdbRefreshing, setTmdbRefreshing] = useState(false);
   const [releaseWatchStatus, setReleaseWatchStatus] = useState<ReleaseWatchStatus | null>(null);
   const [releaseChanges, setReleaseChanges] = useState<ReleaseWatchEvent[]>([]);
   const [releaseWatchSaving, setReleaseWatchSaving] = useState(false);
-  const [tmdbError, setTmdbError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState<CollectionEditMode | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -87,14 +88,11 @@ function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearch
   const collection = collections.find((candidate) => candidate.id === collectionId);
   const hasCollection = Boolean(collection);
   const isManga = collection?.type === "manga";
+  const releases = useReleaseData(gateway.collectionTracking, collections, Boolean(isManga));
+  const personal = useWorkRecord(isManga ? collection : undefined);
+  const focus = useCoverFocus(isManga && volumesCollectionId === collectionId ? collectionId : null, volumes);
   const isGame = collection?.type === "game";
-  const isMovie = collection?.type === "movie";
   const isAv = collection?.type === "av";
-  useEffect(() => {
-    if (!initialTmdbSearch || !isMovie) return;
-    setTmdbTarget({ kind: "existing", collectionId, initialSearch: initialTmdbSearch });
-    onTmdbSearchConsumed?.();
-  }, [collectionId, initialTmdbSearch, isMovie, onTmdbSearchConsumed]);
   const hasBookConnection = Boolean(kakaoConnection);
   const needsBookReconnect = kakaoConnection?.provider === "aladin";
   const selectedCover = covers?.find((cover) => cover.fileName === selectedFileName) ?? null;
@@ -108,7 +106,7 @@ function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearch
   );
 
   useEffect(() => {
-    if (!hasCollection || isManga || isGame || isMovie || isAv) {
+    if (!hasCollection || isManga || isGame || isAv) {
       setCovers([]);
       setSelectedFileName(null);
       return;
@@ -123,38 +121,12 @@ function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearch
       () => { if (active) setCovers([]); },
     );
     return () => { active = false; };
-  }, [gateway, collectionId, hasCollection, isGame, isManga, isMovie, isAv]);
+  }, [gateway, collectionId, hasCollection, isGame, isManga, isAv]);
 
   useEffect(() => {
-    let active = true;
-    setReleaseChanges([]);
-    if (!isManga) return () => { active = false; };
-    if (!gateway.collectionTracking) return () => { active = false; };
-    void gateway.collectionTracking.listInbox().then(
-      (items) => {
-        if (!active) return;
-        setReleaseChanges(items.filter(item => item.collectionId === collectionId).map(item => item.event));
-      },
-      () => undefined,
-    );
-    return () => { active = false; };
-  }, [gateway, collectionId, isManga]);
-
-  useEffect(() => {
-    // 레거시 게임·영화는 로컬 소스 폴더의 표지·아트를 work artwork으로
-    // 지연 등록한다. 한 번 등록되면 이후 호출은 새 파일이 없으면 0을 반환한다.
-    if (!isGame && !isMovie) return;
-    let active = true;
-    void (async () => {
-      try {
-        const imported = await gateway.importCollectionArtworks(collectionId);
-        if (active && imported > 0) await onChangedRef.current();
-      } catch {
-        // 등록에 실패해도 뷰어는 소스 표지로 계속 동작한다.
-      }
-    })();
-    return () => { active = false; };
-  }, [gateway, collectionId, isGame, isMovie]);
+    if (!isManga || !releases.data) return;
+    setReleaseChanges(releases.data.inbox.filter(item => item.collectionId === collectionId).map(item => item.event));
+  }, [releases.data, collectionId, isManga]);
 
   useEffect(() => {
     if (!isManga) {
@@ -163,10 +135,8 @@ function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearch
       return;
     }
     let active = true;
-    setVolumes(null);
+    // Keep the old work until the next work's volumes arrive.
     setVolumeImport(null);
-    setSelectedVolumeId(null);
-    setEditionIndex(0);
     void (async () => {
       try {
         const initial = await gateway.listCollectionVolumes(collectionId, (progress) => {
@@ -175,10 +145,15 @@ function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearch
         if (!active) return;
         setVolumeImport(null);
         setVolumes(initial);
+        setVolumesCollectionId(collectionId);
+        setEditionIndex(0);
         setSelectedVolumeId(firstVolumeId(initial, 0));
       } catch (error) {
         if (active) {
-          setVolumes((current) => current ?? []);
+          setVolumes([]); // no-flash-ok: failed incoming work settles as an empty result
+          setVolumesCollectionId(collectionId);
+          setEditionIndex(0);
+          setSelectedVolumeId(null);
           setMessage(commandErrorMessage(error, "권별 표지를 불러오지 못했습니다."));
         }
       }
@@ -235,26 +210,6 @@ function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearch
 
   useEffect(() => {
     let active = true;
-    setTmdbError(null);
-    if (!isMovie) {
-      setTmdbConnection(null);
-      return () => { active = false; };
-    }
-    setTmdbConnection(undefined);
-    void gateway.getTmdbConnection(collectionId).then(
-      (next) => { if (active) setTmdbConnection(next); },
-      (error) => {
-        if (active) {
-          setTmdbConnection(null);
-          setTmdbError(commandErrorMessage(error, "TMDB 연결 상태를 불러오지 못했습니다."));
-        }
-      },
-    );
-    return () => { active = false; };
-  }, [gateway, collectionId, isMovie]);
-
-  useEffect(() => {
-    let active = true;
     if (!isManga) {
       setBookConnection(null);
       return () => { active = false; };
@@ -268,7 +223,7 @@ function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearch
   }, [gateway, collectionId, isManga]);
 
   const backNavigation = useBackNavigationContext();
-  const canExit = viewerVolumeId === null && !importOpen && !kakaoOpen && tmdbTarget === null && editMode === null && !deleteOpen;
+  const canExit = viewerVolumeId === null && !volumeGridOpen && !importOpen && !kakaoOpen && editMode === null && !deleteOpen;
   useBackHandler(onExit, 10, canExit);
   useEffect(() => {
     if (backNavigation || !canExit) return;
@@ -290,38 +245,6 @@ function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearch
         : null,
     [collection, collectionId, selectedCover],
   );
-
-  const gameCoverUrl = collection?.selectedWorkArtworkId
-    ? workArtworkUrl(collection.selectedWorkArtworkId)
-    : collection?.coverAssetId ? assetUrl(collection.coverAssetId)
-    : collection?.sourcePath ? collectionSourcePreviewUrl(collection.id) : null;
-  const moviePosterUrl = gameCoverUrl;
-  const movieBackdropUrl = collection?.selectedBackdropArtworkId ? workArtworkUrl(collection.selectedBackdropArtworkId) : null;
-
-  const providerMenu = isManga ? (
-    <Menu
-      label="작품 관리"
-      trigger={<span>작품 관리</span>}
-      items={[
-        {
-          id: "edit",
-          label: "편집",
-          onSelect: () => collection && setEditMode({ kind: "edit", collection }),
-        },
-        {
-          id: "showcase",
-          label: collection?.showcase ? "쇼케이스에서 제거" : "쇼케이스에 추가",
-          onSelect: () => void toggleShowcase(),
-        },
-        {
-          id: "delete",
-          label: "삭제",
-          destructive: true,
-          onSelect: () => setDeleteOpen(true),
-        },
-      ]}
-    />
-  ) : null;
 
   async function submitEdit(input: CreateCollection | UpdateCollection) {
     if (editMode?.kind !== "edit") return;
@@ -408,20 +331,6 @@ function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearch
     }
   }
 
-  async function refreshTmdb() {
-    setTmdbRefreshing(true);
-    setTmdbError(null);
-    try {
-      await gateway.refreshTmdbMovie(collectionId);
-      await onChanged();
-      setTmdbConnection(await gateway.getTmdbConnection(collectionId));
-    } catch (error) {
-      setTmdbError(commandErrorMessage(error, "TMDB 정보를 새로고침하지 못했습니다."));
-    } finally {
-      setTmdbRefreshing(false);
-    }
-  }
-
   async function toggleReleaseWatch(enabled: boolean) {
     if (!releaseWatchStatus || releaseWatchSaving) return;
     setReleaseWatchSaving(true);
@@ -455,6 +364,23 @@ function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearch
     requestAnimationFrame(() => viewerOpenerRef.current?.focus());
   }
 
+  const mangaData = useMemo<CollectionWorkData | null>(() => {
+    if (!isManga || !collection || volumes === null || volumesCollectionId !== collectionId) return lastMangaData.current;
+    const visible = volumes.filter(volume => volume.editionIndex === editionIndex).sort((left, right) => left.volumeNumber - right.volumeNumber);
+    const picked = visible.find(volume => volume.id === selectedVolumeId) ?? visible[0];
+    const value: CollectionWorkData = {
+      collection, record: personal.record, av: null, covers: null, related: null, artworks: [], providerConnected: Boolean(mangaDexConnection || kakaoConnection),
+      position: picked?.volumeNumber ?? 0, total: visible.length,
+      case: { title: collection.name, platform: "other", privacy: privacyMode, front: picked?.coverArtworkId ? workArtworkUrl(picked.coverArtworkId) : null, spine: null, back: null },
+      manga: { volumes: visible, activeVolumeId: picked?.id ?? null, editionIndex, latestKoreanVolume: latestKoreanRelease(releases.data?.board.get(collectionId), editionIndex, localDay()), focuses: focus.focuses, ownedNumbers: ownership?.id === collectionId ? ownership.rows.filter(row => row.editionIndex === editionIndex && (row.physical || row.digital)).map(row => row.volumeNumber) : null, scope: library?.root ?? "", revision: "", // Covers have immutable artwork identities; record saves must not recreate the renderer.
+        ownership: <section className="work-manga-ownership"><SectionLabel title="소장" /><CollectionOwnershipPanel compact collectionId={collectionId} volumes={volumes} editionIndex={editionIndex} onOwnershipChanged={rows => setOwnership({ id: collectionId, rows })} releaseWatch={{ enabled: releaseWatchStatus?.enabled ?? false, disabled: !kakaoConnection || !releaseWatchStatus || releaseWatchSaving || (needsBookReconnect && !releaseWatchStatus.enabled), unavailableReason: !kakaoConnection || needsBookReconnect ? "Kakao 연결 후 설정할 수 있습니다." : undefined, onChange: enabled => void toggleReleaseWatch(enabled) }} /><CollectionEditionSelector volumes={volumes} editionIndex={editionIndex} onEditionIndexChange={selectEdition} /></section>,
+        management: <section className="work-manga-management"><SectionLabel title="발매 정보" /><MangaConnections mangaDex={mangaDexConnection} kakao={kakaoConnection} mangaDexBusy={mangaDexConnection === undefined || refreshing} kakaoBusy={kakaoConnection === undefined || kakaoRefreshing} onConnectMangaDex={() => setImportOpen(true)} onRefreshMangaDex={() => void refresh()} onConnectKakao={() => setKakaoOpen(true)} onRefreshKakao={() => void refreshKakao()} hideConnectionPrompt={collection.hideConnectionPrompt} /><ReleaseWatchSummary events={releaseChanges} />{releaseChanges.length > 0 && gateway.collectionTracking && <Button size="sm" disabled={releaseWatchSaving} onClick={async () => { setReleaseWatchSaving(true); try { await gateway.collectionTracking!.acknowledge(collectionId, releaseChanges.map(event => event.id)); setReleaseChanges([]); void onChangedRef.current().catch(() => undefined); } catch (error) { setMessage(commandErrorMessage(error, "신간 알림을 확인 처리하지 못했습니다.")); } finally { setReleaseWatchSaving(false); } }}>표시된 신간 알림 확인</Button>}</section>,
+      },
+    };
+    lastMangaData.current = value;
+    return value;
+  }, [isManga, collection, volumes, volumesCollectionId, collectionId, selectedVolumeId, editionIndex, personal.record, privacyMode, focus.focuses, ownership, library?.root, mangaDexConnection, kakaoConnection, refreshing, kakaoRefreshing, releaseWatchStatus, releaseWatchSaving, releaseChanges, releases.data, gateway]);
+
   if (!collection) return (
     <section className="collection-overlay" aria-label="컬렉션 표지 보기">
       <ViewToolbar title="컬렉션" ariaLabel="컬렉션 표지 도구"
@@ -467,19 +393,26 @@ function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearch
 
   return (
     <section className="collection-overlay" aria-label="컬렉션 표지 보기">
+      {isManga && (mangaData ? <CollectionWorkScreen data={mangaData} pending={volumesCollectionId !== collectionId} actions={{
+        onClose: onExit, onStep: offset => { const visible = mangaData.manga?.volumes ?? []; const index = visible.findIndex(volume => volume.id === mangaData.manga?.activeVolumeId); const next = visible[index + offset]; if (next) setSelectedVolumeId(next.id); },
+        onPickVolume: setSelectedVolumeId, onEnlargeManga: () => { const id = mangaData.manga?.activeVolumeId; if (id) openVolume(id); },
+        onEdit: item => setEditMode({ kind: "edit", collection: item }), onShowcase: () => void toggleShowcase(),
+        onSave: async (item, edit) => { const record = await personal.save(item, edit); void onChanged().catch(error => setMessage(commandErrorMessage(error, "기록 화면을 갱신하지 못했습니다."))); return record; },
+        onOpenPerson: () => undefined, onOpenCollection, onCopyCode: () => undefined,
+        onManage: () => [
+          { id: "volumes", label: "권별 표지 · 소장", onSelect: () => setVolumeGridOpen(true) },
+          { id: "mangadex", label: "MangaDex 연결 · 가져오기", onSelect: () => setImportOpen(true) },
+          { id: "mangadex-refresh", label: "MangaDex 새로고침", disabled: !mangaDexConnection || refreshing, onSelect: () => void refresh() },
+          { id: "kakao", label: "Kakao 연결", onSelect: () => setKakaoOpen(true) },
+          { id: "kakao-refresh", label: "국내 발매 정보 새로고침", disabled: !kakaoConnection || kakaoRefreshing, onSelect: () => void refreshKakao() },
+          { id: "focus", label: "책등 초점 다시 찾기", onSelect: focus.retry },
+          { id: "delete", label: "컬렉션 삭제", destructive: true, onSelect: () => setDeleteOpen(true) },
+        ],
+      }} /> : <div className="work-loading"><Skeleton label={volumeImport ? `표지 ${volumeImport.imported}/${volumeImport.total} 가져오는 중…` : "만화 작품 화면"} /><Button onClick={onExit}>닫기</Button></div>)}
+      {!isManga && <>
       {sidebar && collection && !isAv && <CollectionSidebarSection>
         <h2 className="collection-detail-sidebar__title">{collection.name}</h2>
         <CollectionInfoPanel collection={collection} compact />
-        {isManga && volumes && <CollectionEditionSelector volumes={volumes} editionIndex={editionIndex} onEditionIndexChange={selectEdition} />}
-      </CollectionSidebarSection>}
-      {sidebar && isManga && <CollectionSidebarSection actions>{providerMenu}</CollectionSidebarSection>}
-      {isManga && <CollectionSidebarSection>
-        <CollectionOwnershipPanel key={collectionId} collectionId={collectionId} volumes={volumes ?? []} editionIndex={editionIndex} releaseWatch={{
-          enabled: releaseWatchStatus?.enabled ?? false,
-          disabled: !kakaoConnection || !releaseWatchStatus || releaseWatchSaving || (needsBookReconnect && !releaseWatchStatus.enabled),
-          unavailableReason: !kakaoConnection || needsBookReconnect ? "Kakao 연결 후 설정할 수 있습니다." : undefined,
-          onChange: enabled => void toggleReleaseWatch(enabled),
-        }} />
       </CollectionSidebarSection>}
       <ViewToolbar
         title={collection?.name ?? "컬렉션"}
@@ -491,102 +424,38 @@ function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearch
         </>}
       />
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
-      <ReleaseWatchSummary events={releaseChanges} />
-      {releaseChanges.length > 0 && gateway.collectionTracking && <Button size="sm" disabled={releaseWatchSaving} onClick={async () => {
-        setReleaseWatchSaving(true);
-        try {
-          await gateway.collectionTracking!.acknowledge(collectionId, releaseChanges.map(event => event.id));
-          setReleaseChanges([]);
-          void onChangedRef.current().catch(() => undefined);
-        } catch (error) { setMessage(commandErrorMessage(error, "신간 알림을 확인 처리하지 못했습니다.")); }
-        finally { setReleaseWatchSaving(false); }
-      }}>표시된 신간 알림 확인</Button>}
-      {isMovie && collection ? (
-        <MovieCollectionDetail
-          series={tmdbConnection?.series}
-          film={tmdbConnection?.mediaType === "tv" ? null : tmdbConnection?.film}
-          onOpenCollection={onOpenCollection}
-          collection={collection}
-          posterUrl={moviePosterUrl}
-          backdropUrl={movieBackdropUrl}
-          providerConnected={Boolean(tmdbConnection)}
-          providerBusy={tmdbConnection === undefined || tmdbRefreshing}
-          providerError={tmdbError}
-          onEdit={() => setEditMode({ kind: "edit", collection })}
-          onToggleShowcase={() => void toggleShowcase()}
-          onDelete={() => setDeleteOpen(true)}
-          onConnectProvider={() => setTmdbTarget(tmdbConnection
-            ? { kind: "reconnect", collectionId: collection.id, initialSearch: { query: collection.name, mediaType: tmdbConnection.mediaType === "tv" ? "tv" : "movie" } }
-            : { kind: "existing", collectionId: collection.id })}
-          onRefreshProvider={() => void refreshTmdb()}
-          onChangeArtwork={() => setTmdbTarget({ kind: "artwork", collectionId: collection.id })}
-        />
-      ) : isManga ? (
-        <div className="collection-overlay__manga-layout" role="region" aria-label="만화 상세">
-            <div className="collection-overlay__manga-main">
-              <MangaConnections mangaDex={mangaDexConnection} kakao={kakaoConnection}
-                mangaDexBusy={mangaDexConnection === undefined || refreshing} kakaoBusy={kakaoConnection === undefined || kakaoRefreshing}
-                onConnectMangaDex={() => setImportOpen(true)} onRefreshMangaDex={() => void refresh()}
-                onConnectKakao={() => setKakaoOpen(true)} onRefreshKakao={() => void refreshKakao()}
-                hideConnectionPrompt={collection.hideConnectionPrompt} />
-              {volumes !== null ? (
-                <CollectionVolumeGrid
-                  volumes={volumes}
-                  scope={library?.root ?? ""}
-                  revision={collection?.updatedAt ?? ""}
-                  selectedVolumeId={selectedVolumeId}
-                  editionIndex={editionIndex}
-                  onEditionIndexChange={selectEdition}
-                  showEditionSelector={!sidebar}
-                  onSelect={openVolume}
-                />
-              ) : (
-                <p className="collection-overlay__volume-loading" role="status">
-                  {volumeImport
-                    ? `표지 ${volumeImport.imported}/${volumeImport.total} 가져오는 중…`
-                    : "표지를 가져오는 중…"}
-                </p>
-              )}
-            </div>
-            {!sidebar && <aside className="collection-overlay__manga-aside">
-              {collection && <CollectionInfoPanel collection={collection} />}
-              {providerMenu}
-            </aside>}
-
-        </div>
-      ) : (
-        <>
-          <div className="collection-overlay__body">
-            <div className="collection-overlay__hero">
-              {covers === null || privacyMode ? (
-                <Skeleton className="collection-overlay__hero-skeleton" label="표지를 불러오는 중" />
-              ) : heroUrl ? (
-                <img
-                  key={heroUrl}
-                  src={heroUrl}
-                  alt={selectedCover?.volumeLabel ?? collection?.name ?? ""}
-                  draggable={false}
-                />
-              ) : (
-                <span className="collection-overlay__hero-empty">표지가 없습니다.</span>
-              )}
-            </div>
-            <div className="collection-overlay__details">
-              {collection && <CollectionInfoPanel collection={collection} />}
-            </div>
-          </div>
-          {covers !== null && (
-            <CollectionCoverGrid
-              collectionId={collectionId}
-              covers={covers}
-              selectedFileName={selectedFileName}
-              shelfFilter={shelfFilter}
-              onShelfFilterChange={setShelfFilter}
-              onSelect={setSelectedFileName}
+      <div className="collection-overlay__body">
+        <div className="collection-overlay__hero">
+          {covers === null || privacyMode ? (
+            <Skeleton className="collection-overlay__hero-skeleton" label="표지를 불러오는 중" />
+          ) : heroUrl ? (
+            <img
+              key={heroUrl}
+              src={heroUrl}
+              alt={selectedCover?.volumeLabel ?? collection?.name ?? ""}
+              draggable={false}
             />
+          ) : (
+            <span className="collection-overlay__hero-empty">표지가 없습니다.</span>
           )}
-        </>
+        </div>
+        <div className="collection-overlay__details">
+          {collection && <CollectionInfoPanel collection={collection} />}
+        </div>
+      </div>
+      {covers !== null && (
+        <CollectionCoverGrid
+          collectionId={collectionId}
+          covers={covers}
+          selectedFileName={selectedFileName}
+          shelfFilter={shelfFilter}
+          onShelfFilterChange={setShelfFilter}
+          onSelect={setSelectedFileName}
+        />
       )}
+      </>}
+      {isManga && message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
+      {volumeGridOpen && <Dialog open title="권별 표지 · 소장" onClose={() => setVolumeGridOpen(false)}><CollectionVolumeGrid volumes={volumes ?? []} selectedVolumeId={selectedVolumeId} editionIndex={editionIndex} onEditionIndexChange={selectEdition} onSelect={id => { setSelectedVolumeId(id); setVolumeGridOpen(false); }} /></Dialog>}
       {viewerVolumeId && viewerVolumes.some((volume) => volume.id === viewerVolumeId) && (
         <MangaCoverViewer
           workTitle={collection?.name ?? "컬렉션"}
@@ -609,26 +478,6 @@ function LegacyCollectionOverlay({ collectionId, initialTmdbSearch, onTmdbSearch
           onApplied={async () => {
             await onChanged();
             setMangaDexConnection(await gateway.getMangaDexConnection(collection.id));
-          }}
-        />
-      )}
-      {tmdbTarget && collection && isMovie && (
-        <TmdbMovieDialog
-          open
-          target={tmdbTarget}
-          onClose={() => setTmdbTarget(null)}
-          onOpenSettings={() => {
-            setTmdbTarget(null);
-            onOpenSettings();
-          }}
-          onApplied={async () => {
-            try {
-              await onChanged();
-              setTmdbConnection(await gateway.getTmdbConnection(collection.id));
-              setTmdbError(null);
-            } catch (error) {
-              setTmdbError(commandErrorMessage(error, "TMDB 정보를 갱신하지 못했습니다."));
-            }
           }}
         />
       )}

@@ -65,7 +65,7 @@ export function collectibleStats() {
 }
 export type LiveBook = { tilt(x:number,y:number):void; refresh():void; dispose():void };
 let releaseLive:(()=>void)|null=null;
-export function attachLiveBook(host:HTMLElement, request:CoverRequest, onReady:(ready:boolean)=>void):LiveBook {
+export function attachLiveBook(host:HTMLElement, request:CoverRequest, onReady:(ready:boolean)=>void,frontFacing=false):LiveBook {
   releaseLive?.(); watchVisibility();
   const owner=Symbol("live-book"); liveOwner=owner; cache.pause(true);
   const abort=new AbortController();
@@ -91,13 +91,16 @@ export function attachLiveBook(host:HTMLElement, request:CoverRequest, onReady:(
       texture??=await active.texture(coverKey(request),coverSourceUrl(request),1024,abort.signal);
       if(!current()||document.hidden||contextLost) return;
       const rect=host.getBoundingClientRect(); if(rect.width<1||rect.height<1) return;
-      const cssWidth=Math.min(rect.width,rect.height*1.45),cssHeight=rect.height;
+      const cssWidth=frontFacing?rect.width:Math.min(rect.width,rect.height*1.45),cssHeight=rect.height;
       let scale=Math.min(window.devicePixelRatio||1,1.5,1300/Math.max(cssWidth,cssHeight));
       scale=Math.min(scale,Math.sqrt(1_400_000/(cssWidth*cssHeight)));
       const width=Math.max(1,Math.round(cssWidth*scale)),height=Math.max(1,Math.round(cssHeight*scale));
       if(active.canvas.parentElement!==host) host.append(active.canvas);
       active.canvas.style.width=`${cssWidth}px`; active.canvas.style.height=`${cssHeight}px`;
-      active.draw(texture,{width,height,rx:PAPERBACK_FINAL.rx-y*.12,ry:PAPERBACK_FINAL.ry+x*.18,rz:PAPERBACK_FINAL.rz,zoom:Math.min(1.08,width/height*1.8/texture.ratio)});
+      // Match the flat cover's 90% contain frame at rest. The camera and front
+      // surface depth come from the existing Paperback projection/geometry.
+      const frontZoom=.9*(5.7-(.08+.012+.0055)*PAPERBACK_FINAL.depth/.16)*Math.tan(.49/2)*Math.min(1,width/height/texture.ratio);
+      active.draw(texture,{width,height,rx:(frontFacing?0:PAPERBACK_FINAL.rx)-y*.12,ry:(frontFacing?0:PAPERBACK_FINAL.ry)+x*.18,rz:frontFacing?0:PAPERBACK_FINAL.rz,zoom:frontFacing?frontZoom:Math.min(1.08,width/height*1.8/texture.ratio)});
       last=performance.now(); onReady(true);
     } catch { if(current()) onReady(false); }
     finally { busy=false; if(dirty&&current()) refresh(); }
@@ -110,7 +113,16 @@ export function attachLiveBook(host:HTMLElement, request:CoverRequest, onReady:(
     if(liveOwner===owner) {liveOwner=null;wakeLive=null;releaseLive=null;engine?.shrink();cache.pause(document.hidden||contextLost);}
   }
   releaseLive=dispose; refresh();
-  return {tilt:(nextX,nextY)=>{x=nextX;y=nextY;refresh();},refresh,dispose};
+  return {tilt:(nextX,nextY)=>{
+    if(frontFacing) {
+      const rect=host.getBoundingClientRect();
+      const aspect=rect.width/rect.height,ratio=texture?.ratio??.704;
+      const bookHeight=.9*Math.min(1,aspect/ratio),bookWidth=bookHeight*ratio/aspect;
+      if(!texture||Math.abs(nextX)>bookWidth/2||Math.abs(nextY)>bookHeight/2) {nextX=0;nextY=0;}
+      else {nextX/=bookWidth;nextY/=bookHeight;}
+    }
+    x=nextX;y=nextY;refresh();
+  },refresh,dispose};
 }
 // Development/test observation only; no polling or telemetry upload. Clears memory, not the persistent snapshots.
 export function clearCollectibleCache() { cache.clear(); engine?.clearTextures(); }

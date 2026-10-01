@@ -4,13 +4,15 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 115;
+pub(crate) const SCHEMA_VERSION: i64 = 116;
 
-/// Test helper: undoes migrations 0103 through 0115 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0116 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
 pub(crate) const UNDO_AFTER_102: &str = "
+    DROP TABLE collection_volume_cover_focus;
+    DROP TABLE collection_pc_records;
     ALTER TABLE release_watch_items DROP COLUMN tracked_platforms_json;
     DROP TABLE av_favorite_performers;
     DROP TABLE video_playback_progress;
@@ -687,6 +689,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
             transaction.execute_batch(include_str!(
                 "../../migrations/0115_release_watch_port_platforms.sql"
             ))?;
+        }
+        if version <= 115 {
+            transaction.execute_batch(include_str!("../../migrations/0116_collection_pc_records.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction
@@ -4644,5 +4649,58 @@ mod dev_guard_enforcement_tests {
 
         initialize_database_with_dev_policy(&root.join("library.sqlite"), true, None).unwrap();
         assert_eq!(version_of(&root), SCHEMA_VERSION);
+    }
+}
+
+#[cfg(test)]
+mod collection_pc_migration_tests {
+    use super::*;
+    #[test]
+    fn collection_pc_migration_116_keeps_existing_rows() {
+        let mut c = Connection::open_in_memory().unwrap();
+        tests::historical_schema(&mut c, 115);
+        c.execute_batch("INSERT INTO collections(id,name,type,description,my_score,created_at,updated_at) VALUES('m','Manga','manga','kept memo',3.5,'created','updated');
+            INSERT INTO collection_volumes(id,collection_id,volume_number,edition_index,sort_order,created_at,updated_at) VALUES('v','m',1,0,10,'created','updated');
+            INSERT INTO notes_state(key,value) VALUES('kept','handshake');").unwrap();
+        fn rows(c: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
+            let mut s = c
+                .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
+                .unwrap();
+            let n = s.column_count();
+            let result = s
+                .query_map([], |r| (0..n).map(|i| r.get(i)).collect())
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            result
+        }
+        let tables = [
+            "collections",
+            "collection_volumes",
+            "notes_state",
+            "library_settings",
+        ];
+        let before: Vec<_> = tables.iter().map(|t| rows(&c, t)).collect();
+        migrate_to_latest(&mut c, 115).unwrap();
+        for (t, expected) in tables.iter().zip(before) {
+            assert_eq!(rows(&c, t), expected);
+        }
+        assert!(rows(&c, "collection_pc_records").is_empty());
+        assert!(rows(&c, "collection_volume_cover_focus").is_empty());
+        assert_eq!(
+            c.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            116
+        );
+        assert_eq!(
+            c.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+        assert!(!c
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap());
     }
 }

@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { CollectionSummary, ReleaseBoardEntry, ReleaseInboxItem } from "../library/types";
-import { groupInbox, japanReleases, koreanReleases, koreanVolumeLine, releaseCaption, shortReleaseDate } from "./releaseCaption";
+import { groupInbox, japanReleases, koreanReleases, koreanVolumeLine, latestKoreanRelease, releaseCaption, shortReleaseDate } from "./releaseCaption";
 
 const today = "2026-09-26";
 const work = (id: string, unreadReleaseCount = 0, type: CollectionSummary["type"] = "manga") => ({ id, name: id, type, unreadReleaseCount }) as CollectionSummary;
@@ -16,6 +16,22 @@ const entry = (collectionId: string, options: { watch?: boolean; owned?: number 
   },
 });
 const kakao: [number, string | null][] = [[11, "2026-01-01"], [12, "2026-08-01"], [13, "2026-09-24"], [14, "2026-11-20"], [15, null]];
+
+it("finds the latest Korean release from the shared board, independent of watch, ownership and Japanese releases", () => {
+  const board = entry("w", { watch: false, owned: 1, kakao, mangadex: 30 });
+  expect(latestKoreanRelease(board, 0, today)).toBe(13);
+  expect(latestKoreanRelease(board, 1, today)).toBeNull();
+  expect(latestKoreanRelease(entry("w", { kakao: null, mangadex: 30 }), 0, today)).toBeNull();
+  expect(latestKoreanRelease(undefined, 0, today)).toBeNull();
+  board.releaseSchedule.kakao!.volumes = [
+    { volumeNumber: 1, date: today, status: "upcoming" },
+    { volumeNumber: 2, date: "2026-12-01", status: "released" },
+    { volumeNumber: 3, date: null, status: null },
+  ];
+  expect(latestKoreanRelease(board, 0, today)).toBe(1);
+  board.releaseSchedule.kakao!.volumes.push({ volumeNumber: 4, date: null, status: "released" });
+  expect(latestKoreanRelease(board, 0, today)).toBe(4);
+});
 
 it("(a) an unread release names the unowned Korean volumes already out, with the latest date", () => {
   expect(releaseCaption(work("w", 1), entry("w", { owned: 11, kakao }), [item("w", 13, "2026-09-24")], today)).toEqual({ kind: "new", text: "신간 12–13권", date: "9.24" });

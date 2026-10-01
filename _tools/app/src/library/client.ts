@@ -22,6 +22,9 @@ import type {
   AssetSummary,
   ClassificationEntry,
   CollectionSummary,
+  CollectionWorkRecord,
+  CollectionCoverFocus,
+  CollectionFocusJobResult,
   CreateAlbum,
   CreateClassification,
   CreateCollection,
@@ -623,6 +626,13 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
     invoke<number>("import_collection_artworks", { collectionId }),
   listCollectionWorkArtworks: (collectionId) =>
     invoke<WorkArtworkSummary[]>("list_collection_work_artworks", { collectionId }),
+  getCollectionWorkRecord: collectionId => invoke<CollectionWorkRecord>("get_collection_work_record", { collectionId }),
+  saveCollectionWorkRecord: (collectionId, edit) => invoke<CollectionWorkRecord>("save_collection_work_record", { collectionId, edit }),
+  listCollectionCoverFocus: collectionId => invoke<CollectionCoverFocus[]>("list_collection_cover_focus", { collectionId }),
+  startCollectionCoverFocus: (collectionId, onFocus) => {
+    const channel = new Channel<CollectionCoverFocus>(); channel.onmessage = onFocus;
+    return invoke<CollectionFocusJobResult>("start_collection_cover_focus", { collectionId, onFocus: channel });
+  },
   listCollectionVolumes: (collectionId, onProgress) => {
     // The native command requires a channel even when progress is not displayed.
     const onProgressChannel = new Channel<VolumeImportProgress>();

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLibrary } from "../../library/LibraryContext";
-import type { CollectionSummary, UpdateCollection } from "../../library/types";
+import type { CollectionSummary, UpdateCollection, CollectionWorkRecord, TmdbConnection } from "../../library/types";
 import { assetUrl, collectionSourcePreviewUrl, workArtworkUrl } from "../../assets/mediaUrl";
 import { usePrivacy } from "../../privacy/PrivacyContext";
 import { useBackHandler, useBackNavigationContext } from "../../shared/navigation/BackNavigation";
@@ -13,27 +13,34 @@ import { AvEditPanel } from "../AvEditPanel";
 import { AvArtworkDialog } from "../AvArtworkDialog";
 import { AvPerformerPage } from "../av/AvPerformerPage";
 import { CollectionEditDialog } from "../CollectionEditDialog";
+import { TmdbMovieDialog, type TmdbMovieTarget } from "../TmdbMovieDialog";
 import { IgdbImportDialog } from "../IgdbImportDialog";
 import "../avCollections.css";
 import { casePlatform } from "../case/CollectionCase";
+import { useWorkRecord } from "./useWorkRecord";
 import { CollectionWorkScreen, type CollectionWorkData, type WorkActions } from "./CollectionWorkScreen";
 
 export type CollectionWorkOverlayProps = {
-  collection: CollectionSummary; collections: CollectionSummary[]; listOrder?: string[];
+  collection: CollectionSummary; collections: CollectionSummary[]; listOrder?: string[]; initialTmdbSearch?: { query: string; mediaType: "movie" | "tv" }; onTmdbSearchConsumed?(): void;
   onExit(): void; onChanged(): Promise<void>; onOpenSettings(): void; onOpenCollection?(id: string): void; api?: AvGateway;
 };
-export function CollectionWorkOverlay({ collection, collections, listOrder, onExit, onChanged, onOpenSettings, onOpenCollection, api = avGateway }: CollectionWorkOverlayProps) {
+export function CollectionWorkOverlay({ collection, collections, listOrder, initialTmdbSearch, onTmdbSearchConsumed, onExit, onChanged, onOpenSettings, onOpenCollection, api = avGateway }: CollectionWorkOverlayProps) {
   const { gateway } = useLibrary();
   const { privacyMode } = usePrivacy();
+  const personal = useWorkRecord(collection);
   const [provider, setProvider] = useState<{ id: string; connected: boolean }>({ id: collection.id, connected: false });
-  const [loaded, setLoaded] = useState<CollectionWorkData | null>(() => collection.type === "game" ? {
+  const [tmdb, setTmdb] = useState<{ id: string; connection: TmdbConnection | null; loading: boolean }>({ id: collection.id, connection: null, loading: true });
+  const tmdbRef = useRef(tmdb); tmdbRef.current = tmdb;
+  const [tmdbRefreshing, setTmdbRefreshing] = useState(false);
+  const [loaded, setLoaded] = useState<CollectionWorkData | null>(() => collection.type === "game" || collection.type === "movie" ? {
     collection, av: null, covers: null, related: null, artworks: [], providerConnected: false,
     position: (listOrder?.includes(collection.id) ? listOrder : collections.filter(item => item.type === collection.type).map(item => item.id)).indexOf(collection.id) + 1,
     total: (listOrder?.includes(collection.id) ? listOrder : collections.filter(item => item.type === collection.type).map(item => item.id)).length,
-    case: { title: collection.name, publisher: collection.publisher, platform: casePlatform(collection.platforms), privacy: privacyMode, spine: null, back: null,
+    case: { title: collection.name, publisher: collection.publisher, platform: collection.type === "movie" ? "film" : casePlatform(collection.platforms), privacy: privacyMode, spine: null, back: null,
       front: collection.selectedWorkArtworkId ? workArtworkUrl(collection.selectedWorkArtworkId) : collection.coverAssetId ? assetUrl(collection.coverAssetId) : collection.sourcePath ? collectionSourcePreviewUrl(collection.id) : null },
   } : null);
   const [panel, setPanel] = useState<{ kind: "edit" | "igdb" | "av" | "artwork" | "delete"; data: CollectionWorkData } | null>(null);
+  const [tmdbPanel, setTmdbPanel] = useState<TmdbMovieTarget | null>(null);
   const [performer, setPerformer] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -54,13 +61,32 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, onEx
         if (!active) return;
         const artworkUrl = (id: string | null) => id ? `${workArtworkUrl(id)}?v=${encodeURIComponent(covers?.revision ?? collection.updatedAt)}` : null;
         const front = covers ? artworkUrl(covers.frontId) : collection.selectedWorkArtworkId ? workArtworkUrl(collection.selectedWorkArtworkId) : collection.coverAssetId ? assetUrl(collection.coverAssetId) : collection.sourcePath ? collectionSourcePreviewUrl(collection.id) : null;
-        setLoaded({ collection, av, covers, related, artworks: artworks.filter(item => !["cover", "spine", "back", "volume_cover"].includes(item.kind)), providerConnected: false, position: order.indexOf(collection.id) + 1, total: order.length,
-          case: { title: av?.titleJa?.trim() || collection.name, platform: collection.type === "av" ? "av" : casePlatform(collection.platforms), publisher: collection.publisher, privacy: privacyMode, front, spine: covers ? artworkUrl(covers.spineId) : null, back: covers ? artworkUrl(covers.backId) : null },
-        });
+        setLoaded(current => ({ collection, av, covers, related, tmdb: tmdbRef.current.id === collection.id ? tmdbRef.current.connection : current?.collection.id === collection.id ? current.tmdb : null, artworks: artworks.filter(item => !["cover", "spine", "back", "volume_cover"].includes(item.kind)), providerConnected: false, position: order.indexOf(collection.id) + 1, total: order.length,
+          case: { title: av?.titleJa?.trim() || collection.name, platform: collection.type === "av" ? "av" : collection.type === "movie" ? "film" : casePlatform(collection.platforms), publisher: collection.publisher, privacy: privacyMode, front, spine: covers ? artworkUrl(covers.spineId) : null, back: covers ? artworkUrl(covers.backId) : null },
+        }));
       } catch (reason) { if (active) setError(avError(reason)); }
     })();
     return () => { active = false; };
   }, [api, gateway, collection, reload, privacyMode, orderKey]);
+  useEffect(() => {
+    if (collection.type !== "movie") return;
+    let active = true;
+    setTmdb(current => current.id === collection.id ? { ...current, loading: true } : { id: collection.id, connection: null, loading: true });
+    void gateway.getTmdbConnection(collection.id).then(connection => {
+      if (active) {
+        setTmdb({ id: collection.id, connection, loading: false });
+        setLoaded(current => current?.collection.id === collection.id ? { ...current, tmdb: connection } : current);
+      }
+    }, reason => {
+      if (active) { setTmdb(current => ({ id: collection.id, connection: current.id === collection.id ? current.connection : null, loading: false })); setError(avError(reason)); }
+    });
+    return () => { active = false; };
+  }, [gateway, collection.id, collection.type, reload]);
+  useEffect(() => {
+    if (!initialTmdbSearch || collection.type !== "movie") return;
+    setTmdbPanel({ kind: "existing", collectionId: collection.id, initialSearch: initialTmdbSearch });
+    onTmdbSearchConsumed?.();
+  }, [collection.id, collection.type, initialTmdbSearch, onTmdbSearchConsumed]);
   useEffect(() => {
     if (collection.type !== "game") return;
     let active = true;
@@ -68,21 +94,30 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, onEx
     return () => { active = false; };
   }, [gateway, collection.id, collection.type, reload]);
   useEffect(() => {
-    if (collection.type !== "game") return;
+    if (collection.type !== "game" && collection.type !== "movie") return;
     let active = true;
     void gateway.importCollectionArtworks(collection.id).then(count => { if (active && count > 0) { setReload(value => value + 1); void changedRef.current().catch(reason => setError(avError(reason))); } }, () => undefined);
     return () => { active = false; };
   }, [gateway, collection.id, collection.type]);
-  const screenData = useMemo(() => loaded ? { ...loaded, providerConnected: provider.id === loaded.collection.id && provider.connected, case: { ...loaded.case, privacy: privacyMode } } : null, [loaded, provider, privacyMode]);
-  const canClose = !panel && !performer;
+  const paintedRecord = useRef<{ id: string; record: CollectionWorkRecord } | null>(null);
+  if (loaded?.collection.id === collection.id && personal.record) paintedRecord.current = { id: collection.id, record: personal.record };
+  const screenData = useMemo(() => loaded ? {
+    ...loaded,
+    record: paintedRecord.current?.id === loaded.collection.id ? paintedRecord.current.record : loaded.record,
+    providerConnected: loaded.collection.type === "movie" ? tmdb.id === loaded.collection.id && Boolean(tmdb.connection) : provider.id === loaded.collection.id && provider.connected,
+    tmdb: tmdb.id === loaded.collection.id ? tmdb.connection : loaded.tmdb,
+    providerBusy: loaded.collection.type === "movie" && (tmdb.id !== loaded.collection.id || tmdb.loading || tmdbRefreshing),
+    case: { ...loaded.case, privacy: privacyMode },
+  } : null, [loaded, provider, tmdb, tmdbRefreshing, privacyMode, personal.record, collection.id]);
+  const canClose = !panel && !tmdbPanel && !performer;
   const navigation = useBackNavigationContext();
   useBackHandler(onExit, 10, canClose);
   useBackHandler(() => setPerformer(null), 20, Boolean(performer) && !panel);
   useEffect(() => {
-    if (navigation || panel) return;
+    if (navigation || panel || tmdbPanel) return;
     const key = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); if (performer) setPerformer(null); else onExit(); } };
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
-  }, [navigation, panel, performer, onExit]);
+  }, [navigation, panel, tmdbPanel, performer, onExit]);
   async function mutate(operation: () => Promise<unknown>) {
     try { await operation(); await onChanged(); setReload(value => value + 1); }
     catch (reason) { setError(avError(reason)); }
@@ -92,9 +127,11 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, onEx
     onStep: offset => { const index = order.indexOf(loaded?.collection.id ?? collection.id); const id = order[index + offset]; if (id) onOpenCollection?.(id); },
     onEdit: item => { if (loaded) setPanel({ kind: "edit", data: { ...loaded, collection: item } }); },
     onShowcase: item => void mutate(() => gateway.setCollectionShowcase(item.id, !item.showcase)),
-    onSave: async (item, score, memo) => {
-      await gateway.updateCollection(item.id, { ...item, myScore: score, description: memo, personalBase: { myScore: item.myScore, description: item.description } } satisfies UpdateCollection);
-      await onChanged(); setReload(value => value + 1);
+    onSave: async (item, edit) => {
+      const record = await personal.save(item, edit);
+      setLoaded(current => current?.collection.id === item.id ? { ...current, record, collection: { ...current.collection, myScore: record.myScore, description: record.memo } } : current);
+      void onChanged().catch(reason => setError(avError(reason)));
+      return record;
     },
     onOpenPerson: setPerformer, onOpenCollection,
     onCopyCode: code => { if (code && navigator.clipboard?.writeText) void navigator.clipboard.writeText(code).catch(reason => setError(avError(reason))); },
@@ -105,6 +142,13 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, onEx
         { id: "provider", label: data.providerConnected ? "IGDB 연결됨" : "IGDB 미연결", disabled: true, onSelect: () => undefined },
         { id: "refresh", label: "IGDB 새로고침", disabled: !data.providerConnected, onSelect: () => void mutate(() => gateway.refreshIgdbGame(data.collection.id)) },
         { id: "artwork", label: "표지·hero 변경", disabled: !data.providerConnected, onSelect: () => setPanel({ kind: "igdb", data }) },
+      ] : data.collection.type === "movie" ? [
+        { id: "connect", label: data.providerConnected ? "TMDB 연결 작품 변경" : "TMDB에 연결", disabled: data.providerBusy, onSelect: () => setTmdbPanel(data.providerConnected ? { kind: "reconnect", collectionId: data.collection.id, initialSearch: { query: data.collection.name, mediaType: data.tmdb?.mediaType === "tv" ? "tv" : "movie" } } : { kind: "existing", collectionId: data.collection.id }) },
+        { id: "refresh", label: "TMDB 새로고침", disabled: !data.providerConnected || data.providerBusy, onSelect: () => {
+          setTmdbRefreshing(true);
+          void mutate(() => gateway.refreshTmdbMovie(data.collection.id)).finally(() => setTmdbRefreshing(false));
+        } },
+        { id: "artwork", label: "포스터·배경 변경", disabled: !data.providerConnected || data.providerBusy, onSelect: () => setTmdbPanel({ kind: "artwork", collectionId: data.collection.id }) },
       ] : [
         { id: "av", label: "AV 정보 편집", disabled: !data.av, onSelect: () => setPanel({ kind: "av", data }) },
         { id: "artwork", label: "표지 앞면·책등·뒷면", onSelect: () => setPanel({ kind: "artwork", data }) },
@@ -117,6 +161,7 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, onEx
     {screenData ? <CollectionWorkScreen data={screenData} pending={screenData.collection.id !== collection.id} actions={actions} /> : <div className="work-loading"><Skeleton label="작품 화면" /><Button onClick={onExit}>닫기</Button></div>}
     {error && <div className="work-error" role="alert">{error} <Button size="sm" onClick={() => setReload(value => value + 1)}>다시 시도</Button></div>}
     {panel?.kind === "edit" && <CollectionEditDialog open mode={{ kind: "edit", collection: panel.data.collection }} onClose={() => setPanel(null)} onSubmit={async input => { await gateway.updateCollection(panel.data.collection.id, input as UpdateCollection); await onChanged(); setReload(value => value + 1); }} />}
+    {tmdbPanel && <TmdbMovieDialog open target={tmdbPanel} onClose={() => setTmdbPanel(null)} onOpenSettings={() => { setTmdbPanel(null); onOpenSettings(); }} onApplied={async () => { setTmdbPanel(null); await mutate(async () => undefined); }} />}
     {panel?.kind === "igdb" && <IgdbImportDialog open target={{ kind: "existing", collectionId: panel.data.collection.id }} onClose={() => setPanel(null)} onOpenSettings={() => { setPanel(null); onOpenSettings(); }} onApplied={async () => { setPanel(null); await mutate(async () => undefined); }} />}
     {panel?.kind === "av" && panel.data.av && <AvEditPanel details={panel.data.av} api={api} onClose={() => setPanel(null)} onSaved={() => { void mutate(async () => undefined); }} />}
     {panel?.kind === "artwork" && panel.data.covers && <AvArtworkDialog collectionId={panel.data.collection.id} covers={panel.data.covers} api={api} onClose={() => setPanel(null)} onSaved={() => { void mutate(async () => undefined); }} />}
