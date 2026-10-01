@@ -40,7 +40,7 @@ it("does not acknowledge on open, and confirming a notification does not mark ow
   const api = tracking();
   api.releaseBoard = vi.fn().mockResolvedValue([watched]);
   render(wrap(api, <Releases api={api} />));
-  await screen.findByText("작품");
+  await screen.findByRole("button", { name: "작품" });
   expect(api.acknowledge).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole("button", { name: "모두 확인" }));
   await userEvent.click(within(screen.getByRole("dialog", { name: "모두 확인할까요?" })).getByRole("button", { name: "모두 확인" }));
@@ -49,7 +49,7 @@ it("does not acknowledge on open, and confirming a notification does not mark ow
   expect(api.setOwnedCount).not.toHaveBeenCalled();
   // The release information stays; only the NEW marks go.
   await waitFor(() => expect(screen.queryByText("NEW")).not.toBeInTheDocument());
-  expect(screen.getByText(/7권 ·/)).toBeInTheDocument();
+  expect(screen.getByText("7권")).toBeInTheDocument();
 });
 it("keeps the notification when confirmation fails", async () => {
   const api = tracking();

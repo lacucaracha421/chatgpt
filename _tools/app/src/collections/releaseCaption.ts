@@ -1,3 +1,4 @@
+import { displayDate } from "../shared/displayDate";
 import type { CollectionSummary, ReleaseBoardEntry, ReleaseInboxItem } from "../library/types";
 
 /**
@@ -27,8 +28,7 @@ export function latestKoreanRelease(entry: ReleaseBoardEntry | undefined, editio
 
 /** A short caption date: `9.24` this year, `2027.1.5` otherwise. */
 export function shortReleaseDate(date: string, today: string): string {
-  const [year, month, day] = date.split("-").map(Number);
-  return `${String(year) === today.slice(0, 4) ? "" : `${year}.`}${month}.${day}`;
+  return displayDate(date, new Date(`${today}T12:00:00`));
 }
 
 /** Unread 신간 알림 grouped by work. */
@@ -130,7 +130,7 @@ export function japanReleases(works: CollectionSummary[], board: Map<string, Rel
 /** One unread event as a line: "13권 새로 나옴 · 2026.10.3" or "13권 발매일 2026.10.1 → 2026.10.15". */
 export function releaseLine(item: ReleaseInboxItem): string {
   const { event } = item;
-  const date = (value: string | null) => { const valid = validDate(value); return valid ? valid.split("-").map(Number).join(".") : value ?? ""; };
+  const date = (value: string | null) => { const valid = validDate(value); return valid ? displayDate(valid) : value ?? ""; };
   const volume = `${event.volumeNumber}권`;
   if (event.kind === "new_volume") return event.currentValue ? `${volume} 새로 나옴 · ${date(event.currentValue)}` : `${volume} 새로 나옴`;
   if (event.kind === "release_date_changed") return `${volume} 발매일 ${date(event.previousValue) || "미정"} → ${date(event.currentValue) || "미정"}`;

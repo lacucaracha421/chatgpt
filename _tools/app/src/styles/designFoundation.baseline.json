@@ -109,10 +109,10 @@
       "legacyToken": 0
     },
     "_tools/app/src/collections/collectionReleases.css": {
-      "offScaleSpacing": 3,
+      "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 7
+      "legacyToken": 0
     },
     "_tools/app/src/collections/mangaConnections.css": {
       "offScaleSpacing": 0,

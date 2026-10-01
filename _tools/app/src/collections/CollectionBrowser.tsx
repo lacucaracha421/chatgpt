@@ -4,6 +4,7 @@ import { collectionSourceThumbnailUrl, thumbnailUrl, workArtworkThumbnailUrl } f
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { AssetView, CollectionSummary, CollectionType, CollectionUpdateProvider, CollectionVolumeRangeInput, CreateCollection, UpdateCollection } from "../library/types";
+import type { ViewChromeSpec } from "../layout/WorkspaceChrome";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { Button } from "../shared/ui/Button";
@@ -339,21 +340,23 @@ export function CollectionBrowser({
     </span>}
   </div> : undefined;
 
+  const chrome: ViewChromeSpec = {
+    actions: indexActions,
+    navigation: indexNavigation,
+    summary: `${sortLabel(libraryState.sort, libraryState.direction)}${libraryState.rating !== "all" ? ` · 내 별점 ${ratingLabel(libraryState.rating)}` : ""}`,
+    search: showcase ? undefined : { scope: releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
+  };
+
   return (
     <section className="collection-browser" aria-label="컬렉션">
-      <ViewToolbar
+      {(!releaseProvider || releaseCalendar) && <ViewToolbar
         title={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : `${sectionLabel} 컬렉션`}
         titleContent={releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : showcase ? `${sectionLabel} 쇼케이스` : sectionLabel}
         titleAccessory={<>{!inbox && <span className="collection-toolbar__count">{visible.length.toLocaleString()}</span>}{toolbarControls}</>}
         ariaLabel="컬렉션 도구"
         leadingAction={libraryView ? undefined : <Button size="icon" variant="ghost" aria-label="컬렉션으로 돌아가기" onClick={inbox ? closeInbox : () => setShowcase(false)}><ChevronLeftIcon aria-hidden="true" /></Button>}
-        chrome={{
-          actions: indexActions,
-          navigation: indexNavigation,
-          summary: `${sortLabel(libraryState.sort, libraryState.direction)}${libraryState.rating !== "all" ? ` · 내 별점 ${ratingLabel(libraryState.rating)}` : ""}`,
-          search: showcase ? undefined : { scope: releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
-        }}
-      />
+        chrome={chrome}
+      />}
       {spineBatch.message && <Toast tone={spineBatch.error ? "error" : "status"} onDismiss={spineBatch.dismiss}>{spineBatch.message}</Toast>}
       {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
       <div className={`collection-browser__stage${showcase ? " collection-browser__stage--showcase" : ""}`}>
@@ -371,7 +374,7 @@ export function CollectionBrowser({
             setEditMode({ kind: "create", type: typeFilter });
           }}
         >
-          {releaseProvider && !releaseCalendar && <CollectionReleases provider={releaseProvider} collections={collections} data={releases.data} loading={releases.loading} error={releases.error}
+          {releaseProvider && !releaseCalendar && <CollectionReleases chrome={chrome} onBack={closeInbox} provider={releaseProvider} collections={collections} data={releases.data} loading={releases.loading} error={releases.error}
             query={libraryState.query} coverUrl={collectionCoverUrl} onOpen={collectionId => onViewChange({ kind: "collection", collectionId })} onChanged={onChanged} onProviderChange={openInbox} />}
           {releaseCalendar && <ReleaseCalendarView query={libraryState.query} onWishlistChange={loadWishlistUnread}
             onOpenSettings={() => onViewChange({ kind: "settings", section: "connection" })} />}

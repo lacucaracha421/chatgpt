@@ -255,7 +255,7 @@ describe("CollectionBrowser", () => {
   it("keeps the manual update check in the 신간 view and explains an empty list", async () => {
     const tracking = { ...trackingWith([]), runUpdates: vi.fn(), updateStatus: vi.fn().mockResolvedValue(undefined) } as unknown as CollectionTrackingGateway;
     renderBrowser({ collections: [manga], typeFilter: "manga", showcase: false, tracking, releaseProvider: "kakao" });
-    expect(await screen.findByRole("button", { name: "업데이트 확인" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "새로고침" })).toBeInTheDocument();
     expect(await screen.findByText("신간 알림을 켠 만화가 없습니다.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "신간" })).toBeInTheDocument();
     // The 신간 row is the current location; no type row is, and the library controls step aside.
@@ -312,22 +312,26 @@ describe("CollectionBrowser", () => {
     renderBrowser({ collections, typeFilter: "manga", showcase: false, tracking, onViewChange, releaseProvider: "kakao" });
     const segments = screen.getByRole("radiogroup", { name: "신간 지역" });
     expect(within(segments).getByRole("radio", { name: /한국 정발/ })).toHaveAttribute("aria-checked", "true");
-    const group = await screen.findByRole("region", { name: "가 작품" });
-    expect(within(group).getByText("2권까지 소장")).toBeInTheDocument();
-    expect(within(group).getAllByRole("listitem").map(row => row.textContent)).toEqual([`3권 · ${year - 1}년 9월 16일 발매됨미보유NEW`, `4권 · ${year + 1}년 10월 10일 발매 예정미보유`]);
-    expect(within(group).getByLabelText("새 알림 1개")).toHaveTextContent("NEW 1");
+    const group = await screen.findByRole("row", { name: "가 작품" });
+    expect(within(group).getByText("1–2 권")).toBeInTheDocument();
+    expect(within(group).getByText("3권")).toHaveAttribute("data-chip-kind", "new");
+    expect(within(group).getByText(`4권 ${year + 1}.10.10`)).toHaveAttribute("data-chip-kind", "upcoming");
+    expect(within(group).getByLabelText("새 알림 1개")).toHaveTextContent("NEW");
+    await userEvent.setup().click(within(group).getByText("3권"));
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collection", collectionId: "a" });
+    expect(tracking.acknowledge).not.toHaveBeenCalled();
     // A watched work with every Korean volume owned is not listed; an unwatched work never is.
-    expect(screen.queryByRole("region", { name: "나 작품" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "다 작품" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: "나 작품" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: "다 작품" })).not.toBeInTheDocument();
     await userEvent.setup().click(within(segments).getByRole("radio", { name: /일본/ }));
     expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "manga", showcase: false, releaseProvider: "mangadex" });
     cleanup();
     renderBrowser({ collections, typeFilter: "manga", showcase: false, tracking, releaseProvider: "mangadex" });
-    const japan = await screen.findByRole("region", { name: "나 작품" });
-    expect(within(japan).getByText("일본 최신 9권")).toBeInTheDocument();
-    expect(within(japan).getByText("한국 정발보다 6권 앞섬")).toBeInTheDocument();
-    expect(within(japan).getByRole("list", { name: "나 작품 일본 권" })).toHaveTextContent("4권5권6권7권8권9권NEW");
-    expect(screen.getByRole("region", { name: "가 작품" })).toHaveTextContent("한국 정발보다 2권 앞섬");
+    const japan = await screen.findByRole("row", { name: "나 작품" });
+    expect(within(japan).getByText("9권")).toBeInTheDocument();
+    expect(within(japan).getByText("한국보다 6권 앞섬")).toBeInTheDocument();
+    expect(within(japan).getByLabelText("나 작품 일본 권")).toHaveTextContent("4권5권6권7권8권9권");
+    expect(screen.getByRole("row", { name: "가 작품" })).toHaveTextContent("한국보다 2권 앞섬");
     // Reopening with the same Collection list reuses the shared data instead of reading again.
     expect(tracking.releaseBoard).toHaveBeenCalledTimes(1);
   });
@@ -341,7 +345,7 @@ describe("CollectionBrowser", () => {
     await user.click(await screen.findByRole("button", { name: "가 작품 확인" }));
     expect(tracking.acknowledge).toHaveBeenCalledWith("a", ["a1", "a2"]);
     await waitFor(() => expect(screen.queryByLabelText("새 알림 2개")).not.toBeInTheDocument());
-    expect(screen.getByRole("region", { name: "가 작품" })).toHaveTextContent("3권");
+    expect(screen.getByRole("row", { name: "가 작품" })).toHaveTextContent("3권");
     expect(onChanged).toHaveBeenCalled();
     // Events of works the lists do not show stay under 새 알림.
     expect(screen.getByRole("heading", { name: "그 밖의 새 알림" })).toBeInTheDocument();
