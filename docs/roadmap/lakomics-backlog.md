@@ -954,6 +954,8 @@ Status: `TODO` — requested by the user 2026-10-02 (while trying the release bu
 3. **Top-bar square mark inconsistency:** the 5px square mark before the title shows only on the 메모 top bar (user observation); make every screen's top bar follow one rule (either all show the section mark or none).
 4. **더보기 and 찾기 redesign:** the rail's 더보기 menu opens in an awkward position — re-anchor it; redesign the 찾기 (Ctrl K) surface.
 5. **Thorough performance pass on the PC app** ("빡세게 최적화"): measure first per `docs/agents/implementation.md` (Performance work) — screen entry, type/section switches, scrolling long lists, viewer open/close, idle CPU — then fix the largest costs and lock them with ratchet checks.
+6. **PC 컬렉션 without the sidebar (user, 2026-10-02):** drop the 컬렉션 sidebar index so the list uses the full width; 신간 (한국 정발 / 일본), 발매 캘린더 and 쇼케이스 move into a second section-bar row matching the tablet's shortcut row (`COLLECTION-SHORTCUTS-20261001`), and the 쇼케이스 fold row goes away — aligned with the tablet (user confirmed). On PC the cells open the existing views (no overlay). A ready worker brief exists in the session notes; not started.
+
 
 ## ASSET-EAGLE-20261001 — PC Asset screen candidates from the Eagle comparison
 
