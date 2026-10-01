@@ -11,3 +11,5 @@
 .av-portrait{display:inline-flex;flex:none;align-items:center;justify-content:center;overflow:hidden;border-radius:50%;background:var(--color-control);background-repeat:no-repeat;background-position:center;color:var(--color-muted)}
 .av-portrait-small{width:44px;height:44px;font-size:15px}.av-portrait-large{width:84px;height:84px;font-size:24px}
 .av-portrait>span{font-family:var(--font-ui);font-weight:500}
+/* A published portrait image fills the shape; its width/height reserve the ratio while it decodes, the face sits in the upper part. */
+.av-portrait{position:relative}.av-portrait>img{display:block;width:100%;height:100%;object-fit:cover;object-position:50% 20%}

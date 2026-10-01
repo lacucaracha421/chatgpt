@@ -5,7 +5,9 @@ export type CollectionVolume = {id:string; volumeNumber:number; editionIndex:num
   /** From an upgraded PC (`coverFocus`): where the spine strip sits across the current cover, 0–1. */
   coverFocusX?:number|null};
 export type AvPortraitCrop = {artworkId:string;x:number;y:number;w:number;h:number};
-export type AvPerson = {id:string;name:string;nameJa?:string|null;role:'performer'|'director';order:number;portraitCrop?:AvPortraitCrop|null};
+/** A performer's StashDB / Commons portrait as published (`portraitImage` feature); the bytes come through the Home cover ticket. */
+export type AvPortraitImage = {sha256:string;sizeBytes:number;contentType:string;width:number;height:number};
+export type AvPerson = {id:string;name:string;nameJa?:string|null;role:'performer'|'director';order:number;portraitCrop?:AvPortraitCrop|null;portraitImage?:AvPortraitImage|null};
 export type AvInfo = {productCode?:string|null;titleJa?:string|null;maker?:string|null;label?:string|null;series?:string|null;genres:string[];releaseDate?:string|null;people:AvPerson[]};
 export type CollectionSummary = {
   artworkVersions?:Record<string,{thumbnail?:string|null;original?:string|null}>;

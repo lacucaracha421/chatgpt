@@ -6,6 +6,9 @@ const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:(reason:unknown)=>String(reason)}));
 vi.mock('./media',()=>({mediaTicket:vi.fn()}));
 import {Collections} from './Collections';
+import {PersonPortrait} from './AvCollections';
+import {resetPortraitMemory} from './collectionArtwork';
+import {PRIVACY_MODE_KEY} from './privacyMode';
 
 const coverArtwork={id:'cover-a',kind:'cover',selected:true,thumbnailAvailable:true,originalAvailable:true};
 const spineArtwork={id:'spine-a',kind:'spine',selected:false,thumbnailAvailable:true,originalAvailable:true};
@@ -241,6 +244,92 @@ describe('tablet AV collections',()=>{
       expect(screen.getByRole('article',{name:'AV 배우'}).hasAttribute('inert')).toBe(false);
       expect(screen.queryByRole('region',{name:'내 메모'})).toBeNull();
       expect(screen.queryByRole('img',{name:'즐겨찾기한 배우'})).toBeNull();
+    });
+  });
+
+  describe('published portrait images',()=>{
+    const image=(sha:string)=>({sha256:sha.repeat(64).slice(0,64),sizeBytes:1000,contentType:'image/jpeg',width:300,height:400});
+    const mio=(sha:string|null,crop=avPeople[0]!.portraitCrop)=>({...avPeople[0]!,portraitCrop:crop,portraitImage:sha?image(sha):null});
+    const homeCalls=()=>mocks.native.mock.calls.filter(([op])=>op==='homeCover').map(([,payload])=>(payload as {sha256:string}).sha256);
+    const cropCalls=()=>mocks.native.mock.calls.filter(([op])=>op==='collectionArtwork');
+    const portrait=(name='하야세 미오')=>screen.getByLabelText(`${name} 사진`);
+    const visibleImages=()=>[...portrait().querySelectorAll('img')].filter(node=>node.getAttribute('data-stable-image-loading')!=='true').map(node=>node.getAttribute('src'));
+    beforeEach(()=>{resetPortraitMemory();mocks.native.mockImplementation(async(op:string,payload:{sha256?:string;artworkId?:string})=>({url:op==='homeCover'?`https://example.invalid/portrait/${payload.sha256!.slice(0,1)}`:`https://example.invalid/${payload.artworkId}`}));});
+    afterEach(()=>{vi.unstubAllGlobals();});
+
+    it('requests the image by its hash through the Home cover ticket, reserves its shape, and skips the crop',async()=>{
+      render(<PersonPortrait person={mio('a')} current={avA} items={[avA]} revision="r1" size="large"/>);
+      await waitFor(()=>expect(visibleImages()).toEqual(['https://example.invalid/portrait/a']));
+      expect(homeCalls()).toEqual([image('a').sha256]);
+      const img=portrait().querySelector('img')!;
+      expect(img.getAttribute('width')).toBe('300');expect(img.getAttribute('height')).toBe('400');
+      expect(cropCalls()).toHaveLength(0);
+      expect(portrait().className).toContain('has-image');
+    });
+
+    it('keeps the shown image until the next one is decoded',async()=>{
+      const decodes:(()=>void)[]=[];
+      vi.stubGlobal('Image',class {src='';decode(){return new Promise<void>(resolve=>decodes.push(resolve));}});
+      const view=render(<PersonPortrait person={mio('a')} current={avA} items={[avA]} revision="r1"/>);
+      await waitFor(()=>expect(decodes).toHaveLength(1));
+      // Not decoded yet: initials, never an empty image.
+      expect(portrait().querySelector('img')).toBeNull();expect(portrait().textContent).toBe('하미');
+      await act(async()=>{decodes[0]!();});
+      await waitFor(()=>expect(visibleImages()).toEqual(['https://example.invalid/portrait/a']));
+      view.rerender(<PersonPortrait person={mio('b')} current={avA} items={[avA]} revision="r1"/>);
+      await waitFor(()=>expect(decodes).toHaveLength(2));
+      expect(visibleImages()).toEqual(['https://example.invalid/portrait/a']);
+      expect(portrait().querySelector('img[src$="/portrait/b"]')).toBeNull();
+      await act(async()=>{decodes[1]!();});
+      // The new image loads in the hidden slot; the old one stays until it has loaded.
+      const next=await waitFor(()=>{const node=portrait().querySelector('img[src$="/portrait/b"]');expect(node).not.toBeNull();return node!;});
+      expect(visibleImages()).toEqual(['https://example.invalid/portrait/a']);
+      fireEvent.load(next);
+      await waitFor(()=>expect(visibleImages()).toEqual(['https://example.invalid/portrait/b']));
+    });
+
+    it('falls back to the cover crop when the image fails, and to initials without a crop',async()=>{
+      mocks.native.mockImplementation(async(op:string,payload:{artworkId?:string})=>{if(op==='homeCover')throw new Error('없음');return {url:`https://example.invalid/${payload.artworkId}`};});
+      const view=render(<PersonPortrait person={mio('a')} current={avA} items={[avA]} revision="r1"/>);
+      await waitFor(()=>expect(portrait().getAttribute('style')).toContain('https://example.invalid/cover-a'));
+      expect(homeCalls()).toHaveLength(1);expect(portrait().querySelector('img')).toBeNull();
+      view.unmount();resetPortraitMemory();
+      render(<PersonPortrait person={mio('c',null)} current={avA} items={[avA]} revision="r1"/>);
+      await waitFor(()=>expect(homeCalls()).toHaveLength(2));
+      await act(async()=>{});
+      expect(portrait().className).not.toContain('has-image');expect(portrait().textContent).toBe('하미');
+      // An older publication without the field keeps the crop.
+      cleanup();
+      render(<PersonPortrait person={mio(null)} current={avA} items={[avA]} revision="r1"/>);
+      await waitFor(()=>expect(portrait().getAttribute('style')).toContain('https://example.invalid/cover-a'));
+      expect(homeCalls()).toHaveLength(2);
+    });
+
+    it('shows initials only and requests nothing in privacy mode',async()=>{
+      localStorage.setItem(PRIVACY_MODE_KEY,'1');
+      render(<PersonPortrait person={mio('a')} current={avA} items={[avA]} revision="r1"/>);
+      await act(async()=>{});
+      expect(homeCalls()).toHaveLength(0);expect(cropCalls()).toHaveLength(0);
+      expect(portrait().querySelector('img')).toBeNull();expect(portrait().textContent).toBe('하미');
+    });
+
+    it('asks for at most four portraits at a time, and once per hash',async()=>{
+      const pending:((value:unknown)=>void)[]=[];
+      mocks.native.mockImplementation((op:string,payload:{sha256?:string})=>op==='homeCover'?new Promise(resolve=>pending.push(()=>resolve({url:`https://example.invalid/portrait/${payload.sha256!.slice(0,1)}`}))):Promise.resolve({url:'https://example.invalid/x'}));
+      const people=['1','2','3','4','5','6'].map(sha=>({...mio(sha),id:`p${sha}`,name:`배우 ${sha}`}));
+      render(<>{[...people,people[0]!].map((person,index)=><PersonPortrait key={index} person={person} current={avA} items={[avA]} revision="r1"/>)}</>);
+      await waitFor(()=>expect(homeCalls()).toHaveLength(4));
+      await act(async()=>{});
+      expect(homeCalls()).toHaveLength(4);
+      await act(async()=>{pending[0]!(undefined);});
+      await waitFor(()=>expect(homeCalls()).toHaveLength(5));
+      // The repeated performer shares the first request and shows the same image.
+      expect(new Set(homeCalls()).size).toBe(5);
+      await waitFor(()=>expect(screen.getAllByLabelText('배우 1 사진').every(node=>node.querySelector('img'))).toBe(true));
+      // Settle the rest so the shared queue is free for the next test.
+      await act(async()=>{for(const resolve of pending.slice(1))resolve(undefined);});
+      await waitFor(()=>expect(homeCalls()).toHaveLength(6));
+      await act(async()=>{for(const resolve of pending.slice(5))resolve(undefined);});
     });
   });
 

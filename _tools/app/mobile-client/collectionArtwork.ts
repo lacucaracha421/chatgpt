@@ -10,18 +10,21 @@ import {mediaTicket} from './media';
 import {collectionCover, type CollectionSummary} from './collectionModel';
 import type {Ticket} from './types';
 
-// Only visible artwork requests enter this small queue; native owns the disk cache.
+// Only visible artwork requests (covers, spines, performer portraits) enter this small queue,
+// at most four at a time; native owns the disk cache.
 let artworkActive=0;
 const artworkQueue:(()=>void)[]=[];
-export function artworkTicket(item:CollectionSummary, artworkId:string|undefined|null, revision:string, original:boolean, signal:AbortSignal):Promise<Ticket> {
+function queued(run:()=>Promise<Ticket>,signal:AbortSignal):Promise<Ticket> {
   return new Promise((resolve,reject)=>{
     const cancel=()=>{const index=artworkQueue.indexOf(start);if(index>=0)artworkQueue.splice(index,1);reject(new DOMException('Cancelled','AbortError'));};
     const start=()=>{if(signal.aborted){cancel();return;} artworkActive++;
-      const promise=artworkId ? native<Ticket>('collectionArtwork',{collectionId:item.id,artworkId,variant:original?'original':'thumbnail',revision,digest:item.artworkVersions?.[artworkId]?.[original?'original':'thumbnail']??''},signal) : mediaTicket({id:item.coverAssetId!,kind:'image'},original?'original':'thumbnail',signal);
-      void promise.then(resolve,reject).finally(()=>{signal.removeEventListener('abort',cancel);artworkActive--;while(artworkActive<4&&artworkQueue.length)artworkQueue.shift()!();});
+      void run().then(resolve,reject).finally(()=>{signal.removeEventListener('abort',cancel);artworkActive--;while(artworkActive<4&&artworkQueue.length)artworkQueue.shift()!();});
     };
     signal.addEventListener('abort',cancel,{once:true}); if(artworkActive<4)start();else artworkQueue.push(start);
   });
+}
+export function artworkTicket(item:CollectionSummary, artworkId:string|undefined|null, revision:string, original:boolean, signal:AbortSignal):Promise<Ticket> {
+  return queued(()=>artworkId ? native<Ticket>('collectionArtwork',{collectionId:item.id,artworkId,variant:original?'original':'thumbnail',revision,digest:item.artworkVersions?.[artworkId]?.[original?'original':'thumbnail']??''},signal) : mediaTicket({id:item.coverAssetId!,kind:'image'},original?'original':'thumbnail',signal),signal);
 }
 /**
  * What identifies an artwork's bytes. A published digest names them exactly, and native keys its
@@ -173,4 +176,51 @@ export function useArtworkSet(item:CollectionSummary|null,requests:Record<string
     return()=>controller.abort();
   },[key,active]);// eslint-disable-line react-hooks/exhaustive-deps
   return {urls:state.urls,key:state.key,ready:state.key===key};
+}
+
+/**
+ * Performer portrait images (StashDB / Commons) by content hash, served through the Home cover
+ * ticket (`homeCover`). Decoded URLs are kept for the ticket's life, so every row that shows the
+ * same performer, and a row that mounts again, shows it in its first frame; rows asking for the
+ * same hash share one request, which is cancelled only when all of them have left.
+ */
+const portraitUrls=new Map<string,{url:string;until:number}>();
+const portraitLoads=new Map<string,{promise:Promise<string>;controller:AbortController;users:number}>();
+function rememberedPortrait(sha256:string){const hit=portraitUrls.get(sha256);if(hit&&hit.until>Date.now())return hit.url;portraitUrls.delete(sha256);return null;}
+function loadPortrait(sha256:string,signal:AbortSignal):Promise<string> {
+  const hit=rememberedPortrait(sha256);if(hit)return Promise.resolve(hit);
+  let load=portraitLoads.get(sha256);
+  if(!load){
+    const controller=new AbortController();
+    const entry:{promise:Promise<string>;controller:AbortController;users:number}={controller,users:0,promise:queued(()=>native<Ticket>('homeCover',{sha256},controller.signal),controller.signal).then(async ticket=>{
+      if(!validArtworkUrl(ticket.url))throw new Error('Invalid portrait');
+      await decoded(ticket.url);
+      portraitUrls.set(sha256,{url:ticket.url,until:Date.now()+(ticket.expires_in?ticket.expires_in*1000:ARTWORK_KEEP_MS)});
+      return ticket.url;
+    }).finally(()=>{if(portraitLoads.get(sha256)===entry)portraitLoads.delete(sha256);})};
+    portraitLoads.set(sha256,entry);load=entry;
+  }
+  const shared=load;shared.users++;
+  const detach=()=>{if(--shared.users>0)return;shared.controller.abort();if(portraitLoads.get(sha256)===shared)portraitLoads.delete(sha256);};
+  signal.addEventListener('abort',detach,{once:true});
+  return shared.promise.finally(()=>signal.removeEventListener('abort',detach));
+}
+/** Forget remembered portraits (tests). */
+export function resetPortraitMemory(){portraitUrls.clear();portraitLoads.clear();}
+
+/**
+ * A performer portrait image as a decoded URL. A new hash keeps the shown image until the next
+ * one is decoded; `failed` says the current hash could not be shown, so the caller falls back.
+ */
+export function usePortraitUrl(sha256:string|null,active:boolean):{url:string|null;failed:boolean} {
+  const [shown,setShown]=useState<{sha:string;url:string}|null>(()=>{const url=sha256&&rememberedPortrait(sha256);return url&&sha256?{sha:sha256,url}:null;});
+  const [failed,setFailed]=useState<string|null>(null);
+  useEffect(()=>{
+    if(!active||!sha256||shown?.sha===sha256)return;
+    const hit=rememberedPortrait(sha256);if(hit){setShown({sha:sha256,url:hit});return;}
+    const controller=new AbortController();
+    void loadPortrait(sha256,controller.signal).then(url=>{if(!controller.signal.aborted)setShown({sha:sha256,url});},()=>{if(!controller.signal.aborted)setFailed(sha256);});
+    return()=>controller.abort();
+  },[sha256,active,shown?.sha]);
+  return {url:sha256&&active&&failed!==sha256?shown?.url??null:null,failed:!!sha256&&failed===sha256};
 }

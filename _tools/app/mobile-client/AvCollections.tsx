@@ -2,7 +2,9 @@ import {useMemo, useRef, useState, type CSSProperties} from 'react';
 import {ChevronRightIcon} from '@heroicons/react/24/outline';
 import {CollectionList} from '../src/collections/CollectionList';
 import {displayDate} from '../src/shared/displayDate';
-import {useArtworkSet} from './collectionArtwork';
+import {StableImage} from '../src/shared/ui/StableImage';
+import {useArtworkSet, usePortraitUrl} from './collectionArtwork';
+import {usePrivacyMode} from './privacyMode';
 import {ShelfTile} from './CollectionShelf';
 import type {AvPerson, CollectionDetail, CollectionSummary} from './collectionModel';
 import {api} from './transport';
@@ -19,20 +21,31 @@ function initials(value:string) {
 }
 
 /**
- * A performer's portrait: the crop the PC stored from one of the published covers, else
- * initials. The cover is found among `items` by its artwork id (the list publishes its version).
+ * A performer's portrait: the StashDB / Commons image the PC published (`portraitImage`), else
+ * the crop the PC stored from one of the published covers, else initials. The cover is found
+ * among `items` by its artwork id (the list publishes its version). A changed image keeps the
+ * shown one until it is decoded; a failed image falls back to the crop. Privacy mode shows
+ * initials only and requests nothing, as on the PC.
  */
 export function PersonPortrait({person,current,items,revision,size='small'}:{person:AvPerson;current:CollectionSummary;items:CollectionSummary[];revision:string;size?:'small'|'large'}) {
-  const crop=person.portraitCrop;
+  const [privacy]=usePrivacyMode();
+  const image=person.portraitImage?.sha256?person.portraitImage:null;
+  const portrait=usePortraitUrl(image?.sha256??null,!privacy);
+  const imageWanted=!!image&&!portrait.failed;
+  const crop=privacy||imageWanted?null:person.portraitCrop;
   const source=items.find(item=>item.artworkVersions?.[crop?.artworkId??''])??current;
-  const url=useArtworkSet(source,{front:{id:crop?.artworkId,original:false}},revision,true).urls.front;
+  const url=useArtworkSet(source,crop?{front:{id:crop.artworkId,original:false}}:{},revision,!privacy&&!imageWanted).urls.front;
+  const label=`${person.name} 사진`;
+  if(!privacy&&image&&portrait.url)return <span className={`av-portrait av-portrait-${size} has-image`} aria-label={label}>
+    <StableImage src={portrait.url} alt="" width={image.width||undefined} height={image.height||undefined} draggable={false}/>
+  </span>;
   const style:CSSProperties={};
   if(url&&crop&&crop.w>0&&crop.h>0){
     style.backgroundImage=`url("${url}")`;
     style.backgroundSize=`${100/crop.w}% ${100/crop.h}%`;
     style.backgroundPosition=`${crop.w<1?crop.x/(1-crop.w)*100:0}% ${crop.h<1?crop.y/(1-crop.h)*100:0}%`;
   }
-  return <span className={`av-portrait av-portrait-${size}${url&&crop?' has-image':''}`} style={style} aria-label={`${person.name} 사진`}>{(!url||!crop)&&<span aria-hidden="true">{initials(person.name)}</span>}</span>;
+  return <span className={`av-portrait av-portrait-${size}${url&&crop?' has-image':''}`} style={style} aria-label={label}>{(!url||!crop)&&<span aria-hidden="true">{initials(person.name)}</span>}</span>;
 }
 
 type LookupFeedback = {kind: 'sent'; code: string} | {kind: 'offline' | 'rate' | 'invalid'};
