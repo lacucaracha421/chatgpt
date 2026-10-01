@@ -164,4 +164,4 @@
 
 .notes-rendered__empty svg { width:20px; height:20px; color:var(--color-faint); }
 
-.notes-board > .ui-section-bar { margin: calc(-1 * var(--space-3)) calc(-1 * var(--space-6)) var(--space-3); }
+.notes-board > .ui-section-bar { margin: calc(-1 * var(--space-3)) calc(-1 * var(--space-6)) var(--space-2); }

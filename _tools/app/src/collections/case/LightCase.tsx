@@ -11,6 +11,15 @@ import { CASE_PLASTIC, CaseSpine, spineInsertClass, workCasePlatform, type CaseD
 import { readShelfInfo, rememberedShelfInfo, sameShelfInfo, shelfInfoKey, type ShelfInfo } from "./shelfCaseInfo";
 import "./LightCase.css";
 
+// The browser remounts after a work closes. Retain measured cover shapes so the same
+// case never starts at the fallback ratio again while its image reloads.
+const coverRatios = new Map<string, number>();
+function rememberCoverRatio(src: string, ratio: number) {
+  coverRatios.delete(src);
+  coverRatios.set(src, ratio);
+  if (coverRatios.size > 2048) coverRatios.delete(coverRatios.keys().next().value!);
+}
+
 export function CollectionShelfCase({ collection, front, privacy, active, selected }: { collection: CollectionSummary; front: string | null; privacy: boolean; active: boolean; selected: boolean }) {
   const { gateway, library } = useLibrary();
   const root = library?.root ?? "";
@@ -57,12 +66,16 @@ function LightCaseFrame({ data, selected, ratio, children }: { data: CaseData; s
 }
 
 function ShelfMaterialCase({ data, selected }: { data: CaseData; selected: boolean }) {
-  const [ratio, setRatio] = useState(.71);
+  const [ratio, setRatio] = useState(() => (data.front && coverRatios.get(data.front)) || .71);
   return <LightCaseFrame data={data} selected={selected} ratio={ratio}>
     <span className="cs-front"><span className="ins">
       {!data.privacy && data.front ? <StableImage src={data.front} alt={data.title} draggable={false} onLoad={event => {
         const image = event.currentTarget;
-        if (image.naturalWidth && image.naturalHeight) setRatio(Math.max(.4, Math.min(1.4, image.naturalWidth / image.naturalHeight)));
+        if (image.naturalWidth && image.naturalHeight) {
+          const next = Math.max(.4, Math.min(1.4, image.naturalWidth / image.naturalHeight));
+          rememberCoverRatio(image.getAttribute("src")!, next);
+          setRatio(next);
+        }
       }} /> : <span className="case-mask" />}
     </span></span>
     <span className="cs-spine"><span className={spineInsertClass(data)}><CaseSpine decorative data={data} /></span></span>

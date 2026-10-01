@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MangaViewer } from "./MangaViewer";
@@ -32,6 +33,22 @@ function position(): string {
 }
 
 describe("MangaViewer", () => {
+  it("returns focus to the local work opener when the immersive reader closes", async () => {
+    function LocalReader() {
+      const [open, setOpen] = useState(false);
+      return <><button onClick={() => setOpen(true)}>Local work</button>
+        {open && <MangaViewer seriesId="s1" title="Local work" pageCount={3} galleryId={null} onClose={() => setOpen(false)} />}</>;
+    }
+    const user = userEvent.setup();
+    render(<LocalReader />);
+    const opener = screen.getByRole("button", { name: "Local work" });
+    await user.click(opener);
+    expect(screen.getByRole("dialog", { name: "Local work" })).toBeVisible();
+    expect(document.querySelector(".ui-overlay-panel, .manga-reader__bottom img")).toBeNull();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Local work" })).toBeNull();
+    await waitFor(() => expect(opener).toHaveFocus());
+  });
   it("shows the title and page progress", async () => {
     render(<MangaViewer seriesId="s1" galleryId={null} title="Batsu Kano" pageCount={60} onClose={vi.fn()} />);
     expect(await screen.findByRole("heading", { name: "Batsu Kano" })).toBeInTheDocument();

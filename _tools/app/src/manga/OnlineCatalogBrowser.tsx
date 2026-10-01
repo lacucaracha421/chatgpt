@@ -518,6 +518,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
       const gallery = await gateway.resolveOnlineCatalogWork(catalogIdentityOf(selectedDetail));
       if (!mounted.current || request !== readRequest.current) return;
       const artist = selectedDetail.tagGroups.find(group => group.namespace === "artist")?.values.join(" · ") || null;
+      setDetailOpen(false);
       setViewer({ title: selectedDetail.title, ...gallery, initialPage: 1, artist });
     } catch (error) {
       if (mounted.current && request === readRequest.current) {
@@ -544,7 +545,12 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
     void search(nextQuery, sort, scope);
   }
 
-  function closeViewer() { setViewer(null); }
+  function closeViewer() {
+    setViewer(null);
+    // The read button leaves with the panel; return to the work that opened it after the
+    // reader dialog has finished its own focus cleanup.
+    requestAnimationFrame(() => detailReturnFocus.current?.focus({ preventScroll: true }));
+  }
 
   // The reader's bookmark follows the same state the detail panel shows; the detail row is the reader's own work.
   const viewerIdentity: CatalogWorkIdentity | null = viewer ? { provider: viewer.provider, providerWorkId: viewer.providerWorkId } : null;
@@ -718,7 +724,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
       </div>
     </div>
     <div ref={panelHost} className="online-catalog__panel-host">
-      <OverlayPanel open={detailOpen} title="상세" ariaLabel="망가 상세" closeLabel="상세 닫기" width={380} returnFocusRef={detailReturnFocus}
+      {!viewer && active && <OverlayPanel open={detailOpen} title="상세" ariaLabel="망가 상세" closeLabel="상세 닫기" width={380} returnFocusRef={detailReturnFocus}
         onOpenChange={(open) => { if (!open) closeDetail(); }} actions={detailGroup && detailGroup.versionCount >= 2 && <span onKeyDown={(event) => {
           // Escape belongs to the portalled menu before the panel beneath it.
           if (event.key === "Escape" && event.target instanceof Element && event.target.closest("[role='menu']")) event.stopPropagation();
@@ -736,7 +742,7 @@ export function OnlineCatalogBrowser({ onSwitchLocal, initialScope = "all", requ
             hasMoreEditions={Boolean(detailEditions && (detailEditions.page + 1) * detailEditions.pageSize < detailEditions.totalCount)}
             onEdition={(edition) => void openDetail(edition, detailGroup)} onMoreEditions={() => void loadMoreDetailEditions()} />
         </div>}
-      </OverlayPanel>
+      </OverlayPanel>}
     </div>
     </div>
     {editions && <CatalogEditionsDialog work={editions} language={language} revealBlocked={revealBlocked}

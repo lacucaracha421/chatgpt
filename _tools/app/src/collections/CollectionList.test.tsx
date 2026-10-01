@@ -24,6 +24,38 @@ it("keeps showcase on a single plank with all its cells mounted", () => {
   expect(container.querySelectorAll(".collection-list__plank")).toHaveLength(1);
   expect(new Set([...container.querySelectorAll<HTMLElement>(".collection-list__cell")].map(cell => cell.style.gridRow)).size).toBe(1);
 });
+it("uses the same caption anchor for every column at counts 5 through 12", () => {
+  const draw = (perRow: number) => <CollectionList items={works} view={{ layout: "shelf", perRow, grouping: "sort" }} label="작품" onPick={() => undefined} render={drawCase} />;
+  const { container, rerender } = render(draw(5));
+  for (let perRow = 5; perRow <= 12; perRow++) {
+    rerender(draw(perRow));
+    expect([...container.querySelectorAll(".collection-list__cell")].every(cell => cell.className === "collection-list__cell")).toBe(true);
+  }
+});
+
+it("retains shelf geometry while hidden and measures real window resizes", () => {
+  let width = 1200;
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(() => width);
+  let resize!: ResizeObserverCallback;
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(callback: ResizeObserverCallback) { resize = callback; }
+    observe() {} disconnect() {}
+  });
+  try {
+    const { container } = render(<CollectionList items={works} view={{ layout: "shelf", perRow: 8, grouping: "sort" }} label="작품" onPick={() => undefined} render={drawCase} />);
+    const list = container.querySelector<HTMLElement>(".collection-list")!;
+    const before = list.style.cssText;
+    width = 0;
+    act(() => resize([], {} as ResizeObserver));
+    expect(list.style.cssText).toBe(before);
+    width = 1200;
+    act(() => resize([], {} as ResizeObserver));
+    expect(list.style.cssText).toBe(before);
+    width = 1400;
+    act(() => resize([], {} as ResizeObserver));
+    expect(list.style.cssText).not.toBe(before);
+  } finally { vi.unstubAllGlobals(); }
+});
 it("persists layout and count independently for each collection type", () => {
   const { result, rerender, unmount } = renderHook(({ type }: { type: CollectionType }) => useCollectionView(type), { initialProps: { type: "game" as CollectionType } });
   act(() => result.current[1]({ layout: "grid", perRow: 6 }));

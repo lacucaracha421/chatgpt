@@ -10,6 +10,19 @@ vi.mock("../../library/LibraryContext", () => ({ useLibrary: () => ({ gateway, l
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const book: CaseData = { title: "책 제목", platform: workCasePlatform("manga", null), front: "https://example.invalid/cover", spine: null, author: "작가 이름", privacy: false };
 
+it("retains measured game cover geometry when the shelf remounts after a work closes", () => {
+  const data: CaseData = { ...book, platform: "pc", front: "/geometry-game-cover" };
+  const first = render(<LightCase data={data} selected={false} />);
+  const image = first.container.querySelector<HTMLImageElement>(".cs-front img")!;
+  Object.defineProperties(image, { naturalWidth: { value: 600 }, naturalHeight: { value: 900 } });
+  fireEvent.load(image);
+  const ratio = first.container.querySelector<HTMLElement>(".collection-light-case")!.style.getPropertyValue("--case-ratio");
+  expect(Number(ratio)).toBeCloseTo(2 / 3);
+  first.unmount();
+  const second = render(<LightCase data={data} selected={false} />);
+  expect(second.container.querySelector<HTMLElement>(".collection-light-case")!.style.getPropertyValue("--case-ratio")).toBe(ratio);
+});
+
 it("prints the shared vertical title, front cover strip and author on a shelf book", () => {
   const { container } = render(<LightCase data={book} selected={false} />);
   const object = container.querySelector<HTMLElement>(".collection-light-case--book")!;

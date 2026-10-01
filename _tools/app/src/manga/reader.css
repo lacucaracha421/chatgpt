@@ -1,11 +1,11 @@
 /* PC manga reader (screen C, docs/prototypes/pc-manga-20260929). One reader for local and online works.
    The chrome is the 에셋 viewer's (asset-viewer__topbar, __edge, __filmstrip and its idle fade); these
-   rules only fit it to pages: a taller bottom bar with the page scrubber, half-screen page-turn areas,
+   rules only fit it to pages: a compact bottom bar with the page scrubber, half-screen page-turn areas,
    and page-shaped boxes that hold a placeholder until the page has loaded. */
 
 .manga-reader {
   --reader-top: 56px;
-  --reader-bottom: 104px;
+  --reader-bottom: 32px;
 }
 
 .manga-reader__canvas {
@@ -125,16 +125,6 @@
   margin: 0;
   accent-color: var(--color-accent);
   cursor: pointer;
-}
-
-.manga-reader__strip {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
-  min-width: 0;
-  height: 64px;
-  overflow: hidden;
 }
 
 .manga-reader .manga-viewer__overview { z-index: 4; }

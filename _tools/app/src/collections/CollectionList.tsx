@@ -134,10 +134,10 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
     let row = 1, itemIndex = 0;
     for (const group of groups) {
       if (group.label) children.push(<div key={`group:${group.label}`} className="collection-list__group" style={{ gridRow: row++, gridColumn: "1 / -1" }}>{group.label}<span>{group.items.length.toLocaleString()}</span></div>);
-      group.items.forEach((item, index) => {
+      group.items.forEach(item => {
         const position = positions[itemIndex];
         const windowKey = showcase ? itemIndex + 1 : position.row;
-        children.push(<div key={item.id} className={`collection-list__cell${index % perRow >= perRow - 2 ? " is-end" : ""}`} data-list-index={itemIndex++}
+        children.push(<div key={item.id} className="collection-list__cell" data-list-index={itemIndex++}
           style={{ gridRow: position.row, gridColumn: position.column + 1, height: windowed ? "calc(var(--case-height) + 64px)" : undefined }}>
           {!windowed || nearRows.has(windowKey) || pinnedRows.has(windowKey) ? render(item) : null}
         </div>);

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
@@ -435,28 +435,24 @@ describe("PageViewer", () => {
     expect(screen.getByText("K-Hentai")).toBeVisible();
   });
 
-  it("jumps with the page scrubber and the thumbnail strip", async () => {
-    const user = userEvent.setup();
+  it("keeps page progress and navigation without a bottom thumbnail strip", async () => {
     const onPageChange = vi.fn();
     render(<PageViewer {...viewerProps({ onPageChange })} />);
 
     fireEvent.change(screen.getByRole("slider", { name: "페이지 위치" }), { target: { value: "5" } });
     expect(position()).toBe("5 / 6");
     expect(onPageChange).toHaveBeenLastCalledWith(5);
-    expect(screen.getByRole("button", { name: "5페이지 보기" })).toHaveAttribute("aria-current", "true");
-
-    await user.click(screen.getByRole("button", { name: "2페이지 보기" }));
+    expect(document.querySelector(".asset-viewer__filmstrip-button, .manga-reader__strip")).toBeNull();
+    fireEvent.change(screen.getByRole("slider", { name: "페이지 위치" }), { target: { value: "2" } });
     expect(position()).toBe("2 / 6");
-    expect(shownImages()).toEqual(["Remote 2페이지"]);
+    await waitFor(() => expect(shownImages()).toEqual(["Remote 2페이지"]));
     expect(screen.getByRole("slider", { name: "페이지 위치" })).toHaveValue("2");
   });
 
-  it("keeps the thumbnail strip to nearby pages", () => {
+  it("does not render bottom image previews even for a long work", () => {
     render(<PageViewer {...viewerProps({ pageUrls: Array.from({ length: 40 }, (_, index) => `page-${index + 1}`), initialPage: 20 })} />);
-    const labels = Array.from(document.querySelectorAll(".manga-reader__strip button"), (button) => button.getAttribute("aria-label"));
-    expect(labels).toHaveLength(17);
-    expect(labels[0]).toBe("12페이지 보기");
-    expect(labels[16]).toBe("28페이지 보기");
+    expect(document.querySelector(".manga-reader__bottom img")).toBeNull();
+    expect(screen.getByRole("slider", { name: "페이지 위치" })).toHaveValue("20");
   });
 
   it("fades the bars after idle time and brings them back on pointer movement or a key", () => {

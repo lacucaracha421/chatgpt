@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>망가 목차</title>
+<!-- Loads the app's real tokens and shared controls; only the frames and the proposed parts are local. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<link rel="stylesheet" href="../../../_tools/app/src/styles/controls.css">
+<style>
+/* Layout: decision header, then the PC window (rail · index · list) and a tablet sheet beside it. */
+:root { --page: #0e0f10; color-scheme: dark; }
+body { margin: 0; background: var(--page); color: var(--color-text); font: 400 var(--type-body)/var(--line-ui) var(--font-ui); }
+.doc { max-width: 1520px; margin: 0 auto; padding-block: 32px 80px; padding-inline: 16px; display: flex; flex-direction: column; gap: 24px; }
+h1 { margin: 0; font-size: var(--text-title-large); line-height: var(--line-title-large); font-weight: 600; text-wrap: balance; }
+h2 { margin: 0; font-size: var(--type-title); font-weight: 600; }
+.lead { margin: 8px 0 0; color: var(--color-muted); max-width: 80ch; line-height: var(--line-copy); }
+.lead b, .notes b { color: var(--color-text); font-weight: 600; }
+.notes { margin: 0; padding-left: 20px; color: var(--color-muted); max-width: 86ch; line-height: var(--line-copy); display: flex; flex-direction: column; gap: 6px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; color: var(--color-faint); font-size: var(--type-meta); }
+.pick { display: inline-flex; padding: 2px; background: var(--color-surface); border-radius: var(--radius-control); }
+.pick button { min-height: 26px; padding: 0 12px; border: 0; border-radius: var(--radius-mark); background: transparent; color: var(--color-muted); font: inherit; cursor: pointer; }
+.pick button[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+.stage { display: flex; gap: 24px; align-items: flex-start; overflow-x: auto; padding-bottom: 4px; }
+.col { display: flex; flex-direction: column; gap: 10px; flex: none; }
+.col p { margin: 0; color: var(--color-faint); font-size: var(--type-meta); max-width: 420px; }
+
+/* PC window */
+.win { position: relative; width: 1060px; height: 760px; display: grid; grid-template-columns: 64px var(--sidebar-width-default) minmax(0, 1fr); border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; background: var(--color-bg); }
+.rail { background: var(--color-sidebar); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 6px; color: var(--color-faint); font-size: 11px; }
+.rail .mark { width: 22px; height: 26px; margin-bottom: 10px; color: var(--color-accent); }
+.rail span { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 52px; padding: 6px 0; border-radius: var(--radius-control); }
+.rail span i { width: 18px; height: 16px; border: 1.5px solid currentColor; border-radius: 3px; }
+.rail span.on { color: var(--color-text); background: var(--color-surface); }
+.side { background: var(--color-sidebar); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; min-width: 0; }
+.side-head { height: var(--toolbar-height); flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; color: var(--color-muted); font-size: var(--type-meta); border-bottom: 1px solid var(--color-border); }
+.side-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; padding: 6px 6px 12px; display: flex; flex-direction: column; gap: 2px; }
+.label { display: flex; align-items: center; gap: 8px; margin: 12px 10px 4px; color: var(--color-faint); font-size: var(--type-meta); }
+.label::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+.label::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--color-border), transparent); }
+.row { position: relative; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px 0 10px; border-radius: var(--radius-mark); color: var(--color-text); font: inherit; font-size: var(--type-body); cursor: pointer; border: 0; background: transparent; text-align: left; width: 100%; }
+.row:hover { background: var(--color-sidebar-hover); }
+.row svg.k { width: 14px; height: 14px; flex: none; color: var(--color-faint); }
+.row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .ct { color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; min-width: 24px; text-align: right; }
+.row .pin { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 2px; color: var(--color-faint); opacity: 0; }
+.row .pin svg { width: 13px; height: 13px; }
+.row:hover .pin, .row:focus-visible .pin { opacity: 1; }
+.row .pin:hover { color: var(--color-text); background: var(--color-surface-hover); }
+.row.pinned .pin { opacity: 1; color: var(--color-muted); }
+.row.on { background: var(--color-sidebar-selection); color: var(--color-on-accent); box-shadow: var(--selection-echo); }
+.row.on svg.k, .row.on .ct, .row.on .pin { color: var(--color-on-accent); }
+.row.on::after { content: ""; position: absolute; right: 4px; top: 50%; width: 5px; height: 5px; margin-top: -2.5px; background: var(--color-on-accent); }
+.more { margin: 2px 10px 0; padding: 4px 0; border: 0; background: transparent; color: var(--color-faint); font: inherit; font-size: var(--type-meta); cursor: pointer; text-align: left; }
+.more:hover { color: var(--color-text); }
+.empty-note { margin: 4px 10px; color: var(--color-faint); font-size: var(--type-meta); line-height: var(--line-copy); }
+.gone { margin: 12px 6px 0; padding: 10px 12px; border: 1px solid var(--color-border); display: flex; flex-direction: column; gap: 8px; font-size: var(--type-meta); color: var(--color-muted); }
+.gone b { color: var(--color-text); font-weight: 600; }
+.btn { align-self: flex-start; min-height: 26px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: var(--color-control); color: var(--color-text); font: inherit; font-size: var(--type-meta); cursor: pointer; }
+.btn:hover { background: var(--color-control-hover); }
+.btn.primary { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+.btn:disabled { opacity: .45; cursor: default; }
+
+.main { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.top { height: var(--toolbar-height); flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 16px; background: var(--color-toolbar); border-bottom: 1px solid var(--color-border); }
+.top .t { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.top .t::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); }
+.top .t small { color: var(--color-faint); font-weight: 400; font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.token { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 4px 0 8px; border-radius: var(--radius-mark); background: var(--color-filter-selected); color: var(--color-filter-text); font-size: var(--type-meta); font-weight: 600; }
+.token button { width: 18px; height: 18px; border: 0; background: transparent; color: var(--color-faint); cursor: pointer; border-radius: 2px; font: inherit; line-height: 1; }
+.token button:hover { color: var(--color-text); background: var(--color-surface-hover); }
+.top .grow { flex: 1; }
+.top .wc { display: flex; gap: 18px; color: var(--color-faint); margin-left: 12px; }
+.list { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.sec { display: flex; align-items: center; gap: 12px; padding: 8px 16px; }
+.seg { display: inline-flex; padding: 2px; background: var(--color-surface); border-radius: var(--radius-control); }
+.seg button { min-height: 24px; padding: 0 12px; border: 0; border-radius: var(--radius-mark); background: transparent; color: var(--color-muted); font: inherit; font-size: var(--type-meta); cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.seg button small { color: var(--color-faint); font-variant-numeric: tabular-nums; }
+.seg button[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; box-shadow: 2px 2px 0 -1px var(--color-surface), 2px 2px 0 0 var(--color-selection-echo); }
+.seg button[aria-pressed="true"] small { color: var(--color-on-accent); opacity: .7; }
+.sec .grow { flex: 1; }
+.tool { color: var(--color-muted); font-size: var(--type-meta); padding: 4px 8px; border-radius: var(--radius-control); }
+.tool b { color: var(--color-text); font-weight: 500; }
+.grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 20px 14px; padding: 8px 16px 24px; }
+.card { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cover { position: relative; aspect-ratio: 5 / 7; border-radius: var(--radius-media); background: linear-gradient(160deg, var(--c1), var(--c2)); overflow: hidden; }
+.cover .pg { position: absolute; right: 6px; bottom: 6px; padding: 0 5px; height: 18px; display: grid; place-items: center; background: rgba(0,0,0,.62); color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; border-radius: 2px; }
+.cover .bm { position: absolute; right: 8px; top: 0; width: 12px; height: 16px; background: var(--color-accent); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 75%, 0 100%); }
+.card strong { font-size: var(--type-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card span { color: var(--color-faint); font-size: var(--type-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card mark { background: transparent; color: var(--color-text); }
+
+/* Review dialog (vanished folders) */
+.scrim { position: absolute; inset: 0; background: var(--color-overlay); z-index: 5; display: grid; place-items: center; }
+.scrim[hidden] { display: none; }
+.dialog { position: relative; width: 460px; background: var(--color-surface-elevated); border: 1px solid var(--color-border-strong); box-shadow: var(--shadow-dialog); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.dialog::before, .dialog::after { content: ""; position: absolute; width: 10px; height: 10px; border-color: var(--color-section-mark); border-style: solid; }
+.dialog::before { left: -1px; top: -1px; border-width: 1px 0 0 1px; }
+.dialog::after { right: -1px; bottom: -1px; border-width: 0 1px 1px 0; }
+.dialog h3 { margin: 0; font-size: var(--type-title); font-weight: 600; }
+.dialog p { margin: 0; color: var(--color-muted); font-size: var(--type-meta); line-height: var(--line-copy); }
+.vrow { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--color-border); font-size: var(--type-body); }
+.vrow small { display: block; color: var(--color-faint); font-size: var(--type-meta); }
+.vrow .n { color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.vrow input { accent-color: var(--color-accent); width: 15px; height: 15px; margin: 0; }
+.acts { display: flex; justify-content: flex-end; gap: 8px; }
+.toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 8px 14px; background: var(--color-surface-elevated); border: 1px solid var(--color-border-strong); font-size: var(--type-meta); z-index: 6; opacity: 0; transition: opacity 160ms var(--ease-standard); pointer-events: none; }
+.toast.on { opacity: 1; }
+
+/* Tablet: the 필터 sheet gains the same index at its top. */
+.tab { position: relative; width: 400px; height: 760px; border: 1px solid var(--color-border); border-radius: 18px; overflow: hidden; background: var(--color-bg); }
+.tab .tb { height: 48px; display: flex; align-items: center; padding: 0 16px; gap: 8px; background: var(--color-toolbar); border-bottom: 1px solid var(--color-border); font-weight: 600; }
+.tab .tgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px 10px; padding: 12px 16px; filter: brightness(.55); }
+.tab .tgrid i { aspect-ratio: 5 / 7; border-radius: 2px; background: linear-gradient(160deg, var(--c1), var(--c2)); }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; height: 74%; background: var(--color-bg); border-top: 1px solid var(--color-border); border-radius: 14px 14px 0 0; display: flex; flex-direction: column; }
+.sheet .grab { width: 36px; height: 4px; margin: 8px auto 0; border-radius: 2px; background: var(--color-border-strong); }
+.sheet header { display: flex; align-items: center; padding: 6px 16px 10px; font-weight: 600; border-bottom: 1px solid var(--color-border); }
+.sheet header span { margin-left: auto; color: var(--color-muted); font-weight: 400; font-size: var(--type-meta); }
+.sheet .sb { flex: 1; overflow-y: auto; padding: 4px 16px 24px; scrollbar-width: none; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.tchip { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; border-radius: var(--radius-mark); background: var(--color-surface); color: var(--color-text); font-size: var(--type-body); border: 0; font-family: inherit; }
+.tchip small { color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.tchip.on { background: var(--color-filter-selected); font-weight: 600; box-shadow: inset 0 0 0 1px var(--color-filter-border); }
+.tchip svg { width: 13px; height: 13px; color: var(--color-muted); }
+.sheet .label { margin: 16px 0 8px; }
+.dim { color: var(--color-faint); font-size: var(--type-meta); margin: 0; }
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>망가 목차 — 자주 찾는 태그·작가와 로컬 폴더</h1>
+    <p class="lead">망가 라운드 5번째 조각(왼쪽 목차)과 6번째(태블릿)의 시안입니다. 9월 29일에 정한 A·D 화면을 지금의 섹션 바 구조에 맞춰 다시 그리고, <b>누르면 어떻게 되는지</b>를 정했습니다. 직접 눌러 보세요: 태그·작가 행, 행에 마우스를 올리면 나오는 핀, 「모두 보기」, 위의 출처 전환, 로컬의 「목록 보기」.</p>
+  </header>
+  <ol class="notes">
+    <li><b>무엇이 모이나</b>: 북마크한 작품들에 붙은 태그와 작가를 세어, 많은 순으로 8개씩 보여 줍니다. 숫자는 그 태그가 붙은 <b>북마크 작품 수</b>입니다. 따로 기록하는 건 없고 북마크만 보고 셉니다.</li>
+    <li><b>누르면</b>: 그 태그(또는 작가)로 카탈로그를 바로 거릅니다. 상단바 제목 옆에 「× 네토라레」 표시가 붙고, ×나 같은 행을 다시 누르면 풀립니다. 하나만 고를 수 있습니다(여러 개는 검색창에서).</li>
+    <li><b>고정</b>: 행에 마우스를 올리면 핀이 나오고, 누르면 맨 위 「고정」 칸으로 올라가 늘 그 자리에 있습니다. 고정은 라이브러리에 저장되어 다른 기기와 재설치 후에도 남습니다. <b>이 저장 칸 때문에 라이브러리 구조 변경(마이그레이션)이 필요합니다.</b></li>
+    <li><b>로컬</b>: 왼쪽은 망가 폴더의 첫 단계 폴더(작가·서클)와 작품 수입니다. 디스크에서 사라진 폴더가 있으면 아래에 한 줄 알림이 뜨고, 「목록 보기」에서 골라 <b>백업한 뒤 목록에서만</b> 지웁니다(파일은 이미 없음).</li>
+    <li><b>태블릿</b>: 왼쪽 목차가 없으니 섹션 바의 「필터」 시트 맨 위에 같은 「고정 · 자주 찾는 태그 · 작가」가 칩으로 들어갑니다. 길게 누르면 고정/해제.</li>
+    <li><b>빈 상태</b>: 북마크가 없으면 「북마크한 작품이 생기면 자주 찾는 태그와 작가가 여기에 모입니다」 한 줄만 보입니다.</li>
+  </ol>
+  <div class="controls"><span>출처</span><div class="pick" id="srcPick"><button type="button" aria-pressed="true" data-src="catalog">카탈로그</button><button type="button" aria-pressed="false" data-src="bookmarked">북마크</button><button type="button" aria-pressed="false" data-src="local">로컬</button></div>
+    <span>북마크</span><div class="pick" id="emptyPick"><button type="button" aria-pressed="true" data-empty="0">있음</button><button type="button" aria-pressed="false" data-empty="1">없음</button></div></div>
+  <div class="stage">
+    <div class="col"><h2>PC</h2>
+      <div class="win" id="win">
+        <nav class="rail" aria-label="화면"><svg class="mark" viewBox="0 0 32 36" fill="none" aria-hidden="true"><path d="M3 7h5v23H3zM13 2h5v32h-5zM23 6h5v23h-5z" stroke="currentColor" stroke-width="1.3"/></svg>
+          <span><i></i>홈</span><span><i></i>에셋</span><span><i></i>컬렉션</span><span class="on"><i></i>망가</span><span><i></i>메모</span><span><i></i>전송</span></nav>
+        <aside class="side" aria-label="망가 목차"><div class="side-head"><span id="sideTitle">망가</span><span>⟳</span></div><div class="side-body" id="side"></div></aside>
+        <section class="main">
+          <div class="top"><span class="t">망가 <small id="count">1,284개</small></span><span id="tokenSlot"></span><span class="grow"></span><span class="tool">갱신 22:40</span><span class="wc"><span>─</span><span>□</span><span>×</span></span></div>
+          <div class="list"><div class="sec"><div class="seg" id="seg"></div><span class="grow"></span><span class="tool" id="lang">언어 <b>한국어</b> ⌄</span><span class="tool">정렬 <b id="sortLabel">오늘 인기</b> ⌄</span></div><div class="grid" id="grid"></div></div>
+          <div class="scrim" id="scrim" hidden><div class="dialog" role="dialog" aria-labelledby="dlgT"><h3 id="dlgT">없어진 폴더 2개</h3><p>디스크에서 찾을 수 없는 폴더입니다. 고른 폴더를 <b>라이브러리를 백업한 뒤</b> 망가 목록에서 지웁니다. 디스크의 파일은 건드리지 않습니다(이미 없음).</p>
+            <div id="vlist"></div>
+            <div class="acts"><button class="btn" type="button" data-close>취소</button><button class="btn primary" type="button" id="purge">백업하고 2개 지우기</button></div></div></div>
+          <div class="toast" id="toast" role="status"></div>
+        </section>
+      </div>
+    </div>
+    <div class="col"><h2>태블릿 · 필터 시트</h2><p>섹션 바 둘째 줄의 「필터」를 누르면 열리는 시트. 지금 있는 회피 태그 설정은 이 아래에 그대로 이어집니다.</p>
+      <div class="tab"><div class="tb">카탈로그</div><div class="tgrid" id="tgrid"></div>
+        <div class="sheet"><div class="grab"></div><header>필터<span>초기화</span></header><div class="sb" id="tsheet"></div></div></div>
+    </div>
+  </div>
+</div>
+<script>
+const P = ['#7b4b52', '#43566e', '#5c6b45', '#6c4f7a', '#7a6a43', '#3f6a68', '#6d5640', '#4b4f78', '#7a4a66', '#4f6a52'];
+const TAGS = [['네토라레', 412], ['순애', 388], ['백합', 201], ['촉수', 96], ['판타지', 74], ['교복', 63], ['엘프', 51], ['안경', 44], ['메이드', 39], ['수영복', 31], ['간호사', 22], ['밀프', 18]];
+const ARTISTS = [['sevengar', 12], ['barukan', 9], ['tatsuwaipu', 7], ['shirusuke', 5], ['rald', 5], ['hamao', 4], ['keso', 4], ['sabakan', 3], ['asanagi', 3]];
+const FOLDERS = [['소미소프트', 8], ['롤 뷔페', 4], ['Karube Guri', 3], ['hanasaka houcha', 2], ['기타', 13]];
+const TITLES = ['졸업식날 밤 + 전자판 특전', '아내가 아저씨에게…', 'Gal to Boku ga Seibetsu Gyakuten', 'Bakunyuu Idol Inmanin', '나만을 보고 나만으로', '곤란해♥ 마오코 선생님', 'Succubus Successor', "Fallin' (COMIC Kairakuten)", '우리 엄마가 … 2', '피치비치의 롤 뷔페', '폭유변태녀가 오타쿠 동아리에', '쪼옥 쪼옥 정시은 -2'];
+let src = 'catalog', empty = false, active = null, pins = [['tag', '백합'], ['artist', 'sevengar']], expanded = { tag: false, artist: false }, localOn = '전체', gone = [['쭈욱 시리즈', '소미소프트/쭈욱 시리즈', 3], ['구 번역본', '기타/구 번역본', 1]];
+const ic = { tag: '<svg class="k" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 3h7l7 7-7 7-7-7z"/><circle cx="7" cy="7" r="1.3"/></svg>',
+  artist: '<svg class="k" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="10" cy="7" r="3"/><path d="M4 17c1-3.5 3.5-5 6-5s5 1.5 6 5"/></svg>',
+  folder: '<svg class="k" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 5h5l2 2h7v9H3z"/></svg>' };
+const pinSvg = (solid) => `<svg viewBox="0 0 20 20" fill="${solid ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M7 3h6l-1 5 3 3H5l3-3-1-5zM10 11v6"/></svg>`;
+const isPinned = (k, n) => pins.some(([a, b]) => a === k && b === n);
+const countOf = (k, n) => ((k === 'tag' ? TAGS : ARTISTS).find(([x]) => x === n) || [n, 0])[1];
+function row(kind, name, ct) {
+  const on = active && active[0] === kind && active[1] === name, pinned = isPinned(kind, name);
+  return `<div class="row${on ? ' on' : ''}${pinned ? ' pinned' : ''}" role="button" tabindex="0" data-pick="${kind}|${name}" aria-pressed="${on}">${ic[kind]}<span class="nm">${name}</span><span class="ct">${ct}</span><span class="pin" role="button" tabindex="0" aria-label="${name} ${pinned ? '고정 해제' : '고정'}" data-pin="${kind}|${name}">${pinSvg(pinned)}</span></div>`;
+}
+function section(kind, title, list) {
+  const free = list.filter(([n]) => !isPinned(kind, n)), shown = expanded[kind] ? free : free.slice(0, 8 - (kind === 'artist' ? 3 : 0));
+  return `<div class="label">${title}</div>${shown.map(([n, c]) => row(kind, n, c)).join('')}${free.length > shown.length || expanded[kind] ? `<button class="more" type="button" data-more="${kind}">${expanded[kind] ? '접기' : `모두 보기 (${free.length})`}</button>` : ''}`;
+}
+function renderSide() {
+  const side = document.getElementById('side');
+  document.getElementById('sideTitle').textContent = src === 'local' ? '로컬' : '망가';
+  if (src === 'local') {
+    side.innerHTML = [['전체', 30], ...FOLDERS].map(([n, c]) => `<div class="row${localOn === n ? ' on' : ''}" role="button" tabindex="0" data-folder="${n}">${ic.folder}<span class="nm">${n}</span><span class="ct">${c}</span></div>`).join('')
+      + (gone.length ? `<div class="gone"><span><b>없어진 폴더 ${gone.length}개</b> · 디스크에서 사라짐</span><button class="btn" type="button" data-review>목록 보기</button></div>` : '');
+    return;
+  }
+  if (empty) { side.innerHTML = `<div class="label">자주 찾는 태그</div><p class="empty-note">북마크한 작품이 생기면 자주 찾는 태그와 작가가 여기에 모입니다.</p>`; return; }
+  side.innerHTML = (pins.length ? `<div class="label">고정</div>${pins.map(([k, n]) => row(k, n, countOf(k, n))).join('')}` : '')
+    + section('tag', '자주 찾는 태그', TAGS) + section('artist', '작가', ARTISTS);
+}
+function renderMain() {
+  const counts = { catalog: '1,284', bookmarked: '280', local: '30' };
+  document.getElementById('seg').innerHTML = [['catalog', '카탈로그', ''], ['bookmarked', '북마크', '280'], ['local', '로컬', '30']].map(([k, l, c]) => `<button type="button" aria-pressed="${src === k}" data-src="${k}">${l}${c ? `<small>${c}</small>` : ''}</button>`).join('');
+  document.getElementById('lang').style.display = src === 'local' ? 'none' : '';
+  document.getElementById('sortLabel').textContent = src === 'local' ? '최근 변경순' : src === 'bookmarked' ? '최신순' : '오늘 인기';
+  const n = active ? (active[0] === 'tag' ? Math.round(countOf(...active) * 2.6) : countOf(...active) * 3) : null;
+  document.getElementById('count').textContent = `${src === 'local' ? (localOn === '전체' ? 30 : (FOLDERS.find(([x]) => x === localOn) || [0, 0])[1]) : n ?? counts[src]}개`;
+  document.getElementById('tokenSlot').innerHTML = active && src !== 'local' ? `<span class="token">${active[0] === 'artist' ? '작가 ' : ''}${active[1]}<button type="button" aria-label="${active[1]} 거르기 해제" data-clear>×</button></span>` : '';
+  const seed = active ? active[1].length : src.length;
+  document.getElementById('grid').innerHTML = TITLES.map((t, i) => `<div class="card"><div class="cover" style="--c1:${P[(i + seed) % 10]};--c2:${P[(i + seed + 4) % 10]}"><span class="pg">${[57, 76, 82, 171, 25, 30, 34, 24, 53, 43, 43, 36][i]}p</span>${src === 'bookmarked' || i % 4 === 1 ? '<span class="bm"></span>' : ''}</div><strong>${t}</strong><span>${active && active[0] === 'artist' ? `<mark>${active[1]}</mark>` : ['sabakan', 'tatsuwaipu', '작가 정보 없음', 'shirusuke', 'rald', 'keso'][i % 6]}</span></div>`).join('');
+}
+function renderTablet() {
+  document.getElementById('tgrid').innerHTML = Array.from({ length: 12 }, (_, i) => `<i style="--c1:${P[i % 10]};--c2:${P[(i + 4) % 10]}"></i>`).join('');
+  const chip = (k, n, c) => `<button type="button" class="tchip${active && active[0] === k && active[1] === n ? ' on' : ''}">${isPinned(k, n) ? pinSvg(true) : ''}${k === 'artist' ? '' : ''}${n}<small>${c}</small></button>`;
+  document.getElementById('tsheet').innerHTML = empty ? `<div class="label">자주 찾는 태그</div><p class="dim">북마크한 작품이 생기면 여기에 모입니다.</p>`
+    : `${pins.length ? `<div class="label">고정</div><div class="chips">${pins.map(([k, n]) => chip(k, n, countOf(k, n))).join('')}</div>` : ''}
+    <div class="label">자주 찾는 태그</div><div class="chips">${TAGS.filter(([n]) => !isPinned('tag', n)).slice(0, 8).map(([n, c]) => chip('tag', n, c)).join('')}</div>
+    <div class="label">작가</div><div class="chips">${ARTISTS.filter(([n]) => !isPinned('artist', n)).slice(0, 6).map(([n, c]) => chip('artist', n, c)).join('')}</div>
+    <div class="label">회피 태그</div><p class="dim">지금 있는 회피 태그 · 분류 설정이 여기부터 그대로 이어집니다.</p>`;
+}
+function render() { renderSide(); renderMain(); renderTablet();
+  document.querySelectorAll('#srcPick button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.src === src)));
+  document.querySelectorAll('#emptyPick button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.empty === (empty ? '1' : '0')))); }
+const toast = document.getElementById('toast'); let tt;
+function say(t) { toast.textContent = t; toast.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => toast.classList.remove('on'), 1500); }
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  const s = t.closest('[data-src]'); if (s) { src = s.dataset.src; active = null; render(); return; }
+  const em = t.closest('[data-empty]'); if (em) { empty = em.dataset.empty === '1'; active = null; render(); return; }
+  const pin = t.closest('[data-pin]'); if (pin) { const [k, n] = pin.dataset.pin.split('|'); if (isPinned(k, n)) { pins = pins.filter(([a, b]) => !(a === k && b === n)); say(`${n} 고정 해제`); } else { pins.push([k, n]); say(`${n} 고정 — 맨 위에 늘 표시`); } render(); return; }
+  const pick = t.closest('[data-pick]'); if (pick) { const [k, n] = pick.dataset.pick.split('|'); active = active && active[0] === k && active[1] === n ? null : [k, n]; render(); return; }
+  if (t.closest('[data-clear]')) { active = null; render(); return; }
+  const more = t.closest('[data-more]'); if (more) { expanded[more.dataset.more] = !expanded[more.dataset.more]; renderSide(); return; }
+  const f = t.closest('[data-folder]'); if (f) { localOn = f.dataset.folder; render(); return; }
+  if (t.closest('[data-review]')) { document.getElementById('vlist').innerHTML = gone.map(([n, p, c], i) => `<label class="vrow"><input type="checkbox" checked data-v="${i}"><span>${n}<small>${p}</small></span><span class="n">작품 ${c}</span></label>`).join(''); document.getElementById('scrim').hidden = false; return; }
+  if (t.closest('[data-close]')) { document.getElementById('scrim').hidden = true; return; }
+  if (t.closest('#purge')) { const keep = [...document.querySelectorAll('#vlist input')].filter((x) => !x.checked).map((x) => gone[+x.dataset.v]); const n = gone.length - keep.length; gone = keep; document.getElementById('scrim').hidden = true; render(); say(`백업 완료 · 목록에서 ${n}개 지움`); }
+});
+document.getElementById('vlist').addEventListener('change', () => { const n = document.querySelectorAll('#vlist input:checked').length; const b = document.getElementById('purge'); b.textContent = n ? `백업하고 ${n}개 지우기` : '고른 폴더 없음'; b.disabled = !n; });
+render();
+</script>
+</body>
+</html>

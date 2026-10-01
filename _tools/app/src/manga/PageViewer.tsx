@@ -42,9 +42,6 @@ const VIEWER_GAP_PX: Record<MangaViewerGap, number> = { none: 0, narrow: 8, wide
 const MARGIN_LABEL: Record<MangaViewerMargin, string> = { compact: "좁게", normal: "보통", wide: "넓게" };
 const GAP_LABEL: Record<MangaViewerGap, string> = { none: "없음", narrow: "좁게", wide: "넓게" };
 
-/** Pages shown on each side of the current page in the bottom thumbnail strip. */
-const STRIP_RADIUS = 8;
-
 /** The one immersive manga reader for local and online works. */
 export function PageViewer({ title, pageUrls, initialPage, sourceLabel, artist, bookmark, onPageChange, onClose, actions, onRetryPage }: PageViewerProps) {
   const { privacyMode } = usePrivacy();
@@ -142,8 +139,6 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, artist, 
   ])].filter((value) => !currentSpread.has(value));
   const position = logicalSpread.length === 2 ? `${logicalSpread[0]}-${logicalSpread[1]}` : `${logicalSpread[0]}`;
   const subtitle = [artist?.trim(), sourceLabel].filter(Boolean).join(" · ");
-  const stripStart = Math.max(1, Math.min(page - STRIP_RADIUS, pageCount - 2 * STRIP_RADIUS));
-  const stripPages = Array.from({ length: Math.min(pageCount, 2 * STRIP_RADIUS + 1) }, (_, index) => stripStart + index);
 
   useEffect(() => {
     if (!overviewOpen) return;
@@ -253,7 +248,7 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, artist, 
       onPointerMove={() => { chrome.keyboardFocus.current = false; chrome.reveal(); }}
       onPointerDown={() => { chrome.keyboardFocus.current = false; }}
     >
-      <div className="asset-viewer__stage asset-viewer__stage--filmstrip manga-reader__stage">
+      <div className="asset-viewer__stage manga-reader__stage">
         <div className="manga-reader__canvas">
           <ReaderSpread key={privacyMode ? "private" : "visible"} identity={JSON.stringify([pages, pages.map(value => pageUrls[value - 1]), mode, direction, margin, gap])}>
             <div
@@ -284,7 +279,7 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, artist, 
           </div>
           {edge("left")}
           {edge("right")}
-          {/* Page 1 always sits at the left of the scrubber and strip, whatever the reading direction (user, 2026-10-01). */}
+          {/* Page 1 always sits at the left of the scrubber, whatever the reading direction. */}
           {pageCount > 1 && <div className="asset-viewer__filmstrip manga-reader__bottom" dir="ltr" {...chrome.hover}>
             <input
               type="range"
@@ -297,16 +292,6 @@ export function PageViewer({ title, pageUrls, initialPage, sourceLabel, artist, 
               value={logicalSpread[0]}
               onChange={(event) => goTo(Number(event.currentTarget.value))}
             />
-            <div className="manga-reader__strip">{stripPages.map((value) => {
-              const current = currentSpread.has(value);
-              return <button key={value} type="button" className={`asset-viewer__filmstrip-button${current ? " asset-viewer__filmstrip-button--current" : ""}`}
-                aria-label={`${value}페이지 보기`} aria-current={current ? "true" : undefined} onClick={() => goTo(value)}>
-                {privacyMode || failedPages.has(value)
-                  ? <span className="asset-viewer__filmstrip-placeholder" aria-hidden="true" />
-                  : <img src={pageUrls[value - 1]} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" draggable={false}
-                    onLoad={(event) => { const image = event.currentTarget; if (image.naturalWidth > 0 && image.naturalHeight > 0) recordRatio(value, image.naturalWidth / image.naturalHeight); }} />}
-              </button>;
-            })}</div>
           </div>}
         </div>
       </div>

@@ -509,18 +509,19 @@ describe("OnlineCatalogBrowser", () => {
     expect(await findReaderPosition("1 / 3")).toBeVisible();
   });
 
-  it("closes the viewer back to its detail instead of dropping two layers", async () => {
+  it("closes detail before reading and returns focus to the catalog card on exit", async () => {
     const gateway = createGateway(true);
     renderBrowser(gateway);
-    await userEvent.click(await screen.findByRole("button", { name: "오래된 제독 상세 보기" }));
+    const card = await screen.findByRole("button", { name: "오래된 제독 상세 보기" });
+    await userEvent.click(card);
     await userEvent.click(await screen.findByRole("button", { name: "읽기" }));
     await screen.findByRole("button", { name: "망가 뷰어 닫기" });
+    expect(document.querySelector('.ui-overlay-panel')).toBeNull();
     await userEvent.keyboard("{Escape}");
 
-    expect(screen.getByRole("button", { name: "읽기" })).toBeVisible();
     expect(readerPosition()).not.toBeInTheDocument();
-    await userEvent.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("complementary", { name: "망가 상세" })).not.toBeInTheDocument());
+    expect(screen.queryByRole("complementary", { name: "망가 상세" })).not.toBeInTheDocument();
+    await waitFor(() => expect(card).toHaveFocus());
   });
 
   it("keeps valid search results visible and reports the refresh failure detail", async () => {
