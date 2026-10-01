@@ -127,13 +127,14 @@ describe("merged work screen", () => {
     const one:CollectionWorkData={...first,collection:{...fixtureWork,type:"manga"},case:{...first.case,front:"http://lakomics.localhost/work-artwork/art-1"},manga,position:1,total:2};
     const two:CollectionWorkData={...one,case:{...one.case,front:"http://lakomics.localhost/work-artwork/art-2"},manga:{...manga,activeVolumeId:"v2"},position:2};
     const actions=callbacks(); const {container,rerender}=view(one,actions); const root=screen.getByRole("article",{name:"만화 작품 화면"});
-    const painted=container.querySelector('.manga-work-book > img');
+    const painted=container.querySelector('.manga-bb-front img');
     rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={two} pending={false} actions={actions}/></PrivacyProvider>);
     expect(root.querySelector('.asset-viewer__position')).toHaveTextContent("1 / 2");
     expect(painted).toBeVisible();
-    const incoming=container.querySelector<HTMLImageElement>('.work-surface[aria-hidden="true"] .manga-work-book > img')!;
+    const incoming=container.querySelector<HTMLImageElement>('.work-surface[aria-hidden="true"] .manga-bb-front img')!;
     let decode!:()=>void; Object.defineProperty(incoming,"decode",{value:()=>new Promise<void>(resolve=>{decode=resolve;})});
     fireEvent.load(incoming);
+    await act(async () => { container.querySelectorAll('.work-surface[aria-hidden="true"] .manga-bb-back img, .work-surface[aria-hidden="true"] .manga-jspine-illustration img').forEach(image => fireEvent.load(image)); });
     expect(root.querySelector('.asset-viewer__position')).toHaveTextContent("1 / 2");
     await act(async()=>decode());
     expect(screen.getByRole("article")).toBe(root);
@@ -231,4 +232,113 @@ it("omits missing film facts and an empty overview note", () => {
   expect(document.querySelector(".card2 dl")).toBeEmptyDOMElement();
   expect(document.querySelector(".note")).toBeNull();
   expect(screen.queryByRole("region", { name: "개요" })).toBeNull();
+});
+
+describe("hero art band", () => {
+  it.each(["game", "movie", "av", "manga"] as const)("uses a %s work's selected hero, with only films falling back to backdrop", async type => {
+    const first = value();
+    const data = { ...first, collection: { ...first.collection, type, selectedHeroArtworkId: "hero", selectedBackdropArtworkId: "backdrop" } };
+    const { container, rerender } = view(data);
+    const image = container.querySelector<HTMLImageElement>('.work-hero-band img')!;
+    expect(image).toHaveAttribute("src", "http://lakomics.localhost/work-artwork/hero");
+    expect(image).not.toBeVisible();
+    let decode!: () => void;
+    Object.defineProperty(image, "decode", { value: () => new Promise<void>(resolve => { decode = resolve; }) });
+    fireEvent.load(image); expect(image).not.toBeVisible();
+    await act(async () => decode()); expect(image).toBeVisible();
+    const next = { ...data, collection: { ...data.collection, selectedHeroArtworkId: null } };
+    rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={next} pending={false} actions={callbacks()} /></PrivacyProvider>);
+    const incoming = container.querySelector('.work-surface[aria-hidden="true"]')!;
+    expect(incoming.querySelector('.work-hero-band img')?.getAttribute("src") ?? null).toBe(type === "movie" ? "http://lakomics.localhost/work-artwork/backdrop" : null);
+  });
+  it("keeps the same painted hero and case until both incoming images decode", async () => {
+    const first = { ...value(), collection: { ...fixtureWork, selectedHeroArtworkId: "hero-1" } };
+    const actions = callbacks(); const { container, rerender } = view(first, actions);
+    const oldHero = container.querySelector<HTMLImageElement>('.work-hero-band img')!;
+    await act(async () => fireEvent.load(oldHero));
+    const root = screen.getByRole("article"); const oldCase = container.querySelector('.k-front img');
+    const second = { ...first, collection: { ...fixtureWork, id: "two", name: "게임 둘", selectedHeroArtworkId: "hero-2" }, case: { ...first.case, title: "게임 둘", front: "/next-cover" } };
+    rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={second} pending={false} actions={actions} /></PrivacyProvider>);
+    const incoming = container.querySelector('.work-surface[aria-hidden="true"]')!;
+    const nextHero = incoming.querySelector<HTMLImageElement>('.work-hero-band img')!;
+    const nextCase = incoming.querySelector<HTMLImageElement>('.k-front img')!;
+    let heroDecoded!: () => void; let caseDecoded!: () => void;
+    Object.defineProperty(nextHero, "decode", { value: () => new Promise<void>(resolve => { heroDecoded = resolve; }) });
+    Object.defineProperty(nextCase, "decode", { value: () => new Promise<void>(resolve => { caseDecoded = resolve; }) });
+    fireEvent.load(nextHero); fireEvent.load(nextCase);
+    await act(async () => caseDecoded());
+    expect(oldHero).toBeVisible(); expect(oldCase).toBeVisible(); expect(nextHero).not.toBeVisible();
+    expect(screen.getByRole("heading", { name: "게임 하나" })).toBeInTheDocument();
+    await act(async () => heroDecoded());
+    expect(screen.getByRole("article")).toBe(root);
+    expect(nextHero).toBeVisible(); expect(nextCase).toBeVisible(); expect(oldHero).not.toBeVisible();
+    expect(screen.getByRole("heading", { name: "게임 둘" })).toBeInTheDocument();
+  });
+  it("has no band without art and removes a decoded band immediately in privacy mode", async () => {
+    const { container, rerender } = view(); expect(container.querySelector('.work-hero-band')).toBeNull();
+    const hero = { ...value(), collection: { ...fixtureWork, selectedHeroArtworkId: "hero" } };
+    const privacy = (data: CollectionWorkData) => <PrivacyProvider privacyMode={data.case.privacy} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={data} pending={false} actions={callbacks()} /></PrivacyProvider>;
+    rerender(privacy(hero));
+    await act(async () => { container.querySelectorAll('.work-surface[aria-hidden="true"] img').forEach(image => fireEvent.load(image)); });
+    expect(container.querySelector('.work-hero-band img')).toBeVisible();
+    rerender(privacy({ ...hero, case: { ...hero.case, privacy: true } }));
+    expect(container.querySelector('.work-hero-band')).toBeNull();
+  });
+  it("settles unavailable hero art so navigation remains usable", async () => {
+    const { container, rerender } = view();
+    const next = { ...value(), collection: { ...fixtureWork, id: "two", name: "게임 둘", selectedHeroArtworkId: "failed" }, case: { ...value().case, title: "게임 둘", front: "/next" } };
+    rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={next} pending={false} actions={callbacks()} /></PrivacyProvider>);
+    await act(async () => { fireEvent.error(container.querySelector('.work-surface[aria-hidden="true"] .work-hero-band img')!); fireEvent.load(container.querySelector('img[src="/next"]')!); });
+    expect(screen.getByRole("heading", { name: "게임 둘" })).toBeInTheDocument();
+    expect(container.querySelector('.work-surface:not([aria-hidden="true"]) .work-hero-band')).not.toBeVisible();
+  });
+});
+
+it("rotates the focused manga book while screen arrows change volumes, and the front button resets it", async () => {
+  const first = value();
+  const manga = { volumes: [{ id: "v1", volumeNumber: 1, editionIndex: 0, displayLabel: "1", coverArtworkId: "cover", localReleaseDate: null, isbn13: null, releaseStatus: null }], activeVolumeId: "v1", editionIndex: 0, focuses: [], ownedNumbers: null, scope: "", revision: "", ownership: null, management: null };
+  const { actions } = view({ ...first, collection: { ...fixtureWork, type: "manga", author: "작가" }, manga });
+  const book = screen.getByRole("group", { name: "책" }); book.focus();
+  fireEvent.keyDown(book, { key: "ArrowRight" });
+  expect(book).toHaveAttribute("data-angle", "15"); expect(actions.onStep).not.toHaveBeenCalled();
+  fireEvent.click(book); expect(book).toHaveAttribute("data-angle", "15");
+  await userEvent.click(screen.getByRole("button", { name: "정면으로" })); expect(book).toHaveAttribute("data-angle", "0");
+  const root = screen.getByRole("article"); root.focus(); fireEvent.keyDown(root, { key: "ArrowLeft" });
+  expect(actions.onStep).toHaveBeenCalledWith(-1);
+});
+
+it("reuses an already decoded hero when a surface is reused for another work with the same art", async () => {
+  const base = { ...value(), collection: { ...fixtureWork, selectedHeroArtworkId: "shared-hero" } };
+  const actions = callbacks(); const { container, rerender } = view(base, actions);
+  const originalHero = container.querySelector('.work-hero-band img')!;
+  await act(async () => fireEvent.load(originalHero));
+  const show = (n: number) => rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={{ ...base, collection: { ...base.collection, id: `game-${n}`, name: `게임 ${n}` }, case: { ...base.case, front: `/cover-${n}`, title: `게임 ${n}` } }} pending={false} actions={actions} /></PrivacyProvider>);
+  show(2);
+  await act(async () => { container.querySelectorAll('.work-surface[aria-hidden="true"] .work-hero-band img, img[src="/cover-2"]').forEach(image => fireEvent.load(image)); });
+  expect(screen.getByRole("heading", { name: "게임 2" })).toBeInTheDocument();
+  show(3);
+  await act(async () => fireEvent.load(container.querySelector('img[src="/cover-3"]')!));
+  expect(screen.getByRole("heading", { name: "게임 3" })).toBeInTheDocument();
+  expect(originalHero).toBeVisible();
+});
+
+it("waits for a fresh hero decode when a pending surface changes away from and back to that art", async () => {
+  const base = { ...value(), collection: { ...fixtureWork, selectedHeroArtworkId: "hero-a" } };
+  const actions = callbacks(); const { container, rerender } = view(base, actions);
+  await act(async () => fireEvent.load(container.querySelector('.work-hero-band img')!));
+  const show = (name: string, hero: string) => rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={{ ...base, collection: { ...base.collection, id: name, name, selectedHeroArtworkId: hero }, case: { ...base.case, front: `/cover-${name}`, title: name } }} pending={false} actions={actions} /></PrivacyProvider>);
+  show("게임 둘", "hero-d");
+  await act(async () => container.querySelectorAll('.work-surface[aria-hidden="true"] .work-hero-band img, img[src="/cover-게임 둘"]').forEach(image => fireEvent.load(image)));
+  expect(screen.getByRole("heading", { name: "게임 둘" })).toBeInTheDocument();
+  show("취소된 게임", "hero-b");
+  const incomingHero = container.querySelector<HTMLImageElement>('.work-surface[aria-hidden="true"] .work-hero-band img')!;
+  let cancelled!: () => void;
+  Object.defineProperty(incomingHero, "decode", { configurable: true, value: () => new Promise<void>(resolve => { cancelled = resolve; }) });
+  fireEvent.load(incomingHero);
+  show("게임 셋", "hero-a");
+  await act(async () => { fireEvent.load(container.querySelector('img[src="/cover-게임 셋"]')!); cancelled(); });
+  expect(screen.getByRole("heading", { name: "게임 둘" })).toBeInTheDocument();
+  Object.defineProperty(incomingHero, "decode", { value: () => Promise.resolve() });
+  await act(async () => fireEvent.load(incomingHero));
+  expect(screen.getByRole("heading", { name: "게임 셋" })).toBeInTheDocument(); expect(incomingHero).toBeVisible();
 });

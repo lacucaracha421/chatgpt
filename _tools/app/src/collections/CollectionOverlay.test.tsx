@@ -195,7 +195,7 @@ function renderOverlay(
 }
 
 async function settleManga() {
-  await act(async () => { document.querySelectorAll<HTMLImageElement>(".manga-work-book > img").forEach(image => fireEvent.load(image)); });
+  await act(async () => { document.querySelectorAll<HTMLImageElement>(".manga-work-book img").forEach(image => fireEvent.load(image)); });
 }
 
 async function openProviderMenu(user: ReturnType<typeof userEvent.setup>) {

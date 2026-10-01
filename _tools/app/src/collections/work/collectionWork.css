@@ -8,6 +8,12 @@
 .work-stage { position: absolute; inset: 0 0 112px; overflow: hidden; }
 .work-surface--info .work-stage, .work-surface--info .work-strip { right: 340px; }
 .work-case-slot { width: 100%; height: 100%; }
+.work-stage { z-index: 1; }
+.work-hero-band { position: absolute; inset: 0 0 112px; overflow: hidden; pointer-events: none; }
+.work-surface--info .work-hero-band { right: 340px; }
+.work-hero-band--manga { bottom: 184px; }
+.work-hero-band img { position: absolute; top: 0; left: 0; width: 100%; height: 62%; object-fit: cover; display: block; opacity: .9; mask-image: linear-gradient(180deg, black 0, black 55%, transparent 100%); -webkit-mask-image: linear-gradient(180deg, black 0, black 55%, transparent 100%); }
+.work-hero-band::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--color-viewer-bg) 55%, transparent), transparent 28%, transparent 72%, color-mix(in srgb, var(--color-viewer-bg) 55%, transparent)); }
 /* Previous/next targets stay narrow and short so they never cover the case (user, 2026-10-01). */
 .work-stage .asset-viewer__edge { top: 30%; bottom: 30%; width: 56px; background: transparent; }
 .work-stage .asset-viewer__edge:hover { background: transparent; }
@@ -80,10 +86,30 @@
 .collection-ownership--work { display: flex; flex-direction: column; gap: var(--space-2); }
 .work-own-row .ui-choice { display: flex; gap: var(--space-3); }
 .manga-work-stage.work-stage { bottom: 184px; }
-.manga-work-book { position: absolute; inset: var(--space-4) 96px var(--space-8); display: flex; align-items: center; justify-content: center; }
-.manga-work-book > img, .manga-work-book .paperback-live[data-front-facing] > .paperback-live__original { display: block; width: 90%; height: 90%; object-fit: contain; }
-.manga-work-book > .privacy-mask { width: 60%; height: 100%; }
-.manga-live-layer { position: absolute; inset: 0; }
+/* The approved book is one physical object, scaled with its material and spine type. */
+.manga-work-book { --bh: 560px; --bd: 34px; --bw: calc(var(--bh) * var(--ratio)); position: absolute; inset: var(--space-4) 96px var(--space-8); perspective: 1800px; }
+.manga-bigbook { position: absolute; left: calc(50% - var(--bw) / 2); top: calc(50% - var(--bh) / 2); width: var(--bw); height: var(--bh); transform-style: preserve-3d; transform: scale(var(--book-scale)) rotateY(var(--ty)); cursor: grab; touch-action: none; user-select: none; transition: transform 520ms var(--ease-standard); }
+.manga-bigbook.is-dragging { transition: none; cursor: grabbing; }
+.manga-bigbook > span { position: absolute; display: block; backface-visibility: hidden; overflow: hidden; }
+.manga-bb-front { inset: 0; transform: translateZ(calc(var(--bd) / 2)); border-radius: var(--radius-mark); background: var(--color-surface); }
+.manga-bb-front::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(0,0,0,.32), transparent 3%, rgba(0,0,0,.18) 4.6%, rgba(255,255,255,.1) 5.6%, transparent 8%), linear-gradient(115deg, rgba(255,255,255,.14), transparent 40%); }
+.manga-bb-back { inset: 0; transform: rotateY(180deg) translateZ(calc(var(--bd) / 2)); background: var(--color-surface); }
+.manga-bb-back img { filter: brightness(.55) saturate(.8); }
+.manga-bb-spine { top: 0; bottom: 0; left: calc(50% - var(--bd) / 2); width: var(--bd); transform: rotateY(-90deg) translateZ(calc(var(--bw) / 2)); }
+/* Paper and ink are case-material colours, like the cases' plastic. Volume data has no colour, so ink is neutral. */
+.manga-work-book { --book-paper: #f3f0e8; --book-ink: #15171a; --book-page: #e9e3d3; --book-page-edge: #cfc8b6; }
+.manga-bb-pages { top: 3px; bottom: 3px; left: calc(50% - var(--bd) / 2 + 1px); width: calc(var(--bd) - 2px); transform: rotateY(90deg) translateZ(calc(var(--bw) / 2 - 3px)); background: repeating-linear-gradient(90deg, var(--book-page) 0 1px, var(--book-page-edge) 1px 2px); }
+.manga-bb-top { left: 0; right: 3px; top: calc(50% - var(--bd) / 2 + 1px); height: calc(var(--bd) - 2px); transform: rotateX(90deg) translateZ(calc(var(--bh) / 2 - 3px)); background: repeating-linear-gradient(180deg, var(--book-page) 0 1px, var(--book-page-edge) 1px 2px); }
+.manga-bigbook img, .manga-bigbook .privacy-mask { display: block; width: 100%; height: 100%; object-fit: fill; }
+.manga-book-shadow { position: absolute; left: 50%; top: calc(50% + var(--bh) * var(--book-scale) / 2 - 6px); width: calc(var(--bw) * var(--book-scale) * 1.2); height: 26px; transform: translateX(-50%); background: rgba(0,0,0,.65); filter: blur(14px); border-radius: 50%; pointer-events: none; }
+.manga-jspine { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; background: var(--book-paper); color: var(--book-ink); font-family: var(--font-spine); font-weight: 700; }
+.manga-jspine-title { flex: none; max-height: 52%; overflow: hidden; margin-top: 12%; writing-mode: vertical-rl; text-orientation: mixed; font-size: calc(var(--bd) * .66); line-height: 1; letter-spacing: -.02em; white-space: nowrap; }
+.manga-jspine-number { flex: none; margin-top: 6%; width: 78%; aspect-ratio: 1; display: grid; place-items: center; border-radius: 50%; background: var(--book-ink); color: var(--book-paper); font-family: var(--font-ui); font-weight: 800; font-size: calc(var(--bd) * .42); line-height: 1; }
+.manga-jspine-illustration { flex: 1; align-self: stretch; margin: 7% 0; min-height: 0; overflow: hidden; position: relative; }
+.manga-jspine-illustration img { position: absolute; inset: 0; object-fit: cover; }
+.manga-jspine-author { flex: none; max-height: 18%; overflow: hidden; writing-mode: vertical-rl; text-orientation: mixed; font-family: var(--font-ui); font-weight: 600; font-size: calc(var(--bd) * .3); line-height: 1; letter-spacing: .02em; white-space: nowrap; }
+.manga-jspine-bar { flex: none; width: 46%; height: calc(var(--bd) * .16); margin: 6% 0 5%; background: var(--book-ink); }
+@media (prefers-reduced-motion: reduce) { .manga-bigbook { transition: none; } }
 .manga-cover-empty { color: var(--color-faint); }
 /* Approved physical bookshelf: no band/recess; only real cover strips and a fading plank. */
 .manga-bookcase.work-strip { height: 184px; padding: var(--space-8); display: block; overflow-y: hidden; }

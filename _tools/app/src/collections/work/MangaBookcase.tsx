@@ -3,35 +3,19 @@ import { ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 import type { CollectionVolume, CollectionCoverFocus } from "../../library/types";
 import { workArtworkThumbnailUrl, workArtworkUrl } from "../../assets/mediaUrl";
 import { StableImage } from "../../shared/ui/StableImage";
-import { PaperbackLive } from "../physical/PaperbackLive";
+import { MangaBook } from "./MangaBook";
+import { stripPosition } from "./coverStrip";
 import { volumeLabel } from "../collectionFormat";
 
 export type MangaWorkData = { volumes: CollectionVolume[]; activeVolumeId: string | null; editionIndex: number; latestKoreanVolume?: number | null; focuses: CollectionCoverFocus[]; ownedNumbers: number[] | null; scope: string; revision: string; ownership: ReactNode; management: ReactNode };
 export function editionName(index: number) { return index === 0 ? "기본판" : `대체판 ${index}`; }
-// Converts the head coordinate to object-position so the strip centre, not its edge,
-// lands on the head. This is the accepted prototype's cut rule, clamped at cover edges.
-export function stripPosition(focus: number | null, fullWidth: number, stripWidth: number) {
-  return focus === null || fullWidth <= stripWidth ? 50 : Math.max(0, Math.min(1, (focus * fullWidth - stripWidth / 2) / (fullWidth - stripWidth))) * 100;
-}
-export function MangaStage({ manga, privacy, live, title, onPick, onReady }: { manga: MangaWorkData; privacy: boolean; live: boolean; title: string; onPick(id: string): void; onReady(): void }) {
+export function MangaStage({ manga, privacy, title, author, frontReset, onPick, onReady }: { manga: MangaWorkData; privacy: boolean; title: string; author: string | null; frontReset: number; onPick(id: string): void; onReady(): void }) {
   const active = manga.volumes.find(volume => volume.id === manga.activeVolumeId);
   const index = manga.volumes.findIndex(volume => volume.id === active?.id);
-  const [painted, setPainted] = useState<string | null>(null);
-  const settled = useRef(new Set<string>());
-  const ready = useRef(onReady); ready.current = onReady;
   const src = active?.coverArtworkId ? workArtworkUrl(active.coverArtworkId) : null;
-  useEffect(() => { if (privacy || !src || settled.current.has(src)) ready.current(); });
+  const focus = manga.focuses.find(item => item.volumeId === active?.id && item.coverArtworkId === active?.coverArtworkId)?.focusX ?? null;
   return <div className="work-stage manga-work-stage">
-    <div className="manga-work-book">
-      {privacy ? <span className="privacy-mask" aria-label="비공개 모드" /> : src ? <>
-        <StableImage src={src} alt={`${active ? volumeLabel(active) : title} 표지`} draggable={false} style={live && painted === src ? { visibility: "hidden" } : undefined} onLoad={async event => {
-          const image = event.currentTarget;
-          try { await image.decode?.(); } catch { /* Failed decode settles without locking navigation. */ }
-          if (image.getAttribute("src") === src) { settled.current.add(src); ready.current(); }
-        }} onError={() => { settled.current.add(src); ready.current(); }} onPreloadError={() => { settled.current.add(src); ready.current(); }} />
-        {live && <div className="manga-live-layer" style={painted === src ? undefined : { visibility: "hidden", pointerEvents: "none" }} aria-hidden={painted !== src}><PaperbackLive src={src} alt={`${title} ${active ? volumeLabel(active) : ""} 입체 표지`} scope={manga.scope} revision={manga.revision} frontFacing onReady={success => setPainted(success ? src : null)} /></div>}
-      </> : <span className="manga-cover-empty">표지가 없습니다.</span>}
-    </div>
+    <MangaBook src={src} title={title} author={author} volumeNumber={active?.volumeNumber ?? null} volumeTitle={active ? volumeLabel(active) : ""} focus={focus} privacy={privacy} frontReset={frontReset} onReady={onReady} />
     {/* Wide edges belong to the immersive work viewer, separate from ownership controls. */}
     <button className="asset-viewer__edge asset-viewer__edge--left" aria-label="이전 권" disabled={index <= 0} onClick={() => onPick(manga.volumes[index - 1].id)}><ChevronLeftIcon /></button>
     <button className="asset-viewer__edge asset-viewer__edge--right" aria-label="다음 권" disabled={index < 0 || index >= manga.volumes.length - 1} onClick={() => onPick(manga.volumes[index + 1].id)}><ChevronRightIcon /></button>

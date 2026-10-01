@@ -22,7 +22,10 @@ export type WorkActions = {
   onOpenPerson(id: string): void; onOpenCollection?(id: string): void; onCopyCode(code: string | null): void;
 };
 function samePresentation(left: CollectionWorkData, right: CollectionWorkData) {
-  return left.collection.id === right.collection.id && left.manga?.activeVolumeId === right.manga?.activeVolumeId && (["front", "spine", "back", "platform", "privacy"] as const).every(key => left.case[key] === right.case[key]);
+  return left.collection.id === right.collection.id && heroArtwork(left.collection) === heroArtwork(right.collection) && left.manga?.activeVolumeId === right.manga?.activeVolumeId && (["front", "spine", "back", "platform", "privacy"] as const).every(key => left.case[key] === right.case[key]);
+}
+function heroArtwork(collection: CollectionSummary) {
+  return collection.selectedHeroArtworkId || (collection.type === "movie" ? collection.selectedBackdropArtworkId : null);
 }
 export function CollectionWorkScreen({ data, pending, actions }: { data: CollectionWorkData; pending: boolean; actions: WorkActions }) {
   const root = useRef<HTMLElement>(null);
@@ -66,11 +69,11 @@ export function CollectionWorkScreen({ data, pending, actions }: { data: Collect
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="닫기" onClick={actions.onClose}><XMarkIcon /></Button>
     </header>
     {slots.map((slot, index) => slot && <div key={index} className={`work-surface${info ? " work-surface--info" : ""}`} style={index === active ? undefined : { visibility: "hidden", pointerEvents: "none" }} inert={index !== active || waiting} aria-hidden={index !== active}>
-      <WorkSurface data={index === active ? visible : slot} privacy={privacy} info={info} reset={reset} live={index === active} actions={actions} onReady={() => { if (index !== active && slot === requested.current) { setActive(index as 0 | 1); root.current?.focus({ preventScroll: true }); } }} />
+      <WorkSurface data={index === active ? visible : slot} privacy={privacy} info={info} reset={reset} actions={actions} onReady={() => { if (index !== active && slot === requested.current) { setActive(index as 0 | 1); root.current?.focus({ preventScroll: true }); } }} />
     </div>)}
   </article>;
 }
-function WorkSurface({ data, privacy, info, reset, live, actions, onReady }: { data: CollectionWorkData; privacy: boolean; info: boolean; reset: number; live: boolean; actions: WorkActions; onReady(): void }) {
+function WorkSurface({ data, privacy, info, reset, actions, onReady }: { data: CollectionWorkData; privacy: boolean; info: boolean; reset: number; actions: WorkActions; onReady(): void }) {
   const stage = useRef<HTMLDivElement>(null);
   const [stageBox, setStageBox] = useState<StageBox>();
   useLayoutEffect(() => {
@@ -85,6 +88,16 @@ function WorkSurface({ data, privacy, info, reset, live, actions, onReady }: { d
     return () => observer?.disconnect();
   }, [info, data.collection.id]);
   const caseData = { ...data.case, privacy };
+  const heroId = heroArtwork(data.collection);
+  const heroSrc = !privacy && heroId ? workArtworkUrl(heroId) : null;
+  const presentation = JSON.stringify([data.collection.id, data.manga?.activeVolumeId, data.case.front, data.case.spine, data.case.back, heroSrc, privacy]);
+  const readiness = useRef({ presentation, object: false, hero: !heroSrc });
+  if (readiness.current.presentation !== presentation) readiness.current = { presentation, object: false, hero: !heroSrc };
+  function ready(part: "object" | "hero") {
+    if (readiness.current.presentation !== presentation) return;
+    readiness.current[part] = true;
+    if (readiness.current.object && readiness.current.hero) onReady();
+  }
   const [mode, setMode] = useState("case");
   const [picked, setPicked] = useState("case");
   const flatReady = useRef(false);
@@ -98,12 +111,13 @@ function WorkSurface({ data, privacy, info, reset, live, actions, onReady }: { d
   const isObject = mode === "case" || mode === "open";
   const record = data.record ?? defaultRecord(data.collection);
   return <>
-    {data.manga ? <><MangaStage manga={data.manga} privacy={privacy} live={live} title={data.collection.name} onPick={id => actions.onPickVolume?.(id)} onReady={onReady} /><MangaBookcase manga={data.manga} privacy={privacy} onPick={id => actions.onPickVolume?.(id)} onEnlarge={actions.onEnlargeManga} /></> : <>
+    {heroSrc && <HeroBand src={heroSrc} manga={Boolean(data.manga)} onReady={() => ready("hero")} />}
+    {data.manga ? <><MangaStage manga={data.manga} privacy={privacy} title={data.collection.name} author={data.collection.author} frontReset={reset} onPick={id => actions.onPickVolume?.(id)} onReady={() => ready("object")} /><MangaBookcase manga={data.manga} privacy={privacy} onPick={id => actions.onPickVolume?.(id)} onEnlarge={actions.onEnlargeManga} /></> : <>
     <div ref={stage} className="work-stage">
       <div style={isObject ? undefined : { position: "absolute", inset: 0, visibility: "hidden", pointerEvents: "none" }} className="work-case-slot" inert={!isObject} aria-hidden={!isObject}>
         <CollectionCase data={caseData} large stageBox={stageBox} open={mode === "open"} onOpenChange={open => pick(open ? "open" : "case")} frontReset={reset}
           inside={<CaseInside record={insideRecord(data.collection, record)} facts={insideFacts(data.collection, data.av)} />}
-          note={data.av?.people.length ? <><b>출연 · 감독</b><p className="work-names-note">{data.av.people.map(person => person.displayName).join(" · ")}</p></> : undefined} onReady={onReady} />
+          note={data.av?.people.length ? <><b>출연 · 감독</b><p className="work-names-note">{data.av.people.map(person => person.displayName).join(" · ")}</p></> : undefined} onReady={() => ready("object")} />
       </div>
       {data.collection.type === "av" && <div className="work-flat-slot" style={mode === "flat" ? undefined : { visibility: "hidden", pointerEvents: "none" }} aria-hidden={mode !== "flat"} inert={mode !== "flat"}><FlatJacket data={caseData} stageBox={stageBox} onReady={() => { flatReady.current = true; if (desired.current === "flat") setMode("flat"); }} /></div>}
       {artwork && <div className="work-art" style={mode === "case" || mode === "open" || mode === "flat" ? { visibility: "hidden", pointerEvents: "none" } : undefined} aria-hidden={mode === "case" || mode === "open" || mode === "flat"}>{privacy ? <span className="privacy-mask" aria-label="비공개 모드" /> : <StableImage src={workArtworkUrl(artwork.id)} alt={`${data.case.title} 아트워크`} draggable={false} onLoad={async event => {
@@ -123,6 +137,22 @@ function WorkSurface({ data, privacy, info, reset, live, actions, onReady }: { d
     <aside className="asset-viewer__dock work-dock" aria-label="작품 정보" style={info ? undefined : { visibility: "hidden", pointerEvents: "none" }} aria-hidden={!info} inert={!info}><div className="asset-viewer__dock-body">{data.manga?.ownership}<WorkInfo collection={data.collection} av={data.av} related={data.related} tmdb={data.tmdb} record={record}
       onSave={edit => actions.onSave(data.collection, edit)} onOpenPerson={actions.onOpenPerson} onOpenCollection={actions.onOpenCollection} onCopyCode={() => actions.onCopyCode(data.av?.productCode ?? null)} />{data.manga?.management}</div></aside>
   </>;
+}
+function HeroBand({ src, manga, onReady }: { src: string; manga: boolean; onReady(): void }) {
+  const [settled, setSettled] = useState<{ generation: number; decoded: boolean } | null>(null);
+  const requested = useRef({ src, generation: 0 });
+  if (requested.current.src !== src) requested.current = { src, generation: requested.current.generation + 1 };
+  const generation = requested.current.generation;
+  useEffect(() => { if (settled?.generation === generation) onReady(); });
+  return <div className={`work-hero-band${manga ? " work-hero-band--manga" : ""}`} aria-hidden="true" style={settled?.generation === generation && settled.decoded ? undefined : { visibility: "hidden" }}>
+    {/* The surface's two slots retain this decoded element together with its case. */}
+    <img src={src} alt="" draggable={false} onLoad={async event => {
+      const image = event.currentTarget;
+      try { await image.decode?.(); } catch { if (requested.current.generation === generation) setSettled({ generation, decoded: false }); return; }
+      if (requested.current.generation !== generation || !image.isConnected) return;
+      setSettled({ generation, decoded: true });
+    }} onError={() => { if (requested.current.generation === generation) setSettled({ generation, decoded: false }); }} />
+  </div>;
 }
 function FlatJacket({ data, stageBox, onReady }: { data: CaseData; stageBox?: StageBox; onReady(): void }) {
   const [ratio, setRatio] = useState(.71);
