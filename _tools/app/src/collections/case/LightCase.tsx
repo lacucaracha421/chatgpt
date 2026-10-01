@@ -44,19 +44,18 @@ export function CollectionShelfCase({ collection, front, privacy, active, select
 }
 
 /** Client-independent shelf object; only its data adapter reads local artwork. */
-export function LightCase({ data, selected, selectionMark = true }: { data: CaseData; selected: boolean;
-  /** The shared ivory outline and check on the picked case. The tablet turns it off and keeps only the lift. */ selectionMark?: boolean }) {
+/** Selection is the lift alone (PC and tablet): no outline or check; the owning button shows keyboard focus. */
+export function LightCase({ data, selected }: { data: CaseData; selected: boolean }) {
   const [ratio, setRatio] = useState(.71);
   return <span className="collection-light-case" data-front={selected || undefined} style={{ "--case-ratio": ratio, "--plastic": CASE_PLASTIC[data.platform], "--gloss": selected ? "50%" : "84%" } as CSSProperties}>
     <span className="cs-box">
-      <span className={selectionMark ? "cs-front ui-selectable-media" : "cs-front"} aria-selected={selectionMark ? selected : undefined}>
+      <span className="cs-front">
         <span className="ins">
           {!data.privacy && data.front ? <StableImage src={data.front} alt={data.title} draggable={false} onLoad={event => {
             const image = event.currentTarget;
             if (image.naturalWidth && image.naturalHeight) setRatio(Math.max(.4, Math.min(1.4, image.naturalWidth / image.naturalHeight)));
           }} /> : <span className="case-mask" />}
         </span>
-        {selectionMark && selected && <span className="ui-selection-check" aria-hidden="true" />}
       </span>
       <span className="cs-spine"><span className={spineInsertClass(data)}><CaseSpine decorative data={data} /></span></span>
       <span className="cs-top" />

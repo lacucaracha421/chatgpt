@@ -59,7 +59,7 @@ export function ShelfTile({item, revision, active, privacy, picked, extra, onTap
   // visible covers keep the ticket queue first; until it decodes the case prints its title.
   const spine = useCoverUrl(item, item.spineArtworkId, revision, active && !privacy && !!item.spineArtworkId && (front !== null || (!cover && !item.coverAssetId)), host);
   return <button ref={host} type="button" className="collection-card" data-collection-id={item.id} aria-selected={picked} aria-label={item.name} onClick={() => onTap(item.id)}>
-    <span className="collection-card__light"><LightCase data={workCaseData(item, {front, spine: item.spineArtworkId ? spine : null}, privacy)} selected={picked} selectionMark={false}/></span>
+    <span className="collection-card__light"><LightCase data={workCaseData(item, {front, spine: item.spineArtworkId ? spine : null}, privacy)} selected={picked}/></span>
     <span className="collection-card__meta"><span className="collection-card__name">{item.name}</span>{extra && <span className="collection-card__extra">{extra}</span>}</span>
   </button>;
 }
