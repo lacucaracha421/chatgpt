@@ -960,6 +960,8 @@ Status: `TODO` — requested by the user 2026-10-02 (while trying the release bu
 9. **Less plain manga work screen:** a faint, blurred version of the shown volume's cover behind the stage (both clients), kept quiet so the book stays the subject. AV: the user also wants something there but has no direction yet — bring two or three options (e.g. a faint package art backdrop, performer portraits, a dimmed sample frame) before building.
 10. **메모 editing usability (tablet and PC):** review the editing screen for visibility and convenience (where the caret is, toolbar reach, line/checklist editing, save state) after the IME/Backspace fixes land; propose changes with a mockup.
 11. **가계부 cleanup — HOLD for the user's plan:** subscription price confirmation and other flows have grown complex; the user will reorganise the ledger themselves first. Do not change the ledger until that plan arrives.
+12. **Home: only what needs attention now (user, 2026-10-02):** trim Home to items that call for action or are time-sensitive; the rest moves to its own screens. Direction for the whole app after the redesign rounds: reduce excessive information while fixing bugs (state it in each bug round, not as a sweep).
+13. **Tablet search using the existing tags:** add a search feature to the tablet app (assets first) that reuses the tags the library already has (auto tags, classifications/characters, artists) — suggestions while typing, tag chips as filters; check what the server already exposes (catalog tag suggestions exist) before adding routes.
 
 
 ## ASSET-EAGLE-20261001 — PC Asset screen candidates from the Eagle comparison
