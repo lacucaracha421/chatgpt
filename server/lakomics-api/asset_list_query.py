@@ -1,0 +1,69 @@
+"""Shared date/id keyset selection for ordinary Asset pages and their TOCs."""
+
+from datetime import datetime, timezone
+
+SORT_AT = "COALESCE(asset.collected_at, asset.created_at)"
+
+
+class AssetListQuery:
+    """A resolved scope and filter set, before any page cursor is applied.
+
+    SQL fragments are supplied by the route, never by request text. Both readers use
+    this same selection and ordering, including visibility through ``visible_assets``.
+    """
+
+    def __init__(self, from_clause, where_clause, params, sort):
+        self.from_clause = from_clause
+        self.where_clause = where_clause
+        self.params = list(params)
+        self.sort = sort
+        self.direction = "DESC" if sort == "newest" else "ASC"
+        self.comparison = "<" if sort == "newest" else ">"
+
+    def select(self, columns, *, after=None, limit=None):
+        where = self.where_clause
+        params = self.params.copy()
+        if after is not None:
+            where += (f" AND ({SORT_AT} {self.comparison} ?"
+                      f" OR ({SORT_AT} = ? AND asset.id {self.comparison} ?))")
+            params.extend([after[0], after[0], after[1]])
+        sql = (f"SELECT {columns} FROM {self.from_clause} WHERE {where}"
+               f" ORDER BY {SORT_AT} {self.direction}, asset.id {self.direction}")
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        return sql, params
+
+    def page(self, db, limit, after=None):
+        sql, params = self.select(f"asset.*, {SORT_AT} AS mobile_sort_at",
+                                 after=after, limit=limit)
+        return db.execute(sql, params).fetchall()
+
+    def toc(self, db, generation, encode_cursor):
+        """Count ordered month runs and mint their preceding-row cursors.
+
+        The caller holds the read transaction that also supplied ``generation``.
+        Stream only date/id, keeping memory proportional to the bucket count.
+        Using the actual ordering avoids a separate boundary query and preserves the
+        id tie-break even when many Assets share a timestamp at a month edge.
+        """
+        # Month keys are UTC calendar months, labelled by the client. Legacy naive
+        # timestamps are UTC too. Parse without SQLite's millisecond rounding, which
+        # would move 23:59:59.999999 at a month edge into the following month.
+        sql, params = self.select(f"asset.id, {SORT_AT} AS mobile_sort_at")
+        buckets = []
+        total = 0
+        previous = None
+        for row in db.execute(sql, params):
+            instant = datetime.fromisoformat(row["mobile_sort_at"].replace("Z", "+00:00"))
+            if instant.tzinfo is not None:
+                instant = instant.astimezone(timezone.utc)
+            month = f"{instant.year:04d}-{instant.month:02d}"
+            if not buckets or buckets[-1]["key"] != month:
+                buckets.append({"key": month, "startIndex": total, "count": 0,
+                                "startCursor": encode_cursor(previous) if previous else None})
+            buckets[-1]["count"] += 1
+            total += 1
+            previous = (row["mobile_sort_at"], row["id"])
+        return {"tocVersion": 1, "listGeneration": generation, "totalCount": total,
+                "sort": self.sort, "buckets": buckets}

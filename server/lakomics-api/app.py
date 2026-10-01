@@ -27,6 +27,7 @@ from starlette.requests import ClientDisconnect
 import album_authority
 import asset_authority
 import asset_filters
+import asset_list_query
 import asset_visibility
 import authority
 import change_signal
@@ -1969,6 +1970,8 @@ def list_mobile_classification_assets(
     classification_id: str | None = None,
     authorization: str | None = Header(default=None),
     cursor: str | None = None,
+    toc: int = Query(default=0, ge=0, le=1),
+    if_none_match: str | None = Header(default=None),
     sort: Literal["newest", "oldest"] = "newest",
     limit: int = Query(
         default=MOBILE_LIBRARY_DEFAULT_LIMIT,
@@ -1988,16 +1991,17 @@ def list_mobile_classification_assets(
     Filters are evaluated by the database, before the page is cut, so `limit` counts
     matching Assets rather than post-filter survivors of an arbitrary page. The technical
     fields a user filters on — `width`, `height`, `duration_ms` — are read live from the
-    canonical Asset row, and `filterVersion` is advertised even when nothing is filtered
+    canonical Asset row, and pages advertise `filterVersion` even when nothing is filtered
     so a client can tell "this server applied no filter" from "this server ignores filters".
+    `toc=1` returns the full UTC month index for that same listing instead of a page;
+    it accepts no cursor and is independent of the page limit.
     """
     require_auth(authorization)
+    if toc and cursor is not None:
+        raise HTTPException(status_code=400, detail="toc and cursor are mutually exclusive")
     filters = asset_filters.parse(media_kind, aspect_ratio, duration_ms_min, duration_ms_max)
-    comparison = "<" if sort == "newest" else ">"
-    direction = "DESC" if sort == "newest" else "ASC"
-    params: list[object] = []
     classification_clause = ""
-    cursor_clause = ""
+    after = None
     if cursor is not None:
         # The cursor carries the filter identity. A cursor minted under different filters must
         # not be resumed here: it would silently walk a listing the client did not ask for.
@@ -2021,19 +2025,9 @@ def list_mobile_classification_assets(
                 parsed[2:], 400, "Invalid cursor")
         else:
             raise HTTPException(status_code=400, detail="Invalid cursor")
-        cursor_clause = f"""
-            AND (
-                COALESCE(asset.collected_at, asset.created_at) {comparison} ?
-                OR (
-                    COALESCE(asset.collected_at, asset.created_at) = ?
-                    AND asset.id {comparison} ?
-                )
-            )
-        """
-        params.extend([cursor_sort_at, cursor_sort_at, cursor_asset_id])
-    params.append(limit + 1)
+        after = (cursor_sort_at, cursor_asset_id)
 
-    # The filter's own bindings precede the cursor/limit ones, matching the clause order.
+    # The scope bindings precede the shared technical filter bindings.
     filter_clause, filter_params = asset_filters.filter_clause(filters)
 
     with get_db() as db:
@@ -2044,17 +2038,14 @@ def list_mobile_classification_assets(
         # One authority read for both the filter and the projection, so a page cannot be
         # selected from one state and projected from another.
         active = authority.active_domain(db, classification_authority.DOMAIN)
-        # Clause parameters are collected in the order their clauses appear in the SQL
-        # below, then prepended to the cursor/limit parameters. Building them this way
-        # rather than inserting at fixed indices keeps the binding correct as clauses
-        # are added.
+        # Collect bindings in clause order rather than inserting at fixed indices,
+        # so adding a scope predicate cannot shift a filter's bindings.
         clause_params: list[object] = []
         # Asset lifecycle (ADR-0038) is enforced by the shared `visible_assets`
         # projection, which this query reads, so there is deliberately no second
         # lifecycle predicate here: one rule means a trashed Asset cannot be hidden on
         # one route and visible on another. The projection fails closed, so an Asset
         # whose canonical row is missing is hidden rather than exposed.
-        lifecycle_clause = ""
         if classification_id is not None:
             # Written as a membership test over the classification's own index rather
             # than a correlated EXISTS: the planner turned the latter into a walk of the
@@ -2083,23 +2074,15 @@ def list_mobile_classification_assets(
                     )
                 """
                 clause_params.append(classification_id)
-        # Clause bindings precede the cursor/limit bindings in the statement below.
-        params[:0] = clause_params + filter_params
-        rows = db.execute(
-            f"""
-            SELECT asset.*,
-                   COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
-            FROM visible_assets AS asset
-            WHERE asset.committed = 1
-              {lifecycle_clause}
-              {classification_clause}
-              {filter_clause}
-              {cursor_clause}
-            ORDER BY mobile_sort_at {direction}, asset.id {direction}
-            LIMIT ?
-            """,
-            params,
-        ).fetchall()
+        query = asset_list_query.AssetListQuery(
+            "visible_assets AS asset",
+            f"asset.committed = 1 {classification_clause} {filter_clause}",
+            clause_params + filter_params, sort)
+        if toc:
+            payload = query.toc(db, generation, lambda previous: asset_filters.encode_cursor(
+                "library-assets", filters, [sort, classification_id, *previous]))
+            return conditional.json_response(payload, if_none_match)
+        rows = query.page(db, limit + 1, after)
         has_more = len(rows) > limit
         page_rows = rows[:limit]
         memberships = {row["id"]: [] for row in page_rows}
@@ -2151,8 +2134,10 @@ def list_mobile_classification_assets(
             [sort, classification_id, last["mobile_sort_at"], last["id"]])
     # `listGeneration` is additive: a client binds the page to it in one round trip instead
     # of bracketing the fetch with two `/v1/library/list-generation` reads.
-    return {"items": items, "next_cursor": next_cursor, "has_more": has_more,
-            "filterVersion": asset_filters.FILTER_VERSION, "listGeneration": generation}
+    return conditional.json_response(
+        {"items": items, "next_cursor": next_cursor, "has_more": has_more,
+         "filterVersion": asset_filters.FILTER_VERSION, "listGeneration": generation},
+        if_none_match)
 
 
 def _summary_now() -> datetime:

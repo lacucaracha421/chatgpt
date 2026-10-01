@@ -74,6 +74,7 @@ import authority
 import conditional
 import asset_authority
 import asset_filters
+import asset_list_query
 import asset_visibility
 import classification_authority
 
@@ -548,18 +549,21 @@ def split_membership_key(value):
     return album_id, asset_id
 
 
-def encode_asset_cursor(album_id, after, filters):
+def encode_asset_cursor(album_id, after, filters, sort="newest"):
     """One Album Asset page cursor, bound to the Album and the filter set that minted it.
 
     The Album id sits in the same slot the shipped cursor used, directly after the read tag
     and in front of the ``(sort key, id)`` pair, so the payload layout is unchanged from the
     legacy one and only the envelope wraps it.
     """
+    # Keep the shipped newest cursor unchanged; oldest uses a distinct sort tag in
+    # the same envelope/layout so neither direction can resume the other's walk.
+    tag = ALBUM_ASSETS_SORT if sort == "newest" else "album-assets-oldest"
     return asset_filters.encode_cursor(
-        "album-assets", filters, [ALBUM_ASSETS_SORT, album_id, after[0], after[1]])
+        "album-assets", filters, [tag, album_id, after[0], after[1]])
 
 
-def resolve_asset_cursor(cursor, album_id, filters, fail):
+def resolve_asset_cursor(cursor, album_id, filters, fail, sort="newest"):
     """This route's Asset-page cursor, in either the legacy or the filtered form.
 
     Two shapes are accepted, and both are held to the same scope identity:
@@ -590,7 +594,8 @@ def resolve_asset_cursor(cursor, album_id, filters, fail):
     # binding of the Album it was minted for whatever its outer form was. Anything else
     # carries no Album at all and is refused, by ``decode_cursor`` for the envelope, and here
     # for a bare list whose ``lead`` slot it could not check.
-    if (len(payload) != 4 or payload[0] != ALBUM_ASSETS_SORT or payload[1] != album_id
+    tag = ALBUM_ASSETS_SORT if sort == "newest" else "album-assets-oldest"
+    if (len(payload) != 4 or payload[0] != tag or payload[1] != album_id
             or not isinstance(payload[2], str) or not payload[2]
             or not isinstance(payload[3], str) or not payload[3]):
         fail(422, "invalidAlbumAssetsCursor", "앨범 자산 커서가 올바르지 않습니다.")
@@ -1379,7 +1384,9 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
     @app.get(PREFIX + "/assets")
     async def album_assets(request: Request, libraryId: str, epoch: int, albumId: str,
                            cursor: str | None = None, limit: int = DEFAULT_ALBUM_ASSET_PAGE,
-                           authorization: str | None = Header(default=None)):
+                           sort: str = "newest", toc: int = 0,
+                           authorization: str | None = Header(default=None),
+                           if_none_match: str | None = Header(default=None)):
         """Bounded read-only projection of one Album's displayable Assets.
 
         This is the authority read for Album *contents*. Membership comes from
@@ -1391,18 +1398,23 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
 
         The same three media filters the ordinary library offers are applied here, in
         SQL and before this page is cut, through the shared ``asset_filters`` predicates.
+        `toc=1` returns the full UTC month index in the requested date/id order instead
+        of a page; it accepts no cursor and is independent of the page limit.
         """
         require_client(authorization)
+        if toc == 1 and cursor is not None:
+            fail(400, "invalidAlbumAssets", "toc and cursor are mutually exclusive")
         if not set(request.query_params) <= {"libraryId", "epoch", "albumId", "cursor", "limit",
-                                             "media_kind", "aspect_ratio",
+                                             "sort", "toc", "media_kind", "aspect_ratio",
                                              "duration_ms_min", "duration_ms_max"}:
             fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
         if (not LIBRARY_ID_PATTERN.fullmatch(libraryId) or epoch < 1
                 or not ALBUM_ID_PATTERN.fullmatch(albumId)
+                or sort not in ("newest", "oldest") or toc not in (0, 1)
                 or not 1 <= limit <= MAX_ALBUM_ASSET_PAGE):
             fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
         filters, filter_clause, filter_params = parse_asset_filters(request.query_params, fail)
-        after = None if cursor is None else resolve_asset_cursor(cursor, albumId, filters, fail)
+        after = None if cursor is None else resolve_asset_cursor(cursor, albumId, filters, fail, sort)
 
         def run():
             with get_db() as db:
@@ -1420,40 +1432,17 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                     # rather than as gone.
                     fail(404, "albumNotFound", "앨범을 찾을 수 없습니다.", albumId=albumId)
                 clause_params = [libraryId, albumId] + filter_params
-                request_cursor = encode_asset_cursor(albumId, after, filters) if after else None
-                if after is None:
-                    cursor_clause = ""
-                    params = clause_params + [limit + 1]
-                else:
-                    # Strict inequality on the (sort key, id) pair: every page is
-                    # disjoint from the previous one, so the walk cannot loop.
-                    cursor_clause = """
-                        AND (
-                            COALESCE(asset.collected_at, asset.created_at) < ?
-                            OR (
-                                COALESCE(asset.collected_at, asset.created_at) = ?
-                                AND asset.id < ?
-                            )
-                        )
-                    """
-                    params = clause_params + [after[0], after[0], after[1], limit + 1]
-                rows = db.execute(
-                    f"""
-                    SELECT asset.*,
-                           COALESCE(asset.collected_at, asset.created_at) AS mobile_sort_at
-                    FROM album_authority_members AS member
-                    JOIN visible_assets AS asset ON asset.id = member.asset_id
-                    WHERE member.library_id = ?
-                      AND member.album_id = ?
-                      AND member.desired_state = 1
-                      AND asset.committed = 1
-                      {filter_clause}
-                      {cursor_clause}
-                    ORDER BY mobile_sort_at DESC, asset.id DESC
-                    LIMIT ?
-                    """,
-                    params,
-                ).fetchall()
+                query = asset_list_query.AssetListQuery(
+                    "album_authority_members AS member"
+                    " JOIN visible_assets AS asset ON asset.id = member.asset_id",
+                    "member.library_id = ? AND member.album_id = ?"
+                    f" AND member.desired_state = 1 AND asset.committed = 1 {filter_clause}",
+                    clause_params, sort)
+                if toc:
+                    return query.toc(db, generation, lambda previous: encode_asset_cursor(
+                        albumId, previous, filters, sort))
+                request_cursor = encode_asset_cursor(albumId, after, filters, sort) if after else None
+                rows = query.page(db, limit + 1, after)
                 has_more = len(rows) > limit
                 page_rows = rows[:limit]
                 memberships = asset_classification_ids(db, page_rows)
@@ -1463,7 +1452,7 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                 if has_more and page_rows:
                     last = page_rows[-1]
                     next_cursor = encode_asset_cursor(
-                        albumId, (last["mobile_sort_at"], last["id"]), filters)
+                        albumId, (last["mobile_sort_at"], last["id"]), filters, sort)
                     if next_cursor == request_cursor:
                         # Unreachable while the ordering is strict; if it ever happens
                         # a client would page forever, so it must be an error, not a loop.
@@ -1477,7 +1466,7 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                     page["listGeneration"] = generation
                 return page
 
-        return await run_in_threadpool(run)
+        return conditional.json_response(await run_in_threadpool(run), if_none_match)
 
     @app.get(PREFIX + "/changes")
     async def album_changes(request: Request, libraryId: str, epoch: int, after: int = 0,
