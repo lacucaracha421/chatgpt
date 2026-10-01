@@ -48,7 +48,7 @@ describe("turnable manga book", () => {
   it("prints title, number and author only on the big book and cuts its own cover at the stored focus", () => {
     const { container, rerender } = render(<MangaBook {...props} />);
     const spine = container.querySelector('.manga-jspine')!;
-    expect([...spine.children].map(node => node.textContent)).toEqual(["위치 WATCH", "2", "", "작가 이름", ""]);
+    expect([...spine.children].map(node => node.getAttribute("aria-hidden") === "true" ? null : node.textContent)).toEqual(["위치 WATCH", "2", "", "작가 이름", "", null]);
     const image = spine.querySelector<HTMLImageElement>('img')!;
     expect(image.style.objectPosition).toBe("50% 30%");
     rerender(<MangaBook {...props} focus={.25} />);
@@ -59,6 +59,29 @@ describe("turnable manga book", () => {
     const shelf = screen.getByRole("group", { name: "권별 책장" });
     expect(shelf.querySelector('.manga-jspine')).toBeNull();
     expect(shelf).not.toHaveTextContent("위치 WATCH"); expect(shelf).not.toHaveTextContent("작가 이름");
+  });
+  it("shrinks a long title, then sets two columns split at the subtitle, measured before paint", () => {
+    const long = "드래곤 퀘스트 다이의 대모험 : 용사 아방과 옥염의 마왕";
+    // Each character measures one base em (22px); the spine is 34 × 560, so the title area is 291px.
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) { return this.dataset.text ? Array.from(this.dataset.text).length * 22 : 0; });
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("manga-jspine") ? 34 : 0; });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("manga-jspine") ? 560 : 0; });
+    const { container, rerender } = render(<MangaBook {...props} title="원피스" />);
+    const title = () => container.querySelector<HTMLElement>(".manga-jspine-title")!;
+    expect([...title().querySelectorAll(".manga-jspine-column")].map(node => node.textContent)).toEqual(["원피스"]);
+    expect(title().style.getPropertyValue("--title-scale")).toBe("0.66");
+    rerender(<MangaBook {...props} title={long} />);
+    expect(title()).toHaveClass("manga-jspine-title--columns");
+    expect([...title().querySelectorAll(".manga-jspine-column")].map(node => node.textContent)).toEqual(["드래곤 퀘스트 다이의 대모험", "용사 아방과 옥염의 마왕"]);
+    rerender(<MangaBook {...props} title="죠죠의 기묘한 모험 다이아" />);
+    expect(title()).not.toHaveClass("manga-jspine-title--columns");
+    expect(Number(title().style.getPropertyValue("--title-scale"))).toBeLessThan(.66);
+  });
+  it("prints punctuation in vertical forms and short numbers upright", () => {
+    const { container } = render(<MangaBook {...props} title="그래, '최강' 12권!" />);
+    const title = container.querySelector(".manga-jspine-title")!;
+    expect(title).toHaveTextContent("그래︐ ﹁최강﹂ 12권︕");
+    expect(title.querySelector(".manga-jspine-tcy")).toHaveTextContent("12");
   });
   it("masks all printed art in privacy mode", () => {
     const ready = vi.fn(); const { container } = render(<MangaBook {...props} privacy onReady={ready} />);

@@ -1,5 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { stripPosition } from "./coverStrip";
+import { fitSpineTitle, spineTitleSplits, verticalSpineRuns, verticalSpineText, SPINE_TITLE_SCALE, type SpineTitleFit } from "./verticalText";
+
+/** Share of the spine height the title may take; the rest holds the number, illustration and author. */
+const TITLE_SHARE = .52;
+/** Upright vertical type: mapped punctuation, upright one- or two-digit numbers. */
+function Vertical({ text }: { text: string }) {
+  return <>{verticalSpineRuns(verticalSpineText(text)).map((run, index) => run.upright ? <span key={index} className="manga-jspine-tcy">{run.text}</span> : <Fragment key={index}>{run.text}</Fragment>)}</>;
+}
 
 // The work surface retains the old book until every visible face of this one decodes.
 export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus, privacy, frontReset, onReady }: {
@@ -8,6 +16,11 @@ export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus
 }) {
   const host = useRef<HTMLDivElement>(null);
   const illustration = useRef<HTMLSpanElement>(null);
+  const spine = useRef<HTMLSpanElement>(null);
+  const ruler = useRef<HTMLSpanElement>(null);
+  // The ruler holds every candidate column at the base size; the fit is decided before paint.
+  const rulerTexts = useMemo(() => [...new Set([title, ...spineTitleSplits(title).flatMap(split => split.parts)])], [title]);
+  const [titleFit, setTitleFit] = useState<SpineTitleFit & { title: string }>({ title, scale: SPINE_TITLE_SCALE.base, columns: [title], clipped: false });
   const [angle, setAngle] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [ratio, setRatio] = useState(.71);
@@ -43,6 +56,22 @@ export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(node); return () => observer?.disconnect();
   }, [privacy, title, author, volumeNumber]);
+  useLayoutEffect(() => {
+    const node = spine.current, measuring = ruler.current; if (!node || !measuring) return;
+    const measure = () => {
+      const lengths = new Map([...measuring.children].map(child => [(child as HTMLElement).dataset.text ?? "", (child as HTMLElement).offsetHeight]));
+      const fit = { title, ...fitSpineTitle(title, { available: node.clientHeight * TITLE_SHARE, width: node.clientWidth, length: text => lengths.get(text) ?? 0 }) };
+      setTitleFit(previous => JSON.stringify(previous) === JSON.stringify(fit) ? previous : fit);
+    };
+    measure();
+    // Web fonts change the measured lengths after they load.
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(measuring);
+    let live = true;
+    document.fonts?.ready.then(() => { if (live) measure(); });
+    return () => { live = false; observer?.disconnect(); };
+  }, [privacy, title]);
+  const shownTitle = titleFit.title === title ? titleFit : { scale: SPINE_TITLE_SCALE.base, columns: [title], clipped: false };
   function settle(face: string) {
     if (settled.current.generation !== generation) return;
     settled.current.faces.add(face);
@@ -94,12 +123,15 @@ export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus
         event.preventDefault(); event.stopPropagation();
       }}>
       <span className="manga-bb-back">{cover("back")}</span>
-      <span className="manga-bb-spine">{privacy ? <span className="privacy-mask" aria-label="비공개 모드" /> : <span className="manga-jspine">
-        <span className="manga-jspine-title">{title}</span>
+      <span className="manga-bb-spine">{privacy ? <span className="privacy-mask" aria-label="비공개 모드" /> : <span ref={spine} className="manga-jspine" style={{ "--title-share": TITLE_SHARE, "--title-base": SPINE_TITLE_SCALE.base } as CSSProperties}>
+        <span className={`manga-jspine-title${shownTitle.columns.length > 1 ? " manga-jspine-title--columns" : ""}`} style={{ "--title-scale": shownTitle.scale } as CSSProperties}>
+          {shownTitle.columns.map((column, index) => <span key={index} className="manga-jspine-column"><Vertical text={column} /></span>)}
+        </span>
         {volumeNumber !== null && <span className="manga-jspine-number">{volumeNumber}</span>}
         <span ref={illustration} className="manga-jspine-illustration">{cover("illustration")}</span>
-        {author && <span className="manga-jspine-author">{author}</span>}
+        {author && <span className="manga-jspine-author"><Vertical text={author} /></span>}
         <span className="manga-jspine-bar" />
+        <span ref={ruler} className="manga-jspine-ruler" aria-hidden="true">{rulerTexts.map(text => <span key={text} data-text={text}><Vertical text={text} /></span>)}</span>
       </span>}</span>
       <span className="manga-bb-pages" aria-hidden="true" /><span className="manga-bb-top" aria-hidden="true" />
       <span className="manga-bb-front">{cover("front")}{!privacy && !src && <span className="manga-cover-empty">표지가 없습니다.</span>}</span>

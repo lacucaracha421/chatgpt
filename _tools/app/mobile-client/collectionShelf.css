@@ -30,7 +30,8 @@
 .tablet-work .work-strip { position: relative; inset: auto; height: 112px; justify-content: flex-start; padding: 0 var(--mobile-gutter); scrollbar-width: none; }
 .tablet-work .work-strip::-webkit-scrollbar { display: none; }
 .tablet-work .work-strip-tile { min-width: var(--touch-target); padding: 0; background: transparent; border: 0; font: inherit; font-size: var(--type-meta); }
-.tablet-work .manga-bookcase.work-strip { height: 184px; padding: var(--space-8) var(--mobile-gutter); }
+.tablet-work .manga-bookcase.work-strip { height: 184px; padding: 0; }
+.tablet-work .manga-bookcase .home-shelf__track { padding: var(--space-8) var(--mobile-gutter); }
 .tablet-work .manga-spine { border: 0; background: transparent; font: inherit; }
 .tablet-work .asset-viewer__edge { position: absolute; z-index: 2; top: 30%; bottom: 30%; display: flex; align-items: center; justify-content: center; width: var(--touch-target); padding: 0; color: var(--color-muted); background: transparent; border: 0; }
 .tablet-work .asset-viewer__edge--left { left: 0; }
