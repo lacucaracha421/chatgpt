@@ -63,6 +63,7 @@ pub(crate) mod auto_tags;
 pub(crate) mod tagger_review;
 pub(crate) mod character_suggestions;
 pub(crate) mod home;
+pub(crate) mod launchbox;
 
 #[tauri::command]
 pub async fn inspect_metadata_import(folder: String) -> Result<MetadataImportPlan, CommandError> {

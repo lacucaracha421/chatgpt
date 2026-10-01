@@ -624,6 +624,13 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   listCollectionCovers: (collectionId) => invoke<CollectionCover[]>("list_collection_covers", { collectionId }),
   importCollectionArtworks: (collectionId) =>
     invoke<number>("import_collection_artworks", { collectionId }),
+  fetchLaunchBoxSpine: (collectionId) =>
+    invoke<import("./types").LaunchBoxSpineOutcome>("fetch_launchbox_spine", { collectionId }),
+  fetchLaunchBoxSpines: (request, onProgress) => {
+    const channel = new Channel<import("./types").LaunchBoxSpineProgress>();
+    channel.onmessage = progress => onProgress?.(progress);
+    return invoke<import("./types").LaunchBoxSpineBatchResult>("fetch_launchbox_spines", { request, onProgress: channel });
+  },
   listCollectionWorkArtworks: (collectionId) =>
     invoke<WorkArtworkSummary[]>("list_collection_work_artworks", { collectionId }),
   getCollectionWorkRecord: collectionId => invoke<CollectionWorkRecord>("get_collection_work_record", { collectionId }),

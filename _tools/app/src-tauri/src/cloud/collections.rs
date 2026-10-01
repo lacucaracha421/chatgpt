@@ -7,6 +7,9 @@ mod av;
 #[cfg(test)]
 #[path = "collections_av_tests.rs"]
 mod av_tests;
+#[cfg(test)]
+#[path = "collections_launchbox_tests.rs"]
+mod launchbox_tests;
 use super::publication::{report, Reporter};
 use super::client::CloudClient;
 use crate::library::{

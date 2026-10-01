@@ -1535,6 +1535,8 @@ export interface LibraryGateway {
   setCollectionSourceRoot(path: string | null): Promise<number>;
   listCollectionCovers(collectionId: string): Promise<CollectionCover[]>;
   importCollectionArtworks(collectionId: string): Promise<number>;
+  fetchLaunchBoxSpine?(collectionId: string): Promise<LaunchBoxSpineOutcome>;
+  fetchLaunchBoxSpines?(request: LaunchBoxSpineBatchRequest, onProgress?: (progress: LaunchBoxSpineProgress) => void): Promise<LaunchBoxSpineBatchResult>;
   listCollectionWorkArtworks(collectionId: string): Promise<WorkArtworkSummary[]>;
   getCollectionWorkRecord?(collectionId: string): Promise<CollectionWorkRecord>;
   saveCollectionWorkRecord?(collectionId: string, edit: CollectionRecordEdit): Promise<CollectionWorkRecord>;
@@ -1711,4 +1713,33 @@ export type LegacyPackageMigrationReport = {
   failed: number;
   failures: LegacyPackageMigrationFailure[];
   bookCollections: LegacyPackageBookCollections;
+};
+
+export type LaunchBoxSpineOutcome = {
+  collectionId: string;
+  status: "matched" | "no_match" | "ambiguous" | "failed" | "skipped";
+  reason: string;
+  artworkId: string | null;
+  databaseId: string | null;
+  platform: string | null;
+  fileName: string | null;
+  region: string | null;
+  cached: boolean;
+};
+export type LaunchBoxSpineProgress = {
+  jobId: string;
+  phase: "started" | "loading_metadata" | "fetching_image" | "game_completed" | "completed" | "cancelled";
+  processed: number;
+  total: number;
+  outcome: LaunchBoxSpineOutcome | null;
+};
+export type LaunchBoxSpineBatchRequest =
+  | { action: "run"; jobId: string; limit: number; afterCollectionId?: string | null }
+  | { action: "cancel"; jobId: string };
+export type LaunchBoxSpineBatchResult = {
+  jobId: string;
+  cancelled: boolean;
+  outcomes: LaunchBoxSpineOutcome[];
+  nextCursor: string | null;
+  hasMore: boolean;
 };

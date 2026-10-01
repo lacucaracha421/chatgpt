@@ -121,6 +121,7 @@ mod folder_appearance;
 pub(crate) mod home_data;
 pub(crate) mod igdb;
 mod igdb_flow;
+pub(crate) mod launchbox;
 mod image_fingerprint;
 pub(crate) mod ingestion;
 pub mod legacy_migration;

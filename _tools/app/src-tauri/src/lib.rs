@@ -579,6 +579,8 @@ pub fn run() {
             commands::set_collection_source_root,
             commands::list_collection_covers,
             commands::import_collection_artworks,
+            commands::launchbox::fetch_launchbox_spine,
+            commands::launchbox::fetch_launchbox_spines,
             commands::list_collection_work_artworks,
             commands::list_collection_volumes,
             commands::get_collection_work_record,
