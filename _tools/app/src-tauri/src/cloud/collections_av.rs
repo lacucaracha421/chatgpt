@@ -1,14 +1,20 @@
-//! AV's mobile projection contains text and cover crops only. Performer records (memo,
+//! AV's mobile projection contains text and cover crops. Performer records (memo,
 //! favourite, StashDB profile text, portrait attribution) cross only under the `people`
-//! replica feature, and never portrait bytes, StashDB images or match candidates.
-use super::ReplicaCollection;
+//! replica feature; the chosen StashDB/Commons portrait bytes only under `portraitImage`,
+//! uploaded as an artwork blob. StashDB image URLs and match candidates never cross.
+use super::{blob_for, ArtworkBlob, ReplicaCollection};
 use crate::library::{error::LibraryError, models::CollectionType};
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
-use std::collections::BTreeSet;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 /// Server bound on the replica's top-level `people`.
 pub(super) const MAX_PEOPLE: usize = 2000;
+/// Server bound on an uploaded performer portrait (`portraitImage`).
+pub(super) const MAX_PORTRAIT_BYTES: u64 = 5 * 1024 * 1024;
 
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +38,95 @@ struct AvPerson {
     role: String,
     order: i64,
     portrait_crop: Option<AvPortraitCrop>,
+    /// Feature `portraitImage`; omitted otherwise, so older bodies stay byte-identical.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    portrait_image: Option<AvPortraitImage>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct AvPortraitImage {
+    sha256: String,
+    size_bytes: u64,
+    content_type: String,
+    width: u32,
+    height: u32,
+}
+
+/// Portrait descriptors of one snapshot by person id, each person's bytes hashed once.
+/// `None` = no publishable image (crop, missing, oversized or not jpeg/png/webp).
+pub(super) type PortraitImages = BTreeMap<String, Option<(AvPortraitImage, ArtworkBlob)>>;
+
+/// The stored StashDB/Commons portrait bytes of `person`, when they are within `limit`.
+/// The length is checked before the BLOB is read, so an oversized image is never loaded.
+pub(super) fn portrait_bytes(
+    db: &Connection,
+    person: &str,
+    limit: u64,
+) -> Result<Option<(Vec<u8>, i64, i64)>, LibraryError> {
+    const IMAGE: &str =
+        "person_id=?1 AND kind IN ('stashdb','commons') AND image_bytes IS NOT NULL";
+    let length: Option<i64> = db
+        .query_row(
+            &format!("SELECT length(image_bytes) FROM collection_person_portraits WHERE {IMAGE}"),
+            [person],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if !length.is_some_and(|length| length > 0 && length as u64 <= limit) {
+        return Ok(None);
+    }
+    Ok(db
+        .query_row(
+            &format!(
+                "SELECT image_bytes, width, height FROM collection_person_portraits WHERE {IMAGE}"
+            ),
+            [person],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?
+        .filter(|(bytes, _, _): &(Vec<u8>, i64, i64)| bytes.len() as u64 <= limit))
+}
+
+/// Upload-time re-read through a fresh read-only connection; the caller re-checks the hash.
+pub(super) fn read_portrait_bytes(
+    database: &Path,
+    person: &str,
+    limit: u64,
+) -> Result<Option<Vec<u8>>, LibraryError> {
+    let db = Connection::open_with_flags(database, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    db.busy_timeout(std::time::Duration::from_secs(5))?;
+    Ok(portrait_bytes(&db, person, limit)?.map(|(bytes, _, _)| bytes))
+}
+
+fn portrait_image(
+    db: &Connection,
+    person: &str,
+) -> Result<Option<(AvPortraitImage, ArtworkBlob)>, LibraryError> {
+    let Some((bytes, width, height)) = portrait_bytes(db, person, MAX_PORTRAIT_BYTES)? else {
+        return Ok(None);
+    };
+    // Sniffed, never re-encoded: the published hash is the stored bytes' hash.
+    let Some(blob) = blob_for(&bytes)
+        .ok()
+        .filter(|blob| blob.content_type != "image/gif")
+    else {
+        return Ok(None);
+    };
+    let (Ok(width), Ok(height)) = (u32::try_from(width), u32::try_from(height)) else {
+        return Ok(None);
+    };
+    if width == 0 || height == 0 {
+        return Ok(None);
+    }
+    let image = AvPortraitImage {
+        sha256: blob.sha256.clone(),
+        size_bytes: blob.size_bytes,
+        content_type: blob.content_type.clone(),
+        width,
+        height,
+    };
+    Ok(Some((image, blob)))
 }
 
 #[derive(Debug, Serialize)]
@@ -56,10 +151,12 @@ pub(super) fn published_covers(collections: &[ReplicaCollection]) -> BTreeSet<St
         .collect()
 }
 
+/// `portraits` is `Some` only with the `portraitImage` feature.
 pub(super) fn committed_av(
     db: &Connection,
     id: &str,
     covers: &BTreeSet<String>,
+    mut portraits: Option<&mut PortraitImages>,
 ) -> Result<AvInfo, LibraryError> {
     let row = db
         .query_row(
@@ -116,11 +213,22 @@ pub(super) fn committed_av(
                 role: r.get(3)?,
                 order: r.get(4)?,
                 portrait_crop,
+                portrait_image: None,
             })
         })?
         .collect::<Result<_, _>>()?;
     if info.people.len() > 64 || info.genres.len() > 64 {
         return Err(LibraryError::InvalidCloudResponse);
+    }
+    if let Some(portraits) = portraits.as_deref_mut() {
+        for person in &mut info.people {
+            if !portraits.contains_key(&person.id) {
+                portraits.insert(person.id.clone(), portrait_image(db, &person.id)?);
+            }
+            person.portrait_image = portraits[&person.id]
+                .as_ref()
+                .map(|(image, _)| image.clone());
+        }
     }
     Ok(info)
 }

@@ -1,4 +1,5 @@
-//! Replica features (`workRecord`, `coverFocus`, `people`): sent only when advertised.
+//! Replica features (`workRecord`, `coverFocus`, `people`, `portraitImage`): sent only when
+//! advertised.
 use super::*;
 use crate::cloud::client::CollectionsStatus;
 use serde_json::{json, Value};
@@ -8,12 +9,14 @@ const ALL: ReplicaFeatures = ReplicaFeatures {
     work_record: true,
     cover_focus: true,
     people: true,
+    portrait_image: true,
 };
 const AV_ONLY: ReplicaFeatures = ReplicaFeatures {
     av: true,
     work_record: false,
     cover_focus: false,
     people: false,
+    portrait_image: false,
 };
 
 fn fixture() -> (tempfile::TempDir, Library) {
@@ -86,7 +89,7 @@ fn replica_features_follow_the_status_advertisement() {
             },
         ),
         (
-            json!({"collectionTypes": ["av"], "replicaFeatures": ["workRecord", "coverFocus", "people"]}),
+            json!({"collectionTypes": ["av"], "replicaFeatures": ["workRecord", "coverFocus", "people", "portraitImage"]}),
             ALL,
         ),
     ] {
@@ -361,4 +364,231 @@ fn publication_sends_new_fields_only_to_a_server_that_advertises_them() {
     assert_eq!(item(&value, "g")["ownedPlatform"], "PS5");
     assert_eq!(item(&value, "m")["volumes"][0]["coverFocusX"], 0.25);
     assert_eq!(value["people"].as_array().unwrap().len(), 3);
+}
+
+const PORTRAIT: ReplicaFeatures = ReplicaFeatures {
+    portrait_image: true,
+    ..AV_ONLY
+};
+
+fn png(width: u32, height: u32, shade: u8) -> Vec<u8> {
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(width, height, image::Rgb([shade, 20, 30]))
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    bytes.into_inner()
+}
+
+fn store_portrait(library: &Library, bytes: &[u8]) {
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE collection_person_portraits SET image_bytes=?1,width=3,height=2 WHERE person_id='p'",
+            [bytes],
+        )
+        .unwrap();
+}
+
+fn av_people(value: &Value, id: &str) -> Vec<Value> {
+    item(value, id)["av"]["people"].as_array().unwrap().clone()
+}
+
+/// Performer `p` (Commons portrait) appears in both AV works.
+fn portrait_fixture() -> (tempfile::TempDir, Library, Vec<u8>) {
+    let (temp, library) = fixture();
+    library
+        .connection()
+        .unwrap()
+        .execute_batch("INSERT INTO collection_person_relations(collection_id,person_id,role,sort_order) VALUES('av2','p','performer',1)")
+        .unwrap();
+    let bytes = png(3, 2, 200);
+    store_portrait(&library, &bytes);
+    (temp, library, bytes)
+}
+
+#[test]
+fn portrait_image_is_the_stored_bytes_descriptor_once_per_person() {
+    let (_temp, library, bytes) = portrait_fixture();
+    let snapshot = library
+        .cloud_collections_snapshot_with_features(None, None, PORTRAIT, &|_| {})
+        .unwrap();
+    let value = serde_json::to_value(&snapshot.replica).unwrap();
+    let blob = blob_for(&bytes).unwrap();
+    let expected = json!({"sha256": blob.sha256, "sizeBytes": bytes.len(), "contentType": "image/png", "width": 3, "height": 2});
+    for work in ["av", "av2"] {
+        let p = av_people(&value, work)
+            .into_iter()
+            .find(|person| person["id"] == "p")
+            .unwrap();
+        assert_eq!(p["portraitImage"], expected, "{work}");
+    }
+    // One upload for the person, read back from the library at upload time.
+    assert_eq!(snapshot.files.len(), 1);
+    let local = &snapshot.files[&blob.sha256];
+    assert_eq!(local.descriptor, blob);
+    assert!(matches!(&local.source, BlobSource::Portrait { person_id, .. } if person_id == "p"));
+    // Crops and people without an image are exactly what the feature-less body carries.
+    let plain = serde_json::to_value(
+        &library
+            .cloud_collections_snapshot_with_features(None, None, AV_ONLY, &|_| {})
+            .unwrap()
+            .replica,
+    )
+    .unwrap();
+    for work in ["av", "av2"] {
+        let mut people = av_people(&value, work);
+        for person in &mut people {
+            assert!(person["id"] == "p" || person.get("portraitImage").is_none());
+            person.as_object_mut().unwrap().remove("portraitImage");
+        }
+        assert_eq!(people, av_people(&plain, work), "{work}");
+    }
+    assert!(av_people(&value, "av2")
+        .iter()
+        .any(|person| person["id"] == "n" && person.get("portraitCrop").is_some()));
+}
+
+#[test]
+fn oversized_or_unrecognised_portraits_are_omitted_without_failing() {
+    let (_temp, library, _) = portrait_fixture();
+    let mut oversized = png(3, 2, 1);
+    oversized.resize(5 * 1024 * 1024 + 1, 0);
+    let mut gif = b"GIF89a".to_vec();
+    gif.extend([0; 32]);
+    for bytes in [oversized, gif, b"not an image".to_vec()] {
+        store_portrait(&library, &bytes);
+        let snapshot = library
+            .cloud_collections_snapshot_with_features(None, None, PORTRAIT, &|_| {})
+            .unwrap();
+        let value = serde_json::to_value(&snapshot.replica).unwrap();
+        for work in ["av", "av2"] {
+            assert!(av_people(&value, work)
+                .iter()
+                .all(|person| person.get("portraitImage").is_none()));
+        }
+        assert!(snapshot.files.is_empty());
+    }
+}
+
+#[test]
+fn without_the_feature_portraits_add_no_field_and_no_upload() {
+    let (_temp, library, _) = portrait_fixture();
+    let with_image = body(&library, AV_ONLY);
+    store_portrait(&library, b"not an image");
+    assert_eq!(body(&library, AV_ONLY), with_image);
+    store_portrait(&library, &png(3, 2, 7));
+    let snapshot = library
+        .cloud_collections_snapshot_with_features(None, None, ALL, &|_| {})
+        .unwrap();
+    assert_eq!(snapshot.files.len(), 1);
+    let without = library
+        .cloud_collections_snapshot_with_features(
+            None,
+            None,
+            ReplicaFeatures {
+                portrait_image: false,
+                ..ALL
+            },
+            &|_| {},
+        )
+        .unwrap();
+    assert!(without.files.is_empty());
+    assert!(!serde_json::to_string(&without.replica)
+        .unwrap()
+        .contains("portraitImage"));
+}
+
+#[test]
+fn portrait_upload_rereads_the_library_and_refuses_changed_bytes() {
+    let (_temp, library, bytes) = portrait_fixture();
+    let snapshot = library
+        .cloud_collections_snapshot_with_features(None, None, PORTRAIT, &|_| {})
+        .unwrap();
+    let local = snapshot.files.values().next().unwrap();
+    let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+    let client = CloudClient::new(&format!("http://{}", server.server_addr())).unwrap();
+    let expected = local.descriptor.clone();
+    let worker = std::thread::spawn(move || {
+        let mut request = server
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        assert_eq!(request.url(), "/v1/collections/artworks/prepare");
+        let body: Value = serde_json::from_reader(request.as_reader()).unwrap();
+        assert_eq!(
+            body,
+            json!({"sha256": expected.sha256, "sizeBytes": expected.size_bytes, "contentType": "image/png"})
+        );
+        request
+            .respond(tiny_http::Response::from_string(
+                json!({"objectKey": expected.object_key, "uploadUrl": null, "requiredHeaders": {}})
+                    .to_string(),
+            ))
+            .unwrap();
+        // Nothing else: the changed portrait below never reaches the server.
+        assert!(server
+            .recv_timeout(std::time::Duration::from_millis(300))
+            .unwrap()
+            .is_none());
+    });
+    assert!(!upload_local_blob(&client, "token", local).unwrap());
+    assert_eq!(local.descriptor, blob_for(&bytes).unwrap());
+    store_portrait(&library, &png(3, 2, 9));
+    assert!(matches!(
+        upload_local_blob(&client, "token", local),
+        Err(LibraryError::InvalidWorkArtwork)
+    ));
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "DELETE FROM collection_person_portraits WHERE person_id='p'",
+            [],
+        )
+        .unwrap();
+    assert!(matches!(
+        upload_local_blob(&client, "token", local),
+        Err(LibraryError::InvalidWorkArtwork)
+    ));
+    worker.join().unwrap();
+}
+
+#[test]
+fn an_advertising_server_receives_the_portrait_through_the_artwork_flow() {
+    use crate::library::collection_personal_edits::tests::{configure, scripted};
+    let (_temp, library, bytes) = portrait_fixture();
+    let blob = blob_for(&bytes).unwrap();
+    let (base, handle) = scripted(vec![
+        (
+            "/v1/collections/status",
+            200,
+            json!({"revision": "r1", "collectionTypes": ["game", "manga", "movie", "av"], "replicaFeatures": ["portraitImage"]}).to_string(),
+        ),
+        ("/v1/collections?limit=1", 200, json!({"revision": "r1"}).to_string()),
+        ("/v1/collections/artworks/check", 200, json!({"missing": [blob.sha256]}).to_string()),
+        (
+            "/v1/collections/artworks/prepare",
+            200,
+            json!({"objectKey": blob.object_key, "uploadUrl": null, "requiredHeaders": {}}).to_string(),
+        ),
+        ("/v1/collections/replica", 200, json!({"revision": "r2"}).to_string()),
+    ]);
+    configure(&library, &base);
+    let client = CloudClient::new(&base).unwrap();
+    library
+        .push_cloud_collections_with(&client, &base, "shared", None, &|_| {})
+        .unwrap();
+    let seen = handle.join().unwrap();
+    let check: Value = serde_json::from_str(&seen[2].2).unwrap();
+    assert_eq!(check["items"].as_array().unwrap().len(), 1);
+    let sent: Value = serde_json::from_str(&seen[4].2).unwrap();
+    assert_eq!(
+        av_people(&sent, "av")
+            .iter()
+            .find(|person| person["id"] == "p")
+            .unwrap()["portraitImage"]["sha256"],
+        blob.sha256
+    );
+    assert!(sent.get("people").is_none());
 }

@@ -68,6 +68,7 @@ pub(crate) struct ReplicaFeatures {
     pub work_record: bool,
     pub cover_focus: bool,
     pub people: bool,
+    pub portrait_image: bool,
 }
 impl ReplicaFeatures {
     pub(crate) fn from_status(status: &super::client::CollectionsStatus) -> Self {
@@ -76,6 +77,7 @@ impl ReplicaFeatures {
             work_record: status.supports_replica_feature("workRecord"),
             cover_focus: status.supports_replica_feature("coverFocus"),
             people: status.supports_replica_feature("people"),
+            portrait_image: status.supports_replica_feature("portraitImage"),
         }
     }
 }
@@ -196,8 +198,14 @@ pub struct CloudCollectionsPublishResult {
 }
 struct LocalBlob {
     descriptor: ArtworkBlob,
-    path: PathBuf,
+    source: BlobSource,
     limit: u64,
+}
+/// Where upload re-reads a blob's bytes; both are re-hashed against the descriptor.
+enum BlobSource {
+    File(PathBuf),
+    /// A performer's stored StashDB/Commons portrait, read from a fresh read-only connection.
+    Portrait { database: PathBuf, person_id: String },
 }
 struct Snapshot {
     replica: CollectionReplica,
@@ -366,10 +374,16 @@ fn publish_snapshot_as(client: &CloudClient, token: &str, replica_token: &str, s
 }
 
 fn upload_local_blob(client: &CloudClient, token: &str, local: &LocalBlob) -> Result<bool, LibraryError> {
-    if local.path.canonicalize().map_err(|_| LibraryError::InvalidWorkArtwork)? != local.path {
-        return Err(LibraryError::InvalidWorkArtwork);
+    let bytes = match &local.source {
+        BlobSource::File(path) => {
+            if path.canonicalize().map_err(|_| LibraryError::InvalidWorkArtwork)? != *path {
+                return Err(LibraryError::InvalidWorkArtwork);
+            }
+            read_existing_image(path, local.limit)?
+        }
+        BlobSource::Portrait { database, person_id } => av::read_portrait_bytes(database, person_id, local.limit)?,
     }
-    let bytes = read_existing_image(&local.path, local.limit)?.ok_or(LibraryError::InvalidWorkArtwork)?;
+    .ok_or(LibraryError::InvalidWorkArtwork)?;
     if blob_for(&bytes)? != local.descriptor { return Err(LibraryError::InvalidWorkArtwork); }
     client.upload_collection_artwork(&local.descriptor, &bytes, token)
 }
@@ -519,15 +533,24 @@ fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite:
         // A person's crop can refer to another AV work. Resolve it only after the
         // complete snapshot's selected covers and byte descriptors are known.
         let covers = av::published_covers(&collections);
+        // Portrait uploads re-read the library file; without one there is nothing to upload.
+        let portrait_database = transaction.path().filter(|path| features.portrait_image && !path.is_empty()).map(PathBuf::from);
+        let mut portraits = av::PortraitImages::new();
         for collection in &mut collections {
             if collection.summary.collection_type == crate::library::models::CollectionType::Av {
-                let info = av::committed_av(&transaction, &collection.summary.id, &covers)?;
+                let info = av::committed_av(&transaction, &collection.summary.id, &covers, portrait_database.as_ref().map(|_| &mut portraits))?;
                 metadata_bytes += serde_json::to_vec(&info)
                     .map_err(|_| LibraryError::InvalidCloudResponse)?.len() + 6;
                 if metadata_bytes > MAX_METADATA_BYTES {
                     return Err(LibraryError::InvalidCloudResponse);
                 }
                 collection.av = Some(info);
+            }
+        }
+        if let Some(database) = &portrait_database {
+            for (person_id, (_, blob)) in portraits.iter().filter_map(|(id, image)| Some((id, image.as_ref()?))) {
+                let source = BlobSource::Portrait { database: database.clone(), person_id: person_id.clone() };
+                insert_blob(blob.clone(), source, av::MAX_PORTRAIT_BYTES, &mut files, &mut total_bytes)?;
             }
         }
         let people = if features.people {
@@ -719,21 +742,26 @@ fn add_blob(
         return Err(LibraryError::InvalidWorkArtwork);
     }
     let Some(descriptor) = cache::descriptor(root, &path, limit)? else { return Ok(None); };
+    insert_blob(descriptor.clone(), BlobSource::File(path), limit, files, total)?;
+    Ok(Some(descriptor))
+}
+
+/// Content-addressed: the first source of identical bytes is the one uploaded.
+fn insert_blob(
+    descriptor: ArtworkBlob,
+    source: BlobSource,
+    limit: u64,
+    files: &mut BTreeMap<String, LocalBlob>,
+    total: &mut u64,
+) -> Result<(), LibraryError> {
     if !files.contains_key(&descriptor.sha256) {
         *total += descriptor.size_bytes;
         if files.len() >= MAX_FILES || *total > MAX_TOTAL_BYTES {
             return Err(LibraryError::InvalidWorkArtwork);
         }
-        files.insert(
-            descriptor.sha256.clone(),
-            LocalBlob {
-                descriptor: descriptor.clone(),
-                path,
-                limit,
-            },
-        );
+        files.insert(descriptor.sha256.clone(), LocalBlob { descriptor, source, limit });
     }
-    Ok(Some(descriptor))
+    Ok(())
 }
 
 fn read_existing_image(path: &Path, limit: u64) -> Result<Option<Vec<u8>>, LibraryError> {
@@ -855,7 +883,8 @@ mod tests {
             assert!(collection.summary.source_path.is_none());
             for art in &collection.artworks {
                 let blob=art.thumbnail.as_ref().unwrap();
-                let image=image::open(&first.files[&blob.sha256].path).unwrap();
+                let BlobSource::File(path) = &first.files[&blob.sha256].source else { panic!("file blob") };
+                let image=image::open(path).unwrap();
                 assert!(image.width()<=360 && image.height()<=360);
             }
         }
@@ -1024,7 +1053,7 @@ mod tests {
         let server=Server::http("127.0.0.1:0").unwrap();
         let client=CloudClient::new(&format!("http://{}",server.server_addr())).unwrap();
         let blob=blob_for(b"\x89PNG\r\n\x1a\nknown").unwrap();
-        let files=BTreeMap::from([(blob.sha256.clone(),LocalBlob{descriptor:blob,path:PathBuf::from("does-not-exist.png"),limit:100})]);
+        let files=BTreeMap::from([(blob.sha256.clone(),LocalBlob{descriptor:blob,source:BlobSource::File(PathBuf::from("does-not-exist.png")),limit:100})]);
         let worker=std::thread::spawn(move || {
             let mut request=server.recv_timeout(std::time::Duration::from_secs(5)).unwrap().unwrap();
             assert_eq!(request.url(),"/v1/collections/artworks/check");
