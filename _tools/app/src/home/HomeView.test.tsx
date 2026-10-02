@@ -224,6 +224,27 @@ describe("Home visit read acknowledgement", () => {
   });
 });
 
+describe("Home wishlist arrivals", () => {
+  it.each(["2026-09-25", "2026-09-26"])("never marks an unwished calendar movie NEW on %s, including a saved pending arrival", async date => {
+    writeHomeVisit("fixture", { lastVisit: new Date(2026, 8, 24).toISOString(), pending: [`title:digger:${date}:`], opened: [] });
+    gateway.releaseCalendar.calendar.mockResolvedValue({ entries: [title("digger", "디거", "movie", date, { region: "korea" })], sources: [] });
+    renderHome();
+    await waitFor(() => expect(readHomeVisit("fixture").lastVisit).toBe(NOW.toISOString()));
+    expect(screen.queryByText("디거")).toBeNull();
+    expect(screen.queryByText("NEW")).toBeNull();
+  });
+
+  it("keeps a wished movie's unread release NEW even before the previous visit, unless muted", async () => {
+    writeHomeVisit("fixture", { lastVisit: NOW.toISOString(), pending: [], opened: [] });
+    const watched = title("wish", "관심 영화", "movie", "2026-09-23", { released: true, unread: [{ id: "event", itemId: "wish", kind: "released", previousValue: null, currentValue: "2026-09-23", detectedAt: iso(12), readAt: null }] });
+    gateway.releaseCalendar.wishlist.mockResolvedValue([watched, { ...watched, id: "muted", title: "조용한 영화", muted: true }]);
+    renderHome();
+    const row = await screen.findByRole("button", { name: /관심 영화/ });
+    expect(within(row).getByText("NEW")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /조용한 영화/ })).toBeNull();
+  });
+});
+
 it('keeps the saved visit until collections have successfully loaded and their arrivals are displayed', async () => {
   const previous = new Date(2026,8,24).toISOString();
   writeHomeVisit('fixture', {lastVisit: previous, pending: [], opened: []});

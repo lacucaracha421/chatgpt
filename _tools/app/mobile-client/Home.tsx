@@ -145,7 +145,7 @@ export function Home(props: HomeProps) {
   }
   const muted = new Set(upcoming.wishlistItems.filter(entry => entry.muted).map(entry => entry.id));
   for (const entry of [...upcoming.wishlistItems, ...upcoming.entries]) {
-    if (muted.has(entry.id) || arrivals.has(`title:${entry.id}`)) continue;
+    if (!upcoming.wishlist.has(entry.id) || muted.has(entry.id) || arrivals.has(`title:${entry.id}`)) continue;
     const event = (upcoming.wishlistItems.find(wish => wish.id === entry.id)?.events ?? []).filter(e => e.kind === 'released' && !e.readAt).sort((a,b) => b.detectedAt.localeCompare(a.detectedAt))[0];
     if (event || (entry.precision === 'exact' && entry.date && entry.date <= today)) arrivals.set(`title:${entry.id}`, { key: `title:${entry.id}`, token: `title:${entry.id}:${entry.date ?? event?.id ?? ''}`, date: entry.date ?? null, fresh: !!event, name: entry.title, detail: '발매됨', workId: '', external: entry });
   }

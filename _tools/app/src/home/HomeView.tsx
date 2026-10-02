@@ -8,7 +8,7 @@ import { groupInbox, localDay } from "../collections/releaseCaption";
 import { useReleaseData } from "../collections/releaseData";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useLibrary } from "../library/LibraryContext";
-import type { AssetView, ClassificationEntry, CollectionSummary, HomeOverview, ReleaseCalendar, ReleaseTitle, ReleaseWishlistItem } from "../library/types";
+import type { AssetView, ClassificationEntry, CollectionSummary, HomeOverview, ReleaseTitle, ReleaseWishlistItem } from "../library/types";
 import { characterApi, type CharacterTarget } from "../characters/api";
 import { TaggerReview } from "../characters/TaggerReview";
 import { taggerDecisionApi, taggerReviewSource, type TaggerDecisionApi, type TaggerReviewItem, type TaggerReviewSource } from "../characters/taggerReviewClient";
@@ -88,7 +88,6 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   const [wishlist, setWishlist] = useState<ReleaseWishlistItem[]>([]);
   const [wishlistReady, setWishlistReady] = useState(!calendarApi);
   const [wishlistError, setWishlistError] = useState(false);
-  const [calendar, setCalendar] = useState<ReleaseCalendar | null>(null);
   const [releaseDetail, setReleaseDetail] = useState<ReleaseTitle | null>(null);
   const [shelfRetry, setShelfRetry] = useState(0);
   const [calendarRead, setCalendarRead] = useState<{ api: typeof calendarApi; root: string; retry: number } | null>(null);
@@ -99,7 +98,7 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
       if (live) { setWishlist(items ?? []); setWishlistReady(true); setWishlistError(false); }
       return true;
     }, () => { if (live) setWishlistError(true); return false; });
-    const releaseRead = calendarApi.calendar().then(value => { if (live) setCalendar(value); return true; }, () => false);
+    const releaseRead = calendarApi.calendar().then(() => true, () => false);
     void Promise.all([wishlistRead, releaseRead]).then(results => {
       if (live && results.every(Boolean)) setCalendarRead({ api: calendarApi, root, retry: shelfRetry });
     });
@@ -224,7 +223,7 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
     { key: "pending", label: "처리 대기", count: overview?.server?.capturesPending ?? 0, open: go({ kind: "settings", section: "connection" }) },
   ].filter((todo) => todo.count > 0);
 
-  const releases = newlyReleasedRows(collections, board, inbox, wishlist, today, calendar?.entries ?? []);
+  const releases = newlyReleasedRows(collections, board, inbox, wishlist, today);
   const arrivalItems = releases.map(row => ({ ...row, date: row.date ?? null, token: `${row.key}:${row.date ?? ''}:${row.volume ?? ''}`, fresh: row.caption.kind === 'new' }));
   const arrivalsReady = collectionsReady && (!tracking || Boolean(release.data && !release.loading && !release.error))
     && (!calendarApi || (calendarRead?.api === calendarApi && calendarRead.root === root && calendarRead.retry === shelfRetry));

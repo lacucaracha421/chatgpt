@@ -48,7 +48,7 @@ PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 
 - Show what needs attention: nonzero review queues, ledger reminders, open items from pinned 할 일 notes and connection problems. Start 오늘 할 것 with this month's subscription total and the next charge countdown.
 - PC: 오늘 할 것 in the left column, with 1년 전 오늘 immediately below it; 새로 나옴 and the next two weeks of releases in the right column. The tablet follows that reading order. This placement supersedes the prototype's original right-column anniversary block (`6426fd99`, `c538c508`).
-- 새로 나옴 covers works released since the last visit; NEW remains until opened. Catalog bookmarks are favourites to reopen, so bookmarked chapters are excluded. Do not add 이어 읽기.
+- 새로 나옴 covers local works and wishlist titles released since the last visit, plus their unread release notices; NEW remains until opened. General release-calendar entries require wishlist membership to appear here, including after a new Korean date or calendar-window refresh; muted or removed wishlist titles are excluded. Catalog bookmarks are favourites to reopen, so bookmarked chapters are excluded. Do not add 이어 읽기.
 - Asset totals belong in 통계, healthy connection status in top-bar 확인, artist/performer picks in 작가, and memo cards/ledger detail in 메모. Reduce excess information within each screen's redesign or bug-fix round.
 
 ## 4. 표면과 형태

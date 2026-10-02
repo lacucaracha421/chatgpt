@@ -175,18 +175,17 @@ export function characterReviewGroups(
   return result.sort((a, b) => Number(a.seriesId === null) - Number(b.seriesId === null) || b.total - a.total || a.seriesName.localeCompare(b.seriesName, "ko"));
 }
 
-/** Existing NEW notices plus dated releases already available to this device. */
-export function newlyReleasedRows(collections: CollectionSummary[], board: Map<string, ReleaseBoardEntry>, inbox: Map<string, ReleaseInboxItem[]>, wishlist: ReleaseWishlistItem[], today: string, calendar: ReleaseTitle[] = []): ReleaseRow[] {
+/** Existing NEW notices plus dated local works and wishlist releases. General calendar entries are not followed titles. */
+export function newlyReleasedRows(collections: CollectionSummary[], board: Map<string, ReleaseBoardEntry>, inbox: Map<string, ReleaseInboxItem[]>, wishlist: ReleaseWishlistItem[], today: string): ReleaseRow[] {
   const rows = new Map(releaseRows(collections, board, inbox, wishlist, today).map(row => [row.key, row]));
   for (const release of koreanReleases(collections.filter(c => c.type === 'manga'), board, inbox, today)) {
     const volume = release.volumes.filter(v => v.released && v.date && v.date <= today).sort((a, b) => b.date!.localeCompare(a.date!) || b.volumeNumber - a.volumeNumber)[0];
     const key = `manga:${release.work.id}`;
     if (volume && !rows.has(key)) rows.set(key, { key, kind: 'manga', name: release.work.name, collection: release.work, date: volume.date, volume: volume.volumeNumber, caption: { kind: 'info', text: `${volume.volumeNumber}권`, date: null } });
   }
-  const muted = new Set(wishlist.filter(title => title.muted).map(title => title.id));
-  for (const title of [...wishlist, ...calendar]) {
+  for (const title of wishlist) {
     const key = `title:${title.id}`;
-    if (!muted.has(title.id) && title.precision === 'exact' && title.date && title.date <= today && !rows.has(key)) rows.set(key, { key, kind: title.kind, name: title.title, title, date: title.date, caption: { kind: 'info', text: '발매됨', date: null } });
+    if (!title.muted && title.precision === 'exact' && title.date && title.date <= today && !rows.has(key)) rows.set(key, { key, kind: title.kind, name: title.title, title, date: title.date, caption: { kind: 'info', text: '발매됨', date: null } });
   }
   for (const collection of collections) {
     const key = `work:${collection.id}`;

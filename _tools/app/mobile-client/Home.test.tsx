@@ -9,6 +9,7 @@ import {Home, type HomeProps} from './Home';
 import {setOutboxConnection} from './outboxConnection';
 import {resetReleaseStore} from './releaseStore';
 import {resetHomeSourceCache} from './homeCache';
+import {commitUpcomingWishlist} from './upcomingWishlistOutbox';
 
 const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn(), loadThumbnail: vi.fn()}));
 vi.mock('./transport', async () => { const actual = await vi.importActual<typeof import('./transport')>('./transport'); return {...actual, api: mocks.api, native: mocks.native}; });
@@ -81,15 +82,40 @@ describe('shared Home attention on tablet', () => {
     render(<Home {...props()}/>);
     expect(await screen.findByText('오늘 할 것이 없습니다')).toBeTruthy();
   });
-  it('uses cached calendar release dates since this device visit without a wishlist', async () => {
-    localStorage.setItem('lakomics.home.visit.v1:https://a.example',JSON.stringify({lastVisit:new Date(2026,8,23).toISOString(),pending:[],opened:[]}));
-    server.upcoming={entries:[{...upcomingEntry,date:'2026-09-24'}],wishlist:[]};
+  it.each(['2026-09-24', '2026-09-25'])('never marks an unwished Korean calendar movie NEW on %s, including a saved pending arrival', async date => {
+    const key = 'lakomics.home.visit.v1:https://a.example';
+    const previous = new Date(2026,8,23).toISOString();
+    localStorage.setItem(key,JSON.stringify({lastVisit:previous,pending:[`title:digger:${date}`],opened:[]}));
+    server.upcoming={entries:[{...upcomingEntry,id:'digger',title:'디거',kind:'movie',region:'korea',date}],wishlist:[]};
+    render(<Home {...props()}/>);
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(key)!).lastVisit).not.toBe(previous));
+    expect(screen.queryByText('디거')).toBeNull();
+  });
+  it('keeps a wished title\'s unread release NEW before the previous visit, unless muted', async () => {
+    localStorage.setItem('lakomics.home.visit.v1:https://a.example',JSON.stringify({lastVisit:new Date(2026,8,25).toISOString(),pending:[],opened:[]}));
+    const watched = {...upcomingEntry,date:'2026-09-22',source:'calendar',released:true,events:[{id:'release',kind:'released',currentValue:'2026-09-22',detectedAt:'2026-09-24T10:00:00Z',readAt:null}]};
+    server.upcoming={entries:[],wishlist:[watched,{...watched,id:'muted',title:'Muted movie',muted:true}]};
     render(<Home {...props()}/>);
     const row=await screen.findByRole('button',{name:/Hades II/});
     expect(within(row).getByText('NEW')).toBeTruthy();
+    expect(screen.queryByRole('button',{name:/Muted movie/})).toBeNull();
     fireEvent.click(row);
     expect(await screen.findByRole('dialog',{name:'Hades II'})).toBeTruthy();
     expect(mocks.api.mock.calls.some(([path])=>path.includes('detail'))).toBe(false);
+  });
+  it.each([false, true])('uses the pending wishlist choice (%s) for calendar arrivals', async interested => {
+    const key = 'lakomics.home.visit.v1:https://a.example';
+    const previous = new Date(2026,8,23).toISOString();
+    localStorage.setItem(key,JSON.stringify({lastVisit:previous,pending:['title:game-1:2026-09-24'],opened:[]}));
+    const released = {...upcomingEntry,date:'2026-09-24'};
+    server.upcoming={entries:[released],wishlist:interested ? [] : [released]};
+    commitUpcomingWishlist(released.id, interested);
+    render(<Home {...props()}/>);
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(key)!).lastVisit).not.toBe(previous));
+    if (interested) {
+      const row = await screen.findByRole('button',{name:/Hades II/});
+      expect(within(row).getByText('NEW')).toBeTruthy();
+    } else expect(screen.queryByText('Hades II')).toBeNull();
   });
   it('routes the review and pinned task rows', async () => {
     const p = props({captures:[item('pending')]}); render(<Home {...p}/>);
@@ -168,7 +194,7 @@ it.each(['/v1/collections/releases', '/v1/collections/status', '/v1/collections?
   const key = 'lakomics.home.visit.v1:https://a.example';
   const previous = new Date(2026,8,23).toISOString();
   localStorage.setItem(key, JSON.stringify({lastVisit:previous,pending:[],opened:[]}));
-  server.upcoming={entries:[{...upcomingEntry,date:'2026-09-24'}],wishlist:[]};
+  server.upcoming={entries:[{...upcomingEntry,date:'2026-09-24'}],wishlist:[{...upcomingEntry,date:'2026-09-24'}]};
   const original=mocks.api.getMockImplementation()!;
   let complete: (() => void) | undefined;
   mocks.api.mockImplementation((path,...args) => {

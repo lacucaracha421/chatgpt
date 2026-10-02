@@ -10,11 +10,6 @@ describe('Home release sources', () => {
     expect(rows[0]?.caption.kind).toBe('new'); expect(rows[1]?.caption.kind).toBe('info');
     expect(releaseRows([],new Map(),new Map(),wishlist,'2026-10-02').map(r=>r.name)).toEqual(['new']);
   });
-  it('includes cached calendar arrivals without needing wishlist membership', () => {
-    const calendar = title('cached', '2026-10-01');
-    expect(newlyReleasedRows([],new Map(),new Map(),[],'2026-10-02',[calendar]).map(r=>r.name)).toEqual(['cached']);
-    expect(newlyReleasedRows([],new Map(),new Map(),[title('cached','2026-10-01',{muted:true})],'2026-10-02',[calendar])).toEqual([]);
-  });
   it('uses exact release dates of locally known works, omitting AV and imprecise dates', () => {
     const works = [{id:'g',name:'Game',type:'game',releaseDate:'2026-10-01'}, {id:'av',name:'AV',type:'av',releaseDate:'2026-10-01'}, {id:'year',name:'Year',type:'game',releaseDate:'2026'}] as CollectionSummary[];
     expect(newlyReleasedRows(works,new Map(),new Map(),[],'2026-10-02').map(r=>r.name)).toEqual(['Game']);
