@@ -11,6 +11,7 @@ Mockup for backlog `PC-POLISH-20261002` items 12 (Home) and 4 (더보기 · 찾�
 
 Update 2026-10-02 (after a comparison of Plex, Jellyfin, Kavita, Komga, Mihon, Steam, Google/Apple Photos, YNAB, Rocket
 Money and others; accepted by the user): add 「새로 나옴」 at the top of the right column (works whose release date passed
-since the last visit and new chapters of bookmarked catalog titles, marked NEW until opened) and a one-line subscription
+since the last visit, marked NEW until opened; catalog bookmarks are favourites to re-open, not followed series, so
+new chapters of bookmarked titles are deliberately not shown) and a one-line subscription
 total at the top of 「오늘 할 것」 (this month's total, next charge in N days). No 「이어 읽기」: the user rarely resumes
 reading. Motion: rows that appear or resolve collapse/expand in 140 ms; refreshes never blank the screen.
