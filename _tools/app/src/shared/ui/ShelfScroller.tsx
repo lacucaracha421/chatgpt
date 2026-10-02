@@ -1,5 +1,6 @@
 import { ChevronRightIcon } from "@heroicons/react/24/outline";
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useHorizontalWheel } from "./useHorizontalWheel";
 
 type ShelfScrollerProps = {
   children: ReactNode;
@@ -32,6 +33,12 @@ export function ShelfScroller({ children, previousLabel = "이전 발매 예정"
     const node = track.current;
     if (!node) return;
     target.current = Math.max(0, Math.min(node.scrollWidth - node.clientWidth, left));
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      node.scrollLeft = target.current;
+      stop();
+      measure();
+      return;
+    }
     if (frame.current !== null) return;
     const step = () => {
       const goal = target.current;
@@ -45,22 +52,15 @@ export function ShelfScroller({ children, previousLabel = "이전 발매 예정"
   };
   useEffect(() => stop, []);
 
-  useEffect(() => {
-    const node = track.current;
-    if (!node) return;
-    const wheel = (event: WheelEvent) => {
-      const vertical = Math.abs(event.deltaY) > Math.abs(event.deltaX);
-      const raw = vertical ? event.deltaY : event.deltaX;
-      const delta = event.deltaMode === 1 ? raw * 40 : event.deltaMode === 2 ? raw * node.clientWidth : raw;
-      const from = target.current ?? node.scrollLeft;
-      const max = node.scrollWidth - node.clientWidth;
-      if ((delta < 0 && from <= 0) || (delta > 0 && from >= max - 1)) return;
-      event.preventDefault();
-      easeTo(from + delta * 1.6);
-    };
-    node.addEventListener("wheel", wheel, { passive: false });
-    return () => node.removeEventListener("wheel", wheel);
-  }, []);
+  const bindWheel = useHorizontalWheel({
+    getLeft: () => target.current ?? track.current?.scrollLeft ?? 0,
+    pan: delta => easeTo((target.current ?? track.current?.scrollLeft ?? 0) + delta * 1.6),
+  });
+  const bindTrack = useCallback((node: HTMLDivElement | null) => {
+    track.current = node;
+    const cleanup = bindWheel(node);
+    return () => { cleanup?.(); track.current = null; };
+  }, [bindWheel]);
 
   const drag = useRef<{ x: number; left: number; moved: boolean; lastX: number; lastT: number; velocity: number } | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -98,11 +98,10 @@ export function ShelfScroller({ children, previousLabel = "이전 발매 예정"
     if (node) easeTo((target.current ?? node.scrollLeft) + direction * node.clientWidth * 0.9);
   };
   return <div className="home-shelf">
-    <div ref={track} className={`home-shelf__track${dragging ? " is-dragging" : ""}`} onScroll={measure}
+    <div ref={bindTrack} className={`home-shelf__track${dragging ? " is-dragging" : ""}`} onScroll={measure}
       onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}
       onClickCapture={clickCapture} onDragStart={(event) => event.preventDefault()}>{children}</div>
     {!edges.start && <button type="button" className="home-shelf__arrow home-shelf__arrow--prev" aria-label={previousLabel} onClick={() => page(-1)}><ChevronRightIcon aria-hidden="true" /></button>}
     {!edges.end && <button type="button" className="home-shelf__arrow home-shelf__arrow--next" aria-label={nextLabel} onClick={() => page(1)}><ChevronRightIcon aria-hidden="true" /></button>}
   </div>;
 }
-

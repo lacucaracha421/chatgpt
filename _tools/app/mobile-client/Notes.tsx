@@ -1,3 +1,4 @@
+import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {useVisibleInterval} from './useVisibleInterval';
 import {SIGNAL_FALLBACK_MS,useSyncSignal} from './syncSignals';
 import {TopBar} from './TopBar';
@@ -118,6 +119,7 @@ function RecoveryKey({store}:{store:NotesStore}) {
  *  `onHomeEntryGone`: called when that note is trashed or the list is used instead, so App forgets
  *  the Home origin and Notes behaves like a normal tab visit from then on. */
 export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findStore}:{active:boolean;findStore?:NotesStore;backRef:MutableRefObject<(()=>boolean)|null>;request?:{id:string;key:number}|null;onReturnHome?:()=>void;onHomeEntryGone?:()=>void}) {
+  const stripWheel=useHorizontalWheel();
   useEffect(clearLegacyQuickSections,[]);
   const [store]=useState(()=>findStore??new NotesStore(mobileNotesRequest));
   const state=useSyncExternalStore(store.subscribe,store.snapshot);
@@ -327,7 +329,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
         {kinds.inline}
         {trash?<p className="hint notes-trash-hint">열어서 복원할 수 있습니다.</p>:<form className="notes-search" role="search" onSubmit={event=>{event.preventDefault();(document.activeElement as HTMLElement|null)?.blur();}}><TextInput className="notes-search__input" icon={MagnifyingGlassIcon} aria-label="메모 검색" placeholder="제목, 본문, 라벨 검색" value={query} onChange={event=>setQuery(event.target.value)}/>{query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>setQuery('')}/>}</form>}
         {/* Labels are the user's own tags, not kinds: they sit on their own row after a tag mark. */}
-        {!trash&&allLabels.length>0&&<div className="notes-filter-bar"><TagIcon className="notes-filter-tag" aria-hidden="true"/><div className="filter-chips notes-label-filter" role="group" aria-label="라벨">{allLabels.map(l=>{const on=!!label&&labelKey(label)===labelKey(l.label);return <button key={labelKey(l.label)} type="button" className={`filter-chip${on?' selected':''}`} aria-pressed={on} onClick={()=>setLabel(on?null:l.label)}>{l.label}<span className="numeric">{l.count}</span></button>;})}</div></div>}
+        {!trash&&allLabels.length>0&&<div ref={stripWheel} className="notes-filter-bar"><TagIcon className="notes-filter-tag" aria-hidden="true"/><div className="filter-chips notes-label-filter" role="group" aria-label="라벨">{allLabels.map(l=>{const on=!!label&&labelKey(label)===labelKey(l.label);return <button key={labelKey(l.label)} type="button" className={`filter-chip${on?' selected':''}`} aria-pressed={on} onClick={()=>setLabel(on?null:l.label)}>{l.label}<span className="numeric">{l.count}</span></button>;})}</div></div>}
         {pinned.length>0&&<><SectionLabel as="h2" className="notes-board__label" title="고정됨"/><div className="notes-grid">{pinned.map(card)}</div></>}
         {recent.length>0&&<>{pinned.length>0&&<SectionLabel as="h2" className="notes-board__label" title="최근"/>}<div className="notes-grid">{recent.map(card)}</div></>}
         {!visible.length&&<div className="empty-state"><h2>{trash?'휴지통이 비어 있습니다':scope==='archive'?'보관한 메모가 없습니다':query||label?'찾는 메모가 없습니다':'아직 메모가 없습니다'}</h2>{scope==='all'&&!query&&!label&&<p>아래 버튼으로 첫 메모를 써 보세요.</p>}</div>}

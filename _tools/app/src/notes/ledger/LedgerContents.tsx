@@ -1,3 +1,4 @@
+import { useHorizontalWheel } from "../../shared/ui/useHorizontalWheel";
 import { useRef, useState, type ReactNode } from 'react';
 import { Badge } from '../../shared/ui/Badge';
 import { Button } from '../../shared/ui/Button';
@@ -35,6 +36,7 @@ export function LedgerContents({ ledger, summary, all, today, spending, quickInp
   onRecurring(item: Recurring | null): void; onPlan(item: Planned | null): void; onBuy(item: Planned): Promise<boolean>;
   onKeepRecurring(id: string): void; onKeepPlan(id: string): void;
 }) {
+  const stripWheel = useHorizontalWheel();
   const [selected, setSelected] = useState<string | null>(null), [busy, setBusy] = useState<string | null>(null);
   const buying = useRef(false);
   const figures = budgetFigures(ledger, summary, all), done = donePlans(all);
@@ -68,7 +70,7 @@ export function LedgerContents({ ledger, summary, all, today, spending, quickInp
     </div>
     <div className="ledger-meter-key"><span>고정</span><span>쓴 돈</span><span>사고 싶은 것 (고른 것)</span></div>
     <section aria-label="이번 달 결제 예정"><SectionLabel as="h3" title="이번 달 결제 예정" />
-      {events.length ? <ul className="ledger-timeline">{events.map(e => <li key={`${e.recurring.id}:${e.kind}:${e.date}`}>
+      {events.length ? <ul ref={stripWheel} className="ledger-timeline">{events.map(e => <li key={`${e.recurring.id}:${e.kind}:${e.date}`}>
         <button type="button" onClick={() => onRecurring(e.recurring)}><span>{displayDate(e.date)}{e.days !== null && <Badge>{e.days === 0 ? '오늘' : `D-${e.days}`}</Badge>}</span><strong>{e.recurring.name}{e.kind === 'trialEnd' ? ' · 무료 끝' : e.kind === 'cancellationEnd' ? ' · 끝남' : ''}</strong><span>{e.kind === 'cancellationEnd' ? '해지 예약' : won(e.amount)}</span></button>
       </li>)}</ul> : <p className="ledger-empty">결제 예정 없음</p>}
     </section>

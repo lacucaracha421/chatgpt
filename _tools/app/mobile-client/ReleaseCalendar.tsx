@@ -1,3 +1,4 @@
+import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {BookmarkIcon as BookmarkOutlineIcon, CalendarDaysIcon, CheckIcon} from '@heroicons/react/24/outline';
 import {BookmarkIcon as BookmarkSolidIcon} from '@heroicons/react/24/solid';
 import {useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject} from 'react';
@@ -122,6 +123,7 @@ export type ReleaseCalendarProps = {
 };
 
 export function ReleaseCalendar({onClose, backRef, initialKind, embedded=false, onSnapshot}: ReleaseCalendarProps) {
+  const stripWheel=useHorizontalWheel();
   const [privateMode] = usePrivacyMode();
   const [reply, setReply] = useState<ReleaseCalendarReply | null>(null);
   const [state, setState] = useState<ScreenState>('loading');
@@ -227,7 +229,7 @@ export function ReleaseCalendar({onClose, backRef, initialKind, embedded=false, 
   const header = <TopBar back={{label: '홈으로', onClick: onClose}} crumbs={<span className="top-bar__crumbs">홈 ›</span>} title="발매 캘린더" count={reply && reply.entries.length ? reply.entries.length.toLocaleString('ko-KR') : undefined} />;
   return <div className="release-calendar-screen">
     {!embedded&&header}
-    <div className="release-calendar-controls">
+    <div ref={stripWheel} className="release-calendar-controls">
       <SegmentedControl className="release-calendar-segments" label="종류" options={kindOptions} value={kind} onChange={setKind} />
       <Button type="button" size="sm" variant="quiet" className={`release-calendar-interest${wishlistOnly ? ' is-selected' : ''}`} aria-label={`관심 목록 ${count.toLocaleString('ko-KR')}`} aria-pressed={wishlistOnly} onClick={() => setWishlistOnly(value => !value)}><BookmarkOutlineIcon aria-hidden="true" />관심 <span className="numeric">{count.toLocaleString('ko-KR')}</span></Button>
       {unreadTotal > 0 && <Badge variant="accent">NEW {unreadTotal.toLocaleString('ko-KR')}</Badge>}

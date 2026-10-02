@@ -1,4 +1,5 @@
-import {useEffect, useLayoutEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react';
+import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import type {Asset} from './types';
 import {loadThumbnail} from './media';
 
@@ -64,6 +65,12 @@ function FilmstripThumb({asset, current, index, privacy}: {asset: Asset; current
 export function ViewerFilmstrip({items, index, privacy = false, onIndex, onInteract, onInteractionChange}: ViewerFilmstripProps) {
   const hidden = items.length <= 1 || items[index]?.kind === 'video';
   const stripRef = useRef<HTMLElement>(null);
+  const bindWheel = useHorizontalWheel();
+  const bindStrip = useCallback((node: HTMLElement | null) => {
+    stripRef.current = node;
+    const cleanup = bindWheel(node);
+    return () => { cleanup?.(); stripRef.current = null; };
+  }, [bindWheel]);
   const centeredIndex = useRef<number | undefined>(undefined);
   const pointer = useRef({id: -1, x: 0, y: 0, dragged: false, active: false});
   const [windowRange, setWindowRange] = useState(() => around(index, items.length));
@@ -117,7 +124,7 @@ export function ViewerFilmstrip({items, index, privacy = false, onIndex, onInter
   };
 
   return <nav
-    ref={stripRef}
+    ref={bindStrip}
     className="viewer-filmstrip"
     aria-label="주변 자산"
     onFocusCapture={() => onInteract?.()}

@@ -1,3 +1,4 @@
+import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
 import { ChevronLeftIcon, ChevronRightIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { useState, type KeyboardEvent } from "react";
@@ -28,6 +29,7 @@ const KIND_LABEL: Record<string, string> = {
 // 레거시·원격으로 등록된 Work 아트워크를 한 화면에서 훑어보는 갤러리.
 // 썸네일 줄과 확대 감상 다이얼로그로 구성된다.
 export function WorkArtworkGallery({ workTitle, artworks, initialActiveId, viewerOnly = false, onClose }: WorkArtworkGalleryProps) {
+  const stripWheel = useHorizontalWheel();
   const { privacyMode } = usePrivacy();
   const [activeId, setActiveId] = useState<string | null>(initialActiveId ?? null);
   const close = () => { setActiveId(null); onClose?.(); };
@@ -45,7 +47,7 @@ export function WorkArtworkGallery({ workTitle, artworks, initialActiveId, viewe
   return (
     <section className="work-artwork-gallery" aria-label="스크린샷·아트웍">
       {!viewerOnly && <><h2 className="work-artwork-gallery__title">스크린샷 · 아트웍 {artworks.length}장</h2>
-      <div className="work-artwork-gallery__strip">
+      <div ref={stripWheel} className="work-artwork-gallery__strip">
         {artworks.map((artwork) => (
           <button
             key={artwork.id}

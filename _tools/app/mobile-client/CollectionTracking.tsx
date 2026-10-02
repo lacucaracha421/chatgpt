@@ -1,3 +1,4 @@
+import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {useState} from 'react';
 import {BellSlashIcon, MinusIcon, PlusIcon} from '@heroicons/react/24/outline';
 import {BellIcon as BellSolid} from '@heroicons/react/24/solid';
@@ -76,6 +77,7 @@ export function ReleaseWatchAction({item, edits, onReason}: {item: CollectionDet
 
 /** The owned-count editor: large −/+ steps, a number field for a jump, and 0 / 전체 shortcuts. */
 export function OwnedSheet({item, edition, edits, onClose}: {item: CollectionDetail; edition: number; edits: PersonalEdits; onClose(): void}) {
+  const stripWheel=useHorizontalWheel();
   const authoritative: OwnedVolumesValue = {editionIndex: edition, count: publishedCount(item, edition)};
   const shown = edits.visible<OwnedVolumesValue>(item.id, 'ownedVolumes', authoritative).value.count;
   const total = editionVolumes(item.volumes, edition).length;
@@ -92,7 +94,7 @@ export function OwnedSheet({item, edition, edits, onClose}: {item: CollectionDet
         <label className="collection-owned-value"><input aria-label="소장 권수" className="numeric" inputMode="numeric" pattern="[0-9]*" value={draft} onChange={event => setDraft(event.target.value.replace(/[^0-9]/g, '').slice(0, 4))} onFocus={event => event.currentTarget.select()}/><span>권까지</span></label>
         <button type="button" aria-label="한 권 더하기" disabled={count >= MAX_OWNED_COUNT} onClick={() => step(1)}><PlusIcon aria-hidden="true"/></button>
       </div>
-      <div className="filter-chips collection-owned-shortcuts" role="group" aria-label="빠른 선택">
+      <div ref={stripWheel} className="filter-chips collection-owned-shortcuts" role="group" aria-label="빠른 선택">
         <button type="button" className={`filter-chip${valid && count === 0 ? ' selected' : ''}`} onClick={() => setDraft('0')}>0권</button>
         {total > 0 && <button type="button" className={`filter-chip${valid && count === total ? ' selected' : ''}`} onClick={() => setDraft(String(total))}>전체 {total}권</button>}
       </div>

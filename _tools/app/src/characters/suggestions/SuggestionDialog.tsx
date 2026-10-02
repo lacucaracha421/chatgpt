@@ -1,3 +1,4 @@
+import { useHorizontalWheel } from "../../shared/ui/useHorizontalWheel";
 import { useEffect, useRef, useState } from "react";
 import { assetUrl, thumbnailUrl } from "../../assets/mediaUrl";
 import { commandErrorMessage } from "../../library/errorMessage";
@@ -11,6 +12,7 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
   suggestion: Suggestion; mode: "register" | "merge"; privacyMode: boolean; api: SuggestionApi;
   onClose(): void; onSaved(result: SuggestionResult): void;
 }) {
+  const stripWheel = useHorizontalWheel();
   const [context, setContext] = useState<SuggestionContext | null>(null);
   const [name, setName] = useState(suggestionName(suggestion.tag));
   const [seriesId, setSeriesId] = useState(suggestion.seriesId ?? "");
@@ -114,7 +116,7 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
           {chosenSeries && !detail && !error && <p role="status">이미지 불러오는 중…</p>}
           {detail && <>
             <h3>참조 이미지 {references.length}<small>단독 우선 · 최대 8장</small></h3>
-            <div className="character-suggestion-references" role="group" aria-label="참조 이미지">
+            <div ref={stripWheel} className="character-suggestion-references" role="group" aria-label="참조 이미지">
               {Array.from({ length: 8 }, (_, index) => {
                 const id = references[index];
                 const image = detail.images.find(item => item.assetId === id);

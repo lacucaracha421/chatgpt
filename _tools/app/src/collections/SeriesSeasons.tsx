@@ -1,3 +1,4 @@
+import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
 import { displayDate } from "../shared/displayDate";
 import { useState } from "react";
 import { workArtworkThumbnailUrl } from "../assets/mediaUrl";
@@ -9,6 +10,7 @@ import { WorkArtworkGallery } from "./WorkArtworkGallery";
 import "./SeriesSeasons.css";
 
 export function SeriesSeasons({ series }: { series: TmdbSeriesData }) {
+  const stripWheel = useHorizontalWheel();
   const { privacyMode } = usePrivacy();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [page, setPage] = useState(0);
@@ -20,7 +22,7 @@ export function SeriesSeasons({ series }: { series: TmdbSeriesData }) {
   return <section className="series-seasons" aria-label="시즌과 에피소드">
     <SectionLabel title="시즌" />
     {series.seasons.length === 0 ? <p>등록된 시즌이 없습니다.</p> : <>
-      <div className="series-seasons__posters">
+      <div ref={stripWheel} className="series-seasons__posters">
         {series.seasons.map((season) => <button type="button" className="series-seasons__season" key={season.id}
           aria-pressed={selected?.id === season.id} onClick={() => { setSelectedId(season.id); setPage(0); }}
           aria-description={season.posterArtworkId ? "더블클릭 또는 Enter로 포스터 크게 보기" : undefined}

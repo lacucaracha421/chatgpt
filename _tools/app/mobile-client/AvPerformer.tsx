@@ -1,3 +1,4 @@
+import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {useEffect, useMemo, useState} from 'react';
 import {ArrowsUpDownIcon, ChevronDownIcon, Squares2X2Icon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolidIcon} from '@heroicons/react/24/solid';
@@ -67,6 +68,7 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
   personId: string; currentId: string | null; active: boolean; privacy: boolean; perRow: number; order: ReleaseOrder;
   onOpen(id: string, order: string[]): void; onPerformer(id: string): void; onSort(): void; onView(): void;
 }) {
+  const stripWheel=useHorizontalWheel();
   const [shelf, setShelf] = useState<PerformerShelf | null>(null), [error, setError] = useState(''), [attempt, setAttempt] = useState(0);
   const [role, setRole] = useState<RoleFilter>('all'), [picked, setPicked] = useState<string | null>(null);
   // The published person of `id`; null when the server has none (404, an older server) or the read failed.
@@ -138,7 +140,7 @@ export function AvPerformerScreen({personId, currentId, active, privacy, perRow,
     <section className="tablet-performer__works" aria-labelledby="tablet-performer-works">
       <div className="collection-type-header">
         <SectionLabel as="h2" id="tablet-performer-works" title="작품" count={shown.length}/>
-        <div className="filter-chips collection-chips" role="group" aria-label="정렬과 보기">
+        <div ref={stripWheel} className="filter-chips collection-chips" role="group" aria-label="정렬과 보기">
           <button className="filter-chip" onClick={onSort}><ArrowsUpDownIcon aria-hidden="true"/>{order === 'newest' ? '최신순' : '오래된순'}<ChevronDownIcon aria-hidden="true"/></button>
           <button className="filter-chip" onClick={onView}><Squares2X2Icon aria-hidden="true"/>보기<ChevronDownIcon aria-hidden="true"/></button>
         </div>

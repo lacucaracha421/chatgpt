@@ -1,3 +1,4 @@
+import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
 import { formatBytes } from "../assets/assetMetadata";
 import { useLayoutEffect, useRef } from "react";
 import type { CatalogWork, CatalogWorkDetail } from "../library/types";
@@ -44,6 +45,7 @@ type Props = {
 /** Shared detail contents for the PC overlay and the tablet's sheet. */
 export function MangaDetail({ detail, privacyMode, bookmarkPending, reading, onBookmark, onTagSearch, onRead,
   editionCount, editions, editionsLoading, editionsError, hasMoreEditions, onEdition, onMoreEditions }: Props) {
+  const stripWheel = useHorizontalWheel();
   const extraRef = useRef<HTMLDetailsElement>(null);
   useLayoutEffect(() => {
     if (extraRef.current) extraRef.current.open = false;
@@ -83,7 +85,7 @@ export function MangaDetail({ detail, privacyMode, bookmarkPending, reading, onB
     </dl>}
     {editionCount >= 2 && <section className="manga-detail__editions" aria-label="판본">
       <SectionLabel as="h3" title="판본" />
-      <div className="manga-detail__edition-row" aria-busy={editionsLoading}>
+      <div ref={stripWheel} className="manga-detail__edition-row" aria-busy={editionsLoading}>
         {editions.map(edition => <button type="button" className="manga-detail__edition" key={catalogIdentityKey(edition)}
           aria-label={`${edition.title} 판본 열기`} aria-pressed={catalogIdentityKey(edition) === catalogIdentityKey(detail)} onClick={() => onEdition(edition)}>
           {/* Edition covers are media objects; the open one uses a single ivory outline. */}

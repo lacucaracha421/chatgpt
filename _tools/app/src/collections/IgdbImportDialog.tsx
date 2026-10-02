@@ -1,3 +1,4 @@
+import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
 import { useEffect, useRef, useState } from "react";
 import { igdbImagePreviewUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
@@ -246,10 +247,11 @@ function PreviewSummary({ preview }: { preview: IgdbGamePreview }) {
 }
 
 function ArtworkStep({ kind, candidates, selectedId, onSelect }: { kind: "cover" | "hero"; candidates: IgdbImageCandidate[]; selectedId: string | null; onSelect: (imageId: string) => void }) {
+  const stripWheel = useHorizontalWheel();
   const { privacyMode } = usePrivacy();
   return <section className="igdb-import__artwork" aria-label={kind === "cover" ? "표지 선택" : "대표 이미지 선택"}>
     <h3>{kind === "cover" ? "표지 선택" : "대표 이미지 선택"}</h3>
-    {candidates.length === 0 ? <p className="igdb-import__muted">사용 가능한 이미지가 없습니다.</p> : <div className="igdb-import__candidates">
+    {candidates.length === 0 ? <p className="igdb-import__muted">사용 가능한 이미지가 없습니다.</p> : <div ref={stripWheel} className="igdb-import__candidates">
       {candidates.map((candidate, index) => <label key={candidate.imageId} className="igdb-import__candidate">
         <input type="radio" name={kind} value={candidate.imageId} checked={selectedId === candidate.imageId} aria-label={`${kind === "cover" ? "표지" : "대표 이미지"} ${index + 1} (${candidate.imageId})`} onChange={() => onSelect(candidate.imageId)} />
         {privacyMode ? <Skeleton className="privacy-mask igdb-import__candidate-mask" label="비공개 모드" /> : <img loading="lazy" decoding="async" src={igdbImagePreviewUrl(candidate.imageId, kind === "cover" ? "cover" : "hero")} alt={`${kind === "cover" ? "표지" : "대표 이미지"} ${index + 1}`} />}

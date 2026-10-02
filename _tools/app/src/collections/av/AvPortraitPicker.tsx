@@ -1,3 +1,4 @@
+import { useHorizontalWheel } from "../../shared/ui/useHorizontalWheel";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { workArtworkThumbnailUrl, workArtworkUrl } from "../../assets/mediaUrl";
 import { Dialog } from "../../shared/ui/Dialog";
@@ -35,6 +36,7 @@ function artworkUrl(id: string, revision: string, large = false) {
 export function AvPortraitPicker({ personId, personName, wikidataId = null, api, onClose, onSaved }: {
   personId: string; personName: string; wikidataId?: string | null; api: AvGateway; onClose(): void; onSaved(portrait: AvPortrait | null): void;
 }) {
+  const stripWheel = useHorizontalWheel();
   const { privacyMode } = usePrivacy();
   const [sources, setSources] = useState<AvPortraitSource[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -142,7 +144,7 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, api,
       </nav>
       <div className="av-portrait-picker__work">
         {sourceKind === "crop" && <>
-          <div className="av-portrait-picker__cover-list" aria-label="대표 이미지 표지 목록">
+          <div ref={stripWheel} className="av-portrait-picker__cover-list" aria-label="대표 이미지 표지 목록">
             {sources.map(source => <button key={source.artworkId} type="button" className={source.artworkId === selected?.artworkId ? "is-selected" : ""} onClick={() => selectCover(source)} aria-label={`${source.productCode ?? source.name} 표지${source.solo ? " 단독 작품" : ""}`}>
               {!privacyMode ? <img src={artworkUrl(source.artworkId, source.revision)} alt="" loading="lazy" /> : <span>비공개</span>}
               <small>{source.productCode ?? source.name}</small>

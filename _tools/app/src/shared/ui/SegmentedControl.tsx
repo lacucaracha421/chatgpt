@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useHorizontalWheel } from "./useHorizontalWheel";
 
 export type SegmentedOption<T extends string> = {
   value: T;
@@ -65,6 +66,12 @@ function sameGeometry(previous: readonly (CellGeometry | null)[], next: readonly
 
 export function SegmentedControl<T extends string>({ className, fullWidth = false, label, onChange, options, value }: SegmentedControlProps<T>) {
   const trackRef = useRef<HTMLDivElement | null>(null);
+  const bindWheel = useHorizontalWheel();
+  const bindTrack = useCallback((node: HTMLDivElement | null) => {
+    trackRef.current = node;
+    const cleanup = bindWheel(node);
+    return () => { cleanup?.(); trackRef.current = null; };
+  }, [bindWheel]);
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const geometryRef = useRef<Array<CellGeometry | null>>([]);
   const dragRef = useRef<DragSession | null>(null);
@@ -253,7 +260,7 @@ export function SegmentedControl<T extends string>({ className, fullWidth = fals
 
   return (
     <div
-      ref={trackRef}
+      ref={bindTrack}
       className={["ui-segmented", fullWidth ? "ui-segmented--full-width" : "", className].filter(Boolean).join(" ")}
       role="radiogroup"
       aria-label={label}

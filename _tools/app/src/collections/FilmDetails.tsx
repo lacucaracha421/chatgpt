@@ -1,3 +1,4 @@
+import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
 import { useId, useState } from "react";
 import { tmdbImagePreviewUrl } from "../assets/mediaUrl";
 import type { TmdbFilmData } from "../library/types";
@@ -16,6 +17,7 @@ const releaseTypes: Record<number, string> = {
 };
 
 export function FilmDetails({ film, onOpenCollection }: { film: TmdbFilmData; onOpenCollection?: (collectionId: string) => void }) {
+  const stripWheel = useHorizontalWheel();
   const { privacyMode } = usePrivacy();
   const [allReleases, setAllReleases] = useState(false);
   const [failedPosters, setFailedPosters] = useState<Set<string>>(() => new Set());
@@ -54,7 +56,7 @@ export function FilmDetails({ film, onOpenCollection }: { film: TmdbFilmData; on
     {parts.length > 0 && <section className="work-film-section" aria-label="관련 작품">
       <SectionLabel title="관련 작품" />
       {film.related?.collectionName && <p className="work-film-related-subtitle">{film.related.collectionName}</p>}
-      <ul className="work-film-related" tabIndex={0} aria-label="관련 작품 목록">
+      <ul ref={stripWheel} className="work-film-related" tabIndex={0} aria-label="관련 작품 목록">
         {parts.map(part => {
           const content = <>
             {!privacyMode && <div className="work-film-related-poster">

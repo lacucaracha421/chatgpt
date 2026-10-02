@@ -1,3 +1,4 @@
+import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {usePublicationCheck} from './usePublicationCheck';
 import {CollectionPersonal,PersonalActions,PersonalRecord,workRecordFacts,type PersonalSheet} from './CollectionPersonal';
 import {koreanGenres} from '../src/collections/genreNames';
@@ -207,11 +208,12 @@ function CoverStage({item,id,revision,label,mode,onFlat}:{item:CollectionDetail;
   return <TurnableBook key={source} url={url.url} label={label} onFail={onFlat}/>;
 }
 function SeriesDetails({item,revision,active}:{item:CollectionDetail;revision:string;active:boolean}) {
+  const stripWheel=useHorizontalWheel();
   const seasons=item.series?.seasons??[];
   const [seasonId,setSeasonId]=useState(seasons.find(s=>s.seasonNumber>0)?.id??seasons[0]?.id),[limit,setLimit]=useState(30);
   const selected=seasons.find(s=>s.id===seasonId)??seasons[0];
   return <section className="collection-block collection-series" aria-label="시즌 및 회차"><h2>시즌 {seasons.length}개</h2>
-    {seasons.length>1&&<div className="collection-season-strip" role="group" aria-label="시즌">{seasons.map(season=><button className="collection-season" key={season.id} aria-pressed={selected?.id===season.id} onClick={()=>{setSeasonId(season.id);setLimit(30);}}><Artwork item={item} id={season.posterArtworkId} revision={revision} active={active}/><strong>{season.name}</strong><small className="numeric">{[season.airDate,`${season.episodes.length}화`].filter(Boolean).join(' · ')}</small></button>)}</div>}
+    {seasons.length>1&&<div ref={stripWheel} className="collection-season-strip" role="group" aria-label="시즌">{seasons.map(season=><button className="collection-season" key={season.id} aria-pressed={selected?.id===season.id} onClick={()=>{setSeasonId(season.id);setLimit(30);}}><Artwork item={item} id={season.posterArtworkId} revision={revision} active={active}/><strong>{season.name}</strong><small className="numeric">{[season.airDate,`${season.episodes.length}화`].filter(Boolean).join(' · ')}</small></button>)}</div>}
     {selected&&<><ol className="collection-episodes" aria-label={`${selected.name} 회차`}>{selected.episodes.slice(0,limit).map(episode=><li key={episode.id}><span className="numeric">{episode.episodeNumber}</span><strong>{episode.name}</strong><small>{[episode.airDate,episode.runtimeMinutes?`${episode.runtimeMinutes}분`:null].filter(Boolean).join(' · ')}</small></li>)}</ol>{selected.episodes.length>limit&&<Button variant="ghost" onClick={()=>setLimit(n=>n+30)}>회차 더 보기</Button>}</>}
     {!!item.series?.cast.length&&<p className="collection-cast">출연 · {item.series.cast.join(' · ')}</p>}</section>;
 }
@@ -361,6 +363,7 @@ export type CollectionsPlace={kind:'releases'}|{kind:'work';id:string};
 export type CollectionsRequest=CollectionsPlace&{key:number};
 /** `onReturnHome`: set while the screen was opened from Home; closing that entry level (신간 or the work opened) returns there. */
 export function Collections({active,paused,backRef,request,onReturnHome}:{active:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>;request?:CollectionsRequest|null;onReturnHome?:()=>void}) {
+  const filterWheel=useHorizontalWheel();
   const [tab,setTab]=useState<CollectionTab>('game'),[query,setQuery]=useState(''),[search,setSearch]=useState('');
   const [privacyMode]=usePrivacyMode();
   const [searchOpen,setSearchOpen]=useState(false);
@@ -579,7 +582,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
     return <div className={`collection-grid collection-grid-${kind} is-counted`} style={{'--columns':settings.perRow} as CSSProperties}>{items.map(work=><WorkCard key={work.id} work={card(work)} revision={workRevision} active={visible} caption={captionOf(work)} onOpen={id=>openWork(id,order)} arriving={arrivals.arriving(work.id)} onArrived={arrivals.arrived}/>)}</div>;
   };
   const collectionTypeLabel=<SectionLabel as="h2" className="collection-type-label" title={filtered?'검색 결과':labels[type]} count={!filtered&&main.page?.totalCount!=null ? main.page.totalCount : undefined} />;
-  const filterControls=<div className="filter-chips collection-chips" role="group" aria-label="정렬과 필터">
+  const filterControls=<div ref={filterWheel} className="filter-chips collection-chips" role="group" aria-label="정렬과 필터">
     <button className="filter-chip" onClick={()=>setSheet('sort')}><ArrowsUpDownIcon aria-hidden="true"/>{sortLabel}<ChevronDownIcon aria-hidden="true"/></button>
     <button className={`filter-chip ${filters.rating!=='all'?'selected':''}`} onClick={()=>setSheet('rating')}>{filters.rating==='all'?'내 별점':ratingLabel(filters.rating)}<ChevronDownIcon aria-hidden="true"/></button>
     {filters.rating!=='all'&&<button className="filter-chip" onClick={()=>changeFilters({...filters,rating:'all'})}>초기화</button>}
@@ -604,7 +607,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   const mangaInfo=item?.type==='manga'&&<>
     <header className="tablet-work__identity"><h1>{item.name}</h1>{originalTitle(item)&&<small>{originalTitle(item)}</small>}</header>
     <PersonalRecord item={item} edits={edits} onSheet={setPersonalSheet}/>
-    {editionOptions.length>1&&<div className="filter-chips collection-editions" role="radiogroup" aria-label="판본">{editionOptions.map(value=><button key={value} role="radio" aria-checked={edition===value} className={`filter-chip ${edition===value?'selected':''}`} onClick={()=>{setEdition(value);setCoverIndex(null);}}>{value===0?'기본판':`판본 ${value+1}`}</button>)}</div>}
+    {editionOptions.length>1&&<div ref={filterWheel} className="filter-chips collection-editions" role="radiogroup" aria-label="판본">{editionOptions.map(value=><button key={value} role="radio" aria-checked={edition===value} className={`filter-chip ${edition===value?'selected':''}`} onClick={()=>{setEdition(value);setCoverIndex(null);}}>{value===0?'기본판':`판본 ${value+1}`}</button>)}</div>}
     <CollectionBindings key={item.id} item={item} active={active&&!paused} refreshKey={`${detailRefresh}:${detail!.revision}`} sheet={bindSheet} onSheet={setBindSheet} panelHost={bindHost}/>
     <div ref={setBindHost} className="collection-bind-host"/>
     <CollectionPersonal item={item} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>

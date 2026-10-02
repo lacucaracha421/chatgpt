@@ -1,3 +1,4 @@
+import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {XMarkIcon} from '@heroicons/react/24/outline';
 import {assetSearchKey,type AssetSearchName} from '../src/assets/assetSearch';
@@ -18,6 +19,7 @@ function Chip({chip,leaving,onRemove}:{chip:AssetSearchName;leaving:boolean;onRe
   return <span ref={host} className="asset-scope-chip-slot" aria-hidden={leaving||undefined}><Button type="button" variant="ghost" className="asset-scope-chip" disabled={leaving} aria-label={`${chip.name} 범위 제거`} onClick={()=>onRemove(chip)}>{chip.name}<XMarkIcon aria-hidden="true"/></Button></span>;
 }
 export function AssetScopeChips({chips,onRemove,onClear}:{chips:readonly AssetSearchName[];onRemove(chip:AssetSearchName):void;onClear?():void}) {
+  const stripWheel=useHorizontalWheel();
   const [shown,setShown]=useState(chips.map(chip=>({chip,leaving:false})));
   useLayoutEffect(()=>setShown(previous=>[
     ...previous.map(row=>({chip:chips.find(chip=>assetSearchKey(chip)===assetSearchKey(row.chip))??row.chip,leaving:!chips.some(chip=>assetSearchKey(chip)===assetSearchKey(row.chip))})),
@@ -29,5 +31,5 @@ export function AssetScopeChips({chips,onRemove,onClear}:{chips:readonly AssetSe
     return()=>clearTimeout(timer);
   },[shown]);
   if(!shown.length)return null;
-  return <div className="filter-chips asset-scope-chips" role="group" aria-label="에셋 검색 범위">{shown.map(({chip,leaving})=><Chip key={assetSearchKey(chip)} chip={chip} leaving={leaving} onRemove={onRemove}/>)}{chips.length>=2&&onClear&&<Button type="button" variant="quiet" onClick={onClear}>모두 지우기</Button>}</div>;
+  return <div ref={stripWheel} className="filter-chips asset-scope-chips" role="group" aria-label="에셋 검색 범위">{shown.map(({chip,leaving})=><Chip key={assetSearchKey(chip)} chip={chip} leaving={leaving} onRemove={onRemove}/>)}{chips.length>=2&&onClear&&<Button type="button" variant="quiet" onClick={onClear}>모두 지우기</Button>}</div>;
 }
