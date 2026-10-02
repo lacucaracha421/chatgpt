@@ -77,6 +77,28 @@ final class MediaRepository {
    }
   }
  }
+ /** Bounded shelf probe: no tickets, downloads, timestamp refresh, or visit records. */
+ JSONObject collectionArtworksCached(JSONArray items,CancellationSignal signal)throws Exception{
+  if(items.length()>100)throw new IllegalArgumentException("Too many artworks");
+  synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){
+   JSONObject connection=settings.read();if(!connection.has("token"))throw new IllegalStateException();
+   String account=connection.getString("endpoint")+"\n"+connection.getString("token");
+   List<String> keys=new ArrayList<>();
+   for(int i=0;i<items.length();i++){
+    signal.throwIfCanceled();JSONObject item=items.getJSONObject(i);
+    if(item.has("assetId")){
+     String id=item.getString("assetId");if(!id.matches("[A-Za-z0-9_-]{1,128}"))throw new IllegalArgumentException();
+     keys.add(ThumbnailCache.mediaKey(account,id,"thumbnail",""));
+    }else keys.add(ThumbnailCache.collectionArtworkKey(account,item.getString("collectionId"),item.getString("artworkId"),item.getString("variant"),item.getString("revision"),item.optString("digest","")));
+   }
+   synchronized(cache){
+    String generation=ThumbnailCache.key(account)+"/"+cache.warmGeneration();
+    boolean[] hits=cache.cached(keys,cache.generation());JSONArray indices=new JSONArray();
+    for(int i=0;i<hits.length;i++)if(hits[i])indices.put(i);
+    signal.throwIfCanceled();return new JSONObject().put("generation",generation).put("cachedIndices",indices);
+   }
+  }
+ }
  void clear()throws IOException{synchronized(LibraryDocumentsProvider.CONNECTION_LOCK){for(CancellationSignal signal:active)signal.cancel();try{cache.clear();}finally{tickets.clear();proxy.clear();}}}
  InputStream stream(String key,long generation)throws IOException{return cache.open(key,generation);}
  private final ScheduledExecutorService ticketWorker=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"lakomics-media-tickets");t.setDaemon(true);return t;});
@@ -254,9 +276,11 @@ final class MediaRepository {
   signal.throwIfCanceled();String mime=cachedImageMime(scope);if(!imageMime(mime)){cache.remove(scope.key,scope.generation);throw new IOException("Catalog image type is unsupported");}return local(scope,mime);
  }
  JSONObject collectionArtwork(String collection,String artwork,String variant,String revision,String digest,CancellationSignal signal)throws Exception{
-  if(!collection.matches("[A-Za-z0-9_-]{1,128}") || !artwork.matches("[A-Za-z0-9_-]{1,128}") || !revision.matches("[a-f0-9]{64}") || !(variant.equals("thumbnail") || variant.equals("original")))throw new IllegalArgumentException();
-  if(!digest.isEmpty()&&!digest.matches("[a-f0-9]{64}"))throw new IllegalArgumentException();
-  Scope scope=scopedIdentity("collection/"+collection+"/"+artwork+"/"+(digest.isEmpty()?revision:digest)+"/"+variant);scope.kind=ThumbnailCache.Kind.KEEP;
+  Scope scope=scoped(account->ThumbnailCache.collectionArtworkKey(account,collection,artwork,variant,revision,digest));scope.kind=ThumbnailCache.Kind.KEEP;
+  LockEntry entry=retainLock(scope.key);boolean locked=false;
+  try{
+   lock(entry,signal);locked=true;
+   signal.throwIfCanceled();
   try(InputStream input=new BufferedInputStream(cache.open(scope.key,scope.generation,scope.kind))){
    input.mark(16);byte[] header=new byte[12];int count=input.read(header);input.reset();
    String mime=count==12 && header[0]=='R' && header[1]=='I' && header[2]=='F' && header[3]=='F' && header[8]=='W' && header[9]=='E' && header[10]=='B' && header[11]=='P'?"image/webp":java.net.URLConnection.guessContentTypeFromStream(input);
@@ -267,6 +291,7 @@ final class MediaRepository {
   if(!digest.isEmpty()&&!digest.equals(first.optString("sha256")))throw new IOException("Artwork changed; refresh metadata");
   if(!imageMime(first.optString("content_type")) || first.optLong("size_bytes",Long.MAX_VALUE)>ThumbnailCache.MAX_FILE)throw new IOException("Artwork exceeds limit");
   fillFrom(variant,scope,signal,first,source);signal.throwIfCanceled();return local(scope,first.getString("content_type"));
+  }finally{releaseLock(scope.key,entry,locked);}
  }
  JSONObject homeCover(String sha256,CancellationSignal signal)throws Exception{
   if(sha256==null || !sha256.matches("[a-f0-9]{64}"))throw new IllegalArgumentException();

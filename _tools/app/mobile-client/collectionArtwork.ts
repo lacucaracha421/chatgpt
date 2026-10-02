@@ -9,19 +9,22 @@ import {native} from './transport';
 import {mediaTicket} from './media';
 import {collectionCover, type CollectionSummary} from './collectionModel';
 import type {Ticket} from './types';
+import {beginShelfForeground} from './shelfWarmActivity';
 
 // Only visible artwork requests (covers, spines, performer portraits) enter this small queue,
 // at most four at a time; native owns the disk cache.
 let artworkActive=0;
 const artworkQueue:(()=>void)[]=[];
 function queued(run:()=>Promise<Ticket>,signal:AbortSignal):Promise<Ticket> {
-  return new Promise((resolve,reject)=>{
+  const finish=beginShelfForeground();
+  return new Promise<Ticket>((resolve,reject)=>{
     const cancel=()=>{const index=artworkQueue.indexOf(start);if(index>=0)artworkQueue.splice(index,1);reject(new DOMException('Cancelled','AbortError'));};
     const start=()=>{if(signal.aborted){cancel();return;} artworkActive++;
       void run().then(resolve,reject).finally(()=>{signal.removeEventListener('abort',cancel);artworkActive--;while(artworkActive<4&&artworkQueue.length)artworkQueue.shift()!();});
     };
+    if(signal.aborted){cancel();return;}
     signal.addEventListener('abort',cancel,{once:true}); if(artworkActive<4)start();else artworkQueue.push(start);
-  });
+  }).finally(finish);
 }
 export function artworkTicket(item:CollectionSummary, artworkId:string|undefined|null, revision:string, original:boolean, signal:AbortSignal):Promise<Ticket> {
   return queued(()=>artworkId ? native<Ticket>('collectionArtwork',{collectionId:item.id,artworkId,variant:original?'original':'thumbnail',revision,digest:item.artworkVersions?.[artworkId]?.[original?'original':'thumbnail']??''},signal) : mediaTicket({id:item.coverAssetId!,kind:'image'},original?'original':'thumbnail',signal),signal);

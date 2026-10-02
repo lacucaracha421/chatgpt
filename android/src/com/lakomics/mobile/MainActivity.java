@@ -284,6 +284,7 @@ public final class MainActivity extends Activity {
      case "clearCache":if(media==null)throw new IOException();media.clear();data=cacheStatus();break;
      case "thumbnail":data=thumbnail(p.getString("assetId"),p.optString("revision",""),signal);break;
      case "thumbnailsCached":if(media==null)throw new IOException("Cache unavailable");data=media.thumbnailsCached(p.getJSONArray("assetIds"),p.optJSONArray("revisions"),signal);break;
+     case "collectionArtworksCached":if(media==null)throw new IOException("Cache unavailable");data=media.collectionArtworksCached(p.getJSONArray("items"),signal);break;
      case "collectionArtwork":if(media==null)throw new IOException("Cache unavailable");data=media.collectionArtwork(p.getString("collectionId"),p.getString("artworkId"),p.getString("variant"),p.getString("revision"),p.optString("digest",""),signal);break;
      case "homeCover":data=media==null?client.api("/v1/home/covers/"+p.getString("sha256")+"/media-ticket","POST",new JSONObject(),signal):media.homeCover(p.getString("sha256"),signal);break;
      case "catalogImage":if(media==null)throw new IOException("Cache unavailable");data=media.catalogImage(p.getString("workId"),p.getString("revision"),p.getString("kind"),p.getInt("index"),p.getString("url"),signal);break;

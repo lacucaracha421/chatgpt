@@ -3,10 +3,11 @@ import {mapBounded} from './model';
 import type {Asset, Ticket} from './types';
 import type {MediaTiming} from './perf';
 import {clearOriginalTicketWarm} from './originalTicketWarm';
+import {beginShelfForeground} from './shelfWarmActivity';
 const tickets = new Map<string, {ticket: Ticket; until: number}>();
 const inFlight = new Map<string, Promise<Ticket>>();
 let epoch = 0;
-export function clearMediaCache() { epoch++; tickets.clear(); inFlight.clear(); for(const entry of originals.values())entry.controller.abort(); originals.clear(); clearOriginalTicketWarm(); }
+export function clearMediaCache() { epoch++; tickets.clear(); inFlight.clear(); for(const entry of originals.values())entry.controller.abort(); originals.clear(); clearOriginalTicketWarm(); window.dispatchEvent(new Event('lakomics-media-cache-cleared')); }
 /** The server's thumbnail revision when it sends a usable one (see `Asset.thumbnail_revision`). */
 export function thumbnailRevision(asset: Asset): string | null {
   const revision = asset.thumbnail_revision;
@@ -50,7 +51,8 @@ export function mediaTicket(asset:Asset, variant:'thumbnail'|'original', signal?
   let entry=originals.get(key);
   if(!entry){
     const controller=new AbortController();
-    entry={controller,promise:requestMediaTicket(asset,variant,controller.signal,timing),users:0,settled:false};
+    const finish=beginShelfForeground();
+    entry={controller,promise:requestMediaTicket(asset,variant,controller.signal,timing).finally(finish),users:0,settled:false};
     originals.set(key,entry);
     const owned=entry;
     void entry.promise.finally(()=>{owned.settled=true;if(originals.get(key)===owned)originals.delete(key);}).catch(()=>{});
@@ -123,9 +125,10 @@ function enqueue(queue: (() => void)[], work: () => Promise<unknown>, signal: Ab
   queue.push(start); pump();
 }
 export function loadThumbnail(asset: Asset, signal: AbortSignal): Promise<Asset> {
-  return new Promise((resolve, reject) => {
+  const finish=beginShelfForeground();
+  return new Promise<Asset>((resolve, reject) => {
     enqueue(thumbnailQueue, () => prepareAssets([asset], signal).then(items => resolve(items[0]), reject), signal, reject);
-  });
+  }).finally(finish);
 }
 /**
  * Warm the native thumbnail cache for assets about to scroll into view. Only the ticket is

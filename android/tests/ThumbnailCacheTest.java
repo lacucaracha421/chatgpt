@@ -23,6 +23,28 @@ public final class ThumbnailCacheTest {
   boolean has(String key)throws Exception{return cache.cached(java.util.Collections.singletonList(key),cache.generation())[0];}
   public void close()throws Exception{for(File file:dir.listFiles())Files.deleteIfExists(file.toPath());Files.delete(dir.toPath());}
  }
+ private static void artworkProbeTests()throws Exception{
+  String account="https://server.invalid\naccount-a",revision=hash("revision"),next=hash("next"),digest=hash("cover");
+  String key=ThumbnailCache.collectionArtworkKey(account,"work","cover","thumbnail",revision,digest);
+  check(key.equals(ThumbnailCache.key(account+"\ncollection/work/cover/"+digest+"/thumbnail")));
+  check(key.equals(ThumbnailCache.collectionArtworkKey(account,"work","cover","thumbnail",next,digest)));
+  check(!key.equals(ThumbnailCache.collectionArtworkKey(account+"b","work","cover","thumbnail",revision,digest)));
+  check(!key.equals(ThumbnailCache.collectionArtworkKey(account,"work","spine","thumbnail",revision,digest)));
+  check(!key.equals(ThumbnailCache.collectionArtworkKey(account,"work","cover","original",revision,digest)));
+  check(!ThumbnailCache.collectionArtworkKey(account,"work","cover","thumbnail",revision,"").equals(ThumbnailCache.collectionArtworkKey(account,"work","cover","thumbnail",next,"")));
+  for(String[] fields:new String[][]{{"../work","cover","thumbnail",revision,digest},{"work","../cover","thumbnail",revision,digest},{"work","cover","bad",revision,digest},{"work","cover","thumbnail","bad",digest},{"work","cover","thumbnail",revision,"bad"}}){
+   try{ThumbnailCache.collectionArtworkKey(account,fields[0],fields[1],fields[2],fields[3],fields[4]);throw new AssertionError("Invalid artwork accepted");}catch(IllegalArgumentException expected){check(true);}
+  }
+  try(Fixture f=new Fixture(20)){
+   f.put(key,ThumbnailCache.Kind.KEEP,10);f.now.addAndGet(DAY);
+   long mtime=new File(f.dir,key).lastModified();byte[] visits=Files.readAllBytes(new File(f.dir,".media-usage").toPath());
+   check(f.cache.cached(java.util.Arrays.asList(key,hash("missing")),f.cache.generation())[0]);
+   check(!f.cache.cached(java.util.Arrays.asList(key,hash("missing")),f.cache.generation())[1]);
+   check(new File(f.dir,key).lastModified()==mtime);
+   check(java.util.Arrays.equals(visits,Files.readAllBytes(new File(f.dir,".media-usage").toPath())));
+   f.reopen();check(f.has(key));f.cache.clear();check(!f.has(key));
+  }
+ }
  private static void policyTests()throws Exception{
   ThumbnailCache.Kind keep=ThumbnailCache.Kind.KEEP,view=ThumbnailCache.Kind.VIEW;
   // An older two-day view beats a newer view opened repeatedly on only one day.
@@ -240,6 +262,7 @@ public final class ThumbnailCacheTest {
    }finally{for(File file:revisionDir.listFiles())Files.deleteIfExists(file.toPath());Files.deleteIfExists(revisionDir.toPath());}
    try{ThumbnailCache.mediaKey(account,"asset1","thumbnail","../x");throw new AssertionError("unsafe revision");}catch(IllegalArgumentException expected){check(true);}
    policyTests();
+   artworkProbeTests();
    System.out.println("ThumbnailCache: "+checks+" checks passed");
   }finally{for(File file:dir.listFiles())Files.deleteIfExists(file.toPath());Files.deleteIfExists(dir.toPath());}
  }

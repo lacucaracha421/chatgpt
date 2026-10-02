@@ -137,6 +137,11 @@ final class ThumbnailCache {
   String value=variant.equals("thumbnail")?(revision.isEmpty()?id:id+"\nthumbnail\n"+revision):id+"\n"+variant;
   return key(account+"\n"+value);
  }
+ /** Shared by shelf probes and foreground loads; digests survive metadata-only publications. */
+ static String collectionArtworkKey(String account,String collection,String artwork,String variant,String revision,String digest)throws Exception{
+  if(collection==null || !collection.matches("[A-Za-z0-9_-]{1,128}") || artwork==null || !artwork.matches("[A-Za-z0-9_-]{1,128}") || revision==null || !revision.matches("[a-f0-9]{64}") || !("thumbnail".equals(variant) || "original".equals(variant)) || digest==null || !digest.isEmpty()&&!digest.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("Invalid artwork");
+  return key(account+"\ncollection/"+collection+"/"+artwork+"/"+(digest.isEmpty()?revision:digest)+"/"+variant);
+ }
  /** The WebView URL path of one cached object: a new key or generation is a new URL. */
  static String localPath(long generation,String key){return "https://app.lakomics.local/media-cache/"+generation+"/"+key;}
  synchronized long generation(){return generation;}

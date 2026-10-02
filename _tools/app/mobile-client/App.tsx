@@ -30,6 +30,7 @@ import {closeVisibleShade,useSectionShade} from './SectionShade';
 import {api, errorText, native} from './transport';
 import {clearMediaCache} from './media';
 import {resetWarmProgress, startThumbnailWarm} from './thumbnailWarm';
+import {startCollectionWarm} from './collectionWarm';
 import {DEFAULT_DENSITY, DENSITIES, densityIndex, densityOf, normalizePage, pagePath, RequestGate, validDensity, viewKey} from './model';
 import {StepSlider} from './StepSlider';
 import type {Asset, AssetFiltersValue, Classification, Page, SavedPosition, Status, View} from './types';
@@ -495,6 +496,7 @@ export function App() {
   }, []);
   // Warm every thumbnail into the native cache while the app is open on an unmetered link.
   useEffect(() => status.configured ? startThumbnailWarm(status.endpoint) : undefined, [status.configured, status.endpoint]);
+  useEffect(() => status.configured ? startCollectionWarm(status.endpoint) : undefined, [status.configured, status.endpoint]);
   // Home shows a vault shortcut only while the chosen USB with a vault is attached.
   const onHome=status.configured&&area==='assets'&&page.view.tab==='home'&&!vaultOpen;
   useEffect(()=>{
