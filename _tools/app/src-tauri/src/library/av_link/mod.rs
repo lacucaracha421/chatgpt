@@ -19,6 +19,45 @@ use std::{
 };
 static WORKER: Mutex<()> = Mutex::new(());
 static TICK_RUNNING: AtomicBool = AtomicBool::new(false);
+static WORK_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static TICK_SCHEDULE: Mutex<TickSchedule> = Mutex::new(TickSchedule {
+    root: None,
+    restricted: false,
+    generation: 0,
+    due: None,
+});
+
+pub(crate) fn note_work() {
+    WORK_GENERATION.fetch_add(1, Ordering::Release);
+}
+
+struct TickSchedule {
+    root: Option<std::path::PathBuf>,
+    restricted: bool,
+    generation: u64,
+    due: Option<std::time::Instant>,
+}
+impl TickSchedule {
+    fn ready(
+        &mut self,
+        root: &std::path::Path,
+        restricted: bool,
+        generation: u64,
+        now: std::time::Instant,
+    ) -> bool {
+        if self.root.as_deref() == Some(root)
+            && self.restricted == restricted
+            && self.generation == generation
+            && self.due.is_some_and(|due| now < due)
+        {
+            return false;
+        }
+        self.root = Some(root.to_owned());
+        self.restricted = restricted;
+        self.generation = generation;
+        true
+    }
+}
 const READY_TIMEOUT: i64 = 600;
 
 fn json<T: serde::Serialize>(value: &T) -> Result<String, AvError> {
@@ -347,11 +386,29 @@ impl Library {
         restricted: bool,
     ) -> Result<Option<i64>, AvError> {
         let connection = self.connection()?;
+        Self::claim_av_link_poll_on(&connection, endpoint, now, restricted)
+    }
+    fn claim_av_link_poll_on(
+        connection: &Connection,
+        endpoint: &str,
+        now: i64,
+        restricted: bool,
+    ) -> Result<Option<i64>, AvError> {
+        let spacing = if restricted { 60 } else { 15 };
+        let last: Option<i64> = connection
+            .query_row(
+                "SELECT last_poll_at FROM av_link_poll_cursor WHERE endpoint=?1",
+                [endpoint],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if last.is_some_and(|last| last != 0 && last > now - spacing) {
+            return Ok(None);
+        }
         connection.execute(
             "INSERT OR IGNORE INTO av_link_poll_cursor(endpoint) VALUES(?1)",
             [endpoint],
         )?;
-        let spacing = if restricted { 60 } else { 15 };
         if connection.execute("UPDATE av_link_poll_cursor SET last_poll_at=?2 WHERE endpoint=?1 AND (last_poll_at=0 OR last_poll_at<=?3)", params![endpoint,now,now-spacing])? == 0 { return Ok(None); }
         Ok(Some(connection.query_row(
             "SELECT after_sequence FROM av_link_poll_cursor WHERE endpoint=?1",
@@ -539,6 +596,42 @@ impl Library {
         }
         Ok(true)
     }
+    fn next_av_link_tick(&self, restricted: bool) -> Result<std::time::Duration, AvError> {
+        let c = self.connection()?;
+        let pending: Option<i64> = c.query_row(
+            "SELECT MIN(next_attempt_at) FROM av_link_inbox WHERE normalized_code IS NOT NULL AND status IN ('queued','fetching')",
+            [], |r| r.get(0),
+        )?;
+        let endpoint: Option<String> = c.query_row(
+            "SELECT cloud_api_base_url FROM library_settings WHERE singleton=1",
+            [],
+            |r| r.get(0),
+        )?;
+        let spacing = if restricted { 60 } else { 15 };
+        let poll = endpoint
+            .filter(|e| !e.trim().is_empty())
+            .and_then(|e| crate::cloud::client::CloudClient::new(&e).ok())
+            .map(|client| -> Result<i64, AvError> {
+                let last: Option<i64> = c
+                    .query_row(
+                        "SELECT last_poll_at FROM av_link_poll_cursor WHERE endpoint=?1",
+                        [client.capture_endpoint()],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                Ok(last.unwrap_or(0) + spacing)
+            })
+            .transpose()?;
+        let now = chrono::Utc::now().timestamp();
+        let delay = [pending, poll]
+            .into_iter()
+            .flatten()
+            .map(|due| due.saturating_sub(now).clamp(1, 60) as u64)
+            .min()
+            .unwrap_or(60);
+        Ok(std::time::Duration::from_secs(delay))
+    }
+
     fn finish_av_link_error(
         &self,
         id: &str,
@@ -554,6 +647,19 @@ impl Library {
 /// Called by the existing native one-second scheduler; the worker never holds a UI/DB lock over HTTP.
 pub(crate) fn tick(library: Library, restricted: bool) {
     if TICK_RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    if !TICK_SCHEDULE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .ready(
+            library.root(),
+            restricted,
+            WORK_GENERATION.load(Ordering::Acquire),
+            std::time::Instant::now(),
+        )
+    {
+        TICK_RUNNING.store(false, Ordering::Release);
         return;
     }
     let spawned = std::thread::Builder::new()
@@ -572,6 +678,13 @@ pub(crate) fn tick(library: Library, restricted: bool) {
             let http = NetworkClient::new();
             let _ = library.poll_av_links(&http, restricted);
             let _ = library.fetch_next_av_link_with(&http, chrono::Utc::now().timestamp());
+            let delay = library
+                .next_av_link_tick(restricted)
+                .unwrap_or(std::time::Duration::from_secs(1));
+            TICK_SCHEDULE
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .due = Some(std::time::Instant::now() + delay);
         });
     if spawned.is_err() {
         TICK_RUNNING.store(false, Ordering::Release);

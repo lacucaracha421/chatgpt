@@ -17,15 +17,23 @@ struct Stamp {
     modified: std::time::SystemTime,
     identity: Vec<u64>,
 }
+#[cfg(unix)]
+fn metadata_stamp(m: &std::fs::Metadata) -> Result<Stamp> {
+    use std::os::unix::fs::MetadataExt;
+    Ok(Stamp {
+        length: m.len(),
+        modified: m.modified()?,
+        identity: vec![m.dev(), m.ino(), m.ctime() as u64, m.ctime_nsec() as u64],
+    })
+}
 fn stamp(file: &File) -> Result<Stamp> {
     let m = file.metadata()?;
     #[cfg(unix)]
-    let identity = {
-        use std::os::unix::fs::MetadataExt;
-        vec![m.dev(), m.ino(), m.ctime() as u64, m.ctime_nsec() as u64]
-    };
+    {
+        metadata_stamp(&m)
+    }
     #[cfg(windows)]
-    let identity = {
+    {
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::Storage::FileSystem::{
             GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
@@ -34,17 +42,81 @@ fn stamp(file: &File) -> Result<Stamp> {
         if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
             return Err(std::io::Error::last_os_error().into());
         }
-        vec![
-            info.dwVolumeSerialNumber as u64,
-            info.nFileIndexHigh as u64,
-            info.nFileIndexLow as u64,
-        ]
-    };
-    Ok(Stamp {
-        length: m.len(),
-        modified: m.modified()?,
-        identity,
-    })
+        Ok(Stamp {
+            length: m.len(),
+            modified: m.modified()?,
+            identity: vec![
+                info.dwVolumeSerialNumber as u64,
+                info.nFileIndexHigh as u64,
+                info.nFileIndexLow as u64,
+            ],
+        })
+    }
+}
+
+/// Availability is independent of scoring. Keep successful opens while both the
+/// content key and filesystem identity match; missing/unreadable files are retried.
+#[derive(Debug, Default)]
+pub(super) struct ReferenceFiles {
+    #[cfg(unix)]
+    files: std::collections::HashMap<String, (String, Stamp)>,
+}
+
+#[cfg(all(test, unix))]
+impl ReferenceFiles {
+    pub(super) fn clear(&mut self) {
+        self.files.clear();
+    }
+}
+
+impl Library {
+    pub(super) fn character_reference_available(&self, relative: &str, hash: &str) -> bool {
+        #[cfg(unix)]
+        {
+            let mut cache = self
+                .character_reference_files
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let current = self
+                .library_media_path(relative)
+                .ok()
+                .and_then(|path| std::fs::metadata(path).ok())
+                .filter(|m| m.is_file())
+                .and_then(|m| metadata_stamp(&m).ok());
+            if let Some(identity) = current {
+                if cache
+                    .files
+                    .get(relative)
+                    .is_some_and(|(cached_hash, cached_identity)| {
+                        cached_hash == hash && cached_identity == &identity
+                    })
+                {
+                    return true;
+                }
+                if let Ok(media) = self.open_library_media(relative) {
+                    if stamp(&media.file).is_ok_and(|opened| opened == identity) {
+                        if cache.files.len() >= 4096 {
+                            cache.files.clear();
+                        }
+                        cache.files.insert(relative.into(), (hash.into(), identity));
+                        return true;
+                    }
+                }
+            }
+            cache.files.remove(relative);
+            false
+        }
+        #[cfg(windows)]
+        {
+            let _ = hash;
+            self.open_library_media(relative).is_ok()
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static ORIGINAL_OPENS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 fn hash_copy(file: &mut File, mut copy: Option<&mut File>) -> Result<String> {
     let mut hash = Sha256::new();
@@ -116,8 +188,13 @@ impl Source {
         Ok(())
     }
     pub(super) fn check_identity(&self, library: &Library) -> Result<()> {
-        let current = library.open_library_media(&self.relative)?.file;
-        if stamp(&current)? != self.identity || stamp(&self.original)? != self.identity {
+        #[cfg(unix)]
+        let current = metadata_stamp(&std::fs::metadata(
+            library.library_media_path(&self.relative)?,
+        )?)?;
+        #[cfg(windows)]
+        let current = stamp(&library.open_library_media(&self.relative)?.file)?;
+        if current != self.identity || stamp(&self.original)? != self.identity {
             return Err(Error::Stale);
         }
         Ok(())
@@ -155,6 +232,50 @@ mod tests {
         }
         #[cfg(windows)]
         assert!(std::fs::write(f.temp.path().join("assets/asset-5.png"), b"changed").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unchanged_reference_sets_and_snapshots_reopen_no_originals() {
+        let f = Fixture::new();
+        let target = f.ready("Cached");
+        let c = f.library.connection().unwrap();
+        let source = Source::capture(
+            &f.library,
+            "assets/asset-0.png",
+            &target.references[0].asset_hash,
+        )
+        .unwrap();
+        ORIGINAL_OPENS.with(|n| n.set(0));
+        for _ in 0..32 {
+            let current = f.library.read_character_target(&c, &target.id).unwrap();
+            assert_eq!(current.fingerprint, target.fingerprint);
+            source.check_identity(&f.library).unwrap();
+        }
+        assert_eq!(ORIGINAL_OPENS.with(|n| n.get()), 0);
+        let replacement = f.temp.path().join("replacement");
+        std::fs::write(&replacement, b"replacement bytes").unwrap();
+        std::fs::rename(&replacement, f.temp.path().join("assets/asset-0.png")).unwrap();
+        assert!(source.check_identity(&f.library).is_err());
+        assert!(f
+            .library
+            .character_reference_available("assets/asset-0.png", &target.references[0].asset_hash));
+        assert_eq!(
+            ORIGINAL_OPENS.with(|n| n.get()),
+            1,
+            "replacement must reopen, even if the DB hash has not changed"
+        );
+        std::fs::remove_file(f.temp.path().join("assets/asset-0.png")).unwrap();
+        assert!(!f
+            .library
+            .character_reference_available("assets/asset-0.png", &target.references[0].asset_hash));
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        std::os::unix::fs::symlink(outside.path(), f.temp.path().join("assets/asset-0.png"))
+            .unwrap();
+        assert!(!f
+            .library
+            .character_reference_available("assets/asset-0.png", &target.references[0].asset_hash));
+        assert!(source.check_identity(&f.library).is_err());
     }
 
     #[test]

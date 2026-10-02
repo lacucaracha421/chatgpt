@@ -1118,14 +1118,24 @@ impl Library {
             .ok_or(Error::Stale)?
             .to_string();
         let cutoff = (chrono::Utc::now() - chrono::Duration::days(14)).to_rfc3339();
-        let recent = self
-            .connection()?
+        let c = self.connection()?;
+        let mut recent = c
             .prepare(
                 "SELECT asset_id FROM character_autotag_jobs
                  WHERE state='completed' AND updated_at>=?1 ORDER BY updated_at DESC LIMIT 500",
             )?
             .query_map([&cutoff], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        {
+            let engine = self
+                .character_incremental
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            recent.retain(|asset| !engine.s36_checked.contains(asset));
+        }
+        if recent.is_empty() {
+            return Ok(None);
+        }
         let cache_path = self.root.join(".cache/characters/s36_shadow.sqlite");
         #[cfg(test)]
         if cache_path.is_file() {
@@ -1151,11 +1161,36 @@ impl Library {
                     continue;
                 }
             }
-            let Some(pending) = self.character_shadow_candidate(&asset)? else {
+            // Most restart catch-up rows already have a score. Check the disposable
+            // cache before resolving targets (which validates every reference original).
+            let scored = match &cache {
+                Some(cache) => cache
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM scores WHERE asset_id=?1 AND policy_version=?2)",
+                        rusqlite::params![asset, version],
+                        |r| r.get::<_, bool>(0),
+                    )
+                    .unwrap_or(false),
+                None => false,
+            };
+            if scored {
+                continue;
+            }
+            // Non-S36 series occur in the same recent-job window. Resolve their
+            // folder scope before loading reference rosters that cannot be scored here.
+            let scope = super::character_scope::resolve_character_scope(&c, &asset)?;
+            if !scope.is_some_and(|scope| {
+                scope
+                    .series_classification_ids
+                    .iter()
+                    .any(|series| config.s36.owns(Some(series)))
+            }) {
+                continue;
+            }
+            let Some(pending) = self.character_shadow_candidate_on(&c, &asset)? else {
                 continue;
             };
             let owned = {
-                let c = self.connection()?;
                 let mut series = c.prepare(
                     "SELECT series_classification_id FROM character_targets WHERE id=?1",
                 )?;
@@ -1169,19 +1204,7 @@ impl Library {
             if !owned {
                 continue;
             }
-            let scored = match &cache {
-                Some(cache) => cache
-                    .query_row(
-                        "SELECT EXISTS(SELECT 1 FROM scores WHERE asset_id=?1 AND policy_version=?2)",
-                        rusqlite::params![asset, version],
-                        |r| r.get::<_, bool>(0),
-                    )
-                    .unwrap_or(false),
-                None => false,
-            };
-            if !scored {
-                return Ok(Some(pending));
-            }
+            return Ok(Some(pending));
         }
         Ok(None)
     }
@@ -1205,7 +1228,16 @@ impl Library {
         config: &RuntimeConfig,
         stop: Arc<AtomicBool>,
     ) -> Result<bool> {
-        if config.augmentation_model.is_none() || !self.augmentation_idle_allowed(&stop)? {
+        if config.augmentation_model.is_none()
+            || self
+                .character_incremental
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .training
+                .as_ref()
+                .is_none_or(|training| training.ready)
+            || !self.augmentation_idle_allowed(&stop)?
+        {
             return Ok(false);
         }
         let mut training = {

@@ -285,6 +285,7 @@ pub struct Library {
     revisit_color_cache: Arc<Mutex<revisit_color::ColorCache>>,
     revisit_color_lock: Arc<Mutex<()>>,
     artist_style_runtime: Arc<artist_style::Runtime>,
+    character_reference_files: Arc<Mutex<character_sources::ReferenceFiles>>,
     character_scan: Arc<Mutex<character_scan::ScanState>>,
     character_incremental: Arc<Mutex<character_incremental::Engine>>,
     character_wake: Arc<character_incremental::Wake>,
@@ -400,6 +401,7 @@ impl Library {
             revisit_color_cache: Arc::default(),
             revisit_color_lock: Arc::default(),
             artist_style_runtime: Arc::default(),
+            character_reference_files: Arc::default(),
             character_scan: Arc::default(),
             character_incremental: Arc::default(),
             character_wake: Arc::default(),
@@ -543,6 +545,21 @@ impl Library {
             move |_: rusqlite::hooks::Action, _: &str, table: &str, _: i64| {
                 if character_incremental::is_queue_table(table) {
                     changed.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                if matches!(
+                    table,
+                    "cloud_sync_queue"
+                        | "cloud_backfill_control"
+                        | "cloud_backfill_scope"
+                        | "library_settings"
+                        | "assets"
+                ) {
+                    crate::workload::note_replication_work();
+                }
+                // Poll cursors only record this worker's own schedule; they are
+                // not new work and must not wake another empty tick.
+                if matches!(table, "av_link_inbox" | "library_settings") {
+                    av_link::note_work();
                 }
             },
         ))?;
@@ -866,12 +883,7 @@ impl Library {
         }
     }
 
-    pub(crate) fn open_library_media(
-        &self,
-        relative_path: &str,
-    ) -> Result<MediaResponse, LibraryError> {
-        let _open =
-            crate::media_protocol_timing::stage(crate::media_protocol_timing::Stage::FileOpen);
+    pub(super) fn library_media_path(&self, relative_path: &str) -> Result<PathBuf, LibraryError> {
         let requested_path = self.canonical_root.join(relative_path);
         let canonical_path = fs::canonicalize(&requested_path).map_err(|source| {
             if source.kind() == std::io::ErrorKind::NotFound {
@@ -886,6 +898,18 @@ impl Library {
         if !canonical_path.starts_with(&self.canonical_root) {
             return Err(LibraryError::UnsafeMediaPath);
         }
+        Ok(canonical_path)
+    }
+
+    pub(crate) fn open_library_media(
+        &self,
+        relative_path: &str,
+    ) -> Result<MediaResponse, LibraryError> {
+        let _open =
+            crate::media_protocol_timing::stage(crate::media_protocol_timing::Stage::FileOpen);
+        #[cfg(test)]
+        character_sources::ORIGINAL_OPENS.with(|count| count.set(count.get() + 1));
+        let canonical_path = self.library_media_path(relative_path)?;
         let mime = mime_for_path(&canonical_path);
         let file = File::open(&canonical_path).map_err(|source| LibraryError::ReadMedia {
             path: canonical_path.clone(),

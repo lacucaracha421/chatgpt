@@ -85,7 +85,10 @@ impl Library {
         if !config.enabled || endpoint.is_empty() {
             return Ok(());
         }
-        self.connection()?.execute("UPDATE mobile_publication_state SET endpoint=?1,generation=generation+1,first_dirty=0,last_dirty=0,retry_after=0 WHERE endpoint<>?1",[&endpoint])?;
+        {
+            let c = self.connection()?;
+            Self::update_publication_endpoint_on(&c, &endpoint)?;
+        }
         for (slot, kind) in [
             "collections",
             "characters",
@@ -161,6 +164,21 @@ impl Library {
                 };
             })
             .map_err(|_| LibraryError::InvalidCloudResponse)?;
+        }
+        Ok(())
+    }
+
+    fn update_publication_endpoint_on(
+        connection: &rusqlite::Connection,
+        endpoint: &str,
+    ) -> Result<(), LibraryError> {
+        let changed: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM mobile_publication_state WHERE endpoint<>?1)",
+            [endpoint],
+            |r| r.get(0),
+        )?;
+        if changed {
+            connection.execute("UPDATE mobile_publication_state SET endpoint=?1,generation=generation+1,first_dirty=0,last_dirty=0,retry_after=0 WHERE endpoint<>?1", [endpoint])?;
         }
         Ok(())
     }
@@ -241,6 +259,35 @@ impl Library {
 #[cfg(test)]
 mod tests {
     use crate::library::Library;
+    #[test]
+    fn unchanged_publication_endpoint_tick_is_read_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let c = library.connection().unwrap();
+        let endpoint = "https://fixture.invalid";
+        Library::update_publication_endpoint_on(&c, endpoint).unwrap();
+        let before = c.total_changes();
+        assert!(before > 0);
+        c.execute_batch("PRAGMA query_only=ON").unwrap();
+        for _ in 0..12 {
+            Library::update_publication_endpoint_on(&c, endpoint).unwrap();
+        }
+        assert_eq!(c.total_changes(), before);
+        c.execute_batch("PRAGMA query_only=OFF").unwrap();
+        assert!(!Library::catalog_visibility_tick_on(&c, endpoint, "unchanged").unwrap());
+        c.execute(
+            "UPDATE mobile_catalog_visibility_state SET published_digest=digest",
+            [],
+        )
+        .unwrap();
+        let before = c.total_changes();
+        c.execute_batch("PRAGMA query_only=ON").unwrap();
+        for _ in 0..12 {
+            assert!(!Library::catalog_visibility_tick_on(&c, endpoint, "unchanged").unwrap());
+        }
+        assert_eq!(c.total_changes(), before);
+    }
+
     #[test]
     fn blocked_collection_does_not_block_repeated_character_ticks_or_duplicate_work() {
         use std::sync::{mpsc, Mutex};
@@ -443,6 +490,35 @@ impl Library {
         Ok(())
     }
 
+    fn catalog_visibility_tick_on(
+        db: &rusqlite::Connection,
+        endpoint: &str,
+        digest: &str,
+    ) -> Result<bool, LibraryError> {
+        use rusqlite::OptionalExtension;
+        let previous: Option<String> = db
+            .query_row(
+                "SELECT digest FROM mobile_catalog_visibility_state WHERE endpoint=?1",
+                [endpoint],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match previous {
+            None => {
+                db.execute("INSERT INTO mobile_catalog_visibility_state(endpoint,digest,first_dirty,last_dirty) VALUES(?1,?2,unixepoch(),unixepoch())",params![endpoint,digest])?;
+            }
+            Some(previous) if previous != digest => {
+                db.execute("UPDATE mobile_catalog_visibility_state SET digest=?2,first_dirty=CASE WHEN digest=published_digest THEN unixepoch() ELSE first_dirty END,last_dirty=unixepoch() WHERE endpoint=?1 AND digest<>?2",params![endpoint,digest])?;
+            }
+            Some(_) => {}
+        }
+        let due:bool=db.query_row("SELECT digest<>published_digest AND retry_after<=unixepoch() AND (last_dirty<=unixepoch()-30 OR first_dirty<=unixepoch()-300) FROM mobile_catalog_visibility_state WHERE endpoint=?1",[endpoint],|r|r.get(0))?;
+        if due {
+            db.execute("UPDATE mobile_catalog_visibility_state SET retry_after=unixepoch()+60 WHERE endpoint=?1",[endpoint])?;
+        }
+        Ok(due)
+    }
+
     fn publish_due_catalog_visibility(&self, endpoint: &str) -> Result<(), LibraryError> {
         let (body, digest) = {
             let db = self.connection()?;
@@ -451,14 +527,8 @@ impl Library {
             (body, digest)
         };
         let due = {
-            let db = self.connection()?;
-            db.execute("INSERT OR IGNORE INTO mobile_catalog_visibility_state(endpoint,digest,first_dirty,last_dirty) VALUES(?1,?2,unixepoch(),unixepoch())",params![endpoint,digest])?;
-            db.execute("UPDATE mobile_catalog_visibility_state SET digest=?2,first_dirty=CASE WHEN digest=published_digest THEN unixepoch() ELSE first_dirty END,last_dirty=unixepoch() WHERE endpoint=?1 AND digest<>?2",params![endpoint,digest])?;
-            let due:bool=db.query_row("SELECT digest<>published_digest AND retry_after<=unixepoch() AND (last_dirty<=unixepoch()-30 OR first_dirty<=unixepoch()-300) FROM mobile_catalog_visibility_state WHERE endpoint=?1",[endpoint],|r|r.get(0))?;
-            if due {
-                db.execute("UPDATE mobile_catalog_visibility_state SET retry_after=unixepoch()+60 WHERE endpoint=?1",[endpoint])?;
-            }
-            due
+            let c = self.connection()?;
+            Self::catalog_visibility_tick_on(&c, endpoint, &digest)?
         };
         if !due {
             return Ok(());

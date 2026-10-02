@@ -1430,7 +1430,9 @@ impl Library {
                     match eligible {
                         None => "ineligible",
                         Some((hash, _)) if hash != asset_hash => "changed_content",
-                        Some((_, path)) if self.open_library_media(&path).is_err() => {
+                        Some((_, path))
+                            if !self.character_reference_available(&path, &asset_hash) =>
+                        {
                             "missing_file"
                         }
                         Some(_) => "ready",
@@ -1485,11 +1487,14 @@ impl Library {
                             None => "ineligible",
                             Some((hash, _)) if hash != asset_hash => "changed_content",
                             Some((_, scoped_path))
-                                if self.open_library_media(&scoped_path).is_err() =>
+                                if !self
+                                    .character_reference_available(&scoped_path, &asset_hash) =>
                             {
                                 "missing_file"
                             }
-                            Some(_) if self.open_library_media(&path).is_err() => "missing_file",
+                            Some(_) if !self.character_reference_available(&path, &asset_hash) => {
+                                "missing_file"
+                            }
                             Some(_) => "ready",
                         }
                     }

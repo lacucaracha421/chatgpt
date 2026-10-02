@@ -19,6 +19,11 @@ use tauri::{
 };
 
 static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+static REPLICATION_WORK: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn note_replication_work() {
+    REPLICATION_WORK.store(true, Ordering::Release);
+}
 
 pub(crate) fn video_prepared() {
     if let Some(app) = APP.get() {
@@ -498,11 +503,12 @@ fn start_timers(app: tauri::AppHandle) {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .profile();
         let mut publications = Instant::now() - Duration::from_secs(10);
-        let mut replication = publications;
+        let replication = std::sync::Arc::new(Mutex::new(AuthoritySchedule::new(Instant::now())));
+        let mut replication_root = None;
+        let mut replication_restricted = None;
         let mut launchbox_check = publications;
         static LAUNCHBOX_BUSY: AtomicBool = AtomicBool::new(false);
         static PUBLICATIONS_BUSY: AtomicBool = AtomicBool::new(false);
-        static REPLICATION_BUSY: AtomicBool = AtomicBool::new(false);
         static ASSETS_BUSY: AtomicBool = AtomicBool::new(false);
         // Shared-authority lane: one conditional status read per pass for every domain,
         // with idle backoff (see `library::authority_pass`).
@@ -711,18 +717,63 @@ fn start_timers(app: tauri::AppHandle) {
                     });
                 });
             }
-            if replication.elapsed() >= Duration::from_secs(if profile.restricted { 10 } else { 2 })
-                && !REPLICATION_BUSY.swap(true, Ordering::AcqRel)
-            {
-                replication = Instant::now();
+            let replication_wake = REPLICATION_WORK.swap(false, Ordering::AcqRel);
+            let replication_due = {
+                let mut schedule = replication
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if replication_root.as_deref() != Some(library.root())
+                    || replication_restricted != Some(profile.restricted)
+                    || replication_wake
+                {
+                    replication_restricted = Some(profile.restricted);
+                    replication_root = Some(library.root().to_path_buf());
+                    schedule.wake(Instant::now());
+                }
+                let due = schedule.due(Instant::now());
+                if due {
+                    schedule.begin();
+                }
+                due
+            };
+            if replication_due {
+                let schedule = replication.clone();
+                let restricted = profile.restricted;
                 std::thread::spawn(move || {
-                    let _reset = Reset(&REPLICATION_BUSY);
-                    let _ = library.run_cloud_backfill_cycle();
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        library.run_cloud_backfill_cycle()
+                    }));
+                    let active = result.as_ref().is_ok_and(|result| {
+                        result.as_ref().is_ok_and(|summary| {
+                            summary.committed + summary.retry_scheduled + summary.permanent_failures
+                                > 0
+                        })
+                    });
+                    let failed = !matches!(result, Ok(Ok(_)));
+                    let mut schedule = schedule
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    finish_replication(&mut schedule, active, failed, restricted, Instant::now());
                 });
             }
         }
     });
 }
+fn finish_replication(
+    schedule: &mut AuthoritySchedule,
+    active: bool,
+    failed: bool,
+    restricted: bool,
+    now: Instant,
+) {
+    let delay = schedule.finished(active, false, false, now);
+    // Keep the existing cadence for real work and failures. An idle
+    // queue backs off to 15/30/60 s; queue writes wake it next tick.
+    if delay != Duration::ZERO && (active || failed) {
+        schedule.wake(now + Duration::from_secs(if restricted { 10 } else { 2 }));
+    }
+}
+
 struct FinishPass {
     schedule: std::sync::Arc<Mutex<AuthoritySchedule>>,
     restricted: bool,
@@ -747,6 +798,31 @@ impl Drop for Reset {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn replication_backs_off_only_when_idle_and_keeps_new_work_wakes() {
+        let now = Instant::now();
+        let mut schedule = AuthoritySchedule::new(now);
+        for delay in [15, 30, 60, 60] {
+            schedule.begin();
+            finish_replication(&mut schedule, false, false, false, now);
+            assert!(!schedule.due(now + Duration::from_secs(delay - 1)));
+            assert!(schedule.due(now + Duration::from_secs(delay)));
+        }
+        for (restricted, delay) in [(false, 2), (true, 10)] {
+            schedule.begin();
+            finish_replication(&mut schedule, true, false, restricted, now);
+            assert!(!schedule.due(now + Duration::from_secs(delay - 1)));
+            assert!(schedule.due(now + Duration::from_secs(delay)));
+        }
+        schedule.begin();
+        schedule.wake(now);
+        finish_replication(&mut schedule, false, false, false, now);
+        assert!(
+            schedule.due(now),
+            "a wake during an empty pass must survive finishing"
+        );
+    }
+
     #[test]
     fn workload_defaults_and_recovery_are_machine_local() {
         let now = Instant::now();

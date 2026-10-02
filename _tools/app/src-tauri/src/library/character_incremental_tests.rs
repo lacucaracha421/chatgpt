@@ -2933,3 +2933,107 @@ fn tagger_agreement_requires_native_acceptance_and_preserves_manual_rejection() 
         }
     }
 }
+
+#[test]
+fn s36_catch_up_skips_scored_references_and_reuses_pass_connections() {
+    use crate::library::character_sources::ORIGINAL_OPENS;
+    let f = Fixture::new();
+    let target = f.ready("Cached");
+    let cfg = idle_config(&f);
+    let now = chrono::Utc::now().to_rfc3339();
+    {
+        let c = f.library.connection().unwrap();
+        for id in [
+            "asset-0", "asset-1", "asset-2", "asset-3", "asset-4", "asset-5",
+        ] {
+            character_autotag::enqueue(&c, id, character_autotag::Cause::Ingestion).unwrap();
+            c.execute("UPDATE character_autotag_jobs SET state='completed',updated_at=?2 WHERE asset_id=?1", params![id, now]).unwrap();
+        }
+    }
+    let cache_path = f.temp.path().join(".cache/characters/s36_shadow.sqlite");
+    std::fs::create_dir_all(cache_path.parent().unwrap()).unwrap();
+    let cache = rusqlite::Connection::open(&cache_path).unwrap();
+    cache
+        .execute_batch("CREATE TABLE scores(asset_id TEXT,policy_version TEXT);")
+        .unwrap();
+    for i in 0..6 {
+        cache
+            .execute(
+                "INSERT INTO scores VALUES(?1,'idle-gate')",
+                [format!("asset-{i}")],
+            )
+            .unwrap();
+    }
+    struct Owner;
+    impl Drop for Owner {
+        fn drop(&mut self) {
+            OWNER_THREAD.with(|owner| owner.set(false));
+        }
+    }
+    OWNER_THREAD.with(|owner| owner.set(true));
+    let _owner = Owner;
+    let connections = || {
+        f.library
+            .character_wake
+            .owner_connections
+            .load(Ordering::Relaxed)
+    };
+    let before = connections();
+    ORIGINAL_OPENS.with(|n| n.set(0));
+    assert!(f.library.s36_catch_up(&cfg).unwrap().is_none());
+    assert_eq!(
+        ORIGINAL_OPENS.with(|n| n.get()),
+        0,
+        "cached scores must not resolve reference files"
+    );
+    assert_eq!(
+        connections() - before,
+        2,
+        "one library and one cache connection for the whole pass"
+    );
+    let before = connections();
+    assert!(f.library.s36_catch_up(&cfg).unwrap().is_none());
+    assert_eq!(
+        connections() - before,
+        1,
+        "a drained catch-up must not reopen the score cache"
+    );
+    cache
+        .execute("DELETE FROM scores WHERE asset_id='asset-5'", [])
+        .unwrap();
+    f.library
+        .character_incremental
+        .lock()
+        .unwrap()
+        .s36_checked
+        .clear();
+    let before = connections();
+    let pending = f.library.s36_catch_up(&cfg).unwrap().unwrap();
+    assert_eq!(pending.asset_id, "asset-5");
+    assert_eq!(
+        pending.outcomes,
+        BTreeMap::from([(target.id.clone(), "none".into())])
+    );
+    assert_eq!(
+        connections() - before,
+        2,
+        "a missing score uses the same pass connection"
+    );
+    let mut other_cfg = cfg.clone();
+    other_cfg.s36.s36_series = BTreeSet::from([f.outside.clone()]);
+    f.library
+        .character_incremental
+        .lock()
+        .unwrap()
+        .s36_checked
+        .clear();
+    #[cfg(unix)]
+    f.library.character_reference_files.lock().unwrap().clear();
+    ORIGINAL_OPENS.with(|n| n.set(0));
+    assert!(f.library.s36_catch_up(&other_cfg).unwrap().is_none());
+    assert_eq!(
+        ORIGINAL_OPENS.with(|n| n.get()),
+        0,
+        "non-S36 series must not resolve references even without a cached score"
+    );
+}

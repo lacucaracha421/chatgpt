@@ -143,6 +143,14 @@ impl Library {
 
     pub(super) fn character_shadow_candidate(&self, id: &str) -> Result<Option<Pending>> {
         let c = self.connection()?;
+        self.character_shadow_candidate_on(&c, id)
+    }
+
+    pub(super) fn character_shadow_candidate_on(
+        &self,
+        c: &rusqlite::Connection,
+        id: &str,
+    ) -> Result<Option<Pending>> {
         let asset: Option<(String, String)> = c.query_row(
             "SELECT content_hash,relative_path FROM assets WHERE id=?1 AND status='normal' AND media_kind='image' AND content_hash IS NOT NULL",
             [id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
@@ -150,7 +158,7 @@ impl Library {
             return Ok(None);
         };
         let mut outcomes = BTreeMap::new();
-        for target in self.character_autotag_targets(&c, id)? {
+        for target in self.character_autotag_targets(c, id)? {
             let manual: Option<String> = c.query_row(
                 "SELECT decision FROM character_decisions WHERE source_asset_id=?1 AND target_id=?2 AND origin='manual' ORDER BY sequence DESC LIMIT 1",
                 params![id,target.id], |r| r.get(0)).optional()?;
@@ -181,7 +189,14 @@ impl Library {
         config: &RuntimeConfig,
         stop: Arc<AtomicBool>,
     ) -> bool {
-        if config.shadow_model.is_none() || !self.augmentation_idle_allowed(&stop).unwrap_or(false)
+        if config.shadow_model.is_none()
+            || !self
+                .character_shadow_backfill
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .status
+                .running
+            || !self.augmentation_idle_allowed(&stop).unwrap_or(false)
         {
             return false;
         }

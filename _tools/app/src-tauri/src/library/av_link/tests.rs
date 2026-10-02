@@ -843,3 +843,62 @@ fn av_link_jacket_route_validates_identity_and_canvas_origin() {
         .headers()
         .contains_key("access-control-allow-origin"));
 }
+
+#[test]
+fn av_link_idle_schedule_keeps_poll_retry_and_new_work_deadlines() {
+    let now = std::time::Instant::now();
+    let root = std::path::Path::new("fixture");
+    let mut schedule = TickSchedule {
+        root: None,
+        restricted: false,
+        generation: 0,
+        due: None,
+    };
+    assert!(schedule.ready(root, false, 1, now));
+    schedule.due = Some(now + std::time::Duration::from_secs(15));
+    for i in 1..15 {
+        assert!(!schedule.ready(root, false, 1, now + std::time::Duration::from_secs(i)));
+    }
+    assert!(schedule.ready(root, false, 1, now + std::time::Duration::from_secs(15)));
+    schedule.due = Some(now + std::time::Duration::from_secs(60));
+    assert!(schedule.ready(root, false, 2, now + std::time::Duration::from_secs(16)));
+    assert!(schedule.ready(root, true, 2, now + std::time::Duration::from_secs(17)));
+}
+
+#[test]
+fn av_link_not_due_poll_performs_no_writes() {
+    let (_dir, lib) = setup();
+    assert_eq!(
+        lib.claim_av_link_poll(ENDPOINT, 1000, false).unwrap(),
+        Some(0)
+    );
+    let c = lib.connection().unwrap();
+    c.execute_batch("PRAGMA query_only=ON").unwrap();
+    for i in 1001..1015 {
+        assert_eq!(
+            Library::claim_av_link_poll_on(&c, ENDPOINT, i, false).unwrap(),
+            None
+        );
+    }
+    assert_eq!(c.total_changes(), 0);
+}
+
+#[test]
+fn av_link_idle_delay_honors_a_pending_retry_and_queue_write_wakes() {
+    let (_dir, lib) = setup();
+    assert_eq!(
+        lib.next_av_link_tick(false).unwrap(),
+        std::time::Duration::from_secs(60)
+    );
+    let generation = WORK_GENERATION.load(Ordering::Acquire);
+    let now = chrono::Utc::now().timestamp();
+    lib.connection().unwrap().execute(
+        "INSERT INTO av_link_inbox(id,request_id,product_code,normalized_code,received_at,status,next_attempt_at)
+         VALUES('retry','request','ABW-100','ABW-100','2026','fetching',?1)", [now + 3],
+    ).unwrap();
+    assert_ne!(WORK_GENERATION.load(Ordering::Acquire), generation);
+    let delay = lib.next_av_link_tick(false).unwrap();
+    assert!(
+        delay >= std::time::Duration::from_secs(1) && delay <= std::time::Duration::from_secs(3)
+    );
+}

@@ -552,25 +552,16 @@ impl Library {
         if !config.enabled {
             return Ok(BackfillRunSummary::default());
         }
-        self.connection()?
-            .execute(SUPERSEDED_UPLOAD_SQL, [chrono::Utc::now().to_rfc3339()])?;
         let new_ingests = self.new_ingest_json();
-        let eligible = self.connection()?.query_row(
-            "SELECT EXISTS(SELECT 1 FROM cloud_sync_queue q JOIN assets a ON a.id=q.entity_id
-             WHERE a.status='normal' AND q.entity_type='asset' AND q.operation='upsert' AND q.status='pending'
-             AND NOT EXISTS(SELECT 1 FROM cloud_sync_queue busy WHERE busy.entity_type='asset' AND busy.entity_id=q.entity_id AND busy.status IN ('processing','preparing','uploading','committing'))
-             AND NOT EXISTS(SELECT 1 FROM cloud_sync_queue newer WHERE newer.entity_type='asset' AND newer.entity_id=q.entity_id AND newer.operation='upsert' AND newer.revision>q.revision)
-             AND NOT EXISTS(SELECT 1 FROM cloud_backfill_control WHERE singleton=1 AND state='paused')
-             AND ((?1 AND q.entity_id IN (SELECT value FROM json_each(?2))) OR
-                  (NOT ?1 AND (NOT EXISTS(SELECT 1 FROM cloud_backfill_scope) OR q.entity_id IN (SELECT asset_id FROM cloud_backfill_scope)))))",
-            params![crate::workload::is_restricted(), new_ingests], |r| r.get::<_, bool>(0))?;
+        let eligible = {
+            let connection = self.connection()?;
+            Self::cloud_backfill_tick_on(
+                &connection,
+                &new_ingests,
+                crate::workload::is_restricted(),
+            )?
+        };
         if !eligible {
-            if !crate::workload::is_restricted() {
-                self.connection()?.execute("UPDATE cloud_backfill_control SET state='idle',updated_at=?1 WHERE singleton=1 AND state='running'
-                    AND NOT EXISTS(SELECT 1 FROM cloud_sync_queue WHERE entity_type='asset' AND operation='upsert'
-                    AND status IN ('pending','preparing','uploading','committing')
-                    AND (NOT EXISTS(SELECT 1 FROM cloud_backfill_scope) OR entity_id IN (SELECT asset_id FROM cloud_backfill_scope)))", [chrono::Utc::now().to_rfc3339()])?;
-            }
             return Ok(BackfillRunSummary::default());
         }
         self.begin_cloud_activity("replication")?;
@@ -584,6 +575,56 @@ impl Library {
         };
         self.finish_cloud_activity_with("replication", processed, problems, error, reason)?;
         result
+    }
+
+    fn cloud_backfill_tick_on(
+        connection: &rusqlite::Connection,
+        new_ingests: &str,
+        restricted: bool,
+    ) -> Result<bool, LibraryError> {
+        // A fully drained queue needs no UPDATE statement (nor its write lock).
+        let outstanding: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM cloud_sync_queue WHERE entity_type='asset' AND operation='upsert' AND status IN ('pending','failed'))
+                 OR EXISTS(SELECT 1 FROM cloud_backfill_control WHERE singleton=1 AND state='running')",
+            [], |r| r.get(0),
+        )?;
+        if !outstanding {
+            return Ok(false);
+        }
+        let superseded: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM cloud_sync_queue WHERE entity_type='asset' AND operation='upsert'
+                AND status IN ('pending','failed') AND EXISTS(SELECT 1 FROM cloud_sync_queue newer
+                    WHERE newer.entity_type='asset' AND newer.entity_id=cloud_sync_queue.entity_id
+                      AND newer.operation='upsert' AND newer.revision>cloud_sync_queue.revision AND newer.status='synced'))",
+            [], |r| r.get(0),
+        )?;
+        if superseded {
+            connection.execute(SUPERSEDED_UPLOAD_SQL, [chrono::Utc::now().to_rfc3339()])?;
+        }
+        let eligible = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM cloud_sync_queue q JOIN assets a ON a.id=q.entity_id
+             WHERE a.status='normal' AND q.entity_type='asset' AND q.operation='upsert' AND q.status='pending'
+             AND NOT EXISTS(SELECT 1 FROM cloud_sync_queue busy WHERE busy.entity_type='asset' AND busy.entity_id=q.entity_id AND busy.status IN ('processing','preparing','uploading','committing'))
+             AND NOT EXISTS(SELECT 1 FROM cloud_sync_queue newer WHERE newer.entity_type='asset' AND newer.entity_id=q.entity_id AND newer.operation='upsert' AND newer.revision>q.revision)
+             AND NOT EXISTS(SELECT 1 FROM cloud_backfill_control WHERE singleton=1 AND state='paused')
+             AND ((?1 AND q.entity_id IN (SELECT value FROM json_each(?2))) OR
+                  (NOT ?1 AND (NOT EXISTS(SELECT 1 FROM cloud_backfill_scope) OR q.entity_id IN (SELECT asset_id FROM cloud_backfill_scope)))))",
+            params![restricted, new_ingests], |r| r.get::<_, bool>(0))?;
+        if !eligible {
+            let running: bool = connection.query_row(
+                "SELECT state='running' FROM cloud_backfill_control WHERE singleton=1",
+                [],
+                |r| r.get(0),
+            )?;
+            if !restricted && running {
+                connection.execute("UPDATE cloud_backfill_control SET state='idle',updated_at=?1 WHERE singleton=1 AND state='running'
+                    AND NOT EXISTS(SELECT 1 FROM cloud_sync_queue WHERE entity_type='asset' AND operation='upsert'
+                    AND status IN ('pending','preparing','uploading','committing')
+                    AND (NOT EXISTS(SELECT 1 FROM cloud_backfill_scope) OR entity_id IN (SELECT asset_id FROM cloud_backfill_scope)))", [chrono::Utc::now().to_rfc3339()])?;
+            }
+            return Ok(false);
+        }
+        Ok(true)
     }
 
     fn run_configured_cloud_backfill_cycle(
@@ -1209,4 +1250,31 @@ pub(crate) struct BackfillCommitPayload {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub duration_ms: Option<u64>,
+}
+
+#[cfg(test)]
+#[test]
+fn drained_replication_tick_is_read_only() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    let c = library.connection().unwrap();
+    c.execute_batch("PRAGMA query_only=ON").unwrap();
+    for restricted in [false, true, false] {
+        assert!(!Library::cloud_backfill_tick_on(&c, "[]", restricted).unwrap());
+    }
+    assert_eq!(c.total_changes(), 0);
+    c.execute_batch(
+        "PRAGMA query_only=OFF;
+        INSERT INTO cloud_sync_queue(id,entity_type,entity_id,operation,status,revision,updated_at)
+        VALUES('failed','asset','missing','upsert','failed',1,'2026');
+        PRAGMA query_only=ON;",
+    )
+    .unwrap();
+    let before = c.total_changes();
+    assert!(!Library::cloud_backfill_tick_on(&c, "[]", false).unwrap());
+    assert_eq!(
+        c.total_changes(),
+        before,
+        "an unchanged failure needs no writes either"
+    );
 }
