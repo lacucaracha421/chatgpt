@@ -981,7 +981,15 @@ library, PC render harness, tablet 0.8.98 on device online, server). Numbers bel
   ~500 ms download for ~400 KB.
 - **Server incident (fixed, 4dd26743):** the similarity review feed ran assets × assets for hours per request; 8 stuck
   worker threads held the 1-vCPU VPS at 100% CPU. Query-plan audit + read time budget in progress.
-- **Server audit 2026-10-02 (read-only, two Astra auditors) — in progress as S1/S2, rest queued:**
+- **Thumbnail immutable keys (2026-10-02, user-approved):** server stage + migration tool deployed (d8996552), PC
+  uploads via the new contract (4023d37a), legacy thumbnail uploads blocked on the server
+  (`thumbnail-block.conf` drop-in), pilot 25 OK (revisions preserved, HEAD-free), full run `thumb-full` started
+  ~20:30 KST. **TODO:** after 14 days and with separate approval, delete the journaled old `library/{id}/thumbnail`
+  objects only (never `library/{id}/` prefixes — originals live there); tablet follow-ups from the design §5
+  (revision for ID-only covers, DocumentsUI/Picker) are optional.
+- **TODO — PC Collections first open:** native marks show ~0.6 s to the list and ~1.7 s more until the first cover is
+  visible (test library, debug build); cover loading is the remaining cost.
+- **Server audit 2026-10-02 (read-only, two Astra auditors) — S1–S3 done and deployed (61eb4850); remaining:**
   - S1 (in progress): long-polls and sequential shutdown joins exceed systemd's 10 s stop (SIGKILL on 2 of 3 restarts);
     `library_snapshots` runs `BEGIN IMMEDIATE` on the event loop; stray `*.sqlite-journal` temp files never pruned.
   - S2 (in progress): per-request 8-thread HEAD pools with no global bound/deadline; one transport timeout fails a whole
