@@ -40,6 +40,46 @@ beforeEach(()=>{
   });
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();delete window.LakomicsNative;delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
+it('keeps the visible folder and scroll DOM through a delayed foreground refresh without replaying area motion',async()=>{
+  let visibility:DocumentVisibilityState='visible';
+  const visibilitySpy=vi.spyOn(document,'visibilityState','get').mockImplementation(()=>visibility);
+  try{
+    render(<App/>);await screen.findByRole('heading',{name:'에셋'});await openFolder('분류 B, 2개');
+    const old=await screen.findByText('tile-b1');
+    const gallery=screen.getByLabelText('자산 목록');fireEvent.scroll(gallery);
+    const layer=old.closest<HTMLElement>('[data-motion-view]')!;
+    const animate=vi.fn(()=>({cancel(){}}));
+    Object.defineProperty(HTMLElement.prototype,'animate',{configurable:true,value:animate});
+    const original=mocks.api.getMockImplementation()!;
+    const generation='b'.repeat(64);
+    let resolve!:(page:unknown)=>void;
+    const replacement=new Promise(done=>{resolve=done;});
+    mocks.api.mockImplementation((path:string)=>{
+      if(path==='/v1/library/list-generation')return Promise.resolve({generation});
+      if(path.startsWith('/v1/library/assets?')&&path.includes('classification_id=b')&&!path.includes('toc=1'))return replacement;
+      return original(path);
+    });
+    visibility='hidden';
+    act(()=>{
+      window.dispatchEvent(new Event('lakomics-pause'));document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new CustomEvent('lakomics-list-generation',{detail:{generation}}));
+    });
+    const reads=mocks.api.mock.calls.length;
+    visibility='visible';
+    await act(async()=>{window.dispatchEvent(new Event('lakomics-resume'));document.dispatchEvent(new Event('visibilitychange'));});
+    expect(mocks.api.mock.calls.length).toBeGreaterThan(reads);
+    expect(screen.getByText('tile-b1')).toBe(old);
+    expect(screen.getByLabelText('자산 목록')).toBe(gallery);
+    expect(layer.style.visibility).toBe('');expect(layer.style.display).toBe('');
+    expect(animate).not.toHaveBeenCalled();
+    await act(async()=>resolve({items:[{id:'foreground-new',kind:'image'}],has_more:false,next_cursor:null,list_generation:generation}));
+    await screen.findByText('tile-foreground-new');
+    expect(screen.queryByText('tile-b1')).toBeNull();
+    expect(screen.getByLabelText('자산 목록')).toBe(gallery);
+    expect(gallery.getAttribute('data-restore-scroll')).toBe('420');
+    expect(animate).not.toHaveBeenCalled();
+  }finally{visibilitySpy.mockRestore();}
+});
 describe('asset TOC list wiring',()=>{
   const G='a'.repeat(64),G2='b'.repeat(64);
   const table=(generation=G)=>({tocVersion:1,listGeneration:generation,totalCount:4,sort:'newest',buckets:[{key:'2026-09',startIndex:0,count:2,startCursor:null},{key:'2025-12',startIndex:2,count:2,startCursor:'bucket-b'}]});

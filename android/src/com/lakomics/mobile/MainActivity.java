@@ -12,6 +12,7 @@ import java.util.*;
 import java.util.concurrent.*;
 public final class MainActivity extends Activity {
  private static final String ORIGIN="https://app.lakomics.local";
+ private static final int PAGE_BACKGROUND=Color.rgb(22,23,24);
  private PrivateVault vault;
  private WebView web; private SecureSettings settings; private CloudClient client; private MediaRepository media; private NotesRepository notes;
  private final ThreadPoolExecutor workers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(48));
@@ -84,16 +85,21 @@ public final class MainActivity extends Activity {
  private synchronized void stopNonEssential(){stopped=true;for(Map.Entry<String,CancellationSignal> entry:nonEssential.entrySet())cancelOptional(entry.getKey(),entry.getValue());}
  @Override public void onCreate(Bundle b){super.onCreate(b);settings=new SecureSettings(this);client=new CloudClient(settings);notes=new NotesRepository(this,settings);vault=new PrivateVault(this,state->emit("lakomics-vault",state));
   try{media=MediaRepository.get(this);}catch(IllegalStateException ignored){}
-  getWindow().setStatusBarColor(Color.rgb(16,17,18));getWindow().setNavigationBarColor(Color.rgb(16,17,18));
-  web=new WebView(this);web.setBackgroundColor(Color.rgb(16,17,18));
-  android.widget.FrameLayout frame=new android.widget.FrameLayout(this);frame.setBackgroundColor(Color.rgb(16,17,18));frame.addView(web,new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT));setContentView(frame);
+  configureWindow();
+  web=new WebView(this);web.setBackgroundColor(PAGE_BACKGROUND);
+  android.widget.FrameLayout frame=new android.widget.FrameLayout(this);frame.setBackgroundColor(PAGE_BACKGROUND);frame.addView(web,new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT));setContentView(frame);
   hideStatusBar();
   // Edge-to-edge (targetSdk 35 on Android 15+) no longer resizes the window for the soft
   // keyboard, and a WebView ignores its own padding, so the page never learned the keyboard
   // covered it. The frame pads the keyboard's height below the WebView, shrinking the page
   // above the keyboard as adjustResize did, and hands the WebView the insets without it.
   if(Build.VERSION.SDK_INT>=30)frame.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(0,0,0,insets.getInsets(WindowInsets.Type.ime()).bottom);return new WindowInsets.Builder(insets).setInsets(WindowInsets.Type.ime(),android.graphics.Insets.NONE).build();});
-  web.setOnApplyWindowInsetsListener((v,insets)->{if(Build.VERSION.SDK_INT>=30){android.graphics.Insets i=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(i.left,i.top,i.right,i.bottom);}else v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
+  // Status bars are transient overlays: never turn their visibility into page padding.
+  // Keep navigation/cutout insets for CSS env(safe-area-inset-*), and the frame's IME handling.
+  web.setOnApplyWindowInsetsListener((v,insets)->{
+   if(Build.VERSION.SDK_INT>=30)return new WindowInsets.Builder(insets).setInsets(WindowInsets.Type.statusBars(),android.graphics.Insets.NONE).setInsetsIgnoringVisibility(WindowInsets.Type.statusBars(),android.graphics.Insets.NONE).build();
+   return insets.replaceSystemWindowInsets(insets.getSystemWindowInsetLeft(),0,insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());
+  });
   WebSettings s=web.getSettings();s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);s.setAllowFileAccess(false);s.setAllowContentAccess(false);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setMediaPlaybackRequiresUserGesture(false);s.setJavaScriptCanOpenWindowsAutomatically(false);s.setSupportMultipleWindows(false);s.setSaveFormData(false);s.setSafeBrowsingEnabled(true);
   CookieManager.getInstance().setAcceptCookie(false);WebView.setWebContentsDebuggingEnabled(false);
   web.addJavascriptInterface(new Bridge(),"LakomicsNative");ExchangeService.get(this).addListener(exchangeListener);
@@ -375,11 +381,23 @@ public final class MainActivity extends Activity {
  }
  @Override public void onBackPressed(){emit("lakomics-back",null);}
  @Override public void onUserInteraction(){super.onUserInteraction();if(Build.VERSION.SDK_INT>=33)PickerLibrary.get(this).interaction();}
+ private void configureWindow(){
+  // Fix the WebView bounds before first layout on Android 15 AND earlier releases.
+  // Returning from another app or swiping a transient status bar must not resize it.
+  if(Build.VERSION.SDK_INT>=30)getWindow().setDecorFitsSystemWindows(false);
+  // Older WebViews may not support CSS safe areas: keep the legacy navigation bar
+  // outside the content while making only the status bar an overlay.
+  else{View decor=getWindow().getDecorView();decor.setSystemUiVisibility(decor.getSystemUiVisibility()|View.SYSTEM_UI_FLAG_LAYOUT_STABLE|View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);}
+  getWindow().setStatusBarColor(PAGE_BACKGROUND);getWindow().setNavigationBarColor(PAGE_BACKGROUND);
+  getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(PAGE_BACKGROUND));
+ }
  private void hideStatusBar(){
   if(Build.VERSION.SDK_INT>=30){
+   WindowInsets insets=getWindow().getDecorView().getRootWindowInsets();
+   if(insets!=null&&!insets.isVisible(WindowInsets.Type.statusBars()))return;
    WindowInsetsController controller=getWindow().getInsetsController();
    if(controller!=null){controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);controller.hide(WindowInsets.Type.statusBars());}
-  }else getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+  }else if((getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_FULLSCREEN)==0)getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
  }
  @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(focused){hideStatusBar();clipboardHandler.post(clearSecretClip);}}
  @Override protected void onResume(){super.onResume();if(vault!=null)vault.resumed();synchronized(this){stopped=false;}foreground=true;hideStatusBar();if(web!=null){web.resumeTimers();web.onResume();emit("lakomics-resume",null);if(Build.VERSION.SDK_INT>=33)PickerLibrary.get(this).resume();}

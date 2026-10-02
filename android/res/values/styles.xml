@@ -1,0 +1,7 @@
+<resources>
+ <style name="LakomicsTheme" parent="@android:style/Theme.Material.NoActionBar">
+  <item name="android:windowBackground">#161718</item>
+  <item name="android:statusBarColor">#161718</item>
+  <item name="android:navigationBarColor">#161718</item>
+ </style>
+</resources>

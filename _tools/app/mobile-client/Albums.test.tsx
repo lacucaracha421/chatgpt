@@ -161,7 +161,10 @@ it('reads the native replica on activation, refresh and resume, and cancels stal
  act(()=>window.dispatchEvent(new Event('lakomics-resume')));expect(reads[0].signal.aborted).toBe(true);
  await act(async()=>reads[1].resolve(tree));expect(screen.getByText('업로드용')).toBeTruthy();
  await act(async()=>reads[0].resolve({...tree,albums:[{...albums[0],name:'stale'}]}));expect(screen.queryByText('stale')).toBeNull();
- view.rerender(<Replica revision={2}/>);expect(reads).toHaveLength(3);view.rerender(<Replica active={false} revision={2}/>);expect(reads[2].signal.aborted).toBe(true);
+ act(()=>window.dispatchEvent(new Event('lakomics-resume')));expect(reads).toHaveLength(3);
+ const old=screen.getByText('업로드용');expect(old.isConnected).toBe(true);
+ await act(async()=>reads[2].resolve({...tree,albums:[{...albums[0],name:'Updated album'}]}));expect(screen.getByText('Updated album')).toBeTruthy();
+ view.rerender(<Replica revision={2}/>);expect(reads).toHaveLength(4);view.rerender(<Replica active={false} revision={2}/>);expect(reads[3].signal.aborted).toBe(true);
 });
 it('revalidates an album filter response after a generation retry',async()=>{
  let generation='b'.repeat(64),filtered=0;
