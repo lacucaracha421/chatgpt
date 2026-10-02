@@ -81,7 +81,7 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fin
   }, [current]);
 
   const run = (entry: NavigationEntry | undefined, alternate = false) => {
-    if (!entry) return;
+    if (!entry || query !== filteredQuery) return;
     if (entry.id.startsWith("find-expand-")) { entry.run(); return; }
     if (entry.group !== "search" && entry.group !== "action" && entry.group !== "tag") setRecentIds(rememberRecent(recentKey, entry.id));
     onClose();

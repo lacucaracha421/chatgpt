@@ -81,6 +81,15 @@ function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged,
   const [message, setMessage] = useState<string | null>(null);
   const viewerOpenerRef = useRef<HTMLElement | null>(null);
   const onChangedRef = useRef(onChanged);
+  const refreshScope = useRef(0);
+
+  useEffect(() => {
+    ++refreshScope.current;
+    setRefreshing(false);
+    setKakaoRefreshing(false);
+    setMessage(null);
+    return () => { ++refreshScope.current; };
+  }, [collectionId, gateway]);
 
   useEffect(() => {
     onChangedRef.current = onChanged;
@@ -291,15 +300,17 @@ function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged,
   }
 
   async function refresh() {
+    const scope = refreshScope.current;
     setRefreshing(true);
     setMessage(null);
     try {
       await gateway.refreshMangaDex(collectionId);
       await onChanged();
       const initial = await gateway.listCollectionVolumes(collectionId);
-      setVolumes(initial);
+      if (scope === refreshScope.current) setVolumes(initial);
       const result = await gateway.syncMangaDexVolumeCovers(collectionId);
       const refreshed = await gateway.listCollectionVolumes(collectionId);
+      if (scope !== refreshScope.current) return;
       setVolumes(refreshed);
       setSelectedVolumeId((current) => current && refreshed.some((volume) => volume.id === current)
         ? current
@@ -308,30 +319,34 @@ function LegacyCollectionOverlay({ collectionId, collections, onExit, onChanged,
         setMessage(`표지 ${result.failed}개를 불러오지 못했습니다. 다음 새로고침에서 다시 시도합니다.`);
       }
     } catch (error) {
-      setMessage(commandErrorMessage(error, "MangaDex 정보를 새로고침하지 못했습니다."));
+      if (scope === refreshScope.current) setMessage(commandErrorMessage(error, "MangaDex 정보를 새로고침하지 못했습니다."));
     } finally {
-      setRefreshing(false);
+      if (scope === refreshScope.current) setRefreshing(false);
     }
   }
 
   async function refreshKakao() {
+    const scope = refreshScope.current;
     setKakaoRefreshing(true);
     setMessage(null);
     try {
       const result = await gateway.refreshKakao(collectionId);
       const refreshed = await gateway.listCollectionVolumes(collectionId);
+      const connection = await gateway.getBookConnection(collectionId);
+      const watchStatus = await gateway.getReleaseWatchStatus(collectionId);
+      invalidateReleaseData();
+      if (scope !== refreshScope.current) return;
       setVolumes(refreshed);
       setSelectedVolumeId((current) => current && refreshed.some((volume) => volume.id === current)
         ? current
         : firstVolumeId(refreshed, editionIndex));
-      setBookConnection(await gateway.getBookConnection(collectionId));
-      setReleaseWatchStatus(await gateway.getReleaseWatchStatus(collectionId));
+      setBookConnection(connection);
+      setReleaseWatchStatus(watchStatus);
       setMessage(kakaoResultMessage(result));
-      invalidateReleaseData();
     } catch (error) {
-      setMessage(commandErrorMessage(error, "Kakao 정보를 새로고침하지 못했습니다."));
+      if (scope === refreshScope.current) setMessage(commandErrorMessage(error, "Kakao 정보를 새로고침하지 못했습니다."));
     } finally {
-      setKakaoRefreshing(false);
+      if (scope === refreshScope.current) setKakaoRefreshing(false);
     }
   }
 

@@ -49,6 +49,7 @@ export function AssetInfoPanel({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<MetadataDraft | null>(null);
   const [saving, setSaving] = useState(false);
+  const editSession = useRef(0);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
@@ -65,6 +66,8 @@ export function AssetInfoPanel({
   const autoTags = useAssetAutoTags(gateway.autoTags, asset?.id ?? null, onAutoTagFilterApplied);
 
   useEffect(() => {
+    ++editSession.current;
+    setSaving(false);
     setEditing(false);
     setDraft(null);
     setSaveError(null);
@@ -72,6 +75,7 @@ export function AssetInfoPanel({
     setStyleSuggestion(null);
     setStyleSuggestionHidden(false);
     setStyleSuggestionError(null);
+    return () => { ++editSession.current; };
   }, [assetIds]);
 
   useEffect(() => {
@@ -135,14 +139,16 @@ export function AssetInfoPanel({
   const cancelEditing = () => { setEditing(false); setDraft(null); setSaveError(null); };
   const saveMetadata = async () => {
     if (!draft || saving) return;
+    const session = editSession.current;
     setSaving(true);
     setSaveError(null);
     try {
       const updated = await gateway.updateAssetMetadata({ assetId: asset.id, sourcePublishedAt: asset.sourcePublishedAt, creatorName: nullable(draft.creatorName), creatorHandle: nullable(draft.creatorHandle), creatorUrl: nullable(draft.creatorUrl) });
       onAssetUpdated(updated);
-      cancelEditing();
-    } catch (error) { setSaveError(commandErrorMessage(error, "출처 정보를 저장하지 못했습니다.")); }
-    finally { setSaving(false); }
+      if (session === editSession.current) cancelEditing();
+    } catch (error) {
+      if (session === editSession.current) setSaveError(commandErrorMessage(error, "출처 정보를 저장하지 못했습니다."));
+    } finally { if (session === editSession.current) setSaving(false); }
   };
   const copySource = async () => {
     if (!asset.sourceUrl) return;

@@ -81,10 +81,16 @@ export function Dialog({ children, open, title, variant = "default", onKeyDown, 
           onKeyDown={onKeyDown}
           onKeyUp={onKeyUp}
           onWheel={swipeBack}
-          onEscapeKeyDown={backNavigation ? (event) => {
-            event.preventDefault();
-            backNavigation.requestBack();
-          } : undefined}
+          onEscapeKeyDown={(event) => {
+            if (event.isComposing || event.keyCode === 229) {
+              event.preventDefault();
+              return;
+            }
+            if (backNavigation) {
+              event.preventDefault();
+              backNavigation.requestBack();
+            }
+          }}
         >
           <RadixDialog.Title className="ui-dialog__title">{title}</RadixDialog.Title>
           {children}

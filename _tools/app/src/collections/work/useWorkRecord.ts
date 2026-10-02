@@ -10,13 +10,15 @@ export function useWorkRecord(collection: CollectionSummary | undefined) {
   const saves = useRef(Promise.resolve());
   const pending = useRef(0);
   const current = useRef(collection?.id); current.current = collection?.id;
+  // Status/device edits can leave every summary field (including updatedAt) unchanged.
+  // The shell supplies a fresh summary after the collections-changed event.
   useEffect(() => {
     if (!collection || !gateway.getCollectionWorkRecord) return;
     let active = true;
     const token = ++revision.current;
     void gateway.getCollectionWorkRecord(collection.id).then(record => { if (active && token === revision.current && pending.current === 0) setLoaded({ id: collection.id, record }); }, () => undefined);
     return () => { active = false; };
-  }, [gateway, collection?.id, collection?.myScore, collection?.description]);
+  }, [gateway, collection]);
   async function save(item: CollectionSummary, edit: CollectionRecordEdit) {
     if (!gateway.saveCollectionWorkRecord) throw new Error("개인 기록 저장 명령을 사용할 수 없습니다.");
     const write = gateway.saveCollectionWorkRecord;

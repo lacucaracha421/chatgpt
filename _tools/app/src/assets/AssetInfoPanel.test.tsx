@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { AssetSummary, CollectionSummary, LibraryGateway } from "../library/types";
@@ -61,3 +61,24 @@ function asset(id: string, sourcePublishedAt: string, collectedAt: string): Asse
   };
 }
 
+
+it.each(["resolve", "reject"])("keeps B's draft when A's save finishes with %s", async (outcome) => {
+  const a = asset("a", "t", "t"), b = asset("b", "t", "t");
+  let resolve!: (value: AssetSummary) => void;
+  let reject!: (reason: Error) => void;
+  const updateAssetMetadata = vi.fn(() => new Promise<AssetSummary>((yes, no) => { resolve = yes; reject = no; }));
+  const gateway = { updateAssetMetadata } as unknown as LibraryGateway;
+  const updated = vi.fn();
+  const panel = (selected: AssetSummary) => <LibraryProvider gateway={gateway}><AssetInfoPanel assets={[selected]} onAssetUpdated={updated} /></LibraryProvider>;
+  const { rerender } = render(panel(a));
+  fireEvent.click(screen.getByRole("button", { name: "출처 정보 편집" }));
+  fireEvent.click(screen.getByRole("button", { name: "저장" }));
+  rerender(panel(b));
+  fireEvent.click(screen.getByRole("button", { name: "출처 정보 편집" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "제작자 이름" }), { target: { value: "B draft" } });
+  await act(async () => outcome === "resolve" ? resolve(a) : reject(new Error("A save failed")));
+  expect(screen.getByRole("textbox", { name: "제작자 이름" })).toHaveValue("B draft");
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "저장" })).toBeEnabled();
+  if (outcome === "resolve") expect(updated).toHaveBeenCalledWith(a);
+});

@@ -128,3 +128,16 @@ it("prefers the registered back chain over closing directly", async () => {
   expect(onClose).not.toHaveBeenCalled();
   expect(screen.getByRole("heading", { name: "확인" })).toBeVisible();
 });
+
+it.each([false, true])("ignores composing Escape with back navigation=%s", (withBack) => {
+  const close = vi.fn();
+  const dialog = <Dialog open title="IME editor" onClose={close}><input aria-label="Draft" /></Dialog>;
+  render(withBack ? <BackNavigationProvider>{dialog}</BackNavigationProvider> : dialog);
+  const input = screen.getByRole("textbox");
+  fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+  expect(close).not.toHaveBeenCalled();
+  fireEvent.keyDown(input, { key: "Escape", keyCode: 229 });
+  expect(close).not.toHaveBeenCalled();
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(close).toHaveBeenCalledOnce();
+});

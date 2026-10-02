@@ -6,7 +6,7 @@ type StableImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, "src" | "alt">
   onPreloadError?: () => void;
 };
 
-type Slot = { src: string; alt: string };
+type Slot = { src: string; alt: string; ready?: boolean };
 
 /**
  * Keeps the current image on screen until the next one has loaded and decoded.
@@ -22,18 +22,31 @@ export function StableImage({ src, alt, onPreloadError, ...props }: StableImageP
   useEffect(() => {
     const current = slots[active];
     if (current?.src === src) {
-      if (current.alt !== alt) setSlots((previous) => replaceSlot(previous, active, { src, alt }));
+      if (current.alt !== alt) setSlots((previous) => replaceSlot(previous, active, { ...current, alt }));
       return;
     }
     const other = active === 0 ? 1 : 0;
-    if (slots[other]?.src === src && slots[other]?.alt === alt) return;
+    const next = slots[other];
+    if (next?.src === src) {
+      if (next.alt !== alt) setSlots((previous) => replaceSlot(previous, other, { ...next, alt }));
+      if (next.ready) setActive(other);
+      return;
+    }
     setSlots((previous) => replaceSlot(previous, other, { src, alt }));
   }, [active, alt, slots, src]);
 
   const loaded = (index: 0 | 1, event: SyntheticEvent<HTMLImageElement>) => {
-    if (index === active || slots[index]?.src !== src) return;
+    const loadedSrc = slots[index]?.src;
     const element = event.currentTarget;
-    const show = () => { if (element.isConnected && element.getAttribute("src") === src) setActive(index); };
+    const show = () => {
+      if (!element.isConnected || element.getAttribute("src") !== loadedSrc) return;
+      // Readiness belongs to the slot; only the effect may promote the currently requested source.
+      setSlots(previous => {
+        const slot = previous[index];
+        return slot?.src === loadedSrc && !slot.ready
+          ? replaceSlot(previous, index, { ...slot, ready: true }) : previous;
+      });
+    };
     if (typeof element.decode === "function") void element.decode().then(show, show);
     else show();
   };

@@ -1344,3 +1344,30 @@ it("docks info beside the grid and remembers I's state through navigation and re
   expect(localStorage.getItem("lakomics.assets.infoPanel.open.v1")).toBe("false");
   next.unmount();
 });
+
+it("keeps folder covers through both background lookup stages and clears a confirmed empty cover", async () => {
+  const gateway = createGateway();
+  const entries: ClassificationEntry[] = [
+    { id: "parent", kind: "root", name: "Parent", parentId: null, iconKey: null, colorKey: null },
+    { id: "child", kind: "tag", name: "Child", parentId: "parent", iconKey: null, colorKey: null },
+  ];
+  const seriesFolders = vi.fn().mockResolvedValue([]);
+  const options: BrowserOptions = { view: { kind: "classification", classificationId: "parent" }, classifications: entries, folderShelfApi: { seriesFolders } };
+  vi.mocked(gateway.listAssets).mockImplementation(async query => ({ items: query.limit === 1 ? [asset(7)] : [], nextCursor: null }));
+  const { rerender } = renderBrowser(gateway, options);
+  const card = screen.getByRole("button", { name: "Child 폴더 열기" });
+  await waitFor(() => expect(card.querySelector("img")).toHaveAttribute("src", expect.stringContaining("asset-7")));
+  const image = card.querySelector("img");
+  let finishFolders!: (value: []) => void;
+  let finishFallback!: (value: AssetPage) => void;
+  seriesFolders.mockReturnValueOnce(new Promise(resolve => { finishFolders = resolve; }));
+  vi.mocked(gateway.listAssets).mockImplementation(query => query.limit === 1
+    ? new Promise(resolve => { finishFallback = resolve; })
+    : Promise.resolve({ items: [], nextCursor: null }));
+  rerender(browserElement(gateway, { ...options, refreshVersion: 1 }));
+  expect(card.querySelector("img")).toBe(image);
+  await act(async () => finishFolders([]));
+  expect(card.querySelector("img")).toBe(image);
+  await act(async () => finishFallback({ items: [], nextCursor: null }));
+  expect(card.querySelector("img")).toBeNull();
+});

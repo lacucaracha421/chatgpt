@@ -142,15 +142,15 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   useEffect(() => {
     if (!plainFolderId || folderChildren.length === 0) { setFolderThumbnails({}); return; }
     let active = true;
-    setFolderThumbnails({});
+    setFolderThumbnails(current => Object.fromEntries(folderChildren
+      .filter(child => child.id in current).map(child => [child.id, current[child.id]])));
     void folderShelfApi.seriesFolders(plainFolderId).catch(() => []).then(async result => {
       const thumbnails: Record<string, string | null> = Object.fromEntries((Array.isArray(result) ? result : []).map(item => [item.classificationId, item.thumbnailAssetId]));
-      if (active) setFolderThumbnails(thumbnails);
       // seriesFolders skips series and character folders; give those the newest image below them.
       const missing = folderChildren.filter(child => !thumbnails[child.id]).slice(0, 40);
       const found = await Promise.all(missing.map(child => gateway.listAssets({ classificationId: child.id, albumId: null, collectionId: null, directOnly: false, unclassifiedOnly: false, mediaKind: "images", aspectRatio: null, sort: "newest", randomPivot: null, after: null, limit: 1 })
         .then(page => [child.id, page.items[0]?.id ?? null] as const, () => [child.id, null] as const)));
-      if (active && found.length) setFolderThumbnails(current => ({ ...current, ...Object.fromEntries(found) }));
+      if (active) setFolderThumbnails({ ...thumbnails, ...Object.fromEntries(found) });
     });
     return () => { active = false; };
     // folderChildren is keyed by folderChildrenKey.

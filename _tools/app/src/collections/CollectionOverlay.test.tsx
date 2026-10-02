@@ -179,9 +179,12 @@ function renderOverlay(
     runDueReleaseWatch: vi.fn().mockResolvedValue({ checked: 0, changedCollections: 0, skipped: 0, stopReason: null }),
     ...overrides,
   } as unknown as LibraryGateway;
+  let switchCollection!: (item: CollectionSummary) => void;
   function Detail() {
+    const [currentCollection, setCurrentCollection] = useState(targetCollection);
+    switchCollection = setCurrentCollection;
     const [pendingSearch, setPendingSearch] = useState(initialSearch);
-    return <CollectionOverlay collectionId={targetCollection.id} collections={[targetCollection]} onExit={onExit} onChanged={onChanged} onOpenSettings={onOpenSettings}
+    return <CollectionOverlay collectionId={currentCollection.id} collections={[currentCollection]} onExit={onExit} onChanged={onChanged} onOpenSettings={onOpenSettings}
       initialTmdbSearch={pendingSearch} onTmdbSearchConsumed={() => setPendingSearch(undefined)} />;
   }
   const content = (
@@ -192,7 +195,7 @@ function renderOverlay(
   render(
     withSidebar ? <WorkspaceChromeProvider scope={targetCollection.id}><aside aria-label="작품 사이드바"><ChromeTarget name="details" /></aside>{content}</WorkspaceChromeProvider> : content,
   );
-  return { gateway, onChanged, onExit, onOpenSettings };
+  return { gateway, onChanged, onExit, onOpenSettings, switchCollection: (item: CollectionSummary) => switchCollection(item) };
 }
 
 async function settleManga() {
@@ -916,4 +919,30 @@ it("keeps TMDB poster/backdrop picking and external-service settings reachable",
   await user.click(screen.getByRole("button", { name: "검색" }));
   await user.click(await screen.findByRole("button", { name: "TMDB 설정 열기" }));
   expect(settings).toHaveBeenCalledOnce();
+});
+
+it.each(["MangaDex", "Kakao"])("ignores a late %s refresh after moving from work A to B", async (provider) => {
+  const user = userEvent.setup();
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  const { switchCollection, gateway } = renderOverlay({
+    listCollectionVolumes: vi.fn().mockImplementation(async (id: string) => [{
+      id: `volume-${id}`, volumeNumber: id === collection.id ? 1 : 2, editionIndex: 0,
+      displayLabel: id === collection.id ? "1" : "2", coverArtworkId: null,
+      localReleaseDate: null, isbn13: null, releaseStatus: null,
+    }]),
+    getMangaDexConnection: vi.fn().mockResolvedValue(provider === "MangaDex" ? { mangaId: "md", lastSyncedAt: "t" } : null),
+    getBookConnection: vi.fn().mockResolvedValue(provider === "Kakao" ? { provider: "kakao", query: "A", lastSyncedAt: "t" } : null),
+    refreshMangaDex: vi.fn(() => pending.then(() => collection)),
+    refreshKakao: vi.fn(() => pending.then(() => ({ added: 0, updated: 1, unchanged: 0, ignored: 0 }))),
+  });
+  await screen.findByRole("button", { name: "1권 보기" });
+  await user.click(await screen.findByRole("button", { name: provider === "MangaDex" ? "MangaDex 새로고침" : "카카오 새로고침" }));
+  expect(provider === "MangaDex" ? gateway.refreshMangaDex : gateway.refreshKakao).toHaveBeenCalledWith(collection.id);
+  act(() => switchCollection({ ...collection, id: "work-b", name: "Work B" }));
+  await screen.findByRole("button", { name: "2권 보기" });
+  await act(async () => finish());
+  expect(screen.getByRole("button", { name: "2권 보기" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "1권 보기" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
 });
