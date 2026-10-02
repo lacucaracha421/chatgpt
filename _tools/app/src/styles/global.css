@@ -5588,11 +5588,8 @@ textarea:focus-visible {
 .asset-gallery__asset:hover .asset-gallery__hover-control,
 .asset-gallery__asset:focus-within .asset-gallery__hover-control,
 .asset-gallery__hover-control[data-visible="true"] { opacity: 1; }
-button.asset-gallery__favorite, .asset-gallery__select { width: var(--control-height-compact); height: var(--control-height-compact); padding: 0; border: 0; background: transparent; cursor: pointer; pointer-events: auto; }
-.asset-gallery__select { position: absolute; z-index: 2; top: var(--space-1); left: var(--space-1); display: grid; place-items: center; }
-.asset-gallery__select::before { content: ""; width: 16px; height: 16px; border: 1.5px solid var(--color-accent); border-radius: 50%; background: var(--color-surface); }
-.asset-gallery__select .ui-selection-check { inset: auto; width: 16px; height: 16px; border-radius: 50%; }
-.asset-gallery__select:focus-visible, .asset-gallery__favorite:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: -2px; }
+button.asset-gallery__favorite { width: var(--control-height-compact); height: var(--control-height-compact); padding: 0; border: 0; background: transparent; cursor: pointer; pointer-events: auto; }
+.asset-gallery__favorite:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: -2px; }
 .classification-sidebar__badge { opacity: 0; transition: opacity 90ms var(--ease-standard); }
 .classification-sidebar__quick-view:hover .classification-sidebar__badge,
 .classification-sidebar__quick-view:focus-within .classification-sidebar__badge,

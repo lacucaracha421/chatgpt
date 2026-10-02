@@ -719,21 +719,18 @@ it("uses one duration pill and hides it at small thumbnail sizes", () => {
   expect(container.querySelector(".video-tile__duration")).toBeNull();
 });
 
-it("keeps selection and heart controls reachable, revealing them on hover/focus or selection", () => {
+it("keeps the heart reachable on hover/focus or selection and draws no select circle on tiles", () => {
   const onSelect = vi.fn(), favorite = vi.fn();
   const props = { items: [asset(0), asset(1)], onSelectionGesture: onSelect, onToggleFavorite: favorite };
   const { rerender } = render(<AssetGallery {...props} />);
-  const select = screen.getByRole("button", { name: "asset-0.png 선택" });
+  // The user removed the select circle (2026-10-02); selection stays on click/Ctrl/Shift gestures.
+  expect(screen.queryByRole("button", { name: "asset-0.png 선택" })).toBeNull();
   const heart = screen.getByRole("button", { name: "asset-0.png 좋아요" });
-  expect(select).toHaveClass("asset-gallery__hover-control");
   expect(heart).toHaveClass("asset-gallery__hover-control");
   expect(heart).not.toHaveAttribute("data-visible");
-  fireEvent.click(select);
-  expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "asset-0" }), { toggle: true, range: false });
   fireEvent.click(heart);
   expect(favorite).toHaveBeenCalledWith(expect.objectContaining({ id: "asset-0" }));
   rerender(<AssetGallery {...props} selectedAssetIds={new Set(["asset-1"])} />);
-  expect(select).toHaveAttribute("data-visible", "true");
   expect(heart).toHaveAttribute("data-visible", "true");
   rerender(<AssetGallery {...props} favoritesView />);
   expect(heart).toHaveAttribute("data-visible", "true");

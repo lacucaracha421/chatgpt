@@ -33,3 +33,5 @@
 .memo-editor--touch .memo-tick { position: relative; width: 20px; height: 20px; margin: 12px 0; }
 .memo-editor--touch .memo-tick::before { content: ''; position: absolute; inset: -12px; }
 .memo-editor--touch .memo-add, .memo-editor--touch .memo-done-fold, .memo-editor--touch .memo-chips button { min-height: 44px; }
+.memo-add { min-width: 32px; font-size: var(--type-body, 15px); line-height: 1; text-align: left; }
+.memo-add:hover, .memo-add:focus-visible { color: var(--color-text); }

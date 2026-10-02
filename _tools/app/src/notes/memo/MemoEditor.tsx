@@ -234,7 +234,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
         {(mode === 'todo' ? open : section.items).map(row)}
         {!readOnly && <button className="memo-add" type="button" onClick={() => {
           const next = appendToSection(doc, section.id, '', mode); focus(next.nextId > doc.nextId ? `line-${doc.nextId}` : next.lines[0]!.id, 0); apply(next);
-        }}>{mode === 'todo' ? '+ 추가' : '+ 줄 추가'}</button>}
+        }} aria-label={mode === 'todo' ? '항목 추가' : '줄 추가'} title={mode === 'todo' ? '항목 추가' : '줄 추가'}>+</button>}
         {mode === 'todo' && done.length > 0 && <button className="memo-done-fold" type="button" aria-expanded={doneOpen.has(section.id)} onClick={() => setDoneOpen(current => { const next = new Set(current); if (next.has(section.id)) next.delete(section.id); else next.add(section.id); return next; })}>{doneOpen.has(section.id) ? '▾' : '▸'} 완료 {done.length}</button>}
         {mode === 'todo' && doneOpen.has(section.id) && done.map(row)}
       </section>;

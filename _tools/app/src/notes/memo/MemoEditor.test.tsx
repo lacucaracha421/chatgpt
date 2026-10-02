@@ -109,7 +109,7 @@ it('adds empty rows at section ends and focuses them; sizes using scrollHeight',
   Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', { configurable: true, get: () => 72 });
   try {
     surface(''); expect(rows()[0]).toHaveFocus(); expect(rows()[0]!.style.height).toBe('72px');
-    await userEvent.click(screen.getByRole('button', { name: '+ 줄 추가' }));
+    await userEvent.click(screen.getByRole('button', { name: '줄 추가' }));
     expect(rows()).toHaveLength(2); expect(rows()[1]).toHaveFocus(); expect(body()).toBe('\n');
   } finally { if (original) Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', original); else delete (HTMLTextAreaElement.prototype as any).scrollHeight; }
 });
@@ -138,7 +138,7 @@ it('touch short taps preserve focus/selection and long press opens the same move
 it('read-only notes use the same rows without mutation controls', () => {
   const change = surface('## A\n- [ ] open\n- [x] done', { readOnly: true });
   expect(rows()[0]).toHaveAttribute('readonly'); expect(screen.getByRole('button', { name: '완료' })).toBeDisabled();
-  expect(screen.queryByRole('button', { name: '+ 추가' })).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: '복사' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '항목 추가' })).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: '복사' })).not.toBeInTheDocument();
   fireEvent.keyDown(rows()[0]!, { key: 'Enter' }); expect(change).not.toHaveBeenCalled();
 });
 
@@ -167,7 +167,7 @@ it('replaces fields between notes so an unfinished composition cannot enter the 
 
 it('opens an all-done note with focus in the editor so Esc and quick add remain reachable', () => {
   surface('## A\n- [x] done');
-  expect(screen.getByRole('button', { name: '+ 추가' })).toHaveFocus();
+  expect(screen.getByRole('button', { name: '항목 추가' })).toHaveFocus();
 });
 
 it('keeps a composing section name mounted after blur and commits only after compositionend', async () => {

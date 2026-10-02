@@ -111,7 +111,7 @@ it('creates notes from the floating button and moves an open note to the trash',
  render(<Notes active backRef={{current:null}}/>);await screen.findByText('제목');
  fireEvent.click(screen.getByRole('button',{name:'새 메모'}));
  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'메모'}));
- expect(await screen.findByRole('button',{name:'+ 줄 추가'})).toBeTruthy();
+ expect(await screen.findByRole('button',{name:'줄 추가'})).toBeTruthy();
  await waitFor(()=>expect(saves().some(s=>s.type==='text')).toBe(true));
  fireEvent.click(screen.getByRole('button',{name:'메모 목록'}));
  await openNote('제목');fireEvent.click(await screen.findByRole('button',{name:'고정'}));
