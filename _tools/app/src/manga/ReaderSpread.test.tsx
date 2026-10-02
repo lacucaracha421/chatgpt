@@ -6,7 +6,7 @@ afterEach(() => { cleanup(); document.querySelector('[data-reader-test-style]')?
 
 it("keeps the painted spread above the same decoded pending image through two paint frames", async () => {
   const { readFileSync } = await vi.importActual<{ readFileSync(path: string, encoding: string): string }>("node:fs");
-  const css = readFileSync("src/styles/global.css", "utf8");
+  const css = readFileSync("src/manga/manga.css", "utf8");
   const style = document.createElement("style");
   style.dataset.readerTestStyle = "";
   style.textContent = css.slice(css.indexOf(".manga-viewer__buffers {"), css.indexOf(".manga-viewer__preload {"));

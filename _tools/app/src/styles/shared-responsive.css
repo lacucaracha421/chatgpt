@@ -1,0 +1,25 @@
+@media (max-width: 1100px) {
+  .similarity-review__comparison {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .view-toolbar .ui-slider {
+    flex: 0 1 72px;
+    min-width: 48px;
+  }
+
+  .view-toolbar .ui-slider input {
+    width: 100%;
+    min-width: 48px;
+  }
+
+  .asset-inspector--inline {
+    position: absolute;
+    z-index: 2;
+    inset: 0 0 0 auto;
+    box-sizing: border-box;
+    width: min(var(--inspector-width), calc(100% - var(--space-6)));
+    box-shadow: var(--shadow-floating);
+  }
+}
+

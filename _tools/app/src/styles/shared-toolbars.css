@@ -1,0 +1,293 @@
+.view-toolbar {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: var(--toolbar-height);
+  padding: 0 var(--space-3);
+  background: var(--color-toolbar);
+  border-top: 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.view-toolbar h2 {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: var(--line-ui);
+  white-space: nowrap;
+}
+
+.view-toolbar p {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.view-toolbar__content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-compact);
+  flex: 1;
+  justify-content: flex-start;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.view-toolbar__content > * {
+  flex-shrink: 0;
+}
+
+.view-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-compact);
+  flex-shrink: 0;
+}
+
+.view-toolbar__view-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-compact);
+  padding-right: var(--space-2);
+  margin-right: var(--space-1);
+  border-right: var(--border-width) solid var(--color-border);
+}
+
+.asset-toolbar__group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-compact);
+  padding-left: var(--space-2);
+  border-left: var(--border-width) solid var(--color-border);
+}
+
+.asset-toolbar__group:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.asset-toolbar__group-label {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.asset-toolbar__control-label {
+  white-space: nowrap;
+}
+
+.asset-toolbar__filter-menu .ui-menu__trigger,
+.asset-toolbar__icon-toggle .ui-toggle {
+  box-sizing: border-box;
+  width: var(--control-height-md);
+  min-height: var(--control-height-md);
+  padding: 0;
+  justify-content: center;
+}
+
+.asset-toolbar__filter-menu .ui-menu__trigger svg,
+.asset-toolbar__icon-toggle .ui-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.asset-toolbar__filter-menu[data-active="true"] .ui-menu__trigger {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+  border-color: var(--color-border);
+}
+
+.view-toolbar .ui-toggle > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.asset-browser__next-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-compact);
+  min-width: 0;
+}
+
+.view-toolbar .ui-select > span,
+.view-toolbar .ui-slider > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.view-toolbar .ui-select select {
+  min-height: var(--control-height-md);
+  padding: 0 var(--space-4) 0 var(--space-2);
+  color: var(--color-text);
+  background: transparent;
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-sm);
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--color-muted) 50%), linear-gradient(135deg, var(--color-muted) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+
+.view-toolbar .ui-select select:hover {
+  background-color: var(--color-surface-hover);
+  border-color: var(--color-border);
+}
+
+.view-toolbar .ui-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-height-md);
+  padding: 0 var(--space-2);
+  color: var(--color-muted);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+.view-toolbar .ui-toggle:hover {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+}
+
+.view-toolbar .ui-toggle:has(input:checked) {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+  border-color: var(--color-border);
+}
+
+.view-toolbar .ui-toggle:has(input:focus-visible) {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.asset-toolbar__action-placeholder {
+  visibility: hidden;
+}
+
+.view-toolbar .ui-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.view-toolbar .ui-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.view-toolbar .ui-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+.view-toolbar .ui-slider input {
+  width: 112px;
+  height: var(--control-height-md);
+  margin: 0;
+  appearance: none;
+  background: transparent;
+}
+
+.view-toolbar .ui-slider input::-webkit-slider-runnable-track {
+  height: 6px;
+  background: var(--color-bg);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: 1px;
+  box-shadow: inset 0 1px 0 var(--bevel-dark), inset 0 -1px 0 var(--bevel-light);
+}
+
+.view-toolbar .ui-slider input::-webkit-slider-thumb {
+  width: 12px;
+  height: 16px;
+  margin-top: -6px;
+  appearance: none;
+  background: var(--color-surface-hover);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: 1px;
+  box-shadow: inset 0 1px 0 var(--bevel-light), inset 0 -1px 0 var(--bevel-dark);
+}
+
+.view-toolbar .ui-slider input::-moz-range-track {
+  height: 6px;
+  background: var(--color-bg);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: 1px;
+  box-shadow: inset 0 1px 0 var(--bevel-dark), inset 0 -1px 0 var(--bevel-light);
+}
+
+.view-toolbar .ui-slider input::-moz-range-thumb {
+  width: 12px;
+  height: 16px;
+  appearance: none;
+  background: var(--color-surface-hover);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: 1px;
+  box-shadow: inset 0 1px 0 var(--bevel-light), inset 0 -1px 0 var(--bevel-dark);
+}
+
+.view-toolbar .ui-menu__trigger {
+  width: var(--control-height-icon);
+  padding: 0;
+}
+
+/* Labelled toolbar menus (정렬 · 비율 · 보기) are quiet text buttons, not icon squares. */
+.view-toolbar .ui-menu__trigger.asset-toolbar__quiet-menu,
+.ui-section-bar .ui-menu__trigger.asset-toolbar__quiet-menu {
+  width: auto;
+  height: var(--control-height-compact);
+  min-height: var(--control-height-compact);
+  padding: 0 var(--space-2);
+}
+
+.window-controls {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  margin-right: calc(var(--space-3) * -1);
+}
+
+.window-controls__button {
+  width: 40px;
+  border: none;
+  background: transparent;
+  color: var(--color-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.window-controls__button svg {
+  width: 12px;
+  height: 12px;
+}
+
+.window-controls__button:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.window-controls__button--close:hover {
+  background: var(--color-danger);
+  color: var(--color-bg);
+}
+

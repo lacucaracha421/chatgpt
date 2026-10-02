@@ -1,0 +1,258 @@
+.asset-viewer {
+  position: relative;
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--color-viewer-bg);
+}
+
+.asset-viewer--docked { grid-template-columns: minmax(0, 1fr) 340px; }
+
+.asset-viewer__stage {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  place-items: center;
+}
+
+.asset-viewer__chrome { display: contents; }
+
+.asset-viewer__topbar {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 56px;
+  padding: 0 var(--space-4);
+  background: linear-gradient(rgba(0, 0, 0, 0.6), transparent);
+}
+
+.asset-viewer__spacer { flex: 1; min-width: var(--space-2); }
+
+.asset-viewer__position {
+  flex: none;
+  color: var(--color-muted);
+  font-family: var(--font-numeric);
+  font-size: var(--type-body);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.asset-viewer__position b { color: var(--color-text); font-weight: 600; }
+
+.asset-viewer__title {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  line-height: 1.2;
+}
+
+.asset-viewer__title strong,
+.asset-viewer__title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-viewer__title strong { font-size: var(--type-body); font-weight: 600; }
+.asset-viewer__title small { color: var(--color-faint); font-size: var(--type-meta); }
+
+.asset-viewer__vbtn,
+.asset-viewer__topbar .ui-menu__trigger {
+  flex: none;
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  color: var(--color-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control);
+}
+
+.asset-viewer__vbtn svg,
+.asset-viewer__topbar .ui-menu__trigger svg { width: 24px; height: 24px; }
+
+.asset-viewer__vbtn:hover:not(:disabled),
+.asset-viewer__topbar .ui-menu__trigger:hover:not(:disabled) {
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.asset-viewer__vbtn--text,
+.asset-viewer__topbar .ui-menu__trigger.asset-viewer__vbtn--text {
+  width: auto;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  font-size: var(--type-body);
+  white-space: nowrap;
+}
+
+.asset-viewer__vbtn--text svg,
+.asset-viewer__topbar .ui-menu__trigger.asset-viewer__vbtn--text svg { width: 20px; height: 20px; }
+
+.asset-viewer__vbtn--on,
+.asset-viewer__favorite[aria-pressed="true"] { color: var(--color-accent); }
+
+.asset-viewer__vbtn.ui-button--danger { color: var(--color-danger); }
+
+.asset-viewer__action-anchor { position: relative; display: inline-flex; }
+
+.asset-viewer__character-popover {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  width: min(420px, calc(100vw - var(--space-8)));
+  max-height: calc(100vh - 80px);
+  overflow: hidden;
+  background: var(--color-surface-elevated);
+  border: var(--border-width) solid var(--color-border);
+  box-shadow: var(--shadow-floating);
+}
+
+.asset-viewer__edge {
+  position: absolute;
+  z-index: 2;
+  top: 56px;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.55);
+  background: transparent;
+  border: 0;
+}
+
+.asset-viewer__edge--left { left: 0; }
+.asset-viewer__edge--right { right: 0; }
+.asset-viewer__edge svg { width: 28px; height: 28px; }
+.asset-viewer__edge:hover { color: var(--color-text); background: rgba(255, 255, 255, 0.03); }
+
+.asset-viewer__stage--filmstrip .asset-viewer__edge { bottom: 88px; }
+/* Ctrl+wheel zoom: the image scales around the pointer and is dragged to pan. */
+.asset-viewer__stage[data-zoomed] { cursor: grab; }
+.asset-viewer__stage[data-zoomed]:active { cursor: grabbing; }
+/* A video sits below the top bar, and the edge areas stop above its control bar so play/seek/fullscreen stay clickable. */
+.asset-viewer__stage--video .video-player { align-self: end; height: calc(100% - 56px); }
+.asset-viewer__stage--video .asset-viewer__edge { bottom: 112px; }
+
+.asset-viewer__filmstrip {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  height: 88px;
+  padding: 0 var(--space-4);
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.55));
+}
+
+.asset-viewer__filmstrip-button {
+  display: block;
+  flex: none;
+  width: 44px;
+  height: 60px;
+  padding: 0;
+  opacity: 0.55;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-tile);
+}
+
+.asset-viewer__filmstrip-button img,
+.asset-viewer__filmstrip-placeholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--color-surface);
+  border-radius: var(--radius-tile);
+}
+
+.asset-viewer__filmstrip-button--current {
+  width: 48px;
+  height: 64px;
+  opacity: 1;
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.asset-viewer__dock {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-sidebar);
+  border-left: var(--border-width) solid var(--color-border);
+}
+
+.asset-viewer__dock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 56px;
+  padding: 0 var(--space-4);
+  color: var(--color-faint);
+  font-size: var(--type-meta);
+}
+
+.asset-viewer__dock-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 var(--space-4) var(--space-4);
+  overscroll-behavior: contain;
+}
+
+.asset-viewer--chrome-hidden { cursor: none; }
+
+.asset-viewer--chrome-hidden .asset-viewer__topbar,
+.asset-viewer--chrome-hidden .asset-viewer__edge,
+.asset-viewer--chrome-hidden .asset-viewer__filmstrip {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.asset-viewer__topbar,
+.asset-viewer__edge,
+.asset-viewer__filmstrip {
+  opacity: 1;
+  transition: opacity var(--motion-standard) var(--ease-standard);
+}
+
+.asset-viewer__media {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  min-width: 0;
+  min-height: 0;
+  object-fit: contain;
+}
+
+.asset-viewer__stage--filmstrip .asset-viewer__media { max-height: calc(100% - 128px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .asset-viewer__topbar,
+  .asset-viewer__edge,
+  .asset-viewer__filmstrip,
+  .video-player__controls {
+    transition: none;
+  }
+}
+

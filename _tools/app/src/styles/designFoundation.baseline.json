@@ -18,6 +18,36 @@
       "pillRadius": 0,
       "legacyToken": 0
     },
+    "_tools/app/src/assets/asset-gallery.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 2,
+      "legacyToken": 2
+    },
+    "_tools/app/src/assets/asset-inspector.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 1
+    },
+    "_tools/app/src/assets/asset-viewer.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/assets/assets.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 2
+    },
+    "_tools/app/src/assets/folder-shelf.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
     "_tools/app/src/autotags/autoTags.css": {
       "offScaleSpacing": 6,
       "offRoleFontSize": 4,
@@ -102,6 +132,12 @@
       "pillRadius": 0,
       "legacyToken": 11
     },
+    "_tools/app/src/collections/book-connect.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 1
+    },
     "_tools/app/src/collections/case/CaseMaterials.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
@@ -120,11 +156,35 @@
       "pillRadius": 0,
       "legacyToken": 0
     },
+    "_tools/app/src/collections/collection-overlay.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 7
+    },
     "_tools/app/src/collections/collectionReleases.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 0
+    },
+    "_tools/app/src/collections/collections.css": {
+      "offScaleSpacing": 2,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 11
+    },
+    "_tools/app/src/collections/igdb-import.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/collections/manga-cover-viewer.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 2
     },
     "_tools/app/src/collections/mangaConnections.css": {
       "offScaleSpacing": 0,
@@ -133,6 +193,12 @@
       "legacyToken": 3
     },
     "_tools/app/src/collections/mangaShelf.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/collections/mangadex-import.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
@@ -155,6 +221,12 @@
       "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 0
+    },
+    "_tools/app/src/collections/tmdb-import.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 1
     },
     "_tools/app/src/collections/work/collectionWork.css": {
       "offScaleSpacing": 0,
@@ -240,6 +312,12 @@
       "pillRadius": 0,
       "legacyToken": 0
     },
+    "_tools/app/src/manga/manga.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 7
+    },
     "_tools/app/src/manga/reader.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
@@ -270,6 +348,24 @@
       "pillRadius": 0,
       "legacyToken": 7
     },
+    "_tools/app/src/safety/safety.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/safety/trash-browser.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 1
+    },
+    "_tools/app/src/settings/settings.css": {
+      "offScaleSpacing": 1,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 11
+    },
     "_tools/app/src/shared/findEntry.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
@@ -293,6 +389,12 @@
       "offRoleFontSize": 1,
       "pillRadius": 0,
       "legacyToken": 0
+    },
+    "_tools/app/src/similarity/similarity-review.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 7
     },
     "_tools/app/src/similarity/video/VideoSimilarity.css": {
       "offScaleSpacing": 0,
@@ -331,12 +433,60 @@
       "legacyToken": 0
     },
     "_tools/app/src/styles/global.css": {
-      "offScaleSpacing": 4,
+      "offScaleSpacing": 0,
       "offRoleFontSize": 0,
-      "pillRadius": 2,
-      "legacyToken": 76
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/styles/shared-base.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 5
+    },
+    "_tools/app/src/styles/shared-hover.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/styles/shared-management.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 3
+    },
+    "_tools/app/src/styles/shared-responsive.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/styles/shared-states.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 1
+    },
+    "_tools/app/src/styles/shared-surfaces.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 6
+    },
+    "_tools/app/src/styles/shared-toolbars.css": {
+      "offScaleSpacing": 1,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 8
     },
     "_tools/app/src/styles/tokens.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/video/video-player.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,

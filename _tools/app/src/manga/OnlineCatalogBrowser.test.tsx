@@ -1054,9 +1054,9 @@ it.each(["all", "bookmarked"] as const)("opens a %s card in the shared panel, se
   expect(grid.scrollTop).toBe(400);
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "닫기" })).not.toBeInTheDocument();
-  expect(readFileSync("src/styles/global.css", "utf8")).toMatch(/\.online-catalog__workspace\s*\{[^}]*position: relative/);
+  expect(readFileSync("src/manga/manga.css", "utf8")).toMatch(/\.online-catalog__workspace\s*\{[^}]*position: relative/);
   expect(existsSync("src/manga/OnlineCatalogDetailDialog.tsx")).toBe(false);
-  expect(readFileSync("src/styles/global.css", "utf8")).not.toContain("online-catalog-detail");
+  expect(readFileSync("src/manga/manga.css", "utf8")).not.toContain("online-catalog-detail");
 });
 
 it("swaps cards without unmounting the panel and holds inert old content until the next detail arrives", async () => {

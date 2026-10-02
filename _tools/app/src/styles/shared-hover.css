@@ -1,0 +1,25 @@
+/* Asset controls reveal without moving or reloading the media. */
+.asset-gallery__hover-control { opacity: 0; transition: opacity 90ms var(--ease-standard); }
+.asset-gallery__asset:hover .asset-gallery__hover-control,
+.asset-gallery__asset:focus-within .asset-gallery__hover-control,
+.asset-gallery__hover-control[data-visible="true"] { opacity: 1; }
+button.asset-gallery__favorite { width: var(--control-height-compact); height: var(--control-height-compact); padding: 0; border: 0; background: transparent; cursor: pointer; pointer-events: auto; }
+.asset-gallery__favorite:focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: -2px; }
+.classification-sidebar__badge { opacity: 0; transition: opacity 90ms var(--ease-standard); }
+.classification-sidebar__quick-view:hover .classification-sidebar__badge,
+.classification-sidebar__quick-view:focus-within .classification-sidebar__badge,
+.classification-sidebar__quick-view[aria-current="page"] .classification-sidebar__badge,
+.classification-sidebar__tree-row:hover .classification-sidebar__badge,
+.classification-sidebar__tree-row:focus-within .classification-sidebar__badge,
+.classification-sidebar__tree-row[aria-selected="true"] .classification-sidebar__badge { opacity: 1; }
+.classification-sidebar__folder-section .chrome-tree-heading > .ui-button,
+.classification-sidebar__folder-section .classification-sidebar__heading-menu { opacity: 0; transition: opacity 90ms var(--ease-standard); }
+.classification-sidebar__folder-section:hover .chrome-tree-heading > .ui-button,
+.classification-sidebar__folder-section:focus-within .chrome-tree-heading > .ui-button,
+.classification-sidebar__folder-section:hover .classification-sidebar__heading-menu,
+.classification-sidebar__folder-section:focus-within .classification-sidebar__heading-menu { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .asset-inspector--docked, .asset-gallery__hover-control, .asset-gallery__date-count,
+  .classification-sidebar__badge, .classification-sidebar__folder-section .chrome-tree-heading > .ui-button,
+  .classification-sidebar__folder-section .classification-sidebar__heading-menu { transition: none; }
+}

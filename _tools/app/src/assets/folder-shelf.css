@@ -1,0 +1,46 @@
+/* Folder and character navigation shelf. The scroller supplies wheel, drag, and arrows. */
+.folder-shelf { min-width: 0; }
+.asset-browser__folder-head { --gallery-scrollbar-width: 18px; flex: none; padding: var(--gallery-gap) var(--gallery-scrollbar-width) 0 var(--gallery-gap); }
+.folder-shelf__label { margin: 0 0 var(--space-3); }
+.folder-shelf .home-shelf__track { gap: var(--space-3); padding: 2px 0; }
+.folder-shelf .home-shelf__track > * { width: 132px; min-width: 132px; flex: 0 0 132px; }
+.folder-shelf .home-shelf__arrow { top: 85px; }
+.folder-shelf__card { position: relative; min-width: 0; }
+.folder-shelf__card-open,
+.folder-shelf .series-character__open { width: 132px; display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; padding: 0; border: 0; background: transparent; color: var(--color-text); text-align: left; cursor: pointer; }
+.folder-shelf__card-open > img,
+.folder-shelf__placeholder,
+.folder-shelf .series-character__open > img,
+.folder-shelf .series-character__open > .series-character__placeholder { display: flex; width: 132px; height: 170px; flex: none; box-sizing: border-box; align-items: center; justify-content: center; object-fit: cover; overflow: hidden; border: 0; border-radius: 2px; background: var(--color-surface); color: var(--color-muted); }
+.folder-shelf__placeholder { flex-direction: column; gap: var(--space-1); font-size: var(--type-meta); }
+.folder-shelf__placeholder svg { width: 20px; height: 20px; }
+.folder-shelf__card-open > strong,
+.folder-shelf .series-character__open > strong { display: flex; align-items: center; gap: var(--space-1); width: 132px; min-width: 0; margin-top: var(--space-1); overflow: hidden; font-size: var(--type-body); font-weight: 500; line-height: var(--line-ui); }
+.folder-shelf__name,
+.folder-shelf .series-character__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-shelf__meta { display: block; width: 132px; min-width: 0; overflow: hidden; color: var(--color-faint); font-size: var(--type-meta); line-height: var(--line-ui); font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
+.folder-shelf__icon,
+.folder-shelf .character-group-card__icon { width: 16px; height: 16px; flex: none; color: var(--color-muted); }
+.folder-shelf .character-group-card__mosaic { width: 132px; height: 170px; aspect-ratio: auto; border-radius: 2px; }
+.folder-shelf .series-character__info { top: 6px; right: 6px; width: 28px; height: 28px; min-height: 28px; padding: 0; border-radius: 2px; background: rgb(0 0 0 / 62%); color: #fff; }
+.folder-shelf .series-character__info:hover { background: rgb(0 0 0 / 80%); color: #fff; }
+.folder-shelf .series-character__info svg { width: 16px; height: 16px; }
+.folder-shelf .series-character__warning { width: 14px; height: 14px; }
+.folder-shelf .character-suggestion-tile { width: 132px; color: var(--color-text); }
+.folder-shelf .character-suggestion-tile__mosaic { width: 132px; height: 170px; box-sizing: border-box; aspect-ratio: auto; padding: 0; gap: 2px; border: 0; outline: 1px dashed var(--color-border-strong); outline-offset: 2px; }
+.folder-shelf .character-suggestion-tile__flag { top: 6px; left: 6px; padding: 0 var(--space-1); border: 0; border-radius: 2px; background: var(--color-surface-elevated); color: var(--color-text); font-size: var(--type-meta); line-height: 20px; }
+.folder-shelf .character-suggestion-tile b { width: 132px; margin-top: var(--space-1); color: var(--color-text); font-size: var(--type-body); font-weight: 500; }
+.folder-shelf .character-suggestion-tile small { width: 132px; color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.folder-filter { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
+.folder-filter__explanation { display: grid; gap: var(--space-2); max-width: 360px; color: var(--color-muted); font-size: var(--type-meta); line-height: var(--line-copy); }
+.folder-filter__explanation p { margin: 0; }
+.folder-filter__explanation strong { color: var(--color-text); font-weight: 600; }
+
+@media (max-width: 800px) {
+  .settings-view__content { padding: var(--space-6) var(--space-4) var(--space-8); }
+  .settings-view__property { grid-template-columns: minmax(0, 1fr); }
+  .settings-view__inline-controls,
+  .settings-view__property > .settings-view__actions { grid-column: 1; grid-row: auto; justify-content: flex-start; }
+  .settings-view__inline-edit { grid-column: 1; }
+}
+

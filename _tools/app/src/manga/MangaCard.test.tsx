@@ -16,7 +16,7 @@ it("reserves two title lines and uses a separate artist line and page badge", ()
   expect(container.querySelector(".manga-card__frame")).toContainElement(screen.getByText("76p"));
   expect(container.querySelector('[class*="progress"]')).toBeNull();
   expect(container.querySelector(".manga-card__bookmark")).toBeNull();
-  const css = readFileSync("src/styles/global.css", "utf8");
+  const css = readFileSync("src/manga/manga.css", "utf8");
   expect(css).toMatch(/\.manga-card__title\s*\{[^}]*height: 2\.7em;[^}]*line-height: 1\.35;[^}]*-webkit-line-clamp: 2;/);
   expect(css).toMatch(/\.manga-card__frame\s*\{[^}]*aspect-ratio: 148 \/ 208;/);
   rerender(<MangaCard {...props} title="두 줄보다 훨씬 긴 제목을 가진 작품" artist="작가" />);
