@@ -39,6 +39,8 @@ const MAX_IMAGE_PIXELS: u64 = 200_000_000;
 const THUMBNAIL_BOUND: u32 = 360;
 const THUMBNAIL_WEBP_QUALITY: f32 = 85.0;
 
+mod thumbnail_decode;
+
 fn normalize_collected_at(value: Option<&str>) -> Result<String, LibraryError> {
     let timestamp = match value {
         Some(value) => DateTime::parse_from_rfc3339(value)
@@ -785,6 +787,9 @@ fn staging_image_reader(mut staging: File) -> Result<ImageReader<BufReader<File>
 }
 
 fn decode_staging_image(reader: ImageReader<BufReader<File>>) -> Result<DynamicImage, LibraryError> {
+    if reader.format() == Some(ImageFormat::WebP) {
+        return thumbnail_decode::decode_webp(reader.into_inner());
+    }
     let mut decoder = reader.into_decoder().map_err(|_| LibraryError::UnsupportedImage)?;
     let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
     let mut image = DynamicImage::from_decoder(decoder).map_err(|_| LibraryError::UnsupportedImage)?;
