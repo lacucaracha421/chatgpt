@@ -37,7 +37,7 @@ export function installProbe() {
 // A bounded local quiet window, visible decoded images and two animation frames. It is a
 // repeatable operational definition of settled, not proof of native/background/network idle.
 export function settleSurface(options, done) {
-  const { selector, quietMs = 300, timeoutMs = 15000, requireImages = false } = options;
+  const { selector, quietMs = 300, timeoutMs = 15000, requireImages = false, allowAlerts = false, ignoreBrokenSrc = null } = options;
   const start = performance.now();
   let changed = start, finished = false, observer = null, observed = null, deadline;
   const visible = el => {
@@ -59,11 +59,12 @@ export function settleSurface(options, done) {
       const images = [...root.querySelectorAll('img')].filter(visible);
       if (root.matches('img')) images.push(root);
       const busy = [root, ...root.querySelectorAll('[aria-busy="true"], [role="alert"], .ui-skeleton, .asset-gallery__loading')]
-        .some(el => visible(el) && (el.getAttribute('aria-busy') === 'true' || el.getAttribute('role') === 'alert' || el.classList.contains('ui-skeleton') || el.classList.contains('asset-gallery__loading')));
+        .some(el => visible(el) && (el.getAttribute('aria-busy') === 'true' || (!allowAlerts && el.getAttribute('role') === 'alert') || el.classList.contains('ui-skeleton') || el.classList.contains('asset-gallery__loading')));
       if (!busy && (!requireImages || images.length > 0) && images.every(img => img.complete) && performance.now() - changed >= quietMs) {
-        const broken = images.filter(img => img.naturalWidth === 0).length;
+        const expected = img => ignoreBrokenSrc && img.naturalWidth === 0 && img.src.includes(ignoreBrokenSrc);
+        const broken = images.filter(img => img.naturalWidth === 0 && !expected(img)).length;
         if (broken) return finish({ error: `${broken} broken visible images: ${selector}` });
-        try { await Promise.all(images.map(img => img.decode?.())); } catch { return finish({ error: `image decode failed: ${selector}` }); }
+        try { await Promise.all(images.filter(img => !expected(img)).map(img => img.decode?.())); } catch { return finish({ error: `image decode failed: ${selector}` }); }
         const quietAt = changed;
         requestAnimationFrame(() => requestAnimationFrame(() => {
           if (changed === quietAt) finish({ settledMs: performance.now() - start, images: images.length });

@@ -960,6 +960,26 @@ Status: `VERIFY` — source findings and fixes moved to the [2026-10-02 checkpoi
 - **VERIFY — Native/device and sync acceptance:** Android document grants and exhausted transfer retries, collector pairing/settings queues across server changes, privacy and encrypted-note section memory, ledger concurrent edits, Home NEW after failed reads, keyboard tile focus and local-month scrubber labels. Also verify live artist search after clearing a creator and tablet Home opening the unclassified gallery; `71855626` reports tests, not deployment/device acceptance.
 - **Deferred compatibility limit:** album document-tree grants are refused until membership checking exists (`c523900b`); classification-folder grants have the scoped check. Do not treat refusal as restored album-tree browsing support.
 
+## PERF-20261002 — optimisation phase measurements and candidates
+
+Status: `ACTIVE` — measured 2026-10-02 with the per-platform kits (native PC on a fresh read-only test copy of the
+library, PC render harness, tablet 0.8.98 on device online, server). Numbers below are from those runs.
+
+- **Done (PC renders):** tile re-renders on scroll / unchanged refetches, memo typing commits and saves, idle status
+  commits, startup extra render — see the commit that adds this section for before/after counts.
+- **Kit fixes:** native clicks dispatch on the element (WebKitWebDriver misplaces clicks under the desktop's 1.1 text
+  scale — a viewer close became a trash click); offline-aware settle options; hidden-idle and notes scenarios removed
+  from `perf-all.json` (no hidden visibility after minimize; `__TAURI_INTERNALS__.invoke` is non-writable so the notes
+  IPC fixture cannot install). Server `poll_benchmark.py` used a device token on shared-token `/v1/library/assets` routes.
+- **TODO — native notes scenario:** needs a disposable Secret Service inside the kit's private D-Bus.
+- **IDEA — tablet cold thumbnail tickets:** on device, a thumbnail never seen before took ~3.9 s (ticket wait 3.3 s;
+  one 21-item `media-tickets` batch 1.5 s), because 9,138 of 9,665 server thumbnails live at mutable
+  `library/{id}/thumbnail` keys that need a live R2 HEAD (30 s HEAD cache); only `derived/` keys use the stored-metadata
+  shortcut. Only 3 of 542 thumbnails missed the device cache in a normal browse, so the user-visible cost is first visits
+  to unwarmed areas. A fix would move thumbnails to immutable `derived/` keys (server + PC replication), not drop the HEAD.
+- **Tablet viewer (device, warm):** prepared next image 3.5 ms to commit; first open ~106 ms; uncached original
+  ~500 ms download for ~400 KB.
+
 ## EXTERNAL-REFS-20261002 — external projects worth borrowing from (reference list)
 
 Status: `IDEA` — from an outside survey the user shared on 2026-10-02 (based on `f0e7153a`); controller review. Borrow small
@@ -968,6 +988,10 @@ pieces or behaviour, never replace Lakomics wholesale. Numbers quoted in the sur
 - **Now (optimisation phase):** `Cykooz/fast_image_resize` (MIT/Apache-2.0) for the resize step of thumbnail generation
   (`src-tauri/src/library/ingestion.rs`). First split thumbnail time into decode / resize / WebP encode on real assets;
   adopt only if resize is a real share; keep alpha and colour handling identical.
+  **Measured 2026-10-02 (release, 300 real originals × 3, `ingestion::encode_thumbnail_webp`):** median 42.9 ms /
+  p95 208 ms per thumbnail; decode + orientation 72%, resize + RGBA 13.6%, WebP encode 4.9%, write + fsync 9.4%.
+  Resize is below the 25% bar, so fast_image_resize is **not adopted**. If thumbnail speed matters later, the lever
+  is decode (e.g. reduced-size JPEG decoding for large originals), not resize.
 - **Next 가계부 polish:** `actualbudget/actual` (MIT) — distinguish "day 31" from "last day of month" for recurring
   charges; make explicit whether editing a recurring item changes past entries or only future charges; "still to spend"
   vs "already spent" presentation.

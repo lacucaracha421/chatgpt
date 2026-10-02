@@ -41,6 +41,16 @@ export async function runPerformance({ config, run, call, s, driverPid, app, out
     const result = await call('POST', s('/element'), { using: 'css selector', value: selector });
     return result['element-6066-11e4-a52e-4f735466cecf'] ?? Object.values(result)[0];
   }
+  // WebKitWebDriver maps element clicks to the wrong point when the page has a fractional
+  // device scale (desktop text scaling 1.1 moved a viewer "close" click onto "trash").
+  // Click the element itself, but only when it is the topmost hit at its own centre.
+  async function click(id) {
+    const blocked = await run(`const e = arguments[0]; e.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      const r = e.getBoundingClientRect(); const t = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      if (!t || !(t === e || e.contains(t))) return 'covered by ' + (t ? t.tagName + '.' + t.className : 'nothing');
+      e.click(); return null;`, [{ 'element-6066-11e4-a52e-4f735466cecf': id }]);
+    if (blocked) throw new Error(`element not interactable: ${blocked}`);
+  }
   async function step(item) {
     if (item.wait !== undefined) { await sleep(item.wait); return; }
     if (item.assert) { if (!await run(`return Boolean(${item.assert});`)) throw new Error(`assert failed: ${item.assert}`); return; }
@@ -59,16 +69,18 @@ export async function runPerformance({ config, run, call, s, driverPid, app, out
       if (index < 0) throw new Error(`missing button: ${item.clickText.text}`);
       const elements = await call('POST', s('/elements'), { using: 'css selector', value: item.clickText.selector });
       const id = elements[index]['element-6066-11e4-a52e-4f735466cecf'];
-      return call('POST', s(`/element/${id}/click`), {});
+      return click(id);
     }
     if (item.type) {
       const id = await element(item.type.selector);
-      await call('POST', s(`/element/${id}/click`), {});
+      await click(id);
       // Send one character per driver command, record the cadence in the scenario file.
       for (const text of item.type.text) { await call('POST', s(`/element/${id}/value`), { text }); if (item.type.intervalMs) await sleep(item.type.intervalMs); }
       return;
     }
-    if (item.click) return call('POST', s(`/element/${await element(item.click)}/click`), {});
+    if (item.click) return click(await element(item.click));
+    // Unmeasured recovery for state the driver cannot pre-empt (e.g. a load that ran before a fixture).
+    if (item.clickIfPresent) { if (await run('return Boolean(document.querySelector(arguments[0]));', [item.clickIfPresent])) await click(await element(item.clickIfPresent)); return; }
     if (item.dblclick) {
       const id = await element(item.dblclick);
       return call('POST', s('/actions'), { actions: [{ type: 'pointer', id: 'mouse', parameters: { pointerType: 'mouse' }, actions: [

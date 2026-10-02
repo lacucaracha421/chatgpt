@@ -23,17 +23,23 @@ export function useCloudSyncStatus(gateway: LibraryGateway, libraryRoot: string)
   useEffect(() => {
     let active = true;
     let receivedUpdate = false;
+    let previous: CloudBackfillProgress | null = null;
+    const updateProgress = (next: CloudBackfillProgress) => {
+      if (JSON.stringify(previous) === JSON.stringify(next)) return;
+      previous = next;
+      setProgress(next);
+    };
     setProgress(null);
     const receive = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (detail.gateway === gateway && detail.libraryRoot === libraryRoot) {
         receivedUpdate = true;
-        setProgress(detail.progress);
+        updateProgress(detail.progress);
       }
     };
     window.addEventListener(CLOUD_PROGRESS_EVENT, receive);
     void Promise.resolve().then(() => gateway.cloudBackfillProgress()).then(progress => {
-      if (active && !receivedUpdate && progress) setProgress(progress);
+      if (active && !receivedUpdate && progress) updateProgress(progress);
     }).catch(() => undefined);
     return () => { active = false; window.removeEventListener(CLOUD_PROGRESS_EVENT, receive); };
   }, [gateway, libraryRoot]);

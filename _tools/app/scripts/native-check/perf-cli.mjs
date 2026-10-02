@@ -21,7 +21,7 @@ export function parseArgs(args) {
 export function validateScenarios(config) {
   if (config.version !== 1 || !Array.isArray(config.scenarios) || !config.scenarios.length || !(config.frameBudgetMs > 0) || !Number.isFinite(config.frameBudgetMs)) throw new Error('invalid scenario schema');
   const ids = new Set();
-  const operations = new Set(['click', 'clickText', 'dblclick', 'key', 'type', 'scroll', 'settle', 'wait', 'hidden', 'visible', 'assert', 'waitFor']);
+  const operations = new Set(['click', 'clickText', 'dblclick', 'key', 'type', 'scroll', 'settle', 'wait', 'hidden', 'visible', 'assert', 'waitFor', 'clickIfPresent']);
   for (const scenario of config.scenarios) {
     if (!/^[a-z0-9-]+$/.test(scenario.id) || ids.has(scenario.id) || !scenario.steps?.length) throw new Error('scenario needs unique id and steps');
     if (scenario.id === 'startup' && (ids.size || scenario.setup?.length)) throw new Error('startup must be first and have no unmeasured setup');
@@ -30,7 +30,7 @@ export function validateScenarios(config) {
       const keys = Object.keys(step);
       if (keys.length !== 1 || !operations.has(keys[0])) throw new Error(`invalid step in ${scenario.id}`);
       const op = keys[0], value = step[op];
-      if (['click', 'dblclick', 'key', 'waitFor', 'assert'].includes(op) && (typeof value !== 'string' || !value)) throw new Error(`invalid ${op}`);
+      if (['click', 'clickIfPresent', 'dblclick', 'key', 'waitFor', 'assert'].includes(op) && (typeof value !== 'string' || !value)) throw new Error(`invalid ${op}`);
       if (op === 'wait' && (!Number.isFinite(value) || value < 0 || value > 120000)) throw new Error('invalid wait');
       if (['hidden', 'visible'].includes(op) && value !== true) throw new Error(`invalid ${op}`);
       if (op === 'clickText' && (!value?.selector || typeof value.text !== 'string')) throw new Error('invalid clickText');

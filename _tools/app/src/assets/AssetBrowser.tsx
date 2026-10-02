@@ -22,6 +22,7 @@ import { AutoTagFilterBadges } from "../autotags/AutoTagFilterBadges";
 import { clearAutoTagFilter, hasAutoTagFilter, useAutoTagFilter } from "../autotags/autoTagFilter";
 import { useInfoPanelPreference } from "./useInfoPanelPreference";
 import { AssetGallery } from "./AssetGallery";
+import { shareAssetSummaries } from "./shareAssetSummaries";
 import { AssetInfoPanel } from "./AssetInfoPanel";
 import { AssetInspector } from "./AssetInspector";
 import { AssetToolbar } from "./AssetToolbar";
@@ -224,9 +225,10 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     void load().then((result) => {
       if (!result) return;
       if (generation !== generationRef.current) return;
-      setPage({ sort: queryBase.sort, queryKey, items: result.items, headCursor: result.previousCursor ?? null, tailCursor: result.nextCursor, totalCount: result.totalCount ?? null });
-      setSelectedAsset((selected) => reconcileAsset(selected, selectedViewKeyRef.current, viewKey, result.items));
-      setViewerAssetId((assetId) => requestedAssetRef.current?.id === assetId ? assetId : reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, result.items));
+      const items = shareAssetSummaries(retained?.items ?? EMPTY_ASSETS, result.items);
+      setPage({ sort: queryBase.sort, queryKey, items, headCursor: result.previousCursor ?? null, tailCursor: result.nextCursor, totalCount: result.totalCount ?? null });
+      setSelectedAsset((selected) => reconcileAsset(selected, selectedViewKeyRef.current, viewKey, items));
+      setViewerAssetId((assetId) => requestedAssetRef.current?.id === assetId ? assetId : reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, items));
     }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: commandErrorMessage(error, "자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) setFirstLoading(false); });
     return () => { ++generationRef.current; };
   }, [gateway, queryKey, galleryRefreshVersion, retryVersion, view.kind, viewKey]);

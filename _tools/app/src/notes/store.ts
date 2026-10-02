@@ -71,11 +71,13 @@ export const NOTES_REFRESH_INTERVAL = 5 * 60_000;
 const AUTO_SYNC_IDLE = 5 * 60_000;
 /** Background (non-user) syncs, including the safety net and failure retries, are at least this far apart. */
 const AUTO_SYNC_MIN_INTERVAL = 60_000;
+const TYPING_SAVE_DELAY = 500;
+const TYPING_SAVE_MAX_WAIT = 2000;
 /** true: user-triggered, always runs. "background": pulls others' changes, but waits out an edit in progress. false: also rate-limited (periodic refresh, focus, safety net). */
 export type SyncMode = boolean | "background";
 const message=(error:unknown)=>typeof error === "string" ? error : "메모 작업을 완료하지 못했습니다. 작성 내용은 유지됩니다.";
 
-/** Lives beyond area navigation; immediate serialized local writes never depend on a debounce. */
+/** Lives beyond area navigation; queued typing is flushed by finish() and the window close guard. */
 export class NotesStore {
   private current:Snapshot={ready:false,unlocked:false,notes:[],lastSyncedAt:null,saving:false,syncing:false,error:null};
   private listeners=new Set<()=>void>();
@@ -83,12 +85,17 @@ export class NotesStore {
   private running:Promise<void>|null=null;
   private writing:string|null=null;
   private timer:ReturnType<typeof setTimeout>|undefined;
+  private typingTimer:ReturnType<typeof setTimeout>|undefined;
+  private typingStarted = 0;
   private lastSyncAttempt = -Infinity;
   private lastEdit = -Infinity;
   constructor(readonly request:NotesRequest) {}
   snapshot=()=>this.current;
   subscribe=(fn:()=>void)=>{this.listeners.add(fn);return()=>{this.listeners.delete(fn);};};
-  private patch(change:Partial<Snapshot>){this.current={...this.current,...change};for(const fn of this.listeners)fn();}
+  private patch(change:Partial<Snapshot>){
+    if((Object.keys(change) as (keyof Snapshot)[]).every(key=>Object.is(this.current[key],change[key])))return;
+    this.current={...this.current,...change};for(const fn of this.listeners)fn();
+  }
   private merge(state:NotesState){
     const protectedIds=new Set([...this.queue.keys(),...(this.writing?[this.writing]:[])]);
     const merged=new Map(state.notes.map(n=>[n.id,n]));
@@ -97,13 +104,24 @@ export class NotesStore {
   }
   async load(){if(this.current.ready&&!this.current.error&&!this.current.keyringLocked)return;try{this.merge(await this.request<NotesState>("state"));this.patch({error:null});}catch(e){this.patch({error:message(e),ready:true});}}
   async unlock(key:string){try{this.merge(await this.request<NotesState>("unlock",{key}));this.patch({error:null});return true;}catch(e){this.patch({error:message(e)});return false;}}
-  edit(note:Note){
+  edit(note:Note,coalesceTyping=false){
     this.lastEdit=Date.now();clearTimeout(this.timer);
     // A metadata change made from a redacted view never replaces a queued revealed draft.
     const queued=this.queue.get(note.id);
     if(note.redacted&&queued&&!queued.redacted)note={...queued,title:note.title,pinned:note.pinned,deleted:note.deleted,archived:note.archived,color:note.color};
     const updated={...note,updatedAt:new Date().toISOString(),pending:true};this.queue.set(note.id,updated);
-    this.patch({notes:[updated,...this.current.notes.filter(n=>n.id!==note.id)],saving:true,error:null});void this.drain();
+    this.patch({notes:[updated,...this.current.notes.filter(n=>n.id!==note.id)],saving:true,error:null});
+    if(!coalesceTyping){void this.flush();return;}
+    // Keep the first edit durable immediately. Later keys share one trailing save,
+    // bounded even during continuous typing; the queue always owns the latest draft.
+    const first=this.typingTimer===undefined;
+    if(first)this.typingStarted=Date.now();
+    clearTimeout(this.typingTimer);
+    this.typingTimer=setTimeout(()=>{
+      this.typingTimer=undefined;
+      void this.drain();
+    },Math.min(TYPING_SAVE_DELAY,Math.max(0,this.typingStarted+TYPING_SAVE_MAX_WAIT-Date.now())));
+    if(first)void this.drain();
   }
   create(kind:NoteKind|typeof LEDGER="text"){
     const now=new Date().toISOString();
@@ -173,7 +191,7 @@ export class NotesStore {
             // The stale draft could not merge and was kept as a separate note: keep typing there.
             const copyId=saved.copiedTo;const copy:Note={...(newer??draft),id:copyId,localRevision:1,pending:true,conflict:false,conflictCopy:true};
             if(newer){this.queue.delete(id);this.queue.set(copyId,copy);}
-            this.patch({notes:[copy,...this.current.notes.map(n=>n.id===id?{...saved,copiedTo:undefined}:n)],moved:{from:id,to:copyId}});
+            this.patch({notes:[copy,...this.current.notes.map(n=>n.id===id?{...saved,copiedTo:undefined}:n)],moved:{from:id,to:copyId},saving:this.queue.size>0});
           }else if(newer){
             // Rebase the newer draft: fields it did not change since this save take the saved (possibly merged) values.
             const rebased:Note={...newer,localRevision:saved.localRevision,conflict:saved.conflict};
@@ -185,7 +203,7 @@ export class NotesStore {
             }
             this.queue.set(id,rebased);
             this.patch({notes:this.current.notes.map(n=>n.id===id?rebased:n)});
-          }else this.patch({notes:this.current.notes.map(n=>n.id===id?saved:n)});
+          }else this.patch({notes:this.current.notes.map(n=>n.id===id?saved:n),saving:this.queue.size>0});
         }catch(e){
           this.queue.set(id,this.queue.get(id)??draft);
           // A secret save needs the PIN: keep the draft and ask, instead of showing an error.
@@ -193,6 +211,9 @@ export class NotesStore {
           break;
         }
         finally{this.writing=null;}
+        // A slow leading write may finish after more keys arrived. Keep those
+        // rebased drafts queued until the trailing timer (or an explicit flush).
+        if(this.typingTimer!==undefined)break;
       }
     })().finally(()=>{this.running=null;this.patch({saving:this.queue.size>0});if(!this.queue.size)this.scheduleSync();});
     return this.running;
@@ -212,7 +233,7 @@ export class NotesStore {
     this.patch({syncing:true});
     this.lastSyncAttempt=Date.now();
     try{
-      if(this.queue.size || this.running){await this.drain();clearTimeout(this.timer);if(this.queue.size)return;}
+      if(this.queue.size || this.running){await this.flush();clearTimeout(this.timer);if(this.queue.size)return;}
       this.merge(await this.request<NotesState>("sync"));this.patch({error:null});
     }catch(e){this.patch({error:message(e)});}
     finally{
@@ -222,12 +243,12 @@ export class NotesStore {
   }
   async resolve(note:Note,keepCopy:boolean){
     if(this.current.syncing)return;
-    if(this.queue.size || this.running)await this.drain();
+    if(this.queue.size || this.running)await this.flush();
     if(this.queue.size)return;
     try{this.merge(await this.request<NotesState>("resolve",{id:note.id,expectedRevision:this.current.notes.find(n=>n.id===note.id)?.localRevision,keepCopy}));this.patch({error:null});}
     catch(e){this.patch({error:message(e)});}
   }
-  async flush(){if(this.queue.size||this.running)await this.drain();return !this.queue.size;}
+  async flush(){clearTimeout(this.typingTimer);this.typingTimer=undefined;if(this.queue.size||this.running)await this.drain();return !this.queue.size;}
   /** The user is done with a note (closed, switched, left Notes, app backgrounded): save, then sync once if anything waits. */
   async finish(){
     if(!await this.flush())return;

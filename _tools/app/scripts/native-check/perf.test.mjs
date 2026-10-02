@@ -40,6 +40,7 @@ test('CLI accepts offline sample/baseline and rejects typos/missing args', () =>
 });
 test('complete shipped scenario list validates, fails closed on unrecognized steps', () => {
   const config = JSON.parse(readFileSync(new URL('./scenarios/perf-all.json', import.meta.url)));
-  assert.equal(validateScenarios(config).scenarios.length, 11);
+  assert.equal(validateScenarios(config).scenarios.length, 9);
+  assert.throws(() => validateScenarios({ ...config, scenarios: [{ id: 'x', steps: [{ clickIfPresent: '' }] }] }));
   assert.throws(() => validateScenarios({ ...config, scenarios: [{ id: 'x', steps: [{ typo: true }] }] }));
 });

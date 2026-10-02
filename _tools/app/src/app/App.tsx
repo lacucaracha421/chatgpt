@@ -224,14 +224,27 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }, [gateway, libraryRoot]);
   useEffect(() => gateway.subscribeCollectionsChanged?.(() => { void refreshCollections(); }), [gateway, refreshCollections]);
   const refreshSidebar = useCallback(async () => {
-    const [nextEntries, nextAlbums] = await Promise.all([
-      gateway.listClassifications(),
-      gateway.listAlbums(),
-      refreshCollections(),
-    ]);
-    setEntries(nextEntries);
-    setAlbums(nextAlbums);
-  }, [gateway, refreshCollections]);
+    setCollectionsRead(null);
+    const classifications = gateway.listClassifications(), albums = gateway.listAlbums();
+    const collectionRead = gateway.listCollections();
+    try {
+      const [nextEntries, nextAlbums, nextCollections] = await Promise.all([
+        classifications, albums, collectionRead,
+      ]);
+      // Publish ready collections with the other sidebar data in one update turn.
+      setEntries(nextEntries);
+      setAlbums(nextAlbums);
+      setCollections(nextCollections);
+      setCollectionsRead({ gateway, root: libraryRoot });
+    } catch (error) {
+      // Preserve the independent collection read if another sidebar source fails.
+      void collectionRead.then(next => {
+        setCollections(next);
+        setCollectionsRead({ gateway, root: libraryRoot });
+      }).catch(() => undefined);
+      throw error;
+    }
+  }, [gateway, libraryRoot]);
   const refreshReviewCount = useCallback(async () => {
     const page = await gateway.listSimilarityReviews({ after: null, limit: 1 });
     setReviewCount(page.totalCount);

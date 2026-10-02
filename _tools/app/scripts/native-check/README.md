@@ -73,13 +73,28 @@ Server details: [local benchmark](../../../../server/lakomics-api/tools/PERFORMA
 ## Native scenarios and outputs
 
 `scenarios/perf-all.json` covers startup to assets, folder switch, 16,000 px deep
-scroll, viewer open / next five / close, Collections, manga, notes open/type,
-Home, Find open/type, visible idle 60 seconds and actually minimized/hidden idle
-60 seconds. `setup` is unmeasured and resets to the all-assets grid at the top;
+scroll, viewer open / next five / close, Collections, manga,
+Home, Find open/type and visible idle 60 seconds. Hidden idle was dropped on
+2026-10-02: WebKitGTK on this desktop never reports `visibilityState === hidden`
+after a WebDriver minimize; the PC render harness (`workload-hidden`) covers it.
+`setup` is unmeasured and resets to the all-assets grid at the top;
 `steps` are measured. The viewport is 1440x1000. Adapt selectors/fixture-specific
 folder choice in the JSON rather than inserting production app hooks.
 
-The Notes scenario installs a **measurement-only in-memory notes IPC fixture in
+Clicks are dispatched on the element itself after checking it is the topmost hit at
+its centre: WebKitWebDriver's own element click lands on the wrong point under a
+fractional device scale (desktop text scaling 1.1 turned the viewer close into a
+trash click). Settle accepts `allowAlerts` (an expected offline banner, e.g. the
+online catalog) and `ignoreBrokenSrc` (network-only previews such as Home release
+posters, which the driver's dead proxy blocks).
+
+Notes is **not** in `perf-all.json` (2026-10-02): the in-memory notes IPC fixture
+below cannot install, because Tauri makes `window.__TAURI_INTERNALS__.invoke`
+non-writable, and the private D-Bus has no Secret Service for real notes. Notes
+typing is measured by the PC render harness. A native notes scenario needs a
+disposable Secret Service inside the private bus (backlog).
+
+The (currently inert) Notes fixture would install a **measurement-only in-memory notes IPC fixture in
 this WebView**, intercepting only `notes_request`. It neither persists notes nor
 unlocks the personal keyring. Its input/render timing is useful; it is not native
 notes encryption, storage or sync latency. All other commands use the real backend.
@@ -100,7 +115,7 @@ partial failures; any failed scenario makes the live command exit nonzero.
 | Long tasks | Supported PerformanceObserver long tasks during each instrumented scenario, count and total duration. Unsupported WebKit reports null, not zero. Startup tasks before probe installation cannot be observed. |
 | JS heap | `performance.memory.usedJSHeapSize` at scenario end if exposed; null otherwise. Not WebView/native total memory. |
 | CPU/RSS | `/proc` samples every ~250 ms for this driver's exact app executable and descendants, including WebKit. CPU uses utime+stime deltas divided by real elapsed time and CLK_TCK; 100% = one core, may exceed 100%. RSS sums pages using host PAGESIZE; shared pages can be double-counted. Short-lived exited children may be missed. No system-wide or unrelated Lakomics processes. |
-| Idle hidden | Requires real `document.visibilityState === hidden` after WebDriver minimize; no spoofing. Unsupported minimize/visibility becomes a failure. No rAF statistics are inferred while hidden. |
+| Idle hidden | Not in `perf-all.json` (see above). A custom suite may still add it: it requires real `document.visibilityState === hidden` after WebDriver minimize, no spoofing; unsupported minimize/visibility is a failure. |
 | Baseline delta | After minus before, percentage undefined when before=0. Missing/unsupported metrics stay null; failed scenarios are excluded from deltas. New/missing scenarios are listed. A changed frame budget is rejected. Conditions and fixture/build must match manually. |
 
 The initial session only remembers the test path; performance starts in a fresh

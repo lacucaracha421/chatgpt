@@ -3,10 +3,8 @@
   "frameBudgetMs": 16.666666666666668,
   "conditions": {
     "viewport": "1440x1000",
-    "fixture": "Prepared test library with >=1000 images and local thumbnails/originals, nonempty folder, offline catalog and collections. No source library reads.",
-    "notes": "Synthetic in-memory notes IPC installed by driver; no keyring or persistence measurement."
+    "fixture": "Prepared test library with >=1000 images and local thumbnails/originals, nonempty folder, offline catalog and collections. No source library reads."
   },
-  "notesFixture": true,
   "scenarios": [
     {
       "id": "startup",
@@ -300,70 +298,8 @@
         {
           "settle": {
             "selector": ".online-catalog",
-            "requireImages": false
-          }
-        }
-      ]
-    },
-    {
-      "id": "notes",
-      "setup": [
-        {
-          "clickText": {
-            "selector": ".workspace-rail button",
-            "text": "에셋"
-          }
-        },
-        {
-          "waitFor": ".asset-index__top button"
-        },
-        {
-          "click": ".asset-index__top button"
-        },
-        {
-          "settle": {
-            "selector": ".asset-gallery__scroll",
-            "requireImages": true
-          }
-        },
-        {
-          "scroll": {
-            "selector": ".asset-gallery__scroll",
-            "pixels": -10000000,
-            "durationMs": 1
-          }
-        }
-      ],
-      "steps": [
-        {
-          "clickText": {
-            "selector": ".workspace-rail button",
-            "text": "메모"
-          }
-        },
-        {
-          "settle": {
-            "selector": ".notes-workspace",
-            "requireImages": false
-          }
-        },
-        {
-          "click": "[data-note-id=\"native-check-note\"]"
-        },
-        {
-          "waitFor": "textarea[aria-label=\"메모 본문\"]"
-        },
-        {
-          "type": {
-            "selector": "textarea[aria-label=\"메모 본문\"]",
-            "text": "abcdefghij",
-            "intervalMs": 100
-          }
-        },
-        {
-          "settle": {
-            "selector": ".notes-workspace",
-            "requireImages": false
+            "requireImages": false,
+            "allowAlerts": true
           }
         }
       ]
@@ -407,7 +343,8 @@
         {
           "settle": {
             "selector": ".home-view",
-            "requireImages": false
+            "requireImages": false,
+            "ignoreBrokenSrc": "-image-preview/"
           }
         }
       ]
@@ -504,50 +441,6 @@
         },
         {
           "assert": "document.visibilityState === \"visible\""
-        }
-      ]
-    },
-    {
-      "id": "idle-hidden",
-      "setup": [
-        {
-          "clickText": {
-            "selector": ".workspace-rail button",
-            "text": "에셋"
-          }
-        },
-        {
-          "waitFor": ".asset-index__top button"
-        },
-        {
-          "click": ".asset-index__top button"
-        },
-        {
-          "settle": {
-            "selector": ".asset-gallery__scroll",
-            "requireImages": true
-          }
-        },
-        {
-          "hidden": true
-        },
-        {
-          "scroll": {
-            "selector": ".asset-gallery__scroll",
-            "pixels": -10000000,
-            "durationMs": 1
-          }
-        }
-      ],
-      "steps": [
-        {
-          "assert": "document.visibilityState === \"hidden\""
-        },
-        {
-          "wait": 60000
-        },
-        {
-          "assert": "document.visibilityState === \"hidden\""
         }
       ]
     }

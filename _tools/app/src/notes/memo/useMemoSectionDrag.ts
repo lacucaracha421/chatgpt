@@ -29,7 +29,9 @@ export function useMemoSectionDrag(root: RefObject<HTMLDivElement | null>, enabl
     const current = session.current; session.current = null;
     if (current?.active || current?.scrolling) suppressClick.current = true;
     if (current?.head.hasPointerCapture?.(current.pointer)) current.head.releasePointerCapture(current.pointer);
-    setPreview(null);
+    // Body edits invalidate a drag session too. Avoid scheduling a state update
+    // on every keystroke when there has never been a drag preview to clear.
+    if (current?.active || preview !== null) setPreview(null);
     if (commit && current?.active && current.to !== current.from) drop.current(current.id, current.to);
   }
   function update(current: Session) {
