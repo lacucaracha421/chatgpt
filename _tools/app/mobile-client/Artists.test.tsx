@@ -9,7 +9,7 @@ import type {SparseGallerySource} from './assetToc';
 const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn(), loadThumbnail: vi.fn()}));
 vi.mock('./transport', () => ({api: mocks.api, native: mocks.native, errorText:(e:Error)=>e.message}));
 vi.mock('./media', () => ({loadThumbnail: mocks.loadThumbnail}));
-vi.mock('./Gallery', () => ({Gallery: ({intro, items, onOpen, onNearEnd, sparse, stale}: {intro?: React.ReactNode; items: {id: string}[]; onOpen(index: number): void; onNearEnd():void; sparse?:SparseGallerySource; stale?:boolean}) => <div aria-label="자산 목록" data-toc={sparse?.toc.totalCount} data-stale={stale}>{intro}{items.map((item, index) => <button key={item.id} onClick={() => onOpen(index)}>asset-{item.id}</button>)}<button onClick={onNearEnd}>more</button>{sparse&&<button onClick={()=>void sparse.load(2,1,new AbortController().signal)}>seek</button>}</div>}));
+vi.mock('./Gallery', () => ({Gallery: ({intro, items, onOpen, onNearEnd, sparse, stale, onRefresh, likesRevision}: {intro?: React.ReactNode; items: {id: string}[]; onOpen(index: number): void; onNearEnd():void; sparse?:SparseGallerySource; stale?:boolean;onRefresh?():void;likesRevision?:unknown}) => <div aria-label="자산 목록" data-likes-revision={String(likesRevision)} data-toc={sparse?.toc.totalCount} data-stale={stale}>{intro}<button onClick={onRefresh}>refresh gallery</button>{items.map((item, index) => <button key={item.id} onClick={() => onOpen(index)}>asset-{item.id}</button>)}<button onClick={onNearEnd}>more</button>{sparse&&<button onClick={()=>void sparse.load(2,1,new AbortController().signal)}>seek</button>}</div>}));
 
 const artist = (id: string, label: string, overrides: Partial<LibraryArtist> = {}): LibraryArtist => ({
   id, label, displayName: label, sourceName: label, keys: [`@${id}`], assetCount: 74, recentCount: 2,
@@ -219,4 +219,12 @@ describe('Artists', () => {
     expect(document.querySelectorAll('img')).toHaveLength(0);
     expect(screen.getAllByLabelText('비공개 모드로 이미지 숨김').length).toBeGreaterThan(0);
   });
+});
+
+it('refreshes artist hearts without resetting the gallery scroll identity',async()=>{
+  render(<Artists endpoint="test" backRef={{current:null}} initialArtist={primary} onOpenViewer={vi.fn()}/>);
+  await screen.findByText('asset-haneul-1');
+  const before=screen.getByLabelText('자산 목록').getAttribute('data-likes-revision');
+  fireEvent.click(screen.getByText('refresh gallery'));
+  await waitFor(()=>expect(screen.getByLabelText('자산 목록').getAttribute('data-likes-revision')).not.toBe(before));
 });

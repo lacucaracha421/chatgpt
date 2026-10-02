@@ -187,3 +187,15 @@ it('reports the media element error class for a failed vault video without URLs'
   expect(status.textContent).not.toContain('vault/');
   expect(warn.mock.calls.flat().join(' ')).not.toContain('vault/abc');
 });
+
+it('masks vault gallery thumbnails in privacy mode',async()=>{
+  localStorage.setItem('lakomics.mobile.privacyMode','1');
+  try {
+    render(<PrivateVault onClose={vi.fn()} backRef={{current:null}}/>);
+    fireEvent.change(await screen.findByLabelText('비밀번호'),{target:{value:'password'}});
+    fireEvent.click(screen.getByRole('button',{name:'보관함 열기'}));
+    await screen.findAllByRole('button',{name:'비공개 모드로 이미지 숨김'});
+    expect(document.querySelector('img[src]')).toBeNull();
+    expect(screen.getAllByLabelText('비공개 모드로 이미지 숨김').length).toBeGreaterThan(0);
+  } finally {localStorage.removeItem('lakomics.mobile.privacyMode');}
+});

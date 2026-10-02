@@ -47,3 +47,13 @@ it('hides hearts when the server does not support likes reads',async()=>{
   await act(async()=>{await Promise.resolve();await Promise.resolve();});
   expect(result.current.available).toBe(false);
 });
+
+it.each([false,true])('uses the shown heart %s even when the server changed before the click',async(shown)=>{
+  liked=shown;
+  const {result}=renderHook(()=>useLikesAlbum(['one'],true,1));
+  await waitFor(()=>expect(result.current.available).toBe(true));
+  liked=!shown;
+  await act(()=>result.current.toggle('one'));
+  expect(mocks.api).toHaveBeenCalledWith('/v1/albums/commands',undefined,expect.objectContaining({commandType:'setAlbumMembership',desiredState:!shown,expectedRevision:shown?0:1}),'PUT');
+  expect(result.current.liked.has('one')).toBe(!shown);
+});

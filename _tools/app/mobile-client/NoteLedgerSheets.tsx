@@ -127,12 +127,14 @@ function Stepper({value,onChange,label,max=LEDGER_LIMITS.everyMax}:{value:number
   </span>;
 }
 
+export type LedgerItemPatch<T extends {id:string}> = Pick<T,'id'> & Partial<T>;
+
 /** Tablet frames for the shared subscription and wishlist editors. */
-export function RecurringSheet({ initial, order, error, onSave, onDelete, onClose }: { initial: Recurring | null; order: string; error?: string | null; onSave(item: Recurring): Saved; onDelete?(): Saved; onClose(): void }) {
-  return <Sheet title={initial?.name ?? '구독 추가'} onClose={onClose}><RecurringEditor initial={initial} error={error} onClose={onClose} onDelete={onDelete} onSave={patch => onSave({ ...(initial ?? { id: crypto.randomUUID(), order }), ...patch } as Recurring)} /></Sheet>;
+export function RecurringSheet({ initial, order, error, onSave, onDelete, onClose }: { initial: Recurring | null; order: string; error?: string | null; onSave(item: LedgerItemPatch<Recurring>): Saved; onDelete?(): Saved; onClose(): void }) {
+  return <Sheet title={initial?.name ?? '구독 추가'} onClose={onClose}><RecurringEditor initial={initial} error={error} onClose={onClose} onDelete={onDelete} onSave={patch => onSave({ ...(initial ? { id: initial.id } : { id: crypto.randomUUID(), order }), ...patch })} /></Sheet>;
 }
-export function PlanSheet({ initial, month, order, error, onSave, onDelete, onClose }: { initial: Planned | null; month: string; order: string; error?: string | null; onSave(item: Planned): Saved; onDelete?(): Saved; onClose(): void }) {
-  return <Sheet title={initial?.name ?? '사고 싶은 것 추가'} onClose={onClose}><PlanEditor initial={initial} month={month} error={error} onClose={onClose} onDelete={onDelete} onSave={patch => onSave({ ...(initial ?? { id: crypto.randomUUID(), order, dropped: false }), ...patch } as Planned)} /></Sheet>;
+export function PlanSheet({ initial, month, order, error, onSave, onDelete, onClose }: { initial: Planned | null; month: string; order: string; error?: string | null; onSave(item: LedgerItemPatch<Planned>): Saved; onDelete?(): Saved; onClose(): void }) {
+  return <Sheet title={initial?.name ?? '사고 싶은 것 추가'} onClose={onClose}><PlanEditor initial={initial} month={month} error={error} onClose={onClose} onDelete={onDelete} onSave={patch => onSave({ ...(initial ? { id: initial.id } : { id: crypto.randomUUID(), order, dropped: false }), ...patch })} /></Sheet>;
 }
 
 /** A derived charge in 기록: confirm the real amount, or skip it this time (a 0-won entry). */

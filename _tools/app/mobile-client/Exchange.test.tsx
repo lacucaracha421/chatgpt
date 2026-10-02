@@ -217,3 +217,11 @@ it('removes cached transfer images immediately when privacy turns on',async()=>{
     expect(mocks.native.mock.calls.filter(([op])=>op==='exchangeThumbnail')).toHaveLength(count);
   } finally {localStorage.clear();}
 });
+
+it('offers manual retry after transient send retries are exhausted',()=>{
+  const exhausted={...row({state:'failed',code:'network'}),autoRetryPending:false};
+  expect(rowView(exhausted,false).actions).toEqual(['retry','cancel']);
+  expect(rowView(exhausted,false).label).not.toContain('자동 재시도');
+  expect(rowView({...exhausted,autoRetryPending:true},false).actions).toEqual(['cancel']);
+  expect(rowView({...exhausted,retryable:false},false).actions).toEqual(['cancel']);
+});

@@ -129,7 +129,7 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
 
   const today = localToday();
   const shelf = data.shelf;
-  const works = shelf?.works ?? [];
+  const works = (shelf?.works ?? []).filter(work => work.type === 'manga');
   const watched = works.filter(watching);
   // An older PC publishes no `releaseSchedule` at all; one upgraded PC key anywhere means it is live.
   const absent = !!shelf && works.length > 0 && !works.some(work => work.releaseSchedule !== undefined);

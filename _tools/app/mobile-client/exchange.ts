@@ -11,6 +11,8 @@ export type ExchangeRow = {
   skipped?: number;
   /** False once a folder send's zip is gone: it has to be sent again from the folder. */
   retryable?: boolean;
+  /** Native has scheduled another attempt (including one deferred until foreground). */
+  autoRetryPending?: boolean;
   /** The other device's id (sender of an incoming row, target of an outgoing one); '' when unknown. */
   peerId?: string;
   /** Saved rows: when the file reached Download/Lakomics. */
@@ -95,6 +97,8 @@ function ratio(row: ExchangeRow): number | null {
 }
 
 export function rowView(row: ExchangeRow, incoming: boolean): RowView {
+  const automatic=row.autoRetryPending ?? AUTOMATIC.has(row.code);
+  const failureLabel=automatic?rowMessage(row.code):row.code==='transferNotReady'?'아직 업로드 중':AUTOMATIC.has(row.code)?'서버에 연결할 수 없음':rowMessage(row.code);
   if (incoming) switch (row.state) {
     case 'waiting': return {label: '받기 대기 중', tone: 'waiting', progress: null, actions: ['cancel']};
     case 'downloading': return {label: '받는 중', tone: 'active', progress: ratio(row), actions: ['cancel']};
@@ -102,7 +106,7 @@ export function rowView(row: ExchangeRow, incoming: boolean): RowView {
     case 'saved': return {label: '다운로드 폴더에 저장됨', tone: 'done', progress: null, actions: ['open']};
     case 'expired': return {label: '만료됨 (받지 않음)', tone: 'muted', progress: null, actions: []};
     case 'cancelled': return {label: '보낸 기기에서 취소함', tone: 'muted', progress: null, actions: []};
-    case 'failed': return {label: rowMessage(row.code), tone: 'error', progress: null, actions: AUTOMATIC.has(row.code) ? ['cancel'] : ['retry', 'cancel']};
+    case 'failed': return {label: failureLabel, tone: 'error', progress: null, actions: automatic ? ['cancel'] : ['retry', 'cancel']};
     default: return {label: row.state, tone: 'muted', progress: null, actions: []};
   }
   const retry: RowAction[] = row.retryable === false ? ['cancel'] : ['retry', 'cancel'];
@@ -116,8 +120,8 @@ export function rowView(row: ExchangeRow, incoming: boolean): RowView {
     case 'expired': return {label: '만료됨 (받지 않음)', tone: 'muted', progress: null, actions: []};
     case 'cancelled': return {label: row.code === 'declined' ? '받는 기기에서 받지 않음' : row.code === 'deviceUnregistered' ? '받는 기기가 등록 해제됨' : '취소됨', tone: 'muted', progress: null, actions: []};
     case 'stalled': return {label: '업로드 중단됨', tone: 'error', progress: null, actions: ['cancel']};
-    case 'failed': return {label: rowMessage(row.code), tone: 'error', progress: null,
-      actions: AUTOMATIC.has(row.code) ? ['cancel'] : row.code === 'sourceUnavailable' ? ['cancel'] : retry};
+    case 'failed': return {label: failureLabel, tone: 'error', progress: null,
+      actions: automatic ? ['cancel'] : row.code === 'sourceUnavailable' ? ['cancel'] : retry};
     default: return {label: row.state, tone: 'muted', progress: null, actions: []};
   }
 }

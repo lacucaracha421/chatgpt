@@ -1,0 +1,20 @@
+import {cleanup,render,screen,waitFor} from '@testing-library/react';
+import {afterEach,expect,it,vi} from 'vitest';
+const mocks=vi.hoisted(()=>({native:vi.fn(),api:vi.fn()}));
+vi.mock('./transport',()=>({...mocks,errorText:(e:Error)=>e.message}));
+vi.mock('@tanstack/react-virtual',()=>({useVirtualizer:({count,estimateSize}:{count:number;estimateSize(i:number):number})=>({measure(){},getTotalSize:()=>1000,getVirtualItems:()=>Array.from({length:count},(_,index)=>({key:index,index,start:index*estimateSize(index)}))})}));
+import {Gallery} from './Gallery';
+afterEach(()=>{cleanup();vi.unstubAllGlobals();});
+it('refreshes hearts when a list refresh returns the same ids and gallery identity',async()=>{
+  vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});
+  let liked=false;
+  mocks.native.mockResolvedValue({adopted:true,libraryId:'library',epoch:1});
+  mocks.api.mockImplementation(async()=>({albumId:'likes',memberships:[{assetId:'asset',desiredState:liked,entityRevision:1}]}));
+  const item={id:'asset',kind:'image',preview:'data:image/png;base64,AA',width:300,height:300};
+  const props={items:[item],density:1,identity:'artist:same-scope',restoreScroll:0,onScroll:vi.fn(),onOpen:vi.fn(),onReady:vi.fn(),onNearEnd:vi.fn(),paused:false};
+  const {rerender}=render(<Gallery {...props} likesRevision={0}/>);
+  expect((await screen.findByRole('button',{name:'좋아요'})).getAttribute('aria-pressed')).toBe('false');
+  liked=true;
+  rerender(<Gallery {...props} likesRevision={1}/>);
+  await waitFor(()=>expect(screen.getByRole('button',{name:'좋아요'}).getAttribute('aria-pressed')).toBe('true'));
+});

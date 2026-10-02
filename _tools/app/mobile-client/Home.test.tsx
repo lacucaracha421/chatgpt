@@ -62,7 +62,7 @@ describe('shared Home attention on tablet', () => {
     server.upcoming = {version:1, entries:[upcomingEntry], wishlist:[upcomingEntry]};
     render(<Home {...props({captures:[item('pending')]})}/>);
     const today = await screen.findByRole('region', {name:'오늘 할 것 · 5'});
-    expect(within(today).getAllByRole('button').map(b => b.textContent)).toEqual(['□미분류 에셋7', '□유사 이미지 검토6쌍', '□처리 대기1', '□중복 판본2', '○Todo남은 항목 1개1']);
+    await waitFor(()=>expect(within(today).getAllByRole('button').map(b => b.textContent)).toEqual(['□미분류 에셋7', '□유사 이미지 검토6쌍', '□처리 대기1', '□중복 판본2', '○Todo남은 항목 1개1']));
     expect(document.querySelector('.home-attention-layout')?.classList.contains('is-tablet')).toBe(true);
     await screen.findByRole('region', {name:'2주 안에 나오는 신간'});
     const regions = screen.getAllByRole('region').map(r => r.getAttribute('aria-label'));
@@ -143,4 +143,23 @@ describe('shared Home attention on tablet', () => {
     expect(screen.queryByText('Hades II')).toBeNull();
     expect(screen.queryByRole('region',{name:/1년 전 오늘/})).toBeNull();
   });
+});
+
+it('shows owned game and movie releases since the last visit without a wishlist',async()=>{
+  localStorage.setItem('lakomics.home.visit.v1:https://a.example',JSON.stringify({lastVisit:new Date(2026,8,23).toISOString(),pending:[],opened:[]}));
+  server.upcoming={entries:[],wishlist:[]};
+  const original=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation((path,...args)=>{
+    if(path.startsWith('/v1/collections?')) {
+      const type=new URL(path,'https://test').searchParams.get('type');
+      return Promise.resolve({ready:true,revision:'r1',items:type==='manga'?works:[{id:type,name:`owned ${type}`,type,releaseDate:'2026-09-24'}],nextCursor:null});
+    }
+    return original(path,...args);
+  });
+  const p=props();render(<Home {...p}/>);
+  for(const type of ['game','movie']) {
+    const row=await screen.findByRole('button',{name:new RegExp(`owned ${type}`)});
+    expect(within(row).getByText('NEW')).toBeTruthy();
+    fireEvent.click(row);expect(p.onWork).toHaveBeenCalledWith(type);
+  }
 });

@@ -1,6 +1,7 @@
+import {NotesStore} from '../src/notes/store';
 import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {Notes,type MobileNote} from './Notes';
+import {Notes,mobileNotesRequest,type MobileNote} from './Notes';
 import {pressKey} from './NoteLedgerSheets';
 import type {LedgerEntry,Planned,Recurring} from '../src/notes/ledger/model';
 const mock=vi.hoisted(()=>({native:vi.fn()}));
@@ -87,4 +88,19 @@ it('retains entry sheets on limit errors and preserves Korean composition',async
 });
 it('Back closes the sheet before leaving the ledger',async()=>{
  const backRef:{current:(()=>boolean)|null}={current:null};renderNotes(backRef);await openLedger();fireEvent.click(screen.getByRole('button',{name:'기록'}));await screen.findByRole('dialog');act(()=>{expect(backRef.current?.()).toBe(true);});await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(screen.getByRole('heading',{name:'구독'})).toBeTruthy();act(()=>{expect(backRef.current?.()).toBe(true);});await waitFor(()=>expect(screen.queryByRole('heading',{name:'구독'})).toBeNull());
+});
+
+it.each(['recurring','planned'] as const)('merges only edited %s fields into the synced latest item',async kind=>{
+  const store=new NotesStore(mobileNotesRequest);
+  render(<Notes active findStore={store} backRef={{current:null}}/>);await openLedger();
+  if(kind==='recurring')openSub('넷플릭스');
+  else {fireEvent.click(section('사고 싶은 것').getByRole('button',{name:/러닝화/}));fireEvent.click(section('사고 싶은 것').getByRole('button',{name:'고치기'}));}
+  const s=await sheet();fireEvent.change(s.getByLabelText('이름'),{target:{value:'새 이름'}});
+  const latest={...ledger,localRevision:10,[kind]:ledger[kind]!.map(item=>({...item,amount:99000,memo:'synced',priceHistory:[{until:'2026-09-24',amount:17000}],extraField:'new'}))};
+  db=[latest,...db.filter(n=>n.id!==LEDGER_ID)];
+  await act(()=>store.refresh());
+  fireEvent.click(s.getByRole('button',{name:'저장'}));
+  await waitFor(()=>expect(lastSave(LEDGER_ID)).toBeTruthy());
+  const saved=(lastSave(LEDGER_ID)[kind] as (Recurring|Planned)[]).find(item=>item.name==='새 이름');
+  expect(saved).toMatchObject({amount:99000,memo:'synced',priceHistory:[{until:'2026-09-24',amount:17000}],extraField:'new'});
 });

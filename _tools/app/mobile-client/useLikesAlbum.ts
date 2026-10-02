@@ -40,6 +40,7 @@ export function useLikesAlbum(ids:string[],enabled:boolean,revision:unknown) {
   const toggle=useCallback(async(assetId:string)=>{
     const scope=identity.current,current=generation.current;
     if(!scope||writes.current.has(assetId))return;
+    const desiredState=!liked.has(assetId);
     writes.current.add(assetId);setPending(new Set(writes.current));setError('');
     try {
       const command=(commandType:string,fields:Record<string,unknown>)=>api<{album?:{id:string};membership?:Member}>('/v1/albums/commands',undefined,
@@ -51,7 +52,6 @@ export function useLikesAlbum(ids:string[],enabled:boolean,revision:unknown) {
       if(current!==generation.current)return;
       const member=state.memberships.find(member=>member.assetId===assetId);
       if(!member||state.albumId!==ensured.album.id)throw new Error('좋아요 상태를 다시 불러와 주세요.');
-      const desiredState=!member.desiredState;
       await command('setAlbumMembership',{albumId:state.albumId,assetId,desiredState,expectedRevision:member.entityRevision});
       if(current===generation.current){
         setLiked(previous=>{const next=new Set(previous);if(desiredState)next.add(assetId);else next.delete(assetId);return next;});
@@ -59,6 +59,6 @@ export function useLikesAlbum(ids:string[],enabled:boolean,revision:unknown) {
       }
     } catch(reason) {if(current===generation.current)setError(errorText(reason)||'좋아요를 변경하지 못했습니다.');}
     finally {writes.current.delete(assetId);setPending(new Set(writes.current));}
-  },[]);
+  },[liked]);
   return {liked,available,pending,error,toggle};
 }

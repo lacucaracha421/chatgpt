@@ -37,19 +37,26 @@ export {mobileNotesRequest} from './notesTransport';
 type Scope='all'|'archive'|'trash';
 type Sheet='new'|'color'|'more'|'list'|'recovery'|null;
 const tint=(color:string|null|undefined)=>{const value=noteColorValue(color);return value?({'--note-tint':value} as CSSProperties):undefined;};
-const QUICK_SECTION_KEY='lakomics.notes.quickSection.v1.';
-function readQuickSection(noteId:string):string|null{try{return localStorage.getItem(QUICK_SECTION_KEY+noteId);}catch{return null;}}
-function writeQuickSection(noteId:string,key:string){try{localStorage.setItem(QUICK_SECTION_KEY+noteId,key);}catch{/* Device preferences are optional. */}}
+const QUICK_SECTION_KEY='lakomics.notes.quickSection.v2.';
+/** Remove the retired title-bearing preference before any note is opened or unlocked. */
+function clearLegacyQuickSections(){
+  try {for(const key of Object.keys(localStorage))if(key.startsWith('lakomics.notes.quickSection.v1.'))localStorage.removeItem(key);}catch{/* Device preferences are optional. */}
+}
+clearLegacyQuickSections();
+function readQuickSection(noteId:string):number|null{
+  try {const value=localStorage.getItem(QUICK_SECTION_KEY+noteId);return value!==null&&/^\d+$/.test(value)?Number(value):null;}catch{return null;}
+}
+function writeQuickSection(noteId:string,index:number){try{localStorage.setItem(QUICK_SECTION_KEY+noteId,String(index));}catch{/* Device preferences are optional. */}}
 
 /** The draft stays in its DOM field through saves and composition; sending never blurs it. */
 function MemoQuickAdd({noteId,body,onAppend}:{noteId:string;body:string;onAppend(body:string,line:number):boolean}){
   const editor=useNoteEditor(),field=useRef<HTMLInputElement>(null);
-  const [text,setText]=useState(''),[chosen,setChosen]=useState(()=>readQuickSection(noteId));
   const doc=parseMemo(body),named=memoSections(doc).filter(section=>section.heading);
-  // Persist the heading key (title + occurrence), not the editor's session-only row id.
+  const [text,setText]=useState(''),[chosen,setChosen]=useState(()=>named[readQuickSection(noteId)??-1]?.heading?.key??null);
+  // Heading keys stay in memory; only the non-content section position reaches storage.
   const target=named.find(section=>section.heading!.key===chosen)??named[named.length-1];
   const key=target?.heading?.key??null;
-  useEffect(()=>{if(key){setChosen(key);writeQuickSection(noteId,key);}},[noteId,key]);
+  useEffect(()=>{if(key){setChosen(key);writeQuickSection(noteId,named.indexOf(target));}},[noteId,key]);
   function append(){
     const area=field.current;
     if(!area||editor.isComposing(area)||!area.value.trim())return;
@@ -59,7 +66,7 @@ function MemoQuickAdd({noteId,body,onAppend}:{noteId:string;body:string;onAppend
     setText('');area.value='';area.focus({preventScroll:true});
   }
   return <div className="notes-quick">
-    {named.length>0&&<select aria-label="넣을 섹션" value={key??''} onChange={event=>{setChosen(event.target.value);writeQuickSection(noteId,event.target.value);}}>
+    {named.length>0&&<select aria-label="넣을 섹션" value={key??''} onChange={event=>{setChosen(event.target.value);writeQuickSection(noteId,named.findIndex(section=>section.heading!.key===event.target.value));}}>
       {named.map(section=><option key={section.heading!.key} value={section.heading!.key}>{section.title||'제목 없음'}</option>)}
     </select>}
     <TextInput aria-label="빠른 추가" placeholder="메모 작성" enterKeyHint="send" autoComplete="off" {...editor.bind(text,setText,field)} onKeyDown={event=>{
@@ -111,6 +118,7 @@ function RecoveryKey({store}:{store:NotesStore}) {
  *  `onHomeEntryGone`: called when that note is trashed or the list is used instead, so App forgets
  *  the Home origin and Notes behaves like a normal tab visit from then on. */
 export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findStore}:{active:boolean;findStore?:NotesStore;backRef:MutableRefObject<(()=>boolean)|null>;request?:{id:string;key:number}|null;onReturnHome?:()=>void;onHomeEntryGone?:()=>void}) {
+  useEffect(clearLegacyQuickSections,[]);
   const [store]=useState(()=>findStore??new NotesStore(mobileNotesRequest));
   const state=useSyncExternalStore(store.subscribe,store.snapshot);
   const [key,setKey]=useState('');

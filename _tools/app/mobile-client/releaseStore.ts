@@ -1,9 +1,9 @@
-import {allMangaWorks, type MangaShelf, type ReleaseEvent} from './collectionReleases';
+import {allWorks, type MangaShelf, type ReleaseEvent} from './collectionReleases';
 
 /**
- * The manga shelf and unread release events last read for the 신간 screen, shared with Home.
+ * The manga, game and movie shelf and unread release events last read for the 신간 screen, shared with Home.
  *
- * Reading the shelf means paging through every manga Collection, so it is read once per
+ * Reading the shelf means paging through every published manga, game and movie Collection, so it is read once per
  * `epoch` and reused by whichever screen asks next. The epoch moves when the Collections
  * publication (or a personal edit) changed, or on a pull; a shelf or event list read under an
  * older epoch is read again on its next show. Events are also re-read when the release list
@@ -64,7 +64,7 @@ export function loadShelf(signal: AbortSignal): Promise<MangaShelf> {
   if (!inflight || inflight.epoch !== epoch) {
     inflight?.controller.abort();
     const controller = new AbortController(), at = epoch;
-    const promise = allMangaWorks(controller.signal).then(shelf => {
+    const promise = loadReleaseWorks(controller.signal).then(shelf => {
       if (at === epoch) commitReleases({...releaseStore.current, shelf, shelfEpoch: at});
       return shelf;
     }).finally(() => { if (inflight?.promise === promise) inflight = null; });
@@ -83,4 +83,15 @@ export function loadShelf(signal: AbortSignal): Promise<MangaShelf> {
     entry.promise.then(value => { signal.removeEventListener('abort', leave); entry.waiters--; resolve(value); },
       reason => { signal.removeEventListener('abort', leave); entry.waiters--; reject(reason); });
   });
+}
+
+/** Home also needs owned games and movies; keep one coherent publication across types. */
+async function loadReleaseWorks(signal: AbortSignal): Promise<MangaShelf> {
+  for (let attempt=0; ; attempt++) {
+    const shelves=await Promise.all((['manga','game','movie'] as const).map(type=>allWorks(type,signal)));
+    if(shelves.every(shelf=>shelf.revision===shelves[0].revision))return {
+      works:shelves.flatMap(shelf=>shelf.works),revision:shelves[0].revision,ready:shelves.every(shelf=>shelf.ready),
+    };
+    if(attempt>0||signal.aborted)throw new Error('Collection list changed');
+  }
 }

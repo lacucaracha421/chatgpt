@@ -9,7 +9,7 @@ import type {SparseGallerySource} from './assetToc';
 const mocks=vi.hoisted(()=>({api:vi.fn(),loadThumbnail:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,errorText:(e:Error)=>e.message}));
 vi.mock('./media',()=>({loadThumbnail:mocks.loadThumbnail}));
-vi.mock('./Gallery',()=>({Gallery:({items,onOpen,onNearEnd,restoreScroll,intro,stale,sparse}:{intro?:import('react').ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll:number;stale?:boolean;sparse?:SparseGallerySource})=><div aria-label="character gallery" data-scroll={restoreScroll} data-toc={sparse?.toc.totalCount} data-stale={stale?'true':undefined}>{intro}{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{a.id}</button>)}<button onClick={onNearEnd}>more</button>{sparse&&<button onClick={()=>void sparse.load(2,1,new AbortController().signal)}>seek</button>}</div>}));
+vi.mock('./Gallery',()=>({Gallery:({items,onOpen,onNearEnd,restoreScroll,intro,stale,sparse,privacy,likesRevision,onRefresh}:{intro?:import('react').ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll:number;stale?:boolean;privacy?:boolean;likesRevision?:unknown;onRefresh?():void;sparse?:SparseGallerySource})=><div aria-label="character gallery" data-likes-revision={String(likesRevision)} data-privacy={String(privacy)} data-scroll={restoreScroll} data-toc={sparse?.toc.totalCount} data-stale={stale?'true':undefined}>{intro}<button onClick={onRefresh}>refresh gallery</button>{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{a.id}</button>)}<button onClick={onNearEnd}>more</button>{sparse&&<button onClick={()=>void sparse.load(2,1,new AbortController().signal)}>seek</button>}</div>}));
 const revision='a'.repeat(64);
 const node=(kind:'series'|'group'|'character',id:string,name:string,parentId:string|null)=>({id:`${kind}:${id}`,kind,sourceId:id,seriesId:'s',parentId,name,description:'',thumbnailAssetId:null,manualOnly:false,excluded:false});
 const index:CharacterIndex={version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,publishedAt:'2026',nodes:[node('series','s','Series',null),node('group','g','Group','series:s'),node('character','c','Character','group:g')],scopes:[{nodeId:'series:s',filter:'all',totalCount:2,sourceCount:2},{nodeId:'series:s',filter:'unclassified',totalCount:0,sourceCount:0},{nodeId:'series:s',filter:'needs_review',totalCount:0,sourceCount:0},{nodeId:'group:g',filter:'all',totalCount:2,sourceCount:2},{nodeId:'character:c',filter:'all',totalCount:2,sourceCount:3}]};
@@ -419,4 +419,25 @@ it('shows a scope or filter load only as the line in the top bar, never inside t
   await waitFor(()=>expect(screen.queryByRole('status',{name:'캐릭터 보기 불러오는 중'})).toBeNull());
   hold=true;fireEvent.click(within(screen.getByRole('radiogroup',{name:'이미지 범위'})).getByRole('radio',{name:/전체/}));
   await inBar();
+});
+
+it('passes privacy to the gallery opened directly from Find',async()=>{
+  localStorage.setItem('lakomics.mobile.privacyMode','1');
+  try {
+    render(<CharacterBrowser {...props} initialNode="character:c"/>);
+    await screen.findByText('asset-1');
+    expect(screen.getByLabelText('character gallery').getAttribute('data-privacy')).toBe('true');
+  } finally {localStorage.removeItem('lakomics.mobile.privacyMode');}
+});
+
+it('refreshes character hearts on both host and gallery refresh without a publication change',async()=>{
+  const {rerender}=render(<CharacterBrowser {...props} initialNode="character:c"/>);
+  await screen.findByText('asset-1');
+  const revision=()=>screen.getByLabelText('character gallery').getAttribute('data-likes-revision');
+  const before=revision();
+  fireEvent.click(screen.getByText('refresh gallery'));
+  await waitFor(()=>expect(revision()).not.toBe(before));
+  const refreshed=revision();
+  rerender(<CharacterBrowser {...props} initialNode="character:c" refreshKey={2}/>);
+  await waitFor(()=>expect(revision()).not.toBe(refreshed));
 });

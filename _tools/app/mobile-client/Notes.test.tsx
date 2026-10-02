@@ -535,3 +535,22 @@ it('falls back from a missing remembered section and tolerates unavailable local
  const quick=screen.getByPlaceholderText('메모 작성');fireEvent.change(quick,{target:{value:'새 줄'}});fireEvent.keyDown(quick,{key:'Enter'});
  await waitFor(()=>expect(saves().at(-1)?.body).toBe('## 하나\n첫 줄\n## 마지막\n끝 줄\n새 줄'));
 });
+
+it('clears legacy quick-section plaintext when Notes starts, even while locked',async()=>{
+  localStorage.setItem('lakomics.notes.quickSection.v1.'+note.id,JSON.stringify(['private section',0]));
+  localStorage.setItem('unrelated','keep');
+  mock.native.mockResolvedValue({unlocked:false,notes:[]});
+  render(<Notes active backRef={{current:null}}/>);
+  await screen.findByLabelText('메모 복구 키');
+  expect(localStorage.getItem('lakomics.notes.quickSection.v1.'+note.id)).toBeNull();
+  expect(localStorage.getItem('unrelated')).toBe('keep');
+});
+it('persists only a non-content section position, including duplicate titles',async()=>{
+  mock.native.mockImplementation(state([{...note,body:'## private section\nfirst\n## private section\nsecond'}]));
+  const view=render(<Notes active backRef={{current:null}}/>);await openNote('제목');
+  const picker=screen.getByRole('combobox',{name:'넣을 섹션'}) as HTMLSelectElement;
+  fireEvent.change(picker,{target:{value:picker.options[0]!.value}});
+  expect(JSON.stringify({...localStorage})).not.toContain('private section');
+  view.unmount();render(<Notes active backRef={{current:null}}/>);await openNote('제목');
+  expect((screen.getByRole('combobox',{name:'넣을 섹션'}) as HTMLSelectElement).selectedIndex).toBe(0);
+});

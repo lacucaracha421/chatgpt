@@ -124,14 +124,14 @@ function rowSize(row: JustifiedGalleryRow<GalleryRowItem> & {spacer?:boolean}) {
   return row.height + (row.dateHeadings?.length ? GALLERY_DATE_HEADING_HEIGHT : 0) + GALLERY_ROW_GAP;
 }
 
-export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onClearSelection, sparse}: {sparse?:SparseGallerySource; items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
+export function Gallery({items, density, identity, likesRevision=identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onClearSelection, sparse}: {sparse?:SparseGallerySource; items: Asset[]; density: number; identity: string; likesRevision?:unknown; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
   /** Additional visibility guard for sheets owned by the parent screen. */scrubberHidden?:boolean;
   /** Optional sort metadata; the date fallback follows the existing gallery order. */scrubberSort?:ScrubberSort;
   /** Tablet Library selection; absent for Revisit, character and vault galleries. */selectedIds?:ReadonlySet<string>; favoritesView?:boolean; onSelectAsset?(id:string):void; onToggleSelection?(id:string):void;
   /** A double tap on empty gallery space (not a tile) leaves selection mode. */onClearSelection?():void;
   /** Private Vault mode: same layout and gestures, no library media client. */
   vault?:GalleryVaultSource}) {
-  const likes=useLikesAlbum(items.map(item=>item.id),!paused&&!privacy&&!vault,identity);
+  const likes=useLikesAlbum(items.map(item=>item.id),!paused&&!privacy&&!vault,likesRevision);
   const parent = useRef<HTMLDivElement>(null);
   const activePress = useRef<(() => void)|null>(null);
   const registerPress=(cancel:()=>void)=>{activePress.current?.();activePress.current=cancel;};

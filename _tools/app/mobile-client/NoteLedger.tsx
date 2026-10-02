@@ -9,7 +9,7 @@ import { forkedIds, keepOnly, ledgerLimitProblem, ledgerSizeProblem, monthLabel,
 import { dotDate } from '../src/notes/ledger/input';
 import { ledgerEntries, monthNotesOf, monthSummary, type Charge } from '../src/notes/ledger/summary';
 import { LedgerContents, QuickEntry } from '../src/notes/ledger/LedgerContents';
-import { EntrySheet, IncomeSheet, RecurringSheet, PlanSheet, ChargeSheet, type EntryDraft } from './NoteLedgerSheets';
+import { EntrySheet, IncomeSheet, RecurringSheet, PlanSheet, ChargeSheet, type EntryDraft, type LedgerItemPatch } from './NoteLedgerSheets';
 import '../src/notes/ledger/ledger.css';
 import './ledger.css';
 
@@ -50,8 +50,18 @@ export function NoteLedger({ store, ledger, notes, saveState, onLeave, onMore, b
   }
   function deleteEntry(entryId:string){for(const note of monthNotesNow())if((note.entries??[]).some(e=>e.id===entryId))write(note,{entries:note.entries!.filter(e=>e.id!==entryId)});}
   function keepEntry(entryId:string){for(const note of monthNotesNow()){const list=note.entries??[];const kept=keepOnly(list,entryId);if(kept!==list&&JSON.stringify(kept)!==JSON.stringify(list))write(note,{entries:kept});}}
-  const saveRecurring=(item:Recurring)=>editLedger(l=>({recurring:[...(l.recurring??[]).filter(r=>r.id!==item.id),item]}));
-  const savePlan=(item:Planned)=>editLedger(l=>({planned:[...(l.planned??[]).filter(p=>p.id!==item.id),item]}));
+  function saveRecurring(patch:LedgerItemPatch<Recurring>) {
+    const note=latest(ledger.id);if(!note)return fail(null);
+    const list=note.recurring??[],item=list.find(r=>r.id===patch.id);
+    if(!item&&!patch.order)return fail('다른 기기에서 삭제된 구독입니다.');
+    return write(note,{recurring:item?list.map(r=>r.id===patch.id?{...r,...patch}:r):[...list,patch as Recurring]});
+  }
+  function savePlan(patch:LedgerItemPatch<Planned>) {
+    const note=latest(ledger.id);if(!note)return fail(null);
+    const list=note.planned??[],item=list.find(p=>p.id===patch.id);
+    if(!item&&!patch.order)return fail('다른 기기에서 삭제된 항목입니다.');
+    return write(note,{planned:item?list.map(p=>p.id===patch.id?{...p,...patch}:p):[...list,patch as Planned]});
+  }
   async function saveIncome(scope:'default'|'month',amount:number|null,incomeDay:number|null){
     const day=incomeDay!==(ledger.incomeDay??null)?{incomeDay}:{};
     if(scope==='default')return editLedger(()=>({income:amount,...day}));
