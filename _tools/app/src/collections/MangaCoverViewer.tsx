@@ -1,6 +1,6 @@
 import { ChevronLeftIcon, ChevronRightIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import * as RadixDialog from "@radix-ui/react-dialog";
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import { workArtworkUrl, workArtworkThumbnailUrl } from "../assets/mediaUrl";
 import type { CollectionVolume } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
@@ -22,11 +22,12 @@ type MangaCoverViewerProps = {
 };
 export function MangaCoverViewer({ workTitle, volumes, activeVolumeId, onActiveVolumeChange, onClose, scope = "", revision = "" }: MangaCoverViewerProps) {
   const { privacyMode } = usePrivacy();
+  useEffect(() => { if (privacyMode) onClose(); }, [privacyMode, onClose]);
   const [flat, setFlat] = useState(false);
   const activeIndex = volumes.findIndex(volume => volume.id === activeVolumeId);
   const active = volumes[activeIndex];
   useBackHandler(onClose, 100, Boolean(active));
-  if (!active) return null;
+  if (!active || privacyMode) return null;
   const first = Math.max(0, Math.min(volumes.length - 7, activeIndex - 3));
   function move(offset: -1 | 1) { const next = volumes[activeIndex + offset]; if (next) onActiveVolumeChange(next.id); }
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {

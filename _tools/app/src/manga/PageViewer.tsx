@@ -43,7 +43,13 @@ const MARGIN_LABEL: Record<MangaViewerMargin, string> = { compact: "좁게", nor
 const GAP_LABEL: Record<MangaViewerGap, string> = { none: "없음", narrow: "좁게", wide: "넓게" };
 
 /** The one immersive manga reader for local and online works. */
-export function PageViewer({ title, pageUrls, initialPage, sourceLabel, artist, bookmark, onPageChange, onClose, actions, onRetryPage }: PageViewerProps) {
+export function PageViewer(props: PageViewerProps) {
+  const { privacyMode } = usePrivacy();
+  useEffect(() => { if (privacyMode) props.onClose(); }, [privacyMode, props.onClose]);
+  return privacyMode ? <Skeleton className="privacy-mask manga-reader__mask" label="비공개 모드" /> : <PageViewerContent {...props}/>;
+}
+
+function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, bookmark, onPageChange, onClose, actions, onRetryPage }: PageViewerProps) {
   const { privacyMode } = usePrivacy();
   const pageCount = pageUrls.length;
   const [page, setPage] = useState(() => Math.max(1, Math.min(pageCount, initialPage)));

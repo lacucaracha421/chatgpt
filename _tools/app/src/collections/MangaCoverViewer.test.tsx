@@ -1,3 +1,4 @@
+import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { BackNavigationProvider, useBackHandler, useBackRequest } from "../shared/navigation/BackNavigation";
@@ -105,4 +106,13 @@ describe("MangaCoverViewer", () => {
     await user.click(document.querySelector<HTMLElement>(".manga-cover-viewer__backdrop")!);
     expect(onClose).toHaveBeenCalledOnce();
   });
+});
+
+
+it("closes cover appreciation and removes all images when privacy turns on", () => {
+ const close=vi.fn();
+ const view=(privacy:boolean)=><PrivacyProvider privacyMode={privacy} setPrivacyMode={vi.fn()}><MangaCoverViewer workTitle="작품" volumes={volumes} activeVolumeId="v1" onActiveVolumeChange={vi.fn()} onClose={close}/></PrivacyProvider>;
+ const {rerender}=render(view(false));
+ rerender(view(true));
+ expect(document.querySelector("img[src]")).toBeNull();expect(screen.queryByRole("dialog")).toBeNull();expect(close).toHaveBeenCalledOnce();
 });

@@ -1,3 +1,4 @@
+import { PrivacyProvider } from "../../privacy/PrivacyContext";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
@@ -30,4 +31,13 @@ it("disposes the live owner on a surface change and close", async () => {
   const user = userEvent.setup(), { unmount } = render(<CompleteCoverViewer title="AV" covers={covers} onClose={vi.fn()} />);
   await user.click(screen.getByRole("button", { name: "책등" })); expect(dispose).toHaveBeenCalledOnce();
   unmount(); expect(dispose).toHaveBeenCalledTimes(2);
+});
+
+
+it("closes cover appreciation and removes all images when privacy turns on", () => {
+ const close=vi.fn();
+ const view=(privacy:boolean)=><PrivacyProvider privacyMode={privacy} setPrivacyMode={vi.fn()}><CompleteCoverViewer title="작품" covers={covers} onClose={close}/></PrivacyProvider>;
+ const {rerender}=render(view(false));
+ rerender(view(true));
+ expect(document.querySelector("img[src]")).toBeNull();expect(screen.queryByRole("dialog")).toBeNull();expect(close).toHaveBeenCalledOnce();
 });

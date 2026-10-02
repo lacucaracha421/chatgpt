@@ -15,7 +15,7 @@ async function open(){
   await screen.findByRole('img',{name:'1페이지'});
   return screen.getByRole('slider',{name:'페이지 이동'});
 }
-beforeEach(()=>{
+beforeEach(()=>{localStorage.clear();
   vi.stubGlobal('innerWidth',800);vi.stubGlobal('innerHeight',1280);
   mocks.ticket.mockReset();mocks.decode.mockReset();
   mocks.ticket.mockImplementation(async page=>({url:`https://app.lakomics.local/media-cache/page-${page.index}`}));
@@ -84,4 +84,20 @@ it('keeps counting from the requested page when next is tapped again while a pag
   fireEvent.click(screen.getByRole('button',{name:'다음 페이지'}));
   expect(screen.getAllByText('3 / 40')).toHaveLength(2);
   expect(screen.queryByText('1 / 40')).toBeNull();
+});
+
+
+it('blocks opening a reader in privacy mode without page tickets or image sources',()=>{
+ localStorage.setItem('lakomics.mobile.privacyMode','1');const close=vi.fn();
+ render(<CatalogReader manifest={manifest} title="만화" onClose={close} onRefresh={()=>{}} refreshing={false}/>);
+ expect(document.querySelector('img[src]')).toBeNull();expect(mocks.ticket).not.toHaveBeenCalled();
+ expect(screen.getByLabelText('비공개 모드')).toBeTruthy();expect(close).toHaveBeenCalledOnce();
+});
+it('closes the open reader and aborts page work when privacy turns on',async()=>{
+ const close=vi.fn();render(<CatalogReader manifest={manifest} title="만화" onClose={close} onRefresh={()=>{}} refreshing={false}/>);
+ await screen.findByRole('img',{name:'1페이지'});
+ const signal=mocks.ticket.mock.calls[0][1] as AbortSignal;
+ act(()=>{localStorage.setItem('lakomics.mobile.privacyMode','1');window.dispatchEvent(new Event('lakomics-privacy-mode'));});
+ expect(document.querySelector('img[src]')).toBeNull();expect(screen.queryByRole('dialog')).toBeNull();
+ expect(signal.aborted).toBe(true);expect(close).toHaveBeenCalledOnce();
 });

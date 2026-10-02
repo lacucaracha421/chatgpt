@@ -62,6 +62,7 @@ const makerLabels:Record<CollectionKind,string> = {game:'개발사',manga:'작�
 export function Artwork({item,id,revision,original=false,active=true,label,physical,arrival}:{item:CollectionSummary;id?:string|null;revision:string;original?:boolean;active?:boolean;label?:string;physical?:'book'|'game';
   /** The list card this cover belongs to, held until the cover is decoded (or cannot be). */arrival?:CardArrival}) {
   const memory=useContext(ArtworkMemoryContext),kept=original?null:memory;
+  const [privacy] = usePrivacyMode();
   const source=artworkSource(item,id,revision,original);
   const host=useRef<HTMLSpanElement>(null), [visible,setVisible]=useState(original), [failed,setFailed]=useState<string|null>(null);
   // A cover this screen already decoded is shown in the first frame; one that arrives later fades in.
@@ -83,7 +84,7 @@ export function Artwork({item,id,revision,original=false,active=true,label,physi
   useEffect(()=>{if(original || !host.current)return; if(!('IntersectionObserver' in window)){setVisible(true);return;} const observer=new IntersectionObserver(entries=>setVisible(entries.some(entry=>entry.isIntersecting)),{rootMargin:'120px'});observer.observe(host.current);return()=>observer.disconnect();},[original]);
   useEffect(()=>{
     // Leaving the tab or the screen ends the retries; coming back starts a fresh budget.
-    if(!active||!visible){retries.current={source,failed:0,busy:0};return;}
+    if(privacy||!active||!visible){retries.current={source,failed:0,busy:0};return;}
     if((!id&&!item.coverAssetId)||loaded.current===source)return;
     setFailed(null);const controller=new AbortController();
     const request=kept?.request(item,id,revision,original,controller.signal)??artworkTicket(item,id,revision,original,controller.signal);
@@ -97,16 +98,16 @@ export function Artwork({item,id,revision,original=false,active=true,label,physi
       loaded.current=source;setImage({source,url:ticket.url});
     }).catch(error=>{if(!controller.signal.aborted&&!retryLater(error))setFailed(source);});
     return()=>{controller.abort();window.clearTimeout(retryTimer.current);};
-  },[source,active,visible,attempt]);
-  const broken=failed===source,ready=!!image&&!broken&&(!!id||!!item.coverAssetId);
+  },[source,active,visible,attempt,privacy]);
+  const broken=failed===source,ready=!privacy&&!!image&&!broken&&(!!id||!!item.coverAssetId);
   shown.current=ready?image.url:null;
   const solid=ready&&physical&&flat!==source;
   // A card with no cover to wait for (none, or it failed) arrives at once.
   const absent=!id&&!item.coverAssetId;
-  useEffect(()=>{if(absent||broken)arrival?.ready();},[absent,broken,arrival]);
+  useEffect(()=>{if(privacy||absent||broken)arrival?.ready();},[privacy,absent,broken,arrival]);
   // While the card still waits, the card's arrival shows this cover; it does not fade on its own.
   if(ready&&arrival?.waiting())arriving.current=false;
-  return <span ref={host} className={`collection-art collection-art-${item.type}${solid?' is-physical':''}`}>{ready?(solid?<PhysicalCover kind={physical} src={image.url} alt={label??item.name} scope={item.id} revision={artworkVersion(item,id,revision,original)} large onError={()=>setFlat(source)}/>:<img src={image.url} alt={label??item.name} className={arriving.current?'collection-art-arrive':undefined} onLoad={arrival&&(event=>{const element=event.currentTarget;afterDecode(element,()=>{arrival.ready();arrive(element);});})} onError={()=>{arrival?.ready();loaded.current=null;arriving.current=true;kept?.forget(source);if(retryLater(null))setImage(null);else setFailed(source);}}/>):<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?'불러오는 중…':'표지'}</span></span>}</span>;
+  return <span ref={host} className={`collection-art collection-art-${item.type}${solid?' is-physical':''}`}>{privacy?<span className="privacy-mask" aria-label="비공개 모드"/>:ready?(solid?<PhysicalCover kind={physical} src={image.url} alt={label??item.name} scope={item.id} revision={artworkVersion(item,id,revision,original)} large onError={()=>setFlat(source)}/>:<img src={image.url} alt={label??item.name} className={arriving.current?'collection-art-arrive':undefined} onLoad={arrival&&(event=>{const element=event.currentTarget;afterDecode(element,()=>{arrival.ready();arrive(element);});})} onError={()=>{arrival?.ready();loaded.current=null;arriving.current=true;kept?.forget(source);if(retryLater(null))setImage(null);else setFailed(source);}}/>):<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?'불러오는 중…':'표지'}</span></span>}</span>;
 }
 type Pose={rx:number;ry:number};
 type View={pose:Pose;zoom:number;x:number;y:number};
@@ -397,6 +398,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   const sectionRef=useRef<HTMLElement>(null),listRef=useRef<HTMLDivElement>(null),showcaseRef=useRef<HTMLDivElement>(null),detailRef=useRef<HTMLDivElement>(null),performerRef=useRef<HTMLDivElement>(null);
   const listScroll=useRef(0);
   const live=active&&!paused;
+  useEffect(()=>{if(privacyMode)setCoverIndex(null);},[privacyMode]);
   useEffect(()=>{if(privacyMode&&tab==='av'){setTab('game');setSelected(null);setPerformer(null);setDetail(null);}else if(privacyMode)setPerformer(null);},[privacyMode,tab]);
   const filtered=!!search||filters.rating!=='all';
   const [calendarReply,setCalendarReply]=useState<ReleaseCalendarReply|null>(null);
@@ -659,7 +661,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
     <div ref={detailRef} className="collection-detail" style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item?(!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>)
       :item.type==='manga'
         ?<MangaWork key={item.id} item={item} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} volumes={editionVolumesShared} owned={ownedOf(item,edition)} initialVolumeId={openedVolume?.id===item.id?openedVolume.volumeId:null}
-          latestKorean={latestKoreanRelease(releaseBoardEntry(item,ownedOf,watching),edition,today)} onEnlarge={id=>setCoverIndex(volumes.findIndex(volume=>volume.id===id)+1)} info={mangaInfo}/>
+          latestKorean={latestKoreanRelease(releaseBoardEntry(item,ownedOf,watching),edition,today)} onEnlarge={id=>{if(!privacyMode)setCoverIndex(volumes.findIndex(volume=>volume.id===id)+1);}} info={mangaInfo}/>
         :<CaseWork item={item} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} position={Math.max(1,order.indexOf(item.id)+1)} total={Math.max(1,order.length)} score={visibleScore} record={visibleRecord} onStep={stepWork} info={workInfo}/>}</>}</div>
     {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}>
       <p className="collection-sheet-label">기준</p><div role="radiogroup" aria-label="정렬 기준">{(Object.keys(SORT_LABELS) as Filters['sort'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.sort===value} onClick={()=>changeFilters({...filters,sort:value})}>{SORT_LABELS[value]}<span className="radio-dot"/></button>)}</div>
@@ -670,7 +672,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
     </BottomSheet>}
     {sheet==='rating'&&<BottomSheet title="내 별점" onClose={()=>setSheet(null)}><RatingFilterSlider value={filters.rating} onChange={rating=>changeFilters({...filters,rating})}/></BottomSheet>}
     {sheet==='view'&&<ShelfViewSheet type={performer&&!selected?'av':type} view={viewOf(performer&&!selected?'av':type)} onChange={patch=>patchView(performer&&!selected?'av':type,patch)} onClose={()=>setSheet(null)}/>}
-    {active&&!paused&&coverIndex!==null&&item&&covers[coverIndex]&&<Dialog open title={covers[coverIndex].label} onClose={()=>setCoverIndex(null)} variant="wide"><div className="collection-appreciation"><DialogDescription className="sr-only">선택한 표지를 크게 감상합니다.</DialogDescription>
+    {!privacyMode&&active&&!paused&&coverIndex!==null&&item&&covers[coverIndex]&&<Dialog open title={covers[coverIndex].label} onClose={()=>setCoverIndex(null)} variant="wide"><div className="collection-appreciation"><DialogDescription className="sr-only">선택한 표지를 크게 감상합니다.</DialogDescription>
       <div className="dialog-header">{physical&&<div className="collection-cover-mode" role="radiogroup" aria-label="표지 보기 방식">{(['3d','flat'] as const).map(value=><button key={value} role="radio" aria-checked={coverMode===value} onClick={()=>setCoverMode(value)}>{value==='3d'?'입체':'평면'}</button>)}</div>}<IconButton label="표지 감상 닫기" icon={XMarkIcon} onClick={()=>setCoverIndex(null)}/></div>
       <div className="collection-cover-stage"><CoverStage key={`${edition}:${coverIndex}:${coverMode}`} item={item} id={covers[coverIndex].id} revision={detail!.revision} label={covers[coverIndex].label} mode={physical?coverMode:'flat'} onFlat={()=>setCoverMode('flat')}/></div>
       <footer><IconButton label="이전 표지" icon={ChevronLeftIcon} disabled={coverIndex===0} onClick={()=>setCoverIndex(value=>value!-1)}/><span className="numeric muted">{coverIndex+1} / {covers.length}</span><IconButton label="다음 표지" icon={ChevronRightIcon} disabled={coverIndex===covers.length-1} onClick={()=>setCoverIndex(value=>value!+1)}/></footer></div></Dialog>}

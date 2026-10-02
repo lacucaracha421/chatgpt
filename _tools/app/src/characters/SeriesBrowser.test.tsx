@@ -627,7 +627,9 @@ it("places ordinary folders beside characters with navigation and a persisted ex
   });
   const card = await screen.findByRole("button", { name: "기체 폴더 열기" });
   expect(card.closest(".series-characters")).toContainElement(screen.getByRole("button", { name: "히나 열기" }));
-  expect(card.querySelector("img")).toHaveClass("character-private");
+  expect(card.querySelector("img")).toBeNull();
+  expect(card.querySelector(".privacy-mask")).toHaveAttribute("aria-label", "비공개 모드");
+  expect(screen.getByRole("button", {name: "히나 열기"}).querySelector("img[src]")).toBeNull();
   const user = userEvent.setup();
   expect(within(card).queryByText("제외")).not.toBeInTheDocument();
   await user.click(card);

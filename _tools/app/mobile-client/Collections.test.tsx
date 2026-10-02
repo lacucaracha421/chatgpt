@@ -1228,3 +1228,18 @@ it('retains the painted Showcase while its pull-to-refresh reads a replacement',
   await act(async()=>replacement.resolve({...page,revision:'r2'}));
   expect(within(overlay).getByRole('button',{name:new RegExp(item.name)})).toBe(tile);
 });
+
+
+it('blocks spine double-tap during privacy and closes an already open original cover viewer',async()=>{
+ mocks.api.mockImplementation(async(path:string)=>path.includes('type=av')?{...page,items:[]}:path.includes('/v1/collections/')?{revision:'r1',item:mangaItem()}:{...page,items:[mangaItem()]});
+ render(<Collections active paused={false} backRef={{current:null}}/>);
+ fireEvent.click(await screen.findByText(item.name));
+ const spine=await screen.findByRole('button',{name:'1권 보기'});
+ await waitFor(()=>expect(spine.getAttribute('aria-pressed')).toBe('true'));
+ fireEvent.doubleClick(spine);await screen.findByRole('dialog');
+ act(()=>{localStorage.setItem('lakomics.mobile.privacyMode','1');window.dispatchEvent(new Event('lakomics-privacy-mode'));});
+ expect(screen.queryByRole('dialog')).toBeNull();expect(document.querySelector('img[src]')).toBeNull();
+ const requests=mocks.native.mock.calls.length;
+ fireEvent.doubleClick(screen.getByRole('button',{name:'1권 보기'}));
+ expect(screen.queryByRole('dialog')).toBeNull();expect(mocks.native.mock.calls.length).toBe(requests);
+});

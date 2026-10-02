@@ -6,6 +6,7 @@ import {durationLabel} from './model';
 import {displayDateTime} from '../src/shared/displayDate';
 import {formatBytes} from '../src/shared/formatBytes';
 import {errorText, native} from './transport';
+import {usePrivacyMode} from './privacyMode';
 
 /**
  * Every row renders a field the mobile Asset actually carries; a value the device does
@@ -122,6 +123,7 @@ async function writeClipboard(text: string): Promise<void> {
  * `Viewer`, so those three overlays keep one owner.
  */
 export function ViewerInfo({asset, mediaError = ''}: {asset: Asset; mediaError?: string; onClose?(): void}) {
+  const [privacy] = usePrivacyMode();
   const [status, setStatus] = useState<{kind: 'copied' | 'failed'; label: string} | null>(null);
   const [copied, setCopied] = useState('');
   const [busy, setBusy] = useState(false);
@@ -176,7 +178,7 @@ export function ViewerInfo({asset, mediaError = ''}: {asset: Asset; mediaError?:
   return <section className="viewer-info" aria-label="미디어 정보">
     <header className="viewer-info-heading" data-info-section="artist">
       <div className="viewer-info-preview" aria-hidden="true">
-        {asset.preview ? <img src={asset.preview} alt="" draggable={false}/> : null}
+        {privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : asset.preview ? <img src={asset.preview} alt="" draggable={false}/> : null}
       </div>
       <div className="viewer-info-artist">
         <div className="viewer-info-artist-line">

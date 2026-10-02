@@ -72,3 +72,13 @@ it("keeps suggestions in the same shelf after registered characters", () => {
   expect(screen.getByRole("button", { name: "새 캐릭터 제안" })).toBeVisible();
   expect(screen.queryByRole("navigation", { name: "캐릭터·폴더 페이지" })).not.toBeInTheDocument();
 });
+
+
+it("masks group covers without requesting member images", () => {
+ const withCovers=members.map(member=>({...member,thumbnailAssetId:`cover-${member.id}`}));
+ const {container,rerender}=render(<CharacterGroups seriesId="series" members={withCovers} groups={groups}>{children}</CharacterGroups>);
+ expect(container.querySelector("img[src]")).toBeTruthy();
+ rerender(<CharacterGroups seriesId="series" members={withCovers} groups={groups} privacyMode>{children}</CharacterGroups>);
+ expect(container.querySelector("img[src]")).toBeNull();
+ expect(container.querySelectorAll(".privacy-mask")).toHaveLength(2);
+});

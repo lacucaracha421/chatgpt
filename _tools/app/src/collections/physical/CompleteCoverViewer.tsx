@@ -22,6 +22,7 @@ function CaseSurface({ id, surface, scope, revision, onFailure }: { id: string; 
 }
 export function CompleteCoverViewer({ title, covers, scope = "", onClose }: { title: string; covers: AvCoverSet; scope?: string; onClose(): void }) {
   const { privacyMode } = usePrivacy();
+  useEffect(() => { if (privacyMode) onClose(); }, [privacyMode, onClose]);
   const [surface, setSurface] = useState<CoverSurface>("front"), [flat, setFlat] = useState(false), [failed, setFailed] = useState<Partial<Record<CoverSurface, boolean>>>({});
   const stops = availableCoverStops(covers, failed);
   const current = stops.includes(surface) ? surface : "front", id = covers[`${current}Id`];
@@ -36,6 +37,7 @@ export function CompleteCoverViewer({ title, covers, scope = "", onClose }: { ti
     const next = event.key === "Home" ? "front" : stops[stops.indexOf(current) + (event.key === "ArrowRight" ? 1 : -1)];
     if (next && stops.includes(next)) setSurface(next);
   }
+  if (privacyMode) return null;
   return <Dialog open title={`${title} 표지 감상`} variant="wide" onClose={onClose} onKeyDown={keys}>
     <div className="complete-cover-viewer">
       <div className="complete-cover-viewer__stage">

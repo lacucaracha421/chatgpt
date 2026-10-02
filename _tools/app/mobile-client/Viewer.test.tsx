@@ -14,7 +14,7 @@ import {Viewer} from './Viewer';
 const items:Asset[]=[{id:'a',kind:'image',preview:'https://test.invalid/thumb-a',creator_name:'A'},{id:'b',kind:'image',preview:'https://test.invalid/thumb-b',creator_name:'B'}];
 afterEach(()=>{cleanup();delete window.LakomicsNative;vi.restoreAllMocks();});
 // jsdom has no media playback; the viewer's own calls (resume, release) are observed instead.
-beforeEach(()=>{Object.defineProperty(window,'innerWidth',{configurable:true,value:800});Object.defineProperty(window,'innerHeight',{configurable:true,value:1280});vi.spyOn(HTMLMediaElement.prototype,'play').mockResolvedValue(undefined);vi.spyOn(HTMLMediaElement.prototype,'load').mockImplementation(()=>{});vi.spyOn(HTMLMediaElement.prototype,'pause').mockImplementation(()=>{});mocks.ticket.mockReset();mocks.decode.mockReset();mocks.thumbnail.mockReset();mocks.info.mockReset();mocks.ticket.mockImplementation((asset:Asset)=>Promise.resolve({url:`https://test.invalid/original-${asset.id}`}));mocks.thumbnail.mockImplementation(async(asset:Asset)=>({...asset,preview:`https://test.invalid/thumb-loaded-${asset.id}`}));});
+beforeEach(()=>{localStorage.clear();Object.defineProperty(window,'innerWidth',{configurable:true,value:800});Object.defineProperty(window,'innerHeight',{configurable:true,value:1280});vi.spyOn(HTMLMediaElement.prototype,'play').mockResolvedValue(undefined);vi.spyOn(HTMLMediaElement.prototype,'load').mockImplementation(()=>{});vi.spyOn(HTMLMediaElement.prototype,'pause').mockImplementation(()=>{});mocks.ticket.mockReset();mocks.decode.mockReset();mocks.thumbnail.mockReset();mocks.info.mockReset();mocks.ticket.mockImplementation((asset:Asset)=>Promise.resolve({url:`https://test.invalid/original-${asset.id}`}));mocks.thumbnail.mockImplementation(async(asset:Asset)=>({...asset,preview:`https://test.invalid/thumb-loaded-${asset.id}`}));});
 describe('progressive viewer',()=>{
   it('logs the original commit only after decode and observes prepared neighbour reuse',async()=>{
     const events:Record<string,unknown>[]=[];
@@ -564,4 +564,20 @@ describe('viewer bars',()=>{
     expect(viewer().classList.contains('chrome-visible')).toBe(false);
     tap();expect(viewer().classList.contains('chrome-visible')).toBe(true);
   });
+});
+
+
+it('closes the open asset viewer without keeping any image source in privacy mode',async()=>{
+ mocks.ticket.mockImplementation(()=>new Promise(()=>{}));
+ const close=vi.fn();render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={close}/>);
+ await waitFor(()=>expect(mocks.ticket).toHaveBeenCalled());
+ const signals=mocks.ticket.mock.calls.map(call=>call[2]).filter(Boolean) as AbortSignal[];
+ act(()=>{localStorage.setItem('lakomics.mobile.privacyMode','1');window.dispatchEvent(new Event('lakomics-privacy-mode'));});
+ expect(document.querySelector('img[src]')).toBeNull();expect(screen.queryByRole('dialog')).toBeNull();expect(close).toHaveBeenCalledOnce();
+ expect(signals.every(signal=>signal.aborted)).toBe(true);
+});
+it('does not request media when opened while privacy is enabled',()=>{
+ localStorage.setItem('lakomics.mobile.privacyMode','1');const close=vi.fn();
+ render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={close}/>);
+ expect(mocks.ticket).not.toHaveBeenCalled();expect(document.querySelector('img[src]')).toBeNull();expect(close).toHaveBeenCalledOnce();
 });

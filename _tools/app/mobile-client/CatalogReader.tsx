@@ -6,6 +6,7 @@ import {catalogImageTicket} from './catalogMedia';
 import {fitTransform} from './model';
 import type {CatalogReaderManifest,CatalogReaderPage} from './catalogModel';
 import './CatalogReader.css';
+import {usePrivacyMode} from './privacyMode';
 
 type Transform={scale:number;x:number;y:number};
 function ReaderPage({workId,manifestRevision,page,transform,onRefresh,onFailure,onReady,onDispose,attempt}:{workId:string;manifestRevision:string;page:CatalogReaderPage;transform?:Transform;onRefresh():void;onFailure():void;onReady(index:number,ratio:number):void;onDispose(index:number):void;attempt:number}){
@@ -27,7 +28,13 @@ function ReaderPage({workId,manifestRevision,page,transform,onRefresh,onFailure,
   </div>;
 }
 
-export function CatalogReader({manifest,title,onClose,onRefresh,refreshing}:{manifest:CatalogReaderManifest;title:string;onClose():void;onRefresh():void;refreshing:boolean}){
+export function CatalogReader(props: Parameters<typeof CatalogReaderContent>[0]) {
+  const [privacy] = usePrivacyMode();
+  useEffect(() => { if (privacy) props.onClose(); }, [privacy, props.onClose]);
+  return privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : <CatalogReaderContent {...props}/>;
+}
+
+function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing}:{manifest:CatalogReaderManifest;title:string;onClose():void;onRefresh():void;refreshing:boolean}){
   const [current,setCurrent]=useState(0),[chrome,setChrome]=useState(false),[transform,setTransform]=useState<Transform>({scale:1,x:0,y:0});
   const [target,setTarget]=useState(0);
   const [scrubPage,setScrubPage]=useState<number|null>(null),[controlsFocused,setControlsFocused]=useState(false);

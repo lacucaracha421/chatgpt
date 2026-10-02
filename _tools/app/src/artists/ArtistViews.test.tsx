@@ -1,3 +1,4 @@
+import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
@@ -420,4 +421,14 @@ describe("artist pages in the gallery", () => {
     await user.click(within(panel).getByRole("button", { name: "저장" }));
     expect(artists.setFlags).toHaveBeenCalledWith("artist:moon", { reposter: true });
   });
+});
+
+
+it("masks every artist index cover without image sources when privacy is enabled", async () => {
+ const {container}=render(<PrivacyProvider privacyMode setPrivacyMode={vi.fn()}><LibraryProvider gateway={libraryGateway(artistGateway())}>
+   <ArtistIndex view={{kind:"artists"}} onNavigate={vi.fn()}/>
+ </LibraryProvider></PrivacyProvider>);
+ await screen.findByRole("button",{name:"달그림자 12장"});
+ await waitFor(()=>expect(container.querySelectorAll(".privacy-mask").length).toBeGreaterThan(0));
+ expect(container.querySelector("img[src]")).toBeNull();
 });

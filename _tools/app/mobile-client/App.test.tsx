@@ -10,7 +10,7 @@ vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:()=> 'co
   ApiError:class ApiError extends Error{status:number|null;details:unknown;constructor(message:string,status:number|null,details:unknown){super(message);this.status=status;this.details=details;}}}));
 vi.mock('./media',()=>({clearMediaCache:vi.fn(),loadThumbnail:vi.fn(async(a)=>a),prepareAssets:()=>new Promise(()=>{})}));
 vi.mock('./Home',()=>({Home:({items,onRecent,onArtists}:HomeProps)=><div><button onClick={onRecent}>전체 보기</button><button onClick={onArtists}>작가 전체</button>{items.slice(0,12).map(a=><span key={a.id}>{`tile-${a.id}`}</span>)}</div>}));
-vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,restoreScroll,onScroll,sparse}:{sparse?:SparseGallerySource;intro?:ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll?:number;onScroll?(top:number):void})=><div aria-label="자산 목록" data-restore-scroll={restoreScroll} data-toc-total={sparse?.toc.totalCount} onScroll={()=>{onNearEnd();onScroll?.(420);}}>{intro}{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}{sparse&&<button onClick={()=>void sparse.load(2,2,new AbortController().signal)}>seek bucket</button>}</div>}));
+vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,restoreScroll,onScroll,sparse,onSelectAsset}:{onSelectAsset?(id:string):void;sparse?:SparseGallerySource;intro?:ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll?:number;onScroll?(top:number):void})=><div aria-label="자산 목록" data-restore-scroll={restoreScroll} data-toc-total={sparse?.toc.totalCount} onScroll={()=>{onNearEnd();onScroll?.(420);}}>{intro}{items.map((a,i)=><button key={a.id} onContextMenu={event=>{event.preventDefault();onSelectAsset?.(a.id);}} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}{sparse&&<button onClick={()=>void sparse.load(2,2,new AbortController().signal)}>seek bucket</button>}</div>}));
 vi.mock('./Viewer',()=>({Viewer:({items,index,onIndex,onClose}:{items:Asset[];index:number;onIndex(i:number):void;onClose():void})=><div><span>{`viewer-${items[index].id}`}</span><button onClick={()=>onIndex(1)}>viewer next</button><button onClick={onClose}>viewer close</button></div>}));
 import {App} from './App';
 import {ApiError} from './transport';
@@ -848,4 +848,21 @@ describe('combined asset search chips',()=>{
   expect(fades).toHaveLength(fadeCount);
   fireEvent.click(screen.getByRole('button',{name:'모두 지우기'}));await waitFor(()=>expect(screen.queryByRole('button',{name:'긴 머리 범위 제거'})).toBeNull());expect(fades).toHaveLength(fadeCount);
  });
+});
+
+
+it('opens the shared info from a single list selection and consumes Back before clearing selection',async()=>{
+ render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
+ fireEvent.contextMenu(await screen.findByText('tile-a1'));
+ fireEvent.click(screen.getByRole('button',{name:'정보',exact:true}));
+ const sheet=await screen.findByRole('dialog',{name:'미디어 정보'});
+ expect(within(sheet).getByLabelText('미디어 정보',{selector:'section'})).toBeTruthy();
+ expect(screen.queryByText('viewer-a1')).toBeNull();
+ act(()=>window.dispatchEvent(new Event('lakomics-back')));
+ expect(screen.queryByRole('dialog',{name:'미디어 정보'})).toBeNull();
+ expect(screen.getByText('1개 선택')).toBeTruthy();
+ fireEvent.contextMenu(screen.getByText('tile-a2'));
+ expect(screen.queryByRole('button',{name:'정보',exact:true})).toBeNull();
+ act(()=>window.dispatchEvent(new Event('lakomics-back')));
+ expect(screen.queryByText('2개 선택')).toBeNull();
 });

@@ -320,15 +320,18 @@ describe("PageViewer", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it("masks overview imagery in privacy mode", async () => {
-    const user = userEvent.setup();
-    render(<PrivacyProvider privacyMode setPrivacyMode={vi.fn()}>
-      <PageViewer {...viewerProps()} />
+  it("closes an open reader and removes all image sources when privacy turns on", () => {
+    const close = vi.fn();
+    const { container, rerender } = render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}>
+      <PageViewer {...viewerProps({onClose: close})} />
     </PrivacyProvider>);
-
-    await user.click(screen.getByRole("button", { name: "페이지 목록" }));
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "3페이지로 이동" })).toBeVisible();
+    expect(container.querySelector("img") || screen.queryAllByRole("img").length).toBeTruthy();
+    rerender(<PrivacyProvider privacyMode setPrivacyMode={vi.fn()}>
+      <PageViewer {...viewerProps({onClose: close})} />
+    </PrivacyProvider>);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.querySelector("img[src]")).toBeNull();
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("restores persisted reader preferences on open", async () => {

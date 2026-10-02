@@ -23,7 +23,7 @@ import {buildJustifiedGalleryRows, GALLERY_DATE_HEADING_HEIGHT, type GalleryRowA
  */
 export type GalleryVaultSource = {label(asset: Asset): string};
 
-function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, vault, selectionMode, selected, favoritesView, onSelect, onToggle, onPressStart, onPressEnd, liked, likePending, onLike}: {liked:boolean;likePending:boolean;onLike?:()=>void;asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
+function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, vault, selectionMode, selected, onSelect, onToggle, onPressStart, onPressEnd, liked, likePending, onLike}: {liked:boolean;likePending:boolean;onLike?:()=>void;asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
   selectionMode:boolean; selected:boolean; favoritesView:boolean; onSelect?: (id:string)=>void; onToggle?: (id:string)=>void; onPressStart?: (cancel:()=>void)=>void; onPressEnd?: (cancel:()=>void)=>void}) {
   const timer=useRef<number|null>(null), pressStart=useRef<{x:number;y:number}|null>(null), suppressClick=useRef(false), pressCancel=useRef<()=>void>(()=>{});
   const host=useRef<HTMLButtonElement>(null), image=useRef<HTMLImageElement>(null);
@@ -86,8 +86,8 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, va
         if (vault && !asset.ratio && !(asset.width && asset.height) && element.naturalWidth > 0 && element.naturalHeight > 0) onReady({...asset, ratio: element.naturalWidth / element.naturalHeight});
         void (typeof element.decode === 'function' ? element.decode() : Promise.resolve()).catch(() => {}).then(settle);
       }}/> : <PhotoIcon className="missing-media" aria-hidden="true"/>}
-      {asset.kind === 'video' && width > 100 && <span className="video-mark" aria-label="영상">▶ {formatDuration(asset.duration_ms)}</span>}
-      {(selectionMode || favoritesView) && onSelect && <span className="tile-select" data-selected={selected} aria-hidden="true">{selected && <span className="ui-selection-check"/>}</span>}
+      {asset.kind === 'video' && width > 100 && <span className="video-mark video-duration-pill" aria-label="영상">▶ {formatDuration(asset.duration_ms)}</span>}
+      {selected && onSelect && <span className="tile-select" data-selected={selected} aria-hidden="true">{selected && <span className="ui-selection-check"/>}</span>}
     </span>
   </button>{onLike&&<button type="button" className="tile-favorite" aria-label="좋아요" aria-pressed={liked} disabled={likePending} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();onLike();}}><HeartIcon fill={liked?'currentColor':'none'}/></button>}</div>;
 }

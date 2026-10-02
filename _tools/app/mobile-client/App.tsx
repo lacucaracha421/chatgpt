@@ -1,3 +1,4 @@
+import {AssetInfoSheet} from './AssetInfoSheet';
 import {FindContext,FindButton} from './FindContext';
 import {FindSheet} from './FindSheet';
 import {tabletFindEntries,useFindWorks,useFindNoteTitles,type FindDestination} from './findData';
@@ -175,6 +176,7 @@ export function App() {
   const homeRestore=useRef<number|null>(null);
   const [secondaryError, setSecondaryError] = useState('');
   const [viewer, setViewer] = useState<{items: Asset[]; index: number; pending?: boolean; source?:'library'; character?:ViewerCharacterContext|null} | null>(null);
+  const [assetInfo,setAssetInfo]=useState<Asset|null>(null);
   const [selectedIds,setSelectedIds]=useState<Set<string>>(new Set());
   const [albumBatchOpen,setAlbumBatchOpen]=useState(false);
   const [albumBatchAssetIds,setAlbumBatchAssetIds]=useState<string[]>([]);
@@ -194,8 +196,8 @@ export function App() {
   const scroll = useRef(0), gate = useRef(new RequestGate()), secondaryGate = useRef(new RequestGate());
   const secondaryAt = useRef(0), secondaryPending = useRef(false), capturesRef = useRef<Asset[] | null>(captures);
   capturesRef.current = captures;
-  const latest = useRef({findOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, calendarOpen, selectionSize:selectedIds.size, albumBatchOpen}); latest.current = {findOpen, calendarOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, selectionSize:selectedIds.size, albumBatchOpen};
-  const clearSelection=useCallback(()=>setSelectedIds(new Set()),[]);
+  const latest = useRef({findOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, calendarOpen, selectionSize:selectedIds.size, albumBatchOpen, assetInfo}); latest.current = {findOpen, calendarOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, selectionSize:selectedIds.size, albumBatchOpen, assetInfo};
+  const clearSelection=useCallback(()=>{setAssetInfo(null);setSelectedIds(new Set());},[]);
   const selectAsset=useCallback((id:string)=>setSelectedIds(current=>current.has(id)?current:new Set(current).add(id)),[]);
   const toggleSelectedAsset=useCallback((id:string)=>setSelectedIds(current=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next;}),[]);
   const openAlbumBatch=useCallback(()=>{if(!selectedIds.size)return;setAlbumBatchAssetIds([...selectedIds]);setAlbumBatchOpen(true);},[selectedIds]);
@@ -589,6 +591,7 @@ export function App() {
       else if (state.sortOpen) setSortOpen(false);
       else if (state.viewSettings) setViewSettings(false);
       else if (state.settings) setSettings(false);
+      else if (state.assetInfo) setAssetInfo(null);
       else if (state.albumBatchOpen) setAlbumBatchOpen(false);
       else if (state.selectionSize > 0) clearSelection();
       else if (state.viewer && viewerBack.current?.()) { /* Viewer overlay consumed back. */ }
@@ -750,6 +753,9 @@ export function App() {
   // 종류 (전체 · 이미지 · 영상) is the gallery's first row; scrolled away, the top bar pulls it down.
   const kindShade = useSectionShade<AssetFiltersValue['media']>({label:'종류',options:MEDIA_SECTIONS,value:filters.media,onChange:applyMedia},{active:filterable&&!settings&&!viewer});
   const selectionGallery = filterable;
+  const selectedAsset = selectedIds.size === 1
+    ? visibleItems.find(asset => selectedIds.has(asset.id)) ?? sparse?.ranges.flatMap(range => range.items).find(asset => selectedIds.has(asset.id))
+    : undefined;
   const currentEntry=entries.find(item=>item.id===page.view.classification);
   const childEntries=entries.filter(item=>item.parent_id===currentEntry?.id);
   const currentAlbum=albumTree?.albums.find(album=>album.id===page.view.album?.id);
@@ -863,7 +869,7 @@ export function App() {
           onDuplicates={() => {setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
           onReleases={() => openCalendar()} onWork={id => {setHomeOrigin({area:'collections'});openCollections({kind:'work',id});}}/> : <>
         <Gallery stale={busy} sparse={sparse} privacy={privacyMode} items={visibleItems} intro={<>{scopeChips}{filterable?<>{kindShade.inline}{intro}</>:intro}</>} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings || !!filtersOpen} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onClearSelection={clearSelection}/>
-        {selectionGallery&&<SelectionBar selectedCount={selectedIds.size} batchPending={albumBatchOpen} onAddToAlbum={openAlbumBatch} onClearSelection={clearSelection}/>}
+        {selectionGallery&&<SelectionBar selectedCount={selectedIds.size} batchPending={albumBatchOpen} onAddToAlbum={openAlbumBatch} extraActions={selectedAsset?<Button variant="ghost" onClick={()=>setAssetInfo(selectedAsset)}>정보</Button>:undefined} onClearSelection={clearSelection}/>}
         <LoadingLine label={loadingMore&&'다음 자산을 불러오는 중'} className="is-bottom"/>
         </>}
         {charactersVisited && <CharacterBrowser search={page.view.search} onSearch={openAssetSearch} onInvalidSearch={(invalid)=>{const view=removeViewSearch(page.view,invalid);setSearchChips(previous=>previous.filter(chip=>!invalid.some(item=>assetSearchKey(item)===assetSearchKey(chipName(chip)))));setSearchNotice('사용할 수 없는 검색 조건을 지웠습니다.');void load(view,null,[],0,true,page.filters);}} scopeChips={scopeChips} hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>setViewer({items,index,character})} backRef={characterBack} onExit={exitCharacters}/>}
@@ -892,6 +898,7 @@ export function App() {
     {settings && <div className="settings-layer"><Settings onOpenVault={vaultSelected?undefined:()=>{setSettings(false);setVaultOpen(true);}} onCacheCleared={() => {clearMediaCache(); resetWarmProgress(); viewCache.current.clear(); setPage(current => ({...current,items:current.items.map(({preview,...asset}) => asset)}));}} status={status} onStatus={updateStatus} onClose={() => setSettings(false)}/></div>}
     {fault && <FaultGame items={fault} onClose={() => setFault(null)}/>}
     {similarity && <SimilarityReview backRef={similarityBack} onClose={()=>{setSimilarity(false);setSimilarityClosed(n=>n+1);}}/>}
+    {assetInfo && <AssetInfoSheet asset={assetInfo} onClose={()=>setAssetInfo(null)}/>}
     {viewer && <Viewer onNearEnd={viewer.source==='library'?nearEnd:undefined} backRef={viewerBack} endpoint={status.endpoint} character={viewer.character} onCharacterExcluded={characterExcluded} items={viewer.items} index={viewer.index} onIndex={index => {setViewer({...viewer,index});}} onClose={() => setViewer(null)} onTrash={trash.available&&!viewer.pending?asset=>{void trash.trash(asset,viewer.index);}:undefined} trashNotice={trash.snackbar}/>}
     {trash.open && <LibraryTrash key={status.endpoint} backRef={trash.backRef} known={trash.known} onRestored={trash.restored} onClose={() => trash.setOpen(false)}/>}
     {!viewer && trash.snackbar}

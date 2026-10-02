@@ -1,0 +1,18 @@
+.ui-dialog:has(> .asset-info-sheet) {
+  inset:auto 0 0;
+  transform:none;
+  width:100%;
+  max-height:calc(100dvh - var(--space-8));
+  padding:var(--space-4) var(--mobile-gutter);
+  padding-bottom:calc(var(--space-4) + env(safe-area-inset-bottom));
+  border-radius:var(--space-2) var(--space-2) 0 0;
+}
+.ui-dialog:has(> .asset-info-sheet) > .ui-dialog__title { display:none; }
+.asset-info-sheet { display:flex; flex-direction:column; min-height:0; }
+.asset-info-sheet__header { display:flex; align-items:center; justify-content:space-between; touch-action:none; margin-bottom:var(--space-4); }
+.asset-info-sheet__header strong { font-size:var(--type-title); }
+.asset-info-sheet .viewer-info { min-height:0; }
+@media (orientation:landscape) {
+  .ui-dialog:has(> .asset-info-sheet) { inset:0 0 0 auto; width:min(440px,50vw); height:100dvh; max-height:100dvh; border-radius:0; }
+  .asset-info-sheet { height:100%; }
+}

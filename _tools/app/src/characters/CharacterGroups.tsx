@@ -141,7 +141,7 @@ function CharacterGroupCard({ group, members, memberCounts, privacyMode, onOpen,
       <span className="character-group-card__mosaic" data-count={Math.max(1, previews.length)}>
         {previews.length ? previews.map(target => {
           const assetId = target.thumbnailAssetId ?? target.references.find(reference => reference.status === "ready")?.assetId;
-          return assetId ? <img key={target.id} draggable={false} loading="lazy" className={privacyMode ? "character-private" : undefined} src={thumbnailUrl(assetId)} alt="" /> : <span key={target.id} className="character-group-card__slot"><PhotoIcon aria-hidden="true" /></span>;
+          return privacyMode ? <span key={target.id} className="character-group-card__slot privacy-mask" aria-label="비공개 모드"/> : assetId ? <img key={target.id} draggable={false} loading="lazy" src={thumbnailUrl(assetId)} alt="" /> : <span key={target.id} className="character-group-card__slot"><PhotoIcon aria-hidden="true" /></span>;
         }) : <span className="character-group-card__slot"><PeopleIcon aria-hidden="true" /></span>}
       </span>
       <strong><PeopleIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{group.name}</span></strong>

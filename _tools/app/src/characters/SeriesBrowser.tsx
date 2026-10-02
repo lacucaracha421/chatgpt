@@ -461,7 +461,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       }} actions={automationRecovery} />
     {picking && <div className="series-picking" role="region" aria-label="갤러리 이미지 선택">
       <div className="series-picking__title"><strong>{picking.kind === "references" ? `레퍼런스 선택 · ${picking.ids.length}/${MAX_CHARACTER_REFERENCES}` : picking.kind === "hero" ? "히어로 이미지 선택" : "대표 이미지 선택"}</strong><small>{picking.kind === "hero" ? name : editor?.target ? `${editor.target.displayName} 캐릭터 폴더 · 다른 캐릭터와 공유된 이미지는 제외됩니다` : "다른 캐릭터의 이미지는 제외됩니다"}</small></div>
-      <div className="series-picking__chosen">{picking.ids.map((id,i) => <button key={id} aria-label={`선택 이미지 ${i + 1} 해제`} onClick={() => setPicking({ ...picking, ids: picking.ids.filter(v => v !== id) })}><img src={thumbnailUrl(id)} className={privacyMode ? "character-private" : ""} alt="" /><span>×</span></button>)}</div>
+      <div className="series-picking__chosen">{picking.ids.map((id,i) => <button key={id} aria-label={`선택 이미지 ${i + 1} 해제`} onClick={() => setPicking({ ...picking, ids: picking.ids.filter(v => v !== id) })}>{privacyMode ? <span className="privacy-mask" aria-label="비공개 모드"/> : <img src={thumbnailUrl(id)} alt="" />}<span>×</span></button>)}</div>
       <Button size="sm" disabled={busy || !picking.ids.length} onClick={() => finishPick(true)}>완료</Button><Button size="sm" variant="ghost" onClick={() => finishPick(false)}>취소</Button>
     </div>}
     <ContextMenu items={contextItems}><div className="series-gallery" aria-busy={loading} inert={pageScope !== scope && page.items.length > 0 ? true : undefined} onContextMenu={event => {
@@ -492,7 +492,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               const excluded = folderExclusions.includes(folder.id) || exclusion.disabled;
               return <article className={`series-character folder-shelf__card${excluded ? " series-character--excluded" : ""}`} key={folder.id}>
                 <button className="series-character__open" aria-label={`${folder.name} 폴더 열기`} aria-description={excluded ? "캐릭터 분류 제외" : "일반 폴더"} onClick={() => onNavigate({ kind: "classification", classificationId: folder.id })}>
-                  {item.thumbnailAssetId ? <img draggable={false} loading="lazy" className={privacyMode ? "character-private" : undefined} src={thumbnailUrl(item.thumbnailAssetId)} alt="" /> : <span className="series-character__placeholder"><FolderIcon aria-hidden="true" />일반 폴더</span>}
+                  {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : item.thumbnailAssetId ? <img draggable={false} loading="lazy" src={thumbnailUrl(item.thumbnailAssetId)} alt="" /> : <span className="series-character__placeholder"><FolderIcon aria-hidden="true" />일반 폴더</span>}
                   {excluded && <span className="series-character__tag" aria-hidden="true">제외</span>}
                   <strong><FolderIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{folder.name}</span></strong>
                   {(folder.totalAssetCount ?? folder.assetCount) !== undefined && <small className="folder-shelf__meta">{(folder.totalAssetCount ?? folder.assetCount)!.toLocaleString("ko-KR")}장</small>}
@@ -511,7 +511,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
                 { id: "move-down", label: "아래로 이동", disabled: busy || index === orderedMembers.length - 1, onSelect: () => move(1) },
               ]}><article className="series-character folder-shelf__card">
               <button className="series-character__open" aria-label={`${target.displayName} 열기`} aria-description={description || undefined} onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id })}>
-                {(target.thumbnailAssetId ?? activeCharacterReferences(target)[0]?.assetId) ? <img draggable={false} loading="lazy" className={privacyMode ? "character-private" : ""} src={thumbnailUrl((target.thumbnailAssetId ?? activeCharacterReferences(target)[0]!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><UserIcon aria-hidden="true" />대표 이미지</span>}
+                {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : (target.thumbnailAssetId ?? activeCharacterReferences(target)[0]?.assetId) ? <img draggable={false} loading="lazy" src={thumbnailUrl((target.thumbnailAssetId ?? activeCharacterReferences(target)[0]!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><UserIcon aria-hidden="true" />대표 이미지</span>}
                 <strong><UserIcon className="folder-shelf__icon" aria-hidden="true" />{status.warning && <span className="series-character__warning" aria-hidden="true">!</span>}<span className="series-character__name">{target.displayName}</span></strong>
                 {memberCounts[target.id] !== undefined && <small className="folder-shelf__meta">{memberCounts[target.id]!.toLocaleString("ko-KR")}장</small>}
               </button>

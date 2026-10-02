@@ -12,6 +12,7 @@ import {AlbumMembershipEditor} from './AlbumMembershipEditor';
 import {ClassificationAssignmentEditor} from './ClassificationAssignmentEditor';
 import {CharacterExclusionEditor, type ExclusionRequest, type ExclusionKey, type ExclusionReceipt} from './CharacterExclusion';
 import {ViewerInfo} from './ViewerInfo';
+import {usePrivacyMode} from './privacyMode';
 import {ViewerFilmstrip} from './ViewerFilmstrip';
 import {VideoPlayerSurface} from '../src/video/VideoPlayer';
 
@@ -57,7 +58,14 @@ function viewerDateLabel(value?: string): string {
 function ViewerAction({label, name, icon: Icon, active, danger, onClick}: {label: string; name?: string; icon: ComponentType<SVGProps<SVGSVGElement>>; active?: boolean; danger?: boolean; onClick(): void}) {
   return <Button type="button" size="icon" variant={danger ? 'danger' : 'ghost'} className={`viewer-action${danger ? ' is-danger' : ''}`} aria-label={name ?? label} aria-pressed={active} onClick={onClick}><Icon aria-hidden="true"/></Button>;
 }
-export function Viewer({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,onTrash,trashNotice,totalCount,folderLabel,privacy,vault}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
+export function Viewer(props: Parameters<typeof ViewerContent>[0]) {
+  const [privacy] = usePrivacyMode();
+  const hidden = !props.vault && (privacy || !!props.privacy);
+  useEffect(() => { if (hidden) props.onClose(); }, [hidden, props.onClose]);
+  return hidden ? <span className="privacy-mask" aria-label="비공개 모드"/> : <ViewerContent {...props}/>;
+}
+
+function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,onTrash,trashNotice,totalCount,folderLabel,privacy,vault}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
   /** Move the Asset on screen to the Library Trash (no confirmation: it is reversible). */
   onTrash?(asset:Asset):void;
   /** The host's "휴지통으로 이동함 · 실행 취소" snackbar, rendered inside the modal viewer. */
