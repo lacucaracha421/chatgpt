@@ -38,7 +38,6 @@ class ReplicationStartupTests(unittest.TestCase):
             "app.startup_classifications",
             "app.startup_saved_x_media",
             "app.startup_extension_profile",
-            "app.startup_extension_backup",
             "app.startup_album_replica",
             "notes.register_notes.<locals>.startup_notes",
             "av_lookup_requests.register.<locals>.setup",
