@@ -504,11 +504,17 @@ impl Library {
     }
 
     pub(crate) fn connection(&self) -> Result<LockedConnection<'_>, LibraryError> {
+        let wait =
+            crate::media_protocol_timing::stage(crate::media_protocol_timing::Stage::DatabaseWait);
         let guard = self
             .database_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        drop(wait);
+        let open =
+            crate::media_protocol_timing::stage(crate::media_protocol_timing::Stage::DatabaseOpen);
         let connection = self.unlocked_connection()?;
+        drop(open);
         #[cfg(test)]
         self.character_wake.connection_opened();
         // Every writer of the character queue goes through here, so the idle native owner
@@ -760,8 +766,11 @@ impl Library {
                 .optional()?
                 .flatten(),
             MediaVariant::Thumbnail => {
-                thumbnail_path = self
-                    .connection()?
+                let connection = self.connection()?;
+                let _query = crate::media_protocol_timing::stage(
+                    crate::media_protocol_timing::Stage::ThumbnailQuery,
+                );
+                thumbnail_path = connection
                     .query_row(
                         "SELECT thumbnail_relative_path FROM assets
                          WHERE id = ?1 AND status IN ('normal', 'review')",
@@ -843,6 +852,7 @@ impl Library {
         &self,
         relative_path: &str,
     ) -> Result<MediaResponse, LibraryError> {
+        let _open = crate::media_protocol_timing::stage(crate::media_protocol_timing::Stage::FileOpen);
         let requested_path = self.canonical_root.join(relative_path);
         let canonical_path = fs::canonicalize(&requested_path).map_err(|source| {
             if source.kind() == std::io::ErrorKind::NotFound {

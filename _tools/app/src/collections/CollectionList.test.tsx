@@ -105,7 +105,7 @@ function windowedShelf(perRow = 8, options: { pickedId?: string; restoredFocusId
     pickedId={options.pickedId} restoredFocusId={options.restoredFocusId} view={{ layout: "shelf", perRow, grouping: options.grouping ?? "sort" }}
     label="작품" onPick={options.onPick ?? (() => undefined)} render={drawCase} /></div>;
 }
-it("mounts only near rows, including a viewport ahead, while retaining all shelf tracks", () => {
+it("mounts only near rows, including half a viewport ahead, while retaining all shelf tracks", () => {
   shelfGeometry();
   const { container } = render(windowedShelf());
   const mounted = () => [...container.querySelectorAll<HTMLElement>("[data-collection-id]")].map(card => card.dataset.collectionId);
@@ -160,12 +160,12 @@ it("recomputes row geometry and window membership when columns or grouping chang
   rerender(windowedShelf(5));
   expect(list.style.getPropertyValue("--case-height")).not.toBe(oldHeight);
   expect(container.querySelectorAll(".collection-list__plank")).toHaveLength(37);
-  expect(container.querySelectorAll("[data-collection-id]")).toHaveLength(15);
+  expect(container.querySelectorAll("[data-collection-id]")).toHaveLength(10);
   expect(container.querySelector('[data-collection-id="work-0"]')).toBe(first);
   rerender(windowedShelf(5, { grouping: "year" }));
   expect(container.querySelectorAll(".collection-list__group")).toHaveLength(3);
   expect(container.querySelector('[data-collection-id="work-0"]')).toBe(first);
-  expect(container.querySelectorAll("[data-collection-id]").length).toBeLessThanOrEqual(15);
+  expect(container.querySelectorAll("[data-collection-id]").length).toBeLessThanOrEqual(10);
 });
 it("keeps the tablet's default opt-out fully mounted", () => {
   shelfGeometry();
@@ -260,4 +260,22 @@ it("skips row rectangle reads on unrelated parent updates but remeasures after s
   fireEvent.scroll(root);
   expect(rowReads()).toBeGreaterThan(0);
   expect(container.querySelector('[data-collection-id="work-48"]')).not.toBeNull();
+});
+
+
+it("does not assign image sources outside the near window and retains visible images on refresh", () => {
+  shelfGeometry();
+  const draw = (items: CollectionSummary[]) => <div className="collection-browser__list-scroll"><CollectionList items={items} windowRows
+    view={{ layout: "shelf", perRow: 5, grouping: "sort" }} label="Works" onPick={() => undefined}
+    render={work => <button data-collection-id={work.id}><img src={`/covers/${work.id}`} alt={work.name} /></button>} /></div>;
+  const { container, rerender } = render(draw(largeShelf));
+  expect(container.querySelectorAll("img")).toHaveLength(10);
+  expect(container.querySelector('img[src="/covers/work-10"]')).toBeNull();
+  const first = container.querySelector('img[src="/covers/work-0"]');
+  rerender(draw(largeShelf.map(work => ({ ...work }))));
+  expect(container.querySelector('img[src="/covers/work-0"]')).toBe(first);
+  const root = container.firstElementChild as HTMLElement;
+  root.scrollTop = 2000; fireEvent.scroll(root);
+  expect(container.querySelector('img[src="/covers/work-25"]')).not.toBeNull();
+  expect(container.querySelector('img[src="/covers/work-0"]')).toBeNull();
 });

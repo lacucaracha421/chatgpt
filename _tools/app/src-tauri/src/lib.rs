@@ -16,6 +16,8 @@ pub use cloud::thumbnail_refresh::{
 #[cfg(test)]
 mod catalog_source_tests;
 mod media_protocol;
+mod media_protocol_queue;
+mod media_protocol_timing;
 
 #[cfg(not(any(windows, target_os = "linux")))]
 compile_error!("Lakomics desktop supports Windows and Linux only");
@@ -173,15 +175,40 @@ pub fn run() {
                 .map(str::to_owned);
             let method = request.method().clone();
             let path = request.uri().path().to_string();
-            tauri::async_runtime::spawn_blocking(move || {
-                let mut response = media_protocol::media_response_gated(
-                    library.as_ref(),
-                    &method,
-                    &path,
-                    range.as_deref(),
-                );
-                collectible_cors::allow_cover_canvas(&mut response, origin.as_deref(), &path);
-                responder.respond(response);
+            let mut timing = media_protocol_timing::MediaTiming::start(&path);
+            tauri::async_runtime::spawn(async move {
+                if let Some(timing) = timing.as_mut() {
+                    timing.wait_started();
+                }
+                // Wait without occupying a blocking worker. Keep the permit inside the
+                // blocking closure: dropping its JoinHandle cannot cancel a running read.
+                let permit = media_protocol_queue::acquire(&path).await;
+                if let Some(timing) = timing.as_mut() {
+                    timing.permit_acquired();
+                }
+                tauri::async_runtime::spawn_blocking(move || {
+                    let _permit = permit;
+                    if let Some(timing) = timing.as_mut() {
+                        timing.worker_started();
+                    }
+                    let serve = || {
+                        media_protocol::media_response_with_range(
+                            library.as_ref(),
+                            &method,
+                            &path,
+                            range.as_deref(),
+                        )
+                    };
+                    let mut response = match timing.as_mut() {
+                        Some(timing) => timing.trace_serving(serve),
+                        None => serve(),
+                    };
+                    collectible_cors::allow_cover_canvas(&mut response, origin.as_deref(), &path);
+                    if let Some(timing) = timing {
+                        timing.finish(response.status().as_u16(), response.body().len());
+                    }
+                    responder.respond(response);
+                });
             });
         })
         .invoke_handler(tauri::generate_handler![

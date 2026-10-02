@@ -37,8 +37,8 @@ export function shelfGroups<T extends ShelfItem>(items: T[], grouping: Collectio
   }
   return [...groups].map(([label, works]) => ({ label, items: works }));
 }
-// Mount one viewport ahead of either edge; keep this single knob for native measurements.
-const SHELF_OVERSCAN_VIEWPORTS = 1;
+// Half a viewport keeps scrolling prepared without decoding a second screen on entry.
+const SHELF_OVERSCAN_VIEWPORTS = .5;
 
 /** Flat, keyed cells retain shelf geometry even while their cases are outside the window. */
 export function CollectionList<T extends ShelfItem>({ items, view, render, label, onPick, showcase = false, windowRows = false, pickedId, restoredFocusId }: {

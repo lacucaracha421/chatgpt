@@ -115,7 +115,7 @@ export function CaseSpine({ data, decorative = false, onSettled }: { data: CaseD
   const template = ["sw2", "sw", "ps5"].includes(data.platform);
   const title = <span className="spine-title" data-title={decorative ? data.title : undefined}>{decorative ? null : data.title}</span>;
   return <span className="case-spine-art">{data.privacy ? <span className="case-mask" /> : <>
-    {slots.map((url, index) => url && <img key={index} className="cv" src={url} alt={decorative ? "" : `${data.title} 책등`} draggable={false}
+    {slots.map((url, index) => url && <img key={index} className="cv" src={url} decoding="async" loading={decorative ? "lazy" : undefined} alt={decorative ? "" : `${data.title} 책등`} draggable={false}
       style={hasPaintedSpine && painted === index ? undefined : { position: "absolute", visibility: "hidden", pointerEvents: "none" }}
       aria-hidden={painted !== index || undefined}
       onLoad={async event => {

@@ -7,6 +7,7 @@ import type { CollectionSummary } from "../library/types";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import type { ReleaseCaption } from "./releaseCaption";
 import { collectionCardDate, collectionCredit } from "./collectionFormat";
+import { collectionCoverSourceRef } from "./collectionPerf";
 
 export { collectionCardDate, collectionCredit } from "./collectionFormat";
 
@@ -42,6 +43,9 @@ export function CollectionCard({
   const flat = !(lightCase && shelf);
   const [flatMounted, setFlatMounted] = useState(flat);
   if (flat && !flatMounted) setFlatMounted(true);
+  // Likewise, grid entry must not request the hidden shelf's front and spine.
+  const [shelfMounted, setShelfMounted] = useState(lightCase && shelf);
+  if (lightCase && shelf && !shelfMounted) setShelfMounted(true);
   const { privacyMode } = usePrivacy();
   const visibleCoverUrl = coverUrl && coverUrl !== failedCoverUrl ? coverUrl : null;
   const date = meta ? collectionCardDate(collection) : "";
@@ -61,13 +65,14 @@ export function CollectionCard({
       aria-description={captionText}
       onClick={onClick}
     >
-      {lightCase && <span className="collection-card__light" aria-hidden={!shelf}><CollectionShelfCase collection={collection} front={coverUrl} privacy={privacyMode} active={shelf} selected={selected} /></span>}
+      {lightCase && shelfMounted && <span className="collection-card__light" aria-hidden={!shelf}><CollectionShelfCase collection={collection} front={coverUrl} privacy={privacyMode} active={shelf} selected={selected} /></span>}
       {flatMounted && <span aria-hidden={!flat} className={`collection-card__object collection-card__object--${collection.type}`}>
         <span className="collection-card__cover">
           {visibleCoverUrl && !privacyMode && (collection.type === "game" || collection.type === "av") ? <GameCase src={visibleCoverUrl} alt={collection.name} scope={scope} revision={collection.updatedAt} large={exhibition} onError={() => setFailedCoverUrl(visibleCoverUrl)} /> : visibleCoverUrl && !privacyMode && collection.type === "manga" ? (
             <PhysicalCover kind="book" src={visibleCoverUrl} alt={collection.name} scope={scope} revision={collection.updatedAt} large={exhibition} onError={() => setFailedCoverUrl(visibleCoverUrl)} />
           ) : visibleCoverUrl && !privacyMode ? (
             <img
+              ref={collectionCoverSourceRef}
               className="collection-cover-image"
               src={visibleCoverUrl}
               alt={collection.name}

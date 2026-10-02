@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { CollectionSummary } from "../../library/types";
 import { useLibrary } from "../../library/LibraryContext";
 import { workArtworkThumbnailUrl } from "../../assets/mediaUrl";
@@ -9,6 +9,8 @@ import { useSpineArtworkRevision } from "../launchBoxSpines";
 import { avGateway } from "../avClient";
 import { CASE_PLASTIC, CaseSpine, spineInsertClass, workCasePlatform, type CaseData } from "./CollectionCase";
 import { readShelfInfo, rememberedShelfInfo, sameShelfInfo, shelfInfoKey, type ShelfInfo } from "./shelfCaseInfo";
+import { beginNativePhase } from "../../shared/nativePerf";
+import { collectionCoverSourceRef } from "../collectionPerf";
 import "./LightCase.css";
 
 // The browser remounts after a work closes. Retain measured cover shapes so the same
@@ -18,6 +20,29 @@ function rememberCoverRatio(src: string, ratio: number) {
   coverRatios.delete(src);
   coverRatios.set(src, ratio);
   if (coverRatios.size > 2048) coverRatios.delete(coverRatios.keys().next().value!);
+}
+
+/** Let the first front have a paint opportunity before mounting secondary artwork.
+ * Once admitted, keep it mounted through refreshes and layout changes. */
+function useShelfArtAfterFront(front: string | null, privacy: boolean, needed: boolean) {
+  const [ready, setReady] = useState(false);
+  const frame = useRef<number | null>(null);
+  const frontSettled = useRef(false);
+  const settled = useCallback(() => {
+    frontSettled.current = true;
+    if (!needed || frame.current !== null || ready) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = requestAnimationFrame(() => { setReady(true); });
+    });
+  }, [needed, ready]);
+  useEffect(() => {
+    if (!front || privacy || frontSettled.current) settled();
+  }, [front, privacy, settled]);
+  useEffect(() => () => {
+    if (frame.current !== null) cancelAnimationFrame(frame.current);
+    frame.current = null;
+  }, []);
+  return { ready, settled };
 }
 
 export function CollectionShelfCase({ collection, front, privacy, active, selected }: { collection: CollectionSummary; front: string | null; privacy: boolean; active: boolean; selected: boolean }) {
@@ -41,10 +66,12 @@ export function CollectionShelfCase({ collection, front, privacy, active, select
   useEffect(() => {
     if (collection.type !== "av" || !active || privacy) return;
     let current = true;
+    const phase = beginNativePhase("collections.ipc.get_av_cover_set");
     void avGateway.getCoverSet(collection.id).then(covers => {
+      phase?.mark("arrived");
       const url = (id: string | null) => id ? `${workArtworkThumbnailUrl(id)}?v=${encodeURIComponent(covers.revision)}` : null;
       if (current) setAvArt({ id: collection.id, front: url(covers.frontId), spine: url(covers.spineId) });
-    }, () => undefined /* Existing front artwork and the platform template remain available. */);
+    }, () => { phase?.mark("failed"); } /* Existing front artwork and the platform template remain available. */).finally(() => phase?.cancel());
     return () => { current = false; };
   }, [active, privacy, collection.id, collection.type, collection.updatedAt]);
   const av = avArt?.id === collection.id ? avArt : null;
@@ -67,9 +94,12 @@ function LightCaseFrame({ data, selected, ratio, children }: { data: CaseData; s
 
 function ShelfMaterialCase({ data, selected }: { data: CaseData; selected: boolean }) {
   const [ratio, setRatio] = useState(() => (data.front && coverRatios.get(data.front)) || .71);
+  const secondary = useShelfArtAfterFront(data.front, data.privacy, Boolean(data.spine) && !data.privacy);
+  const spineData = secondary.ready ? data : { ...data, spine: null };
   return <LightCaseFrame data={data} selected={selected} ratio={ratio}>
     <span className="cs-front"><span className="ins">
-      {!data.privacy && data.front ? <StableImage src={data.front} alt={data.title} draggable={false} onLoad={event => {
+      {!data.privacy && data.front ? <StableImage ref={collectionCoverSourceRef} src={data.front} alt={data.title} draggable={false} decoding="async" decodeFirst={false} onError={secondary.settled} onLoad={event => {
+        secondary.settled();
         const image = event.currentTarget;
         if (image.naturalWidth && image.naturalHeight) {
           const next = Math.max(.4, Math.min(1.4, image.naturalWidth / image.naturalHeight));
@@ -78,12 +108,13 @@ function ShelfMaterialCase({ data, selected }: { data: CaseData; selected: boole
         }
       }} /> : <span className="case-mask" />}
     </span></span>
-    <span className="cs-spine"><span className={spineInsertClass(data)}><CaseSpine decorative data={data} /></span></span>
+    <span className="cs-spine"><span className={spineInsertClass(spineData)}><CaseSpine decorative data={spineData} /></span></span>
   </LightCaseFrame>;
 }
 
-/** Keep both decoded elements until their replacements are ready; no per-book effects or measurement. */
+/** First fronts paint on load; a refresh still retains both faces until both replacements decode. */
 function ShelfBookCase({ data, selected }: { data: CaseData; selected: boolean }) {
+  const secondary = useShelfArtAfterFront(data.front, data.privacy, Boolean(data.front) && !data.privacy);
   const [slots, setSlots] = useState<[string | null, string | null]>([data.front, null]);
   const [painted, setPainted] = useState<0 | 1 | null>(null);
   const wanted = useRef(data.front); wanted.current = data.front;
@@ -100,21 +131,29 @@ function ShelfBookCase({ data, selected }: { data: CaseData; selected: boolean }
     }
   }
   function cover(face: "front" | "strip") {
-    return !data.front ? null : slots.map((src, index) => {
+    return !data.front || (face === "strip" && !secondary.ready) ? null : slots.map((src, index) => {
       const version = versions.current[index];
-      return src && <img key={index} src={src} alt={face === "front" ? data.title : ""} draggable={false}
-      aria-hidden={face === "strip" || painted !== index || undefined}
+      const visible = painted === index && loaded.current[index]?.faces.has(face);
+      return src && <img ref={face === "front" ? collectionCoverSourceRef : undefined} key={index} src={src} alt={face === "front" ? data.title : ""} draggable={false} decoding="async"
+      aria-hidden={face === "strip" || !visible || undefined}
       style={{ ...(face === "strip" ? { objectPosition: `${stripPosition(data.coverFocus ?? null, ratio, .08)}% 30%` } : {}),
-        ...(painted === index ? {} : { position: "absolute", visibility: "hidden", pointerEvents: "none" }) }}
+        ...(visible ? {} : { position: "absolute", visibility: "hidden", pointerEvents: "none" }) }}
+      onError={face === "front" ? secondary.settled : undefined}
       onLoad={async event => {
         const image = event.currentTarget;
-        try { await image.decode?.(); } catch { return; }
-        if (!image.isConnected || versions.current[index] !== version || wanted.current !== src || image.getAttribute("src") !== src) return;
+        // Nothing painted yet on this face: allow the browser's async first decode.
+        // Once there is content, decode in the spare DOM slot before the atomic swap.
+        if (painted !== null && painted !== index) {
+          try { await image.decode?.(); } catch { return; }
+        }
+        if (!image.isConnected || versions.current[index] !== version || (wanted.current !== src && painted !== index) || image.getAttribute("src") !== src) return;
         if (loaded.current[index]?.src !== src) loaded.current[index] = { src, faces: new Set(), ratio };
         const ready = loaded.current[index]!;
         ready.faces.add(face);
         if (face === "front" && image.naturalWidth && image.naturalHeight) ready.ratio = image.naturalWidth / image.naturalHeight;
-        if (ready.faces.size === 2) setPainted(index as 0 | 1);
+        if (face === "front") secondary.settled();
+        if (ready.faces.size === 2 || (face === "front" && painted === null)) setPainted(index as 0 | 1);
+        if (painted === index) setSlots(current => [...current]);
       }} />;
     });
   }

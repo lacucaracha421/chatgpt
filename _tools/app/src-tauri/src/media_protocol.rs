@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     io::{Read, Seek, SeekFrom},
-    sync::{Condvar, Mutex, MutexGuard, PoisonError, OnceLock},
+    sync::{Mutex, OnceLock},
     time::Duration,
 };
 
@@ -26,64 +26,6 @@ pub(crate) fn media_response(
     path: &str,
 ) -> Response<Vec<u8>> {
     media_response_with_range(library, method, path, None)
-}
-
-/// 미디어 응답의 동시 실행 수를 제한한다. 썸네일 생성처럼 원본 이미지를
-/// 디코딩하는 요청이 수백 개 동시에 들어와도 메모리와 CPU가 폭증하지 않게 한다.
-const MEDIA_MAX_CONCURRENT: usize = 6;
-static MEDIA_ACTIVE: Mutex<usize> = Mutex::new(0);
-static MEDIA_AVAILABLE: Condvar = Condvar::new();
-
-/// 로컬 파일을 읽지 않고 외부 네트워크만 오가는 라우트. 20~60초 걸릴 수
-/// 있어 로컬 미디어의 6슬롯 퍼밋을 점유하면 썸네일·재생 전반이 정체되므로
-/// 퍼밋 밖에서 실행한다.
-fn is_remote_media_path(path: &str) -> bool {
-    ["/igdb-image-preview/", "/tmdb-image-preview/", "/remote-manga-", "/remote-catalog-thumbnail/"]
-        .iter()
-        .any(|prefix| path.starts_with(prefix))
-        || path.starts_with("/mangadex-cover-preview/")
-}
-
-pub(crate) fn media_response_gated(
-    library: Option<&Library>,
-    method: &Method,
-    path: &str,
-    range_header: Option<&str>,
-) -> Response<Vec<u8>> {
-    // MangaDex 커버는 parse_path 통과 후에 식별되므로 접두어로 직접 판정한다.
-    with_media_permit(path, || media_response_with_range(library, method, path, range_header))
-}
-
-fn with_media_permit<T>(path: &str, work: impl FnOnce() -> T) -> T {
-    let _permit = (!is_remote_media_path(path)).then(MediaPermit::acquire);
-    work()
-}
-
-struct MediaPermit;
-
-impl MediaPermit {
-    fn acquire() -> MediaPermit {
-        let mut active = lock_media_active();
-        while *active >= MEDIA_MAX_CONCURRENT {
-            active = MEDIA_AVAILABLE
-                .wait(active)
-                .unwrap_or_else(PoisonError::into_inner);
-        }
-        *active += 1;
-        MediaPermit
-    }
-}
-
-impl Drop for MediaPermit {
-    fn drop(&mut self) {
-        let mut active = lock_media_active();
-        *active -= 1;
-        MEDIA_AVAILABLE.notify_one();
-    }
-}
-
-fn lock_media_active() -> MutexGuard<'static, usize> {
-    MEDIA_ACTIVE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 const PREVIEW_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
@@ -389,7 +331,11 @@ pub(crate) fn media_response_with_range(
         }
         Ok((mut media, current_revision)) => {
             let mut bytes = Vec::new();
-            if media.file.read_to_end(&mut bytes).is_err() {
+            let read =
+                crate::media_protocol_timing::stage(crate::media_protocol_timing::Stage::FileRead);
+            let result = media.file.read_to_end(&mut bytes);
+            drop(read);
+            if result.is_err() {
                 return empty_response(StatusCode::INTERNAL_SERVER_ERROR);
             }
             let mut response = Response::builder()
@@ -1214,13 +1160,34 @@ mod tests {
         assert_eq!(response.headers()[CONTENT_TYPE], "image/png");
         assert_eq!(response.body(), &artwork_bytes);
 
+        let cold_started = std::time::Instant::now();
         let thumbnail = media_response(
             Some(&library),
             &Method::GET,
             &format!("/work-artwork-thumbnail/{ARTWORK_ID}"),
         );
+        let cold_elapsed = cold_started.elapsed();
         assert_eq!(thumbnail.status(), StatusCode::OK);
         assert_eq!(thumbnail.headers()[CONTENT_TYPE], "image/webp");
+        let decoded = image::load_from_memory(thumbnail.body()).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (240, 360));
+        // A warm request must only read the small cached file, even if the original
+        // cannot be decoded. This also guards against moving resizing into the WebView.
+        std::fs::write(&absolute_path, b"not an image").unwrap();
+        let warm_started = std::time::Instant::now();
+        for _ in 0..20 {
+            let warm = media_response(
+                Some(&library),
+                &Method::GET,
+                &format!("/work-artwork-thumbnail/{ARTWORK_ID}"),
+            );
+            assert_eq!(warm.status(), StatusCode::OK);
+            assert_eq!(warm.body(), thumbnail.body());
+        }
+        eprintln!(
+            "w5 fixture: cold={cold_elapsed:?}, 20 warm requests={:?}",
+            warm_started.elapsed()
+        );
         assert!(library
             .root()
             .join(format!(
@@ -1866,34 +1833,6 @@ mod tests {
                 params![id, poster, scrub],
             )
             .unwrap();
-    }
-}
-
-#[cfg(test)]
-mod permit_tests {
-    #[test]
-    fn twelve_local_jobs_hold_six_slots_through_work_and_release_on_errors() {
-        use std::sync::{Arc, Mutex, Condvar, mpsc};
-        use std::time::Duration;
-        let release = Arc::new((Mutex::new(false),Condvar::new()));
-        let (entered, receive) = mpsc::channel();
-        let mut jobs = Vec::new();
-        for i in 0..12 {
-            let release = release.clone(); let entered = entered.clone();
-            jobs.push(std::thread::spawn(move || super::with_media_permit("/asset/local", || {
-                entered.send(i).unwrap();
-                let (lock, notify) = &*release;
-                let mut ready = lock.lock().unwrap();
-                while !*ready { ready = notify.wait(ready).unwrap(); }
-                if i % 2 == 0 { Ok(()) } else { Err(()) }
-            })));
-        }
-        for _ in 0..6 { receive.recv_timeout(Duration::from_secs(5)).unwrap(); }
-        assert!(receive.recv_timeout(Duration::from_millis(100)).is_err());
-        assert_eq!(super::with_media_permit("/remote-manga-page/x", || 7),7);
-        *release.0.lock().unwrap() = true; release.1.notify_all();
-        for job in jobs { let _ = job.join().unwrap(); }
-        assert_eq!(*super::lock_media_active(),0);
     }
 }
 

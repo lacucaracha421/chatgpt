@@ -76,7 +76,10 @@ it("marks the originating work beside its code, turns on click, opens on double-
   const open = vi.fn(), co = vi.fn(); render(page(gateway(), { onOpenCollection: open, onOpenPerformer: co }));
   const work = await screen.findByRole("button", { name: "작품 0 CODE-0" });
   expect(within(work).getByText("이 작품").parentElement).toContainElement(within(work).getByText("CODE-0"));
-  const realSpine = work.querySelector(".cs-spine img"); expect(realSpine?.getAttribute("src")).toContain("spine-0");
+  // The spine mounts after the front cover has had a paint opportunity.
+  for (const front of work.querySelectorAll<HTMLImageElement>(".cs-front img, .collection-light-case img")) fireEvent.load(front);
+  const realSpine = await waitFor(() => { const found = work.querySelector(".cs-spine img"); expect(found).not.toBeNull(); return found; });
+  expect(realSpine?.getAttribute("src")).toContain("spine-0");
   fireEvent.click(work); expect(open).not.toHaveBeenCalled(); expect(work).toHaveAttribute("aria-selected", "true"); expect(work.querySelector(".collection-light-case")).toHaveAttribute("data-front", "true");
   fireEvent.doubleClick(work); expect(open).toHaveBeenCalledWith("work-0");
   fireEvent.keyDown(work, { key: "Enter" }); expect(open).toHaveBeenCalledTimes(2);

@@ -86,7 +86,8 @@ it("refreshes the matched light case without changing the collection timestamp",
   vi.mocked(gateway.listCollectionShelfCases!).mockResolvedValue([{ collectionId: "a", ownedPlatform: null, spineArtworkId: "spine" }]);
   await act(async () => { await requestMissingGameSpine(gateway, "", game, []); });
   await waitFor(() => expect(gateway.listCollectionShelfCases).toHaveBeenCalledTimes(2));
-  const image = container.querySelector<HTMLImageElement>('img[src*="spine"]')!;
+  // Secondary shelf art mounts two frames after the front settles (no front here).
+  const image = await waitFor(() => { const found = container.querySelector<HTMLImageElement>('img[src*="spine"]'); expect(found).not.toBeNull(); return found!; });
   expect(container.querySelector("[data-spine-template]")).not.toBeNull();
   await act(async () => fireEvent.load(image));
   expect(image).toBeVisible(); expect(container.querySelector("[data-spine-template]")).toBeNull();

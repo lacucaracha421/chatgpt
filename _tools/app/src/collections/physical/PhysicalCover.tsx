@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { acquireCover, coverKey, coverSourceUrl, type CoverRequest } from "./collectibleRuntime";
 import type { Snapshot } from "./RenderCache";
 import { observeCover, observeCoverSize } from "./coverVisibility";
+import { collectionCoverSourceRef } from "../collectionPerf";
 import "./physicalCollections.css";
 export type PhysicalCoverProps = {
   src:string|null; alt:string; kind:"book"|"game"; scope?:string; revision?:string; large?:boolean; onError?:()=>void;
@@ -52,7 +53,7 @@ export function PhysicalCover({src,alt,kind,scope="",revision="",large=false,onE
     {showShell&&<img className="physical-cover__shell" src={shell!.url} alt="" aria-hidden="true" decoding="async" draggable={false} />}
     {/* No <img> until there is a source: WebKitGTK spent ~70 ms a frame for most of a second on a
         grid's worth of source-less images (the covers outside the near margin) after every mount. */}
-    {url!==null&&<img className="physical-cover__image" src={url} crossOrigin="anonymous" alt={alt} decoding="async" draggable={false}
+    {url!==null&&<img ref={collectionCoverSourceRef} className="physical-cover__image" src={url} crossOrigin="anonymous" alt={alt} decoding="async" draggable={false}
       onLoad={()=>setLoadedUrl(url)}
       onError={()=>{
         if(src&&art) setResult({key,value:null,failed:true,instant:true});

@@ -1,3 +1,5 @@
+vi.mock("../library/LibraryContext", () => ({ useLibrary: () => ({ gateway: {}, library: null }) }));
+
 // Raster lifecycle is covered separately; jsdom has no canvas/WebGL implementation.
 vi.mock("./physical/collectibleRuntime", async (importOriginal) => ({
   ...await importOriginal<typeof import("./physical/collectibleRuntime")>(),
@@ -147,4 +149,19 @@ describe("CollectionCard", () => {
     expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("src", coverSourceUrl({ src: "working.jpg", scope: "", revision: sample.updatedAt }));
     expect(screen.getByRole("img", { name: "Sample" })).toHaveAttribute("decoding", "async");
   });
+});
+
+
+it("does not mount a hidden shelf on grid entry and retains both surfaces after layout switches", () => {
+  const props = { collection: sample, coverUrl: "/front", selected: false, onClick: vi.fn(), lightCase: true };
+  const { container, rerender } = render(<CollectionCard {...props} shelf={false} />);
+  expect(container.querySelector(".collection-card__light")).toBeNull();
+  const flat = container.querySelector(".collection-card__cover img");
+  expect(flat).not.toBeNull();
+  rerender(<CollectionCard {...props} shelf />);
+  const front = container.querySelector(".cs-front img");
+  expect(front).toHaveAttribute("src", "/front");
+  rerender(<CollectionCard {...props} shelf={false} />);
+  expect(container.querySelector(".cs-front img")).toBe(front);
+  expect(container.querySelector(".collection-card__cover img")).toBe(flat);
 });

@@ -1,8 +1,26 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { StableImage } from "./StableImage";
 
 afterEach(cleanup);
+
+it("allows an opted-in first appearance on load but holds that same image through a slow refresh", async () => {
+  const { container, rerender } = render(<StableImage src="/first" alt="Cover" decodeFirst={false} decoding="async" />);
+  const first = screen.getByRole<HTMLImageElement>("img");
+  first.decode = vi.fn(() => new Promise<void>(() => {}));
+  fireEvent.load(first);
+  expect(first.decode).not.toHaveBeenCalled();
+  expect(first.style.visibility).toBe("");
+  rerender(<StableImage src="/next" alt="Cover" decodeFirst={false} decoding="async" />);
+  const next = container.querySelector<HTMLImageElement>('img[src="/next"]')!;
+  let finish!: () => void;
+  next.decode = () => new Promise<void>(resolve => { finish = resolve; });
+  fireEvent.load(next);
+  expect(screen.getByRole("img")).toBe(first);
+  expect(next.style.visibility).toBe("hidden");
+  await act(async () => finish());
+  expect(screen.getByRole("img")).toBe(next);
+});
 
 it("returns to the already loaded A image after A to B to A without another load event", async () => {
   const { container, rerender } = render(<StableImage src="/a" alt="A" />);

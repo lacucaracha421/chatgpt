@@ -163,7 +163,12 @@ at the next scenario start. The Markdown summary still reports whole scenarios.
 | `w4:viewer.request.visible` | The same request through two animation-frame boundaries after promotion. |
 | `w4:viewer.decode.done` / `w4:viewer.prefetch-decode.done` | The actual element's `decode()` promise after load, for requested/speculative media. Cache-dependent; a rejected decode is treated as settled as before. |
 | `w4:collections.query.arrived` | `list_collections` IPC dispatch to result. Usually in startup, not Collections entry, because the shell already holds the list. |
-| `w4:collections.list-to-first-cover.loaded` / `.decoded` / `.visible` | List props committed to the browser through the first visible front cover's load, decode and paint opportunity. Includes layout/mount work after that commit; does not wait for every cover. |
+| `w4:collections.list-to-first-cover.list-committed` / `.src-observed` | Browser list commit and first front-image source observation. These are separate from the startup query arrival. |
+| `w4:collections.first-cover.src-assigned` | Zero-duration measurement whose `startTime` is the first front image's callback-ref commit timestamp. Does not read layout. |
+| `w4:collections.list-to-first-cover.loaded` / `.decoded` / `.visible-ready` / `.visible` | First successful front-image load observation, first successful decode probe, first decoded front found in the viewport, and its next paint opportunity. Load/decode include hidden fronts; these first occurrences can belong to different covers. Unlike W5b, load is not held until visibility. Geometry reads are coalesced into a frame and skipped before a decode succeeds. |
+| `w4:collections.first-cover.request-start` / `.response-start` / `.response-end` | Zero-duration timestamps from the first available front-image Resource Timing entry. Absent when custom-scheme timing is unsupported; cached entries may predate this mount. They are not native responder timestamps. |
+| `w4:collections.ipc.list_collection_shelf_cases.dispatched` / `.arrived` | Shelf metadata batching and IPC arrival; the initial front does not await this command. |
+| `w4:collections.ipc.get_av_cover_set.arrived` | AV artwork refinement IPC arrival; the summary front remains available while it is pending. |
 | `w4:collections.open-to-visible` | Captured rail click to that first cover's paint opportunity. |
 
 Two rAF boundaries are a paint opportunity, not proof of compositor presentation.

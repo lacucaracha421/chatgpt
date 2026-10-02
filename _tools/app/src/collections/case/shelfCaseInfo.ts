@@ -1,3 +1,4 @@
+import { beginNativePhase } from "../../shared/nativePerf";
 import type { CollectionShelfCase, LibraryGateway } from "../../library/types";
 
 /** What a shelf case prints beyond the list row: the owned device and the chosen spine artwork. */
@@ -26,12 +27,16 @@ export function readShelfInfo(gateway: LibraryGateway, root: string, collectionI
     const requests: Waiting = new Map();
     batch = requests;
     waiting.set(gateway, requests);
+    const phase = beginNativePhase("collections.ipc.list_collection_shelf_cases");
     queueMicrotask(() => {
       waiting.delete(gateway);
+      phase?.mark("dispatched");
       read([...requests.keys()]).then(cases => {
+        phase?.mark("arrived");
+        phase?.cancel();
         const found = new Map(cases.map(item => [item.collectionId, item]));
         for (const [id, callers] of requests) callers.forEach(caller => caller.resolve(found.get(id) ?? NO_SHELF_INFO));
-      }, error => { for (const callers of requests.values()) callers.forEach(caller => caller.reject(error)); });
+      }, error => { phase?.mark("failed"); phase?.cancel(); for (const callers of requests.values()) callers.forEach(caller => caller.reject(error)); });
     });
   }
   const requests = batch;

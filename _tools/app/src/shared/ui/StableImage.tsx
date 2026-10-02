@@ -1,18 +1,22 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ImgHTMLAttributes, type SyntheticEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ImgHTMLAttributes, type Ref, type SyntheticEvent } from "react";
 
 import { beginNativePhase } from "../nativePerf";
 
 type StableImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, "src" | "alt"> & {
   src: string;
   alt: string;
+  /** Receives each real image slot (including the spare loading slot). */
+  ref?: Ref<HTMLImageElement>;
   onPreloadError?: () => void;
   /** Load one adjacent image in the actual spare DOM slot, after the current image is ready. */
   prefetchSrc?: string;
   /** Opt-in native-kit tracing; absent in ordinary image surfaces. */
   perfName?: string;
+  /** A new shelf cover may paint on load; replacements still decode in the spare slot. */
+  decodeFirst?: boolean;
 };
 
-type Slot = { src: string; alt: string; ready?: boolean; failed?: boolean };
+type Slot = { src: string; alt: string; ready?: boolean; decoded?: boolean; failed?: boolean };
 
 /**
  * Keeps the current image on screen until the next one has loaded and decoded.
@@ -21,7 +25,7 @@ type Slot = { src: string; alt: string; ready?: boolean; failed?: boolean };
  * once ready. Showing the element that did the loading matters on the PC (WebKitGTK), which does not
  * reliably reuse a preloaded `lakomics://` image for a fresh <img>, so swapping `src` flashed blank.
  */
-export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, ...props }: StableImageProps) {
+export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, decodeFirst = true, ...props }: StableImageProps) {
   const [slots, setSlots] = useState<[Slot | null, Slot | null]>([{ src, alt }, null]);
   const [active, setActive] = useState<0 | 1>(0);
 
@@ -36,7 +40,7 @@ export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, .
   }, [src, perfName]);
   useLayoutEffect(() => {
     if (slots[active]?.src !== src || !slots[active]?.ready) return;
-    trace.current?.mark("decoded");
+    trace.current?.mark(slots[active]?.decoded ? "decoded" : "load-ready");
     return trace.current?.afterPaint("visible");
   }, [active, src, slots]);
 
@@ -64,19 +68,23 @@ export function StableImage({ src, alt, onPreloadError, prefetchSrc, perfName, .
   const loaded = (index: 0 | 1, event: SyntheticEvent<HTMLImageElement>) => {
     const loadedSrc = slots[index]?.src;
     const element = event.currentTarget;
-    const show = () => {
+    const show = (decoded: boolean) => {
       if (!element.isConnected || element.getAttribute("src") !== loadedSrc) return;
       // A late speculative decode may only promote the source still requested by the viewer.
       if (loadedSrc === wanted.current) setActive(index);
       setSlots(previous => {
         const slot = previous[index];
         return slot?.src === loadedSrc && !slot.ready
-          ? replaceSlot(previous, index, { ...slot, ready: true }) : previous;
+          ? replaceSlot(previous, index, { ...slot, ready: true, decoded }) : previous;
       });
     };
     if (loadedSrc === wanted.current) trace.current?.mark("loaded");
+    if (!decodeFirst && index === active && !slots[index]?.ready && slots[1 - index] === null) {
+      show(false);
+      return;
+    }
     const phase = perfName ? beginNativePhase(`${perfName}.${loadedSrc === wanted.current ? "decode" : "prefetch-decode"}`) : null;
-    const decoded = () => { phase?.mark("done"); phase?.cancel(); show(); };
+    const decoded = () => { phase?.mark("done"); phase?.cancel(); show(true); };
     if (typeof element.decode === "function") void element.decode().then(decoded, decoded);
     else decoded();
   };
