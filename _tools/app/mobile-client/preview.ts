@@ -237,7 +237,7 @@ export async function demoTransport(op: string, payload: Record<string, unknown>
   if(op==='notesLedgerMonthId'){const found=demoNotes.find(n=>n.type==='ledger-month'&&n.ledger===payload.ledger&&n.month===payload.month);return {id:found?.id??String(payload.month).replace('-','').padEnd(32,'c')};}
   if(op==='notesSave'){const note={...demoNotes.find(n=>n.id===payload.id),...payload,localRevision:Number(payload.expectedRevision)+1,pending:false,conflict:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()} as MobileNote;demoNotes=[note,...demoNotes.filter(n=>n.id!==note.id)];return note;}
   if (op === 'collectionArtwork') {const index=Number(String(payload.artworkId).match(/\d+$/)?.[0]??0);return {url:art(index,String(payload.artworkId).startsWith('hero')?1200:600,String(payload.artworkId).startsWith('hero')?600:800),expires_in:240};}
-  if (op === 'cacheStatus' || op === 'clearCache') return {bytes:0,count:0,limit:1024*1024*1024};
+  if (op === 'cacheStatus' || op === 'clearCache') return {bytes:0,count:0,limit:3*1024*1024*1024};
   if (op === 'thumbnail' || op === 'media') return {url:assets.find(asset => asset.id === payload.assetId)?.preview,expires_in:240};
   // The real bridge copies text through the platform clipboard; the preview reports the
   // same success shape so the panel's copy feedback is exercised without a device.
