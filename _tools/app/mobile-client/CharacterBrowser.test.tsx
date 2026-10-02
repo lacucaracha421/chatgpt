@@ -4,11 +4,12 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import type {Asset} from './types';
 import {CharacterBrowser} from './CharacterBrowser';
 import type {CharacterIndex,CharacterPage} from './characterModel';
+import type {SparseGallerySource} from './assetToc';
 
 const mocks=vi.hoisted(()=>({api:vi.fn(),loadThumbnail:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,errorText:(e:Error)=>e.message}));
 vi.mock('./media',()=>({loadThumbnail:mocks.loadThumbnail}));
-vi.mock('./Gallery',()=>({Gallery:({items,onOpen,onNearEnd,restoreScroll,intro,stale}:{intro?:import('react').ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll:number;stale?:boolean})=><div aria-label="character gallery" data-scroll={restoreScroll} data-stale={stale?'true':undefined}>{intro}{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{a.id}</button>)}<button onClick={onNearEnd}>more</button></div>}));
+vi.mock('./Gallery',()=>({Gallery:({items,onOpen,onNearEnd,restoreScroll,intro,stale,sparse}:{intro?:import('react').ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll:number;stale?:boolean;sparse?:SparseGallerySource})=><div aria-label="character gallery" data-scroll={restoreScroll} data-toc={sparse?.toc.totalCount} data-stale={stale?'true':undefined}>{intro}{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{a.id}</button>)}<button onClick={onNearEnd}>more</button>{sparse&&<button onClick={()=>void sparse.load(2,1,new AbortController().signal)}>seek</button>}</div>}));
 const revision='a'.repeat(64);
 const node=(kind:'series'|'group'|'character',id:string,name:string,parentId:string|null)=>({id:`${kind}:${id}`,kind,sourceId:id,seriesId:'s',parentId,name,description:'',thumbnailAssetId:null,manualOnly:false,excluded:false});
 const index:CharacterIndex={version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,publishedAt:'2026',nodes:[node('series','s','Series',null),node('group','g','Group','series:s'),node('character','c','Character','group:g')],scopes:[{nodeId:'series:s',filter:'all',totalCount:2,sourceCount:2},{nodeId:'series:s',filter:'unclassified',totalCount:0,sourceCount:0},{nodeId:'series:s',filter:'needs_review',totalCount:0,sourceCount:0},{nodeId:'group:g',filter:'all',totalCount:2,sourceCount:2},{nodeId:'character:c',filter:'all',totalCount:2,sourceCount:3}]};
@@ -23,6 +24,42 @@ beforeEach(()=>{
   mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?structuredClone(index):page());
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
+
+it('requests a date TOC and seeks with its bucket cursor without extending the loaded-page scale',async()=>{
+  mocks.api.mockImplementation(async(path:string)=>{
+    if(path.endsWith('/characters'))return structuredClone(index);
+    const params=new URL(path,'https://test').searchParams;
+    expect(params.get('node')).toBe('character:c');
+    expect(params.get('sort')).toBe('newest');
+    if(params.has('toc')){
+      expect(params.has('utcOffsetMinutes')).toBe(true);
+      return {tocVersion:1,listGeneration:'g1',sort:'newest',totalCount:3,buckets:[{key:'2026-10',startIndex:0,count:2,startCursor:null},{key:'2025-01',startIndex:2,count:1,startCursor:'bucket'}]};
+    }
+    return {...page([params.has('cursor')?'destination':'first']),listGeneration:'g1',has_more:!params.has('cursor'),next_cursor:params.has('cursor')?null:'next'};
+  });
+  render(<CharacterBrowser {...props} initialNode="character:c"/>);
+  await screen.findByText('first');
+  expect(screen.getByLabelText('character gallery').getAttribute('data-toc')).toBe('3');
+  fireEvent.click(screen.getByText('seek'));
+  await screen.findByText('destination');
+  expect(mocks.api.mock.calls.some(([path])=>path.includes('cursor=bucket'))).toBe(true);
+  expect(screen.getByLabelText('character gallery').getAttribute('data-toc')).toBe('3');
+  fireEvent.click(screen.getByText('destination'));
+  expect(onOpen.mock.calls.at(-1)?.[0].map((asset:Asset)=>asset.id)).toEqual(['first','destination']);
+});
+
+it('keeps cursor paging when the optional character TOC cannot be read',async()=>{
+  mocks.api.mockImplementation(async(path:string)=>{
+    if(path.endsWith('/characters'))return structuredClone(index);
+    if(path.includes('toc=1'))throw new Error('offline TOC');
+    return path.includes('cursor=next')?page(['second']):{...page(['first']),has_more:true,next_cursor:'next'};
+  });
+  render(<CharacterBrowser {...props} initialNode="character:c"/>);
+  await screen.findByText('first');
+  expect(screen.getByLabelText('character gallery').hasAttribute('data-toc')).toBe(false);
+  fireEvent.click(screen.getByText('more'));
+  await screen.findByText('second');
+});
 
 it('navigates series, groups and characters, opens shared assets and returns to parents',async()=>{
   render(<CharacterBrowser {...props}/>);
@@ -338,6 +375,7 @@ it('keeps the committed gallery page while a series filter replacement is pendin
   let finish!:(result:CharacterPage)=>void;
   mocks.api.mockImplementation((path:string)=>{
     if(path.endsWith('/characters'))return Promise.resolve(structuredClone(index));
+    if(path.includes('toc=1'))return Promise.resolve({});
     if(path.includes('filter=all'))return new Promise(resolve=>{finish=resolve;});
     return Promise.resolve(page(['old']));
   });

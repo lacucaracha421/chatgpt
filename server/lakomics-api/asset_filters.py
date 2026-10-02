@@ -227,7 +227,7 @@ def decode_cursor(cursor, kind: str, filters: Filters, status: int, detail, lead
         elif isinstance(decoded, dict):
             tag, bound, payload = decoded["kind"], decoded["filters"], decoded["p"]
             if (tag != kind or not isinstance(bound, list) or not isinstance(payload, list)
-                    or len(payload) != 4):
+                    or len(payload) != (6 if kind == "character-assets-date" else 4)):
                 raise ValueError
         else:
             raise ValueError

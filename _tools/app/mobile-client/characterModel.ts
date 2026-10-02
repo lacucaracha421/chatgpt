@@ -1,6 +1,7 @@
 import {assetSearchParams,type AssetSearchName} from '../src/assets/assetSearch';
-import type {AssetFiltersValue, Page} from './types';
+import type {AssetFiltersValue} from './types';
 import {EMPTY_FILTERS, withFilters} from './assetFilters';
+import type {ScopedAssetPage} from './scopedAssetToc';
 export type CharacterFilter = 'all' | 'unclassified' | 'needs_review';
 /** Assets that define this character (its base and learned references). Only an upgraded
  * publisher sends the field, so `undefined` is "this server cannot tell", never "none". */
@@ -26,17 +27,19 @@ export type CharacterIndex = {
   libraryId?:string;exclusionCursor?:number;reviewDecisionCursor?:number;appliedReviewDecisionCursor?:number;
   navigationOrder?:string[];ready:boolean;revision:string|null;publishedAt:string|null;nodes:CharacterNode[];scopes:CharacterScope[];
 };
-export type CharacterPage = Page & {revision:string;totalCount:number;sourceCount:number};
+export type CharacterPage = ScopedAssetPage & {revision:string;totalCount:number;sourceCount:number};
 /**
  * One character-scope page.
  *
  * Membership stays frozen at publication; the requested `revision` is what pins it. Asset
  * filters are applied by the server against the live Asset metadata for the members of
  * that frozen scope, so a filter never needs a new publication to become meaningful —
- * only the membership and the scope counts do.
+ * only the membership and the scope counts do. Tablet pages explicitly use the live
+ * newest date order, whose TOC cursors differ from the server's default published order.
  */
-export function characterPath(node:string,filter:CharacterFilter,revision:string,cursor:string|null,filters:AssetFiltersValue=EMPTY_FILTERS,search:readonly AssetSearchName[]=[]) {
-  const params=assetSearchParams(new URLSearchParams({node,filter,revision,limit:'40'}),search,false);
+export function characterPath(node:string,filter:CharacterFilter,revision:string,cursor:string|null,filters:AssetFiltersValue=EMPTY_FILTERS,search:readonly AssetSearchName[]=[],toc=false) {
+  const params=assetSearchParams(new URLSearchParams({node,filter,revision,limit:'40',sort:'newest'}),search,false);
+  if(toc){params.delete('limit');params.set('toc','1');params.set('utcOffsetMinutes',String(-new Date().getTimezoneOffset()));}
   if(cursor)params.set('cursor',cursor);
   return withFilters(`/v1/library/characters/assets?${params}`,filters);
 }

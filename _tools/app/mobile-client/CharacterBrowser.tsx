@@ -13,6 +13,7 @@ import {api,errorText} from './transport';
 import {loadThumbnail} from './media';
 import {readyFirstScreen} from './firstScreen';
 import {Gallery} from './Gallery';
+import {readScopedToc, readyScopedAsset, useScopedAssetToc, withScopedToc} from './scopedAssetToc';
 import {pagePath,RequestGate} from './model';
 import type {Asset,AssetFiltersValue,AssetMediaFilter} from './types';
 import {ASSET_FILTER_VERSION,EMPTY_FILTERS,MEDIA_SECTIONS,filterKey,filterVersionOf,hasActiveFilters,sameFilters} from './assetFilters';
@@ -231,9 +232,14 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
     // A cached page is re-validated against the contract it was stored under, so a scope
     // cannot present a page the server would now refuse simply because it was cached.
     const usable=cached&&(!hasActiveFilters(where.filters)||cached.page.filter_version===ASSET_FILTER_VERSION)?cached:undefined;
-    const promise=(usable?Promise.resolve(usable.page):api<CharacterPage>(characterPath(where.node,where.filter,index.revision,null,where.filters,where.search),request.signal).then(value=>({...value,filter_version:filterVersionOf(value)??undefined})))
+    const promise=(usable?Promise.resolve(usable.page):withScopedToc(
+      api<CharacterPage&{listGeneration?:string}>(characterPath(where.node,where.filter,index.revision,null,where.filters,where.search),request.signal).then(value=>({...value,list_generation:value.listGeneration,filter_version:filterVersionOf(value)??undefined})),
+      readScopedToc(characterPath(where.node,where.filter,index.revision,null,where.filters,where.search,true),request.signal),'newest'))
       // A switch inside a shown scope keeps the old page until the new first screen is decoded.
-      .then(result=>latest.current.page?readyFirstScreen(result.items,request.signal).then(items=>({...result,items})):result)
+      .then(result=>latest.current.page?readyFirstScreen(result.items,request.signal).then(items=>{
+        const prepared=new Map(items.map(asset=>[asset.id,asset]));
+        return {...result,items,assetRanges:result.assetRanges?{...result.assetRanges,ranges:result.assetRanges.ranges.map(range=>({...range,items:range.items.map(asset=>prepared.get(asset.id)??asset)}))}:undefined};
+      }):result)
       .then(result=>{
         if(!pageGate.current.current(request.id))return;
         // The reader's own envelope declares the contract under the wire name, so it is resolved
@@ -259,7 +265,7 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   const filterPending=!!shown&&(shown.filter!==where.filter||!sameFilters(shown.filters,where.filters)||assetSearchSelectionKey(shown.search)!==assetSearchSelectionKey(where.search));
   const append=useCallback(async()=>{
     const s=latest.current;
-    if(!s.active||s.paused||!s.page?.next_cursor||!s.index?.revision||!s.where.node||morePending.current)return;
+    if(!s.active||s.paused||s.page?.assetRanges||!s.page?.next_cursor||!s.index?.revision||!s.where.node||morePending.current)return;
     // Append only through the scope the visible page was committed under, and only when that is
     // still the scope on screen. A failed narrowing leaves the two apart, and extending the old
     // cursor under filters that never applied would splice two different result sets.
@@ -283,7 +289,16 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
     }catch(reason){if(moreGate.current.current(request.id)&&!await recoverSearch(s.where,reason,request.signal)&&moreGate.current.current(request.id))setMoreError(errorText(reason));}
     finally{if(moreGate.current.current(request.id)){morePending.current=false;setMore(false);}}
   },[]);
-  const ready=useCallback((asset:Asset)=>setPage(current=>current?{...current,items:current.items.map(a=>a.id===asset.id?{...a,...asset}:a)}:current),[]);
+  const ready=useCallback((asset:Asset)=>setPage(current=>current?readyScopedAsset(current,asset):current),[]);
+  const sparse=useScopedAssetToc(page,setPage,active&&!paused&&!busy&&!filterPending,
+    async(cursor,signal)=>{
+      const base=committed;
+      if(!base?.node||!index?.revision)throw new Error('목록이 변경되었습니다. 새로고침해 주세요.');
+      const raw=await api<CharacterPage&{listGeneration?:string}>(characterPath(base.node,base.filter,index.revision,cursor,base.filters,base.search),signal);
+      if(raw.revision!==index.revision||hasActiveFilters(base.filters)&&filterVersionOf(raw)!==ASSET_FILTER_VERSION)throw new Error('자산 필터 응답을 확인할 수 없습니다. 서버를 업데이트해 주세요.');
+      return {...raw,list_generation:raw.listGeneration,filter_version:filterVersionOf(raw)??undefined};
+    },()=>{cache.current.clear();setRetry(n=>n+1);},setMoreError,
+    (reason,signal)=>committed?recoverSearch(committed,reason,signal):Promise.resolve(false));
   // The committed page and its filters are one value, so an append cannot extend a page that
   // was fetched under a different scope than the one now displayed.
   const nearEnd=useCallback(()=>{if(!busy&&!moreError)void append();},[busy,moreError,append]);
@@ -352,10 +367,10 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   return <section className={`character-browser${landscape?' character-browser-landscape':''}`} style={{display:active?undefined:'none'}} aria-label="시리즈·캐릭터" ref={host}>
     {characterHeader}
     {where.node&&kindShade.shade}
-    <Gallery items={galleryItems} stale={stale} intro={<>{scopeChips}{where.node?<>{kindShade.inline}{overview}</>:overview}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null}/>
+    <Gallery sparse={sparse} items={galleryItems} stale={stale} intro={<>{scopeChips}{where.node?<>{kindShade.inline}{overview}</>:overview}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null}/>
     {where.node&&<FilterChips media={false} row={false} value={where.filters} applied={where.filters} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}
     {more&&<div className="loading-line is-bottom" role="status" aria-label="다음 캐릭터 자산 불러오는 중"/>}
-    {moreError&&<div className="inline-error" role="alert">{moreError}<Button onClick={()=>void append()}>다시 시도</Button><Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
+    {moreError&&<div className="inline-error" role="alert">{moreError}<Button onClick={()=>{if(sparse){cache.current.clear();setRetry(n=>n+1);}else void append();}}>다시 시도</Button><Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
     {filterHelpOpen&&<BottomSheet title="미분류와 전체" onClose={()=>setFilterHelpOpen(false)}><div className="folder-filter__explanation"><p><strong>미분류</strong>: 이 폴더에 바로 들어 있고 아직 캐릭터나 하위 폴더에 없는 이미지</p><p><strong>전체</strong>: 캐릭터와 하위 폴더까지 모두</p></div></BottomSheet>}
   </section>;
 }

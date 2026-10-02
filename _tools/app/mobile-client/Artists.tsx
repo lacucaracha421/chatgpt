@@ -2,19 +2,22 @@ import {useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactN
 import {ArrowUpRightIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronRightIcon, ComputerDesktopIcon, MagnifyingGlassIcon, PhotoIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {EmptyState,IconButton,SectionLabel} from './ui';
 import {TopBar, TopBarSearch} from './TopBar';
-import {api, native} from './transport';
+import {api, errorText, native} from './transport';
 import {Cover} from './CoverGroup';
 import {Gallery} from './Gallery';
 import {Scrubber} from './Scrubber';
-import {DEFAULT_DENSITY} from './model';
-import type {Asset} from './types';
+import {DEFAULT_DENSITY, normalizePage} from './model';
+import {filterVersionOf, ASSET_FILTER_VERSION} from './assetFilters';
+import {readyFirstScreen} from './firstScreen';
+import {readScopedToc, readyScopedAsset, useScopedAssetToc, withScopedToc, type ScopedAssetPage} from './scopedAssetToc';
+import type {Asset, PageWire} from './types';
 import {usePrivacyMode} from './privacyMode';
 import {artistHandles, artistName, assetsFromIds, daysSince, matchedPositions, matchesArtist, normalizeArtist, normalizeArtists, normalizeAssignments, orderedArtists, profileUrl, todayArtists, type ArtistAssignment, type LibraryArtist} from './artistsModel';
 import {displayDate} from '../src/shared/displayDate';
 import './artists.css';
 
 type ArtistState = 'loading' | 'ready' | 'empty';
-type ArtistPage = {items?: Asset[]; has_more?: boolean; next_cursor?: string | null; list_generation?: string};
+type ArtistPage = ScopedAssetPage & {scope:string};
 
 export function Placeholder({privateMode = false, label = '이미지 없음'}: {privateMode?: boolean; label?: string}) {
   return <span className={`artist-placeholder${privateMode ? ' is-private' : ''}`} aria-label={privateMode ? '비공개 모드로 이미지 숨김' : label}><PhotoIcon aria-hidden="true" /></span>;
@@ -102,12 +105,6 @@ function ArtistHub({artists, assignments, query, privateMode, paused, onOpen}: {
 
 export function EmptyArtists() { return <EmptyState icon={PhotoIcon} title="PC 앱이 작가 목록을 아직 보내지 않았습니다" />; }
 
-function assetPage(value: unknown): ArtistPage {
-  if (!value || typeof value !== 'object') return {};
-  const page = value as ArtistPage;
-  return {items: Array.isArray(page.items) ? page.items.filter(item => !!item && typeof item.id === 'string') : [], has_more: page.has_more === true, next_cursor: typeof page.next_cursor === 'string' ? page.next_cursor : null, list_generation: page.list_generation};
-}
-
 function ArtistIntro({artist, privateMode, sort, filter, onSort, onFilter, assets}: {artist: LibraryArtist; privateMode: boolean; sort: 'newest' | 'oldest'; filter: 'all' | 'image' | 'video'; onSort(): void; onFilter(value: 'all' | 'image' | 'video'): void; assets: Asset[]}) {
   const avatar = assetsFromIds(artist.coverAssetIds)[0];
   const imageCount = assets.filter(asset => asset.kind !== 'video').length || Math.max(0, artist.assetCount - assets.filter(asset => asset.kind === 'video').length);
@@ -123,14 +120,30 @@ function ArtistIntro({artist, privateMode, sort, filter, onSort, onFilter, asset
 function ArtistDetail({scopeChips,summary, assignments, privateMode, paused, onBack, onOpenViewer}: {scopeChips?:ReactNode;summary: LibraryArtist; assignments: ArtistAssignment[]; privateMode: boolean; paused:boolean; onBack(): void; onOpenViewer(items: Asset[], index: number): void}) {
   const [artist, setArtist] = useState(summary);
   const [missing, setMissing] = useState(false);
-  const [assets, setAssets] = useState<Asset[]>(() => assetsFromIds(assignments.filter(row => row.artistId === summary.id).map(row => row.assetId)));
-  const [source, setSource] = useState<'assigned' | 'covers' | 'gallery'>(() => assets.length ? 'assigned' : 'covers');
+  const [page, setPage] = useState<ArtistPage>();
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
   const [filter, setFilter] = useState<'all' | 'image' | 'video'>('all');
-  const [cursor, setCursor] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const fallback = assetsFromIds(summary.coverAssetIds);
-  const primaryKey = summary.keys[0];
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
+  const generation = useRef(0), moreRequest = useRef<AbortController|null>(null);
+  const scope = `${summary.id}:${sort}:${filter}`;
+  const latest = useRef({scope, privateMode});latest.current={scope,privateMode};
+  const assigned = assetsFromIds(assignments.filter(row => row.artistId === summary.id).map(row => row.assetId));
+  const fallback = assigned.length ? assigned : assetsFromIds(summary.coverAssetIds);
+  const path = (cursor:string|null, toc=false) => {
+    const params=new URLSearchParams({artist:summary.id,sort,limit:'100'});
+    if(filter!=='all')params.set('media_kind',filter==='video'?'videos':'images');
+    if(cursor)params.set('cursor',cursor);
+    if(toc){params.delete('limit');params.set('toc','1');params.set('utcOffsetMinutes',String(-new Date().getTimezoneOffset()));}
+    return `/v1/library/assets?${params}`;
+  };
+  const read = async(cursor:string|null, signal:AbortSignal):Promise<ArtistPage> => {
+    const raw=await api<PageWire&{listGeneration?:string}>(path(cursor),signal);
+    if(filter!=='all'&&filterVersionOf(raw)!==ASSET_FILTER_VERSION)throw new Error('자산 필터 응답을 확인할 수 없습니다. 서버를 업데이트해 주세요.');
+    return {...normalizePage(raw),list_generation:raw.listGeneration,scope};
+  };
   useEffect(() => {
     const controller = new AbortController();
     void api<{artist?: LibraryArtist}>(`/v1/library/artists/${encodeURIComponent(summary.id)}`, controller.signal).then(reply => {
@@ -140,32 +153,39 @@ function ArtistDetail({scopeChips,summary, assignments, privateMode, paused, onB
     return () => controller.abort();
   }, [summary.id]);
   useEffect(() => {
-    if (privateMode || !primaryKey) return;
-    const controller = new AbortController();
-    void api<ArtistPage>(`/v1/library/revisit/creator/${encodeURIComponent(primaryKey)}/assets?limit=100&sort=${sort}`, controller.signal).then(value => {
-      const page = assetPage(value);
-      if (!controller.signal.aborted && page.items?.length) { setAssets(page.items); setSource('gallery'); setCursor(page.next_cursor ?? null); }
-    }, () => {});
-    return () => controller.abort();
-  }, [primaryKey, privateMode, sort]);
-  const filtered = useMemo(() => {
-    const next = filter === 'all' ? assets : assets.filter(asset => filter === 'video' ? asset.kind === 'video' : asset.kind !== 'video');
-    return sort === 'oldest' && source !== 'gallery' ? [...next].reverse() : next;
-  }, [assets, filter, sort, source]);
+    const version=++generation.current;
+    moreRequest.current?.abort();moreRequest.current=null;setLoadingMore(false);
+    if(privateMode){setBusy(false);return;}
+    const controller=new AbortController();setBusy(true);setError('');
+    void withScopedToc(read(null,controller.signal).then(async result=>{
+      const items=page?await readyFirstScreen(result.items,controller.signal):result.items;
+      return {...result,items};
+    }),readScopedToc(path(null,true),controller.signal),sort).then(result=>{
+      if(!controller.signal.aborted&&generation.current===version)setPage(result);
+    },reason=>{if(!controller.signal.aborted&&generation.current===version)setError(errorText(reason));})
+      .finally(()=>{if(generation.current===version)setBusy(false);});
+    return()=>{controller.abort();moreRequest.current?.abort();generation.current++;};
+  }, [summary.id, privateMode, sort, filter, retry]);
+  const changeSort = () => {generation.current++;moreRequest.current?.abort();setSort(value=>value==='newest'?'oldest':'newest');};
+  const changeFilter = (value:'all'|'image'|'video') => {generation.current++;moreRequest.current?.abort();setFilter(value);};
+  const sparse=useScopedAssetToc(page,setPage,!privateMode&&!paused&&!busy&&page?.scope===scope,read,()=>setRetry(value=>value+1),setError);
   const profile = profileUrl(artist);
   const loadMore = () => {
-    if (privateMode || !primaryKey || !cursor || loadingMore) return;
-    setLoadingMore(true);
-    const controller = new AbortController();
-    void api<ArtistPage>(`/v1/library/revisit/creator/${encodeURIComponent(primaryKey)}/assets?limit=100&cursor=${encodeURIComponent(cursor)}&sort=${sort}`, controller.signal).then(value => {
-      const page = assetPage(value);
-      if (page.items?.length) { setAssets(current => [...current, ...page.items!.filter(item => !current.some(old => old.id === item.id))]); setCursor(page.next_cursor ?? null); }
-    }, () => {}).finally(() => setLoadingMore(false));
+    if(privateMode||paused||busy||page?.assetRanges||page?.scope!==scope||!page.next_cursor||moreRequest.current)return;
+    const version=generation.current,controller=new AbortController();moreRequest.current=controller;setLoadingMore(true);
+    void read(page.next_cursor,controller.signal).then(result=>{
+      if(controller.signal.aborted||generation.current!==version||latest.current.scope!==scope||latest.current.privateMode)return;
+      if(page.list_generation&&page.list_generation!==result.list_generation){setRetry(value=>value+1);return;}
+      setPage(current=>current?.scope===scope?{...result,items:[...current.items,...result.items.filter(item=>!current.items.some(old=>old.id===item.id))]}:current);
+    },reason=>{if(!controller.signal.aborted&&generation.current===version)setError(errorText(reason));})
+      .finally(()=>{if(moreRequest.current===controller){moreRequest.current=null;setLoadingMore(false);}});
   };
   if (missing) return <div className="artist-screen"><TopBar back={{label:'작가 목록으로', onClick:onBack}} crumbs={<span className="top-bar__crumbs">홈 › 작가 ›</span>} title={artistName(summary)} />{scopeChips}<EmptyArtists /></div>;
-  const shown = filtered.length ? filtered : fallback;
+  const local = filter==='all'?fallback:fallback.filter(asset=>filter==='video'?asset.kind==='video':asset.kind!=='video');
+  const shown = page?.items ?? (sort==='oldest'?[...local].reverse():local);
+  const stale = !!page && page.scope!==scope;
   return <div className="artist-screen"><TopBar back={{label:'작가 목록으로', onClick:onBack}} crumbs={<span className="top-bar__crumbs">홈 › 작가 ›</span>} title={artistName(artist)} actions={profile ? <IconButton label="작가 프로필 열기" icon={ArrowUpRightIcon} onClick={() => { void native('openExternal', {url: profile}).catch(() => {}); }} /> : undefined} />
-    <div className="artist-detail-scroll"><Gallery items={shown} density={DEFAULT_DENSITY} identity={`artist:${artist.id}:${sort}:${filter}:${source}`} restoreScroll={0} onScroll={() => {}} onReady={ready => setAssets(current => current.map(asset => asset.id === ready.id ? {...asset, ...ready} : asset))} onNearEnd={loadMore} paused={privateMode||paused} privacy={privateMode} intro={<>{scopeChips}<ArtistIntro artist={artist} privateMode={privateMode} sort={sort} filter={filter} onSort={() => setSort(value => value === 'newest' ? 'oldest' : 'newest')} onFilter={setFilter} assets={shown} /></>} onOpen={index => { if (!privateMode) onOpenViewer(shown, index); }} />{!shown.length && <div className="artist-detail-empty">PC가 이 작가의 asset id를 아직 게시하지 않았습니다.</div>}</div>
+    <div className="artist-detail-scroll"><Gallery sparse={privateMode?undefined:sparse} items={shown} privacy={privateMode} stale={stale} busy={busy||loadingMore} onRefresh={()=>setRetry(value=>value+1)} density={DEFAULT_DENSITY} identity={`artist:${page?.scope??scope}`} restoreScroll={0} onScroll={() => {}} onReady={ready => setPage(current=>current?readyScopedAsset(current,ready):current)} onNearEnd={loadMore} paused={privateMode||paused} intro={<>{scopeChips}<ArtistIntro artist={artist} privateMode={privateMode} sort={sort} filter={filter} onSort={changeSort} onFilter={changeFilter} assets={shown} /></>} onOpen={index => { if (!privateMode&&!stale) onOpenViewer(shown, index); }} />{!shown.length&&!busy && <div className="artist-detail-empty">조건에 맞는 자산이 없습니다.</div>}{error&&<div className="inline-error" role="alert">{error}<button onClick={()=>setRetry(value=>value+1)}>다시 시도</button></div>}</div>
   </div>;
 }
 

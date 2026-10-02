@@ -3442,6 +3442,7 @@ from mobile_characters import register_characters
 
 startup_mobile_characters = register_characters(
     app, get_db, require_auth, mobile_asset_item, _mobile_memberships,
+    list_generation=list_generation,
     require_client=lambda authorization: client_guard(get_db, API_TOKEN)(authorization),
     require_publisher=require_publisher,
 )

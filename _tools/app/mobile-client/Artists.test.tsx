@@ -4,11 +4,12 @@ import type {MutableRefObject} from 'react';
 import {Artists} from './Artists';
 import {AssetScopeChips} from './AssetScopeChips';
 import {matchesArtist, matchedPositions, type LibraryArtist} from './artistsModel';
+import type {SparseGallerySource} from './assetToc';
 
 const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn(), loadThumbnail: vi.fn()}));
-vi.mock('./transport', () => ({api: mocks.api, native: mocks.native}));
+vi.mock('./transport', () => ({api: mocks.api, native: mocks.native, errorText:(e:Error)=>e.message}));
 vi.mock('./media', () => ({loadThumbnail: mocks.loadThumbnail}));
-vi.mock('./Gallery', () => ({Gallery: ({intro, items, onOpen}: {intro?: React.ReactNode; items: {id: string}[]; onOpen(index: number): void}) => <div aria-label="자산 목록">{intro}{items.map((item, index) => <button key={item.id} onClick={() => onOpen(index)}>asset-{item.id}</button>)}</div>}));
+vi.mock('./Gallery', () => ({Gallery: ({intro, items, onOpen, onNearEnd, sparse, stale}: {intro?: React.ReactNode; items: {id: string}[]; onOpen(index: number): void; onNearEnd():void; sparse?:SparseGallerySource; stale?:boolean}) => <div aria-label="자산 목록" data-toc={sparse?.toc.totalCount} data-stale={stale}>{intro}{items.map((item, index) => <button key={item.id} onClick={() => onOpen(index)}>asset-{item.id}</button>)}<button onClick={onNearEnd}>more</button>{sparse&&<button onClick={()=>void sparse.load(2,1,new AbortController().signal)}>seek</button>}</div>}));
 
 const artist = (id: string, label: string, overrides: Partial<LibraryArtist> = {}): LibraryArtist => ({
   id, label, displayName: label, sourceName: label, keys: [`@${id}`], assetCount: 74, recentCount: 2,
@@ -32,7 +33,7 @@ beforeEach(() => {
   mocks.api.mockImplementation(async (path: string) => {
     if (path === '/v1/library/artists') return reply;
     if (path.startsWith('/v1/library/artists/')) return {version: 1, revision: 4, artist: detail, assignedAssetCount: 1};
-    if (path.startsWith('/v1/library/revisit/creator/')) return {items: [{id: 'haneul-1', kind: 'image', width: 600, height: 800}], has_more: false, next_cursor: null};
+    if (path.startsWith('/v1/library/assets?')) return {items: [{id: 'haneul-1', kind: 'image', width: 600, height: 800}], has_more: false, next_cursor: null, filterVersion:1};
     throw new Error(`unexpected path ${path}`);
   });
   mocks.native.mockResolvedValue({});
@@ -48,6 +49,118 @@ describe('artist model', () => {
 });
 
 describe('Artists', () => {
+  it('uses the published artist id and TOC seek, including artists without creator keys', async () => {
+    const original=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path:string)=>{
+      if(!path.startsWith('/v1/library/assets?'))return original(path);
+      const params=new URL(path,'https://test').searchParams;
+      expect(params.get('artist')).toBe(primary.id);
+      expect(params.get('sort')).toBe('newest');
+      if(params.has('toc'))return Promise.resolve({tocVersion:1,listGeneration:'g1',totalCount:3,sort:'newest',buckets:[{key:'2026-10',count:2,startIndex:0,startCursor:null},{key:'2025-01',count:1,startIndex:2,startCursor:'old-month'}]});
+      return Promise.resolve({items:[{id:params.has('cursor')?'manual':'merged-key',kind:'image'}],has_more:!params.has('cursor'),next_cursor:params.has('cursor')?null:'next',listGeneration:'g1'});
+    });
+    render(<Artists endpoint="test" backRef={{current:null}} initialArtist={{...primary,keys:[]}} onOpenViewer={vi.fn()}/>);
+    await screen.findByText('asset-merged-key');
+    expect(screen.getByLabelText('자산 목록').getAttribute('data-toc')).toBe('3');
+    fireEvent.click(screen.getByText('seek'));
+    await screen.findByText('asset-manual');
+    const tocPath=mocks.api.mock.calls.find(([path])=>path.includes('toc=1'))![0];
+    expect(new URL(tocPath,'https://test').searchParams.has('utcOffsetMinutes')).toBe(true);
+    expect(mocks.api.mock.calls.some(([path])=>path.includes('cursor=old-month'))).toBe(true);
+    expect(mocks.api.mock.calls.some(([path])=>path.includes('/revisit/'))).toBe(false);
+  });
+
+  it('ignores a next page that completes after the sort changes', async () => {
+    let resolveMore!:(value:unknown)=>void;
+    let moreSignal!:AbortSignal;
+    const original=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path:string,signal:AbortSignal)=>{
+      if(!path.startsWith('/v1/library/assets?'))return original(path);
+      const params=new URL(path,'https://test').searchParams;
+      if(params.has('toc'))return Promise.reject(new Error('old server'));
+      if(params.has('cursor')){moreSignal=signal;return new Promise(resolve=>{resolveMore=resolve;});}
+      return Promise.resolve({items:[{id:params.get('sort')==='oldest'?'old-first':'new-first',kind:'image'}],has_more:true,next_cursor:'next'});
+    });
+    render(<Artists endpoint="test" backRef={{current:null}} initialArtist={primary} onOpenViewer={vi.fn()}/>);
+    await screen.findByText('asset-new-first');
+    fireEvent.click(screen.getByText('more'));
+    fireEvent.click(screen.getByRole('button',{name:'최근 저장 순'}));
+    await screen.findByText('asset-old-first');
+    expect(moreSignal.aborted).toBe(true);
+    await act(async()=>resolveMore({items:[{id:'stale-new-page',kind:'image'}],has_more:false,next_cursor:null}));
+    expect(screen.queryByText('asset-stale-new-page')).toBeNull();
+    expect(screen.queryByText('asset-new-first')).toBeNull();
+  });
+
+  it('keeps the viewport during a TOC seek and ignores its late result after a sort change', async () => {
+    let finishSeek!:(value:unknown)=>void;
+    const original=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path:string)=>{
+      if(!path.startsWith('/v1/library/assets?'))return original(path);
+      const params=new URL(path,'https://test').searchParams,sort=params.get('sort');
+      if(params.has('toc'))return Promise.resolve({tocVersion:1,listGeneration:sort,totalCount:3,sort,buckets:[{key:'2026-10',count:2,startIndex:0,startCursor:null},{key:'2025-01',count:1,startIndex:2,startCursor:'bucket'}]});
+      if(params.has('cursor'))return new Promise(resolve=>{finishSeek=resolve;});
+      return Promise.resolve({items:[{id:`${sort}-first`,kind:'image'}],has_more:true,next_cursor:'next',listGeneration:sort});
+    });
+    render(<Artists endpoint="test" backRef={{current:null}} initialArtist={primary} onOpenViewer={vi.fn()}/>);
+    await screen.findByText('asset-newest-first');
+    fireEvent.click(screen.getByText('seek'));
+    await waitFor(()=>expect(finishSeek).toBeDefined());
+    expect(screen.getByText('asset-newest-first')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'최근 저장 순'}));
+    await screen.findByText('asset-oldest-first');
+    await act(async()=>finishSeek({items:[{id:'stale-destination',kind:'image'}],has_more:false,next_cursor:null,listGeneration:'newest'}));
+    expect(screen.queryByText('asset-stale-destination')).toBeNull();
+  });
+
+  it('refreshes a TOC seek when its page belongs to another generation', async () => {
+    let changed=false;
+    const original=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path:string)=>{
+      if(!path.startsWith('/v1/library/assets?'))return original(path);
+      const params=new URL(path,'https://test').searchParams;
+      if(params.has('cursor'))changed=true;
+      const generation=changed?'g2':'g1';
+      if(params.has('toc'))return Promise.resolve({tocVersion:1,listGeneration:generation,totalCount:3,sort:'newest',buckets:[{key:'2026-10',count:2,startIndex:0,startCursor:null},{key:'2025-01',count:1,startIndex:2,startCursor:'bucket'}]});
+      return Promise.resolve({items:[{id:params.has('cursor')?'wrong-generation':changed?'refreshed':'first',kind:'image'}],has_more:true,next_cursor:'next',listGeneration:generation});
+    });
+    render(<Artists endpoint="test" backRef={{current:null}} initialArtist={primary} onOpenViewer={vi.fn()}/>);
+    await screen.findByText('asset-first');
+    fireEvent.click(screen.getByText('seek'));
+    await screen.findByText('asset-refreshed');
+    expect(screen.queryByText('asset-wrong-generation')).toBeNull();
+    expect(screen.getByLabelText('자산 목록').getAttribute('data-toc')).toBe('3');
+  });
+
+  it('shows an empty video result without image covers and sends the filter to both reads', async () => {
+    const original=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path:string)=>path.includes('media_kind=videos')?Promise.resolve({items:[],has_more:false,next_cursor:null,filterVersion:1}):original(path));
+    render(<Artists endpoint="test" backRef={{current:null}} initialArtist={primary} onOpenViewer={vi.fn()}/>);
+    await screen.findByText('asset-haneul-1');
+    fireEvent.click(screen.getByRole('button',{name:/영상 0/}));
+    await screen.findByText('조건에 맞는 자산이 없습니다.');
+    expect(screen.queryByText('asset-haneul-1')).toBeNull();
+    expect(mocks.api.mock.calls.filter(([path])=>path.includes('media_kind=videos'))).toHaveLength(2);
+  });
+
+  it('keeps local artwork offline but an offline video scope has no image fallback', async () => {
+    const original=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path:string)=>path.startsWith('/v1/library/assets?')?Promise.reject(new Error('offline')):original(path));
+    render(<Artists endpoint="test" backRef={{current:null}} initialArtist={primary} onOpenViewer={vi.fn()}/>);
+    await screen.findByRole('alert');
+    expect(screen.getByText('asset-haneul-1')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:/영상 0/}));
+    await screen.findByText('조건에 맞는 자산이 없습니다.');
+    expect(screen.queryByText('asset-haneul-1')).toBeNull();
+  });
+
+  it('does not read artwork pages or TOCs in private mode', async () => {
+    localStorage.setItem('lakomics.mobile.privacyMode','1');
+    render(<Artists endpoint="test" backRef={{current:null}} initialArtist={primary} onOpenViewer={vi.fn()}/>);
+    await screen.findByRole('heading',{level:2,name:'하늘빛'});
+    expect(mocks.api.mock.calls.some(([path])=>path.startsWith('/v1/library/assets?'))).toBe(false);
+    expect(mocks.loadThumbnail).not.toHaveBeenCalled();
+  });
   it('starts on an initial artist detail and closes through the owner on Back', async () => {
     const close = vi.fn();
     const directRef: MutableRefObject<(() => boolean) | null> = {current: null};

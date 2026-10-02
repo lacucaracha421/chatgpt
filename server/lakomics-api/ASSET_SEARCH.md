@@ -38,9 +38,18 @@ production data changes were performed during implementation.
 - `GET /v1/albums/assets` accepts the same repeated `tag` and single `artist`,
   alongside its existing `libraryId`, `epoch`, `albumId` and media/TOC parameters.
   `GET /v1/library/characters/assets` accepts them alongside its existing `node`,
-  `revision`, `filter`, cursor and media parameters. Character order remains the
-  published order; `totalCount` uses the new predicates, `sourceCount` retains
-  its published meaning. These two routes do not accept `classification_id`.
+  `revision`, `filter`, cursor and media parameters. Character order defaults to
+  the published order (`sort=published`). Explicit `sort=newest|oldest` orders
+  the published membership by live `COALESCE(collected_at,created_at)` and id,
+  and supports `toc=1` + `utcOffsetMinutes` with the shared month TOC rules.
+  TOCs require an explicit date sort and reject any cursor, including an empty
+  one. Date cursors bind revision, node, filter, sort and search/media filters;
+  they cannot resume published-order pages. Date pages carry `listGeneration`;
+  TOCs and pages read membership, visibility, metadata and generation in one
+  transaction and support private conditional ETags. Hidden character members
+  participate in that generation even before the next PC publication.
+  `totalCount` uses the requested predicates, while `sourceCount` retains its
+  published meaning. These two routes do not accept `classification_id`.
 - Revisit date/creator routes retain their existing scope and parameter contract;
   use `/v1/library/assets?artist=...` for complete merged-artist search.
 - List pages and `/v1/library/list-generation` advertise `searchVersion:1`.

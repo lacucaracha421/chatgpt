@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 from starlette.concurrency import run_in_threadpool
 
 import asset_filters
+import asset_list_query
 import character_exclusions
 import character_review
 import similarity_review
@@ -127,7 +128,7 @@ def status_signal(db):
 
 
 def register_characters(app, get_db, require_auth, asset_item, asset_memberships,
-                        require_client=None, require_publisher=None):
+                        require_client=None, require_publisher=None, *, list_generation):
     reader = require_client or require_auth
     publisher = require_publisher or require_auth
     character_exclusions.register(app, get_db, reader, publisher)
@@ -286,18 +287,22 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
     def browse(request: Request, node: NodeID, revision: Revision, filter: Filter = "all",
                cursor: str | None = Query(default=None, max_length=16384),
                limit: int = Query(default=40, ge=1, le=100),
+               sort: Literal["published", "newest", "oldest"] = "published",
+               toc: int = Query(default=0, ge=0, le=1),
+               utc_offset_minutes: str = Query(default="0", alias="utcOffsetMinutes"),
                media_kind: asset_filters.MediaKind | None = Query(default=None, pattern="^(images|videos)$"),
                aspect_ratio: asset_filters.AspectRatio | None = Query(default=None, pattern="^(square|landscape|portrait)$"),
                duration_ms_min: int | None = Query(default=None, ge=0, le=asset_filters.BOUND_MAX),
                duration_ms_max: int | None = Query(default=None, ge=0, le=asset_filters.BOUND_MAX),
                tag: list[str] | None = Query(default=None),
                artist: str | None = Query(default=None),
-               authorization: str | None = Header(default=None)):
+               authorization: str | None = Header(default=None),
+               if_none_match: str | None = Header(default=None)):
         """One Character scope's Assets, with the shared media filters applied in SQL.
 
         Two different things are in play, and they are deliberately not symmetric.
 
-        **Membership and order are frozen.** The filter narrows the page; it never changes
+        **Membership and default order are frozen.** The filter narrows the page; it never changes
         which Assets the scope holds or the position each holds, so `sourceCount` stays the
         publication's own number — it counts the published scope, not this response. The
         cursor position is still a position in that frozen order, which is why a filtered
@@ -315,6 +320,9 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
         aspect or duration filter — and a stale stored value is never preferred over the
         live one. An Asset the current visibility path hides is absent from that join and
         so drops out of the page without touching the frozen membership.
+
+        Explicit newest/oldest mode orders that same membership by live collected/created
+        date and id. Its pages and optional month TOC share one read snapshot and generation.
         """
         reader(authorization)
         # The shipped read declared its parameters explicitly, so an unknown one was ignored
@@ -323,22 +331,41 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
         # filtered when it was not, so the parameter set is closed explicitly.
         if request.query_params.keys() - {"node", "revision", "filter", "cursor", "limit",
                                            "media_kind", "aspect_ratio", "tag", "artist",
-                                           "duration_ms_min", "duration_ms_max"}:
+                                           "duration_ms_min", "duration_ms_max", "sort", "toc",
+                                           "utcOffsetMinutes"}:
             raise HTTPException(422, "Invalid character scope request")
+        if toc and cursor is not None:
+            raise HTTPException(400, "TOC cannot be combined with a cursor")
+        if toc and sort == "published":
+            raise HTTPException(422, "Character TOC requires a date sort")
+        applied_offset = 0
+        if toc:
+            try:
+                applied_offset = asset_list_query.parse_utc_offset_minutes(utc_offset_minutes)
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
         filters = asset_filters.parse(media_kind, aspect_ratio, duration_ms_min, duration_ms_max, tag, artist)
         filter_clause, filter_params = asset_filters.filter_clause(filters)
         position = -1
+        after = None
         if cursor is not None:
             # The scope identity is the cursor's first three slots, so a cursor from another
             # revision, node or filter is rejected before any page is read.
-            parsed = asset_filters.decode_cursor(cursor, "character-assets", filters, 400,
+            date_order = sort != "published"
+            lead = [revision, node, filter] + ([sort] if date_order else [])
+            parsed = asset_filters.decode_cursor(cursor, "character-assets-date" if date_order else "character-assets", filters, 400,
                                                  "Invalid character cursor",
-                                                 lead=[revision, node, filter])
-            if len(parsed) != 4 or parsed[:3] != [revision, node, filter]:
+                                                 lead=lead)
+            if len(parsed) != (6 if date_order else 4) or parsed[:len(lead)] != lead:
                 raise HTTPException(400, "Invalid character cursor")
-            position = parsed[3]
-            if type(position) is not int or not 0 <= position <= asset_filters.BOUND_MAX:
-                raise HTTPException(400, "Invalid character cursor")
+            if date_order:
+                if not all(isinstance(value, str) and value for value in parsed[-2:]):
+                    raise HTTPException(400, "Invalid character cursor")
+                after = parsed[-2:]
+            else:
+                position = parsed[3]
+                if type(position) is not int or not 0 <= position <= asset_filters.BOUND_MAX:
+                    raise HTTPException(400, "Invalid character cursor")
         with get_db() as db:
             db.execute("BEGIN")
             current = state(db)
@@ -348,6 +375,42 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             scope = next((s for s in index["scopes"] if s["nodeId"] == node and s["filter"] == filter), None)
             if scope is None:
                 raise HTTPException(404, "Character scope not found")
+            if sort != "published":
+                hidden = [row[0] for row in db.execute(
+                    "SELECT asset_id FROM mobile_character_hidden_members WHERE node_id=? AND filter=? ORDER BY asset_id",
+                    [node, filter])]
+                generation = hashlib.sha256(encode([list_generation(db), revision, hidden]).encode()).hexdigest()
+                query = asset_list_query.AssetListQuery(
+                    "mobile_character_members AS m JOIN mobile_character_assets AS a ON a.id=m.asset_id "
+                    "JOIN visible_assets AS asset ON asset.id=m.asset_id",
+                    f"m.node_id=? AND m.filter=? AND asset.committed=1 AND {character_exclusions.VISIBLE_MEMBER} {filter_clause}",
+                    [node, filter] + filter_params, sort, prefer_id_lookup=True)
+                encode_date_cursor = lambda previous: asset_filters.encode_cursor(
+                    "character-assets-date", filters, [revision, node, filter, sort, *previous])
+                if toc:
+                    payload = query.toc(db, generation, encode_date_cursor, applied_offset)
+                else:
+                    sql, params = query.select(
+                        f"a.payload, asset.width, asset.height, asset.duration_ms, asset.created_at, "
+                        f"asset.collected_at, asset.id, {asset_list_query.SORT_AT} AS mobile_sort_at",
+                        after=after, limit=limit + 1)
+                    rows = db.execute(sql, params).fetchall()
+                    more = len(rows) > limit
+                    rows = rows[:limit]
+                    count_sql, count_params = query.select("COUNT(*)")
+                    total = db.execute(count_sql, count_params).fetchone()[0]
+                    items = []
+                    for row in rows:
+                        item = json.loads(row["payload"])
+                        item.update(asset_filters.technical_fields(row))
+                        item.update(collected_at=row["collected_at"], created_at=row["created_at"])
+                        items.append(item)
+                    payload = {"revision": revision, "filterVersion": asset_filters.FILTER_VERSION,
+                               "searchVersion": 1, "searchFilters": {"tag": list(filters.tags), "artist": filters.artist},
+                               "listGeneration": generation, "items": items, "totalCount": total,
+                               "sourceCount": scope["sourceCount"], "has_more": more,
+                               "next_cursor": encode_date_cursor((rows[-1]["mobile_sort_at"], rows[-1]["id"])) if more else None}
+                return asset_filters.search_response(payload, filters, if_none_match, [revision, node, filter, sort])
             # One statement selects the page, hides deleted Assets and reads the live
             # technical fields, so a page cannot show a dimension from one instant while
             # hiding from another, and metadata repair is visible to the filter itself.
