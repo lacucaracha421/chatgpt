@@ -136,7 +136,7 @@ export function CaseWork({item, revision, active, privacy, position, total, scor
   return <WorkZoomProvider workId={work.id} reset={reset}><article className="tablet-work" aria-label={label} aria-busy={waiting} inert={waiting || undefined}>
     <div className="tablet-work__frame">
       {shown.urls.hero && <HeroBand src={shown.urls.hero} manga={false} onReady={() => undefined}/>}
-      <WorkZoomStage stageRef={stage} className="work-stage tablet-work__stage" enabled={isObject || mode === 'flat'} {...swipe}>
+      <WorkZoomStage stageRef={stage} className="work-stage tablet-work__stage" enabled={isObject || mode === 'flat'} {...swipe} onEmptyClick={() => { if (mode === 'open') pick('case'); }}>
         {work.type === 'av' && !privacy && <WorkBackdrop src={data.front}/>}
         <WorkZoomObject>
         <div className="work-case-slot" style={isObject ? undefined : {...hidden, position: 'absolute', inset: 0}} inert={!isObject || undefined} aria-hidden={!isObject}>

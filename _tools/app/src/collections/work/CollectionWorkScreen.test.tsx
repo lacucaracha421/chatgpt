@@ -34,6 +34,31 @@ it.each(["av", "game", "movie"] as const)("uses only AV's shown case front for t
 function view(data = value(), actions = callbacks()) {
   return { actions, ...render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={data} pending={false} actions={actions} /></PrivacyProvider>) };
 }
+it('closes only an open case from empty stage layers, preserves closed rotation/zoom, and leaves case and controls working', () => {
+  const { container, actions } = view();
+  const object = screen.getByRole('group', { name: '케이스' });
+  const stage = container.querySelector('.work-stage')!;
+  const layer = container.querySelector('.work-case-slot')!;
+  const zoom = container.querySelector('.work-zoom-object')!;
+  fireEvent.keyDown(object, { key: 'ArrowRight' });
+  const angle = object.getAttribute('data-angle');
+  fireEvent.wheel(stage, { deltaY: -100 }); const scale = zoom.getAttribute('data-zoom');
+  for (const empty of [stage, layer, zoom]) fireEvent.click(empty);
+  expect(object).toHaveAttribute('aria-expanded', 'false'); expect(object).toHaveAttribute('data-angle', angle);
+  expect(zoom).toHaveAttribute('data-zoom', scale);
+  fireEvent.keyDown(object, { key: 'Enter' }); expect(object).toHaveAttribute('aria-expanded', 'true');
+  fireEvent.click(object.querySelector('.k-front')!); expect(object).toHaveAttribute('aria-expanded', 'true');
+  fireEvent.click(screen.getByRole('button', { name: '다음 작품' }));
+  expect(actions.onStep).toHaveBeenCalledWith(1); expect(object).toHaveAttribute('aria-expanded', 'true');
+  fireEvent.click(layer); expect(object).toHaveAttribute('aria-expanded', 'false');
+  expect(object).toHaveAttribute('data-angle', angle); expect(zoom).toHaveAttribute('data-zoom', scale);
+  const mouse = { pointerId: 7, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 };
+  fireEvent.pointerDown(object, mouse); fireEvent.pointerUp(object, mouse);
+  fireEvent.click(stage, { detail: 1 }); // Capture may retarget the synthetic click to the stage.
+  expect(object).toHaveAttribute('aria-expanded', 'true');
+  fireEvent.pointerDown(stage, mouse); fireEvent.pointerUp(stage, mouse); fireEvent.click(stage, { detail: 1 });
+  expect(object).toHaveAttribute('aria-expanded', 'false');
+});
 describe("merged work screen", () => {
   it("zooms smoothly with fractional wheel deltas, clamps, resets both pose and zoom, and leaves outside scrolling alone", () => {
     const first = value(); const actions = callbacks(); const { container, rerender } = view(first, actions);

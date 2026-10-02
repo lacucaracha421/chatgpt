@@ -166,13 +166,30 @@ export function moveMemoSection(doc: MemoDocument, id: string, direction: 'up' |
   const sections = memoSections(doc).filter(section => section.heading); const index = sections.findIndex(section => section.id === id);
   const target = index + (direction === 'up' ? -1 : 1);
   if (index < 0 || target < 0 || target >= sections.length) return doc;
+  return moveMemoSectionTo(doc, id, target);
+}
+/** Index is the final zero-based position among named sections; the untitled prefix stays put. */
+export function moveMemoSectionTo(doc: MemoDocument, id: string, index: number): MemoDocument {
+  const sections = memoSections(doc).filter(section => section.heading);
+  const from = sections.findIndex(section => section.id === id);
+  if (from < 0 || !Number.isInteger(index) || index < 0 || index >= sections.length || from === index) return doc;
   const starts = sections.map(section => doc.lines.findIndex(line => line.id === section.id));
-  const low = Math.min(index, target), high = Math.max(index, target);
-  const a = starts[low]!, b = starts[high]!, end = starts[high + 1] ?? doc.lines.length;
-  const right = doc.lines.slice(b, end);
-  if (!right[right.length - 1]!.ending) right[right.length - 1] = { ...right[right.length - 1]!, ending: eolOf(doc) };
-  const lines = [...doc.lines.slice(0, a), ...right, ...doc.lines.slice(a, b), ...doc.lines.slice(end)];
-  lines[lines.length - 1] = { ...lines[lines.length - 1]!, ending: doc.lines[doc.lines.length - 1]!.ending };
+  // parseMemo represents a terminal newline with an empty sentinel. It belongs to EOF.
+  const last = doc.lines[doc.lines.length - 1]!;
+  const sentinel = last.raw === '' && last.ending === '';
+  const end = doc.lines.length - (sentinel ? 1 : 0);
+  const blocks = starts.map((start, i) => doc.lines.slice(start, starts[i + 1] ?? end));
+  const [moved] = blocks.splice(from, 1); blocks.splice(index, 0, moved!);
+  const lines = [...doc.lines.slice(0, starts[0]), ...blocks.flat()];
+  // An unterminated final line cannot sit between headings. Transfer the existing
+  // boundary delimiter to it, keeping all delimiter bytes and the EOF convention.
+  if (!sentinel && !last.ending && lines[lines.length - 1]!.id !== last.id) {
+    const final = lines[lines.length - 1]!;
+    const relocated = lines.findIndex(line => line.id === last.id);
+    lines[relocated] = { ...last, ending: final.ending };
+    lines[lines.length - 1] = { ...final, ending: '' };
+  }
+  if (sentinel) lines.push(last);
   return { ...doc, lines };
 }
 export function switchMode(doc: MemoDocument, mode: MemoMode): MemoDocument {

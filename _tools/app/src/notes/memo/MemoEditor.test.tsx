@@ -3,19 +3,113 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
 import { MEMO_HOLD_MS, MemoEditor, type MemoEditorProps } from './MemoEditor';
+import { MEMO_DRAG_HOLD_MS } from './useMemoSectionDrag';
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 function surface(body: string, options: Partial<MemoEditorProps> = {}) {
   const changes = vi.fn();
   function Harness() {
     const [value, setValue] = useState(body);
-    return <><div data-testid="body">{value}</div><MemoEditor noteId="one" body={value} {...options} onChange={(next, structural) => { changes(next, structural); setValue(next); }}/></>;
+    return <div data-testid="memo-pane" style={{ overflowY: 'auto' }}><div data-testid="body">{value}</div><MemoEditor noteId="one" body={value} {...options} onChange={(next, structural) => { changes(next, structural); setValue(next); }}/></div>;
   }
   render(<Harness/>); return changes;
 }
 const rows = () => screen.getAllByRole('textbox', { name: '메모 본문' }) as HTMLTextAreaElement[];
 const texts = () => rows().map(row => row.value);
 const body = () => screen.getByTestId('body').textContent;
+function dragRects() {
+  const sections = [...document.querySelectorAll<HTMLElement>('[data-memo-section]')];
+  sections.forEach((section, index) => vi.spyOn(section, 'getBoundingClientRect').mockReturnValue({
+    top: 100 + index * 120, bottom: 200 + index * 120, height: 100, left: 0, right: 500, width: 500, x: 0, y: 100 + index * 120, toJSON: () => ({}),
+  }));
+  return sections.map(section => section.querySelector<HTMLElement>('.memo-section-head')!);
+}
+const mouse = { pointerType: 'mouse', pointerId: 1, button: 0, clientX: 20, clientY: 110 };
+it.each(['text', 'todo'] as const)('reorders %s sections after 4px, previews without saves, and persists once on drop', mode => {
+  const line = mode === 'todo' ? '- [ ] ' : '';
+  const changes = surface(`${line}top\n## A\n${line}a\n## B\n${line}b\n## C\n${line}c`);
+  const heads = dragRects(); const untouched = rows()[1]!;
+  fireEvent.pointerDown(heads[0]!, mouse);
+  fireEvent.pointerMove(window, { ...mouse, clientY: 113 });
+  expect(document.querySelector('.memo-section--dragging')).toBeNull();
+  fireEvent.pointerMove(window, { ...mouse, clientY: 114 });
+  expect(heads[0]!.closest('section')).toHaveClass('memo-section--dragging');
+  fireEvent.pointerMove(window, { ...mouse, clientY: 390 });
+  expect(document.querySelector('.memo-section-drop')).toBeInTheDocument();
+  expect(heads[1]!.closest('section')!.style.transform).toBe('translateY(-120px)');
+  expect(changes).not.toHaveBeenCalled();
+  fireEvent.pointerUp(window, { ...mouse, clientY: 390 });
+  expect(changes).toHaveBeenCalledExactlyOnceWith(`${line}top\n## B\n${line}b\n## C\n${line}c\n## A\n${line}a`, true);
+  expect(screen.getAllByRole('heading').map(head => head.textContent)).toEqual(['B', 'C', 'A']);
+  expect(rows()[3]).toBe(untouched);
+  expect(document.querySelector('.memo-section-drop')).toBeNull();
+});
+it('leaves clicks on copy and the section menu working and suppresses the click after dragging a control', async () => {
+  const copyText = vi.fn(async () => {});
+  const changes = surface('## A\na\n## B\nb', { copyText });
+  const heads = dragRects();
+  await userEvent.click(within(heads[0]!).getByRole('button', { name: '복사' }));
+  expect(copyText).toHaveBeenCalledWith('a');
+  await userEvent.click(screen.getByRole('button', { name: 'A 더보기' }));
+  expect(await screen.findByRole('menuitem', { name: '아래로' })).toBeInTheDocument();
+  await userEvent.keyboard('{Escape}');
+  const button = within(heads[0]!).getByRole('button', { name: '복사' });
+  fireEvent.pointerDown(button, mouse);
+  fireEvent.pointerMove(window, { ...mouse, clientY: 280 });
+  fireEvent.pointerUp(window, { ...mouse, clientY: 280 });
+  fireEvent.click(button, { detail: 1 });
+  expect(copyText).toHaveBeenCalledTimes(1);
+  expect(changes).toHaveBeenCalledTimes(1);
+  await userEvent.click(within(screen.getByLabelText('메모 섹션')).getByRole('button', { name: 'B' }));
+  expect(texts()).toEqual(['b']);
+});
+it('cancels an active drag with Escape or pointercancel without saving', () => {
+  const changes = surface('## A\na\n## B\nb'); const heads = dragRects();
+  for (const cancel of ['escape', 'pointercancel']) {
+    fireEvent.pointerDown(heads[0]!, mouse);
+    fireEvent.pointerMove(window, { ...mouse, clientY: 280 });
+    if (cancel === 'escape') fireEvent.keyDown(window, { key: 'Escape' });
+    else fireEvent.pointerCancel(window, mouse);
+    fireEvent.pointerUp(window, mouse);
+    expect(document.querySelector('.memo-section--dragging')).toBeNull();
+  }
+  expect(changes).not.toHaveBeenCalled(); expect(body()).toBe('## A\na\n## B\nb');
+});
+it('disables dragging under a section filter and for read-only notes', () => {
+  const changes = surface('## A\na\n## B\nb');
+  fireEvent.click(within(screen.getByLabelText('메모 섹션')).getByRole('button', { name: 'A' }));
+  const head = screen.getByRole('heading', { name: 'A' }).parentElement!;
+  fireEvent.pointerDown(head, mouse); fireEvent.pointerMove(window, { ...mouse, clientY: 400 }); fireEvent.pointerUp(window, mouse);
+  expect(head).not.toHaveClass('memo-section-head--draggable'); expect(changes).not.toHaveBeenCalled();
+  cleanup(); surface('## A\na\n## B\nb', { readOnly: true });
+  expect(document.querySelector('.memo-section-head--draggable')).toBeNull();
+});
+it('keeps touch taps and vertical scrolling, starts at 250ms, and scrolls near the pane edge during drag', () => {
+  vi.useFakeTimers();
+  const changes = surface('## A\na\n## B\nb\n## C\nc', { touch: true });
+  const heads = dragRects(); const pane = screen.getByTestId('memo-pane');
+  Object.defineProperties(pane, { scrollHeight: { value: 2000 }, clientHeight: { value: 400 } });
+  vi.spyOn(pane, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 400, height: 400 } as DOMRect);
+  pane.scrollTop = 100;
+  const touch = { ...mouse, pointerType: 'touch' };
+  fireEvent.pointerDown(heads[0]!, touch);
+  act(() => vi.advanceTimersByTime(100)); fireEvent.pointerUp(window, touch);
+  act(() => vi.advanceTimersByTime(200)); expect(changes).not.toHaveBeenCalled();
+  fireEvent.pointerDown(heads[0]!, touch);
+  fireEvent.pointerMove(window, { ...touch, clientY: 80 });
+  expect(pane.scrollTop).toBe(130);
+  act(() => vi.advanceTimersByTime(300)); fireEvent.pointerUp(window, touch);
+  expect(document.querySelector('.memo-section--dragging')).toBeNull(); expect(changes).not.toHaveBeenCalled();
+  fireEvent.pointerDown(heads[0]!, touch);
+  act(() => vi.advanceTimersByTime(MEMO_DRAG_HOLD_MS - 1));
+  expect(document.querySelector('.memo-section--dragging')).toBeNull();
+  act(() => vi.advanceTimersByTime(1)); expect(heads[0]!.closest('section')).toHaveClass('memo-section--dragging');
+  fireEvent.pointerMove(window, { ...touch, clientY: 390 });
+  act(() => vi.advanceTimersByTime(32)); expect(pane.scrollTop).toBeGreaterThan(130);
+  fireEvent.pointerUp(window, { ...touch, clientY: 390 });
+  expect(changes).toHaveBeenCalledTimes(1);
+  expect(screen.getAllByRole('heading').map(head => head.textContent)).toEqual(['B', 'C', 'A']);
+});
 it('focuses at the end on open, splits Enter/Shift+Enter and preserves other DOM nodes', () => {
   surface('abc\nlast');
   expect(rows()[1]).toHaveFocus(); expect(rows()[1]!.selectionStart).toBe(4);

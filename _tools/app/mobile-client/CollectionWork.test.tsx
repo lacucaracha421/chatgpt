@@ -11,6 +11,52 @@ const volumes = [1, 2].map(n => sharedVolume({id: `v${n}`, volumeNumber: n, edit
 const manga: CollectionDetail = {id: 'manga', name: '만화', type: 'manga', showcase: false, volumes, artworks: []};
 const props = {item: manga, revision: 'r1', active: true, privacy: false, volumes, owned: 1, latestKorean: 2, onEnlarge: vi.fn(), info: null};
 
+it('taps empty stage to close an open case, preserves a closed pose/zoom, and leaves controls and case taps working', () => {
+  artwork.urls = {};
+  const item: CollectionDetail = {...manga, id: 'game', type: 'game'};
+  const onStep = vi.fn();
+  const view = render(<CaseWork item={item} revision="r1" active privacy={false} position={1} total={2} score={() => null} onStep={onStep} info={() => null}/>);
+  const object = screen.getByRole('group', {name: '케이스'});
+  const stage = view.container.querySelector('.work-stage')!;
+  const slot = view.container.querySelector('.work-case-slot')!;
+  const zoom = view.container.querySelector('.work-zoom-object')!;
+  const touch = {pointerType: 'touch', pointerId: 1, button: 0, clientX: 100, clientY: 100};
+  const tap = (target: Element) => {fireEvent.pointerDown(target, touch); fireEvent.pointerUp(target, touch); fireEvent.click(target, {detail: 1});};
+  fireEvent.keyDown(object, {key: 'ArrowRight'}); const angle = object.getAttribute('data-angle');
+  fireEvent.wheel(stage, {deltaY: -100}); const scale = zoom.getAttribute('data-zoom');
+  tap(slot); expect(object.getAttribute('aria-expanded')).toBe('false');
+  expect(object.getAttribute('data-angle')).toBe(angle); expect(zoom.getAttribute('data-zoom')).toBe(scale);
+  tap(object); expect(object.getAttribute('aria-expanded')).toBe('true');
+  tap(screen.getByRole('button', {name: '다음 작품'})); expect(onStep).toHaveBeenCalledWith(1);
+  expect(object.getAttribute('aria-expanded')).toBe('true');
+  tap(slot); expect(object.getAttribute('aria-expanded')).toBe('false');
+  expect(object.getAttribute('data-angle')).toBe(angle); expect(zoom.getAttribute('data-zoom')).toBe(scale);
+  tap(object); expect(object.getAttribute('aria-expanded')).toBe('true');
+  tap(object); expect(object.getAttribute('aria-expanded')).toBe('false');
+});
+
+it('does not close the open case after an empty-stage swipe, pinch or vertical scroll', () => {
+  artwork.urls = {};
+  const item: CollectionDetail = {...manga, id: 'game', type: 'game'};
+  const onStep = vi.fn();
+  const view = render(<div data-testid="scroll" style={{overflowY: 'auto'}}><CaseWork item={item} revision="r1" active privacy={false} position={1} total={2} score={() => null} onStep={onStep} info={() => null}/></div>);
+  const pane = screen.getByTestId('scroll');
+  Object.defineProperties(pane, {scrollHeight: {value: 2000}, clientHeight: {value: 800}}); pane.scrollTop = 100;
+  const object = screen.getByRole('group', {name: '케이스'}); const stage = view.container.querySelector('.work-stage')!;
+  fireEvent.keyDown(object, {key: 'Enter'});
+  const touch = {pointerType: 'touch', pointerId: 1, button: 0, clientX: 200, clientY: 200};
+  fireEvent.pointerDown(stage, touch); fireEvent.pointerMove(stage, {...touch, clientX: 100}); fireEvent.pointerUp(stage, {...touch, clientX: 100});
+  fireEvent.click(stage, {detail: 1}); expect(onStep).toHaveBeenCalledExactlyOnceWith(1); expect(object.getAttribute('aria-expanded')).toBe('true');
+  fireEvent.pointerDown(stage, touch); fireEvent.pointerMove(stage, {...touch, clientY: 150}); fireEvent.pointerUp(stage, {...touch, clientY: 150});
+  fireEvent.click(stage, {detail: 1}); expect(pane.scrollTop).toBe(150); expect(object.getAttribute('aria-expanded')).toBe('true');
+  fireEvent.pointerDown(stage, touch); fireEvent.pointerDown(stage, {...touch, pointerId: 2, clientX: 300});
+  fireEvent.pointerMove(stage, {...touch, pointerId: 2, clientX: 400});
+  fireEvent.pointerUp(stage, {...touch, pointerId: 2}); fireEvent.pointerUp(stage, touch); fireEvent.click(stage, {detail: 1});
+  expect(object.getAttribute('aria-expanded')).toBe('true'); expect(onStep).toHaveBeenCalledTimes(1);
+  fireEvent.pointerDown(stage, touch); fireEvent.pointerUp(stage, touch); fireEvent.click(stage, {detail: 1});
+  expect(object.getAttribute('aria-expanded')).toBe('false');
+});
+
 it.each(['av', 'game', 'movie'] as const)('uses only the AV jacket front as a backdrop (%s) and removes it in privacy mode', async type => {
   artwork.urls = {cover: '/front'};
   const item: CollectionDetail = {...manga, id: type, type, selectedWorkArtworkId: 'cover'};

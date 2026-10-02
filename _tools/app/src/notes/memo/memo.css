@@ -2,7 +2,19 @@
 .notes-title-row .notes-title { flex: 1; min-width: 0; padding-bottom: 0; }
 .notes-title-row { margin-bottom: 24px; max-width: 720px; }
 .notes-title-row .ui-segmented { flex-shrink: 0; }
-.memo-editor { max-width: 720px; padding: 16px 0 32px; }
+.memo-editor { position: relative; max-width: 720px; padding: 16px 0 32px; }
+.memo-editor--dragging { user-select: none; }
+.memo-editor--dragging .memo-section { transition: transform 140ms var(--ease-standard); }
+.memo-editor--dragging .memo-section--dragging { position: relative; z-index: 1; transition: none; opacity: .85; background: var(--color-surface); box-shadow: var(--shadow-floating); }
+.memo-section-head--draggable { position: relative; cursor: grab; user-select: none; }
+.memo-section--dragging .memo-section-head { cursor: grabbing; }
+.memo-section-grip { position: absolute; left: -16px; color: var(--color-faint); opacity: 0; transition: opacity 90ms var(--ease-standard); }
+.memo-section-head:hover .memo-section-grip, .memo-section-head:focus-within .memo-section-grip { opacity: 1; }
+.memo-section-drop { position: absolute; left: 0; right: 0; height: 2px; background: var(--color-accent); pointer-events: none; }
+/* As on the work stage, this small touch handle scrolls manually before the hold. */
+.memo-editor--touch .memo-section-head--draggable { touch-action: none; -webkit-touch-callout: none; min-height: 44px; }
+.memo-editor--touch .memo-section-grip { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .memo-editor--dragging .memo-section, .memo-section-grip { transition: none; } }
 .memo-section + .memo-section { margin-top: 24px; }
 .memo-section-head { display: flex; align-items: center; gap: 8px; min-height: 36px; margin-bottom: 4px; border-bottom: 1px solid var(--color-border); }
 .memo-section-head h2 { margin: 0; font-size: var(--type-body, 15px); font-weight: 600; color: var(--color-text); }

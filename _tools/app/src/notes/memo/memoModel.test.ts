@@ -1,7 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { appendToSection, deleteMemoSection, editItem, joinItem, makeSection, memoBody, memoItems, memoMode, memoSections, moveItem, moveMemoSection, parseMemo, pasteItems, removeItem, renameMemoSection, sectionCopy, splitItem, switchMode, toggleItem, TOP_SECTION, unmakeSection } from './memoModel';
+import { appendToSection, deleteMemoSection, editItem, joinItem, makeSection, memoBody, memoItems, memoMode, memoSections, moveItem, moveMemoSection, moveMemoSectionTo, parseMemo, pasteItems, removeItem, renameMemoSection, sectionCopy, splitItem, switchMode, toggleItem, TOP_SECTION, unmakeSection } from './memoModel';
 
 const item = (body: string, index = 0) => memoItems(parseMemo(body))[index]!;
+describe('moveMemoSectionTo', () => {
+  it('moves whole named blocks to a final index, retaining exact text, mixed endings, IDs and the top prefix', () => {
+    const prefix = 'top  \r\n\r';
+    const a = '## Same\r\n  a \n\n';
+    const b = '### B\r```\n## not a section\r\n```\n';
+    const c = '## Same\n* [X] c\r\n';
+    const doc = parseMemo(prefix + a + b + c);
+    const named = memoSections(doc).filter(section => section.heading);
+    const next = moveMemoSectionTo(doc, named[0]!.id, 2);
+    expect(memoBody(next)).toBe(prefix + b + c + a);
+    expect(next.nextId).toBe(doc.nextId);
+    for (const line of next.lines) expect(line).toBe(doc.lines.find(old => old.id === line.id));
+    expect(memoBody(moveMemoSectionTo(next, named[0]!.id, 0))).toBe(memoBody(doc));
+    expect(memoBody(moveMemoSectionTo(doc, named[2]!.id, 0))).toBe(prefix + c + a + b);
+  });
+  it('preserves unterminated EOF by transferring the existing boundary delimiter, without normalizing mixed EOLs', () => {
+    const doc = parseMemo('top\r## A\r\na\r## B\nb\r\n## C\rc');
+    const next = moveMemoSectionTo(doc, memoSections(doc)[3]!.id, 0);
+    expect(memoBody(next)).toBe('top\r## C\rc\r\n## A\r\na\r## B\nb');
+    expect(next.lines.map(line => line.ending).sort()).toEqual(doc.lines.map(line => line.ending).sort());
+    expect(parseMemo(memoBody(next)).lines.map(line => line.raw)).toEqual(next.lines.map(line => line.raw));
+    expect(memoSections(next).map(section => section.title)).toEqual([null, 'C', 'A', 'B']);
+  });
+  it('leaves invalid IDs, the untitled part, unchanged positions and invalid indexes alone', () => {
+    const doc = parseMemo('top\n## A\na\n## B\nb');
+    const id = memoSections(doc)[1]!.id;
+    for (const index of [-1, 2, 0.5, NaN, Infinity]) expect(moveMemoSectionTo(doc, id, index)).toBe(doc);
+    expect(moveMemoSectionTo(doc, id, 0)).toBe(doc);
+    expect(moveMemoSectionTo(doc, TOP_SECTION, 1)).toBe(doc);
+    expect(moveMemoSectionTo(doc, 'missing', 1)).toBe(doc);
+  });
+});
 describe('memo mode and lossless parsing', () => {
   it.each([
     ['', 'text'], ['\n \n## 제목', 'text'], ['- [ ]', 'todo'], ['## 오늘\r\n* [X] 끝\r\n+ [ ] 시작\r\n', 'todo'],

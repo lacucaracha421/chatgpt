@@ -123,6 +123,30 @@ it("opens with the caret at the last row end and preserves point-to-caret helper
   }finally{Object.defineProperty(document,"caretPositionFromPoint",{configurable:true,value:original});}
 });
 
+it('undoes a section drag separately from typing, restores exact body order and redoes the move', async () => {
+  const original = 'top\r\n## A\r\na\r\n## B\r\nb';
+  const fake = backend([base('note', { title: 'Reorder', body: original })]);
+  surface(new NotesStore(fake.request));
+  await userEvent.click(await screen.findByRole('button', { name: /Reorder/ }));
+  const area = screen.getAllByRole('textbox', { name: '메모 본문' })[1]!;
+  fireEvent.change(area, { target: { value: 'edited' } });
+  const sections = [...document.querySelectorAll<HTMLElement>('[data-memo-section]')];
+  sections.forEach((section, index) => vi.spyOn(section, 'getBoundingClientRect').mockReturnValue({ top: index * 120, height: 100 } as DOMRect));
+  const head = sections[0]!.querySelector('.memo-section-head')!;
+  const mouse = { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 10, clientY: 10 };
+  fireEvent.pointerDown(head, mouse); fireEvent.pointerMove(window, { ...mouse, clientY: 170 }); fireEvent.pointerUp(window, { ...mouse, clientY: 170 });
+  const titles = () => [...document.querySelectorAll('.memo-section-head h2')].map(head => head.textContent);
+  expect(titles()).toEqual(['B', 'A']);
+  await userEvent.click(screen.getByRole('button', { name: '되돌리기' }));
+  expect(titles()).toEqual(['A', 'B']);
+  expect(screen.getAllByRole('textbox', { name: '메모 본문' }).map(field => (field as HTMLTextAreaElement).value)).toEqual(['top', 'edited', 'b']);
+  await userEvent.click(screen.getByRole('button', { name: '되돌리기' }));
+  expect(screen.getAllByRole('textbox', { name: '메모 본문' }).map(field => (field as HTMLTextAreaElement).value)).toEqual(['top', 'a', 'b']);
+  fireEvent.keyDown(area, { key: 'z', ctrlKey: true, shiftKey: true });
+  fireEvent.keyDown(area, { key: 'z', ctrlKey: true, shiftKey: true });
+  expect(titles()).toEqual(['B', 'A']);
+});
+
 it("undoes and redoes title and body edits per open note", async () => {
   const fake = backend([base("note", { title: "원래 제목", body: "원래 본문" }), base("other", { body: "다른 본문" })]);
   const store = new NotesStore(fake.request); surface(store);

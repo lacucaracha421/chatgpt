@@ -115,7 +115,7 @@ function WorkSurface({ data, privacy, info, reset, actions, onReady }: { data: C
   return <>
     {heroSrc && <HeroBand src={heroSrc} manga={Boolean(data.manga)} onReady={() => ready("hero")} />}
     {data.manga ? <><MangaStage manga={data.manga} privacy={privacy} title={data.collection.name} author={data.collection.author} frontReset={reset} onPick={id => actions.onPickVolume?.(id)} onReady={() => ready("object")} /><MangaBookcase manga={data.manga} privacy={privacy} onPick={id => actions.onPickVolume?.(id)} onEnlarge={actions.onEnlargeManga} /></> : <>
-    <WorkZoomStage stageRef={stage} className="work-stage" enabled={isObject || mode === "flat"}>
+    <WorkZoomStage stageRef={stage} className="work-stage" enabled={isObject || mode === "flat"} onEmptyClick={() => { if (mode === "open") pick("case"); }}>
       <WorkZoomObject>
       <div style={isObject ? undefined : { position: "absolute", inset: 0, visibility: "hidden", pointerEvents: "none" }} className="work-case-slot" inert={!isObject} aria-hidden={!isObject}>
         <CollectionCase data={caseData} large stageBox={stageBox} open={mode === "open"} onOpenChange={open => pick(open ? "open" : "case")} frontReset={reset}

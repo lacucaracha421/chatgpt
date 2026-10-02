@@ -18,7 +18,9 @@ export function WorkZoomObject({ children }: { children: ReactNode }) {
   return <div className="work-zoom-object" data-zoom={zoom} style={{ "--work-zoom": zoom } as CSSProperties}>{children}</div>;
 }
 
-export function WorkZoomStage({ enabled = true, stageRef, children, ...props }: HTMLAttributes<HTMLDivElement> & { enabled?: boolean; stageRef?: Ref<HTMLDivElement>; children: ReactNode }) {
+const isEmptyStage = (target: EventTarget | null) => target instanceof Element && !target.closest('.kase,.manga-bigbook,.work-flat-slot,.work-art,button,a,input,textarea,select,[role="button"]');
+
+export function WorkZoomStage({ enabled = true, stageRef, onEmptyClick, children, ...props }: HTMLAttributes<HTMLDivElement> & { enabled?: boolean; stageRef?: Ref<HTMLDivElement>; onEmptyClick?: () => void; children: ReactNode }) {
   const model = useContext(ZoomContext);
   const node = useRef<HTMLDivElement | null>(null);
   const latest = useRef(model); latest.current = model;
@@ -26,11 +28,12 @@ export function WorkZoomStage({ enabled = true, stageRef, children, ...props }: 
   const distance = useRef<number | null>(null);
   const pinched = useRef(false);
   const suppressClick = useRef(false);
+  const clickStart = useRef<{ pointer: number; x: number; y: number; empty: boolean } | null>(null);
   // The stage takes every touch (touch-action: none) so pinches reach it; a one-finger vertical drag still scrolls the page by hand.
   const scroll = useRef<{ pointer: number; x: number; y: number; target: HTMLElement | null; active: boolean } | null>(null);
   useLayoutEffect(() => {
     if (pinched.current && model) model.blocked.current = false;
-    touches.current.clear(); distance.current = null; pinched.current = false; suppressClick.current = false; scroll.current = null;
+    touches.current.clear(); distance.current = null; pinched.current = false; suppressClick.current = false; scroll.current = null; clickStart.current = null;
     return () => { if (pinched.current && latest.current) latest.current.blocked.current = false; };
   }, [model?.session, enabled]);
   useEffect(() => {
@@ -63,6 +66,7 @@ export function WorkZoomStage({ enabled = true, stageRef, children, ...props }: 
   }} data-zoom-enabled={enabled || undefined}
     onPointerDownCapture={event => {
       if (!touches.current.size) suppressClick.current = false;
+      clickStart.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, empty: isEmptyStage(event.target) };
       if (!enabled || !model || event.pointerType !== "touch") return;
       touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (touches.current.size === 1) scroll.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, target: scrollParent(event.currentTarget), active: false };
@@ -73,6 +77,8 @@ export function WorkZoomStage({ enabled = true, stageRef, children, ...props }: 
       event.currentTarget.setPointerCapture?.(event.pointerId);
     }}
     onPointerMoveCapture={event => {
+      const start = clickStart.current;
+      if (start?.pointer === event.pointerId && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) suppressClick.current = true;
       if (!touches.current.has(event.pointerId)) return;
       const drag = scroll.current;
       if (drag && drag.pointer === event.pointerId && !pinched.current && drag.target) {
@@ -87,11 +93,16 @@ export function WorkZoomStage({ enabled = true, stageRef, children, ...props }: 
       if (pinched.current) event.preventDefault();
     }}
     onPointerUpCapture={event => { touches.current.delete(event.pointerId); distance.current = span(); }}
-    onPointerCancelCapture={event => { touches.current.delete(event.pointerId); distance.current = span(); }}
+    onPointerCancelCapture={event => { suppressClick.current = true; touches.current.delete(event.pointerId); distance.current = span(); }}
     onPointerDown={event => { if (pinched.current || scroll.current?.active) event.stopPropagation(); else props.onPointerDown?.(event); }}
     onPointerUp={event => { if (pinched.current || scroll.current?.active) event.stopPropagation(); else props.onPointerUp?.(event); finish(); }}
     onPointerCancel={event => { if (pinched.current || scroll.current?.active) event.stopPropagation(); props.onPointerCancel?.(event); finish(); }}
     onClickCapture={event => { if (suppressClick.current && event.detail > 0) { event.preventDefault(); event.stopPropagation(); } else props.onClickCapture?.(event); }}
+    onClick={event => {
+      props.onClick?.(event);
+      if (!event.defaultPrevented && !suppressClick.current && isEmptyStage(event.target) && (clickStart.current?.empty ?? true)) onEmptyClick?.();
+      clickStart.current = null;
+    }}
   >{children}</div>;
 }
 

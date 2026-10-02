@@ -4,7 +4,8 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Button } from '../../shared/ui/Button';
 import { Dialog } from '../../shared/ui/Dialog';
 import { Menu, type MenuItem } from '../../shared/ui/Menu';
-import { appendToSection, deleteMemoSection, editItem, joinItem, makeSection, memoBody, memoMode, memoSections, moveItem, moveMemoSection, parseMemo, pasteItems, renameMemoSection, sectionCopy, splitItem, toggleItem, unmakeSection, type MemoDocument, type MemoItem } from './memoModel';
+import { appendToSection, deleteMemoSection, editItem, joinItem, makeSection, memoBody, memoMode, memoSections, moveItem, moveMemoSection, moveMemoSectionTo, parseMemo, pasteItems, renameMemoSection, sectionCopy, splitItem, toggleItem, unmakeSection, type MemoDocument, type MemoItem } from './memoModel';
+import { useMemoSectionDrag } from './useMemoSectionDrag';
 import './memo.css';
 
 export type MemoEditorProps = {
@@ -84,6 +85,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
   const renamingComposition = useRef(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [moveMenu, setMoveMenu] = useState<string | null>(null);
+  const [sectionMenu, setSectionMenu] = useState<string | null>(null);
   const [status, setStatus] = useState<{ id: string; text: string } | null>(null);
   const statusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const root = useRef<HTMLDivElement>(null);
@@ -97,7 +99,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
     cancelHold(); clearTimeout(statusTimer.current); focusTarget.current = null;
     revealTarget.current = null; renamingComposition.current = false;
     documentRef.current = { id: noteId, doc: parseMemo(body) };
-    setFilter(null); setDoneOpen(new Set()); setRename(null); setDeleteTarget(null); setMoveMenu(null); setStatus(null);
+    setFilter(null); setDoneOpen(new Set()); setRename(null); setDeleteTarget(null); setMoveMenu(null); setSectionMenu(null); setStatus(null);
   } else if (memoBody(documentRef.current.doc) !== body) {
     documentRef.current.doc = parseMemo(body, documentRef.current.doc);
   }
@@ -108,6 +110,8 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
   const activeFilter = named.some(section => section.id === filter) ? filter : null;
   const shown = sections.filter(section => (!activeFilter || section.id === activeFilter) && (section.heading || section.items.length));
   const visible = shown.flatMap(section => mode === 'todo' ? [...tasks(section.items).filter(item => !item.done), ...(doneOpen.has(section.id) ? tasks(section.items).filter(item => item.done) : [])] : section.items);
+  const canDrag = !readOnly && !activeFilter && named.length > 1 && !rename;
+  const sectionDrag = useMemoSectionDrag(root, canDrag, `${noteId}:${body}`, (id, index) => apply(moveMemoSectionTo(documentRef.current.doc, id, index)));
   useLayoutEffect(() => {
     if (!revealItem) return;
     const item = sections.flatMap(section => section.items).find(item => item.id === doc.lines[revealItem.line]?.id);
@@ -197,7 +201,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
       {!readOnly && <Menu label="다른 섹션으로 옮기기" trigger={<ArrowsRightLeftIcon aria-hidden="true"/>} triggerClassName={`memo-move${touch ? ' memo-move--touch' : ''}`} open={moveMenu === item.id} onOpenChange={open => setMoveMenu(open ? item.id : null)} content={moveContent}/>}
     </div>;
   }
-  return <div ref={root} tabIndex={-1} className={`memo-editor${touch ? ' memo-editor--touch' : ''}`}>
+  return <div ref={root} tabIndex={-1} className={`memo-editor${touch ? ' memo-editor--touch' : ''}${sectionDrag.dragged ? ' memo-editor--dragging' : ''}`} onPointerDownCapture={sectionDrag.resetClick} onClickCapture={sectionDrag.clickCapture}>
     {named.length >= 2 && <div className="memo-chips" aria-label="메모 섹션">
       <button type="button" aria-label={mode === 'todo' ? `전체 ${sections.reduce((total, section) => total + tasks(section.items).filter(item => !item.done).length, 0)}` : '전체'} aria-pressed={!activeFilter} onClick={() => setFilter(null)}>전체{mode === 'todo' && <small> {sections.reduce((total, section) => total + tasks(section.items).filter(item => !item.done).length, 0)}</small>}</button>
       {named.map(section => <button key={section.id} type="button" aria-label={`${section.title || '제목 없음'}${mode === 'todo' ? ` ${tasks(section.items).filter(item => !item.done).length}` : ''}`} aria-pressed={activeFilter === section.id} onClick={() => setFilter(section.id)}>{section.title || '제목 없음'}{mode === 'todo' && <small> {tasks(section.items).filter(item => !item.done).length}</small>}</button>)}
@@ -212,8 +216,18 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
         { id: 'unmake', label: '섹션 풀기', onSelect: () => apply(unmakeSection(doc, section.id, mode)) },
         { id: 'delete', label: '섹션 삭제', destructive: true, onSelect: () => setDeleteTarget(section.id) },
       ];
-      return <section className="memo-section" key={`${noteId}:${section.id}`}>
-        {section.heading && <div className="memo-section-head">
+      return <section className={`memo-section${sectionDrag.dragged === section.id ? ' memo-section--dragging' : ''}`} key={`${noteId}:${section.id}`}
+        data-memo-section={section.heading ? section.id : undefined} style={sectionDrag.style(section.id)}>
+        {section.heading && <div className={`memo-section-head${canDrag ? ' memo-section-head--draggable' : ''}`}
+          onPointerDownCapture={event => {
+            sectionDrag.pointerDown(event, section.id);
+            // Radix normally opens on pointer-down. Defer this row's menu to click,
+            // allowing its button to participate in the same threshold/hold gesture.
+            if ((event.target as Element).closest('.ui-menu__trigger')) event.stopPropagation();
+          }}
+          onClick={event => { if ((event.target as Element).closest('.ui-menu__trigger')) setSectionMenu(current => current === section.id ? null : section.id); }}
+          onContextMenu={event => { if (sectionDrag.dragged) event.preventDefault(); }}>
+          {canDrag && <span className="memo-section-grip" aria-hidden="true">⠿</span>}
           {rename === section.id && !readOnly ? <input className="memo-rename" aria-label="섹션 이름" autoFocus defaultValue={section.title ?? ''}
             onCompositionStart={() => { renamingComposition.current = true; }}
             onCompositionEnd={event => {
@@ -229,7 +243,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
           {!readOnly && <><Button variant="quiet" onClick={async () => {
             try { await copyText(sectionCopy(section, mode)); if (documentRef.current.id !== noteId) return; setStatus({ id: section.id, text: '복사됨' }); } catch { if (documentRef.current.id !== noteId) return; setStatus({ id: section.id, text: '복사하지 못했습니다.' }); }
             clearTimeout(statusTimer.current); statusTimer.current = setTimeout(() => setStatus(null), 2200);
-          }}>복사</Button><Menu label={`${section.title || '제목 없음'} 더보기`} items={sectionActions} trigger="⋯"/>{status?.id === section.id && <span className="memo-status" role="status">{status.text}</span>}</>}
+          }}>복사</Button><Menu label={`${section.title || '제목 없음'} 더보기`} items={sectionActions} trigger="⋯" open={sectionMenu === section.id} onOpenChange={open => setSectionMenu(open ? section.id : null)}/>{status?.id === section.id && <span className="memo-status" role="status">{status.text}</span>}</>}
         </div>}
         {(mode === 'todo' ? open : section.items).map(row)}
         {!readOnly && <button className="memo-add" type="button" onClick={() => {
@@ -239,6 +253,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
         {mode === 'todo' && doneOpen.has(section.id) && done.map(row)}
       </section>;
     })}
+    {sectionDrag.indicator !== undefined && <div className="memo-section-drop" aria-hidden="true" style={{ top: sectionDrag.indicator }}/>}
     {deleteTarget && <Dialog open title="섹션 삭제" onClose={() => setDeleteTarget(null)}><p>이 섹션과 항목을 삭제할까요?</p><div className="ui-dialog__actions"><Button variant="ghost" onClick={() => setDeleteTarget(null)}>취소</Button><Button variant="danger" onClick={() => { focus(''); apply(deleteMemoSection(doc, deleteTarget)); setDeleteTarget(null); }}>삭제</Button></div></Dialog>}
   </div>;
 }
