@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -20,6 +21,8 @@ from fastapi import HTTPException
 import catalog_bookmarks
 import read_budget
 from mobile_catalog_query import count_groups, freeze_query, search_groups
+
+LOG = logging.getLogger(__name__)
 
 MAX_CONTENT = 512 * 1024 * 1024
 MAX_RECORD = 1024 * 1024
@@ -367,6 +370,53 @@ def _prepare_users(root, content, revision, users):
         if os.path.exists(temporary):
             os.unlink(temporary)
 
+def reuse_users(root, content, revision, previous_revision):
+    """Reuse only a proven unchanged state/count projection, under catalog_lock.
+
+    Latest summaries include Views/FileCount. Recompute all prepared pages against
+    the new content before linking; if any differ, copy and replace just the pages.
+    Never mutate the old inode: readers and pruning rely on immutable snapshots.
+    A legacy/missing projection falls back to the normal full preparation.
+    """
+    destination = users_path(root, revision)
+    source = users_path(root, previous_revision)
+    if destination.exists() or not source.is_file():
+        return
+    with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as db:
+        db.row_factory = sqlite3.Row
+        db.execute("ATTACH DATABASE ? AS catalog", [artifact_path(root, content).as_uri() + "?mode=ro"])
+        pages = []
+        unchanged = True
+        for row in db.execute("SELECT language,sort,payload FROM prepared_pages"):
+            language, sort, old = row
+            query = freeze_query(db, {"language": language, "revealBlocked": False,
+                                      "text": "", "scope": "all", "sort": sort})
+            payload = encode(search_groups(db, query, 0, PREPARED_PAGE_ITEMS))
+            pages.append((payload, language, sort))
+            unchanged = unchanged and payload == old
+    if unchanged:
+        try:
+            os.link(source, destination)
+        except FileExistsError:
+            pass
+        return
+    fd, temporary = tempfile.mkstemp(prefix="users-", suffix=".sqlite", dir=root)
+    os.close(fd)
+    try:
+        shutil.copyfile(source, temporary)
+        with closing(sqlite3.connect(temporary)) as db:
+            db.executemany("UPDATE prepared_pages SET payload=? WHERE language=? AND sort=?", pages)
+            db.commit()
+        with open(temporary, "rb+") as sealed:
+            os.fsync(sealed.fileno())
+        try:
+            os.link(temporary, destination)
+        except FileExistsError:
+            pass
+    finally:
+        os.unlink(temporary)
+
+
 def device_filters(query):
     """True when the query carries filters the prepared projection cannot answer.
 
@@ -407,7 +457,7 @@ def prepared_items(db, query, offset, limit, total):
     return items[offset:offset + limit]
 
 def publish(body, root, get_db, *, additions=(), finalize=None,
-            external_publisher=False, publisher_library_id=None):
+            external_publisher=False, publisher_library_id=None, counter_interval=0):
     """Commit a catalog publication.
 
     Owns the whole authority fence: the initial derivation snapshot and the final
@@ -426,11 +476,12 @@ def publish(body, root, get_db, *, additions=(), finalize=None,
     # the new publication makes them current. The pruner skips meanwhile.
     with catalog_lock(root):
         return _publish(body, content, users, root, get_db, additions=additions, finalize=finalize,
-                        external_publisher=external_publisher, publisher_library_id=publisher_library_id)
+                        external_publisher=external_publisher, publisher_library_id=publisher_library_id,
+                        counter_interval=counter_interval)
 
 
 def _publish(body, content, users, root, get_db, *, additions, finalize, external_publisher,
-             publisher_library_id):
+             publisher_library_id, counter_interval):
     # Initial snapshot. The control-database connection is closed again before any
     # materialization or prepare work, so no read lock is held meanwhile.
     authority = catalog_bookmarks.load(get_db)
@@ -442,7 +493,9 @@ def _publish(body, content, users, root, get_db, *, additions, finalize, externa
         if json.loads(artifact[0])["groupDecisionRevision"] != users["decisionRevision"]:
             fail(409, "Catalog decisions changed; export again")
     from catalog_refresh_content import materialize
-    content = materialize(root, content, get_db, additions)
+    source_content, effects = content, {}
+    content = materialize(root, content, get_db, additions,
+                          counter_interval=counter_interval, effects=effects)
     user_revision = digest(users)
     revision = digest(["mobile-catalog-v1", content, user_revision])
     with get_db() as db:
@@ -457,6 +510,9 @@ def _publish(body, content, users, root, get_db, *, additions, finalize, externa
             fail(409, "Catalog publication changed; refresh before publishing")
         if prior and not already_current and prior["content_digest"] != content and prior["user_revision"] != user_revision and db.execute("SELECT EXISTS(SELECT 1 FROM mobile_catalog_publications WHERE content_digest=?)", [content]).fetchone()[0]:
             fail(409, "A rollback must retain the current user snapshot")
+    if (prior and prior["content_digest"] == source_content
+            and prior["user_revision"] == user_revision and effects.get("stable_user_state")):
+        reuse_users(root, content, revision, prior["revision"])
     prepare_users(root, content, revision, users)
     expected = catalog_bookmarks.signature(authority)
     with get_db() as db:
@@ -474,7 +530,7 @@ def _publish(body, content, users, root, get_db, *, additions, finalize, externa
         if (prior["revision"] if prior else None) != body["baseRevision"]:
             if not prior or prior["revision"] != revision:
                 fail(409, "Catalog publication changed; refresh before publishing")
-        published = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        published = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time()))
         db.execute("INSERT INTO mobile_catalog_users VALUES(?,?) ON CONFLICT DO NOTHING", [user_revision, encode(users)])
         db.execute("INSERT INTO mobile_catalog_publications VALUES(?,?,?,?) ON CONFLICT DO NOTHING", [revision, content, user_revision, published])
         db.execute("INSERT INTO mobile_catalog_current VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET publication_revision=excluded.publication_revision", [revision])
@@ -482,6 +538,11 @@ def _publish(body, content, users, root, get_db, *, additions, finalize, externa
             finalize(db, revision)
         db.commit()
         row = current(db)
+        if not prior or prior["revision"] != revision:
+            LOG.info("Catalog publication: origin=%s content_changed=%s users_changed=%s",
+                     "pc" if external_publisher else "refresh" if counter_interval else "internal",
+                     not prior or prior["content_digest"] != content,
+                     not prior or prior["user_revision"] != user_revision)
         return dict(publicationRevision=revision, publishedAt=row["published_at"], userRevision=user_revision)
 
 

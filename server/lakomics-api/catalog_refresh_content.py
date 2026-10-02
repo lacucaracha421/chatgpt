@@ -7,6 +7,9 @@ PC publications own those non-monotonic fields (there is no observation clock in
 the PC projection).
 """
 import json
+import logging
+import time
+from datetime import datetime
 import math
 import os
 import shutil
@@ -18,6 +21,9 @@ from contextlib import closing
 import mobile_catalog_replica as replica
 
 MAX_PAGE_BYTES = 5 * 1024 * 1024
+LOG = logging.getLogger(__name__)
+# Only Views is delayed. Rating, FileCount, Updated and Expunged publish immediately.
+COUNTER_INTERVAL_SECONDS = 3600
 MUTABLE_FIELDS = ("Views", "Rating", "FileCount", "Updated", "Expunged")
 
 
@@ -101,17 +107,17 @@ def parse_page(body, language):
     return rows
 
 
-def materialize(root, content, get_db, additions=()):
+def materialize(root, content, get_db, additions=(), *, counter_interval=0, effects=None):
     """Build an immutable derived artifact without touching the readable baseline.
 
     Holds the catalog lock shared (re-entered inside publish) so the pruner cannot
     remove the source or the derived file before it is registered and published.
     """
     with replica.catalog_lock(root):
-        return _materialize(root, content, get_db, additions)
+        return _materialize(root, content, get_db, additions, counter_interval, effects)
 
 
-def _materialize(root, content, get_db, additions):
+def _materialize(root, content, get_db, additions, counter_interval, effects):
     fresh = {row["work"]["Id"]: row for row in additions}
     with get_db() as control:
         saved = control.execute("SELECT payload FROM mobile_catalog_server_additions ORDER BY work_id").fetchall()
@@ -146,6 +152,25 @@ def _materialize(root, content, get_db, additions):
                 changes.append((row, exists, missing, updates))
     if not changes:
         return content
+    counters_only = all(exists and not languages and set(updates) <= {"Views"}
+                        for _, exists, languages, updates in changes)
+    if counter_interval and counters_only:
+        with get_db() as control:
+            prior = replica.current(control)
+        if prior and prior["content_digest"] == content:
+            published = datetime.fromisoformat(prior["published_at"].replace("Z", "+00:00")).timestamp()
+            if time.time() < published + counter_interval:
+                LOG.info("Catalog refresh deferred: views-only rows=%d", len(changes))
+                return content  # finalize still checkpoints the durable observations.
+    if effects is not None:
+        # These fields cannot change membership, visibility, counts or latest order.
+        # Prepared summaries may still change, so the caller compares those too.
+        effects["stable_user_state"] = all(
+            exists and not languages and set(updates) <= {"Views", "Rating", "FileCount", "Updated"}
+            for _, exists, languages, updates in changes)
+    LOG.info("Catalog refresh materialize: rows=%d fields=%s additions=%d languages=%d",
+             len(changes), sorted({field for _, _, _, updates in changes for field in updates}),
+             sum(not exists for _, exists, _, _ in changes), sum(len(tags) for _, _, tags, _ in changes))
     derived = replica.digest(["server-catalog-observations-v2", content, changes])
     destination = replica.artifact_path(root, derived)
     if shutil.disk_usage(root).free < source.stat().st_size * 2 + 64 * 1024 * 1024:
@@ -192,3 +217,60 @@ def _materialize(root, content, get_db, additions):
         return derived
     finally:
         os.unlink(temporary)
+
+
+def compare_catalogs(before, after):
+    """Offline, read-only comparison of two explicit catalog artifacts.
+
+    Reports counts per field/table, never titles or user data. Memory is bounded
+    to two rows; primary-key scans avoid loading either full catalog into Python.
+    Usage: python catalog_refresh_content.py BEFORE.sqlite AFTER.sqlite
+    No default paths, control DB, network or production discovery are used.
+    """
+    from contextlib import ExitStack
+    from pathlib import Path
+
+    keys = {"work": ("Id",), "tag": ("WorkId", "Namespace", "Value"),
+            "member": ("provider", "work_id"), "handle": ("provider", "anchor_work_id"),
+            "translation": ("namespace", "value")}
+    report = {}
+    with ExitStack() as stack:
+        databases = [stack.enter_context(closing(sqlite3.connect(
+            Path(path).resolve().as_uri() + "?mode=ro", uri=True))) for path in (before, after)]
+        for db in databases:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA query_only=ON")
+        for kind, (table, columns) in replica.TABLES.items():
+            sql = f"SELECT {','.join(columns)} FROM {table} ORDER BY {','.join(keys[kind])}"
+            left, right = (iter(db.execute(sql)) for db in databases)
+            a, b = next(left, None), next(right, None)
+            stats = {"inserted": 0, "deleted": 0, "changed": 0, "fields": {}}
+            while a is not None or b is not None:
+                ka = tuple(a[k] for k in keys[kind]) if a is not None else None
+                kb = tuple(b[k] for k in keys[kind]) if b is not None else None
+                if b is None or (a is not None and ka < kb):
+                    stats["deleted"] += 1
+                    a = next(left, None)
+                elif a is None or kb < ka:
+                    stats["inserted"] += 1
+                    b = next(right, None)
+                else:
+                    fields = [column for column in columns if a[column] != b[column]]
+                    stats["changed"] += bool(fields)
+                    for column in fields:
+                        stats["fields"][column] = stats["fields"].get(column, 0) + 1
+                    a, b = next(left, None), next(right, None)
+            report[table] = stats
+        manifests = [json.loads(db.execute("SELECT payload FROM Manifest").fetchone()[0]) for db in databases]
+        report["manifestFields"] = sorted(key for key in manifests[0].keys() | manifests[1].keys()
+                                          if manifests[0].get(key) != manifests[1].get(key))
+    return report
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description=compare_catalogs.__doc__)
+    parser.add_argument("before")
+    parser.add_argument("after")
+    args = parser.parse_args()
+    print(json.dumps(compare_catalogs(args.before, args.after), indent=2, sort_keys=True))
