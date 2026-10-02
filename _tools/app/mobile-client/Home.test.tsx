@@ -29,7 +29,7 @@ let notes: Note[];
 const exchange = (sending = false): ExchangeSnapshot => ({configured: true, tokenConfigured: true, receiveSupported: true, deviceId: 'tablet', deviceName: '태블릿', code: '', devices: [{deviceId: 'pc', name: '작업실 PC', kind: 'pc', lastSeenAt: '2026-09-25T11:29:00Z'}], incoming: [{transferId: 'rx1', batchId: 'b', fileName: '받은 표지.jpg', sizeBytes: 100, bytes: 100, peer: 'pc', peerId: 'pc', state: 'saved', code: '', createdAt: '2026-09-25T11:00:00Z'}], unseen: 1, outgoing: sending ? [{transferId: 'tx1', batchId: 'b2', fileName: '스케치.zip', sizeBytes: 100, bytes: 62, peer: 'pc', peerId: 'pc', state: 'uploading', code: '', createdAt: '2026-09-25T10:00:00Z'}] : []});
 const note = (id: string, values: Partial<Note>): Note => ({id, title: '', body: '', pinned: true, deleted: false, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z', localRevision: 1, pending: false, conflict: false, ...values});
 const pinnedNotes = (): Note[] => [note('shop', {type: 'checklist', title: 'Todo', items: [{id: '1', text: '**우유**', checked: true, order: 'a'}, {id: '2', text: '계란', checked: false, order: 'b'}, {id: '3', text: '두부', checked: true, order: 'c'}]}), note('ledger', {type: 'ledger', title: '가계부', income: 1000000, recurring: [], planned: []}), note('month', {type: 'ledger-month', pinned: false, archived: true, ledger: 'ledger', month: '2026-09', income: null, entries: [{id: 'e1', date: '2026-09-10', amount: 250000, name: '마트', createdAt: '2026-09-10T00:00:00Z'}]})];
-const props = (overrides: Partial<HomeProps> = {}): HomeProps => ({items: [item('recent')], hasMore: false, captures: [], busy: false, paused: false, secondaryError: '', scope: 'https://a.example', exchange: exchange(), characters: null, review: {enabled: false, refreshKey: 0}, similarityKey: 0, onPending: vi.fn(), onReview: vi.fn(), onSimilarity: vi.fn(), onDuplicates: vi.fn(), onExchange: vi.fn(), onReleases: vi.fn(), onWork: vi.fn(), onSettings: vi.fn(), onRecent: vi.fn(), onLibrary: vi.fn(), onNotes: vi.fn(), onRefresh: vi.fn(), ...overrides});
+const props = (overrides: Partial<HomeProps> = {}): HomeProps => ({items: [item('recent')], hasMore: false, captures: [], busy: false, paused: false, secondaryError: '', scope: 'https://a.example', exchange: exchange(), characters: null, review: {enabled: false, refreshKey: 0}, similarityKey: 0, onPending: vi.fn(), onReview: vi.fn(), onSimilarity: vi.fn(), onDuplicates: vi.fn(), onExchange: vi.fn(), onReleases: vi.fn(), onWork: vi.fn(), onSettings: vi.fn(), onRecent: vi.fn(), onLibrary: vi.fn(), onUnclassified: vi.fn(), onNotes: vi.fn(), onRefresh: vi.fn(), ...overrides});
 
 beforeEach(() => {
   vi.useFakeTimers({toFake: ['Date']}); vi.setSystemTime(new Date(2026, 8, 25, 14, 32));
@@ -93,7 +93,7 @@ describe('shared Home attention on tablet', () => {
   });
   it('routes the review and pinned task rows', async () => {
     const p = props({captures:[item('pending')]}); render(<Home {...p}/>);
-    fireEvent.click(await screen.findByRole('button',{name:/미분류 에셋7/})); expect(p.onLibrary).toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button',{name:/미분류 에셋7/})); expect(p.onUnclassified).toHaveBeenCalled(); expect(p.onLibrary).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button',{name:/유사 이미지 검토6쌍/})); expect(p.onSimilarity).toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button',{name:/처리 대기1/})); expect(p.onPending).toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button',{name:/Todo남은 항목/})); expect(p.onNotes).toHaveBeenCalledWith('shop');
@@ -162,4 +162,45 @@ it('shows owned game and movie releases since the last visit without a wishlist'
     expect(within(row).getByText('NEW')).toBeTruthy();
     fireEvent.click(row);expect(p.onWork).toHaveBeenCalledWith(type);
   }
+});
+
+it.each(['/v1/collections/releases', '/v1/collections/status', '/v1/collections?', '/v1/home/upcoming'])('waits for %s before advancing this visit', async blocked => {
+  const key = 'lakomics.home.visit.v1:https://a.example';
+  const previous = new Date(2026,8,23).toISOString();
+  localStorage.setItem(key, JSON.stringify({lastVisit:previous,pending:[],opened:[]}));
+  server.upcoming={entries:[{...upcomingEntry,date:'2026-09-24'}],wishlist:[]};
+  const original=mocks.api.getMockImplementation()!;
+  let complete: (() => void) | undefined;
+  mocks.api.mockImplementation((path,...args) => {
+    if(path.startsWith(blocked) && !complete) return new Promise(resolve => {complete=() => {void original(path,...args).then(resolve);};});
+    return original(path,...args);
+  });
+  render(<Home {...props()}/>);
+  await screen.findByRole('button',{name:/미분류 에셋7/});
+  await waitFor(() => expect(complete).toBeTypeOf('function'));
+  expect(JSON.parse(localStorage.getItem(key)!).lastVisit).toBe(previous);
+  complete!();
+  const card=await screen.findByRole('button',{name:/Hades II/});
+  expect(within(card).getByText('NEW')).toBeTruthy();
+  await waitFor(() => expect(JSON.parse(localStorage.getItem(key)!).lastVisit).not.toBe(previous));
+});
+
+it('preserves the visit after a failed release read and advances after a successful retry', async () => {
+  const key='lakomics.home.visit.v1:https://a.example';
+  const previous=new Date(2026,8,23).toISOString();
+  localStorage.setItem(key,JSON.stringify({lastVisit:previous,pending:[],opened:[]}));
+  const original=mocks.api.getMockImplementation()!;
+  let fail=true;
+  mocks.api.mockImplementation((path,...args)=>path.startsWith('/v1/collections/releases')&&fail
+    ? Promise.reject(new ApiError('failed',500,null)) : original(path,...args));
+  render(<Home {...props()}/>);
+  await screen.findByRole('button',{name:/서버요청을 처리할 수 없음/});
+  expect(JSON.parse(localStorage.getItem(key)!).lastVisit).toBe(previous);
+  fail=false;
+  const home=screen.getByLabelText('홈');
+  fireEvent.touchStart(home,{touches:[{clientX:0,clientY:0}]});
+  fireEvent.touchMove(home,{touches:[{clientX:0,clientY:150}]});
+  fireEvent.touchEnd(home);
+  await screen.findByRole('button',{name:/밤의 도서관/});
+  await waitFor(()=>expect(JSON.parse(localStorage.getItem(key)!).lastVisit).not.toBe(previous));
 });

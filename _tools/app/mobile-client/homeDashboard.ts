@@ -5,7 +5,7 @@ import type {CollectionSummary} from './collectionModel';
 import {currentShelf, invalidateReleases, loadShelf, observePublication, releaseEpoch, subscribeReleases} from './releaseStore';
 import {useSimilarityReviewCount} from './useSimilarityReview';
 import {useDuplicateCount} from './CatalogDuplicates';
-import {useCachedHomeSource} from './homeCache';
+import {useCachedHomeSource, useCachedHomeSourceRead} from './homeCache';
 import {ApiError, api, native} from './transport';
 import type {RefreshJob} from './CatalogRefresh';
 import {fetchLibrarySummary, type LibrarySummary} from './librarySummary';
@@ -231,7 +231,7 @@ function rememberUpcoming(scope: string, reply: UpcomingHomeReply): void {
 }
 
 export function useHomeUpcoming(enabled: boolean, scope: string, forceKey?: unknown) {
-  const reply = useCachedHomeSource<UpcomingHomeReply | null>({
+  const {value: reply, ready} = useCachedHomeSourceRead<UpcomingHomeReply | null>({
     enabled, scope, source: 'upcoming', signalKey: 'upcoming', initial: cachedUpcoming(scope), forceKey,
     read: async signal => {
       await flushUpcomingWishlist(signal, scope);
@@ -252,7 +252,7 @@ export function useHomeUpcoming(enabled: boolean, scope: string, forceKey?: unkn
     const controller = new AbortController();
     void flushUpcomingWishlist(controller.signal, scope).finally(() => controller.abort());
   };
-  return {entries: reply?.entries ?? [], wishlistItems: reply?.wishlist ?? [], wishlist: ids, wishlistPending: tick, toggle};
+  return {ready, entries: reply?.entries ?? [], wishlistItems: reply?.wishlist ?? [], wishlist: ids, wishlistPending: tick, toggle};
 }
 
 export const HOME_SNAPSHOT_KEY = 'lakomics.mobile.homeSnapshot';
@@ -328,11 +328,11 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
   };
   const similar = useSimilarityReviewCount(enabled, similarityKey, scope, refreshKey);
   const duplicates = useDuplicateCount(enabled, scope, refreshKey);
-  const counts = useCachedHomeSource<ReleaseCounts | null>({
+  const {value: counts, ready: countsReady} = useCachedHomeSourceRead<ReleaseCounts | null>({
     enabled, scope, source: 'releaseCounts', signalKey: 'releases', initial: null, forceKey: refreshKey,
     read: async signal => { const reply = await api<unknown>(RELEASE_COUNTS_PATH, signal); if (!signal.aborted) result('releases'); return reply ? releaseCounts(reply) : NO_RELEASES; }, onError: reason => result('releases', reason),
   });
-  const collectionRevision = useCachedHomeSource<string | null>({
+  const {value: collectionRevision, ready: collectionsReady} = useCachedHomeSourceRead<string | null>({
     enabled, scope, source: 'collectionsStatus', signalKey: 'collections', initial: null, forceKey: refreshKey,
     read: async signal => { const reply = await api<{revision?: string | null}>('/v1/collections/status', signal); if (!signal.aborted) result('collections'); return reply?.revision ?? null; }, onError: reason => result('collections', reason),
   });
@@ -388,6 +388,7 @@ export function useHomeDashboard({enabled, scope, pending, similarityKey, exchan
     todosAt: offline ? Math.max(0, ...TODO_ORDER.map(key => snapshot.counts[key]?.at ?? 0)) || null : null,
     applicable: TODO_ORDER.filter(key => key !== 'character'),
     unreadWorks: counts ? Object.keys(counts.byCollection).length : snapshot.counts.releases?.value ?? null,
+    releasesReady: countsReady && collectionsReady && Boolean(shelf?.ready && (!collectionRevision || shelf.revision === collectionRevision)),
     releases: pick(releases, snapshot.releases),
     releasesAt: offline || !releases ? snapshot.releases?.at ?? null : null,
     upcoming: pick(upcoming, snapshot.upcoming),

@@ -1,4 +1,5 @@
 """Incremental effective tag publication, search scopes and whole-walk TOCs."""
+import sqlite3
 import unittest
 
 from pydantic import ValidationError
@@ -8,6 +9,7 @@ import app as api_app
 import asset_authority
 import classification_authority
 import authority
+import asset_filters
 import library_artists
 import library_search as search
 from tests.test_home_upcoming import HomeFixture
@@ -23,6 +25,24 @@ def upload(assets=None, vocabulary=None):
     return {"version": 1, "vocabulary": [tag()] if vocabulary is None else vocabulary,
             "assets": [{"assetId": "asset-1", "tags": ["long_hair"], "creatorKey": "alice"}]
             if assets is None else assets}
+
+
+class CreatorFilterTests(unittest.TestCase):
+    def test_published_null_suppresses_only_the_legacy_creator_fallback(self):
+        with sqlite3.connect(":memory:") as db:
+            db.executescript(search.DDL + library_artists.DDL)
+            db.execute("CREATE TABLE assets(id TEXT PRIMARY KEY, creator_handle TEXT)")
+            db.executemany("INSERT INTO assets VALUES(?, 'alice')",
+                           [(id,) for id in ("cleared", "unpublished", "published", "assigned", "reassigned")])
+            db.executemany("INSERT INTO library_artist_keys VALUES(?,?)",
+                           [("alice", "artist:a1"), ("bob", "artist:other")])
+            db.executemany("INSERT INTO library_tag_assets VALUES(?, 'digest', ?)",
+                           [("cleared", None), ("published", "bob"), ("assigned", None)])
+            db.executemany("INSERT INTO library_artist_assignments VALUES(?, ?)",
+                           [("assigned", "artist:a1"), ("reassigned", "artist:other")])
+            clause, params = asset_filters.filter_clause(asset_filters.Filters(artist="artist:a1"))
+            matched = {row[0] for row in db.execute("SELECT asset.id FROM assets asset WHERE 1" + clause, params)}
+            self.assertEqual(matched, {"unpublished", "assigned"})
 
 
 class PublicationTests(HomeFixture):
@@ -100,6 +120,25 @@ class SearchFilterTests(unittest.TestCase):
         response = self.client.put(search.PREFIX, headers=self.publisher,
                                    json=upload(rows, [tag(), tag("glasses", "안경")]))
         self.assertEqual(response.status_code, 200, response.text)
+
+    def test_explicit_creator_clear_does_not_restore_replicated_handle(self):
+        ids = list(self.assets)
+        cleared, unpublished, assigned = ids[1], ids[4], ids[2]
+        response = self.client.put(search.PREFIX, headers=self.publisher, json=upload([
+            {"assetId": cleared, "creatorKey": None, "tags": []},
+            {"assetId": assigned, "creatorKey": None, "tags": []},
+        ], []))
+        self.assertEqual(response.status_code, 200, response.text)
+        with api_app.get_db() as db:
+            db.execute("DELETE FROM library_tag_assets WHERE asset_id=?", [unpublished])
+            db.commit()
+        rows, _ = self.walk("library", artist="artist:a1")
+        matched = {row["id"] for row in rows}
+        self.assertNotIn(cleared, matched)
+        self.assertIn(unpublished, matched, "Unpublished assets retain the legacy fallback")
+        self.assertIn(assigned, matched, "Explicit artist assignments still take precedence")
+        self.assertEqual(self.read("library", artist="artist:a1", toc=1).json()["totalCount"],
+                         len(matched))
 
     def test_each_filter_and_combination_pagination_and_toc(self):
         combos = [({"tag": ["long_hair"]}, lambda i: i % 2 == 0),

@@ -160,7 +160,7 @@ def filter_clause(filters: Filters, alias: str = "asset") -> tuple[str, list]:
             JOIN assets original ON original.creator_handle=keys.creator_key
             WHERE keys.artist_id=?
               AND NOT EXISTS(SELECT 1 FROM library_tag_assets tagged
-                             WHERE tagged.asset_id=original.id AND tagged.creator_key IS NOT NULL)
+                             WHERE tagged.asset_id=original.id)
               AND NOT EXISTS(SELECT 1 FROM library_artist_assignments assigned
                              WHERE assigned.asset_id=original.id))""")
         params.extend([filters.artist] * 3)

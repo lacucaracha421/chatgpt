@@ -1941,9 +1941,19 @@ def _authority_memberships(db, active, rows):
     return {row["id"]: memberships.get(row["id"], []) for row in rows}
 
 
+def _classified_asset_sql(active):
+    if active is not None:
+        return ("""EXISTS (SELECT 1 FROM classification_authority_assignments AS assignment
+            WHERE assignment.library_id = ? AND assignment.asset_id = asset.id
+              AND assignment.classification_id IS NOT NULL)""", [active["libraryId"]])
+    return ("""EXISTS (SELECT 1 FROM asset_classifications AS relationship
+        WHERE relationship.asset_id = asset.id)""", [])
+
+
 @app.get("/v1/library/assets")
 def list_mobile_classification_assets(
     classification_id: list[str] | None = Query(default=None),
+    unclassified: int = Query(default=0, ge=0, le=1),
     tag: list[str] | None = Query(default=None),
     artist: str | None = Query(default=None),
     authorization: str | None = Header(default=None),
@@ -1990,6 +2000,7 @@ def list_mobile_classification_assets(
     classifications = asset_filters.identifiers(classification_id, 8, 200)
     # Preserve the shipped cursor scope for absent/single classification requests.
     classification_id = classifications[0] if len(classifications) == 1 else list(classifications) if classifications else None
+    scope_identity = {"classification_id": classification_id, "unclassified": 1} if unclassified else classification_id
     classification_clause = ""
     after = None
     if cursor is not None:
@@ -2001,7 +2012,7 @@ def list_mobile_classification_assets(
         parsed = asset_filters.decode_cursor(cursor, "library-assets", filters,
                                              400, "Invalid cursor")
         if len(parsed) == 3:
-            if len(classifications) > 1:
+            if unclassified or len(classifications) > 1:
                 raise HTTPException(status_code=400, detail="Invalid cursor")
             # Pre-filter layout. It has no scope slots — the classification is the parameter
             # the request arrived with — so the sort slot is all there is to bind.
@@ -2011,7 +2022,7 @@ def list_mobile_classification_assets(
                 parsed[1:], 400, "Invalid cursor")
         elif len(parsed) == 4:
             # New cursors bind the classification as well as the sort and filters.
-            if parsed[0] != sort or parsed[1] != classification_id:
+            if parsed[0] != sort or parsed[1] != scope_identity:
                 raise HTTPException(status_code=400, detail="Invalid cursor")
             cursor_sort_at, cursor_asset_id = asset_filters.require_strings(
                 parsed[2:], 400, "Invalid cursor")
@@ -2066,14 +2077,18 @@ def list_mobile_classification_assets(
                     )
                 """
                 clause_params.append(classification)
+        if unclassified:
+            classified_sql, classified_params = _classified_asset_sql(active)
+            classification_clause += f" AND NOT {classified_sql}"
+            clause_params.extend(classified_params)
         query = asset_list_query.AssetListQuery(
             "visible_assets AS asset",
             f"asset.committed = 1 {classification_clause} {filter_clause}",
             clause_params + filter_params, sort, prefer_id_lookup=filters.artist is not None)
         if toc:
             payload = query.toc(db, generation, lambda previous: asset_filters.encode_cursor(
-                "library-assets", filters, [sort, classification_id, *previous]), applied_offset)
-            return asset_filters.search_response(payload, filters, if_none_match, list(classifications))
+                "library-assets", filters, [sort, scope_identity, *previous]), applied_offset)
+            return asset_filters.search_response(payload, filters, if_none_match, scope_identity if unclassified else list(classifications))
         rows = query.page(db, limit + 1, after)
         has_more = len(rows) > limit
         page_rows = rows[:limit]
@@ -2123,13 +2138,14 @@ def list_mobile_classification_assets(
         last = page_rows[-1]
         next_cursor = asset_filters.encode_cursor(
             "library-assets", filters,
-            [sort, classification_id, last["mobile_sort_at"], last["id"]])
+            [sort, scope_identity, last["mobile_sort_at"], last["id"]])
     # `listGeneration` is additive: a client binds the page to it in one round trip instead
     # of bracketing the fetch with two `/v1/library/list-generation` reads.
     return conditional.json_response(
         {"items": items, "next_cursor": next_cursor, "has_more": has_more,
          "filterVersion": asset_filters.FILTER_VERSION, "searchVersion": 1, "listGeneration": generation,
-         "searchFilters": {"tag": list(filters.tags), "artist": filters.artist, "classification_id": list(classifications)}},
+         "searchFilters": {"tag": list(filters.tags), "artist": filters.artist, "classification_id": list(classifications),
+                           **({"unclassified": 1} if unclassified else {})}},
         if_none_match)
 
 
@@ -2176,15 +2192,7 @@ def mobile_library_summary(
         db.execute("BEGIN")
         generation = list_generation(db)
         active = authority.active_domain(db, classification_authority.DOMAIN)
-        if active is not None:
-            classified_sql = """EXISTS (SELECT 1 FROM classification_authority_assignments AS assignment
-                WHERE assignment.library_id = ? AND assignment.asset_id = asset.id
-                  AND assignment.classification_id IS NOT NULL)"""
-            classified_params: list[object] = [active["libraryId"]]
-        else:
-            classified_sql = """EXISTS (SELECT 1 FROM asset_classifications AS relationship
-                WHERE relationship.asset_id = asset.id)"""
-            classified_params = []
+        classified_sql, classified_params = _classified_asset_sql(active)
         # One pass over the visible library: the dated counts read the indexed sort key and
         # the classification probe is a primary-key seek per Asset.
         row = db.execute(

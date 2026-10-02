@@ -17,6 +17,7 @@ vi.mock('./Home', () => ({Home:(props:HomeProps) => <div className="home-scroll"
   <button onClick={() => props.onNotes()}>home 메모 카드</button>
   <button onClick={props.onDuplicates}>home 중복</button>
   <button onClick={props.onRecent}>home 최근</button>
+  <button onClick={props.onUnclassified}>home 미분류</button>
   <button onClick={props.onLibrary}>home 라이브러리</button>
 </div>}));
 // The review overview and the review: stand-ins that close on Back like the real ones.
@@ -177,4 +178,14 @@ it('opens the 발매 캘린더 from the Home shelf over Home, and Back returns t
   await waitFor(() => expect(screen.queryByRole('region',{name:'calendar-screen'})).toBeNull());
   expect(onHome()).toBe(true);
   expect(screen.getByLabelText('홈 대시보드')).toBe(home);
+});
+
+it('opens unsorted from Home rather than restoring the last Library folder, then returns Home', async () => {
+  await startHome(240);
+  fireEvent.click(screen.getByRole('button', {name:'home 미분류'}));
+  await screen.findByRole('heading', {name:'미분류'});
+  await waitFor(() => expect(mocks.api.mock.calls.some(([path]) => path.startsWith('/v1/library/assets?') && path.includes('unclassified=1'))).toBe(true));
+  expect(mocks.api.mock.calls.some(([path]) => path.includes('toc=1') && path.includes('unclassified=1'))).toBe(true);
+  back();
+  expect((await screen.findByLabelText('홈 대시보드')).scrollTop).toBe(240);
 });

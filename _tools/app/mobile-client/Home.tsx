@@ -32,7 +32,7 @@ export interface HomeProps {
   /** Retained input shape; the tablet deliberately omits this review category. */
   review: {enabled: boolean; refreshKey: unknown}; similarityKey: unknown;
   onPending(): void; onReview(): void; onSimilarity(): void; onDuplicates(): void; onExchange(): void;
-  onReleases(): void; onWork(id: string): void; onSettings(): void; onRecent(): void; onLibrary(): void;
+  onReleases(): void; onWork(id: string): void; onSettings(): void; onRecent(): void; onLibrary(): void; onUnclassified(): void;
   onRevisit?(key: string, title: string): void; onArtists?(): void; onNotes(id?: string): void; onRefresh?(): void;
 }
 
@@ -155,7 +155,7 @@ export function Home(props: HomeProps) {
     if ([...arrivals.values()].some(e => e.name === work.name && e.date === work.releaseDate)) continue;
     arrivals.set(`work:${work.id}`, { key: `work:${work.id}`, token: `work:${work.id}:${work.releaseDate}`, date: work.releaseDate, fresh: false, name: work.name, detail: '발매됨', workId: work.id, external: null });
   }
-  const visit = useHomeVisit(props.scope, [...arrivals.values()], today, !paused);
+  const visit = useHomeVisit(props.scope, [...arrivals.values()], today, !paused, at.toISOString(), d.releasesReady && upcoming.ready);
   const future: HomeReleaseCard[] = manga.filter(e => e.kind === 'upcoming').map(e => ({ key: `manga:${e.id}:${e.volumeNumber}`, name: e.name, date: e.date, detail: `${e.volumeNumber}권`, cover: cover(e.id, e.name), onOpen: () => props.onWork(e.id) }));
   const futureTitles = new Map(upcoming.wishlistItems.map(entry => [entry.id, entry as UpcomingHomeEntry & { muted?: boolean }]));
   for (const entry of upcoming.entries) if (upcoming.wishlist.has(entry.id) && !futureTitles.has(entry.id)) futureTitles.set(entry.id, entry);
@@ -189,7 +189,7 @@ export function Home(props: HomeProps) {
     {pull}
     <HomeAttentionLayout tablet today={<HomeToday rows={rows} loading={!memos || reviewRows.some(r => r.count === null) ? <Skeleton label="오늘 할 것" /> : undefined} onOpen={row => {
       if (row.noteId) props.onNotes(row.noteId);
-      else if (row.key === 'unsorted') props.onLibrary();
+      else if (row.key === 'unsorted') props.onUnclassified();
       else if (row.key === 'similar') props.onSimilarity();
       else if (row.key === 'pending') props.onPending();
       else if (row.key === 'duplicates') props.onDuplicates();

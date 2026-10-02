@@ -52,7 +52,7 @@ export type HomeSourceOptions<T> = {
  * bounded by source and connection scope, and uses the existing sync signal plus visibility
  * timer to decide when a fresh read is needed.
  */
-export function useCachedHomeSource<T>({enabled, scope, source, signalKey, initial, forceKey, forceOnMount = false, read, onError}: HomeSourceOptions<T>): T {
+export function useCachedHomeSourceRead<T>({enabled, scope, source, signalKey, initial, forceKey, forceOnMount = false, read, onError}: HomeSourceOptions<T>) {
   const key = cacheKey(scope, source);
   const readRef = useRef(read); readRef.current = read;
   const errorRef = useRef(onError); errorRef.current = onError;
@@ -66,6 +66,8 @@ export function useCachedHomeSource<T>({enabled, scope, source, signalKey, initi
     const entry = currentEntry(scope, source);
     return entry ? entry.value as T : initial;
   });
+
+  const [readState, setReadState] = useState(() => ({key, forceKey, signalRevision, ready: !forceChanged && isFresh(currentEntry(scope, source), signalKey)}));
 
   useSyncSignal(signalKey ?? '', () => {
     const entry = cache.get(key);
@@ -82,7 +84,11 @@ export function useCachedHomeSource<T>({enabled, scope, source, signalKey, initi
   useEffect(() => {
     if (!enabled) return;
     const entry = currentEntry(scope, source);
-    if (!forceChanged && isFresh(entry, signalKey)) return;
+    if (!forceChanged && isFresh(entry, signalKey)) {
+      setReadState({key, forceKey, signalRevision, ready: true});
+      return;
+    }
+    setReadState({key, forceKey, signalRevision, ready: false});
     const controller = new AbortController();
     let live = true;
     if (entry) setValue(entry.value as T);
@@ -90,6 +96,7 @@ export function useCachedHomeSource<T>({enabled, scope, source, signalKey, initi
       if (!live || controller.signal.aborted) return;
       store(key, {value: next, at: Date.now(), signal: signalKey ? syncSignal(signalKey) : undefined});
       setValue(next);
+      setReadState({key, forceKey, signalRevision, ready: true});
     }, reason => {
       if (live && !controller.signal.aborted) errorRef.current?.(reason);
     });
@@ -99,5 +106,11 @@ export function useCachedHomeSource<T>({enabled, scope, source, signalKey, initi
   const entry = currentEntry(scope, source);
   const nextCheck = enabled ? Math.max(1_000, (entry?.at && entry.at > 0 ? entry.at : Date.now()) + HOME_SOURCE_TTL - Date.now()) : null;
   useVisibleInterval(() => setSignalRevision(revision => revision + 1), nextCheck);
-  return value;
+  const ready = readState.key === key && Object.is(readState.forceKey, forceKey)
+    && readState.signalRevision === signalRevision && readState.ready;
+  return {value, ready};
+}
+
+export function useCachedHomeSource<T>(options: HomeSourceOptions<T>): T {
+  return useCachedHomeSourceRead(options).value;
 }

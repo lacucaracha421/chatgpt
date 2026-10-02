@@ -9,6 +9,7 @@ import type {
   MetadataBackup,
   ReleaseWatchRunResult,
 } from "../library/types";
+import { readHomeVisit, writeHomeVisit } from "../home/homeAttention";
 import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
 import * as characters from "../characters/api";
 import { fixtureTarget } from "../characters/characterFixtures";
@@ -373,6 +374,22 @@ describe("App", () => {
     await waitFor(() => expect(libraryGateway.runDueReleaseWatch).toHaveBeenCalledOnce());
     await waitFor(() => expect(libraryGateway.listCollections).toHaveBeenCalledTimes(2));
     expect(screen.queryByText(/(?:Kakao 신간|MangaDex 새 권) 정보가 있는 작품/)).not.toBeInTheDocument();
+  });
+
+  it("waits for the App collection read before acknowledging Home arrivals", async () => {
+    localStorage.setItem("lakomics.libraryPath", summary.root);
+    const previous = "2020-01-01T00:00:00Z";
+    writeHomeVisit(summary.root, { lastVisit: previous, pending: [], opened: [] });
+    const libraryGateway = gateway();
+    let complete!: (items: Awaited<ReturnType<LibraryGateway["listCollections"]>>) => void;
+    const pending = new Promise<Awaited<ReturnType<LibraryGateway["listCollections"]>>>(resolve => { complete = resolve; });
+    vi.mocked(libraryGateway.listCollections).mockReturnValue(pending);
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await screen.findByRole("region", { name: /^오늘 할 것/ });
+    await waitFor(() => expect(libraryGateway.listCollections).toHaveBeenCalled());
+    expect(readHomeVisit(summary.root).lastVisit).toBe(previous);
+    await act(async () => complete([]));
+    await waitFor(() => expect(readHomeVisit(summary.root).lastVisit).not.toBe(previous));
   });
 
   it("starts on Home and opens the library from 에셋", async () => {

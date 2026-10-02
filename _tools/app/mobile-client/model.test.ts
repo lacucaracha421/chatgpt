@@ -1,5 +1,7 @@
 import {describe, expect, it, vi} from 'vitest';
-import {imageNeighbours, justifiedRows, mapBounded, normalizePage, pagePath, RequestGate, fitTransform, dateLabel, rowHeight, validDensity} from './model';
+import {imageNeighbours, justifiedRows, mapBounded, normalizePage, pagePath, viewKey, RequestGate, fitTransform, dateLabel, rowHeight, validDensity} from './model';
+import {EMPTY_FILTERS} from './assetFilters';
+import {assetTocPath, supportsAssetToc} from './assetToc';
 import type {Asset} from './types';
 const assets: Asset[] = [0.4,1.5,1,3,0.6,2,1.4].map((ratio,index) => ({id:String(index),kind:'image',ratio}));
 describe('gallery geometry', () => {
@@ -61,4 +63,13 @@ it('uses shared calendar dates and preserves the missing-date fallback',()=>{
     expect(dateLabel({id:'a',kind:'image'})).toBe('날짜 없음');
     expect(dateLabel({id:'a',kind:'image',collected_at:'invalid'})).toBe('날짜 없음');
   } finally {vi.useRealTimers();}
+});
+
+it('keeps unsorted pages, TOC and navigation distinct from the last folder and all assets', () => {
+  const view = {tab: 'library' as const, title: '미분류', unclassified: true};
+  expect(pagePath(view, 'next')).toContain('unclassified=1');
+  expect(assetTocPath(view, EMPTY_FILTERS, 540)).toContain('unclassified=1');
+  expect(supportsAssetToc(view)).toBe(true);
+  expect(viewKey(view)).not.toBe(viewKey({tab:'library',title:'전체'}));
+  expect(viewKey(view)).not.toBe(viewKey({tab:'library',title:'폴더',classification:'b'}));
 });

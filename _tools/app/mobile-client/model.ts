@@ -22,13 +22,15 @@ export function rowHeight(density: number, width: number) { return Math.min(290 
  */
 export function viewKey(view: View, filters: AssetFiltersValue = EMPTY_FILTERS) {
   const base = `${view.tab}:${view.root?'root':''}:${view.characters?`characters:${view.characterNode??''}`:''}:${view.classification ?? ''}:${view.revisit ?? ''}`;
-  const scope = view.album ? `${base}:album:${JSON.stringify(view.album)}` : base;
+  const unsorted = view.unclassified ? `${base}:unclassified` : base;
+  const scope = view.album ? `${base}:album:${JSON.stringify(view.album)}` : unsorted;
   const key = [filterKey(filters),assetSearchSelectionKey(view.search)].filter(Boolean).join(':');
   return key ? `${scope}:${key}` : scope;
 }
 export function pagePath(view: View, cursor: string | null, filters: AssetFiltersValue = EMPTY_FILTERS, limit = PAGE_SIZE) {
   const params = assetSearchParams(new URLSearchParams({limit: String(limit)}),view.search,!view.album);
   if (cursor) params.set('cursor', cursor);
+  if (view.unclassified) params.set('unclassified', '1');
   if (view.album) {
     params.set('libraryId',view.album.libraryId);params.set('epoch',String(view.album.epoch));params.set('albumId',view.album.id);
     return withFilters(`/v1/albums/assets?${params}`,filters);

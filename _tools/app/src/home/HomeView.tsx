@@ -42,6 +42,7 @@ type CharacterQueue = { total: number; targets: ShadowReviewPendingTarget[] };
 
 export type HomeViewProps = {
   collections: CollectionSummary[];
+  collectionsReady?: boolean;
   /** Opens one asset in the library viewer (다시 보기 thumbnails). */
   onOpenAsset?: (assetId: string) => void;
   /** Similarity review groups waiting (the app's count). */
@@ -69,7 +70,7 @@ export type HomeViewProps = {
 
 /** Attention-only Home: existing note, review, connection and cached release sources. */
 
-export function HomeView({ collections, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, notes, shadowApi, characterSource, taggerSource, taggerApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, onOpenAsset }: HomeViewProps) {
+export function HomeView({ collections, collectionsReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, notes, shadowApi, characterSource, taggerSource, taggerApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, onOpenAsset }: HomeViewProps) {
   const { gateway, library } = useLibrary();
   const root = library?.root ?? "";
   const { privacyMode } = usePrivacy();
@@ -225,7 +226,7 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
 
   const releases = newlyReleasedRows(collections, board, inbox, wishlist, today, calendar?.entries ?? []);
   const arrivalItems = releases.map(row => ({ ...row, date: row.date ?? null, token: `${row.key}:${row.date ?? ''}:${row.volume ?? ''}`, fresh: row.caption.kind === 'new' }));
-  const arrivalsReady = (!tracking || Boolean(release.data && !release.loading && !release.error))
+  const arrivalsReady = collectionsReady && (!tracking || Boolean(release.data && !release.loading && !release.error))
     && (!calendarApi || (calendarRead?.api === calendarApi && calendarRead.root === root && calendarRead.retry === shelfRetry));
   const visit = useHomeVisit(root, arrivalItems, today, true, at.toISOString(), arrivalsReady);
   const upcoming = upcomingRows(collections, board, inbox, wishlist, today).filter(row => daysAfter(row.date, today) <= 14);

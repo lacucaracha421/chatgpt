@@ -141,6 +141,8 @@ class AssetListTocTests(unittest.TestCase):
                 continue
             if scope == "album" and not data["album"]:
                 continue
+            if filters.get("unclassified") and data["classified"]:
+                continue
             media = filters.get("media_kind")
             if media == "images" and data["kind"] not in ("image", "gif"):
                 continue
@@ -215,6 +217,8 @@ class AssetListTocTests(unittest.TestCase):
             for sort in ("newest", "oldest"):
                 with self.subTest(scope=scope, sort=sort):
                     self.assert_toc(scope, sort)
+                    if scope == "library":
+                        self.assert_toc(scope, sort, unclassified=1)
 
     def test_technical_filters_match_full_walk_and_seek_in_every_scope(self):
         cases = [{"media_kind": "images"}, {"media_kind": "videos"},
@@ -432,6 +436,39 @@ class AssetListTocTests(unittest.TestCase):
                 db.execute("UPDATE assets SET collected_at=? WHERE id=?", [DATES[0], list(self.assets)[0]])
                 db.commit()
 
+    def test_unclassified_full_walk_pages_and_toc(self):
+        for sort in ("newest", "oldest"):
+            for filters in ({}, {"media_kind": "images"}, {"aspect_ratio": "landscape"},
+                            {"media_kind": "videos", "duration_ms_min": 0}):
+                with self.subTest(sort=sort, filters=filters):
+                    params = {"unclassified": 1, **filters}
+                    self.assert_toc("library", sort, **params)
+                    full = self.read("library", sort=sort, limit=100, **params)
+                    self.assertEqual(full.status_code, 200, full.text)
+                    self.assertEqual([row["id"] for row in full.json()["items"]],
+                                     self.expected("library", sort, params))
+                    self.assertTrue(all(not row["classification_ids"] for row in full.json()["items"]))
+        self.assertEqual(self.read("classification", unclassified=1).json()["items"], [])
+        for value in (-1, 2, "bad"):
+            self.assertEqual(self.read("library", unclassified=value).status_code, 422)
+
+    def test_unclassified_cursor_and_etag_identity(self):
+        for source, destination in (({}, {"unclassified": 1}), ({"unclassified": 1}, {})):
+            page = self.read("library", limit=2, **source).json()
+            self.assertEqual(self.read("library", cursor=page["next_cursor"], **destination).status_code, 400)
+        legacy = base64.urlsafe_b64encode(json.dumps(["newest", DATES[-1], list(self.assets)[-1]]).encode()).decode()
+        self.assertEqual(self.read("library", unclassified=1, cursor=legacy).status_code, 400)
+        with api_app.get_db() as db:
+            db.execute("DELETE FROM asset_classifications")
+            db.commit()
+        # Even identical rows/buckets are different query identities.
+        for params in ({"limit": 100}, {"toc": 1}):
+            ordinary = self.read("library", **params)
+            unsorted = self.read("library", unclassified=1, **params)
+            self.assertNotEqual(ordinary.headers["etag"], unsorted.headers["etag"])
+            self.assertEqual(self.read("library", unclassified=1, headers={"If-None-Match": unsorted.headers["etag"]}, **params).status_code, 304)
+            self.assertEqual(self.read("library", unclassified=1, headers={"If-None-Match": ordinary.headers["etag"]}, **params).status_code, 200)
+
     def test_canonical_classification_assignments_replace_legacy_membership(self):
         classification_authority.startup(api_app.get_db)
         entries = [{"id": CLASSIFICATION, "kind": "root", "name": "Folder",
@@ -447,9 +484,16 @@ class AssetListTocTests(unittest.TestCase):
                 db, library_id=LIBRARY, entries=entries, assignments=assignments, roles=[],
                 baseline_digest="fixture", baseline_revision=None, snapshot_version=1, now="now")
             db.commit()
+        missing = list(self.assets)[0]
+        self.assets[missing]["classified"] = False
+        with api_app.get_db() as db:
+            db.execute("DELETE FROM classification_authority_assignments WHERE asset_id=?", [missing])
+            db.commit()
         for sort in ("newest", "oldest"):
             self.assert_toc("classification", sort)
             self.assert_toc("classification", sort, media_kind="videos")
+            self.assert_toc("library", sort, unclassified=1)
+            self.assert_toc("library", sort, unclassified=1, media_kind="images")
 
     def test_trashed_tombstoned_and_missing_canonical_assets_are_not_counted(self):
         asset_authority.startup(api_app.get_db)

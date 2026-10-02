@@ -185,6 +185,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [entries, setEntries] = useState<ClassificationEntry[]>([]);
   const [albums, setAlbums] = useState<AlbumEntry[]>([]);
   const [collections, setCollections] = useState<CollectionSummary[]>([]);
+  const [collectionsRead, setCollectionsRead] = useState<{ gateway: typeof gateway; root: string } | null>(null);
   const [collectionLibraryState, setCollectionLibraryState] = useState<CollectionLibraryStateByType>(createDefaultCollectionLibraryState);
   const collectionNavigationMemory = useRef<CollectionNavigationMemory>(new Map());
   const assetNavigationMemory = useRef<AssetNavigationMemory>(new Map());
@@ -253,19 +254,20 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     setAlbums(await gateway.listAlbums());
   }, [gateway]);
   const refreshCollections = useCallback(async () => {
+    setCollectionsRead(null);
     setCollections(await gateway.listCollections());
-  }, [gateway]);
+    setCollectionsRead({ gateway, root: libraryRoot });
+  }, [gateway, libraryRoot]);
   useEffect(() => gateway.subscribeCollectionsChanged?.(() => { void refreshCollections(); }), [gateway, refreshCollections]);
   const refreshSidebar = useCallback(async () => {
-    const [nextEntries, nextAlbums, nextCollections] = await Promise.all([
+    const [nextEntries, nextAlbums] = await Promise.all([
       gateway.listClassifications(),
       gateway.listAlbums(),
-      gateway.listCollections(),
+      refreshCollections(),
     ]);
     setEntries(nextEntries);
     setAlbums(nextAlbums);
-    setCollections(nextCollections);
-  }, [gateway]);
+  }, [gateway, refreshCollections]);
   const refreshReviewCount = useCallback(async () => {
     const page = await gateway.listSimilarityReviews({ after: null, limit: 1 });
     setReviewCount(page.totalCount);
@@ -859,7 +861,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                         onContentChanged={() => void refreshPrivateVaultStatus()} privacyMode={preferences.privacyMode} />
                     : <DeferredViewFallback />
                 ) : view.kind === "home" ? (
-                  <HomeView collections={collections} reviewCount={reviewCount} unsortedCount={unsortedCount} trashCount={trashCount}
+                  <HomeView collections={collections} collectionsReady={collectionsRead?.gateway === gateway && collectionsRead.root === libraryRoot} reviewCount={reviewCount} unsortedCount={unsortedCount} trashCount={trashCount}
                     refreshVersion={assetRefresh} onNavigate={(next) => navigateView(next, { fromHome: true })} onOpenAsset={(assetId) => void openExisting(assetId, { fromHome: true })}
                     onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}
                     characters={characterHub.targets} classifications={entries} />

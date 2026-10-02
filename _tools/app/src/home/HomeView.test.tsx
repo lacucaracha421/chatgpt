@@ -223,3 +223,17 @@ describe("Home visit read acknowledgement", () => {
     expect(readHomeVisit("fixture").pending).toContain("title:retry:2026-09-25:");
   });
 });
+
+it('keeps the saved visit until collections have successfully loaded and their arrivals are displayed', async () => {
+  const previous = new Date(2026,8,24).toISOString();
+  writeHomeVisit('fixture', {lastVisit: previous, pending: [], opened: []});
+  const store=notesWith([]);
+  const props={collections: [], collectionsReady: false, reviewCount: 0, unsortedCount: 0, trashCount: 0, notes: store, onNavigate: vi.fn(), now: () => NOW};
+  const view=render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><HomeView {...props}/></PrivacyProvider>);
+  await screen.findByText('오늘 할 것이 없습니다');
+  expect(readHomeVisit('fixture').lastVisit).toBe(previous);
+  view.rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><HomeView {...props} collectionsReady collections={[{id:'owned',name:'늦게 읽은 게임',type:'game',releaseDate:'2026-09-25'} as HomeViewProps['collections'][number]]}/></PrivacyProvider>);
+  const card=await screen.findByRole('button',{name:/늦게 읽은 게임/});
+  expect(within(card).getByText('NEW')).toBeTruthy();
+  await waitFor(()=>expect(readHomeVisit('fixture').lastVisit).toBe(NOW.toISOString()));
+});
