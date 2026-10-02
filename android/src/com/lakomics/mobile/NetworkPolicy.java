@@ -27,6 +27,8 @@ final class NetworkPolicy {
   boolean get=p.equals("/v1/library/list-generation") || p.equals("/v1/library/classifications") || p.equals("/v1/library/assets") || p.equals("/v1/library/revisit") || p.equals("/v1/library/revisit/date") || p.matches("/v1/library/revisit/creator/[A-Za-z0-9_%.-]+/assets") || p.equals("/v1/captures/pending") || p.matches("/v1/captures/[A-Za-z0-9_-]+/download");
   get=get || p.equals("/v1/library/characters") || p.equals("/v1/library/characters/assets") || p.equals("/v1/library/characters/status");
   get=get || p.equals("/v1/library/search/suggestions");
+  // SAF grant checks: exactly one classification and one Asset, GET only.
+  get=get || p.matches("/v1/library/classifications/[A-Za-z0-9_-]{1,128}/contains/[A-Za-z0-9_-]{1,128}");
   // HOME-DASH-001: read-only Home library counts.
   get=get || p.equals("/v1/library/summary");
   // HOME-DASH-001 Home documents the PC publishes: 발매 예정 (+ the wishlist intent command) and

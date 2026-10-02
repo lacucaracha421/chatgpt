@@ -39,32 +39,49 @@ importScripts("classification-tree.js", "api-client.js", "menu-settings.js", "pr
     return { ok: true, query, urls };
   }
 
+  let connectionChanges = Promise.resolve();
+  function changeConnection(work) {
+    const result = connectionChanges.then(work);
+    connectionChanges = result.catch(() => {});
+    return result;
+  }
+  function confirmationPage(sender) {
+    return sender.id === chrome.runtime.id && sender.url?.split("#")[0] === chrome.runtime.getURL("options/pairing.html") && sender.frameId === 0;
+  }
+
   async function handleMessage(message, sender = {}) {
     if (message?.type?.startsWith("translation:")) return globalThis.LakomicsTranslation.handle(message);
     switch (message?.type) {
+      case "pair:review": {
+        if (!globalThis.LakomicsListApi.parsePairing(message.value)) return { ok: false, code: "invalid_pairing" };
+        await chrome.tabs.create({ url: chrome.runtime.getURL("options/pairing.html") + "#" + encodeURIComponent(message.value) });
+        return { ok: true, pending: true };
+      }
       case "pair": {
-        const previous = await globalThis.LakomicsListApi.readConnection();
-        const result = await globalThis.LakomicsListApi.pair(message.value);
-        if (!result.ok) return result;
-        if (previous?.origin !== result.connection.origin) await globalThis.LakomicsProfileStore.clear();
-        await globalThis.LakomicsProfileStore.seed(result.bootstrap);
-        await globalThis.LakomicsMenuSettings.sync({ force: true });
-        const state = await globalThis.LakomicsProfileStore.readState();
-        void globalThis.LakomicsProfileStore.flush();
-        return { ok: true, state, connection: { origin: result.connection.origin, clientId: result.connection.clientId } };
+        if (!confirmationPage(sender)) return { ok: false, code: "confirmation_required" };
+        return changeConnection(async () => {
+          const result = await globalThis.LakomicsListApi.pair(message.value, {
+            confirmedOrigin: message.confirmedOrigin, expectedConnection: message.expectedConnection,
+          });
+          if (!result.ok) return result;
+          await globalThis.LakomicsProfileStore.seed(result.bootstrap);
+          await globalThis.LakomicsMenuSettings.sync({ force: true });
+          return { ok: true, state: await globalThis.LakomicsProfileStore.readState(), connection: { origin: result.connection.origin, clientId: result.connection.clientId } };
+        });
       }
       case "disconnect":
-        await globalThis.LakomicsListApi.request("/v1/extension/session", { method: "DELETE", timeoutMs: 5000 }).catch(() => undefined);
-        await globalThis.LakomicsListApi.clearConnection();
-        await globalThis.LakomicsProfileStore.clear();
-        return { ok: true };
+        return changeConnection(async () => {
+          await globalThis.LakomicsListApi.request("/v1/extension/session", { method: "DELETE", timeoutMs: 5000 }).catch(() => undefined);
+          await globalThis.LakomicsListApi.clearConnection();
+          return { ok: true };
+        });
       case "settings:open":
         await chrome.runtime.openOptionsPage();
         return { ok: true };
       case "settings:get": {
         const connection = await globalThis.LakomicsListApi.readConnection();
         const state = await globalThis.LakomicsProfileStore.readState();
-        return { ok: true, paired: Boolean(connection), origin: connection?.origin ?? null, clientId: connection?.clientId ?? null, pairedAt: connection?.pairedAt ?? 0, state };
+        return { ok: true, paired: Boolean(connection), origin: connection?.origin ?? null, clientId: connection?.clientId ?? null, pairedAt: connection?.pairedAt ?? 0, connectionIdentity: globalThis.LakomicsListApi.connectionIdentity(connection), state };
       }
       case "collector:state": {
         const result = await globalThis.LakomicsProfileStore.getState();

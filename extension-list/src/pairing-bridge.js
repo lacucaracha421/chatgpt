@@ -61,22 +61,11 @@
     else render();
   }
 
-  // A pairing can succeed in the worker while this page sees a failure: the page ran
-  // twice (the second use of the one-time link is rejected) or the reply was lost or
-  // late. A connection saved after this attempt started means it did connect.
-  async function pairedSince(startedAt) {
-    const settings = await runtimeMessage({ type: "settings:get" });
-    return Boolean(settings?.paired) && Number(settings.pairedAt) >= startedAt;
-  }
-
   async function pairFromLocation(value = location.href) {
     if (!pairingLocation(value)) return { ok: false, code: "not_pairing_url" };
     try { history.replaceState(null, "", `${location.origin}/extension-pair`); } catch {}
-    const startedAt = Date.now() - 1000;
-    let result = await runtimeMessage({ type: "pair", value });
-    if (!result?.ok && await pairedSince(startedAt)) result = { ok: true, recovered: true };
-    renderResult(Boolean(result?.ok), result?.ok ? "" : failureReason(result));
-    if (result?.ok) setTimeout(() => { try { window.close(); } catch {} }, 600);
+    const result = await runtimeMessage({ type: "pair:review", value });
+    if (!result?.ok) renderResult(false, failureReason(result));
     return result;
   }
 

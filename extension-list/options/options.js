@@ -95,9 +95,9 @@
   $("pair-form").onsubmit = async (event) => {
     event.preventDefault(); if (busy) return; busy = true; $("pair-status").textContent = "…";
     try {
-      const result = await send({ type: "pair", value: $("pairing").value.trim() });
+      const result = await send({ type: "pair:review", value: $("pairing").value.trim() });
       if (!result?.ok) { $("pair-status").textContent = result?.code === "pairing_expired" ? "만료된 링크입니다. PC에서 새로 발급하세요." : result?.code === "invalid_pairing" ? "연결 링크 전체를 붙여넣으세요." : "연결 실패 · 다시 시도해 주세요."; return; }
-      $("pairing").value = ""; $("pair-status").textContent = ""; state = result.state; await load();
+      $("pairing").value = ""; $("pair-status").textContent = "새로 열린 확장 화면에서 서버 주소를 확인하고 연결하세요.";
     } finally { busy = false; }
   };
   $("refresh").onclick = async () => { const result = await send({ type: "profile:refresh" }); if (result?.ok) { state = result.state; render(); setStatus(""); } else setStatus("연결 실패"); };

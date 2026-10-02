@@ -3,9 +3,23 @@
   const STATE_KEY = "lakomics:list:state:v1";
   const OUTBOX_KEY = "lakomics:list:profile-outbox:v1";
   const HIDDEN_KEY = "lakomics:arc:hidden:v1";
-  const MAX_OUTBOX = 32;
   let refreshPromise = null;
   let flushPromise = null;
+  let generation = 0;
+  let mutations = Promise.resolve(), requests = Promise.resolve();
+  const changed = () => ({ ok: false, code: "connection_changed" });
+
+  // Serialize storage separately so offline edits remain durable while a request waits.
+  function mutate(work, started = generation) {
+    const result = mutations.then(() => started === generation ? work() : changed());
+    mutations = result.catch(() => {});
+    return result;
+  }
+  function requestSerial(work, started) {
+    const result = requests.then(() => started === generation ? work() : changed());
+    requests = result.catch(() => {});
+    return result;
+  }
 
   function normalizeState(value) {
     const tree = globalThis.LakomicsClassificationTree;
@@ -39,33 +53,50 @@
     return normalized;
   }
 
-  async function clear() {
-    await globalThis.LakomicsMenuSettings?.clear();
-    await chrome.storage.local.remove([STATE_KEY, OUTBOX_KEY, HIDDEN_KEY]);
+  function clear() {
+    generation++;
+    refreshPromise = flushPromise = null;
+    requests = Promise.resolve();
+    return mutate(async () => {
+      await globalThis.LakomicsMenuSettings?.clear();
+      await chrome.storage.local.remove([STATE_KEY, OUTBOX_KEY, HIDDEN_KEY]);
+    });
   }
 
-  async function setHidden(ids) {
-    await globalThis.LakomicsMenuSettings?.record({ hiddenClassificationIds: ids }, await readState());
-    await chrome.storage.local.set({ [HIDDEN_KEY]: globalThis.LakomicsClassificationTree.cleanIds(ids) });
-    return { ok: true, state: await readState() };
+  function setHidden(ids) {
+    return mutate(async () => {
+      await globalThis.LakomicsMenuSettings?.record({ hiddenClassificationIds: ids }, await readState());
+      await chrome.storage.local.set({ [HIDDEN_KEY]: globalThis.LakomicsClassificationTree.cleanIds(ids) });
+      return { ok: true, state: await readState() };
+    });
   }
 
-  async function seed(bootstrap) {
-    if (!bootstrap?.profile || !bootstrap?.classifications) return null;
-    const state = await writeState({ ...bootstrap, syncedAt: Date.now() });
-    return state;
+  function seed(bootstrap) {
+    return mutate(async () => {
+      if (!bootstrap?.profile || !bootstrap?.classifications) return null;
+      return writeState({ ...bootstrap, profile: await overlayPending(bootstrap.profile), syncedAt: Date.now() });
+    });
   }
 
-  async function refresh({ forceMenuSettings = false } = {}) {
+  function refresh({ forceMenuSettings = false } = {}) {
     if (refreshPromise) return refreshPromise;
-    const promise = globalThis.LakomicsListApi.request("/v1/extension/bootstrap")
-      .then(async (response) => {
-        if (!response.ok) return { ok: false, code: response.code || `http_${response.status}` };
-        const state = await seed(response.data);
-        if (!state) return { ok: false, code: "invalid_state" };
-        await globalThis.LakomicsMenuSettings?.sync({ force: forceMenuSettings });
-        return { ok: true, state: await readState() };
-      }).finally(() => { if (refreshPromise === promise) refreshPromise = null; });
+    const started = generation;
+    const promise = requestSerial(async () => {
+      await drain(started);
+      if (started !== generation) return changed();
+      const response = await globalThis.LakomicsListApi.request("/v1/extension/bootstrap");
+      if (started !== generation) return changed();
+      if (!response.ok) return { ok: false, code: response.code || `http_${response.status}` };
+      const state = await mutate(async () => {
+        if (!response.data?.profile || !response.data?.classifications) return null;
+        return writeState({ ...response.data, profile: await overlayPending(response.data.profile), syncedAt: Date.now() });
+      }, started);
+      if (started !== generation) return changed();
+      if (!state) return { ok: false, code: "invalid_state" };
+      await globalThis.LakomicsMenuSettings?.sync({ force: forceMenuSettings });
+      if (started !== generation) return changed();
+      return { ok: true, state: await readState() };
+    }, started).finally(() => { if (refreshPromise === promise) refreshPromise = null; });
     refreshPromise = promise;
     return promise;
   }
@@ -99,67 +130,90 @@
 
   async function readOutbox() {
     const stored = await chrome.storage.local.get([OUTBOX_KEY]);
-    return Array.isArray(stored[OUTBOX_KEY]) ? stored[OUTBOX_KEY].filter((item) => item && typeof item === "object").slice(-MAX_OUTBOX) : [];
+    return Array.isArray(stored[OUTBOX_KEY]) ? stored[OUTBOX_KEY].filter(item => item?.patch && typeof item.patch === "object") : [];
+  }
+
+  function mergePatch(previous, next) {
+    return {
+      ...previous, ...next,
+      ...(previous.listOrderPatch || next.listOrderPatch ? { listOrderPatch: { ...previous.listOrderPatch, ...next.listOrderPatch } } : {}),
+      ...(previous.preferences || next.preferences ? { preferences: { ...previous.preferences, ...next.preferences } } : {}),
+    };
+  }
+
+  async function overlayPending(profile) {
+    for (const item of await readOutbox()) profile = applyLocal(profile, item.patch);
+    return profile;
   }
 
   async function enqueue(patch) {
-    const outbox = await readOutbox();
-    const last = outbox.at(-1);
-    if (last) {
-      if (patch.listOrderPatch && last.patch?.listOrderPatch) last.patch.listOrderPatch = { ...last.patch.listOrderPatch, ...patch.listOrderPatch };
-      else if (patch.preferences && last.patch?.preferences) last.patch.preferences = { ...last.patch.preferences, ...patch.preferences };
-      else if (patch.pinnedClassificationIds && last.patch?.pinnedClassificationIds) last.patch.pinnedClassificationIds = patch.pinnedClassificationIds;
-      else outbox.push({ id: crypto.randomUUID(), patch });
-    } else outbox.push({ id: crypto.randomUUID(), patch });
-    await chrome.storage.local.set({ [OUTBOX_KEY]: outbox.slice(-MAX_OUTBOX) });
+    const merged = (await readOutbox()).reduce((all, item) => mergePatch(all, item.patch), {});
+    await chrome.storage.local.set({ [OUTBOX_KEY]: [{ id: crypto.randomUUID(), patch: mergePatch(merged, patch) }] });
   }
 
-  async function sendPatch(patch, allowConflictRetry = true) {
+  async function sendPatch(item, started, allowConflictRetry = true) {
     const state = await readState();
+    if (started !== generation) return changed();
     if (!state) return { ok: false, code: "state_missing" };
     const response = await globalThis.LakomicsListApi.request("/v1/extension/profile", {
-      method: "PATCH", body: { expectedRevision: state.profile.revision, ...patch }, timeoutMs: 10000,
+      method: "PATCH", body: { ...item.patch, expectedRevision: state.profile.revision }, timeoutMs: 10000,
     });
+    if (started !== generation) return changed();
     if (response.ok) {
-      const next = await writeState({ ...state, profile: response.data, syncedAt: Date.now() });
-      return { ok: true, state: next };
+      return mutate(async () => {
+        // Never acknowledge an edit that arrived while this request was in flight.
+        const remaining = (await readOutbox()).filter(pending => pending.id !== item.id);
+        await chrome.storage.local.set({ [OUTBOX_KEY]: remaining });
+        const current = await readState();
+        const next = await writeState({ ...current, profile: await overlayPending(response.data), syncedAt: Date.now() });
+        return { ok: true, state: next };
+      }, started);
     }
     if (response.status === 409 && allowConflictRetry) {
       const current = response.data?.detail?.profile;
       if (!current) return { ok: false, code: "profile_conflict" };
-      await writeState({ ...state, profile: current, syncedAt: Date.now() });
-      return sendPatch(patch, false);
+      await mutate(async () => writeState({ ...await readState(), profile: await overlayPending(current), syncedAt: Date.now() }), started);
+      return sendPatch(item, started, false);
     }
     return { ok: false, code: response.code || (response.status === 401 ? "revoked" : "sync_failed") };
   }
 
   async function patchProfile(patch) {
-    const state = await readState();
-    if (!state) return { ok: false, code: "state_missing" };
-    if (patch.listOrderPatch) await globalThis.LakomicsMenuSettings?.record(patch, state);
-    const optimistic = await writeState({ ...state, profile: applyLocal(state.profile, patch), syncedAt: state.syncedAt });
-    const sent = await sendPatch(patch);
-    if (sent.ok) return sent;
-    if (sent.code === "revoked") return sent;
-    await enqueue(patch);
-    return { ok: true, state: optimistic, pending: true };
+    const started = generation;
+    const optimistic = await mutate(async () => {
+      const state = await readState();
+      if (!state) return { ok: false, code: "state_missing" };
+      if (patch.listOrderPatch) await globalThis.LakomicsMenuSettings?.record(patch, state);
+      await enqueue(patch);
+      return { ok: true, state: await writeState({ ...state, profile: applyLocal(state.profile, patch), syncedAt: state.syncedAt }) };
+    }, started);
+    if (!optimistic.ok || started !== generation) return started !== generation ? changed() : optimistic;
+    const sent = await flush();
+    if (started !== generation) return changed();
+    if (!sent.ok && sent.code === "revoked") return sent;
+    const pending = (await readOutbox()).length > 0;
+    if (started !== generation) return changed();
+    return { ok: true, state: await readState(), ...(pending ? { pending: true } : {}) };
   }
 
-  async function flush() {
+  async function drain(started) {
+    let completed = 0;
+    while (started === generation) {
+      const item = await mutate(async () => (await readOutbox())[0], started);
+      if (started !== generation) return changed();
+      if (!item) return { ok: true, completed };
+      const result = await sendPatch(item, started);
+      if (!result.ok) return { ...result, completed };
+      completed++;
+    }
+    return changed();
+  }
+
+  function flush() {
     if (flushPromise) return flushPromise;
-    const promise = (async () => {
-      let outbox = await readOutbox();
-      let completed = 0;
-      while (outbox.length) {
-        const item = outbox[0];
-        const result = await sendPatch(item.patch);
-        if (!result.ok) return { ok: false, code: result.code, completed };
-        outbox = outbox.slice(1);
-        completed += 1;
-        await chrome.storage.local.set({ [OUTBOX_KEY]: outbox });
-      }
-      return { ok: true, completed };
-    })().finally(() => { if (flushPromise === promise) flushPromise = null; });
+    const started = generation;
+    const promise = requestSerial(() => drain(started), started)
+      .finally(() => { if (flushPromise === promise) flushPromise = null; });
     flushPromise = promise;
     return promise;
   }

@@ -166,28 +166,44 @@
       .slice(0, 180);
   }
 
-  async function rememberRecent(sourceUrl) {
-    const key = xKey(sourceUrl);
-    if (!key) return;
-    const stored = await chrome.storage.local.get([RECENT_KEY]);
-    const now = Date.now();
-    const values = (Array.isArray(stored[RECENT_KEY]) ? stored[RECENT_KEY] : [])
-      .filter((item) => item && item.expiresAt > now && typeof item.key === "string" && item.key !== key);
-    values.push({ key, expiresAt: now + RECENT_MS });
-    await chrome.storage.local.set({ [RECENT_KEY]: values.slice(-500) });
+  let recentWrites = Promise.resolve();
+  function recentMutation(work) {
+    const result = recentWrites.then(work);
+    recentWrites = result.catch(() => {});
+    return result;
+  }
+  async function connectionIdentity() {
+    const api = globalThis.LakomicsListApi;
+    return api.connectionIdentity?.(await api.readConnection?.()) ?? null;
+  }
+  function clearRecent() {
+    return recentMutation(() => chrome.storage.local.remove([RECENT_KEY]));
+  }
+  function rememberRecent(sourceUrl, connection) {
+    return recentMutation(async () => {
+      const key = xKey(sourceUrl);
+      if (!key || !connection || connection !== await connectionIdentity()) return;
+      const stored = (await chrome.storage.local.get([RECENT_KEY]))[RECENT_KEY];
+      const now = Date.now();
+      // Legacy unscoped markers cannot be attributed to a server and are discarded.
+      const values = (stored?.connection === connection && Array.isArray(stored.items) ? stored.items : [])
+        .filter(item => item && item.expiresAt > now && typeof item.key === "string" && item.key !== key);
+      values.push({ key, expiresAt: now + RECENT_MS });
+      await chrome.storage.local.set({ [RECENT_KEY]: { connection, items: values.slice(-500) } });
+    });
   }
 
-  async function recentKeys() {
-    const stored = await chrome.storage.local.get([RECENT_KEY]);
-    const now = Date.now();
-    const live = (Array.isArray(stored[RECENT_KEY]) ? stored[RECENT_KEY] : []).filter((item) => item && item.expiresAt > now && typeof item.key === "string");
-    if (live.length !== (stored[RECENT_KEY] || []).length) await chrome.storage.local.set({ [RECENT_KEY]: live });
-    return [...new Set(live.map((item) => item.key))];
+  async function recentKeys(connection) {
+    await recentWrites;
+    if (!connection) return [];
+    const stored = (await chrome.storage.local.get([RECENT_KEY]))[RECENT_KEY];
+    if (stored?.connection !== connection || !Array.isArray(stored.items)) return [];
+    return [...new Set(stored.items.filter(item => item && item.expiresAt > Date.now() && typeof item.key === "string").map(item => item.key))];
   }
 
-  async function confirm(payload) {
+  async function confirm(payload, connection) {
     const params = new URLSearchParams({ source_url: payload.source_url, media_url: payload.media_url, classification_id: payload.classification_id });
-    const response = await globalThis.LakomicsListApi.request(`/v1/extension/captures/confirm?${params}`, { timeoutMs: 8000 });
+    const response = await globalThis.LakomicsListApi.request(`/v1/extension/captures/confirm?${params}`, { timeoutMs: 8000, expectedConnection: connection });
     if (!response.ok || !response.data?.found) return null;
     return response.data?.capture || { status: "pending" };
   }
@@ -208,6 +224,7 @@
   }
 
   async function save({ candidate, classificationId, classificationPath = [] }) {
+    const connection = await connectionIdentity();
     const resolved = await resolveXVideo(candidate);
     if (!resolved.ok) return resolved;
     candidate = resolved.candidate;
@@ -221,9 +238,10 @@
       media_type: type,
       source: source(candidate),
     };
-    const response = await globalThis.LakomicsListApi.request("/v1/captures", { method: "POST", body: payload, timeoutMs: type === "video" ? 300_000 : 60_000 });
+    const response = await globalThis.LakomicsListApi.request("/v1/captures", { method: "POST", body: payload, expectedConnection: connection, timeoutMs: type === "video" ? 300_000 : 60_000 });
+    if (connection !== await connectionIdentity()) return { ok: false, code: "connection_changed" };
     if (response.ok) {
-      await rememberRecent(candidate.sourceUrl);
+      await rememberRecent(candidate.sourceUrl, connection);
       const capture = response.data?.capture || null;
       return {
         ok: true,
@@ -233,9 +251,10 @@
       };
     }
     if ([0, 408, 429, 500, 502, 503, 504].includes(response.status)) {
-      const confirmed = await confirm(payload).catch(() => null);
+      const confirmed = await confirm(payload, connection).catch(() => null);
+      if (connection !== await connectionIdentity()) return { ok: false, code: "connection_changed" };
       if (confirmed) {
-        await rememberRecent(candidate.sourceUrl);
+        await rememberRecent(candidate.sourceUrl, connection);
         return { ok: true, status: "confirmed", capture: confirmed, captureStatus: confirmed.status || "pending" };
       }
     }
@@ -250,12 +269,14 @@
   }
 
   async function savedIndex() {
-    const response = await globalThis.LakomicsListApi.request("/v1/saved-x-media", { timeoutMs: 8000 });
-    const recent = await recentKeys();
+    const connection = await connectionIdentity();
+    const response = await globalThis.LakomicsListApi.request("/v1/saved-x-media", { timeoutMs: 8000, expectedConnection: connection });
+    const recent = await recentKeys(connection);
+    if (connection !== await connectionIdentity()) return { ok: false, code: "connection_changed" };
     if (!response.ok) return recent.length ? { ok: true, savedKeys: recent, indexSource: "recent" } : { ok: false, code: response.code || "offline" };
     const keys = Array.isArray(response.data?.keys) ? response.data.keys.filter((key) => typeof key === "string") : [];
     return { ok: true, savedKeys: [...new Set([...keys, ...recent])], indexSource: "server", authoritative: true };
   }
 
-  globalThis.LakomicsSaveClient = { gifLike, mediaType, safeServerDetail, save, savedIndex, xKey, resolveXVideoCandidate, xVideoMediaUrl };
+  globalThis.LakomicsSaveClient = { clearRecent, gifLike, mediaType, safeServerDetail, save, savedIndex, xKey, resolveXVideoCandidate, xVideoMediaUrl };
 })();

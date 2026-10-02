@@ -62,7 +62,7 @@ final class ExchangeService {
         String zip;
         int skipped;
         long size = -1, bytes;
-        boolean incoming, persistable, freshId;
+        boolean incoming, persistable, freshId, autoRetryPending;
         volatile boolean cancelled;
         int attempts;
     }
@@ -901,17 +901,18 @@ final class ExchangeService {
     private void fail(Row row, String reason, Runnable again) {
         boolean scheduled = false;
         synchronized (this) {
-            row.state = "failed"; row.code = reason;
+            row.state = "failed"; row.code = reason; row.autoRetryPending = false;
             // A receive keeps retrying (every 60 s at most) while the app is open: the inbox
             // revision it arrived with is already handled, so nothing else would bring it back.
             if (again != null && AUTOMATIC.contains(reason) && (row.incoming || row.attempts < AUTO_RETRIES)) {
                 long delay = ExchangeTransfer.retryDelay(row.attempts++);
                 int started = epoch;
-                scheduled = true;
+                scheduled = true; row.autoRetryPending = true;
                 net.schedule(() -> {
                     synchronized (this) {
                         if (started != epoch || row.cancelled || !"failed".equals(row.state)) return;
                         if (!foreground) { deferred.add(row.id); return; }
+                        row.autoRetryPending = false;
                     }
                     again.run();
                 }, delay, TimeUnit.MILLISECONDS);
@@ -927,6 +928,7 @@ final class ExchangeService {
         Row row;
         synchronized (this) { row = incoming.containsKey(id) ? incoming.get(id) : outgoing.get(id); }
         if (row == null || row.cancelled) return;
+        row.autoRetryPending = false;
         if (row.incoming) enqueueReceive(row); else enqueueUpload(row);
     }
 
@@ -937,7 +939,7 @@ final class ExchangeService {
         if (row == null) throw new UserError("다시 시도할 항목을 찾을 수 없습니다.");
         if ("sourceUnavailable".equals(row.code)) throw new UserError("원본 파일을 읽을 수 없습니다. 파일을 다시 선택해 주세요.");
         if (!retryable(row)) throw new UserError("압축 파일이 이미 정리되었습니다. 폴더를 다시 보내 주세요.");
-        row.attempts = 0; row.cancelled = false;
+        row.attempts = 0; row.cancelled = false; row.autoRetryPending = false;
         if (row.incoming) { row.state = "waiting"; enqueueReceive(row); }
         else { row.state = "preparing"; enqueueUpload(row); }
         changed();
@@ -1053,6 +1055,7 @@ final class ExchangeService {
                 .put("sizeBytes", row.size).put("bytes", row.bytes).put("peer", row.peer).put("state", row.state)
                 .put("code", row.code).put("createdAt", row.created == null ? "" : row.created)
                 .put("skipped", row.skipped).put("retryable", row.incoming || retryable(row))
+                .put("autoRetryPending", "failed".equals(row.state) && row.autoRetryPending)
                 .put("peerId", row.peerId == null ? "" : row.peerId);
     }
 

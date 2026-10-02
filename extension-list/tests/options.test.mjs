@@ -8,8 +8,8 @@ const sources = await Promise.all(['classification-tree', 'api-client', 'profile
 const optionsSource = await readFile(new URL('../options/options.js', import.meta.url), 'utf8');
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
-test('PC pasted link pairs through the existing API, then arc edits and local hiding persist when settings reopen', async () => {
-  const memory = {}, requests = [];
+test('PC pasted link requests confirmation, then confirmed pairing retains arc edits and local hiding', async () => {
+  const memory = {}, requests = [], reviews = [];
   const classifications = { revision: 1, entries: [{ id: 'games', name: '게임', parentId: null }, { id: 'other', name: '기타', parentId: null }, { id: 'child', name: '하위', parentId: 'games' }] };
   let profile = { revision: 1, pinnedClassificationIds: [], listOrder: {}, preferences: {} };
   async function open() {
@@ -28,7 +28,7 @@ test('PC pasted link pairs through the existing API, then arc edits and local hi
     } }, runtime: { async sendMessage(message) {
       const store = w.LakomicsProfileStore, api = w.LakomicsListApi;
       if (message.type === 'settings:get') return { paired: Boolean(await api.readConnection()), state: await store.readState() };
-      if (message.type === 'pair') { const result = await api.pair(message.value); return result.ok ? { ...result, state: await store.seed(result.bootstrap) } : result; }
+      if (message.type === 'pair:review') { reviews.push(message.value); return { ok: true, pending: true }; }
       if (message.type === 'profile:refresh') return store.refresh();
       if (message.type === 'profile:patch') return store.patchProfile(message.patch);
       if (message.type === 'arc:hidden') return store.setHidden(message.ids);
@@ -45,9 +45,15 @@ test('PC pasted link pairs through the existing API, then arc edits and local hi
   first.doc.querySelector('#pairing').value = `https://cloud.example.test/extension-pair#${secret}`;
   first.doc.querySelector('#pair-form').dispatchEvent(new first.w.Event('submit', { bubbles: true, cancelable: true }));
   await tick();
-  assert.equal(first.doc.querySelector('#pair-form').hidden, true);
+  assert.equal(first.doc.querySelector('#pair-form').hidden, false);
   assert.equal(first.doc.querySelector('#pairing').value, '');
-  assert.equal(requests[0].url, 'https://cloud.example.test/v1/extension/pair');
+  assert.equal(requests.length, 0);
+  assert.equal(reviews.length, 1);
+  const result = await first.w.LakomicsListApi.pair(reviews[0], { confirmedOrigin: 'https://cloud.example.test', expectedConnection: null });
+  assert.equal(result.ok, true);
+  await first.w.LakomicsProfileStore.seed(result.bootstrap);
+  first.w.eval(optionsSource); await tick();
+  assert.equal(first.doc.querySelector('#pair-form').hidden, true);
   assert.equal(JSON.parse(requests[0].init.body).secret, secret);
   assert.equal(first.doc.querySelector('#order-editor').firstElementChild.id, 'lakomics-arc-collector');
   first.arc().querySelector('[data-classification-id="games"]').click();

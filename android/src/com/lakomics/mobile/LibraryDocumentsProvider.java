@@ -106,7 +106,9 @@ public final class LibraryDocumentsProvider extends DocumentsProvider {
    // The Albums section is only real for Albums this connection actually holds live, so a
    // stale document id cannot name a section that the replica no longer contains.
    if(parent.equals(DocumentTreePolicy.ALBUMS))return albumsAdopted() && liveAlbum(document);
-   if(parent.startsWith("album:"))return liveAlbum(parent);
+   // A live Album alone proves nothing about the requested child. Until a current
+   // membership read exists, use the policy's deny rule for Album tree grants.
+   if(parent.startsWith("album:"))return DocumentTreePolicy.isChild(parent,document,null,Collections.emptyMap(),Collections.emptyList());
    if(document.startsWith("album:") || document.equals(DocumentTreePolicy.ALBUMS) || document.startsWith("album-page:"))return false;
    String pageClass=null;if(document.startsWith("page:"))pageClass=new JSONObject(new String(Base64.decode(document.substring(5),Base64.URL_SAFE|Base64.NO_WRAP),StandardCharsets.UTF_8)).getString("classification");
    Map<String,String> parents=new HashMap<>();List<String> memberships=new ArrayList<>();

@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lakomics 연결 확인</title><link rel="stylesheet" href="options.css"></head>
+<body><main>
+<header><h1>Lakomics 연결 확인</h1></header>
+<p>아래 서버로 수집한 이미지와 설정을 보냅니다. PC에서 발급한 연결 주소인지 확인하세요.</p>
+<p>연결할 서버: <code id="target"></code></p>
+<p id="existing" hidden>현재 서버: <code id="current"></code><br>확인하면 기존 연결과 이 브라우저의 수집 설정이 교체됩니다.</p>
+<button id="confirm" disabled>이 서버에 연결</button><button id="cancel">취소</button>
+<p id="status" role="status"></p>
+</main><script src="../src/api-client.js"></script><script src="pairing.js"></script></body></html>

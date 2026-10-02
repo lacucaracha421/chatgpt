@@ -94,3 +94,88 @@ test('hidden folders survive refresh and reopening locally without patching the 
   await store.clear();
   assert.equal(memory[store.HIDDEN_KEY], undefined);
 });
+
+const baseProfile = () => ({ revision: 1, pinnedClassificationIds: [], listOrder: {}, preferences: { autoLikeOnSave: true } });
+const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+async function resetStore() { await store.clear(); await store.seed({ classifications, profile: baseProfile() }); }
+
+test('a newer successful edit cannot be overwritten by an older offline edit', async () => {
+  await resetStore();
+  requestImpl = async () => ({ ok: false, status: 0, code: 'offline' });
+  await store.patchProfile({ preferences: { autoLikeOnSave: false } });
+  let remote = baseProfile();
+  requestImpl = async (_path, { body }) => {
+    remote = { ...remote, revision: remote.revision + 1, preferences: { ...remote.preferences, ...body.preferences } };
+    return { ok: true, data: remote };
+  };
+  await store.patchProfile({ preferences: { autoLikeOnSave: true } });
+  await store.flush();
+  assert.equal(remote.preferences.autoLikeOnSave, true);
+});
+
+test('an edit arriving while a flush is in flight stays queued and visible', async () => {
+  await resetStore();
+  requestImpl = async () => ({ ok: false, status: 0, code: 'offline' });
+  await store.patchProfile({ pinnedClassificationIds: ['games'] });
+  const entered = deferred(), response = deferred(); let calls = 0;
+  requestImpl = async () => {
+    if (++calls === 1) { entered.resolve(); return response.promise; }
+    return { ok: false, status: 0, code: 'offline' };
+  };
+  const flushing = store.flush(); await entered.promise;
+  const editing = store.patchProfile({ preferences: { autoLikeOnSave: false } });
+  // Let the local edit reach storage while the network response is held.
+  await new Promise(resolve => setTimeout(resolve, 10));
+  response.resolve({ ok: true, data: { ...baseProfile(), revision: 2, pinnedClassificationIds: ['games'] } });
+  await Promise.all([flushing, editing]);
+  assert.equal((await store.readState()).profile.preferences.autoLikeOnSave, false);
+  assert.ok(memory[store.OUTBOX_KEY].some(item => item.patch.preferences?.autoLikeOnSave === false));
+});
+
+test('coalescing preserves every field of mixed patches and the last value per key', async () => {
+  await resetStore(); requestImpl = async () => ({ ok: false, status: 0, code: 'offline' });
+  await store.patchProfile({ listOrderPatch: { games: ['blue'] }, preferences: { autoLikeOnSave: true } });
+  await store.patchProfile({ listOrderPatch: { games: null }, preferences: { autoLikeOnSave: false }, pinnedClassificationIds: ['blue'] });
+  let sent;
+  requestImpl = async (_path, { body }) => { sent = body; return { ok: true, data: baseProfile() }; };
+  await store.flush();
+  assert.equal(sent.preferences.autoLikeOnSave, false);
+  assert.equal(sent.listOrderPatch.games, null);
+  assert.deepEqual(sent.pinnedClassificationIds, ['blue']);
+});
+
+test('old bootstrap and PATCH responses cannot overwrite a newly seeded connection', async () => {
+  for (const operation of ['refresh', 'patch']) {
+    await resetStore(); const entered = deferred(), response = deferred();
+    requestImpl = async () => { entered.resolve(); return response.promise; };
+    const pending = operation === 'refresh' ? store.refresh() : store.patchProfile({ pinnedClassificationIds: ['games'] });
+    await entered.promise;
+    await store.clear();
+    await store.seed({ classifications, profile: { ...baseProfile(), revision: 99, pinnedClassificationIds: ['blue'] } });
+    response.resolve({ ok: true, data: operation === 'refresh' ? { classifications, profile: baseProfile() } : baseProfile() });
+    await pending;
+    assert.equal((await store.readState()).profile.revision, 99, operation);
+    assert.deepEqual((await store.readState()).profile.pinnedClassificationIds, ['blue']);
+  }
+});
+
+test('refresh overlays offline edits and a new connection refresh never waits for an old request', async () => {
+  await resetStore();
+  requestImpl = async () => ({ ok: false, status: 0, code: 'offline' });
+  await store.patchProfile({ pinnedClassificationIds: ['blue'], preferences: { autoLikeOnSave: false } });
+  requestImpl = async path => path.endsWith('/bootstrap')
+    ? { ok: true, data: { classifications, profile: baseProfile() } } : { ok: false, status: 0, code: 'offline' };
+  const refreshed = await store.refresh();
+  assert.deepEqual(refreshed.state.profile.pinnedClassificationIds, ['blue']);
+  assert.equal(refreshed.state.profile.preferences.autoLikeOnSave, false);
+  await resetStore();
+  const entered = deferred(), response = deferred();
+  requestImpl = async () => { entered.resolve(); return response.promise; };
+  const old = store.refresh(); await entered.promise;
+  await store.clear();
+  requestImpl = async () => ({ ok: true, data: { classifications, profile: { ...baseProfile(), revision: 77 } } });
+  assert.equal((await store.refresh()).state.profile.revision, 77);
+  response.resolve({ ok: true, data: { classifications, profile: baseProfile() } });
+  assert.equal((await old).code, 'connection_changed');
+  assert.equal((await store.readState()).profile.revision, 77);
+});

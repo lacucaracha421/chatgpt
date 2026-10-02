@@ -5,6 +5,15 @@ public final class NetworkPolicyTest {
  static void pass(Attempt a)throws Exception{a.run();checks++;}
  static void reject(Attempt a)throws Exception{try{a.run();}catch(Exception e){checks++;return;}throw new AssertionError("Unsafe input accepted");}
  public static void main(String[] args)throws Exception{
+ String contains="/v1/library/classifications/class_1/contains/asset-2";
+ pass(()->NetworkPolicy.api(contains,"GET"));
+ for(String method:new String[]{"POST","PUT","DELETE","PATCH","HEAD"})reject(()->NetworkPolicy.api(contains,method));
+ for(String id:new String[]{"", ".", "..", "%2e%2e", "%2F", "a/b", "a.b", "a%252Fb", "a".repeat(129)}){
+  reject(()->NetworkPolicy.api("/v1/library/classifications/"+id+"/contains/asset-2","GET"));
+  reject(()->NetworkPolicy.api("/v1/library/classifications/class_1/contains/"+id,"GET"));
+ }
+ reject(()->NetworkPolicy.api(contains+"/extra","GET"));
+ reject(()->NetworkPolicy.api(contains+"/","GET"));
  pass(()->NetworkPolicy.endpoint("https://example.com:443/",false));
  for(String host:new String[]{"10.0.0.1","127.0.0.1","172.16.0.1","172.31.255.255","192.168.1.1","100.64.0.1","100.127.255.254"})pass(()->NetworkPolicy.endpoint("http://"+host+":32146",true));
  for(String host:new String[]{"example.com","8.8.8.8","100.63.255.255","100.128.0.1","172.32.0.1","10.1","010.0.0.1","2130706433","[::1]","169.254.169.254"})reject(()->NetworkPolicy.endpoint("http://"+host,true));

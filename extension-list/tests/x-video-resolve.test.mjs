@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 await import('../src/api-client.js');
 await import('../src/save-client.js');
+globalThis.chrome = { storage: { local: { get: async () => ({}) } } };
 
 const candidate = {
   type: 'video', source: 'x', mediaUrl: null,
