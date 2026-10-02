@@ -1,118 +1,28 @@
-import { describe, expect, it } from "vitest";
-import type { CollectionSummary, ReleaseBoardEntry, ReleaseInboxItem } from "../library/types";
-import { nextInSeriesRows } from "./homeModel";
-
-const today = "2026-09-29";
-
-function work(id: string, name: string, type: CollectionSummary["type"] = "manga"): CollectionSummary {
-  return { id, name, type } as CollectionSummary;
-}
-
-function entry(
-  collectionId: string,
-  owned: number,
-  volumes: { volumeNumber: number; date: string | null; status: "upcoming" | "released" | null }[],
-  enabled = true,
-): ReleaseBoardEntry {
-  return {
-    collectionId,
-    releaseWatch: { enabled, available: true },
-    ownedVolumes: [{ editionIndex: 0, count: owned }],
-    releaseSchedule: { kakao: { editionIndex: 0, checkedAt: null, volumes }, mangadex: null },
-  };
-}
-
-function event(collectionId: string, volumeNumber: number): ReleaseInboxItem {
-  return {
-    collectionId,
-    collectionName: collectionId,
-    provider: "kakao",
-    event: { id: `${collectionId}-${volumeNumber}`, kind: "new_volume", volumeNumber, previousValue: null, currentValue: null, detectedAt: "2026-09-29T00:00:00Z" },
-  };
-}
-
-function seriesRows(collections: CollectionSummary[], board: Map<string, ReleaseBoardEntry>, inbox: Map<string, ReleaseInboxItem[]>) {
-  return nextInSeriesRows(
-    collections.filter((item) => item.type === "manga"),
-    (item, editionIndex) => board.get(item.id)?.ownedVolumes.find((owned) => owned.editionIndex === editionIndex)?.count ?? null,
-    (item) => {
-      const value = board.get(item.id);
-      return value?.releaseWatch.enabled ? value.releaseSchedule.kakao : null;
-    },
-    [...inbox.values()].flat(),
-    (item) => item.collectionId,
-    today,
-  );
-}
-
-describe("nextInSeriesRows", () => {
-  it("keeps released unowned manga volumes and reports the first gap", () => {
-    const collections = [work("series", "Series"), work("game", "Game", "game")];
-    const board = new Map([
-      ["series", entry("series", 2, [
-        { volumeNumber: 2, date: "2026-01-01", status: null },
-        { volumeNumber: 3, date: "2026-09-20", status: null },
-        { volumeNumber: 4, date: null, status: "released" },
-        { volumeNumber: 5, date: "2026-10-10", status: "released" },
-      ])],
-      ["game", entry("game", 0, [{ volumeNumber: 1, date: "2026-09-20", status: null }])],
-    ]);
-
-    expect(seriesRows(collections, board, new Map())).toEqual([{
-      work: collections[0],
-      ownedCount: 2,
-      nextVolume: { number: 3, date: "2026-09-20" },
-      releasedUnownedCount: 3,
-      fresh: false,
-    }]);
+import { describe, expect, it } from 'vitest';
+import type { CollectionSummary, ReleaseWishlistItem } from '../library/types';
+import { daysAfter, newlyReleasedRows, releaseRows, upcomingRows } from './homeModel';
+const title = (id: string, date: string, extra: Partial<ReleaseWishlistItem> = {}) => ({ id, title: id, kind:'game', provider:'igdb', date, precision:'exact', platforms:[], unread:[], muted:false, released:false, ...extra }) as ReleaseWishlistItem;
+describe('Home release sources', () => {
+  it('includes existing unread NEW notices and dated releases without a new read', () => {
+    const wishlist = [title('new', '2026-10-01', { released:true, unread:[{id:'event',itemId:'new',readAt:null,kind:'released',detectedAt:'2026-10-01',currentValue:'2026-10-01',previousValue:null}] }), title('past','2026-09-30'), title('future','2026-10-03'), title('muted','2026-10-01',{muted:true})];
+    const rows = newlyReleasedRows([], new Map(), new Map(), wishlist, '2026-10-02');
+    expect(rows.map(r => r.name)).toEqual(['new','past']);
+    expect(rows[0]?.caption.kind).toBe('new'); expect(rows[1]?.caption.kind).toBe('info');
+    expect(releaseRows([],new Map(),new Map(),wishlist,'2026-10-02').map(r=>r.name)).toEqual(['new']);
   });
-
-  it("orders fresh rows first, then the most recent first unowned release", () => {
-    const collections = [work("older", "Older"), work("fresh", "Fresh"), work("newer", "Newer"), work("future", "Future")];
-    const board = new Map([
-      ["older", entry("older", 0, [
-        { volumeNumber: 1, date: "2026-08-01", status: null },
-        { volumeNumber: 2, date: "2026-09-28", status: null },
-      ])],
-      ["fresh", entry("fresh", 0, [{ volumeNumber: 1, date: "2026-07-01", status: null }])],
-      ["newer", entry("newer", 0, [{ volumeNumber: 1, date: "2026-09-25", status: null }])],
-      ["future", entry("future", 0, [{ volumeNumber: 1, date: "2026-10-01", status: null }])],
-    ]);
-    const inbox = new Map([["fresh", [event("fresh", 1)]]]);
-
-    expect(seriesRows(collections, board, inbox).map((row) => row.work.id))
-      .toEqual(["fresh", "older", "newer"]);
+  it('includes cached calendar arrivals without needing wishlist membership', () => {
+    const calendar = title('cached', '2026-10-01');
+    expect(newlyReleasedRows([],new Map(),new Map(),[],'2026-10-02',[calendar]).map(r=>r.name)).toEqual(['cached']);
+    expect(newlyReleasedRows([],new Map(),new Map(),[title('cached','2026-10-01',{muted:true})],'2026-10-02',[calendar])).toEqual([]);
   });
-
-  it("inherits koreanReleases watch and ownership rules", () => {
-    const collections = [work("owned", "Owned"), work("off", "Off")];
-    const board = new Map([
-      ["owned", entry("owned", 1, [{ volumeNumber: 1, date: "2026-09-01", status: null }])],
-      ["off", entry("off", 0, [{ volumeNumber: 1, date: "2026-09-01", status: null }], false)],
-    ]);
-
-    expect(seriesRows(collections, board, new Map())).toEqual([]);
+  it('uses exact release dates of locally known works, omitting AV and imprecise dates', () => {
+    const works = [{id:'g',name:'Game',type:'game',releaseDate:'2026-10-01'}, {id:'av',name:'AV',type:'av',releaseDate:'2026-10-01'}, {id:'year',name:'Year',type:'game',releaseDate:'2026'}] as CollectionSummary[];
+    expect(newlyReleasedRows(works,new Map(),new Map(),[],'2026-10-02').map(r=>r.name)).toEqual(['Game']);
   });
-
-  it("excludes a work whose owned count is unknown", () => {
-    const collections = [work("unknown", "Unknown")];
-    const value = entry("unknown", 0, [{ volumeNumber: 1, date: "2026-09-01", status: "released" }]);
-    value.ownedVolumes = [];
-    expect(seriesRows(collections, new Map([["unknown", value]]), new Map())).toEqual([]);
+  it('sorts upcoming exact dates, with D-n measured across month and year ends', () => {
+    expect(upcomingRows([],new Map(),new Map(),[title('later','2026-11-01'),title('first','2026-10-31'),title('imprecise','2026-11-01',{precision:'month'})],'2026-10-30').map(r=>r.name)).toEqual(['first','later']);
+    expect(daysAfter('2026-11-01','2026-10-30')).toBe(2);
+    expect(daysAfter('2027-01-01','2026-12-31')).toBe(1);
+    expect(daysAfter('2028-03-01','2028-02-28')).toBe(2);
   });
-});
-
-it('previews body-derived todos and legacy checklists in the existing Home row shape', async () => {
-  const { memoRows } = await import('./homeModel');
-  const base = { title: '메모', body: '', pinned: true, deleted: false, createdAt: '2026-10-02', updatedAt: '2026-10-02', localRevision: 1, pending: false, conflict: false };
-  const rows = memoRows([
-    { ...base, id: 'todo', body: '## 오늘\n* [X] 끝\n+ [ ] 시작' },
-    { ...base, id: 'legacy', type: 'checklist', items: [{ id: 'a', text: '**literal**', checked: false, order: 'A' }] },
-    { ...base, id: 'mixed', body: '## 글\n- [ ] 할 일\n**literal**' },
-    { ...base, id: 'fenced', body: '```\n- [ ] code\n```' },
-  ], '2026-10-02');
-  expect(rows[0]).toMatchObject({ kind: 'checklist', done: 1, total: 2, items: [{ text: '시작', checked: false }, { text: '끝', checked: true }] });
-  expect(rows[1]).toMatchObject({ kind: 'checklist', items: [{ text: '**literal**', checked: false }] });
-  expect(rows[2]).toMatchObject({ kind: 'text', snippet: '글 할 일 **literal**' });
-  expect(rows[3]).toMatchObject({ kind: 'text', snippet: '``` - [ ] code ```' });
 });

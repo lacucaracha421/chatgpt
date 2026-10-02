@@ -56,8 +56,11 @@ export function WorkspaceChromeProvider({ scope, children }: PropsWithChildren<{
   const owner = meta?.search ? meta.owner : null;
   const applySearch = useCallback((query: string) => { if (owner) searchActions.current.get(owner)?.apply?.(query); }, [owner]);
   const openSearch = useCallback((draft: string) => { if (owner) searchActions.current.get(owner)?.open?.(draft); }, [owner]);
-  const value = useMemo(() => ({ scope, targets, setTarget, publish, unpublish, meta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden }),
-    [scope, targets, setTarget, publish, unpublish, meta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden]);
+  const findAction = useRef<(() => void) | null>(null);
+  const setFindAction = useCallback((action: (() => void) | null) => { findAction.current = action; }, []);
+  const openFind = useCallback(() => findAction.current?.(), []);
+  const value = useMemo(() => ({ openFind, setFindAction, scope, targets, setTarget, publish, unpublish, meta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden }),
+    [openFind, setFindAction, scope, targets, setTarget, publish, unpublish, meta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden]);
   return <ChromeContext.Provider value={value}><ChromePresenceContext.Provider value>{children}</ChromePresenceContext.Provider></ChromeContext.Provider>;
 }
 

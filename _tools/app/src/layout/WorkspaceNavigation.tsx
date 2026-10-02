@@ -1,7 +1,7 @@
 import { BookmarkIcon, BookOpenIcon, ExchangeIcon, FolderIcon, HomeIcon, MagnifyingGlassIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon } from "../shared/ui/ArchiveIcons";
 import { ViewColumnsIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType, CollectionSummary } from "../library/types";
 import { useOptionalLibrary } from "../library/LibraryContext";
@@ -81,8 +81,8 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   const areaName = { home: "홈", assets: "에셋", collections: "컬렉션", manga: "망가", notes:"메모", exchange: "전송", private_vault: "비밀", manage: "더보기" }[area];
   const artistView = isArtistView(view);
   const areaTitle = view.kind === "settings" ? "설정" : area === "manage" ? "더보기" : areaName;
-  const hideEmptyNotesIndex = area === "notes"
-    && chrome?.meta != null
+  // Notes and Home (attention-first since 2026-10-02) drop the index column when nothing fills it.
+  const hideEmptyNotesIndex = (area === "home" || (area === "notes" && chrome?.meta != null))
     && !chrome?.meta?.navigation
     && !chrome?.meta?.actions
     && chrome?.meta?.search?.kind !== "surface";
@@ -128,7 +128,9 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   const paletteButton = useRef<HTMLButtonElement>(null);
   const queuesRequested = useRef(onQueuesRequested);
   queuesRequested.current = onQueuesRequested;
-  const openPalette = () => { setPaletteOpen(true); queuesRequested.current?.(); };
+  const openPalette = useCallback(() => { setPaletteOpen(true); queuesRequested.current?.(); }, []);
+  const setFindAction = chrome?.setFindAction;
+  useEffect(() => { setFindAction?.(openPalette); return () => setFindAction?.(null); }, [setFindAction, openPalette]);
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
@@ -222,7 +224,7 @@ function AssetIndexTopRow({ icon, label, count, selected, onClick }: {
     <span className="classification-sidebar__quick-view-surface">
       {icon}
       <span className="classification-sidebar__quick-view-label">{label}</span>
-      {count !== null && <span className="classification-sidebar__badge" style={{ color: "var(--color-faint)" }} aria-hidden="true">{formatIndexCount(count)}</span>}
+      {count !== null && <span className="classification-sidebar__badge classification-sidebar__hover-count" style={{ color: "var(--color-faint)" }} aria-hidden="true">{formatIndexCount(count)}</span>}
     </span>
   </button>;
 }

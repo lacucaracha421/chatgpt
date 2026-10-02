@@ -9,31 +9,14 @@ import {useCachedHomeSource} from './homeCache';
 import {ApiError, api, native} from './transport';
 import type {RefreshJob} from './CatalogRefresh';
 import {fetchLibrarySummary, type LibrarySummary} from './librarySummary';
-import type {CharacterIndex} from './characterModel';
 import type {Asset, Revisit} from './types';
-import type {NotesState} from '../src/notes/store';
-import {daysAfter,memoRows,UPCOMING_DAYS,type MemoRow} from '../src/home/homeModel';
+import type {Note, NotesState} from '../src/notes/store';
+import {daysAfter,UPCOMING_DAYS} from '../src/home/homeModel';
 import {commitUpcomingWishlist, flushUpcomingWishlist, readUpcomingWishlistIntents, reconcileUpcomingWishlist, visibleUpcomingWishlist} from './upcomingWishlistOutbox';
 
-export {clockLabel,dateBlock,daysAfter,memoRows,UPCOMING_DAYS,type MemoRow} from '../src/home/homeModel';
+export {clockLabel,daysAfter,UPCOMING_DAYS} from '../src/home/homeModel';
 
-/**
- * Home's information dashboard (HOME-DASH-001, layout R2), from data the tablet already reads
- * elsewhere.
- *
- * - 확인할 것: the same single-row count reads the Library root and Catalog use.
- * - 신간 / 발매 예정: the release counts read (tiny) and the manga shelf from the shared release
- *   store, read at most once per Collections publication whichever of Home and the 신간 screen
- *   asks first.
- * - 전송 / PC: the native exchange snapshot the App already holds.
- * - 자산 현황: the library summary (`/v1/library/summary`); an older server without it falls
- *   back to counting the first page of recent saves. 캐릭터 자동 태그 comes from the character
- *   index the App already holds.
- * - 메모: the on-device notes store (works offline).
- * - 서버 상태: reachability, the PC's last visit and the catalog refresh job.
- * - Offline: the last fresh values are kept in a small per-connection snapshot so Home can say
- *   what it last knew and when.
- */
+/** Shared source cache for the attention-only Home; refreshes retain previous values. */
 export type TodoKey = 'pending' | 'character' | 'similar' | 'duplicates';
 export const TODO_LABELS: Record<TodoKey, {label: string; unit: string; note: string}> = {
   pending: {label: '처리 대기', unit: '건', note: '수집 요청 · 분류 전'},
@@ -62,11 +45,6 @@ export type UpcomingWishItem = UpcomingHomeEntry & {
   events: UpcomingWatchEvent[];
 };
 export type UpcomingHomeReply = {version?: number; revision?: string | number | null; entries?: UpcomingHomeEntry[]; wishlist?: UpcomingWishItem[]; pending?: {itemId?: string; action?: string}[]};
-export type AvPick = {date?: string; personId: string; name: string; aliases?: string[]; workCount?: number; latestWork?: {code?: string; label?: string; series?: string | null; title?: string; date?: string; collectionId?: string | null; cover?: HomeCover | null} | null; cover?: HomeCover | null};
-export type AvPickReply = {version?: number; revision?: string | number | null; pick?: AvPick | null};
-export type LibraryArtist = {id: string; label: string; displayName?: string | null; sourceName?: string | null; assetCount?: number; recentCount?: number; lastOpenedAt?: string | null; main?: boolean; hidden?: boolean; coverAssetIds?: string[]};
-export type LibraryArtistsReply = {artists?: LibraryArtist[]};
-
 const ownedOf = (work: CollectionSummary, edition: number) => work.ownedVolumes?.find(entry => entry.editionIndex === edition)?.count ?? null;
 const watching = (work: CollectionSummary) => work.type === 'manga' && !!work.releaseWatch?.enabled;
 
@@ -108,37 +86,6 @@ export function lastPeer(snapshot: ExchangeSnapshot | null) {
   const devices = (snapshot?.devices ?? []).filter(device => device.deviceId !== snapshot?.deviceId && Number.isFinite(Date.parse(device.lastSeenAt)));
   return devices.sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt))[0] ?? null;
 }
-/**
- * 자산 현황's 오늘 추가, counted from the first page of recent saves (newest first). When every
- * asset on a page that has more is from today, the true count is unknown: `more` says "N+".
- */
-export function addedToday(items: {collected_at?: string | null; created_at?: string | null}[], hasMore: boolean, now = new Date()) {
-  const today = localToday(now);
-  const count = items.filter(item => {
-    const at = item.collected_at ?? item.created_at;
-    const date = at ? new Date(at) : null;
-    return !!date && Number.isFinite(date.getTime()) && localToday(date) === today;
-  }).length;
-  return {count, more: hasMore && count > 0 && count === items.length};
-}
-
-/**
- * 캐릭터 자동 태그 progress from the character index the App already holds: each series'
- * `unclassified` scope against its `all` scope. Null when the index has no such scopes.
- */
-export function characterTagging(index: CharacterIndex | null | undefined) {
-  if (!index?.ready) return null;
-  let all = 0, left = 0, seen = false;
-  for (const node of index.nodes) {
-    if (node.kind !== 'series') continue;
-    const total = index.scopes.find(scope => scope.nodeId === node.id && scope.filter === 'all')?.totalCount;
-    const open = index.scopes.find(scope => scope.nodeId === node.id && scope.filter === 'unclassified')?.totalCount;
-    if (typeof total !== 'number' || typeof open !== 'number') continue;
-    all += total; left += Math.min(open, total); seen = true;
-  }
-  return seen && all > 0 ? {done: (all - left) / all, left} : null;
-}
-
 /* ---- 신간 · 발매 예정 cover shelf ---- */
 /** A `YYYY-MM-DD` date from `shortReleaseDate`'s "9.24" / "2025.9.24" (the year defaults to today's). */
 export function releaseDateOf(short: string | null | undefined, today = localToday()) {
@@ -211,18 +158,14 @@ export function useHomeRevisit(enabled: boolean, scope: string, forceKey?: unkno
   });
 }
 
-export type HomeMemos = {rows: MemoRow[]; locked: boolean} | null;
+export type HomeMemos = {notes: Note[]; locked: boolean} | null;
 /** Reads the on-device notes (no network) whenever Home is shown and `key` moves. */
 export function useHomeMemos(enabled: boolean, scope: string, forceKey?: unknown): HomeMemos {
   return useCachedHomeSource({
     enabled, scope, source: 'memos', signalKey: 'notes', initial: null as HomeMemos, forceKey,
     read: async () => {
-      try {
-        const state = await native<NotesState>('notesState', {});
-        return {rows: memoRows(state.notes ?? [], localToday()), locked: !state.unlocked};
-      } catch {
-        return {rows: [], locked: true};
-      }
+      const state = await native<NotesState>('notesState', {});
+      return {notes: state.unlocked ? state.notes ?? [] : [], locked: !state.unlocked};
     },
   });
 }
@@ -253,42 +196,6 @@ export function normalizeUpcomingReply(value: unknown): UpcomingHomeReply {
     wishlist: (Array.isArray(reply.wishlist) ? reply.wishlist : []).flatMap(value => {
       const item = normalizeWishlistItem(value); return item ? [item] : [];
     })};
-}
-
-export type ExternalShelfRow = {entry: UpcomingHomeEntry; fresh: boolean};
-
-/**
- * Tablet adapter for PC `releaseRows` + `upcomingRows`: unread released wishlist items first,
- * then exact upcoming wishlist dates. The calendar contributes only the port marker.
- */
-export function externalShelfRows(entries: UpcomingHomeEntry[], wishlistItems: UpcomingWishItem[], interested: Set<string>, today = localToday(), window = UPCOMING_DAYS): ExternalShelfRow[] {
-  const calendar = new Map(entries.map(entry => [entry.id, entry]));
-  const wishes = new Map<string, UpcomingWishItem | UpcomingHomeEntry>(wishlistItems.map(item => [item.id, item]));
-  // Preserve the pending add overlay before the PC publishes the new wishlist item.
-  for (const id of interested) if (!wishes.has(id)) {
-    const entry = calendar.get(id); if (entry) wishes.set(id, entry);
-  }
-  const released: Array<ExternalShelfRow & {detectedAt: string}> = [];
-  const upcoming: ExternalShelfRow[] = [];
-  for (const item of wishes.values()) {
-    if (!interested.has(item.id) || ('muted' in item && item.muted)) continue;
-    const calendarEntry = calendar.get(item.id);
-    const base = {...item, port: calendarEntry?.port === true};
-    const unreadReleased = ('events' in item ? item.events : [])
-      .filter(event => event.kind === 'released' && !event.readAt)
-      .sort((a, b) => b.detectedAt.localeCompare(a.detectedAt))[0];
-    if (unreadReleased) {
-      const eventDate = unreadReleased.currentValue?.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? null;
-      released.push({entry: {...base, date: eventDate}, fresh: true, detectedAt: unreadReleased.detectedAt});
-      continue;
-    }
-    if (('released' in item && item.released) || item.precision !== 'exact' || !item.date) continue;
-    const days = daysAfter(item.date, today);
-    if (days >= 0 && days <= window) upcoming.push({entry: base, fresh: false});
-  }
-  released.sort((a, b) => b.detectedAt.localeCompare(a.detectedAt));
-  upcoming.sort((a, b) => (a.entry.date ?? '').localeCompare(b.entry.date ?? '') || a.entry.title.localeCompare(b.entry.title, 'ko'));
-  return [...released, ...upcoming];
 }
 
 export function wishlistIds(reply: UpcomingHomeReply | null): Set<string> {
@@ -348,36 +255,6 @@ export function useHomeUpcoming(enabled: boolean, scope: string, forceKey?: unkn
   return {entries: reply?.entries ?? [], wishlistItems: reply?.wishlist ?? [], wishlist: ids, wishlistPending: tick, toggle};
 }
 
-export function useHomeAvPick(enabled: boolean, scope: string, forceKey?: unknown) {
-  const [failure, setFailure] = useState<string | null>(null);
-  const pick = useCachedHomeSource<AvPick | null | undefined>({
-    enabled, scope, source: 'avPick', signalKey: 'avPick', initial: undefined, forceKey,
-    read: async signal => {
-      try {
-        const reply = await api<AvPickReply>('/v1/home/av-pick', signal);
-        if (!signal.aborted) setFailure(null);
-        return reply?.pick ?? null;
-      } catch (reason) {
-        if (reason instanceof ApiError && reason.status === 404) {
-          if (!signal.aborted) setFailure(null);
-          return null;
-        }
-        throw reason;
-      }
-    },
-    onError: () => setFailure(scope),
-  });
-  return {pick, error: failure === scope};
-}
-
-export function useHomeArtists(enabled: boolean, scope: string, forceKey?: unknown) {
-  return useCachedHomeSource({
-    enabled, scope, source: 'artists', signalKey: 'artists', initial: [] as LibraryArtist[], forceKey,
-    read: async signal => (await api<LibraryArtistsReply>('/v1/library/artists', signal))?.artists?.filter(artist => !artist.hidden) ?? [],
-  });
-}
-
-/* ---- Offline snapshot ---- */
 export const HOME_SNAPSHOT_KEY = 'lakomics.mobile.homeSnapshot';
 type Stamped<T> = {value: T; at: number};
 export type HomeSnapshot = {

@@ -70,10 +70,11 @@ h1,h2,h3,p { margin:0; }
 .gallery-row { position:absolute; top:0; left:0; display:flex; gap:var(--mobile-row-gap); width:100%; }
 .gallery-row-segment { display:flex; flex:none; }
 .gallery-date-heading { position:absolute; left:0; right:0; height:var(--gallery-date-heading-height); display:flex; align-items:baseline; gap:var(--space-2); line-height:var(--gallery-date-heading-height); color:var(--color-muted); font-family:var(--font-numeric); font-size:var(--type-meta); font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; }
-.gallery-date-heading__day { min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--color-text); font-weight:500; }
+.gallery-date-heading__day { min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--color-muted); font-weight:400; }
 .gallery-date-heading__weekday { color:var(--color-faint); font-family:var(--font-ui); font-weight:400; }
-.gallery-date-heading__rule { align-self:center; flex:1; min-width:0; height:var(--border-width); margin:0 var(--space-1); background:var(--color-border); }
-.gallery-date-heading__count { flex:none; color:var(--color-muted); }
+.gallery-date-heading__count { flex:none; color:var(--color-muted); opacity:0; transition:opacity 90ms var(--ease-standard); }
+.gallery-date-heading[data-active="true"] .gallery-date-heading__count, .gallery-date-heading:focus-visible .gallery-date-heading__count { opacity:1; }
+.gallery-date-heading:focus-visible { outline:var(--focus-width) solid var(--color-focus); }
 .media-tile { position:relative; padding:0; background:none; border:0; text-align:left; flex-shrink:0; min-width:0; border-radius:var(--radius-tile); overflow:hidden; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; touch-action:pan-y; }
 .tile-picture { background:var(--color-surface); display:flex; align-items:center; justify-content:center; position:relative; width:100%; overflow:hidden; border-radius:var(--radius-tile); }
 .tile-picture img { width:100%; height:100%; object-fit:contain; display:block; }
@@ -438,3 +439,9 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .series-breadcrumb button { min-width:0; max-width:8em; overflow:hidden; padding:0; border:0; background:transparent; color:var(--color-muted); font:inherit; text-overflow:ellipsis; white-space:nowrap; }
 .series-breadcrumb button:active { color:var(--color-text); }
 .series-breadcrumb svg { width:16px; height:16px; flex:none; color:var(--color-muted); }
+
+.tile-favorite { position:absolute; top:var(--space-2); right:var(--space-2); color:var(--color-heart); }
+.tile-favorite svg { display:block; width:var(--icon-sm); height:var(--icon-sm); }
+.tile-select { position:absolute; top:var(--space-2); left:var(--space-2); width:20px; height:20px; border:1.5px solid var(--color-accent); border-radius:50%; background:var(--color-surface); }
+.tile-select .ui-selection-check { inset:0; width:100%; height:100%; border-radius:50%; }
+@media (prefers-reduced-motion:reduce) { .gallery-date-heading__count { transition:none; } }

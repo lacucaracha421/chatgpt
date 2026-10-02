@@ -656,7 +656,7 @@ function QuickViewButton({ icon, label, count, onClick, selected }: { icon: Reac
       <span className="classification-sidebar__quick-view-surface">
         {icon}
         <span className="classification-sidebar__quick-view-label">{label}</span>
-        {count !== undefined && <span className="classification-sidebar__badge" aria-hidden="true">{formatCount(count)}</span>}
+        {count !== undefined && <span className="classification-sidebar__badge classification-sidebar__hover-count" aria-hidden="true">{formatCount(count)}</span>}
       </span>
     </button>
   );
@@ -765,7 +765,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
             {editingName ? (
               <InlineFolderInput name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />
             ) : <span className="classification-sidebar__tree-label">{node.entry.name}</span>}
-            {node.entry.assetCount ? <span className="classification-sidebar__badge" aria-hidden="true">{formatCount(node.entry.assetCount)}</span> : null}
+            {node.entry.assetCount ? <span className="classification-sidebar__badge classification-sidebar__hover-count" aria-hidden="true">{formatCount(node.entry.assetCount)}</span> : null}
           </span>
         </div>
       </ContextMenu>

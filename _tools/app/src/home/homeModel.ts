@@ -1,12 +1,6 @@
-import type { AuthoritySyncHealth, CloudBackfillProgress, CollectionSummary, ReleaseBoardEntry, ReleaseInboxItem, ReleaseWishlistItem } from "../library/types";
+import type { AuthoritySyncHealth, CloudBackfillProgress, CollectionSummary, ReleaseBoardEntry, ReleaseInboxItem, ReleaseTitle, ReleaseWishlistItem } from "../library/types";
 import { koreanReleases, releaseCaption, shortReleaseDate, type ReleaseCaption } from "../collections/releaseCaption";
 import { releaseEventLine } from "../collections/releaseCalendarFormat";
-import { checklistMarkdown, noteColorValue } from "../notes/model";
-import { memoItems, memoMode, memoPreview, parseMemo } from "../notes/memo/memoModel";
-import type { Note } from "../notes/store";
-import type { AvPerformerProfile } from "../collections/avTypes";
-import { LEDGER, LEDGER_MONTH } from "../notes/ledger/model";
-import { monthNotesOf, monthSummary } from "../notes/ledger/summary";
 
 /**
  * PC Home (HOME-DASH-001, layout D): pure shaping of data other screens
@@ -28,11 +22,6 @@ export function localBoundaries(now = new Date()) {
 }
 
 const WEEKDAYS = "일월화수목금토";
-/** "10.8" and "수요일" for a `YYYY-MM-DD` date (the year only when it differs from today's). */
-export function dateBlock(date: string, today: string) {
-  const [year, month, day] = date.split("-").map(Number);
-  return { day: shortReleaseDate(date, today), weekday: `${WEEKDAYS[new Date(year!, month! - 1, day!).getDay()]}요일` };
-}
 /** Local calendar days from `today` to `date` (both `YYYY-MM-DD`). */
 export function daysAfter(date: string, today: string) {
   const day = (value: string) => { const [y, m, d] = value.split("-").map(Number); return Date.UTC(y!, m! - 1, d!) / 86_400_000; };
@@ -46,7 +35,7 @@ export function weekdayLabel(now: Date) {
 /* ---- 신간 · 나온 권 ---- */
 export type ReleaseKind = "manga" | "game" | "movie" | "anime";
 export type ReleaseRow = { key: string; kind: ReleaseKind; name: string; caption: ReleaseCaption | { kind: "info"; text: string; date: null };
-  collection?: CollectionSummary; title?: ReleaseWishlistItem; date?: string | null; volume?: number | null; watch?: boolean };
+  collection?: CollectionSummary; title?: ReleaseTitle; date?: string | null; volume?: number | null; watch?: boolean };
 
 /**
  * Released unread manga notices (most notices first) and released 관심 목록 items, newest event first.
@@ -83,16 +72,9 @@ export function releaseRows(collections: CollectionSummary[], board: Map<string,
   return [...manga, ...titles];
 }
 
-/** Watched manga (신간 알림 on) for the calm line. */
-export function watchedMangaCount(board: Map<string, ReleaseBoardEntry>) {
-  let count = 0;
-  for (const entry of board.values()) if (entry.releaseWatch.enabled) count += 1;
-  return count;
-}
-
 /* ---- 발매 예정 · 나올 권 ---- */
 export type UpcomingRow = { key: string; kind: ReleaseKind; date: string; name: string; detail: string; watch: boolean; volume?: number; collectionId?: string; platforms?: string[]; moved?: boolean };
-export const UPCOMING_DAYS = 60;
+export const UPCOMING_DAYS = 14;
 
 /**
  * Dated upcoming releases, soonest first: the Korean volumes of watched manga beyond the owned
@@ -112,100 +94,6 @@ export function upcomingRows(collections: CollectionSummary[], board: Map<string
         platforms: item.kind === "game" ? item.platforms : undefined, moved };
     });
   return [...manga, ...titles].sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name, "ko") || a.key.localeCompare(b.key));
-}
-
-/* ---- 이어지는 시리즈 ---- */
-export type NextInSeriesRow<TWork = CollectionSummary> = {
-  work: TWork;
-  ownedCount: number;
-  nextVolume: { number: number; date: string | null };
-  releasedUnownedCount: number;
-  fresh: boolean;
-};
-
-export type NextInSeriesSchedule = {
-  editionIndex: number;
-  volumes: readonly { volumeNumber: number; date: string | null; status: "upcoming" | "released" | null }[];
-};
-
-/** Released Korean volumes beyond a known owned count, unread first and then latest release. */
-export function nextInSeriesRows<TWork extends { id: string; name: string }, TEvent>(
-  works: readonly TWork[],
-  ownedOf: (work: TWork, editionIndex: number) => number | null,
-  scheduleOf: (work: TWork) => NextInSeriesSchedule | null,
-  events: readonly TEvent[],
-  eventWorkId: (event: TEvent) => string,
-  today: string,
-): NextInSeriesRow<TWork>[] {
-  const freshWorks = new Set(events.map(eventWorkId));
-  return works.flatMap((work) => {
-      const schedule = scheduleOf(work);
-      if (!schedule) return [];
-      const owned = ownedOf(work, schedule.editionIndex);
-      if (owned === null) return [];
-      const seen = new Set<number>();
-      const released = schedule.volumes
-        .filter((volume) => Number.isInteger(volume.volumeNumber) && volume.volumeNumber > owned && !seen.has(volume.volumeNumber) && seen.add(volume.volumeNumber))
-        .map((volume) => ({ ...volume, date: volume.date && /^\d{4}-\d{2}-\d{2}/.test(volume.date) ? volume.date.slice(0, 10) : null }))
-        .filter((volume) => volume.status === "released" || Boolean(volume.date && volume.date <= today))
-        .sort((a, b) => a.volumeNumber - b.volumeNumber);
-      const next = released[0];
-      if (!next) return [];
-      return [{
-        value: {
-          work,
-          ownedCount: owned,
-          nextVolume: { number: next.volumeNumber, date: next.date },
-          releasedUnownedCount: released.length,
-          fresh: freshWorks.has(work.id),
-        },
-        latestReleaseDate: released.map((volume) => volume.date).filter((date): date is string => !!date).sort().reverse()[0] ?? "",
-      }];
-    })
-    .sort((left, right) => Number(right.value.fresh) - Number(left.value.fresh)
-      || right.latestReleaseDate.localeCompare(left.latestReleaseDate)
-      || left.value.work.name.localeCompare(right.value.work.name, "ko")
-      || left.value.work.id.localeCompare(right.value.work.id))
-    .map((row) => row.value);
-}
-
-/* ---- 메모 ---- */
-export type MemoRow =
-  | { id: string; title: string; color: string | null; kind: "checklist"; done: number; total: number; items: { text: string; checked: boolean }[] }
-  | { id: string; title: string; color: string | null; kind: "ledger"; month: number; amount: number; available: number | null; spent: number; scheduled: number; perDay: number | null;
-    categories: { label: string; amount: number }[]; latest: { label: string; amount: number }[] }
-  | { id: string; title: string; color: string | null; kind: "secret" }
-  | { id: string; title: string; color: string | null; kind: "text"; snippet: string };
-/** Pinned notes, most recently edited first; ledger month notes never show. Home renders the first two. */
-export function memoRows(notes: Note[], today: string): MemoRow[] {
-  return notes.filter((note) => note.pinned && !note.deleted && !note.archived && note.type !== LEDGER_MONTH)
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    .map((note): MemoRow => {
-      const base = { id: note.id, title: note.title.trim(), color: noteColorValue(note.color) };
-      if (note.type === "secret") return { ...base, kind: "secret" };
-      if (note.concealed && note.type !== LEDGER) return { ...base, kind: "text", snippet: "숨긴 메모" };
-      if (note.type === LEDGER) {
-        const summary = monthSummary(note, monthNotesOf(notes, note.id), today.slice(0, 7), today);
-        const entries = summary.entries.filter((entry) => !entry.in);
-        const categoryMap = new Map<string, number>();
-        for (const entry of entries) {
-          const category = entry.category;
-          const label = typeof category === "string" ? category.trim() : "";
-          if (label) categoryMap.set(label, (categoryMap.get(label) ?? 0) + entry.amount);
-        }
-        const categories = [...categoryMap].map(([label, amount]) => ({ label, amount })).sort((a, b) => b.amount - a.amount).slice(0, 3);
-        const latest = entries.slice(0, 3).map((entry) => ({ label: entry.name || "기록", amount: entry.amount }));
-        return { ...base, title: base.title || "가계부", kind: "ledger", month: Number(today.slice(5, 7)),
-          amount: summary.available ?? summary.spent, available: summary.available, spent: summary.spent, scheduled: summary.scheduled, perDay: summary.perDay,
-          categories, latest };
-      }
-      const body = note.type === "checklist" ? checklistMarkdown(note.items ?? []) : note.body;
-      if (note.type === "checklist" || memoMode(body) === "todo") {
-        const items = memoItems(parseMemo(body)).filter(item => item.task).map(item => ({ text: item.text, checked: item.done })).sort((a,b) => Number(a.checked)-Number(b.checked));
-        return { ...base, kind: "checklist", done: items.filter((item) => item.checked).length, total: items.length, items: items.slice(0, 5) };
-      }
-      return { ...base, kind: "text", snippet: memoPreview(body).split(/\r\n|\n|\r/).map(line => line.trim()).filter(Boolean).join(" ").slice(0, 160) };
-    });
 }
 
 /* ---- 연결 ---- */
@@ -287,19 +175,22 @@ export function characterReviewGroups(
   return result.sort((a, b) => Number(a.seriesId === null) - Number(b.seriesId === null) || b.total - a.total || a.seriesName.localeCompare(b.seriesName, "ko"));
 }
 
-/** Home's short performer profile: "1998.3.2 · 28세", "158cm · B83 W57 H85", "2019– · 8년차". */
-export function avProfileLines(profile: Pick<AvPerformerProfile, "birthDate" | "heightCm" | "bandIn" | "waistIn" | "hipIn" | "cup" | "careerStart" | "careerEnd">, today: Date): string[] {
-  const lines: string[] = [];
-  const birth = profile.birthDate && /^\d{4}-\d{2}-\d{2}$/.test(profile.birthDate) ? profile.birthDate.split("-").map(Number) : null;
-  if (birth) {
-    const [year, month, day] = birth as [number, number, number];
-    const age = today.getFullYear() - year - (today.getMonth() + 1 < month || (today.getMonth() + 1 === month && today.getDate() < day) ? 1 : 0);
-    lines.push(`${year}.${month}.${day}${age >= 0 ? ` · ${age}세` : ""}`);
+/** Existing NEW notices plus dated releases already available to this device. */
+export function newlyReleasedRows(collections: CollectionSummary[], board: Map<string, ReleaseBoardEntry>, inbox: Map<string, ReleaseInboxItem[]>, wishlist: ReleaseWishlistItem[], today: string, calendar: ReleaseTitle[] = []): ReleaseRow[] {
+  const rows = new Map(releaseRows(collections, board, inbox, wishlist, today).map(row => [row.key, row]));
+  for (const release of koreanReleases(collections.filter(c => c.type === 'manga'), board, inbox, today)) {
+    const volume = release.volumes.filter(v => v.released && v.date && v.date <= today).sort((a, b) => b.date!.localeCompare(a.date!) || b.volumeNumber - a.volumeNumber)[0];
+    const key = `manga:${release.work.id}`;
+    if (volume && !rows.has(key)) rows.set(key, { key, kind: 'manga', name: release.work.name, collection: release.work, date: volume.date, volume: volume.volumeNumber, caption: { kind: 'info', text: `${volume.volumeNumber}권`, date: null } });
   }
-  const cm = (inches: number | null) => inches ? Math.round(inches * 2.54) : null;
-  const size = [cm(profile.bandIn) && `B${cm(profile.bandIn)}${profile.cup ? `(${profile.cup})` : ""}`, cm(profile.waistIn) && `W${cm(profile.waistIn)}`, cm(profile.hipIn) && `H${cm(profile.hipIn)}`].filter(Boolean).join(" ");
-  const body = [profile.heightCm ? `${profile.heightCm}cm` : null, size || null].filter(Boolean).join(" · ");
-  if (body) lines.push(body);
-  if (profile.careerStart !== null) lines.push(profile.careerEnd !== null ? `${profile.careerStart}–${profile.careerEnd} · 은퇴` : `${profile.careerStart}– · ${Math.max(1, today.getFullYear() - profile.careerStart)}년차`);
-  return lines;
+  const muted = new Set(wishlist.filter(title => title.muted).map(title => title.id));
+  for (const title of [...wishlist, ...calendar]) {
+    const key = `title:${title.id}`;
+    if (!muted.has(title.id) && title.precision === 'exact' && title.date && title.date <= today && !rows.has(key)) rows.set(key, { key, kind: title.kind, name: title.title, title, date: title.date, caption: { kind: 'info', text: '발매됨', date: null } });
+  }
+  for (const collection of collections) {
+    const key = `work:${collection.id}`;
+    if (collection.type !== 'av' && collection.type !== 'manga' && collection.releaseDate && /^\d{4}-\d{2}-\d{2}$/.test(collection.releaseDate) && collection.releaseDate <= today && ![...rows.values()].some(row => row.collection?.id === collection.id || (row.name === collection.name && row.date === collection.releaseDate))) rows.set(key, { key, kind: collection.type, name: collection.name, collection, date: collection.releaseDate, caption: { kind: 'info', text: '발매됨', date: null } });
+  }
+  return [...rows.values()];
 }

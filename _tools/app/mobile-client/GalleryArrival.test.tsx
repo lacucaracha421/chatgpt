@@ -3,7 +3,7 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {Gallery} from './Gallery';
 import {CatalogCover} from './CatalogCover';
 import * as catalogMedia from './catalogMedia';
-import {ARRIVE_MS,ARRIVE_WAIT_MS} from './motion';
+import {ARRIVE_MS} from './motion';
 import type {Asset} from './types';
 const measured=vi.hoisted(()=>({sizes:[] as number[]}));
 vi.mock('@tanstack/react-virtual',()=>({useVirtualizer:({count,estimateSize}:{count:number;estimateSize(i:number):number})=>{
@@ -25,27 +25,17 @@ const gallery=(items:Asset[],identity='all',stale=false)=><Gallery items={items}
 const tileAnimations=(id:string)=>animate.mock.calls.filter(([element])=>element===tile(id));
 async function load(id:string){fireEvent.load(tile(id).querySelector('img')!);await act(async()=>{});}
 
-it('holds appended tiles until their thumbnail decodes, then rises them in once',async()=>{
+it('shows appended tiles in place without a content entrance animation',async()=>{
  const first=[asset('a'),asset('b')];
  const view=render(gallery(first));
- expect(tile('a').style.opacity).not.toBe('0');
- const more=[...first,asset('c'),asset('d')];
- view.rerender(gallery(more));
- expect(tile('c').style.opacity).toBe('0');
- expect(tile('d').style.opacity).toBe('0');
+ const original=tile('a');
+ view.rerender(gallery([...first,asset('c'),asset('d')]));
+ expect(tile('a')).toBe(original);
+ expect(tile('c').style.opacity).not.toBe('0');
+ expect(tile('d').style.opacity).not.toBe('0');
  await load('c');
- expect(tile('c').style.opacity).toBe('');
- expect(tileAnimations('c')).toHaveLength(1);
- const [,frames,options]=tileAnimations('c')[0] as [HTMLElement,Keyframe[],KeyframeAnimationOptions];
- expect(frames[0]).toMatchObject({opacity:0,transform:expect.stringContaining('translateY')});
- expect(options.duration).toBe(ARRIVE_MS);
- expect(ARRIVE_MS).toBeLessThanOrEqual(180);
- // Loading again or re-rendering the same list never replays it.
- await load('c');
- view.rerender(gallery([...more]));
- expect(tile('c').style.opacity).toBe('');
- expect(tileAnimations('c')).toHaveLength(1);
- expect(screen.getByRole('button',{name:'항목 d'}).style.opacity).toBe('0');
+ expect(animate).not.toHaveBeenCalled();
+ expect(tileAnimations('c')).toHaveLength(0);
 });
 
 it('does not animate the first page, a new place or anything under reduced motion',async()=>{
@@ -87,22 +77,14 @@ it('keeps a stale list mounted and does not arrive ready thumbnails on replaceme
  }
 });
 
-it('shows an appended tile whose thumbnail is slow after a short wait, then fades the image in',async()=>{
- vi.useFakeTimers();
+it('keeps slow thumbnails and decoded images in place without fading',async()=>{
  const view=render(gallery([asset('a')]));
  view.rerender(gallery([asset('a'),asset('b')]));
- expect(tile('b').style.opacity).toBe('0');
- act(()=>{vi.advanceTimersByTime(ARRIVE_WAIT_MS);});
- expect(tile('b').style.opacity).toBe('');
- expect(tileAnimations('b')).toHaveLength(1);
  const image=tile('b').querySelector('img')!;
- // jsdom never decodes, so the image counts as not ready and waits for its own fade.
- expect(image.style.opacity).toBe('0');
- fireEvent.load(image);
- await act(async()=>{await Promise.resolve();});
- expect(image.style.opacity).toBe('');
- expect(animate.mock.calls.filter(([element])=>element===image)).toHaveLength(1);
- expect(tileAnimations('b')).toHaveLength(1);
+ expect(tile('b').style.opacity).not.toBe('0');
+ expect(image.style.opacity).not.toBe('0');
+ await load('b');
+ expect(animate).not.toHaveBeenCalled();
 });
 
 it('fades a catalog cover in once it decodes, in its already sized box',async()=>{

@@ -7,7 +7,7 @@ import { VideoTileMedia } from "../video/VideoTileMedia";
 export function AssetVideoTileMedia(props: ComponentProps<typeof VideoTileMedia>) {
   const state = props.asset.media.preparationState;
   if (state === "pending" || state === "processing") return <PendingVideoTile />;
-  return <VideoTileMedia {...props} />;
+  return <VideoTileMedia {...props} compactBadge durationVisible={props.asset.width > 100} />;
 }
 
 function PendingVideoTile() {

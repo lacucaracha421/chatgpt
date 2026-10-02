@@ -697,3 +697,83 @@ it("keeps painted asset cells and images mounted when N, layout and width change
   expect(screen.getByRole("option", { name: "asset-0.png" })).toBe(cell);
   expect(cell.querySelector("img")).toBe(image);
 });
+
+it("never paints a supplied filename or creator caption, even on hover", () => {
+  const item = { ...asset(0), creatorName: "Visible only in info" };
+  render(<AssetGallery layout="masonry" items={[item]} captionLabel={() => "Creator caption"} />);
+  const tile = screen.getByRole("option", { name: "asset-0.png" });
+  fireEvent.pointerOver(tile);
+  expect(tile).toHaveAttribute("aria-description", expect.stringContaining("Creator caption"));
+  expect(tile.querySelector(".asset-gallery__metadata")).toBeNull();
+  expect(screen.queryByText("Creator caption")).toBeNull();
+});
+
+it("uses one duration pill and hides it at small thumbnail sizes", () => {
+  const item = { ...videoAsset(0), media: { ...videoAsset(0).media, durationMs: 42000 } } as AssetSummary;
+  const { container, rerender } = render(<AssetGallery layout="masonry" items={[item]} />);
+  expect(container.querySelectorAll(".video-tile__duration")).toHaveLength(1);
+  expect(container.querySelector(".video-tile__duration")).toHaveTextContent("▶ 0:42");
+  expect(container.querySelector(".video-tile__icon")).toBeNull();
+  localStorage.setItem("lakomics.assets.perRow.v1", "12");
+  rerender(<AssetGallery layout="masonry" items={[item]} />);
+  expect(container.querySelector(".video-tile__duration")).toBeNull();
+});
+
+it("keeps selection and heart controls reachable, revealing them on hover/focus or selection", () => {
+  const onSelect = vi.fn(), favorite = vi.fn();
+  const props = { items: [asset(0), asset(1)], onSelectionGesture: onSelect, onToggleFavorite: favorite };
+  const { rerender } = render(<AssetGallery {...props} />);
+  const select = screen.getByRole("button", { name: "asset-0.png 선택" });
+  const heart = screen.getByRole("button", { name: "asset-0.png 좋아요" });
+  expect(select).toHaveClass("asset-gallery__hover-control");
+  expect(heart).toHaveClass("asset-gallery__hover-control");
+  expect(heart).not.toHaveAttribute("data-visible");
+  fireEvent.click(select);
+  expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "asset-0" }), { toggle: true, range: false });
+  fireEvent.click(heart);
+  expect(favorite).toHaveBeenCalledWith(expect.objectContaining({ id: "asset-0" }));
+  rerender(<AssetGallery {...props} selectedAssetIds={new Set(["asset-1"])} />);
+  expect(select).toHaveAttribute("data-visible", "true");
+  expect(heart).toHaveAttribute("data-visible", "true");
+  rerender(<AssetGallery {...props} favoritesView />);
+  expect(heart).toHaveAttribute("data-visible", "true");
+});
+
+it.each(["masonry", "justified"] as const)("reveals date counts on the %s group's pointer or keyboard focus without a rule", layout => {
+  const { container } = render(<AssetGallery layout={layout} items={[asset(0), asset(1)]} />);
+  const heading = container.querySelector<HTMLElement>(".asset-gallery__date")!;
+  expect(heading.querySelector(".asset-gallery__date-rule")).toBeNull();
+  expect(heading.querySelector(".asset-gallery__date-count")).toHaveTextContent("2");
+  fireEvent.pointerOver(screen.getByRole("option", { name: "asset-0.png" }));
+  expect(heading).toHaveAttribute("data-active", "true");
+  fireEvent.pointerOver(container.querySelector(".asset-gallery__scroll")!);
+  expect(heading).toHaveAttribute("data-active", "false");
+  fireEvent.focus(screen.getByRole("option", { name: "asset-1.png" }));
+  expect(heading).toHaveAttribute("data-active", "true");
+  expect(heading).toHaveAttribute("tabindex", "0");
+});
+
+it.each(["masonry", "justified"] as const)("keeps the top asset and its image mounted during %s panel and size reflow", layout => {
+  let resize: ResizeObserverCallback | undefined;
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(private readonly callback: ResizeObserverCallback) {}
+    observe(element: HTMLElement) { if (element.classList.contains("asset-gallery__scroll")) resize = this.callback; }
+    disconnect() {} unobserve() {}
+  });
+  const items = Array.from({ length: 100 }, (_, index) => asset(index));
+  const { container, rerender } = render(<AssetGallery layout={layout} items={items} groupDates={false} infoOpen={false} />);
+  const scroller = container.querySelector<HTMLElement>(".asset-gallery__scroll")!;
+  scroller.scrollTop = 440; fireEvent.scroll(scroller);
+  const positions = () => [...container.querySelectorAll<HTMLElement>("[data-gallery-cell]")];
+  const anchor = positions().find(cell => Number.parseFloat(cell.style.top) + Number.parseFloat(cell.style.height) > scroller.scrollTop)!;
+  const image = anchor.querySelector("img");
+  const offset = Number.parseFloat(anchor.style.top) - scroller.scrollTop;
+  rerender(<AssetGallery layout={layout} items={items} groupDates={false} infoOpen />);
+  act(() => resize?.([{ contentRect: { width: 600, height: 600 } } as ResizeObserverEntry], {} as ResizeObserver));
+  expect(Number.parseFloat(anchor.style.top) - scroller.scrollTop).toBeCloseTo(offset);
+  expect(anchor.querySelector("img")).toBe(image);
+  localStorage.setItem("lakomics.assets.perRow.v1", "9");
+  rerender(<AssetGallery layout={layout} items={items} groupDates={false} infoOpen />);
+  expect(Number.parseFloat(anchor.style.top) - scroller.scrollTop).toBeCloseTo(offset);
+  expect(anchor.querySelector("img")).toBe(image);
+});

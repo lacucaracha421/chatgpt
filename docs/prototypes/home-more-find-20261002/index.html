@@ -43,7 +43,7 @@ section.prop { display: flex; flex-direction: column; gap: 12px; }
 [hidden] { display: none !important; }
 
 /* Home proposal */
-.home { padding: 20px 24px; display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 28px; overflow: hidden; }
+.home { padding: 20px 24px; overflow-y: auto; display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 28px; overflow: hidden; }
 .todo { display: flex; flex-direction: column; gap: 4px; }
 .todo .row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 40px; padding: 0 8px; border-radius: var(--radius-mark); }
 .todo .row:hover { background: var(--color-surface); }
@@ -109,7 +109,7 @@ section.prop { display: flex; flex-direction: column; gap: 12px; }
     <h2 id="h-home">1. 홈: 지금 손댈 것만</h2>
     <ol class="notes">
       <li><b>왼쪽 「오늘 할 것」</b> 한 줄 목록: 검토할 것(0이 아닌 것만), 가계부 알림(무료 끝남 D-3, 결제 예정), 고정한 할 일 메모의 남은 항목, 문제가 있을 때만 연결 상태. 아무것도 없으면 「오늘 할 것이 없습니다」 한 줄.</li>
-      <li><b>오른쪽</b>: 2주 안에 나오는 신간(D-n)과 「1년 전 오늘」만 남깁니다. 둘 다 날짜가 지나면 의미가 없는 것들입니다.</li>
+      <li><b>오른쪽</b>: 「새로 나옴」(지난번 이후 발매일이 지난 작품, 북마크한 만화의 새 화 — 열어 보면 NEW가 빠짐), 2주 안에 나오는 신간(D-n), 「1년 전 오늘」. (2026-10-02 조사 후 추가: 새로 나옴, 왼쪽 맨 위 구독 합계 한 줄. 이어 읽기는 사용자가 거의 안 해서 넣지 않음.)</li>
       <li><b>빠지는 것</b>: 자산 현황 → 통계, 상태(정상일 때) → 상단 「확인」, 작가 · AV 배우 추천 → 작가 화면, 메모 카드 전체 · 가계부 숫자 → 메모 화면.</li>
     </ol>
     <div class="pick" id="homePick"><button type="button" aria-pressed="true" data-v="new">제안</button><button type="button" aria-pressed="false" data-v="old">지금 (칸 8개)</button></div>
@@ -120,6 +120,7 @@ section.prop { display: flex; flex-direction: column; gap: 12px; }
           <div style="display:flex;flex-direction:column;gap:10px">
             <div class="label">오늘 할 것 · 6</div>
             <div class="todo">
+              <div class="row"><i class="round"></i><span>구독 이번 달 ₩245,300<small>다음 결제 3일 후 · Claude Max</small></span><span class="n num">5개</span></div>
               <div class="row"><i class="round"></i><span>Netflix 무료 끝남<small>11.02부터 ₩17,000 결제</small></span><span class="soon">D-3</span></div>
               <div class="row"><i class="round"></i><span>Claude Max 결제<small>10.09 · ₩145,000</small></span><span class="soon">D-7</span></div>
               <div class="row"><i></i><span>미분류 에셋</span><span class="n num">27</span></div>
@@ -129,6 +130,12 @@ section.prop { display: flex; flex-direction: column; gap: 12px; }
             </div>
           </div>
           <div class="right">
+            <div class="label">새로 나옴 · 지난번 이후</div>
+            <div class="shelf">
+              <div><span class="cv" style="background:var(--c2)"></span><span class="d"><span>어제 발매</span><span class="dd">NEW</span></span><b>룩 백 5</b></div>
+              <div><span class="cv" style="background:var(--c4)"></span><span class="d"><span>북마크 · 새 화</span><span class="dd">NEW</span></span><b>유리 정원 23화</b></div>
+              <div><span class="cv" style="background:var(--c1)"></span><span class="d"><span>북마크 · 새 화</span><span class="dd">NEW</span></span><b>별과 바다 사이 41화</b></div>
+            </div>
             <div class="label">2주 안에 나오는 신간</div>
             <div class="shelf">
               <div><span class="cv" style="background:var(--c1)"></span><span class="d"><span>10.8</span><span class="dd">D-6</span></span><b>별과 바다 사이 4</b></div>

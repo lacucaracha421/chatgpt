@@ -17,37 +17,32 @@ const baseProps = {
   onMetadataVisibleChange: vi.fn(), onThumbnailRowHeightChange: vi.fn(), onReshuffle: vi.fn(),
 };
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.clear(); });
 
 function renderChrome(ui: React.ReactElement) {
   return render(<WorkspaceChromeProvider scope="assets-test"><aside aria-label="index"><ChromeTarget name="header" /><ChromeTarget name="actions" /><ChromeSettingsDock /></aside>{ui}</WorkspaceChromeProvider>);
 }
 
-it("puts kind in the section bar with sort and view at its right end, and removes sidebar view settings", async () => {
+it("keeps only title and View in the toolbar, with every choice in View", async () => {
   const user = userEvent.setup();
   renderChrome(<AssetToolbar {...baseProps} inspectorAvailable onInspectorOpenChange={vi.fn()} />);
-  expect(screen.getByRole("heading", { name: "전체" })).toBeVisible();
-  const kinds = screen.getByRole("radiogroup", { name: "종류" });
-  expect(kinds).toBeVisible();
-  const bar = kinds.closest(".ui-section-bar") as HTMLElement;
   const header = screen.getByRole("toolbar", { name: "자산 도구" });
-  expect(header).not.toContainElement(kinds);
-  expect(within(bar).getByRole("button", { name: "정렬" })).toBeVisible();
-  expect(within(bar).getByRole("button", { name: "보기" })).toBeVisible();
-  expect(within(header).queryByRole("button", { name: "정렬" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "보기 설정" })).not.toBeInTheDocument();
+  expect(within(header).getByRole("heading", { name: "전체" })).toBeVisible();
+  expect(within(header).getByRole("button", { name: "에셋 검색" })).toBeVisible();
+  expect(within(header).getByRole("button", { name: "보기" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "정렬" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("radiogroup", { name: "종류" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "보기" }));
-  expect(screen.getByRole("radiogroup", { name: "배치" })).toBeVisible();
+  for (const name of ["종류", "정렬", "배치", "비율"]) expect(screen.getByRole("radiogroup", { name })).toBeVisible();
   expect(screen.getByRole("slider", { name: "한 줄에" })).toBeVisible();
   expect(screen.getByRole("switch", { name: "정보" })).toBeVisible();
-  expect(screen.queryByRole("switch", { name: "정보 숨기기" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("switch", { name: "비공개 모드" })).not.toBeInTheDocument();
 });
 
 it("changes media kind from the segmented control", async () => {
   const user = userEvent.setup();
   const onMediaFilterChange = vi.fn();
   renderChrome(<AssetToolbar {...baseProps} onMediaFilterChange={onMediaFilterChange} />);
+  await user.click(screen.getByRole("button", { name: "보기" }));
   await user.click(within(screen.getByRole("radiogroup", { name: "종류" })).getByRole("radio", { name: "영상" }));
   expect(onMediaFilterChange).toHaveBeenCalledWith("videos");
 });
@@ -66,8 +61,8 @@ it("offers reshuffle only from the random sort menu", async () => {
   const user = userEvent.setup();
   const onReshuffle = vi.fn();
   renderChrome(<AssetToolbar {...baseProps} sort="random" onReshuffle={onReshuffle} />);
-  await user.click(screen.getByRole("button", { name: "정렬" }));
-  await user.click(screen.getByRole("menuitem", { name: "다시 섞기" }));
+  await user.click(screen.getByRole("button", { name: "보기" }));
+  await user.click(screen.getByRole("button", { name: "다시 섞기" }));
   expect(onReshuffle).toHaveBeenCalledOnce();
 });
 
@@ -88,27 +83,23 @@ it("shows collection names and no folder count", () => {
   expect(screen.queryByText(/12,345/)).not.toBeInTheDocument();
 });
 
-it("has no section bar where there is no kind choice and keeps sort and view in the top bar", () => {
+it("keeps View in the toolbar when the scope has no kind choice", () => {
   renderChrome(<AssetToolbar {...baseProps} view={{ kind: "trash" }} />);
   expect(screen.queryByRole("radiogroup", { name: "종류" })).not.toBeInTheDocument();
   expect(document.querySelector(".ui-section-bar")).toBeNull();
   const header = screen.getByRole("toolbar", { name: "자산 도구" });
-  expect(within(header).getByRole("button", { name: "정렬" })).toBeVisible();
+  expect(within(header).queryByRole("button", { name: "정렬" })).not.toBeInTheDocument();
   expect(within(header).getByRole("button", { name: "보기" })).toBeVisible();
 });
 
 
-it("puts the section row first in the measured asset intro and names the section when it scrolls away", () => {
-  renderChrome(<section className="asset-browser"><AssetToolbar {...baseProps} mediaFilter="images" />
-    <div className="asset-browser__gallery"><div className="asset-gallery__scroll" data-testid="asset-scroll" style={{ overflowY: "auto" }}><div className="asset-gallery__intro"><p>Folder shelf</p></div><p>Assets</p></div></div>
-  </section>);
-  const bar = screen.getByRole("radiogroup", { name: "종류" }).closest<HTMLElement>(".ui-section-bar")!;
-  expect(document.querySelector(".asset-gallery__intro")!.firstElementChild).toContainElement(bar);
-  const scroller = screen.getByTestId("asset-scroll"); scroller.scrollTop = 100; fireEvent.scroll(scroller);
-  const toggle = screen.getByRole("button", { name: "에셋 · 이미지" });
-  fireEvent.click(toggle);
-  const copy = document.querySelector(".ui-section-drop") as HTMLElement;
-  expect(copy).toHaveClass("is-open");
-  expect(within(copy).getByRole("button", { name: "정렬" })).toBeInTheDocument();
-  expect(within(copy).getByRole("button", { name: "보기" })).toBeInTheDocument();
+it("changes size with minus and plus while the slider has focus", async () => {
+  renderChrome(<AssetToolbar {...baseProps} />);
+  await userEvent.click(screen.getByRole("button", { name: "보기" }));
+  const slider = screen.getByRole("slider", { name: "한 줄에" });
+  const initial = Number((slider as HTMLInputElement).value);
+  fireEvent.keyDown(slider, { key: "+" });
+  expect(Number((slider as HTMLInputElement).value)).toBe(initial + 1);
+  fireEvent.keyDown(slider, { key: "-" });
+  expect(Number((slider as HTMLInputElement).value)).toBe(initial);
 });

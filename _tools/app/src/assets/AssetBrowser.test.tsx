@@ -158,13 +158,13 @@ describe("AssetBrowser", () => {
     const { rerender } = render(renderView({ kind: "classification", classificationId: null }));
 
     await screen.findByRole("option", { name: "asset-0.png" });
+    await user.click(screen.getByRole("button", { name: "보기" }));
     await user.click(await screen.findByRole("radio", { name: "이미지" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
       expect.objectContaining({ mediaKind: "images", aspectRatio: null, after: null, aroundDate: null }),
     ));
     expect(await screen.findByRole("option", { name: "asset-0.png" })).toHaveAttribute("aria-selected", "false");
 
-    await user.click(screen.getByRole("button", { name: "보기" }));
     await user.click(within(screen.getByRole("radiogroup", { name: "비율" })).getByRole("radio", { name: "세로형" }));
     await user.keyboard("{Escape}");
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
@@ -172,11 +172,13 @@ describe("AssetBrowser", () => {
     ));
 
     rerender(renderView({ kind: "unsorted" }));
+    await user.click(screen.getByRole("button", { name: "보기" }));
     expect(screen.getByRole("radio", { name: "이미지" })).toHaveAttribute("aria-checked", "true");
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(
       expect.objectContaining({ unclassifiedOnly: true, mediaKind: "images", aspectRatio: "portrait" }),
     ));
 
+    await user.keyboard("{Escape}");
     rerender(renderView({ kind: "collection", collectionId: "collection-1" }));
     expect(screen.queryByRole("radiogroup", { name: "종류" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "보기" }));
@@ -347,7 +349,7 @@ describe("AssetBrowser", () => {
 
   it("shows direct child folders in a sorted shelf with the folder image filter", async () => {
     const user = userEvent.setup();
-    const gateway = createGateway();
+    const gateway = createGateway({ items: [asset(0), asset(1)], nextCursor: null });
     const entries: ClassificationEntry[] = [
       { id: "parent", kind: "root", name: "상위", parentId: null, iconKey: null, colorKey: null, assetCount: 7, totalAssetCount: 20 },
       { id: "child-b", kind: "tag", name: "베타", parentId: "parent", iconKey: null, colorKey: null, assetCount: 3, totalAssetCount: 11 },
@@ -358,9 +360,12 @@ describe("AssetBrowser", () => {
     };
     renderBrowser(gateway, { view: { kind: "classification", classificationId: "parent" }, classifications: entries, folderShelfApi });
 
-    expect(await screen.findByRole("heading", { name: "폴더 2" })).toBeVisible();
+    await screen.findByRole("option", { name: "asset-0.png" });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "폴더 2" })).toBeVisible());
     expect(screen.getAllByRole("button", { name: /폴더 열기/ }).map(button => button.getAttribute("aria-label"))).toEqual(["베타 폴더 열기", "알파 폴더 열기"]);
     expect(screen.getByText("11장")).toBeVisible();
+    expect(document.querySelector(".asset-gallery__date")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "보기" }));
     expect(screen.getByRole("radio", { name: "미분류 7" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "전체 20" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("button", { name: "미분류와 전체 설명" })).toBeInTheDocument();
@@ -369,6 +374,10 @@ describe("AssetBrowser", () => {
 
     await user.click(screen.getByRole("radio", { name: "전체 20" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ classificationId: "parent", directOnly: false })));
+    expect(screen.queryByRole("heading", { name: "폴더 2" })).toBeNull();
+    await waitFor(() => expect(document.querySelector(".asset-gallery__date")).not.toBeNull());
+    await user.click(screen.getByRole("radio", { name: "미분류 7" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "폴더 2" })).toBeVisible());
   });
 
   it("resets the folder image filter when the classification changes", async () => {
@@ -382,6 +391,7 @@ describe("AssetBrowser", () => {
     ];
     const folderShelfApi: Pick<CharacterHubApi, "seriesFolders"> = { seriesFolders: vi.fn().mockResolvedValue([]) };
     const { rerender } = renderBrowser(gateway, { view: { kind: "classification", classificationId: "folder-a" }, classifications: entries, folderShelfApi });
+    await user.click(screen.getByRole("button", { name: "보기" }));
     await user.click(await screen.findByRole("radio", { name: "전체 8" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({ classificationId: "folder-a", directOnly: false, limit: 100 })));
 
@@ -406,8 +416,8 @@ describe("AssetBrowser", () => {
     renderBrowser(gateway, { sort: "random" });
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalled());
     const first = vi.mocked(gateway.listAssets).mock.calls[0]![0].randomPivot;
-    await user.click(screen.getByRole("button", { name: "정렬" }));
-    await user.click(screen.getByRole("menuitem", { name: "다시 섞기" }));
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    await user.click(screen.getByRole("button", { name: "다시 섞기" }));
     await waitFor(() => expect(gateway.listAssets).toHaveBeenCalledTimes(2));
     expect(vi.mocked(gateway.listAssets).mock.calls[1]![0].randomPivot).not.toBe(first);
   });
@@ -1313,4 +1323,24 @@ it("publishes a completed read during continuous ingestion refreshes", async () 
   rerender(browserElement(gateway, { refreshVersion: 3 }));
   await act(async () => { finishNext({ items: [asset(802), asset(801)], nextCursor: null }); });
   expect(screen.getByRole("option", { name: "asset-802.png" })).toBeInTheDocument();
+});
+
+it("docks info beside the grid and remembers I's state through navigation and remounting", async () => {
+  const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+  const view = renderBrowser(gateway);
+  const tile = await screen.findByRole("option", { name: "asset-0.png" });
+  fireEvent.keyDown(tile, { key: "I" });
+  const panel = screen.getByRole("complementary", { name: "자산 정보" });
+  expect(panel).toHaveClass("asset-inspector--docked");
+  expect(panel.closest(".asset-browser__workspace")).toHaveAttribute("data-info-open", "true");
+  expect(panel.closest(".ui-overlay-panel")).toBeNull();
+  expect(localStorage.getItem("lakomics.assets.infoPanel.open.v1")).toBe("true");
+  view.unmount();
+  const next = renderBrowser(gateway);
+  await screen.findByRole("option", { name: "asset-0.png" });
+  expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeVisible();
+  fireEvent.keyDown(screen.getByRole("complementary", { name: "자산 정보" }), { key: "i" });
+  expect(screen.queryByRole("complementary", { name: "자산 정보" })).toBeNull();
+  expect(localStorage.getItem("lakomics.assets.infoPanel.open.v1")).toBe("false");
+  next.unmount();
 });

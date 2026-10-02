@@ -1,9 +1,12 @@
 import {warmOriginalTickets} from './originalTicketWarm';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,type PointerEvent,type ReactNode} from 'react';
-import {ARRIVE_RISE_PX, ARRIVE_WAIT_MS, arrive, holdArrival, holdImage, useAppendArrivals} from './motion';
 import {defaultRangeExtractor, observeElementOffset, observeElementRect, useVirtualizer, type Virtualizer} from '@tanstack/react-virtual';
-import {PlayIcon, PhotoIcon} from '@heroicons/react/24/outline';
+import {PhotoIcon} from '@heroicons/react/24/outline';
+import {HeartIcon} from '@heroicons/react/24/solid';
+import {collectedDate} from '../src/assets/masonryLayout';
+import {formatDuration} from '../src/video/formatDuration';
+import {revealGalleryDateCount} from '../src/assets/galleryDateFeedback';
 import type {Asset} from './types';
 import {dateLabel, justifiedRows, ratio, rowHeight} from './model';
 import {invalidateTicket, loadThumbnail, mediaTicket, prefetchThumbnails, prepareAssets} from './media';
@@ -19,8 +22,8 @@ import {buildJustifiedGalleryRows, GALLERY_DATE_HEADING_HEIGHT, type GalleryRowA
  */
 export type GalleryVaultSource = {label(asset: Asset): string};
 
-function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, vault, arriving, onArrived, selectionMode, selected, onSelect, onToggle, onPressStart, onPressEnd, instant=false}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
-  /** Appended by a page load and not shown yet: the tile waits for its thumbnail, then rises in. */arriving:boolean; onArrived(id:string):void; selectionMode:boolean; selected:boolean; onSelect?: (id:string)=>void; onToggle?: (id:string)=>void; onPressStart?: (cancel:()=>void)=>void; onPressEnd?: (cancel:()=>void)=>void; instant?:boolean}) {
+function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, vault, selectionMode, selected, favoritesView, onSelect, onToggle, onPressStart, onPressEnd}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
+  selectionMode:boolean; selected:boolean; favoritesView:boolean; onSelect?: (id:string)=>void; onToggle?: (id:string)=>void; onPressStart?: (cancel:()=>void)=>void; onPressEnd?: (cancel:()=>void)=>void}) {
   const timer=useRef<number|null>(null), pressStart=useRef<{x:number;y:number}|null>(null), suppressClick=useRef(false), pressCancel=useRef<()=>void>(()=>{});
   const host=useRef<HTMLButtonElement>(null), image=useRef<HTMLImageElement>(null);
   const clearTimer=()=>{if(timer.current!==null){window.clearTimeout(timer.current);timer.current=null;}};
@@ -63,28 +66,7 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, va
     }, () => {});
     return () => controller.abort();
   }, [asset.id, asset.preview, asset.thumbnail_available, asset.thumbnail_revision, asset.pending, onReady, paused, privacy, vault]);
-  const hasPreview=!!preview;
-  // An appended tile stays transparent in its final box until its thumbnail is decoded (or a
-  // short wait ends), then rises in once. Any other tile whose first image comes late fades it in.
-  const waiting=useRef(false);
-  useLayoutEffect(()=>{
-    if(!arriving||waiting.current)return;
-    waiting.current=holdArrival(host.current);
-    if(!waiting.current)onArrived(asset.id);
-  },[]);// eslint-disable-line react-hooks/exhaustive-deps
-  useLayoutEffect(()=>{if(instant&&image.current)image.current.style.opacity='';else if(hasPreview&&!waiting.current)holdImage(image.current);},[hasPreview]);
-  // Preparing an existing row may reveal its image; finishing the seek must never hide it again.
-  useLayoutEffect(()=>{if(instant&&image.current)image.current.style.opacity='';},[instant]);
-  const settle=()=>{if(waiting.current){waiting.current=false;onArrived(asset.id);arrive(host.current,ARRIVE_RISE_PX);}else if(!instant)arrive(image.current);else if(image.current)image.current.style.opacity='';};
-  useEffect(()=>{
-    if(!waiting.current)return;
-    const timer=window.setTimeout(()=>{
-      if(!waiting.current)return;
-      // Shown before its thumbnail: the image then fades in by itself when it comes.
-      waiting.current=false;holdImage(image.current);onArrived(asset.id);arrive(host.current,ARRIVE_RISE_PX);
-    },hasPreview||!(vault||asset.thumbnail_available===false)?ARRIVE_WAIT_MS:0);
-    return()=>window.clearTimeout(timer);
-  },[hasPreview]);// eslint-disable-line react-hooks/exhaustive-deps
+  const settle = () => { if (image.current) image.current.style.opacity = ""; };
   const retry = () => {
     if (vault) {setPreview(undefined); return;}
     if (retried || asset.pending || asset.thumbnail_available === false) return;
@@ -95,7 +77,7 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, va
     if(suppressClick.current){suppressClick.current=false;return;}
     if(selectionMode){onToggle?.(asset.id);return;}
     if(!privacy) onOpen(index);
-  }} onPointerDown={beginPress} onPointerMove={movePress} onPointerUp={endPress} onPointerCancel={cancelPointer} onContextMenu={event=>{if(onSelect)event.preventDefault();}} aria-label={privacy ? '비공개 모드로 이미지 숨김' : vault ? vault.label(asset) : `${asset.creator_name || asset.creator_handle || (asset.kind === 'video' ? '영상' : '이미지')}, ${dateLabel(asset)}`} aria-selected={selectionMode&&selected?true:undefined} data-asset-id={asset.id}>
+  }} onPointerDown={beginPress} onPointerMove={movePress} onPointerUp={endPress} onPointerCancel={cancelPointer} onContextMenu={event=>{if(onSelect)event.preventDefault();}} aria-label={privacy ? '비공개 모드로 이미지 숨김' : vault ? vault.label(asset) : `${asset.creator_name || asset.creator_handle || (asset.kind === 'video' ? '영상' : '이미지')}, ${dateLabel(asset)}`} aria-description={!privacy && asset.kind === "video" ? `영상 ${formatDuration(asset.duration_ms)}` : undefined} aria-selected={selectionMode&&selected?true:undefined} data-asset-id={asset.id} data-date-label={collectedDate(asset.collected_at ?? asset.created_at).label}>
     <span className="tile-picture" style={{height}}>
       {privacy ? <span className="artist-private-tile" aria-hidden="true" /> : preview ? <img ref={image} src={preview} alt="" draggable={false} onError={() => {settle(); retry();}} onLoad={event => {
         const element = event.currentTarget;
@@ -103,8 +85,9 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, va
         if (vault && !asset.ratio && !(asset.width && asset.height) && element.naturalWidth > 0 && element.naturalHeight > 0) onReady({...asset, ratio: element.naturalWidth / element.naturalHeight});
         void (typeof element.decode === 'function' ? element.decode() : Promise.resolve()).catch(() => {}).then(settle);
       }}/> : <PhotoIcon className="missing-media" aria-hidden="true"/>}
-      {asset.kind === 'video' && <span className="video-mark" aria-label="영상"><PlayIcon/></span>}
-      {selectionMode&&selected&&<span className="ui-selection-check" aria-hidden="true"/>}
+      {asset.kind === 'video' && width > 100 && <span className="video-mark" aria-label="영상">▶ {formatDuration(asset.duration_ms)}</span>}
+      {asset.favorite && (selectionMode || favoritesView) && <span className="tile-favorite" aria-label="좋아요"><HeartIcon /></span>}
+      {(selectionMode || favoritesView) && onSelect && <span className="tile-select" data-selected={selected} aria-hidden="true">{selected && <span className="ui-selection-check"/>}</span>}
     </span>
   </button>;
 }
@@ -141,10 +124,10 @@ function rowSize(row: JustifiedGalleryRow<GalleryRowItem> & {spacer?:boolean}) {
   return row.height + (row.dateHeadings?.length ? GALLERY_DATE_HEADING_HEIGHT : 0) + GALLERY_ROW_GAP;
 }
 
-export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, onSelectAsset, onToggleSelection, onClearSelection, sparse}: {sparse?:SparseGallerySource; items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
+export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onClearSelection, sparse}: {sparse?:SparseGallerySource; items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
   /** Additional visibility guard for sheets owned by the parent screen. */scrubberHidden?:boolean;
   /** Optional sort metadata; the date fallback follows the existing gallery order. */scrubberSort?:ScrubberSort;
-  /** Tablet Library selection; absent for Revisit, character and vault galleries. */selectedIds?:ReadonlySet<string>; onSelectAsset?(id:string):void; onToggleSelection?(id:string):void;
+  /** Tablet Library selection; absent for Revisit, character and vault galleries. */selectedIds?:ReadonlySet<string>; favoritesView?:boolean; onSelectAsset?(id:string):void; onToggleSelection?(id:string):void;
   /** A double tap on empty gallery space (not a tile) leaves selection mode. */onClearSelection?():void;
   /** Private Vault mode: same layout and gestures, no library media client. */
   vault?:GalleryVaultSource}) {
@@ -207,7 +190,6 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   }
   const virtualizer = useVirtualizer({count: rows.length, getScrollElement: () => parent.current, getItemKey:i=>rows[i].key, estimateSize: i => rowSize(rows[i]), overscan: GALLERY_ROW_OVERSCAN,scrollMargin:introHeight,observeElementRect:observeShownRect,observeElementOffset:observeOffset,
     rangeExtractor:range=>[...new Set([...defaultRangeExtractor(range),...destinationRows,...retainedRows])].sort((a,b)=>a-b)});
-  const arrivals = useAppendArrivals(identity, useMemo(() => items.map(asset => asset.id), [items]));
   useLayoutEffect(() => {
     const scroll = parent.current;
     if (!scroll) return;
@@ -309,7 +291,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     if (last && now - last.at < 350 && Math.hypot(event.clientX - last.x, event.clientY - last.y) < 32) { lastBackgroundTap.current = null; onClearSelection(); return; }
     lastBackgroundTap.current = {at: now, x: event.clientX, y: event.clientY};
   };
-  return <div className={`gallery-scroll${stale?' is-stale':''}`} ref={parent} onPointerUp={backgroundTap} onScroll={event => {cancelActivePress();if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" aria-busy={stale||undefined} inert={stale||undefined} tabIndex={0}>
+  return <div className={`gallery-scroll${stale?' is-stale':''}`} ref={parent} onPointerOver={event => { if (event.pointerType !== "touch") revealGalleryDateCount(parent.current, event.target); }} onPointerLeave={() => revealGalleryDateCount(parent.current, document.activeElement)} onFocusCapture={event => { if (event.target.matches(":focus-visible")) revealGalleryDateCount(parent.current, event.target); }} onBlurCapture={event => revealGalleryDateCount(parent.current, event.relatedTarget)} onPointerUp={backgroundTap} onScroll={event => {cancelActivePress();if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" aria-busy={stale||undefined} inert={stale||undefined} tabIndex={0}>
     {/* The refresh pill is a zero-height sticky overlay, so it never changes the intro height. */}
     {pull}
     {intro!=null&&<div ref={introduction}>{intro}</div>}
@@ -320,7 +302,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
         if(row.spacer)return <div key={virtual.key} className="gallery-sparse-spacer" aria-hidden="true" data-spacer-start={row.startIndex} style={{position:'absolute',width:'100%',height:row.height,transform:`translateY(${virtual.start-introHeight}px)`}}/>;
         const hasDateHeadings = Boolean(row.dateHeadings?.length);
         const packedHeadings = row.dateHeadings && row.dateHeadings.length > 1 ? row.dateHeadings : null;
-        const renderTile = (item: GalleryRowItem) => <Tile key={item.asset.id} {...item} height={row.height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} instant={destinationRows.includes(virtual.index)} arriving={!sparse&&arrivals.arriving(item.asset.id)} onArrived={arrivals.arrived} selectionMode={Boolean(onSelectAsset&&selectedIds?.size)} selected={selectedIds?.has(item.asset.id)??false} onSelect={onSelectAsset} onToggle={onToggleSelection} onPressStart={registerPress} onPressEnd={releasePress}/>;
+        const renderTile = (item: GalleryRowItem) => <Tile key={item.asset.id} {...item} height={row.height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} favoritesView={favoritesView} selectionMode={Boolean(onSelectAsset&&selectedIds?.size)} selected={selectedIds?.has(item.asset.id)??false} onSelect={onSelectAsset} onToggle={onToggleSelection} onPressStart={registerPress} onPressEnd={releasePress}/>;
         let itemOffset = 0;
         const tileContent = packedHeadings
           ? packedHeadings.map(heading => {
@@ -330,10 +312,9 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
           })
           : row.items.map(renderTile);
         return <div className="gallery-justified-unit" data-gallery-row={row.key} inert={destinationRows.includes(virtual.index)||undefined} key={virtual.key} style={{height: rowSize(row), transform: `translateY(${virtual.start-introHeight}px)`}}>
-          {row.dateHeadings?.map(heading => <div key={`${heading.label}-${heading.left}`} className="gallery-date-heading" data-date-heading="true" role="presentation" style={{left: heading.left, width: heading.width}}>
+          {row.dateHeadings?.map(heading => <div key={`${heading.label}-${heading.left}`} className="gallery-date-heading" data-date-heading="true" data-gallery-date="" data-date-label={heading.label} tabIndex={0} style={{left: heading.left, width: heading.width}}>
             <span className="gallery-date-heading__day">{heading.label}</span>
             {heading.weekday && <span className="gallery-date-heading__weekday">{heading.weekday}</span>}
-            <span className="gallery-date-heading__rule" aria-hidden="true" />
             {heading.count > 1 && <span className="gallery-date-heading__count">{heading.count.toLocaleString()}</span>}
           </div>)}
           <div className="gallery-row" style={{top: hasDateHeadings ? GALLERY_DATE_HEADING_HEIGHT : 0, height: row.height, gap: packedHeadings ? GALLERY_TILE_GAP * 4 : GALLERY_TILE_GAP}}>{tileContent}</div>

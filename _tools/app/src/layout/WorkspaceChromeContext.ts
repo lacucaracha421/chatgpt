@@ -20,6 +20,8 @@ type ChromeContextValue = {
   setSearchActions: (owner: string, actions: ChromeSearchActions | null) => void;
   applySearch: (query: string) => void;
   openSearch: (draft: string) => void;
+  openFind: () => void;
+  setFindAction: (action: (() => void) | null) => void;
   indexHidden: Record<string, true>;
   setIndexHidden: (area: string, hidden: boolean) => void;
 };

@@ -1,3 +1,4 @@
+import { formatDuration } from "./formatDuration";
 import { useEffect, useRef, useState } from "react";
 import { ClockIcon } from "@heroicons/react/24/outline";
 import type { AssetSummary } from "../library/types";
@@ -8,9 +9,9 @@ import { Badge } from "../shared/ui/Badge";
 import { Skeleton } from "../shared/ui/Skeleton";
 
 type VideoAsset = AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> };
-type Props = { asset: VideoAsset; active: boolean; onRequestActive(): void; onReleaseActive(): void; onRetry(): void; privacyMode?: boolean; thumbnailSrc?: string; playbackSrc?: string };
+type Props = { asset: VideoAsset; active: boolean; onRequestActive(): void; onReleaseActive(): void; onRetry(): void; privacyMode?: boolean; thumbnailSrc?: string; playbackSrc?: string; compactBadge?: boolean; durationVisible?: boolean };
 
-export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive, onRetry, privacyMode = false, thumbnailSrc, playbackSrc }: Props) {
+export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive, onRetry, privacyMode = false, thumbnailSrc, playbackSrc, compactBadge = false, durationVisible = true }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hoverTimer = useRef<number | null>(null);
   const seekTimer = useRef<number | null>(null);
@@ -142,7 +143,7 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
       onSeeked={(event) => { if (!scrubbingRef.current) { setPlayedRatio(Math.min(1, event.currentTarget.currentTime / Math.max(0.001, durationSeconds))); setPreviewRatio(null); } }}
       onDurationChange={(event) => { const d = event.currentTarget.duration; if (Number.isFinite(d) && d > 0) setVideoDuration(d); }}
     />}
-    <Badge className="video-tile__duration" variant="scrim">{formatDuration(asset.media.durationMs)}</Badge><span className="video-tile__icon" aria-hidden="true">▶</span>
+    {durationVisible && <Badge className="video-tile__duration" variant="scrim">{compactBadge ? `▶ ${formatDuration(asset.media.durationMs)}` : formatDuration(asset.media.durationMs)}</Badge>}{!compactBadge && <span className="video-tile__icon" aria-hidden="true">▶</span>}
     <div
       className="video-tile__scrub"
       tabIndex={0}
@@ -176,9 +177,4 @@ function PendingVideoTile() {
     <ClockIcon className="video-tile__status-icon" aria-hidden="true" />
     <span className="video-tile__status">{restricted ? "절약 모드로 대기 중" : "준비 중"}</span>
   </div>;
-}
-
-function formatDuration(durationMs: number) {
-  const totalSeconds = Math.floor(durationMs / 1_000);
-  return `${Math.floor(totalSeconds / 60)}:${(totalSeconds % 60).toString().padStart(2, "0")}`;
 }

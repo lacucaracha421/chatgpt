@@ -1144,3 +1144,18 @@ describe("ClassificationSidebar", () => {
     expect(onViewChange).toHaveBeenCalledWith({ kind: "collections", typeFilter: "movie", showcase: false });
   });
 });
+
+it("keeps counts quiet but available for the selected, hovered or focused row", async () => {
+  renderSidebar(gateway(), { embedded: true, entries: entries.map(entry => ({ ...entry, assetCount: 23 })), view: { kind: "classification", classificationId: "work" } });
+  const selected = screen.getByRole("treeitem", { name: "Blue Archive" });
+  const other = screen.getByRole("treeitem", { name: "Games" });
+  expect(selected).toHaveAttribute("aria-selected", "true");
+  expect(selected.querySelector(".classification-sidebar__hover-count")).toHaveTextContent("23");
+  expect(other.querySelector(".classification-sidebar__hover-count")).toHaveTextContent("23");
+  expect(screen.getByRole("button", { name: "새 폴더" }).closest(".classification-sidebar__folder-section")).not.toBeNull();
+  const menu = screen.getByRole("button", { name: "폴더 보기 옵션" });
+  expect(menu).toHaveClass("classification-sidebar__heading-menu");
+  menu.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(screen.getByRole("menuitem", { name: "모든 폴더 접기" })).toBeInTheDocument();
+});

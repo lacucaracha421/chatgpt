@@ -20,6 +20,7 @@ import { isUnknownArtist } from "../artists/types";
 import { faultSelectionItem, useFaultGame } from "../games/FaultGame";
 import { AutoTagFilterBadges } from "../autotags/AutoTagFilterBadges";
 import { clearAutoTagFilter, hasAutoTagFilter, useAutoTagFilter } from "../autotags/autoTagFilter";
+import { useInfoPanelPreference } from "./useInfoPanelPreference";
 import { AssetGallery } from "./AssetGallery";
 import { AssetInfoPanel } from "./AssetInfoPanel";
 import { AssetInspector } from "./AssetInspector";
@@ -103,7 +104,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   const [selectedAsset, setSelectedAsset] = useState<AssetSummary | null>(null);
   const [selection, setSelection] = useState<SelectionState>(emptySelection);
   const [viewerAssetId, setViewerAssetId] = useState<string | null>(null);
-  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useInfoPanelPreference();
   const [batchPending, setBatchPending] = useState(false);
   const [undoAssetIds, setUndoAssetIds] = useState<string[] | null>(null);
   const [characterOpen, setCharacterOpen] = useState(false);
@@ -244,7 +245,6 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   useEffect(() => {
     setSelection(emptySelection());
     setSelectedAsset(null);
-    setInspectorOpen(false);
   }, [viewKey]);
   useEffect(() => {
     if (!requestedAsset) return;
@@ -526,7 +526,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     { id: "trash", label: "휴지통으로 이동", destructive: true, disabled: batchPending, onSelect: trashSelection },
   ];
   const showNewest = () => { setPage(null); pageRef.current = null; setNewAssetsAvailable(false); refresh(); }; // no-flash-ok: 처음부터 보기 is an explicit restart
-  const folderShelfIntro = plainFolderId && folderChildren.length > 0 ? <>
+  const folderShelfIntro = plainFolderId && directOnly && folderChildren.length > 0 ? <>
     <FolderShelf
       label={`폴더 ${folderChildren.length.toLocaleString()}`}
       ariaLabel="하위 폴더"
@@ -540,13 +540,13 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
         </button>
       </article>)}
     />
-    <FolderFilterControl
+  </> : null;
+  const folderFilterControl = plainFolderId && folderChildren.length > 0 ? <FolderFilterControl
       label="폴더 이미지 필터"
       options={[{ value: "direct", label: "미분류", count: folderEntry?.assetCount }, { value: "all", label: "전체", count: folderEntry?.totalAssetCount }]}
       value={directOnly ? "direct" : "all"}
       onChange={value => setDirectOnlyState({ folderId: plainFolderId, value: value === "direct" })}
-    />
-  </> : null;
+    /> : null;
   // Outside the gallery (loading, empty, error) the shelf needs the gallery's own side padding.
   // Same padding as the gallery scroll area (layout-dependent gap + scrollbar lane), so the shelf does
   // not shift when the view moves between a loading/empty state and the gallery.
@@ -567,9 +567,12 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
           const target = items.find((item) => item.id === id);
           if (!target || (batchPending && !selection.ids.has(target.id))) { event.preventDefault(); return; }
           if (!selection.ids.has(target.id)) selectWithGesture(target, { toggle: false, range: false });
-        }} className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery scrubberHidden={inspectorOpen || viewerAssetId !== null} layout={galleryLayout} intro={<>{artistScope?.intro}{folderShelfIntro}</>} groupDates={visiblePage?.sort === "newest" || visiblePage?.sort === "oldest"} items={visibleItems} scopeKey={visiblePage?.queryKey} totalCount={styleSuggestionsOnly ? styleSuggestionAssets?.totalImages ?? null : visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onFocusAsset={focusAssetOnly} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onAssignCharacter={openCharacterPicker} onToggleFavorite={toggleFocusedFavorite} onToggleInfo={() => setInspectorOpen((open) => !open)} onEscape={() => { if (inspectorOpen) setInspectorOpen(false); else clearSelection(); }} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
-  return <section className="asset-browser" aria-label="저장소">
-    {<AssetToolbar title={artistScope?.title} titleAccessory={<>{artistScope?.accessory}<AutoTagFilterBadges resultCount={activePage?.totalCount ?? null} /></>} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} inspectorOpen={inspectorOpen} inspectorAvailable onInspectorOpenChange={setInspectorOpen} />}
+        }} className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery scrubberHidden={viewerAssetId !== null} layout={galleryLayout} intro={<>{artistScope?.intro}{folderShelfIntro}</>} infoOpen={inspectorOpen} favoritesView={sort === "favorites"} groupDates={!folderShelfIntro && (visiblePage?.sort === "newest" || visiblePage?.sort === "oldest")} items={visibleItems} scopeKey={visiblePage?.queryKey} totalCount={styleSuggestionsOnly ? styleSuggestionAssets?.totalImages ?? null : visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onFocusAsset={focusAssetOnly} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onAssignCharacter={openCharacterPicker} onToggleFavorite={toggleFocusedFavorite} onToggleInfo={() => setInspectorOpen((open) => !open)} onEscape={() => { if (inspectorOpen) setInspectorOpen(false); else clearSelection(); }} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
+  return <section className="asset-browser" aria-label="저장소" onKeyDown={event => {
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.key.toLowerCase() !== "i" || (event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
+    event.preventDefault(); setInspectorOpen(open => !open);
+  }}>
+    {<AssetToolbar title={artistScope?.title} scopeControl={folderFilterControl} titleAccessory={<>{artistScope?.accessory}<AutoTagFilterBadges resultCount={activePage?.totalCount ?? null} /></>} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} inspectorOpen={inspectorOpen} inspectorAvailable onInspectorOpenChange={setInspectorOpen} />}
     {newAssetsAvailable && <div role="status">새 자료가 있습니다. <Button size="sm" onClick={showNewest}>처음부터 보기</Button></div>}
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
     {characterNotice && <Toast secondaryActionLabel="열기" onSecondaryAction={() => {
@@ -581,7 +584,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       <span><strong>{characterNotice.count.toLocaleString("ko-KR")}장</strong> → {characterNotice.target.displayName}</span>
     </span></Toast>}
     {currentFirstError && <Toast tone="error">{currentFirstError}</Toast>}
-    <div className="asset-browser__workspace">
+    <div className="asset-browser__workspace" data-info-open={inspectorOpen}>
       <div className="asset-browser__gallery">
         {assetResults}
         {artistScope?.panel}
@@ -589,7 +592,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
         {currentNextError && <div className="asset-browser__next-error"><Toast tone="error">{currentNextError}</Toast><Button onClick={() => loadNextPage(true)}>다시 시도</Button></div>}
         {currentPrevError && <div className="asset-browser__next-error"><Toast tone="error">{currentPrevError}</Toast><Button onClick={() => loadPrevPage(true)}>다시 시도</Button></div>}
       </div>
-      <AssetInspector presentation="overlay" assets={inspectorAssets} classifications={classifications} currentCollection={view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId) ?? null : null} open={inspectorOpen} onOpenChange={setInspectorOpen} onOpenAsset={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onOpenArtist={(artistId) => onViewChange?.({ kind: "creator", creatorKey: artistId })} onAssetUpdated={updateAssetSummary} privacyMode={privacyMode} />
+      <AssetInspector presentation="docked" assets={inspectorAssets} classifications={classifications} currentCollection={view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId) ?? null : null} open={inspectorOpen} onOpenChange={setInspectorOpen} onOpenAsset={(asset) => { viewerViewKeyRef.current = viewKey; setViewerAssetId(asset.id); }} onOpenArtist={(artistId) => onViewChange?.({ kind: "creator", creatorKey: artistId })} onAssetUpdated={updateAssetSummary} privacyMode={privacyMode} />
     </div>
     {assignOpen && selectedIds.length > 0 && <AssignArtistDialog assetIds={[...selectedIds]} privacyMode={privacyMode} onClose={() => setAssignOpen(false)}
       onAssigned={(_artistId, label) => { setAssignOpen(false); setUndoAssetIds(null); setMessage(`${selectedIds.length.toLocaleString("ko-KR")}장을 ${label}에 붙였어요`); clearSelection(); refresh(); }} />}

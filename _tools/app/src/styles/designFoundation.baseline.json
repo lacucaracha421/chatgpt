@@ -188,7 +188,13 @@
     },
     "_tools/app/src/home/home.css": {
       "offScaleSpacing": 0,
-      "offRoleFontSize": 2,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/home/homeAttention.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 0
     },
@@ -322,7 +328,7 @@
       "offScaleSpacing": 9,
       "offRoleFontSize": 0,
       "pillRadius": 2,
-      "legacyToken": 78
+      "legacyToken": 77
     },
     "_tools/app/src/styles/tokens.css": {
       "offScaleSpacing": 0,

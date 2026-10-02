@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>에셋 화면 덜 복잡하게</title>
+<!-- Loads the app's real tokens; the PC frame and both variants are local. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<style>
+/* Layout: decision text, a 지금/제안 switch with hover/info toggles, then one PC frame redrawn per state. */
+:root { --page: #0e0f10; color-scheme: dark; }
+body { margin: 0; background: var(--page); color: var(--color-text); font: 400 var(--type-body)/var(--line-ui) var(--font-ui); }
+[hidden] { display: none !important; }
+.doc { max-width: 1240px; margin: 0 auto; padding-block: 32px 80px; padding-inline: 16px; display: flex; flex-direction: column; gap: 18px; }
+h1 { margin: 0; font-size: var(--text-title-large); font-weight: 600; text-wrap: balance; }
+.lead { margin: 8px 0 0; color: var(--color-muted); max-width: 82ch; line-height: var(--line-copy); }
+.notes { margin: 0; padding-left: 20px; color: var(--color-muted); max-width: 92ch; line-height: var(--line-copy); display: flex; flex-direction: column; gap: 5px; }
+.notes b { color: var(--color-text); font-weight: 600; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; color: var(--color-faint); font-size: var(--type-meta); }
+.pick { display: inline-flex; padding: 2px; background: var(--color-surface); border-radius: var(--radius-control); }
+.pick button { min-height: 30px; padding: 0 14px; border: 0; border-radius: var(--radius-mark); background: transparent; color: var(--color-muted); font: inherit; cursor: pointer; }
+.pick button[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+.pick button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.scroll { overflow-x: auto; padding-bottom: 4px; }
+
+.win { position: relative; width: 1180px; height: 700px; display: grid; grid-template-columns: 64px 220px minmax(0, 1fr) auto; border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; background: var(--color-bg); }
+.rail { background: var(--color-sidebar); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 4px; color: var(--color-faint); font-size: 11px; }
+.rail span { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 52px; padding: 6px 0; border-radius: var(--radius-control); }
+.rail span i { width: 18px; height: 16px; border: 1.5px solid currentColor; border-radius: 3px; }
+.rail span.on { color: var(--color-text); background: var(--color-surface); }
+.side { background: var(--color-sidebar); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; min-width: 0; }
+.side-head { height: var(--toolbar-height); display: flex; align-items: center; justify-content: space-between; padding: 0 12px; color: var(--color-muted); font-size: var(--type-meta); }
+.side .grp { padding: 6px 8px; display: flex; flex-direction: column; gap: 1px; }
+.side .grp-h { display: flex; justify-content: space-between; align-items: center; padding: 8px 8px 4px; color: var(--color-faint); font-size: var(--type-meta); }
+.side .grp-h .acts { opacity: 1; letter-spacing: 6px; }
+.side .it { display: flex; justify-content: space-between; align-items: center; min-height: 30px; padding: 0 8px; border-radius: var(--radius-mark); font-size: var(--type-body); }
+.side .it small { color: var(--color-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.side .it.on { background: var(--color-sidebar-selection); color: var(--color-on-accent); }
+.side .it.on small { color: var(--color-on-accent); opacity: .7; }
+.main { display: flex; flex-direction: column; min-width: 0; }
+.top { height: var(--toolbar-height); flex: none; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid var(--color-border); font-size: var(--type-meta); color: var(--color-muted); }
+.top b { color: var(--color-text); font-size: var(--type-body); font-weight: 600; }
+.top .grow { flex: 1; }
+.shelf { display: flex; gap: 10px; padding: 12px 16px 0; }
+.shelf span { width: 120px; height: 46px; border-radius: var(--radius-mark); background: var(--color-surface); display: flex; align-items: center; padding: 0 10px; font-size: var(--type-meta); color: var(--color-muted); }
+.grid { flex: 1; overflow: hidden; padding: 8px 16px; display: flex; flex-direction: column; gap: 14px; }
+.day { display: flex; flex-direction: column; gap: 8px; }
+.dh { display: flex; align-items: center; gap: 8px; font-size: var(--type-body); font-weight: 600; }
+.dh small { color: var(--color-faint); font-weight: 400; font-size: var(--type-meta); }
+.dh::after { content: ""; flex: 1; height: 1px; background: var(--color-border); }
+.tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.tile { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.tile .img { position: relative; aspect-ratio: 1; border-radius: 2px; overflow: hidden; }
+.tile .cap { display: flex; justify-content: space-between; font-size: 11px; color: var(--color-faint); white-space: nowrap; overflow: hidden; }
+.badge { position: absolute; font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: var(--radius-mark); background: rgba(0,0,0,.6); color: #fff; }
+.b-dur { right: 6px; bottom: 6px; } .b-play { left: 6px; top: 6px; } .b-heart { right: 6px; top: 6px; background: transparent; color: #e36a6a; font-size: 14px; }
+.b-name { left: 6px; bottom: 6px; background: transparent; color: rgba(255,255,255,.65); font-weight: 400; }
+.hoverstrip { position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 8px 6px; background: linear-gradient(transparent, rgba(0,0,0,.7)); font-size: 11px; color: #f1eee6; display: flex; justify-content: space-between; }
+.check { position: absolute; left: 6px; top: 6px; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.85); background: rgba(0,0,0,.25); }
+.hover .img { outline: 2px solid var(--color-text); outline-offset: -2px; }
+.scrub { position: absolute; right: 4px; top: 120px; width: 3px; height: 40px; background: var(--color-muted); border-radius: 2px; }
+
+/* Proposed state overrides */
+.calm .dh { font-weight: 500; font-size: var(--type-meta); color: var(--color-muted); padding-top: 6px; }
+.calm .dh::after { display: none; }
+.calm .dh small { display: none; }
+.calm .day:hover .dh small { display: inline; }
+.calm .side .it small { visibility: hidden; }
+.calm .side .it.on small, .calm .side .it:hover small { visibility: visible; }
+.calm .side .grp-h .acts { opacity: 0; }
+.calm .side .grp:hover .grp-h .acts { opacity: 1; }
+.info { width: 0; overflow: hidden; background: var(--color-sidebar); border-left: 1px solid var(--color-border); }
+.info.open { width: 280px; }
+.info .in { width: 280px; padding: 16px; display: flex; flex-direction: column; gap: 10px; font-size: var(--type-meta); color: var(--color-faint); box-sizing: border-box; }
+.info .in .pv { aspect-ratio: 1; border-radius: 2px; }
+.info .row { display: grid; grid-template-columns: 64px 1fr; gap: 8px; } .info .row span:last-child { color: var(--color-text); }
+.info .chips { display: flex; flex-wrap: wrap; gap: 4px; } .info .chips span { padding: 2px 8px; border-radius: var(--radius-mark); background: var(--color-surface); color: var(--color-muted); }
+.overlay-info { position: absolute; right: 16px; top: 60px; width: 280px; height: 300px; background: var(--color-surface-elevated); border: 1px solid var(--color-border-strong); box-shadow: var(--shadow-dialog); z-index: 3; display: grid; place-items: center; color: var(--color-faint); font-size: var(--type-meta); }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>에셋 화면 덜 복잡하게</h1>
+    <p class="lead">비슷한 프로그램(Eagle, Google 포토, Apple 사진, Lightroom, Immich) 조사에서 대부분이 따르는 규칙을 그대로 옮겼습니다. 위에서 지금/제안을 바꾸고, 「마우스 올림」과 「정보 열기」로 숨긴 정보가 언제 나오는지 보세요.</p>
+  </header>
+  <ol class="notes">
+    <li><b>그림만</b>: 파일 이름 · 작가는 타일에 표시하지 않습니다(마우스를 올려도 없음). 필요하면 정보 패널에서 봅니다. (사용자 결정 2026-10-02)</li>
+    <li><b>배지 하나</b>: 영상은 「▶ 0:42」 한 칸만. 하트와 선택 동그라미는 마우스를 올렸을 때만(즐겨찾기 화면에서는 하트 항상).</li>
+    <li><b>날짜 제목은 작은 글자</b>: 가로줄과 장수를 빼고(장수는 마우스를 올리면), 스크롤 중에는 지금처럼 날짜 말풍선.</li>
+    <li><b>사이드바 숫자는 고른 항목과 마우스를 올린 항목에만</b>, 폴더 묶음의 ＋ · ⋯도 마우스를 올렸을 때만.</li>
+    <li><b>도구 줄은 제목 · 검색 · 보기</b>: 정렬과 크기 슬라이더는 보기 메뉴 안으로.</li>
+    <li><b>정보 패널은 옆에 붙여 열기</b>: 지금처럼 그림 위를 덮지 않고, 열면 목록이 옆으로 비켜납니다(I 키로 열고 닫기).</li>
+    <li>폴더 줄은 폴더 맨 위에서만 보이고, 날짜 제목과 겹쳐 쌓이지 않게 합니다.</li>
+  </ol>
+  <div class="controls">
+    <div class="pick" id="state"><button type="button" aria-pressed="false" data-v="now">지금</button><button type="button" aria-pressed="true" data-v="calm">제안</button></div>
+    <div class="pick" id="hov"><button type="button" aria-pressed="false" data-v="1">마우스 올림 보기</button></div>
+    <div class="pick" id="inf"><button type="button" aria-pressed="false" data-v="1">정보 열기</button></div>
+  </div>
+  <div class="scroll"><div class="win" id="win">
+    <nav class="rail" aria-label="화면"><span><i></i>홈</span><span class="on"><i></i>에셋</span><span><i></i>컬렉션</span><span><i></i>망가</span><span><i></i>메모</span><span><i></i>전송</span></nav>
+    <aside class="side">
+      <div class="side-head"><span>에셋</span><span>＋</span></div>
+      <div class="grp"><div class="it on"><span>전체</span><small>3,214</small></div><div class="it"><span>작가</span><small>212</small></div><div class="it"><span>앨범</span><small>18</small></div></div>
+      <div class="grp"><div class="grp-h"><span>폴더</span><span class="acts">＋ ⋯</span></div>
+        <div class="it"><span>오리지널</span><small>1,206</small></div><div class="it"><span>게임</span><small>1,126</small></div><div class="it"><span>만화</span><small>680</small></div><div class="it"><span>블루 아카이브</span><small>245</small></div><div class="it"><span>리버스: 1999</span><small>142</small></div></div>
+    </aside>
+    <section class="main"><div class="top" id="top"></div><div id="shelf"></div><div class="grid" id="grid"></div></section>
+    <aside class="info" id="info"><div class="in"><span class="pv" style="background:linear-gradient(150deg,#4f7d5a,#b9c98f 60%,#3d3550)"></span><div class="row"><span>작가</span><span>모래빛</span></div><div class="row"><span>수집</span><span>9.12 21:40</span></div><div class="row"><span>크기</span><span>2048 × 2048</span></div><div class="row"><span>폴더</span><span class="chips"><span>게임 ×</span><span>＋</span></span></div><div class="row"><span>태그</span><span class="chips"><span>1girl</span><span>smile</span><span>＋</span></span></div></div></aside>
+    <span class="scrub" aria-hidden="true"></span>
+  </div></div>
+</div>
+<script>
+const G = ['#4f7d5a,#b9c98f 60%,#3d3550', '#5a6aa8,#c4a2c0 60%,#353a50', '#a8645a,#e0b58f 60%,#3b2f3a', '#3f8a8a,#9fd0c0 60%,#2f3d48', '#7d4a5c,#c98f7a 55%,#3b2a3f', '#6d6a3a,#c9c48f 60%,#2f3a2a'];
+const days = [['9.12 토', 6], ['9.6 일', 6], ['8.25 화', 6]];
+let state = 'calm', hover = false, info = false;
+function tile(d, i) {
+  const g = G[(d * 3 + i) % G.length], video = (d + i) % 4 === 1, fav = (d + i) % 5 === 2, hot = hover && d === 0 && i === 1;
+  const now = state === 'now';
+  let badges = '';
+  if (now) badges = `${video ? '<span class="badge b-play">▶</span><span class="badge b-dur">0:42</span>' : ''}${fav ? '<span class="badge b-heart">♥</span>' : ''}<span class="badge b-name">asset-0${d}${i}</span>`;
+  else badges = `${video ? '<span class="badge b-dur">▶ 0:42</span>' : ''}${hot ? `<span class="check"></span><span class="badge b-heart">${fav ? '♥' : '♡'}</span>` : ''}`;
+  const cap = now ? `<span class="cap"><span>모래빛</span><span>21:4${i}</span></span>` : '';
+  return `<div class="tile${hot ? ' hover' : ''}"><span class="img" style="background:linear-gradient(150deg,${g})">${badges}</span>${cap}</div>`;
+}
+function render() {
+  const win = document.getElementById('win'); const calm = state === 'calm';
+  win.classList.toggle('calm', calm);
+  document.getElementById('top').innerHTML = calm
+    ? '<b>전체</b><span class="grow"></span><span>⌕ 검색</span><span>보기 ▾</span>'
+    : '<b>에셋 · 전체 ▾</b><span>3,214장</span><span class="grow"></span><span>정렬 수집순 ▾</span><span>필터 ▾</span><span>⌕</span><span>▦ 보기</span><span>ⓘ</span><span>＋</span>';
+  document.getElementById('shelf').innerHTML = calm ? '' : '<div class="shelf"><span>📁 오리지널</span><span>📁 게임</span><span>📁 만화</span><span>📁 블루 아카이브</span></div>'.replace(/📁 /g, '');
+  document.getElementById('grid').innerHTML = days.map(([label, n], d) => `<div class="day"><div class="dh">${label}<small>${n * 4}장</small></div><div class="tiles">${Array.from({ length: n }, (_, i) => tile(d, i)).join('')}</div></div>`).join('');
+  document.getElementById('info').classList.toggle('open', info && calm);
+  win.querySelector('.overlay-info')?.remove();
+  if (info && !calm) win.insertAdjacentHTML('beforeend', '<div class="overlay-info">지금: 정보 패널이 그림 위를 덮음</div>');
+}
+function bind(id, fn) { document.getElementById(id).addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; fn(b); render(); }); }
+bind('state', (b) => { state = b.dataset.v; document.querySelectorAll('#state button').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); });
+bind('hov', (b) => { hover = !hover; b.setAttribute('aria-pressed', String(hover)); });
+bind('inf', (b) => { info = !info; b.setAttribute('aria-pressed', String(info)); });
+render();
+</script>
+</body>
+</html>

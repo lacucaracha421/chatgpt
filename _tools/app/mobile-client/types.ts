@@ -11,7 +11,8 @@ export interface Asset {
   // its disk cache and local URL by it, so a regenerated thumbnail is not served from the
   // retained old copy. Absent from servers that do not send it (then the cache keys by id).
   thumbnail_revision?: string | null;
-  pending?: boolean; preview?: string; ratio?: number;
+  // Optional source-provided state; the current library publication omits favourites.
+  favorite?: boolean; pending?: boolean; preview?: string; ratio?: number;
 }
 export interface Classification { id: string; name: string; parent_id: string | null; asset_count: number; color_key?: string; icon_key?: string }
 /**

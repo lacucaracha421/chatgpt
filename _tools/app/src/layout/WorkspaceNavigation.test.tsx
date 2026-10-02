@@ -7,6 +7,7 @@ import { SearchSurface } from "./SearchSurface";
 import { ViewToolbar } from "./ViewToolbar";
 import { WorkspaceChromeProvider } from "./WorkspaceChrome";
 import { ChromeTarget } from "./WorkspaceChrome";
+import { useWorkspaceChrome } from "./WorkspaceChromeContext";
 import { WorkspaceNavigation } from "./WorkspaceNavigation";
 import { MangaToolbar } from "../manga/MangaToolbar";
 import type { AssetView } from "../library/types";
@@ -97,13 +98,13 @@ it("limits index toggling to manga and preserves preferences for other areas", a
   const { rerender } = render(<IndexToggleWorkspace />);
   await user.click(screen.getByRole("button", { name: "사이드바 숨기기" }));
   expect(JSON.parse(localStorage.getItem(indexHiddenKey)!)).toEqual({ assets: true, notes: true, manga: true });
-  for (const view of [assetsView, { kind: "home" }, { kind: "collection", collectionId: "m1" }] as AssetView[]) {
+  for (const view of [assetsView, { kind: "collection", collectionId: "m1" }] as AssetView[]) {
     rerender(<IndexToggleWorkspace view={view} />);
     expect(screen.getByRole("complementary", { name: "탐색 인덱스" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "사이드바 숨기기" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "사이드바 보이기" })).not.toBeInTheDocument();
   }
-  for (const view of [{ kind: "collections", typeFilter: "game", showcase: false }, { kind: "notes" }] as AssetView[]) {
+  for (const view of [{ kind: "collections", typeFilter: "game", showcase: false }, { kind: "notes" }, { kind: "home" }] as AssetView[]) {
     rerender(<IndexToggleWorkspace view={view} />);
     expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "사이드바 보이기" })).not.toBeInTheDocument();
@@ -176,7 +177,8 @@ it("opens Home from the first rail entry, marks it current there and names the i
   rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "home" }} onNavigate={onNavigate} />);
   expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page");
   expect(within(rail).getByRole("button", { name: "에셋" })).not.toHaveAttribute("aria-current");
-  expect(document.querySelector(".workspace-index__head")).toHaveAttribute("aria-label", "홈");
+  // Home is attention-first and has no index column of its own (2026-10-02).
+  expect(document.querySelector(".workspace-index")).toBeNull();
   // A note opened from Home is not where the 메모 rail entry returns to.
   rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "notes", noteId: "n1" }} onNavigate={onNavigate} />);
   rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "home" }} onNavigate={onNavigate} />);
@@ -561,4 +563,20 @@ it.each([
   expect(screen.getByRole("complementary", { name: "탐색 인덱스" })).toBeInTheDocument();
   rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "collection", collectionId: "m1" }} onNavigate={vi.fn()} />);
   expect(document.querySelector('[data-chrome-slot="details"]')).toBeInTheDocument();
+});
+
+it("opens the existing find surface from a toolbar search action and keeps asset counts quiet", async () => {
+  function ToolbarSearch() {
+    const chrome = useWorkspaceChrome();
+    return <ViewToolbar title="전체" trailingAction={<button onClick={chrome?.openFind}>에셋 검색</button>} chrome={{}} />;
+  }
+  render(<WorkspaceChromeProvider scope="assets"><ChromeTarget name="header" />
+    <WorkspaceNavigation view={{ kind: "classification", classificationId: null }} collectionType="game" width={208} onWidthChange={vi.fn()} onNavigate={vi.fn()} assetNavigation={null} reviewCount={0} trashCount={0} places={{ classifications: [], albums: [{ id: "one", name: "표지", parentId: null, iconKey: null, colorKey: null }], characters: [] }} />
+    <ToolbarSearch />
+  </WorkspaceChromeProvider>);
+  const row = screen.getByRole("button", { name: "앨범 1개" });
+  expect(row.querySelector(".classification-sidebar__hover-count")).toHaveTextContent("1");
+  expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
+  await userEvent.click(screen.getByRole("button", { name: "에셋 검색" }));
+  expect(screen.getByRole("dialog", { name: "찾기" })).toBeVisible();
 });

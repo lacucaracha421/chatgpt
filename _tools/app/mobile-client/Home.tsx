@@ -1,11 +1,10 @@
-import {HomeReadState} from '../src/home/HomeReadState';
-import {useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
-import {BookOpenIcon, ChevronRightIcon, InboxIcon, ListBulletIcon, RectangleStackIcon, Square2StackIcon, WalletIcon} from '@heroicons/react/24/outline';
+import {useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
+import {RectangleStackIcon} from '@heroicons/react/24/outline';
 import {collectionCover, type CollectionSummary} from './collectionModel';
 import {localToday} from './collectionReleases';
 import {Cover} from './CoverGroup';
 import {currentShelf, subscribeReleases} from './releaseStore';
-import {addedToday, clockLabel, dateBlock, daysAfter, externalShelfRows, shelfEntries, useHomeArtists, useHomeAvPick, useHomeDashboard, useHomeMemos, useHomeRevisit, useHomeUpcoming, type HomeCover, type MemoRow, type RevisitGroup, type ShelfEntry, type UpcomingHomeEntry} from './homeDashboard';
+import {daysAfter, shelfEntries, useHomeDashboard, useHomeMemos, useHomeRevisit, useHomeUpcoming, type HomeCover, type RevisitGroup, type UpcomingHomeEntry} from './homeDashboard';
 import type {CharacterIndex} from './characterModel';
 import type {ExchangeSnapshot} from './exchange';
 import {api, native} from './transport';
@@ -14,12 +13,15 @@ import {BottomSheet} from './BottomSheet';
 import {usePullToRefresh} from './usePullToRefresh';
 import {usePrivacyMode} from './privacyMode';
 import type {Asset, Ticket} from './types';
-import {PlatformBadges} from '../src/collections/PlatformBadges';
 import {KIND_LABEL} from '../src/collections/collectionFormat';
-import {nextInSeriesRows,type NextInSeriesRow} from '../src/home/homeModel';
-import {groupedNumber} from '../src/notes/ledger/model';
 import {ddayLabel, displayDate} from '../src/shared/displayDate';
-import {Badge, Button, SectionLabel, Skeleton} from './ui';
+import {Badge, Skeleton} from './ui';
+import {HomeAttentionLayout, HomePresence, HomeReleaseList, HomeSection, HomeToday, type HomeReleaseCard} from '../src/home/HomeAttention';
+import {attentionRows} from '../src/home/homeAttention';
+import {useHomeVisit} from '../src/home/useHomeVisit';
+import {koreanReleases} from './collectionReleases';
+import {useLocalDayClock} from '../src/shared/useLocalDayClock';
+import {StableImage} from '../src/shared/ui/StableImage';
 import './home.css';
 
 export interface HomeProps {
@@ -34,13 +36,6 @@ export interface HomeProps {
   onRevisit?(key: string, title: string): void; onArtists?(): void; onNotes(id?: string): void; onRefresh?(): void;
 }
 
-const grouped = groupedNumber;
-function Progress({value, muted}: {value: number; muted?: boolean}) { return <span className={`home-progress${muted ? ' is-muted' : ''}`} aria-hidden="true"><i style={{width: `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`}} /></span>; }
-
-function Section({title, onMore, actions, className = '', children}: {title: string; onMore?(): void; actions?: ReactNode; className?: string; children: ReactNode}) {
-  return <section className={`home-sec ${className}`} aria-label={title}><SectionLabel title={title} onOpen={onMore} actions={actions} /><div className="home-section-body">{children}</div></section>;
-}
-
 function HomeCoverImage({cover, alt, privacy = false, className = ''}: {cover?: HomeCover | null; alt: string; privacy?: boolean; className?: string}) {
   const [url, setUrl] = useState('');
   useEffect(() => {
@@ -50,7 +45,7 @@ function HomeCoverImage({cover, alt, privacy = false, className = ''}: {cover?: 
       if (cover.url && /^https:\/\//.test(cover.url)) { setUrl(cover.url); return; }
       setUrl(''); return;
     }
-    const controller = new AbortController(); setUrl('');
+    const controller = new AbortController();
     const request = window.LakomicsNative
       ? native<Ticket>('homeCover', {sha256}, controller.signal)
       : api<Ticket>(`/v1/home/covers/${encodeURIComponent(sha256)}/media-ticket`, controller.signal, undefined, 'POST');
@@ -60,7 +55,7 @@ function HomeCoverImage({cover, alt, privacy = false, className = ''}: {cover?: 
     return () => controller.abort();
   }, [cover?.url, cover?.sha256, privacy]);
   if (privacy) return <span className={`home-cover-placeholder is-private ${className}`} aria-label="비공개 모드로 이미지 숨김" />;
-  return url ? <img className={`home-home-image ${className}`} src={url} alt={alt} /> : <span className={`home-cover-placeholder ${className}`} aria-label={`${alt} 표지 준비 중`} />;
+  return url ? <StableImage className={`home-home-image ${className}`} src={url} alt={alt} /> : <span className={`home-cover-placeholder ${className}`} aria-label={`${alt} 표지 준비 중`} />;
 }
 
 type HomeArtworkCacheEntry = {url: string; until: number};
@@ -106,44 +101,10 @@ function HomeMangaCover({item, revision, label, active}: {item: CollectionSummar
     void load.then(next => { if (live) setUrl(next); }, () => {});
     return () => { live = false; };
   }, [active, artworkId, item, revision, source]);
-  return url ? <img className="collection-art" src={url} alt={label} /> : <span className="home-cover-placeholder"><RectangleStackIcon aria-hidden="true" /></span>;
+  return url ? <StableImage className="collection-art" src={url} alt={label} /> : <span className="home-cover-placeholder"><RectangleStackIcon aria-hidden="true" /></span>;
 }
 
 const upcomingKind: Record<UpcomingHomeEntry['kind'], string> = KIND_LABEL;
-
-function ShelfManga({entry, cover, today, privacy, onOpen}: {entry: ShelfEntry; cover: ReactNode; today: string; privacy: boolean; onOpen(): void}) {
-  const fresh = entry.kind === 'new';
-  const todayNew = fresh && (!entry.date || entry.date === today);
-  const date = entry.date ?? today;
-  const block = dateBlock(date, today);
-  const days = daysAfter(date, today);
-  const rail = <span className={`home-rail${todayNew ? ' is-new' : ''}`}><span className="home-rail-d numeric">{block?.day ?? '오늘'}</span>{ddayLabel(days) && <span className="home-rail-dd numeric">{ddayLabel(days)}</span>}</span>;
-  const volumes = fresh ? entry.volumes : `${entry.volumeNumber}권`;
-  const volume = volumes.match(/(\d+(?:[–-]\d+)?)권/)?.[1];
-  return <button className="home-shelf-item" onClick={onOpen} aria-label={`${entry.name} ${volumes}`}><span>{rail}</span><span className="home-shelf-art">{privacy ? <span className="home-cover-placeholder is-private" aria-label="비공개 모드로 이미지 숨김" /> : cover}{fresh && <Badge className="home-newmark" variant="accent">NEW</Badge>}{volume && <Badge className="home-volume-badge" variant="scrim">{volume}</Badge>}</span><span className="home-shelf-title">{entry.name}</span><span className="home-shelf-sub" aria-hidden="true" /></button>;
-}
-
-function ShelfExternal({entry, fresh, today, privacy, onOpen}: {entry: UpcomingHomeEntry; fresh: boolean; today: string; privacy: boolean; onOpen(): void}) {
-  const date = entry.date && /^\d{4}-\d{2}-\d{2}$/.test(entry.date) ? entry.date : null;
-  const days = date ? daysAfter(date, today) : null;
-  const block = date ? dateBlock(date, today) : null;
-  const hasGamePlatforms = entry.kind === 'game' && !!entry.platforms?.length;
-  return <button className="home-shelf-item home-external-item" onClick={onOpen} aria-label={`${entry.title}${date ? ` · ${ddayLabel(days) ?? '발매됨'}` : ''}`}><span className="home-rail"><span className="home-rail-d numeric">{block?.day ?? '—'}</span>{block && <span className="home-rail-dd numeric">{ddayLabel(days)}</span>}</span><span className="home-shelf-art"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} />{fresh && <Badge className="home-newmark" variant="accent">NEW</Badge>}</span><span className="home-shelf-title">{entry.title}</span><span className="home-shelf-sub">{hasGamePlatforms ? <PlatformBadges platforms={entry.platforms!} port={entry.port === true} /> : null}</span></button>;
-}
-
-function MemoPanel({rows, memos, onOpen}: {rows: MemoRow[]; memos: ReturnType<typeof useHomeMemos>; onOpen(id?: string): void}) {
-  if (!memos) return <Section title="메모" onMore={() => onOpen()}><div className="home-memo-grid is-loading" aria-busy="true"><Skeleton className="home-tall-memo is-loading" label="메모를 불러오는 중" /><Skeleton className="home-tall-memo is-loading" label="메모를 불러오는 중" /></div></Section>;
-  const nonLedger = rows.filter((row): row is Exclude<MemoRow, {kind: 'ledger'}> => row.kind !== 'ledger');
-  const pinned = nonLedger[0];
-  const checklist = pinned?.kind === 'checklist' ? pinned : undefined;
-  const ledger = rows.find((row): row is Extract<MemoRow, {kind: 'ledger'}> => row.kind === 'ledger');
-  const renderNote = (note: Exclude<MemoRow, {kind: 'ledger'}>, key: string) => note.kind === 'checklist'
-    ? <button key={key} className="home-tall-memo" onClick={() => onOpen(note.id)}><span className="home-memo-title"><ListBulletIcon className="home-icon" />{note.title || 'Todo'}</span><span className="home-checklist-lines">{note.items.map((item, index) => <span key={index}><i className={item.checked ? 'is-checked' : ''}>{item.checked ? '✓' : ''}</i>{item.text}</span>)}</span><span className="home-memo-foot"><span className="numeric">{note.done}/{note.total}</span> 완료<Progress value={note.total ? note.done / note.total : 0} muted /></span></button>
-    : <button key={key} className="home-tall-memo" onClick={() => onOpen(note.id)}><span className="home-memo-title"><ListBulletIcon className="home-icon" />{note.title || '메모'}</span><span className="home-memo-snippet">{note.kind === 'text' ? note.snippet : '잠긴 메모'}</span></button>;
-  const noteCard = pinned ? renderNote(pinned, pinned.id) : <button key="empty-note" className="home-tall-memo is-empty" onClick={() => onOpen()}><span className="home-memo-title"><ListBulletIcon className="home-icon" />메모</span><span>고정한 메모가 없습니다.</span></button>;
-  const ledgerCard = ledger ? <button key={ledger.id} className="home-tall-memo" onClick={() => onOpen(ledger.id)}><span className="home-memo-title"><WalletIcon className="home-icon" />{ledger.title || '가계부'}</span><small className="home-ledger-month">{ledger.month}월 {ledger.available !== null ? '쓸 수 있는 돈' : '쓴 돈'}</small><strong className="home-ledger-total numeric">{grouped(ledger.amount)}원</strong>{ledger.categories.length > 0 ? <span className="home-ledger-bars">{ledger.categories.map(category => <span key={category.label}><span><b>{category.label}</b><em className="numeric">{grouped(category.amount)}원</em></span><Progress value={ledger.spent ? category.amount / ledger.spent : 0} /></span>)}</span> : <span className="home-ledger-latest"><small>최근 기록</small>{ledger.latest.map(entry => <span key={`${entry.label}:${entry.amount}`}><b>{entry.label}</b><em className="numeric">{grouped(entry.amount)}원</em></span>)}</span>}</button> : <button key="empty-ledger" className="home-tall-memo is-empty" onClick={() => onOpen()}><span className="home-memo-title"><WalletIcon className="home-icon" />가계부</span><span>고정한 가계부가 없습니다.</span></button>;
-  return <Section title="메모" onMore={() => onOpen()}><div className="home-memo-grid">{noteCard}{ledgerCard}</div>{!checklist && !ledger && memos?.locked && <p className="home-memo-locked">메모가 잠겨 있습니다.</p>}</Section>;
-}
 
 function RevisitMosaic({group, paused, privacy, onOpen}: {group: RevisitGroup; paused: boolean; privacy: boolean; onOpen(): void}) {
   const items = group.items.slice(0, 7);
@@ -152,59 +113,19 @@ function RevisitMosaic({group, paused, privacy, onOpen}: {group: RevisitGroup; p
   return <button className="home-revisit" onClick={onOpen} aria-label={`1년 전 오늘 ${group.count}장`}><span className="home-revisit-pics">{rows.map((row, index) => <span key={index} className="home-jrow">{row.map(asset => <span key={asset.id} className="home-jcell" style={{flexGrow: ratio(asset), aspectRatio: String(ratio(asset))}}>{privacy ? <span className="home-private-cell" aria-label="비공개 모드로 이미지 숨김" /> : <Cover asset={asset} paused={paused} />}</span>)}</span>)}</span><span className="home-caption"><span>1년 전 오늘</span><span className="numeric">{group.count}장</span></span></button>;
 }
 
-function ArtistStrip({group, paused, privacy, onOpen}: {group: RevisitGroup; paused: boolean; privacy: boolean; onOpen(): void}) {
-  const items = group.items.slice(0, 6);
-  // Only real images: an artist with 3 images shows 3 wider cells, not 3 empty slots.
-  const cells: (typeof items[number] | undefined)[] = items.length ? items : [undefined];
-  const name = group.name ?? group.title.replace(/^오늘의 작가\s*·\s*/, '');
-  return <button className="home-artist-strip" onClick={onOpen} aria-label={group.title}><span className="home-artist-pics">{cells.map((asset, index) => <span key={asset?.id ?? `empty:${index}`} className="home-artist-cell">{asset && !privacy ? <Cover asset={asset} paused={paused} /> : <span className="home-private-cell" aria-label={privacy ? '비공개 모드로 이미지 숨김' : undefined} />}</span>)}</span><span className="home-caption"><span>{name}</span><span className="numeric">{group.count}장</span></span></button>;
-}
-
-function AssetTile({value, title, unit, onOpen, label}: {value: string; title: string; unit: string; onOpen(): void; label: string}) { return <button className="home-asset-tile" onClick={onOpen} aria-label={label}><strong className="numeric">{value}<small>{unit}</small></strong><span>{title}</span></button>; }
-function CollectionCount({value, title}: {value: number; title: string}) { return <span className="home-asset-collection"><strong className="numeric">{grouped(value)}</strong><span>{title}</span></span>; }
-
-function ContinuingSeries({rows, revision, active, privacy, onOpen}: {rows: NextInSeriesRow<CollectionSummary>[]; revision: string; active: boolean; privacy: boolean; onOpen(id: string): void}) {
-  if (!rows.length) return null;
-  return <Section title="이어지는 시리즈"><div className="home-series-grid">{rows.map(row => <button key={row.work.id} className="home-series-card" onClick={() => onOpen(row.work.id)} aria-label={`${row.work.name} ${row.nextVolume.number}권 발매`}><span className="home-series-pair"><span className="home-series-cover">{privacy ? <span className="home-cover-placeholder is-private" aria-label="비공개 모드로 이미지 숨김" /> : <HomeMangaCover item={row.work} revision={revision} active={active} label={row.work.name} />}{row.ownedCount > 0 && <Badge className="home-volume-badge" variant="scrim">{row.ownedCount}</Badge>}</span><span className="home-series-next"><b><span className="numeric">{row.nextVolume.number}</span><small>권</small></b><small>발매</small></span></span><strong className="home-series-title">{row.work.name}</strong><span className="home-series-meta">{row.ownedCount > 0 ? <><span className="numeric">{row.ownedCount}</span>권까지 소장</> : '소장 없음'}</span></button>)}</div></Section>;
-}
-
-/**
- * 오늘의 AV 배우: the performer face on the left and the published name data on the right.
- * The tablet response currently carries one cover, aliases, and an optional work count only.
- */
-function AvCard({pick, privacy}: {pick: NonNullable<ReturnType<typeof useHomeAvPick>["pick"]>; privacy: boolean}) {
-  const cover = pick.latestWork?.cover ?? pick.cover ?? null;
-  const initials = Array.from(pick.name.replace(/\s+/g, '')).slice(0, 2).join('') || 'AV';
-  const originalName = pick.aliases?.[0];
-  const workCount = typeof pick.workCount === 'number' && Number.isFinite(pick.workCount) ? pick.workCount : null;
-  return <article className="home-av-card home-av-split">
-    <span className="home-av-face">{cover ? <HomeCoverImage cover={cover} alt={pick.name} privacy={privacy} /> : <b>{initials}</b>}</span>
-    <span className="home-av-side"><strong>{pick.name}</strong>{originalName && <small>{originalName}</small>}{workCount !== null && <span className="home-av-count"><b className="numeric">{workCount}</b> 출연</span>}</span>
-  </article>;
-}
-
-function AvPlaceholder() {
-  return <article className="home-av-card home-av-split is-loading" aria-label="오늘의 AV 배우 불러오는 중"><Skeleton className="home-av-face" label="오늘의 AV 배우 불러오는 중" /><span className="home-av-side"><Skeleton className="home-av-placeholder-line" label="오늘의 AV 배우 불러오는 중" /><Skeleton className="home-av-placeholder-line is-short" label="오늘의 AV 배우 불러오는 중" /></span></article>;
-}
-
 function UpcomingDetailSheet({entry, interested, privacy, onToggle, onClose}: {entry: UpcomingHomeEntry; interested: boolean; privacy: boolean; onToggle(): void; onClose(): void}) {
   const days = entry.date ? daysAfter(entry.date, localToday()) : null;
   return <BottomSheet title={entry.title} onClose={onClose}><div className="home-detail-sheet"><div className="home-detail-cover"><HomeCoverImage cover={entry.cover} alt={entry.title} privacy={privacy} /></div><Badge>{upcomingKind[entry.kind]}</Badge>{entry.originalTitle && <p className="home-detail-original">{entry.originalTitle}</p>}<p className="home-detail-meta">{entry.date ? displayDate(entry.date) : '발매일 미정'}{days !== null && ` · ${ddayLabel(days) ?? '발매됨'}`}</p>{entry.platforms?.length ? <p className="home-detail-meta">{entry.platforms.join(' · ')}</p> : null}{entry.description && <p className="home-detail-description">{entry.description}</p>}<button className="home-interest-action" onClick={onToggle}>{interested ? '관심 목록에서 빼기' : '관심 목록에 추가'}</button></div></BottomSheet>;
 }
 
 export function Home(props: HomeProps) {
-  const {items, captures, paused, secondaryError} = props;
+  const {captures, paused, secondaryError} = props;
   const [privacy] = usePrivacyMode();
-  const [reducedMotion] = useState(() => {
-    try { return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false; } catch { return false; }
-  });
-  const pending = captures ? captures.length : null;
-  const d = useHomeDashboard({enabled: !paused, scope: props.scope, pending, similarityKey: props.similarityKey, exchange: props.exchange});
+  const at = useLocalDayClock();
+  const today = localToday(at);
+  const d = useHomeDashboard({enabled: !paused, scope: props.scope, pending: captures?.length ?? null, similarityKey: props.similarityKey, exchange: props.exchange});
   const memos = useHomeMemos(!paused, props.scope, d.refreshKey);
   const upcoming = useHomeUpcoming(!paused, props.scope, d.refreshKey);
-  const av = useHomeAvPick(!paused && !privacy, props.scope, d.refreshKey);
-  const avPick = av.pick;
-  const artists = useHomeArtists(!paused, props.scope, d.refreshKey);
   const revisit = useHomeRevisit(!paused, props.scope, d.refreshKey);
   const homeScroll = useRef<HTMLDivElement>(null);
   const refreshHome = () => { d.retry(); props.onRefresh?.(); };
@@ -212,62 +133,68 @@ export function Home(props: HomeProps) {
   const [detail, setDetail] = useState<UpcomingHomeEntry | null>(null);
   const shelf = useSyncExternalStore(subscribeReleases, currentShelf);
   const works = useMemo(() => new Map((shelf?.works ?? []).map(work => [work.id, work])), [shelf]);
-  const today = localToday();
-  const stale = d.offline;
-  const dateGroup = revisit.find(group => group.key === 'date');
-  const fallbackArtist = revisit.find(group => group.key !== 'date');
-  const publishedArtist = artists.find(artist => artist.main) ?? artists[0];
-  const artistSource = publishedArtist?.coverAssetIds?.length ? revisit.find(group => group.items.some(asset => publishedArtist.coverAssetIds?.includes(asset.id))) : null;
-  const artistAssets = publishedArtist?.coverAssetIds?.length ? items.filter(asset => publishedArtist.coverAssetIds?.includes(asset.id)) : [];
-  const artistBase = artistSource ?? fallbackArtist ?? (publishedArtist ? {key: `artist:${publishedArtist.id}`, title: publishedArtist.displayName || publishedArtist.label, count: publishedArtist.assetCount ?? 0, items: artistAssets, label: ''} : null);
-  const artistGroup = publishedArtist && artistBase ? {...artistBase, key: `artist:${publishedArtist.id}`, title: `오늘의 작가 · ${publishedArtist.displayName || publishedArtist.label}`, label: ''} : fallbackArtist ? {...fallbackArtist, title: `오늘의 작가 · ${fallbackArtist.name ?? fallbackArtist.title}`, label: ''} : null;
-
-  const mangaEntries = shelfEntries(d.unreadWorks && d.unreadWorks > 0 ? d.releases ?? [] : [], d.upcoming ?? [], today);
-  const externalEntries = externalShelfRows(upcoming.entries, upcoming.wishlistItems, upcoming.wishlist, today);
-  const cover = (id: string, name: string) => { const work = works.get(id); return work ? <HomeMangaCover item={work} revision={shelf?.revision ?? ''} active={!paused} label={name} /> : <span className="home-cover-placeholder"><RectangleStackIcon aria-hidden="true" /></span>; };
-  const summary = d.summary;
-  const fallback = addedToday(items, props.hasMore);
-  const total = summary ? grouped(summary.total) : '—';
-  const unclassified = summary ? grouped(summary.unclassified) : '—';
-  const todayAdded = summary ? grouped(summary.addedToday) : `${fallback.count}${fallback.more ? '+' : ''}`;
-  const weekAdded = summary ? grouped(summary.addedThisWeek) : '—';
-  const detailedSummary = summary?.images !== undefined && summary.videos !== undefined && summary.collections !== undefined ? summary : null;
-  const seriesRows = useMemo(() => {
-    if (!shelf?.ready) return [];
-    const works = shelf.works.filter(work => work.type === 'manga' && !!work.releaseWatch?.enabled);
-    return nextInSeriesRows(
-      works,
-      (work, editionIndex) => work.ownedVolumes?.find(value => value.editionIndex === editionIndex)?.count ?? null,
-      work => work.releaseSchedule?.kakao ?? null,
-      d.releases ?? [],
-      event => event.id,
-      today,
-    ).slice(0, 3);
-  }, [d.releases, shelf, today]);
+  const cover = (id: string, name: string) => {
+    const work = works.get(id);
+    return !privacy && work ? <HomeMangaCover item={work} revision={shelf?.revision ?? ''} active={!paused} label={name} /> : undefined;
+  };
+  const manga = shelfEntries(d.releases ?? [], d.upcoming ?? [], today, 14);
+  const arrivals = new Map(manga.filter(e => e.kind === 'new').map(e => [e.id, { key: `manga:${e.id}`, token: `manga:${e.id}:${e.date ?? ''}:${e.volumes}`, date: e.date, fresh: true, name: e.name, detail: e.volumes, workId: e.id, external: null as UpcomingHomeEntry | null }]));
+  if (shelf) for (const row of koreanReleases(shelf.works.filter(w => w.type === 'manga' && w.releaseWatch?.enabled), (work, edition) => work.ownedVolumes?.find(o => o.editionIndex === edition)?.count ?? null, [], today)) {
+    const volume = row.volumes.filter(v => v.released && v.date && v.date <= today).sort((a,b) => b.date!.localeCompare(a.date!) || b.volumeNumber - a.volumeNumber)[0];
+    if (volume && !arrivals.has(row.work.id)) arrivals.set(row.work.id, { key: `manga:${row.work.id}`, token: `manga:${row.work.id}:${volume.date}:${volume.volumeNumber}권`, date: volume.date, fresh: false, name: row.work.name, detail: `${volume.volumeNumber}권`, workId: row.work.id, external: null });
+  }
+  const muted = new Set(upcoming.wishlistItems.filter(entry => entry.muted).map(entry => entry.id));
+  for (const entry of [...upcoming.wishlistItems, ...upcoming.entries]) {
+    if (muted.has(entry.id) || arrivals.has(`title:${entry.id}`)) continue;
+    const event = (upcoming.wishlistItems.find(wish => wish.id === entry.id)?.events ?? []).filter(e => e.kind === 'released' && !e.readAt).sort((a,b) => b.detectedAt.localeCompare(a.detectedAt))[0];
+    if (event || (entry.precision === 'exact' && entry.date && entry.date <= today)) arrivals.set(`title:${entry.id}`, { key: `title:${entry.id}`, token: `title:${entry.id}:${entry.date ?? event?.id ?? ''}`, date: entry.date ?? null, fresh: !!event, name: entry.title, detail: '발매됨', workId: '', external: entry });
+  }
+  // Published collection dates are already in the shelf; no extra detail reads.
+  for (const work of shelf?.works ?? []) {
+    if (work.type === 'av' || work.type === 'manga' || !work.releaseDate || !/^\d{4}-\d{2}-\d{2}$/.test(work.releaseDate) || work.releaseDate > today) continue;
+    if ([...arrivals.values()].some(e => e.name === work.name && e.date === work.releaseDate)) continue;
+    arrivals.set(`work:${work.id}`, { key: `work:${work.id}`, token: `work:${work.id}:${work.releaseDate}`, date: work.releaseDate, fresh: false, name: work.name, detail: '발매됨', workId: work.id, external: null });
+  }
+  const visit = useHomeVisit(props.scope, [...arrivals.values()], today, !paused);
+  const future: HomeReleaseCard[] = manga.filter(e => e.kind === 'upcoming').map(e => ({ key: `manga:${e.id}:${e.volumeNumber}`, name: e.name, date: e.date, detail: `${e.volumeNumber}권`, cover: cover(e.id, e.name), onOpen: () => props.onWork(e.id) }));
+  const futureTitles = new Map(upcoming.wishlistItems.map(entry => [entry.id, entry as UpcomingHomeEntry & { muted?: boolean }]));
+  for (const entry of upcoming.entries) if (upcoming.wishlist.has(entry.id) && !futureTitles.has(entry.id)) futureTitles.set(entry.id, entry);
+  for (const entry of futureTitles.values()) {
+    if (entry.muted || !upcoming.wishlist.has(entry.id) || entry.precision !== 'exact' || !entry.date) continue;
+    const days = daysAfter(entry.date, today);
+    if (days < 0 || days > 14) continue;
+    future.push({ key: `title:${entry.id}`, name: entry.title, date: entry.date, cover: <HomeCoverImage cover={entry.cover} alt="" privacy={privacy} />, onOpen: () => setDetail(entry) });
+  }
+  future.sort((a,b) => (a.date ?? '').localeCompare(b.date ?? '') || a.name.localeCompare(b.name, 'ko'));
   const reviewRows = [
-    {key: 'pending', label: '처리 대기', value: d.todos.pending, unit: '건', icon: InboxIcon, onOpen: props.onPending},
-    {key: 'similar', label: '유사 이미지', value: d.todos.similar, unit: '쌍', icon: Square2StackIcon, onOpen: props.onSimilarity},
-    {key: 'duplicates', label: '중복 판본', value: d.todos.duplicates, unit: '건', icon: BookOpenIcon, onOpen: props.onDuplicates},
-  ].filter(row => row.value !== null && row.value > 0);
-
-  const avLoading = !privacy && avPick === undefined && !av.error;
-  const shelfLoading = !paused && d.releases === null && d.upcoming === null && upcoming.entries.length === 0 && upcoming.wishlistItems.length === 0;
-  const enterClass = reducedMotion ? '' : ' home-enter-block';
-  const shelfCards = shelfLoading
-    ? Array.from({length: 6}, (_, index) => <span className="home-shelf-item is-loading" key={`loading:${index}`} aria-hidden="true"><Skeleton className="home-rail" label="신간 정보를 불러오는 중" /><Skeleton className="home-shelf-art" label="신간 정보를 불러오는 중" /><Skeleton className="home-shelf-title" label="신간 정보를 불러오는 중" /><Skeleton className="home-shelf-sub" label="신간 정보를 불러오는 중" /></span>)
-    : <>{mangaEntries.slice(0, 12).map(entry => <ShelfManga key={`manga:${entry.kind}:${entry.id}:${entry.kind === 'upcoming' ? entry.volumeNumber : ''}`} entry={entry} today={today} privacy={privacy} cover={cover(entry.id, entry.name)} onOpen={() => props.onWork(entry.id)} />)}{externalEntries.slice(0, 12).map(row => <ShelfExternal key={`${row.entry.kind}:${row.entry.id}`} entry={row.entry} fresh={row.fresh} today={today} privacy={privacy} onOpen={() => setDetail(row.entry)} />)}{mangaEntries.length + externalEntries.length === 0 && <p className="home-empty-shelf">신간이 없습니다.</p>}</>;
-  return <div className={`home-scroll home-c${privacy ? ' is-private' : ''}${stale ? ' is-stale' : ''}`} ref={homeScroll} aria-label="홈">
+    { key: 'unsorted', label: '미분류 에셋', count: d.summary?.unclassified ?? null },
+    { key: 'similar', label: '유사 이미지 검토', count: d.todos.similar, unit: '쌍' },
+    { key: 'pending', label: '처리 대기', count: d.todos.pending },
+    { key: 'duplicates', label: '중복 판본', count: d.todos.duplicates },
+  ];
+  const connections = [
+    ...(d.offline || d.serverProblem ? [{ key: 'server', label: '서버', value: d.offline ? '연결 안 됨' : '요청을 처리할 수 없음', tone: 'off' }] : []),
+    ...(props.exchange?.configured && props.exchange.code ? [{ key: 'exchange', label: 'PC 연결', value: '전송을 확인해 주세요', tone: 'off' }] : []),
+    ...(d.catalogJob?.state === 'failed' ? [{ key: 'catalog', label: '카탈로그', value: '갱신 실패', tone: 'off' }] : []),
+  ];
+  const rows = attentionRows(memos?.notes ?? [], reviewRows, connections, today);
+  const dateGroup = revisit.find(group => group.key === 'date' && group.count > 0);
+  const right = [
+    ...(visit.arrivals.length ? [{ key: 'new', content: <HomeSection title="새로 나옴 · 지난번 이후" onOpen={props.onReleases}><HomeReleaseList today={today} rows={visit.arrivals.map(e => ({ key: e.key, name: e.name, date: e.date, detail: e.detail, fresh: true, cover: e.external ? <HomeCoverImage cover={e.external.cover} alt="" privacy={privacy} /> : cover(e.workId, e.name), onOpen: () => { visit.opened(e.token); if (e.external) setDetail(e.external); else props.onWork(e.workId); } }))} /></HomeSection> }] : []),
+    ...(future.length ? [{ key: 'upcoming', content: <HomeSection title="2주 안에 나오는 신간" onOpen={props.onReleases}><HomeReleaseList rows={future} today={today} /></HomeSection> }] : []),
+    ...(dateGroup ? [{ key: 'revisit', content: <HomeSection title={`1년 전 오늘 · ${dateGroup.count.toLocaleString()}장`}><RevisitMosaic group={dateGroup} paused={paused} privacy={privacy} onOpen={() => props.onRevisit?.('date', dateGroup.title)} /></HomeSection> }] : []),
+  ];
+  return <div className={`home-scroll home-attention-mobile${privacy ? ' is-private' : ''}`} ref={homeScroll} aria-label="홈">
     {pull}
-    {stale && <div className="home-offline" role="status"><span>서버에 닿지 않음{d.since && <> · <span className="numeric">{clockLabel(d.since)}</span>부터</>}</span><Button variant="ghost" size="sm" onClick={refreshHome}>다시 시도</Button></div>}
-    {!stale && d.serverProblem && <div className="home-offline" role="status"><span>서버가 요청을 처리하지 못했습니다.</span><Button variant="ghost" size="sm" onClick={refreshHome}>다시 시도</Button></div>}
-    <div className="home-c-grid">
-      <div className={`home-block home-release-block${enterClass}`}><Section title="캘린더" onMore={props.onReleases}><div className="home-shelf">{shelfCards}</div></Section></div>
-      <div className={`home-block home-duo-block${enterClass}`}><div className="home-duo"><Section title="다시 보기" onMore={() => dateGroup ? props.onRevisit?.('date', dateGroup.title) : props.onRecent?.()}><>{dateGroup ? <RevisitMosaic group={dateGroup} paused={paused} privacy={privacy} onOpen={() => props.onRevisit?.('date', dateGroup.title)} /> : <div className="home-revisit is-empty"><span className="home-private-cell" /><span className="home-caption"><span>1년 전 오늘</span><span className="numeric">0장</span></span></div>}</></Section><Section title="작가" onMore={props.onArtists}><>{artistGroup ? <ArtistStrip group={artistGroup} paused={paused} privacy={privacy} onOpen={() => props.onArtists?.()} /> : <div className="home-artist-strip is-empty"><span className="home-artist-pics">{Array.from({length: 6}, (_, index) => <span className="home-private-cell" key={index} />)}</span><span className="home-caption"><span>오늘의 작가</span><span className="numeric">0장</span></span></div>}</></Section></div></div>
-      <div className={`home-block home-duo-block${enterClass}`}><div className={`home-duo home-review-duo${!privacy ? '' : ' is-review-wide'}`}>{!privacy && <Section title="AV 배우" actions={av.error && avPick ? <Button variant="quiet" onClick={refreshHome}>다시 시도</Button> : undefined}><div className="home-today-av" inert={Boolean(avPick) && av.error}>{avLoading ? <AvPlaceholder /> : avPick ? <AvCard pick={avPick} privacy={privacy} /> : <HomeReadState failed={av.error} onRetry={refreshHome} />}</div></Section>}<Section title="검토"><div className="home-review-list">{reviewRows.length ? reviewRows.map(row => { const Icon = row.icon; return <button key={row.key} className="home-review-row" onClick={row.onOpen}><Icon aria-hidden="true" /><span>{row.label}</span><strong className="home-review-row-count numeric">{row.value}<small>{row.unit}</small></strong><ChevronRightIcon aria-hidden="true" /></button>; }) : <div className="home-review-empty"><span className="home-review-ok" aria-hidden="true">✓</span><span>모두 확인함</span></div>}</div></Section></div></div>
-      <div className={`home-block home-memo-block${enterClass}`}><MemoPanel rows={memos?.rows ?? []} memos={memos} onOpen={props.onNotes} /></div>
-      <div className={`home-block home-assets-block${enterClass}`}><Section title="자산 현황"><div className="home-assets">{detailedSummary ? <><div className="home-assets-media"><AssetTile value={grouped(detailedSummary.images!)} unit="장" title="이미지" label={`이미지 ${grouped(detailedSummary.images!)}장`} onOpen={props.onRecent} /><AssetTile value={grouped(detailedSummary.videos!)} unit="장" title="영상" label={`영상 ${grouped(detailedSummary.videos!)}장`} onOpen={props.onRecent} /></div><div className={`home-assets-collections${privacy ? ' is-private' : ''}`}><CollectionCount value={detailedSummary.collections!.game} title="게임" /><CollectionCount value={detailedSummary.collections!.manga} title="만화" /><CollectionCount value={detailedSummary.collections!.movie} title="영화" />{!privacy && <CollectionCount value={detailedSummary.collections!.av} title="AV" />}</div></> : <div className="home-assets-cells"><AssetTile value={total} unit="장" title="전체" label={`전체 ${total}장`} onOpen={props.onRecent} /><AssetTile value={unclassified} unit="장" title="분류 안 됨" label={`분류 안 됨 ${unclassified}장`} onOpen={props.onLibrary} /></div>}<div className="home-assets-foot"><button onClick={props.onRecent}>오늘 <strong className="numeric">+{todayAdded}</strong></button><button onClick={props.onRecent}>이번 주 <strong className="numeric">+{weekAdded}</strong></button>{detailedSummary && <button onClick={props.onLibrary} aria-label={`분류 안 됨 ${unclassified}장`}>분류 안 됨 <strong className="numeric">{unclassified}</strong></button>}<span className={`home-server-status${stale ? ' is-offline' : ''}`}><i aria-hidden="true" />서버</span></div></div></Section></div>
-      {seriesRows.length > 0 && <div className={`home-block home-series-block${enterClass}`}><ContinuingSeries rows={seriesRows} revision={shelf?.revision ?? ''} active={!paused} privacy={privacy} onOpen={props.onWork} /></div>}
-    </div>
+    <HomeAttentionLayout tablet today={<HomeToday rows={rows} loading={!memos || reviewRows.some(r => r.count === null) ? <Skeleton label="오늘 할 것" /> : undefined} onOpen={row => {
+      if (row.noteId) props.onNotes(row.noteId);
+      else if (row.key === 'unsorted') props.onLibrary();
+      else if (row.key === 'similar') props.onSimilarity();
+      else if (row.key === 'pending') props.onPending();
+      else if (row.key === 'duplicates') props.onDuplicates();
+      else if (row.key === 'connection:exchange') props.onExchange();
+      else if (row.key.startsWith('connection:')) props.onSettings();
+    }} />} right={<HomePresence items={right} />} />
     {secondaryError && <p className="hint" role="status">{secondaryError}</p>}
     {detail && <UpcomingDetailSheet entry={detail} interested={upcoming.wishlist.has(detail.id)} privacy={privacy} onToggle={() => upcoming.toggle(detail.id)} onClose={() => setDetail(null)} />}
   </div>;
