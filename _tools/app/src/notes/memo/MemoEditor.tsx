@@ -4,7 +4,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Button } from '../../shared/ui/Button';
 import { Dialog } from '../../shared/ui/Dialog';
 import { Menu, type MenuItem } from '../../shared/ui/Menu';
-import { appendToSection, deleteMemoSection, editItem, joinItem, makeSection, memoBody, memoMode, memoSections, moveItem, moveMemoSection, moveMemoSectionTo, parseMemo, pasteItems, renameMemoSection, sectionCopy, splitItem, toggleItem, unmakeSection, type MemoDocument, type MemoItem } from './memoModel';
+import { addMemoSection, appendToSection, deleteMemoSection, editItem, editSectionBody, joinItem, memoBody, memoMode, memoSections, moveItem, moveMemoSection, moveMemoSectionTo, parseMemo, pasteItems, renameMemoSection, sectionCopy, sectionText, splitItem, toggleItem, type MemoDocument, type MemoItem } from './memoModel';
 import { useMemoSectionDrag } from './useMemoSectionDrag';
 import './memo.css';
 
@@ -31,21 +31,22 @@ function sizeArea(area: HTMLTextAreaElement) {
   const border = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
   area.style.height = `${Math.max(area.scrollHeight + border, parseFloat(style.lineHeight) || 24)}px`;
 }
-function ItemArea({ item, readOnly, onEdit, onKey, onPaste, register }: {
-  item: MemoItem; readOnly: boolean; onEdit: (text: string) => boolean | void;
-  onKey: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
-  onPaste: (start: number, end: number, text: string) => void;
+function MemoArea({ id, text, plainBody = false, readOnly, onEdit, onKey, onPaste, register }: {
+  id: string; text: string; plainBody?: boolean; readOnly: boolean; onEdit: (text: string) => boolean | void;
+  onKey?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onPaste?: (start: number, end: number, text: string) => void;
   register: (node: HTMLTextAreaElement | null) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
-  const commit = useRef(item.text);
+  const display = text.replace(/\r\n|\r/g, '\n');
+  const commit = useRef(display);
   useLayoutEffect(() => {
     const area = ref.current; if (!area || composing.current) return;
-    if (area.value !== item.text) area.value = item.text;
-    commit.current = item.text;
+    if (area.value !== display) area.value = display;
+    commit.current = display;
     sizeArea(area);
-  }, [item.text]);
+  }, [text]);
   useLayoutEffect(() => {
     const area = ref.current; if (!area) return;
     register(area);
@@ -62,16 +63,16 @@ function ItemArea({ item, readOnly, onEdit, onKey, onPaste, register }: {
     sizeArea(area);
     if (commit.current === area.value) return;
     commit.current = area.value;
-    if (onEdit(area.value) === false) { area.value = item.text; commit.current = item.text; sizeArea(area); }
+    if (onEdit(area.value) === false) { area.value = display; commit.current = display; sizeArea(area); }
   }
-  return <textarea ref={ref} className="memo-item-text" data-memo-item={item.id} aria-label="메모 본문" defaultValue={item.text} rows={1} spellCheck={false} readOnly={readOnly}
+  return <textarea ref={ref} className={plainBody ? 'memo-body-text' : 'memo-item-text'} data-memo-item={id} aria-label="메모 본문" defaultValue={text} rows={1} spellCheck={false} readOnly={readOnly}
     onChange={event => { sizeArea(event.currentTarget); if (!composing.current && !(event.nativeEvent as InputEvent).isComposing) save(event.currentTarget); }}
     onCompositionStart={() => { composing.current = true; }}
     onCompositionEnd={event => { composing.current = false; save(event.currentTarget); }}
     onBlur={event => { if (!composing.current) save(event.currentTarget); }}
-    onKeyDown={event => { if (!composing.current && !event.nativeEvent.isComposing && event.keyCode !== 229 && !readOnly) onKey(event); }}
+    onKeyDown={event => { if (!composing.current && !event.nativeEvent.isComposing && event.keyCode !== 229 && !readOnly) onKey?.(event); }}
     onPaste={event => {
-      if (readOnly || composing.current) return;
+      if (readOnly || composing.current || !onPaste) return;
       const text = event.clipboardData.getData('text/plain');
       if (!/[\r\n]/.test(text)) return;
       event.preventDefault(); onPaste(event.currentTarget.selectionStart, event.currentTarget.selectionEnd, text);
@@ -120,8 +121,8 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
   const sections = memoSections(doc);
   const named = sections.filter(section => section.heading);
   const tasks = (items: MemoItem[]) => mode === 'todo' ? items.filter(item => item.task) : items;
-  const activeFilter = named.some(section => section.id === filter) ? filter : null;
-  const shown = sections.filter(section => (!activeFilter || section.id === activeFilter) && (section.heading || section.items.length));
+  const activeFilter = named.length >= 2 && named.some(section => section.id === filter) ? filter : null;
+  const shown = sections.filter(section => (!activeFilter || section.id === activeFilter) && (section.heading || (mode === 'todo' ? section.items.length : !named.length || sectionText(section).length > 0)));
   const visible = shown.flatMap(section => mode === 'todo' ? [...tasks(section.items).filter(item => !item.done), ...(doneOpen.has(section.id) ? tasks(section.items).filter(item => item.done) : [])] : section.items);
   const canDrag = !readOnly && !activeFilter && named.length > 1 && !rename;
   const sectionDrag = useMemoSectionDrag(root, canDrag, `${noteId}:${body}`, (id, index) => apply(moveMemoSectionTo(documentRef.current.doc, id, index)));
@@ -129,7 +130,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
     if (!revealItem) return;
     const item = sections.flatMap(section => section.items).find(item => item.id === doc.lines[revealItem.line]?.id);
     if (!item) return;
-    revealTarget.current = item.id;
+    revealTarget.current = mode === 'text' ? item.sectionId : item.id;
     if (activeFilter && activeFilter !== item.sectionId) setFilter(item.sectionId === 'top' ? null : item.sectionId);
   }, [noteId, revealItem]);
   useLayoutEffect(() => {
@@ -143,7 +144,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
     if (opened.current !== noteId) {
       opened.current = noteId;
       const last = [...visible].reverse().find(item => mode !== 'todo' || !item.done);
-      focus(last?.id ?? '');
+      focus(mode === 'text' ? shown[shown.length - 1]?.id ?? '' : last?.id ?? '');
     }
     const target = focusTarget.current; if (!target) return;
     if (!target.id) { focusTarget.current = null; (root.current?.querySelector<HTMLButtonElement>('.memo-add') ?? root.current)?.focus(); return; }
@@ -183,27 +184,30 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
       field?.focus(); const at = event.key === 'ArrowUp' ? field?.value.length ?? 0 : 0; field?.setSelectionRange(at, at);
     }
   }
+  function finishRename(id: string, title: string) {
+    const next = renameMemoSection(documentRef.current.doc, id, title);
+    focus(mode === 'text' ? id : memoSections(next).find(section => section.id === id)?.items.find(item => item.task && !item.done)?.id ?? '');
+    apply(next); setRename(null);
+  }
   function row(item: MemoItem) {
     const targets = sections.filter(section => section.id !== item.sectionId && (section.heading || section.items.length));
     const moveContent = <>
       {targets.map(section => <DropdownMenu.Item className="ui-menu__item" key={section.id} onSelect={() => { focus(activeFilter || item.done ? '' : item.id); apply(moveItem(doc, item.id, section.id, mode)); }}>{section.title ?? '제목 없음'}</DropdownMenu.Item>)}
-      <DropdownMenu.Separator className="memo-menu-separator"/>
-      <DropdownMenu.Item className="ui-menu__item" onSelect={() => { focus(''); apply(makeSection(doc, item.id)); setFilter(null); }}>섹션으로 만들기</DropdownMenu.Item>
     </>;
     function pointerDown(event: PointerEvent<HTMLDivElement>) {
-      if (!touch || readOnly || (event.target as HTMLElement).closest('button') || event.button !== 0) return;
+      if (!targets.length || !touch || readOnly || (event.target as HTMLElement).closest('button') || event.button !== 0) return;
       cancelHold(); hold.current = { x: event.clientX, y: event.clientY, timer: setTimeout(() => { hold.current = null; setMoveMenu(item.id); }, MEMO_HOLD_MS) };
     }
     return <div className={`memo-item${mode === 'todo' && item.done ? ' is-done' : ''}`} key={item.id}
       onPointerDown={pointerDown} onPointerUp={cancelHold} onPointerCancel={cancelHold}
-      onContextMenu={event => { if (touch && !readOnly) { event.preventDefault(); cancelHold(); setMoveMenu(item.id); } }}
+      onContextMenu={event => { if (targets.length && touch && !readOnly) { event.preventDefault(); cancelHold(); setMoveMenu(item.id); } }}
       onPointerMove={event => { if (hold.current && Math.hypot(event.clientX - hold.current.x, event.clientY - hold.current.y) > 8) cancelHold(); }}>
       {mode === 'todo' && <button type="button" className="memo-tick" aria-label={item.done ? '완료 취소' : '완료'} aria-pressed={item.done} disabled={readOnly} onClick={() => {
         if (!item.done) { const peers = visible.filter(candidate => candidate.id !== item.id && !candidate.done); const index = visible.findIndex(candidate => candidate.id === item.id); focus(peers.find(candidate => visible.indexOf(candidate) > index)?.id ?? peers[peers.length - 1]?.id ?? ''); }
         else focus(item.id);
         apply(toggleItem(doc, item.id));
       }}/>}
-      <ItemArea item={item} readOnly={readOnly} register={node => { if (node) areas.current.set(item.id, node); else areas.current.delete(item.id); }}
+      <MemoArea id={item.id} text={item.text} readOnly={readOnly} register={node => { if (node) areas.current.set(item.id, node); else areas.current.delete(item.id); }}
         onEdit={text => apply(editItem(documentRef.current.doc, item.id, text, mode), false)} onKey={event => key(event, item)}
         onPaste={(start, end, text) => {
           const next = pasteItems(doc, item.id, start, end, text, mode);
@@ -211,7 +215,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
           const id = parts.length > 1 ? `line-${next.nextId - 1}` : item.id;
           focus(id, Number.MAX_SAFE_INTEGER); apply(next);
         }}/>
-      {!readOnly && <Menu label="다른 섹션으로 옮기기" trigger={<ArrowsRightLeftIcon aria-hidden="true"/>} triggerClassName={`memo-move${touch ? ' memo-move--touch' : ''}`} open={moveMenu === item.id} onOpenChange={open => setMoveMenu(open ? item.id : null)} content={moveContent}/>}
+      {!readOnly && targets.length > 0 && <Menu label="다른 섹션으로 옮기기" trigger={<ArrowsRightLeftIcon aria-hidden="true"/>} triggerClassName={`memo-move${touch ? ' memo-move--touch' : ''}`} open={moveMenu === item.id} onOpenChange={open => setMoveMenu(open ? item.id : null)} content={moveContent}/>}
     </div>;
   }
   return <div ref={root} tabIndex={-1} className={`memo-editor${touch ? ' memo-editor--touch' : ''}${sectionDrag.dragged ? ' memo-editor--dragging' : ''}`} onPointerDownCapture={sectionDrag.resetClick} onClickCapture={sectionDrag.clickCapture}>
@@ -226,7 +230,6 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
         { id: 'rename', label: '이름 바꾸기', onSelect: () => setRename(section.id) },
         { id: 'up', label: '위로', disabled: index === 0, onSelect: () => apply(moveMemoSection(doc, section.id, 'up')) },
         { id: 'down', label: '아래로', disabled: index === named.length - 1, onSelect: () => apply(moveMemoSection(doc, section.id, 'down')) },
-        { id: 'unmake', label: '섹션 풀기', onSelect: () => apply(unmakeSection(doc, section.id, mode)) },
         { id: 'delete', label: '섹션 삭제', destructive: true, onSelect: () => setDeleteTarget(section.id) },
       ];
       return <section className={`memo-section${sectionDrag.dragged === section.id ? ' memo-section--dragging' : ''}`} key={`${noteId}:${section.id}`}
@@ -245,9 +248,9 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
             onCompositionStart={() => { renamingComposition.current = true; }}
             onCompositionEnd={event => {
               renamingComposition.current = false;
-              if (document.activeElement !== event.currentTarget) { apply(renameMemoSection(documentRef.current.doc, section.id, event.currentTarget.value)); setRename(null); }
+              if (document.activeElement !== event.currentTarget) { finishRename(section.id, event.currentTarget.value); }
             }}
-            onBlur={event => { if (renamingComposition.current) return; apply(renameMemoSection(documentRef.current.doc, section.id, event.currentTarget.value)); setRename(null); }} onKeyDown={event => {
+            onBlur={event => { if (renamingComposition.current) return; finishRename(section.id, event.currentTarget.value); }} onKeyDown={event => {
             if (renamingComposition.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
             if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); }
             if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setRename(null); }
@@ -258,14 +261,31 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
             clearTimeout(statusTimer.current); statusTimer.current = setTimeout(() => setStatus(null), 2200);
           }}><ClipboardDocumentIcon aria-hidden="true" /></Button><Menu label={`${section.title || '제목 없음'} 더보기`} items={sectionActions} trigger="⋯" open={sectionMenu === section.id} onOpenChange={open => setSectionMenu(open ? section.id : null)}/>{status?.id === section.id && <span className="memo-status" role="status">{status.text}</span>}</>}
         </div>}
-        {(mode === 'todo' ? open : section.items).map(row)}
-        {!readOnly && <button className="memo-add" type="button" onClick={() => {
+        {mode === 'todo' ? open.map(row) : <MemoArea id={section.id} text={sectionText(section)} plainBody readOnly={readOnly}
+          register={node => { if (node) areas.current.set(section.id, node); else areas.current.delete(section.id); }}
+          onEdit={text => apply(editSectionBody(documentRef.current.doc, section.id, text), false)}/>}
+
+        {mode === 'todo' && !readOnly && <button className="memo-add" type="button" onClick={() => {
           const next = appendToSection(doc, section.id, '', mode); focus(next.nextId > doc.nextId ? `line-${doc.nextId}` : next.lines[0]!.id, 0); apply(next);
-        }} aria-label={mode === 'todo' ? '항목 추가' : '줄 추가'} title={mode === 'todo' ? '항목 추가' : '줄 추가'}>+</button>}
+        }} aria-label="항목 추가">+</button>}
         {mode === 'todo' && done.length > 0 && <button className="memo-done-fold" type="button" aria-expanded={doneOpen.has(section.id)} onClick={() => setDoneOpen(current => { const next = new Set(current); if (next.has(section.id)) next.delete(section.id); else next.add(section.id); return next; })}>{doneOpen.has(section.id) ? '▾' : '▸'} 완료 {done.length}</button>}
         {mode === 'todo' && doneOpen.has(section.id) && done.map(row)}
       </section>;
     })}
+    {!readOnly && <Button type="button" variant="ghost" className="memo-section-add" onClick={() => {
+      const next = addMemoSection(documentRef.current.doc, mode);
+      const addedSections = memoSections(next).filter(section => section.heading);
+      if (addedSections.length <= named.length) {
+        setStatus({ id: 'add', text: '코드 블록을 닫은 뒤 섹션을 추가해 주세요.' });
+        clearTimeout(statusTimer.current); statusTimer.current = setTimeout(() => setStatus(null), 2200);
+        return;
+      }
+      const added = addedSections[addedSections.length - 1]!;
+      if (!apply(next)) return;
+      if (activeFilter) setFilter(added.id);
+      setRename(added.id);
+    }}>섹션 추가</Button>}
+    {status?.id === 'add' && <p className="memo-status" role="status">{status.text}</p>}
     {sectionDrag.indicator !== undefined && <div className="memo-section-drop" aria-hidden="true" style={{ top: sectionDrag.indicator }}/>}
     {deleteTarget && <Dialog open title="섹션 삭제" onClose={() => setDeleteTarget(null)}><p>이 섹션과 항목을 삭제할까요?</p><div className="ui-dialog__actions"><Button variant="ghost" onClick={() => setDeleteTarget(null)}>취소</Button><Button variant="danger" onClick={() => { focus(''); apply(deleteMemoSection(doc, deleteTarget)); setDeleteTarget(null); }}>삭제</Button></div></Dialog>}
   </div>;

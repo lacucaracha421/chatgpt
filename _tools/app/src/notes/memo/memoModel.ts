@@ -4,11 +4,11 @@ export type MemoMode = 'text' | 'todo';
 export type MemoLine = { id: string; raw: string; ending: string };
 export type MemoDocument = { lines: MemoLine[]; nextId: number };
 export type MemoItem = MemoLine & { text: string; task: boolean; done: boolean; sectionId: string; fenced: boolean };
-export type MemoSection = { id: string; title: string | null; heading: NoteSection | null; items: MemoItem[] };
+export type MemoSection = { id: string; title: string | null; heading: NoteSection | null; items: MemoItem[]; hasNext: boolean };
 export const TOP_SECTION = 'top';
 const taskPattern = /^(\s*[-*+]\s+\[)([ xX])(\])([ \t]*)(.*)$/;
 const clean = (text: string) => text.replace(/[\r\n]+/g, ' ');
-// A heading pasted/typed into an item stays an item. Only makeSection creates headings.
+// A heading typed into a body stays plain text; named sections are added separately.
 const plain = (text: string) => /^ {0,3}#{1,6}(?:[ \t]|$)/.test(text) ? `\\${text}` : text;
 export const memoBody = (doc: MemoDocument) => doc.lines.map(line => line.raw + line.ending).join('');
 const eolOf = (doc: MemoDocument) => doc.lines.find(line => line.ending)?.ending ?? '\n';
@@ -56,7 +56,7 @@ export function parseMemo(body: string, previous?: MemoDocument): MemoDocument {
 }
 
 export function memoSections(doc: MemoDocument): MemoSection[] {
-  const sections: MemoSection[] = [{ id: TOP_SECTION, title: null, heading: null, items: [] }];
+  const sections: MemoSection[] = [{ id: TOP_SECTION, title: null, heading: null, items: [], hasNext: false }];
   const headings = new Map(splitSections(memoBody(doc)).sections.map(section => [section.headingRange.start, section]));
   let offset = 0;
   let current = sections[0]!;
@@ -65,7 +65,8 @@ export function memoSections(doc: MemoDocument): MemoSection[] {
     const heading = headings.get(offset);
     offset += line.raw.length + line.ending.length;
     if (heading) {
-      current = { id: line.id, title: heading.title, heading, items: [] };
+      current.hasNext = true;
+      current = { id: line.id, title: heading.title, heading, items: [], hasNext: false };
       sections.push(current);
       continue;
     }
@@ -77,6 +78,45 @@ export function memoSections(doc: MemoDocument): MemoSection[] {
     current.items.push({ ...line, sectionId: current.id, fenced, task: !!task, done: !!task && task[2] !== ' ', text: task ? task[5]! : fenced ? line.raw : line.raw.replace(/^\\(?= {0,3}#{1,6}(?:[ \t]|$))/, '') });
   }
   return sections;
+}
+/** Whole plain bodies retain task markup and line endings; only escaped headings are decoded. */
+export function sectionText(section: MemoSection): string {
+  const text = section.items.map(item => (item.fenced ? item.raw : item.raw.replace(/^\\(?= {0,3}#{1,6}(?:[ \t]|$))/, '')) + item.ending).join('');
+  // Before another heading, the final delimiter separates sections. EOF has no such delimiter.
+  const boundary = section.hasNext ? section.items[section.items.length - 1]?.ending ?? '' : '';
+  return boundary ? text.slice(0, -boundary.length) : text;
+}
+export function editSectionBody(doc: MemoDocument, id: string, text: string): MemoDocument {
+  const section = memoSections(doc).find(section => section.id === id);
+  if (!section) return doc;
+  const current = sectionText(section);
+  // Native textareas normalize CRLF. A save echo/blur must not rewrite untouched bytes.
+  if (text === current || text === current.replace(/\r\n|\r/g, '\n')) return doc;
+  const eol = section.items.find(item => item.ending)?.ending ?? eolOf(doc);
+  const input = /\r/.test(text) ? text : text.replace(/\n/g, eol);
+  let fence: ReturnType<typeof fenceStart> = null;
+  const escaped = parseMemo(input).lines.map(line => {
+    const nextFence = fenceStart(line.raw);
+    const raw = fence || nextFence ? line.raw : plain(line.raw);
+    if (fence) { if (fenceEnd(line.raw, fence)) fence = null; }
+    else fence = nextFence;
+    return raw + line.ending;
+  }).join('');
+  const body = memoBody(doc);
+  const start = section.heading?.bodyRange.start ?? 0;
+  const end = section.heading?.bodyRange.end ?? splitSections(body).preamble.end;
+  const separator = end < body.length && escaped ? eol : '';
+  // A heading-only legacy section may have no delimiter before its new body.
+  const headingEnd = section.heading && start === section.heading.headingRange.end && escaped ? eol : '';
+  return parseMemo(body.slice(0, start) + headingEnd + escaped + separator + body.slice(end), doc);
+}
+export function addMemoSection(doc: MemoDocument, mode: MemoMode = memoMode(memoBody(doc))): MemoDocument {
+  const titles = new Set(memoSections(doc).map(section => section.title));
+  let title = '새 섹션', suffix = 2;
+  while (titles.has(title)) title = `새 섹션 ${suffix++}`;
+  const body = memoBody(doc), eol = eolOf(doc);
+  const separator = body && (mode === 'text' || !/[\r\n]$/.test(body)) ? eol : '';
+  return parseMemo(`${body}${separator}## ${title}${eol}${mode === 'todo' ? '- [ ]' : ''}`, doc);
 }
 export function memoItems(doc: MemoDocument) { return memoSections(doc).flatMap(section => section.items); }
 export function memoMode(body: string): MemoMode {
@@ -132,6 +172,10 @@ export function joinItem(doc: MemoDocument, id: string, mode: MemoMode = memoMod
 }
 export function appendToSection(doc: MemoDocument, sectionId: string, text = '', mode: MemoMode = memoMode(memoBody(doc))): MemoDocument {
   const sections = memoSections(doc); const section = sections.find(section => section.id === sectionId); if (!section) return doc;
+  if (mode === 'text') {
+    const current = sectionText(section);
+    return editSectionBody(doc, sectionId, current + (current ? eolOf(doc) : '') + clean(text));
+  }
   const lastOpen = [...section.items].reverse().find(item => mode !== 'todo' || (item.task && !item.done));
   const headingIndex = doc.lines.findIndex(line => line.id === sectionId);
   const at = lastOpen ? doc.lines.findIndex(line => line.id === lastOpen.id) + 1 : headingIndex + 1;
@@ -143,21 +187,13 @@ export function moveItem(doc: MemoDocument, id: string, target: string, mode: Me
   // Append before removing so a lone top item cannot create a synthetic row in the destination.
   const appended = appendToSection(doc, target, item.text, mode);
   if (appended === doc) return doc;
-  const newId = `line-${doc.nextId}`;
+  const newId = mode === 'text' ? memoSections(appended).find(section => section.id === target)?.items.slice().reverse().find(item => item.raw.trim())?.id : `line-${doc.nextId}`;
   const removed = removeItem(appended, id);
   return { ...removed, lines: removed.lines.map(line => line.id === newId ? { ...line, id, raw: item.raw } : line) };
-}
-export function makeSection(doc: MemoDocument, id: string): MemoDocument {
-  const item = findItem(doc, id); return item ? replaceLine(doc, id, `## ${clean(item.text).trim()}`) : doc;
 }
 export function renameMemoSection(doc: MemoDocument, id: string, title: string): MemoDocument {
   const section = memoSections(doc).find(section => section.id === id);
   return section?.heading ? parseMemo(renameSection(memoBody(doc), section.heading, title), doc) : doc;
-}
-export function unmakeSection(doc: MemoDocument, id: string, mode: MemoMode = memoMode(memoBody(doc))): MemoDocument {
-  const section = memoSections(doc).find(section => section.id === id);
-  if (!section?.heading) return doc;
-  return replaceLine(doc, id, mode === 'todo' ? `- [ ]${section.title ? ` ${section.title}` : ''}` : plain(section.title ?? ''));
 }
 export function deleteMemoSection(doc: MemoDocument, id: string): MemoDocument {
   const section = memoSections(doc).find(section => section.id === id);
@@ -220,7 +256,7 @@ export function pasteItems(doc: MemoDocument, id: string, start: number, end: nu
   return next;
 }
 export function sectionCopy(section: MemoSection, mode: MemoMode): string {
-  return (mode === 'todo' ? section.items.filter(item => item.task && !item.done).map(item => `- ${item.text}`) : section.items.map(item => item.text)).join('\n');
+  return mode === 'todo' ? section.items.filter(item => item.task && !item.done).map(item => `- ${item.text}`).join('\n') : sectionText(section);
 }
 export function memoPreview(body: string): string {
   const doc = parseMemo(body); const sections = memoSections(doc);

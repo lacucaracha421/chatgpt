@@ -298,9 +298,9 @@ export function NotesWorkspace({store,initialNoteId}:{store:NotesStore;initialNo
     :secretCreation?<div className="notes-main notes-main--editor">{secretCreation}</div>
     :listView;
   const recoverySurface=recoveryOpen?<div className="notes-recovery-backdrop" role="presentation"><section className="notes-recovery-surface" role="dialog" aria-modal="true" aria-label="복구키"><div className="notes-recovery-surface__head"><h2>복구키</h2><Button variant="quiet" onClick={()=>setRecoveryOpen(false)}>닫기</Button></div><RecoveryKeyReveal store={store}/></section></div>:null;
-  return <div className="notes-workspace" onBlur={e=>{if(e.target.matches(".notes-title,.memo-item-text"))void store.flush();}} onKeyDownCapture={e=>{if(e.key!=="Escape"||e.nativeEvent.isComposing||e.keyCode===229||(!selected&&!creatingSecret)||(e.target as HTMLElement).matches?.(".memo-rename")||document.querySelector('[data-state="open"], [role="dialog"]'))return;e.preventDefault();e.stopPropagation();close();}} onKeyDown={e=>{if(e.nativeEvent.isComposing||e.keyCode===229)return;const mod=e.ctrlKey||e.metaKey;const key=e.key.toLowerCase();
+  return <div className="notes-workspace" onBlur={e=>{if(e.target.matches(".notes-title,.memo-item-text,.memo-body-text"))void store.flush();}} onKeyDownCapture={e=>{if(e.key!=="Escape"||e.nativeEvent.isComposing||e.keyCode===229||(!selected&&!creatingSecret)||(e.target as HTMLElement).matches?.(".memo-rename")||document.querySelector('[data-state="open"], [role="dialog"]'))return;e.preventDefault();e.stopPropagation();close();}} onKeyDown={e=>{if(e.nativeEvent.isComposing||e.keyCode===229)return;const mod=e.ctrlKey||e.metaKey;const key=e.key.toLowerCase();
       const target=e.target as HTMLElement;
-      const undoTarget=target.matches?.(".notes-title,.memo-item-text,.memo-rename")&&!target.closest(".notes-secret");
+      const undoTarget=target.matches?.(".notes-title,.memo-item-text,.memo-body-text,.memo-rename")&&!target.closest(".notes-secret");
       if(mod&&undoTarget&&key==="z"&&!e.shiftKey){if(noteUndo.undo()){e.preventDefault();e.stopPropagation();}}
       else if(mod&&undoTarget&&((key==="z"&&e.shiftKey)||key==="y")){if(noteUndo.redo()){e.preventDefault();e.stopPropagation();}}
       if(mod&&!e.shiftKey&&key==="n"&&state.unlocked){e.preventDefault();newNote();}

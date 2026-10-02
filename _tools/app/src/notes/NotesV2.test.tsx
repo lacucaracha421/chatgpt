@@ -44,12 +44,12 @@ function surface(store: NotesStore) {
 const last = <T,>(list: T[]) => list[list.length - 1];
 const settle = (store: NotesStore) => waitFor(() => expect(store.snapshot().saving).toBe(false));
 
-it("opens mixed notes as plain rows without Markdown, then rewrites only the toggled task after switching mode", async () => {
+it("opens mixed notes as a plain body without Markdown, then rewrites only the toggled task after switching mode", async () => {
   const fake = backend([base("할 일", { body: "# 오늘\n- [ ] 우유\n- [ ] 빵\n\n설명" })]);
   const store = new NotesStore(fake.request); surface(store);
   await userEvent.click(await screen.findByRole("button", { name: /할 일/ }));
   expect(screen.getByRole("heading", { name: "오늘" })).toBeInTheDocument();
-  expect(screen.getAllByRole("textbox", { name: "메모 본문" }).map(area=>(area as HTMLTextAreaElement).value)).toEqual(["우유","빵","","설명"]);
+  expect(screen.getAllByRole("textbox", { name: "메모 본문" }).map(area=>(area as HTMLTextAreaElement).value)).toEqual(["- [ ] 우유\n- [ ] 빵\n\n설명"]);
   expect(fake.saves()).toHaveLength(0);
   expect(screen.queryByRole("button", {name:"마크다운 도움말"})).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("radio",{name:"할 일"}));
@@ -107,7 +107,7 @@ it("filters kinds in the top chips and scopes and labels in the 보기 menu", as
   await userEvent.click(screen.getByRole("menuitem", { name: "라벨 해제" }));
 });
 
-it("opens with the caret at the last row end and preserves point-to-caret helper coverage", async () => {
+it("opens with the caret at the body end and preserves point-to-caret helper coverage", async () => {
   const fake=backend([base("note",{body:"첫 줄\n\n아래 줄의 본문"})]);
   const store=new NotesStore(fake.request);surface(store);
   const original=(document as Document & {caretPositionFromPoint?:unknown}).caretPositionFromPoint;
@@ -117,7 +117,7 @@ it("opens with the caret at the last row end and preserves point-to-caret helper
   }});
   try{
     await userEvent.click(await screen.findByRole("button",{name:/note/}));
-    const area=screen.getAllByRole("textbox",{name:"메모 본문"})[2] as HTMLTextAreaElement;
+    const area=screen.getAllByRole("textbox",{name:"메모 본문"})[0] as HTMLTextAreaElement;
     expect(area).toHaveFocus();expect(area.selectionStart).toBe(area.value.length);
     expect(caretOffsetAtPoint(area,120,200)).toBe(3);
   }finally{Object.defineProperty(document,"caretPositionFromPoint",{configurable:true,value:original});}
@@ -326,4 +326,23 @@ it("opens a legacy checklist without writing and converts on its first edit",asy
   expect(last(fake.saves())).not.toHaveProperty("items");
   await userEvent.click(screen.getByRole("button",{name:"되돌리기"}));
   expect(store.snapshot().notes[0]!.body).toBe("- [ ] open\n- [x] done");
+});
+
+it('undoes section creation and naming separately from plain body typing', async () => {
+  const fake = backend([base('note', { title: 'Sections', body: 'original' })]);
+  surface(new NotesStore(fake.request));
+  await userEvent.click(await screen.findByRole('button', { name: /Sections/ }));
+  const first = screen.getByRole('textbox', { name: '메모 본문' });
+  fireEvent.change(first, { target: { value: 'typed' } });
+  await userEvent.click(screen.getByRole('button', { name: '섹션 추가' }));
+  const name = screen.getByRole('textbox', { name: '섹션 이름' });
+  fireEvent.change(name, { target: { value: 'Named' } }); fireEvent.keyDown(name, { key: 'Enter' });
+  expect(screen.getByRole('heading', { name: 'Named' })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '되돌리기' }));
+  expect(screen.getByRole('heading', { name: '새 섹션' })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '되돌리기' }));
+  expect(screen.queryByRole('heading', { name: '새 섹션' })).toBeNull();
+  expect(screen.getByRole('textbox', { name: '메모 본문' })).toHaveValue('typed');
+  await userEvent.click(screen.getByRole('button', { name: '되돌리기' }));
+  expect(screen.getByRole('textbox', { name: '메모 본문' })).toHaveValue('original');
 });

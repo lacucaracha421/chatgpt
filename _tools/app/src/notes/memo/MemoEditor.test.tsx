@@ -110,30 +110,33 @@ it('keeps touch taps and vertical scrolling, starts at 250ms, and scrolls near t
   expect(changes).toHaveBeenCalledTimes(1);
   expect(screen.getAllByRole('heading').map(head => head.textContent)).toEqual(['B', 'C', 'A']);
 });
-it('focuses at the end on open, splits Enter/Shift+Enter and preserves other DOM nodes', () => {
-  surface('abc\nlast');
-  expect(rows()[1]).toHaveFocus(); expect(rows()[1]!.selectionStart).toBe(4);
-  const untouched = rows()[1]!; const first = rows()[0]!;
-  first.focus(); first.setSelectionRange(1, 2);
-  fireEvent.keyDown(first, { key: 'Enter', shiftKey: true });
-  expect(texts()).toEqual(['a', 'c', 'last']);
-  expect(rows()[1]).toHaveFocus(); expect(rows()[1]!.selectionStart).toBe(0);
-  expect(rows()[2]).toBe(untouched);
-  fireEvent.change(rows()[0]!, { target: { value: 'edited' } });
-  expect(rows()[2]).toBe(untouched);
+it('opens a single growing plain body with native Enter, paste and the caret at its end', async () => {
+  const changes = surface('abc\nlast');
+  const area = rows()[0]!;
+  expect(rows()).toHaveLength(1); expect(area).toHaveFocus(); expect(area.selectionStart).toBe(8);
+  area.setSelectionRange(area.value.length, area.value.length);
+  await userEvent.type(area, '{Enter}# x');
+  expect(rows()[0]).toBe(area); expect(texts()).toEqual(['abc\nlast\n# x']);
+  expect(body()).toBe('abc\nlast\n\\# x');
+  expect(changes.mock.calls.every(call => call[1] === false)).toBe(true);
+  expect(screen.queryByRole('button', { name: '줄 추가' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '다른 섹션으로 옮기기' })).toBeNull();
+  const paste = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(paste, 'clipboardData', { value: { getData: () => '# pasted\ntext' } });
+  fireEvent(area, paste); expect(paste.defaultPrevented).toBe(false);
 });
 it('removes/joins with Backspace and never merges the first item into a heading', () => {
-  surface('## A\nfirst\n\nnext\n## B\nlast');
+  surface('## A\n- [ ] first\n- [ ]\n- [ ] next\n## B\n- [ ] last');
   const empty = rows()[1]!; empty.focus(); empty.setSelectionRange(0, 0);
   fireEvent.keyDown(empty, { key: 'Backspace' });
   expect(texts()).toEqual(['first', 'next', 'last']); expect(rows()[0]).toHaveFocus(); expect(rows()[0]!.selectionStart).toBe(5);
   const next = rows()[1]!; next.focus(); next.setSelectionRange(0, 0); fireEvent.keyDown(next, { key: 'Backspace' });
   expect(texts()).toEqual(['firstnext', 'last']); expect(rows()[0]!.selectionStart).toBe(5);
   rows()[1]!.focus(); rows()[1]!.setSelectionRange(0, 0); fireEvent.keyDown(rows()[1]!, { key: 'Backspace' });
-  expect(body()).toBe('## A\nfirstnext\n## B\nlast');
+  expect(body()).toBe('## A\n- [ ] firstnext\n## B\n- [ ] last');
 });
 it('moves up/down only at text boundaries across visible items', () => {
-  surface('one\ntwo');
+  surface('- [ ] one\n- [ ] two');
   rows()[1]!.setSelectionRange(0, 0); fireEvent.keyDown(rows()[1]!, { key: 'ArrowUp' });
   expect(rows()[0]).toHaveFocus(); expect(rows()[0]!.selectionStart).toBe(3);
   fireEvent.keyDown(rows()[0]!, { key: 'ArrowDown' }); expect(rows()[1]).toHaveFocus(); expect(rows()[1]!.selectionStart).toBe(0);
@@ -161,15 +164,13 @@ it('filters chips with counts, hides the top part outside 전체, and resets whe
   view.rerender(<MemoEditor noteId="two" body={'## A\nnew a\n## B\nnew b'} onChange={vi.fn()}/>);
   expect(texts()).toEqual(['new a', 'new b']); expect(rows()[1]).toHaveFocus();
 });
-it('moves to another section, exposes untitled top and makes a line a section', async () => {
-  surface('top\n## A\na\n## B\nb');
+it('moves todo items between sections and the untitled top without creating sections', async () => {
+  surface('- [ ] top\n## A\n- [ ] a\n## B\n- [ ] b');
   await userEvent.click(screen.getAllByRole('button', { name: '다른 섹션으로 옮기기' })[1]!);
   expect(await screen.findByRole('menuitem', { name: '제목 없음' })).toBeInTheDocument();
+  expect(screen.queryByRole('menuitem', { name: '섹션으로 만들기' })).toBeNull();
   await userEvent.click(screen.getByRole('menuitem', { name: 'B' }));
-  expect(body()).toBe('top\n## A\n## B\nb\na');
-  await userEvent.click(screen.getAllByRole('button', { name: '다른 섹션으로 옮기기' })[2]!);
-  await userEvent.click(await screen.findByRole('menuitem', { name: '섹션으로 만들기' }));
-  expect(body()).toBe('top\n## A\n## B\nb\n## a'); expect(screen.getByRole('heading', { name: 'a' })).toBeInTheDocument();
+  expect(body()).toBe('- [ ] top\n## A\n## B\n- [ ] b\n- [ ] a');
 });
 it('copies open todo items only and copies plain section lines including blank rows', async () => {
   const copyText = vi.fn(async () => {});
@@ -189,39 +190,36 @@ it('splits multiline paste, retaining task states and treating pasted headings a
 });
 it('ignores composition keys and save echoes until composition commits without remounting', () => {
   const changes = vi.fn();
-  const view = render(<MemoEditor noteId="one" body={'한\nother'} onChange={changes}/>);
+  const view = render(<MemoEditor noteId="one" body={'## A\n한\n## B\nother'} onChange={changes}/>);
   const area = rows()[0]!; area.focus();
   fireEvent.compositionStart(area); fireEvent.change(area, { target: { value: '한국' } });
   for (const key of ['Enter', 'Backspace', 'ArrowUp', 'ArrowDown']) fireEvent.keyDown(area, { key, isComposing: true });
   fireEvent.keyDown(area, { key: 'Enter', keyCode: 229 }); expect(changes).not.toHaveBeenCalled();
-  view.rerender(<MemoEditor noteId="one" body={'한\nother updated'} onChange={changes}/>);
+  view.rerender(<MemoEditor noteId="one" body={'## A\n한\n## B\nother updated'} onChange={changes}/>);
   expect(rows()[0]).toBe(area); expect(area.value).toBe('한국');
-  fireEvent.compositionEnd(area); expect(changes).toHaveBeenCalledWith('한국\nother updated', false);
+  fireEvent.compositionEnd(area); expect(changes).toHaveBeenCalledWith('## A\n한국\n## B\nother updated', false);
 });
-it('adds empty rows at section ends and focuses them; sizes using scrollHeight', async () => {
+it('opens an empty memo as one growing focused textarea', () => {
   const original = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'scrollHeight');
   Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', { configurable: true, get: () => 72 });
   try {
-    surface(''); expect(rows()[0]).toHaveFocus(); expect(rows()[0]!.style.height).toBe('72px');
-    await userEvent.click(screen.getByRole('button', { name: '줄 추가' }));
-    expect(rows()).toHaveLength(2); expect(rows()[1]).toHaveFocus(); expect(body()).toBe('\n');
+    surface(''); expect(rows()).toHaveLength(1); expect(rows()[0]).toHaveFocus(); expect(rows()[0]!.style.height).toBe('72px');
+    expect(screen.queryByRole('button', { name: '줄 추가' })).toBeNull();
   } finally { if (original) Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', original); else delete (HTMLTextAreaElement.prototype as any).scrollHeight; }
 });
-it('renames, moves, unmakes and confirms deletion of sections', async () => {
+it('renames, moves and confirms deletion of sections', async () => {
   surface('## A\na\n## B\nb');
   await userEvent.click(screen.getByRole('button', { name: 'B 더보기' })); await userEvent.click(await screen.findByRole('menuitem', { name: '이름 바꾸기' }));
   const rename = screen.getByRole('textbox', { name: '섹션 이름' }); fireEvent.change(rename, { target: { value: 'renamed' } }); fireEvent.keyDown(rename, { key: 'Enter' });
   expect(body()).toBe('## A\na\n## renamed\nb');
   await userEvent.click(screen.getByRole('button', { name: 'renamed 더보기' })); await userEvent.click(await screen.findByRole('menuitem', { name: '위로' }));
   expect(body()).toBe('## renamed\nb\n## A\na');
-  await userEvent.click(screen.getByRole('button', { name: 'A 더보기' })); await userEvent.click(await screen.findByRole('menuitem', { name: '섹션 풀기' }));
-  expect(body()).toBe('## renamed\nb\nA\na');
   await userEvent.click(screen.getByRole('button', { name: 'renamed 더보기' })); await userEvent.click(await screen.findByRole('menuitem', { name: '섹션 삭제' }));
   expect(screen.getByRole('dialog', { name: '섹션 삭제' })).toBeInTheDocument(); expect(body()).not.toBe('');
-  await userEvent.click(screen.getByRole('button', { name: '삭제' })); expect(body()).toBe('');
+  await userEvent.click(screen.getByRole('button', { name: '삭제' })); expect(body()).toBe('## A\na');
 });
 it('touch short taps preserve focus/selection and long press opens the same move menu', () => {
-  surface('## A\na\n## B\nb', { touch: true });
+  surface('## A\n- [ ] a\n## B\n- [ ] b', { touch: true });
   vi.useFakeTimers(); const area = rows()[0]!; area.focus(); area.setSelectionRange(0, 1);
   fireEvent.pointerDown(area, { button: 0, clientX: 10, clientY: 10 });
   act(() => vi.advanceTimersByTime(100)); fireEvent.pointerUp(area);
@@ -236,13 +234,13 @@ it('read-only notes use the same rows without mutation controls', () => {
   fireEvent.keyDown(rows()[0]!, { key: 'Enter' }); expect(change).not.toHaveBeenCalled();
 });
 
-it('keeps 500 existing row nodes through a line edit and a save acknowledgement', () => {
+it('keeps one body node through a 500-line edit and a save acknowledgement', () => {
   const body = Array.from({ length: 500 }, (_, i) => `line ${i}`).join('\n');
   const view = render(<MemoEditor noteId="many" body={body} onChange={vi.fn()}/>);
   const before = rows();
   view.rerender(<MemoEditor noteId="many" body={body.replace('line 250\n', 'updated 250\n')} onChange={vi.fn()}/>);
-  expect(rows()).toHaveLength(500);
-  expect(rows()[250]).toBe(before[250]); expect(rows()[499]).toBe(before[499]); expect(rows()[499]).toHaveFocus();
+  expect(rows()).toHaveLength(1);
+  expect(rows()[0]).toBe(before[0]); expect(rows()[0]).toHaveFocus(); expect(rows()[0]!.value).toContain('updated 250\n');
 }, 30000);
 it('restores a rejected draft without replacing its textarea node', () => {
   render(<MemoEditor noteId="one" body="valid" onChange={() => false}/>);
@@ -283,14 +281,14 @@ it('keeps a composing section name mounted after blur and commits only after com
 
 it('lets the tablet back gesture close its own menu before the note', async () => {
   const backRef: { current: (() => boolean) | null } = { current: null };
-  render(<MemoEditor noteId="n" body={'- [ ] 우유\n- [ ] 계란'} touch onChange={() => true} backRef={backRef} />);
+  render(<MemoEditor noteId="n" body={'## A\n- [ ] 우유\n## B\n- [ ] 계란'} touch onChange={() => true} backRef={backRef} />);
   expect(backRef.current?.()).toBe(false);
   fireEvent.contextMenu(screen.getAllByRole('textbox')[0]!.closest('.memo-item')!);
-  expect(await screen.findByRole('menuitem', { name: '섹션으로 만들기' })).toBeInTheDocument();
+  expect(await screen.findByRole('menuitem', { name: 'B' })).toBeInTheDocument();
   let handled = false;
   act(() => { handled = backRef.current?.() ?? false; });
   expect(handled).toBe(true);
-  await waitFor(() => expect(screen.queryByRole('menuitem', { name: '섹션으로 만들기' })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('menuitem', { name: 'B' })).toBeNull());
   expect(backRef.current?.()).toBe(false);
 });
 
@@ -305,4 +303,61 @@ it.each([false, true])('copies a memo section with an accessible icon button (to
   await userEvent.click(copy);
   expect(copyText).toHaveBeenCalledExactlyOnceWith('text');
   expect(screen.getByRole('status')).toHaveTextContent('복사됨');
+});
+
+
+it.each([false, true])('adds sections in plain and todo modes, then focuses their body (todo=%s)', async todo => {
+  const changes = surface(todo ? '- [ ] top' : 'top');
+  const add = screen.getByRole('button', { name: '섹션 추가' });
+  expect(add).toHaveClass('ui-button--ghost');
+  await userEvent.click(add);
+  const name = screen.getByRole('textbox', { name: '섹션 이름' });
+  expect(name).toHaveFocus(); expect(name).toHaveValue('새 섹션');
+  fireEvent.change(name, { target: { value: '내 섹션' } }); fireEvent.keyDown(name, { key: 'Enter' });
+  expect(screen.getByRole('heading', { name: '내 섹션' })).toBeInTheDocument();
+  expect(rows()[rows().length - 1]).toHaveFocus(); expect(rows()[rows().length - 1]).toHaveValue('');
+  expect(changes.mock.calls.every(call => call[1] === true)).toBe(true);
+  expect(body()).toBe(todo ? '- [ ] top\n## 내 섹션\n- [ ]' : 'top\n## 내 섹션\n');
+});
+it('hides an empty top body with sections, adds unique names under a filter and commits blur', async () => {
+  surface('## 새 섹션\na\n## B\nb');
+  expect(rows()).toHaveLength(2);
+  await userEvent.click(within(screen.getByLabelText('메모 섹션')).getByRole('button', { name: 'B' }));
+  await userEvent.click(screen.getByRole('button', { name: '섹션 추가' }));
+  const name = screen.getByRole('textbox', { name: '섹션 이름' });
+  expect(name).toHaveValue('새 섹션 2');
+  fireEvent.blur(name);
+  expect(screen.getByRole('button', { name: '새 섹션 2' })).toHaveAttribute('aria-pressed', 'true');
+  expect(rows()).toHaveLength(1); expect(rows()[0]).toHaveFocus();
+});
+it('preserves whole pasted text, task markup and fences in one body', async () => {
+  const changes = surface('original');
+  const area = rows()[0]!; area.select();
+  await userEvent.paste('first\n# x\n```\n## code\n```\n- [x] literal\n');
+  expect(rows()).toHaveLength(1);
+  expect(area.value).toBe('first\n# x\n```\n## code\n```\n- [x] literal\n');
+  expect(body()).toBe('first\n\\# x\n```\n## code\n```\n- [x] literal\n');
+  expect(changes).toHaveBeenCalledExactlyOnceWith(body(), false);
+});
+it('read-only plain bodies have no section add or row controls', () => {
+  surface('## A\nfirst\nsecond', { readOnly: true });
+  expect(rows()).toHaveLength(1); expect(rows()[0]).toHaveAttribute('readonly');
+  expect(screen.queryByRole('button', { name: '섹션 추가' })).toBeNull();
+});
+
+it('returns to the whole memo when deletion leaves fewer than two section chips', async () => {
+  surface('top\n## A\na\n## B\nb');
+  await userEvent.click(within(screen.getByLabelText('메모 섹션')).getByRole('button', { name: 'A' }));
+  await userEvent.click(screen.getByRole('button', { name: 'A 더보기' }));
+  expect(screen.queryByRole('menuitem', { name: '섹션 풀기' })).toBeNull();
+  await userEvent.click(await screen.findByRole('menuitem', { name: '섹션 삭제' }));
+  await userEvent.click(screen.getByRole('button', { name: '삭제' }));
+  expect(screen.queryByLabelText('메모 섹션')).toBeNull(); expect(texts()).toEqual(['top', 'b']);
+});
+
+it('preserves the existing fence rule and leaves the body untouched if a section would be inside an open fence', async () => {
+  const changes = surface('```\n# code');
+  await userEvent.click(screen.getByRole('button', { name: '섹션 추가' }));
+  expect(changes).not.toHaveBeenCalled(); expect(body()).toBe('```\n# code');
+  expect(screen.getByRole('status')).toHaveTextContent('코드 블록을 닫은 뒤');
 });

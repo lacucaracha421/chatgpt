@@ -169,12 +169,6 @@ export function moveSection(body: string, section: NoteSection, direction: "up" 
   return before + between + nextText + currentText + after;
 }
 
-export function unfixSection(body: string, section: NoteSection): string {
-  const current = currentSection(body, section);
-  if (!current) return body;
-  return body.slice(0, current.headingRange.start) + current.title + body.slice(current.headingRange.end);
-}
-
 export function deleteSection(body: string, section: NoteSection): string {
   const current = currentSection(body, section);
   if (!current) return body;

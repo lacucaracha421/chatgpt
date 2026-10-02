@@ -21,8 +21,8 @@
 .memo-section-head small { font-size: var(--type-meta, 12px); color: var(--color-faint); }
 .memo-section-head .ui-button { margin-left: auto; }
 .memo-item { position: relative; display: flex; align-items: flex-start; gap: 8px; min-height: 32px; }
-.memo-item-text { display: block; flex: 1; min-width: 0; width: 100%; box-sizing: border-box; resize: none; overflow: hidden; padding: 4px 0; border: 0; border-radius: 0; background: transparent; color: var(--color-text); font: inherit; font-size: var(--type-body, 15px); line-height: 24px; user-select: text; -webkit-user-select: text; }
-.memo-item-text:focus-visible { outline: 0; box-shadow: 0 2px 0 var(--color-focus); }
+.memo-item-text, .memo-body-text { display: block; flex: 1; min-width: 0; width: 100%; box-sizing: border-box; resize: none; overflow: hidden; padding: 4px 0; border: 0; border-radius: 0; background: transparent; color: var(--color-text); font: inherit; font-size: var(--type-body, 15px); line-height: 24px; user-select: text; -webkit-user-select: text; }
+.memo-item-text:focus-visible, .memo-body-text:focus-visible { outline: 0; box-shadow: 0 2px 0 var(--color-focus); }
 .memo-item.is-done .memo-item-text { color: var(--color-faint); text-decoration: line-through; }
 .memo-tick { width: 16px; height: 16px; flex-shrink: 0; margin: 8px 0; padding: 0; border: 1px solid var(--color-muted); border-radius: 50%; background: transparent; cursor: pointer; }
 .memo-tick[aria-pressed="true"] { background: var(--color-muted); border-color: var(--color-muted); }
@@ -38,12 +38,14 @@
 .memo-chips button[aria-pressed="true"] { background: var(--color-filter-selected); color: var(--color-text); font-weight: 600; }
 .memo-chips small { color: var(--color-faint); }
 .memo-rename { min-width: 0; flex: 1; background: var(--color-surface); border: 0; color: var(--color-text); padding: 4px 8px; font: inherit; }
-.memo-menu-separator { height: 1px; background: var(--color-border); margin: 4px 0; }
 .memo-status { color: var(--color-muted); font-size: var(--type-meta, 12px); }
 .memo-editor--touch .memo-item { min-height: 44px; gap: 12px; }
-.memo-editor--touch .memo-item-text { font-size: var(--type-body, 17px); line-height: 28px; padding: 8px 0; }
+.memo-editor--touch .memo-item-text, .memo-editor--touch .memo-body-text { font-size: var(--type-body, 17px); line-height: 28px; padding: 8px 0; }
 .memo-editor--touch .memo-tick { position: relative; width: 20px; height: 20px; margin: 12px 0; }
 .memo-editor--touch .memo-tick::before { content: ''; position: absolute; inset: -12px; }
 .memo-editor--touch .memo-add, .memo-editor--touch .memo-done-fold, .memo-editor--touch .memo-chips button { min-height: 44px; }
 .memo-add { min-width: 32px; font-size: var(--type-body, 15px); line-height: 1; text-align: left; }
 .memo-add:hover, .memo-add:focus-visible { color: var(--color-text); }
+
+.memo-section-add { margin-top: 24px; color: var(--color-muted); }
+.memo-editor--touch .memo-section-add { min-height: 44px; }

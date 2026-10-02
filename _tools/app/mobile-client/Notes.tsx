@@ -61,8 +61,10 @@ function MemoQuickAdd({noteId,body,onAppend}:{noteId:string;body:string;onAppend
   function append(){
     const area=field.current;
     if(!area||editor.isComposing(area)||!area.value.trim())return;
-    const next=appendToSection(doc,target?.id??TOP_SECTION,area.value.trim(),memoMode(body));
-    const added=next.nextId>doc.nextId?`line-${doc.nextId}`:next.lines[0]!.id;
+    const mode=memoMode(body),targetId=target?.id??TOP_SECTION;
+    const next=appendToSection(doc,targetId,area.value.trim(),mode);
+    const items=memoSections(next).find(section=>section.id===targetId)?.items??[];
+    const added=mode==='text'?[...items].reverse().find(item=>item.raw.trim())?.id:next.nextId>doc.nextId?`line-${doc.nextId}`:next.lines[0]!.id;
     if(!onAppend(memoBody(next),next.lines.findIndex(line=>line.id===added)))return;
     setText('');area.value='';area.focus({preventScroll:true});
   }

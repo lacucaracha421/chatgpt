@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appendToSection, deleteMemoSection, editItem, joinItem, makeSection, memoBody, memoItems, memoMode, memoSections, moveItem, moveMemoSection, moveMemoSectionTo, parseMemo, pasteItems, removeItem, renameMemoSection, sectionCopy, splitItem, switchMode, toggleItem, TOP_SECTION, unmakeSection } from './memoModel';
+import { addMemoSection, appendToSection, deleteMemoSection, editItem, editSectionBody, joinItem, memoBody, memoItems, memoMode, memoSections, moveItem, moveMemoSection, moveMemoSectionTo, parseMemo, pasteItems, removeItem, renameMemoSection, sectionCopy, splitItem, switchMode, toggleItem, TOP_SECTION, sectionText } from './memoModel';
 
 const item = (body: string, index = 0) => memoItems(parseMemo(body))[index]!;
 describe('moveMemoSectionTo', () => {
@@ -79,7 +79,7 @@ describe('line operations', () => {
     expect(memoBody(next)).toBe('## A\n- [ ] one\n- [ ] new\n- [x] done\n## B\n- [ ] two');
     expect(next.lines.filter(line => doc.lines.some(old => old.id === line.id)).map(line => line.raw)).toEqual(doc.lines.map(line => line.raw));
     expect(memoBody(appendToSection(parseMemo(''), TOP_SECTION, 'tablet'))).toBe('tablet');
-    expect(memoBody(appendToSection(parseMemo(''), TOP_SECTION))).toBe('\n');
+    expect(memoBody(appendToSection(parseMemo(''), TOP_SECTION))).toBe('');
   });
   it('moves items between sections and the untitled top, retaining done state and other raw lines', () => {
     const doc = parseMemo('- [ ] top\r\n## A\r\n* [X] done\r\n## B\r\n+ [ ] two');
@@ -89,13 +89,10 @@ describe('line operations', () => {
     expect(memoBody(moveItem(doc, id, TOP_SECTION, 'todo'))).toBe('- [ ] top\r\n* [X] done\r\n## A\r\n## B\r\n+ [ ] two');
     expect(moveItem(doc, id, sections[1]!.id)).toBe(doc);
   });
-  it('makes/unmakes/renames/deletes and moves sections without glued final lines', () => {
-    const doc = parseMemo('- [x] title\r\n- [ ] body');
-    const made = makeSection(doc, doc.lines[0]!.id);
-    expect(memoBody(made)).toBe('## title\r\n- [ ] body');
-    expect(memoBody(unmakeSection(made, made.lines[0]!.id, 'todo'))).toBe('- [ ] title\r\n- [ ] body');
-    expect(memoBody(renameMemoSection(made, made.lines[0]!.id, 'new'))).toBe('## new\r\n- [ ] body');
-    expect(memoBody(deleteMemoSection(made, made.lines[0]!.id))).toBe('');
+  it('renames/deletes and moves sections without glued final lines', () => {
+    const doc = parseMemo('## title\r\n- [ ] body');
+    expect(memoBody(renameMemoSection(doc, doc.lines[0]!.id, 'new'))).toBe('## new\r\n- [ ] body');
+    expect(memoBody(deleteMemoSection(doc, doc.lines[0]!.id))).toBe('');
     const two = parseMemo('## A\na\n## B\nb');
     const moved = moveMemoSection(two, two.lines[2]!.id, 'up');
     expect(memoBody(moved)).toBe('## B\nb\n## A\na');
@@ -119,7 +116,7 @@ describe('mode switching and copying', () => {
     expect(memoMode(memoBody(todo))).toBe('todo');
     expect(memoBody(switchMode(todo, 'text'))).toBe('## title\r\nbullet\r\ndone\r\nnumbered\r\nplain');
     expect(sectionCopy(memoSections(todo)[1]!, 'todo')).toBe('- bullet\n- numbered\n- plain');
-    expect(sectionCopy(memoSections(switchMode(todo, 'text'))[1]!, 'text')).toBe('bullet\ndone\nnumbered\nplain');
+    expect(sectionCopy(memoSections(switchMode(todo, 'text'))[1]!, 'text')).toBe('bullet\r\ndone\r\nnumbered\r\nplain');
   });
   it('keeps an empty todo note in todo mode, including heading-only input and converted fences', () => {
     for (const body of ['', '\n\n', '## title']) expect(memoMode(memoBody(switchMode(parseMemo(body), 'todo')))).toBe('todo');
@@ -181,4 +178,60 @@ it('keeps literal backslashes in fenced line display and subsequent edits', () =
   const line = memoItems(doc)[1]!;
   expect(line.text).toBe('\\# literal');
   expect(memoBody(editItem(doc, line.id, line.text + '!', 'text'))).toBe('```\n\\# literal!\n```');
+});
+
+
+describe('plain section bodies', () => {
+  it.each([
+    'typed # in a sentence',
+    '# x\n## y\nplain\n',
+    'first\r\n# x\r\nlast\r\n',
+    '```js\n# code\n\\# literal\n```\n# x\n',
+    '~~~\n## code\n~~~\n   ### x\n####### literal\n',
+  ])('round-trips a typed/pasted body %j without creating headings', text => {
+    const doc = editSectionBody(parseMemo(''), TOP_SECTION, text);
+    expect(memoSections(doc)).toHaveLength(1);
+    expect(sectionText(memoSections(parseMemo(memoBody(doc)))[0]!)).toBe(text);
+    expect(editSectionBody(doc, TOP_SECTION, text)).toBe(doc);
+  });
+  it('escapes only headings outside fences and preserves trailing newlines', () => {
+    const doc = editSectionBody(parseMemo(''), TOP_SECTION, '# x\n```\n# code\n```\n## y\n');
+    expect(memoBody(doc)).toBe('\\# x\n```\n# code\n```\n\\## y\n');
+  });
+  it('preserves CRLF through native textarea normalization, without rewriting neighbors', () => {
+    const doc = parseMemo('top\r\n## A\r\nfirst\r\nlast\r\n## B\nuntouched');
+    const a = memoSections(doc)[1]!;
+    expect(editSectionBody(doc, a.id, 'first\nlast')).toBe(doc);
+    const next = editSectionBody(doc, a.id, 'first\n# x\nlast');
+    expect(memoBody(next)).toBe('top\r\n## A\r\nfirst\r\n\\# x\r\nlast\r\n## B\nuntouched');
+    expect(memoSections(next)[2]!.id).toBe(memoSections(doc)[2]!.id);
+  });
+  it('keeps mixed task markup literal and edits a heading-only legacy section', () => {
+    const doc = parseMemo('## A\nexplanation\n* [X] done\n');
+    expect(sectionText(memoSections(doc)[1]!)).toBe('explanation\n* [X] done\n');
+    const empty = parseMemo('## A');
+    expect(memoBody(editSectionBody(empty, empty.lines[0]!.id, '# literal'))).toBe('## A\n\\# literal');
+  });
+  it.each(['text', 'todo'] as const)('appends a uniquely named %s section without changing old bytes', mode => {
+    const body = '## 새 섹션\r\nold\r\n## 새 섹션 2\r\nlast';
+    const next = addMemoSection(parseMemo(body), mode);
+    expect(memoBody(next)).toBe(body + '\r\n## 새 섹션 3\r\n' + (mode === 'todo' ? '- [ ]' : ''));
+    expect(memoSections(next)[memoSections(next).length - 1]!.title).toBe('새 섹션 3');
+  });
+});
+
+
+it('keeps a body trailing newline through section add, edits and reopen', () => {
+  const doc = addMemoSection(parseMemo('top\r\n'), 'text');
+  expect(sectionText(memoSections(doc)[0]!)).toBe('top\r\n');
+  const id = memoSections(doc)[1]!.id;
+  const withSecond = addMemoSection(editSectionBody(doc, id, 'first\r\n'), 'text');
+  const next = editSectionBody(withSecond, id, '# x\r\n\r\n');
+  expect(sectionText(memoSections(parseMemo(memoBody(next)))[1]!)).toBe('# x\r\n\r\n');
+  expect(memoSections(next).filter(section => section.heading).map(section => section.title)).toEqual(['새 섹션', '새 섹션 2']);
+});
+
+it('retains the final newline when text conversion removes the empty sentinel', () => {
+  const doc = switchMode(parseMemo('## A\r\n- [ ] item\r\n'), 'text');
+  expect(sectionText(memoSections(doc)[1]!)).toBe('item\r\n');
 });

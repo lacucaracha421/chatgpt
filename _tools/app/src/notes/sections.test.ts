@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appendSection, deleteSection, moveSection, renameSection, replaceSectionBody, splitSections, unfixSection } from "./sections";
+import { appendSection, deleteSection, moveSection, renameSection, replaceSectionBody, splitSections } from "./sections";
 
 describe("note sections", () => {
   it("splits headings while preserving CRLF ranges and ignoring fenced or escaped hashes", () => {
@@ -26,14 +26,13 @@ describe("note sections", () => {
     expect(next.slice(next.indexOf("## 둘"))).toBe(body.slice(body.indexOf("## 둘")));
   });
 
-  it("renames, moves, unfixes, deletes and appends sections", () => {
+  it("renames, moves, deletes and appends sections", () => {
     const body = "## 하나\nA\n### 하위\nchild\n## 둘\nB\n## 셋\nC\n";
     const parsed = splitSections(body);
     const renamed = renameSection(body, parsed.sections[3]!, "새 셋");
     expect(renamed).toContain("## 새 셋\nC");
     expect(moveSection(body, parsed.sections[3]!, "up")).toBe("## 하나\nA\n### 하위\nchild\n## 셋\nC\n## 둘\nB\n");
     expect(moveSection(body, parsed.sections[0]!, "down")).toBe("### 하위\nchild\n## 둘\nB\n## 하나\nA\n## 셋\nC\n");
-    expect(unfixSection(body, parsed.sections[1]!)).toBe("## 하나\nA\n하위\nchild\n## 둘\nB\n## 셋\nC\n");
     expect(deleteSection(body, parsed.sections[3]!)).toBe("## 하나\nA\n### 하위\nchild\n## 둘\nB\n");
     expect(appendSection("## 하나\nA\n")).toBe("## 하나\nA\n## 새 제목\n");
   });
