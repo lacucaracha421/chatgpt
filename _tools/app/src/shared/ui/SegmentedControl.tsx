@@ -270,7 +270,7 @@ export function SegmentedControl<T extends string>({ className, fullWidth = fals
       onPointerCancel={handlePointerCancel}
     >
       <span
-        className={["ui-segmented__thumb", initialMeasurement ? "ui-segmented__thumb--initial" : "", settlingIndex !== null ? "ui-segmented__thumb--settling" : "", pointerHeld ? "ui-segmented__thumb--pressed" : "", drag ? "ui-segmented__thumb--dragging" : ""].filter(Boolean).join(" ")}
+        className={["ui-segmented__thumb", initialMeasurement ? "ui-segmented__thumb--initial" : "", settlingIndex !== null ? "ui-segmented__thumb--settling" : "", drag ? "ui-segmented__thumb--pressed" : "", drag ? "ui-segmented__thumb--dragging" : ""].filter(Boolean).join(" ")}
         aria-hidden="true"
         style={activeGeometry ? { left: activeGeometry.left, width: activeGeometry.width, visibility: "visible" } : { visibility: "hidden" }}
       />

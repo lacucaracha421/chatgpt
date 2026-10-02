@@ -467,7 +467,8 @@ select.ui-text-input {
 }
 
 .ui-segmented__thumb--settling {
-  transition: left 200ms cubic-bezier(.3, 1.4, .5, 1), width 200ms cubic-bezier(.3, 1.4, .5, 1), transform 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard);
+  /* No overshoot: a bouncing width read as the buttons changing size (user, 2026-10-03). */
+  transition: left 200ms var(--ease-sheet), width 200ms var(--ease-sheet), transform 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard);
 }
 
 .ui-segmented__thumb--pressed {
