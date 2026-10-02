@@ -39,6 +39,8 @@ export function pageGenerationOf(reply: unknown): string | null {
 
 /** Local signal that a mutation changed Asset visibility, so an open view must refetch. */
 export const ASSET_LIST_CHANGED_EVENT = 'lakomics-asset-list-changed';
+/** An edit made from the open viewer (like, classification): refresh lists, but keep the viewer open. */
+export const viewerEditEvent = () => new CustomEvent(ASSET_LIST_CHANGED_EVENT, {detail: {keepViewer: true}});
 
 /**
  * The Asset filter contract version this client requires, or `null` when the server

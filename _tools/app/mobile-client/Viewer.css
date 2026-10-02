@@ -247,7 +247,6 @@
 }
 
 .viewer.is-video .viewer-error { top: calc(64px + env(safe-area-inset-top)); bottom: auto; }
-.zoom-reset { position: absolute; z-index: 5; top: calc(64px + env(safe-area-inset-top)); left: 16px; background: var(--color-sidebar); }
 .empty-inline { padding: 24px; color: var(--color-muted); }
 
 .viewer-filmstrip {

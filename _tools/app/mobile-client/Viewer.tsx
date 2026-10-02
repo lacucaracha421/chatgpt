@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent} from 'react';
-import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, HeartIcon, InformationCircleIcon, ArrowPathIcon, MagnifyingGlassMinusIcon, FolderIcon, Square2StackIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
+import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, HeartIcon, InformationCircleIcon, ArrowPathIcon, FolderIcon, Square2StackIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
 import type {ComponentType, SVGProps} from 'react';
 import {Dialog, DialogDescription, IconButton, Button} from './ui';
 import {BottomSheet} from './BottomSheet';
@@ -375,7 +375,6 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
       </div>
       {likes.error && <div className="viewer-error" role="alert"><span>{likes.error}</span></div>}
       {error && <div className="viewer-error" role="status"><span>{error}</span><Button onClick={() => {autoRetry.current={id:asset.id,used:false};renewVideo(video.current,!!video.current&&!video.current.paused);}}><ArrowPathIcon/>다시 시도</Button></div>}
-      {transform.scale > 1 && <div className="zoom-reset"><IconButton label="화면에 맞추기" icon={MagnifyingGlassMinusIcon} onClick={() => setTransform({scale:1,x:0,y:0})}/></div>}
       {!vault&&<ViewerFilmstrip items={items} index={index} privacy={privacy} onIndex={change} onInteract={revealChrome} onInteractionChange={setFilmstripActive}/>}
       {vault&&<footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index === 0} onClick={() => change(index - 1)}/><span className="viewer-title">{vault.label(asset)}</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index === items.length - 1} onClick={() => change(index + 1)}/></footer>}
       {!vault&&<nav className="viewer-nav-a11y" aria-label="자산 이동"><button type="button" aria-label="이전 자산" disabled={index === 0} onClick={() => change(index - 1)}>이전 자산</button><button type="button" aria-label="다음 자산" disabled={index === items.length - 1} onClick={() => change(index + 1)}>다음 자산</button></nav>}

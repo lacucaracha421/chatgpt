@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {api,errorText,native} from './transport';
-import {ASSET_LIST_CHANGED_EVENT} from './listGeneration';
+import {viewerEditEvent} from './listGeneration';
 import type {AlbumTree} from './albumModel';
 
 type Member = {assetId:string;desiredState:boolean;entityRevision:number};
@@ -55,7 +55,7 @@ export function useLikesAlbum(ids:string[],enabled:boolean,revision:unknown) {
       await command('setAlbumMembership',{albumId:state.albumId,assetId,desiredState,expectedRevision:member.entityRevision});
       if(current===generation.current){
         setLiked(previous=>{const next=new Set(previous);if(desiredState)next.add(assetId);else next.delete(assetId);return next;});
-        window.dispatchEvent(new Event(ASSET_LIST_CHANGED_EVENT));
+        window.dispatchEvent(viewerEditEvent());
       }
     } catch(reason) {if(current===generation.current)setError(errorText(reason)||'좋아요를 변경하지 못했습니다.');}
     finally {writes.current.delete(assetId);setPending(new Set(writes.current));}

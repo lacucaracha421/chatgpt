@@ -13,6 +13,7 @@ vi.mock('./Home',()=>({Home:({items,onRecent,onArtists}:HomeProps)=><div><button
 vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,restoreScroll,onScroll,sparse,onSelectAsset}:{onSelectAsset?(id:string):void;sparse?:SparseGallerySource;intro?:ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;restoreScroll?:number;onScroll?(top:number):void})=><div aria-label="자산 목록" data-restore-scroll={restoreScroll} data-toc-total={sparse?.toc.totalCount} onScroll={()=>{onNearEnd();onScroll?.(420);}}>{intro}{items.map((a,i)=><button key={a.id} onContextMenu={event=>{event.preventDefault();onSelectAsset?.(a.id);}} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}{sparse&&<button onClick={()=>void sparse.load(2,2,new AbortController().signal)}>seek bucket</button>}</div>}));
 vi.mock('./Viewer',()=>({Viewer:({items,index,onIndex,onClose}:{items:Asset[];index:number;onIndex(i:number):void;onClose():void})=><div><span>{`viewer-${items[index].id}`}</span><button onClick={()=>onIndex(1)}>viewer next</button><button onClick={onClose}>viewer close</button></div>}));
 import {App} from './App';
+import {viewerEditEvent} from './listGeneration';
 import {ApiError} from './transport';
 import {outboxConnection,setOutboxConnection} from './outboxConnection';
 const a=[{id:'a1',kind:'image'},{id:'a2',kind:'image'}],b=[{id:'b1',kind:'image'},{id:'b2',kind:'image'}];
@@ -549,6 +550,18 @@ describe('server list generation',()=>{
     await waitFor(()=>expect(screen.queryByText('tile-a1')).toBeNull());
     fireEvent.click(screen.getByRole('button',{name:'홈',exact:true}));
     await waitFor(()=>expect(screen.queryByText('tile-a1')).toBeNull());
+  });
+  it('keeps the viewer open after a like or classification made from it, but closes it for other moves',async()=>{
+    const server=fixture();render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
+    fireEvent.click(await screen.findByText('tile-a1'));await screen.findByText('viewer-a1');
+    server.change(a);act(()=>window.dispatchEvent(viewerEditEvent()));
+    await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>path==='/v1/library/list-generation').length).toBeGreaterThan(0));
+    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,50));});
+    expect(screen.getByText('viewer-a1')).toBeTruthy();
+    vi.spyOn(Date,'now').mockReturnValue(Date.now()+60_000);
+    server.change(a);act(()=>window.dispatchEvent(new CustomEvent('lakomics-list-generation',{detail:{generation:server.generation()}})));
+    await waitFor(()=>expect(screen.queryByText('viewer-a1')).toBeNull());
+    vi.restoreAllMocks();
   });
   it('remote restore returns the same ID and new canonical Assets appear without restart',async()=>{
     const server=fixture();render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');

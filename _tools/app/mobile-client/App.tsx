@@ -74,6 +74,8 @@ import {usePrivacyMode} from './privacyMode';
 const adoptConnection=(next:Status)=>{setOutboxConnection(next.configured?next.endpoint:null);return next;};
 
 const HOME: View = {tab:'home', title:'홈'};
+/** How long after an edit made from the open viewer a list-generation move keeps the viewer open. */
+const VIEWER_EDIT_GRACE_MS = 15_000;
 const LIBRARY = LIBRARY_ROOT;
 const HOME_PAGE_KEY = `${viewKey(HOME)}:null`;
 function readLocalStatus(): Status {
@@ -183,6 +185,8 @@ export function App() {
   const [albumBatchAssetIds,setAlbumBatchAssetIds]=useState<string[]>([]);
   // Library Trash: local hiding, the undo snackbar and the trash browser.
   const trash = useLibraryTrash(status.configured, status.endpoint, setViewer);
+  // Likes/classification edits made from the open viewer move the list generation too; keep the viewer.
+  const viewerEditAt = useRef(0);
   const exchange = useExchange(status.configured, status.endpoint, exchangeOpen);
   const visibleItems = useMemo(() => trash.hidden.size ? page.items.filter(item => !trash.hidden.has(item.id)) : page.items, [page.items, trash.hidden]);
   const [density, setDensity] = useState(() => {try {return validDensity(JSON.parse(localStorage.getItem('lakomics.mobile.density') ?? '1'));} catch {return DEFAULT_DENSITY;}});
@@ -386,14 +390,14 @@ export function App() {
           viewCache.current.clear(); cancelMore(); clearMediaCache();
           // This device's own trash/restore moves the generation too; the viewer already
           // shows the result, so it stays open instead of closing under the user.
-          if (!trash.recent()) setViewer(null);
+          if (!trash.recent() && Date.now() - viewerEditAt.current > VIEWER_EDIT_GRACE_MS) setViewer(null);
           await load(state.page.view,state.page.cursor,state.page.previous,scroll.current,true,state.page.filters);
           setIndexRevision(value=>value+1);
         }
       } catch { /* Retain last committed view on transport failure; cache reuse still validates. */ }
       finally {running=false;if(active&&pendingGeneration!==null)void check();}
     };
-    const changed=()=>{observedGeneration.current=null;void check();};
+    const changed=(event:Event)=>{if((event as CustomEvent<{keepViewer?:boolean}>).detail?.keepViewer)viewerEditAt.current=Date.now();observedGeneration.current=null;void check();};
     const generationEvent=(event:Event)=>{const value=(event as CustomEvent<{generation?:string}>).detail?.generation;if(typeof value==='string'){pendingGeneration=value;void check();}};
     const removeVisible=onVisible(()=>{if(pendingGeneration!==null)void check();});
     window.addEventListener('lakomics-list-generation',generationEvent);
