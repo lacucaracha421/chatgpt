@@ -12,10 +12,10 @@ mod album_reconciliation_tests;
 pub(crate) mod asset_authority;
 mod asset_metadata;
 pub(crate) mod authority_pass;
-pub(crate) mod av_link;
 pub(crate) mod av_artwork;
 pub(crate) mod av_collection;
 mod av_detail;
+pub(crate) mod av_link;
 pub(crate) mod av_models;
 pub(crate) mod av_portrait;
 pub(crate) mod av_stashdb;
@@ -35,6 +35,7 @@ mod catalog_count_fixture_tests;
 #[cfg(test)]
 mod catalog_count_gate_tests;
 mod catalog_counts;
+pub(crate) mod catalog_duplicate_sync;
 mod catalog_group_api;
 mod catalog_group_identity;
 mod catalog_group_query;
@@ -44,7 +45,6 @@ mod catalog_preparation;
 pub(crate) mod catalog_provider;
 mod catalog_query;
 pub(crate) mod catalog_review;
-pub(crate) mod catalog_duplicate_sync;
 mod catalog_revision;
 pub(crate) mod catalog_update;
 mod catalog_visibility;
@@ -55,8 +55,8 @@ pub(crate) mod character_exclusions;
 #[cfg(test)]
 #[path = "character_exclusions_tests.rs"]
 mod character_exclusions_tests;
-pub mod character_folders;
 mod character_folder_order;
+pub mod character_folders;
 pub mod character_groups;
 pub mod character_hub;
 pub mod character_incremental;
@@ -66,7 +66,6 @@ pub mod character_reference_refresh;
 #[cfg(test)]
 mod character_reference_refresh_bench;
 pub mod character_reference_regions;
-pub(crate) mod home_publications;
 pub(crate) mod character_review_feed;
 pub(crate) mod character_review_sync;
 pub mod character_scan;
@@ -81,6 +80,7 @@ pub(crate) mod character_worker;
 pub mod character_workflow;
 pub mod characters;
 mod classification;
+pub(crate) mod home_publications;
 pub(crate) use classification::list_classifications_in;
 pub(crate) mod classification_authority;
 #[cfg(test)]
@@ -92,13 +92,13 @@ pub(crate) mod classification_reconciliation;
 mod classification_reconciliation_tests;
 pub mod cloud_preflight;
 pub(crate) mod collection;
+pub(crate) mod collection_binding_sync;
 pub mod collection_pc;
 pub(crate) mod collection_personal_edits;
-pub(crate) mod collection_binding_sync;
 pub(crate) mod collection_release_sync;
 pub(crate) mod collection_source;
-pub(crate) mod collection_volume_range;
 mod collection_volume;
+pub(crate) mod collection_volume_range;
 pub(crate) mod credential;
 pub(crate) mod credential_broker;
 mod db;
@@ -111,6 +111,16 @@ mod linux_fs;
 pub(crate) mod notes;
 #[cfg(target_os = "linux")]
 pub(crate) use drag_out::PreparedAssetDrag;
+pub(crate) mod artist_style;
+pub(crate) mod artists;
+#[cfg(test)]
+mod artists_tests;
+pub(crate) mod auto_tag_inbox;
+pub(crate) mod auto_tag_publication;
+pub(crate) mod auto_tags;
+#[cfg(test)]
+mod auto_tags_tests;
+pub(crate) mod character_suggestions;
 pub mod collection_tracking;
 pub(crate) mod collection_updates;
 pub mod error;
@@ -121,14 +131,13 @@ mod folder_appearance;
 pub(crate) mod home_data;
 pub(crate) mod igdb;
 mod igdb_flow;
-pub(crate) mod launchbox;
 mod image_fingerprint;
 pub(crate) mod ingestion;
+pub(crate) mod launchbox;
 pub mod legacy_migration;
 pub mod legacy_package_migration;
 mod lock;
 pub(crate) mod machine_settings;
-pub(crate) mod auto_tag_inbox;
 mod manga;
 pub mod manga_index;
 pub(crate) mod manga_index_sync;
@@ -143,19 +152,10 @@ pub mod models;
 mod online_catalog;
 mod provider_requests;
 mod query;
-mod release_watch;
 pub(crate) mod release_calendar;
-pub(crate) mod artists;
-pub(crate) mod artist_style;
-#[cfg(test)]
-mod artists_tests;
-pub(crate) mod auto_tags;
-pub(crate) mod auto_tag_publication;
-pub(crate) mod tagger_review;
-pub(crate) mod character_suggestions;
-#[cfg(test)]
-mod auto_tags_tests;
+mod release_watch;
 pub(crate) mod release_wishlist;
+pub(crate) mod tagger_review;
 pub(crate) use release_watch::release_status_at;
 pub(crate) mod remote_gallery;
 pub(crate) mod remote_media;
@@ -441,7 +441,12 @@ impl Library {
     pub fn use_machine_settings(&self, path: PathBuf) {
         if let Ok(id) = self.library_id() {
             match machine_settings::new_ingests(&path, &id) {
-                Ok(ids) => *self.new_ingests.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = ids,
+                Ok(ids) => {
+                    *self
+                        .new_ingests
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = ids
+                }
                 Err(error) => eprintln!("new ingest settings: {error}"),
             }
         }
@@ -452,8 +457,15 @@ impl Library {
     }
 
     pub(crate) fn remember_new_ingest(&self, id: &str, pending: bool) {
-        let mut ids = self.new_ingests.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        if pending { ids.insert(id.to_owned()); } else { ids.remove(id); }
+        let mut ids = self
+            .new_ingests
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pending {
+            ids.insert(id.to_owned());
+        } else {
+            ids.remove(id);
+        }
         if let (Some(path), Ok(library_id)) = (self.machine_settings_path(), self.library_id()) {
             if let Err(error) = machine_settings::set_new_ingests(&path, &library_id, ids.clone()) {
                 eprintln!("new ingest settings: {error}");
@@ -461,7 +473,13 @@ impl Library {
         }
     }
     pub(crate) fn new_ingest_json(&self) -> String {
-        serde_json::to_string(&*self.new_ingests.lock().unwrap_or_else(std::sync::PoisonError::into_inner)).unwrap_or_else(|_| "[]".into())
+        serde_json::to_string(
+            &*self
+                .new_ingests
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+        .unwrap_or_else(|_| "[]".into())
     }
 
     pub(crate) fn machine_settings_path(&self) -> Option<PathBuf> {
@@ -852,7 +870,8 @@ impl Library {
         &self,
         relative_path: &str,
     ) -> Result<MediaResponse, LibraryError> {
-        let _open = crate::media_protocol_timing::stage(crate::media_protocol_timing::Stage::FileOpen);
+        let _open =
+            crate::media_protocol_timing::stage(crate::media_protocol_timing::Stage::FileOpen);
         let requested_path = self.canonical_root.join(relative_path);
         let canonical_path = fs::canonicalize(&requested_path).map_err(|source| {
             if source.kind() == std::io::ErrorKind::NotFound {

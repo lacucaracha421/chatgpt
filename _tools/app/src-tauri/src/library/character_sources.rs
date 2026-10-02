@@ -163,13 +163,18 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         std::fs::create_dir(temp.path().join("references")).unwrap();
-        let references = (0..18).map(|index| {
-            let relative = format!("references/{index}.bin");
-            let bytes = vec![index as u8; 421_000];
-            std::fs::write(temp.path().join(&relative), &bytes).unwrap();
-            let hash = Sha256::digest(&bytes).iter().map(|byte| format!("{byte:02x}")).collect::<String>();
-            (relative, hash)
-        }).collect::<Vec<_>>();
+        let references = (0..18)
+            .map(|index| {
+                let relative = format!("references/{index}.bin");
+                let bytes = vec![index as u8; 421_000];
+                std::fs::write(temp.path().join(&relative), &bytes).unwrap();
+                let hash = Sha256::digest(&bytes)
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>();
+                (relative, hash)
+            })
+            .collect::<Vec<_>>();
         let candidates = 20;
 
         let old_started = std::time::Instant::now();
@@ -182,7 +187,10 @@ mod tests {
         let old = old_started.elapsed();
 
         let prepared_started = std::time::Instant::now();
-        let prepared = references.iter().map(|(path, hash)| Source::capture(&library, path, hash).unwrap()).collect::<Vec<_>>();
+        let prepared = references
+            .iter()
+            .map(|(path, hash)| Source::capture(&library, path, hash).unwrap())
+            .collect::<Vec<_>>();
         for _ in 0..candidates {
             for source in &prepared {
                 source.check_identity(&library).unwrap();

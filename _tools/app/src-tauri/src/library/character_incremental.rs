@@ -210,7 +210,11 @@ pub(super) struct Engine {
 #[cfg(test)]
 impl Engine {
     pub(super) fn shadow_fixture(config: RuntimeConfig) -> Self {
-        Self { running: true, config: Some(config), ..Self::default() }
+        Self {
+            running: true,
+            config: Some(config),
+            ..Self::default()
+        }
     }
 }
 #[derive(Debug, Serialize)]
@@ -331,11 +335,25 @@ impl Library {
         self.character_wake.notify();
     }
     pub(super) fn character_shadow_backfill_available(&self) -> Result<()> {
-        if crate::workload::is_restricted() { return Err(Error::Invalid("절약 모드가 끝난 뒤 과거 이미지 채점을 시작해 주세요.")); }
-        let engine = self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !engine.running || engine.stop.load(Ordering::Acquire)
-            || !engine.config.as_ref().is_some_and(|config| config.shadow_model.is_some()) {
-            return Err(Error::Invalid("분석 환경과 S36 시험 채점을 켠 뒤 다시 시도해 주세요."));
+        if crate::workload::is_restricted() {
+            return Err(Error::Invalid(
+                "절약 모드가 끝난 뒤 과거 이미지 채점을 시작해 주세요.",
+            ));
+        }
+        let engine = self
+            .character_incremental
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !engine.running
+            || engine.stop.load(Ordering::Acquire)
+            || !engine
+                .config
+                .as_ref()
+                .is_some_and(|config| config.shadow_model.is_some())
+        {
+            return Err(Error::Invalid(
+                "분석 환경과 S36 시험 채점을 켠 뒤 다시 시도해 주세요.",
+            ));
         }
         Ok(())
     }
@@ -370,9 +388,11 @@ impl Library {
         )?;
         active_work.fresh_remaining = c
             .query_row(
-                &format!("SELECT COUNT(*) FROM character_autotag_jobs j
+                &format!(
+                    "SELECT COUNT(*) FROM character_autotag_jobs j
             WHERE state IN ('pending','processing') AND cause<>'reconsideration' AND {}",
-                    super::character_scope::JOB_SCOPE_ALLOWED_SQL),
+                    super::character_scope::JOB_SCOPE_ALLOWED_SQL
+                ),
                 [],
                 |r| r.get::<_, i64>(0),
             )?
@@ -455,7 +475,10 @@ impl Library {
             let restricted = crate::workload::is_restricted();
             if restricted {
                 self.character_worker_pool.release();
-                let mut engine = self.character_incremental.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut engine = self
+                    .character_incremental
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 engine.prepared_references = None;
                 engine.training = None;
                 if let Some(last) = engine
@@ -477,11 +500,15 @@ impl Library {
                     return Ok(false);
                 }
                 let Some(job) = self.claim_character_autotag()? else {
-                    if crate::workload::is_restricted() { return Ok(false); }
+                    if crate::workload::is_restricted() {
+                        return Ok(false);
+                    }
                     if self.advance_character_reference_refresh(32)? > 0 {
                         return Ok(true);
                     }
-                    if crate::workload::is_restricted() { return Ok(false); }
+                    if crate::workload::is_restricted() {
+                        return Ok(false);
+                    }
                     // Preserve native augmentation warm-up priority as well.
                     if self
                         .advance_character_augmentation(&config, stop.clone())
@@ -489,9 +516,15 @@ impl Library {
                     {
                         return Ok(true);
                     }
-                    if crate::workload::is_restricted() { return Ok(false); }
-                    if self.advance_character_shadow(&config, stop.clone()) { return Ok(true); }
-                    if crate::workload::is_restricted() { return Ok(false); }
+                    if crate::workload::is_restricted() {
+                        return Ok(false);
+                    }
+                    if self.advance_character_shadow(&config, stop.clone()) {
+                        return Ok(true);
+                    }
+                    if crate::workload::is_restricted() {
+                        return Ok(false);
+                    }
                     return Ok(self.advance_character_shadow_backfill(&config, stop.clone()));
                 };
                 if self.supersede_invalid_reference_refresh_job(&job)? {
@@ -649,9 +682,7 @@ impl Library {
             let context = self.character_autotag_context(&c, job, runtime)?;
             let mut paths = BTreeMap::new();
             for target in &context.targets {
-                for reference in target
-                    .usable_references()
-                {
+                for reference in target.usable_references() {
                     let id = reference.asset_id.as_ref().ok_or(Error::Stale)?;
                     let (hash, path) = super::characters::scoped_image(
                         &c,
@@ -795,22 +826,24 @@ impl Library {
         })?;
         // Borrow separately: an optional worker failure resets the child but
         // cannot discard the already completed native comparisons.
-        let augmentation =
-            if !crate::workload::is_restricted() && config.augmentation_model.is_some() && ready["augmentationAvailable"] == true {
-                self.compare_character_augmentation(
-                    job,
-                    config,
-                    stop.clone(),
-                    &context,
-                    &query,
-                    &predictions,
-                    &reference_targets,
-                )
-                .ok()
-                .flatten()
-            } else {
-                None
-            };
+        let augmentation = if !crate::workload::is_restricted()
+            && config.augmentation_model.is_some()
+            && ready["augmentationAvailable"] == true
+        {
+            self.compare_character_augmentation(
+                job,
+                config,
+                stop.clone(),
+                &context,
+                &query,
+                &predictions,
+                &reference_targets,
+            )
+            .ok()
+            .flatten()
+        } else {
+            None
+        };
         let verification_started = Instant::now();
         query.verify(self)?;
         self.check_incremental_references(&prepared)?;
@@ -1071,7 +1104,10 @@ impl Library {
 
     /// One recently completed image in an S36 series that has no score under the
     /// current policy. Each asset is checked at most once per queue run.
-    fn s36_catch_up(&self, config: &RuntimeConfig) -> Result<Option<super::character_shadow::Pending>> {
+    fn s36_catch_up(
+        &self,
+        config: &RuntimeConfig,
+    ) -> Result<Option<super::character_shadow::Pending>> {
         if config.s36.s36_series.is_empty() {
             return Ok(None);
         }
@@ -1100,7 +1136,8 @@ impl Library {
             .then(|| {
                 rusqlite::Connection::open_with_flags(
                     &cache_path,
-                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
                 )
             })
             .transpose()?;
@@ -1364,7 +1401,9 @@ impl Library {
             AND NOT (reason='recommendation' AND pixai_score>=0.85 AND canary_score>=0.85)")?
             .query_map(params![job.asset_id,job.content_hash], |r| r.get::<_,String>(0))?
             .collect::<std::result::Result<Vec<_>,_>>()?;
-        for id in blocked { latest.entry(id).or_insert_with(|| "cleared".into()); }
+        for id in blocked {
+            latest.entry(id).or_insert_with(|| "cleared".into());
+        }
         let (mut accepted, mut covered) = super::character_augmentation::native_selection(
             &selectable,
             &latest,

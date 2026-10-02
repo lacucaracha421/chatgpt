@@ -454,7 +454,9 @@ fn automation_setting_reports_the_worker_pause_independently_of_history_pause() 
     let status = serde_json::to_value(f.library.character_incremental_status().unwrap()).unwrap();
     assert_eq!(status["automationEnabled"], false);
     assert_eq!(status["paused"], false);
-    f.library.set_character_reference_refresh_paused(true).unwrap();
+    f.library
+        .set_character_reference_refresh_paused(true)
+        .unwrap();
     f.library.set_character_incremental_paused(false).unwrap();
     let status = serde_json::to_value(f.library.character_incremental_status().unwrap()).unwrap();
     assert_eq!(status["automationEnabled"], true);
@@ -601,7 +603,11 @@ fn unified_reference_pool_compares_remaining_images_and_restores_six_vote_accept
 
     f.library.trash_assets(&["asset-0".into()]).unwrap();
     run(&f, &config, "asset-5");
-    assert!(f.library.character_relations_for_asset("asset-5").unwrap().is_empty());
+    assert!(f
+        .library
+        .character_relations_for_asset("asset-5")
+        .unwrap()
+        .is_empty());
     assert_eq!(prepare_paths(&config)[0].len(), 5);
 
     f.library.restore_assets(&["asset-0".into()]).unwrap();
@@ -621,9 +627,16 @@ fn unified_reference_pool_compares_remaining_images_and_restores_six_vote_accept
         character_autotag::Cause::ManualScanEnrollment,
     );
     assert_eq!(prepare_paths(&config)[1].len(), 6);
-    assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap(), vec![target.id.clone()]);
+    assert_eq!(
+        f.library.character_relations_for_asset("asset-5").unwrap(),
+        vec![target.id.clone()]
+    );
     let current = f.library.get_character_target(&target.id).unwrap();
-    assert_eq!(current.usable_references().count(), 6, "automatic acceptance never adds a reference");
+    assert_eq!(
+        current.usable_references().count(),
+        6,
+        "automatic acceptance never adds a reference"
+    );
 }
 
 #[test]
@@ -1300,13 +1313,23 @@ fn parent_inference_reuses_one_query_per_image_across_two_dozen_characters() {
     let config = config(&f);
     for id in ["asset-5", "asset-6"] {
         run(&f, &config, id);
-        assert_eq!(f.library.character_autotag_job(id).unwrap().unwrap().state, "completed");
-        assert!(f.library.character_relations_for_asset(id).unwrap().is_empty());
+        assert_eq!(
+            f.library.character_autotag_job(id).unwrap().unwrap().state,
+            "completed"
+        );
+        assert!(f
+            .library
+            .character_relations_for_asset(id)
+            .unwrap()
+            .is_empty());
     }
     let log = std::fs::read_to_string(config.script.with_extension("log")).unwrap();
     assert_eq!(log.lines().filter(|line| *line == "start").count(), 1);
     assert_eq!(log.lines().filter(|line| *line == "load_query").count(), 2);
-    assert_eq!(log.lines().filter(|line| *line == "compare_query").count(), 48);
+    assert_eq!(
+        log.lines().filter(|line| *line == "compare_query").count(),
+        48
+    );
     let c = f.library.connection().unwrap();
     let predictions: i64 = c
         .query_row(
@@ -1339,11 +1362,17 @@ fn parent_inference_arbitrates_across_series_and_preserves_the_saved_folder() {
             .unwrap();
         drop(c);
         let parent = if intermediate {
-            f.library.create_classification(super::super::models::CreateClassification {
-                kind: super::super::models::ClassificationKind::Tag,
-                name: "Intermediate".into(), parent_id: Some(root),
-            }).unwrap().id
-        } else { root };
+            f.library
+                .create_classification(super::super::models::CreateClassification {
+                    kind: super::super::models::ClassificationKind::Tag,
+                    name: "Intermediate".into(),
+                    parent_id: Some(root),
+                })
+                .unwrap()
+                .id
+        } else {
+            root
+        };
         let c = f.library.connection().unwrap();
         c.execute(
             "UPDATE classification_entries SET parent_id=?1 WHERE id=?2",
@@ -1362,7 +1391,10 @@ fn parent_inference_arbitrates_across_series_and_preserves_the_saved_folder() {
         let job = f.library.claim_character_autotag().unwrap().unwrap();
         let mut c = f.library.connection().unwrap();
         let tx = c.transaction().unwrap();
-        let context = f.library.character_autotag_context(&tx, &job, &"a".repeat(64)).unwrap();
+        let context = f
+            .library
+            .character_autotag_context(&tx, &job, &"a".repeat(64))
+            .unwrap();
         assert_eq!(context.targets.len(), 2);
         let predictions = [(&a, 6), (&b, competing_votes)].into_iter().map(|(target, votes)| Prediction {
             target_id: target.id.clone(),
@@ -1393,26 +1425,66 @@ fn parent_inference_arbitrates_across_series_and_preserves_the_saved_folder() {
             .unwrap();
         assert_eq!(saved, parent);
         drop(c);
-        assert_eq!(f.library.character_relations_for_asset("asset-5").unwrap().len(), expected);
+        assert_eq!(
+            f.library
+                .character_relations_for_asset("asset-5")
+                .unwrap()
+                .len(),
+            expected
+        );
         if expected == 1 {
-            let page = f.library.browse_character_assets(super::super::character_hub::BrowseQuery {
-                series_id: f.series.clone(), target_id: Some(a.id.clone()), group_id: None,
-                reference_target_id: None, after: None, limit: 100, all: false, series_filter: None,
-            }).unwrap();
+            let page = f
+                .library
+                .browse_character_assets(super::super::character_hub::BrowseQuery {
+                    series_id: f.series.clone(),
+                    target_id: Some(a.id.clone()),
+                    group_id: None,
+                    reference_target_id: None,
+                    after: None,
+                    limit: 100,
+                    all: false,
+                    series_filter: None,
+                })
+                .unwrap();
             assert!(page.items.iter().any(|asset| asset.id == "asset-5"));
-            f.library.record_character_decisions(DecisionRequest {
-                target_id: a.id.clone(), expected_fingerprint: a.fingerprint,
-                asset_ids: vec!["asset-5".into()], decision: DecisionKind::Rejected,
-                baseline_fingerprint: None, scan_id: None,
-            }).unwrap();
-            assert!(f.library.character_relations_for_asset("asset-5").unwrap().is_empty());
+            f.library
+                .record_character_decisions(DecisionRequest {
+                    target_id: a.id.clone(),
+                    expected_fingerprint: a.fingerprint,
+                    asset_ids: vec!["asset-5".into()],
+                    decision: DecisionKind::Rejected,
+                    baseline_fingerprint: None,
+                    scan_id: None,
+                })
+                .unwrap();
+            assert!(f
+                .library
+                .character_relations_for_asset("asset-5")
+                .unwrap()
+                .is_empty());
         } else {
-            assert!(f.library.character_review_pending(&f.series, &a.id).unwrap());
+            assert!(f
+                .library
+                .character_review_pending(&f.series, &a.id)
+                .unwrap());
             for target_id in [Some(a.id.clone()), None] {
-                let page = f.library.character_review_page(super::super::character_scan::ReviewQuery {
-                    series_id: f.series.clone(), target_id, filter: "recommended".into(), after: None, limit: 2,
-                }).unwrap();
-                assert_eq!(page.rows.iter().map(|row| row.asset.id.as_str()).collect::<Vec<_>>(), vec!["asset-5"]);
+                let page = f
+                    .library
+                    .character_review_page(super::super::character_scan::ReviewQuery {
+                        series_id: f.series.clone(),
+                        target_id,
+                        filter: "recommended".into(),
+                        after: None,
+                        limit: 2,
+                    })
+                    .unwrap();
+                assert_eq!(
+                    page.rows
+                        .iter()
+                        .map(|row| row.asset.id.as_str())
+                        .collect::<Vec<_>>(),
+                    vec!["asset-5"]
+                );
             }
         }
     }
@@ -1514,19 +1586,33 @@ fn arbitration_uses_latest_judgment_and_keeps_ambiguous_people_for_review() {
 #[test]
 fn arbitration_releases_monie_only_when_the_rival_is_safely_weaker() {
     let monie = vec![
-        0.0930563360452652, 0.06063959002494812, 0.0923059955239296,
-        0.1261855512857437, 0.062034815549850464, 0.19817233085632324,
-        0.10088373720645905, 0.1669408231973648, 0.11253073066473009,
-        0.06524112075567245, 0.07422041893005371, 0.2249622642993927,
-        0.06969894468784332, 0.05852421745657921,
+        0.0930563360452652,
+        0.06063959002494812,
+        0.0923059955239296,
+        0.1261855512857437,
+        0.062034815549850464,
+        0.19817233085632324,
+        0.10088373720645905,
+        0.1669408231973648,
+        0.11253073066473009,
+        0.06524112075567245,
+        0.07422041893005371,
+        0.2249622642993927,
+        0.06969894468784332,
+        0.05852421745657921,
     ];
     let hiyuki = vec![
-        0.25773942470550537, 0.30683422088623047, 0.19877029955387115,
-        0.2447524070739746, 1.0, 0.24989449977874756, 0.18796686828136444,
+        0.25773942470550537,
+        0.30683422088623047,
+        0.19877029955387115,
+        0.2447524070739746,
+        1.0,
+        0.24989449977874756,
+        0.18796686828136444,
     ];
     for (rival_distances, invalid, expected) in [
         (hiyuki.clone(), "", true),
-        (vec![0.12,0.12,0.4,0.4,0.4,0.4], "", false),
+        (vec![0.12, 0.12, 0.4, 0.4, 0.4, 0.4], "", false),
         (vec![0.16; 6], "", false),
         (hiyuki.clone(), "missing", false),
         (hiyuki.clone(), "fallback", false),
@@ -1540,12 +1626,18 @@ fn arbitration_releases_monie_only_when_the_rival_is_safely_weaker() {
         add_learned_reference(&f, &a.id);
         add_learned_reference(&f, &b.id);
         character_autotag::enqueue(
-            &f.library.connection().unwrap(), "asset-5", character_autotag::Cause::Ingestion,
-        ).unwrap();
+            &f.library.connection().unwrap(),
+            "asset-5",
+            character_autotag::Cause::Ingestion,
+        )
+        .unwrap();
         let job = f.library.claim_character_autotag().unwrap().unwrap();
         let mut c = f.library.connection().unwrap();
         let tx = c.transaction().unwrap();
-        let context = f.library.character_autotag_context(&tx, &job, &"a".repeat(64)).unwrap();
+        let context = f
+            .library
+            .character_autotag_context(&tx, &job, &"a".repeat(64))
+            .unwrap();
         let mut predictions = [(&a, &monie), (&b, &rival_distances)].into_iter().map(|(target, distances)| {
             let votes = distances.iter().enumerate().filter_map(|(i,d)| (*d <= 0.21323118981474148).then_some(i)).collect::<Vec<_>>();
             Prediction {
@@ -1572,13 +1664,24 @@ fn arbitration_releases_monie_only_when_the_rival_is_safely_weaker() {
             "error_field" => predictions[1].result.error = Some("comparison failed".into()),
             _ => {}
         }
-        f.library.finalize_incremental(
-            &tx, &job, &context, &predictions, &BTreeSet::new(), &BTreeSet::new(),
-        ).unwrap();
+        f.library
+            .finalize_incremental(
+                &tx,
+                &job,
+                &context,
+                &predictions,
+                &BTreeSet::new(),
+                &BTreeSet::new(),
+            )
+            .unwrap();
         tx.commit().unwrap();
         drop(c);
         let relations = f.library.character_relations_for_asset("asset-5").unwrap();
-        assert_eq!(relations, if expected { vec![a.id] } else { vec![] }, "{invalid}");
+        assert_eq!(
+            relations,
+            if expected { vec![a.id] } else { vec![] },
+            "{invalid}"
+        );
     }
 }
 
@@ -1631,11 +1734,16 @@ fn arbitration_keeps_weak_six_vote_companion_crop_for_review() {
         .unwrap();
     tx.commit().unwrap();
     drop(c);
-    let state: String = f.library.connection().unwrap().query_row(
-        "SELECT review_state FROM character_autotag_jobs WHERE asset_id='asset-5'",
-        [],
-        |row| row.get(0),
-    ).unwrap();
+    let state: String = f
+        .library
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT review_state FROM character_autotag_jobs WHERE asset_id='asset-5'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(state, "partially_resolved");
 }
 
@@ -1993,9 +2101,16 @@ fn character_reference_refresh_retains_competitor_with_five_remaining_valid_refe
         )
         .unwrap();
     let c = f.library.connection().unwrap();
-    let context = f.library.character_autotag_context(&c, &job, &"a".repeat(64)).unwrap();
+    let context = f
+        .library
+        .character_autotag_context(&c, &job, &"a".repeat(64))
+        .unwrap();
     assert_eq!(context.targets.len(), 2);
-    let remaining = context.targets.iter().find(|target| target.id == competitor.id).unwrap();
+    let remaining = context
+        .targets
+        .iter()
+        .find(|target| target.id == competitor.id)
+        .unwrap();
     assert_eq!(remaining.usable_references().count(), 5);
     let item_state: String = c
         .query_row(
@@ -2029,29 +2144,33 @@ fn work_status_uses_snapshot_totals_and_the_actual_comparison_target() {
     )
     .unwrap();
     drop(c);
-    f.library.request_character_reference_refresh(&target.id,target.revision).unwrap();
+    f.library
+        .request_character_reference_refresh(&target.id, target.revision)
+        .unwrap();
     f.library.advance_character_reference_refresh(1).unwrap();
-    let job=f.library.claim_character_autotag().unwrap().unwrap();
+    let job = f.library.claim_character_autotag().unwrap().unwrap();
     {
-        let mut engine=f.library.character_incremental.lock().unwrap();
-        engine.active=Some(job.asset_id.clone());
-        engine.active_series_name=Some("Series".into());
-        engine.active_target_name=Some("Competing character".into());
-        engine.active_cause=Some("reconsideration".into());
+        let mut engine = f.library.character_incremental.lock().unwrap();
+        engine.active = Some(job.asset_id.clone());
+        engine.active_series_name = Some("Series".into());
+        engine.active_target_name = Some("Competing character".into());
+        engine.active_cause = Some("reconsideration".into());
     }
-    let status=serde_json::to_value(f.library.character_incremental_status().unwrap()).unwrap();
-    assert_eq!(status["activeWork"]["targetName"],"Competing character");
-    assert_eq!(status["historyRefreshes"][0]["targetName"],"A");
-    assert_eq!(status["historyRefreshes"][0]["total"],2);
-    assert_eq!(status["historyRefreshes"][0]["remaining"],2);
-    let mut c=f.library.connection().unwrap();
-    let tx=c.transaction().unwrap();
-    f.library.complete_reference_refresh_item(&tx,&job,&BTreeSet::new(),true,false).unwrap();
+    let status = serde_json::to_value(f.library.character_incremental_status().unwrap()).unwrap();
+    assert_eq!(status["activeWork"]["targetName"], "Competing character");
+    assert_eq!(status["historyRefreshes"][0]["targetName"], "A");
+    assert_eq!(status["historyRefreshes"][0]["total"], 2);
+    assert_eq!(status["historyRefreshes"][0]["remaining"], 2);
+    let mut c = f.library.connection().unwrap();
+    let tx = c.transaction().unwrap();
+    f.library
+        .complete_reference_refresh_item(&tx, &job, &BTreeSet::new(), true, false)
+        .unwrap();
     tx.commit().unwrap();
     drop(c);
-    let status=serde_json::to_value(f.library.character_incremental_status().unwrap()).unwrap();
-    assert_eq!(status["historyRefreshes"][0]["processed"],1);
-    assert_eq!(status["historyRefreshes"][0]["remaining"],1);
+    let status = serde_json::to_value(f.library.character_incremental_status().unwrap()).unwrap();
+    assert_eq!(status["historyRefreshes"][0]["processed"], 1);
+    assert_eq!(status["historyRefreshes"][0]["remaining"], 1);
 }
 
 #[test]
@@ -2210,7 +2329,11 @@ fn s36_series_suppresses_native_automatic_membership_only_for_its_targets() {
         tx.commit().unwrap();
         drop(c);
         let relations = f.library.character_relations_for_asset("asset-5").unwrap();
-        assert_eq!(relations.is_empty(), s36_series, "S36 series = {s36_series}");
+        assert_eq!(
+            relations.is_empty(),
+            s36_series,
+            "S36 series = {s36_series}"
+        );
     }
 }
 
@@ -2221,7 +2344,11 @@ fn idle_config(f: &Fixture) -> RuntimeConfig {
     std::fs::create_dir_all(&runtime).unwrap();
     let script = runtime.join("scan_worker.py");
     std::fs::write(&script, "raise SystemExit(1)\n").unwrap();
-    std::fs::write(runtime.join("s36_policy.json"), r#"{"version":"idle-gate"}"#).unwrap();
+    std::fs::write(
+        runtime.join("s36_policy.json"),
+        r#"{"version":"idle-gate"}"#,
+    )
+    .unwrap();
     let mut s36 = crate::library::character_worker::S36Publication::default();
     s36.s36_series.insert(f.series.clone());
     RuntimeConfig {
@@ -2238,14 +2365,20 @@ fn idle_config(f: &Fixture) -> RuntimeConfig {
 fn wait_for(limit: Duration, mut done: impl FnMut() -> bool) -> Duration {
     let started = Instant::now();
     while !done() {
-        assert!(started.elapsed() < limit, "condition not reached within {limit:?}");
+        assert!(
+            started.elapsed() < limit,
+            "condition not reached within {limit:?}"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
     started.elapsed()
 }
 
 fn job_state(f: &Fixture, id: &str) -> Option<String> {
-    f.library.character_autotag_job(id).unwrap().map(|job| job.state)
+    f.library
+        .character_autotag_job(id)
+        .unwrap()
+        .map(|job| job.state)
 }
 
 /// Tighten-only gate (PERF-ALL-001): library connections the idle owner opens per
@@ -2261,14 +2394,20 @@ fn idle_owner_blocks_instead_of_polling_the_queue() {
     let wake = f.library.character_wake.clone();
     let opened = || wake.owner_connections.load(Ordering::Relaxed);
     f.library.start_character_incremental(idle_config(&f));
-    wait_for(Duration::from_secs(10), || f.library.character_incremental_turns().1 >= 1);
+    wait_for(Duration::from_secs(10), || {
+        f.library.character_incremental_turns().1 >= 1
+    });
     // Let the first turn's delayed-job lookup finish so the loop is blocked.
     std::thread::sleep(Duration::from_millis(100));
 
     // Real time with the real 60 s safety timeout: no turn and no connection at all.
     let (connections, turns) = (opened(), f.library.character_incremental_turns().0);
     std::thread::sleep(Duration::from_millis(1500));
-    assert_eq!(opened() - connections, 0, "idle owner opened connections while blocked");
+    assert_eq!(
+        opened() - connections,
+        0,
+        "idle owner opened connections while blocked"
+    );
     assert_eq!(f.library.character_incremental_turns().0 - turns, 0);
 
     // Fast-forward: without new work the owner runs one turn per safety timeout, i.e.
@@ -2279,10 +2418,16 @@ fn idle_owner_blocks_instead_of_polling_the_queue() {
     for _ in 0..minutes {
         let (turns, idle) = f.library.character_incremental_turns();
         wake.notify();
-        wait_for(Duration::from_secs(5), || f.library.character_incremental_turns().1 > idle);
+        wait_for(Duration::from_secs(5), || {
+            f.library.character_incremental_turns().1 > idle
+        });
         // The delayed-job lookup follows the turn; then the loop is blocked again.
         std::thread::sleep(Duration::from_millis(100));
-        assert_eq!(f.library.character_incremental_turns(), (turns + 1, idle + 1), "an idle owner found work");
+        assert_eq!(
+            f.library.character_incremental_turns(),
+            (turns + 1, idle + 1),
+            "an idle owner found work"
+        );
     }
     let connections = opened() - connections;
     eprintln!(
@@ -2301,7 +2446,9 @@ fn idle_owner_wakes_for_new_work_unpause_retry_time_and_stop() {
     let f = Fixture::new();
     f.target("A");
     f.library.start_character_incremental(idle_config(&f));
-    wait_for(Duration::from_secs(10), || f.library.character_incremental_turns().1 >= 1);
+    wait_for(Duration::from_secs(10), || {
+        f.library.character_incremental_turns().1 >= 1
+    });
     std::thread::sleep(Duration::from_millis(100));
     // The safety timeout stays 60 s: anything below that proves a wake.
     let prompt = Duration::from_secs(2);
@@ -2313,7 +2460,9 @@ fn idle_owner_wakes_for_new_work_unpause_retry_time_and_stop() {
         character_autotag::Cause::Ingestion
     )
     .unwrap());
-    let took = wait_for(Duration::from_secs(10), || job_state(&f, "asset-5").as_deref() == Some("completed"));
+    let took = wait_for(Duration::from_secs(10), || {
+        job_state(&f, "asset-5").as_deref() == Some("completed")
+    });
     assert!(took < prompt, "queued work waited {took:?}");
 
     // Paused work stays queued and starts as soon as automation resumes.
@@ -2329,21 +2478,30 @@ fn idle_owner_wakes_for_new_work_unpause_retry_time_and_stop() {
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(job_state(&f, "asset-4").as_deref(), Some("pending"));
     f.library.set_character_incremental_paused(false).unwrap();
-    let took = wait_for(Duration::from_secs(10), || job_state(&f, "asset-4").as_deref() == Some("completed"));
+    let took = wait_for(Duration::from_secs(10), || {
+        job_state(&f, "asset-4").as_deref() == Some("completed")
+    });
     assert!(took < prompt, "resumed work waited {took:?}");
 
     // A delayed job is claimed when its retry time arrives, not at the safety timeout.
     {
         let c = f.library.connection().unwrap();
-        assert!(character_autotag::enqueue(&c, "asset-3", character_autotag::Cause::Ingestion).unwrap());
+        assert!(
+            character_autotag::enqueue(&c, "asset-3", character_autotag::Cause::Ingestion).unwrap()
+        );
         c.execute(
             "UPDATE character_autotag_jobs SET retry_at=?1 WHERE asset_id='asset-3'",
             [chrono::Utc::now().timestamp() + 2],
         )
         .unwrap();
     }
-    let took = wait_for(Duration::from_secs(10), || job_state(&f, "asset-3").as_deref() == Some("completed"));
-    assert!(took >= Duration::from_millis(900) && took < Duration::from_secs(4), "delayed job ran after {took:?}");
+    let took = wait_for(Duration::from_secs(10), || {
+        job_state(&f, "asset-3").as_deref() == Some("completed")
+    });
+    assert!(
+        took >= Duration::from_millis(900) && took < Duration::from_secs(4),
+        "delayed job ran after {took:?}"
+    );
 
     // Stop reaches a blocked owner at once.
     let stopped = Instant::now();
@@ -2351,7 +2509,11 @@ fn idle_owner_wakes_for_new_work_unpause_retry_time_and_stop() {
     wait_for(Duration::from_secs(5), || {
         !f.library.character_incremental.lock().unwrap().running
     });
-    assert!(stopped.elapsed() < Duration::from_millis(400), "stop took {:?}", stopped.elapsed());
+    assert!(
+        stopped.elapsed() < Duration::from_millis(400),
+        "stop took {:?}",
+        stopped.elapsed()
+    );
 }
 
 #[test]
@@ -2361,13 +2523,26 @@ fn review_regression_retry_due_between_claim_and_deadline_runs_immediately() {
     let retry_at = chrono::Utc::now().timestamp() + 60;
     {
         let c = f.library.connection().unwrap();
-        assert!(character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Ingestion).unwrap());
-        c.execute("UPDATE character_autotag_jobs SET retry_at=?1", [retry_at]).unwrap();
+        assert!(
+            character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Ingestion).unwrap()
+        );
+        c.execute("UPDATE character_autotag_jobs SET retry_at=?1", [retry_at])
+            .unwrap();
     }
-    assert!(f.library.claim_character_autotag_with_profile(false).unwrap().is_none());
+    assert!(f
+        .library
+        .claim_character_autotag_with_profile(false)
+        .unwrap()
+        .is_none());
     // Advance only the deadline query's clock across the retry boundary, without a write/wake.
-    let due = f.library.next_character_retry_at(false, retry_at * 1000).unwrap();
-    assert!(due.is_some(), "already-due work must not fall back to the 60-second safety sleep");
+    let due = f
+        .library
+        .next_character_retry_at(false, retry_at * 1000)
+        .unwrap();
+    assert!(
+        due.is_some(),
+        "already-due work must not fall back to the 60-second safety sleep"
+    );
     assert!(due.unwrap() <= Instant::now());
 }
 
@@ -2377,20 +2552,42 @@ fn review_regression_ineligible_retries_do_not_spin() {
     f.target("A");
     let now = chrono::Utc::now().timestamp_millis();
     let c = f.library.connection().unwrap();
-    assert!(character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Ingestion).unwrap());
+    assert!(
+        character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Ingestion).unwrap()
+    );
     drop(c);
     let execute = |sql: &str| f.library.connection().unwrap().execute(sql, []).unwrap();
     for retry in [0, now / 1000 + 60] {
-        f.library.connection().unwrap().execute("UPDATE character_autotag_jobs SET retry_at=?1", [retry]).unwrap();
+        f.library
+            .connection()
+            .unwrap()
+            .execute("UPDATE character_autotag_jobs SET retry_at=?1", [retry])
+            .unwrap();
         execute("UPDATE character_autotag_control SET paused=1");
-        assert!(f.library.next_character_retry_at(false, now).unwrap().is_none());
+        assert!(f
+            .library
+            .next_character_retry_at(false, now)
+            .unwrap()
+            .is_none());
         execute("UPDATE character_autotag_control SET paused=0, reference_refresh_paused=1");
         execute("UPDATE character_autotag_jobs SET cause='reconsideration'");
-        assert!(f.library.next_character_retry_at(false, now).unwrap().is_none());
+        assert!(f
+            .library
+            .next_character_retry_at(false, now)
+            .unwrap()
+            .is_none());
         execute("UPDATE character_autotag_control SET reference_refresh_paused=0");
-        assert!(f.library.next_character_retry_at(true, now).unwrap().is_none());
+        assert!(f
+            .library
+            .next_character_retry_at(true, now)
+            .unwrap()
+            .is_none());
         execute("UPDATE character_autotag_jobs SET cause='manual_scan'");
-        assert!(f.library.next_character_retry_at(true, now).unwrap().is_none());
+        assert!(f
+            .library
+            .next_character_retry_at(true, now)
+            .unwrap()
+            .is_none());
         execute("UPDATE character_autotag_jobs SET cause='ingestion'");
     }
 }
@@ -2402,18 +2599,36 @@ fn broad_folder_rule_is_off_by_default_and_hides_without_deleting() {
     let b = f.ready_in_series("Nested B", &f.child);
     let c = f.library.connection().unwrap();
     let root: String = c
-        .query_row("SELECT parent_id FROM classification_entries WHERE id=?1", [&f.series], |r| r.get(0))
+        .query_row(
+            "SELECT parent_id FROM classification_entries WHERE id=?1",
+            [&f.series],
+            |r| r.get(0),
+        )
         .unwrap();
-    c.execute("UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'", [&root])
-        .unwrap();
+    c.execute(
+        "UPDATE asset_classifications SET classification_id=?1 WHERE asset_id='asset-5'",
+        [&root],
+    )
+    .unwrap();
     drop(c);
     // Off (the default): no job for an image saved directly in the broad folder.
-    assert!(!f.library.character_incremental_status().unwrap().broad_folder_enabled);
+    assert!(
+        !f.library
+            .character_incremental_status()
+            .unwrap()
+            .broad_folder_enabled
+    );
     let c = f.library.connection().unwrap();
-    assert!(!character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Ingestion).unwrap());
+    assert!(
+        !character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Ingestion).unwrap()
+    );
     let jobs = |c: &rusqlite::Connection| -> Vec<String> {
-        c.prepare("SELECT state FROM character_autotag_jobs WHERE asset_id='asset-5'").unwrap()
-            .query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap()
+        c.prepare("SELECT state FROM character_autotag_jobs WHERE asset_id='asset-5'")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
     };
     assert!(jobs(&c).is_empty());
     drop(c);
@@ -2421,20 +2636,39 @@ fn broad_folder_rule_is_off_by_default_and_hides_without_deleting() {
     // On: a job; switched off before it runs, it waits unclaimed and does not count as work.
     f.library.set_character_broad_folder_scope(true).unwrap();
     let c = f.library.connection().unwrap();
-    assert!(character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Ingestion).unwrap());
+    assert!(
+        character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Ingestion).unwrap()
+    );
     drop(c);
     f.library.set_character_broad_folder_scope(false).unwrap();
     assert!(f.library.claim_character_autotag().unwrap().is_none());
-    assert!(f.library.next_character_retry_at(false, 0).unwrap().is_none());
-    assert!(!f.library.character_incremental_status().unwrap().work_active);
+    assert!(f
+        .library
+        .next_character_retry_at(false, 0)
+        .unwrap()
+        .is_none());
+    assert!(
+        !f.library
+            .character_incremental_status()
+            .unwrap()
+            .work_active
+    );
     f.library.set_character_broad_folder_scope(true).unwrap();
-    assert!(f.library.character_incremental_status().unwrap().broad_folder_enabled);
+    assert!(
+        f.library
+            .character_incremental_status()
+            .unwrap()
+            .broad_folder_enabled
+    );
     let job = f.library.claim_character_autotag().unwrap().unwrap();
 
     // Compared with both series; the competing vote keeps "A" a recommendation.
     let mut c = f.library.connection().unwrap();
     let tx = c.transaction().unwrap();
-    let context = f.library.character_autotag_context(&tx, &job, &"a".repeat(64)).unwrap();
+    let context = f
+        .library
+        .character_autotag_context(&tx, &job, &"a".repeat(64))
+        .unwrap();
     assert_eq!(context.targets.len(), 2);
     let predictions = [(&a, 6), (&b, 2)].into_iter().map(|(target, votes)| Prediction {
         target_id: target.id.clone(),
@@ -2446,20 +2680,44 @@ fn broad_folder_rule_is_off_by_default_and_hides_without_deleting() {
         },
     }).collect::<Vec<_>>();
     f.library
-        .finalize_incremental(&tx, &job, &context, &predictions, &BTreeSet::new(), &BTreeSet::new())
+        .finalize_incremental(
+            &tx,
+            &job,
+            &context,
+            &predictions,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        )
         .unwrap();
     tx.commit().unwrap();
     drop(c);
-    assert!(f.library.character_relations_for_asset("asset-5").unwrap().is_empty());
+    assert!(f
+        .library
+        .character_relations_for_asset("asset-5")
+        .unwrap()
+        .is_empty());
 
     let listed = |f: &Fixture| -> (bool, Vec<String>, bool) {
-        let page = f.library.character_review_page(super::super::character_scan::ReviewQuery {
-            series_id: f.series.clone(), target_id: Some(a.id.clone()), filter: "recommended".into(), after: None, limit: 10,
-        }).unwrap();
+        let page = f
+            .library
+            .character_review_page(super::super::character_scan::ReviewQuery {
+                series_id: f.series.clone(),
+                target_id: Some(a.id.clone()),
+                filter: "recommended".into(),
+                after: None,
+                limit: 10,
+            })
+            .unwrap();
         (
-            f.library.character_review_pending(&f.series, &a.id).unwrap(),
+            f.library
+                .character_review_pending(&f.series, &a.id)
+                .unwrap(),
             page.rows.iter().map(|row| row.asset.id.clone()).collect(),
-            f.library.b36_recommended_pairs().unwrap().iter().any(|(_, asset)| asset == "asset-5"),
+            f.library
+                .b36_recommended_pairs()
+                .unwrap()
+                .iter()
+                .any(|(_, asset)| asset == "asset-5"),
         )
     };
     assert_eq!(listed(&f), (true, vec!["asset-5".to_string()], true));
@@ -2468,7 +2726,10 @@ fn broad_folder_rule_is_off_by_default_and_hides_without_deleting() {
     f.library.set_character_broad_folder_scope(false).unwrap();
     assert_eq!(listed(&f), (false, Vec::new(), false));
     let c = f.library.connection().unwrap();
-    assert!(!character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Classification).unwrap());
+    assert!(
+        !character_autotag::enqueue(&c, "asset-5", character_autotag::Cause::Classification)
+            .unwrap()
+    );
     assert_eq!(jobs(&c), vec!["completed".to_string()]);
     drop(c);
 
@@ -2479,37 +2740,92 @@ fn broad_folder_rule_is_off_by_default_and_hides_without_deleting() {
 
 #[test]
 fn tagger_pending_blocks_native_automatic_pass_and_manual_reaccept_sticks() {
-    use crate::library::tagger_review::tests::{signals,automatic};
-    for veto in [false,true] {
-        let f=Fixture::new();let t=f.ready("Tagger");
-        add_learned_reference(&f,&t.id);
-        signals(&f,&t,if veto {0.2}else{0.9},if veto {0.2}else{0.9});
-        if veto {automatic(&f,&t);}
-        let p=f.library.preview_tagger_review().unwrap();f.library.apply_tagger_review(&p.preview_token).unwrap();
+    use crate::library::tagger_review::tests::{automatic, signals};
+    for veto in [false, true] {
+        let f = Fixture::new();
+        let t = f.ready("Tagger");
+        add_learned_reference(&f, &t.id);
+        signals(
+            &f,
+            &t,
+            if veto { 0.2 } else { 0.9 },
+            if veto { 0.2 } else { 0.9 },
+        );
+        if veto {
+            automatic(&f, &t);
+        }
+        let p = f.library.preview_tagger_review().unwrap();
+        f.library.apply_tagger_review(&p.preview_token).unwrap();
         // Registration also queues one-tagger recommendations; those remain blocked.
         if !veto {
-            f.library.connection().unwrap().execute("UPDATE character_tagger_candidates SET canary_score=0.2 WHERE target_id=?1", [&t.id]).unwrap();
+            f.library
+                .connection()
+                .unwrap()
+                .execute(
+                    "UPDATE character_tagger_candidates SET canary_score=0.2 WHERE target_id=?1",
+                    [&t.id],
+                )
+                .unwrap();
         }
-        for manual in [false,true] {
+        for manual in [false, true] {
             if manual {
-                let t=f.library.get_character_target(&t.id).unwrap();
-                f.library.record_character_decisions(crate::library::characters::DecisionRequest{
-                    target_id:t.id,expected_fingerprint:t.fingerprint,asset_ids:vec!["asset-5".into()],
-                    decision:crate::library::characters::DecisionKind::Accepted,scan_id:None,baseline_fingerprint:None,
-                }).unwrap();
+                let t = f.library.get_character_target(&t.id).unwrap();
+                f.library
+                    .record_character_decisions(crate::library::characters::DecisionRequest {
+                        target_id: t.id,
+                        expected_fingerprint: t.fingerprint,
+                        asset_ids: vec!["asset-5".into()],
+                        decision: crate::library::characters::DecisionKind::Accepted,
+                        scan_id: None,
+                        baseline_fingerprint: None,
+                    })
+                    .unwrap();
             }
-            character_autotag::enqueue(&f.library.connection().unwrap(),"asset-5",character_autotag::Cause::Reconsideration).unwrap();
-            let job=f.library.claim_character_autotag().unwrap().unwrap();
-            let mut c=f.library.connection().unwrap();let tx=c.transaction().unwrap();
-            let context=f.library.character_autotag_context(&tx,&job,&"a".repeat(64)).unwrap();
-            let prediction=Prediction{target_id:t.id.clone(),result:ScanResult{
-                asset_id:job.asset_id.clone(),content_hash:job.content_hash.clone(),state:"recommended".into(),error:None,
-                evidence:Some(json!({"passed":true,"wholeFallback":false,"queryBoxes":[[0,0,832,1216]],
-                    "evidence":[{"matchedReferences":[0,1,2,3,4,5],"referenceDistances":vec![0.05;6]}]})),
-            }};
-            f.library.finalize_incremental(&tx,&job,&context,&[prediction],&BTreeSet::new(),&BTreeSet::new()).unwrap();
-            tx.commit().unwrap();drop(c);
-            assert_eq!(!f.library.character_relations_for_asset("asset-5").unwrap().is_empty(),manual);
+            character_autotag::enqueue(
+                &f.library.connection().unwrap(),
+                "asset-5",
+                character_autotag::Cause::Reconsideration,
+            )
+            .unwrap();
+            let job = f.library.claim_character_autotag().unwrap().unwrap();
+            let mut c = f.library.connection().unwrap();
+            let tx = c.transaction().unwrap();
+            let context = f
+                .library
+                .character_autotag_context(&tx, &job, &"a".repeat(64))
+                .unwrap();
+            let prediction = Prediction {
+                target_id: t.id.clone(),
+                result: ScanResult {
+                    asset_id: job.asset_id.clone(),
+                    content_hash: job.content_hash.clone(),
+                    state: "recommended".into(),
+                    error: None,
+                    evidence: Some(
+                        json!({"passed":true,"wholeFallback":false,"queryBoxes":[[0,0,832,1216]],
+                    "evidence":[{"matchedReferences":[0,1,2,3,4,5],"referenceDistances":vec![0.05;6]}]}),
+                    ),
+                },
+            };
+            f.library
+                .finalize_incremental(
+                    &tx,
+                    &job,
+                    &context,
+                    &[prediction],
+                    &BTreeSet::new(),
+                    &BTreeSet::new(),
+                )
+                .unwrap();
+            tx.commit().unwrap();
+            drop(c);
+            assert_eq!(
+                !f.library
+                    .character_relations_for_asset("asset-5")
+                    .unwrap()
+                    .is_empty(),
+                manual
+            );
             if manual {
                 assert_eq!(f.library.connection().unwrap().query_row("SELECT origin FROM character_decisions WHERE target_id=?1 AND source_asset_id='asset-5' ORDER BY sequence DESC LIMIT 1",[&t.id],|r|r.get::<_,String>(0)).unwrap(),"manual");
             }
@@ -2539,32 +2855,81 @@ fn tagger_agreement_requires_native_acceptance_and_preserves_manual_rejection() 
         assert_eq!(f.library.tagger_review_counts().unwrap().total, 1);
         if manual_reject {
             let current = f.library.get_character_target(&t.id).unwrap();
-            f.library.record_character_decisions(crate::library::characters::DecisionRequest {
-                target_id: current.id, expected_fingerprint: current.fingerprint,
-                asset_ids: vec!["asset-5".into()], decision: crate::library::characters::DecisionKind::Rejected,
-                scan_id: None, baseline_fingerprint: None,
-            }).unwrap();
+            f.library
+                .record_character_decisions(crate::library::characters::DecisionRequest {
+                    target_id: current.id,
+                    expected_fingerprint: current.fingerprint,
+                    asset_ids: vec!["asset-5".into()],
+                    decision: crate::library::characters::DecisionKind::Rejected,
+                    scan_id: None,
+                    baseline_fingerprint: None,
+                })
+                .unwrap();
         }
-        character_autotag::enqueue(&f.library.connection().unwrap(), "asset-5", character_autotag::Cause::Reconsideration).unwrap();
+        character_autotag::enqueue(
+            &f.library.connection().unwrap(),
+            "asset-5",
+            character_autotag::Cause::Reconsideration,
+        )
+        .unwrap();
         let job = f.library.claim_character_autotag().unwrap().unwrap();
         let mut c = f.library.connection().unwrap();
         let tx = c.transaction().unwrap();
-        let context = f.library.character_autotag_context(&tx, &job, &"a".repeat(64)).unwrap();
-        let prediction = Prediction { target_id: t.id.clone(), result: ScanResult {
-            asset_id: job.asset_id.clone(), content_hash: job.content_hash.clone(), state: "recommended".into(), error: None,
-            evidence: Some(json!({"passed":native_accepts,"wholeFallback":false,"queryBoxes":[[0,0,832,1216]],
-                "evidence":[{"matchedReferences":[0,1,2,3,4,5],"referenceDistances":vec![if native_accepts {0.05} else {0.9};6]}]})),
-        }};
-        f.library.finalize_incremental(&tx, &job, &context, &[prediction], &BTreeSet::new(), &BTreeSet::new()).unwrap();
+        let context = f
+            .library
+            .character_autotag_context(&tx, &job, &"a".repeat(64))
+            .unwrap();
+        let prediction = Prediction {
+            target_id: t.id.clone(),
+            result: ScanResult {
+                asset_id: job.asset_id.clone(),
+                content_hash: job.content_hash.clone(),
+                state: "recommended".into(),
+                error: None,
+                evidence: Some(
+                    json!({"passed":native_accepts,"wholeFallback":false,"queryBoxes":[[0,0,832,1216]],
+                "evidence":[{"matchedReferences":[0,1,2,3,4,5],"referenceDistances":vec![if native_accepts {0.05} else {0.9};6]}]}),
+                ),
+            },
+        };
+        f.library
+            .finalize_incremental(
+                &tx,
+                &job,
+                &context,
+                &[prediction],
+                &BTreeSet::new(),
+                &BTreeSet::new(),
+            )
+            .unwrap();
         tx.commit().unwrap();
         drop(c);
         let accepted = pixai >= 0.85 && canary >= 0.85 && native_accepts && !manual_reject;
-        assert_eq!(!f.library.character_relations_for_asset("asset-5").unwrap().is_empty(), accepted);
-        assert_eq!(f.library.tagger_review_counts().unwrap().total, i64::from(!accepted && !manual_reject));
-        assert_eq!(f.library.tagger_review_items().unwrap().len(), usize::from(!accepted && !manual_reject));
+        assert_eq!(
+            !f.library
+                .character_relations_for_asset("asset-5")
+                .unwrap()
+                .is_empty(),
+            accepted
+        );
+        assert_eq!(
+            f.library.tagger_review_counts().unwrap().total,
+            i64::from(!accepted && !manual_reject)
+        );
+        assert_eq!(
+            f.library.tagger_review_items().unwrap().len(),
+            usize::from(!accepted && !manual_reject)
+        );
         if accepted || manual_reject {
             let decision: (String, String) = f.library.connection().unwrap().query_row("SELECT decision,origin FROM character_decisions WHERE target_id=?1 AND source_asset_id='asset-5' ORDER BY sequence DESC LIMIT 1", [&t.id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
-            assert_eq!(decision, if accepted { ("accepted".into(), "automatic".into()) } else { ("rejected".into(), "manual".into()) });
+            assert_eq!(
+                decision,
+                if accepted {
+                    ("accepted".into(), "automatic".into())
+                } else {
+                    ("rejected".into(), "manual".into())
+                }
+            );
         }
     }
 }
