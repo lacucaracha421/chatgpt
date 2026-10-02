@@ -1,3 +1,4 @@
+import {FindEntryContent} from "../shared/FindEntryContent";
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { useEffect, useId, useLayoutEffect, useRef, useState, useDeferredValue, useMemo, type KeyboardEvent } from "react";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
@@ -7,7 +8,7 @@ import { modalDialogOpen } from "./modalDialog";
 import type { ChromeSearchInfo } from "./WorkspaceChromeContext";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Button } from "../shared/ui/Button";
-import { FIND_SCOPES, findGroups, GROUP_LIMIT, matchedSpans, readRecent, rememberRecent, type FindScope } from "./findModel";
+import { FIND_SCOPES, findGroups, GROUP_LIMIT, readRecent, rememberRecent, type FindScope } from "./findModel";
 import { NAVIGATION_GROUP_LABELS, type NavigationEntry, type NavigationEntryGroup } from "./navigationEntries";
 
 export type PaletteSearch = { info: ChromeSearchInfo; apply: (query: string) => void; open: (draft: string) => void };
@@ -147,11 +148,7 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fin
                   aria-current={entry.selected ? "page" : undefined}
                   className="command-palette__option" onPointerMove={() => { if (own !== current) setActive(own); }}
                   onMouseDown={(event) => event.preventDefault()} onClick={(event) => run(entry, event.shiftKey)}>
-                  <span className="command-palette__icon" aria-hidden="true">{entry.thumbnail && !privacyMode ? <img className={entry.avatar ? "command-palette__avatar" : undefined} src={entry.thumbnail} alt="" loading="lazy" decoding="async" /> : entry.icon}</span>
-                  <span className="command-palette__label">{matchedSpans(entry.label, filteredQuery).map((span, at) => span.matched ? <mark key={at}>{span.text}</mark> : span.text)}</span>
-                  {entry.context && <span className="command-palette__meta command-palette__context">{entry.context}</span>}
-                  {entry.activity && <span className="command-palette__meta">{entry.activity}</span>}
-                  {entry.count !== undefined && <span className="command-palette__count">{entry.count.toLocaleString("ko-KR")}</span>}
+                  <FindEntryContent entry={entry} query={filteredQuery} privacy={privacyMode}/>
                 </div>;
               })}
             </div>;

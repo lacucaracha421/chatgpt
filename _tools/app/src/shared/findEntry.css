@@ -1,0 +1,8 @@
+.find-entry__media { display: grid; place-items: center; flex: none; width: var(--control-height); min-height: var(--control-height); color: var(--color-muted); }
+.find-entry__media svg { width: var(--icon-md); height: var(--icon-md); }
+.find-entry__media img { width: var(--control-height); height: calc(var(--control-height) * 1.25); object-fit: cover; border-radius: var(--radius-tile); }
+.find-entry__media img.find-entry__avatar { height: var(--control-height); border-radius: 50%; }
+.find-entry__text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.find-entry__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--type-body); }
+.find-entry__label mark { color: var(--color-accent); background: transparent; }
+.find-entry__meta { color: var(--color-muted); font-size: var(--type-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }

@@ -1,0 +1,25 @@
+/* Full-screen tablet frame; matching and row contents come from the PC find surface. */
+.tablet-find-overlay { position: fixed; inset: 0; z-index: var(--z-dialog-overlay); background: var(--color-bg); }
+.tablet-find { position: fixed; inset: 0; z-index: var(--z-dialog-content); display: flex; flex-direction: column; background: var(--color-bg); color: var(--color-text); outline: none; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+.tablet-find[data-state=open] { animation: tablet-find-in var(--motion-screen) var(--ease-standard); }
+.tablet-find[data-state=closed] { animation: tablet-find-out var(--motion-screen) var(--ease-standard); pointer-events: none; }
+.tablet-find__bar { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-6); }
+.tablet-find__bar h2 { margin: 0; font-size: var(--type-title); font-weight: 600; }
+.tablet-find__field { padding: 0 var(--space-6); }
+.tablet-find__field .ui-text-input { width: 100%; }
+.tablet-find__scopes { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: var(--space-2) var(--space-6); }
+.tablet-find__scopes .ui-button[aria-pressed=true] { color: var(--color-filter-text); background: var(--color-filter-selected); font-weight: 600; }
+.tablet-find__results { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-2) var(--space-6); }
+.tablet-find__results > [role=group] + [role=group] { margin-top: var(--space-6); }
+.tablet-find__option { display: flex; align-items: center; gap: var(--space-3); min-height: var(--row-height-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--color-border); cursor: pointer; }
+.tablet-find__option:active { background: var(--color-surface-pressed); }
+.tablet-find__option:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.tablet-find__more { width: 100%; margin-top: var(--space-2); }
+.tablet-find__empty { margin: 0; padding: var(--space-8) 0; font-size: var(--type-body); color: var(--color-faint); }
+.tablet-find__skeleton { display: grid; gap: var(--space-2); animation: tablet-find-skeleton 300ms step-end; }
+.tablet-find__skeleton .ui-skeleton { height: var(--row-height-2); }
+.tablet-find__error { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-6); color: var(--color-danger); font-size: var(--type-meta); }
+@keyframes tablet-find-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes tablet-find-out { from { transform: translateY(0); } to { transform: translateY(100%); } }
+@keyframes tablet-find-skeleton { from { visibility: hidden; } to { visibility: visible; } }
+@media (prefers-reduced-motion: reduce) { .tablet-find[data-state] { animation: none; } }

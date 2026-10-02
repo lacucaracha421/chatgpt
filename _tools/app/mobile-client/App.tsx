@@ -1,3 +1,8 @@
+import {FindContext,FindButton} from './FindContext';
+import {FindSheet} from './FindSheet';
+import {tabletFindEntries,useFindWorks,useFindNoteTitles,type FindDestination} from './findData';
+import {NotesStore} from '../src/notes/store';
+import {mobileNotesRequest} from './notesTransport';
 import {PrivateVault} from './PrivateVault';
 import {ReleaseCalendar} from './ReleaseCalendar';
 import {onVisible,visibleInterval} from './useVisibleInterval';
@@ -117,6 +122,10 @@ export function App() {
   const startedWithLocalConnection = useRef(status.configured);
   const [privacyMode] = usePrivacyMode();
   const [searchChips,setSearchChips]=useState<AssetSearchChip[]>([]);
+  const [findOpen,setFindOpen]=useState(false),[findRetry,setFindRetry]=useState(0);
+  const findStore=useMemo(()=>new NotesStore(mobileNotesRequest),[status.endpoint]);
+  const findWorks=useFindWorks(findOpen&&status.configured,status.endpoint);
+  const findNotes=useFindNoteTitles(findOpen&&status.configured,findStore);
   const [assetSearchOpen,setAssetSearchOpen]=useState(false),[searchNotice,setSearchNotice]=useState('');
   const [searchListsRequested,setSearchListsRequested]=useState(false);
   // Queued personal Collection edits are sent on start and on return, whatever screen is open.
@@ -177,15 +186,15 @@ export function App() {
   const entries=useMemo(()=>mergeLibraryEntries(classifications,characterIndex),[classifications,characterIndex]);
   const entriesRef=useRef(entries);entriesRef.current=entries;
   const characterIndexRef=useRef(characterIndex);characterIndexRef.current=characterIndex;
-  const {tree:albumTree,error:albumError,loading:albumLoading}=useAlbumTree(status.configured&&area==='assets'&&!settings&&!viewer&&page.view.tab==='library'&&(searchListsRequested||librarySegment==='albums'||!!page.view.album),indexRevision,status.endpoint);
-  const searchArtists=useLibraryArtists(assetSearchOpen,indexRevision,status.endpoint);
+  const {tree:albumTree,error:albumError,loading:albumLoading}=useAlbumTree(status.configured&&(findOpen||(area==='assets'&&!settings&&!viewer&&page.view.tab==='library'&&(searchListsRequested||librarySegment==='albums'||!!page.view.album))),indexRevision+findRetry,status.endpoint);
+  const searchArtists=useLibraryArtists(assetSearchOpen||findOpen,indexRevision,status.endpoint);
   const searchItems=useMemo(()=>assetSuggestions(entries,characterIndex,albumTree,searchArtists.artists),[entries,characterIndex,albumTree,searchArtists.artists]);
   const albumTreeRef=useRef(albumTree);albumTreeRef.current=albumTree;
   const appRef=useRef<HTMLDivElement>(null),mainRef=useRef<HTMLElement>(null);
   const scroll = useRef(0), gate = useRef(new RequestGate()), secondaryGate = useRef(new RequestGate());
   const secondaryAt = useRef(0), secondaryPending = useRef(false), capturesRef = useRef<Asset[] | null>(captures);
   capturesRef.current = captures;
-  const latest = useRef({page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, calendarOpen, selectionSize:selectedIds.size, albumBatchOpen}); latest.current = {calendarOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, selectionSize:selectedIds.size, albumBatchOpen};
+  const latest = useRef({findOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, calendarOpen, selectionSize:selectedIds.size, albumBatchOpen}); latest.current = {findOpen, calendarOpen, page, viewer, settings, status, area, viewSettings, sortOpen, filtersOpen, filterVersion, fault, similarity, vaultOpen, exchangeOpen, artistsOpen, selectionSize:selectedIds.size, albumBatchOpen};
   const clearSelection=useCallback(()=>setSelectedIds(new Set()),[]);
   const selectAsset=useCallback((id:string)=>setSelectedIds(current=>current.has(id)?current:new Set(current).add(id)),[]);
   const toggleSelectedAsset=useCallback((id:string)=>setSelectedIds(current=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next;}),[]);
@@ -568,8 +577,9 @@ export function App() {
     };
     const back = () => {
       const state = latest.current;
-      // The FAULT game covers everything, so it closes before any surface beneath it.
-      if (state.vaultOpen) {if(!vaultBack.current?.())setVaultOpen(false);}
+      // Find consumes Back before the tab or any surface it was opened over.
+      if (state.findOpen) setFindOpen(false);
+      else if (state.vaultOpen) {if(!vaultBack.current?.())setVaultOpen(false);}
       else if (state.fault) setFault(null);
       else if (state.exchangeOpen) {if (!exchangeBack.current?.()) setExchangeOpen(false);}
       else if (state.similarity) {if (!similarityBack.current?.()) setSimilarity(false);}
@@ -723,7 +733,7 @@ export function App() {
     setPage({generation:null,items:[],has_more:false,next_cursor:null,view:LIBRARY,cursor:null,previous:[],version:0,restoreScroll:0,filters:{...EMPTY_FILTERS}});
     setHomeOrigin(null); homeRestore.current = null;
     setArea('assets'); setNotesVisited(false); setCollectionsVisited(false); setCatalogVisited(false); setCharactersVisited(false);
-    setSearchChips([]);setAssetSearchOpen(false);setSearchNotice('');setSearchListsRequested(false);
+    setFindOpen(false);setSearchChips([]);setAssetSearchOpen(false);setSearchNotice('');setSearchListsRequested(false);
     setStatus(adoptConnection(next));
   };
   usePublicationCheck(status.configured&&area==='assets'&&!settings&&!viewer,'/v1/library/characters/status',characterIndex?.revision,(_reply,changed)=>{if(changed)setIndexRevision(n=>n+1);});
@@ -814,9 +824,29 @@ export function App() {
       <Button type="button" size="icon" variant="ghost" className="top-bar__options" aria-label="보기 옵션" onClick={()=>{setOptionsScope(page.view.album?page.items:[]);setSortOpen(false);setViewSettings(true);}}><Squares2X2Icon aria-hidden="true"/></Button>
     </>}/>;
   const revisitToolbar=page.view.tab==='library'&&!page.view.root&&!page.view.characters&&page.view.revisit&&<TopBar className="library-header" loading={busy&&'목록 불러오는 중'} back={{label:'뒤로',onClick:()=>window.dispatchEvent(new Event('lakomics-back'))}} crumbs={libraryCrumbNode} title={page.view.title} count={libraryCount}/>;
-  return <div className="mobile-app" ref={appRef}>
+  const findNavigate=(destination:FindDestination)=>{
+    closeArtists();setHomeOrigin(null);
+    // Settings is an overlay; picks beneath it must become visible immediately.
+    if(destination.kind!=='screen'||destination.screen!=='settings')setSettings(false);
+    if(destination.kind==='work')openCollections({kind:'work',id:destination.id});
+    else if(destination.kind==='artist'){setArea('assets');openArtist(destination.artist);}
+    else if(destination.kind==='note'){
+      setNotesVisited(true);setArea('notes');setNoteRequest(current=>({id:destination.id,key:(current?.key??0)+1}));
+    }else if(destination.kind==='place'){setArea('assets');select(destination.view);}
+    else if(destination.screen==='home')openHome();
+    else if(destination.screen==='assets')openLibrary();
+    else if(destination.screen==='settings')setSettings(true);
+    else {
+      setArea(destination.screen);
+      if(destination.screen==='collections')setCollectionsVisited(true);
+      if(destination.screen==='catalog')setCatalogVisited(true);
+      if(destination.screen==='notes')setNotesVisited(true);
+    }
+  };
+  const findEntries=tabletFindEntries({works:findWorks.works,artists:searchArtists.artists,notes:findNotes.notes,folders:entries,albums:albumTree,navigate:findNavigate});
+  return <FindContext.Provider value={()=>setFindOpen(true)}><div className="mobile-app" ref={appRef}>
     {/* Every configured area except Home draws its own title bar. */}
-    {!(status.configured&&(area!=='assets'||page.view.tab==='library')||artistsOpen)&&<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&vaultPresent&&<IconButton label="비밀 보관함 열기" icon={LockClosedIcon} onClick={()=>setVaultOpen(true)}/>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<span className="header-action-badge"><IconButton label={exchangeLabel} icon={ArrowsUpDownIcon} onClick={()=>setExchangeOpen(true)}/>{exchangeBadge&&<span className="header-badge" aria-hidden="true">{exchangeBadge}</span>}</span>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={()=>setSettings(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>}
+    {!(status.configured&&(area!=='assets'||page.view.tab==='library')||artistsOpen)&&<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{status.configured&&area==='assets'&&page.view.tab==='home'&&<FindButton/>}{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&vaultPresent&&<IconButton label="비밀 보관함 열기" icon={LockClosedIcon} onClick={()=>setVaultOpen(true)}/>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<span className="header-action-badge"><IconButton label={exchangeLabel} icon={ArrowsUpDownIcon} onClick={()=>setExchangeOpen(true)}/>{exchangeBadge&&<span className="header-badge" aria-hidden="true">{exchangeBadge}</span>}</span>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={()=>setSettings(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>}
     {status.configured ? <div className="app-body" data-active-tab={area==='assets'?page.view.tab:area}>
       <main className="library-main" ref={mainRef} style={{display:area!=='assets'||artistsOpen?'none':undefined}}>
         {page.view.tab==='home'&&<HeaderTools active={area==='assets'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2></div></HeaderTools>}
@@ -849,10 +879,11 @@ export function App() {
       {calendarOpen && <div className="release-calendar-layer"><ReleaseCalendar onClose={closeCalendar} initialKind={calendarKind} backRef={calendarBack}/></div>}
       {artistsOpen && <Artists endpoint={status.endpoint} backRef={artistsBack} initialArtist={artistSelection ?? undefined} onClose={closeArtists} paused={settings||!!viewer} onOpenViewer={(items,index) => setViewer({items,index})}/>}
       {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest} onReturnHome={homeOrigin?.area==='collections'?returnHome:undefined}/>}
-      {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack} request={noteRequest} onReturnHome={homeOrigin?.area==='notes'?returnHome:undefined} onHomeEntryGone={homeOrigin?.area==='notes'?forgetHome:undefined}/>}
+      {notesVisited && <Notes findStore={findStore} key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack} request={noteRequest} onReturnHome={homeOrigin?.area==='notes'?returnHome:undefined} onHomeEntryGone={homeOrigin?.area==='notes'?forgetHome:undefined}/>}
       {catalogVisited && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} paused={settings || !!viewer} backRef={catalogBack} openDuplicates={duplicateRequest} onReturnHome={homeOrigin?.area==='catalog'?returnHome:undefined}/>}
     </div> : <main className="welcome"><Mark/><span className="eyebrow">YOUR ARCHIVE, WITH YOU</span><h1>어디서든,<br/>나의 라이브러리.</h1><p>보관한 이미지와 영상을 감상하고,<br/>다른 앱에 첨부할 때도 바로 찾아보세요.</p><Button variant="primary" disabled={checking} onClick={() => setSettings(true)}>{checking ? '연결 확인 중' : '라이브러리 연결'}<ChevronRightIcon/></Button>{error && <p className="error-message" role="alert">{error}</p>}<span className="welcome-footer">LAKOMICS <span>／</span> MOBILE</span></main>}
     {status.configured && <nav className="bottom-nav" aria-label="주요 탐색"><button className={area==='assets' && page.view.tab === 'home' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'home' ? 'page' : undefined} onClick={()=>{closeArtists();openHome();}}><HomeIcon/><span>홈</span></button><button className={area==='assets' && page.view.tab === 'library' ? 'active' : ''} aria-current={area==='assets' && page.view.tab === 'library' ? 'page' : undefined} onClick={()=>{closeArtists();setHomeOrigin(null);openLibrary();}}><PhotoIcon aria-hidden="true"/><span>에셋</span></button><button className={area==='collections'?'active':''} aria-current={area==='collections'?'page':undefined} onClick={()=>{closeArtists();setHomeOrigin(null);setCollectionsVisited(true);setArea('collections');}}><RectangleStackIcon/><span>컬렉션</span></button><button className={area==='catalog'?'active':''} aria-current={area==='catalog'?'page':undefined} onClick={()=>{closeArtists();setHomeOrigin(null);setCatalogVisited(true);setArea('catalog');}}><BookOpenIcon aria-hidden="true"/><span>카탈로그</span></button><button className={area==='notes'?'active':''} aria-current={area==='notes'?'page':undefined} onClick={()=>{closeArtists();setHomeOrigin(null);setNotesVisited(true);setArea('notes');}}><PencilSquareIcon aria-hidden="true"/><span>메모</span></button></nav>}
+    {status.configured&&<FindSheet open={findOpen} onClose={()=>setFindOpen(false)} entries={findEntries} endpoint={status.endpoint} privacy={privacyMode} loading={findWorks.loading||findNotes.loading||albumLoading||searchArtists.state==='loading'} error={findWorks.error||findNotes.error||albumError||searchArtists.error} onRetry={()=>{setFindRetry(value=>value+1);findWorks.retry();searchArtists.retry();void findStore.load();}}/>}
     {sortOpen&&<BottomSheet title="정렬" onClose={()=>setSortOpen(false)}><div role="radiogroup" aria-label="정렬">{ASSET_SORTS.map(sort=><button key={sort} className="sheet-option" role="radio" aria-checked={sortOf(filters)===sort} onClick={()=>applySort(sort)}>{SORT_LABELS[sort]}<span className="radio-dot"/></button>)}</div></BottomSheet>}
     {viewSettings&&<BottomSheet title="보기 옵션" onClose={()=>setViewSettings(false)}><div className="view-options-host" ref={setOptionsHost}/><StepSlider className="view-options-density" label="썸네일 크기" count={DENSITIES.length} index={densityIndex(density)} defaultIndex={densityIndex(DEFAULT_DENSITY)} valueText={index=>DENSITIES[index]} onChange={index=>{const next=densityOf(index);setDensity(next);store('lakomics.mobile.density',next);}}/>{faultCandidates(optionsScope).length>0&&<button className="sheet-option" onClick={()=>{setViewSettings(false);setFault(optionsScope);}}>FAULT로 플레이<PlayIcon aria-hidden="true" width={18} height={18}/></button>}</BottomSheet>}
     {albumBatchOpen&&<AlbumBatchSheet assetIds={albumBatchAssetIds} open onClose={closeAlbumBatch} onComplete={clearSelection}/>}
@@ -866,5 +897,5 @@ export function App() {
     {!viewer && trash.snackbar}
     {exchangeOpen && status.configured && <Exchange snapshot={exchange.snapshot} onSnapshot={exchange.setSnapshot} backRef={exchangeBack} onClose={()=>setExchangeOpen(false)}/>}
     {exchange.toast && status.configured && !viewer && !fault && !vaultOpen && <div className="exchange-toast" role="status" key={exchange.toast.key}><span>{exchange.toast.text}</span><Button variant="ghost" onClick={()=>{exchange.dismissToast();setExchangeOpen(true);}}>보기</Button></div>}
-  </div>;
+  </div></FindContext.Provider>;
 }

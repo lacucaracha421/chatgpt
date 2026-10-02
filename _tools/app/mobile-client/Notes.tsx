@@ -8,7 +8,6 @@ import {PinIcon} from './PinIcon';
 import {Button,IconButton,SectionLabel,SegmentedControl,TextInput} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {usePullToRefresh} from './usePullToRefresh';
-import {native,errorText} from './transport';
 import {useLevelMotion} from './motion';
 import {checklistMarkdown,labelKey,NOTE_COLORS,NOTE_LIMITS,noteColorValue,noteLimitProblem,normalizeLabel,type NoteKind} from '../src/notes/model';
 import {MemoEditor} from '../src/notes/memo/MemoEditor';
@@ -32,17 +31,8 @@ export type MobileNote=Note;
 export const SECRET_IDLE_MS=5*60_000;
 const SECRET_TOUCH_MS=60_000;
 
-/**
- * The PC notes store drives the tablet too (same queue, rebase, keep-both and secret-lock
- * semantics); only its transport differs. Native errors reach it as their Korean text, which
- * is what the store shows and matches (the PIN prompt texts).
- */
-const OPERATIONS:Record<string,string>={state:'notesState',unlock:'notesUnlock',save:'notesSave',sync:'notesSync',secretStatus:'notesSecretStatus',secretSetPin:'notesSecretSetPin',secretUnlock:'notesSecretUnlock',secretResetPin:'notesSecretResetPin',secretLock:'notesSecretLock',secretTouch:'notesSecretTouch',dismissConflictCopy:'notesDismissConflictCopy',recoveryKey:'notesRecoveryKey',ledgerMonthId:'notesLedgerMonthId'};
-export function mobileNotesRequest<T>(operation:string,input:unknown={}):Promise<T> {
-  const op=OPERATIONS[operation];
-  if(!op)return Promise.reject('이 기기에서는 지원하지 않는 메모 작업입니다.');
-  return native<T>(op,input as Record<string,unknown>).catch((reason:unknown)=>{throw errorText(reason)||'메모 작업을 완료하지 못했습니다. 작성 내용은 유지됩니다.';});
-}
+import {mobileNotesRequest} from './notesTransport';
+export {mobileNotesRequest} from './notesTransport';
 
 type Scope='all'|'archive'|'trash';
 type Sheet='new'|'color'|'more'|'list'|'recovery'|null;
@@ -120,8 +110,8 @@ function RecoveryKey({store}:{store:NotesStore}) {
 /** `onReturnHome`: set while a note was opened from Home; leaving that note returns there.
  *  `onHomeEntryGone`: called when that note is trashed or the list is used instead, so App forgets
  *  the Home origin and Notes behaves like a normal tab visit from then on. */
-export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{active:boolean;backRef:MutableRefObject<(()=>boolean)|null>;request?:{id:string;key:number}|null;onReturnHome?:()=>void;onHomeEntryGone?:()=>void}) {
-  const [store]=useState(()=>new NotesStore(mobileNotesRequest));
+export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findStore}:{active:boolean;findStore?:NotesStore;backRef:MutableRefObject<(()=>boolean)|null>;request?:{id:string;key:number}|null;onReturnHome?:()=>void;onHomeEntryGone?:()=>void}) {
+  const [store]=useState(()=>findStore??new NotesStore(mobileNotesRequest));
   const state=useSyncExternalStore(store.subscribe,store.snapshot);
   const [key,setKey]=useState('');
   const [selected,setSelected]=useState<string|null>(null),[scope,setScope]=useState<Scope>('all'),[label,setLabel]=useState<string|null>(null),[query,setQuery]=useState(''),[kindFilter,setKindFilter]=useState<NoteKindFilter>('all');
@@ -275,8 +265,8 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   const memoTasks=memoItems(parseMemo(memoSource)).filter(item=>item.task);
   const footer=note&&!isSecret(note)?memoEditingMode==='todo'?`${memoTasks.filter(item=>item.done).length}/${memoTasks.length} 완료`:`${memoSource.length.toLocaleString()}자`:null;
   return <section ref={section} className={`mobile-notes ${editing?'note-open':''}`} style={{display:active?undefined:'none',maxHeight:selected&&note?editorHeight:undefined}} aria-label="메모" onCompositionStartCapture={()=>setCompositionNote(currentNote)} onCompositionEndCapture={()=>setCompositionNote(null)}>
-    {!state.ready?<TopBar title="메모" loading="메모 불러오는 중"/>:!state.unlocked?<>
-      <TopBar title="메모"/>
+    {!state.ready?<TopBar find title="메모" loading="메모 불러오는 중"/>:!state.unlocked?<>
+      <TopBar find title="메모"/>
       <form className="notes-unlock" onSubmit={event=>{event.preventDefault();void store.unlock(key).then(ok=>{if(ok)setKey('');});}}><h2>메모 연결</h2><p>PC 메모에서 사용하는 복구 키를 한 번 입력하세요.</p><input type="password" aria-label="메모 복구 키" value={key} autoComplete="off" spellCheck={false} autoCapitalize="none" onChange={event=>setKey(event.target.value)}/><Button type="submit" variant="primary" disabled={key.trim().length!==64}>메모 열기</Button></form>
     </>:null}
     {state.ready&&state.unlocked&&creatingSecret&&!note&&<>
@@ -319,7 +309,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
     <div className="notes-list-view" style={{display:state.ready&&state.unlocked&&!editing?undefined:'none'}}>
       {scope!=='all'
         ?<header ref={kinds.barRef} className="notes-top is-sub"><IconButton label="메모 목록으로" icon={ArrowLeftIcon} onClick={()=>setScope('all')}/><h1>{kinds.title(trash?'휴지통':'보관함')}<span className="numeric muted">{trash?trashed:archived}</span></h1></header>
-        :<TopBar barRef={kinds.barRef} title={kinds.title('메모')} actions={<><span className="notes-save-state" role="status">{status}</span>{syncButton}<IconButton label="메모 목록 더보기" icon={EllipsisHorizontalIcon} onClick={()=>setSheet('list')}/></>}/>}
+        :<TopBar find barRef={kinds.barRef} title={kinds.title('메모')} actions={<><span className="notes-save-state" role="status">{status}</span>{syncButton}<IconButton label="메모 목록 더보기" icon={EllipsisHorizontalIcon} onClick={()=>setSheet('list')}/></>}/>}
       {kinds.shade}
       <div ref={list} className="notes-scroll">
         {pull}

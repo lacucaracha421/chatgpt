@@ -7,7 +7,7 @@ import { notesStore, type Note } from "../notes/store";
 import { BookOpenIcon, NoteIcon, PersonIcon } from "../shared/ui/ArchiveIcons";
 import type { NavigationEntry } from "./navigationEntries";
 
-const TYPE_LABEL = { game: "게임", manga: "만화", movie: "영화", av: "AV" };
+import {FIND_WORK_TYPE_LABEL} from "../shared/findEntries";
 /** Only project titles; never copy note bodies, fields, labels or checklist content into the index. */
 export function noteTitleEntries(notes: Pick<Note, "id" | "title" | "type" | "deleted">[], onNavigate: (view: AssetView) => void): NavigationEntry[] {
   return notes.filter(note => !note.deleted && note.type !== "ledger-month").map(note => ({
@@ -18,7 +18,7 @@ export function noteTitleEntries(notes: Pick<Note, "id" | "title" | "type" | "de
 export function workEntries(works: CollectionSummary[], onNavigate: (view: AssetView) => void): NavigationEntry[] {
   return works.map(work => ({
     id: `work-${work.id}`, group: "work", label: work.name, keywords: work.originalTitle ? [work.originalTitle] : [],
-    context: TYPE_LABEL[work.type], icon: <BookOpenIcon />, thumbnail: work.coverAssetId ? thumbnailUrl(work.coverAssetId) : undefined,
+    context: FIND_WORK_TYPE_LABEL[work.type], icon: <BookOpenIcon />, thumbnail: work.coverAssetId ? thumbnailUrl(work.coverAssetId) : undefined,
     run: () => onNavigate({ kind: "collection", collectionId: work.id }),
   }));
 }

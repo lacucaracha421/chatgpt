@@ -42,7 +42,7 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
   const cacheValue = cache ? `${(cache.bytes/1024/1024).toFixed(1)} MB / ${(cache.limit/1024/1024/1024).toFixed(0)} GB · ${(cache.count ?? 0).toLocaleString('ko-KR')}개` : '사용량 확인 중…';
 
   return <div className="settings-screen">
-    <TopBar back={{label:'홈으로', onClick:onClose}} title="설정" />
+    <TopBar find back={{label:'홈으로', onClick:onClose}} title="설정" />
     <main className="settings-screen__scroll" aria-label="설정 항목">
       <div className="settings-screen__content">
         <SettingsGroup title="연결">

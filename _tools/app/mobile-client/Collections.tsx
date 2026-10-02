@@ -540,7 +540,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
           <MagnifyingGlassIcon aria-hidden="true"/><input aria-label="컬렉션 검색" type="search" enterKeyHint="search" autoFocus={searchOpen} placeholder={`제목이나 ${makerLabels[type]} 찾기`} value={query} onChange={event=>setQuery(event.target.value)}/>
           {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
         </form></TopBarSearch>
-        :<TopBar barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} actions={tab!=='av'?<SearchButton onClick={()=>setSearchOpen(true)}/>:undefined}/>;
+        :<TopBar find={tab==='av'} barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} actions={tab!=='av'?<SearchButton onClick={()=>setSearchOpen(true)}/>:undefined}/>;
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
   const unpublishedNotice=<EmptyState icon={RectangleStackIcon} title="컬렉션이 아직 공유되지 않았습니다" />;
 
