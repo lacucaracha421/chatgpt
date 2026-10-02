@@ -251,7 +251,7 @@ describe("CollectionBrowser", () => {
     expect(entry).toHaveTextContent("신간3");
     expect(entry.querySelector(".is-new")).toHaveTextContent("3");
     expect(entry).not.toHaveAttribute("aria-current");
-    expect(shortcuts.closest(".ui-section-bar__extra")?.parentElement).toBe(screen.getByRole("radiogroup", { name: "컬렉션 유형" }).parentElement);
+    expect(shortcuts.closest(".ui-section-bar__trailing")?.parentElement).toBe(screen.getByRole("radiogroup", { name: "컬렉션 유형" }).parentElement);
     await userEvent.setup().click(entry);
     expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "manga", showcase: false, releaseProvider: "kakao" });
   });
@@ -278,18 +278,32 @@ describe("CollectionBrowser", () => {
     expect(screen.queryByRole("button", { name: "정렬" })).not.toBeInTheDocument();
   });
 
-  it.each(["game", "movie", "manga", "av"] as const)("shows only the %s shortcuts, with quiet zero counts and no selection", async typeFilter => {
+  it.each(["game", "movie", "manga", "av"] as const)("shows only the %s shortcuts, in the right group with quiet zero counts and a Showcase toggle", async typeFilter => {
     const onViewChange = vi.fn();
     renderBrowser({ collections: [{ ...sample, type: typeFilter, showcase: true }], typeFilter, showcase: false, onViewChange });
     const shortcuts = screen.getByRole("group", { name: "컬렉션 바로가기" });
-    expect(shortcuts).toHaveClass("ui-segmented", "ui-segmented--full-width");
+    expect(shortcuts.closest(".ui-section-bar__trailing")).not.toBeNull();
+    expect(document.querySelector(".ui-section-bar__extra")).toBeNull();
+    expect(shortcuts.nextElementSibling).toHaveClass("collection-shortcuts__divider");
+    expect(shortcuts.parentElement?.lastElementChild).toHaveTextContent("보기");
     expect(within(shortcuts).getAllByRole("button").map(button => button.getAttribute("aria-label"))).toEqual(typeFilter === "av" ? ["쇼케이스 1"] : ["쇼케이스 1", typeFilter === "manga" ? "신간 보기" : "발매 캘린더 보기"]);
-    expect(shortcuts.querySelector(".is-new, .ui-segmented__thumb, [aria-checked], [aria-pressed], [aria-current]")).toBeNull();
+    expect(shortcuts.querySelector(".is-new, .ui-segmented__thumb, [aria-checked], [aria-current]")).toBeNull();
     const showcase = within(shortcuts).getByRole("button", { name: "쇼케이스 1" });
+    expect(showcase).toHaveAttribute("aria-pressed", "false");
     showcase.focus();
     await userEvent.keyboard("{Enter}");
     expect(onViewChange).toHaveBeenCalledWith({ kind: "collections", typeFilter, showcase: true });
     expect(document.querySelector(".collection-browser__showcase-row")).toBeNull();
+  });
+
+  it("marks Showcase pressed and toggles back to the library with the keyboard", async () => {
+    const onViewChange = vi.fn();
+    renderBrowser({ collections: [{ ...sample, showcase: true }], typeFilter: "game", showcase: true, onViewChange });
+    const button = screen.getByRole("button", { name: "쇼케이스 1" });
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    button.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "game", showcase: false });
   });
 
   it("keeps the manual update check in the 신간 view and explains an empty list", async () => {

@@ -78,7 +78,7 @@ export function collectionCoverUrl(collection: CollectionSummary): string | null
 
 /**
  * The Collections browser. The section bar under the top bar holds the types with sort, rating and
- * view controls at its right end and shortcuts in a second row. The list spans the workspace
+ * shortcuts followed by view controls at its right end. The list spans the workspace
  * beside the rail; shortcuts open the existing news views and paged Showcase exhibition.
  */
 export function CollectionBrowser({
@@ -294,18 +294,18 @@ export function CollectionBrowser({
 
   const inbox = Boolean(releaseProvider) || releaseCalendar;
   const libraryView = !inbox && !showcase;
-  const shortcuts = <div className="ui-segmented ui-segmented--full-width collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
-    <button type="button" className="ui-segmented__cell" aria-label={`쇼케이스 ${showcaseItems.length.toLocaleString()}`} onClick={() => setShowcase(true)}>
-      <StarIcon aria-hidden="true" />쇼케이스<span className="collection-shortcuts__count">{showcaseItems.length.toLocaleString()}</span>
-    </button>
-    {(typeFilter === "game" || typeFilter === "movie") && <button type="button" className="ui-segmented__cell"
+  const shortcuts = <div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
+    <Button variant="quiet" size="sm" aria-pressed={showcase} aria-label={`쇼케이스 ${showcaseItems.length.toLocaleString()}`} onClick={() => setShowcase(!showcase)}>
+      <StarIcon aria-hidden="true" /><span className="collection-shortcuts__label">쇼케이스</span><span className="collection-shortcuts__count">{showcaseItems.length.toLocaleString()}</span>
+    </Button>
+    {(typeFilter === "game" || typeFilter === "movie") && <Button variant="quiet" size="sm"
       aria-label={wishlistUnread > 0 ? `발매 캘린더 보기, 관심 목록 새 알림 ${wishlistUnread.toLocaleString()}개` : "발매 캘린더 보기"} onClick={openCalendar}>
-      <CalendarIcon aria-hidden="true" />발매 캘린더{wishlistUnread > 0 && <span className="collection-shortcuts__count is-new" aria-hidden="true">{wishlistUnread.toLocaleString()}</span>}
-    </button>}
-    {typeFilter === "manga" && <button type="button" className="ui-segmented__cell"
+      <CalendarIcon aria-hidden="true" /><span className="collection-shortcuts__label">발매 캘린더</span>{wishlistUnread > 0 && <span className="collection-shortcuts__count is-new" aria-hidden="true">{wishlistUnread.toLocaleString()}</span>}
+    </Button>}
+    {typeFilter === "manga" && <Button variant="quiet" size="sm"
       aria-label={unreadTotal > 0 ? `신간 보기, 새 알림 ${unreadTotal.toLocaleString()}개` : "신간 보기"} onClick={() => openInbox("kakao")}>
-      <BellIcon aria-hidden="true" />신간{unreadTotal > 0 && <span className="collection-shortcuts__count is-new" aria-hidden="true">{unreadTotal.toLocaleString()}</span>}
-    </button>}
+      <BellIcon aria-hidden="true" /><span className="collection-shortcuts__label">신간</span>{unreadTotal > 0 && <span className="collection-shortcuts__count is-new" aria-hidden="true">{unreadTotal.toLocaleString()}</span>}
+    </Button>}
   </div>;
   const avCount = avInbox.items.length;
   const typeOptions = TYPES.map(value => value === "av" && avCount > 0
@@ -352,7 +352,7 @@ export function CollectionBrowser({
     </span>}
   </div> : undefined;
 
-  const sectionDrop = useSectionDrop({ label: "컬렉션 유형", options: typeOptions, value: typeFilter, onChange: setTypeFilter, trailing: viewControls, extra: shortcuts }, !inbox, "컬렉션");
+  const sectionDrop = useSectionDrop({ label: "컬렉션 유형", options: typeOptions, value: typeFilter, onChange: setTypeFilter, trailing: <>{shortcuts}<span className="collection-shortcuts__divider" aria-hidden="true" />{viewControls}</> }, !inbox, "컬렉션");
 
   const chrome: ViewChromeSpec = {
     actions: collectionActions,

@@ -1,84 +1,49 @@
-import {cleanup, fireEvent, render, screen} from '@testing-library/react';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import type {Asset} from './types';
+import {act, cleanup, fireEvent, render, screen} from '@testing-library/react';
+import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {ViewerFilmstrip} from './ViewerFilmstrip';
-
-const assets = Array.from({length: 100}, (_, index) => ({
-  id: `asset-${index}`,
-  kind: 'image',
-  preview: `https://test.invalid/thumb-${index}`,
-}) satisfies Asset);
-
-beforeEach(() => {
-  Object.defineProperty(window, 'matchMedia', {
-    configurable: true,
-    value: vi.fn(() => ({matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn()})),
-  });
+import type {Asset} from './types';
+const load = vi.hoisted(() => vi.fn());
+vi.mock('./media', () => ({loadThumbnail:load}));
+const assets: Asset[] = Array.from({length:100}, (_, i) => ({id:`asset-${i}`,kind:'image',preview:`thumb:${i}`,width:100,height:200}));
+beforeEach(() => {vi.stubGlobal('matchMedia', () => ({matches:true}));});
+afterEach(() => {cleanup();vi.unstubAllGlobals();vi.clearAllMocks();});
+it('bounds the visible window even after distant navigation', () => {
+  const props = {items:assets,onIndex:vi.fn()};
+  const view = render(<ViewerFilmstrip {...props} index={50}/>);
+  expect(screen.getAllByRole('button').length).toBeLessThan(40);
+  view.rerender(<ViewerFilmstrip {...props} index={90}/>);
+  expect(screen.getAllByRole('button').length).toBeLessThan(40);
+  expect(screen.queryByRole('button',{name:'51번째 자산 보기'})).toBeNull();
+  expect(screen.getByRole('button',{name:'91번째 자산 보기'}).getAttribute('aria-current')).toBe('true');
 });
-
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
+it('jumps on a tap and reports touch ownership', () => {
+  const onIndex = vi.fn(), onInteractionChange = vi.fn();
+  render(<ViewerFilmstrip items={assets} index={50} onIndex={onIndex} onInteractionChange={onInteractionChange}/>);
+  const button = screen.getByRole('button',{name:'52번째 자산 보기'});
+  fireEvent.pointerDown(button,{pointerId:1,clientX:100,clientY:20});
+  fireEvent.pointerUp(button,{pointerId:1,clientX:100,clientY:20});
+  fireEvent.click(button);
+  expect(onIndex).toHaveBeenCalledWith(51);
+  expect(onInteractionChange.mock.calls).toEqual([[true],[false]]);
 });
-
-describe('ViewerFilmstrip', () => {
-  it('renders a bounded window and grows it when the native scroller reaches an edge', () => {
-    render(<ViewerFilmstrip items={assets} index={50} onIndex={() => {}}/>);
-    const strip = screen.getByRole('navigation', {name: '주변 자산'});
-    expect(strip.querySelectorAll('button')).toHaveLength(61);
-
-    Object.defineProperties(strip, {
-      clientWidth: {configurable: true, value: 400},
-      scrollWidth: {configurable: true, value: 4_000},
-      scrollLeft: {configurable: true, value: 3_600},
-    });
-    fireEvent.scroll(strip);
-
-    expect(strip.querySelectorAll('button').length).toBeGreaterThan(61);
-  });
-
-  it('smoothly centres the current thumbnail when the current item changes', () => {
-    const scrollTo = vi.fn();
-    const view = render(<ViewerFilmstrip items={assets} index={50} onIndex={() => {}}/>);
-    const strip = screen.getByRole('navigation', {name: '주변 자산'});
-    Object.defineProperty(strip, 'clientWidth', {configurable: true, value: 400});
-    Object.defineProperty(strip, 'scrollWidth', {configurable: true, value: 4_000});
-    Object.defineProperty(strip, 'scrollTo', {configurable: true, value: scrollTo});
-    scrollTo.mockClear();
-
-    view.rerender(<ViewerFilmstrip items={assets} index={51} onIndex={() => {}}/>);
-
-    expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({behavior: 'smooth'}));
-  });
-
-  it('does not change the current item after a drag, but a tap jumps to the thumbnail', () => {
-    const onIndex = vi.fn();
-    render(<ViewerFilmstrip items={assets} index={50} onIndex={onIndex}/>);
-    const strip = screen.getByRole('navigation', {name: '주변 자산'});
-    const dragged = screen.getByRole('button', {name: '46번째 자산 보기'});
-
-    fireEvent.pointerDown(dragged, {pointerId: 1, clientX: 100, clientY: 20});
-    fireEvent.pointerMove(strip, {pointerId: 1, clientX: 60, clientY: 20});
-    fireEvent.pointerUp(strip, {pointerId: 1, clientX: 60, clientY: 20});
-    fireEvent.click(dragged);
-    expect(onIndex).not.toHaveBeenCalled();
-
-    const tapped = screen.getByRole('button', {name: '47번째 자산 보기'});
-    fireEvent.pointerDown(tapped, {pointerId: 2, clientX: 100, clientY: 20});
-    fireEvent.pointerUp(tapped, {pointerId: 2, clientX: 101, clientY: 20});
-    fireEvent.click(tapped);
-    expect(onIndex).toHaveBeenCalledWith(46);
-  });
-
-  it('reports touch ownership until the finger leaves the strip', () => {
-    const onInteractionChange = vi.fn();
-    render(<ViewerFilmstrip items={assets} index={50} onIndex={() => {}} onInteractionChange={onInteractionChange}/>);
-    const thumb = screen.getByRole('button', {name: '51번째 자산 보기'});
-
-    fireEvent.pointerDown(thumb, {pointerId: 3, clientX: 100, clientY: 20});
-    fireEvent.pointerUp(thumb, {pointerId: 3, clientX: 100, clientY: 20});
-
-    expect(onInteractionChange).toHaveBeenNthCalledWith(1, true);
-    expect(onInteractionChange).toHaveBeenLastCalledWith(false);
-  });
+it('accepts upward swipes on the bottom strip and includes video neighbours', () => {
+  const onSwipeUp = vi.fn();
+  render(<ViewerFilmstrip items={[{...assets[0],kind:'video'},assets[1]]} index={0} onIndex={()=>{}} onSwipeUp={onSwipeUp}/>);
+  const strip=screen.getByRole('navigation');
+  fireEvent.pointerDown(strip,{pointerId:1,clientX:100,clientY:100});
+  fireEvent.pointerMove(strip,{pointerId:1,clientX:100,clientY:20});
+  fireEvent.pointerUp(strip,{pointerId:1,clientX:100,clientY:20});
+  expect(onSwipeUp).toHaveBeenCalledOnce();
+});
+it('reuses loaded thumbnails when virtual items remount', async () => {
+  load.mockResolvedValue({preview:'cached:unique'});
+  const many=assets.map((asset,i)=>({...asset,id:`cached-${i}`,preview:undefined}));
+  const props={items:many,onIndex:()=>{}};
+  const view=render(<ViewerFilmstrip {...props} index={50}/>);
+  await act(async()=>{await Promise.resolve();});
+  const count=load.mock.calls.filter(([asset])=>asset.id==='cached-50').length;
+  view.rerender(<ViewerFilmstrip {...props} index={90}/>);
+  await act(async()=>{await Promise.resolve();});
+  view.rerender(<ViewerFilmstrip {...props} index={50}/>);
+  expect(load.mock.calls.filter(([asset])=>asset.id==='cached-50')).toHaveLength(count);
 });

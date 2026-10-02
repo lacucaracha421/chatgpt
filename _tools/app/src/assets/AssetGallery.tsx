@@ -1,3 +1,4 @@
+import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { MagnifyingGlassPlusIcon } from "@heroicons/react/24/outline";
 import { HeartIcon } from "@heroicons/react/24/solid";
@@ -352,6 +353,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
   const inRangeIds = new Set(inRange.map(tile => tile.asset.id));
   const mountedTiles = positionedTiles.filter(tile => retainedIds.has(tile.asset.id) || inRangeIds.has(tile.asset.id));
   useLayoutEffect(() => { paintedRef.current = { scopeKey, scrollTop, ids: new Set(mountedTiles.map(tile => tile.asset.id)) }; });
+  useFirstAppearance(scrollRef, items.length, true, `asset-gallery:${mediaSource}`);
   return <div className={`asset-gallery asset-gallery--${layout}`} data-per-row={perRow}>
     <div
       ref={scrollRef}

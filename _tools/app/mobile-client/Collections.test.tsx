@@ -413,18 +413,19 @@ describe('read-only collections',()=>{
     expect(within(screen.getByRole('dialog')).getByRole('button',{name:'미평가만'}).getAttribute('aria-pressed')).toBe('false');
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'닫기'}));
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.click(screen.getByRole('button',{name:'최신순'}));
+    fireEvent.click(screen.getByRole('button',{name:'정렬'}));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('radio',{name:'최근 추가'}));
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('sort=recent'));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('radio',{name:'오래된순'}));
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('direction=asc'));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'닫기'}));
-    expect(screen.getByRole('button',{name:/최근 추가 · 오래된순/})).toBeTruthy();
-    expect(screen.getByRole('button',{name:/★ 4\.5/})).toBeTruthy();
+    expect(screen.getByRole('button',{name:'정렬'})).toBeTruthy();
+    expect(screen.getByRole('button',{name:'내 별점'}).getAttribute('aria-pressed')).toBe('true');
     pressTab('만화');
     await waitFor(()=>expect(screen.getByRole('button',{name:/^내 별점/})).toBeTruthy());
     pressTab('게임');
-    await waitFor(()=>expect(screen.getByRole('button',{name:/★ 4\.5/})).toBeTruthy());
+    await waitFor(()=>expect(screen.getByRole('button',{name:'내 별점'}).getAttribute('aria-pressed')).toBe('true'));
+    fireEvent.click(screen.getByRole('button',{name:'내 별점'}));
     fireEvent.click(screen.getByRole('button',{name:'초기화'}));
     await waitFor(()=>expect(mocks.api.mock.calls.at(-1)?.[0]).toContain('rating=all'));
   });
@@ -517,7 +518,7 @@ describe('read-only collections',()=>{
     expect(switcher().closest('header.top-bar')).toBeNull();
     // The section bar is the scrolling list's first row (after the zero-height refresh pill).
     const firstRow=[...list().children].find(child=>!child.matches('.pull-refresh'));
-    expect(firstRow?.classList.contains('section-shade-rows--inline')).toBe(true);
+    expect(firstRow?.classList.contains('ui-section-bar--inline')).toBe(true);
     expect(firstRow?.contains(switcher())).toBe(true);
     expect(screen.getAllByRole('radiogroup',{name:'컬렉션 유형'})).toHaveLength(1);
     const listPaths=()=>mocks.api.mock.calls.map(([path])=>path as string).filter(path=>path.startsWith('/v1/collections?'));
@@ -1111,18 +1112,37 @@ describe('collection shortcut overlays',()=>{
     return {revision:'r1',item};
   });
   const shortcuts=()=>screen.getByRole('group',{name:'컬렉션 바로가기'});
-  it.each([['게임','발매 캘린더 2'],['영화','발매 캘린더 1'],['만화','신간 3'],['AV',null]] as const)('shows the %s shortcuts, counts and quiet segmented shape',async(type,other)=>{
+  it.each([['게임','발매 캘린더 2'],['영화','발매 캘린더 1'],['만화','신간 3'],['AV',null]] as const)('shows the %s shortcuts, counts and right-group order',async(type,other)=>{
     serve();render(<Collections active paused={false} backRef={{current:null}}/>);
     pressTab(type);
     await within(shortcuts()).findByRole('button',{name:'쇼케이스 12'});
     const buttons=within(shortcuts()).getAllByRole('button');expect(buttons).toHaveLength(other?2:1);
-    expect(shortcuts().classList.contains('ui-segmented--full-width')).toBe(true);
+    expect(shortcuts().closest('.ui-section-bar__trailing')).not.toBeNull();
+    expect(document.querySelector('.section-shade-extra,.section-shade-rows--inline')).toBeNull();
+    expect(shortcuts().nextElementSibling?.className).toBe('collection-shortcuts__divider');
+    expect(Array.from(shortcuts().parentElement!.children).slice(2).map(button=>button.getAttribute('aria-label'))).toEqual(['정렬','내 별점','보기']);
     expect(buttons[0].querySelector('.collection-shortcuts__count')?.classList.contains('is-new')).toBe(false);
     if(other){const shortcut=await within(shortcuts()).findByRole('button',{name:other});expect(shortcut.querySelector('.is-new')?.textContent).toBe(other.endsWith('3')?'3':other.endsWith('2')?'2':'1');}
-    for(const button of buttons){expect(button.getAttribute('aria-pressed')).toBeNull();expect(button.getAttribute('data-segmented-active')).toBeNull();expect(button.querySelector('svg')).toBeTruthy();}
+    expect(buttons[0].getAttribute('aria-pressed')).toBe('false');
+    for(const button of buttons.slice(1)){expect(button.getAttribute('aria-pressed')).toBeNull();expect(button.getAttribute('data-segmented-active')).toBeNull();expect(button.querySelector('svg')).toBeTruthy();}
     expect(document.querySelector('.collection-showcase-fold,.collection-news-section')).toBeNull();
     // Counts do not fetch the retired manga news preview.
     expect(mocks.api.mock.calls.some(([path])=>path.startsWith('/v1/collections/releases?limit=100'))).toBe(false);
+  });
+  it('carries shortcuts and sheets in the same shade row, retaining the list', async()=>{
+    serve();render(<Collections active paused={false} backRef={{current:null}}/>);
+    await within(shortcuts()).findByRole('button',{name:'쇼케이스 12'});
+    const scroller=list(),cards=scroller.querySelector('.collection-grid');
+    scroller.scrollTop=440;fireEvent.scroll(scroller);
+    fireEvent.click(screen.getByRole('button',{name:'컬렉션 · 게임'}));
+    const shade=document.querySelector('.section-shade.is-open') as HTMLElement;
+    const right=shade.querySelector('.ui-section-bar__trailing') as HTMLElement;
+    expect(within(right).getByRole('button',{name:'쇼케이스 12'})).toBeTruthy();
+    expect(within(right).getByRole('button',{name:'발매 캘린더 2'})).toBeTruthy();
+    fireEvent.click(within(right).getByRole('button',{name:'보기'}));
+    expect(screen.getByRole('dialog',{name:'보기'})).toBeTruthy();
+    expect(scroller.querySelector('.collection-grid')).toBe(cards);
+    expect(scroller.scrollTop).toBe(440);
   });
   it.each(['게임','영화','만화'])('hides the zero news count for %s and retains the zero Showcase count',async(type)=>{
     mocks.api.mockImplementation(async(path:string)=>path==='/v1/home/upcoming'?{entries:[],wishlist:[]}:path.startsWith('/v1/collections/releases')?{counts:{unread:0,collections:[]}}:{...page,totalCount:0,items:[]});
@@ -1137,6 +1157,7 @@ describe('collection shortcut overlays',()=>{
     const scroller=list(),cards=scroller.querySelector('.collection-grid');scroller.scrollTop=440;fireEvent.scroll(scroller);
     fireEvent.click(within(shortcuts()).getByRole('button',{name:new RegExp(`^${shortcut}`)}));
     const overlay=screen.getByRole('dialog',{name:title});
+    if(title==='쇼케이스')expect(scroller.querySelector('.collection-shortcuts [aria-pressed]')?.getAttribute('aria-pressed')).toBe('true');
     expect(scroller.style.display).toBe('');expect(scroller.scrollTop).toBe(440);expect(scroller.querySelector('.collection-grid')).toBe(cards);
     expect(scroller.hasAttribute('inert')).toBe(true);
     if(title==='발매 캘린더'){
@@ -1148,6 +1169,7 @@ describe('collection shortcut overlays',()=>{
     if(title==='신간')expect(within(overlay).getByRole('radiogroup',{name:'신간 지역'})).toBeTruthy();
     act(()=>{expect(backRef.current?.()).toBe(true);});expect(screen.queryByRole('dialog',{name:title})).toBeNull();
     expect(list()).toBe(scroller);expect(scroller.scrollTop).toBe(440);expect(scroller.querySelector('.collection-grid')).toBe(cards);
+    if(title==='쇼케이스')expect(scroller.querySelector('.collection-shortcuts [aria-pressed]')?.getAttribute('aria-pressed')).toBe('false');
     if(title!=='신간')expect(home).not.toHaveBeenCalled();
     act(()=>{expect(backRef.current?.()).toBe(false);});
   });

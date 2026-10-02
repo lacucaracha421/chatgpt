@@ -101,9 +101,13 @@ it("renders a bounded filmstrip and moves from a thumbnail", () => {
   expect(onActiveIdChange).toHaveBeenCalledWith("asset-5");
 });
 
-it("hides the filmstrip for videos and single assets", () => {
+it("shows the video strip when paused, hides it while playing, and omits it for single assets", () => {
   const { rerender } = render(<AssetViewer items={[videoAsset("video", "video.webm"), asset("b", "b.png")]} activeId="video" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
-  expect(document.querySelector(".asset-viewer__filmstrip")).not.toBeInTheDocument();
+  expect(document.querySelector(".asset-viewer__filmstrip")).toBeInTheDocument();
+  fireEvent.play(document.querySelector('video')!);
+  expect(document.querySelector('.asset-viewer')).toHaveClass('asset-viewer--playing');
+  fireEvent.pause(document.querySelector('video')!);
+  expect(document.querySelector('.asset-viewer')).not.toHaveClass('asset-viewer--playing');
   // The video layout keeps the edge areas off the player's control bar.
   expect(document.querySelector(".asset-viewer__stage")).toHaveClass("asset-viewer__stage--video");
 
@@ -246,17 +250,18 @@ it("keeps the visible image until the next asset has loaded and decoded in its o
   expect(loading.style.visibility).toBe("");
 });
 
-it("shows a failure placeholder instead of a stale image when preload fails", async () => {
+it("keeps the painted image and reports a failed replacement without a blank state", async () => {
   const items = [asset("a", "a.png"), asset("b", "b.png"), asset("c", "c.png")];
   const { rerender, container } = render(<AssetViewer items={items} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
   expect(screen.getByRole("img", { name: "a.png" })).toBeInTheDocument();
 
   rerender(<AssetViewer items={items} activeId="b" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
   fireEvent.error(container.ownerDocument.querySelector<HTMLImageElement>('img.asset-viewer__media[data-stable-image-loading]')!);
-  await waitFor(() => expect(screen.getByText("이미지를 불러오지 못했습니다")).toBeVisible());
-  expect(screen.queryByRole("img", { name: "a.png" })).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.getByText(/이미지를 불러오지 못했습니다/)).toBeVisible());
+  expect(screen.queryByRole("img", { name: "a.png" })).toBeInTheDocument();
 
   rerender(<AssetViewer items={items} activeId="c" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
+  await act(async () => fireEvent.load(document.querySelector('img.asset-viewer__media[data-stable-image-loading]')!));
   await waitFor(() => expect(screen.getByRole("img", { name: "c.png" })).toBeInTheDocument());
   expect(screen.queryByText("이미지를 불러오지 못했습니다")).not.toBeInTheDocument();
 });
@@ -386,4 +391,18 @@ it("warms only the next library image, never vault, private or video media", () 
   rerender(draw({ items: [items[0], videoAsset("v", "v.mp4")] }));
   fireEvent.load(screen.getByRole("img", { name: "a.png" }));
   expect(document.querySelectorAll('.asset-viewer__media')).toHaveLength(1);
+});
+
+it('grows the strip near the bottom and shrinks after the pointer leaves', () => {
+  vi.useFakeTimers();
+  try {
+    render(<AssetViewer items={[asset('a','a.png'),asset('b','b.png')]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()}/>);
+    const viewer=document.querySelector<HTMLElement>('.asset-viewer')!;
+    vi.spyOn(viewer,'getBoundingClientRect').mockReturnValue({bottom:800} as DOMRect);
+    fireEvent.pointerMove(viewer,{clientY:700});
+    expect(screen.getByRole('navigation',{name:'주변 자산'})).toHaveClass('is-grown');
+    fireEvent.pointerMove(viewer,{clientY:100});
+    act(()=>vi.advanceTimersByTime(220));
+    expect(screen.getByRole('navigation',{name:'주변 자산'})).not.toHaveClass('is-grown');
+  } finally {vi.useRealTimers();}
 });

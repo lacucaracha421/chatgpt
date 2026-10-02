@@ -13,6 +13,8 @@ import {
 } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { CenteredFilmstrip } from "../shared/viewer/CenteredFilmstrip";
+import { useViewerMotion, type TileRect } from "../shared/viewer/useViewerMotion";
 import { artistHandle } from "../artists/format";
 import { useOptionalLibrary } from "../library/LibraryContext";
 import type { AlbumEntry, AssetSummary, ClassificationEntry } from "../library/types";
@@ -34,6 +36,7 @@ const WHEEL_STEP_DELTA = 40;
 const WHEEL_STEP_COOLDOWN_MS = 180;
 
 type AssetViewerProps = {
+  originRect?: TileRect;
   items: AssetSummary[];
   activeId: string | null;
   onActiveIdChange: (id: string) => void;
@@ -59,6 +62,7 @@ type AssetViewerProps = {
 
 export function AssetViewer({
   items,
+  originRect,
   activeId,
   onActiveIdChange,
   onClose,
@@ -81,6 +85,12 @@ export function AssetViewer({
   const library = useOptionalLibrary();
   const index = items.findIndex((item) => item.id === activeId);
   const asset = items[index];
+  const motion = useViewerMotion(activeId, onClose, originRect, asset?.width && asset?.height ? asset.width / asset.height : 1, activeId ? (mediaSource === "vault" ? vaultAssetUrl(activeId) : assetUrl(activeId)) : undefined);
+  const [stripGrown, setStripGrown] = useState(false);
+  const [videoPlaying, setVideoPlaying] = useState(false);
+  const stripActive = useRef(false);
+  const stripGrowTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [replacementFailed, setReplacementFailed] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const [folderPath, setFolderPath] = useState("");
   const [characterOpen, setCharacterOpen] = useState(false);
@@ -113,7 +123,7 @@ export function AssetViewer({
   const [chromeVisible, setChromeVisible] = useState(true);
   const viewerOpen = Boolean(asset);
   const total = totalCount != null && Number.isFinite(totalCount) && totalCount >= items.length ? totalCount : items.length;
-  const showFilmstrip = Boolean(asset && asset.media.kind !== "video" && items.length > 1);
+  const showFilmstrip = Boolean(asset && items.length > 1);
 
   const revealChrome = useCallback(() => {
     setChromeVisible(true);
@@ -121,11 +131,13 @@ export function AssetViewer({
     chromeTimerRef.current = window.setTimeout(() => {
       chromeTimerRef.current = null;
       // Stay visible while the pointer rests on a control or a Tab-focused control shows its focus ring.
-      if (pointerOverChromeRef.current) return;
+      if (pointerOverChromeRef.current || stripActive.current) return;
       if (keyboardFocusRef.current && chromeRef.current?.contains(document.activeElement)) return;
       setChromeVisible(false);
     }, VIEWER_CHROME_IDLE_MS);
   }, []);
+
+  useEffect(() => () => clearTimeout(stripGrowTimer.current), []);
 
   useEffect(() => {
     if (!viewerOpen) {
@@ -144,6 +156,8 @@ export function AssetViewer({
 
   useEffect(() => {
     setImageFailed(false);
+    setReplacementFailed(false);
+    setVideoPlaying(false);
     setCharacterOpen(false);
     setZoom(current => current.scale === 1 && current.x === 0 && current.y === 0 ? current : { scale: 1, x: 0, y: 0 });
   }, [asset?.id]);
@@ -200,7 +214,7 @@ export function AssetViewer({
   const metaLabel = [folderPath, dateLabel].filter(Boolean).join(" · ");
   const handleDialogClose = () => {
     if (infoOpen) { setInfoOpen(false); return; }
-    onClose();
+    motion.close();
   };
   const chromeHover = {
     onPointerEnter: () => { pointerOverChromeRef.current = true; setChromeVisible(true); },
@@ -285,11 +299,18 @@ export function AssetViewer({
     }}
   >
     <div
-      className={`asset-viewer${chromeVisible ? "" : " asset-viewer--chrome-hidden"}${infoOpen ? " asset-viewer--docked" : ""}`}
+      ref={motion.bind}
+      className={`asset-viewer${chromeVisible ? "" : " asset-viewer--chrome-hidden"}${infoOpen ? " asset-viewer--docked" : ""}${videoPlaying ? " asset-viewer--playing" : ""}`}
       data-chrome-visible={chromeVisible}
-      onPointerMove={() => { keyboardFocusRef.current = false; revealChrome(); }}
+      onPointerMove={(event) => {
+        keyboardFocusRef.current = false; revealChrome();
+        if (stripActive.current) return;
+        if (event.clientY > event.currentTarget.getBoundingClientRect().bottom - 210) { clearTimeout(stripGrowTimer.current); stripGrowTimer.current = undefined; setStripGrown(true); }
+        else if (!stripGrowTimer.current) stripGrowTimer.current = setTimeout(() => { stripGrowTimer.current = undefined; setStripGrown(false); }, 220);
+      }}
       onPointerDown={() => { keyboardFocusRef.current = false; }}
     >
+      <div data-viewer-backdrop className="asset-viewer__backdrop" />
       <div className={`asset-viewer__stage${showFilmstrip ? " asset-viewer__stage--filmstrip" : ""}${seekable ? " asset-viewer__stage--video" : ""}`} ref={attachStage}
         onPointerDown={(event) => {
           if (zoom.scale === 1 || event.button !== 0 || (event.target instanceof HTMLElement && event.target.closest("button, a, input, .ui-menu, .asset-viewer__character-popover"))) return;
@@ -308,7 +329,7 @@ export function AssetViewer({
         data-zoomed={zoom.scale > 1 ? "true" : undefined}>
         <div ref={chromeRef} className="asset-viewer__chrome" onFocusCapture={revealChrome} onBlurCapture={revealChrome}>
           <div className="asset-viewer__topbar" {...chromeHover}>
-            <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="뒤로" onClick={onClose}><ChevronLeftIcon aria-hidden="true" /></Button>
+            <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="뒤로" onClick={motion.close}><ChevronLeftIcon aria-hidden="true" /></Button>
             <span className="asset-viewer__position"><b>{index + 1}</b> / {total.toLocaleString("ko-KR")}</span>
             <span className="asset-viewer__title">
               <strong>{artistLabel}</strong>
@@ -326,27 +347,22 @@ export function AssetViewer({
             {onExport && <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="내보내기" aria-description="PC 폴더로 내보내기" onClick={() => onExport(asset)}><ArrowDownTrayIcon aria-hidden="true" /></Button>}
             {onTrash && <Button className="asset-viewer__vbtn" size="icon" variant="danger" aria-label="휴지통으로 이동" onClick={() => onTrash(asset)}><TrashIcon aria-hidden="true" /></Button>}
             {renderInfo && <Button className={`asset-viewer__vbtn${infoOpen ? " asset-viewer__vbtn--on" : ""}`} size="icon" variant="ghost" aria-label="정보" aria-pressed={infoOpen} onClick={() => setInfoOpen((open) => !open)}><InformationCircleIcon aria-hidden="true" /></Button>}
-            <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="감상 화면 닫기" aria-description="감상 화면 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
+            <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="감상 화면 닫기" aria-description="감상 화면 닫기" onClick={motion.close}><XMarkIcon aria-hidden="true" /></Button>
           </div>
           {previous && <button className="asset-viewer__edge asset-viewer__edge--left" type="button" aria-label="이전 자산" onClick={() => move(previous)} {...chromeHover}><ChevronLeftIcon aria-hidden="true" /></button>}
           {next && <button className="asset-viewer__edge asset-viewer__edge--right" type="button" aria-label="다음 자산" onClick={() => move(next)} {...chromeHover}><ChevronRightIcon aria-hidden="true" /></button>}
-          {showFilmstrip && <div className="asset-viewer__filmstrip" {...chromeHover}>{items.slice(Math.max(0, index - 5), Math.min(items.length, index + 6)).map((item, offset) => {
-            const itemIndex = Math.max(0, index - 5) + offset;
-            const current = item.id === asset.id;
-            return <button key={item.id} className={`asset-viewer__filmstrip-button${current ? " asset-viewer__filmstrip-button--current" : ""}`} type="button" aria-label={`${itemIndex + 1}번째 자산 보기`} aria-current={current ? "true" : undefined} onClick={() => onActiveIdChange(item.id)}>
-              {privacyMode
-                ? <span className="asset-viewer__filmstrip-placeholder" aria-hidden="true" />
-                : <img src={mediaSource === "vault" ? vaultThumbnailUrl(item.id) : assetThumbnailUrl(item)} alt="" loading="lazy" decoding="async" draggable={false} />}
-            </button>;
-          })}</div>}
+          {showFilmstrip && <CenteredFilmstrip items={items} index={index} height={seekable ? 84 : 124} grown={seekable || stripGrown} className="asset-viewer__filmstrip" onIndex={i => onActiveIdChange(items[i].id)} onInteract={revealChrome} onInteractionChange={active => { stripActive.current = active; if (active) setStripGrown(true); revealChrome(); }} renderThumbnail={(_, i) => privacyMode ? <span className="centered-filmstrip__placeholder" /> : <img src={mediaSource === "vault" ? vaultThumbnailUrl(items[i].id) : assetThumbnailUrl(items[i])} alt="" loading="lazy" decoding="async" draggable={false} />} />}
         </div>
+        <div data-viewer-media className="asset-viewer__media-surface">
         {privacyMode
           ? <Skeleton className="privacy-mask asset-viewer__media-mask" label="비공개 모드" />
           : asset.media.kind === "video"
-            ? <VideoPlayer ref={videoPlayerRef} key={asset.id} source={mediaSource} asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} />
+            ? <VideoPlayer ref={videoPlayerRef} key={asset.id} source={mediaSource} mediaEvents={{onPlay: () => setVideoPlaying(true), onPause: () => { setVideoPlaying(false); revealChrome(); }, onEnded: () => { setVideoPlaying(false); revealChrome(); }}} asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} />
             : imageFailed
               ? <EmptyState title="이미지를 불러오지 못했습니다">다른 자산으로 이동하면 자동으로 다시 시도합니다.</EmptyState>
-              : <StableImage perfName="viewer" prefetchSrc={mediaSource === "library" && next?.media.kind === "image" ? assetUrl(next.id) : undefined} className="asset-viewer__media" style={zoom.scale > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined} src={mediaSource === "vault" ? vaultAssetUrl(asset.id) : assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setImageFailed(true)} />}
+              : <StableImage perfName="viewer" prefetchSrc={mediaSource === "library" && next?.media.kind === "image" ? assetUrl(next.id) : undefined} className="asset-viewer__media" style={zoom.scale > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined} src={mediaSource === "vault" ? vaultAssetUrl(asset.id) : assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setReplacementFailed(true)} />}
+        </div>
+        {replacementFailed && <div className="asset-viewer__load-error" role="status">이미지를 불러오지 못했습니다. 다른 자산으로 이동하면 다시 시도합니다.</div>}
       </div>
       {infoOpen && renderInfo && <aside className="asset-viewer__dock" role="complementary" aria-label="자산 정보">
         <header className="asset-viewer__dock-header"><span>정보</span><Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="정보 닫기" onClick={() => setInfoOpen(false)}><XMarkIcon aria-hidden="true" /></Button></header>

@@ -159,10 +159,19 @@ it('filters by kind in memory, swipes through the filtered list, and resets the 
   fireEvent.click(screen.getByRole('radio',{name:'이미지'}));
   expect(screen.queryByRole('button',{name:'영상 제목 · 영상'})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'사용자 지정 제목 · 이미지'}));
-  await screen.findByAltText('사용자 지정 제목');
+  const current=await screen.findByAltText('사용자 지정 제목');
+  fireEvent.load(current);
   expect(screen.getByText('1 / 2')).toBeTruthy();
   fireEvent.click(screen.getByRole('button',{name:'다음 자산'}));
+  // The current image stays painted until the actual replacement slot is ready.
+  expect(screen.getByAltText('사용자 지정 제목')).toBe(current);
+  expect(current.style.opacity).toBe('1');
+  expect(document.querySelector('.viewer-placeholder')).toBeNull();
+  const incoming=document.querySelector('[data-stable-image-loading]') as HTMLImageElement;
+  expect(incoming.getAttribute('src')).toBe(open.items[2].url);
+  fireEvent.load(incoming);
   expect((await screen.findByAltText('두 번째 이미지')).getAttribute('src')).toBe(open.items[2].url);
+  expect(screen.getByAltText('두 번째 이미지')).toBe(incoming);
   expect(document.querySelector('video')).toBeNull();
   emit({...locked,epoch:3});
   expect(document.querySelector('img,video')).toBeNull();

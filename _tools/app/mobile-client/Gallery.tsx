@@ -1,3 +1,4 @@
+import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
 import {warmOriginalTickets} from './originalTicketWarm';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,type PointerEvent,type ReactNode} from 'react';
@@ -130,6 +131,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   /** Private Vault mode: same layout and gestures, no library media client. */
   vault?:GalleryVaultSource}) {
   const parent = useRef<HTMLDivElement>(null);
+  useFirstAppearance(parent, items.length, !paused && !stale, vault ? 'vault-gallery' : 'asset-gallery');
   const activePress = useRef<(() => void)|null>(null);
   const registerPress=(cancel:()=>void)=>{activePress.current?.();activePress.current=cancel;};
   const releasePress=(cancel:()=>void)=>{if(activePress.current===cancel)activePress.current=null;};

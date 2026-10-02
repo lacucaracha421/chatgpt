@@ -22,7 +22,7 @@ import {CollectionBindings} from './CollectionBindings';
 import type {BindProvider} from './collectionBindings';
 import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent} from 'react';
 import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,useSegmentMotion,type CardArrival} from './motion';
-import {BellIcon, CalendarIcon, StarIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon, XMarkIcon} from '@heroicons/react/24/outline';
+import {BellIcon, CalendarIcon, StarIcon, ArrowsUpDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel} from './ui';
 import {BottomSheet} from './BottomSheet';
@@ -521,20 +521,18 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   const covers=item?[{id:collectionCover(item),label:item.name},...volumes.map(v=>({id:v.coverArtworkId,label:[volumeLabel(v),volumeReleaseLabel(v)].filter(Boolean).join(' · ')}))]:[];
   const physical=item?.type==='manga';
   const revision=main.page?.revision??'';
-  // The release-date sort reads as just 최신순/오래된순 (user request, 2026-09-25).
-  const sortLabel=filters.sort==='media_date'?sortDirectionLabels(filters.sort)[filters.direction]:`${SORT_LABELS[filters.sort]} · ${sortDirectionLabels(filters.sort)[filters.direction]}`;
   // A queued rating shows on the cards too, until the list re-reads the server.
   const card=(work:CollectionSummary)=>{const value=edits.visible(work.id,'myScore',work.myScore??null).value;return value===(work.myScore??null)?work:{...work,myScore:value};};
 
   // The type switch is the list's first row; scrolled away, the top bar pulls it down as a shade.
   const typeOptions=TABS.filter(value=>!privacyMode||value!=='av').map(value=>({value,label:labels[value]}));
-  // Shortcut cells reuse the segmented track's shared shape, without a selection thumb.
-  const shortcuts=<div className="ui-segmented ui-segmented--full-width collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
-    <button type="button" className="ui-segmented__cell" aria-label={showcaseCount==null?'쇼케이스':`쇼케이스 ${showcaseCount.toLocaleString()}`} onClick={()=>setShowcaseAll(true)}><StarIcon aria-hidden="true"/>쇼케이스{showcaseCount!=null&&<span className="numeric collection-shortcuts__count">{showcaseCount.toLocaleString()}</span>}</button>
-    {(tab==='game'||tab==='movie')&&<button type="button" className="ui-segmented__cell" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>setCalendarOpen(true)}><CalendarIcon aria-hidden="true"/>발매 캘린더{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</button>}
-    {tab==='manga'&&<button type="button" className="ui-segmented__cell" aria-label={`신간${releases.unread>0?` ${releases.unread.toLocaleString()}`:''}`} onClick={openInbox}><BellIcon aria-hidden="true"/>신간{releases.unread>0&&<span className="numeric collection-shortcuts__count is-new">{releases.unread.toLocaleString()}</span>}</button>}
+  // Shortcuts and view controls share the section bar's right group on both surfaces.
+  const shortcuts=<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
+    <Button variant="quiet" size="sm" aria-label={showcaseCount==null?'쇼케이스':`쇼케이스 ${showcaseCount.toLocaleString()}`} aria-pressed={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}><StarIcon aria-hidden="true"/><span className="collection-shortcuts__label">쇼케이스</span>{showcaseCount!=null&&<span className="numeric collection-shortcuts__count">{showcaseCount.toLocaleString()}</span>}</Button>
+    {(tab==='game'||tab==='movie')&&<Button variant="quiet" size="sm" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>setCalendarOpen(true)}><CalendarIcon aria-hidden="true"/><span className="collection-shortcuts__label">발매 캘린더</span>{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</Button>}
+    {tab==='manga'&&<Button variant="quiet" size="sm" aria-label={`신간${releases.unread>0?` ${releases.unread.toLocaleString()}`:''}`} onClick={openInbox}><BellIcon aria-hidden="true"/><span className="collection-shortcuts__label">신간</span>{releases.unread>0&&<span className="numeric collection-shortcuts__count is-new">{releases.unread.toLocaleString()}</span>}</Button>}
   </div>;
-  const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,extra:shortcuts},{active:live&&!selected&&!overlayOpen&&!performer});
+  const sections=useSectionShade({label:'컬렉션 유형',options:typeOptions,value:tab,onChange:chooseTab,trailing:<>{shortcuts}<span className="collection-shortcuts__divider" aria-hidden="true"/><Button variant="quiet" size="sm" aria-label="정렬" onClick={()=>setSheet('sort')}><ArrowsUpDownIcon aria-hidden="true"/></Button><Button variant="quiet" size="sm" aria-label="내 별점" aria-pressed={filters.rating!=='all'} onClick={()=>setSheet('rating')}><StarIcon aria-hidden="true"/></Button><Button variant="quiet" size="sm" aria-label="보기" onClick={()=>setSheet('view')}><Squares2X2Icon aria-hidden="true"/></Button></>},{active:live&&!selected&&!overlayOpen&&!performer});
   // Search lives in the shared bar: a magnifier that opens the field, kept open while a query is set.
   const searching=searchOpen||!!query||!!search;
   const closeSearch=()=>{setQuery('');setSearch('');setSearchOpen(false);};
@@ -553,7 +551,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
 
   // Works and performers remain navigation levels; shortcuts use the overlay motion.
   useLevelMotion(sectionRef,active?`${selected??''}|${performer?.id??''}`:null,(selected?1:0)+(performer?1:0));
-  // A type switch swaps the committed list sideways; both section-bar rows stay still.
+  // A type switch swaps the committed list sideways; the section bar stays still.
   useSegmentMotion(listRef,tab==='av'||settledOn(main,mainKey)?tab:null,(privacyMode?TABS.filter(value=>value!=='av'):TABS).indexOf(tab),listParts);
   // The grid keeps the layout of the type it shows until the new type's page commits.
   const shownType=main.items[0]?.type??type;
@@ -582,13 +580,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
     return <div className={`collection-grid collection-grid-${kind} is-counted`} style={{'--columns':settings.perRow} as CSSProperties}>{items.map(work=><WorkCard key={work.id} work={card(work)} revision={workRevision} active={visible} caption={captionOf(work)} onOpen={id=>openWork(id,order)} arriving={arrivals.arriving(work.id)} onArrived={arrivals.arrived}/>)}</div>;
   };
   const collectionTypeLabel=<SectionLabel as="h2" className="collection-type-label" title={filtered?'검색 결과':labels[type]} count={!filtered&&main.page?.totalCount!=null ? main.page.totalCount : undefined} />;
-  const filterControls=<div ref={filterWheel} className="filter-chips collection-chips" role="group" aria-label="정렬과 필터">
-    <button className="filter-chip" onClick={()=>setSheet('sort')}><ArrowsUpDownIcon aria-hidden="true"/>{sortLabel}<ChevronDownIcon aria-hidden="true"/></button>
-    <button className={`filter-chip ${filters.rating!=='all'?'selected':''}`} onClick={()=>setSheet('rating')}>{filters.rating==='all'?'내 별점':ratingLabel(filters.rating)}<ChevronDownIcon aria-hidden="true"/></button>
-    {filters.rating!=='all'&&<button className="filter-chip" onClick={()=>changeFilters({...filters,rating:'all'})}>초기화</button>}
-    <button className="filter-chip" onClick={()=>setSheet('view')}><Squares2X2Icon aria-hidden="true"/>보기<ChevronDownIcon aria-hidden="true"/></button>
-  </div>;
-  const typeHeader=<div className="collection-section collection-all"><div className="collection-type-header">{collectionTypeLabel}{filterControls}</div></div>;
+  const typeHeader=<div className="collection-section collection-all"><div className="collection-type-header">{collectionTypeLabel}</div></div>;
   const mainOrder=main.items.map(work=>work.id);
   const worksView=workList(main.items,shownType,`${labels[type]} 작품 목록`,revision,listActive,mainArrivals);
   // The opened work as the shared work screen, its information as the section below the stage.
@@ -675,7 +667,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
     {sheet==='performerSort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}>
       <div role="radiogroup" aria-label="정렬 순서">{([['newest','발매일 최신순'],['oldest','발매일 오래된순']] as const).map(([value,label])=><button key={value} className="sheet-option" role="radio" aria-checked={performerOrder===value} onClick={()=>setPerformerOrder(value)}>{label}<span className="radio-dot"/></button>)}</div>
     </BottomSheet>}
-    {sheet==='rating'&&<BottomSheet title="내 별점" onClose={()=>setSheet(null)}><RatingFilterSlider value={filters.rating} onChange={rating=>changeFilters({...filters,rating})}/></BottomSheet>}
+    {sheet==='rating'&&<BottomSheet title="내 별점" onClose={()=>setSheet(null)}><RatingFilterSlider value={filters.rating} onChange={rating=>changeFilters({...filters,rating})}/>{filters.rating!=='all'&&<Button variant="quiet" onClick={()=>changeFilters({...filters,rating:'all'})}>초기화</Button>}</BottomSheet>}
     {sheet==='view'&&<ShelfViewSheet type={performer&&!selected?'av':type} view={viewOf(performer&&!selected?'av':type)} onChange={patch=>patchView(performer&&!selected?'av':type,patch)} onClose={()=>setSheet(null)}/>}
     {!privacyMode&&active&&!paused&&coverIndex!==null&&item&&covers[coverIndex]&&<Dialog open title={covers[coverIndex].label} onClose={()=>setCoverIndex(null)} variant="wide"><div className="collection-appreciation"><DialogDescription className="sr-only">선택한 표지를 크게 감상합니다.</DialogDescription>
       <div className="dialog-header">{physical&&<div className="collection-cover-mode" role="radiogroup" aria-label="표지 보기 방식">{(['3d','flat'] as const).map(value=><button key={value} role="radio" aria-checked={coverMode===value} onClick={()=>setCoverMode(value)}>{value==='3d'?'입체':'평면'}</button>)}</div>}<IconButton label="표지 감상 닫기" icon={XMarkIcon} onClick={()=>setCoverIndex(null)}/></div>

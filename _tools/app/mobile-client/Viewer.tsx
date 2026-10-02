@@ -13,6 +13,8 @@ import {ClassificationAssignmentEditor} from './ClassificationAssignmentEditor';
 import {CharacterExclusionEditor, type ExclusionRequest, type ExclusionKey, type ExclusionReceipt} from './CharacterExclusion';
 import {ViewerInfo} from './ViewerInfo';
 import {usePrivacyMode} from './privacyMode';
+import {StableImage} from '../src/shared/ui/StableImage';
+import {useViewerMotion} from '../src/shared/viewer/useViewerMotion';
 import {ViewerFilmstrip} from './ViewerFilmstrip';
 import {useLikesAlbum} from './useLikesAlbum';
 import {VideoPlayerSurface} from '../src/video/VideoPlayer';
@@ -80,6 +82,8 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   /** Private Vault mode: same gestures, chrome and video controls; no library media or actions. */
   vault?:ViewerVaultSource}) {
   const asset = items[index];
+  const [stripGrown, setStripGrown] = useState(false);
+  const [videoPlaying, setVideoPlaying] = useState(false);
   // The heart lives here, not on gallery tiles (user, 2026-10-02): one membership read per shown asset.
   const likes = useLikesAlbum(asset ? [asset.id] : [], !vault && !!asset && !asset.pending, asset?.id);
   useEffect(()=>{if(index>=items.length-3)onNearEnd?.();},[index,items.length,onNearEnd]);
@@ -89,7 +93,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   useEffect(()=>()=>{for(const work of prefetches.current.values())work.controller.abort();prefetches.current.clear();},[]);
   const [decoded, setDecoded] = useState<{id: string; url: string}>();
   const original = vault ? vault.original(asset) : decoded?.id === asset.id ? decoded.url : prepared.current.get(asset.id);
-  // Vault images decode in place; the thumbnail covers the surface until the original has loaded.
+  const motion = useViewerMotion(asset.id, onClose, undefined, asset.width && asset.height ? asset.width / asset.height : 1, original || decoded?.url || asset.preview, original ? asset.id : decoded?.id || asset.id);
   const [loaded, setLoaded] = useState('');
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
@@ -119,7 +123,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
       if (pickersOpen.current.classificationOpen) { setClassificationOpen(false); return true; }
       if (pickersOpen.current.albumOpen) { setAlbumOpen(false); return true; }
       if (infoOpen.current) { setInfo(false); return true; }
-      return false;
+      return motion.back();
     };
     return () => { backRef.current = null; };
   }, [backRef]);
@@ -133,6 +137,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const [landscape, setLandscape] = useState(() => window.innerWidth > window.innerHeight);
   const [transform, setTransform] = useState({scale: 1, x: 0, y: 0});
   const surface = useRef<HTMLDivElement>(null);
+  useEffect(() => setVideoPlaying(false), [asset.id]);
   const video = useRef<HTMLVideoElement>(null);
   const videoResume = useRef({id:'',time:0,playing:false});
   const stallTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -155,7 +160,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   useEffect(() => {
     if (vault) {
       // Moving to another item never brings the bars back; only direct viewer activity does.
-      timing.current = undefined; setLoaded(''); setError(''); if (asset.kind === 'video') setChrome(true); gesture.current.points.clear();
+      timing.current = undefined; setError(''); if (asset.kind === 'video') setChrome(true); gesture.current.points.clear();
       return () => clearTimeout(stallTimer.current);
     }
     const controller = new AbortController();
@@ -186,12 +191,18 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const videoRef = useCallback((element: HTMLVideoElement | null) => {
     video.current = element;
   }, []);
-  // Observe React's committed src, not setDecoded() scheduling or a screen paint.
+  // Record the slot actually displayed, including promotions inside StableImage.
   useLayoutEffect(() => {
-    const observation=timing.current;
-    if(!observation||observation.id!==asset.id||observation.span.done||!observation.url)return;
-    const element=asset.kind==='video'?video.current:surface.current?.querySelector('img');
-    if(element?.getAttribute('src')===observation.url)observation.span.log('commit');
+    const observe = () => {
+      const observation = timing.current;
+      if (!observation || observation.id !== asset.id || observation.span.done || !observation.url) return;
+      const element = asset.kind === 'video' ? video.current : surface.current?.querySelector('img:not([data-stable-image-loading])');
+      if (element?.getAttribute('src') === observation.url) observation.span.log('commit');
+    };
+    observe();
+    const observer = new MutationObserver(observe);
+    if (surface.current) observer.observe(surface.current, {subtree:true, attributes:true, childList:true});
+    return () => observer.disconnect();
   });
   useEffect(() => {setTransform({scale:1,x:0,y:0});}, [asset.id,asset.pending]);
   useEffect(() => {
@@ -217,8 +228,9 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   }, [original, items, index, asset.id]);
   useEffect(() => {
     if (!chrome || filmstripActive || info || albumOpen || classificationOpen || exclusion) return;
-    const timer = setTimeout(() => setChrome(false), vault ? 4000 : 2500); return () => clearTimeout(timer);
-  }, [chrome, chromeActivity, filmstripActive, info, albumOpen, classificationOpen, exclusion, asset.id, vault]);
+    if (asset.kind === 'video' && !videoPlaying) return;
+    const timer = setTimeout(() => setChrome(false), vault ? 4000 : asset.kind === 'video' ? 2000 : 2500); return () => clearTimeout(timer);
+  }, [chrome, chromeActivity, filmstripActive, info, albumOpen, classificationOpen, exclusion, asset.id, asset.kind, videoPlaying, vault]);
   const change = (next: number) => { if (next >= 0 && next < items.length) onIndex(next); };
   const renewVideo = (element: HTMLVideoElement | null, intendPlay: boolean) => {
     clearTimeout(progressTimer.current);
@@ -272,11 +284,11 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
       revision:character.revision,
     });
   };
-  const imageSrc = original || asset.preview || (!vault && decoded?.id !== asset.id ? decoded?.url : undefined);
+  const imageSrc = original || (!vault ? decoded?.url : undefined) || asset.preview;
   const playerAsset = {id:asset.id,title:vault?vault.label(asset):artistLabel,originalName:vault?vault.label(asset):artistLabel,thumbnailRevision:asset.thumbnail_revision,media:{durationMs:asset.duration_ms ?? 0,scrubFrameCount:0}};
-  return <Dialog open title="미디어 감상" variant="fullscreen" onClose={onClose} onKeyDown={event => {
+  return <Dialog open title="미디어 감상" variant="fullscreen" onClose={motion.close} onKeyDown={event => {
     if (event.key === 'Escape' && info) { event.preventDefault(); setInfo(false); return; }
-    if (event.target instanceof HTMLVideoElement) return;
+    if (event.target instanceof HTMLVideoElement || (event.target instanceof HTMLElement && event.target.closest('.video-player'))) return;
     // Panels own their own keyboard input, so arrows inside one never change the asset.
     revealChrome();
     if (info || albumOpen || classificationOpen || exclusion) return;
@@ -284,10 +296,11 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     if (event.key === 'ArrowRight') { event.preventDefault(); change(index + 1); }
   }}>
     <DialogDescription className="sr-only">이미지는 두 손가락으로 확대할 수 있습니다. 좌우로 밀거나 버튼을 눌러 같은 목록의 이전·다음 자산을 봅니다. 미디어 정보를 열면 그 패널이 키보드 조작을 우선합니다.</DialogDescription>
-    <div className={`viewer ${chrome ? 'chrome-visible' : ''}${asset.kind === 'video' ? ' is-video' : ''}${vault ? ' is-vault' : ''}${info && landscape && !vault ? ' has-info-panel' : ''}`}>
+    <div ref={motion.bind} className={`viewer ${chrome ? 'chrome-visible' : ''}${asset.kind === 'video' ? ' is-video' : ''}${videoPlaying ? ' is-playing' : ''}${vault ? ' is-vault' : ''}${info && landscape && !vault ? ' has-info-panel' : ''}`}>
+      <div data-viewer-backdrop className="viewer-backdrop"/>
       <div className="viewer-main">
       <header className="viewer-bar">
-        <IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/>
+        <IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={motion.close}/>
         <span className="numeric viewer-position">{index + 1} / {total.toLocaleString('ko-KR')}</span>
         {!vault&&<div className="viewer-heading"><strong>{artistLabel}</strong>{metaLabel&&<small>{metaLabel}</small>}</div>}
         {!vault&&<span className="viewer-spacer"/>}
@@ -302,7 +315,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
           </>}
         </div>
       </header>
-      <div ref={surface} className={`viewer-surface ${asset.kind === 'video' ? 'is-video' : ''}${vault ? ' is-vault' : ''}`} onContextMenu={vault ? event => event.preventDefault() : undefined} onPointerDown={event => {
+      <div data-viewer-media ref={surface} className={`viewer-surface ${asset.kind === 'video' ? 'is-video' : ''}${vault ? ' is-vault' : ''}`} onContextMenu={vault ? event => event.preventDefault() : undefined} onPointerDown={event => {
         if (event.button > 0 || info || albumOpen || classificationOpen || exclusion) return;
         if (chrome) revealChrome();
         event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -331,8 +344,9 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
         g.points.delete(event.pointerId);
         if (g.points.size === 1) { const remaining = [...g.points.values()][0]; g.lastX = remaining.x; g.lastY = remaining.y; }
         const dx = event.clientX - g.startX, dy = event.clientY - g.startY;
-        if (g.points.size === 0 && !g.pinched && transform.scale === 1 && Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.2) change(index + (dx < 0 ? 1 : -1));
-        else if (g.points.size === 0 && !g.moved && !g.pinched) setChrome(value => !value);
+        if (g.points.size === 0 && !g.pinched && transform.scale === 1 && g.startY > event.currentTarget.getBoundingClientRect().bottom - 160 && dy < -40 && Math.abs(dy) > Math.abs(dx)) { setStripGrown(true); revealChrome(); }
+        else if (g.points.size === 0 && !g.pinched && transform.scale === 1 && Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.2) change(index + (dx < 0 ? 1 : -1));
+        else if (g.points.size === 0 && !g.moved && !g.pinched) { setStripGrown(false); if (stripGrown) revealChrome(); else setChrome(value => !value); }
       }} onPointerCancel={() => gesture.current.points.clear()}>
         {asset.kind === 'video' ? <VideoPlayerSurface
           key={retry}
@@ -343,7 +357,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
           autoPlay={videoResume.current.id!==asset.id||videoResume.current.playing}
           loop
           preload="auto"
-          controlsVisible={chrome}
+          controlsVisible={chrome || !videoPlaying}
           onControlsActivity={revealChrome}
           togglePlaybackOnMediaClick={false}
           scrubFrameUrlBuilder={null}
@@ -351,6 +365,9 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
           controlsList={vault?'nodownload noremoteplayback':undefined}
           disablePictureInPicture={!!vault||undefined}
           mediaEvents={{
+            onPlay:() => setVideoPlaying(true),
+            onPause:() => {setVideoPlaying(false);revealChrome();},
+            onEnded:() => {setVideoPlaying(false);revealChrome();},
             onWaiting:event => {track(event);waiting();},
             onStalled:event => {track(event);waiting();},
             onPlaying:event => {track(event);playing();},
@@ -368,14 +385,13 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
           }}
         />
           : vault ? <>
-            {asset.preview && loaded !== asset.id && <img className="viewer-image viewer-placeholder" src={asset.preview} alt="" aria-hidden="true" draggable={false}/>}
-            <img key={asset.id} className="viewer-image" src={original} alt={vault.label(asset)} draggable={false} onLoad={() => setLoaded(asset.id)} onError={() => setError('이미지를 표시하지 못했습니다. USB 연결과 지원 형식을 확인해 주세요.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, opacity: loaded === asset.id ? undefined : 0}}/>
-          </>
-          : imageSrc ? <img key={asset.id} className="viewer-image" src={imageSrc} alt={artistLabel} draggable={false} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}}/> : <div className="empty-inline">{error ? '미리보기를 표시할 수 없습니다.' : '이미지 불러오는 중'}</div>}
+            {asset.preview && !loaded && <img className="viewer-image viewer-placeholder" src={asset.preview} alt="" aria-hidden="true" draggable={false}/>}
+            <StableImage decodeFirst={false} className="viewer-image" src={original!} alt={vault.label(asset)} draggable={false} onLoad={() => setLoaded(asset.id)} onError={() => setError('이미지를 표시하지 못했습니다. USB 연결과 지원 형식을 확인해 주세요.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, opacity: loaded ? 1 : 0}}/>
+          </> : imageSrc ? <StableImage decodeFirst={false} className="viewer-image" src={imageSrc} alt={artistLabel} draggable={false} onError={() => setError('이미지를 표시하지 못했습니다.')} onPreloadError={() => setError('이미지를 표시하지 못했습니다.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}}/> : <div className="empty-inline">{error ? '미리보기를 표시할 수 없습니다.' : '이미지 불러오는 중'}</div>}
       </div>
       {likes.error && <div className="viewer-error" role="alert"><span>{likes.error}</span></div>}
       {error && <div className="viewer-error" role="status"><span>{error}</span><Button onClick={() => {autoRetry.current={id:asset.id,used:false};renewVideo(video.current,!!video.current&&!video.current.paused);}}><ArrowPathIcon/>다시 시도</Button></div>}
-      {!vault&&<ViewerFilmstrip items={items} index={index} privacy={privacy} onIndex={change} onInteract={revealChrome} onInteractionChange={setFilmstripActive}/>}
+      {!vault&&<ViewerFilmstrip items={items} index={index} privacy={privacy} grown={stripGrown} onSwipeUp={() => {setStripGrown(true);revealChrome();}} onIndex={change} onInteract={revealChrome} onInteractionChange={setFilmstripActive}/>}
       {vault&&<footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index === 0} onClick={() => change(index - 1)}/><span className="viewer-title">{vault.label(asset)}</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index === items.length - 1} onClick={() => change(index + 1)}/></footer>}
       {!vault&&<nav className="viewer-nav-a11y" aria-label="자산 이동"><button type="button" aria-label="이전 자산" disabled={index === 0} onClick={() => change(index - 1)}>이전 자산</button><button type="button" aria-label="다음 자산" disabled={index === items.length - 1} onClick={() => change(index + 1)}>다음 자산</button></nav>}
       </div>

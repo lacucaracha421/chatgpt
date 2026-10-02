@@ -11,7 +11,7 @@ import { useCharacterHub } from "../characters/useCharacterHub";
 import { CharacterFolderContent } from "../characters/CharacterFolderContent";
 import { applyInitialCountOrder, reorderFolders } from "../classification/folderOrder";
 import { useNotesCloseGuard } from "../notes/useNotesCloseGuard";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { AssetBrowser, type AssetBrowserStatus, type AssetNavigationMemory } from "../assets/AssetBrowser";
 import { startAssetDrag as nativeStartAssetDrag, type StartAssetDrag } from "../drag-out/startAssetDrag";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
@@ -28,7 +28,9 @@ import {
 import { DropOverlay } from "../ingestion/DropOverlay";
 import { AppShell } from "../layout/AppShell";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
-import { WorkspaceNavigation } from "../layout/WorkspaceNavigation";
+import { WorkspaceNavigation, workspaceArea } from "../layout/WorkspaceNavigation";
+import { AreaSwitch, MotionScope, viewReady } from "../shared/motion/AreaSwitch";
+import { ChromeContext, useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { LightweightModeIndicator, WindowControls } from "../layout/WindowControls";
 import { libraryGateway } from "../library/client";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -695,7 +697,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 <WindowControls /></div>
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
-                <Suspense fallback={<DeferredViewFallback />}>
+                <MotionScope><WorkspaceAreaSwitch area={workspaceArea(view)} ready={(host, area) => (area !== "collections" || (collectionsRead?.gateway === gateway && collectionsRead.root === libraryRoot)) && viewReady(host)}><Suspense fallback={<DeferredViewFallback />}>
                 {view.kind === "private_vault" ? (
                   privateVaultVisible && privateVaultStatus
                     ? <ExternalVaultBrowser gateway={gateway} status={privateVaultStatus} onStatusChange={updatePrivateVaultStatus}
@@ -814,7 +816,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                   />
                   </CharacterFolderContent>
                 )}
-                </Suspense>
+                </Suspense></WorkspaceAreaSwitch></MotionScope>
                 {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
               </section>
             </div>
@@ -833,4 +835,10 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
 
 function DeferredViewFallback() {
   return <div className="library-content__deferred" role="status" aria-label="화면 불러오는 중" />;
+}
+
+/** Freeze the outgoing chrome scope too: it must not publish into the incoming area's slots. */
+function WorkspaceAreaSwitch({area, ready, children}: {area: string; ready(host: HTMLElement, area: string): boolean; children: ReactNode}) {
+  const chrome = useWorkspaceChrome();
+  return <AreaSwitch activeKey={area} ready={ready} views={{[area]: <ChromeContext.Provider value={chrome}>{children}</ChromeContext.Provider>}}/>;
 }

@@ -6,7 +6,7 @@
   min-height: 0;
   width: 100%;
   box-sizing: border-box;
-  background: var(--color-viewer-bg);
+  background: transparent;
 }
 
 .asset-viewer--docked { grid-template-columns: minmax(0, 1fr) 340px; }
@@ -144,54 +144,18 @@
 /* Ctrl+wheel zoom: the image scales around the pointer and is dragged to pan. */
 .asset-viewer__stage[data-zoomed] { cursor: grab; }
 .asset-viewer__stage[data-zoomed]:active { cursor: grabbing; }
-/* A video sits below the top bar, and the edge areas stop above its control bar so play/seek/fullscreen stay clickable. */
-.asset-viewer__stage--video .video-player { align-self: end; height: calc(100% - 56px); }
+/* Video fills the stage; edge controls stop above the overlaid playback controls. */
+.asset-viewer__stage--video .video-player { height: 100%; }
 .asset-viewer__stage--video .asset-viewer__edge { bottom: 112px; }
 
-.asset-viewer__filmstrip {
-  position: absolute;
-  z-index: 3;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
-  height: 88px;
-  padding: 0 var(--space-4);
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.55));
-}
-
-.asset-viewer__filmstrip-button {
-  display: block;
-  flex: none;
-  width: 44px;
-  height: 60px;
-  padding: 0;
-  opacity: 0.55;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-tile);
-}
-
-.asset-viewer__filmstrip-button img,
-.asset-viewer__filmstrip-placeholder {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  background: var(--color-surface);
-  border-radius: var(--radius-tile);
-}
-
-.asset-viewer__filmstrip-button--current {
-  width: 48px;
-  height: 64px;
-  opacity: 1;
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
+.asset-viewer__backdrop { position: absolute; inset: 0; background: var(--color-viewer-bg); pointer-events: none; }
+.asset-viewer__media-surface { display: grid; width: 100%; height: 100%; min-height: 0; min-width: 0; place-items: center; }
+.asset-viewer__media-surface > .video-player { width: 100%; height: 100%; }
+.asset-viewer__filmstrip.centered-filmstrip { bottom: 12px; }
+.asset-viewer__stage--video .asset-viewer__filmstrip { bottom: 112px; }
+.asset-viewer--playing .asset-viewer__filmstrip { opacity: 0; transform: translateY(24px); pointer-events: none; visibility: hidden; }
+.asset-viewer--playing .asset-viewer__topbar, .asset-viewer--playing .asset-viewer__edge { opacity: 0; pointer-events: none; }
+.asset-viewer[data-viewer-closing] .asset-viewer__chrome { visibility: hidden; }
 
 .asset-viewer__dock {
   display: flex;
@@ -245,7 +209,6 @@
   object-fit: contain;
 }
 
-.asset-viewer__stage--filmstrip .asset-viewer__media { max-height: calc(100% - 128px); }
 
 @media (prefers-reduced-motion: reduce) {
   .asset-viewer__topbar,
@@ -256,3 +219,8 @@
   }
 }
 
+.ui-dialog--fullscreen:has(>.asset-viewer) { background: transparent; }
+
+.asset-viewer__load-error { position: absolute; bottom: 160px; padding: 8px 12px; background: var(--color-surface); color: var(--color-muted); }
+
+.asset-viewer:not(.asset-viewer--playing) .asset-viewer__stage--video .asset-viewer__filmstrip { opacity: 1; pointer-events: auto; }

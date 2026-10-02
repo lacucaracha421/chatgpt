@@ -11,6 +11,11 @@ vi.mock('./AlbumMembershipEditor',()=>({AlbumMembershipEditor:({open}:{open:bool
 vi.mock('./ClassificationAssignmentEditor',()=>({ClassificationAssignmentEditor:({open}:{open:boolean})=>open?<div>classification-editor-open</div>:null}));
 vi.mock('./ViewerInfo',()=>({ViewerInfo:(props:{asset:Asset;mediaError:string;onClose():void})=>{mocks.info(props);return <div>viewer-info-open<button aria-label="정보 닫기" onClick={props.onClose}/></div>;}}));
 import {Viewer} from './Viewer';
+async function showOriginal(id:string) {
+  let image!:HTMLImageElement;
+  await waitFor(() => { image = document.querySelector<HTMLImageElement>(`.viewer-surface img[src$="original-${id}"]`)!; expect(image).toBeTruthy(); });
+  await act(async () => {fireEvent.load(image); await Promise.resolve();});
+}
 const items:Asset[]=[{id:'a',kind:'image',preview:'https://test.invalid/thumb-a',creator_name:'A'},{id:'b',kind:'image',preview:'https://test.invalid/thumb-b',creator_name:'B'}];
 it.each([['분류','classification-editor-open'],['앨범','album-editor-open']])('consumes Android Back in the %s picker before closing the viewer',(label,marker)=>{
   const backRef={current:null as (()=>boolean)|null};
@@ -37,11 +42,13 @@ describe('progressive viewer',()=>{
     expect(events.some(p=>p.event==='commit')).toBe(false);
     expect(screen.getByRole('img').getAttribute('src')).toBe(items[0].preview);
     await act(async()=>{finish();});
+    await showOriginal('a');
     await waitFor(()=>expect(events.some(p=>p.event==='commit'&&p.id==='a')).toBe(true));
     expect(screen.getByRole('img').getAttribute('src')).toContain('original-a');
     await waitFor(()=>expect(events.some(p=>p.event==='prefetch_finish'&&p.id==='b'&&p.status==='ok')).toBe(true));
     const requests=mocks.ticket.mock.calls.length;
     rerender(<Viewer items={items} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
+    await showOriginal('b');
     await waitFor(()=>expect(events.some(p=>p.event==='commit'&&p.id==='b'&&p.prepared===true&&p.source==='prepared')).toBe(true));
     expect(mocks.ticket).toHaveBeenCalledTimes(requests);
   });
@@ -78,6 +85,7 @@ describe('progressive viewer',()=>{
       expect(cancel).not.toHaveBeenCalledWith(operation);
       expect(requests.filter(r=>r.assetId==='b')).toHaveLength(1);
       await act(async()=>{finish();});
+      await showOriginal('b');
       await waitFor(()=>expect(screen.getByRole('img').getAttribute('src')).toContain('original-b'));
       expect(requests.filter(r=>r.assetId==='b')).toHaveLength(1);
       expect(cancel).not.toHaveBeenCalledWith(operation);
@@ -191,7 +199,7 @@ describe('progressive viewer',()=>{
     expect(screen.getByRole('img').getAttribute('src')).toBe(items[0].preview);
     await waitFor(()=>expect(mocks.decode).toHaveBeenCalledOnce());
     expect(screen.getByRole('img').getAttribute('src')).toBe(items[0].preview);
-    finish(); await waitFor(()=>expect(screen.getByRole('img').getAttribute('src')).toContain('original-a'));
+    await act(async () => finish()); await showOriginal('a'); await waitFor(()=>expect(screen.getByRole('img').getAttribute('src')).toContain('original-a'));
   });
   it('keeps the useful thumbnail and offers retry on decode failure',async()=>{
     mocks.decode.mockRejectedValue(new Error('이미지를 표시하지 못했습니다.'));
@@ -204,6 +212,7 @@ describe('progressive viewer',()=>{
     const {rerender}=render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
     await waitFor(()=>expect(mocks.decode).toHaveBeenCalled());
     rerender(<Viewer items={items} index={1} onIndex={()=>{}} onClose={()=>{}}/>);
+    await showOriginal('b');
     await waitFor(()=>expect(screen.getByRole('img').getAttribute('src')).toContain('original-b'));
     finishA(); expect(screen.getByRole('img').getAttribute('src')).toContain('original-b');
   });
@@ -414,11 +423,15 @@ describe('tablet immersive viewer chrome',()=>{
     expect(change).toHaveBeenCalledWith(2);
   });
 
-  it('hides the filmstrip for a single item and for video',()=>{
+  it('omits the strip for a single item and overlays it for paused video',()=>{
     const {rerender}=render(<Viewer items={[items[0]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
     expect(screen.queryByRole('navigation',{name:'주변 자산'})).toBeNull();
     rerender(<Viewer items={[{...items[0],kind:'video'},items[1]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
-    expect(screen.queryByRole('navigation',{name:'주변 자산'})).toBeNull();
+    expect(screen.queryByRole('navigation',{name:'주변 자산'})).toBeTruthy();
+    fireEvent.play(document.querySelector('video')!);
+    expect(document.querySelector('.viewer')?.classList.contains('is-playing')).toBe(true);
+    fireEvent.pause(document.querySelector('video')!);
+    expect(document.querySelector('.viewer')?.classList.contains('is-playing')).toBe(false);
   });
 
   it('uses the portrait sheet and the landscape dock for information',()=>{
@@ -454,7 +467,8 @@ describe('tablet immersive viewer chrome',()=>{
       act(()=>{vi.advanceTimersByTime(2500);});
       expect(document.querySelector('.viewer')?.classList.contains('chrome-visible')).toBe(false);
       rerender(<Viewer items={[{id:'v',kind:'video'},items[1]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
-      act(()=>{vi.advanceTimersByTime(5000);});
+      fireEvent.play(document.querySelector('video')!);
+      act(()=>{vi.advanceTimersByTime(2000);});
       expect(document.querySelector('.viewer')?.classList.contains('chrome-visible')).toBe(false);
     } finally {
       vi.useRealTimers();
@@ -591,4 +605,34 @@ it('does not request media when opened while privacy is enabled',()=>{
  localStorage.setItem('lakomics.mobile.privacyMode','1');const close=vi.fn();
  render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={close}/>);
  expect(mocks.ticket).not.toHaveBeenCalled();expect(document.querySelector('img[src]')).toBeNull();expect(close).toHaveBeenCalledOnce();
+});
+
+it('grows after an upward strip swipe and shrinks on a picture tap',()=>{
+  render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+  const strip=screen.getByRole('navigation',{name:'주변 자산'});
+  fireEvent.pointerDown(strip,{pointerId:91,clientX:100,clientY:150});
+  fireEvent.pointerMove(strip,{pointerId:91,clientX:100,clientY:70});
+  fireEvent.pointerUp(strip,{pointerId:91,clientX:100,clientY:70});
+  expect(strip.classList.contains('is-grown')).toBe(true);
+  const surface=document.querySelector('.viewer-surface')!;
+  fireEvent.pointerDown(surface,{pointerId:92,clientX:100,clientY:100});
+  fireEvent.pointerUp(surface,{pointerId:92,clientX:100,clientY:100});
+  expect(strip.classList.contains('is-grown')).toBe(false);
+});
+
+it('keeps the actual painted slot until the next original loads and decodes',async()=>{
+  const props={items,onIndex:()=>{},onClose:()=>{}};
+  const view=render(<Viewer {...props} index={0}/>);
+  await showOriginal('a');
+  const old=screen.getByRole('img');
+  view.rerender(<Viewer {...props} index={1}/>);
+  await waitFor(()=>expect(document.querySelector('.viewer-surface img[src$="original-b"]')).toBeTruthy());
+  expect(screen.getByRole('img')).toBe(old);
+  const next=document.querySelector<HTMLImageElement>('.viewer-surface img[src$="original-b"]')!;
+  let finish!:()=>void;
+  Object.defineProperty(next,'decode',{value:()=>new Promise<void>(resolve=>{finish=resolve;})});
+  fireEvent.load(next);
+  expect(screen.getByRole('img')).toBe(old);
+  await act(async()=>finish());
+  expect(screen.getByRole('img')).toBe(next);
 });

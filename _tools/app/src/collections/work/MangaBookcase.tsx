@@ -98,14 +98,41 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
 }
 function Spine({ volume, latest, picked, privacy, focus, owned, src, onPick, onEnlarge }: { volume: CollectionVolume; latest: boolean; picked: boolean; privacy: boolean; focus: number | null; owned: boolean | null; src: string | null; onPick(): void; onEnlarge?(): void }) {
   const [ratio, setRatio] = useState(.71);
+  // Admit a front only when picked, then retain it through put-down. The strip remains
+  // visible until that front loads; StableImage retains decoded covers on refresh.
+  const [frontMounted, setFrontMounted] = useState(picked);
+  const [frontReady, setFrontReady] = useState(privacy || !src);
+  const [fronted, setFronted] = useState(false);
+  useLayoutEffect(() => {
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (!picked) {
+      setFronted(false);
+      if (!frontMounted) return;
+      if (reduced) { setFrontMounted(false); setFrontReady(privacy || !src); return; }
+      const timer = setTimeout(() => { setFrontMounted(false); setFrontReady(privacy || !src); }, 420);
+      return () => clearTimeout(timer);
+    }
+    setFrontMounted(true);
+    if (!frontReady && !privacy && src) return;
+    if (reduced) { setFronted(true); return; }
+    const frame = requestAnimationFrame(() => setFronted(true));
+    return () => cancelAnimationFrame(frame);
+  }, [picked, frontMounted, frontReady, privacy, src]);
   const full = 120 * ratio;
   const missing = owned === false;
-  const image = (front: boolean) => !privacy && src ? <StableImage src={src} alt="" draggable={false} onLoad={event => { if (event.currentTarget.naturalHeight) setRatio(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight); }} style={front ? undefined : { objectPosition: `${stripPosition(focus, full, MANGA_SPINE_WIDTH)}% 50%` }} /> : <span className="manga-spine-empty" aria-hidden="true" />;
-  return <button type="button" className={`manga-spine${missing ? " manga-spine--missing" : ""}${volume.releaseStatus === "upcoming" ? " manga-spine--upcoming" : ""}`} aria-label={`${volumeLabel(volume)} 보기`} aria-description={volume.releaseStatus === "upcoming" ? `${volume.localReleaseDate ?? ""} 출간 예정` : missing ? "미보유" : undefined} aria-pressed={picked} data-volume-id={volume.id} onClick={onPick} onDoubleClick={onEnlarge} style={{ "--spine-width": `${MANGA_SPINE_WIDTH}px`, "--cover-width": `${full}px` } as CSSProperties}>
+  const image = (front: boolean) => !privacy && src ? <StableImage src={src} alt="" draggable={false} decodeFirst={!front} onLoad={async event => {
+    const element = event.currentTarget;
+    if (element.naturalHeight) setRatio(element.naturalWidth / element.naturalHeight);
+    if (front) {
+      try { await element.decode?.(); } catch { return; }
+      if (element.isConnected && element.getAttribute("src") === src) setFrontReady(true);
+    }
+  }} style={front ? undefined : { objectPosition: `${stripPosition(focus, full, MANGA_SPINE_WIDTH)}% 50%` }} /> : <span className="manga-spine-empty" aria-hidden="true" />;
+  return <button type="button" className={`manga-spine${fronted ? " is-fronted" : ""}${frontMounted && !picked ? " is-settling" : ""}${missing ? " manga-spine--missing" : ""}${volume.releaseStatus === "upcoming" ? " manga-spine--upcoming" : ""}`} aria-label={`${volumeLabel(volume)} 보기`} aria-description={volume.releaseStatus === "upcoming" ? `${volume.localReleaseDate ?? ""} 출간 예정` : missing ? "미보유" : undefined} aria-pressed={picked} data-volume-id={volume.id} onClick={onPick} onDoubleClick={onEnlarge} style={{ "--spine-width": `${MANGA_SPINE_WIDTH}px`, "--cover-width": `${full}px`, "--spine-angle": `${Math.acos(Math.min(1, MANGA_SPINE_WIDTH / full)) * 180 / Math.PI}deg` } as CSSProperties}>
     {/* The shelf is a physical object: real cover strip, light only, no invented printing. */}
     {latest && <span className="manga-latest-label">최신</span>}
-    <span className="manga-spine-strip" style={picked ? { visibility: "hidden" } : undefined}>{image(false)}<span className="manga-spine-number">{volume.volumeNumber}</span></span>
-    {picked && <span className="manga-spine-front">{image(true)}</span>}
+    <span className="manga-spine-strip">{image(false)}<span className="manga-spine-number">{volume.volumeNumber}</span></span>
+    {frontMounted && <span className="manga-spine-front" onTransitionEnd={event => { if (!picked && event.target === event.currentTarget && event.propertyName === "transform") { setFrontMounted(false); setFrontReady(privacy || !src); } }}>{image(true)}</span>}
     {picked && <span className="manga-picked-number">{volume.volumeNumber}</span>}
     {missing && volume.releaseStatus === "upcoming" && !picked && <span className="manga-upcoming-date">{volume.localReleaseDate?.slice(5).replace("-", ".")}</span>}
   </button>;

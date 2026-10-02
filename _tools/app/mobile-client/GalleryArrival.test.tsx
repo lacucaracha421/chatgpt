@@ -3,7 +3,6 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {Gallery} from './Gallery';
 import {CatalogCover} from './CatalogCover';
 import * as catalogMedia from './catalogMedia';
-import {ARRIVE_MS} from './motion';
 import type {Asset} from './types';
 const measured=vi.hoisted(()=>({sizes:[] as number[]}));
 vi.mock('@tanstack/react-virtual',()=>({useVirtualizer:({count,estimateSize}:{count:number;estimateSize(i:number):number})=>{
@@ -14,8 +13,8 @@ vi.mock('@tanstack/react-virtual',()=>({useVirtualizer:({count,estimateSize}:{co
 const animate=vi.fn();
 beforeEach(()=>{
  vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});
- animate.mockReset();
- (HTMLElement.prototype as unknown as {animate:unknown}).animate=function(this:HTMLElement,...args:unknown[]){animate(this,...args);};
+ animate.mockReset().mockImplementation(()=>({cancel:vi.fn()}));
+ (HTMLElement.prototype as unknown as {animate:unknown}).animate=function(this:HTMLElement,...args:unknown[]){return animate(this,...args);};
 });
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
 
@@ -29,6 +28,7 @@ it('shows appended tiles in place without a content entrance animation',async()=
  const first=[asset('a'),asset('b')];
  const view=render(gallery(first));
  const original=tile('a');
+ animate.mockClear(); // Only the initial uncached batch has an entrance.
  view.rerender(gallery([...first,asset('c'),asset('d')]));
  expect(tile('a')).toBe(original);
  expect(tile('c').style.opacity).not.toBe('0');
@@ -38,8 +38,12 @@ it('shows appended tiles in place without a content entrance animation',async()=
  expect(tileAnimations('c')).toHaveLength(0);
 });
 
-it('does not animate the first page, a new place or anything under reduced motion',async()=>{
+it('animates only the true first load, not a new place or anything under reduced motion',async()=>{
  const view=render(gallery([asset('a')]));
+ expect(tileAnimations('a')).toHaveLength(1);
+ expect(animate.mock.calls[0][1]).toEqual([{opacity:0,transform:'translateY(8px) scale(.98)'},{opacity:1,transform:'none'}]);
+ expect(animate.mock.calls[0][2]).toEqual(expect.objectContaining({duration:560,delay:0}));
+ animate.mockClear();
  view.rerender(gallery([asset('x'),asset('y')],'other'));
  expect(tile('y').style.opacity).not.toBe('0');
  expect(animate.mock.calls.filter(([element])=>(element as HTMLElement).classList.contains('media-tile'))).toHaveLength(0);
@@ -79,6 +83,7 @@ it('keeps a stale list mounted and does not arrive ready thumbnails on replaceme
 
 it('keeps slow thumbnails and decoded images in place without fading',async()=>{
  const view=render(gallery([asset('a')]));
+ animate.mockClear();
  view.rerender(gallery([asset('a'),asset('b')]));
  const image=tile('b').querySelector('img')!;
  expect(tile('b').style.opacity).not.toBe('0');

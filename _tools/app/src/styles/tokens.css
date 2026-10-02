@@ -127,6 +127,8 @@
   --motion-standard: 140ms;
   --motion-screen: 200ms;
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-sheet: cubic-bezier(.32,.72,0,1);
+  --ease-spring: cubic-bezier(.22,1,.36,1);
   --z-dialog-overlay: 1110;
   --z-dialog-content: 1120;
   --z-floating-menu: 1200;
@@ -158,3 +160,8 @@
 }
 
 :root { --asset-selection-tint: rgb(36 125 137 / 55%); }
+
+/* The prototype samples the critically damped spring (omega = 8) at 41 points. */
+@supports (transition-timing-function: linear(0, 1)) {
+  :root { --ease-spring: linear(0.0000, 0.0175, 0.0616, 0.1219, 0.1912, 0.2642, 0.3374, 0.4082, 0.4751, 0.5372, 0.5940, 0.6454, 0.6916, 0.7326, 0.7689, 0.8009, 0.8288, 0.8532, 0.8743, 0.8926, 0.9084, 0.9220, 0.9337, 0.9437, 0.9523, 0.9596, 0.9658, 0.9711, 0.9756, 0.9794, 0.9826, 0.9854, 0.9877, 0.9897, 0.9913, 0.9927, 0.9939, 0.9949, 0.9957, 0.9964, 1.0000); }
+}

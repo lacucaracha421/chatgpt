@@ -109,3 +109,12 @@
 .tablet-performer__labels { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .tablet-performer__labels .numeric { color: var(--color-faint); }
 .tablet-performer__skeleton { display: block; height: 220px; }
+
+/* The shortcuts and controls travel together in the section shade. */
+.mobile-collections .ui-section-bar { flex-wrap: nowrap; gap: 0; }
+.mobile-collections .ui-section-bar > .ui-segmented { flex: 1 1 auto; width: auto; overflow-x: auto; }
+.mobile-collections .ui-section-bar__trailing { gap: 0; }
+.mobile-collections .ui-section-bar__trailing .ui-button { min-width: 44px; min-height: 44px; height: 44px; padding-inline: var(--space-2); }
+.mobile-collections .ui-section-bar__trailing > .ui-button svg { width: 20px; height: 20px; }
+.mobile-collections .collection-shortcuts__label { display: none; }
+.mobile-collections .collection-shortcuts__divider { margin-inline: var(--space-1); }

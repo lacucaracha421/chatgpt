@@ -467,7 +467,11 @@ it('uses drill-down in both orientations and keeps settings only on Home',async(
     expect(screen.queryByRole('button',{name:'사이드바 열기'})).toBeNull();
   }
 });
-it('shows bottom tabs with their final backdrop on the first commit and retains visited screens',async()=>{
+it.each([false,true])('switches ready bottom tabs with the approved motion and retains visited screens (reduced=%s)',async(reduced)=>{
+  vi.stubGlobal('matchMedia',()=>({matches:reduced,addEventListener:vi.fn(),removeEventListener:vi.fn()}));
+  const api=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation((path:string)=>path.startsWith('/v1/collections?')?Promise.resolve({ready:true,revision:'m1',items:[],nextCursor:null}):path.startsWith('/v1/mobile-catalog')?Promise.resolve({ready:true,publicationRevision:'p1',items:[],totalCount:0,countStatus:'ready',context:'c',nextCursor:null}):api(path));
+  mocks.native.mockImplementation(async(op:string)=>op.startsWith('notes')?{unlocked:true,notes:[]}:{configured:true,endpoint:'https://example.invalid'});
   const animate=vi.fn(function(this:HTMLElement){return {cancel(){}};});
   const descriptor=Object.getOwnPropertyDescriptor(HTMLElement.prototype,'animate');
   Object.defineProperty(HTMLElement.prototype,'animate',{configurable:true,value:animate});
@@ -475,19 +479,26 @@ it('shows bottom tabs with their final backdrop on the first commit and retains 
     render(<App/>);
     await screen.findByRole('heading',{name:'에셋'});
     const body=document.querySelector('.app-body')!;
+    await waitFor(()=>expect(body.querySelector('.motion-stage')?.getAttribute('data-motion-shown')).toBe('library'));
     const retained=new Map<string,Element>();
-    const tabs=[['홈','home','.library-main'],['에셋','library','.library-root'],['컬렉션','collections','.mobile-collections'],['카탈로그','catalog','.mobile-catalog'],['메모','notes','.mobile-notes']] as const;
+    const tabs=[['홈','home','[data-motion-view=home] .library-main'],['에셋','library','.library-root'],['컬렉션','collections','.mobile-collections'],['카탈로그','catalog','.mobile-catalog'],['메모','notes','.mobile-notes']] as const;
     for(const [label,key,selector] of [...tabs,...tabs]){
       animate.mockClear();
       await act(async()=>{fireEvent.click(within(screen.getByRole('navigation',{name:'주요 탐색'})).getByRole('button',{name:label,exact:true}));});
       expect(body.getAttribute('data-active-tab')).toBe(key);
       const shown=body.querySelector(selector)!;
       expect(shown).toBeTruthy();
-      // A tab entrance used to fade and translate whole surfaces, including their gradients.
-      // The first commit must leave those surfaces at their final opacity and position.
-      expect(animate).not.toHaveBeenCalled();
-      if(retained.has(key))expect(shown).toBe(retained.get(key));
-      else retained.set(key,shown);
+      await waitFor(()=>expect(body.querySelector(`[data-motion-view=${key}]`)?.getAttribute('aria-hidden')).toBeNull());
+      if(reduced)expect(animate).not.toHaveBeenCalled();
+      else expect(animate.mock.calls).toEqual(expect.arrayContaining([
+        [[{opacity:0},{opacity:1}],{duration:160,easing:'cubic-bezier(0.2, 0, 0, 1)'}],
+        [[{transform:'translateY(12px)'},{transform:'none'}],{duration:380,easing:'cubic-bezier(.32,.72,0,1)'}],
+      ]));
+      await waitFor(()=>expect(body.querySelector('.motion-stage')?.getAttribute('data-motion-shown')).toBe(key));
+      if(key!=='home'){
+        if(retained.has(key))expect(shown).toBe(retained.get(key));
+        else retained.set(key,shown);
+      }
     }
   } finally {
     if(descriptor)Object.defineProperty(HTMLElement.prototype,'animate',descriptor);
