@@ -628,24 +628,24 @@ it('closes an open search on Back before leaving the Library root',async()=>{
   render(<App/>);
   await screen.findByRole('button',{name:/^분류 B, /});
   fireEvent.click(screen.getByRole('button',{name:'검색'}));
-  fireEvent.change(screen.getByRole('searchbox',{name:'폴더·캐릭터 찾기'}),{target:{value:'분류'}});
+  fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:'분류'}});
   mocks.native.mockClear();
   act(()=>window.dispatchEvent(new Event('lakomics-back')));
-  expect(screen.queryByRole('searchbox',{name:'폴더·캐릭터 찾기'})).toBeNull();
+  expect(screen.queryByRole('searchbox',{name:'에셋 찾기'})).toBeNull();
   expect(mocks.native.mock.calls.some(([op])=>op==='finish')).toBe(false);
 });
 it('keeps the Library root mounted behind an open folder, so Back returns to the same search without rebuilding it',async()=>{
   render(<App/>);
   await screen.findByRole('button',{name:/^분류 B, /});
   fireEvent.click(screen.getByRole('button',{name:'검색'}));
-  fireEvent.change(screen.getByRole('searchbox',{name:'폴더·캐릭터 찾기'}),{target:{value:'분류'}});
-  fireEvent.click(await screen.findByRole('button',{name:/^분류 B, /}));
+  fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:'분류'}});
+  fireEvent.click(await screen.findByRole('button',{name:/^분류 B/}));
   await screen.findByRole('heading',{name:'분류 B'});
   // Hidden, not unmounted: it is out of the accessibility tree while the folder is shown.
-  expect(screen.queryByRole('searchbox',{name:'폴더·캐릭터 찾기'})).toBeNull();
+  expect(screen.queryByRole('searchbox',{name:'에셋 찾기'})).toBeNull();
   act(()=>window.dispatchEvent(new Event('lakomics-back')));
   await screen.findByRole('heading',{name:'에셋'});
-  expect((screen.getByRole('searchbox',{name:'폴더·캐릭터 찾기'}) as HTMLInputElement).value).toBe('분류');
+  expect((screen.getByRole('searchbox',{name:'에셋 찾기'}) as HTMLInputElement).value).toBe('분류');
 });
 it('shows a failed load over the bottom of the content instead of inserting it above the list',async()=>{
   render(<App/>);
@@ -725,5 +725,35 @@ describe('pages that carry their own list generation',()=>{
     fireEvent.click(await screen.findByRole('button',{name:'분류 B, 2개'}));await screen.findByText('tile-b1');await settle();
     expect(pageReads()-pages).toBe(1);
     expect(generationReads()-generations).toBe(2);
+  });
+});
+
+describe('asset search scope navigation',()=>{
+  it.each(['folder','character','album','artist'] as const)('opens a chosen %s and returns to the root when its chip is removed',async kind=>{
+    vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){}}));
+    const revision='a'.repeat(64),names={folder:'검색 폴더',character:'검색 캐릭터',album:'검색 앨범',artist:'검색 작가'};
+    const original=mocks.api.getMockImplementation()!;
+    const artist={id:'search-artist',label:names.artist,displayName:names.artist,keys:['search-artist'],assetCount:2,recentCount:0,pinned:false,hidden:false,main:true,coverAssetIds:[]};
+    mocks.native.mockImplementation(async(op:string)=>op==='albumTree'?{adopted:true,libraryId:'library',epoch:1,code:'',albums:[{id:'search-album',name:names.album,parentId:null,iconKey:null,colorKey:null,assetCount:2}]}:{configured:true,endpoint:'https://example.invalid'});
+    mocks.api.mockImplementation((path:string)=>{
+      if(path==='/v1/library/classifications')return Promise.resolve({items:[{id:'b',name:names.folder,asset_count:2,parent_id:null}]});
+      if(path==='/v1/library/characters')return Promise.resolve({version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,nodes:[{id:'series:s',sourceId:'s',seriesId:'s',kind:'series',parentId:null,name:'시리즈',description:'',thumbnailAssetId:null,manualOnly:false,excluded:false},{id:'character:c',sourceId:'c',seriesId:'s',kind:'character',parentId:'series:s',name:names.character,description:'',thumbnailAssetId:null,manualOnly:false,excluded:false}],scopes:[{nodeId:'series:s',filter:'all',totalCount:2,sourceCount:2},{nodeId:'character:c',filter:'all',totalCount:2,sourceCount:2}]});
+      if(path.startsWith('/v1/library/characters/assets'))return Promise.resolve({revision,items:b,totalCount:2,sourceCount:2,has_more:false,next_cursor:null});
+      if(path.startsWith('/v1/albums/assets?'))return Promise.resolve({items:b,hasMore:false,nextCursor:null});
+      if(path==='/v1/library/artists')return Promise.resolve({artists:[artist]});
+      if(path==='/v1/library/artists/search-artist')return Promise.resolve({artist});
+      if(path.startsWith('/v1/library/revisit/creator/'))return Promise.resolve({items:b,has_more:false,next_cursor:null});
+      return original(path);
+    });
+    render(<App/>);
+    fireEvent.click(await screen.findByRole('button',{name:'검색',exact:true}));
+    fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:'검색'}});
+    fireEvent.click(await screen.findByRole('button',{name:new RegExp(`^${names[kind]}`)}));
+    const chip=await screen.findByRole('button',{name:`${names[kind]} 범위 제거`});
+    await screen.findByText('tile-b1');
+    expect(screen.getAllByRole('group',{name:'에셋 검색 범위'})).toHaveLength(1);
+    fireEvent.click(chip);
+    await screen.findByRole('searchbox',{name:'에셋 찾기'});
+    expect(screen.queryByRole('button',{name:`${names[kind]} 범위 제거`})).toBeNull();
   });
 });

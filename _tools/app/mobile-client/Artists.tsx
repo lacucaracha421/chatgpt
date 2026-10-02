@@ -120,7 +120,7 @@ function ArtistIntro({artist, privateMode, sort, filter, onSort, onFilter, asset
   </div>;
 }
 
-function ArtistDetail({summary, assignments, privateMode, paused, onBack, onOpenViewer}: {summary: LibraryArtist; assignments: ArtistAssignment[]; privateMode: boolean; paused:boolean; onBack(): void; onOpenViewer(items: Asset[], index: number): void}) {
+function ArtistDetail({scopeChips,summary, assignments, privateMode, paused, onBack, onOpenViewer}: {scopeChips?:ReactNode;summary: LibraryArtist; assignments: ArtistAssignment[]; privateMode: boolean; paused:boolean; onBack(): void; onOpenViewer(items: Asset[], index: number): void}) {
   const [artist, setArtist] = useState(summary);
   const [missing, setMissing] = useState(false);
   const [assets, setAssets] = useState<Asset[]>(() => assetsFromIds(assignments.filter(row => row.artistId === summary.id).map(row => row.assetId)));
@@ -162,14 +162,14 @@ function ArtistDetail({summary, assignments, privateMode, paused, onBack, onOpen
       if (page.items?.length) { setAssets(current => [...current, ...page.items!.filter(item => !current.some(old => old.id === item.id))]); setCursor(page.next_cursor ?? null); }
     }, () => {}).finally(() => setLoadingMore(false));
   };
-  if (missing) return <div className="artist-screen"><TopBar back={{label:'작가 목록으로', onClick:onBack}} crumbs={<span className="top-bar__crumbs">홈 › 작가 ›</span>} title={artistName(summary)} /><EmptyArtists /></div>;
+  if (missing) return <div className="artist-screen"><TopBar back={{label:'작가 목록으로', onClick:onBack}} crumbs={<span className="top-bar__crumbs">홈 › 작가 ›</span>} title={artistName(summary)} />{scopeChips}<EmptyArtists /></div>;
   const shown = filtered.length ? filtered : fallback;
   return <div className="artist-screen"><TopBar back={{label:'작가 목록으로', onClick:onBack}} crumbs={<span className="top-bar__crumbs">홈 › 작가 ›</span>} title={artistName(artist)} actions={profile ? <IconButton label="작가 프로필 열기" icon={ArrowUpRightIcon} onClick={() => { void native('openExternal', {url: profile}).catch(() => {}); }} /> : undefined} />
-    <div className="artist-detail-scroll"><Gallery items={shown} density={DEFAULT_DENSITY} identity={`artist:${artist.id}:${sort}:${filter}:${source}`} restoreScroll={0} onScroll={() => {}} onReady={ready => setAssets(current => current.map(asset => asset.id === ready.id ? {...asset, ...ready} : asset))} onNearEnd={loadMore} paused={privateMode||paused} privacy={privateMode} intro={<ArtistIntro artist={artist} privateMode={privateMode} sort={sort} filter={filter} onSort={() => setSort(value => value === 'newest' ? 'oldest' : 'newest')} onFilter={setFilter} assets={shown} />} onOpen={index => { if (!privateMode) onOpenViewer(shown, index); }} />{!shown.length && <div className="artist-detail-empty">PC가 이 작가의 asset id를 아직 게시하지 않았습니다.</div>}</div>
+    <div className="artist-detail-scroll"><Gallery items={shown} density={DEFAULT_DENSITY} identity={`artist:${artist.id}:${sort}:${filter}:${source}`} restoreScroll={0} onScroll={() => {}} onReady={ready => setAssets(current => current.map(asset => asset.id === ready.id ? {...asset, ...ready} : asset))} onNearEnd={loadMore} paused={privateMode||paused} privacy={privateMode} intro={<>{scopeChips}<ArtistIntro artist={artist} privateMode={privateMode} sort={sort} filter={filter} onSort={() => setSort(value => value === 'newest' ? 'oldest' : 'newest')} onFilter={setFilter} assets={shown} /></>} onOpen={index => { if (!privateMode) onOpenViewer(shown, index); }} />{!shown.length && <div className="artist-detail-empty">PC가 이 작가의 asset id를 아직 게시하지 않았습니다.</div>}</div>
   </div>;
 }
 
-export function Artists({endpoint, backRef, onOpenViewer, paused=false, initialArtist, onClose}: {endpoint: string; backRef: MutableRefObject<(() => boolean) | null>; onOpenViewer(items: Asset[], index: number): void; paused?:boolean; initialArtist?: LibraryArtist; onClose?(): void}) {
+export function Artists({scopeChips,endpoint, backRef, onOpenViewer, paused=false, initialArtist, onClose}: {scopeChips?:ReactNode;endpoint: string; backRef: MutableRefObject<(() => boolean) | null>; onOpenViewer(items: Asset[], index: number): void; paused?:boolean; initialArtist?: LibraryArtist; onClose?(): void}) {
   const [privateMode] = usePrivacyMode();
   const [state, setState] = useState<ArtistState>('loading');
   const [artists, setArtists] = useState<LibraryArtist[]>([]);
@@ -196,7 +196,7 @@ export function Artists({endpoint, backRef, onOpenViewer, paused=false, initialA
     return () => { backRef.current = null; };
   }, [backRef, detail, initialArtist, onClose, searchOpen]);
   const closeSearch = () => { setSearchOpen(false); setQuery(''); };
-  if (detail) return <ArtistDetail summary={detail} assignments={assignments} privateMode={privateMode} paused={paused} onBack={() => { if (initialArtist && onClose) onClose(); else setDetail(null); }} onOpenViewer={onOpenViewer} />;
+  if (detail) return <ArtistDetail scopeChips={scopeChips} summary={detail} assignments={assignments} privateMode={privateMode} paused={paused} onBack={() => { if (initialArtist && onClose) onClose(); else setDetail(null); }} onOpenViewer={onOpenViewer} />;
   const header = searchOpen ? <TopBarSearch title="작가" onClose={closeSearch}><label className="top-bar__search"><MagnifyingGlassIcon aria-hidden="true" /><input autoFocus type="search" aria-label="작가 검색" placeholder="이름, 핸들, 초성" value={query} onChange={event => setQuery(event.target.value)} />{query && <IconButton label="검색어 지우기" icon={XMarkIcon} onClick={() => setQuery('')} />}</label></TopBarSearch> : <TopBar back={{label:'홈으로', onClick:() => window.dispatchEvent(new Event('lakomics-back'))}} crumbs={<span className="top-bar__crumbs">홈 ›</span>} title="작가" count={artists.length ? artists.length.toLocaleString('ko-KR') : undefined} actions={state === 'ready' ? <IconButton label="작가 검색" icon={MagnifyingGlassIcon} onClick={() => setSearchOpen(true)} /> : undefined} />;
   return <div className="artist-screen">{header}{state === 'loading' ? <div className="artist-empty" role="status"><span>작가 목록을 불러오는 중입니다</span></div> : state === 'empty' ? <EmptyArtists /> : <ArtistHub artists={artists} assignments={assignments} query={query} privateMode={privateMode} paused={paused} onOpen={setDetail} />}</div>;
 }

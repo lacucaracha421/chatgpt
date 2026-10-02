@@ -1,12 +1,11 @@
-import {useEffect,useMemo,useRef,useState} from 'react';
-import {ArrowsUpDownIcon,MagnifyingGlassIcon} from '@heroicons/react/24/outline';
+import {useEffect,useMemo,useState} from 'react';
+import {ArrowsUpDownIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
 import {ArtistImage,EmptyArtists} from './Artists';
-import {api} from './transport';
 import {EmptyState,SegmentedControl} from './ui';
 import {usePrivacyMode} from './privacyMode';
 import {PinIcon} from './PinIcon';
-import {artistName,assetsFromIds,matchesArtist,normalizeArtists,sortArtists,type ArtistSort,type LibraryArtist} from './artistsModel';
+import {artistName,assetsFromIds,sortArtists,type ArtistSort,type LibraryArtist} from './artistsModel';
 
 const SORT_LABELS: Record<ArtistSort,string> = {recent:'최근 저장 순',count:'장수',name:'이름'};
 const SORT_OPTIONS = (Object.entries(SORT_LABELS) as [ArtistSort,string][]).map(([value,label]) => ({value,label}));
@@ -34,39 +33,11 @@ function ArtistGridCard({artist,privateMode,paused,onOpen}:{artist:LibraryArtist
   </button>;
 }
 
-export function ArtistGrid({active,paused,onOpenArtist,onVisibleNames}:{active:boolean;paused:boolean;onOpenArtist(artist:LibraryArtist):void;onVisibleNames?(names:string[]):void}) {
+export function ArtistGrid({artists,state,paused,onOpenArtist,onVisibleNames}:{artists:LibraryArtist[];state:'idle'|'loading'|'ready'|'empty';paused:boolean;onOpenArtist(artist:LibraryArtist):void;onVisibleNames?(names:string[]):void}) {
   const [privateMode] = usePrivacyMode();
-  const [state,setState] = useState<'idle'|'loading'|'ready'|'empty'>('idle');
-  const [artists,setArtists] = useState<LibraryArtist[]>([]);
-  const [query,setQuery] = useState('');
   const [sort,setSort] = useState<ArtistSort>(readSort);
   const [sortOpen,setSortOpen] = useState(false);
-  const request = useRef<AbortController|null>(null);
-
-  useEffect(() => () => request.current?.abort(), []);
-  useEffect(() => {
-    if (!active || state !== 'idle' || request.current) return;
-    const controller = new AbortController();
-    request.current = controller;
-    setState('loading');
-    void api<unknown>('/v1/library/artists',controller.signal).then(value => {
-      if (controller.signal.aborted) return;
-      const next = normalizeArtists(value);
-      setArtists(next);
-      setState(next.length ? 'ready' : 'empty');
-    }, () => {
-      if (!controller.signal.aborted) setState('empty');
-    }).finally(() => {
-      if (request.current === controller) request.current = null;
-    });
-  }, [active,state]);
-
-  const visible = useMemo(() => {
-    const candidates = query.trim()
-      ? artists.filter(artist => matchesArtist(artist,query))
-      : artists.some(artist => artist.main) ? artists.filter(artist => artist.main) : artists;
-    return sortArtists(candidates,sort);
-  }, [artists,query,sort]);
+  const visible = useMemo(() => sortArtists(artists.some(artist=>artist.main)?artists.filter(artist=>artist.main):artists,sort),[artists,sort]);
   useEffect(() => { onVisibleNames?.(visible.map(artistName)); }, [onVisibleNames,visible]);
 
   const chooseSort = (value:ArtistSort) => {
@@ -77,7 +48,6 @@ export function ArtistGrid({active,paused,onOpenArtist,onVisibleNames}:{active:b
 
   return <div className="artist-grid-pane" aria-label="작가 목록">
     <div className="artist-grid-toolbar">
-      <label className="artist-grid-search"><MagnifyingGlassIcon aria-hidden="true"/><span className="sr-only">작가 찾기</span><input type="search" aria-label="작가 찾기" placeholder="작가 찾기" value={query} onChange={event => setQuery(event.target.value)}/></label>
       <button type="button" className="artist-grid-sort" aria-label={`정렬: ${SORT_LABELS[sort]}`} onClick={() => setSortOpen(true)}><ArrowsUpDownIcon aria-hidden="true"/>{SORT_LABELS[sort]}</button>
     </div>
     {state === 'idle' || state === 'loading' ? <div className="artist-empty" role="status"><span>{state === 'loading' ? '작가 목록을 불러오는 중입니다' : '작가 목록을 준비하는 중입니다'}</span></div> : state === 'empty' ? <EmptyArtists/> : visible.length ? <div className="artist-grid-list">{visible.map(artist => <ArtistGridCard key={artist.id} artist={artist} privateMode={privateMode} paused={paused} onOpen={() => onOpenArtist(artist)}/>)}</div> : <EmptyState title="검색 결과가 없습니다"/>}

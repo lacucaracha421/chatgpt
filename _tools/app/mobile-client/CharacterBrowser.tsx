@@ -1,7 +1,7 @@
 import type {LibraryCrumb} from './LibraryHeader';
 import {FilterChips,type FilterGroup} from './FilterChips';
 import {usePublicationCheck} from './usePublicationCheck';
-import {useCallback,useEffect,useId,useRef,useState,type MutableRefObject} from 'react';
+import {useCallback,useEffect,useId,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
 import {ArrowLeftIcon,ChevronUpIcon,InformationCircleIcon,PhotoIcon,Squares2X2Icon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
 import {BarProgress} from './TopBar';
@@ -80,7 +80,7 @@ function Card({node,count,paused,onSelect,previews=[],lazy=false}:{node:Characte
   </button>;
 }
 
-export function CharacterBrowser({hostBusy=false,entryKey=0,onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit}:{/** The host's own load of this scope (the list generation read), shown in the same bar slot. */hostBusy?:boolean;/** Kept for character-local view options supplied by the host; asset filters are rendered in the top bar. */optionsHost?:HTMLElement|null;onCloseOptions?():void;entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
+export function CharacterBrowser({scopeChips,hostBusy=false,entryKey=0,onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit}:{scopeChips?:ReactNode;/** The host's own load of this scope (the list generation read), shown in the same bar slot. */hostBusy?:boolean;/** Kept for character-local view options supplied by the host; asset filters are rendered in the top bar. */optionsHost?:HTMLElement|null;onCloseOptions?():void;entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
   const [landscape,setLandscape]=useState(()=>window.matchMedia?.('(orientation: landscape) and (min-width: 900px)').matches??false);
   useEffect(()=>{const media=window.matchMedia?.('(orientation: landscape) and (min-width: 900px)');if(!media)return;const change=()=>setLandscape(media.matches);media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[]);
   const [index,setIndex]=useState<CharacterIndex>();
@@ -336,7 +336,7 @@ export function CharacterBrowser({hostBusy=false,entryKey=0,onOptions=()=>{},onL
   return <section className={`character-browser${landscape?' character-browser-landscape':''}`} style={{display:active?undefined:'none'}} aria-label="시리즈·캐릭터" ref={host}>
     {characterHeader}
     {where.node&&kindShade.shade}
-    <Gallery items={galleryItems} stale={stale} intro={where.node?<>{kindShade.inline}{overview}</>:overview} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null}/>
+    <Gallery items={galleryItems} stale={stale} intro={<>{scopeChips}{where.node?<>{kindShade.inline}{overview}</>:overview}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null}/>
     {where.node&&<FilterChips media={false} row={false} value={where.filters} applied={where.filters} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}
     {more&&<div className="loading-line is-bottom" role="status" aria-label="다음 캐릭터 자산 불러오는 중"/>}
     {moreError&&<div className="inline-error" role="alert">{moreError}<Button onClick={()=>void append()}>다시 시도</Button><Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}

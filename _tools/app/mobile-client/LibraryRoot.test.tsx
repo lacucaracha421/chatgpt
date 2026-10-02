@@ -20,7 +20,7 @@ const characters:CharacterIndex={version:1,authority:'pc',authorityEpoch:0,capab
 ],scopes:[]};
 const entries=mergeLibraryEntries([{id:'game',name:'게임',parent_id:null,asset_count:20},{id:'s',name:'블루 아카이브',parent_id:'game',asset_count:10}],characters);
 const props={entries,characters,recentFolders:['s'],items:[{id:'all-cover',kind:'image',preview:'data:image/png;base64,AA'}],total:20,paused:false,busy:false,revision:1,onSelect:vi.fn(),onOpenArtist:vi.fn(),onRefresh:vi.fn(),albumTree:null,albumError:'',segment:'folders' as const,onSegment:vi.fn(),restoreScroll:0,onScroll:vi.fn()};
-beforeEach(()=>{resetHomeSourceCache();vi.stubGlobal('ResizeObserver',class{observe(){}unobserve(){}disconnect(){}});});
+beforeEach(()=>{localStorage.clear();resetHomeSourceCache();vi.stubGlobal('ResizeObserver',class{observe(){}unobserve(){}disconnect(){}});});
 afterEach(()=>{cleanup();vi.clearAllMocks();vi.unstubAllGlobals();});
 it('does not read the similarity queue while the retained root is hidden',async()=>{
  const scope='https://library-root.example';
@@ -37,31 +37,29 @@ it('shows root cards and All without recent folders, then searches every charact
  expect(document.querySelector('.library-recents')).toBeNull();expect(screen.queryByText('최근 연 폴더')).toBeNull();
  // Search is a magnifier in the shared bar until opened.
  expect(screen.queryByRole('searchbox')).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'검색'}));
- expect(screen.getByText('하위 폴더 1')).toBeTruthy();
  fireEvent.click(screen.getByRole('button',{name:/모든 자산/}));expect(props.onSelect).toHaveBeenLastCalledWith({tab:'library',title:'모든 자산'});
- const search=screen.getByRole('searchbox',{name:'폴더·캐릭터 찾기'});
+ fireEvent.click(screen.getByRole('button',{name:'검색'}));
+ const search=screen.getByRole('searchbox',{name:'에셋 찾기'});
  fireEvent.change(search,{target:{value:'학생'}});
- expect(document.querySelector('mark')?.textContent).toBe('학생');
- expect(screen.getByText('캐릭터 그룹 · 게임 › 블루 아카이브')).toBeTruthy();
+ expect(screen.getByRole('region',{name:'캐릭터'})).toBeTruthy();
  fireEvent.click(screen.getByRole('button',{name:/학생회/}));expect(props.onSelect).toHaveBeenLastCalledWith(expect.objectContaining({characterNode:'group:g'}));
- fireEvent.change(search,{target:{value:'유우'}});expect(screen.getByText('캐릭터 · 게임 › 블루 아카이브 › 학생회')).toBeTruthy();
+ fireEvent.change(search,{target:{value:'유우'}});expect(screen.getByRole('button',{name:/유우카/})).toBeTruthy();
  fireEvent.click(screen.getByRole('button',{name:/유우카/}));expect(props.onSelect).toHaveBeenLastCalledWith(expect.objectContaining({characterNode:'character:c'}));
- fireEvent.change(search,{target:{value:'없는 폴더'}});expect(screen.getByText('일치하는 폴더가 없습니다.')).toBeTruthy();
+ fireEvent.change(search,{target:{value:'없는 폴더'}});await screen.findByText('검색 결과가 없습니다.');
 });
-it('searches nested albums as folder-style result rows and opens a Library scope',async()=>{
+it('searches nested albums from the unified field and opens a Library scope',async()=>{
  const tree={adopted:true,libraryId:'a'.repeat(32),epoch:1,code:'',albums:[{id:'a',parentId:null,name:'앨범 A',iconKey:null,colorKey:null},{id:'b',parentId:'a',name:'여행',iconKey:null,colorKey:null}]};
  function Root(){const [segment,onSegment]=useState<'folders'|'albums'>('folders');return <LibraryRoot {...props} albumTree={tree} segment={segment} onSegment={onSegment}/>;}
  render(<Root/>);fireEvent.click(screen.getByRole('radio',{name:'앨범'}));
  await screen.findByText('앨범 A');expect(screen.queryByText('여행')).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'검색'}));
- fireEvent.change(screen.getByRole('searchbox',{name:'앨범 찾기'}),{target:{value:'여행'}});
- const result=screen.getByRole('button',{name:'여행, 앨범 A'});
- expect(result.className).toBe('library-result');expect(result.querySelector('small')?.textContent).toBe('앨범 A');
+ fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:'여행'}});
+ const result=screen.getByRole('button',{name:'여행'});
+ expect(result.className).toBe('asset-search-result');
  fireEvent.click(result);expect(props.onSelect).toHaveBeenLastCalledWith(expect.objectContaining({album:{id:'b',libraryId:tree.libraryId,epoch:1}}));
  expect(screen.queryByRole('dialog')).toBeNull();
- fireEvent.change(screen.getByRole('searchbox',{name:'앨범 찾기'}),{target:{value:'missing'}});
- expect(screen.getByText('일치하는 앨범이 없습니다.')).toBeTruthy();
+ fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:'missing'}});
+ await screen.findByText('검색 결과가 없습니다.');
 });
 it('keeps folder thumbnails mounted while switching to albums and back',async()=>{
  const tree={adopted:true,libraryId:'a'.repeat(32),epoch:1,code:'',albums:[{id:'a',parentId:null,name:'앨범 A',iconKey:null,colorKey:null}]};
@@ -89,9 +87,11 @@ it('shows the three asset segments and lazily browses pinned artists with search
  expect(document.querySelector('.artist-grid-pin')).toBeTruthy();
  fireEvent.click(cards[0]);
  expect(props.onOpenArtist).toHaveBeenCalledWith(artists[0]);
- fireEvent.change(screen.getByPlaceholderText('작가 찾기'),{target:{value:'다람'}});
+ fireEvent.click(screen.getByRole('button',{name:'검색'}));
+ fireEvent.change(screen.getByPlaceholderText('에셋 찾기'),{target:{value:'다람'}});
  expect(screen.getAllByRole('button',{name:/다람/})).toHaveLength(1);
- fireEvent.change(screen.getByPlaceholderText('작가 찾기'),{target:{value:''}});
+ fireEvent.click(screen.getByRole('button',{name:'검색 닫기'}));
+ expect(mocks.api.mock.calls.filter(([path])=>path==='/v1/library/artists')).toHaveLength(1);
  fireEvent.click(screen.getByRole('button',{name:'정렬: 최근 저장 순'}));
  fireEvent.click(screen.getByRole('radio',{name:'장수'}));
  expect(localStorage.getItem('lakomics.mobile.artistSort')).toBe('count');
@@ -148,13 +148,13 @@ it('sizes the top-level covers from the real scroller so the first screen ends o
 });
 it('closes the search bar and clears its query on an empty-space tap or Back, but not on a result tap',()=>{
  render(<LibraryRoot {...props}/>);
- const open=(text:string)=>{fireEvent.click(screen.getByRole('button',{name:'검색'}));fireEvent.change(screen.getByRole('searchbox',{name:'폴더·캐릭터 찾기'}),{target:{value:text}});};
+ const open=(text:string)=>{fireEvent.click(screen.getByRole('button',{name:'검색'}));fireEvent.change(screen.getByRole('searchbox',{name:'에셋 찾기'}),{target:{value:text}});};
  open('학생');
  // Tapping a result is left to the result.
  fireEvent.pointerDown(screen.getByRole('button',{name:/학생회/}));
- expect(screen.getByRole('searchbox',{name:'폴더·캐릭터 찾기'})).toBeTruthy();
+ expect(screen.getByRole('searchbox',{name:'에셋 찾기'})).toBeTruthy();
  // Empty space outside the bar closes it and drops the query.
- fireEvent.pointerDown(screen.getByLabelText('에셋 탐색'));
+ fireEvent.pointerDown(screen.getByLabelText('에셋 검색 제안'));
  expect(screen.queryByRole('searchbox')).toBeNull();expect(document.querySelector('mark')).toBeNull();
  expect(screen.getByRole('heading',{name:'에셋'})).toBeTruthy();
  // Back (App's handler) closes the visible search first, then has nothing more to close.

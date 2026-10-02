@@ -1,0 +1,93 @@
+import {act,cleanup,fireEvent,render,screen,within} from '@testing-library/react';
+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+import {AssetSearch} from './AssetSearch';
+import {AssetScopeChips} from './AssetScopeChips';
+import {assetSuggestions,readAssetSearchRecents,writeAssetSearchRecents,type AssetSuggestion} from './assetSearchModel';
+import {assetSearchKey,groupAssetSuggestions,rememberAssetSearch,type AssetSearchIdentity} from '../src/assets/assetSearch';
+import {PRIVACY_MODE_KEY} from './privacyMode';
+import type {LibraryArtist} from './artistsModel';
+vi.mock('./media',()=>({loadThumbnail:vi.fn(async(asset)=>asset)}));
+const artist:LibraryArtist={id:'artist',label:'서리 작가',keys:[],assetCount:4,recentCount:0,pinned:false,hidden:false,main:true,coverAssetIds:['art-cover']};
+const tree={adopted:true,libraryId:'library',epoch:3,code:'',albums:[{id:'album',name:'서리 앨범',parentId:null,iconKey:null,colorKey:null,assetCount:3}]};
+const suggestions=assetSuggestions([{id:'folder',name:'서리 폴더',parent_id:null,asset_count:1},{id:'character',name:'서리 캐릭터',parent_id:null,asset_count:2,characterNode:'character:c',characterKind:'character'}],undefined,tree,[artist]);
+const props={items:suggestions,endpoint:'endpoint',paused:false,onClose:vi.fn(),onChoose:vi.fn()};
+beforeEach(()=>localStorage.clear());
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.clearAllMocks();});
+it('groups matching names in folder, character, album, artist order, including initial consonants',()=>{
+ const groups=groupAssetSuggestions(suggestions,'ㅅㄹ');
+ expect(groups.map(group=>group.label)).toEqual(['폴더','캐릭터','앨범','작가']);
+ expect(groups.map(group=>group.items[0]?.id)).toEqual(['folder','character','album','artist']);
+ expect(groupAssetSuggestions(suggestions,'ㅅㄹ ㅍㄷ').flatMap(group=>group.items).map(item=>item.kind)).toEqual(['folder']);
+});
+it.each(suggestions)('chooses $kind with the existing destination and remembers its identity',item=>{
+ render(<AssetSearch {...props}/>);
+ fireEvent.change(screen.getByRole('searchbox'),{target:{value:'ㅅㄹ'}});
+ fireEvent.click(screen.getByRole('button',{name:new RegExp(item.name)}));
+ expect(props.onChoose).toHaveBeenCalledWith(item);
+ if(item.kind==='artist')expect(item.artist).toBe(artist);
+ else if(item.kind==='album')expect(item.view.album).toEqual({id:'album',libraryId:'library',epoch:3});
+ else if(item.kind==='character')expect(item.view.characterNode).toBe('character:c');
+ else expect(item.view.classification).toBe('folder');
+ expect(readAssetSearchRecents('endpoint')).toEqual([{kind:item.kind,id:item.id}]);
+});
+it('shows five per group and expands only the selected group with more',()=>{
+ const items:AssetSuggestion[]=Array.from({length:7},(_,i)=>({...suggestions[0],id:`folder-${i}`,name:`서리 ${i}`}));
+ render(<AssetSearch {...props} items={items}/>);
+ fireEvent.change(screen.getByRole('searchbox'),{target:{value:'서리'}});
+ expect(document.querySelectorAll('.asset-search-result')).toHaveLength(5);
+ fireEvent.click(screen.getByRole('button',{name:'폴더 더 보기'}));
+ expect(document.querySelectorAll('.asset-search-result')).toHaveLength(7);
+});
+it('shows only names while private, hides recents, and never mounts a thumbnail',()=>{
+ writeAssetSearchRecents('endpoint',[{kind:'artist',id:'artist'}]);
+ localStorage.setItem(PRIVACY_MODE_KEY,'1');
+ render(<AssetSearch {...props}/>);
+ expect(screen.queryByRole('region',{name:'최근 검색'})).toBeNull();
+ fireEvent.change(screen.getByRole('searchbox'),{target:{value:'ㅅㄹ'}});
+ const results=document.querySelector('.asset-search-results')!;
+ expect(results.querySelector('img,svg,.numeric,.asset-search-cover')).toBeNull();
+ expect(results.textContent).toContain('서리 작가');
+ act(()=>{localStorage.setItem(PRIVACY_MODE_KEY,'0');window.dispatchEvent(new Event('storage'));});
+ expect(results.querySelector('.asset-search-cover')).toBeTruthy();
+});
+it('keeps eight unique choices newest first, resolves current names, and ignores deleted and other-library items',()=>{
+ let history:AssetSearchIdentity[]=[];
+ for(let i=0;i<10;i++)history=rememberAssetSearch(history,{kind:'folder',id:`${i}`});
+ history=rememberAssetSearch(history,{kind:'folder',id:'5'});
+ expect(history).toHaveLength(8);expect(history.map(item=>item.id)).toEqual(['5','9','8','7','6','4','3','2']);
+ writeAssetSearchRecents('endpoint',[{kind:'folder',id:'gone'},...suggestions.map(({kind,id})=>({kind,id}))]);
+ expect(readAssetSearchRecents('different')).toEqual([]);
+ render(<AssetSearch {...props}/>);
+ const recent=screen.getByRole('region',{name:'최근 검색'});
+ expect(within(recent).getAllByRole('button')).toHaveLength(4);
+ expect(within(recent).queryByText('gone')).toBeNull();
+ expect(within(recent).getByText('서리 폴더')).toBeTruthy();
+});
+it('tolerates unavailable or malformed local storage',()=>{
+ localStorage.setItem('lakomics.mobile.assetSearch.recents','broken');
+ expect(readAssetSearchRecents('endpoint')).toEqual([]);
+ vi.spyOn(Storage.prototype,'getItem').mockImplementation(()=>{throw Error('denied');});
+ vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw Error('denied');});
+ expect(readAssetSearchRecents('endpoint')).toEqual([]);
+ expect(()=>writeAssetSearchRecents('endpoint',[])).not.toThrow();
+});
+it('keeps the same input and results during Korean composition and a delayed list refresh',()=>{
+ const view=render(<AssetSearch {...props}/>);
+ const input=screen.getByRole('searchbox') as HTMLInputElement;
+ fireEvent.change(input,{target:{value:'서리'}});
+ const row=screen.getByRole('button',{name:/서리 폴더/});
+ fireEvent.compositionStart(input);fireEvent.input(input,{target:{value:'가'},isComposing:true});
+ fireEvent.keyDown(input,{key:'Enter',keyCode:13});
+ view.rerender(<AssetSearch {...props} loading items={[...suggestions]}/>);
+ expect(screen.getByRole('searchbox')).toBe(input);expect(input.value).toBe('가');
+ expect(screen.getByRole('button',{name:/서리 폴더/})).toBe(row);
+ expect(props.onChoose).not.toHaveBeenCalled();
+ fireEvent.compositionEnd(input,{data:'가'});
+ expect(screen.queryByRole('button',{name:/서리 폴더/})).toBeNull();
+});
+it('removes a selected scope through its chip without treating it as a search action',()=>{
+ const remove=vi.fn();render(<AssetScopeChips chips={[suggestions[0]]} onRemove={remove}/>);
+ fireEvent.click(screen.getByRole('button',{name:'서리 폴더 범위 제거'}));
+ expect(remove).toHaveBeenCalledWith(suggestions[0]);
+ expect(assetSearchKey(suggestions[0])).toBe('folder:folder');
+});

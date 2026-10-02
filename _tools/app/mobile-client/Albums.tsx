@@ -12,22 +12,22 @@ export type {AlbumTree,NativeAlbum} from './albumModel';
 
 /** Keep the native replica available while drilling down; every resume replaces older reads. */
 export function useAlbumTree(active:boolean,revision:number,endpoint:string) {
-  const [tree,setTree]=useState<AlbumTree|null>(null),[error,setError]=useState('');
+  const [tree,setTree]=useState<AlbumTree|null>(null),[error,setError]=useState(''),[loading,setLoading]=useState(false);
   useEffect(()=>{setTree(null);setError('');},[endpoint]);
   useEffect(()=>{
     if(!active)return;
     let controller:AbortController;
     const read=()=>{
       controller?.abort();controller=new AbortController();const signal=controller.signal;
-      setError('');
+      setError('');setLoading(true);
       void native<AlbumTree>('albumTree',{},signal).then(value=>{
         if(!signal.aborted)setTree(value?.adopted&&Array.isArray(value.albums)?value:null);
-      }).catch(reason=>{if(!signal.aborted)setError(errorText(reason));});
+      }).catch(reason=>{if(!signal.aborted)setError(errorText(reason));}).finally(()=>{if(!signal.aborted)setLoading(false);});
     };
     read();window.addEventListener('lakomics-resume',read);
     return()=>{controller.abort();window.removeEventListener('lakomics-resume',read);};
   },[active,revision,endpoint]);
-  return {tree,error};
+  return {tree,error,loading};
 }
 function useAlbumCovers(tree:AlbumTree,items:NativeAlbum[],paused:boolean,revision:number) {
   const [visible,setVisible]=useState<Set<string>>(new Set()),[covers,setCovers]=useState<Record<string,Asset[]>>({});

@@ -2,6 +2,7 @@ import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {MutableRefObject} from 'react';
 import {Artists} from './Artists';
+import {AssetScopeChips} from './AssetScopeChips';
 import {matchesArtist, matchedPositions, type LibraryArtist} from './artistsModel';
 
 const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn(), loadThumbnail: vi.fn()}));
@@ -54,6 +55,16 @@ describe('Artists', () => {
     expect(await screen.findByRole('heading', {level: 2, name: '하늘빛'})).toBeTruthy();
     act(() => { expect(directRef.current?.()).toBe(true); });
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains the removable search scope when the chosen artist has disappeared', async () => {
+    const original=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path:string)=>path===`/v1/library/artists/${primary.id}`?Promise.reject({status:404}):original(path));
+    const remove=vi.fn();
+    render(<Artists endpoint="https://example.invalid" backRef={{current:null}} initialArtist={primary} onOpenViewer={vi.fn()} scopeChips={<AssetScopeChips chips={[{kind:'artist',id:primary.id,name:'하늘빛'}]} onRemove={remove}/>}/>);
+    await screen.findByText('PC 앱이 작가 목록을 아직 보내지 않았습니다');
+    fireEvent.click(screen.getByRole('button',{name:'하늘빛 범위 제거'}));
+    expect(remove).toHaveBeenCalledTimes(1);
   });
 
   it('renders a fixture list with today picks and major artist tiles', async () => {
