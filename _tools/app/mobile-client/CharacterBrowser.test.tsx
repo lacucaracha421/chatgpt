@@ -430,14 +430,3 @@ it('passes privacy to the gallery opened directly from Find',async()=>{
   } finally {localStorage.removeItem('lakomics.mobile.privacyMode');}
 });
 
-it('refreshes character hearts on both host and gallery refresh without a publication change',async()=>{
-  const {rerender}=render(<CharacterBrowser {...props} initialNode="character:c"/>);
-  await screen.findByText('asset-1');
-  const revision=()=>screen.getByLabelText('character gallery').getAttribute('data-likes-revision');
-  const before=revision();
-  fireEvent.click(screen.getByText('refresh gallery'));
-  await waitFor(()=>expect(revision()).not.toBe(before));
-  const refreshed=revision();
-  rerender(<CharacterBrowser {...props} initialNode="character:c" refreshKey={2}/>);
-  await waitFor(()=>expect(revision()).not.toBe(refreshed));
-});

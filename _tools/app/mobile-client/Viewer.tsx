@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent} from 'react';
-import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, InformationCircleIcon, ArrowPathIcon, MagnifyingGlassMinusIcon, FolderIcon, Square2StackIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
+import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, HeartIcon, InformationCircleIcon, ArrowPathIcon, MagnifyingGlassMinusIcon, FolderIcon, Square2StackIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
 import type {ComponentType, SVGProps} from 'react';
 import {Dialog, DialogDescription, IconButton, Button} from './ui';
 import {BottomSheet} from './BottomSheet';
@@ -14,6 +14,7 @@ import {CharacterExclusionEditor, type ExclusionRequest, type ExclusionKey, type
 import {ViewerInfo} from './ViewerInfo';
 import {usePrivacyMode} from './privacyMode';
 import {ViewerFilmstrip} from './ViewerFilmstrip';
+import {useLikesAlbum} from './useLikesAlbum';
 import {VideoPlayerSurface} from '../src/video/VideoPlayer';
 
 import './Viewer.css';
@@ -79,6 +80,8 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   /** Private Vault mode: same gestures, chrome and video controls; no library media or actions. */
   vault?:ViewerVaultSource}) {
   const asset = items[index];
+  // The heart lives here, not on gallery tiles (user, 2026-10-02): one membership read per shown asset.
+  const likes = useLikesAlbum(asset ? [asset.id] : [], !vault && !!asset && !asset.pending, asset?.id);
   useEffect(()=>{if(index>=items.length-3)onNearEnd?.();},[index,items.length,onNearEnd]);
   const timing=useRef<{id:string;url?:string;span:ReturnType<typeof viewerTiming>}|undefined>(undefined);
   const prepared=useRef(new Map<string,string>());
@@ -293,6 +296,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
             <ViewerAction label="앨범" icon={Square2StackIcon} active={albumOpen} onClick={() => {setInfo(false);setClassificationOpen(false);setExclusion(null);setAlbumOpen(true);revealChrome();}}/>
             <ViewerAction label="분류" icon={FolderIcon} active={classificationOpen} onClick={() => {setInfo(false);setAlbumOpen(false);setExclusion(null);setClassificationOpen(true);revealChrome();}}/>
             {canExclude&&<Button type="button" size="icon" variant="ghost" className="viewer-action viewer-action--exclude" aria-label={`${character!.name}에서 제외`} onClick={openExclusion}><UserMinusIcon aria-hidden="true"/></Button>}
+            {likes.available&&<Button type="button" size="icon" variant="ghost" className="viewer-action viewer-action--like" aria-label="좋아요" aria-pressed={likes.liked.has(asset.id)} disabled={likes.pending.has(asset.id)} onClick={() => {revealChrome();void likes.toggle(asset.id);}}><HeartIcon aria-hidden="true" fill={likes.liked.has(asset.id) ? 'currentColor' : 'none'}/></Button>}
             <ViewerAction label="정보" name="미디어 정보" icon={InformationCircleIcon} active={info} onClick={() => {setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);setInfo(!info); revealChrome();}}/>
             {onTrash&&!asset.pending&&<ViewerAction label="휴지통" name="휴지통으로" danger icon={TrashIcon} onClick={() => {setInfo(false);setAlbumOpen(false);setClassificationOpen(false);setExclusion(null);revealChrome();onTrash(asset);}}/>}
           </>}
@@ -369,6 +373,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
           </>
           : imageSrc ? <img key={asset.id} className="viewer-image" src={imageSrc} alt={artistLabel} draggable={false} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}}/> : <div className="empty-inline">{error ? '미리보기를 표시할 수 없습니다.' : '이미지 불러오는 중'}</div>}
       </div>
+      {likes.error && <div className="viewer-error" role="alert"><span>{likes.error}</span></div>}
       {error && <div className="viewer-error" role="status"><span>{error}</span><Button onClick={() => {autoRetry.current={id:asset.id,used:false};renewVideo(video.current,!!video.current&&!video.current.paused);}}><ArrowPathIcon/>다시 시도</Button></div>}
       {transform.scale > 1 && <div className="zoom-reset"><IconButton label="화면에 맞추기" icon={MagnifyingGlassMinusIcon} onClick={() => setTransform({scale:1,x:0,y:0})}/></div>}
       {!vault&&<ViewerFilmstrip items={items} index={index} privacy={privacy} onIndex={change} onInteract={revealChrome} onInteractionChange={setFilmstripActive}/>}

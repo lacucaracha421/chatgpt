@@ -221,10 +221,3 @@ describe('Artists', () => {
   });
 });
 
-it('refreshes artist hearts without resetting the gallery scroll identity',async()=>{
-  render(<Artists endpoint="test" backRef={{current:null}} initialArtist={primary} onOpenViewer={vi.fn()}/>);
-  await screen.findByText('asset-haneul-1');
-  const before=screen.getByLabelText('자산 목록').getAttribute('data-likes-revision');
-  fireEvent.click(screen.getByText('refresh gallery'));
-  await waitFor(()=>expect(screen.getByLabelText('자산 목록').getAttribute('data-likes-revision')).not.toBe(before));
-});

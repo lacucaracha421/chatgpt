@@ -123,6 +123,8 @@
 .viewer-actions .viewer-action svg,
 .viewer-action--exclude svg { width: 22px; height: 22px; color: var(--color-muted); }
 .viewer-actions .viewer-action[aria-pressed="true"] { background: var(--color-selected); }
+.viewer-actions .viewer-action--like[aria-pressed="true"] { background: transparent; }
+.viewer-actions .viewer-action--like[aria-pressed="true"] svg { color: var(--color-heart); }
 .viewer-actions .viewer-action.is-danger { color: var(--color-danger); }
 .viewer-actions .viewer-action.is-danger svg { color: currentColor; }
 .viewer-actions__divider { display: none; }

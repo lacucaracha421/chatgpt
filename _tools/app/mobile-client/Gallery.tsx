@@ -3,8 +3,6 @@ import {usePullToRefresh} from './usePullToRefresh';
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,type PointerEvent,type ReactNode} from 'react';
 import {defaultRangeExtractor, observeElementOffset, observeElementRect, useVirtualizer, type Virtualizer} from '@tanstack/react-virtual';
 import {PhotoIcon} from '@heroicons/react/24/outline';
-import {HeartIcon} from '@heroicons/react/24/outline';
-import {useLikesAlbum} from './useLikesAlbum';
 import {collectedDate} from '../src/assets/masonryLayout';
 import {formatDuration} from '../src/video/formatDuration';
 import {revealGalleryDateCount} from '../src/assets/galleryDateFeedback';
@@ -23,7 +21,7 @@ import {buildJustifiedGalleryRows, GALLERY_DATE_HEADING_HEIGHT, type GalleryRowA
  */
 export type GalleryVaultSource = {label(asset: Asset): string};
 
-function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, vault, selectionMode, selected, onSelect, onToggle, onPressStart, onPressEnd, liked, likePending, onLike}: {liked:boolean;likePending:boolean;onLike?:()=>void;asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
+function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, vault, selectionMode, selected, onSelect, onToggle, onPressStart, onPressEnd}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
   selectionMode:boolean; selected:boolean; favoritesView:boolean; onSelect?: (id:string)=>void; onToggle?: (id:string)=>void; onPressStart?: (cancel:()=>void)=>void; onPressEnd?: (cancel:()=>void)=>void}) {
   const timer=useRef<number|null>(null), pressStart=useRef<{x:number;y:number}|null>(null), suppressClick=useRef(false), pressCancel=useRef<()=>void>(()=>{});
   const host=useRef<HTMLButtonElement>(null), image=useRef<HTMLImageElement>(null);
@@ -89,7 +87,7 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, va
       {asset.kind === 'video' && width > 100 && <span className="video-mark video-duration-pill" aria-label="영상">▶ {formatDuration(asset.duration_ms)}</span>}
       {selected && onSelect && <span className="tile-select" data-selected={selected} aria-hidden="true">{selected && <span className="ui-selection-check"/>}</span>}
     </span>
-  </button>{onLike&&<button type="button" className="tile-favorite" aria-label="좋아요" aria-pressed={liked} disabled={likePending} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();onLike();}}><HeartIcon fill={liked?'currentColor':'none'}/></button>}</div>;
+  </button></div>;
 }
 
 /**
@@ -124,14 +122,13 @@ function rowSize(row: JustifiedGalleryRow<GalleryRowItem> & {spacer?:boolean}) {
   return row.height + (row.dateHeadings?.length ? GALLERY_DATE_HEADING_HEIGHT : 0) + GALLERY_ROW_GAP;
 }
 
-export function Gallery({items, density, identity, likesRevision=identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onClearSelection, sparse}: {sparse?:SparseGallerySource; items: Asset[]; density: number; identity: string; likesRevision?:unknown; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
+export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onClearSelection, sparse}: {sparse?:SparseGallerySource; items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
   /** Additional visibility guard for sheets owned by the parent screen. */scrubberHidden?:boolean;
   /** Optional sort metadata; the date fallback follows the existing gallery order. */scrubberSort?:ScrubberSort;
   /** Tablet Library selection; absent for Revisit, character and vault galleries. */selectedIds?:ReadonlySet<string>; favoritesView?:boolean; onSelectAsset?(id:string):void; onToggleSelection?(id:string):void;
   /** A double tap on empty gallery space (not a tile) leaves selection mode. */onClearSelection?():void;
   /** Private Vault mode: same layout and gestures, no library media client. */
   vault?:GalleryVaultSource}) {
-  const likes=useLikesAlbum(items.map(item=>item.id),!paused&&!privacy&&!vault,likesRevision);
   const parent = useRef<HTMLDivElement>(null);
   const activePress = useRef<(() => void)|null>(null);
   const registerPress=(cancel:()=>void)=>{activePress.current?.();activePress.current=cancel;};
@@ -295,7 +292,7 @@ export function Gallery({items, density, identity, likesRevision=identity, resto
   return <div className={`gallery-scroll${stale?' is-stale':''}`} ref={parent} onPointerOver={event => { if (event.pointerType !== "touch") revealGalleryDateCount(parent.current, event.target); }} onPointerLeave={() => revealGalleryDateCount(parent.current, document.activeElement)} onFocusCapture={event => { if (event.target.matches(":focus-visible")) revealGalleryDateCount(parent.current, event.target); }} onBlurCapture={event => revealGalleryDateCount(parent.current, event.relatedTarget)} onPointerUp={backgroundTap} onScroll={event => {cancelActivePress();if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" aria-busy={stale||undefined} inert={stale||undefined} tabIndex={0}>
     {/* The refresh pill is a zero-height sticky overlay, so it never changes the intro height. */}
     {pull}
-    {(intro!=null||likes.error)&&<div ref={introduction}>{likes.error&&<p className="error-message" role="alert">{likes.error}</p>}{intro}</div>}
+    {intro!=null&&<div ref={introduction}>{intro}</div>}
     <div className="gallery-canvas" style={{height: virtualizer.getTotalSize()}}>
       {virtualizer.getVirtualItems().map(virtual => {
         const row = rows[virtual.index];
@@ -303,7 +300,7 @@ export function Gallery({items, density, identity, likesRevision=identity, resto
         if(row.spacer)return <div key={virtual.key} className="gallery-sparse-spacer" aria-hidden="true" data-spacer-start={row.startIndex} style={{position:'absolute',width:'100%',height:row.height,transform:`translateY(${virtual.start-introHeight}px)`}}/>;
         const hasDateHeadings = Boolean(row.dateHeadings?.length);
         const packedHeadings = row.dateHeadings && row.dateHeadings.length > 1 ? row.dateHeadings : null;
-        const renderTile = (item: GalleryRowItem) => <Tile key={item.asset.id} {...item} height={row.height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} favoritesView={favoritesView} selectionMode={Boolean(onSelectAsset&&selectedIds?.size)} selected={selectedIds?.has(item.asset.id)??false} onSelect={onSelectAsset} onToggle={onToggleSelection} onPressStart={registerPress} onPressEnd={releasePress} liked={likes.liked.has(item.asset.id)} likePending={likes.pending.has(item.asset.id)} onLike={likes.available&&!privacy&&!vault?()=>void likes.toggle(item.asset.id):undefined}/>;
+        const renderTile = (item: GalleryRowItem) => <Tile key={item.asset.id} {...item} height={row.height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} favoritesView={favoritesView} selectionMode={Boolean(onSelectAsset&&selectedIds?.size)} selected={selectedIds?.has(item.asset.id)??false} onSelect={onSelectAsset} onToggle={onToggleSelection} onPressStart={registerPress} onPressEnd={releasePress}/>;
         let itemOffset = 0;
         const tileContent = packedHeadings
           ? packedHeadings.map(heading => {

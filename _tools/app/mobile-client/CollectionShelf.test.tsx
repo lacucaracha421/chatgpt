@@ -1,4 +1,4 @@
-import {cleanup, render, waitFor} from '@testing-library/react';
+import {fireEvent, cleanup, render, waitFor} from '@testing-library/react';
 import {afterEach, expect, it, vi} from 'vitest';
 import type {CollectionSummary} from './collectionModel';
 const mocks = vi.hoisted(() => ({native: vi.fn()}));
@@ -26,7 +26,9 @@ it('draws title, the same front source and author without requesting a separate 
   await waitFor(() => expect(container.querySelector('.cs-front img')).not.toBeNull());
   expect(container.querySelector('.manga-jspine-title')?.textContent).toBe(item.name);
   expect(container.querySelector('.manga-jspine-author')?.textContent).toBe(item.author);
-  expect(container.querySelector('.cs-spine img')?.getAttribute('src')).toBe(container.querySelector('.cs-front img')?.getAttribute('src'));
+  // The shared case mounts the spine after the front has had a paint opportunity.
+  fireEvent.load(container.querySelector('.cs-front img')!);
+  await waitFor(() => expect(container.querySelector('.cs-spine img')?.getAttribute('src')).toBe(container.querySelector('.cs-front img')?.getAttribute('src')));
   expect(container.querySelector('.manga-jspine-number')?.textContent).toBe('1');
   expect(mocks.native).toHaveBeenCalledTimes(1);
   expect(mocks.native).toHaveBeenCalledWith('collectionArtwork', expect.objectContaining({artworkId: 'first'}), expect.any(AbortSignal));
