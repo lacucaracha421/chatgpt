@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- PROTOTYPE (2026-10-02). Throwaway. Question: does opening a pack of "Lakomics cards" built on the
+     Pokémon TCG card template feel fun, and which frame style (A classic / B modern / C full art) fits?
+     Deliberately independent of the app's design tokens; sample art is generated, not library assets. -->
+<title>Lakomics 카드 팩</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:ital,wght@0,500;0,700;1,500&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* Layout: a dark card table. One pack at a time in the centre; the opened cards collect in a tray below;
+   a detail overlay shows one card large with tilt/holo and its metadata beside it. */
+:root {
+  color-scheme: dark;
+  --table: #16181d;
+  --table-2: #0d0e11;
+  --felt: #1e2129;
+  --fg: #ece9e1;
+  --fg-dim: #9a9890;
+  --line: #2d313a;
+  --gold: #d9b24c;
+  --border-yellow: #f2d04b;
+  --border-silver: #cfd3d8;
+  --font-display: "Jost", "Futura", "Pretendard", "Noto Sans KR", sans-serif;
+  --font-body: "Noto Sans KR", "Pretendard", "Malgun Gothic", sans-serif;
+  --t-draw: #3d7ed9; --t-photo: #4f9f45; --t-gif: #e0b23a; --t-video: #8456c4;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: radial-gradient(ellipse at 50% 20%, var(--felt), var(--table) 55%, var(--table-2));
+  color: var(--fg); font: 400 14px/1.5 var(--font-body); overflow-x: hidden; min-height: 100%;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+.app { min-height: 100%; display: flex; flex-direction: column; padding-inline: 16px; padding-block: 14px 110px; }
+
+/* ---------- top line ---------- */
+.top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.top h1 { margin: 0; font: 700 18px/1.2 var(--font-display); letter-spacing: .04em; text-transform: uppercase; }
+.top h1 span { color: var(--fg-dim); font-weight: 500; margin-left: 8px; text-transform: none; letter-spacing: 0; font-family: var(--font-body); font-size: 13px; }
+.top .note { color: var(--fg-dim); font-size: 12px; }
+.crumbs { display: flex; gap: 6px; align-items: center; margin-top: 14px; color: var(--fg-dim); font-size: 12px; }
+.crumbs b { color: var(--fg); font-weight: 500; }
+.crumbs button { background: none; border: 0; padding: 0; color: var(--fg-dim); text-decoration: underline dotted; }
+
+/* ---------- screens ---------- */
+.screen { display: none; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding-block: 24px; }
+.app[data-screen="shelf"] .screen.shelf, .app[data-screen="pack"] .screen.pack, .app[data-screen="reveal"] .screen.reveal, .app[data-screen="result"] .screen.result { display: flex; }
+.hint { color: var(--fg-dim); font-size: 13px; text-align: center; margin: 0; min-height: 1.5em; }
+.hint kbd { font: 500 11px var(--font-display); border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; }
+
+/* ---------- shelf ---------- */
+.shelf-row { display: flex; gap: 28px; flex-wrap: wrap; justify-content: center; }
+.pack-btn { background: none; border: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; align-items: center; transition: transform 140ms ease; }
+.pack-btn:hover, .pack-btn:focus-visible { transform: translateY(-6px); outline: none; }
+.pack-btn:focus-visible .pack { outline: 2px solid #7fb0ff; outline-offset: 4px; }
+.pack-btn .label { text-align: center; }
+.pack-btn .label b { display: block; font: 700 15px/1.2 var(--font-display); letter-spacing: .02em; }
+.pack-btn .label small { color: var(--fg-dim); font-size: 12px; }
+
+/* ---------- pack (booster) ---------- */
+.pack {
+  --pw: 200px; position: relative; width: var(--pw); aspect-ratio: 2.1/3.3; color: #fff; user-select: none;
+  filter: drop-shadow(0 18px 24px rgba(0,0,0,.5));
+}
+.pack .body, .pack .top-strip {
+  position: absolute; left: 0; right: 0; background:
+    linear-gradient(120deg, rgba(255,255,255,.22), transparent 30%, transparent 70%, rgba(255,255,255,.12)),
+    repeating-linear-gradient(135deg, rgba(255,255,255,.06) 0 2px, transparent 2px 9px),
+    linear-gradient(170deg, var(--p1), var(--p2) 60%, var(--p3));
+}
+.pack .body { top: 12%; bottom: 0; border-radius: 4px 4px 10px 10px;
+  mask: linear-gradient(#000, #000); }
+.pack .body::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 6px;
+  background: repeating-linear-gradient(90deg, transparent 0 7px, var(--table) 7px 9px); opacity: 0; transition: opacity 200ms; }
+.pack.torn .body::before, .pack.tearing .body::before { opacity: 1; }
+.pack .top-strip { top: 0; height: 12.5%; border-radius: 10px 10px 2px 2px; touch-action: none; cursor: grab;
+  transform-origin: 0% 100%;
+  transform: translateX(calc(var(--tear, 0) * 10%)) rotate(calc(var(--tear, 0) * -4deg));
+}
+.pack .top-strip::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 7px;
+  background: repeating-linear-gradient(90deg, transparent 0 7px, var(--table) 7px 9px); opacity: var(--tear, 0); }
+.pack .top-strip .seal { position: absolute; inset: 35% 10% auto 10%; height: 2px; background: rgba(255,255,255,.35); }
+.pack.torn .top-strip { transition: transform 420ms cubic-bezier(.3,.6,.4,1), opacity 420ms; transform: translate(130%, -60%) rotate(-28deg); opacity: 0; }
+.pack .art { position: absolute; left: 12%; right: 12%; top: 24%; aspect-ratio: 1; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.75), rgba(255,255,255,.1) 45%, transparent 70%); mix-blend-mode: screen; }
+.pack .art::after { content: ""; position: absolute; inset: 18%; border-radius: 50%; border: 2px solid rgba(255,255,255,.5); }
+.pack .brand { position: absolute; top: 16%; left: 0; right: 0; text-align: center; font: 700 12px/1 var(--font-display); letter-spacing: .28em; opacity: .85; }
+.pack .set-name { position: absolute; left: 8%; right: 8%; bottom: 22%; text-align: center; font: 700 clamp(13px, calc(var(--pw) * .09), 22px)/1.1 var(--font-display); text-shadow: 0 2px 6px rgba(0,0,0,.45); }
+.pack .set-sub { position: absolute; left: 8%; right: 8%; bottom: 13%; text-align: center; font-size: 11px; opacity: .85; }
+.pack .count { position: absolute; left: 0; right: 0; bottom: 5%; text-align: center; font: 500 10px/1 var(--font-display); letter-spacing: .2em; opacity: .75; }
+.pack .cards-out { position: absolute; left: 14%; right: 14%; top: 4%; bottom: 10%; pointer-events: none; }
+.pack .cards-out i { position: absolute; inset: 0; border-radius: 4.5% / 3.2%; background: #1c2a4a; border: 2px solid #e9e4d6; opacity: 0;
+  transform: translateY(0); }
+.pack.torn .cards-out i { animation: cardsOut 700ms cubic-bezier(.2,.7,.3,1) forwards; animation-delay: calc(var(--i) * 70ms + 180ms); }
+@keyframes cardsOut { 0% { opacity: 0; transform: translateY(0) } 30% { opacity: 1 } 100% { opacity: 1; transform: translateY(-78%) rotate(calc(var(--i) * 2deg - 4deg)) } }
+.pack-stage .pack { --pw: min(260px, 60vw); }
+.pack-stage { display: flex; flex-direction: column; align-items: center; gap: 22px; }
+.tear-fallback { background: none; border: 1px solid var(--line); border-radius: 4px; padding: 6px 14px; color: var(--fg-dim); font-size: 13px; }
+.tear-fallback:hover { color: var(--fg); border-color: var(--fg-dim); }
+
+/* ---------- card (Pokémon TCG proportions 63:88) ---------- */
+.card {
+  --cw: 240px; width: var(--cw); max-width: 100%; aspect-ratio: 63/88; position: relative; container-type: inline-size;
+  perspective: 1200px; user-select: none; -webkit-user-select: none;
+  --rx: 0deg; --ry: 0deg; --mx: 50%; --my: 50%; --tilt: 1;
+}
+.card .inner { position: absolute; inset: 0; transform-style: preserve-3d; transition: transform 520ms cubic-bezier(.3,.7,.3,1);
+  transform: rotateX(var(--rx)) rotateY(var(--ry)); }
+.card.facedown .inner { transform: rotateX(var(--rx)) rotateY(calc(180deg + var(--ry))); }
+.card.tilting .inner { transition: transform 90ms linear; }
+.card .face { position: absolute; inset: 0; border-radius: 4.5% / 3.2%; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  box-shadow: 0 14px 30px rgba(0,0,0,.55), 0 1px 0 rgba(255,255,255,.12) inset; }
+.card .back { transform: rotateY(180deg); background:
+  radial-gradient(circle at 50% 50%, #27406e 0, #1a2b4e 32%, #0f1a33 60%, #0a1226);
+  display: grid; place-items: center; }
+.card .back::before { content: ""; position: absolute; inset: 5%; border-radius: 3%; border: 1px solid rgba(255,255,255,.14);
+  background: repeating-conic-gradient(from 45deg, rgba(255,255,255,.04) 0 25%, transparent 0 50%) 50% / 12% 12%; }
+.card .back .emblem { position: relative; width: 44%; aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center;
+  background: radial-gradient(circle, #e9e4d6 0 30%, #c8bf9e 31% 36%, #1a2b4e 37% 44%, #e9e4d6 45% 48%, transparent 49%);
+  font: 700 18cqw/1 var(--font-display); color: #1a2b4e; }
+.card .back .wordmark { position: absolute; bottom: 7%; left: 0; right: 0; text-align: center; font: 700 5cqw/1 var(--font-display); letter-spacing: .3em; color: #c8bf9e; }
+
+/* rarity tease while face down: subtle edge light the player learns to read */
+.card.facedown[data-rarity="uncommon"] .back { box-shadow: 0 14px 30px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.18); }
+.card.facedown[data-rarity="rare"] .back { box-shadow: 0 14px 30px rgba(0,0,0,.55), 0 0 18px 2px rgba(120,170,255,.35); }
+.card.facedown[data-rarity="fullart"] .back { box-shadow: 0 14px 30px rgba(0,0,0,.55), 0 0 22px 3px rgba(190,120,255,.45); }
+.card.facedown[data-rarity="secret"] .back { box-shadow: 0 14px 30px rgba(0,0,0,.55), 0 0 26px 4px rgba(230,190,90,.55); }
+
+/* front: common structure */
+.card .front { background: var(--border); color: #1c1c1c; padding: 4.2%; display: flex; }
+.card .front .frame { position: relative; flex: 1; min-width: 0; border-radius: 2.5% / 1.8%; display: flex; flex-direction: column;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--type) 70%, #fff), var(--type) 40%, color-mix(in srgb, var(--type) 75%, #000));
+  padding: 2.4cqw; gap: 1.6cqw; }
+.card .head { display: flex; align-items: baseline; gap: 2cqw; padding-inline: 1cqw; }
+.card .head .stage { font: 500 3.1cqw/1 var(--font-display); letter-spacing: .06em; color: rgba(0,0,0,.65); text-transform: uppercase; }
+.card .head .name { flex: 1; min-width: 0; font: 700 7.4cqw/1.05 var(--font-display); color: #111; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .head .hp { font: 700 6.2cqw/1 var(--font-display); color: #111; display: flex; align-items: center; gap: 1cqw; white-space: nowrap; }
+.card .head .hp small { font-size: 3.2cqw; font-weight: 500; letter-spacing: .05em; }
+.card .tdot { width: 6.5cqw; height: 6.5cqw; border-radius: 50%; display: inline-grid; place-items: center; font: 700 3.6cqw/1 var(--font-display); color: #fff;
+  background: radial-gradient(circle at 35% 30%, #fff8 0, transparent 50%), var(--type); border: 1px solid rgba(0,0,0,.35); box-shadow: 0 1px 0 rgba(255,255,255,.4) inset; }
+.card .art { position: relative; aspect-ratio: 4/3; border: 1.6cqw solid #e8d9a3; border-image: linear-gradient(135deg, #f6ebc0, #b99b4b 45%, #f3e6b6 70%, #a98a3e) 1; overflow: hidden; background: #000;
+  box-shadow: 0 1px 3px rgba(0,0,0,.45) inset; }
+.card .art img, .card .art canvas { display: block; width: 100%; height: 100%; object-fit: cover; }
+.card .strip { margin: 0 4cqw; text-align: center; font: italic 500 3.1cqw/1.3 var(--font-display); color: #1a1a1a;
+  background: linear-gradient(90deg, transparent, #f5f1e4 18%, #f5f1e4 82%, transparent); padding: .6cqw 2cqw; border-radius: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .box { flex: 1; min-height: 0; background: linear-gradient(#fffdf6, #f3efe3); border-radius: 1.5% / 1%; padding: 1.8cqw 2.4cqw; display: flex; flex-direction: column; gap: 1.6cqw; box-shadow: 0 0 0 .5cqw rgba(255,255,255,.35) inset; }
+.card .row { display: flex; align-items: center; gap: 2cqw; font-size: 3.6cqw; line-height: 1.2; }
+.card .row .k { font: 700 3.4cqw/1 var(--font-display); letter-spacing: .04em; color: #333; min-width: 8cqw; }
+.card .row .v { flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #111; }
+.card .row .n { font: 700 5cqw/1 var(--font-display); color: #111; font-variant-numeric: tabular-nums; }
+.card .flavor { margin-top: auto; font: italic 400 3.2cqw/1.35 var(--font-body); color: #444; border-top: 1px solid #d9d2bd; padding-top: 1.4cqw;
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card .foot { display: flex; align-items: center; justify-content: space-between; gap: 2cqw; padding-inline: 1cqw; font: 500 2.9cqw/1 var(--font-display); color: rgba(0,0,0,.75); }
+.card .foot .marks { display: flex; gap: 1.6cqw; align-items: center; }
+.card .foot .marks span { display: inline-flex; align-items: center; gap: .6cqw; }
+.card .foot .marks .heart { color: #c73a3a; }
+.card .foot .marks .heart.off { color: rgba(0,0,0,.35); }
+.card .foot .right { display: flex; gap: 2cqw; align-items: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.card .foot .illus { font-style: italic; overflow: hidden; text-overflow: ellipsis; max-width: 40cqw; }
+.card .setmark { width: 3.6cqw; height: 3.6cqw; border: 1.5px solid currentColor; transform: rotate(45deg); display: inline-block; }
+.card .rar { font-size: 3.4cqw; }
+.card[data-rarity="secret"] .rar, .card[data-rarity="fullart"] .rar { color: #8a6500; }
+
+/* holo + glare layers */
+.card .holo, .card .glare { position: absolute; inset: 0; pointer-events: none; opacity: 0; }
+.card .holo {
+  background:
+    repeating-linear-gradient(115deg, #ff6a6a 0%, #ffd36a 8%, #7dff8a 16%, #6ad9ff 24%, #8f7dff 32%, #ff7ad1 40%, #ff6a6a 48%),
+    radial-gradient(circle at var(--mx) var(--my), rgba(255,255,255,.6), transparent 45%);
+  background-size: 300% 300%, 100% 100%; background-position: calc(var(--mx) * 1.6) calc(var(--my) * 1.6), 0 0;
+  mix-blend-mode: color-dodge; filter: saturate(1.1) contrast(1.05);
+}
+.card .glare { background: radial-gradient(circle at var(--mx) var(--my), rgba(255,255,255,.55), rgba(255,255,255,.08) 28%, transparent 60%); mix-blend-mode: overlay; }
+.card[data-rarity="rare"] .art .holo { opacity: .55; }
+.card[data-rarity="rare"] .art .glare { opacity: .8; }
+.card[data-rarity="fullart"] .front > .holo, .card[data-rarity="secret"] .front > .holo { opacity: .45; }
+.card[data-rarity="fullart"] .front > .glare, .card[data-rarity="secret"] .front > .glare { opacity: .9; }
+.card[data-rarity="secret"] .front > .holo { background-image:
+  repeating-linear-gradient(115deg, #ffe08a 0%, #fff6d0 10%, #d9a73a 20%, #fff0b8 30%, #ffe08a 40%), radial-gradient(circle at var(--mx) var(--my), rgba(255,255,255,.7), transparent 45%); }
+.card .front > .holo, .card .front > .glare { border-radius: inherit; }
+.card .sparkle { position: absolute; inset: 0; pointer-events: none; opacity: 0; mix-blend-mode: screen;
+  background: radial-gradient(circle at 20% 30%, #fff 0 .6%, transparent 1.2%), radial-gradient(circle at 70% 60%, #fff 0 .5%, transparent 1%), radial-gradient(circle at 45% 80%, #fff 0 .4%, transparent .9%), radial-gradient(circle at 85% 20%, #fff 0 .5%, transparent 1%); }
+.card[data-rarity="rare"] .art .sparkle, .card[data-rarity="fullart"] .sparkle, .card[data-rarity="secret"] .sparkle { opacity: calc(.4 + var(--tilt) * .3); }
+
+/* ---- Variant A (default): classic yellow border, type-coloured frame ---- */
+.card { --border: var(--border-yellow); }
+.card[data-rarity="secret"] { --border: linear-gradient(150deg, #f6e7a8, #c9a23a 40%, #f7eaba 60%, #b58d2c); }
+
+/* full-art layout (always for fullart/secret; for every card in variant C) */
+.card[data-rarity="fullart"] .front .frame, .card[data-rarity="secret"] .front .frame, body[data-variant="C"] .card .front .frame { padding: 0; background: #000; gap: 0; }
+.card[data-rarity="fullart"] .art, .card[data-rarity="secret"] .art, body[data-variant="C"] .card .art { position: absolute; inset: 0; aspect-ratio: auto; border: 0; }
+.card[data-rarity="fullart"] .head, .card[data-rarity="secret"] .head, body[data-variant="C"] .card .head { position: relative; z-index: 2; padding: 2.4cqw 3cqw 0; }
+.card[data-rarity="fullart"] .head .name, .card[data-rarity="secret"] .head .name, .card[data-rarity="fullart"] .head .hp, .card[data-rarity="secret"] .head .hp, .card[data-rarity="fullart"] .head .stage, .card[data-rarity="secret"] .head .stage,
+body[data-variant="C"] .card .head .name, body[data-variant="C"] .card .head .hp, body[data-variant="C"] .card .head .stage { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.9), 0 0 10px rgba(0,0,0,.6); }
+.card[data-rarity="fullart"] .strip, .card[data-rarity="secret"] .strip, body[data-variant="C"] .card .strip { display: none; }
+.card[data-rarity="fullart"] .box, .card[data-rarity="secret"] .box, body[data-variant="C"] .card .box { position: relative; z-index: 2; margin: auto 2.4cqw 0; flex: 0 0 auto;
+  background: linear-gradient(rgba(20,20,24,.55), rgba(20,20,24,.78)); backdrop-filter: blur(6px); color: #fff; box-shadow: 0 0 0 1px rgba(255,255,255,.25) inset; }
+.card[data-rarity="fullart"] .box .k, .card[data-rarity="secret"] .box .k, .card[data-rarity="fullart"] .box .v, .card[data-rarity="secret"] .box .v, .card[data-rarity="fullart"] .box .n, .card[data-rarity="secret"] .box .n, .card[data-rarity="fullart"] .flavor, .card[data-rarity="secret"] .flavor,
+body[data-variant="C"] .card .box .k, body[data-variant="C"] .card .box .v, body[data-variant="C"] .card .box .n, body[data-variant="C"] .card .flavor { color: #f3f1ea; border-color: rgba(255,255,255,.25); }
+.card[data-rarity="fullart"] .flavor, .card[data-rarity="secret"] .flavor, body[data-variant="C"] .card .flavor { margin-top: 0; }
+.card[data-rarity="fullart"] .foot, .card[data-rarity="secret"] .foot, body[data-variant="C"] .card .foot { position: relative; z-index: 2; padding: 1.6cqw 3cqw 2.4cqw; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.9); }
+.card[data-rarity="fullart"] .foot .heart.off, body[data-variant="C"] .card .foot .heart.off { color: rgba(255,255,255,.5); }
+.card[data-rarity="fullart"] .rar, .card[data-rarity="secret"] .rar, body[data-variant="C"] .card .rar { color: #ffd98a; }
+
+/* ---- Variant B: modern silver border, dark bottom box, type colour only as a band ---- */
+body[data-variant="B"] .card { --border: linear-gradient(160deg, #eef0f3, #b7bcc4 35%, #e4e7eb 60%, #a3a9b2); }
+body[data-variant="B"] .card[data-rarity="secret"] { --border: linear-gradient(150deg, #f6e7a8, #c9a23a 40%, #f7eaba 60%, #b58d2c); }
+body[data-variant="B"] .card .front .frame { background: linear-gradient(#f4f5f7, #e3e6ea); gap: 0; padding: 0; overflow: hidden; }
+body[data-variant="B"] .card .head { padding: 2.2cqw 3cqw; background: linear-gradient(90deg, var(--type), color-mix(in srgb, var(--type) 60%, #fff)); }
+body[data-variant="B"] .card .head .name, body[data-variant="B"] .card .head .hp, body[data-variant="B"] .card .head .stage { color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,.4); }
+body[data-variant="B"] .card .art { border: 0; aspect-ratio: 5/4; }
+body[data-variant="B"] .card .strip { margin: 0; border-radius: 0; background: #22252b; color: #fff; padding: 1cqw 2cqw; }
+body[data-variant="B"] .card .box { border-radius: 0; background: #fff; box-shadow: none; }
+body[data-variant="B"] .card .foot { padding: 0 3cqw 2.2cqw; background: #fff; }
+body[data-variant="B"] .card[data-rarity="fullart"] .head, body[data-variant="B"] .card[data-rarity="secret"] .head { background: none; }
+body[data-variant="B"] .card[data-rarity="fullart"] .foot, body[data-variant="B"] .card[data-rarity="secret"] .foot { background: none; }
+body[data-variant="B"] .card[data-rarity="fullart"] .box, body[data-variant="B"] .card[data-rarity="secret"] .box { background: linear-gradient(rgba(20,20,24,.55), rgba(20,20,24,.78)); }
+
+/* ---- Variant C: everything full art, black border ---- */
+body[data-variant="C"] .card { --border: #141416; }
+body[data-variant="C"] .card[data-rarity="secret"] { --border: linear-gradient(150deg, #f6e7a8, #c9a23a 40%, #f7eaba 60%, #b58d2c); }
+body[data-variant="C"] .card .front > .holo { opacity: .22; }
+body[data-variant="C"] .card[data-rarity="rare"] .front > .holo { opacity: .45; }
+body[data-variant="C"] .card[data-rarity="rare"] .front > .glare { opacity: .8; }
+body[data-variant="C"] .card[data-rarity="common"] .front > .holo { opacity: 0; }
+
+/* ---------- reveal stack ---------- */
+.stack-wrap { position: relative; width: min(300px, 70vw); aspect-ratio: 63/88; }
+.stack-wrap .card { --cw: 100%; position: absolute; inset: 0; cursor: pointer; }
+.stack-wrap .card.behind { pointer-events: none; }
+.stack-wrap .card.behind:nth-child(1) { transform: translate(10px, 10px) rotate(2deg); }
+.stack-wrap .card.behind:nth-child(2) { transform: translate(5px, 5px) rotate(1deg); }
+.stack-wrap .card.leaving { transition: transform 420ms cubic-bezier(.3,.7,.3,1), opacity 420ms; transform: translate(0, 60vh) scale(.5); opacity: 0; pointer-events: none; }
+.slot-label { font: 500 11px/1 var(--font-display); letter-spacing: .2em; color: var(--fg-dim); text-transform: uppercase; }
+.slot-label b { color: var(--gold); }
+.tray { display: flex; gap: 8px; justify-content: center; min-height: 60px; flex-wrap: wrap; }
+.tray .card { --cw: 42px; cursor: pointer; }
+.tray .card .face { box-shadow: 0 4px 10px rgba(0,0,0,.5); }
+.tray .card .front { padding: 0; } .tray .card .frame > *:not(.art) { display: none; } .tray .card .art { position: absolute; inset: 0; aspect-ratio: auto; border: 0; }
+.tray .card .front > .holo, .tray .card .front > .glare, .tray .card .sparkle { display: none; }
+
+/* ---------- result ---------- */
+.result-row { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; align-items: flex-end; }
+.result-row .card { --cw: clamp(120px, 17vw, 200px); cursor: pointer; transition: transform 140ms ease; }
+.result-row .card:hover, .result-row .card:focus-visible { transform: translateY(-10px); outline: none; }
+.result-row .card:focus-visible .face { outline: 2px solid #7fb0ff; }
+.result-row .slot { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.result-row .slot small { font: 500 10px/1 var(--font-display); letter-spacing: .18em; color: var(--fg-dim); text-transform: uppercase; }
+.result-row .slot.rare small { color: var(--gold); }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.btn { background: #262a33; border: 1px solid var(--line); border-radius: 4px; padding: 8px 16px; font-size: 13px; }
+.btn:hover { background: #2f343f; }
+.btn.primary { background: var(--fg); color: #111; border-color: var(--fg); font-weight: 500; }
+.btn.primary:hover { background: #fff; }
+
+/* ---------- detail overlay ---------- */
+.detail { position: fixed; inset: 0; z-index: 50; display: none; background: rgba(8,9,12,.92); overflow: auto; padding-inline: 16px; padding-block: calc(16px + env(safe-area-inset-top, 0px)) calc(96px + env(safe-area-inset-bottom, 0px)); }
+.detail[data-open="true"] { display: block; }
+.detail .wrap { max-width: 980px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 320px); gap: 36px; align-items: start; min-height: 100%; }
+.detail .stage { display: flex; flex-direction: column; align-items: center; gap: 18px; position: sticky; top: 16px; }
+.detail .stage .card { --cw: min(400px, 90vw, calc((100vh - 220px) * 63 / 88)); cursor: grab; }
+.detail .stage .card .face { box-shadow: 0 30px 60px rgba(0,0,0,.7); }
+.detail .nav { display: flex; gap: 10px; align-items: center; color: var(--fg-dim); font: 500 12px/1 var(--font-display); letter-spacing: .1em; }
+.detail .nav button { background: none; border: 1px solid var(--line); border-radius: 4px; width: 32px; height: 28px; color: var(--fg); }
+.detail .panel { display: flex; flex-direction: column; gap: 18px; padding-top: 6px; }
+.detail .panel h2 { margin: 0; font: 700 26px/1.1 var(--font-display); letter-spacing: .01em; }
+.detail .panel .sub { color: var(--fg-dim); font-size: 13px; margin-top: 4px; }
+.rarity-tag { display: inline-flex; align-items: center; gap: 6px; font: 700 11px/1 var(--font-display); letter-spacing: .18em; text-transform: uppercase; padding: 4px 8px; border: 1px solid var(--line); border-radius: 3px; color: var(--fg); }
+.rarity-tag[data-r="rare"] { border-color: #6f9ee6; color: #a9c6f5; }
+.rarity-tag[data-r="fullart"] { border-color: #a97fe6; color: #cdb3f5; }
+.rarity-tag[data-r="secret"] { border-color: var(--gold); color: #f0d78a; }
+.meta { display: grid; grid-template-columns: 76px 1fr; gap: 8px 14px; font-size: 13px; margin: 0; }
+.meta dt { color: var(--fg-dim); } .meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.meta dd .tag { display: inline-block; background: #262a33; border-radius: 3px; padding: 1px 7px; margin: 0 4px 4px 0; font-size: 12px; }
+.detail .panel .actions { justify-content: flex-start; }
+.detail .close { position: fixed; top: calc(12px + env(safe-area-inset-top, 0px)); right: 14px; background: none; border: 1px solid var(--line); color: var(--fg); border-radius: 4px; width: 34px; height: 30px; }
+.toast { position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--fg); color: #111; padding: 8px 14px; border-radius: 4px; font-size: 13px; opacity: 0; transition: opacity 140ms; pointer-events: none; z-index: 70; }
+.toast.on { opacity: 1; }
+.proto-note { color: var(--fg-dim); font-size: 12px; line-height: 1.5; border-top: 1px solid var(--line); padding-top: 12px; }
+
+/* ---------- variant switcher (prototype chrome, not part of the design) ---------- */
+.switcher { position: fixed; left: 50%; bottom: 0; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 6px;
+  margin-bottom: 14px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px)); background: #fff; color: #111; border-radius: 999px; box-shadow: 0 8px 24px rgba(0,0,0,.5); font: 500 12px/1 var(--font-display); }
+.switcher button { background: none; border: 0; width: 28px; height: 28px; border-radius: 50%; font-size: 14px; }
+.switcher button:hover { background: #eee; }
+.switcher .lab { padding: 0 6px; min-width: 190px; text-align: center; letter-spacing: .02em; }
+.switcher .lab b { font-weight: 700; }
+
+@media (max-width: 760px) {
+  .detail .wrap { grid-template-columns: 1fr; gap: 24px; }
+  .detail .stage { position: static; }
+  .result-row { gap: 10px; }
+  .result-row .card { --cw: calc((100vw - 32px - 20px) / 3); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .card .inner, .card.leaving, .pack.torn .top-strip, .pack-btn, .result-row .card { transition: none !important; }
+  .pack.torn .cards-out i { animation-duration: 1ms; }
+}
+</style>
+</head>
+<body data-variant="A">
+<div class="app" id="app" data-screen="shelf">
+  <div class="top">
+    <h1>Lakomics 카드 팩 <span>시안 · 2026-10-02</span></h1>
+    <div class="note">그림은 자동 생성한 샘플입니다. 실제로는 라이브러리 에셋이 들어갑니다.</div>
+  </div>
+  <div class="crumbs" id="crumbs"></div>
+
+  <!-- 1. shelf -->
+  <section class="screen shelf">
+    <p class="hint">팩을 하나 고르세요.</p>
+    <div class="shelf-row" id="shelf"></div>
+  </section>
+
+  <!-- 2. pack -->
+  <section class="screen pack">
+    <div class="pack-stage">
+      <div id="packHolder"></div>
+      <p class="hint" id="packHint">윗부분을 잡고 오른쪽으로 당겨 뜯으세요.</p>
+      <button class="tear-fallback" id="tearBtn">그냥 뜯기</button>
+    </div>
+  </section>
+
+  <!-- 3. reveal -->
+  <section class="screen reveal">
+    <div class="slot-label" id="slotLabel"></div>
+    <div class="stack-wrap" id="stack"></div>
+    <p class="hint" id="revealHint">카드를 눌러 뒤집으세요.</p>
+    <div class="tray" id="tray"></div>
+  </section>
+
+  <!-- 4. result -->
+  <section class="screen result">
+    <p class="hint">이번 팩에서 나온 카드 5장. 카드를 누르면 자세히 봅니다.</p>
+    <div class="result-row" id="resultRow"></div>
+    <div class="actions">
+      <button class="btn primary" id="againBtn">같은 팩 다시 뽑기</button>
+      <button class="btn" id="shelfBtn">다른 팩 고르기</button>
+    </div>
+  </section>
+</div>
+
+<!-- detail overlay -->
+<div class="detail" id="detail" data-open="false" role="dialog" aria-modal="true" aria-label="카드 자세히 보기">
+  <button class="close" id="closeBtn" aria-label="닫기">✕</button>
+  <div class="wrap">
+    <div class="stage">
+      <div id="detailCardHolder"></div>
+      <div class="nav">
+        <button id="prevBtn" aria-label="이전 카드">←</button>
+        <span id="navLabel">1 / 5</span>
+        <button id="nextBtn" aria-label="다음 카드">→</button>
+        <button id="flipBtn" style="width:auto;padding:0 10px">뒤집기</button>
+      </div>
+    </div>
+    <div class="panel" id="panel"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<div class="switcher" aria-label="시안 변형 선택">
+  <button id="varPrev" aria-label="이전 변형">‹</button>
+  <span class="lab" id="varLabel"></span>
+  <button id="varNext" aria-label="다음 변형">›</button>
+</div>
+
+<script>
+/* ---------- sample data ---------- */
+const SETS = [
+  { key: 'S1', name: '하늘빛 학원', sub: '캐릭터 세트', total: 318, p1: '#5fa8ff', p2: '#2b5bd6', p3: '#141e5a', pool: 'char' },
+  { key: 'S2', name: '9월 신작', sub: '작가 세트 · 2026-09', total: 124, p1: '#ff8a6a', p2: '#d13b4a', p3: '#4a1430', pool: 'artist' },
+  { key: 'S3', name: '1년 전 오늘', sub: '기념 세트 · 2025-10-02', total: 57, p1: '#c79bff', p2: '#7a4ad6', p3: '#241446', pool: 'anniv' },
+];
+const TYPES = {
+  draw:  { label: '그림', glyph: '✎', color: 'var(--t-draw)' },
+  photo: { label: '사진', glyph: '◉', color: 'var(--t-photo)' },
+  gif:   { label: 'GIF',  glyph: '∞', color: 'var(--t-gif)' },
+  video: { label: '영상', glyph: '▶', color: 'var(--t-video)' },
+};
+const RARITY = {
+  common:  { label: '일반', mark: '●', weight: 1 },
+  uncommon:{ label: '언커먼', mark: '◆', weight: 1 },
+  rare:    { label: '레어 홀로', mark: '★', weight: 1 },
+  fullart: { label: '풀아트', mark: '★★', weight: 1 },
+  secret:  { label: '시크릿 레어', mark: '✦', weight: 1 },
+};
+const NAMES = { char: ['세이', '리나', '하루카', '미도리', '나츠키', '아오이', '유리', '칸나', '린', '시온', '마히루', '코코로'],
+  artist: ['작업실 창가', '비 오는 교차로', '여름 끝 해변', '야간 자율학습', '심야 편의점', '옥상 바람', '벚꽃 터널', '지하철 마지막 칸'],
+  anniv: ['첫 저장', '그날의 스크랩', '지나간 시즌', '오래된 즐겨찾기', '다시 본 컷', '정리 전 폴더'] };
+const ARTISTS = ['kuro_pen', 'mitsu_ya', 'hanabi_art', 'nekomura', 'sora_sketch', 'yoru_9', 'aki_draws', 'pon_pon_e'];
+const SOURCES = ['X', 'Pixiv', 'Danbooru', 'Instagram', 'Fantia'];
+const FOLDERS = { char: ['하늘빛 학원 / 1학년', '하늘빛 학원 / 2학년', '하늘빛 학원 / 선생'], artist: ['작가 / 신작', '작가 / 스케치'], anniv: ['미분류함', '2025 / 10월'] };
+const TAGS = ['교복', '벚꽃', '전신', '상반신', '야경', '웃는 얼굴', '뒷모습', '빗속', '여름', '안경', '포니테일', '일러스트', '스케치', '컬러', '흑백', '세로 구도'];
+const RES = [[1200, 1600], [2048, 2900], [1920, 1080], [3000, 4000], [1080, 1350], [1668, 2388], [4096, 2304]];
+
+let seed = Date.now() % 100000;
+const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+const pick = a => a[Math.floor(rnd() * a.length)];
+const pad = n => String(n).padStart(3, '0');
+
+function rollRarity(slot) {
+  const r = rnd();
+  if (slot < 3) return r < 0.75 ? 'common' : 'uncommon';
+  if (slot === 3) return r < 0.55 ? 'uncommon' : 'rare';
+  return r < 0.6 ? 'rare' : r < 0.9 ? 'fullart' : 'secret';
+}
+function makeCard(set, slot) {
+  const rarity = rollRarity(slot);
+  const type = rarity === 'secret' && rnd() < 0.5 ? pick(['gif', 'video']) : pick(['draw', 'draw', 'draw', 'photo', 'gif', 'video']);
+  const [w, h] = pick(RES);
+  const mp = (w * h / 1e6).toFixed(1);
+  const d = new Date(2026, 8, 1 + Math.floor(rnd() * 30), Math.floor(rnd() * 24), Math.floor(rnd() * 60));
+  if (set.pool === 'anniv') d.setFullYear(2025), d.setMonth(9, 2);
+  const tags = Array.from(new Set([pick(TAGS), pick(TAGS), pick(TAGS)]));
+  return {
+    id: Math.floor(rnd() * 1e9).toString(36), set, slot, rarity, type, w, h, mp,
+    name: pick(NAMES[set.pool]), stage: set.pool === 'char' ? '캐릭터' : set.pool === 'artist' ? '작품' : '기록',
+    no: 1 + Math.floor(rnd() * set.total), artist: pick(ARTISTS), source: pick(SOURCES),
+    collected: d, size: (0.4 + rnd() * 6).toFixed(1), folder: pick(FOLDERS[set.pool]), albums: Math.floor(rnd() * 3),
+    fav: rnd() < 0.3, tags, seed: Math.floor(rnd() * 1e6),
+  };
+}
+const fmtDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/* ---------- generated sample art (stands in for a library asset) ---------- */
+const artCache = new Map();
+function art(card) {
+  if (artCache.has(card.seed)) return artCache.get(card.seed);
+  let s = card.seed; const r = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  const c = document.createElement('canvas'); c.width = 630; c.height = 880; const g = c.getContext('2d');
+  const hue = r() * 360;
+  const grad = g.createLinearGradient(0, 0, 630, 880);
+  grad.addColorStop(0, `hsl(${hue} 55% 22%)`); grad.addColorStop(1, `hsl(${(hue + 60) % 360} 50% 12%)`);
+  g.fillStyle = grad; g.fillRect(0, 0, 630, 880);
+  for (let i = 0; i < 7; i++) {
+    const x = r() * 630, y = r() * 880, rad = 120 + r() * 320;
+    const rg = g.createRadialGradient(x, y, 0, x, y, rad);
+    rg.addColorStop(0, `hsla(${(hue + i * 37) % 360} 80% ${55 + r() * 25}% / .85)`); rg.addColorStop(1, 'transparent');
+    g.fillStyle = rg; g.fillRect(0, 0, 630, 880);
+  }
+  // a "subject": tall soft silhouette so cards read as a figure rather than wallpaper
+  g.globalCompositeOperation = 'source-over';
+  const sx = 250 + r() * 130, sy = 300 + r() * 120;
+  const body = g.createRadialGradient(sx, sy, 20, sx, sy + 120, 320);
+  body.addColorStop(0, `hsla(${(hue + 180) % 360} 30% 95% / .95)`); body.addColorStop(.35, `hsla(${(hue + 180) % 360} 40% 70% / .6)`); body.addColorStop(1, 'transparent');
+  g.fillStyle = body; g.beginPath(); g.ellipse(sx, sy + 160, 150, 330, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = `hsla(${(hue + 180) % 360} 20% 98% / .9)`; g.beginPath(); g.arc(sx, sy - 40, 62, 0, Math.PI * 2); g.fill();
+  // light streaks
+  g.globalCompositeOperation = 'screen';
+  for (let i = 0; i < 4; i++) { g.strokeStyle = `hsla(${(hue + 30 * i) % 360} 90% 80% / ${.15 + r() * .25})`; g.lineWidth = 2 + r() * 14; g.beginPath(); const x0 = r() * 630; g.moveTo(x0, -20); g.lineTo(x0 - 200 + r() * 400, 900); g.stroke(); }
+  // grain
+  g.globalCompositeOperation = 'overlay';
+  for (let i = 0; i < 2600; i++) { g.fillStyle = `rgba(255,255,255,${r() * .18})`; g.fillRect(r() * 630, r() * 880, 2, 2); }
+  const url = c.toDataURL('image/jpeg', .82); artCache.set(card.seed, url); return url;
+}
+
+/* ---------- card element ---------- */
+function cardEl(card, { facedown = false } = {}) {
+  const t = TYPES[card.type], rr = RARITY[card.rarity];
+  const el = document.createElement('div');
+  el.className = 'card' + (facedown ? ' facedown' : '');
+  el.dataset.rarity = card.rarity; el.dataset.type = card.type; el.dataset.id = card.id;
+  el.style.setProperty('--type', t.color);
+  el.innerHTML = `
+    <div class="inner">
+      <div class="face front">
+        <div class="frame">
+          <div class="head">
+            <span class="stage">${card.stage}</span>
+            <span class="name">${card.name}</span>
+            <span class="hp"><small>MP</small>${card.mp}<span class="tdot" title="${t.label}">${t.glyph}</span></span>
+          </div>
+          <div class="art"><img alt="" src="${art(card)}"><div class="holo"></div><div class="glare"></div><div class="sparkle"></div></div>
+          <div class="strip">No. ${pad(card.no)} · ${card.set.name} · ${card.w}×${card.h} · ${card.size} MB</div>
+          <div class="box">
+            <div class="row"><span class="k">작가</span><span class="v">@${card.artist}</span><span class="n">${t.label}</span></div>
+            <div class="row"><span class="k">출처</span><span class="v">${card.source} · ${fmtDate(card.collected)} 수집</span></div>
+            <div class="flavor">${card.tags.join(' · ')} — ${card.folder}</div>
+          </div>
+          <div class="foot">
+            <div class="marks"><span class="heart ${card.fav ? '' : 'off'}">♥</span><span>▭ ${card.folder.split(' / ')[0]}</span><span>▤ ${card.albums}</span></div>
+            <div class="right"><span class="illus">Illus. ${card.artist}</span><span class="setmark"></span><span>${pad(card.no)}/${card.set.total}</span><span class="rar">${rr.mark}</span></div>
+          </div>
+        </div>
+        <div class="holo"></div><div class="glare"></div><div class="sparkle"></div>
+      </div>
+      <div class="face back"><div class="emblem">L</div><div class="wordmark">LAKOMICS</div></div>
+    </div>`;
+  return el;
+}
+
+/* pointer tilt + holo tracking; shared by the stack card and the detail card */
+function attachTilt(el, max = 14) {
+  let raf = 0;
+  const move = e => {
+    const r = el.getBoundingClientRect();
+    const px = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), py = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => {
+      el.classList.add('tilting');
+      el.style.setProperty('--ry', `${(px - .5) * 2 * max}deg`); el.style.setProperty('--rx', `${(.5 - py) * 2 * max}deg`);
+      el.style.setProperty('--mx', `${px * 100}%`); el.style.setProperty('--my', `${py * 100}%`);
+      el.style.setProperty('--tilt', `${Math.hypot(px - .5, py - .5) * 2}`);
+    });
+  };
+  const leave = () => { cancelAnimationFrame(raf); el.classList.remove('tilting'); ['--rx', '--ry'].forEach(k => el.style.setProperty(k, '0deg')); el.style.setProperty('--mx', '50%'); el.style.setProperty('--my', '50%'); el.style.setProperty('--tilt', '0'); };
+  el.addEventListener('pointermove', move); el.addEventListener('pointerleave', leave); el.addEventListener('pointercancel', leave);
+}
+
+/* ---------- state ---------- */
+const app = document.getElementById('app');
+let currentSet = null, cards = [], revealIndex = 0, detailIndex = -1;
+const $ = id => document.getElementById(id);
+
+function go(screen) { app.dataset.screen = screen; crumbs(); }
+function crumbs() {
+  const s = app.dataset.screen; const set = currentSet ? `<b>${currentSet.name}</b>` : '';
+  $('crumbs').innerHTML = s === 'shelf' ? '팩 선택' : `<button id="crumbShelf">팩 선택</button><span>›</span>${set}<span>›</span><b>${{ pack: '개봉', reveal: '카드 넘기기', result: '결과' }[s]}</b>`;
+  const b = $('crumbShelf'); if (b) b.onclick = () => go('shelf');
+}
+
+/* shelf */
+function packEl(set) {
+  const p = document.createElement('div'); p.className = 'pack';
+  p.style.setProperty('--p1', set.p1); p.style.setProperty('--p2', set.p2); p.style.setProperty('--p3', set.p3);
+  p.innerHTML = `<div class="body"><div class="brand">LAKOMICS</div><div class="art"></div><div class="set-name">${set.name}</div><div class="set-sub">${set.sub}</div><div class="count">5 CARDS · ${set.total} IN SET</div></div>
+    <div class="cards-out">${[0, 1, 2, 3, 4].map(i => `<i style="--i:${i}"></i>`).join('')}</div>
+    <div class="top-strip"><div class="seal"></div></div>`;
+  return p;
+}
+function renderShelf() {
+  const row = $('shelf'); row.innerHTML = '';
+  SETS.forEach(set => {
+    const b = document.createElement('button'); b.className = 'pack-btn'; b.type = 'button';
+    b.appendChild(packEl(set));
+    b.insertAdjacentHTML('beforeend', `<div class="label"><b>${set.name}</b><small>${set.sub} · 5장</small></div>`);
+    b.onclick = () => startPack(set); row.appendChild(b);
+  });
+}
+
+/* pack opening */
+function startPack(set) {
+  currentSet = set; cards = [0, 1, 2, 3, 4].map(i => makeCard(set, i)); revealIndex = 0;
+  const holder = $('packHolder'); holder.innerHTML = ''; const p = packEl(set); holder.appendChild(p);
+  $('packHint').textContent = '윗부분을 잡고 오른쪽으로 당겨 뜯으세요.';
+  go('pack');
+  const strip = p.querySelector('.top-strip'); let startX = null, tear = 0, done = false;
+  const finish = () => { if (done) return; done = true; p.classList.add('torn'); $('packHint').textContent = '뜯었습니다.'; setTimeout(startReveal, 820); };
+  strip.addEventListener('pointerdown', e => { if (done) return; startX = e.clientX; strip.setPointerCapture(e.pointerId); p.classList.add('tearing'); });
+  strip.addEventListener('pointermove', e => { if (startX === null || done) return; tear = Math.max(0, Math.min(1, (e.clientX - startX) / (p.offsetWidth * .7))); p.style.setProperty('--tear', tear); if (tear >= 1) finish(); });
+  const up = () => { if (done) return; startX = null; if (tear > .8) finish(); else { tear = 0; p.style.setProperty('--tear', 0); p.classList.remove('tearing'); } };
+  strip.addEventListener('pointerup', up); strip.addEventListener('pointercancel', up);
+  $('tearBtn').onclick = () => { p.style.setProperty('--tear', 1); finish(); };
+}
+
+/* reveal, one card at a time; the fifth slot is the rare slot */
+function startReveal() { $('tray').innerHTML = ''; go('reveal'); renderStack(); }
+function renderStack() {
+  const stack = $('stack'); stack.innerHTML = '';
+  const remaining = cards.length - revealIndex;
+  if (remaining <= 0) return showResult();
+  for (let k = Math.min(2, remaining - 1); k >= 1; k--) { const b = cardEl(cards[revealIndex + k], { facedown: true }); b.classList.add('behind'); stack.appendChild(b); }
+  const card = cards[revealIndex]; const top = cardEl(card, { facedown: true }); stack.appendChild(top); attachTilt(top, 10);
+  $('slotLabel').innerHTML = revealIndex === 4 ? `<b>마지막 칸 · 레어 확정</b>` : `${revealIndex + 1} / 5`;
+  $('revealHint').textContent = '카드를 눌러 뒤집으세요.';
+  let faceup = false;
+  top.addEventListener('click', () => {
+    if (!faceup) { faceup = true; top.classList.remove('facedown'); $('revealHint').textContent = `${RARITY[card.rarity].label} · 다시 누르면 다음 카드`; return; }
+    top.classList.add('leaving');
+    const mini = cardEl(card); mini.onclick = () => openDetail(cards.indexOf(card)); $('tray').appendChild(mini);
+    revealIndex++;
+    setTimeout(renderStack, 300);
+  });
+}
+
+/* result */
+function showResult() {
+  go('result'); const row = $('resultRow'); row.innerHTML = '';
+  cards.forEach((c, i) => {
+    const slot = document.createElement('div'); slot.className = 'slot' + (i === 4 ? ' rare' : '');
+    const el = cardEl(c); el.tabIndex = 0; el.setAttribute('role', 'button'); el.onclick = () => openDetail(i); el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(i); } };
+    slot.appendChild(el); slot.insertAdjacentHTML('beforeend', `<small>${i === 4 ? '레어 슬롯' : `슬롯 ${i + 1}`}</small>`); row.appendChild(slot);
+  });
+}
+$('againBtn').onclick = () => startPack(currentSet);
+$('shelfBtn').onclick = () => go('shelf');
+
+/* detail */
+function openDetail(i) {
+  detailIndex = i; const card = cards[i];
+  const holder = $('detailCardHolder'); holder.innerHTML = ''; const el = cardEl(card); holder.appendChild(el); attachTilt(el, 16);
+  $('navLabel').textContent = `${i + 1} / 5`;
+  const t = TYPES[card.type], rr = RARITY[card.rarity];
+  $('panel').innerHTML = `
+    <div><span class="rarity-tag" data-r="${card.rarity}">${rr.mark} ${rr.label}</span>
+      <h2 style="margin-top:12px">${card.name}</h2>
+      <div class="sub">${card.set.name} · No. ${pad(card.no)} / ${card.set.total}${i === 4 ? ' · 레어 슬롯' : ''}</div></div>
+    <dl class="meta">
+      <dt>종류</dt><dd>${t.label} · ${card.w}×${card.h} · ${card.size} MB</dd>
+      <dt>작가</dt><dd>@${card.artist}</dd>
+      <dt>출처</dt><dd>${card.source} · 게시물 열기</dd>
+      <dt>수집일</dt><dd>${fmtDate(card.collected)} ${String(card.collected.getHours()).padStart(2, '0')}:${String(card.collected.getMinutes()).padStart(2, '0')}</dd>
+      <dt>폴더</dt><dd>${card.folder}</dd>
+      <dt>앨범</dt><dd>${card.albums ? `${card.albums}개` : '없음'}</dd>
+      <dt>태그</dt><dd>${card.tags.map(x => `<span class="tag">${x}</span>`).join('')}</dd>
+    </dl>
+    <div class="actions">
+      <button class="btn primary" id="openAsset">에셋 열기</button>
+      <button class="btn" id="favBtn">${card.fav ? '♥ 좋아요 해제' : '♡ 좋아요'}</button>
+    </div>
+    <div class="proto-note">카드 등급은 에셋마다 고정됩니다. 같은 에셋은 어느 팩에서 나와도 같은 등급으로 나옵니다 (시안에서는 매번 새로 뽑습니다).</div>`;
+  $('openAsset').onclick = () => toast('실제 앱에서는 이 에셋을 뷰어로 엽니다.');
+  $('favBtn').onclick = () => { card.fav = !card.fav; openDetail(i); toast(card.fav ? '좋아요에 추가했습니다.' : '좋아요를 해제했습니다.'); };
+  $('detail').dataset.open = 'true';
+}
+function closeDetail() { $('detail').dataset.open = 'false'; detailIndex = -1; if (app.dataset.screen === 'result') showResult(); else if (app.dataset.screen === 'reveal') refreshTray(); }
+function refreshTray() { const tray = $('tray'); tray.innerHTML = ''; cards.slice(0, revealIndex).forEach(c => { const m = cardEl(c); m.onclick = () => openDetail(cards.indexOf(c)); tray.appendChild(m); }); }
+$('closeBtn').onclick = closeDetail;
+$('detail').addEventListener('click', e => { if (e.target === $('detail')) closeDetail(); });
+$('prevBtn').onclick = () => openDetail((detailIndex + 4) % 5);
+$('nextBtn').onclick = () => openDetail((detailIndex + 1) % 5);
+$('flipBtn').onclick = () => $('detailCardHolder').querySelector('.card')?.classList.toggle('facedown');
+let toastT; function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1800); }
+
+/* keyboard */
+document.addEventListener('keydown', e => {
+  if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+  if (e.key === '1' || e.key === '2' || e.key === '3') return setVariant(['A', 'B', 'C'][+e.key - 1]);
+  if ($('detail').dataset.open === 'true') {
+    if (e.key === 'Escape') closeDetail(); else if (e.key === 'ArrowLeft') $('prevBtn').click(); else if (e.key === 'ArrowRight') $('nextBtn').click(); else if (e.key === ' ' || e.key.toLowerCase() === 'f') { e.preventDefault(); $('flipBtn').click(); }
+    return;
+  }
+  if (app.dataset.screen === 'reveal' && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); $('stack').querySelector('.card:not(.behind)')?.click(); }
+  if (app.dataset.screen === 'pack' && e.key === 'Enter') $('tearBtn').click();
+});
+
+/* ---------- variant switcher ---------- */
+const VARIANTS = { A: '클래식 · 노란 테두리, 속성색 프레임', B: '모던 · 실버 테두리, 흰 정보 박스', C: '풀아트 · 모든 카드 전면 이미지' };
+function setVariant(v) { document.body.dataset.variant = v; $('varLabel').innerHTML = `<b>${v}</b> ${VARIANTS[v]}`; try { history.replaceState(null, '', `?variant=${v}`); } catch (_) {} }
+$('varPrev').onclick = () => { const k = Object.keys(VARIANTS); setVariant(k[(k.indexOf(document.body.dataset.variant) + 2) % 3]); };
+$('varNext').onclick = () => { const k = Object.keys(VARIANTS); setVariant(k[(k.indexOf(document.body.dataset.variant) + 1) % 3]); };
+setVariant(new URLSearchParams(location.search).get('variant') || 'A');
+
+renderShelf(); crumbs();
+</script>
+</body>
+</html>
