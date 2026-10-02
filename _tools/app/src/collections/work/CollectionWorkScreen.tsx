@@ -59,7 +59,6 @@ export function CollectionWorkScreen({ data, pending, actions }: { data: Collect
     }}>
     <header className="asset-viewer__topbar">
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label={visible.manga ? "컬렉션으로 돌아가기" : "목록으로"} onClick={actions.onClose}><ChevronLeftIcon /></Button>
-      <span className="asset-viewer__position"><b>{visible.position}</b> / {visible.total}</span>
       <span className="asset-viewer__title"><strong role="heading" aria-level={1}>{title}</strong><small>{visible.manga ? editionName(visible.manga.editionIndex) : workMeta(visible.collection, visible.case.platform, visible.av)}</small></span>
       <span className="asset-viewer__spacer" />
       <Button className="asset-viewer__vbtn asset-viewer__favorite" size="icon" variant="ghost" aria-label="쇼케이스" aria-pressed={visible.collection.showcase} disabled={waiting} onClick={() => actions.onShowcase(visible.collection)}><StarIcon /></Button>

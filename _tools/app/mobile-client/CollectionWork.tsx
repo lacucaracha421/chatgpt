@@ -80,7 +80,7 @@ function useSwipe(onSwipe: (offset: -1 | 1) => void) {
   };
 }
 
-/** Previous / next on the stage edges, the same viewer edges as the manga stage's; a swipe does the same. */
+/** Previous / next work through explicit stage edge buttons. */
 function StageEdges({previous, next, onStep}: {previous: boolean; next: boolean; onStep(offset: -1 | 1): void}) {
   return <>
     <button className="asset-viewer__edge asset-viewer__edge--left" aria-label="이전 작품" disabled={!previous} onClick={() => onStep(-1)}><ChevronLeftIcon/></button>
@@ -112,7 +112,6 @@ export function CaseWork({item, revision, active, privacy, position, total, scor
     if (faces.ready && (shown?.item !== item || shown.urls !== faces.urls)) setShown({item, revision, urls: faces.urls});
   }, [faces.ready, faces.urls, item, revision, shown]);
   const [stage, stageBox] = useStageBox(shown !== null);
-  const swipe = useSwipe(offset => { if ((offset < 0 && position > 1) || (offset > 0 && position < total)) onStep(offset); });
   const [mode, setMode] = useState('case'), [picked, setPicked] = useState('case'), [reset, setReset] = useState(0);
   const flatReady = useRef(false);
   const shownId = shown?.item.id;
@@ -136,7 +135,7 @@ export function CaseWork({item, revision, active, privacy, position, total, scor
   return <WorkZoomProvider workId={work.id} reset={reset}><article className="tablet-work" aria-label={label} aria-busy={waiting} inert={waiting || undefined}>
     <div className="tablet-work__frame" style={{"--work-strip-height": work.type === 'av' || strip.length ? '76px' : '0px'} as CSSProperties}>
       {shown.urls.hero && <HeroBand src={shown.urls.hero} manga={false} onReady={() => undefined}/>}
-      <WorkZoomStage stageRef={stage} className="work-stage tablet-work__stage" enabled={isObject || mode === 'flat'} {...swipe} onEmptyClick={() => { if (mode !== 'case' || picked !== 'case') pick('case'); }}>
+      <WorkZoomStage stageRef={stage} className="work-stage tablet-work__stage" enabled={isObject || mode === 'flat'} onEmptyClick={() => { if (mode !== 'case' || picked !== 'case') pick('case'); }}>
         {work.type === 'av' && !privacy && <WorkBackdrop src={data.front}/>}
         <WorkZoomObject>
         <div className="work-case-slot" style={isObject ? undefined : {...hidden, position: 'absolute', inset: 0}} inert={!isObject || undefined} aria-hidden={!isObject}>
@@ -156,7 +155,7 @@ export function CaseWork({item, revision, active, privacy, position, total, scor
     </div>
     <header className="tablet-work__identity">
       <h1>{data.title}</h1>
-      <small className="numeric">{[workMeta(work, data.platform, work.av ?? null), `${position.toLocaleString()} / ${total.toLocaleString()}`].filter(Boolean).join(' · ')}</small>
+      <small className="numeric">{workMeta(work, data.platform, work.av ?? null)}</small>
     </header>
     <div className="tablet-work__info">{info(work)}</div>
   </article></WorkZoomProvider>;

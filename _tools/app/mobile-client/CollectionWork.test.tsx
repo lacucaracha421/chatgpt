@@ -54,13 +54,13 @@ it('does not close the open case after an empty-stage swipe, pinch or vertical s
   fireEvent.keyDown(object, {key: 'Enter'});
   const touch = {pointerType: 'touch', pointerId: 1, button: 0, clientX: 200, clientY: 200};
   fireEvent.pointerDown(stage, touch); fireEvent.pointerMove(stage, {...touch, clientX: 100}); fireEvent.pointerUp(stage, {...touch, clientX: 100});
-  fireEvent.click(stage, {detail: 1}); expect(onStep).toHaveBeenCalledExactlyOnceWith(1); expect(object.getAttribute('aria-expanded')).toBe('true');
+  fireEvent.click(stage, {detail: 1}); expect(onStep).not.toHaveBeenCalled(); expect(object.getAttribute('aria-expanded')).toBe('true');
   fireEvent.pointerDown(stage, touch); fireEvent.pointerMove(stage, {...touch, clientY: 150}); fireEvent.pointerUp(stage, {...touch, clientY: 150});
   fireEvent.click(stage, {detail: 1}); expect(pane.scrollTop).toBe(150); expect(object.getAttribute('aria-expanded')).toBe('true');
   fireEvent.pointerDown(stage, touch); fireEvent.pointerDown(stage, {...touch, pointerId: 2, clientX: 300});
   fireEvent.pointerMove(stage, {...touch, pointerId: 2, clientX: 400});
   fireEvent.pointerUp(stage, {...touch, pointerId: 2}); fireEvent.pointerUp(stage, touch); fireEvent.click(stage, {detail: 1});
-  expect(object.getAttribute('aria-expanded')).toBe('true'); expect(onStep).toHaveBeenCalledTimes(1);
+  expect(object.getAttribute('aria-expanded')).toBe('true'); expect(onStep).not.toHaveBeenCalled();
   fireEvent.pointerDown(stage, touch); fireEvent.pointerUp(stage, touch); fireEvent.click(stage, {detail: 1});
   expect(object.getAttribute('aria-expanded')).toBe('false');
 });
@@ -175,4 +175,26 @@ it('keeps the AV front-thumbnail flat tile first and returns from it on a repeat
   fireEvent.click(flat); expect(flat.getAttribute('aria-pressed')).toBe('true');
   expect(screen.queryByRole('group', {name: '케이스'})).toBeNull();
   fireEvent.click(flat); expect(screen.getByRole('group', {name: '케이스'})).toBeTruthy();
+});
+
+it.each(['game', 'movie', 'av'] as const)('ignores horizontal stage swipes on %s, hides the position counter, and keeps edge navigation', type => {
+  artwork.urls = {};
+  const item: CollectionDetail = {...manga, id: type, name: '작품', type, releaseDate: '2026-09-01'};
+  const onStep = vi.fn();
+  const {container} = render(<CaseWork item={item} revision="r1" active privacy={false} position={37} total={181} score={() => null} onStep={onStep} info={() => null}/>);
+  expect(screen.getByRole('heading', {name: '작품'})).toBeTruthy();
+  const identity = container.querySelector('.tablet-work__identity')!;
+  expect(identity.textContent).not.toMatch(/37\s*\/\s*181/);
+  expect(identity.querySelector('small')?.textContent).toContain('9.1');
+  const stage = container.querySelector('.work-stage')!;
+  const touch = {pointerType: 'touch', pointerId: 1, button: 0, clientX: 200, clientY: 200};
+  for (const clientX of [100, 300]) {
+    fireEvent.pointerDown(stage, touch);
+    fireEvent.pointerMove(stage, {...touch, clientX});
+    fireEvent.pointerUp(stage, {...touch, clientX});
+  }
+  expect(onStep).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', {name: '이전 작품'}));
+  fireEvent.click(screen.getByRole('button', {name: '다음 작품'}));
+  expect(onStep.mock.calls).toEqual([[-1], [1]]);
 });

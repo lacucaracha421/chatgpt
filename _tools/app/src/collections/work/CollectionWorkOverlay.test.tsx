@@ -133,15 +133,16 @@ describe("Collection work open path", () => {
     expect(screen.queryByRole("article", { name: "AV 배우 상세" })).toBeNull();
     expect(screen.getByRole("article", { name: "AV 작품 화면" })).toBeInTheDocument();
   });
-  it.each(["game", "av", "movie"] as const)("opens %s by double-click / Enter with the actual list position, and Escape returns", async type => {
+  it.each(["game", "av", "movie"] as const)("opens %s by double-click / Enter showing the selected work, and Escape returns", async type => {
     const { Harness, exit } = fixtures(type); render(<Harness />); const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /^가 작품/ })); expect(screen.queryByRole("article")).toBeNull();
     await user.dblClick(screen.getByRole("button", { name: /^가 작품/ }));
     const root = await screen.findByRole("article", { name: type === "game" ? "게임 작품 화면" : type === "movie" ? "영화 작품 화면" : "AV 작품 화면" });
-    expect(root.querySelector(".asset-viewer__position")).toHaveTextContent("1 / 2");
+    expect(within(root).getByRole("heading", { name: "가 작품", level: 1 })).toBeInTheDocument();
+    expect(root.querySelector(".asset-viewer__position")).toBeNull();
     await user.keyboard("{Escape}"); expect(exit).toHaveBeenCalledOnce();
     const second = screen.getByRole("button", { name: /^나 작품/ }); second.focus(); await user.keyboard("{Enter}");
-    expect((await screen.findByRole("article")).querySelector(".asset-viewer__position")).toHaveTextContent("2 / 2");
+    expect(within(await screen.findByRole("article")).getByRole("heading", { name: "나 작품", level: 1 })).toBeInTheDocument();
   });
   it.each(["game", "movie"] as const)("holds the old %s through a delayed command and steps without unmounting", async type => {
     const { Harness, gateway } = fixtures(type); let release!: (items: []) => void;

@@ -1020,7 +1020,7 @@ describe('shelf view',()=>{
     localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout:'shelf',perRow:4}));
     mocks.api.mockImplementation(async(path:string)=>path.includes('type=av')?{...page,items:[]}:path==='/v1/collections/second'?{revision:'r1',item:second}:path.includes('/v1/collections/')?{revision:'r1',item}:{...page,items:[item,second]});
   });
-  it('stands games as light cases N per row; a tap picks, a second tap opens, a swipe steps to the next work',async()=>{
+  it('stands games as light cases N per row; a tap picks, a second tap opens, swipes keep the work and edge buttons step',async()=>{
     render(<Collections active paused={false} backRef={{current:null}}/>);
     const shelf=await screen.findByRole('group',{name:'게임 작품 목록'});
     // The list group is there before its first page commits; wait for the cases.
@@ -1032,12 +1032,16 @@ describe('shelf view',()=>{
     expect(screen.queryByRole('article',{name:'게임 작품 화면'})).toBeNull();
     fireEvent.click(tile);
     await screen.findByRole('heading',{level:1,name:item.name});
-    // A horizontal swipe on the stage, outside the case, steps through the list it was opened from.
+    // A horizontal stage swipe keeps the work; the explicit edge button steps through the list.
     const stage=document.querySelector('.tablet-work__stage') as HTMLElement;
     fireEvent.pointerDown(stage,{pointerId:1,clientX:400,clientY:200});
     fireEvent.pointerUp(stage,{pointerId:1,clientX:200,clientY:210});
+    expect(screen.getByRole('heading',{level:1,name:item.name})).toBeTruthy();
+    expect(screen.queryByRole('heading',{level:1,name:second.name})).toBeNull();
+    expect(document.querySelector('.tablet-work__identity')?.textContent).not.toMatch(/\d+\s*\/\s*\d+/);
+    fireEvent.click(screen.getByRole('button',{name:'다음 작품'}));
     expect(await screen.findByRole('heading',{level:1,name:second.name})).toBeTruthy();
-    expect(screen.getByText(/2 \/ 2/)).toBeTruthy();
+    expect(document.querySelector('.tablet-work__identity')?.textContent).not.toMatch(/\d+\s*\/\s*\d+/);
   });
   it('shows the published spine on the shelf, a game case by its owned 기기, and 상태 · 기기 in 내 기록',async()=>{
     const owned:CollectionDetail={...item,platforms:'PC · PS5',ownedPlatform:'Switch 2',status:'playing',spineArtworkId:'spine-1',artworkVersions:{'spine-1':{thumbnail:'spine-digest'}}};

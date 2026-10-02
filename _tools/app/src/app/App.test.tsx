@@ -1760,8 +1760,10 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
     await user.dblClick(await screen.findByText("Showcase Game"));
     const root = await screen.findByRole("article", { name: type === "movie" ? "영화 작품 화면" : "게임 작품 화면" });
-    const position = root.querySelector(".asset-viewer__position")!.textContent!;
-    await user.click(screen.getByRole("button", { name: position.startsWith("1") ? "다음 작품" : "이전 작품" }));
+    expect(within(root).getByRole("heading", { name: "Showcase Game" })).toBeInTheDocument();
+    expect(root.querySelector(".asset-viewer__position")).toBeNull();
+    const next = within(root).getByRole<HTMLButtonElement>("button", { name: "다음 작품" });
+    await user.click(next.disabled ? within(root).getByRole("button", { name: "이전 작품" }) : next);
     await screen.findByRole("heading", { name: "다음 게임" });
     expect(screen.getByRole("article", { name: type === "movie" ? "영화 작품 화면" : "게임 작품 화면" })).toBe(root);
     await user.click(screen.getByRole("button", { name: "목록으로" }));

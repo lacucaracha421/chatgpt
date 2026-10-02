@@ -116,9 +116,9 @@ describe("merged work screen", () => {
     expect(screen.getByRole("button", { name: "편집" })).not.toBeDisabled();
     observer.disconnect();
   });
-  it("shows position, a dock that pushes the stage, and object modes with no empty divider", async () => {
+  it("hides position, shows a dock that pushes the stage, and object modes with no empty divider", async () => {
     const { container } = view(); const user = userEvent.setup();
-    expect(container.querySelector(".asset-viewer__position")).toHaveTextContent("2 / 3");
+    expect(container.querySelector(".asset-viewer__position")).toBeNull();
     expect(screen.getByRole("complementary", { name: "작품 정보" })).toBeInTheDocument();
     expect(container.querySelector(".work-surface")).toHaveClass("work-surface--info");
     await user.click(screen.getByRole("button", { name: "정보" }));
@@ -145,7 +145,7 @@ describe("merged work screen", () => {
     expect(screen.getByRole("heading", { name: "게임 둘" })).toBeInTheDocument();
     expect(screen.getByRole("article")).toBe(root);
     expect(document.activeElement).toBe(root);
-    expect(container.querySelector(".asset-viewer__position")).toHaveTextContent("3 / 3");
+    expect(container.querySelector(".asset-viewer__position")).toBeNull();
   });
   it("steps by screen arrows but rotates by case arrows", () => {
     const { actions } = view(); const root = screen.getByRole("article");
@@ -217,16 +217,17 @@ describe("merged work screen", () => {
     fireEvent.wheel(container.querySelector('.manga-work-stage')!, { deltaY: -100 });
     const volumeZoom = container.querySelector('.work-zoom-object')!.getAttribute('data-zoom');
     rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={two} pending={false} actions={actions}/></PrivacyProvider>);
-    expect(root.querySelector('.asset-viewer__position')).toHaveTextContent("1 / 2");
+    expect(screen.getByRole("heading", { name: "게임 하나 1권" })).toBeInTheDocument();
     expect(painted).toBeVisible();
     const incoming=container.querySelector<HTMLImageElement>('.work-surface[aria-hidden="true"] .manga-bb-front img')!;
     let decode!:()=>void; Object.defineProperty(incoming,"decode",{value:()=>new Promise<void>(resolve=>{decode=resolve;})});
     fireEvent.load(incoming);
     await act(async () => { container.querySelectorAll('.work-surface[aria-hidden="true"] .manga-bb-back img, .work-surface[aria-hidden="true"] .manga-jspine-illustration img').forEach(image => fireEvent.load(image)); });
-    expect(root.querySelector('.asset-viewer__position')).toHaveTextContent("1 / 2");
+    expect(screen.getByRole("heading", { name: "게임 하나 1권" })).toBeInTheDocument();
     await act(async()=>decode());
     expect(screen.getByRole("article")).toBe(root);
-    expect(root.querySelector('.asset-viewer__position')).toHaveTextContent("2 / 2");
+    expect(screen.getByRole("heading", { name: "게임 하나 2권" })).toBeInTheDocument();
+    expect(root.querySelector(".asset-viewer__position")).toBeNull();
     expect(incoming).toBeVisible();
     expect([...container.querySelectorAll('.work-zoom-object')].every(node => node.getAttribute('data-zoom') === volumeZoom)).toBe(true);
     expect(oldBackdrop).toHaveClass('is-painted');
@@ -281,7 +282,7 @@ it("opens the film form with a plain disc case, concise facts and film record op
   const data = filmValue(); const { container, actions } = view(data); const user = userEvent.setup();
   expect(screen.getByRole("article", { name: "영화 작품 화면" })).toBeInTheDocument();
   expect(container.querySelector(".asset-viewer__title small")).toHaveTextContent("감독 이름 · 9.1");
-  expect(container.querySelector(".asset-viewer__position")).toHaveTextContent("2 / 3");
+  expect(container.querySelector(".asset-viewer__position")).toBeNull();
   for (const name of ["쇼케이스", "편집", "작품 관리", "정면으로", "정보", "닫기"]) expect(screen.getByRole("button", { name })).toBeInTheDocument();
   fireEvent.keyDown(screen.getByRole("group", { name: "케이스" }), { key: "Enter" });
   expect(container.querySelector(".disc")).not.toBeNull();

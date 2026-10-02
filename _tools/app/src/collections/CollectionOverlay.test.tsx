@@ -306,17 +306,18 @@ describe("CollectionOverlay MangaDex flow", () => {
     renderOverlay({ listCollectionVolumes: vi.fn().mockResolvedValue([1,2].map(n => ({ id: `v${n}`, volumeNumber: n, editionIndex: 0, displayLabel: String(n), coverArtworkId: `art-${n}` }))) });
     const root = await screen.findByRole("article", { name: "만화 작품 화면" });
     expect(root.querySelector(".collection-overlay__hero")).toBeNull();
-    expect(root.querySelector(".asset-viewer__position")).toHaveTextContent("1 / 2");
+    expect(root.querySelector(".asset-viewer__position")).toBeNull();
+    expect(within(root).getByRole("heading", { name: "던전밥 1권" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "작품 정보" })).toContainElement(screen.getByRole("button", { name: "한 권 늘리기" }));
     expect(screen.getByRole("group", { name: "권별 책장" })).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "판본 선택" })).toBeNull();
     const connect = await screen.findByRole("region", { name: "연결" });
     expect(within(connect).getByRole("button", { name: "카카오 연결" })).toHaveClass("is-primary");
     await user.click(screen.getByRole("button", { name: "2권 보기" }));
-    expect(root.querySelector(".asset-viewer__position")).toHaveTextContent("1 / 2");
+    expect(within(root).getByRole("heading", { name: "던전밥 1권" })).toBeInTheDocument();
     await settleManga();
     expect(screen.getByRole("article")).toBe(root);
-    expect(root.querySelector(".asset-viewer__position")).toHaveTextContent("2 / 2");
+    expect(within(root).getByRole("heading", { name: "던전밥 2권" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -327,7 +328,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     const root = await screen.findByRole("article", { name: "만화 작품 화면" });
     expect(screen.getByRole("button", { name: "2권 보기" })).toHaveAttribute("aria-pressed", "true");
     await settleManga();
-    expect(root.querySelector(".asset-viewer__position")).toHaveTextContent("2 / 3");
+    expect(within(root).getByRole("heading", { name: "던전밥 2권" })).toBeInTheDocument();
     expect(requestedMangaVolume("collection-1")).toBeNull();
   });
 
@@ -472,7 +473,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     await waitFor(()=>expect(screen.getByRole("button",{name:"2권 보기"})).toHaveFocus());
     expect(onExit).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button",{name:"3권 보기"}));
-    await waitFor(()=>expect(root.querySelector(".asset-viewer__position")).toHaveTextContent("3 / 3"));
+    await waitFor(()=>expect(within(root).getByRole("heading", { name: "던전밥 3권" })).toBeInTheDocument());
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByText("표지가 없습니다.")).toBeInTheDocument();
   });
