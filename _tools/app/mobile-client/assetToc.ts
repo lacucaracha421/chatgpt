@@ -111,8 +111,8 @@ export async function fetchAssetRange(list:AssetRangeList, index:number, count:n
 
 type TocHost = Page & AssetTocPage & {version:number; generation:string|null; view:View; filters:AssetFiltersValue; cursor:string|null};
 /** App keeps the loaded ranges with its cached list, selection and viewer source. */
-export function useAssetToc<T extends TocHost>(page:T, setPage:Dispatch<SetStateAction<T>>, reload:()=>void, onError:(message:string)=>void):SparseGallerySource|undefined {
-  const latest=useRef({page,reload,onError});latest.current={page,reload,onError};
+export function useAssetToc<T extends TocHost>(page:T, setPage:Dispatch<SetStateAction<T>>, reload:()=>void, onError:(message:string)=>void,onRejected?:(reason:unknown,signal:AbortSignal)=>Promise<boolean>):SparseGallerySource|undefined {
+  const latest=useRef({page,reload,onError,onRejected});latest.current={page,reload,onError,onRejected};
   useEffect(()=>{
     if(!page.tocRequest || page.cursor)return;
     let live=true;
@@ -146,6 +146,8 @@ export function useAssetToc<T extends TocHost>(page:T, setPage:Dispatch<SetState
       latest.current.onError('');return true;
     } catch(reason) {
       if(signal.aborted || latest.current.page.version!==current.version)return false;
+      if(await latest.current.onRejected?.(reason,signal))return false;
+      if(signal.aborted||latest.current.page.version!==current.version)return false;
       if(reason instanceof AssetListChanged)latest.current.reload();
       else latest.current.onError(errorText(reason));
       return false;

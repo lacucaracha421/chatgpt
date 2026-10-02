@@ -84,7 +84,7 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
   const suggestions=useMemo(()=>assetSuggestions(entries,characters,albumTree,artistList.artists),[entries,characters,albumTree,artistList.artists]);
   const closeSearch=()=>setSearchOpen(false);
   const openSearch=()=>{setSearchOpen(true);setListsRequested(true);onSearchFocus?.();};
-  const chooseSuggestion=(item:AssetSuggestion)=>{if(onSearchSelect)onSearchSelect(item);else if(item.kind==='artist')onOpenArtist(item.artist);else onSelect(item.view);};
+  const chooseSuggestion=(item:AssetSuggestion)=>{if(onSearchSelect)onSearchSelect(item);else if(item.kind==='artist')onOpenArtist(item.artist);else if(item.kind!=='tag')onSelect(item.view);};
   const albumItems=useMemo(()=>{
     if(!albumTree)return [];
     const known=new Set(albumTree.albums.map(album=>album.id));

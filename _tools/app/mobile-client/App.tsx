@@ -29,11 +29,15 @@ import {StepSlider} from './StepSlider';
 import type {Asset, AssetFiltersValue, Classification, Page, SavedPosition, Status, View} from './types';
 import {EMPTY_FILTERS, ASSET_FILTER_VERSION, ASSET_SORTS, MEDIA_SECTIONS, SORT_LABELS, hasActiveFilters, sameFilters, sortOf, type AssetSort} from './assetFilters';
 import {FilterChips,type FilterGroup} from './FilterChips';
-import {BarProgress,LoadingLine,TopBar,closeVisibleSearch} from './TopBar';
+import {BarProgress,LoadingLine,TopBar,SearchButton,closeVisibleSearch} from './TopBar';
 import {BottomSheet} from './BottomSheet';
 import {LibraryRoot,type LibrarySegment} from './LibraryRoot';
 import {AssetScopeChips} from './AssetScopeChips';
-import type {AssetSuggestion,AssetSearchChip} from './assetSearchModel';
+import {viewSearchChips,assetSuggestions,chipName,searchChip,addSearchChip,searchView,removeViewSearch,invalidSearchChoices,type AssetSuggestion,type AssetSearchChip} from './assetSearchModel';
+import {assetSearchKey,type AssetSearchName} from '../src/assets/assetSearch';
+import {AssetSearch} from './AssetSearch';
+import {useLibraryArtists} from './useLibraryArtists';
+import {characterPath} from './characterModel';
 import {FolderCards} from './FolderCards';
 import {Albums,useAlbumTree} from './Albums';
 import {albumAncestors,albumPage,albumView,type AlbumAssetPage} from './albumModel';
@@ -113,6 +117,7 @@ export function App() {
   const startedWithLocalConnection = useRef(status.configured);
   const [privacyMode] = usePrivacyMode();
   const [searchChips,setSearchChips]=useState<AssetSearchChip[]>([]);
+  const [assetSearchOpen,setAssetSearchOpen]=useState(false),[searchNotice,setSearchNotice]=useState('');
   const [searchListsRequested,setSearchListsRequested]=useState(false);
   // Queued personal Collection edits are sent on start and on return, whatever screen is open.
   useCollectionEditBackgroundFlush(status.configured);
@@ -171,7 +176,10 @@ export function App() {
   const [density, setDensity] = useState(() => {try {return validDensity(JSON.parse(localStorage.getItem('lakomics.mobile.density') ?? '1'));} catch {return DEFAULT_DENSITY;}});
   const entries=useMemo(()=>mergeLibraryEntries(classifications,characterIndex),[classifications,characterIndex]);
   const entriesRef=useRef(entries);entriesRef.current=entries;
+  const characterIndexRef=useRef(characterIndex);characterIndexRef.current=characterIndex;
   const {tree:albumTree,error:albumError,loading:albumLoading}=useAlbumTree(status.configured&&area==='assets'&&!settings&&!viewer&&page.view.tab==='library'&&(searchListsRequested||librarySegment==='albums'||!!page.view.album),indexRevision,status.endpoint);
+  const searchArtists=useLibraryArtists(assetSearchOpen,indexRevision,status.endpoint);
+  const searchItems=useMemo(()=>assetSuggestions(entries,characterIndex,albumTree,searchArtists.artists),[entries,characterIndex,albumTree,searchArtists.artists]);
   const albumTreeRef=useRef(albumTree);albumTreeRef.current=albumTree;
   const appRef=useRef<HTMLDivElement>(null),mainRef=useRef<HTMLElement>(null);
   const scroll = useRef(0), gate = useRef(new RequestGate()), secondaryGate = useRef(new RequestGate());
@@ -203,6 +211,20 @@ export function App() {
     moreGate.current.cancel(); prefetched.current?.controller.abort(); prefetched.current = null;
     morePending.current = false; setLoadingMore(false); setMoreError('');
   }, []);
+  const recoverSearch=useCallback(async(view:View,reason:unknown,signal:AbortSignal):Promise<View|null>=>{
+    if((reason as {status?:number})?.status!==422||!view.search?.length)return null;
+    const invalid=await invalidSearchChoices(view.search,chip=>{
+      const probe:View={tab:'library',title:'에셋',search:[chip]};
+      if(chip.kind==='album')probe.album=view.album;
+      if(chip.kind==='character'&&view.characterNode&&characterIndexRef.current?.revision)
+        return api(characterPath(view.characterNode,'all',characterIndexRef.current.revision,null,EMPTY_FILTERS),signal);
+      return api(pagePath(probe,null,EMPTY_FILTERS,1),signal);
+    },signal);
+    if(!invalid.length)return null;
+    setSearchChips(previous=>previous.filter(chip=>!invalid.some(item=>assetSearchKey(item)===assetSearchKey(chipName(chip)))));
+    setSearchNotice('사용할 수 없는 검색 조건을 지웠습니다.');
+    return removeViewSearch(view,invalid);
+  },[]);
   const nextPage = useCallback((view:View, cursor:string, filters:AssetFiltersValue) => {
     const path = pagePath(view, cursor, filters);
     if (prefetched.current?.path === path) return prefetched.current.promise;
@@ -214,7 +236,7 @@ export function App() {
     return promise;
   }, []);
 
-  const load = useCallback(async (view: View, cursor: string | null = null, previous: (string | null)[] = [], restore = 0, fresh = false, nextFilters: AssetFiltersValue = EMPTY_FILTERS) => {
+  const load = useCallback(async (view: View, cursor: string | null = null, previous: (string | null)[] = [], restore = 0, fresh = false, nextFilters: AssetFiltersValue = EMPTY_FILTERS):Promise<void> => {
     const visible = latest.current.page;
     const placeChanged=visible.version>0&&viewKey(visible.view,visible.filters)!==viewKey(view,nextFilters);
     if(placeChanged){clearSelection();if(latest.current.albumBatchOpen)closeAlbumBatch();}
@@ -303,6 +325,10 @@ export function App() {
       setFilters(nextFilters);setFiltersOpen(null);
       setPage({ ...response, items, view, cursor, previous, restoreScroll:restored, generation, version:request.id, filters:nextFilters, tocRequest, ...(cached?.assetRanges?{assetRanges:cached.assetRanges}:{}) });
     } catch (reason) { if (gate.current.current(request.id)) {
+      const recovered=await recoverSearch(view,reason,request.signal);
+      if(!gate.current.current(request.id))return;
+      if(recovered){void load(recovered,null,[],0,true,nextFilters);return;}
+
       // The previous page stays mounted and committed on failure: an error must not
       // discard a usable gallery, and it must not leave the heading claiming filters
       // the visible page does not have.
@@ -310,8 +336,12 @@ export function App() {
       setError(errorText(reason));
     } }
     finally { if (gate.current.current(request.id)) setBusy(false); }
-  }, [cancelMore,clearSelection,closeAlbumBatch]);
-  const sparse = useAssetToc(page,setPage,()=>{const current=latest.current.page;void load(current.view,null,[],0,true,current.filters);},setMoreError);
+  }, [cancelMore,clearSelection,closeAlbumBatch,recoverSearch]);
+  const sparse = useAssetToc(page,setPage,()=>{const current=latest.current.page;void load(current.view,null,[],0,true,current.filters);},setMoreError,async(reason,signal)=>{
+    const current=latest.current.page,recovered=await recoverSearch(current.view,reason,signal);
+    if(!recovered||signal.aborted||latest.current.page.version!==current.version)return false;
+    void load(recovered,null,[],0,true,current.filters);return true;
+  });
   useEffect(()=>{if(page.assetRanges)cancelMore();},[page.assetRanges?.toc,cancelMore]);
   useEffect(()=>{
     if(!page.assetRanges)return;
@@ -418,9 +448,9 @@ export function App() {
         return {...previous, items:[...previous.items,...response.items.filter(item => !seen.has(item.id))],
           has_more:response.has_more, next_cursor:response.next_cursor};
       });
-    } catch (reason) {if (moreGate.current.current(request.id)) setMoreError(errorText(reason));}
+    } catch (reason) {if (moreGate.current.current(request.id)){const recovered=await recoverSearch(current.view,reason,request.signal);if(!moreGate.current.current(request.id))return;if(recovered)void load(recovered,null,[],0,true,current.filters);else setMoreError(errorText(reason));}}
     finally {if (moreGate.current.current(request.id)) {morePending.current = false; setLoadingMore(false);}}
-  }, [nextPage,load,sparse]);
+  }, [nextPage,load,sparse,recoverSearch]);
   const nearEnd = useCallback(() => {
     // The committed page is what supplies the cursor, so a failed filter change must not be
     // continued: appending would extend the previous result set under the new filters.
@@ -591,7 +621,7 @@ export function App() {
     // An explicit folder selection starts unfiltered. Tab restoration uses the saved
     // scope and its own filters instead of this entry path.
     setArea('assets');
-    if(view.characters){setCharactersVisited(true);setCharacterEntry(value=>value+1);}
+    if(view.characters){if(!page.view.characters)beforeCharacter.current={view:page.view,cursor:page.cursor,previous:page.previous,scroll:scroll.current,filters:page.filters};setCharactersVisited(true);setCharacterEntry(value=>value+1);}
     void load(view, null, [], 0, false, EMPTY_FILTERS);
   };
   /**
@@ -693,7 +723,7 @@ export function App() {
     setPage({generation:null,items:[],has_more:false,next_cursor:null,view:LIBRARY,cursor:null,previous:[],version:0,restoreScroll:0,filters:{...EMPTY_FILTERS}});
     setHomeOrigin(null); homeRestore.current = null;
     setArea('assets'); setNotesVisited(false); setCollectionsVisited(false); setCatalogVisited(false); setCharactersVisited(false);
-    setSearchChips([]);setSearchListsRequested(false);
+    setSearchChips([]);setAssetSearchOpen(false);setSearchNotice('');setSearchListsRequested(false);
     setStatus(adoptConnection(next));
   };
   usePublicationCheck(status.configured&&area==='assets'&&!settings&&!viewer,'/v1/library/characters/status',characterIndex?.revision,(_reply,changed)=>{if(changed)setIndexRevision(n=>n+1);});
@@ -733,7 +763,7 @@ export function App() {
     return 1+(entry?ancestorsOf(entries,entry.id).length:0);
   };
   const libraryLevel=status.configured&&area==='assets'&&page.view.tab==='library'&&page.version>0;
-  useLevelMotion(mainRef,libraryLevel?viewKey(page.view):null,libraryLevel?levelDepth(page.view):0);
+  useLevelMotion(mainRef,libraryLevel?(page.view.search!==undefined?'asset-search':viewKey(page.view)):null,libraryLevel?levelDepth(page.view):0);
   // Tab surfaces, including their backdrop gradients, appear at their final opacity and position.
   // Back from a Library entry opened from Home puts Home's scroll offset back once it is shown.
   // Home's cards render from their kept snapshot first, so a second try covers late growth.
@@ -753,19 +783,32 @@ export function App() {
   if(page.view.root)rootPage.current={items:visibleItems,total:page.version&&!page.has_more?visibleItems.length:undefined};
   const demo = import.meta.env.DEV && new URLSearchParams(location.search).has('demo');
   const openPending = () => { if (captures?.length) setViewer({items: captures, index: 0, pending: true}); else void refreshSecondary(true); };
-  const libraryCount=hasActiveFilters(page.filters)?`${page.items.length}${page.has_more?'+':''}`:currentEntry?.asset_count??currentAlbum?.assetCount??`${page.items.length}${page.has_more?'+':''}`;
+  const libraryCount=page.view.search?.length?(page.assetRanges?.toc.totalCount.toLocaleString('ko-KR')??`${page.items.length}${page.has_more?'+':''}`):hasActiveFilters(page.filters)?`${page.items.length}${page.has_more?'+':''}`:currentEntry?.asset_count??currentAlbum?.assetCount??`${page.items.length}${page.has_more?'+':''}`;
   const libraryCrumbNode=<nav className="library-breadcrumb" aria-label="현재 위치">{crumbs.map((crumb,i)=><span key={crumb.id}>{i>0&&<span aria-hidden="true">›</span>}<button type="button" onClick={crumb.onSelect}>{crumb.name}</button></span>)}</nav>;
-  const chooseSearchScope=(item:AssetSuggestion)=>{
-    if(item.kind==='artist')openArtist(item.artist);else select(item.view);
-    setSearchChips([{type:'scope',item}]);
+  const commitSearch=(chips:AssetSearchChip[])=>{
+    setSearchChips(chips);setAssetSearchOpen(false);setSearchNotice('');setArea('assets');
+    const view=searchView(chips);
+    if(view.characters){setCharactersVisited(true);if(!page.view.characters||view.characterNode!==page.view.characterNode)setCharacterEntry(value=>value+1);}
+    void load(view,null,[],0,false,page.filters);
   };
-  const removeSearchScope=()=>{closeArtists();openRoot();};
-  // Only the committed destination carries its scope chip while navigation is pending.
-  const activeScopes=searchChips.flatMap(chip=>chip.type==='scope'?[chip.item]:[]);
-  const galleryScopes=activeScopes.filter(item=>item.kind!=='artist'&&viewKey(item.view)===viewKey(page.view));
-  const scopeChips=<AssetScopeChips chips={galleryScopes} onRemove={removeSearchScope}/>;
+  const chooseSearchScope=(item:AssetSuggestion)=>commitSearch(addSearchChip(assetSearchOpen?searchChips:viewSearchChips(page.view),item));
+  const removeSearchScope=(item:AssetSearchName)=>commitSearch(viewSearchChips(page.view).filter(chip=>assetSearchKey(chipName(chip))!==assetSearchKey(item)));
+  const openAssetSearch=()=>{
+    let chips=viewSearchChips(page.view);
+    if(!page.view.search?.length){
+      const scope=searchItems.find(item=>item.kind==='album'?item.id===page.view.album?.id:item.kind==='character'?item.id===page.view.classification||item.kind==='character'&&item.view.characterNode===page.view.characterNode:item.kind==='folder'&&item.id===page.view.classification);
+      chips=scope?[searchChip(scope)]:[];
+    }
+    if(page.view.characters&&focusedCharacter&&focusedCharacter!==page.view.characterNode){
+      const current=searchItems.find(item=>item.kind==='character'&&item.view.characterNode===focusedCharacter);
+      if(current)chips=addSearchChip(chips,current);
+    }
+    setSearchChips(chips);setSearchListsRequested(true);setAssetSearchOpen(true);
+  };
+  const scopeChips=<AssetScopeChips chips={page.view.search??[]} onRemove={removeSearchScope} onClear={()=>commitSearch([])}/>;
   const assetToolbar=page.view.tab==='library'&&!page.view.root&&!page.view.characters&&!page.view.revisit&&<TopBar barRef={kindShade.barRef} className="library-header asset-topbar" loading={busy&&'목록 불러오는 중'} back={{label:'뒤로',onClick:()=>window.dispatchEvent(new Event('lakomics-back'))}} crumbs={libraryCrumbNode} title={kindShade.title(page.view.title)} count={libraryCount}
     actions={<>
+      <SearchButton onClick={openAssetSearch}/>
       <FilterChips media={false} sheet={false} variant="toolbar" showReset={false} value={filters} applied={filters} onChange={applyFilters} open={null} onOpen={setFiltersOpen}/>
       {!page.view.album&&<Button type="button" size="sm" variant="ghost" className="asset-topbar__sort" aria-label={`정렬 ${SORT_LABELS[sortOf(filters)]}`} onClick={()=>setSortOpen(true)}><ArrowsUpDownIcon aria-hidden="true"/><span>{SORT_LABELS[sortOf(filters)]}</span></Button>}
       <Button type="button" size="icon" variant="ghost" className="top-bar__options" aria-label="보기 옵션" onClick={()=>{setOptionsScope(page.view.album?page.items:[]);setSortOpen(false);setViewSettings(true);}}><Squares2X2Icon aria-hidden="true"/></Button>
@@ -789,20 +832,22 @@ export function App() {
           onReview={() => {}} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
           onDuplicates={() => {setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
           onReleases={() => openCalendar()} onWork={id => {setHomeOrigin({area:'collections'});openCollections({kind:'work',id});}}/> : <>
-        <Gallery sparse={sparse} privacy={privacyMode} items={visibleItems} intro={<>{scopeChips}{filterable?<>{kindShade.inline}{intro}</>:intro}</>} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings || !!filtersOpen} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onClearSelection={clearSelection}/>
+        <Gallery stale={busy} sparse={sparse} privacy={privacyMode} items={visibleItems} intro={<>{scopeChips}{filterable?<>{kindShade.inline}{intro}</>:intro}</>} onRefresh={refresh} busy={busy} density={density} identity={`${viewKey(page.view,page.filters)}:${page.cursor}:${page.version}`} restoreScroll={page.restoreScroll} onScroll={top=>{scroll.current=top;}} onOpen={openCurrent} onReady={thumbnailReady} onNearEnd={nearEnd} paused={paused} scrubberHidden={viewSettings || !!filtersOpen} selectedIds={selectionGallery?selectedIds:undefined} onSelectAsset={selectionGallery?selectAsset:undefined} onToggleSelection={selectionGallery?toggleSelectedAsset:undefined} onClearSelection={clearSelection}/>
         {selectionGallery&&<SelectionBar selectedCount={selectedIds.size} batchPending={albumBatchOpen} onAddToAlbum={openAlbumBatch} onClearSelection={clearSelection}/>}
         <LoadingLine label={loadingMore&&'다음 자산을 불러오는 중'} className="is-bottom"/>
         </>}
-        {charactersVisited && <CharacterBrowser scopeChips={scopeChips} hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>setViewer({items,index,character})} backRef={characterBack} onExit={exitCharacters}/>}
+        {charactersVisited && <CharacterBrowser search={page.view.search} onSearch={openAssetSearch} onInvalidSearch={(invalid)=>{const view=removeViewSearch(page.view,invalid);setSearchChips(previous=>previous.filter(chip=>!invalid.some(item=>assetSearchKey(item)===assetSearchKey(chipName(chip)))));setSearchNotice('사용할 수 없는 검색 조건을 지웠습니다.');void load(view,null,[],0,true,page.filters);}} scopeChips={scopeChips} hostBusy={busy} optionsHost={optionsHost} onCloseOptions={()=>setViewSettings(false)} entryKey={characterEntry} crumbs={characterCrumbs} onOptions={items=>{setOptionsScope(items);setViewSettings(true);}} onLocation={setFocusedCharacter} initialNode={page.view.characterNode} key={status.endpoint} active={area==='assets'&&!!page.view.characters} paused={settings||!!viewer||!!fault} density={density} refreshKey={page.view.characters?page.version:0} onOpen={(items,index,character)=>setViewer({items,index,character})} backRef={characterBack} onExit={exitCharacters}/>}
         <div className="floating-notices">
+          {searchNotice&&<p className="hint" role="status">{searchNotice}</p>}
           {indexError&&rootShown&&<p className="error-message">{indexError}</p>}
           {filterNotice && <div className="inline-error" role="alert"><span>{filterNotice}</span><Button variant="ghost" onClick={retryFilters}>다시 시도</Button><Button variant="ghost" onClick={clearFilters}>필터 해제</Button></div>}
           {error && <div className="inline-error" role="alert"><span>{error}</span><Button onClick={() => {const intent = lastIntent.current; void load(intent.view,intent.cursor,intent.previous,0,false,intent.filters);}}>다시 시도</Button></div>}
           {moreError && !page.view.root && !page.view.characters && page.view.tab!=='home' && <div className="inline-error" role="alert"><span>{moreError}</span><Button variant="ghost" disabled={busy || loadingMore} onClick={() => {void append();}}>다시 시도</Button></div>}
         </div>
       </main>
+      {assetSearchOpen&&<div className="asset-search-layer"><AssetSearch items={searchItems} chips={searchChips.map(chipName)} endpoint={status.endpoint} paused={settings||!!viewer} onClose={()=>setAssetSearchOpen(false)} onChoose={chooseSearchScope}/></div>}
       {calendarOpen && <div className="release-calendar-layer"><ReleaseCalendar onClose={closeCalendar} initialKind={calendarKind} backRef={calendarBack}/></div>}
-      {artistsOpen && <Artists scopeChips={<AssetScopeChips chips={activeScopes.filter(item=>item.kind==='artist'&&item.id===artistSelection?.id)} onRemove={removeSearchScope}/>} endpoint={status.endpoint} backRef={artistsBack} initialArtist={artistSelection ?? undefined} onClose={closeArtists} paused={settings||!!viewer} onOpenViewer={(items,index) => setViewer({items,index})}/>}
+      {artistsOpen && <Artists endpoint={status.endpoint} backRef={artistsBack} initialArtist={artistSelection ?? undefined} onClose={closeArtists} paused={settings||!!viewer} onOpenViewer={(items,index) => setViewer({items,index})}/>}
       {collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest} onReturnHome={homeOrigin?.area==='collections'?returnHome:undefined}/>}
       {notesVisited && <Notes key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack} request={noteRequest} onReturnHome={homeOrigin?.area==='notes'?returnHome:undefined} onHomeEntryGone={homeOrigin?.area==='notes'?forgetHome:undefined}/>}
       {catalogVisited && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} paused={settings || !!viewer} backRef={catalogBack} openDuplicates={duplicateRequest} onReturnHome={homeOrigin?.area==='catalog'?returnHome:undefined}/>}

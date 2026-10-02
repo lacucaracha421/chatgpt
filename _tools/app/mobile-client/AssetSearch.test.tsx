@@ -6,17 +6,19 @@ import {assetSuggestions,readAssetSearchRecents,writeAssetSearchRecents,type Ass
 import {assetSearchKey,groupAssetSuggestions,rememberAssetSearch,type AssetSearchIdentity} from '../src/assets/assetSearch';
 import {PRIVACY_MODE_KEY} from './privacyMode';
 import type {LibraryArtist} from './artistsModel';
+const mocks=vi.hoisted(()=>({api:vi.fn()}));
+vi.mock('./transport',()=>({api:mocks.api}));
 vi.mock('./media',()=>({loadThumbnail:vi.fn(async(asset)=>asset)}));
 const artist:LibraryArtist={id:'artist',label:'서리 작가',keys:[],assetCount:4,recentCount:0,pinned:false,hidden:false,main:true,coverAssetIds:['art-cover']};
 const tree={adopted:true,libraryId:'library',epoch:3,code:'',albums:[{id:'album',name:'서리 앨범',parentId:null,iconKey:null,colorKey:null,assetCount:3}]};
 const suggestions=assetSuggestions([{id:'folder',name:'서리 폴더',parent_id:null,asset_count:1},{id:'character',name:'서리 캐릭터',parent_id:null,asset_count:2,characterNode:'character:c',characterKind:'character'}],undefined,tree,[artist]);
 const props={items:suggestions,endpoint:'endpoint',paused:false,onClose:vi.fn(),onChoose:vi.fn()};
-beforeEach(()=>localStorage.clear());
-afterEach(()=>{cleanup();vi.restoreAllMocks();vi.clearAllMocks();});
+beforeEach(()=>{localStorage.clear();mocks.api.mockReset();mocks.api.mockResolvedValue({items:[]});});
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.clearAllMocks();vi.useRealTimers();delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
 it('groups matching names in folder, character, album, artist order, including initial consonants',()=>{
  const groups=groupAssetSuggestions(suggestions,'ㅅㄹ');
- expect(groups.map(group=>group.label)).toEqual(['폴더','캐릭터','앨범','작가']);
- expect(groups.map(group=>group.items[0]?.id)).toEqual(['folder','character','album','artist']);
+ expect(groups.map(group=>group.label)).toEqual(['폴더','캐릭터','앨범','작가','태그']);
+ expect(groups.map(group=>group.items[0]?.id)).toEqual(['folder','character','album','artist',undefined]);
  expect(groupAssetSuggestions(suggestions,'ㅅㄹ ㅍㄷ').flatMap(group=>group.items).map(item=>item.kind)).toEqual(['folder']);
 });
 it.each(suggestions)('chooses $kind with the existing destination and remembers its identity',item=>{
@@ -90,4 +92,67 @@ it('removes a selected scope through its chip without treating it as a search ac
  fireEvent.click(screen.getByRole('button',{name:'서리 폴더 범위 제거'}));
  expect(remove).toHaveBeenCalledWith(suggestions[0]);
  expect(assetSearchKey(suggestions[0])).toBe('folder:folder');
+});
+
+const tagReply=(id:string,label:string,count=7)=>({items:[{kind:'tag',id,label,count}]});
+const advance=async(ms=200)=>{await act(async()=>{await vi.advanceTimersByTimeAsync(ms);});};
+it('debounces remote tags, cancels stale reads, retains previous rows, and uses the original tag id',async()=>{
+ vi.useFakeTimers();const reads:{path:string;signal:AbortSignal;resolve(value:unknown):void}[]=[];
+ mocks.api.mockImplementation((path:string,signal:AbortSignal)=>new Promise(resolve=>reads.push({path,signal,resolve})));
+ render(<AssetSearch {...props}/>);const input=screen.getByRole('searchbox');
+ fireEvent.change(input,{target:{value:'긴'}});await advance(199);expect(reads).toHaveLength(0);
+ fireEvent.change(input,{target:{value:'긴 머리'}});await advance();expect(reads).toHaveLength(1);
+ expect(new URL(reads[0].path,'https://test').searchParams.get('text')).toBe('긴 머리');expect(reads[0].path).toContain('limit=10');
+ await act(async()=>reads[0].resolve(tagReply('long_hair','긴 머리')));
+ const row=within(screen.getByRole('region',{name:'태그'})).getByRole('button',{name:'긴 머리7장'});
+ fireEvent.change(input,{target:{value:'안경'}});expect(screen.getByRole('button',{name:'긴 머리7장'})).toBe(row);expect((row as HTMLButtonElement).disabled).toBe(true);
+ await advance();expect(reads[0].signal.aborted).toBe(true);
+ fireEvent.change(input,{target:{value:'서리'}});expect(reads[1].signal.aborted).toBe(true);await advance();
+ await act(async()=>reads[1].resolve(tagReply('glasses','안경')));expect(screen.queryByText('안경')).toBeNull();
+ await act(async()=>reads[2].resolve(tagReply('frost','서리 태그',1234)));
+ expect(screen.getByRole('region',{name:'폴더'})).toBeTruthy();
+ fireEvent.click(screen.getByRole('button',{name:'서리 태그1,234장'}));
+ expect(props.onChoose).toHaveBeenCalledWith({kind:'tag',id:'frost',name:'서리 태그',count:1234});
+ expect(readAssetSearchRecents('endpoint')).toEqual([{kind:'tag',id:'frost',name:'서리 태그'}]);
+});
+it('shows a recent tag on reopening, hides all recent choices/counts/covers in privacy mode',async()=>{
+ vi.useFakeTimers();writeAssetSearchRecents('endpoint',[{kind:'tag',id:'long_hair',name:'긴 머리'}]);
+ const view=render(<AssetSearch {...props}/>);expect(within(screen.getByRole('region',{name:'최근 검색'})).getByText('긴 머리')).toBeTruthy();
+ act(()=>{localStorage.setItem(PRIVACY_MODE_KEY,'1');window.dispatchEvent(new Event('storage'));});
+ expect(screen.queryByRole('region',{name:'최근 검색'})).toBeNull();
+ mocks.api.mockResolvedValue(tagReply('long_hair','긴 머리'));
+ fireEvent.change(screen.getByRole('searchbox'),{target:{value:'긴'}});await advance();
+ expect(screen.getByRole('region',{name:'태그'}).querySelector('img,svg,.numeric,.asset-search-cover')).toBeNull();
+ view.unmount();expect(mocks.api.mock.calls[0][1].aborted).toBe(true);
+});
+it('keeps local suggestions when offline and quietly clears unavailable tag results',async()=>{
+ vi.useFakeTimers();mocks.api.mockResolvedValueOnce(tagReply('frost','서리 태그')).mockRejectedValue(Error('offline'));
+ render(<AssetSearch {...props}/>);const input=screen.getByRole('searchbox');
+ fireEvent.change(input,{target:{value:'서리'}});await advance();expect(screen.getByRole('region',{name:'태그'})).toBeTruthy();
+ fireEvent.change(input,{target:{value:'서리 폴'}});expect(screen.getByRole('region',{name:'태그'})).toBeTruthy();await advance();
+ expect(screen.queryByRole('region',{name:'태그'})).toBeNull();expect(screen.getByRole('button',{name:/서리 폴더/})).toBeTruthy();expect(screen.queryByRole('alert')).toBeNull();
+});
+it('disables a ninth tag and folder with a short hint and keeps Korean composition out of remote requests',async()=>{
+ vi.useFakeTimers();const chips=Array.from({length:8},(_,i)=>({kind:'tag' as const,id:String(i),name:String(i)}));
+ mocks.api.mockResolvedValue(tagReply('new','새 태그'));
+ const view=render(<AssetSearch {...props} chips={chips}/>);const input=screen.getByRole('searchbox');
+ fireEvent.compositionStart(input);fireEvent.input(input,{target:{value:'서리'},isComposing:true});await advance();expect(mocks.api).not.toHaveBeenCalled();
+ fireEvent.compositionEnd(input,{data:'서리'});await advance();expect(mocks.api).toHaveBeenCalledTimes(1);
+ const row=screen.getByRole('button',{name:'새 태그7장'}) as HTMLButtonElement;expect(row.disabled).toBe(true);expect(screen.getByText('태그는 최대 8개입니다.')).toBeTruthy();fireEvent.click(row);expect(props.onChoose).not.toHaveBeenCalled();
+ view.rerender(<AssetSearch {...props} chips={chips.map(item=>({...item,kind:'folder'}))}/>);
+ expect((screen.getByRole('button',{name:/서리 폴더/}) as HTMLButtonElement).disabled).toBe(true);expect(screen.getByText('폴더는 최대 8개입니다.')).toBeTruthy();
+});
+it('removes chips independently, offers clear-all for multiple chips, and animates width/opacity for 140 ms',async()=>{
+ vi.useFakeTimers();const animations=vi.fn(()=>({cancel:vi.fn(),onfinish:null}));
+ Object.defineProperty(HTMLElement.prototype,'animate',{configurable:true,writable:true,value:animations});
+ vi.spyOn(Element.prototype,'getBoundingClientRect').mockReturnValue({width:96} as DOMRect);
+ const remove=vi.fn(),clear=vi.fn(),tag={kind:'tag' as const,id:'long_hair',name:'긴 머리'};
+ const view=render(<AssetScopeChips chips={[suggestions[0],tag]} onRemove={remove} onClear={clear}/>);
+ fireEvent.click(screen.getByRole('button',{name:'긴 머리 범위 제거'}));expect(remove).toHaveBeenCalledWith(tag);
+ fireEvent.click(screen.getByRole('button',{name:'모두 지우기'}));expect(clear).toHaveBeenCalledOnce();
+ view.rerender(<AssetScopeChips chips={[suggestions[0]]} onRemove={remove} onClear={clear}/>);
+ expect(screen.queryByRole('button',{name:'모두 지우기'})).toBeNull();expect(screen.queryByRole('button',{name:'긴 머리 범위 제거'})).toBeNull();
+ expect(animations.mock.calls[0]?.[0]).toEqual([{width:'0px',opacity:0},{width:'96px',opacity:1}]);
+ expect(animations.mock.calls.at(-1)?.[1]).toMatchObject({duration:140});expect(animations.mock.calls.at(-1)?.[0]).toEqual([{width:'96px',opacity:1},{width:'0px',opacity:0}]);
+ await advance(140);expect(view.container.querySelectorAll('.asset-scope-chip-slot')).toHaveLength(1);
 });

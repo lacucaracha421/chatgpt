@@ -1,3 +1,4 @@
+import {assetSearchParams,type AssetSearchName} from '../src/assets/assetSearch';
 import type {AssetFiltersValue, Page} from './types';
 import {EMPTY_FILTERS, withFilters} from './assetFilters';
 export type CharacterFilter = 'all' | 'unclassified' | 'needs_review';
@@ -34,8 +35,8 @@ export type CharacterPage = Page & {revision:string;totalCount:number;sourceCoun
  * that frozen scope, so a filter never needs a new publication to become meaningful —
  * only the membership and the scope counts do.
  */
-export function characterPath(node:string,filter:CharacterFilter,revision:string,cursor:string|null,filters:AssetFiltersValue=EMPTY_FILTERS) {
-  const params=new URLSearchParams({node,filter,revision,limit:'40'});
+export function characterPath(node:string,filter:CharacterFilter,revision:string,cursor:string|null,filters:AssetFiltersValue=EMPTY_FILTERS,search:readonly AssetSearchName[]=[]) {
+  const params=assetSearchParams(new URLSearchParams({node,filter,revision,limit:'40'}),search,false);
   if(cursor)params.set('cursor',cursor);
   return withFilters(`/v1/library/characters/assets?${params}`,filters);
 }

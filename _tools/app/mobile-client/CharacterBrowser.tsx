@@ -1,17 +1,19 @@
+import {assetSearchSelectionKey,type AssetSearchName} from '../src/assets/assetSearch';
+import {invalidSearchChoices} from './assetSearchModel';
 import type {LibraryCrumb} from './LibraryHeader';
 import {FilterChips,type FilterGroup} from './FilterChips';
 import {usePublicationCheck} from './usePublicationCheck';
 import {useCallback,useEffect,useId,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
 import {ArrowLeftIcon,ChevronUpIcon,InformationCircleIcon,PhotoIcon,Squares2X2Icon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
-import {BarProgress} from './TopBar';
+import {BarProgress,SearchButton} from './TopBar';
 import {useSectionShade} from './SectionShade';
 import {Button,IconButton,SegmentedControl} from './ui';
 import {api,errorText} from './transport';
 import {loadThumbnail} from './media';
 import {readyFirstScreen} from './firstScreen';
 import {Gallery} from './Gallery';
-import {RequestGate} from './model';
+import {pagePath,RequestGate} from './model';
 import type {Asset,AssetFiltersValue,AssetMediaFilter} from './types';
 import {ASSET_FILTER_VERSION,EMPTY_FILTERS,MEDIA_SECTIONS,filterKey,filterVersionOf,hasActiveFilters,sameFilters} from './assetFilters';
 import {characterChildren,characterExclusion,characterExclusionTarget,characterPath,validCharacterIndex,type CharacterFilter,type CharacterIndex,type CharacterNode,type CharacterPage} from './characterModel';
@@ -28,7 +30,7 @@ import './characters.css';
  * location, so two filter sets cannot collide, and Back and drill-down keep working on
  * the same value they always did.
  */
-type Location={node:string|null;filter:CharacterFilter;filters:AssetFiltersValue};
+type Location={search?:readonly AssetSearchName[];node:string|null;filter:CharacterFilter;filters:AssetFiltersValue};
 type Cached={page:CharacterPage;scroll:number};
 const ROOT:Location={node:null,filter:'all',filters:{...EMPTY_FILTERS}};
 /** The series filters the mobile app offers; 추가 확인 (needs_review) stays a server scope only. */
@@ -80,7 +82,7 @@ function Card({node,count,paused,onSelect,previews=[],lazy=false}:{node:Characte
   </button>;
 }
 
-export function CharacterBrowser({scopeChips,hostBusy=false,entryKey=0,onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit}:{scopeChips?:ReactNode;/** The host's own load of this scope (the list generation read), shown in the same bar slot. */hostBusy?:boolean;/** Kept for character-local view options supplied by the host; asset filters are rendered in the top bar. */optionsHost?:HTMLElement|null;onCloseOptions?():void;entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
+export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hostBusy=false,entryKey=0,onOptions=()=>{},onLocation,initialNode,active,paused,density,refreshKey,onOpen,backRef,onExit}:{search?:readonly AssetSearchName[];onSearch?():void;onInvalidSearch?(chips:AssetSearchName[]):void;scopeChips?:ReactNode;/** The host's own load of this scope (the list generation read), shown in the same bar slot. */hostBusy?:boolean;/** Kept for character-local view options supplied by the host; asset filters are rendered in the top bar. */optionsHost?:HTMLElement|null;onCloseOptions?():void;entryKey?:number;crumbs?:LibraryCrumb[];onOptions?(scopeItems:Asset[]):void;onLocation?(id:string|null):void;initialNode?:string;active:boolean;paused:boolean;density:number;refreshKey:number;onOpen(items:Asset[],index:number,character?:import('./Viewer').ViewerCharacterContext|null):void;backRef:MutableRefObject<(()=>boolean)|null>;onExit():void}) {
   const [landscape,setLandscape]=useState(()=>window.matchMedia?.('(orientation: landscape) and (min-width: 900px)').matches??false);
   useEffect(()=>{const media=window.matchMedia?.('(orientation: landscape) and (min-width: 900px)');if(!media)return;const change=()=>setLandscape(media.matches);media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[]);
   const [index,setIndex]=useState<CharacterIndex>();
@@ -101,9 +103,9 @@ export function CharacterBrowser({scopeChips,hostBusy=false,entryKey=0,onOptions
   const indexGate=useRef(new RequestGate()),pageGate=useRef(new RequestGate()),moreGate=useRef(new RequestGate());
   const cache=useRef(new Map<string,Cached>()),morePending=useRef(false);
   const [filtersOpen,setFiltersOpen]=useState<FilterGroup|null>(null),[filterHelpOpen,setFilterHelpOpen]=useState(false);
-  const latest=useRef({index,where,page,active,paused,committed,filtersOpen});latest.current={index,where,page,active,paused,committed,filtersOpen};
+  const latest=useRef({index,where,page,active,paused,committed,filtersOpen,onInvalidSearch});latest.current={index,where,page,active,paused,committed,filtersOpen,onInvalidSearch};
   // The filter set is part of the location, so it is already part of this key.
-  const key=(revision:string,location:Location)=>`${revision}:${location.node}:${location.filter}:${filterKey(location.filters)}`;
+  const key=(revision:string,location:Location)=>`${revision}:${location.node}:${location.filter}:${filterKey(location.filters)}:${assetSearchSelectionKey(location.search)}`;
   const remember=useCallback(()=>{
     const s=latest.current;
     if(s.index?.revision&&s.page&&s.committed?.node){
@@ -154,13 +156,18 @@ export function CharacterBrowser({scopeChips,hostBusy=false,entryKey=0,onOptions
   // entry effect updates its ref eagerly while `where` commits later, so comparing the two
   // reported a drill-down for a folder that had just been opened and wrongly consumed Back.
   const drilled=useRef(false);
-  useEffect(()=>{if(active&&initialNode&&(appliedInitialNode.current!==initialNode||appliedEntryKey.current!==entryKey)){appliedEntryKey.current=entryKey;appliedInitialNode.current=initialNode;drilled.current=false;navigate({node:initialNode,filter:defaultCharacterFilter(initialNode,latest.current.index),filters:{...EMPTY_FILTERS}});}},[initialNode,entryKey,active,navigate]);
+  useEffect(()=>{if(active&&initialNode&&(appliedInitialNode.current!==initialNode||appliedEntryKey.current!==entryKey)){appliedEntryKey.current=entryKey;appliedInitialNode.current=initialNode;drilled.current=false;navigate({node:initialNode,filter:defaultCharacterFilter(initialNode,latest.current.index),filters:{...EMPTY_FILTERS},search});}},[initialNode,entryKey,active,navigate,search]);
+  useEffect(()=>{
+    if(!active||assetSearchSelectionKey(search)===assetSearchSelectionKey(latest.current.where.search))return;
+    pageGate.current.cancel();moreGate.current.cancel();morePending.current=false;setMore(false);
+    setWhere(current=>({...current,search}));
+  },[active,search]);
   // Changing a filter in the entry folder does not create a parent navigation step, and
   // entering a different child or moving between Series filters is a different scope, so
   // the filters start empty rather than carrying the previous scope's narrowing into it.
   const enterInside=useCallback((next:{node:string|null;filter:CharacterFilter})=>{
     if(next.node!==latest.current.where.node)drilled.current=true;
-    navigate({...next,filters:{...EMPTY_FILTERS}});
+    navigate({...next,filters:{...EMPTY_FILTERS},search:latest.current.where.search});
   },[navigate]);
   usePublicationCheck(active&&!paused,'/v1/library/characters/status',index?.revision,(_reply,changed)=>{if(changed)setRetry(n=>n+1);});
   useEffect(()=>{
@@ -184,7 +191,7 @@ export function CharacterBrowser({scopeChips,hostBusy=false,entryKey=0,onOptions
       if(!parent||parent===appliedInitialNode.current)drilled.current=false;
       // Stepping up keeps the scope filters: the parent folder is the same kind of scope as
       // the child, so carrying the filter set lets the user keep narrowing while walking up.
-      navigate({node:parent,filter:defaultCharacterFilter(parent,s.index),filters:s.where.filters});return true;
+      navigate({node:parent,filter:defaultCharacterFilter(parent,s.index),filters:s.where.filters,search:s.where.search});return true;
     };
     return()=>{backRef.current=null;};
   },[backRef,navigate,applyFilters,applyCharacterFilter]);
@@ -208,6 +215,14 @@ export function CharacterBrowser({scopeChips,hostBusy=false,entryKey=0,onOptions
       .finally(()=>{if(indexGate.current.current(request.id))setBusy(false);});
     return()=>indexGate.current.cancel();
   },[active,refreshKey,retry,remember]);
+  const recoverSearch=async(location:Location,reason:unknown,signal:AbortSignal)=>{
+    if((reason as {status?:number})?.status!==422||!location.search?.length||!latest.current.onInvalidSearch)return false;
+    const invalid=await invalidSearchChoices(location.search,chip=>chip.kind==='character'&&location.node&&latest.current.index?.revision
+      ?api(characterPath(location.node,'all',latest.current.index.revision,null),signal)
+      :api(pagePath({tab:'library',title:'에셋',search:[chip]},null,EMPTY_FILTERS,1),signal),signal);
+    if(!invalid.length)return false;
+    latest.current.onInvalidSearch?.(invalid);return true;
+  };
   useEffect(()=>{
     if(!active||!index?.ready||!index.revision||!where.node)return;
     const request=pageGate.current.begin();setBusy(true);setError('');setMoreError('');
@@ -216,7 +231,7 @@ export function CharacterBrowser({scopeChips,hostBusy=false,entryKey=0,onOptions
     // A cached page is re-validated against the contract it was stored under, so a scope
     // cannot present a page the server would now refuse simply because it was cached.
     const usable=cached&&(!hasActiveFilters(where.filters)||cached.page.filter_version===ASSET_FILTER_VERSION)?cached:undefined;
-    const promise=(usable?Promise.resolve(usable.page):api<CharacterPage>(characterPath(where.node,where.filter,index.revision,null,where.filters),request.signal).then(value=>({...value,filter_version:filterVersionOf(value)??undefined})))
+    const promise=(usable?Promise.resolve(usable.page):api<CharacterPage>(characterPath(where.node,where.filter,index.revision,null,where.filters,where.search),request.signal).then(value=>({...value,filter_version:filterVersionOf(value)??undefined})))
       // A switch inside a shown scope keeps the old page until the new first screen is decoded.
       .then(result=>latest.current.page?readyFirstScreen(result.items,request.signal).then(items=>({...result,items})):result)
       .then(result=>{
@@ -226,7 +241,7 @@ export function CharacterBrowser({scopeChips,hostBusy=false,entryKey=0,onOptions
         if(hasActiveFilters(where.filters)&&result.filter_version!==ASSET_FILTER_VERSION)throw new Error('자산 필터 응답을 확인할 수 없습니다. 서버를 업데이트해 주세요.');
         setPage(result);setCommitted(where);setRestore(usable?.scroll??scroll.current);scroll.current=usable?.scroll??scroll.current;
       });
-    void promise.catch(reason=>{if(pageGate.current.current(request.id))setError((reason as {status?:number}).status===409?'캐릭터 보기가 변경되었습니다. 새로고침해 주세요.':errorText(reason));})
+    void promise.catch(async reason=>{if(pageGate.current.current(request.id)){if(await recoverSearch(where,reason,request.signal)||!pageGate.current.current(request.id))return;setError((reason as {status?:number}).status===409?'캐릭터 보기가 변경되었습니다. 새로고침해 주세요.':errorText(reason));}})
       .finally(()=>{if(pageGate.current.current(request.id))setBusy(false);});
     return()=>pageGate.current.cancel();
   },[active,index,where]);
@@ -241,7 +256,7 @@ export function CharacterBrowser({scopeChips,hostBusy=false,entryKey=0,onOptions
   // but leaves this value alone until the replacement page commits, so Gallery keeps its identity
   // and the old images do not flash out during the request.
   const shown=committed&&committed.node===where.node?committed:null;
-  const filterPending=!!shown&&(shown.filter!==where.filter||!sameFilters(shown.filters,where.filters));
+  const filterPending=!!shown&&(shown.filter!==where.filter||!sameFilters(shown.filters,where.filters)||assetSearchSelectionKey(shown.search)!==assetSearchSelectionKey(where.search));
   const append=useCallback(async()=>{
     const s=latest.current;
     if(!s.active||s.paused||!s.page?.next_cursor||!s.index?.revision||!s.where.node||morePending.current)return;
@@ -249,11 +264,11 @@ export function CharacterBrowser({scopeChips,hostBusy=false,entryKey=0,onOptions
     // still the scope on screen. A failed narrowing leaves the two apart, and extending the old
     // cursor under filters that never applied would splice two different result sets.
     const base=s.committed;
-    if(!base||base.node!==s.where.node||base.filter!==s.where.filter||!sameFilters(base.filters,s.where.filters))return;
+    if(!base||base.node!==s.where.node||base.filter!==s.where.filter||!sameFilters(base.filters,s.where.filters)||assetSearchSelectionKey(base.search)!==assetSearchSelectionKey(s.where.search))return;
     morePending.current=true;setMore(true);setMoreError('');
     const request=moreGate.current.begin();
     try{
-      const raw=await api<CharacterPage>(characterPath(s.where.node,s.where.filter,s.index.revision,s.page.next_cursor,base.filters),request.signal);
+      const raw=await api<CharacterPage>(characterPath(s.where.node,s.where.filter,s.index.revision,s.page.next_cursor,base.filters,base.search),request.signal);
       if(!moreGate.current.current(request.id))return;
       // Resolved through the same reader as the other scopes, since this envelope declares the
       // contract under the wire name rather than the normalized page field.
@@ -265,7 +280,7 @@ export function CharacterBrowser({scopeChips,hostBusy=false,entryKey=0,onOptions
       // filtered scope.
       if(hasActiveFilters(base.filters)&&result.filter_version!==ASSET_FILTER_VERSION)throw new Error('자산 필터 응답을 확인할 수 없습니다. 서버를 업데이트해 주세요.');
       setPage(current=>current?{...result,items:[...current.items,...result.items.filter(a=>!current.items.some(b=>a.id===b.id))]}:current);
-    }catch(reason){if(moreGate.current.current(request.id))setMoreError(errorText(reason));}
+    }catch(reason){if(moreGate.current.current(request.id)&&!await recoverSearch(s.where,reason,request.signal)&&moreGate.current.current(request.id))setMoreError(errorText(reason));}
     finally{if(moreGate.current.current(request.id)){morePending.current=false;setMore(false);}}
   },[]);
   const ready=useCallback((asset:Asset)=>setPage(current=>current?{...current,items:current.items.map(a=>a.id===asset.id?{...a,...asset}:a)}:current),[]);
@@ -294,7 +309,7 @@ export function CharacterBrowser({scopeChips,hostBusy=false,entryKey=0,onOptions
     // retained gallery does not replay the hierarchy fade when 미분류 and 전체 swap.
     level.current={key:committed.node??'root',depth};
   }
-  useLevelMotion(host,level.current?.key??null,level.current?.depth??0);
+  useLevelMotion(host,search?.length?'asset-search':level.current?.key??null,level.current?.depth??0);
   const stale=!!shown&&filterPending||(!page&&busy&&!error&&!!where.node&&!!lastPage.current);
   const galleryItems=page?.items??(stale?lastPage.current!.items:[]);
   const foldable=folderStrip&&children.length>0;
@@ -329,6 +344,7 @@ export function CharacterBrowser({scopeChips,hostBusy=false,entryKey=0,onOptions
       <h1 className="sr-only" aria-label={node?.name??'시리즈'}/>
     </div>
     <span className="top-bar__space"/>
+    {onSearch&&<SearchButton onClick={onSearch}/>}
     {where.node&&<FilterChips media={false} sheet={false} variant="toolbar" showReset={false} value={where.filters} applied={where.filters} onChange={applyFilters} open={null} onOpen={setFiltersOpen}/>}
     <Button type="button" size="icon" variant="ghost" className="top-bar__options" aria-label="보기 옵션" onClick={()=>onOptions(page?.items??[])}><Squares2X2Icon aria-hidden="true"/></Button>
     <BarProgress label={(busy||hostBusy)&&'캐릭터 보기 불러오는 중'}/>

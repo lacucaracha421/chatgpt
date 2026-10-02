@@ -38,7 +38,7 @@ beforeEach(()=>{
     return{items:path.includes('classification_id=b')?b:a,has_more:false,next_cursor:null};
   });
 });
-afterEach(()=>{cleanup();vi.unstubAllGlobals();delete window.LakomicsNative;});
+afterEach(()=>{cleanup();vi.unstubAllGlobals();delete window.LakomicsNative;delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
 describe('asset TOC list wiring',()=>{
   const G='a'.repeat(64),G2='b'.repeat(64);
   const table=(generation=G)=>({tocVersion:1,listGeneration:generation,totalCount:4,sort:'newest',buckets:[{key:'2026-09',startIndex:0,count:2,startCursor:null},{key:'2025-12',startIndex:2,count:2,startCursor:'bucket-b'}]});
@@ -729,7 +729,7 @@ describe('pages that carry their own list generation',()=>{
 });
 
 describe('asset search scope navigation',()=>{
-  it.each(['folder','character','album','artist'] as const)('opens a chosen %s and returns to the root when its chip is removed',async kind=>{
+  it.each(['folder','character','album','artist'] as const)('opens a chosen %s and returns to the unfiltered gallery when its chip is removed',async kind=>{
     vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){}}));
     const revision='a'.repeat(64),names={folder:'검색 폴더',character:'검색 캐릭터',album:'검색 앨범',artist:'검색 작가'};
     const original=mocks.api.getMockImplementation()!;
@@ -742,7 +742,7 @@ describe('asset search scope navigation',()=>{
       if(path.startsWith('/v1/albums/assets?'))return Promise.resolve({items:b,hasMore:false,nextCursor:null});
       if(path==='/v1/library/artists')return Promise.resolve({artists:[artist]});
       if(path==='/v1/library/artists/search-artist')return Promise.resolve({artist});
-      if(path.startsWith('/v1/library/revisit/creator/'))return Promise.resolve({items:b,has_more:false,next_cursor:null});
+      if(new URL(path,'https://test').searchParams.get('artist')==='search-artist')return Promise.resolve({items:b,has_more:false,next_cursor:null});
       return original(path);
     });
     render(<App/>);
@@ -753,7 +753,99 @@ describe('asset search scope navigation',()=>{
     await screen.findByText('tile-b1');
     expect(screen.getAllByRole('group',{name:'에셋 검색 범위'})).toHaveLength(1);
     fireEvent.click(chip);
-    await screen.findByRole('searchbox',{name:'에셋 찾기'});
-    expect(screen.queryByRole('button',{name:`${names[kind]} 범위 제거`})).toBeNull();
+    await waitFor(()=>expect(screen.queryByRole('button',{name:`${names[kind]} 범위 제거`})).toBeNull());
+    expect(screen.getByRole('button',{name:'검색',exact:true})).toBeTruthy();
   });
+});
+
+describe('combined asset search chips',()=>{
+ const revision='c'.repeat(64);
+ const artist={id:'artist:one',label:'검색 작가',keys:['one'],assetCount:2,recentCount:0,pinned:false,hidden:false,main:true,coverAssetIds:[]};
+ beforeEach(()=>{
+  vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){}}));
+  mocks.native.mockImplementation(async(op:string)=>op==='albumTree'?{adopted:true,libraryId:'library',epoch:3,code:'',albums:[{id:'album',name:'검색 앨범',parentId:null,iconKey:null,colorKey:null,assetCount:2}]}:{configured:true,endpoint:'https://example.invalid'});
+  const original=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async(path:string)=>{
+   const url=new URL(path,'https://test');
+   if(url.pathname==='/v1/library/search/suggestions')return{items:[{kind:'tag',id:'long_hair',label:'긴 머리',count:2},{kind:'tag',id:'glasses',label:'안경',count:1}]};
+   if(path==='/v1/library/artists')return{artists:[artist]};
+   if(path==='/v1/library/characters')return{version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision,nodes:[{id:'character:c',sourceId:'c',seriesId:'s',kind:'character',parentId:null,name:'검색 캐릭터',description:'',thumbnailAssetId:null,manualOnly:false,excluded:false}],scopes:[{nodeId:'character:c',filter:'all',totalCount:2,sourceCount:2}]};
+   if(url.pathname==='/v1/library/characters/assets')return{revision,items:b,totalCount:2,sourceCount:2,has_more:false,next_cursor:null};
+   if(url.pathname==='/v1/library/assets'||url.pathname==='/v1/albums/assets'){
+    if(url.searchParams.has('toc'))return{tocVersion:1,listGeneration:revision,totalCount:2,sort:'newest',buckets:[{key:'2026-10',startIndex:0,count:2,startCursor:null}]};
+    return{items:b,has_more:false,next_cursor:null,hasMore:false,nextCursor:null,listGeneration:revision};
+   }
+   return original(path);
+  });
+ });
+ async function choose(query:string,name:RegExp){
+  if(!screen.queryByRole('searchbox'))fireEvent.click(await screen.findByRole('button',{name:'검색',exact:true}));
+  fireEvent.change(screen.getByRole('searchbox'),{target:{value:query}});
+  fireEvent.click(await screen.findByRole('button',{name}));
+ }
+ it.each(['folder','album','character'] as const)('combines tags and artist inside a %s gallery and sends the same selection to page/TOC reads',async kind=>{
+  render(<App/>);await screen.findByRole('heading',{name:'에셋'});
+  await choose(kind==='folder'?'분류 B':'검색',kind==='folder'?/^분류 B/:kind==='album'?/^검색 앨범/:/^검색 캐릭터/);
+  await screen.findByText('tile-b1');
+  await choose('긴',/^긴 머리/);await screen.findByRole('button',{name:'긴 머리 범위 제거'});
+  await choose('안경',/^안경/);await screen.findByRole('button',{name:'안경 범위 제거'});
+  await choose('검색 작가',/^검색 작가/);await screen.findByRole('button',{name:'검색 작가 범위 제거'});
+  const route=kind==='folder'?'/v1/library/assets':kind==='album'?'/v1/albums/assets':'/v1/library/characters/assets';
+  const urls=mocks.api.mock.calls.map(([path])=>new URL(String(path),'https://test')).filter(url=>url.pathname===route&&url.searchParams.has('artist'));
+  expect(urls.length).toBeGreaterThan(0);
+  for(const url of urls){
+   expect(url.searchParams.getAll('tag')).toEqual(['long_hair','glasses']);expect(url.searchParams.getAll('artist')).toEqual(['artist:one']);
+   expect(url.searchParams.getAll('classification_id')).toEqual(kind==='folder'?['b']:[]);
+   if(kind==='album'){expect(url.searchParams.get('libraryId')).toBe('library');expect(url.searchParams.get('epoch')).toBe('3');expect(url.searchParams.get('albumId')).toBe('album');}
+   if(kind==='character'){expect(url.searchParams.get('node')).toBe('character:c');expect(url.searchParams.get('revision')).toBe(revision);}
+  }
+  if(kind!=='character')expect(urls.some(url=>url.searchParams.get('toc')==='1')).toBe(true);
+  expect(screen.getByRole('button',{name:'모두 지우기'})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'긴 머리 범위 제거'}));
+  await waitFor(()=>expect(screen.queryByRole('button',{name:'긴 머리 범위 제거'})).toBeNull());
+  expect(screen.getByRole('button',{name:'안경 범위 제거'})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'모두 지우기'}));await waitFor(()=>expect(screen.queryByRole('button',{name:'안경 범위 제거'})).toBeNull());
+  expect(screen.queryByRole('button',{name:'안경 범위 제거'})).toBeNull();
+ });
+ it.each(['folder','character'] as const)('drops an invalid tag after 422 in a %s scope while keeping its valid scope/artist and gallery',async kind=>{
+  const original=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async(path:string)=>{
+   const url=new URL(path,'https://test');
+   if(url.searchParams.getAll('tag').includes('long_hair')&&url.pathname.endsWith('/assets'))throw new ApiError('invalid',422,null);
+   return original(path);
+  });
+  render(<App/>);await screen.findByRole('heading',{name:'에셋'});
+  await choose(kind==='folder'?'분류 B':'검색',kind==='folder'?/^분류 B/:/^검색 캐릭터/);await screen.findByText('tile-b1');
+  await choose('검색 작가',/^검색 작가/);await screen.findByRole('button',{name:'검색 작가 범위 제거'});
+  await choose('긴',/^긴 머리/);
+  await screen.findByText('사용할 수 없는 검색 조건을 지웠습니다.');
+  await waitFor(()=>expect(screen.queryByRole('button',{name:'긴 머리 범위 제거'})).toBeNull());
+  expect(screen.getByRole('button',{name:'검색 작가 범위 제거'})).toBeTruthy();
+  expect(screen.getByRole('button',{name:kind==='folder'?'분류 B 범위 제거':'검색 캐릭터 범위 제거'})).toBeTruthy();
+  expect(screen.getByText('tile-b1')).toBeTruthy();expect(screen.queryByRole('alert')).toBeNull();
+ });
+ it('drops a stale folder id while retaining an already selected artist',async()=>{
+  const original=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation((path:string)=>new URL(path,'https://test').searchParams.getAll('classification_id').includes('b')?Promise.reject(new ApiError('invalid folder',422,null)):original(path));
+  render(<App/>);await screen.findByRole('heading',{name:'에셋'});
+  await choose('검색 작가',/^검색 작가/);await screen.findByRole('button',{name:'검색 작가 범위 제거'});
+  await choose('분류 B',/^분류 B/);await screen.findByText('사용할 수 없는 검색 조건을 지웠습니다.');
+  await waitFor(()=>expect(screen.queryByRole('button',{name:'분류 B 범위 제거'})).toBeNull());
+  expect(screen.getByRole('button',{name:'검색 작가 범위 제거'})).toBeTruthy();expect(screen.getByText('tile-b1')).toBeTruthy();expect(screen.queryByRole('alert')).toBeNull();
+ });
+ it('keeps the previous gallery and committed chips during a delayed replacement, then swaps without fading the list',async()=>{
+  const fades:Keyframe[][]=[];
+  Object.defineProperty(HTMLElement.prototype,'animate',{configurable:true,writable:true,value:function(this:HTMLElement,frames:Keyframe[]){if(this.getAttribute('aria-label')==='자산 목록')fades.push(frames);return {cancel(){},onfinish:null};}});
+  render(<App/>);await screen.findByRole('heading',{name:'에셋'});
+  await choose('분류 B',/^분류 B/);await screen.findByText('tile-b1');
+  const fadeCount=fades.length;
+  const original=mocks.api.getMockImplementation()!;let finish!:(reply:unknown)=>void;
+  mocks.api.mockImplementation((path:string)=>new URL(path,'https://test').searchParams.has('tag')&&!path.includes('toc=1')?new Promise(resolve=>{finish=resolve;}):original(path));
+  await choose('긴',/^긴 머리/);
+  await waitFor(()=>expect(finish).toBeDefined());expect(screen.getByText('tile-b1')).toBeTruthy();expect(screen.queryByRole('button',{name:'긴 머리 범위 제거'})).toBeNull();
+  await act(async()=>finish({items:b,has_more:false,next_cursor:null,listGeneration:revision}));
+  await screen.findByRole('button',{name:'긴 머리 범위 제거'});expect(screen.getByText('tile-b1')).toBeTruthy();
+  expect(fades).toHaveLength(fadeCount);
+  fireEvent.click(screen.getByRole('button',{name:'모두 지우기'}));await waitFor(()=>expect(screen.queryByRole('button',{name:'긴 머리 범위 제거'})).toBeNull());expect(fades).toHaveLength(fadeCount);
+ });
 });

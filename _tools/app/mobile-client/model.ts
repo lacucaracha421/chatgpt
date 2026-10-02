@@ -1,3 +1,4 @@
+import {assetSearchParams,assetSearchSelectionKey} from '../src/assets/assetSearch';
 import {displayDate} from '../src/shared/displayDate';
 import type {Asset, AssetFiltersValue, Page, PageWire, View} from './types';
 import {EMPTY_FILTERS, filterKey, filterVersionOf, withFilters} from './assetFilters';
@@ -22,17 +23,17 @@ export function rowHeight(density: number, width: number) { return Math.min(290 
 export function viewKey(view: View, filters: AssetFiltersValue = EMPTY_FILTERS) {
   const base = `${view.tab}:${view.root?'root':''}:${view.characters?`characters:${view.characterNode??''}`:''}:${view.classification ?? ''}:${view.revisit ?? ''}`;
   const scope = view.album ? `${base}:album:${JSON.stringify(view.album)}` : base;
-  const key = filterKey(filters);
+  const key = [filterKey(filters),assetSearchSelectionKey(view.search)].filter(Boolean).join(':');
   return key ? `${scope}:${key}` : scope;
 }
 export function pagePath(view: View, cursor: string | null, filters: AssetFiltersValue = EMPTY_FILTERS, limit = PAGE_SIZE) {
-  const params = new URLSearchParams({limit: String(limit)});
+  const params = assetSearchParams(new URLSearchParams({limit: String(limit)}),view.search,!view.album);
   if (cursor) params.set('cursor', cursor);
   if (view.album) {
     params.set('libraryId',view.album.libraryId);params.set('epoch',String(view.album.epoch));params.set('albumId',view.album.id);
     return withFilters(`/v1/albums/assets?${params}`,filters);
   }
-  if (view.classification) params.set('classification_id', view.classification);
+  if (view.classification&&!params.getAll('classification_id').includes(view.classification)) params.append('classification_id', view.classification);
   const path = view.revisit === 'date' ? '/v1/library/revisit/date' : view.revisit
     ? `/v1/library/revisit/creator/${encodeURIComponent(view.revisit)}/assets` : '/v1/library/assets';
   // Revisit views are a different question from a filtered gallery, so the controls are
