@@ -10,7 +10,6 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    classification::classifications_for_asset,
     error::LibraryError,
     image_fingerprint::{
         dimensions_are_compatible, fingerprint, minimum_distance, ImageFingerprint,
@@ -582,10 +581,18 @@ impl Library {
 
     /// Compute one Asset's missing PDQ hash through the lazy indexing path (same decode
     /// bound, same failure codes). A hashed or failed Asset is left as it is.
-    pub(super) fn ensure_similarity_hash(&self, asset_id: &str) -> Result<(), LibraryError> {
+    /// Returns false when workload policy defers the Asset, leaving it queued.
+    pub(super) fn ensure_similarity_hash(
+        &self,
+        asset_id: &str,
+        is_restricted: &impl Fn() -> bool,
+    ) -> Result<bool, LibraryError> {
         let _index = INDEX_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if is_restricted() {
+            return Ok(false);
+        }
         let missing: bool = self.connection()?.query_row(
             "SELECT EXISTS(SELECT 1 FROM assets WHERE id = ?1 AND status = 'normal'
              AND media_kind IN ('image', 'gif')
@@ -596,7 +603,7 @@ impl Library {
         if missing {
             self.index_similarity_asset(asset_id)?;
         }
-        Ok(())
+        Ok(true)
     }
 
     fn index_similarity_asset(&self, asset_id: &str) -> Result<(), LibraryError> {
@@ -822,21 +829,6 @@ fn decode_review_cursor(after: Option<AssetCursor>) -> Result<Option<ReviewCurso
             serde_json::from_str(&cursor.token).map_err(|_| LibraryError::InvalidAssetCursor)
         })
         .transpose()
-}
-
-fn load_review_asset(
-    connection: &Connection,
-    asset_id: &str,
-    expected_status: &str,
-) -> Result<SimilarityReviewAsset, LibraryError> {
-    let asset = load_asset_summary(connection, asset_id, expected_status)?;
-    let format = review_format(&asset.relative_path);
-    let classifications = classifications_for_asset(connection, asset_id)?;
-    Ok(SimilarityReviewAsset {
-        asset,
-        format,
-        classifications,
-    })
 }
 
 fn load_asset_summary(

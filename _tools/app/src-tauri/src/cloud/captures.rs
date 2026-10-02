@@ -704,19 +704,6 @@ fn x_creator_handle(url: &url::Url) -> Option<String> {
     Some(handle.to_string())
 }
 
-fn is_retryable_capture_error(error: &LibraryError) -> bool {
-    match error {
-        LibraryError::CloudRequestTimedOut | LibraryError::CloudRequestUnavailable => true,
-        LibraryError::CloudCaptureListRejected(status)
-        | LibraryError::CloudCaptureTicketRejected(status)
-        | LibraryError::CloudCaptureDownloadRejected(status)
-        | LibraryError::CloudCaptureAcknowledgementRejected(status) => {
-            *status == 429 || (500..=599).contains(status)
-        }
-        _ => false,
-    }
-}
-
 struct TemporaryCaptureDownload {
     path: PathBuf,
 }

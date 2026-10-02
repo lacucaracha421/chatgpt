@@ -647,24 +647,6 @@ impl Library {
     }
 }
 
-/// The role binding this PC has adopted, or `None` before adoption.
-///
-/// Roles are not stored in a new table: `classification_roles` (migration 0060) is the
-/// existing product table and already *is* the local materialization of the immutable
-/// role. A second copy would be a second source of truth for the same authority state.
-pub(super) fn read_role(
-    connection: &Connection,
-    role: &str,
-) -> Result<Option<String>, LibraryError> {
-    Ok(connection
-        .query_row(
-            "SELECT classification_id FROM classification_roles WHERE role = ?1",
-            [role],
-            |row| row.get(0),
-        )
-        .optional()?)
-}
-
 pub(super) fn write_role(
     transaction: &Transaction<'_>,
     role: &str,

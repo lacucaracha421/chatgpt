@@ -50,47 +50,48 @@ impl HomeTransport for Fake {
 fn fixture(count: usize) -> (tempfile::TempDir, Library) {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
-    {
-        let db = library.connection().unwrap();
-        for index in 0..count {
-            let id = format!("a{index:04}");
-            db.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,creator_url) VALUES(?1,?1,'image',?1,?1,?1,1,10,10,'2026-10-01','https://artist.test/alice')",[&id]).unwrap();
-        }
-        for (tag, category) in [
-            ("long_hair", "general"),
-            ("signature", "general"),
-            ("low_(series)", "character"),
-            ("high_(series)", "character"),
-            ("added_(series)", "character"),
-            ("rating", "rating"),
-        ] {
-            db.execute(
-                "INSERT INTO auto_tag_vocabulary VALUES(?1,?2)",
-                params![tag, category],
-            )
-            .unwrap();
-        }
-        for (tag, score) in [
-            ("long_hair", 0.9),
-            ("signature", 1.0),
-            ("low_(series)", 0.84),
-            ("high_(series)", 0.85),
-            ("rating", 1.0),
-        ] {
-            db.execute(
-                "INSERT INTO asset_auto_tags VALUES('a0000',?1,?2)",
-                params![tag, score],
-            )
-            .unwrap();
-        }
+    seed(&library.connection().unwrap(), count);
+    (temp, library)
+}
+fn seed(db: &rusqlite::Connection, count: usize) {
+    for index in 0..count {
+        let id = format!("a{index:04}");
+        db.execute("INSERT INTO assets(id,content_hash,media_kind,original_name,relative_path,thumbnail_relative_path,byte_size,width,height,collected_at,creator_url) VALUES(?1,?1,'image',?1,?1,?1,1,10,10,'2026-10-01','https://artist.test/alice')",[&id]).unwrap();
+    }
+    for (tag, category) in [
+        ("long_hair", "general"),
+        ("signature", "general"),
+        ("low_(series)", "character"),
+        ("high_(series)", "character"),
+        ("added_(series)", "character"),
+        ("rating", "rating"),
+    ] {
         db.execute(
-            "INSERT INTO asset_auto_tag_edits VALUES('a0000','added_(series)','added','t')",
-            [],
+            "INSERT INTO auto_tag_vocabulary VALUES(?1,?2)",
+            params![tag, category],
         )
         .unwrap();
     }
-    (temp, library)
+    for (tag, score) in [
+        ("long_hair", 0.9),
+        ("signature", 1.0),
+        ("low_(series)", 0.84),
+        ("high_(series)", 0.85),
+        ("rating", 1.0),
+    ] {
+        db.execute(
+            "INSERT INTO asset_auto_tags VALUES('a0000',?1,?2)",
+            params![tag, score],
+        )
+        .unwrap();
+    }
+    db.execute(
+        "INSERT INTO asset_auto_tag_edits VALUES('a0000','added_(series)','added','t')",
+        [],
+    )
+    .unwrap();
 }
+
 fn run(library: &Library, fake: &Fake, time: i64) -> Result<(), LibraryError> {
     library.run_auto_tags_with(fake, "publisher", "https://example.invalid", time, false)
 }
@@ -270,23 +271,24 @@ fn new_vocabulary_during_a_resumed_scan_is_sent_before_assets() {
 }
 #[test]
 fn v119_upgrade_preserves_existing_home_state_and_tags() {
-    let (temp, library) = fixture(1);
+    let temp = tempfile::tempdir().unwrap();
     {
-        let db = library.connection().unwrap();
+        let mut db =
+            crate::library::db::open_database(&temp.path().join("library.sqlite")).unwrap();
+        crate::library::db::tests::historical_schema(&mut db, 119);
+        seed(&db, 1);
         db.execute(
             "INSERT INTO home_publication_state VALUES('endpoint','artists','{}')",
             [],
         )
         .unwrap();
-        db.execute_batch("DROP TABLE auto_tag_publication_state; DROP TABLE auto_tag_publication_digests; PRAGMA user_version=119;").unwrap();
     }
-    drop(library);
     let library = Library::open(temp.path()).unwrap();
     let db = library.connection().unwrap();
     assert_eq!(
         db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        120
+        crate::library::db::SCHEMA_VERSION
     );
     assert_eq!(
         db.query_row("SELECT state_json FROM home_publication_state", [], |r| {
@@ -301,6 +303,25 @@ fn v119_upgrade_preserves_existing_home_state_and_tags() {
             .unwrap(),
         5
     );
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM asset_auto_tag_edits", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM auto_tag_vocabulary", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        6
+    );
+    assert!(db
+        .query_row(
+            "SELECT likes_album_id IS NULL FROM library_settings",
+            [],
+            |r| r.get::<_, bool>(0)
+        )
+        .unwrap());
     assert_eq!(
         db.query_row(
             "SELECT COUNT(*) FROM auto_tag_publication_digests",

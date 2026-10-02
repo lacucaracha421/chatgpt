@@ -69,6 +69,56 @@ fn queue_status(library: &Library, asset_id: &str) -> Option<String> {
 }
 
 #[test]
+fn reconciliation_waits_for_running_replication_before_requeueing() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library.connection().unwrap().execute_batch(
+        "INSERT INTO cloud_sync_queue(id,entity_type,entity_id,operation,status,revision,updated_at)
+         VALUES('running','asset','running','upsert','uploading',1,'t'),
+               ('interrupted','asset','interrupted','upsert','preparing',1,'t');"
+    ).unwrap();
+    let upload = library.replication_lock.lock().unwrap();
+    thread::scope(|scope| {
+        let (started_tx, started_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let library = &library;
+        let repair = scope.spawn(move || {
+            started_tx.send(()).unwrap();
+            done_tx.send(library.reconcile_cloud_backfill()).unwrap();
+        });
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let early = done_rx.recv_timeout(Duration::from_millis(100));
+        let status = queue_status(library, "running");
+        // The active upload commits before releasing the same lock used by recovery.
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE cloud_sync_queue SET status='synced' WHERE id='running'",
+                [],
+            )
+            .unwrap();
+        drop(upload);
+        repair.join().unwrap();
+        assert!(matches!(early, Err(mpsc::RecvTimeoutError::Timeout)));
+        assert_eq!(status.as_deref(), Some("uploading"));
+        let report = done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        assert_eq!(report.requeued, 1);
+        assert_eq!(queue_status(library, "running").as_deref(), Some("synced"));
+        assert_eq!(
+            queue_status(library, "interrupted").as_deref(),
+            Some("pending")
+        );
+    });
+}
+
+#[test]
 fn backfill_control_state_is_idle_by_default_and_persists_pause() {
     let temp = tempfile::tempdir().unwrap();
     {
@@ -828,7 +878,7 @@ fn backfill_worker_prepares_uploads_and_commits_one_image() {
         let mut received = Vec::new();
         std::io::Read::read_to_end(upload.as_reader(), &mut received).unwrap();
         upload.respond(Response::empty(200)).unwrap();
-        let mut register = server.recv().unwrap();
+        let register = server.recv().unwrap();
         assert_eq!(register.url(), "/v1/assets");
         register.respond(Response::empty(201)).unwrap();
 
@@ -891,13 +941,7 @@ fn backfill_worker_prepares_uploads_and_commits_one_image() {
     assert_eq!(summary.committed, 1);
     assert_eq!(summary.permanent_failures, 0);
     assert_eq!(queue_status(&library, &asset_id).as_deref(), Some("synced"));
-    if let Err(panic) = server_thread.join() {
-        let message = panic
-            .downcast_ref::<&str>()
-            .map(|s| (*s).to_owned())
-            .or_else(|| panic.downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "<non-string panic>".into());
-    }
+    server_thread.join().unwrap();
 }
 
 #[test]
@@ -918,7 +962,6 @@ fn backfill_commit_carries_local_dimensions_and_omits_unknown_ones() {
         // an asset, which restarts the sequence from `prepare`, so a fixed request order
         // would be asserting something the contract does not promise. Each commit is
         // recorded and the loop ends once both assets have committed.
-        let mut pending_original: Option<String> = None;
         while recorded.lock().expect("captured commits").len() < 2 {
             let mut request = server.recv().unwrap();
             let url = request.url().to_owned();

@@ -168,6 +168,16 @@ impl Library {
     /// Processed Assets leave the queue, including ones that cannot be compared (video, trash,
     /// low-quality or undecodable images). Returns the number of pairs created.
     pub(crate) fn run_similarity_auto_compare_batch(&self) -> Result<u64, LibraryError> {
+        self.run_similarity_auto_compare_with_policy(crate::workload::is_restricted)
+    }
+
+    fn run_similarity_auto_compare_with_policy(
+        &self,
+        is_restricted: impl Fn() -> bool,
+    ) -> Result<u64, LibraryError> {
+        if is_restricted() {
+            return Ok(0);
+        }
         let queued: Vec<String> = {
             let connection = self.connection()?;
             let mut statement = connection.prepare(
@@ -183,17 +193,26 @@ impl Library {
             return Ok(0);
         }
         for asset_id in &queued {
-            self.ensure_similarity_hash(asset_id)?;
+            // Leave the entire batch queued if the mode changes between images.
+            if !self.ensure_similarity_hash(asset_id, &is_restricted)? {
+                return Ok(0);
+            }
         }
         let _guard = SCAN_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if is_restricted() {
+            return Ok(0);
+        }
         let library = {
             let connection = self.connection()?;
             load_comparable(&connection)?
         };
         let mut matches = Vec::new();
         for target in library.iter().filter(|asset| queued.contains(&asset.id)) {
+            if is_restricted() {
+                return Ok(0);
+            }
             let mut found: Vec<(u32, &ScanAsset)> = library
                 .iter()
                 .filter(|other| other.id != target.id)
@@ -375,6 +394,112 @@ mod tests {
         models::{SimilarityDecision, SimilarityDecisionRequest},
         Library,
     };
+
+    #[test]
+    fn automatic_comparison_keeps_queued_work_while_restricted_then_resumes() {
+        let temp = TempDir::new().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_asset(&library, "a", [0; 32], [0; 32]);
+        insert_asset(&library, "b", [0; 32], [0; 32]);
+        insert_asset(&library, "c", [0; 32], [0; 32]);
+        library.connection().unwrap().execute_batch(
+            "UPDATE assets SET perceptual_hash=NULL WHERE id='c';
+             INSERT INTO similarity_auto_compare_queue(asset_id,queued_at) VALUES('b','t'),('c','t');"
+        ).unwrap();
+        assert_eq!(
+            library
+                .run_similarity_auto_compare_with_policy(|| true)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            library
+                .list_similarity_reviews(None, 20)
+                .unwrap()
+                .total_count,
+            0
+        );
+        drop(library);
+        let library = Library::open(temp.path()).unwrap();
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT count(*) FROM similarity_auto_compare_queue",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            2
+        );
+        assert!(library.connection().unwrap().query_row(
+            "SELECT perceptual_hash IS NULL AND perceptual_hash_error IS NULL FROM assets WHERE id='c'",
+            [], |r| r.get::<_, bool>(0)
+        ).unwrap());
+        assert_eq!(
+            library
+                .run_similarity_auto_compare_with_policy(|| false)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT count(*) FROM similarity_auto_compare_queue",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn automatic_comparison_stops_before_the_next_image_when_mode_changes() {
+        let temp = TempDir::new().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        for id in ["a", "b"] {
+            insert_asset(&library, id, [0; 32], [0; 32]);
+        }
+        library.connection().unwrap().execute_batch(
+            "UPDATE assets SET perceptual_hash=NULL;
+             INSERT INTO similarity_auto_compare_queue(asset_id,queued_at) VALUES('a','t'),('b','t');"
+        ).unwrap();
+        // Enter lightweight mode between the first and second image. Missing fixture
+        // originals leave an error only if the image indexing path was actually entered.
+        let calls = std::cell::Cell::new(0);
+        assert_eq!(
+            library
+                .run_similarity_auto_compare_with_policy(|| {
+                    let call = calls.get();
+                    calls.set(call + 1);
+                    call >= 2
+                })
+                .unwrap(),
+            0
+        );
+        let db = library.connection().unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM similarity_auto_compare_queue",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            2
+        );
+        assert!(db
+            .query_row(
+                "SELECT perceptual_hash_error IS NOT NULL FROM assets WHERE id='a'",
+                [],
+                |r| r.get::<_, bool>(0)
+            )
+            .unwrap());
+        assert!(db.query_row("SELECT perceptual_hash IS NULL AND perceptual_hash_error IS NULL FROM assets WHERE id='b'", [], |r| r.get::<_, bool>(0)).unwrap());
+    }
 
     #[test]
     fn historical_scan_resumes_after_reopen_and_does_not_duplicate_reviews() {

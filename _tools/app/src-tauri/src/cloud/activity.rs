@@ -22,10 +22,6 @@ pub struct CloudActivity {
 }
 
 impl Library {
-    pub(crate) fn record_cloud_metadata_activity(&self, error: Option<&'static str>) -> Result<(), LibraryError> {
-        self.record_cloud_metadata_activity_with(error, None)
-    }
-
     /// Record the metadata publication outcome, with an optional structured reason.
     ///
     /// The reason is stored only when the pass failed; a later success clears both the
@@ -47,6 +43,7 @@ impl Library {
         Ok(())
     }
 
+    #[cfg(test)]
     // Callers pass fixed public messages only; transport errors may contain secrets/paths.
     pub(crate) fn finish_cloud_activity(&self, direction: &str, processed: u64, problems: u64, error: Option<&'static str>) -> Result<(), LibraryError> {
         self.finish_cloud_activity_with(direction, processed, problems, error, None)

@@ -166,6 +166,11 @@ impl Library {
     }
 
     pub fn reconcile_cloud_backfill(&self) -> Result<BackfillReconcileReport, LibraryError> {
+        // An active worker must finish before its in-flight rows can be recovered.
+        let _flight = self
+            .replication_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         let now = chrono::Utc::now().to_rfc3339();
@@ -1071,17 +1076,10 @@ pub(crate) enum CloudBackfillError {
     Library(LibraryError),
 }
 
+#[cfg(test)]
 impl CloudBackfillError {
     pub(crate) fn is_retryable(&self) -> bool {
         matches!(self, CloudBackfillError::Retryable(_, _))
-    }
-
-    pub(crate) fn message(&self) -> String {
-        match self {
-            CloudBackfillError::Retryable(_, message)
-            | CloudBackfillError::Permanent(_, message) => message.clone(),
-            CloudBackfillError::Library(error) => error.to_string(),
-        }
     }
 }
 

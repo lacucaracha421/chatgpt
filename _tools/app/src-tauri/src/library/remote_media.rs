@@ -1,4 +1,9 @@
-use std::{io::Read, path::Path, sync::OnceLock, time::Duration};
+use std::{
+    io::{Read, Write},
+    path::Path,
+    sync::OnceLock,
+    time::Duration,
+};
 
 use super::{
     error::LibraryError,
@@ -117,22 +122,7 @@ where
         return Err(LibraryError::RemoteGalleryUnavailable);
     }
     let bytes = fetch(descriptor)?;
-    let mime = image_mime(&bytes).ok_or(LibraryError::UnsupportedImage)?;
-    let parent = cache_path.parent().expect("remote page cache has a parent");
-    std::fs::create_dir_all(parent).map_err(|source| LibraryError::WriteAsset {
-        path: parent.into(),
-        source,
-    })?;
-    let partial = cache_path.with_extension("bin.partial");
-    std::fs::write(&partial, &bytes).map_err(|source| LibraryError::WriteAsset {
-        path: partial.clone(),
-        source,
-    })?;
-    std::fs::rename(&partial, &cache_path).map_err(|source| LibraryError::WriteAsset {
-        path: cache_path,
-        source,
-    })?;
-    Ok(RemoteMedia { bytes, mime })
+    publish_cached_image(&cache_path, bytes)
 }
 
 /// 카탈로그 표지(게시판 썸네일)를 `cache/remote-manga/catalog-thumbs`에
@@ -163,22 +153,35 @@ pub(crate) fn load_catalog_thumbnail(
     if bytes.len() > MAX_REMOTE_IMAGE_BYTES {
         return Err(LibraryError::UnsupportedImage);
     }
+    publish_cached_image(&cache_path, bytes)
+}
+
+fn publish_cached_image(cache_path: &Path, bytes: Vec<u8>) -> Result<RemoteMedia, LibraryError> {
     let mime = image_mime(&bytes).ok_or(LibraryError::UnsupportedImage)?;
-    let parent = cache_path.parent().expect("catalog thumb cache has a parent");
-    std::fs::create_dir_all(parent).map_err(|source| LibraryError::WriteAsset {
-        path: parent.into(),
+    let write_error = |source| LibraryError::WriteAsset {
+        path: cache_path.into(),
         source,
-    })?;
-    let partial = cache_path.with_extension("bin.partial");
-    std::fs::write(&partial, &bytes).map_err(|source| LibraryError::WriteAsset {
-        path: partial.clone(),
-        source,
-    })?;
-    std::fs::rename(&partial, &cache_path).map_err(|source| LibraryError::WriteAsset {
-        path: cache_path,
-        source,
-    })?;
-    Ok(RemoteMedia { bytes, mime })
+    };
+    let parent = cache_path
+        .parent()
+        .expect("remote image cache has a parent");
+    std::fs::create_dir_all(parent).map_err(write_error)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(write_error)?;
+    temporary.write_all(&bytes).map_err(write_error)?;
+    match temporary.persist_noclobber(cache_path) {
+        Ok(_) => Ok(RemoteMedia { bytes, mime }),
+        Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+            // Another request published first. Drop our private temporary file and
+            // return the same complete image that future cache hits will receive.
+            let bytes = std::fs::read(cache_path).map_err(|source| LibraryError::ReadMedia {
+                path: cache_path.into(),
+                source,
+            })?;
+            let mime = image_mime(&bytes).ok_or(LibraryError::UnsupportedImage)?;
+            Ok(RemoteMedia { bytes, mime })
+        }
+        Err(error) => Err(write_error(error.error)),
+    }
 }
 
 fn url_hash(bytes: &[u8]) -> u128 {
@@ -282,6 +285,54 @@ mod tests {
         assert_eq!(calls.get(), 1);
         assert_eq!(first.bytes, second.bytes);
         assert_eq!(first.mime, "image/png");
+    }
+
+    #[test]
+    fn reuses_a_cache_published_while_another_fetch_is_in_flight() {
+        let (root, png) = fixture();
+        let mut published = png.clone();
+        published.extend_from_slice(b"published first");
+        let result = load_remote_page_with(root.path(), 42, 1, |_| {
+            load_remote_page_with(root.path(), 42, 1, |_| Ok(published.clone()))?;
+            Ok(png)
+        })
+        .unwrap();
+        assert_eq!(result.bytes, published);
+        assert_eq!(
+            std::fs::read(root.path().join("cache/remote-manga/pages/42/1.bin")).unwrap(),
+            published
+        );
+    }
+
+    #[test]
+    fn concurrent_uncached_requests_all_read_the_published_image() {
+        let (root, png) = fixture();
+        let barrier = std::sync::Barrier::new(8);
+        std::thread::scope(|scope| {
+            let requests: Vec<_> = (0..8)
+                .map(|index| {
+                    let (root, png, barrier) = (&root, &png, &barrier);
+                    scope.spawn(move || {
+                        load_remote_page_with(root.path(), 42, 1, |_| {
+                            barrier.wait();
+                            let mut bytes = png.clone();
+                            bytes.push(index);
+                            Ok(bytes)
+                        })
+                    })
+                })
+                .collect();
+            let images: Vec<_> = requests
+                .into_iter()
+                .map(|r| r.join().unwrap().unwrap())
+                .collect();
+            let directory = root.path().join("cache/remote-manga/pages/42");
+            let published = std::fs::read(directory.join("1.bin")).unwrap();
+            assert!(images
+                .iter()
+                .all(|image| image.bytes == published && image.mime == "image/png"));
+            assert_eq!(std::fs::read_dir(directory).unwrap().count(), 1);
+        });
     }
 
     #[test]
