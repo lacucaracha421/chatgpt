@@ -38,6 +38,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "app.startup_classifications",
             "app.startup_saved_x_media",
             "app.startup_extension_profile",
+            "capture_routes.InboxReclaimer.start",
             "app.startup_album_replica",
             "notes.register_notes.<locals>.startup_notes",
             "av_lookup_requests.register.<locals>.setup",
@@ -60,6 +61,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "app.startup_image_thumbnails",
         ]
         expected_shutdown = [
+            "capture_routes.InboxReclaimer.stop",
             "prune_catalog_artifacts.AutoPruner.stop",
             "mobile_catalog_refresh.RefreshWorker.shutdown",
             "app.shutdown_image_thumbnails",

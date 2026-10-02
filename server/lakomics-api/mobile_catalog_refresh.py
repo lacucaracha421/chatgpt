@@ -21,6 +21,9 @@ REFRESH_INTERVAL_SECONDS = 3600
 REFRESH_POLL_SECONDS = 60
 MAX_STAGED_BYTES = 16 * 1024 * 1024
 RECENT_SECONDS = 30 * 86400
+HISTORY_RETENTION_SECONDS = 30 * 86400
+HISTORY_PRUNE_INTERVAL_SECONDS = 3600
+HISTORY_PRUNE_LIMIT = 100
 LOG = logging.getLogger(__name__)
 DDL = """
 CREATE TABLE IF NOT EXISTS mobile_catalog_refresh_jobs(
@@ -31,11 +34,14 @@ CREATE TABLE IF NOT EXISTS mobile_catalog_refresh_jobs(
  added INTEGER NOT NULL DEFAULT 0, error TEXT, publication_revision TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS mobile_catalog_one_refresh
  ON mobile_catalog_refresh_jobs((1)) WHERE state IN ('queued','running');
+CREATE INDEX IF NOT EXISTS mobile_catalog_refresh_history ON mobile_catalog_refresh_jobs(state,updated);
+CREATE INDEX IF NOT EXISTS mobile_catalog_refresh_language_history ON mobile_catalog_refresh_jobs(language,created);
 CREATE TABLE IF NOT EXISTS mobile_catalog_refresh_pages(
  job_id TEXT NOT NULL, work_id INTEGER NOT NULL, payload TEXT NOT NULL,
  PRIMARY KEY(job_id,work_id));
 CREATE TABLE IF NOT EXISTS mobile_catalog_refresh_receipts(
  operation_id TEXT PRIMARY KEY, language TEXT NOT NULL, job_id TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS mobile_catalog_refresh_receipt_job ON mobile_catalog_refresh_receipts(job_id);
 CREATE TABLE IF NOT EXISTS mobile_catalog_refresh_streams(
  language TEXT PRIMARY KEY, watermark INTEGER NOT NULL, cursor INTEGER,
  pending_max INTEGER NOT NULL);
@@ -43,12 +49,51 @@ CREATE TABLE IF NOT EXISTS mobile_catalog_refresh_schedule(
  language TEXT PRIMARY KEY, next_due REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS mobile_catalog_refresh_batches(
  parent_id TEXT NOT NULL, job_id TEXT PRIMARY KEY);
+CREATE INDEX IF NOT EXISTS mobile_catalog_refresh_batch_parent ON mobile_catalog_refresh_batches(parent_id);
 CREATE TABLE IF NOT EXISTS mobile_catalog_metadata_streams(
  language TEXT PRIMARY KEY, cursor INTEGER);
 CREATE TABLE IF NOT EXISTS mobile_catalog_metadata_jobs(
  job_id TEXT PRIMARY KEY, cursor INTEGER, done INTEGER NOT NULL DEFAULT 0,
  incremental_pages INTEGER NOT NULL DEFAULT 0);
 """
+
+
+def prune_history(db, *, now=None, limit=HISTORY_PRUNE_LIMIT):
+    """Remove old finished, unreferenced history; retain receipts and each language's latest job.
+
+    Caller owns the write transaction. Batch edges are internal references and may be
+    removed only when the entire family is eligible. Streams own resumable cursors.
+    """
+    if not 1 <= limit <= HISTORY_PRUNE_LIMIT:
+        raise ValueError("Invalid history prune limit")
+    cutoff = (time.time() if now is None else now) - HISTORY_RETENTION_SECONDS
+    rows = db.execute("""
+        WITH eligible AS (
+            SELECT j.id FROM mobile_catalog_refresh_jobs j
+            WHERE j.state IN ('completed','failed') AND j.updated < ?
+              AND NOT EXISTS(SELECT 1 FROM mobile_catalog_refresh_receipts r WHERE r.job_id=j.id)
+              AND j.id != (SELECT latest.id FROM mobile_catalog_refresh_jobs latest
+                  WHERE latest.language=j.language ORDER BY latest.created DESC,latest.rowid DESC LIMIT 1)
+        )
+        SELECT j.id FROM mobile_catalog_refresh_jobs j JOIN eligible e ON e.id=j.id
+        WHERE NOT EXISTS(SELECT 1 FROM mobile_catalog_refresh_batches b WHERE b.job_id=j.id)
+          AND NOT EXISTS(SELECT 1 FROM mobile_catalog_refresh_batches b
+                         WHERE b.parent_id=j.id AND b.job_id NOT IN (SELECT id FROM eligible))
+        ORDER BY j.updated,j.id LIMIT ?
+        """, [cutoff, limit]).fetchall()
+    deleted = 0
+    for (parent,) in rows:
+        family = [parent, *[row[0] for row in db.execute(
+            "SELECT job_id FROM mobile_catalog_refresh_batches WHERE parent_id=?", [parent])]]
+        if deleted + len(family) > limit:
+            continue
+        marks = ",".join("?" for _ in family)
+        for table in ("mobile_catalog_refresh_pages", "mobile_catalog_metadata_jobs"):
+            db.execute(f"DELETE FROM {table} WHERE job_id IN ({marks})", family)
+        db.execute("DELETE FROM mobile_catalog_refresh_batches WHERE parent_id=?", [parent])
+        db.execute(f"DELETE FROM mobile_catalog_refresh_jobs WHERE id IN ({marks})", family)
+        deleted += len(family)
+    return deleted
 
 
 def public_job(row):
@@ -211,9 +256,23 @@ class RefreshWorker:
             self.wake.set()
         return queued
 
+    def prune_history(self):
+        with self.get_db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            deleted = prune_history(db)
+            db.commit()
+            return deleted
+
     def loop(self):
         due_check = 0.0
+        history_due = time.monotonic() + HISTORY_PRUNE_INTERVAL_SECONDS
         while not self.stop.is_set():
+            if time.monotonic() >= history_due:
+                history_due = time.monotonic() + HISTORY_PRUNE_INTERVAL_SECONDS
+                try:
+                    self.prune_history()
+                except Exception:
+                    LOG.error("Catalog refresh history prune failed")
             try:
                 if self.run_once():
                     continue

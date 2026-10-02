@@ -3,6 +3,7 @@
 The application module is supplied at registration so its shared services and
 compatibility hooks are resolved at call time, including test monkeypatches.
 """
+import logging
 import sqlite3
 import threading
 import uuid
@@ -13,6 +14,8 @@ from urllib.parse import urlparse
 
 from fastapi import HTTPException, Header
 from pydantic import AwareDatetime, BaseModel
+
+from app_lifecycle import join_worker, lifecycle
 
 import asset_authority
 import authority
@@ -454,6 +457,10 @@ def acknowledge_capture_imported(
 def register(app, services):
     global api
     api = services
+    reclaimer = InboxReclaimer(services.get_db)
+    app.state.capture_reclaimer = reclaimer
+    lifecycle(app).on_startup(reclaimer.start)
+    lifecycle(app).on_shutdown(reclaimer.stop)
     app.post("/v1/captures")(create_capture)
     app.get("/v1/captures/pending")(list_pending_captures)
     app.get("/v1/extension/captures/confirm")(confirm_extension_capture)
@@ -478,7 +485,7 @@ def _inbox_references(db, keys):
     return referenced
 
 
-def reclaim_orphaned_inbox(get_db, storage, bucket, *, cursor=None, limit=25, now=None):
+def reclaim_orphaned_inbox(get_db, storage, bucket, *, cursor=None, limit=25, now=None, stop_event=None):
     """Reclaim at most one page per inbox prefix; no request/startup sweep.
 
     Run periodically against the API's control DB and R2 bucket, passing the returned
@@ -498,6 +505,8 @@ def reclaim_orphaned_inbox(get_db, storage, bucket, *, cursor=None, limit=25, no
     positions = dict(cursor or {})
     result = {"scanned": 0, "deleted": 0, "errors": 0, "cursor": positions}
     for prefix in ("images/inbox/", "videos/inbox/"):
+        if stop_event is not None and stop_event.is_set():
+            return result
         after = positions.get(prefix)
         if after is not None and not after.startswith(prefix):
             raise ValueError("Invalid inbox cursor")
@@ -525,11 +534,15 @@ def reclaim_orphaned_inbox(get_db, storage, bucket, *, cursor=None, limit=25, no
             with get_db() as db:
                 referenced = _inbox_references(db, candidates)
             for key in candidates:
+                if stop_event is not None and stop_event.is_set():
+                    return result
                 if key in referenced:
                     continue
                 with get_db() as db:
                     db.execute("BEGIN IMMEDIATE")
                     try:
+                        if stop_event is not None and stop_event.is_set():
+                            return result
                         if _inbox_references(db, [key]):
                             continue
                         try:
@@ -541,6 +554,54 @@ def reclaim_orphaned_inbox(get_db, storage, bucket, *, cursor=None, limit=25, no
                         db.rollback()
         positions[prefix] = objects[-1]["Key"] if listing.get("IsTruncated") and objects else None
     return result
+
+
+class InboxReclaimer:
+    """One small page hourly, independent of catalog enablement and publish wakeups.
+
+    R2 calls must not stall local catalog pruning. Stop prevents further calls and
+    joins share the application deadline; an already running SDK call may outlive it.
+    """
+    INTERVAL_SECONDS = 3600
+    INITIAL_DELAY_SECONDS = 300
+    PAGE_LIMIT = 5
+
+    def __init__(self, get_db):
+        self.get_db = get_db
+        self.stop_event = threading.Event()
+        self.thread = None
+        self.cursor = {}
+
+    def start(self):
+        if self.thread is not None and self.thread.is_alive():
+            return
+        self.stop_event.clear()
+        self.thread = threading.Thread(target=self.loop, name="capture-reclaim", daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        self.stop_event.set()
+        if self.thread is not None:
+            join_worker(self.thread, 1)
+
+    def run_once(self):
+        if self.stop_event.is_set():
+            return None
+        from r2 import R2_BUCKET, _s3
+        result = reclaim_orphaned_inbox(self.get_db, _s3, R2_BUCKET,
+                                       cursor=self.cursor, limit=self.PAGE_LIMIT,
+                                       stop_event=self.stop_event)
+        self.cursor = result["cursor"]
+        return result
+
+    def loop(self):
+        delay = self.INITIAL_DELAY_SECONDS
+        while not self.stop_event.wait(delay):
+            try:
+                self.run_once()
+            except Exception:
+                logging.getLogger(__name__).warning("Capture inbox reclaim failed; retry next interval")
+            delay = self.INTERVAL_SECONDS
 
 
 if __name__ == "__main__":

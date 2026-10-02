@@ -117,20 +117,35 @@ def materialize(root, content, get_db, additions=(), *, counter_interval=0, effe
         return _materialize(root, content, get_db, additions, counter_interval, effects)
 
 
-def _materialize(root, content, get_db, additions, counter_interval, effects):
-    fresh = {row["work"]["Id"]: row for row in additions}
-    with get_db() as control:
-        saved = control.execute("SELECT payload FROM mobile_catalog_server_additions ORDER BY work_id").fetchall()
-    merged = {row["work"]["Id"]: row for row in map(lambda r: json.loads(r[0]), saved)}
+def iter_observations(control, additions):
+    """Merge the ordered durable ledger with the bounded fresh page set one row at a time."""
+    fresh = {}
     for row in additions:
         work_id = row["work"]["Id"]
-        merged[work_id] = merge_observation(merged.get(work_id), row)
-    if not merged:
-        return content
+        fresh[work_id] = merge_observation(fresh.get(work_id), row)
+    pending = iter(sorted(fresh))
+    next_id = next(pending, None)
+    for work_id, payload in control.execute(
+            "SELECT work_id,payload FROM mobile_catalog_server_additions ORDER BY work_id"):
+        while next_id is not None and next_id < work_id:
+            yield next_id, fresh[next_id]
+            next_id = next(pending, None)
+        row = json.loads(payload)
+        if next_id == work_id:
+            row = merge_observation(row, fresh[next_id])
+            next_id = next(pending, None)
+        yield work_id, row
+    while next_id is not None:
+        yield next_id, fresh[next_id]
+        next_id = next(pending, None)
+
+
+def _materialize(root, content, get_db, additions, counter_interval, effects):
+    fresh = {row["work"]["Id"]: row for row in additions}
     source = replica.artifact_path(root, content)
     changes = []
-    with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as db:
-        for work_id, row in sorted(merged.items()):
+    with get_db() as control, closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as db:
+        for work_id, row in iter_observations(control, additions):
             existing = db.execute(f"SELECT {','.join(MUTABLE_FIELDS)} FROM Works WHERE Id=?", [work_id]).fetchone()
             exists = existing is not None
             if not exists and row.get("update_only"):

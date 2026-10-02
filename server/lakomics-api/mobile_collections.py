@@ -790,7 +790,9 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
                 order = f"name COLLATE NOCASE {direction}, id"
             total = db.execute(f"SELECT COUNT(*) FROM {source}" + where, parameters).fetchone()[0]
             rows = db.execute(f"SELECT payload FROM {source}" + where + " ORDER BY " + order + " LIMIT ? OFFSET ?", [*parameters, limit + 1, offset]).fetchall()
-            payloads = [finalize(db, active, json.loads(row["payload"])) for row in rows[:limit]]
+            payloads = [json.loads(row["payload"]) for row in rows[:limit]]
+            if active is not None:
+                collection_authority.finalize_items(db, active["libraryId"], payloads)
         next_cursor = base64.urlsafe_b64encode(encode({"scope": scope, "offset": offset + limit}).encode()).decode() if len(rows) > limit else None
         return {"ready": revision is not None, "revision": revision, "publishedAt": published, "filterVersion": 1, "totalCount": total,
                 "items": [public_item(payload) for payload in payloads], "nextCursor": next_cursor}

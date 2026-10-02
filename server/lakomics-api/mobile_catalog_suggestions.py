@@ -2,12 +2,13 @@
 
 The PC counts every tag in the catalog, orders it by use, and matches a
 case-insensitive substring of `namespace:value` or its Korean label. Mobile
-returns at most 10 and also accepts a short namespace (`a:asa`). The same list is built here once per publication revision (a
-visibility-only republication is a new revision, so the blocked flags follow
-it) and filtered in memory for each keystroke.
+returns at most 10 and also accepts a short namespace (`a:asa`). The list is reused
+across publications with identical tag counts, translations and blocked flags,
+and filtered in memory for each keystroke.
 """
 from __future__ import annotations
 
+import hashlib
 import threading
 
 from mobile_catalog_query import expand_namespace
@@ -55,29 +56,37 @@ def match(index, text, limit, reveal_blocked=False):
     return result
 
 
-class SuggestionCache:
-    """The index of one publication revision, rebuilt when the revision changes.
+def input_digest(db):
+    """Stream the effective inputs; metadata/bookmark publications reuse the index."""
+    digest = hashlib.sha256()
+    sql = ("SELECT json_array(Namespace,Value,uses,label,blocked) FROM (" + _INDEX_SQL
+           + ") ORDER BY Namespace,Value")
+    for (payload,) in db.execute(sql):
+        digest.update(payload.encode())
+        digest.update(b"\n")
+    return digest.digest()
 
-    Building is serialized so concurrent first requests share one build; a reader
-    of the current revision never waits once it is built.
-    """
+
+class SuggestionCache:
+    """Serialize builds, retaining one index when only the publication changes."""
 
     def __init__(self):
         self._lock = threading.Lock()
-        # (revision, index) is replaced as one reference, so a lock-free reader can
-        # never pair one revision with another revision's index.
-        self._entry = (None, None)
+        # Publish revision, digest and index together for lock-free readers.
+        self._entry = (None, None, None)
         self.builds = 0
 
     def index(self, revision, db):
-        cached_revision, cached = self._entry
+        cached_revision, _, cached = self._entry
         if cached_revision == revision and cached is not None:
             return cached
         with self._lock:
-            cached_revision, cached = self._entry
+            cached_revision, cached_digest, cached = self._entry
             if cached_revision == revision and cached is not None:
                 return cached
-            index = build_index(db)
-            self._entry = (revision, index)
-            self.builds += 1
-            return index
+            digest = input_digest(db)
+            if cached is None or digest != cached_digest:
+                cached = build_index(db)
+                self.builds += 1
+            self._entry = (revision, digest, cached)
+            return cached

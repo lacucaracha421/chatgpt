@@ -978,35 +978,53 @@ def served_state(db):
             "publishedAt": changed[0] if changed else row["activatedAt"]}
 
 
-def finalize_item(db, library_id, item, today=None):
-    """Read-time values: assetCount and fallback cover from membership ∩ visible Assets.
-
-    Visibility belongs to the Asset domain and changes without touching this cursor, so
-    these are never materialized. ``releaseStatus`` depends on today's date.
-    """
+def finalize_items(db, library_id, items, *, detail=False, today=None):
+    """Resolve a page's visible member counts/covers without loading member IDs."""
+    if not items:
+        return items
     asset_visibility.install(db)
     has_view = db.execute(
         "SELECT 1 FROM sqlite_temp_master WHERE type='view' AND name='visible_assets'").fetchone()
-    members = []
+    stats = {}
     if has_view:
-        members = [row[0] for row in db.execute(
-            "SELECT member.asset_id FROM collection_authority_members AS member"
-            " JOIN visible_assets AS asset ON asset.id=member.asset_id AND asset.committed=1"
-            " WHERE member.library_id=? AND member.work_id=? AND member.desired_state=1"
-            " ORDER BY member.added_at, member.asset_id", [library_id, item["id"]])]
-    item["assetCount"] = len(members)
-    cover = item.get("coverAssetId")
-    item["coverAssetId"] = cover if cover in set(members) else (members[0] if members else None)
-    today = today or datetime.datetime.now(datetime.timezone.utc).date()
-    for volume in item.get("volumes") or []:
-        status = None
-        try:
-            date = datetime.datetime.strptime(volume.get("localReleaseDate") or "", "%Y-%m-%d").date()
-            status = "upcoming" if date > today else "released"
-        except ValueError:
-            pass
-        volume["releaseStatus"] = status
-    return item
+        placeholders = ",".join("(?,?)" for _ in items)
+        parameters = [value for item in items for value in (item["id"], item.get("coverAssetId"))]
+        rows = db.execute(f"""
+            WITH requested(work_id,cover_id) AS (VALUES {placeholders}),
+            members AS (
+                SELECT member.work_id, member.asset_id, requested.cover_id,
+                       ROW_NUMBER() OVER (PARTITION BY member.work_id
+                           ORDER BY member.added_at, member.asset_id) AS position
+                FROM requested JOIN collection_authority_members AS member
+                  ON member.work_id=requested.work_id AND member.library_id=?
+                JOIN visible_assets AS asset ON asset.id=member.asset_id AND asset.committed=1
+                WHERE member.desired_state=1)
+            SELECT work_id, COUNT(*), MAX(CASE WHEN position=1 THEN asset_id END),
+                   MAX(CASE WHEN asset_id=cover_id THEN asset_id END)
+            FROM members GROUP BY work_id
+            """, [*parameters, library_id])
+        stats = {row[0]: tuple(row[1:]) for row in rows}
+    if detail:
+        today = today or datetime.datetime.now(datetime.timezone.utc).date()
+    for item in items:
+        count, first, cover = stats.get(item["id"], (0, None, None))
+        item["assetCount"] = count
+        item["coverAssetId"] = cover if cover is not None else first
+        if detail:
+            for volume in item.get("volumes") or []:
+                status = None
+                try:
+                    date = datetime.datetime.strptime(volume.get("localReleaseDate") or "", "%Y-%m-%d").date()
+                    status = "upcoming" if date > today else "released"
+                except ValueError:
+                    pass
+                volume["releaseStatus"] = status
+    return items
+
+
+def finalize_item(db, library_id, item, today=None):
+    """Detail reads also resolve date-dependent volume release status."""
+    return finalize_items(db, library_id, [item], detail=True, today=today)[0]
 
 
 def projection_artwork(db, work_id, artwork_id):

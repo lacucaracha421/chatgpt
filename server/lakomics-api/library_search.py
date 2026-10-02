@@ -4,6 +4,7 @@ No media commits or backfills. Tag batches may arrive before their replicated As
 all readers join visible committed Assets, so missing/trash rows never contribute.
 """
 import hashlib
+import heapq
 from typing import Literal
 
 from fastapi import Header, Query, Request
@@ -17,6 +18,7 @@ from home_publications import Strict, fail, text
 from library_artists import AssetId
 
 PREFIX = "/v1/library/auto-tags"
+AGGREGATE_VERSION = 1
 MAX_BODY_BYTES = 1024 * 1024
 MAX_ASSETS = 100
 MAX_VOCABULARY = 500
@@ -34,8 +36,11 @@ CREATE TABLE IF NOT EXISTS library_asset_tags(
  PRIMARY KEY(asset_id,tag_id));
 CREATE INDEX IF NOT EXISTS library_asset_tags_by_tag ON library_asset_tags(tag_id,asset_id);
 CREATE INDEX IF NOT EXISTS library_tag_assets_by_creator ON library_tag_assets(creator_key,asset_id);
+CREATE TABLE IF NOT EXISTS library_tag_aggregate_state(
+ singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS library_tag_counts(tag_id TEXT PRIMARY KEY, count INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS library_tag_visibility(asset_id TEXT PRIMARY KEY, visible INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS library_tag_visibility_by_visible ON library_tag_visibility(visible,asset_id);
 """
 
 
@@ -52,14 +57,24 @@ def startup_db(db):
     visible = f"EXISTS(SELECT 1 FROM assets a WHERE a.id=library_tag_visibility.asset_id AND a.committed=1 AND {predicate})"
     db.execute("BEGIN IMMEDIATE")
     try:
-        # Startup also upgrades already published tag data, under the same write lock.
-        db.execute(f"INSERT INTO library_tag_visibility SELECT DISTINCT t.asset_id, "
-                   f"EXISTS(SELECT 1 FROM assets a WHERE a.id=t.asset_id AND a.committed=1 AND {predicate}) "
-                   "FROM library_asset_tags t WHERE 1 ON CONFLICT(asset_id) DO UPDATE SET visible=excluded.visible")
-        db.execute("DELETE FROM library_tag_counts")
-        db.execute("INSERT INTO library_tag_counts SELECT t.tag_id,COUNT(*) FROM library_asset_tags t "
-                   "JOIN library_tag_visibility v ON v.asset_id=t.asset_id WHERE v.visible=1 GROUP BY t.tag_id")
-        install_count_triggers(db, predicate, visible, tables)
+        triggers_changed = install_count_triggers(db, predicate, visible, tables)
+        version = db.execute("SELECT version FROM library_tag_aggregate_state WHERE singleton=1").fetchone()
+        # Constant-size probes catch missing aggregates without recounting healthy data.
+        missing = db.execute("""SELECT
+            (NOT EXISTS(SELECT 1 FROM library_tag_visibility)
+             AND EXISTS(SELECT 1 FROM library_asset_tags))
+            OR (NOT EXISTS(SELECT 1 FROM library_tag_counts)
+                AND EXISTS(SELECT 1 FROM library_tag_visibility v WHERE v.visible=1
+                    AND EXISTS(SELECT 1 FROM library_asset_tags t WHERE t.asset_id=v.asset_id)))
+            """).fetchone()[0]
+        if triggers_changed or version is None or version[0] != AGGREGATE_VERSION or missing:
+            db.execute(f"INSERT INTO library_tag_visibility SELECT DISTINCT t.asset_id, "
+                       f"EXISTS(SELECT 1 FROM assets a WHERE a.id=t.asset_id AND a.committed=1 AND {predicate}) "
+                       "FROM library_asset_tags t WHERE 1 ON CONFLICT(asset_id) DO UPDATE SET visible=excluded.visible")
+            db.execute("DELETE FROM library_tag_counts")
+            db.execute("INSERT INTO library_tag_counts SELECT t.tag_id,COUNT(*) FROM library_asset_tags t "
+                       "JOIN library_tag_visibility v ON v.asset_id=t.asset_id WHERE v.visible=1 GROUP BY t.tag_id")
+            db.execute("INSERT OR REPLACE INTO library_tag_aggregate_state VALUES(1,?)", [AGGREGATE_VERSION])
         db.commit()
     except BaseException:
         db.rollback()
@@ -68,8 +83,16 @@ def startup_db(db):
 
 def install_count_triggers(db, predicate, visible, tables):
     """Update exact visible counts in the writer's transaction, including lifecycle changes."""
+    changed = False
+    existing = dict(db.execute("SELECT name,sql FROM sqlite_master WHERE type='trigger'"))
+
     def trigger(name, event, table, body, when=""):
-        db.execute(f"CREATE TRIGGER IF NOT EXISTS {name} {event} ON {table} {when} BEGIN {body} END")
+        nonlocal changed
+        sql = f"CREATE TRIGGER {name} {event} ON {table} {when} BEGIN {body} END"
+        if existing.get(name) != sql:
+            db.execute(f"DROP TRIGGER IF EXISTS {name}")
+            db.execute(sql)
+            changed = True
 
     def counts(delta, asset_id):
         return (f"INSERT INTO library_tag_counts SELECT tag_id,{delta} FROM library_asset_tags "
@@ -107,6 +130,8 @@ def install_count_triggers(db, predicate, visible, tables):
                             ("UPDATE OF library_id,domain", "OLD.domain='assets' OR NEW.domain='assets'")):
             trigger("tag_domain_" + event.split()[0].lower(), "AFTER " + event,
                     "authority_domains", refresh("1"), "WHEN " + when)
+
+    return changed
 
 
 class Tag(Strict):
@@ -188,28 +213,34 @@ def register(app, get_db, require_client, require_publisher):
         needle = normalize(text)
         with get_db() as db:
             db.execute("BEGIN")
-            sql = ("SELECT v.tag_id,v.label,v.category,c.count "
-                   "FROM library_tag_vocabulary v JOIN library_tag_counts c ON c.tag_id=v.tag_id "
-                   "WHERE c.count>0 AND v.category NOT IN ('artist','meta','rating')")
-            # Popular suggestions have one rank; return only the requested top rows.
-            rows = db.execute(sql + (" ORDER BY c.count DESC,v.tag_id LIMIT ?" if not needle else ""),
-                              [limit] if not needle else []).fetchall()
-        ranked = []
-        for row in rows:
-            rank = match_rank(needle, row["tag_id"], row["label"]) if needle else 1
-            if rank is not None:
-                ranked.append((rank, -row["count"], row["tag_id"], {
-                    "kind": "tag", "id": row["tag_id"], "label": row["label"],
-                    "category": row["category"], "count": row["count"]}))
-        ranked.sort(key=lambda item: item[:3])
+            items = suggestion_items(db, needle, limit)
         return conditional.json_response({"version": 1, "text": text, "limit": limit,
-                                          "items": [row[3] for row in ranked[:limit]]}, if_none_match)
+                                          "items": items}, if_none_match)
 
     def startup():
         with get_db() as db:
             startup_db(db)
             db.commit()
     return startup
+
+
+def suggestion_items(db, needle, limit):
+    sql = ("SELECT v.tag_id,v.label,v.category,c.count "
+           "FROM library_tag_vocabulary v JOIN library_tag_counts c ON c.tag_id=v.tag_id "
+           "WHERE c.count>0 AND v.category NOT IN ('artist','meta','rating')")
+    rows = db.execute(sql + (" ORDER BY c.count DESC,v.tag_id LIMIT ?" if not needle else ""),
+                      [limit] if not needle else [])
+
+    def candidates():
+        for row in rows:
+            rank = match_rank(needle, row["tag_id"], row["label"]) if needle else 1
+            if rank is not None:
+                yield (rank, -row["count"], row["tag_id"], row)
+
+    # A streaming top-N retains at most `limit` candidates, including Hangul matches.
+    ranked = heapq.nsmallest(limit, candidates(), key=lambda item: item[:3])
+    return [{"kind": "tag", "id": row["tag_id"], "label": row["label"],
+             "category": row["category"], "count": row["count"]} for *_, row in ranked]
 
 
 def normalize(value):

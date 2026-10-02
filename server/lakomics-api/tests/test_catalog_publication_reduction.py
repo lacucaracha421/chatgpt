@@ -327,7 +327,7 @@ class RefreshCycleTests(DirectCatalogFixture, unittest.TestCase):
         self.run_fast(worker)
         self.assertEqual(self.count_publications(), 2)
         with self.get_db() as db:
-            self.assertEqual([row[0] for row in db.execute('SELECT state FROM mobile_catalog_refresh_jobs')], ['completed', 'failed'])
+            self.assertEqual([row[0] for row in db.execute('SELECT state FROM mobile_catalog_refresh_jobs ORDER BY rowid')], ['completed', 'failed'])
             self.assertEqual(db.execute('SELECT COUNT(*) FROM mobile_catalog_refresh_pages').fetchone()[0], 0)
             self.assertEqual(db.execute('SELECT COUNT(*) FROM mobile_catalog_server_additions').fetchone()[0], 1)
             self.assertEqual([row[0] for row in db.execute('SELECT language FROM mobile_catalog_metadata_streams')], ['korean'])
@@ -338,7 +338,7 @@ class RefreshCycleTests(DirectCatalogFixture, unittest.TestCase):
         self.run_fast(worker)
         self.assertEqual(self.count_publications(), 2)
         with self.get_db() as db:
-            self.assertEqual([row[0] for row in db.execute('SELECT state FROM mobile_catalog_refresh_jobs')], ['failed', 'completed'])
+            self.assertEqual([row[0] for row in db.execute('SELECT state FROM mobile_catalog_refresh_jobs ORDER BY rowid')], ['failed', 'completed'])
             self.assertEqual([row[0] for row in db.execute('SELECT language FROM mobile_catalog_metadata_streams')], ['japanese'])
 
     def test_idle_minute_poll_does_not_open_catalog_files(self):
