@@ -688,6 +688,32 @@ describe("App", () => {
     expect(within(await screen.findByRole("dialog", { name: "더보기" })).queryByRole("button", { name: "메모" })).not.toBeInTheDocument();
   });
 
+  it("opens another note from 찾기 while Notes is already mounted", async () => {
+    const root = "C:\\FindNotes";
+    localStorage.setItem("lakomics.libraryPath", root);
+    const libraryGateway = gateway();
+    vi.mocked(libraryGateway.openLibrary).mockResolvedValue({ root });
+    const state = { unlocked: true, lastSyncedAt: null, notes: ["첫 메모", "다음 메모"].map((title, at) => ({
+      id: `find-note-${at}`, title, body: "", type: "checklist", items: [], pinned: false, deleted: false,
+      createdAt: "2026-10-02T00:00:00Z", updatedAt: "2026-10-02T00:00:00Z", localRevision: 1, pending: false, conflict: false,
+    })) };
+    const previous = nativeInvoke.getMockImplementation()!;
+    nativeInvoke.mockImplementation(async (command, ...args) => command === "notes_request" ? state as never : previous(command, ...args));
+    try {
+      const user = userEvent.setup();
+      render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+      const rail = await screen.findByRole("navigation", { name: "주요 영역" });
+      await user.click(within(rail).getByRole("button", { name: "메모" }));
+      for (const title of ["첫 메모", "다음 메모"]) {
+        await user.click(within(rail).getByRole("button", { name: "찾기" }));
+        const palette = await screen.findByRole("dialog", { name: "찾기" });
+        await user.type(within(palette).getByRole("combobox"), title);
+        await user.click(await within(palette).findByRole("option", { name: title }));
+        expect(await screen.findByRole("textbox", { name: "메모 제목" })).toHaveValue(title);
+      }
+    } finally { nativeInvoke.mockImplementation(previous); }
+  });
+
   it("opens 작가 from the asset index and returns to the folder with back", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     const libraryGateway = gateway();
@@ -1631,7 +1657,7 @@ describe("App", () => {
     await user.keyboard("{Control>}f{/Control}");
     const search = within(await screen.findByRole("dialog", { name: "찾기" })).getByRole("combobox");
     await user.type(search, "nier");
-    expect(screen.getAllByRole("option")[0]).toHaveTextContent(/‘nier’ — .*컬렉션에서 검색/);
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent(/컬렉션에서 ‘nier’ 검색/);
     await user.keyboard("{Enter}");
     await user.dblClick(await screen.findByText("NieR: Automata"));
     await user.click(await screen.findByRole("button", { name: "목록으로" }, { timeout: 5_000 }));

@@ -1,3 +1,4 @@
+import { matchesKoreanSearch } from "../shared/koreanSearch";
 import type { ReactNode } from "react";
 import { nativeWorkload, updateWorkloadSettings, useWorkloadProfile } from "../app/workloadProfile";
 import type { AlbumEntry, AssetView, ClassificationEntry } from "../library/types";
@@ -5,7 +6,7 @@ import { useExchangeSnapshot } from "../exchange/exchangeStore";
 import { ActivityIcon, BookmarkIcon, Cog6ToothIcon, ExchangeIcon, FolderIcon, InboxIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 
 /** search: the current view's own search (palette only); tag: 자동 태그 filters for the 에셋 screen (palette only, while typing); place: folders, albums and characters by name (palette only, while typing); queue: non-empty review queues; go: destinations; action: commands; settings: settings sections (palette only). */
-export type NavigationEntryGroup = "search" | "tag" | "place" | "queue" | "go" | "action" | "settings";
+export type NavigationEntryGroup = "search" | "work" | "artist" | "note" | "recent" | "tag" | "place" | "queue" | "go" | "action" | "settings";
 
 export type NavigationEntry = {
   id: string;
@@ -20,15 +21,21 @@ export type NavigationEntry = {
   /** Where the destination lives, e.g. a folder path "게임 › 젠레스". */
   context?: string;
   selected?: boolean;
+  thumbnail?: string;
+  avatar?: boolean;
   run: () => void;
   /** Shift+Enter or Shift+click, e.g. exclude a tag instead of including it. */
   runAlternate?: () => void;
 };
 
 export const NAVIGATION_GROUP_LABELS: Record<NavigationEntryGroup, string> = {
-  search: "검색",
+  search: "이 화면에서",
+  work: "작품",
+  artist: "작가",
+  note: "메모",
+  recent: "최근 연 것",
   tag: "자동 태그",
-  place: "폴더·앨범·캐릭터",
+  place: "폴더",
   queue: "확인할 것",
   go: "이동",
   action: "실행",
@@ -91,11 +98,9 @@ export function useNavigationEntries({ view, onNavigate, reviewCount, unsortedCo
   return [...queues, ...destinations, ...actions, ...settings];
 }
 
-/** Case-insensitive substring match on the label and keywords. */
+/** Korean-aware name and keyword match, shared with the palette. */
 export function matchesEntry(entry: NavigationEntry, query: string) {
-  const needle = query.trim().toLocaleLowerCase();
-  if (!needle) return true;
-  return [entry.label, ...(entry.keywords ?? [])].some((name) => name.toLocaleLowerCase().replace(/\s+/g, "").includes(needle.replace(/\s+/g, "")));
+  return matchesKoreanSearch([entry.label, ...(entry.keywords ?? [])], query);
 }
 
 /** Named places the palette can jump to: the folder tree, albums and characters already loaded by the app. */
@@ -106,8 +111,6 @@ export type PlaceSources = {
   /** Group members are hidden from the folder tree, so the palette shows the group in their path. */
   characterGroups?: { id: string; name: string; seriesId: string; targetIds: string[] }[];
 };
-
-const PLACE_LIMIT = 8;
 
 function ancestorNames<T extends { id: string; name: string; parentId: string | null }>(byId: Map<string, T>, parentId: string | null): string[] {
   const names: string[] = [];
@@ -123,17 +126,17 @@ function ancestorNames<T extends { id: string; name: string; parentId: string | 
 
 /**
  * Folder, album and character rows whose name matches the typed text, with their path
- * ("게임 › 젠레스") as context. Names starting with the text come first; at most eight rows.
+ * ("게임 › 젠레스") as context. Names starting with the text come first; the palette limits and expands each group.
  */
 export function placeEntries(sources: PlaceSources | undefined, query: string, view: AssetView, onNavigate: (view: AssetView) => void): NavigationEntry[] {
   const needle = query.trim().toLocaleLowerCase().replace(/\s+/g, "");
-  if (!sources || !needle) return [];
+  if (!sources) return [];
   const folders = new Map(sources.classifications.map((entry) => [entry.id, entry]));
   const albums = new Map(sources.albums.map((entry) => [entry.id, entry]));
   type Candidate = { entry: NavigationEntry; name: string };
   const candidates: Candidate[] = [];
   const add = (name: string, entry: NavigationEntry) => {
-    if (name.toLocaleLowerCase().replace(/\s+/g, "").includes(needle)) candidates.push({ name, entry });
+    if (matchesKoreanSearch(name, query)) candidates.push({ name, entry });
   };
   for (const folder of sources.classifications) {
     add(folder.name, {
@@ -166,6 +169,5 @@ export function placeEntries(sources: PlaceSources | undefined, query: string, v
   const starts = (candidate: Candidate) => candidate.name.toLocaleLowerCase().replace(/\s+/g, "").startsWith(needle) ? 0 : 1;
   return candidates
     .sort((a, b) => starts(a) - starts(b) || a.name.length - b.name.length || a.name.localeCompare(b.name, "ko"))
-    .slice(0, PLACE_LIMIT)
     .map((candidate) => candidate.entry);
 }

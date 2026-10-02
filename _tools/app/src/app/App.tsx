@@ -802,6 +802,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               reviewCount={reviewCount} trashCount={trashCount} onImportFiles={dropEnabled ? () => void importFiles() : undefined}
               unsortedCount={unsortedCount} onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}
               privateVaultAvailable={privateVaultVisible}
+              collections={collections}
               places={{ classifications: entries, albums, characters: characterHub.targets, characterGroups: characterHub.groups }}
               assetNavigation={<ClassificationSidebar embedded characters={characterHub.targets} characterGroups={characterHub.groups}
               entries={entries}
@@ -862,7 +863,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     refreshVersion={assetRefresh} onNavigate={(next) => navigateView(next, { fromHome: true })} onOpenAsset={(assetId) => void openExisting(assetId, { fromHome: true })}
                     onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}
                     characters={characterHub.targets} classifications={entries} />
-                ) : view.kind === "notes" ? <NotesView noteId={view.noteId} /> : view.kind === "exchange" ? <ExchangeView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
+                ) : view.kind === "notes" ? <NotesView key={view.noteId ?? "notes"} noteId={view.noteId} /> : view.kind === "exchange" ? <ExchangeView /> : view.kind === "statistics" ? <StatisticsPanel /> : view.kind === "trash" ? <TrashBrowser onCountChange={setTrashCount} /> : view.kind === "settings" ? (
                   <SettingsView
                     restoring={maintenance === "restore"}
                     onRestore={restoreBackup}

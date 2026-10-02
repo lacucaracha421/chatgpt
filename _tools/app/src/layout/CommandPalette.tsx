@@ -1,13 +1,14 @@
 import * as RadixDialog from "@radix-ui/react-dialog";
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, useDeferredValue, useMemo, type KeyboardEvent } from "react";
 import { useBackHandler } from "../shared/navigation/BackNavigation";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import { MagnifyingGlassIcon } from "../shared/ui/ArchiveIcons";
 import { modalDialogOpen } from "./modalDialog";
 import type { ChromeSearchInfo } from "./WorkspaceChromeContext";
-import { matchesEntry, NAVIGATION_GROUP_LABELS, type NavigationEntry, type NavigationEntryGroup } from "./navigationEntries";
-
-const GROUP_ORDER: NavigationEntryGroup[] = ["search", "tag", "place", "queue", "go", "action", "settings"];
+import { usePrivacy } from "../privacy/PrivacyContext";
+import { Button } from "../shared/ui/Button";
+import { FIND_SCOPES, findGroups, GROUP_LIMIT, matchedSpans, readRecent, rememberRecent, type FindScope } from "./findModel";
+import { NAVIGATION_GROUP_LABELS, type NavigationEntry, type NavigationEntryGroup } from "./navigationEntries";
 
 export type PaletteSearch = { info: ChromeSearchInfo; apply: (query: string) => void; open: (draft: string) => void };
 
@@ -18,9 +19,9 @@ function searchEntries(search: PaletteSearch | null | undefined, text: string): 
   const typed = text.trim();
   const rows: NavigationEntry[] = [];
   if (info.kind === "query" && typed) {
-    rows.push({ id: "search-apply", group: "search", label: `‘${typed}’ — ${info.scope}에서 검색`, icon: <MagnifyingGlassIcon />, run: () => search.apply(typed) });
+    rows.push({ id: "search-apply", group: "search", label: `${info.scope}에서 ‘${typed}’ 검색`, icon: <MagnifyingGlassIcon />, run: () => search.apply(typed) });
   } else if (info.kind === "surface") {
-    rows.push({ id: "search-open", group: "search", label: `${info.scope} 검색 열기`, icon: <MagnifyingGlassIcon />, run: () => search.open(typed) });
+    rows.push({ id: "search-open", group: "search", label: typed ? `${info.scope}에서 ‘${typed}’ 검색` : `${info.scope} 검색 열기`, icon: <MagnifyingGlassIcon />, run: () => search.open(typed) });
   }
   if (info.query.trim()) {
     rows.push({ id: "search-clear", group: "search", label: "검색 해제", icon: <XMarkIcon />, activity: `‘${info.query.trim()}’`, run: () => search.apply("") });
@@ -28,11 +29,16 @@ function searchEntries(search: PaletteSearch | null | undefined, text: string): 
   return rows;
 }
 
-/**
- * The 찾기 palette: searches the current view when it supports search, then moves to destinations
- * and runs a few commands by name. It never searches asset text where the view has no search.
- */
-export function CommandPalette({ open, onClose, entries, search, findPlaces, findTags, fallbackFocus }: { open: boolean; onClose: () => void; entries: NavigationEntry[]; search?: PaletteSearch | null; findPlaces?: (query: string) => NavigationEntry[]; findTags?: (query: string) => NavigationEntry[]; fallbackFocus?: () => HTMLElement | null }) {
+/** Device-local names and the current screen's existing search contract. */
+export function CommandPalette({ open, onClose, entries, search, findPlaces, findTags, fallbackFocus, recentKey = "workspace", loading = false, error }: {
+  open: boolean; onClose: () => void; entries: NavigationEntry[]; search?: PaletteSearch | null;
+  findPlaces?: (query: string) => NavigationEntry[]; findTags?: (query: string) => NavigationEntry[];
+  fallbackFocus?: () => HTMLElement | null; recentKey?: string; loading?: boolean; error?: string | null;
+}) {
+  const { privacyMode } = usePrivacy();
+  const [scope, setScope] = useState<FindScope>("전체");
+  const [expanded, setExpanded] = useState<NavigationEntryGroup[]>([]);
+  const [recentIds, setRecentIds] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   // Tracked by id: when a queue count arrives an entry can move between groups, and the highlight must follow it.
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -44,13 +50,26 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fin
     if (!open) return;
     openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setQuery("");
+    setScope("전체");
+    setExpanded([]);
+    setRecentIds(readRecent(recentKey));
     setActiveId(null);
-  }, [open]);
+  }, [open, recentKey]);
 
-  // Settings sections are only offered once the user types, so the default list stays short.
-  // Folders, albums and characters are offered only once the user types (see placeEntries).
-  const visible = [...searchEntries(search, query), ...(findTags?.(query) ?? []), ...(findPlaces?.(query) ?? []), ...entries.filter((entry) => (query.trim() || entry.group !== "settings") && matchesEntry(entry, query))];
-  const ordered = GROUP_ORDER.flatMap((group) => visible.filter((entry) => entry.group === group));
+  // Deferred filtering leaves the last complete list painted while typing stays immediate.
+  const filteredQuery = useDeferredValue(query);
+  const groups = useMemo(() => findGroups([
+    ...searchEntries(search, filteredQuery), ...(findTags?.(filteredQuery) ?? []),
+    ...(findPlaces?.(filteredQuery) ?? []), ...entries,
+  ], filteredQuery, scope, recentIds), [entries, search, findTags, findPlaces, filteredQuery, scope, recentIds]);
+  const displayed = groups.map(({ group, items }) => ({ group, items: [
+    ...(expanded.includes(group) ? items : items.slice(0, GROUP_LIMIT)),
+    ...(items.length > GROUP_LIMIT ? [{ id: `find-expand-${group}`, group,
+      label: expanded.includes(group) ? "접기" : `${NAVIGATION_GROUP_LABELS[group]} ${items.length - GROUP_LIMIT}개 더 보기`, icon: null,
+      run: () => setExpanded(previous => previous.includes(group) ? previous.filter(value => value !== group) : [...previous, group]),
+    }] : []),
+  ] }));
+  const ordered = displayed.flatMap(({ items }) => items);
   const found = ordered.findIndex((entry) => entry.id === activeId);
   const current = found >= 0 ? found : 0;
   const setActive = (index: number) => setActiveId(ordered[index]?.id ?? null);
@@ -62,6 +81,8 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fin
 
   const run = (entry: NavigationEntry | undefined, alternate = false) => {
     if (!entry) return;
+    if (entry.id.startsWith("find-expand-")) { entry.run(); return; }
+    if (entry.group !== "search" && entry.group !== "action" && entry.group !== "tag") setRecentIds(rememberRecent(recentKey, entry.id));
     onClose();
     (alternate && entry.runAlternate ? entry.runAlternate : entry.run)();
   };
@@ -69,7 +90,12 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fin
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     // Korean IME: Enter or arrows that confirm a composition must not run a command.
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    if (event.key === "Tab") {
+      event.preventDefault();
+      setScope(FIND_SCOPES[(FIND_SCOPES.indexOf(scope) + (event.shiftKey ? FIND_SCOPES.length - 1 : 1)) % FIND_SCOPES.length]);
+      setExpanded([]);
+      setActiveId(null);
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       if (!ordered.length) return;
       const step = event.key === "ArrowDown" ? 1 : -1;
@@ -99,16 +125,18 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fin
         <RadixDialog.Title className="command-palette__title">찾기</RadixDialog.Title>
         <div className="command-palette__field">
           <MagnifyingGlassIcon aria-hidden="true" />
-          <input autoFocus type="text" role="combobox" aria-label={search ? `${search.info.scope} 검색어 또는 이동할 곳 이름` : "이동할 곳 또는 명령 이름"} aria-expanded="true"
+          <input autoFocus type="text" role="combobox" aria-label="작품, 작가, 메모 제목, 폴더, 화면 또는 명령 이름" aria-expanded="true"
             aria-controls={`${id}-list`} aria-autocomplete="list" aria-activedescendant={ordered.length ? optionId(current) : undefined}
-            placeholder={search ? "검색하거나 이동할 곳 이름" : "이동할 곳이나 명령 이름"} value={query} spellCheck={false} autoComplete="off"
-            onChange={(event) => { setQuery(event.target.value); setActiveId(null); }} onKeyDown={onKeyDown} />
+            placeholder="작품, 작가, 메모, 폴더 찾기" value={query} spellCheck={false} autoComplete="off"
+            onChange={(event) => { setQuery(event.target.value); setExpanded([]); setActiveId(null); }} onKeyDown={onKeyDown} />
         </div>
-        <div ref={listRef} id={`${id}-list`} className="command-palette__list" role="listbox" aria-label={search ? "검색, 이동과 명령" : "이동과 명령"}>
-          {ordered.length === 0 && <p className="command-palette__empty">일치하는 이름이 없습니다.</p>}
-          {GROUP_ORDER.map((group) => {
-            const items = ordered.filter((entry) => entry.group === group);
-            if (!items.length) return null;
+        <div className="command-palette__scopes" role="group" aria-label="찾기 범위">
+          {FIND_SCOPES.map(name => <Button key={name} size="sm" variant="ghost" aria-pressed={scope === name}
+            onMouseDown={event => event.preventDefault()} onClick={() => { setScope(name); setExpanded([]); setActiveId(null); }}>{name}</Button>)}
+        </div>
+        <div ref={listRef} id={`${id}-list`} className="command-palette__list" role="listbox" aria-label="찾기 결과" aria-busy={loading || query !== filteredQuery}>
+          {ordered.length === 0 && <p className="command-palette__empty">{loading ? "이름을 불러오는 중…" : query.trim() ? "일치하는 이름이 없습니다." : "확인할 것과 최근 연 항목이 없습니다."}</p>}
+          {displayed.map(({ group, items }) => {
             return <div key={group} role="group" aria-labelledby={`${id}-${group}`} className="command-palette__group">
               <div id={`${id}-${group}`} className="command-palette__heading" role="presentation">{NAVIGATION_GROUP_LABELS[group]}</div>
               {items.map((entry) => {
@@ -119,8 +147,8 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fin
                   aria-current={entry.selected ? "page" : undefined}
                   className="command-palette__option" onPointerMove={() => { if (own !== current) setActive(own); }}
                   onMouseDown={(event) => event.preventDefault()} onClick={(event) => run(entry, event.shiftKey)}>
-                  <span className="command-palette__icon" aria-hidden="true">{entry.icon}</span>
-                  <span className="command-palette__label">{entry.label}</span>
+                  <span className="command-palette__icon" aria-hidden="true">{entry.thumbnail && !privacyMode ? <img className={entry.avatar ? "command-palette__avatar" : undefined} src={entry.thumbnail} alt="" loading="lazy" decoding="async" /> : entry.icon}</span>
+                  <span className="command-palette__label">{matchedSpans(entry.label, filteredQuery).map((span, at) => span.matched ? <mark key={at}>{span.text}</mark> : span.text)}</span>
                   {entry.context && <span className="command-palette__meta command-palette__context">{entry.context}</span>}
                   {entry.activity && <span className="command-palette__meta">{entry.activity}</span>}
                   {entry.count !== undefined && <span className="command-palette__count">{entry.count.toLocaleString("ko-KR")}</span>}
@@ -129,9 +157,10 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fin
             </div>;
           })}
         </div>
+        {error && <p role="status" className="command-palette__empty">{error}</p>}
         <div id={`${id}-hint`} className="command-palette__foot">
           <span><kbd>↑↓</kbd> 선택 <kbd>Enter</kbd> 열기{hasAlternate && <> <kbd>Shift</kbd>+<kbd>Enter</kbd> 태그 제외</>} <kbd>Esc</kbd> 닫기</span>
-          <span>{search ? `${search.info.scope}에서 검색하거나 이름으로 이동합니다` : "이 화면은 검색이 없어 이름으로 이동만 합니다"}</span>
+          <span><kbd>Tab</kbd> 범위 바꾸기</span>
         </div>
       </RadixDialog.Content>
     </RadixDialog.Portal>

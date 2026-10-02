@@ -3,12 +3,14 @@ import { ViewColumnsIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
-import type { AssetView, CollectionType } from "../library/types";
+import type { AssetView, CollectionType, CollectionSummary } from "../library/types";
 import { useOptionalLibrary } from "../library/LibraryContext";
 import { useVaultExportJob, vaultExportProgressText } from "../external-vault/vaultExportJob";
 import { useVaultImportJob, vaultImportProgressText } from "../external-vault/vaultImportJob";
 import { ArtistIndex, isArtistView } from "../artists/ArtistIndex";
 import { useArtistOverview } from "../artists/artistStore";
+import { useFindData } from "./findData";
+import { rememberRecent } from "./findModel";
 import { CommandPalette } from "./CommandPalette";
 import { useAutoTagPaletteSearch } from "../autotags/autoTagPalette";
 import { MoreEntryList, MorePanel } from "./MorePanel";
@@ -54,6 +56,7 @@ type Props = {
   onImportFiles?: () => void;
   /** Folders, albums and characters the 찾기 palette matches by name. */
   places?: PlaceSources;
+  collections?: CollectionSummary[];
 };
 
 function isEditing(target: EventTarget | null) {
@@ -61,7 +64,7 @@ function isEditing(target: EventTarget | null) {
     && (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement);
 }
 
-export function WorkspaceNavigation({ view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, unsortedCount = null, onQueuesRequested, privateVaultAvailable = false, onImportFiles, places }: Props) {
+export function WorkspaceNavigation({ view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, unsortedCount = null, onQueuesRequested, privateVaultAvailable = false, onImportFiles, places, collections = [] }: Props) {
   const chrome = useWorkspaceChrome();
   const vaultImport = useVaultImportJob().job;
   const vaultExport = useVaultExportJob();
@@ -106,6 +109,21 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
   const searchInfo = chrome?.meta?.search ?? null;
   const paletteSearch = searchInfo && chrome ? { info: searchInfo, apply: chrome.applySearch, open: chrome.openSearch } : null;
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const find = useFindData(paletteOpen, collections, onNavigate);
+  useEffect(() => {
+    const id = view.kind === "collection" ? `work-${view.collectionId}`
+      : view.kind === "creator" ? `artist-${view.creatorKey}`
+      : view.kind === "notes" && view.noteId ? `note-${view.noteId}`
+      : view.kind === "classification" && view.classificationId ? (view.characterId ? `place-character-${view.characterId}` : `place-folder-${view.classificationId}`)
+      : view.kind === "album" ? `place-album-${view.albumId}` : null;
+    if (id) rememberRecent(find.recentKey, id);
+  }, [view, find.recentKey]);
+  const paletteEntries = [...find.entries,
+    { id: "home", group: "go" as const, label: "홈", icon: <HomeIcon />, run: () => onNavigate({ kind: "home" }) },
+    { id: "assets", group: "go" as const, label: "에셋", icon: <RectangleStackIcon />, run: () => onNavigate({ kind: "classification", classificationId: null }) },
+    { id: "collections", group: "go" as const, label: "컬렉션", icon: <BookOpenIcon />, run: () => onNavigate({ kind: "collections", typeFilter: collectionType, showcase: false }) },
+    { id: "manga", group: "go" as const, label: "망가", icon: <PhotoIcon />, run: () => onNavigate({ kind: "manga" }) },
+    ...entries];
   const findTags = useAutoTagPaletteSearch(paletteOpen, view, onNavigate);
   const paletteButton = useRef<HTMLButtonElement>(null);
   const queuesRequested = useRef(onQueuesRequested);
@@ -175,7 +193,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
         }}
       />
     </aside>}
-    <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={entries} search={paletteSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} findTags={findTags} fallbackFocus={() => paletteButton.current} />
+    <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={paletteEntries} recentKey={find.recentKey} loading={find.loading} error={find.error} search={paletteSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} findTags={findTags} fallbackFocus={() => paletteButton.current} />
   </div>;
 }
 
