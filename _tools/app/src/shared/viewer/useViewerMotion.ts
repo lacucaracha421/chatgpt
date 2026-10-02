@@ -43,7 +43,8 @@ export function useViewerMotion(id: string | null, onClose: () => void, origin?:
     if (from && thumb && fit.width > 0) {
       ghost = thumb.cloneNode() as HTMLImageElement;
       ghost.removeAttribute('class'); ghost.removeAttribute('id'); ghost.alt = ''; ghost.setAttribute('aria-hidden', 'true'); ghost.dataset.viewerZoomPreview = 'true';
-      Object.assign(ghost.style, {position: 'fixed', left: `${fit.left}px`, top: `${fit.top}px`, width: `${fit.width}px`, height: `${fit.height}px`, objectFit: 'contain', zIndex: '8', pointerEvents: 'none'});
+      Object.assign(ghost.style, {position: 'fixed', left: `${fit.left}px`, top: `${fit.top}px`, width: `${fit.width}px`, height: `${fit.height}px`, objectFit: 'contain', zIndex: '1', pointerEvents: 'none'});
+      // Above the media, below the strip and bars (z 2+): a grown strip must not drop behind the zoom copy.
       node.append(ghost);
       const mediaOpacity = media.style.opacity; media.style.opacity = '0';
       const dx = from.left + from.width / 2 - fit.left - fit.width / 2, dy = from.top + from.height / 2 - fit.top - fit.height / 2;
