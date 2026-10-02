@@ -1,5 +1,3 @@
-import type { ClassificationEntry } from "../library/types";
-
 export type TreeEntry = {
   id: string;
   name: string;
@@ -12,15 +10,6 @@ export type TreeNode<T extends TreeEntry> = {
 };
 
 export type Tree<T extends TreeEntry> = TreeNode<T>[] & {
-  hasOrphans: boolean;
-};
-
-export type ClassificationTreeNode = {
-  entry: ClassificationEntry;
-  children: ClassificationTreeNode[];
-};
-
-export type ClassificationTree = ClassificationTreeNode[] & {
   hasOrphans: boolean;
 };
 
@@ -55,8 +44,4 @@ export function buildTree<T extends TreeEntry>(entries: T[], orderedIds: string[
   return Object.assign(roots, {
     hasOrphans: visible.size !== entries.length,
   });
-}
-
-export function buildClassificationTree(entries: ClassificationEntry[]): ClassificationTree {
-  return buildTree(entries);
 }

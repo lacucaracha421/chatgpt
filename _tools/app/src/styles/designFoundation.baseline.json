@@ -270,6 +270,12 @@
       "pillRadius": 0,
       "legacyToken": 7
     },
+    "_tools/app/src/shared/findEntry.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
     "_tools/app/src/shared/markdown/markdown.css": {
       "offScaleSpacing": 1,
       "offRoleFontSize": 0,
@@ -325,10 +331,10 @@
       "legacyToken": 0
     },
     "_tools/app/src/styles/global.css": {
-      "offScaleSpacing": 9,
+      "offScaleSpacing": 4,
       "offRoleFontSize": 0,
       "pillRadius": 2,
-      "legacyToken": 77
+      "legacyToken": 76
     },
     "_tools/app/src/styles/tokens.css": {
       "offScaleSpacing": 0,
@@ -338,6 +344,12 @@
     }
   },
   "tablet": {
+    "_tools/app/mobile-client/AssetInfoSheet.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
     "_tools/app/mobile-client/Catalog.css": {
       "offScaleSpacing": 23,
       "offRoleFontSize": 20,
@@ -434,6 +446,12 @@
       "pillRadius": 0,
       "legacyToken": 0
     },
+    "_tools/app/mobile-client/find.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
     "_tools/app/mobile-client/home.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
@@ -459,8 +477,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/mobile.css": {
-      "offScaleSpacing": 88,
-      "offRoleFontSize": 51,
+      "offScaleSpacing": 86,
+      "offRoleFontSize": 50,
       "pillRadius": 2,
       "legacyToken": 0
     },

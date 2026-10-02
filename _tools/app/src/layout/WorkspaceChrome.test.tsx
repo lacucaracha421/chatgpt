@@ -1,7 +1,7 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useState } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BackNavigationProvider } from "../shared/navigation/BackNavigation";
 import { Menu } from "../shared/ui/Menu";
 import { Select } from "../shared/ui/Select";
@@ -37,7 +37,7 @@ function Harness({ probe = false }: { probe?: boolean }) {
     <button onClick={() => setScope((value) => value === "첫 화면" ? "다른 화면" : "첫 화면")}>범위 이동</button>
   </WorkspaceChromeProvider></BackNavigationProvider>;
 }
-afterEach(() => { cleanup(); mounts = 0; });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); mounts = 0; });
 describe("Chrome 03b workspace", () => {
   it("opens without remounting the gallery and preserves controlled settings and selection", async () => {
     const user = userEvent.setup(); render(<Harness />);
@@ -66,11 +66,23 @@ describe("Chrome 03b workspace", () => {
     expect(screen.getByRole("button", { name: "바깥 동작 1" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "보기 설정" })).not.toBeInTheDocument();
   });
-  it("keeps nested menu interaction inside the panel and consumes Escape one layer at a time", async () => {
+  it.each(["before", "after"])("keeps nested menu interaction inside the panel and consumes Escape one layer at a time when autofocus runs %s the menu opens", async timing => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => frames.push(callback));
     const user = userEvent.setup(); render(<Harness />);
     await user.click(screen.getByRole("button", { name: "보기 설정" }));
+    if (timing === "before") {
+      act(() => { frames.splice(0).forEach(callback => callback(performance.now())); });
+      expect(screen.getByLabelText("정렬")).toHaveFocus();
+    }
     await user.click(await screen.findByRole("button", { name: "하위 메뉴" }));
+    const menu = screen.getByRole("menu");
+    expect(menu).toHaveFocus();
+    // Run the parent's deferred autofocus after the nested portal has taken focus.
+    act(() => { frames.splice(0).forEach(callback => callback(performance.now())); });
+    expect(menu).toHaveFocus();
     await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "보기 설정" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "하위 메뉴" })).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "하위 메뉴" }));
@@ -78,6 +90,9 @@ describe("Chrome 03b workspace", () => {
     expect(screen.getByRole("dialog", { name: "보기 설정" })).toBeInTheDocument();
     expect(screen.getByLabelText("정렬")).toHaveValue("oldest");
     expect(screen.getByRole("checkbox", { name: "선택한 자산" })).toBeChecked();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "보기 설정" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "보기 설정" })).toHaveFocus();
   });
   it("does not reopen a stale panel after navigating away and returning", async () => {
     const user = userEvent.setup(); render(<Harness />);

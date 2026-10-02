@@ -6,8 +6,7 @@ import { LibraryProvider } from "../library/LibraryContext";
 import type { AssetView, ClassificationEntry, LibraryGateway } from "../library/types";
 import { ClassificationSidebar } from "./ClassificationSidebar";
 import { fixtureTarget } from "../characters/characterFixtures";
-import { buildClassificationTree } from "./buildTree";
-import { invoke } from "@tauri-apps/api/core";
+import { buildTree } from "./buildTree";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
@@ -166,9 +165,9 @@ function renderSidebar(
   return { libraryGateway, onChanged, onExpandedIdsChange, onSidebarWidthChange, onViewChange, onClearAssetSelection };
 }
 
-describe("buildClassificationTree", () => {
+describe("buildTree", () => {
   it("orders roots and children alphabetically without losing their kinds", () => {
-    const tree = buildClassificationTree([...entries].reverse());
+    const tree = buildTree([...entries].reverse());
 
     expect(tree.map((node) => node.entry.name)).toEqual(["Games"]);
     expect(tree[0].children[0].entry.kind).toBe("work");
@@ -176,7 +175,7 @@ describe("buildClassificationTree", () => {
   });
 
   it("reports whether disconnected entries were omitted", () => {
-    const tree = buildClassificationTree([...entries, { id: "lost", kind: "tag", name: "Lost", parentId: "missing", iconKey: null, colorKey: null }]);
+    const tree = buildTree([...entries, { id: "lost", kind: "tag", name: "Lost", parentId: "missing", iconKey: null, colorKey: null }]);
 
     expect(tree.hasOrphans).toBe(true);
   });
@@ -207,129 +206,6 @@ describe("ClassificationSidebar", () => {
     });
     expect(screen.getByRole("treeitem", { name: "Blue Archive" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("treeitem", { name: "Zulu" })).not.toBeInTheDocument();
-  });
-
-  it.skip("opens series relocation from a grouped character and navigates after moving", async () => {
-    const user = userEvent.setup();
-    const target = { ...fixtureTarget("lorentz", "로렌츠"), seriesClassificationId: "work", linkedClassificationId: null };
-    vi.mocked(invoke).mockImplementation(async command => {
-      if (command === "character_series") return [{ classificationId: "work" }, { classificationId: "tag" }];
-      if (command === "character_series_move_preview") return { targetId: target.id, destinationId: "tag", assetCount: 3, relocationCount: 3, sharedCount: 0, groupName: "라플라스", token: "move-token" };
-      if (command === "move_character_to_series") return { ...target, seriesClassificationId: "tag" };
-      throw new Error(command);
-    });
-    const { onViewChange, onChanged } = renderSidebar(gateway(), {
-      characters: [target],
-      characterGroups: [{ id: "laplace", name: "라플라스", seriesId: "work", revision: 1, targetIds: [target.id] }],
-      expandedIds: ["root", "work"],
-    });
-    expect(screen.queryByRole("treeitem", { name: "로렌츠" })).not.toBeInTheDocument();
-    fireEvent.contextMenu(screen.getByRole("treeitem", { name: "라플라스" }));
-    await user.click(await screen.findByRole("menuitem", { name: "로렌츠 · 다른 시리즈로 이동…" }));
-    const dialog = await screen.findByRole("dialog", { name: "로렌츠 · 다른 시리즈로 이동" });
-    await waitFor(() => expect(within(dialog).getByRole("combobox")).toBeEnabled());
-    await user.selectOptions(within(dialog).getByRole("combobox"), "tag");
-    await waitFor(() => expect(within(dialog).getByRole("button", { name: "이동" })).toBeEnabled());
-    await user.click(within(dialog).getByRole("button", { name: "이동" }));
-    expect(onChanged).toHaveBeenCalledOnce();
-    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "classification", classificationId: "tag", characterId: "lorentz" });
-  });
-  it.skip("shows only the group row for grouped characters and highlights it when a member is open", async () => {
-    const user = userEvent.setup();
-    const hina = { ...fixtureTarget("hina", "히나"), seriesClassificationId: "work", linkedClassificationId: null };
-    const kisaki = { ...fixtureTarget("kisaki", "키사키"), seriesClassificationId: "work", linkedClassificationId: null };
-    const iroha = { ...fixtureTarget("iroha", "이로하"), seriesClassificationId: "work", linkedClassificationId: null };
-    const { onViewChange, onExpandedIdsChange } = renderSidebar(gateway(), {
-      characters: [hina, kisaki, iroha],
-      characterGroups: [{ id: "group-1", seriesId: "work", name: "학생회", revision: 1, targetIds: ["hina", "kisaki"] }],
-      expandedIds: ["root"],
-      view: { kind: "classification", classificationId: "work", characterId: "hina" },
-    });
-    // Opening a member reveals and highlights its group row; members have no rows.
-    const group = await screen.findByRole("treeitem", { name: "학생회" });
-    expect(onExpandedIdsChange).toHaveBeenCalledWith(["root", "work"]);
-    expect(group).toHaveAttribute("aria-selected", "true");
-    expect(group).not.toHaveAttribute("aria-expanded");
-    expect(screen.queryByRole("treeitem", { name: "히나" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("treeitem", { name: "키사키" })).not.toBeInTheDocument();
-    expect(screen.getByRole("treeitem", { name: "이로하" })).toBeVisible();
-    await user.click(group);
-    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "classification", classificationId: "work", characterGroupId: "group-1" });
-    await user.click(screen.getByRole("treeitem", { name: "이로하" }));
-    expect(onViewChange).toHaveBeenLastCalledWith({ kind: "classification", classificationId: "work", characterId: "iroha" });
-    expect(group).toHaveAttribute("aria-selected", "false");
-  });
-
-  it.skip("draws character and group rows as light, icon-free rows while folders keep icons", () => {
-    const hina = { ...fixtureTarget("hina", "히나"), seriesClassificationId: "work", linkedClassificationId: null };
-    renderSidebar(gateway(), {
-      characters: [hina, { ...fixtureTarget("ako", "아코"), seriesClassificationId: "work", linkedClassificationId: null }],
-      characterGroups: [{ id: "group-1", seriesId: "work", name: "학생회", revision: 1, targetIds: ["ako"] }],
-      expandedIds: ["root", "work"],
-    });
-    for (const name of ["히나", "학생회"]) {
-      const row = screen.getByRole("treeitem", { name });
-      expect(row).toHaveClass("classification-sidebar__tree-row--character");
-      expect(row.querySelector("svg")).toBeNull();
-    }
-    const folder = screen.getByRole("treeitem", { name: "Arona" });
-    expect(folder).not.toHaveClass("classification-sidebar__tree-row--character");
-    expect(folder.querySelector(".classification-sidebar__tree-folder")).not.toBeNull();
-  });
-
-  it.skip("keeps only one character series expanded and leaves ordinary folders alone", async () => {
-    const user = userEvent.setup();
-    const seriesEntries: ClassificationEntry[] = [
-      ...entries,
-      { id: "other", kind: "work", name: "Nikke", parentId: "root", iconKey: null, colorKey: null },
-      { id: "plain", kind: "tag", name: "Plain", parentId: "root", iconKey: null, colorKey: null },
-      { id: "plain-child", kind: "tag", name: "Plain child", parentId: "plain", iconKey: null, colorKey: null },
-    ];
-    const hina = { ...fixtureTarget("hina", "히나"), seriesClassificationId: "work", linkedClassificationId: null };
-    const rapi = { ...fixtureTarget("rapi", "라피"), seriesClassificationId: "other", linkedClassificationId: null };
-    const { onExpandedIdsChange } = renderSidebar(gateway(), {
-      entries: seriesEntries, characters: [hina, rapi], expandedIds: ["root", "work", "plain"],
-    });
-    expect(screen.getByRole("treeitem", { name: "히나" })).toBeVisible();
-    expect(screen.queryByRole("treeitem", { name: "라피" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Nikke 펼치기" }));
-    expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["root", "plain", "other"]);
-    expect(screen.getByRole("treeitem", { name: "라피" })).toBeVisible();
-    expect(screen.queryByRole("treeitem", { name: "히나" })).not.toBeInTheDocument();
-    expect(screen.getByRole("treeitem", { name: "Plain child" })).toBeVisible();
-    // Selecting the other series opens it and closes the first one again.
-    await user.click(screen.getByRole("treeitem", { name: "Blue Archive" }));
-    await waitFor(() => expect(screen.getByRole("treeitem", { name: "히나" })).toBeVisible());
-    expect(screen.queryByRole("treeitem", { name: "라피" })).not.toBeInTheDocument();
-    expect(screen.getByRole("treeitem", { name: "Plain child" })).toBeVisible();
-    // Keyboard navigation follows the visible rows only.
-    screen.getByRole("treeitem", { name: "Blue Archive" }).focus();
-    await user.keyboard("{ArrowDown}");
-    expect(["Arona", "히나"]).toContain(document.activeElement?.getAttribute("aria-label"));
-    await user.keyboard("{ArrowDown}{ArrowDown}");
-    expect(document.activeElement?.getAttribute("aria-label")).not.toBe("라피");
-  });
-
-  it.skip("marks a visible character row as the drop target", () => {
-    const hina = { ...fixtureTarget("hina", "히나"), seriesClassificationId: "work", linkedClassificationId: null };
-    renderSidebar(gateway(), {
-      characters: [hina], expandedIds: ["root", "work"],
-      dragTarget: { kind: "character", entryId: "hina", position: "inside", valid: true },
-    });
-    expect(screen.getByRole("treeitem", { name: "히나" })).toHaveAttribute("data-drop-state", "valid");
-  });
-
-  it.skip("keeps character rows free of review-pending status", () => {
-    const hina = { ...fixtureTarget("hina", "히나"), seriesClassificationId: "work", linkedClassificationId: null };
-    const kisaki = { ...fixtureTarget("kisaki", "키사키"), seriesClassificationId: "work", linkedClassificationId: null };
-    renderSidebar(gateway(), {
-      characters: [hina, kisaki],
-      expandedIds: ["root", "work"],
-    });
-
-    expect(screen.getByRole("treeitem", { name: "히나" }).querySelector(".classification-sidebar__review-mark")).toBeNull();
-    expect(screen.getByRole("treeitem", { name: "키사키" }).querySelector(".classification-sidebar__review-mark")).toBeNull();
-    expect(screen.queryByRole("treeitem", { name: "히나 · 검토 대기 있음" })).not.toBeInTheDocument();
   });
 
   it("keeps the Originals root visible but protects its storage-only identity", async () => {
@@ -604,22 +480,6 @@ describe("ClassificationSidebar", () => {
     expect(onExpandedIdsChange).not.toHaveBeenCalled();
     rerender(<LibraryProvider gateway={gateway()}><ClassificationSidebar {...props} view={{ kind: "classification", classificationId: "tag" }} /></LibraryProvider>);
     expect(onExpandedIdsChange).toHaveBeenLastCalledWith(["root", "work"]);
-  });
-
-  it.skip("coalesces character count reads while folder counts change in quick succession", async () => {
-    const characterSidebarCounts = vi.fn().mockResolvedValue({ targets: { lorentz: 2 }, groups: {} });
-    const libraryGateway = { ...gateway(), characterSidebarCounts };
-    const target = { ...fixtureTarget("lorentz", "로렌츠"), seriesClassificationId: "work", linkedClassificationId: null };
-    const props = { collectionType: "manga" as const, expandedIds: ["root", "work"], sidebarWidth: 232, reviewCount: 0, characters: [target],
-      view: { kind: "classification", classificationId: null } as AssetView, onViewChange: vi.fn(), onExpandedIdsChange: vi.fn(), onSidebarWidthChange: vi.fn(), onChanged: vi.fn() };
-    const withCount = (count: number) => entries.map((entry) => ({ ...entry, assetCount: count, totalAssetCount: count }));
-    const { rerender } = render(<LibraryProvider gateway={libraryGateway}><ClassificationSidebar {...props} entries={withCount(1)} /></LibraryProvider>);
-    for (const count of [2, 3, 4]) rerender(<LibraryProvider gateway={libraryGateway}><ClassificationSidebar {...props} entries={withCount(count)} /></LibraryProvider>);
-    // A fresh array with the same counts is not a change.
-    rerender(<LibraryProvider gateway={libraryGateway}><ClassificationSidebar {...props} entries={withCount(4)} /></LibraryProvider>);
-    await waitFor(() => expect(screen.getByRole("treeitem", { name: "로렌츠" }).querySelector(".classification-sidebar__badge")?.textContent).toBe("2"));
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    expect(characterSidebarCounts).toHaveBeenCalledTimes(1);
   });
 
   it("exposes the trash count in the footer quick view", async () => {
