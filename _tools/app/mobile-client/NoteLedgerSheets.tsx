@@ -2,9 +2,10 @@ import {useState,type ReactNode} from 'react';
 import {BackspaceIcon,CalendarIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {useNoteEditor} from './noteCaret';
 import {Button,Dialog,DialogDescription,IconButton} from './ui';
-import {addDays,addMonths,localToday,nextCharges} from '../src/notes/ledger/cycle';
-import {LEDGER_LIMITS,monthLabel,won,type LedgerEntry,type LedgerUnit,type Planned,type Recurring} from '../src/notes/ledger/model';
+import {addDays,localToday} from '../src/notes/ledger/cycle';
+import {LEDGER_LIMITS,monthLabel,won,type LedgerEntry,type Planned,type Recurring} from '../src/notes/ledger/model';
 import {matchesKoreanSearch} from '../src/shared/koreanSearch';
+import {RecurringEditor,PlanEditor} from '../src/notes/ledger/LedgerEditors';
 import {dotDate} from '../src/notes/ledger/input';
 
 /**
@@ -118,8 +119,6 @@ export function IncomeSheet({month,monthIncome,defaultIncome,incomeDay,error,onS
   </Sheet>;
 }
 
-const UNITS:[LedgerUnit,string][]=[['week','주'],['month','개월'],['year','년']];
-const numberText=(value:string)=>value.replace(/\D/g,'').replace(/^0+(?=\d)/,'').slice(0,MAX_DIGITS);
 function Stepper({value,onChange,label,max=LEDGER_LIMITS.everyMax}:{value:number;onChange(value:number):void;label:string;max?:number}) {
   return <span className="ledger-stepper" role="group" aria-label={label}>
     <button type="button" aria-label={`${label} 줄이기`} disabled={value<=1} onClick={()=>onChange(value-1)}>−</button>
@@ -128,66 +127,12 @@ function Stepper({value,onChange,label,max=LEDGER_LIMITS.everyMax}:{value:number
   </span>;
 }
 
-/** 고정·구독 추가/고치기: 이름, 금액, 주기 (N주/개월/년), 첫 결제일, 체험 중, 만료일, 메모. */
-export function RecurringSheet({initial,order,error,onSave,onDelete,onClose}:{initial:Recurring|null;order:string;error?:string|null;onSave(item:Recurring):Saved;onDelete?():Saved;onClose():void}) {
-  const editor=useNoteEditor();
-  const today=localToday();
-  const [name,setName]=useState(initial?.name??''),[amount,setAmount]=useState(digitsOf(initial?.amount)),[every,setEvery]=useState(initial?.every??1),[unit,setUnit]=useState<LedgerUnit>(initial?.unit??'month');
-  const [start,setStart]=useState(initial?.start??today),[trial,setTrial]=useState(initial?.trial??false),[until,setUntil]=useState(initial?.until??''),[memo,setMemo]=useState(initial?.memo??'');
-  const valid=!!name.trim()&&!!amount&&!!start&&(!until||until>start);
-  async function save(){
-    if(!valid)return;
-    if(await onSave({...(initial??{}),id:initial?.id??crypto.randomUUID(),order:initial?.order??order,name:name.trim(),amount:amountOf(amount),every,unit,start,trial,until:until||null,memo}))onClose();
-  }
-  // 해지: no charge from the next one on (the service stays until then).
-  const cancelAt=nextCharges({every,unit,start,until:null},today,1)[0]??today;
-  return <Sheet title={initial?'고정·구독 고치기':'고정·구독 추가'} onClose={onClose} error={error}>
-    <div className="ledger-form">
-      <label className="ledger-field"><span>이름</span><input {...editor.bind(name,setName)} maxLength={LEDGER_LIMITS.nameChars} placeholder="넷플릭스, 월세, 보험…"/></label>
-      <label className="ledger-field"><span>금액</span><input className="numeric" inputMode="numeric" value={amount?won(amountOf(amount)):''} placeholder="₩0" aria-label="금액" onChange={event=>setAmount(numberText(event.target.value))}/></label>
-      <div className="ledger-field is-row"><span>주기</span><div className="ledger-cycle"><Stepper label="주기" value={every} onChange={setEvery}/><Segment<LedgerUnit> label="주기 단위" value={unit} options={UNITS.map(([key,text]):[LedgerUnit,string]=>[key,every===1?{week:'매주',month:'매월',year:'매년'}[key]:`${text}마다`])} onChange={setUnit}/></div></div>
-      <label className="ledger-field"><span>첫 결제일</span><input type="date" value={start} max="9999-12-31" onChange={event=>{if(event.target.value)setStart(event.target.value);}}/></label>
-      <label className="ledger-field is-check"><input type="checkbox" checked={trial} onChange={event=>setTrial(event.target.checked)}/><span>무료 체험 중 (첫 결제일까지 무료)</span></label>
-      <div className="ledger-field is-row"><span>만료일</span><div className="ledger-until">
-        <input type="date" aria-label="만료일" value={until} min={start} max="9999-12-31" onChange={event=>setUntil(event.target.value)}/>
-        {until?<Button variant="ghost" onClick={()=>setUntil('')}>만료 없음</Button>:initial&&<Button variant="ghost" onClick={()=>setUntil(cancelAt)}>해지 ({longDate(cancelAt)}부터 결제 없음)</Button>}
-      </div></div>
-      {until&&until<=start&&<p className="notes-limit" role="alert">만료일은 첫 결제일보다 뒤여야 합니다.</p>}
-      <label className="ledger-field"><span>메모</span><input {...editor.bind(memo,setMemo)} maxLength={LEDGER_LIMITS.memoChars} placeholder="선택"/></label>
-    </div>
-    <div className="ledger-sheet__actions">
-      {onDelete?<Button variant="ghost" className="is-danger" onClick={async()=>{if(await onDelete())onClose();}}>삭제</Button>:<span/>}
-      <Button variant="primary" disabled={!valid} onClick={()=>void save()}>저장</Button>
-    </div>
-  </Sheet>;
+/** Tablet frames for the shared subscription and wishlist editors. */
+export function RecurringSheet({ initial, order, error, onSave, onDelete, onClose }: { initial: Recurring | null; order: string; error?: string | null; onSave(item: Recurring): Saved; onDelete?(): Saved; onClose(): void }) {
+  return <Sheet title={initial?.name ?? '구독 추가'} onClose={onClose}><RecurringEditor initial={initial} error={error} onClose={onClose} onDelete={onDelete} onSave={patch => onSave({ ...(initial ?? { id: crypto.randomUUID(), order }), ...patch } as Recurring)} /></Sheet>;
 }
-
-/** 계획 추가/고치기: 이름, 금액, 달 (언젠가 or a month), 메모, 안 사기로 함. */
-export function PlanSheet({initial,month,order,error,onSave,onDelete,onClose}:{initial:Planned|null;month:string;order:string;error?:string|null;onSave(plan:Planned):Saved;onDelete?():Saved;onClose():void}) {
-  const editor=useNoteEditor();
-  const [name,setName]=useState(initial?.name??''),[amount,setAmount]=useState(digitsOf(initial?.amount)),[when,setWhen]=useState<string>(initial?initial.month??'':month),[memo,setMemo]=useState(initial?.memo??'');
-  const current=localToday().slice(0,7);
-  const months=Array.from({length:14},(_,i)=>addMonths(current,i-1));
-  if(when&&!months.includes(when))months.push(when);
-  months.sort();
-  const valid=!!name.trim();
-  async function save(dropped=initial?.dropped??false){
-    if(!valid)return;
-    if(await onSave({...(initial??{}),id:initial?.id??crypto.randomUUID(),order:initial?.order??order,name:name.trim(),amount:amountOf(amount),month:when||null,memo,dropped}))onClose();
-  }
-  return <Sheet title={initial?'계획 고치기':'계획 추가'} onClose={onClose} error={error}>
-    <div className="ledger-form">
-      <label className="ledger-field"><span>이름</span><input {...editor.bind(name,setName)} maxLength={LEDGER_LIMITS.nameChars} placeholder="사고 싶은 것"/></label>
-      <label className="ledger-field"><span>금액</span><input className="numeric" inputMode="numeric" aria-label="금액" value={amount?won(amountOf(amount)):''} placeholder="₩0" onChange={event=>setAmount(numberText(event.target.value))}/></label>
-      <label className="ledger-field"><span>언제</span><select value={when} aria-label="언제" onChange={event=>setWhen(event.target.value)}><option value="">언젠가</option>{months.map(m=><option key={m} value={m}>{monthLabel(m)}</option>)}</select></label>
-      <label className="ledger-field"><span>메모</span><input {...editor.bind(memo,setMemo)} maxLength={LEDGER_LIMITS.memoChars} placeholder="선택"/></label>
-    </div>
-    <div className="ledger-sheet__actions">
-      {initial&&onDelete&&<Button variant="ghost" className="is-danger" onClick={async()=>{if(await onDelete())onClose();}}>삭제</Button>}
-      {initial&&<Button variant="ghost" disabled={!valid} onClick={()=>void save(!initial.dropped)}>{initial.dropped?'다시 사기로':'안 사기로 함'}</Button>}
-      <Button variant="primary" disabled={!valid} onClick={()=>void save()}>저장</Button>
-    </div>
-  </Sheet>;
+export function PlanSheet({ initial, month, order, error, onSave, onDelete, onClose }: { initial: Planned | null; month: string; order: string; error?: string | null; onSave(item: Planned): Saved; onDelete?(): Saved; onClose(): void }) {
+  return <Sheet title={initial?.name ?? '사고 싶은 것 추가'} onClose={onClose}><PlanEditor initial={initial} month={month} error={error} onClose={onClose} onDelete={onDelete} onSave={patch => onSave({ ...(initial ?? { id: crypto.randomUUID(), order, dropped: false }), ...patch } as Planned)} /></Sheet>;
 }
 
 /** A derived charge in 기록: confirm the real amount, or skip it this time (a 0-won entry). */

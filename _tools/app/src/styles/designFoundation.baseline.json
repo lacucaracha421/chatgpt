@@ -241,10 +241,10 @@
       "legacyToken": 0
     },
     "_tools/app/src/notes/ledger/ledger.css": {
-      "offScaleSpacing": 32,
-      "offRoleFontSize": 5,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 24
+      "legacyToken": 0
     },
     "_tools/app/src/notes/memo/memo.css": {
       "offScaleSpacing": 0,
@@ -374,6 +374,12 @@
       "pillRadius": 0,
       "legacyToken": 0
     },
+    "_tools/app/mobile-client/assetSearch.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
     "_tools/app/mobile-client/avCollections.css": {
       "offScaleSpacing": 9,
       "offRoleFontSize": 9,
@@ -429,8 +435,8 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/ledger.css": {
-      "offScaleSpacing": 28,
-      "offRoleFontSize": 35,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 0
     },

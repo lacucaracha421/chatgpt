@@ -1,23 +1,19 @@
-/**
- * PC ledger (가계부) screen: left = month summary, upcoming charges and this month's plans;
- * right = 기록 (inline Tab/Enter entry row over the day-grouped table), 고정·구독 and 계획.
- * Design: docs/research/budget-notes-design-20260925.md §3.2 and §7. Figures come only from
- * ./summary and ./cycle; this file only reads and writes notes through the store.
- */
+/** PC frame and persistence for the shared accepted ledger screen. */
 import { useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode, type RefObject } from "react";
-import { ArrowPathRoundedSquareIcon, ChevronLeftIcon, ChevronRightIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { ArrowPathRoundedSquareIcon, ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 import { Button } from "../../shared/ui/Button";
 import { keyBetween } from "../model";
 import type { Note, NotesStore } from "../store";
-import { addDays, addMonths, cycleLabel, inTrial, isEnded, localToday, monthEnd, monthlyEquivalent, monthStart, nextCharges, recurringTotals } from "./cycle";
-import { forkedIds, keepOnly, LEDGER_LIMITS, ledgerLimitProblem, ledgerSizeProblem, monthLabel, signedWon, sortRecurring, validIncomeDay, won, type LedgerEntry, type LedgerUnit, type Planned, type Recurring } from "./model";
-import { baseIncome, donePlans, ledgerEntries, monthNotesOf, monthSummary, type Charge } from "./summary";
-import { amountText, daysUntil, dotDate, formatAmountInput, parseAmount, parseDay, parseMonth, weekday } from "./input";
+import { addMonths, localToday } from "./cycle";
+import { forkedIds, keepOnly, LEDGER_LIMITS, ledgerLimitProblem, ledgerSizeProblem, monthLabel, signedWon, sortRecurring, validIncomeDay, won, type LedgerEntry, type Planned, type Recurring } from "./model";
+import { baseIncome, ledgerEntries, monthNotesOf, monthSummary, type Charge } from "./summary";
+import { amountText, dotDate, formatAmountInput, parseAmount, parseDay, weekday } from "./input";
+import { Dialog } from "../../shared/ui/Dialog";
+import { LedgerContents, QuickEntry } from "./LedgerContents";
+import { RecurringEditor, PlanEditor, type RecurringChanges, type PlanChanges } from "./LedgerEditors";
 import "./ledger.css";
 export { ledgerCard } from "./card";
 
-type Tab = "entries" | "recurring" | "plans";
-const TABS: [Tab, string][] = [["entries", "기록"], ["recurring", "고정·구독"], ["plans", "계획"]];
 const monthNumber = (month: string) => Number(month.slice(5, 7));
 const codePoints = (text: string) => Array.from(text).length;
 const nameTooLong = (text: string) => codePoints(text) > LEDGER_LIMITS.nameChars;
@@ -59,20 +55,21 @@ function EntryForm({ label, month, initial, submitLabel = "추가", link, onUnli
   const [name, setName] = useState(initial.name);
   const [problem, setProblem] = useState("");
   const ownRef = useRef<HTMLInputElement>(null);
+  const composing = useRef(false), busy = useRef(false);
   const ref = amountRef ?? ownRef;
   const incoming = amount.trimStart().startsWith("+");
   async function submit() {
+    if (composing.current || busy.current) return;
     const day = parseDay(date, month);
     if (!day) { setProblem("날짜는 09-25처럼 적어 주세요."); return; }
     const parsed = parseAmount(amount);
     if (!parsed || parsed.amount === 0) { setProblem("금액을 적어 주세요."); ref.current?.focus(); return; }
     if (nameTooLong(name.trim())) { setProblem("기록 이름은 100자까지 쓸 수 있습니다."); return; }
     setProblem("");
-    if (await onSubmit({ date: day, amount: parsed.amount, name: name.trim(), in: parsed.in }) && !onCancel) {
-      setAmount(""); setName(""); ref.current?.focus();
-    }
+    busy.current = true;
+    try { await onSubmit({ date: day, amount: parsed.amount, name: name.trim(), in: parsed.in }); } finally { busy.current = false; }
   }
-  return <div className="ledger-entry-form" role="group" aria-label={label} onKeyDown={formKeys(() => void submit(), onCancel)}>
+  return <div className="ledger-entry-form" role="group" aria-label={label} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }} onKeyDown={e => { if (!composing.current) formKeys(() => void submit(), onCancel)(e); }}>
     <div className="ledger-entry-form__row">
       <input className="ledger-input ledger-entry-form__date" aria-label="날짜" autoComplete="off" value={date} onChange={(e) => setDate(e.target.value)} />
       <span className="ledger-input ledger-amount-input ledger-entry-form__amount">
@@ -91,16 +88,16 @@ function EntryForm({ label, month, initial, submitLabel = "추가", link, onUnli
 }
 
 /** A derived charge: 실제 금액으로 확정, or 이번 달은 건너뜀 (a 0-won confirmation). */
-function ChargeForm({ charge, onConfirm, onCancel }: { charge: Charge; onConfirm: (amount: number) => void; onCancel: () => void }) {
+function ChargeForm({ charge, onConfirm, onCancel }: { charge: Charge; onConfirm: (amount: number) => Promise<boolean>; onCancel: () => void }) {
   const [amount, setAmount] = useState(amountText(charge.amount));
   const [problem, setProblem] = useState("");
-  const confirm = () => { const parsed = parseAmount(amount); if (!parsed) { setProblem("금액을 적어 주세요."); return; } onConfirm(parsed.amount); };
+  const confirm = () => { const parsed = parseAmount(amount); if (!parsed) { setProblem("금액을 적어 주세요."); return; } void onConfirm(parsed.amount); };
   return <div className="ledger-entry-form" role="group" aria-label={`${charge.recurring.name} 결제 확정`} onKeyDown={formKeys(confirm, onCancel)}>
     <div className="ledger-entry-form__row">
       <span className="ledger-entry-form__caption">{dotDate(charge.date)} {charge.recurring.name}</span>
       <AmountInput label="실제 금액" value={amount} onChange={setAmount} />
       <Button variant="primary" onClick={confirm}>실제 금액으로 확정</Button>
-      <Button onClick={() => onConfirm(0)}>이번 달은 건너뜀</Button>
+      <Button onClick={() => void onConfirm(0)}>이번 달은 건너뜀</Button>
       <Button variant="ghost" onClick={onCancel}>취소</Button>
     </div>
     {problem && <p className="ledger-problem" role="alert">{problem}</p>}
@@ -132,83 +129,8 @@ function IncomeForm({ month, ledgerIncome, override, incomeDay, onSave, onCancel
   </div>;
 }
 
-type RecurringDraft = Pick<Recurring, "name" | "amount" | "every" | "unit" | "start" | "trial" | "until" | "memo">;
-function RecurringForm({ initial, today, onSave, onCancel, onDelete }: { initial?: Recurring; today: string; onSave: (draft: RecurringDraft) => void; onCancel: () => void; onDelete?: () => void }) {
-  const [name, setName] = useState(initial?.name ?? "");
-  const [amount, setAmount] = useState(amountText(initial?.amount));
-  const [every, setEvery] = useState(String(initial?.every ?? 1));
-  const [unit, setUnit] = useState<LedgerUnit>(initial?.unit ?? "month");
-  const [start, setStart] = useState(initial?.start ?? today);
-  const [trial, setTrial] = useState(initial?.trial ?? false);
-  const [until, setUntil] = useState(initial?.until ?? "");
-  const [memo, setMemo] = useState(initial?.memo ?? "");
-  const [problem, setProblem] = useState("");
-  function draft(untilValue = until): RecurringDraft | null {
-    const parsed = parseAmount(amount), n = Number(every), month = today.slice(0, 7);
-    const startDate = parseDay(start, month), untilDate = untilValue.trim() ? parseDay(untilValue, month) : null;
-    const fail = (text: string) => { setProblem(text); return null; };
-    if (!name.trim()) return fail("이름을 적어 주세요.");
-    if (nameTooLong(name.trim()) || codePoints(memo) > LEDGER_LIMITS.memoChars) return fail("이름은 100자, 메모는 500자까지 쓸 수 있습니다.");
-    if (!parsed) return fail("금액을 적어 주세요.");
-    if (!Number.isInteger(n) || n < 1 || n > LEDGER_LIMITS.everyMax) return fail("주기는 1~120 사이로 적어 주세요.");
-    if (!startDate) return fail("첫 결제일은 2026-09-25처럼 적어 주세요.");
-    if (untilValue.trim() && !untilDate) return fail("만료일은 2026-12-31처럼 적어 주세요.");
-    setProblem("");
-    return { name: name.trim(), amount: parsed.amount, every: n, unit, start: startDate, trial, until: untilDate, memo };
-  }
-  const submit = () => { const d = draft(); if (d) onSave(d); };
-  // 해지: no charge from the next renewal on (the item stays usable until then).
-  const cancelNext = initial ? nextCharges(initial, addDays(today, 1), 1)[0] ?? addDays(today, 1) : null;
-  return <div className="ledger-form ledger-form--grid" role="group" aria-label={initial ? `${initial.name} 고치기` : "고정·구독 추가"} onKeyDown={formKeys(submit, onCancel)}>
-    <label className="ledger-field"><span>이름</span><input className="ledger-input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="넷플릭스, 월세…" /></label>
-    <label className="ledger-field"><span>금액</span><AmountInput label="금액" value={amount} onChange={setAmount} /></label>
-    <div className="ledger-field"><span>주기</span><span className="ledger-cycle">
-      <input className="ledger-input" aria-label="주기 간격" inputMode="numeric" value={every} onChange={(e) => setEvery(e.target.value.replace(/\D/g, "").slice(0, 3))} />
-      <select className="ledger-input" aria-label="주기 단위" value={unit} onChange={(e) => setUnit(e.target.value as LedgerUnit)}><option value="week">주마다</option><option value="month">개월마다</option><option value="year">년마다</option></select></span></div>
-    <label className="ledger-field"><span>첫 결제일</span><input className="ledger-input" value={start} onChange={(e) => setStart(e.target.value)} placeholder="2026-09-25" /></label>
-    <label className="ledger-field ledger-field--check"><input type="checkbox" checked={trial} onChange={(e) => setTrial(e.target.checked)} /><span>첫 결제일까지 무료 체험</span></label>
-    <label className="ledger-field"><span>만료일</span><input className="ledger-input" value={until} onChange={(e) => setUntil(e.target.value)} placeholder="비우면 계속" /></label>
-    <label className="ledger-field ledger-field--wide"><span>메모</span><input className="ledger-input" value={memo} onChange={(e) => setMemo(e.target.value)} /></label>
-    <div className="ledger-form__actions">
-      <Button variant="primary" onClick={submit}>저장</Button><Button variant="ghost" onClick={onCancel}>취소</Button>
-      {initial && !initial.until && cancelNext && <Button variant="ghost" onClick={() => { const d = draft(cancelNext); if (d) onSave(d); }}>해지 · {dotDate(cancelNext)}부터 결제 없음</Button>}
-      {onDelete && <Button variant="ghost" onClick={onDelete}>삭제</Button>}
-    </div>
-    {problem && <p className="ledger-problem" role="alert">{problem}</p>}
-  </div>;
-}
-
-type PlanDraft = Pick<Planned, "name" | "amount" | "month" | "memo">;
-function PlanForm({ initial, currentMonth, onSave, onCancel, onDelete }: { initial?: Planned; currentMonth: string; onSave: (draft: PlanDraft) => void; onCancel: () => void; onDelete?: () => void }) {
-  const [name, setName] = useState(initial?.name ?? "");
-  const [amount, setAmount] = useState(amountText(initial?.amount));
-  const [month, setMonth] = useState(initial ? initial.month ?? "" : currentMonth);
-  const [memo, setMemo] = useState(initial?.memo ?? "");
-  const [problem, setProblem] = useState("");
-  function submit() {
-    const parsed = parseAmount(amount), m = parseMonth(month, currentMonth);
-    if (!name.trim()) { setProblem("이름을 적어 주세요."); return; }
-    if (nameTooLong(name.trim()) || codePoints(memo) > LEDGER_LIMITS.memoChars) { setProblem("이름은 100자, 메모는 500자까지 쓸 수 있습니다."); return; }
-    if (!parsed) { setProblem("금액을 적어 주세요."); return; }
-    if (m === undefined) { setProblem("달은 2026-10처럼 적거나 비워 두세요."); return; }
-    setProblem("");
-    onSave({ name: name.trim(), amount: parsed.amount, month: m, memo });
-  }
-  return <div className="ledger-form ledger-form--grid" role="group" aria-label={initial ? `${initial.name} 고치기` : "계획 추가"} onKeyDown={formKeys(submit, onCancel)}>
-    <label className="ledger-field"><span>이름</span><input className="ledger-input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="사고 싶은 것" /></label>
-    <label className="ledger-field"><span>금액</span><AmountInput label="금액" value={amount} onChange={setAmount} /></label>
-    <label className="ledger-field"><span>달</span><input className="ledger-input" value={month} onChange={(e) => setMonth(e.target.value)} placeholder="비우면 언젠가" /></label>
-    <label className="ledger-field"><span>메모</span><input className="ledger-input" value={memo} onChange={(e) => setMemo(e.target.value)} /></label>
-    <div className="ledger-form__actions"><Button variant="primary" onClick={submit}>저장</Button><Button variant="ghost" onClick={onCancel}>취소</Button>{onDelete && <Button variant="ghost" onClick={onDelete}>삭제</Button>}</div>
-    {problem && <p className="ledger-problem" role="alert">{problem}</p>}
-  </div>;
-}
-
 function ForkBar({ onKeep }: { onKeep: () => void }) {
   return <div className="ledger-fork"><span>두 기기에서 다르게 고침</span><Button size="sm" onClick={onKeep}>이것만 남기기</Button></div>;
-}
-function SectionLabel({ children }: { children: ReactNode }) {
-  return <h3 className="ledger-label">{children}<span aria-hidden="true" /></h3>;
 }
 
 export function LedgerView({ store, ledgerId, today, actions, children }: { store: NotesStore; ledgerId: string; today?: string; actions?: ReactNode; children?: ReactNode }) {
@@ -228,27 +150,21 @@ function orderAfter<T extends Recurring | Planned>(list: T[]): string {
 function LedgerScreen({ store, ledger, notes, today, actions, children }: { store: NotesStore; ledger: Note; notes: Note[]; today: string; actions?: ReactNode; children?: ReactNode }) {
   const currentMonth = today.slice(0, 7);
   const [month, setMonth] = useState(currentMonth);
-  const [tab, setTab] = useState<Tab>("entries");
-  const [buying, setBuying] = useState<Planned | null>(null);
   const [incomeOpen, setIncomeOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [editingRec, setEditingRec] = useState<string | null>(null);
   const [editingPlan, setEditingPlan] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const amountRef = useRef<HTMLInputElement>(null);
 
   const monthNotes = useMemo(() => monthNotesOf(notes, ledger.id), [notes, ledger.id]);
   const entries = useMemo(() => ledgerEntries(monthNotes), [monthNotes]);
   const summary = useMemo(() => monthSummary(ledger, monthNotes, month, today, entries), [ledger, monthNotes, month, today, entries]);
   const recurring = ledger.recurring ?? [];
   const planned = ledger.planned ?? [];
-  const done = useMemo(() => donePlans(entries), [entries]);
   const forkedEntries = useMemo(() => forkedIds(entries), [entries]);
-  const forkedRecurring = forkedIds(recurring), forkedPlans = forkedIds(planned);
   const override = monthNotes.find((n) => n.month === month && n.income != null)?.income ?? null;
   const base = baseIncome(ledger, monthNotes, month);
-  const M = monthNumber(month);
 
   // ---- writes -------------------------------------------------------------------------
   const freshMonthNotes = () => monthNotesOf(store.snapshot().notes, ledger.id);
@@ -265,6 +181,8 @@ function LedgerScreen({ store, ledger, notes, today, actions, children }: { stor
   async function saveMonth(m: string, update: (list: LedgerEntry[]) => LedgerEntry[], extra: Partial<Note> = {}): Promise<boolean> {
     try {
       const id = await store.ledgerMonth(ledger.id, m);
+      // Finish the initial empty-month save before writing its first entry.
+      if (!await store.flush()) { setError(store.snapshot().error ?? "가계부 기록을 저장하지 못했습니다."); return false; }
       const note = store.snapshot().notes.find((n) => n.id === id);
       if (!note) return false;
       const next = { ...note, ...extra, entries: update(note.entries ?? []) };
@@ -302,64 +220,35 @@ function LedgerScreen({ store, ledger, notes, today, actions, children }: { stor
     return true;
   }
   async function saveIncome(income: number | null, only: number | null, incomeDay: number | null) {
-    if ((income !== (ledger.income ?? null) || incomeDay !== (ledger.incomeDay ?? null)) && !saveLedger(() => ({ income, incomeDay }))) return;
+    if ((income !== (ledger.income ?? null) || incomeDay !== (ledger.incomeDay ?? null)) && !saveLedger(() => ({ ...(income !== (ledger.income ?? null) ? { income } : {}), ...(incomeDay !== (ledger.incomeDay ?? null) ? { incomeDay } : {}) }))) return;
     const hasMonthNote = monthNotes.some((n) => n.month === month);
     if (only !== override && (only !== null || hasMonthNote) && !await saveMonth(month, (list) => list, { income: only })) return;
     setIncomeOpen(false);
   }
-  function saveRecurring(id: string | null, draft: RecurringDraft) {
+  function saveRecurring(id: string | null, draft: RecurringChanges) {
     const ok = saveLedger((current) => {
       const list = current.recurring ?? [];
       const old = id ? list.find((r) => r.id === id) : undefined;
       return { recurring: upsert(list, { ...(old ?? { id: crypto.randomUUID(), order: orderAfter(list) }), ...draft } as Recurring) };
     });
-    if (ok) setEditingRec(null);
+    return ok;
   }
-  function savePlan(id: string | null, draft: PlanDraft) {
+  function savePlan(id: string | null, draft: PlanChanges) {
     const ok = saveLedger((current) => {
       const list = current.planned ?? [];
       const old = id ? list.find((p) => p.id === id) : undefined;
       return { planned: upsert(list, { ...(old ?? { id: crypto.randomUUID(), order: orderAfter(list), dropped: false }), ...draft } as Planned) };
     });
-    if (ok) setEditingPlan(null);
+    return ok;
   }
-  const setDropped = (id: string, dropped: boolean) => saveLedger((c) => ({ planned: (c.planned ?? []).map((p) => (p.id === id ? { ...p, dropped } : p)) }));
-  function buy(plan: Planned) {
-    setBuying(plan); setTab("entries");
-    requestAnimationFrame(() => amountRef.current?.focus());
-  }
-  const focusEntryRow = () => { setTab("entries"); requestAnimationFrame(() => amountRef.current?.focus()); };
-
-  // ---- derived view data --------------------------------------------------------------
-  const defaultDate = month === currentMonth ? today : month < currentMonth ? monthEnd(month) : monthStart(month);
+  const focusEntryRow = () => document.querySelector<HTMLInputElement>('[aria-label="지출 빠른 입력"]')?.focus();
   const days = useMemo(() => {
-    const byDay = new Map<string, { entries: LedgerEntry[]; charges: Charge[] }>();
-    const day = (date: string) => { let d = byDay.get(date); if (!d) byDay.set(date, (d = { entries: [], charges: [] })); return d; };
-    for (const e of summary.entries) day(e.date).entries.push(e);
-    for (const c of summary.pastCharges) day(c.date).charges.push(c);
-    return [...byDay.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([date, d]) => ({
-      date, ...d, total: d.entries.filter((e) => !e.in).reduce((s, e) => s + e.amount, 0) + d.charges.reduce((s, c) => s + c.amount, 0),
-    }));
+    const grouped = new Map<string, { entries: LedgerEntry[]; charges: Charge[] }>();
+    const at = (date: string) => { let day = grouped.get(date); if (!day) grouped.set(date, day = { entries: [], charges: [] }); return day; };
+    for (const entry of summary.entries) at(entry.date).entries.push(entry);
+    for (const charge of summary.pastCharges) at(charge.date).charges.push(charge);
+    return [...grouped.entries()].sort(([a], [b]) => b.localeCompare(a));
   }, [summary]);
-  type Upcoming = { kind: "charge"; r: Recurring; date: string } | { kind: "income"; date: string; amount: number };
-  const upcoming = useMemo((): Upcoming[] => {
-    const income: Upcoming[] = summary.incomeUpcoming && summary.incomeDate && base !== null ? [{ kind: "income", date: summary.incomeDate, amount: base }] : [];
-    if (summary.phase === "past") return income;
-    const from = summary.phase === "current" ? addDays(today, 1) : monthStart(month);
-    const confirmed = new Set(entries.filter((e) => e.recurring).map((e) => `${e.recurring!.id}\n${e.recurring!.date}`));
-    // One line per item: only its next unconfirmed charge, so a subscription never repeats.
-    const charges = recurring.flatMap((r) => nextCharges(r, from, 3).filter((date) => !confirmed.has(`${r.id}\n${date}`)).slice(0, 1).map((date): Upcoming => ({ kind: "charge", r, date })))
-      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).slice(0, 3);
-    // The upcoming income joins the charges by date (money in, not counted as a charge).
-    return [...charges, ...income].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.kind === "income" ? -1 : 1));
-  }, [summary.phase, summary.incomeUpcoming, summary.incomeDate, base, today, month, entries, recurring]);
-  const totals = recurringTotals(recurring, today);
-  const nextOf = (r: Recurring) => nextCharges(r, today, 1)[0] ?? null;
-  const activeRecurring = recurring.filter((r) => !isEnded(r, today)).map((r) => ({ r, next: nextOf(r) })).sort((a, b) => (a.next ?? "9999") < (b.next ?? "9999") ? -1 : (a.next ?? "9999") > (b.next ?? "9999") ? 1 : a.r.order < b.r.order ? -1 : 1);
-  const endedRecurring = sortRecurring(recurring.filter((r) => isEnded(r, today)));
-  const ledgerForks = recurring.filter((r) => r.forkOf).length + planned.filter((p) => p.forkOf).length;
-
-  // ---- render pieces ------------------------------------------------------------------
   const entryRow = (e: LedgerEntry) => <li key={e.id} className={`ledger-entry${forkedEntries.has(e.id) ? " is-forked" : ""}`}>
     {editingEntry === e.id
       ? <EntryForm label="기록 고치기" submitLabel="저장" month={month} initial={{ date: e.date, amount: amountText(e.amount), name: e.name, in: !!e.in }}
@@ -374,7 +263,7 @@ function LedgerScreen({ store, ledger, notes, today, actions, children }: { stor
   </li>;
   const chargeRow = (c: Charge) => { const key = `${c.recurring.id}\n${c.date}`; return <li key={key} className="ledger-entry is-derived">
     {confirming === key
-      ? <ChargeForm charge={c} onCancel={() => setConfirming(null)} onConfirm={(amount) => { setConfirming(null); void addEntry({ date: c.date, amount, name: c.recurring.name, in: false }, { recurring: { id: c.recurring.id, date: c.date } }); }} />
+      ? <ChargeForm charge={c} onCancel={() => setConfirming(null)} onConfirm={async amount => { const ok = await addEntry({ date: c.date, amount, name: c.recurring.name, in: false }, { recurring: { id: c.recurring.id, date: c.date } }); if (ok) setConfirming(null); return ok; }} />
       : <button type="button" className="ledger-entry__main" onClick={() => setConfirming(key)}>
           <span className="ledger-entry__icon" aria-hidden="true"><ArrowPathRoundedSquareIcon /></span>
           <span className="ledger-entry__name">{c.recurring.name}</span>
@@ -383,136 +272,39 @@ function LedgerScreen({ store, ledger, notes, today, actions, children }: { stor
         </button>}
   </li>; };
 
-  const entriesPanel = <>
-    <EntryForm key={`add:${month}:${buying?.id ?? ""}`} label="새 기록" month={month} amountRef={amountRef}
-      initial={{ date: defaultDate, amount: buying ? amountText(buying.amount) : "", name: buying?.name ?? "", in: false }}
-      link={buying?.name} onUnlink={() => setBuying(null)}
-      onSubmit={async (d) => { const plan = buying; const ok = await addEntry(d, plan ? { planned: plan.id } : {}); if (ok && plan) { setBuying(null); requestAnimationFrame(() => amountRef.current?.focus()); } return ok; }} />
-    <p className="ledger-hint"><kbd>Ctrl</kbd>+<kbd>N</kbd> 새 기록 · <kbd>Tab</kbd> 다음 칸 · 금액 앞에 <kbd>+</kbd> 들어온 돈 · <kbd>Enter</kbd> 추가 · <kbd>Alt</kbd>+<kbd>←</kbd><kbd>→</kbd> 달 이동</p>
-    {days.length === 0 && <p className="ledger-empty">{M}월 기록이 없어요.</p>}
-    {days.map((d) => <section key={d.date} className="ledger-day" aria-label={`${dotDate(d.date)} ${weekday(d.date)}`}>
-      <header className="ledger-day__head"><b>{dotDate(d.date)}</b><span>{weekday(d.date)}</span><span className="ledger-day__total">{won(d.total)}</span></header>
-      <ul>{d.entries.map(entryRow)}{d.charges.map(chargeRow)}</ul>
+
+  const spending = <>{summary.reviewCount > 0 && <p className="ledger-review" role="status">확인할 기록 {summary.reviewCount}건</p>}
+    {!days.length && <p className="ledger-empty">기록 없음</p>}
+    {days.map(([date, day]) => <section key={date} className="ledger-day" aria-label={`${dotDate(date)} ${weekday(date)}`}>
+      <header className="ledger-day__head">{dotDate(date)}</header><ul>{day.entries.map(entryRow)}{day.charges.map(chargeRow)}</ul>
     </section>)}
   </>;
-
-  const recurringRow = ({ r, next }: { r: Recurring; next: string | null }) => <li key={r.id} className={`ledger-rec${isEnded(r, today) ? " is-ended" : ""}${forkedRecurring.has(r.id) ? " is-forked" : ""}`}>
-    {editingRec === r.id
-      ? <RecurringForm initial={r} today={today} onSave={(d) => saveRecurring(r.id, d)} onCancel={() => setEditingRec(null)} onDelete={() => { if (saveLedger((c) => ({ recurring: (c.recurring ?? []).filter((x) => x.id !== r.id) }))) setEditingRec(null); }} />
-      : <button type="button" className="ledger-rec__main" onClick={() => setEditingRec(r.id)}>
-          <span className="ledger-mono" aria-hidden="true">{Array.from(r.name.trim())[0] ?? "·"}</span>
-          <span className="ledger-rec__name"><strong>{r.name}
-            {inTrial(r, today) && <span className="ledger-badge">체험 중 · 첫 결제 {dotDate(r.start)}</span>}
-            {r.until && !isEnded(r, today) && <span className="ledger-badge ledger-badge--soft">해지함 · {dotDate(r.until)} 만료</span>}
-            {r.until && isEnded(r, today) && <span className="ledger-badge ledger-badge--soft">{r.until} 종료</span>}</strong>
-            <small>{cycleLabel(r)}{r.memo ? ` · ${r.memo}` : ""}</small></span>
-          <span className="ledger-rec__when">{next ? <><b>{dotDate(next)}</b><small>{daysUntil(next, today)}</small></> : <small>결제 없음</small>}</span>
-          <span className="ledger-rec__amount"><b>{won(r.amount)}</b>{!(r.unit === "month" && r.every === 1) && <small>월 {won(monthlyEquivalent(r))}</small>}</span>
-        </button>}
-    {forkedRecurring.has(r.id) && <ForkBar onKeep={() => saveLedger((c) => ({ recurring: keepOnly(c.recurring ?? [], r.id) }))} />}
-  </li>;
-  const trialLines = recurring.filter((r) => inTrial(r, today) && !isEnded(r, today)).sort((a, b) => (a.start < b.start ? -1 : 1));
-  const recurringPanel = <>
-    <div className="ledger-subsum">
-      <div><small>월 환산 합계</small><b>{won(totals.monthly)}</b></div>
-      <p>1년 <span className="ledger-num">{won(totals.yearly)}</span> · {M}월 결제 <span className="ledger-num">{won(summary.recurringThisMonth)}</span> · 사용 중 <span className="ledger-num">{totals.active}</span>개</p>
-      {trialLines.map((r) => <p key={r.id}>{monthNumber(r.start)}월부터 {r.name} +{amountText(r.amount)}</p>)}
-    </div>
-    <div className="ledger-toolbar"><Button size="sm" onClick={() => setEditingRec("new")}><PlusIcon aria-hidden="true" />고정·구독 추가</Button></div>
-    {editingRec === "new" && <RecurringForm today={today} onSave={(d) => saveRecurring(null, d)} onCancel={() => setEditingRec(null)} />}
-    {!recurring.length && editingRec !== "new" && <p className="ledger-empty">구독이나 월세처럼 반복해서 나가는 돈을 적어 두세요.</p>}
-    <ul className="ledger-list">{activeRecurring.map(recurringRow)}</ul>
-    {endedRecurring.length > 0 && <details className="ledger-ended"><summary>종료됨 {endedRecurring.length}</summary><ul className="ledger-list">{endedRecurring.map((r) => recurringRow({ r, next: null }))}</ul></details>}
-  </>;
-
-  const planRow = (p: Planned) => { const doneBy = done.get(p.id); return <li key={p.id} className={`ledger-plan${doneBy || p.dropped ? " is-closed" : ""}${forkedPlans.has(p.id) ? " is-forked" : ""}`}>
-    {editingPlan === p.id
-      ? <PlanForm initial={p} currentMonth={currentMonth} onSave={(d) => savePlan(p.id, d)} onCancel={() => setEditingPlan(null)} onDelete={() => { if (saveLedger((c) => ({ planned: (c.planned ?? []).filter((x) => x.id !== p.id) }))) setEditingPlan(null); }} />
-      : <div className="ledger-plan__row">
-          <button type="button" className="ledger-plan__name" onClick={() => setEditingPlan(p.id)}><strong>{p.name}</strong>{p.memo && <small>{p.memo}</small>}</button>
-          <span className="ledger-plan__amount">{won(p.amount)}</span>
-          {doneBy ? <span className="ledger-plan__state">샀어요 · {dotDate(doneBy.date)} {won(doneBy.amount)}</span>
-            : p.dropped ? <><span className="ledger-plan__state">안 사기로 함</span><Button size="sm" variant="ghost" onClick={() => setDropped(p.id, false)}>되돌리기</Button></>
-            : <><Button size="sm" onClick={() => buy(p)}>샀어요</Button><Button size="sm" variant="ghost" onClick={() => setDropped(p.id, true)}>안 사기로 함</Button></>}
-        </div>}
-    {forkedPlans.has(p.id) && <ForkBar onKeep={() => saveLedger((c) => ({ planned: keepOnly(c.planned ?? [], p.id) }))} />}
-  </li>; };
-  const openPlans = sortRecurring(planned.filter((p) => !p.dropped && !done.has(p.id)));
-  const closedPlans = sortRecurring(planned.filter((p) => p.dropped || done.has(p.id)));
-  const planGroups = (() => {
-    const groups = new Map<string, Planned[]>();
-    const keyOf = (p: Planned) => p.month ?? "~";
-    for (const p of [...openPlans].sort((a, b) => (keyOf(a) < keyOf(b) ? -1 : keyOf(a) > keyOf(b) ? 1 : 0))) { const k = keyOf(p); groups.set(k, [...(groups.get(k) ?? []), p]); }
-    return [...groups.entries()].map(([k, list]) => ({ key: k, label: k === "~" ? "언젠가" : k === currentMonth ? "이번 달" : monthLabel(k), list }));
-  })();
-  const plansPanel = <>
-    <div className="ledger-toolbar"><Button size="sm" onClick={() => setEditingPlan("new")}><PlusIcon aria-hidden="true" />계획 추가</Button></div>
-    {editingPlan === "new" && <PlanForm currentMonth={month} onSave={(d) => savePlan(null, d)} onCancel={() => setEditingPlan(null)} />}
-    {!planned.length && editingPlan !== "new" && <p className="ledger-empty">사고 싶은 것을 미리 적어 두면 그 달의 쓸 수 있는 돈에서 빠져요.</p>}
-    {planGroups.map((g) => <section key={g.key} className="ledger-sec" aria-label={g.label}><SectionLabel>{g.label}</SectionLabel><ul className="ledger-list">{g.list.map(planRow)}</ul></section>)}
-    {closedPlans.length > 0 && <details className="ledger-ended"><summary>끝난 계획 {closedPlans.length}</summary><ul className="ledger-list">{closedPlans.map(planRow)}</ul></details>}
-  </>;
-
-  const spentShare = summary.income > 0 ? Math.min(100, (summary.spent / summary.income) * 100) : 0;
-  const scheduledShare = summary.income > 0 ? Math.min(100 - spentShare, (summary.scheduled / summary.income) * 100) : 0;
-  const headline = summary.phase === "current" ? "이번 달 쓸 수 있는 돈" : summary.phase === "past" ? `${M}월 남은 돈` : `${M}월 쓸 수 있는 돈`;
-
-  return <div className="ledger" onKeyDown={(e) => {
-    if (e.nativeEvent.isComposing) return;
-    const mod = e.ctrlKey || e.metaKey;
-    if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") { e.preventDefault(); e.stopPropagation(); focusEntryRow(); }
-    else if (e.altKey && !mod && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); setMonth((m) => addMonths(m, e.key === "ArrowLeft" ? -1 : 1)); setEditingEntry(null); setConfirming(null); }
+  return <div className="ledger" onKeyDown={e => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); e.stopPropagation(); focusEntryRow(); }
+    else if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); setMonth(m => addMonths(m, e.key === 'ArrowLeft' ? -1 : 1)); }
   }}>
     {children}
-    {error && <p className="ledger-problem ledger-banner" role="alert">{error}</p>}
-    <div className="ledger__panes">
-      <section className="ledger-summary" aria-label={`${monthLabel(month)} 요약`}>
-        <div className="ledger-monthrow">
-          <Button size="icon" variant="ghost" aria-label="이전 달" onClick={() => setMonth(addMonths(month, -1))}><ChevronLeftIcon aria-hidden="true" /></Button>
-          <h2>{monthLabel(month)}</h2>
-          <Button size="icon" variant="ghost" aria-label="다음 달" onClick={() => setMonth(addMonths(month, 1))}><ChevronRightIcon aria-hidden="true" /></Button>
-          {month !== currentMonth && <Button size="sm" variant="ghost" onClick={() => setMonth(currentMonth)}>이번 달로</Button>}
-          <span className="ledger-spacer" />
-          <Button size="sm" variant="ghost" aria-expanded={incomeOpen} onClick={() => setIncomeOpen(!incomeOpen)}>{base !== null ? `수입 ${amountText(base)}${summary.incomeDate ? ` · ${Number(summary.incomeDate.slice(8))}일` : ""}` : "수입 적기"}</Button>
-        </div>
-        {incomeOpen && <IncomeForm key={month} month={month} ledgerIncome={ledger.income ?? null} override={override} incomeDay={ledger.incomeDay ?? null} onSave={(income, only, day) => void saveIncome(income, only, day)} onCancel={() => setIncomeOpen(false)} />}
-        <div className="ledger-hero">
-          {summary.available !== null ? <>
-            <p className="ledger-hero__k">{headline}</p>
-            <p className={`ledger-hero__big${summary.available < 0 ? " is-over" : ""}`} aria-label={`${headline} ${signedWon(summary.available)}`}>{summary.available < 0 && "−"}<span className="ledger-hero__won">₩</span>{amountText(Math.abs(summary.available))}</p>
-            {summary.perDay !== null && summary.perDay > 0 && <p className="ledger-hero__sub">하루 약 <span className="ledger-num">{won(summary.perDay)}</span> · 남은 날 <span className="ledger-num">{summary.remainingDays}</span>일</p>}
-          </> : <>
-            <p className="ledger-hero__k">{summary.phase === "current" ? "이번 달 쓴 돈" : `${M}월 쓴 돈`}</p>
-            <p className="ledger-hero__big" aria-label={`쓴 돈 ${won(summary.spent)}`}><span className="ledger-hero__won">₩</span>{amountText(summary.spent)}</p>
-            <p className="ledger-hero__sub">수입을 적으면 쓸 수 있는 돈이 보여요</p>
-          </>}
-          {summary.income > 0 && <div className="ledger-meter" role="img" aria-label={`수입 중 쓴 돈 ${Math.round(spentShare)}%, 예정 ${Math.round(scheduledShare)}%`}><i className="ledger-meter__spent" style={{ width: `${spentShare}%` }} /><i className="ledger-meter__coming" style={{ width: `${scheduledShare}%` }} /></div>}
-          <dl className="ledger-figs">
-            <div><dt>수입</dt><dd>{amountText(summary.income)}</dd></div>
-            <div><dt>쓴 돈</dt><dd>{amountText(summary.spent)}</dd></div>
-            <div><dt>예정</dt><dd>{amountText(summary.scheduled)}</dd></div>
-            <div><dt>고정·구독 이번 달</dt><dd>{amountText(summary.recurringThisMonth)}</dd></div>
-          </dl>
-          {summary.reviewCount > 0 && <p className="ledger-review" role="status">확인할 기록 {summary.reviewCount}건 · 두 기기에서 다르게 고친 기록이 모두 더해져 있어요</p>}
-          {ledgerForks > 0 && <p className="ledger-review" role="status">확인할 고정·구독·계획 {ledgerForks}건</p>}
-        </div>
-        {upcoming.length > 0 && <section className="ledger-sec" aria-label="다가오는 결제"><SectionLabel>다가오는 결제</SectionLabel>
-          <ul className="ledger-list">{upcoming.map((u) => u.kind === "income"
-            ? <li key="income" className="ledger-line is-in"><span className="ledger-line__date">{dotDate(u.date)}</span><span className="ledger-line__name">수입</span><span className="ledger-line__amount">+{won(u.amount)}</span></li>
-            : <li key={`${u.r.id}\n${u.date}`} className="ledger-line"><span className="ledger-line__date">{dotDate(u.date)}</span><span className="ledger-line__name">{u.r.name}{u.r.trial && u.date === u.r.start ? " (체험 끝)" : ""}</span><span className="ledger-line__amount">{won(u.r.amount)}</span></li>)}</ul></section>}
-        {summary.plans.length > 0 && <section className="ledger-sec" aria-label={`${M}월 계획`}><SectionLabel>{summary.phase === "current" ? "이번 달 계획" : `${M}월 계획`}</SectionLabel>
-          <ul className="ledger-list">{summary.plans.map(({ plan, doneBy }) => <li key={plan.id} className={`ledger-line${doneBy ? " is-closed" : ""}`}>
-            <span className="ledger-line__name">{plan.name}</span><span className="ledger-line__amount">{won(doneBy ? doneBy.amount : plan.amount)}</span>
-            {doneBy ? <span className="ledger-plan__state">샀어요</span> : <Button size="sm" onClick={() => buy(plan)}>샀어요</Button>}</li>)}</ul></section>}
-      </section>
-      <section className="ledger-main" aria-label="가계부 내용">
-        <div className="ledger-tabs">
-          <div className="ledger-seg" role="group" aria-label="가계부 보기">{TABS.map(([id, text]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)}>{text}</button>)}</div>
-          <span className="ledger-count">{M}월 기록 <span className="ledger-num">{summary.entries.length}</span>건</span>
-          {actions && <div className="ledger-actions">{actions}</div>}
-        </div>
-        {tab === "entries" ? entriesPanel : tab === "recurring" ? recurringPanel : plansPanel}
-      </section>
+    <div className="ledger-page">
+      <div className="ledger-monthrow"><Button size="icon" variant="ghost" aria-label="이전 달" onClick={() => setMonth(addMonths(month, -1))}><ChevronLeftIcon /></Button><h2>{monthLabel(month)}</h2><Button size="icon" variant="ghost" aria-label="다음 달" onClick={() => setMonth(addMonths(month, 1))}><ChevronRightIcon /></Button>
+        {month !== currentMonth && <Button size="sm" variant="quiet" onClick={() => setMonth(currentMonth)}>이번 달로</Button>}<span className="ledger-spacer" />
+        <Button size="sm" variant="quiet" onClick={() => setIncomeOpen(!incomeOpen)}>{base === null ? '예산 정하기' : `예산 ${won(base)}${summary.incomeDate ? ` · ${Number(summary.incomeDate.slice(8))}일` : ''}`}</Button>{actions}
+      </div>
+      {incomeOpen && <IncomeForm key={month} month={month} ledgerIncome={ledger.income ?? null} override={override} incomeDay={ledger.incomeDay ?? null} onSave={(income, only, day) => void saveIncome(income, only, day)} onCancel={() => setIncomeOpen(false)} />}
+      {error && !editingRec && !editingPlan && <p className="ledger-problem" role="alert">{error}</p>}
+      <LedgerContents ledger={ledger} summary={summary} all={entries} today={today} spending={spending}
+        quickInput={<QuickEntry onSave={d => addEntry({ ...d, date: today, in: false })} />}
+        onRecurring={r => { setError(null); setEditingRec(r?.id ?? 'new'); }} onPlan={p => { setError(null); setEditingPlan(p?.id ?? 'new'); }}
+        onBuy={p => addEntry({ name: p.name, amount: p.amount, date: today, in: false }, { planned: p.id })}
+        onKeepRecurring={id => saveLedger(c => ({ recurring: keepOnly(c.recurring ?? [], id) }))} onKeepPlan={id => saveLedger(c => ({ planned: keepOnly(c.planned ?? [], id) }))} />
     </div>
+    {editingRec && <Dialog open title={recurring.find(r => r.id === editingRec)?.name ?? '구독 추가'} onClose={() => setEditingRec(null)}>
+      <RecurringEditor key={editingRec} initial={recurring.find(r => r.id === editingRec)} today={today} error={error} onClose={() => setEditingRec(null)} onSave={d => saveRecurring(editingRec === 'new' ? null : editingRec, d)}
+        onDelete={editingRec === 'new' ? undefined : () => saveLedger(c => ({ recurring: (c.recurring ?? []).filter(r => r.id !== editingRec) }))} />
+    </Dialog>}
+    {editingPlan && <Dialog open title={planned.find(p => p.id === editingPlan)?.name ?? '사고 싶은 것 추가'} onClose={() => setEditingPlan(null)}>
+      <PlanEditor key={editingPlan} initial={planned.find(p => p.id === editingPlan)} month={month} error={error} onClose={() => setEditingPlan(null)} onSave={d => savePlan(editingPlan === 'new' ? null : editingPlan, d)}
+        onDelete={editingPlan === 'new' ? undefined : () => saveLedger(c => ({ planned: (c.planned ?? []).filter(p => p.id !== editingPlan) }))} />
+    </Dialog>}
   </div>;
 }

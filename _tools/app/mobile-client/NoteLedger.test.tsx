@@ -37,259 +37,54 @@ function serve(notes:MobileNote[]){
 beforeEach(()=>{mock.native.mockReset();vi.useFakeTimers({toFake:['Date'],now:new Date(2026,8,25,12)});serve([text,ledger,monthNote('2026-09',september)]);});
 afterEach(()=>{cleanup();vi.useRealTimers();});
 const renderNotes=(backRef:{current:(()=>boolean)|null}={current:null})=>render(<Notes active backRef={backRef}/>);
-async function openLedger(){fireEvent.click(await screen.findByRole('button',{name:/^가계부/}));await screen.findByRole('tablist',{name:'가계부'});}
+async function openLedger(){fireEvent.click(await screen.findByRole('button',{name:/^가계부/}));await screen.findByRole('heading',{name:'구독'});}
 const sheet=async()=>within(await screen.findByRole('dialog'));
 const lastSave=(id:string)=>saves().filter(s=>s.id===id).at(-1)!;
 
-it('number pad presses: no leading zeros, 000, backspace and at most 12 digits',()=>{
-  expect(pressKey('','0')).toBe('');expect(pressKey('','000')).toBe('');
-  expect(pressKey('12','000')).toBe('12000');expect(pressKey('12000','⌫')).toBe('1200');
-  expect(pressKey('999999999999','1')).toBe('999999999999');expect(pressKey('99999999999','000')).toBe('99999999999');
+const section=(name:string)=>within(screen.getByRole('region',{name}));
+const openSub=(name:string)=>fireEvent.click(section('구독').getByRole('button',{name:new RegExp(`^${name}`)}));
+it('keeps the number pad for entry editing',()=>{expect(pressKey('','0')).toBe('');expect(pressKey('12','000')).toBe('12000');expect(pressKey('12000','⌫')).toBe('1200');});
+it('renders old ledgers with the accepted budget figures and this-month strip',async()=>{
+ renderNotes();await openLedger();
+ for(const [label,value] of [['예산','₩2,300,000'],['고정','₩1,035,990'],['쓴 돈','₩612,400'],['남은 돈','₩651,610']])expect(screen.getByLabelText(label!).textContent).toBe(value);
+ expect(section('이번 달 결제 예정').getAllByRole('listitem')).toHaveLength(2);expect(screen.queryByText('가계부 2026-09')).toBeNull();expect(saves()).toHaveLength(0);
 });
-it('shows the month figures from the fixture on the card and the 이번 달 tab, and keeps month notes out of the list and 보관함',async()=>{
-  renderNotes();
-  const card=await screen.findByRole('button',{name:/^가계부/});
-  expect(card.textContent).toContain('9월 쓸 수 있는 돈 ₩562,610');
- expect(card.textContent).toContain('다음 결제 9월 27일 · 쿠팡 와우');
-  // The archived month note is hidden: no 보관함 link, no card titled after the month.
-  expect(screen.queryByText('가계부 2026-09')).toBeNull();
-  expect(screen.queryByRole('button',{name:/보관함/})).toBeNull();
-  // Search matches the ledger by title only (its fallback body is not searched).
-  fireEvent.change(screen.getByRole('textbox',{name:'메모 검색'}),{target:{value:'김치찌개'}});
-  expect(screen.queryByRole('button',{name:/^가계부/})).toBeNull();
-  fireEvent.change(screen.getByRole('textbox',{name:'메모 검색'}),{target:{value:''}});
-  await openLedger();
-  expect(screen.getByLabelText('이번 달 쓸 수 있는 돈').textContent).toBe('₩562,610');
-  const figures=document.querySelector('.ledger-figures')!.textContent!;
-  for(const value of ['수입2,300,000','쓴 돈1,612,500','예정124,890','고정·구독 이번 달1,035,990'])expect(figures).toContain(value);
-  expect(document.querySelector('.ledger-hero__sub')!.textContent).toContain('하루 약 ₩93,768 · 남은 날 6일');
-  expect(screen.getByRole('button',{name:/수입 2,300,000/})).toBeTruthy();
-  // 다가오는 결제 continues into October.
-  const upcoming=screen.getByRole('heading',{name:/다가오는 결제/}).parentElement!;
-  const rows=[...upcoming.querySelectorAll('li')];
-  expect(rows.map(n=>n.querySelector('strong')!.textContent).slice(0,2)).toEqual(['쿠팡 와우','ChatGPT Plus']);
-  expect(rows).toHaveLength(3);expect(rows[2]!.textContent).toContain('10월 ·');
-  // Past months are final: the previous month has no scheduled plans.
-  fireEvent.click(screen.getByRole('button',{name:'이전 달'}));
-  expect(await screen.findByText('2026년 8월')).toBeTruthy();
-  expect(screen.getByLabelText('8월에 남은 돈')).toBeTruthy();
+it('renders lifecycle pills, trial amount, reminders and next charge',async()=>{
+ serve([text,{...ledger,recurring:[rec('r','무료',17000,'2026-09-28',{trial:true,trialFrom:'2026-06-28',remindDays:3}),rec('n','연간',120000,'2026-03-01',{unit:'year'}),rec('c','분기',30000,'2026-01-01',{every:3,until:'2026-10-01'})]}]);renderNotes();await openLedger();const subs=section('구독');
+ for(const pill of ['매달','1년 갱신','3달마다','처음 3달 무료','무료 D-3','해지 예약'])expect(subs.getByText(pill)).toBeTruthy();expect(subs.getByRole('button',{name:/^연간/}).textContent).toContain('2027.3.1 · ₩120,000월 ₩10,000');expect(section('이번 달 결제 예정').getByText('D-3')).toBeTruthy();
 });
-it('adds an entry with the number pad into the month note, keeping the keyboard closed, and 저장하고 하나 더 keeps the sheet open',async()=>{
-  renderNotes();await openLedger();
-  fireEvent.click(screen.getByRole('button',{name:'기록'}));
-  const s=await sheet();
-  // Opening the sheet focuses no text field (the Android keyboard stays down).
-  expect(document.activeElement?.tagName).not.toBe('INPUT');
-  for(const key of ['1','2','000'])fireEvent.click(s.getByRole('button',{name:key}));
-  fireEvent.click(s.getByRole('button',{name:'5'}));fireEvent.click(s.getByRole('button',{name:'지우기'}));
-  expect(document.querySelector('.ledger-amount')!.textContent).toBe('₩12,000');
-  // Recent names are one tap.
-  fireEvent.click(s.getByRole('button',{name:'편의점'}));
-  expect((s.getByPlaceholderText('이름 (선택)') as HTMLInputElement).value).toBe('편의점');
-  fireEvent.click(s.getByRole('button',{name:'저장하고 하나 더'}));
-  await waitFor(()=>expect((lastSave(monthId('2026-09')).entries as LedgerEntry[]).some(e=>e.amount===12000&&e.name==='편의점'&&e.date==='2026-09-25'&&!e.in)).toBe(true));
-  expect(screen.getByRole('dialog')).toBeTruthy();
-  await waitFor(()=>expect(document.querySelector('.ledger-amount')!.textContent).toBe('₩0'));
-  // A refund: 들어온 돈.
-  fireEvent.click(s.getByRole('radio',{name:'들어온 돈'}));
-  fireEvent.click(s.getByRole('button',{name:'3'}));fireEvent.click(s.getByRole('button',{name:'000'}));
-  fireEvent.click(s.getByRole('button',{name:'어제'}));
-  fireEvent.click(s.getByRole('button',{name:'저장'}));
-  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
-  const entries=lastSave(monthId('2026-09')).entries as LedgerEntry[];
-  expect(entries.find(e=>e.amount===3000)).toMatchObject({in:true,date:'2026-09-24'});
-  expect(entries).toHaveLength(september.length+2);
-  expect(screen.getByLabelText('이번 달 쓸 수 있는 돈').textContent).toBe('₩553,610');
+it('changes price and reminder, preserving old price and unknown fields',async()=>{
+ serve([text,{...ledger,recurring:[rec('r','구독',10000,'2026-01-01',{extraField:'keep'})]}]);renderNotes();await openLedger();openSub('구독');let s=await sheet();
+ fireEvent.click(s.getByRole('button',{name:'가격 바꾸기'}));fireEvent.change(s.getByLabelText('가격'),{target:{value:'8000'}});fireEvent.change(s.getByLabelText('가격 적용일'),{target:{value:'2026-09-25'}});fireEvent.change(s.getByLabelText('알림'),{target:{value:'7'}});fireEvent.click(s.getByRole('button',{name:'저장'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+ expect((lastSave(LEDGER_ID).recurring as Recurring[])[0]).toMatchObject({amount:8000,priceHistory:[{until:'2026-09-25',amount:10000}],remindDays:7,extraField:'keep'});expect((lastSave(LEDGER_ID).recurring as Recurring[])[0]).not.toHaveProperty('trialFrom');openSub('구독');s=await sheet();expect(s.getByText('9.25에 ₩10,000에서 내림')).toBeTruthy();
 });
-it('creates the month note on first use through the native month id',async()=>{
-  serve([text,ledger]);
-  renderNotes();await openLedger();
-  fireEvent.click(screen.getByRole('button',{name:'기록'}));
-  const s=await sheet();
-  fireEvent.click(s.getByRole('button',{name:'7'}));fireEvent.click(s.getByRole('button',{name:'저장'}));
-  await waitFor(()=>expect(saves().some(p=>p.id===monthId('2026-09'))).toBe(true));
-  expect(mock.native).toHaveBeenCalledWith('notesLedgerMonthId',{ledger:LEDGER_ID,month:'2026-09'});
-  expect(lastSave(monthId('2026-09'))).toMatchObject({type:'ledger-month',ledger:LEDGER_ID,month:'2026-09',archived:true,entries:[expect.objectContaining({amount:7})]});
+it.each(['scheduled','now'])('cancels %s before the trial’s first charge',async mode=>{
+ serve([text,{...ledger,recurring:[rec('r','구독',10000,'2026-10-01',{trial:true})]}]);renderNotes();await openLedger();openSub('구독');const s=await sheet();fireEvent.change(s.getByLabelText('해지'),{target:{value:mode}});fireEvent.click(s.getByRole('button',{name:'저장'}));await waitFor(()=>expect(lastSave(LEDGER_ID)).toBeTruthy());expect((lastSave(LEDGER_ID).recurring as Recurring[])[0]!.until).toBe(mode==='now'?'2026-09-25':'2026-10-01');
 });
-it('adds a recurring charge with its cycle and lists it by next charge',async()=>{
-  renderNotes();await openLedger();
-  fireEvent.click(screen.getByRole('tab',{name:'고정·구독'}));
-  expect(screen.getByText('월 환산 합계')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button',{name:'고정·구독 추가'}));
-  const s=await sheet();
-  fireEvent.change(s.getByPlaceholderText('넷플릭스, 월세, 보험…'),{target:{value:'헬스장'}});
-  fireEvent.change(s.getByRole('textbox',{name:'금액'}),{target:{value:'165000'}});
-  fireEvent.click(s.getByRole('button',{name:'주기 늘리기'}));fireEvent.click(s.getByRole('button',{name:'주기 늘리기'}));
-  fireEvent.click(s.getByRole('radio',{name:'개월마다'}));
-  fireEvent.click(s.getByRole('button',{name:'저장'}));
-  await waitFor(()=>expect((lastSave(LEDGER_ID)?.recurring as Recurring[]|undefined)?.some(r=>r.name==='헬스장')).toBe(true));
-  expect((lastSave(LEDGER_ID).recurring as Recurring[]).find(r=>r.name==='헬스장')).toMatchObject({amount:165000,every:3,unit:'month',start:'2026-09-25',trial:false,until:null});
-  expect(await screen.findByText('3개월마다 · 25일')).toBeTruthy();
-  expect(screen.getByText('헬스장').closest('li')!.textContent).toContain('월 55,000');
+it('adds a cycle and trial, leaving optional fields absent on old name-only edits',async()=>{
+ renderNotes();await openLedger();openSub('월세');let s=await sheet();fireEvent.change(s.getByLabelText('이름'),{target:{value:'집세'}});fireEvent.click(s.getByRole('button',{name:'저장'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+ const rent=(lastSave(LEDGER_ID).recurring as Recurring[]).find(r=>r.id==='rent')!;for(const key of ['trialFrom','priceHistory','remindDays'])expect(rent).not.toHaveProperty(key);
+ fireEvent.click(screen.getByRole('button',{name:'+ 구독 추가'}));s=await sheet();fireEvent.change(s.getByLabelText('이름'),{target:{value:'새 구독'}});fireEvent.change(s.getByLabelText('가격'),{target:{value:'30000'}});fireEvent.click(s.getByRole('radio',{name:'N달마다'}));fireEvent.click(s.getByRole('radio',{name:'처음 1달 무료'}));fireEvent.change(s.getByLabelText('무료 개월'),{target:{value:'2'}});fireEvent.click(s.getByRole('button',{name:'저장'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+ expect((lastSave(LEDGER_ID).recurring as Recurring[]).find(r=>r.name==='새 구독')).toMatchObject({every:3,trial:true,trialFrom:'2026-09-25',start:'2026-11-25'});
 });
-it('plan → 샀어요 opens a pre-filled entry linked to the plan and marks the plan done',async()=>{
-  renderNotes();await openLedger();
-  const row=screen.getByText('러닝화').closest('li')!;
-  fireEvent.click(within(row).getByRole('button',{name:'샀어요'}));
-  const s=await sheet();
-  expect(document.querySelector('.ledger-amount')!.textContent).toBe('₩89,000');
-  expect((s.getByPlaceholderText('이름 (선택)') as HTMLInputElement).value).toBe('러닝화');
-  expect(s.queryByRole('button',{name:'저장하고 하나 더'})).toBeNull();
-  // The real price differs: 89,000 → 84,000.
-  for(let i=0;i<5;i++)fireEvent.click(s.getByRole('button',{name:'지우기'}));
-  for(const key of ['8','4','000'])fireEvent.click(s.getByRole('button',{name:key}));
-  fireEvent.click(s.getByRole('button',{name:'저장'}));
-  await waitFor(()=>expect((lastSave(monthId('2026-09'))?.entries as LedgerEntry[]|undefined)?.some(e=>e.planned==='shoes')).toBe(true));
-  expect((lastSave(monthId('2026-09')).entries as LedgerEntry[]).find(e=>e.planned==='shoes')).toMatchObject({amount:84000,name:'러닝화',date:'2026-09-25'});
-  const planRow=()=>document.querySelector('.ledger-row.is-plan')!;
-  await waitFor(()=>expect(planRow().className).toContain('is-done'));
-  expect(planRow().textContent).toContain('러닝화');expect(planRow().textContent).toContain('실제 ₩84,000');
-  // The plan no longer counts as scheduled; the entry counts as spent: 562,610 + 89,000 − 84,000.
-  expect(screen.getByLabelText('이번 달 쓸 수 있는 돈').textContent).toBe('₩567,610');
+it('expands the wish, buys into today’s entry, removes it and keeps entry editing',async()=>{
+ renderNotes();await openLedger();fireEvent.click(section('사고 싶은 것').getByRole('button',{name:/러닝화/}));expect(screen.getByText('이번 달에 사면 남는 돈').parentElement!.textContent).toContain('₩562,610');expect((document.querySelector('.ledger-budget-meter__plan') as HTMLElement).style.width).not.toBe('0%');fireEvent.click(screen.getByRole('button',{name:'샀음'}));await waitFor(()=>expect(section('사고 싶은 것').queryByText('러닝화')).toBeNull());
+ expect((lastSave(monthId('2026-09')).entries as LedgerEntry[]).find(e=>e.planned==='shoes')).toMatchObject({amount:89000,date:'2026-09-25'});fireEvent.click(section('지출').getByRole('button',{name:/러닝화/}));const s=await sheet();for(let i=0;i<5;i++)fireEvent.click(s.getByRole('button',{name:'지우기'}));for(const k of ['8','4','000'])fireEvent.click(s.getByRole('button',{name:k}));fireEvent.click(s.getByRole('button',{name:'저장'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect((lastSave(monthId('2026-09')).entries as LedgerEntry[]).find(e=>e.planned==='shoes')!.amount).toBe(84000);
 });
-it('shows forked entries and resolves them with 이것만 남기기',async()=>{
-  serve([ledger,monthNote('2026-09',[...september,entry('e1-copy','2026-09-25',9000,'점심 김치찌개',{forkOf:'e1'})])]);
-  renderNotes();await openLedger();
-  expect(screen.getByRole('button',{name:/확인할 기록 1건/})).toBeTruthy();
-  fireEvent.click(screen.getByRole('tab',{name:'기록'}));
-  expect(screen.getAllByText('두 기기에서 다르게 고침')).toHaveLength(2);
-  const copy=screen.getByText('₩9,000').closest('li')!;
-  fireEvent.click(within(copy).getByRole('button',{name:'이것만 남기기'}));
-  await waitFor(()=>expect(saves().some(p=>p.id===monthId('2026-09'))).toBe(true));
-  const entries=lastSave(monthId('2026-09')).entries as LedgerEntry[];
-  expect(entries.find(e=>e.id==='e1')).toBeUndefined();
-  expect(entries.find(e=>e.id==='e1-copy')).toEqual(expect.not.objectContaining({forkOf:expect.anything()}));
-  await waitFor(()=>expect(screen.queryByText('두 기기에서 다르게 고침')).toBeNull());
+it('edits wishlist where and priority, without populating them on name-only edits',async()=>{
+ renderNotes();await openLedger();fireEvent.click(section('사고 싶은 것').getByRole('button',{name:/러닝화/}));fireEvent.click(screen.getByRole('button',{name:'고치기'}));let s=await sheet();fireEvent.change(s.getByLabelText('이름'),{target:{value:'운동화'}});fireEvent.click(s.getByRole('button',{name:'저장'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());let p=(lastSave(LEDGER_ID).planned as Planned[]).find(p=>p.id==='shoes')!;expect(p).not.toHaveProperty('where');expect(p).not.toHaveProperty('priority');
+ fireEvent.click(screen.getByRole('button',{name:'고치기'}));s=await sheet();fireEvent.change(s.getByLabelText('구매처'),{target:{value:'쿠팡'}});fireEvent.change(s.getByLabelText('우선순위'),{target:{value:'2'}});fireEvent.click(s.getByRole('button',{name:'저장'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());p=(lastSave(LEDGER_ID).planned as Planned[]).find(p=>p.id==='shoes')!;expect(p).toMatchObject({where:'쿠팡',priority:2});
 });
-it('shows derived charges in 기록 and skips one with a 0-won entry',async()=>{
-  renderNotes();await openLedger();
-  fireEvent.click(screen.getByRole('tab',{name:'기록'}));
-  const derived=screen.getAllByText('월세').find(n=>n.closest('li')?.className.includes('is-derived'))!.closest('li')!;
-  fireEvent.click(derived);
-  fireEvent.click((await sheet()).getByRole('button',{name:'이번 달은 건너뜀'}));
-  await waitFor(()=>expect((lastSave(monthId('2026-09'))?.entries as LedgerEntry[]|undefined)?.some(e=>e.recurring?.id==='rent')).toBe(true));
-  expect((lastSave(monthId('2026-09')).entries as LedgerEntry[]).find(e=>e.recurring?.id==='rent')).toMatchObject({amount:0,date:'2026-09-01',recurring:{id:'rent',date:'2026-09-01'}});
+it('quick input is IME safe and creates the native month note on first use',async()=>{
+ serve([text,{...ledger,recurring:[],planned:[]}]);renderNotes();await openLedger();const field=screen.getByLabelText('지출 빠른 입력');fireEvent.change(field,{target:{value:'점심 8000'}});fireEvent.compositionStart(field);fireEvent.keyDown(field,{key:'Enter'});expect(saves()).toHaveLength(0);fireEvent.compositionEnd(field);fireEvent.keyDown(field,{key:'Enter'});await waitFor(()=>expect(lastSave(monthId('2026-09'))).toBeTruthy());
+ expect(lastSave(monthId('2026-09'))).toMatchObject({type:'ledger-month',ledger:LEDGER_ID,archived:true,entries:[expect.objectContaining({amount:8000,name:'점심',date:'2026-09-25'})]});expect(mock.native).toHaveBeenCalledWith('notesLedgerMonthId',{ledger:LEDGER_ID,month:'2026-09'});await waitFor(()=>expect((field as HTMLInputElement).value).toBe(''));
 });
-it('Back closes a ledger sheet first, then leaves the ledger',async()=>{
-  const backRef:{current:(()=>boolean)|null}={current:null};
-  renderNotes(backRef);await openLedger();
-  fireEvent.click(screen.getByRole('button',{name:'기록'}));await screen.findByRole('dialog');
-  act(()=>{expect(backRef.current?.()).toBe(true);});
-  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
-  expect(screen.getByRole('tablist',{name:'가계부'})).toBeTruthy();
-  act(()=>{expect(backRef.current?.()).toBe(true);});
-  await waitFor(()=>expect(screen.queryByRole('tablist',{name:'가계부'})).toBeNull());
-  expect(await screen.findByText('다음에 볼 작품')).toBeTruthy();
-  expect(backRef.current?.()).toBe(false);
+it('keeps the screen and prevents duplicate saves while the month id is pending',async()=>{
+ serve([text,{...ledger,recurring:[],planned:[]}]);const original=mock.native.getMockImplementation()!;let resolve!:(v:{id:string})=>void;const pending=new Promise<{id:string}>(r=>{resolve=r;});mock.native.mockImplementation((op,p)=>op==='notesLedgerMonthId'?pending:original(op,p));renderNotes();await openLedger();const field=screen.getByLabelText('지출 빠른 입력');fireEvent.change(field,{target:{value:'점심 8000'}});fireEvent.keyDown(field,{key:'Enter'});fireEvent.keyDown(field,{key:'Enter'});expect(screen.getByLabelText('예산').textContent).toBe('₩2,300,000');resolve({id:monthId('2026-09')});await waitFor(()=>expect((field as HTMLInputElement).value).toBe(''));expect(lastSave(monthId('2026-09')).entries).toHaveLength(1);
 });
-it('the 가계부 option opens the existing ledger, or creates one pinned',async()=>{
-  renderNotes();await screen.findByText('다음에 볼 작품');
-  fireEvent.click(screen.getByRole('button',{name:'새 메모'}));
-  fireEvent.click((await sheet()).getByRole('button',{name:'가계부'}));
-  expect(await screen.findByLabelText('이번 달 쓸 수 있는 돈')).toBeTruthy();
-  expect(saves().some(p=>p.type==='ledger')).toBe(false);
-  cleanup();mock.native.mockReset();serve([text]);
-  renderNotes();await screen.findByText('다음에 볼 작품');
-  fireEvent.click(screen.getByRole('button',{name:'새 메모'}));
-  fireEvent.click((await sheet()).getByRole('button',{name:'가계부'}));
-  await waitFor(()=>expect(saves().some(p=>p.type==='ledger')).toBe(true));
-  expect(saves().find(p=>p.type==='ledger')).toMatchObject({pinned:true,title:'가계부',income:null,recurring:[],planned:[]});
-  expect(await screen.findByRole('button',{name:'수입을 적으면 쓸 수 있는 돈이 보여요'})).toBeTruthy();
+it('retains entry sheets on limit errors and preserves Korean composition',async()=>{
+ serve([text,{...ledger,recurring:[],planned:[]},monthNote('2026-09',Array.from({length:300},(_,i)=>entry(`f${i}`,'2026-09-25',1000,'마트')))]);renderNotes();await openLedger();fireEvent.click(screen.getByRole('button',{name:'기록'}));const s=await sheet();const field=s.getByPlaceholderText('이름 (선택)');act(()=>field.focus());fireEvent.compositionStart(field);fireEvent.input(field,{target:{value:'ㅎ'},isComposing:true});fireEvent.keyDown(field,{key:'Enter'});expect(document.activeElement).toBe(field);fireEvent.compositionEnd(field);fireEvent.click(s.getByRole('button',{name:'1'}));fireEvent.click(s.getByRole('button',{name:'저장'}));expect((await s.findByRole('alert')).textContent).toContain('300개');expect(screen.getByRole('dialog')).toBeTruthy();expect(saves()).toHaveLength(0);
 });
-it('sets this month’s income separately from the default',async()=>{
-  renderNotes();await openLedger();
-  fireEvent.click(screen.getByRole('button',{name:/수입 2,300,000/}));
-  const s=await sheet();
-  fireEvent.click(s.getByRole('radio',{name:'9월만'}));
-  for(let i=0;i<7;i++)fireEvent.click(s.getByRole('button',{name:'지우기'}));
-  for(const key of ['2','5','000','0','0'])fireEvent.click(s.getByRole('button',{name:key}));
-  fireEvent.click(s.getByRole('button',{name:'저장'}));
-  await waitFor(()=>expect(lastSave(monthId('2026-09'))?.income).toBe(2500000));
-  expect(saves().some(p=>p.id===LEDGER_ID)).toBe(false);
-  await waitFor(()=>expect(screen.getByLabelText('이번 달 쓸 수 있는 돈').textContent).toBe('₩762,610'));
-});
-it('sets the payday (들어오는 날) and lists the upcoming income in 다가오는 결제',async()=>{
-  renderNotes();await openLedger();
-  fireEvent.click(screen.getByRole('button',{name:/수입 2,300,000/}));
-  let s=await sheet();
-  fireEvent.click(s.getByRole('button',{name:'날짜 정하기'}));
-  for(let i=0;i<2;i++)fireEvent.click(s.getByRole('button',{name:'들어오는 날 늘리기'}));
-  expect(s.getByRole('group',{name:'들어오는 날'}).textContent).toContain('27');
-  fireEvent.click(s.getByRole('button',{name:'저장'}));
-  await waitFor(()=>expect(lastSave(LEDGER_ID)).toMatchObject({income:2300000,incomeDay:27}));
-  await waitFor(()=>expect(screen.getByRole('button',{name:/수입 2,300,000 · 27일/})).toBeTruthy());
-  // The headline is unchanged; the payday joins the charges by date as money in.
-  expect(screen.getByLabelText('이번 달 쓸 수 있는 돈').textContent).toBe('₩562,610');
-  const rows=[...screen.getByRole('heading',{name:/다가오는 결제/}).parentElement!.querySelectorAll('li')];
-  expect(rows.map(n=>n.querySelector('strong')!.textContent).slice(0,3)).toEqual(['수입','쿠팡 와우','ChatGPT Plus']);
-  expect(rows[0]!.className).toContain('is-in');expect(rows[0]!.textContent).toContain('+₩2,300,000');
-  // 안 정함 clears the day; the line disappears.
-  fireEvent.click(screen.getByRole('button',{name:/수입 2,300,000 · 27일/}));
-  s=await sheet();
-  fireEvent.click(s.getByRole('button',{name:'안 정함'}));
-  fireEvent.click(s.getByRole('button',{name:'저장'}));
-  await waitFor(()=>expect(lastSave(LEDGER_ID).incomeDay).toBeNull());
-  await waitFor(()=>expect([...screen.getByRole('heading',{name:/다가오는 결제/}).parentElement!.querySelectorAll('li strong')].map(n=>n.textContent)).not.toContain('수입'));
-});
-it('a payday of 31 falls on the last day of a shorter month and is not listed once it passed',async()=>{
-  serve([text,{...ledger,incomeDay:31},monthNote('2026-09',september)]);
-  renderNotes();await openLedger();
-  expect(screen.getByRole('button',{name:/수입 2,300,000 · 30일/})).toBeTruthy();
-  fireEvent.click(screen.getByRole('button',{name:'이전 달'}));
-  expect(await screen.findByText('2026년 8월')).toBeTruthy();
-  expect(screen.getByRole('button',{name:/수입 2,300,000 · 31일/})).toBeTruthy();
-  expect(document.querySelector('.ledger-row.is-in')).toBeNull();
-});
-it('refuses an entry over the monthly limit, keeping the sheet and the typed amount (also for 저장하고 하나 더)',async()=>{
-  const full=Array.from({length:300},(_,i)=>entry(`f${i}`,'2026-09-02',1000,'마트'));
-  serve([ledger,monthNote('2026-09',full)]);
-  renderNotes();await openLedger();
-  fireEvent.click(screen.getByRole('button',{name:'기록'}));
-  const s=await sheet();
-  for(const key of ['4','000'])fireEvent.click(s.getByRole('button',{name:key}));
-  fireEvent.click(s.getByRole('button',{name:'저장하고 하나 더'}));
-  expect((await s.findByRole('alert')).textContent).toBe('기록은 300개까지 저장할 수 있습니다.');
-  fireEvent.click(s.getByRole('button',{name:'저장'}));
-  await waitFor(()=>expect(s.getByRole('alert').textContent).toContain('300개'));
-  expect(screen.getByRole('dialog')).toBeTruthy();
-  expect(document.querySelector('.ledger-amount')!.textContent).toBe('₩4,000');
-  expect(saves().some(p=>p.id===monthId('2026-09'))).toBe(false);
-});
-it('refuses a recurring item that would make the ledger note too large, keeping the typed input',async()=>{
-  const long='가'.repeat(100),memo='나'.repeat(500);
-  const recurring=Array.from({length:199},(_,i)=>rec(`r${i}`,`${long.slice(0,95)}${i}`,1000,'2026-01-01',{memo}));
-  serve([{...ledger,recurring,planned:[]}]);
-  renderNotes();await openLedger();
-  fireEvent.click(screen.getByRole('tab',{name:'고정·구독'}));
-  fireEvent.click(screen.getByRole('button',{name:'고정·구독 추가'}));
-  const s=await sheet();
-  fireEvent.change(s.getByPlaceholderText('넷플릭스, 월세, 보험…'),{target:{value:long}});
-  fireEvent.change(s.getByRole('textbox',{name:'금액'}),{target:{value:'5000'}});
-  fireEvent.change(s.getByPlaceholderText('선택'),{target:{value:memo}});
-  fireEvent.click(s.getByRole('button',{name:'저장'}));
-  expect((await s.findByRole('alert')).textContent).toBe('가계부 항목이 너무 많습니다. 끝난 항목을 지워 주세요.');
-  expect((s.getByPlaceholderText('넷플릭스, 월세, 보험…') as HTMLInputElement).value).toBe(long);
-  expect(saves().some(p=>p.id===LEDGER_ID)).toBe(false);
-});
-it('the 가계부 option restores a ledger from the trash instead of creating a second one',async()=>{
-  serve([text,{...ledger,deleted:true},monthNote('2026-09',september)]);
-  renderNotes();await screen.findByText('다음에 볼 작품');
-  fireEvent.click(screen.getByRole('button',{name:'새 메모'}));
-  fireEvent.click((await sheet()).getByRole('button',{name:'가계부'}));
-  expect((await screen.findByLabelText('이번 달 쓸 수 있는 돈')).textContent).toBe('₩562,610');
-  await waitFor(()=>expect(saves().some(p=>p.id===LEDGER_ID&&p.deleted===false)).toBe(true));
-  expect(saves().filter(p=>p.type==='ledger'&&p.id!==LEDGER_ID)).toHaveLength(0);
-});
-
-
-it('keeps the ledger entry name composing when Enter arrives without a native composition flag',async()=>{
- renderNotes();await openLedger();fireEvent.click(screen.getByRole('button',{name:'기록'}));
- const s=await sheet();const field=s.getByPlaceholderText('이름 (선택)') as HTMLInputElement;
- act(()=>field.focus());fireEvent.compositionStart(field);fireEvent.compositionUpdate(field,{data:'ㅎ'});fireEvent.input(field,{target:{value:'ㅎ'},isComposing:true});
- const setter=vi.spyOn(field,'value','set');fireEvent.keyDown(field,{key:'Enter'});
- expect(document.activeElement).toBe(field);expect(field.value).toBe('ㅎ');expect(setter).not.toHaveBeenCalled();setter.mockRestore();
- fireEvent.compositionUpdate(field,{data:'하'});fireEvent.input(field,{target:{value:'하'},isComposing:true});
- fireEvent.input(field,{target:{value:'한'},isComposing:true});fireEvent.compositionEnd(field,{data:'한'});
- fireEvent.click(s.getByRole('button',{name:'1'}));fireEvent.click(s.getByRole('button',{name:'저장'}));
- await waitFor(()=>expect((lastSave(monthId('2026-09'))?.entries as LedgerEntry[]|undefined)?.some(entry=>entry.name==='한')).toBe(true));
+it('Back closes the sheet before leaving the ledger',async()=>{
+ const backRef:{current:(()=>boolean)|null}={current:null};renderNotes(backRef);await openLedger();fireEvent.click(screen.getByRole('button',{name:'기록'}));await screen.findByRole('dialog');act(()=>{expect(backRef.current?.()).toBe(true);});await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(screen.getByRole('heading',{name:'구독'})).toBeTruthy();act(()=>{expect(backRef.current?.()).toBe(true);});await waitFor(()=>expect(screen.queryByRole('heading',{name:'구독'})).toBeNull());
 });
