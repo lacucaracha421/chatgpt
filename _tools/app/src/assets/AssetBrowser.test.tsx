@@ -1407,3 +1407,92 @@ it("keeps folder covers through both background lookup stages and clears a confi
   await act(async () => finishFallback({ items: [], nextCursor: null }));
   expect(card.querySelector("img")).toBeNull();
 });
+
+
+it("renders a known folder cover immediately on A → leaf B → A and after remount, including failed reads", async () => {
+  const gateway = createGateway();
+  const entries: ClassificationEntry[] = [
+    { id: "f2-a", kind: "root", name: "A", parentId: null, iconKey: null, colorKey: null },
+    { id: "f2-child", kind: "tag", name: "Child", parentId: "f2-a", iconKey: null, colorKey: null },
+    { id: "f2-b", kind: "root", name: "B", parentId: null, iconKey: null, colorKey: null },
+  ];
+  const seriesFolders = vi.fn().mockResolvedValue([{ classificationId: "f2-child", thumbnailAssetId: "f2-cover" }]);
+  const options: BrowserOptions = { view: { kind: "classification", classificationId: "f2-a" }, classifications: entries, folderShelfApi: { seriesFolders } };
+  const view = renderBrowser(gateway, options);
+  const card = () => screen.getByRole("button", { name: "Child 폴더 열기" });
+  await waitFor(() => expect(card().querySelector("img")).toHaveAttribute("src", expect.stringContaining("f2-cover")));
+  view.rerender(browserElement(gateway, { ...options, view: { kind: "classification", classificationId: "f2-b" } }));
+  let fail!: (error: Error) => void;
+  seriesFolders.mockReturnValueOnce(new Promise((_, reject) => { fail = reject; }));
+  vi.mocked(gateway.listAssets).mockImplementation(query => query.limit === 1
+    ? Promise.reject(new Error("offline")) : Promise.resolve({ items: [], nextCursor: null }));
+  view.rerender(browserElement(gateway, options));
+  expect(card().querySelector("img")).toHaveAttribute("src", expect.stringContaining("f2-cover"));
+  expect(card()).not.toHaveTextContent("폴더 이미지 없음");
+  await act(async () => fail(new Error("offline")));
+  expect(card().querySelector("img")).toHaveAttribute("src", expect.stringContaining("f2-cover"));
+  expect(card()).not.toHaveTextContent("폴더 이미지 없음");
+  view.unmount();
+  seriesFolders.mockReturnValue(new Promise(() => {}));
+  renderBrowser(gateway, options);
+  expect(card().querySelector("img")).toHaveAttribute("src", expect.stringContaining("f2-cover"));
+  expect(card()).not.toHaveTextContent("폴더 이미지 없음");
+});
+
+it("publishes each folder cover progressively and labels only confirmed empty folders as none", async () => {
+  const gateway = createGateway();
+  const entries: ClassificationEntry[] = [
+    { id: "f2-parent", kind: "root", name: "Parent", parentId: null, iconKey: null, colorKey: null },
+    ...["fast", "slow", "empty", "failed"].map(id => ({ id, kind: "tag" as const, name: id, parentId: "f2-parent", iconKey: null, colorKey: null })),
+  ];
+  let finish!: (page: AssetPage) => void;
+  vi.mocked(gateway.listAssets).mockImplementation(query => {
+    if (query.limit !== 1) return Promise.resolve({ items: [], nextCursor: null });
+    if (query.classificationId === "slow") return new Promise(resolve => { finish = resolve; });
+    if (query.classificationId === "failed") return Promise.reject(new Error("offline"));
+    return Promise.resolve({ items: query.classificationId === "fast" ? [asset(7)] : [], nextCursor: null });
+  });
+  renderBrowser(gateway, { view: { kind: "classification", classificationId: "f2-parent" }, classifications: entries, folderShelfApi: { seriesFolders: vi.fn().mockResolvedValue([]) } });
+  const card = (name: string) => screen.getByRole("button", { name: `${name} 폴더 열기` });
+  expect(card("slow")).not.toHaveTextContent("폴더 이미지 없음");
+  await waitFor(() => expect(card("fast").querySelector("img")).toHaveAttribute("src", expect.stringContaining("asset-7")));
+  expect(card("empty")).toHaveTextContent("폴더 이미지 없음");
+  expect(card("slow")).not.toHaveTextContent("폴더 이미지 없음");
+  expect(card("failed")).not.toHaveTextContent("폴더 이미지 없음");
+  await act(async () => finish({ items: [asset(8)], nextCursor: null }));
+  expect(card("slow").querySelector("img")).toHaveAttribute("src", expect.stringContaining("asset-8"));
+});
+
+it("keeps the painted folder image until its replacement loads", async () => {
+  const gateway = createGateway();
+  const entries: ClassificationEntry[] = [
+    { id: "swap-parent", kind: "root", name: "Parent", parentId: null, iconKey: null, colorKey: null },
+    { id: "swap-child", kind: "tag", name: "Child", parentId: "swap-parent", iconKey: null, colorKey: null },
+  ];
+  const seriesFolders = vi.fn().mockResolvedValue([{ classificationId: "swap-child", thumbnailAssetId: "swap-a" }]);
+  const options: BrowserOptions = { view: { kind: "classification", classificationId: "swap-parent" }, classifications: entries, folderShelfApi: { seriesFolders } };
+  const view = renderBrowser(gateway, options);
+  const card = screen.getByRole("button", { name: "Child 폴더 열기" });
+  const first = await waitFor(() => { const image = card.querySelector("img")!; expect(image).toHaveAttribute("src", expect.stringContaining("swap-a")); return image; });
+  fireEvent.load(first);
+  seriesFolders.mockResolvedValue([{ classificationId: "swap-child", thumbnailAssetId: "swap-b" }]);
+  view.rerender(browserElement(gateway, { ...options, refreshVersion: 1 }));
+  const next = await waitFor(() => { const image = card.querySelector<HTMLImageElement>('[data-stable-image-loading="true"]')!; expect(image).toHaveAttribute("src", expect.stringContaining("swap-b")); return image; });
+  expect(first).toBeVisible();
+  fireEvent.load(next);
+  expect(next).toBeVisible();
+  expect(first).toHaveAttribute("aria-hidden", "true");
+});
+
+
+it("keeps every displayed cover when a large active shelf exceeds the revisit cache limit", async () => {
+  const gateway = createGateway();
+  const entries: ClassificationEntry[] = [
+    { id: "large-parent", kind: "root", name: "Parent", parentId: null, iconKey: null, colorKey: null },
+    ...Array.from({ length: 257 }, (_, index) => ({ id: `large-${index}`, kind: "tag" as const, name: `Child ${index}`, parentId: "large-parent", iconKey: null, colorKey: null })),
+  ];
+  renderBrowser(gateway, { view: { kind: "classification", classificationId: "large-parent" }, classifications: entries,
+    folderShelfApi: { seriesFolders: vi.fn().mockResolvedValue(entries.slice(1).map(child => ({ classificationId: child.id, thumbnailAssetId: `cover-${child.id}` }))) } });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Child 256 폴더 열기" }).querySelector("img")).toHaveAttribute("src", expect.stringContaining("cover-large-256")));
+  expect(screen.getByRole("button", { name: "Child 0 폴더 열기" }).querySelector("img")).toHaveAttribute("src", expect.stringContaining("cover-large-0"));
+});

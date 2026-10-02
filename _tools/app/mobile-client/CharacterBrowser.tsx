@@ -12,6 +12,7 @@ import {useSectionShade} from './SectionShade';
 import {Button,IconButton,SegmentedControl} from './ui';
 import {api,errorText} from './transport';
 import {loadThumbnail} from './media';
+import {StableImage} from '../src/shared/ui/StableImage';
 import {readyFirstScreen} from './firstScreen';
 import {Gallery} from './Gallery';
 import {readScopedToc, readyScopedAsset, useScopedAssetToc, withScopedToc} from './scopedAssetToc';
@@ -54,16 +55,24 @@ export function viewerCharacterContext(node:CharacterNode|undefined|null,index:C
   return {targetId:target.sourceId,name:target.name,libraryId:capability.libraryId,revision:capability.revision,protectedAssetIds:target.protectedAssetIds};
 }
 
+const resolvedPreviews=new Map<string,string>();
+function rememberPreview(id:string,preview:string) {
+  resolvedPreviews.delete(id);resolvedPreviews.set(id,preview);
+  while(resolvedPreviews.size>128)resolvedPreviews.delete(resolvedPreviews.keys().next().value!);
+}
 function Preview({id,paused,label=''}:{id?:string|null;paused:boolean;label?:string}) {
   const [loaded,setLoaded]=useState<{id:string;preview?:string}>();
-  const preview=loaded?.id===id?loaded?.preview:undefined;
+  const cached=id?resolvedPreviews.get(id):undefined;
+  const preview=cached??loaded?.preview;
   useEffect(()=>{
-    if(paused||!id||preview)return;
+    if(!id)return;
+    if(cached){rememberPreview(id,cached);if(loaded?.id!==id||loaded.preview!==cached)setLoaded({id,preview:cached});return;}
+    if(paused||loaded?.id===id&&loaded.preview)return;
     const controller=new AbortController();
-    void loadThumbnail({id,kind:'image'},controller.signal).then(a=>{if(!controller.signal.aborted)setLoaded({id,preview:a.preview});},()=>{});
+    void loadThumbnail({id,kind:'image'},controller.signal).then(a=>{if(!controller.signal.aborted&&a.preview){rememberPreview(id,a.preview);setLoaded({id,preview:a.preview});}},()=>{});
     return()=>controller.abort();
-  },[id,paused,preview]);
-  return preview?<img src={preview} alt={label}/>:<PhotoIcon aria-hidden="true"/>;
+  },[id,paused,cached,loaded]);
+  return preview?<StableImage src={preview} alt={label}/>:<PhotoIcon aria-hidden="true"/>;
 }
 function Card({node,count,paused,onSelect,previews=[],lazy=false}:{node:CharacterNode;count?:number;paused:boolean;onSelect():void;previews?:string[];lazy?:boolean}) {
   const host=useRef<HTMLButtonElement>(null),[visible,setVisible]=useState(!lazy);

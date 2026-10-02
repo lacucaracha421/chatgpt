@@ -430,3 +430,39 @@ it('passes privacy to the gallery opened directly from Find',async()=>{
   } finally {localStorage.removeItem('lakomics.mobile.privacyMode');}
 });
 
+
+it('never replaces a known preview with a placeholder on A → B → A or tab remount',async()=>{
+  let current=structuredClone(index);
+  current.nodes=current.nodes.map(item=>item.id==='series:s'?{...item,thumbnailAssetId:'f2-mobile-a'}:item);
+  mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?current:page());
+  mocks.loadThumbnail.mockImplementation(async(a:Asset)=>({...a,preview:`data:image/png;base64,${a.id}`}));
+  let view=render(<CharacterBrowser {...props}/>);
+  const card=()=>screen.getByRole('button',{name:'Series · 2장'});
+  const first=await waitFor(()=>{const image=card().querySelector('img')!;expect(image?.getAttribute('src')).toContain('f2-mobile-a');return image;});
+  fireEvent.load(first);
+  let finish!:(asset:Asset)=>void;
+  mocks.loadThumbnail.mockImplementation((a:Asset)=>a.id==='f2-mobile-b'?new Promise(resolve=>{finish=resolve;}):Promise.resolve({...a,preview:`data:image/png;base64,${a.id}`}));
+  current={...current,revision:'b'.repeat(64),nodes:current.nodes.map(item=>item.id==='series:s'?{...item,thumbnailAssetId:'f2-mobile-b'}:item)};
+  view.rerender(<CharacterBrowser {...props} refreshKey={2}/>);
+  await waitFor(()=>expect(mocks.loadThumbnail.mock.calls.some(([a])=>a.id==='f2-mobile-b')).toBe(true));
+  expect(card().querySelector('img')).toBe(first);
+  expect(card().querySelector('.character-card-image > svg')).toBeNull();
+  await act(async()=>finish({id:'f2-mobile-b',kind:'image',preview:'data:image/png;base64,f2-mobile-b'}));
+  const next=card().querySelector<HTMLImageElement>('[data-stable-image-loading="true"]')!;
+  expect(next?.getAttribute('src')).toBe('data:image/png;base64,f2-mobile-b');
+  expect(first.style.visibility).not.toBe('hidden');
+  fireEvent.load(next);
+  expect(next.style.visibility).not.toBe('hidden');
+  current={...current,revision:'c'.repeat(64),nodes:current.nodes.map(item=>item.id==='series:s'?{...item,thumbnailAssetId:'f2-mobile-a'}:item)};
+  view.rerender(<CharacterBrowser {...props} refreshKey={3}/>);
+  await waitFor(()=>expect(card().querySelector('img:not([aria-hidden])')?.getAttribute('src')).toContain('f2-mobile-a'));
+  expect(card().querySelector('.character-card-image > svg')).toBeNull();
+  expect(mocks.loadThumbnail.mock.calls.filter(([a])=>a.id==='f2-mobile-a')).toHaveLength(1);
+  view.unmount();
+  mocks.loadThumbnail.mockReturnValue(new Promise(()=>{}));
+  view=render(<CharacterBrowser {...props}/>);
+  await screen.findByRole('button',{name:'Series · 2장'});
+  expect(card().querySelector('img')?.getAttribute('src')).toContain('f2-mobile-a');
+  expect(card().querySelector('.character-card-image > svg')).toBeNull();
+  expect(mocks.loadThumbnail.mock.calls.filter(([a])=>a.id==='f2-mobile-a')).toHaveLength(1);
+});

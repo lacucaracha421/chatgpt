@@ -740,6 +740,18 @@ it('defaults manga to one LightCase book per work and picks before opening',asyn
   expect(tile.querySelector('.cs-spine .manga-jspine-title')?.textContent).toBe(item.name);
   fireEvent.click(tile);expect(tile.getAttribute('aria-selected')).toBe('true');
   expect(screen.queryByRole('heading',{level:1,name:item.name})).toBeNull();
+  for(const empty of [list(),shelf.querySelector('.collection-list__plank')!,shelf.querySelector('.collection-list__cell')!]){
+    fireEvent.click(empty);expect(tile.getAttribute('aria-selected')).toBe('false');
+    expect(within(shelf).getByRole('button',{name:item.name})).toBe(tile);
+    fireEvent.click(tile);expect(tile.getAttribute('aria-selected')).toBe('true');
+  }
+  fireEvent.scroll(list());expect(tile.getAttribute('aria-selected')).toBe('true');
+  fireEvent.click(screen.getByRole('button',{name:'보기'}));
+  expect(tile.getAttribute('aria-selected')).toBe('true');
+  fireEvent.click(within(screen.getByRole('dialog',{name:'보기'})).getByRole('button',{name:'닫기'}));
+  const secondTile=within(shelf).getByRole('button',{name:second.name});
+  fireEvent.click(secondTile);expect(tile.getAttribute('aria-selected')).toBe('false');expect(secondTile.getAttribute('aria-selected')).toBe('true');
+  fireEvent.click(tile);expect(tile.getAttribute('aria-selected')).toBe('true');
   fireEvent.click(tile);await screen.findByRole('heading',{level:1,name:item.name});
 });
 
@@ -799,10 +811,20 @@ it('stands manga on the shared bookcase rows: a tap picks a volume, a second tap
     }
     fireEvent.click(track,{detail:1});
   };
-  tapGap();
+  fireEvent.click(second);
   expect(second.getAttribute('aria-pressed')).toBe('true');
   expect(detailPane().style.display).toBe('none');
   tapGap();
+  expect(second.getAttribute('aria-pressed')).toBe('false');
+  expect(detailPane().style.display).toBe('none');
+  fireEvent.click(second);
+  for(const type of ['pointerdown','pointermove','pointerup']){
+    const event=new MouseEvent(type,{bubbles:true,clientX:type==='pointerdown'?20:100,clientY:20,button:0});
+    Object.defineProperties(event,{pointerId:{value:1},pointerType:{value:'touch'},isPrimary:{value:true}});fireEvent(track,event);
+  }
+  fireEvent.click(track,{detail:1});expect(second.getAttribute('aria-pressed')).toBe('true');
+  tapGap();expect(second.getAttribute('aria-pressed')).toBe('false');
+  fireEvent.click(second);fireEvent.click(second);
   const bookcase=await screen.findByRole('group',{name:'권별 책장'});
   await waitFor(()=>expect(within(bookcase).getByRole('button',{name:'2권 보기'}).getAttribute('aria-pressed')).toBe('true'));
   within(bookcase).getAllByRole('button').forEach((spine,index)=>{

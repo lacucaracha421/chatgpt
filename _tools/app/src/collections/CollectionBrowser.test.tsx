@@ -505,6 +505,35 @@ describe("CollectionBrowser", () => {
     expect(onOpenWork).toHaveBeenLastCalledWith("key-0", works.map(work => work.id));
   });
 
+  it("puts shelf cases down on planks, gaps and list margins, preserves controls and opens on double-click", async () => {
+    const onOpenWork = vi.fn();
+    renderBrowser({ collections: [sample, { ...sample, id: "c2", name: "Second" }], typeFilter: "game", showcase: false, onOpenWork });
+    const first = screen.getByRole("button", { name: /Astral Chain/ });
+    const second = screen.getByRole("button", { name: /Second/ });
+    const list = document.querySelector(".collection-browser__list-scroll")!;
+    for (const empty of [list, list.querySelector(".collection-list__plank")!, list.querySelector(".collection-list__cell")!]) {
+      fireEvent.click(first); expect(first).toHaveAttribute("aria-selected", "true");
+      fireEvent.click(empty); expect(first).toHaveAttribute("aria-selected", "false");
+      expect(screen.getByRole("button", { name: /Astral Chain/ })).toBe(first);
+    }
+    fireEvent.click(first);
+    fireEvent.scroll(list); expect(first).toHaveAttribute("aria-selected", "true");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "정렬" }));
+    expect(first).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    expect(first).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Escape}");
+    fireEvent.click(second); expect(first).toHaveAttribute("aria-selected", "false");
+    expect(second).toHaveAttribute("aria-selected", "true"); expect(onOpenWork).not.toHaveBeenCalled();
+    fireEvent.click(second); expect(onOpenWork).not.toHaveBeenCalled(); // a second click keeps it picked
+    fireEvent.doubleClick(second); expect(onOpenWork).toHaveBeenCalledExactlyOnceWith("c2", ["c1", "c2"]);
+    onOpenWork.mockClear();
+    await user.dblClick(first);
+    expect(onOpenWork).toHaveBeenCalledExactlyOnceWith("c1", ["c1", "c2"]);
+  });
+
   it("renders a grid of collection cards", () => {
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false });
     expect(screen.getByText("Astral Chain")).toBeInTheDocument();
@@ -787,6 +816,10 @@ describe("CollectionBrowser manga shelf", () => {
     expect(within(spines[1]).getByText("2", { selector: ".manga-picked-number" })).toBeInTheDocument();
     expect(spines[1]).not.toHaveTextContent("미보유");
     expect(onViewChange).not.toHaveBeenCalled();
+    fireEvent.click(row.querySelector(".manga-bookcase-board")!);
+    expect(spines[1]).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(spines[0]); expect(spines[0]).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(spines[1]); expect(spines[0]).toHaveAttribute("aria-pressed", "false");
     fireEvent.doubleClick(spines[1]);
     expect(onViewChange).toHaveBeenCalledWith({ kind: "collection", collectionId: "m1" });
     expect(requestedMangaVolume("m1")).toBe("v2");

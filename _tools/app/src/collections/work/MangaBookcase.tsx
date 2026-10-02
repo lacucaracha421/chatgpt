@@ -49,7 +49,8 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
     if (start && start.id === event.pointerId && (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8 || start.track.scrollLeft !== start.left)) start.moved = true;
   };
   const pointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (!touchTargets || event.button !== 0 || event.isPrimary === false) return;
+    // List gaps belong to put-down; only the detail shelf expands taps to the nearest book.
+    if (!touchTargets || list || event.button !== 0 || event.isPrimary === false) return;
     suppressClick.current = false;
     const track = (event.target as HTMLElement).closest<HTMLElement>(".home-shelf__track");
     if (!track) return;

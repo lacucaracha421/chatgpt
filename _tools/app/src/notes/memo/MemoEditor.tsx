@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { ArrowsRightLeftIcon } from '@heroicons/react/24/outline';
+import { ArrowsRightLeftIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Button } from '../../shared/ui/Button';
 import { Dialog } from '../../shared/ui/Dialog';
@@ -253,10 +253,10 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
             if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setRename(null); }
           }}/> : <h2>{section.title || '제목 없음'}</h2>}
           {mode === 'todo' && <small>{open.length}개 남음</small>}
-          {!readOnly && <><Button variant="quiet" onClick={async () => {
+          {!readOnly && <><Button type="button" size="icon" variant="ghost" aria-label="섹션 복사" onClick={async () => {
             try { await copyText(sectionCopy(section, mode)); if (documentRef.current.id !== noteId) return; setStatus({ id: section.id, text: '복사됨' }); } catch { if (documentRef.current.id !== noteId) return; setStatus({ id: section.id, text: '복사하지 못했습니다.' }); }
             clearTimeout(statusTimer.current); statusTimer.current = setTimeout(() => setStatus(null), 2200);
-          }}>복사</Button><Menu label={`${section.title || '제목 없음'} 더보기`} items={sectionActions} trigger="⋯" open={sectionMenu === section.id} onOpenChange={open => setSectionMenu(open ? section.id : null)}/>{status?.id === section.id && <span className="memo-status" role="status">{status.text}</span>}</>}
+          }}><ClipboardDocumentIcon aria-hidden="true" /></Button><Menu label={`${section.title || '제목 없음'} 더보기`} items={sectionActions} trigger="⋯" open={sectionMenu === section.id} onOpenChange={open => setSectionMenu(open ? section.id : null)}/>{status?.id === section.id && <span className="memo-status" role="status">{status.text}</span>}</>}
         </div>}
         {(mode === 'todo' ? open : section.items).map(row)}
         {!readOnly && <button className="memo-add" type="button" onClick={() => {

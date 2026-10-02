@@ -14,6 +14,7 @@ import { Button } from "../shared/ui/Button";
 import { ViewOptionsMenu } from "../shared/ui/ViewOptionsMenu";
 import { useLaunchBoxSpineBatch } from "./launchBoxSpines";
 import { CollectionList, shelfGroups, useCollectionView } from "./CollectionList";
+import { useShelfPutDown } from "./useShelfPutDown";
 import { MangaShelfList } from "./MangaShelfList";
 import type { MangaShelfPick } from "./MangaShelfRow";
 import { requestMangaVolume } from "./work/mangaVolumeRequest";
@@ -253,7 +254,8 @@ export function CollectionBrowser({
   const board = releases.data?.board;
   const viewLayout = viewSettings.layout;
   const renderCollection = useCallback((collection: CollectionSummary) => {
-    const work = collection.type !== "manga" || (viewLayout === "shelf" && !showcase);
+    const shelf = viewLayout === "shelf" && !showcase;
+    const work = collection.type !== "manga" || shelf;
     const open = () => latest.current.openCollection(collection);
     return <ContextMenu
               key={collection.id}
@@ -264,7 +266,7 @@ export function CollectionBrowser({
                 coverUrl={collectionCoverUrl(collection)}
                 selected={pickedId === collection.id}
                 lightCase={!showcase}
-                shelf={viewLayout === "shelf" && !showcase}
+                shelf={shelf}
                 releaseCaption={releaseCaption(collection, board?.get(collection.id), inboxByWork.get(collection.id) ?? [], today)}
                 scope={libraryRoot}
                 exhibition={showcase}
@@ -363,6 +365,7 @@ export function CollectionBrowser({
     : {kind: "date", values: visible.map(work => libraryState.sort === "recent" ? work.createdAt : work.releaseDate ?? work.createdAt)},
   [visible, libraryState.sort]);
   const scrubberList = useScrubberList(stageRef, mangaBookcase ? ".manga-shelf-list__item" : ".collection-list__cell");
+  const shelfPutDown = useShelfPutDown(() => { setPickedId(null); setMangaPick(null); });
 
   return (
     <section className="collection-browser" aria-label="컬렉션">
@@ -398,7 +401,7 @@ export function CollectionBrowser({
           {!inbox && showcase && visible.length > 0 && <><SectionDropMount host=".collection-browser" target=".collection-exhibition">{sectionDrop.inline}</SectionDropMount>
             <CollectionExhibition items={visible} page={exhibition.page} onPageChange={changeExhibitionPage} render={collection => renderCollection(collection)} scrollRef={stageRef} /></>}
           {!inbox && showcase && visible.length === 0 && <div className="collection-browser__showcase-scroll">{sectionDrop.inline}<div className="collection-browser__empty"><EmptyState title="쇼케이스에 컬렉션이 없습니다.">라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다.</EmptyState></div></div>}
-          {!inbox && !showcase && <div ref={stageRef} className="collection-browser__list-scroll" tabIndex={0} data-cover-scroll-root="">
+          {!inbox && !showcase && <div ref={stageRef} className="collection-browser__list-scroll" tabIndex={0} data-cover-scroll-root="" {...shelfPutDown}>
             {sectionDrop.inline}
             {leading}
             {mangaBookcase ? mangaShelfList(libraryItems, `${sectionLabel} 작품 목록`)

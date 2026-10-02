@@ -48,12 +48,12 @@ it('leaves clicks on copy and the section menu working and suppresses the click 
   const copyText = vi.fn(async () => {});
   const changes = surface('## A\na\n## B\nb', { copyText });
   const heads = dragRects();
-  await userEvent.click(within(heads[0]!).getByRole('button', { name: '복사' }));
+  await userEvent.click(within(heads[0]!).getByRole('button', { name: '섹션 복사' }));
   expect(copyText).toHaveBeenCalledWith('a');
   await userEvent.click(screen.getByRole('button', { name: 'A 더보기' }));
   expect(await screen.findByRole('menuitem', { name: '아래로' })).toBeInTheDocument();
   await userEvent.keyboard('{Escape}');
-  const button = within(heads[0]!).getByRole('button', { name: '복사' });
+  const button = within(heads[0]!).getByRole('button', { name: '섹션 복사' });
   fireEvent.pointerDown(button, mouse);
   fireEvent.pointerMove(window, { ...mouse, clientY: 280 });
   fireEvent.pointerUp(window, { ...mouse, clientY: 280 });
@@ -174,10 +174,10 @@ it('moves to another section, exposes untitled top and makes a line a section', 
 it('copies open todo items only and copies plain section lines including blank rows', async () => {
   const copyText = vi.fn(async () => {});
   surface('## A\n- [ ] open\n- [x] done', { copyText });
-  await userEvent.click(screen.getByRole('button', { name: '복사' }));
+  await userEvent.click(screen.getByRole('button', { name: '섹션 복사' }));
   expect(copyText).toHaveBeenCalledWith('- open'); expect(screen.getByRole('status')).toHaveTextContent('복사됨');
   cleanup(); surface('## A\nplain\n\n**literal**', { copyText });
-  await userEvent.click(screen.getByRole('button', { name: '복사' })); expect(copyText).toHaveBeenLastCalledWith('plain\n\n**literal**');
+  await userEvent.click(screen.getByRole('button', { name: '섹션 복사' })); expect(copyText).toHaveBeenLastCalledWith('plain\n\n**literal**');
 });
 it('splits multiline paste, retaining task states and treating pasted headings as plain items', () => {
   surface('- [ ] ab\n- [ ] untouched');
@@ -232,7 +232,7 @@ it('touch short taps preserve focus/selection and long press opens the same move
 it('read-only notes use the same rows without mutation controls', () => {
   const change = surface('## A\n- [ ] open\n- [x] done', { readOnly: true });
   expect(rows()[0]).toHaveAttribute('readonly'); expect(screen.getByRole('button', { name: '완료' })).toBeDisabled();
-  expect(screen.queryByRole('button', { name: '항목 추가' })).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: '복사' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '항목 추가' })).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: '섹션 복사' })).not.toBeInTheDocument();
   fireEvent.keyDown(rows()[0]!, { key: 'Enter' }); expect(change).not.toHaveBeenCalled();
 });
 
@@ -292,4 +292,17 @@ it('lets the tablet back gesture close its own menu before the note', async () =
   expect(handled).toBe(true);
   await waitFor(() => expect(screen.queryByRole('menuitem', { name: '섹션으로 만들기' })).toBeNull());
   expect(backRef.current?.()).toBe(false);
+});
+
+
+it.each([false, true])('copies a memo section with an accessible icon button (touch=%s)', async touch => {
+  const copyText = vi.fn(async () => {});
+  surface('## A\ntext', { copyText, touch });
+  const copy = screen.getByRole('button', { name: '섹션 복사' });
+  expect(copy).toHaveClass('ui-button--icon', 'ui-button--ghost');
+  expect(copy.textContent).toBe('');
+  expect(copy.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  await userEvent.click(copy);
+  expect(copyText).toHaveBeenCalledExactlyOnceWith('text');
+  expect(screen.getByRole('status')).toHaveTextContent('복사됨');
 });

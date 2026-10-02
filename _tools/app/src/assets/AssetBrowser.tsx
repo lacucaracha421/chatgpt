@@ -29,6 +29,8 @@ import { AssetToolbar } from "./AssetToolbar";
 import { AssetViewer } from "./AssetViewer";
 import { SelectionBar } from "./SelectionBar";
 import { thumbnailUrl } from "./mediaUrl";
+import { folderPreviewCache, rememberFolderPreview } from "./folderPreviewCache";
+import { StableImage } from "../shared/ui/StableImage";
 import { CharacterAssignPicker } from "../characters/CharacterAssignPicker";
 import { moveAssetsToCharacters, type CharacterTarget } from "../characters/api";
 import { characterHubApi, type CharacterGroup, type CharacterHubApi } from "../characters/hubApi";
@@ -85,7 +87,8 @@ function useStyleSuggestionAssetIds(enabled: boolean) {
 
 
 export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout = "masonry", onGalleryLayoutChange, view, onViewChange, classifications, characterTargets = [], characterGroups = [], onCharactersChanged = () => undefined, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, clearSelectionRequest = 0, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, folderShelfApi = characterHubApi, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
-  const { gateway } = useLibrary();
+  const { gateway, library } = useLibrary();
+  const previewCache = folderPreviewCache(gateway, library?.root);
   const [assignOpen, setAssignOpen] = useState(false);
   const [directOnlyState, setDirectOnlyState] = useState<{ folderId: string | null; value: boolean }>({ folderId: null, value: true });
   const [mediaFilter, setMediaFilter] = useState<AssetMediaFilter>("all");
@@ -136,27 +139,43 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   const folderEntry = plainFolderId ? classifications.find(entry => entry.id === plainFolderId) : undefined;
   const directOnly = directOnlyState.folderId === plainFolderId ? directOnlyState.value : true;
   const folderChildrenKey = folderChildren.map(entry => entry.id).join(",");
-  const [folderThumbnails, setFolderThumbnails] = useState<Record<string, string | null>>({});
+  const [, updateFolderThumbnails] = useState(0);
+  // Cache eviction must not remove a cover already displayed in the current shelf.
+  const folderThumbnails = useMemo(() => new Map(previewCache.thumbnails), [previewCache, plainFolderId]);
   useEffect(() => {
     setDirectOnlyState(current => current.folderId === plainFolderId ? current : { folderId: plainFolderId, value: true });
   }, [plainFolderId]);
   useEffect(() => {
-    if (!plainFolderId || folderChildren.length === 0) { setFolderThumbnails({}); return; }
+    if (!plainFolderId || folderChildren.length === 0) return;
     let active = true;
-    setFolderThumbnails(current => Object.fromEntries(folderChildren
-      .filter(child => child.id in current).map(child => [child.id, current[child.id]])));
-    void folderShelfApi.seriesFolders(plainFolderId).catch(() => []).then(async result => {
-      const thumbnails: Record<string, string | null> = Object.fromEntries((Array.isArray(result) ? result : []).map(item => [item.classificationId, item.thumbnailAssetId]));
-      // seriesFolders skips series and character folders; give those the newest image below them.
-      const missing = folderChildren.filter(child => !thumbnails[child.id]).slice(0, 40);
-      const found = await Promise.all(missing.map(child => gateway.listAssets({ classificationId: child.id, albumId: null, collectionId: null, directOnly: false, unclassifiedOnly: false, mediaKind: "images", aspectRatio: null, sort: "newest", randomPivot: null, after: null, limit: 1 })
-        .then(page => [child.id, page.items[0]?.id ?? null] as const, () => [child.id, null] as const)));
-      if (active) setFolderThumbnails({ ...thumbnails, ...Object.fromEntries(found) });
+    const publish = (id: string, thumbnail: string | null) => {
+      if (!active) return;
+      rememberFolderPreview(previewCache.thumbnails, id, thumbnail);
+      folderThumbnails.set(id, thumbnail);
+      updateFolderThumbnails(version => version + 1);
+    };
+    // Touch visible covers so switching among nearby folders retains them longest.
+    for (const child of folderChildren) {
+      if (folderThumbnails.has(child.id)) rememberFolderPreview(previewCache.thumbnails, child.id, folderThumbnails.get(child.id)!);
+    }
+    void folderShelfApi.seriesFolders(plainFolderId).catch(() => []).then(result => {
+      if (!active) return;
+      const thumbnails = new Map((Array.isArray(result) ? result : []).map(item => [item.classificationId, item.thumbnailAssetId]));
+      for (const child of folderChildren) {
+        const thumbnail = thumbnails.get(child.id);
+        if (thumbnail) publish(child.id, thumbnail);
+      }
+      // Series/character folders omitted by seriesFolders need their newest descendant image.
+      // Publish each finished read without waiting for slower siblings. Errors retain the cache.
+      for (const child of folderChildren.filter(child => !thumbnails.get(child.id)).slice(0, 40)) {
+        void gateway.listAssets({ classificationId: child.id, albumId: null, collectionId: null, directOnly: false, unclassifiedOnly: false, mediaKind: "images", aspectRatio: null, sort: "newest", randomPivot: null, after: null, limit: 1 })
+          .then(page => publish(child.id, page.items[0]?.id ?? null), () => undefined);
+      }
     });
     return () => { active = false; };
     // folderChildren is keyed by folderChildrenKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [folderChildren.length, folderChildrenKey, folderShelfApi, gateway, plainFolderId, refreshVersion]);
+  }, [folderChildren.length, folderChildrenKey, folderShelfApi, gateway, previewCache, plainFolderId, refreshVersion]);
   const creatorKey = view.kind === "creator" ? view.creatorKey : null;
   const styleSuggestionsOnly = view.kind === "creator" && isUnknownArtist(view.creatorKey) && view.styleSuggestionsOnly === true;
   const styleSuggestionAssets = useStyleSuggestionAssetIds(styleSuggestionsOnly);
@@ -539,9 +558,9 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       ariaLabel="하위 폴더"
       cards={folderChildren.map(child => <article className="folder-shelf__card" key={child.id}>
         <button type="button" className="folder-shelf__card-open" aria-label={`${child.name} 폴더 열기`} onClick={() => onViewChange?.({ kind: "classification", classificationId: child.id })}>
-          {folderThumbnails[child.id] && !privacyMode
-            ? <img draggable={false} loading="lazy" src={thumbnailUrl(folderThumbnails[child.id]!)} alt="" />
-            : <span className="folder-shelf__placeholder"><FolderIcon aria-hidden="true" />{privacyMode ? "비공개 폴더" : "폴더 이미지 없음"}</span>}
+          {folderThumbnails.get(child.id) && !privacyMode
+            ? <StableImage draggable={false} loading="lazy" src={thumbnailUrl(folderThumbnails.get(child.id)!)} alt="" />
+            : <span className="folder-shelf__placeholder"><FolderIcon aria-hidden="true" />{privacyMode ? "비공개 폴더" : folderThumbnails.get(child.id) === null ? "폴더 이미지 없음" : ""}</span>}
           <strong><FolderIcon className="folder-shelf__icon" aria-hidden="true" /><span className="folder-shelf__name">{child.name}</span></strong>
           {(child.totalAssetCount ?? child.assetCount) !== undefined && <small>{(child.totalAssetCount ?? child.assetCount)!.toLocaleString("ko-KR")}장</small>}
         </button>

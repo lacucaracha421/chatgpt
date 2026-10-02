@@ -987,6 +987,16 @@ library, PC render harness, tablet 0.8.98 on device online, server). Numbers bel
   ~20:30 KST. **TODO:** after 14 days and with separate approval, delete the journaled old `library/{id}/thumbnail`
   objects only (never `library/{id}/` prefixes — originals live there); tablet follow-ups from the design §5
   (revision for ID-only covers, DocumentsUI/Picker) are optional.
+- **TODO (next Sol batch) — LaunchBox "lookup is already running":** opening a game work triggers `fetch_one`, which
+  also starts the daily ~108 MB LaunchBox metadata refresh; on 2026-10-02 it downloaded at ~17 KB/s and held the shared
+  `FETCH_STATE`/lease, so every other game detail showed the Busy error (and the failed attempt is cached for the
+  session). Fix: silent background attempts with later retry (no session-long failure cache), lookups use the existing
+  index while a refresh runs (separate lock), refresh weekly/idle with a stall timeout. The ~1 GB XML parse after a
+  refresh is a likely fan/CPU spike.
+- **TODO (next Sol batch) — PC background churn:** in 5 min of normal use the PC app sent 48
+  `POST /v1/collections/artworks/check` and 2 `PUT /v1/collections/replica` while logging "collection artwork import:
+  0 new" repeatedly; one tokio worker sat at ~17% CPU. Measure on a quiet PC, then only check/upload when something
+  changed.
 - **TODO — PC Collections first open:** native marks show ~0.6 s to the list and ~1.7 s more until the first cover is
   visible (test library, debug build); cover loading is the remaining cost.
 - **Server audit 2026-10-02 (read-only, two Astra auditors) — S1–S3 done and deployed (61eb4850); remaining:**

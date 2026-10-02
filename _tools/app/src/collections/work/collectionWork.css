@@ -40,6 +40,7 @@
 .work-dock { position: absolute; inset: 0 0 0 auto; width: 340px; }
 .work-dock .asset-viewer__dock-body { padding-top: var(--space-4); }
 .work-info { display: flex; flex-direction: column; gap: var(--space-6); }
+.work-dock .manga-connections__choices { grid-template-columns: minmax(0, 1fr); }
 .work-info section { display: flex; flex-direction: column; gap: var(--space-3); }
 .work-info dl { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; }
 .work-info dl > div { display: grid; grid-template-columns: 56px minmax(0,1fr); gap: var(--space-3); align-items: baseline; }
@@ -119,7 +120,7 @@
 .manga-bookcase.work-strip { height: 184px; padding: 0; display: block; overflow: hidden; }
 .manga-bookcase .home-shelf { display: block; height: 100%; margin: 0; padding: 0; overflow: visible; }
 .manga-bookcase .home-shelf__track { box-sizing: border-box; height: 100%; gap: 0; padding: var(--space-8); }
-.manga-bookcase-board { position: relative; width: max-content; min-width: 100%; height: 120px; }
+.manga-bookcase-board { position: relative; flex: none; width: max-content; min-width: 100%; height: 120px; }
 .manga-bookcase-board::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 6px; background: linear-gradient(color-mix(in srgb, var(--color-text) 20%, transparent), color-mix(in srgb, var(--color-text) 7%, transparent)); mask-image: linear-gradient(90deg, transparent, black 9%, black 91%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, black 9%, black 91%, transparent); pointer-events: none; }
 .manga-bookcase-board::before { content: ""; position: absolute; left: 4%; right: 4%; top: calc(100% - 10px); height: 22px; background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, black 55%, transparent), transparent 72%); pointer-events: none; }
 .manga-bookcase-spines { position: relative; display: flex; justify-content: center; align-items: flex-end; gap: 2px; height: 100%; }

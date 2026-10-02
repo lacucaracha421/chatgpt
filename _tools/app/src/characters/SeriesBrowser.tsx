@@ -1,3 +1,5 @@
+import { folderPreviewCache, rememberFolderPreview } from "../assets/folderPreviewCache";
+import { StableImage } from "../shared/ui/StableImage";
 import { CharacterSuggestionTile, useCharacterSuggestions } from "./suggestions/CharacterSuggestions";
 import { invoke } from "@tauri-apps/api/core";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
@@ -37,7 +39,7 @@ import { ShadowReview } from "./ShadowReview";
 import { shadowReviewApi, type ShadowReviewApi } from "./shadowReviewApi";
 import { S36ScoringWarning, S36SeriesControl, readinessLabel, useS36CharacterExclusion, useS36Readiness, s36PublicationApi, type S36Readiness } from "./S36Publication";
 import { characterApi, draftReferenceRegions, moveAssetsToCharacters, type CharacterApi, type CharacterTarget } from "./api";
-import { characterHubApi, type CharacterBrowsePage, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesFolder, type SeriesGalleryFilter } from "./hubApi";
+import { characterHubApi, type CharacterBrowsePage, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesGalleryFilter, type SeriesFolder } from "./hubApi";
 import "./CharacterManagement.css";
 import "./SeriesBrowser.css";
 
@@ -78,12 +80,19 @@ function characterStatus(target: CharacterTarget, readiness: S36Readiness | unde
 export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId, groupId, targets, groups = [], classifications, galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi }: Props) {
   void onPrivacyModeChange;
   void onMetadataVisibleChange;
-  const { gateway } = useLibrary();
+  const { gateway, library } = useLibrary();
+  const previewCache = folderPreviewCache(gateway, library?.root);
   const suggestions = useCharacterSuggestions(refreshVersion);
   const [hiddenSuggestions, setHiddenSuggestions] = useState<string[]>([]);
   const seriesSuggestions = suggestions.rows.filter(row => row.seriesId === series.classificationId);
   const suggestionsHidden = hiddenSuggestions.includes(series.classificationId);
-  const [folders, setFolders] = useState<SeriesFolder[]>([]);
+  const [folderRead, setFolderRead] = useState<{ cache: typeof previewCache; seriesId: string; folders: SeriesFolder[] } | null>(null);
+  // Keep the displayed shelf until an uncached series read settles; stale cards cannot act.
+  const cachedFolders = previewCache.shelves.get(series.classificationId);
+  const retainedFolderRead = folderRead?.cache === previewCache ? folderRead : null;
+  const folders = cachedFolders ?? retainedFolderRead?.folders ?? [];
+  const folderSeriesId = cachedFolders ? series.classificationId : retainedFolderRead?.seriesId ?? series.classificationId;
+  const staleFolders = folderSeriesId !== series.classificationId;
   // `series`: opened from this series' candidate count, so scoped to it; `all`: the overflow entry.
   const [shadowReview, setShadowReview] = useState<false | "series" | "all">(false);
   const [s36Setup, setS36Setup] = useState(false);
@@ -227,10 +236,17 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     if (targetId || currentGroup || picking) return;
     let active = true;
     void hubApi.seriesFolders(series.classificationId).then(result => {
-      if (active) setFolders(result);
+      if (!active) return;
+      const next = result.map(item => {
+        const thumbnailAssetId = item.thumbnailAssetId;
+        rememberFolderPreview(previewCache.thumbnails, item.classificationId, thumbnailAssetId);
+        return { ...item, thumbnailAssetId };
+      });
+      rememberFolderPreview(previewCache.shelves, series.classificationId, next, 16);
+      setFolderRead({ cache: previewCache, seriesId: series.classificationId, folders: next });
     }).catch(error => { if (active) setFolderError(commandErrorMessage(error, "하위 폴더를 불러오지 못했습니다.")); });
     return () => { active = false; };
-  }, [hubApi, series.classificationId, targetId, currentGroup?.id, Boolean(picking), refreshVersion, reload]);
+  }, [hubApi, previewCache, series.classificationId, targetId, currentGroup?.id, Boolean(picking), refreshVersion, reload]);
   useEffect(() => {
     // Pending S36 candidates (automatic + recommended) drive the quiet 후보 N 확인 action
     // on the series count line. Without the runtime the action stays hidden.
@@ -480,7 +496,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       <AssetGallery {...(!picking ? galleryDrag : {})} intro={<>
         {!picking && current && <div className="series-character-folder-head"><div className="folder-shelf__label character-group-heading"><span>이미지</span><span className="character-group-heading__count">{page.totalCount.toLocaleString("ko-KR")}</span></div></div>}
         {!picking && !current && !excludedOnly && <div className="series-browser__overview">
-          <CharacterGroups key={`${series.classificationId}:${currentGroup?.id ?? "series"}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={currentGroup?.id} privacyMode={privacyMode} memberCounts={memberCounts}
+          <CharacterGroups key={`${library?.root ?? ""}:${folderSeriesId}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={currentGroup?.id} privacyMode={privacyMode} memberCounts={memberCounts}
             onOpenGroup={id => onNavigate({ kind: "classification", classificationId: series.classificationId, ...(id ? { characterGroupId: id } : {}) })}
             onGroupsChanged={onChanged} suggestionCount={currentGroup ? 0 : seriesSuggestions.length}
             suggestionCards={!currentGroup && !suggestionsHidden ? seriesSuggestions.map(suggestion => <CharacterSuggestionTile key={suggestion.tag} suggestion={suggestion} state={suggestions} privacyMode={privacyMode} onChanged={onChanged} />) : undefined}
@@ -490,14 +506,14 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               if (!folder) return null;
               const exclusion = folderExclusionItem(folder.id, classifications, folderExclusions, excluded => void action(() => hubApi.setFolderExcluded(folder.id, excluded)));
               const excluded = folderExclusions.includes(folder.id) || exclusion.disabled;
-              return <article className={`series-character folder-shelf__card${excluded ? " series-character--excluded" : ""}`} key={folder.id}>
-                <button className="series-character__open" aria-label={`${folder.name} 폴더 열기`} aria-description={excluded ? "캐릭터 분류 제외" : "일반 폴더"} onClick={() => onNavigate({ kind: "classification", classificationId: folder.id })}>
-                  {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : item.thumbnailAssetId ? <img draggable={false} loading="lazy" src={thumbnailUrl(item.thumbnailAssetId)} alt="" /> : <span className="series-character__placeholder"><FolderIcon aria-hidden="true" />일반 폴더</span>}
+              return <article className={`series-character folder-shelf__card${excluded ? " series-character--excluded" : ""}`} key={folder.id} inert={staleFolders}>
+                <button disabled={staleFolders} className="series-character__open" aria-label={`${folder.name} 폴더 열기`} aria-description={excluded ? "캐릭터 분류 제외" : "일반 폴더"} onClick={() => onNavigate({ kind: "classification", classificationId: folder.id })}>
+                  {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : item.thumbnailAssetId ? <StableImage draggable={false} loading="lazy" src={thumbnailUrl(item.thumbnailAssetId)} alt="" /> : <span className="series-character__placeholder"><FolderIcon aria-hidden="true" />일반 폴더</span>}
                   {excluded && <span className="series-character__tag" aria-hidden="true">제외</span>}
                   <strong><FolderIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{folder.name}</span></strong>
                   {(folder.totalAssetCount ?? folder.assetCount) !== undefined && <small className="folder-shelf__meta">{(folder.totalAssetCount ?? folder.assetCount)!.toLocaleString("ko-KR")}장</small>}
                 </button>
-                <Menu label={`${folder.name} 폴더 더보기`} triggerClassName="series-character__info" disabled={busy} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[exclusion]} />
+                <Menu label={`${folder.name} 폴더 더보기`} triggerClassName="series-character__info" disabled={busy || staleFolders} trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[exclusion]} />
               </article>;
             }) : undefined}>{visibleMembers => <>{visibleMembers.map(target => {
               const status = characterStatus(target, readiness.get(target.id), s36Driven(target.id));
@@ -511,7 +527,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
                 { id: "move-down", label: "아래로 이동", disabled: busy || index === orderedMembers.length - 1, onSelect: () => move(1) },
               ]}><article className="series-character folder-shelf__card">
               <button className="series-character__open" aria-label={`${target.displayName} 열기`} aria-description={description || undefined} onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id })}>
-                {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : (target.thumbnailAssetId ?? activeCharacterReferences(target)[0]?.assetId) ? <img draggable={false} loading="lazy" src={thumbnailUrl((target.thumbnailAssetId ?? activeCharacterReferences(target)[0]!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><UserIcon aria-hidden="true" />대표 이미지</span>}
+                {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : (target.thumbnailAssetId ?? activeCharacterReferences(target)[0]?.assetId) ? <StableImage draggable={false} loading="lazy" src={thumbnailUrl((target.thumbnailAssetId ?? activeCharacterReferences(target)[0]!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><UserIcon aria-hidden="true" />대표 이미지</span>}
                 <strong><UserIcon className="folder-shelf__icon" aria-hidden="true" />{status.warning && <span className="series-character__warning" aria-hidden="true">!</span>}<span className="series-character__name">{target.displayName}</span></strong>
                 {memberCounts[target.id] !== undefined && <small className="folder-shelf__meta">{memberCounts[target.id]!.toLocaleString("ko-KR")}장</small>}
               </button>

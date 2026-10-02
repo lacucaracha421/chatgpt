@@ -6,6 +6,7 @@ import {CaseFacts} from '../src/collections/case/CollectionCase';
 import {moreWorkFacts, workFacts} from '../src/collections/work/workFacts';
 import {latestKoreanRelease} from '../src/collections/releaseCaption';
 import {ShelfTile, ShelfViewSheet, useShelfViews} from './CollectionShelf';
+import {useShelfPutDown} from '../src/collections/useShelfPutDown';
 import {CaseWork, MangaWork, sharedVolume} from './CollectionWork';
 import {TabletMangaShelf} from './CollectionMangaShelf';
 import type {MangaShelfPick} from '../src/collections/MangaShelfRow';
@@ -376,6 +377,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   const [picked,setPicked]=useState<string|null>(null),[order,setOrder]=useState<string[]>([]);
   // 만화 · 선반: the picked spine, and the volume a shelf opened its work at.
   const [mangaPick,setMangaPick]=useState<MangaShelfPick>(null),[openedVolume,setOpenedVolume]=useState<{id:string;volumeId:string}|null>(null);
+  const shelfPutDown=useShelfPutDown(()=>{setPicked(null);setMangaPick(null);});
   const stepping=useRef(false);
   // The AV performer page: `from` is the work it was opened from (Back returns there).
   const [performer,setPerformer]=useState<{id:string;from:string|null}|null>(null),[performerOrder,setPerformerOrder]=useState<'newest'|'oldest'>('newest');
@@ -612,7 +614,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
     <div style={{display:'contents'}} inert={overlayOpen&&!selected&&!performer||undefined}>{header}</div>
     {!selected&&!overlayOpen&&!performer&&!searching&&sections.shade}
-    <div ref={listRef} className="collection-scroll" inert={overlayOpen||undefined} aria-hidden={overlayOpen||undefined} style={{display:selected||performer?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
+    <div ref={listRef} className="collection-scroll" {...shelfPutDown} inert={overlayOpen||undefined} aria-hidden={overlayOpen||undefined} style={{display:selected||performer?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
       {listPull}
       {sections.inline}
       {tab==='av'?<>
