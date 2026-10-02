@@ -182,8 +182,9 @@ export function Home(props: HomeProps) {
   const right = [
     ...(visit.arrivals.length ? [{ key: 'new', content: <HomeSection title="새로 나옴 · 지난번 이후" onOpen={props.onReleases}><HomeReleaseList today={today} rows={visit.arrivals.map(e => ({ key: e.key, name: e.name, date: e.date, detail: e.detail, fresh: true, cover: e.external ? <HomeCoverImage cover={e.external.cover} alt="" privacy={privacy} /> : cover(e.workId, e.name), onOpen: () => { visit.opened(e.token); if (e.external) setDetail(e.external); else props.onWork(e.workId); } }))} /></HomeSection> }] : []),
     ...(future.length ? [{ key: 'upcoming', content: <HomeSection title="2주 안에 나오는 신간" onOpen={props.onReleases}><HomeReleaseList rows={future} today={today} /></HomeSection> }] : []),
-    ...(dateGroup ? [{ key: 'revisit', content: <HomeSection title={`1년 전 오늘 · ${dateGroup.count.toLocaleString()}장`}><RevisitMosaic group={dateGroup} paused={paused} privacy={privacy} onOpen={() => props.onRevisit?.('date', dateGroup.title)} /></HomeSection> }] : []),
   ];
+  // Same order as the PC: 1년 전 오늘 follows 오늘 할 것, before 새로 나옴 and 신간.
+  const revisitSection = dateGroup ? <HomePresence items={[{ key: 'revisit', content: <HomeSection title={`1년 전 오늘 · ${dateGroup.count.toLocaleString()}장`}><RevisitMosaic group={dateGroup} paused={paused} privacy={privacy} onOpen={() => props.onRevisit?.('date', dateGroup.title)} /></HomeSection> }]} /> : null;
   return <div className={`home-scroll home-attention-mobile${privacy ? ' is-private' : ''}`} ref={homeScroll} aria-label="홈">
     {pull}
     <HomeAttentionLayout tablet today={<HomeToday rows={rows} loading={!memos || reviewRows.some(r => r.count === null) ? <Skeleton label="오늘 할 것" /> : undefined} onOpen={row => {
@@ -194,7 +195,7 @@ export function Home(props: HomeProps) {
       else if (row.key === 'duplicates') props.onDuplicates();
       else if (row.key === 'connection:exchange') props.onExchange();
       else if (row.key.startsWith('connection:')) props.onSettings();
-    }} />} right={<HomePresence items={right} />} />
+    }} />} leftAfter={revisitSection} right={<HomePresence items={right} />} />
     {secondaryError && <p className="hint" role="status">{secondaryError}</p>}
     {detail && <UpcomingDetailSheet entry={detail} interested={upcoming.wishlist.has(detail.id)} privacy={privacy} onToggle={() => upcoming.toggle(detail.id)} onClose={() => setDetail(null)} />}
   </div>;

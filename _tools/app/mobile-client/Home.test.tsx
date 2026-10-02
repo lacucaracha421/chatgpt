@@ -66,7 +66,7 @@ describe('shared Home attention on tablet', () => {
     expect(document.querySelector('.home-attention-layout')?.classList.contains('is-tablet')).toBe(true);
     await screen.findByRole('region', {name:'2주 안에 나오는 신간'});
     const regions = screen.getAllByRole('region').map(r => r.getAttribute('aria-label'));
-    expect(regions.filter(n => n !== '1년 전 오늘')).toEqual(['오늘 할 것 · 5','새로 나옴 · 지난번 이후','2주 안에 나오는 신간','1년 전 오늘 · 2장']);
+    expect(regions.filter(n => n !== '1년 전 오늘')).toEqual(['오늘 할 것 · 5','1년 전 오늘 · 2장','새로 나옴 · 지난번 이후','2주 안에 나오는 신간']);
     for (const name of ['자산 현황','AV 배우','작가','메모','검토','이어지는 시리즈']) expect(screen.queryByRole('region',{name})).toBeNull();
     expect(mocks.api.mock.calls.some(([path]) => ['/v1/home/av-pick','/v1/library/artists'].includes(path))).toBe(false);
   });
