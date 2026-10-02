@@ -31,8 +31,8 @@
 .tablet-work__manga-stage { position: relative; height: clamp(320px, 52vh, 640px); touch-action: pan-y; }
 .tablet-work__manga-stage .work-stage.manga-work-stage { position: absolute; inset: 0; }
 .tablet-work .manga-work-book { inset: var(--space-4) var(--space-8) var(--space-8); }
-/* Horizontal drags turn the object; vertical ones still scroll the page. */
-.tablet-work .collection-case .kase, .tablet-work .manga-bigbook { touch-action: pan-y; }
+/* The stage owns turning and two-finger zoom; scrolling remains available outside it. */
+.tablet-work .work-stage[data-zoom-enabled], .tablet-work .collection-case .kase, .tablet-work .manga-bigbook { touch-action: none; }
 .tablet-work .work-strip { position: relative; inset: auto; height: 112px; justify-content: flex-start; padding: 0 var(--mobile-gutter); scrollbar-width: none; }
 .tablet-work .work-strip::-webkit-scrollbar { display: none; }
 .tablet-work .work-strip-tile { min-width: var(--touch-target); padding: 0; background: transparent; border: 0; font: inherit; font-size: var(--type-meta); }

@@ -1,3 +1,4 @@
+import { useWorkTurnBlocked } from "./WorkZoom";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
 import "../case/CaseMaterials.css";
 import { stripPosition } from "./coverStrip";
@@ -41,6 +42,7 @@ export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus
   const rulerTexts = useMemo(() => [...new Set([title, ...spineTitleSplits(title).flatMap(split => split.parts)])], [title]);
   const [titleFit, setTitleFit] = useState<SpineTitleFit & { title: string }>({ title, scale: SPINE_TITLE_SCALE.base, columns: [title], clipped: false });
   const [angle, setAngle] = useState(0);
+  const blocked = useWorkTurnBlocked();
   const [dragging, setDragging] = useState(false);
   const [ratio, setRatio] = useState(.71);
   const [box, setBox] = useState<{ width: number; height: number } | null>(null);
@@ -57,7 +59,7 @@ export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus
   useLayoutEffect(() => {
     const node = host.current; if (!node) return;
     const measure = () => {
-      const { width, height } = node.getBoundingClientRect();
+      const width = node.clientWidth, height = node.clientHeight;
       if (width > 0 && height > 0) setBox(previous => previous?.width === width && previous.height === height ? previous : { width, height });
     };
     measure();
@@ -120,11 +122,13 @@ export function MangaBook({ src, title, author, volumeNumber, volumeTitle, focus
     {/* Rotation is an interaction with the physical book, separate from volume navigation. */}
     <div className={`manga-bigbook${dragging ? " is-dragging" : ""}`} role="group" aria-label="책" tabIndex={0} data-angle={angle} style={{ "--ty": `${angle}deg` } as CSSProperties}
       onPointerDown={event => {
+        if (blocked?.current) { drag.current = null; setDragging(false); return; }
         if (event.button !== 0 || drag.current) return;
         event.currentTarget.focus({ preventScroll: true });
         drag.current = { pointer: event.pointerId, x: event.clientX, angle, moved: false };
         event.currentTarget.setPointerCapture?.(event.pointerId);
       }} onPointerMove={event => {
+        if (blocked?.current) { drag.current = null; setDragging(false); return; }
         const start = drag.current; if (!start || event.pointerId !== start.pointer) return;
         const distance = event.clientX - start.x;
         if (!start.moved && Math.abs(distance) < 4) return;

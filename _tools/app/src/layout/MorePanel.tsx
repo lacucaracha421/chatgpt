@@ -17,6 +17,8 @@ export function MorePanel({ entries, current = false, onOpenChange }: { entries:
     open={open}
     onOpenChange={setOpen}
     title="더보기"
+    anchor="rail"
+    showHeader={false}
     trigger={<button type="button" className="workspace-rail__item" aria-label={label} aria-description={activity} title={activity}
       aria-current={current ? "page" : undefined}>
       <span className="workspace-rail__icon">

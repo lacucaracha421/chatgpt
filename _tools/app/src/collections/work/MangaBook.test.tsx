@@ -3,10 +3,44 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MangaBook } from "./MangaBook";
 import { MangaBookcase, type MangaWorkData } from "./MangaBookcase";
 import { stripPosition } from "./coverStrip";
+import { WorkZoomObject, WorkZoomProvider, WorkZoomStage } from "./WorkZoom";
+import { WorkBackdrop } from "./WorkBackdrop";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const props = { src: "/cover", title: "위치 WATCH", author: "작가 이름", volumeNumber: 2, volumeTitle: "2권", focus: null, privacy: false, frontReset: 0, onReady: vi.fn() };
 describe("turnable manga book", () => {
+  it("keeps the loaded backdrop through rapid cover changes and ignores stale decodes, even on returning to a pending cover", async () => {
+    const view = render(<WorkBackdrop src="/one"/>);
+    const old = view.container.querySelector<HTMLImageElement>('img')!;
+    await act(async () => fireEvent.load(old));
+    view.rerender(<WorkBackdrop src="/two"/>);
+    const cancelled = view.container.querySelector<HTMLImageElement>('img[src="/two"]')!;
+    let decoded!: () => void;
+    Object.defineProperty(cancelled, 'decode', { value: () => new Promise<void>(resolve => { decoded = resolve; }) });
+    fireEvent.load(cancelled);
+    view.rerender(<WorkBackdrop src="/three"/>);
+    view.rerender(<WorkBackdrop src="/two"/>);
+    const next = view.container.querySelector<HTMLImageElement>('img[src="/two"]')!;
+    expect(next).not.toBe(cancelled);
+    await act(async () => decoded()); expect(old).toHaveClass('is-painted'); expect(next).not.toHaveClass('is-painted');
+    await act(async () => fireEvent.load(next)); expect(next).toHaveClass('is-painted'); expect(old).not.toHaveClass('is-painted');
+  });
+  it("pinches without turning, stays blocked until both fingers lift, then supports a new single-finger drag", () => {
+    const { container } = render(<WorkZoomProvider workId="manga" reset={0}><WorkZoomStage><WorkZoomObject><MangaBook {...props}/></WorkZoomObject></WorkZoomStage></WorkZoomProvider>);
+    const book = screen.getByRole('group', { name: '책' });
+    fireEvent.pointerDown(book, { pointerType: 'touch', button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerDown(book, { pointerType: 'touch', button: 0, pointerId: 2, clientX: 200, clientY: 100 });
+    fireEvent.pointerMove(book, { pointerType: 'touch', pointerId: 2, clientX: 300, clientY: 100 });
+    expect(container.querySelector('.work-zoom-object')).toHaveAttribute('data-zoom', '2');
+    expect(book).toHaveAttribute('data-angle', '0');
+    fireEvent.pointerUp(book, { pointerType: 'touch', pointerId: 2 });
+    fireEvent.pointerMove(book, { pointerType: 'touch', pointerId: 1, clientX: 160, clientY: 100 });
+    expect(book).toHaveAttribute('data-angle', '0');
+    fireEvent.pointerUp(book, { pointerType: 'touch', pointerId: 1 });
+    fireEvent.pointerDown(book, { pointerType: 'touch', button: 0, pointerId: 3, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(book, { pointerType: 'touch', pointerId: 3, clientX: 150, clientY: 100 });
+    expect(book).toHaveAttribute('data-angle', '30');
+  });
   it("rests facing front, rotates in 15 degree steps, and resets by Home or the front action", () => {
     const view = render(<MangaBook {...props} />); const book = screen.getByRole("group", { name: "책" });
     expect(book).toHaveAttribute("data-angle", "0");

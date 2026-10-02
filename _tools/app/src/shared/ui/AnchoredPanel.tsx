@@ -11,12 +11,14 @@ type AnchoredPanelProps = {
   trigger: ReactElement;
   title: string;
   description?: string;
+  anchor?: "index" | "rail";
+  showHeader?: boolean;
   children: ReactNode;
   footer?: ReactNode;
 };
 
 /** A non-modal, viewport-bounded sheet that never reserves gallery space. */
-export function AnchoredPanel({ open, onOpenChange, trigger, title, description, children, footer }: AnchoredPanelProps) {
+export function AnchoredPanel({ open, onOpenChange, trigger, title, description, children, footer, anchor = "index", showHeader = true }: AnchoredPanelProps) {
   const id = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -32,11 +34,12 @@ export function AnchoredPanel({ open, onOpenChange, trigger, title, description,
     const content = contentNode;
     if (!triggerNode || !content) return;
     const navigation = triggerNode.closest<HTMLElement>(".workspace-navigation");
-    const index = triggerNode.closest<HTMLElement>(".workspace-index")
+    const index = (anchor === "rail" ? triggerNode.closest<HTMLElement>(".workspace-rail") : null)
+      ?? triggerNode.closest<HTMLElement>(".workspace-index")
       ?? navigation?.querySelector<HTMLElement>(".workspace-index")
       ?? triggerNode;
     const positionPanel = () => {
-      const anchor = triggerNode.getBoundingClientRect();
+      const triggerRect = triggerNode.getBoundingClientRect();
       const side = index.getBoundingClientRect();
       const rect = content.getBoundingClientRect();
       const viewport = window.visualViewport;
@@ -45,7 +48,7 @@ export function AnchoredPanel({ open, onOpenChange, trigger, title, description,
       const offsetX = viewport?.offsetLeft ?? 0;
       const offsetY = viewport?.offsetTop ?? 0;
       const left = Math.max(offsetX + EDGE, Math.min(side.right + GAP, offsetX + width - rect.width - EDGE));
-      const top = Math.max(offsetY + EDGE, Math.min(anchor.bottom - rect.height, offsetY + height - rect.height - EDGE));
+      const top = Math.max(offsetY + EDGE, Math.min(triggerRect.bottom - rect.height, offsetY + height - rect.height - EDGE));
       setPosition({ left, top, visibility: "visible" });
     };
     positionPanel();
@@ -55,12 +58,13 @@ export function AnchoredPanel({ open, onOpenChange, trigger, title, description,
     window.addEventListener("resize", positionPanel);
     window.visualViewport?.addEventListener("resize", positionPanel);
     return () => { observer.disconnect(); window.removeEventListener("resize", positionPanel); window.visualViewport?.removeEventListener("resize", positionPanel); };
-  }, [open, contentNode]);
+  }, [open, contentNode, anchor]);
   return <RadixDialog.Root modal={false} open={open} onOpenChange={onOpenChange}>
     <RadixDialog.Trigger ref={triggerRef} asChild>{trigger}</RadixDialog.Trigger>
     <RadixDialog.Portal>
       <RadixDialog.Content ref={attachContent} className="ui-anchored-panel"
-        style={position} data-workspace-popover={id} aria-modal={false} aria-describedby={undefined}
+        style={position} data-workspace-popover={id} aria-modal={false} aria-describedby={undefined} aria-label={showHeader ? undefined : title}
+        onCloseAutoFocus={anchor === "rail" ? event => { event.preventDefault(); triggerRef.current?.focus({ preventScroll: true }); } : undefined}
         onOpenAutoFocus={(event) => { event.preventDefault(); requestAnimationFrame(() => {
           // Skip controls inside closed <details> or otherwise hidden, which cannot take focus.
           const first = (selector: string) => [...contentRef.current?.querySelectorAll<HTMLElement>(selector) ?? []].find(node => node.checkVisibility?.() ?? true);
@@ -74,10 +78,11 @@ export function AnchoredPanel({ open, onOpenChange, trigger, title, description,
           if (target instanceof Element && target.closest("[data-panel-owner]")?.getAttribute("data-panel-owner") === id) event.preventDefault();
         }}
       >
-        <div className="ui-anchored-panel__head">
+        {!showHeader && <RadixDialog.Title hidden>{title}</RadixDialog.Title>}
+        {showHeader && <div className="ui-anchored-panel__head">
           <RadixDialog.Title>{title}</RadixDialog.Title>
           <RadixDialog.Close className="ui-button ui-button--icon ui-button--ghost" aria-label={`${title} 닫기`}><XMarkIcon aria-hidden="true" /></RadixDialog.Close>
-        </div>
+        </div>}
         {description && <p className="ui-anchored-panel__context">{description}</p>}
         <div className="ui-anchored-panel__body">{children}</div>
         {footer && <div className="ui-anchored-panel__foot">{footer}</div>}

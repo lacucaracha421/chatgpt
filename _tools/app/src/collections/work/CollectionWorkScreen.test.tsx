@@ -18,10 +18,56 @@ function value(av = false): CollectionWorkData {
 function callbacks(): WorkActions {
   return { onClose: vi.fn(), onStep: vi.fn(), onEdit: vi.fn(), onShowcase: vi.fn(), onManage: () => [], onSave: vi.fn().mockImplementation(async (collection, edit) => ({ ...defaultRecord(collection), [edit.field === "myScore" ? "myScore" : edit.field]: edit.value })), onOpenPerson: vi.fn(), onOpenCollection: vi.fn(), onCopyCode: vi.fn() };
 }
+it.each(["av", "game", "movie"] as const)("uses only AV's shown case front for the shared backdrop (%s)", async type => {
+  const base = value(type === "av");
+  const data = {...base, collection: {...base.collection, type}};
+  const {container, rerender} = view(data);
+  const image = container.querySelector<HTMLImageElement>(".work-backdrop img");
+  if (type !== "av") { expect(image).toBeNull(); return; }
+  expect(image).toHaveAttribute("src", data.case.front);
+  expect(image).not.toHaveClass("is-painted");
+  await act(async () => fireEvent.load(image!));
+  expect(image).toHaveClass("is-painted");
+  rerender(<PrivacyProvider privacyMode setPrivacyMode={vi.fn()}><CollectionWorkScreen data={{...data, case: {...data.case, privacy: true}}} pending={false} actions={callbacks()}/></PrivacyProvider>);
+  expect(container.querySelector(".work-backdrop")).toBeNull();
+});
 function view(data = value(), actions = callbacks()) {
   return { actions, ...render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={data} pending={false} actions={actions} /></PrivacyProvider>) };
 }
 describe("merged work screen", () => {
+  it("zooms smoothly with fractional wheel deltas, clamps, resets both pose and zoom, and leaves outside scrolling alone", () => {
+    const first = value(); const actions = callbacks(); const { container, rerender } = view(first, actions);
+    const stage = container.querySelector('.work-stage')!;
+    const zoom = () => Number(container.querySelector('.work-zoom-object')!.getAttribute('data-zoom'));
+    fireEvent.wheel(stage, { deltaY: -.5 }); expect(zoom()).toBeGreaterThan(1); expect(zoom()).toBeLessThan(1.01);
+    const wheel = new WheelEvent('wheel', { deltaY: -100000, bubbles: true, cancelable: true });
+    fireEvent(stage, wheel); expect(wheel.defaultPrevented).toBe(true); expect(zoom()).toBe(2.5);
+    fireEvent.wheel(stage, { deltaY: 100000 }); expect(zoom()).toBe(.6);
+    const outside = new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true });
+    fireEvent(screen.getByRole('complementary'), outside); expect(outside.defaultPrevented).toBe(false);
+    fireEvent.keyDown(screen.getByRole('group', { name: '케이스' }), { key: 'ArrowRight' });
+    fireEvent.click(screen.getByRole('button', { name: '정면으로' }));
+    expect(zoom()).toBe(1); expect(screen.getByRole('group', { name: '케이스' })).toHaveAttribute('data-angle', '0');
+    fireEvent.wheel(stage, { deltaY: -100 });
+    const next = { ...first, collection: { ...first.collection, id: 'another' }, case: { ...first.case, front: null } };
+    rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={next} pending={false} actions={actions}/></PrivacyProvider>);
+    expect([...container.querySelectorAll('.work-zoom-object')].every(node => node.getAttribute('data-zoom') === '1')).toBe(true);
+  });
+  it("zooms open and flat objects but leaves the standalone artwork view unchanged", async () => {
+    const data = { ...value(true), case: { ...value(true).case, privacy: true }, artworks: [{ id: 'art', kind: 'screenshot' as const, selected: false }] };
+    const { container } = view(data);
+    const stage = container.querySelector('.work-stage')!;
+    const object = container.querySelector('.work-zoom-object')!;
+    fireEvent.click(screen.getByRole('button', { name: '안쪽' }));
+    fireEvent.wheel(stage, { deltaY: -100 }); expect(Number(object.getAttribute('data-zoom'))).toBeGreaterThan(1);
+    fireEvent.click(screen.getByRole('button', { name: '펼친 표지' }));
+    fireEvent.wheel(stage, { deltaY: -100 }); const flatZoom = object.getAttribute('data-zoom');
+    expect(object.querySelector('.work-flat')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '아트워크 1' }));
+    const wheel = new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true });
+    fireEvent(stage, wheel); expect(wheel.defaultPrevented).toBe(false); expect(object.getAttribute('data-zoom')).toBe(flatZoom);
+    expect(container.querySelector('.work-backdrop')).toBeNull();
+  });
   it("updates metadata in the painted surface without busy states or slot swaps", async () => {
     const first = { ...value(), record: { status: "playing", ownedPlatform: "PC", myScore: 3.5, memo: "메모" } };
     const actions = callbacks(); const { container, rerender } = view(first, actions);
@@ -128,6 +174,12 @@ describe("merged work screen", () => {
     const two:CollectionWorkData={...one,case:{...one.case,front:"http://lakomics.localhost/work-artwork/art-2"},manga:{...manga,activeVolumeId:"v2"},position:2};
     const actions=callbacks(); const {container,rerender}=view(one,actions); const root=screen.getByRole("article",{name:"만화 작품 화면"});
     const painted=container.querySelector('.manga-bb-front img');
+    const oldBackdrop = container.querySelector<HTMLImageElement>('.work-backdrop img')!;
+    expect(oldBackdrop.src).toBe((painted as HTMLImageElement).src);
+    await act(async () => fireEvent.load(oldBackdrop));
+    expect(oldBackdrop).toHaveClass('is-painted');
+    fireEvent.wheel(container.querySelector('.manga-work-stage')!, { deltaY: -100 });
+    const volumeZoom = container.querySelector('.work-zoom-object')!.getAttribute('data-zoom');
     rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={two} pending={false} actions={actions}/></PrivacyProvider>);
     expect(root.querySelector('.asset-viewer__position')).toHaveTextContent("1 / 2");
     expect(painted).toBeVisible();
@@ -140,6 +192,20 @@ describe("merged work screen", () => {
     expect(screen.getByRole("article")).toBe(root);
     expect(root.querySelector('.asset-viewer__position')).toHaveTextContent("2 / 2");
     expect(incoming).toBeVisible();
+    expect([...container.querySelectorAll('.work-zoom-object')].every(node => node.getAttribute('data-zoom') === volumeZoom)).toBe(true);
+    expect(oldBackdrop).toHaveClass('is-painted');
+    const newBackdrop = container.querySelector<HTMLImageElement>('.work-backdrop img:not(.is-painted)')!;
+    let backdropDecode!: () => void;
+    Object.defineProperty(newBackdrop, 'decode', { value: () => new Promise<void>(resolve => { backdropDecode = resolve; }) });
+    fireEvent.load(newBackdrop); expect(oldBackdrop).toHaveClass('is-painted');
+    await act(async () => backdropDecode());
+    expect(newBackdrop).toHaveClass('is-painted'); expect(oldBackdrop).not.toHaveClass('is-painted');
+    fireEvent.keyDown(screen.getByRole('group', { name: '책' }), { key: 'ArrowRight' });
+    fireEvent.click(screen.getByRole('button', { name: '정면으로' }));
+    expect(screen.getByRole('group', { name: '책' })).toHaveAttribute('data-angle', '0');
+    expect([...container.querySelectorAll('.work-zoom-object')].every(node => node.getAttribute('data-zoom') === '1')).toBe(true);
+    rerender(<PrivacyProvider privacyMode setPrivacyMode={vi.fn()}><CollectionWorkScreen data={{...two, case: {...two.case, privacy: true}}} pending={false} actions={actions}/></PrivacyProvider>);
+    expect(container.querySelector('.work-backdrop')).toBeNull();
     fireEvent.keyDown(root,{key:"ArrowLeft"}); expect(actions.onStep).toHaveBeenCalledWith(-1);
   });
 

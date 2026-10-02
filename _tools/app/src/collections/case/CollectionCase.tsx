@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useWorkTurnBlocked } from "../work/WorkZoom";
 import "./CollectionCase.css";
 import "./CaseMaterials.css";
 import { fitCollectionCase, type StageBox } from "./fitCaseStage";
@@ -35,16 +36,18 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
   data: CaseData; open: boolean; onOpenChange(open: boolean): void; frontReset?: number;
   inside?: ReactNode; note?: ReactNode; onReady?(): void; large?: boolean; stageBox?: StageBox;
 }) {
+  const blocked = useWorkTurnBlocked();
   const [angle, setAngle] = useState(open ? -10 : 28);
   const [ratio, setRatio] = useState(.71);
   const savedAngle = useRef(28);
-  const drag = useRef<{ x: number; angle: number; moved: boolean } | null>(null);
+  const lastReset = useRef(frontReset);
+  const drag = useRef<{ pointer: number; x: number; angle: number; moved: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
   const settled = useRef(new Set<string>());
   const readyRef = useRef(onReady); readyRef.current = onReady;
   const sources = data.privacy ? [] : [data.front, data.spine, data.back].filter((url): url is string => Boolean(url));
   useEffect(() => { if (sources.every(source => settled.current.has(source))) readyRef.current?.(); });
-  useEffect(() => { setAngle(0); }, [frontReset]);
+  useEffect(() => { setAngle(0); if (lastReset.current !== frontReset) savedAngle.current = 0; lastReset.current = frontReset; drag.current = null; setDragging(false); }, [frontReset]);
   useEffect(() => {
     if (open) { savedAngle.current = angle; setAngle(-10); }
     else setAngle(savedAngle.current);
@@ -72,9 +75,9 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
     <span className="floor-shadow" aria-hidden="true" />
     {/* This control is the physical media object, with rotation distinct from screen navigation. */}
     <div className={`kase${dragging ? " is-dragging" : ""}`} tabIndex={0} role="group" aria-label="케이스" aria-expanded={open} data-angle={angle} style={{ "--ry": `${angle}deg`, "--open": open ? 1 : 0, "--gloss": `${50 + angle}%` } as CSSProperties}
-      onPointerDown={event => { if (event.button !== 0) return; drag.current = { x: event.clientX, angle, moved: false }; event.currentTarget.setPointerCapture?.(event.pointerId); }}
-      onPointerMove={event => { const start = drag.current; if (!start) return; if (!start.moved && Math.abs(event.clientX - start.x) < 4) return; if (!start.moved) { start.moved = true; setDragging(true); } turn(start.angle + (event.clientX - start.x) * .6); }}
-      onPointerUp={() => { const click = drag.current && !drag.current.moved; drag.current = null; setDragging(false); if (click) onOpenChange(!open); }} onPointerCancel={() => { drag.current = null; setDragging(false); }}
+      onPointerDown={event => { if (blocked?.current) { drag.current = null; setDragging(false); return; } if (event.button !== 0 || drag.current) return; drag.current = { pointer: event.pointerId, x: event.clientX, angle, moved: false }; event.currentTarget.setPointerCapture?.(event.pointerId); }}
+      onPointerMove={event => { if (blocked?.current) { drag.current = null; setDragging(false); return; } const start = drag.current; if (!start || start.pointer !== event.pointerId) return; if (!start.moved && Math.abs(event.clientX - start.x) < 4) return; if (!start.moved) { start.moved = true; setDragging(true); } turn(start.angle + (event.clientX - start.x) * .6); }}
+      onPointerUp={event => { if (drag.current?.pointer !== event.pointerId) return; const click = !blocked?.current && drag.current && !drag.current.moved; drag.current = null; setDragging(false); if (click) onOpenChange(!open); }} onPointerCancel={() => { drag.current = null; setDragging(false); }} onLostPointerCapture={() => { drag.current = null; setDragging(false); }}
       onKeyDown={event => {
         if (event.key === "ArrowLeft") turn(angle - 15);
         else if (event.key === "ArrowRight") turn(angle + 15);

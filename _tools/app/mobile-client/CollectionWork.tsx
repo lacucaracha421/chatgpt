@@ -1,3 +1,5 @@
+import {WorkZoomObject, WorkZoomProvider, WorkZoomStage} from '../src/collections/work/WorkZoom';
+import {WorkBackdrop} from '../src/collections/work/WorkBackdrop';
 import {useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode} from 'react';
 import {ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon} from '@heroicons/react/24/outline';
 import {CaseInside, CollectionCase} from '../src/collections/case/CollectionCase';
@@ -131,10 +133,12 @@ export function CaseWork({item, revision, active, privacy, position, total, scor
   const hidden: CSSProperties = {visibility: 'hidden', pointerEvents: 'none'};
   const people = work.av?.people ?? [];
   const label = work.type === 'av' ? 'AV 작품 화면' : work.type === 'movie' ? '영화 작품 화면' : '게임 작품 화면';
-  return <article className="tablet-work" aria-label={label} aria-busy={waiting} inert={waiting || undefined}>
+  return <WorkZoomProvider workId={work.id} reset={reset}><article className="tablet-work" aria-label={label} aria-busy={waiting} inert={waiting || undefined}>
     <div className="tablet-work__frame">
       {shown.urls.hero && <HeroBand src={shown.urls.hero} manga={false} onReady={() => undefined}/>}
-      <div ref={stage} className="work-stage tablet-work__stage" {...swipe}>
+      <WorkZoomStage stageRef={stage} className="work-stage tablet-work__stage" enabled={isObject || mode === 'flat'} {...swipe}>
+        {work.type === 'av' && !privacy && <WorkBackdrop src={data.front}/>}
+        <WorkZoomObject>
         <div className="work-case-slot" style={isObject ? undefined : {...hidden, position: 'absolute', inset: 0}} inert={!isObject || undefined} aria-hidden={!isObject}>
           <CollectionCase key={work.id} data={data} large stageBox={stageBox} open={mode === 'open'} onOpenChange={open => pick(open ? 'open' : 'case')} frontReset={reset}
             inside={<CaseInside record={caseRecord(record(work), <RecordStars score={score(work)}/>)} facts={insideFacts(work, work.av ?? null)}/>}
@@ -143,10 +147,11 @@ export function CaseWork({item, revision, active, privacy, position, total, scor
         {work.type === 'av' && <div className="work-flat-slot" style={mode === 'flat' ? undefined : hidden} aria-hidden={mode !== 'flat'} inert={mode !== 'flat' || undefined}>
           <FlatJacket key={work.id} data={data} stageBox={stageBox} onReady={() => { flatReady.current = true; if (picked === 'flat') setMode('flat'); }}/>
         </div>}
+        </WorkZoomObject>
         {!isObject && mode !== 'flat' && art.urls.art && <div className="work-art"><StableImage src={art.urls.art} alt={`${data.title} 아트워크`} draggable={false}/></div>}
         <StageEdges previous={position > 1} next={position < total} onStep={onStep}/>
         <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={() => setReset(value => value + 1)}><ArrowPathIcon aria-hidden="true"/></Button>
-      </div>
+      </WorkZoomStage>
       <WorkStrip av={work.type === 'av'} mode={picked} artworks={strip} privacy={privacy} thumbnailUrl={id => thumbs.urls[id] ?? null} onPick={pick}/>
     </div>
     <header className="tablet-work__identity">
@@ -154,7 +159,7 @@ export function CaseWork({item, revision, active, privacy, position, total, scor
       <small className="numeric">{[workMeta(work, data.platform, work.av ?? null), `${position.toLocaleString()} / ${total.toLocaleString()}`].filter(Boolean).join(' · ')}</small>
     </header>
     <div className="tablet-work__info">{info(work)}</div>
-  </article>;
+  </article></WorkZoomProvider>;
 }
 
 /** The published volume as the shared bookcase reads it; a future local date is a pre-registered volume. */
@@ -193,17 +198,18 @@ export function MangaWork({item, revision, active, privacy, volumes, owned, late
     scope: '', revision, ownership: null, management: null,
   };
   const [reset, setReset] = useState(0);
-  return <article className="tablet-work tablet-work--manga" aria-label="만화 작품 화면">
+  return <WorkZoomProvider workId={item.id} reset={reset}><article className="tablet-work tablet-work--manga" aria-label="만화 작품 화면">
     <div className="tablet-work__frame">
       {hero.urls.hero && <HeroBand src={hero.urls.hero} manga onReady={() => undefined}/>}
       <div className="tablet-work__manga-stage" {...swipe}>
+        {!privacy && <WorkBackdrop src={shownVolume.url}/>}
         {volumes.length
           ? <MangaStage manga={manga} privacy={privacy} title={item.name} author={item.author ?? null} frontReset={reset} coverUrl={id => id === shown?.coverArtworkId ? shownVolume.url : null} onPick={setWanted} onReady={() => undefined}/>
-          : <div className="work-stage manga-work-stage"><MangaBook src={shownVolume.url} title={item.name} author={item.author ?? null} volumeNumber={null} volumeTitle={item.name} focus={null} privacy={privacy} frontReset={reset} onReady={() => undefined}/></div>}
+          : <WorkZoomStage className="work-stage manga-work-stage"><WorkZoomObject><MangaBook src={shownVolume.url} title={item.name} author={item.author ?? null} volumeNumber={null} volumeTitle={item.name} focus={null} privacy={privacy} frontReset={reset} onReady={() => undefined}/></WorkZoomObject></WorkZoomStage>}
         <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={() => setReset(value => value + 1)}><ArrowPathIcon aria-hidden="true"/></Button>
       </div>
       <MangaBookcase touchTargets manga={manga} privacy={privacy} coverUrl={id => spines.urls[id] ?? null} onPick={setWanted} onEnlarge={() => { if (shown) onEnlarge(shown.id); }}/>
     </div>
     <div className="tablet-work__info">{info}</div>
-  </article>;
+  </article></WorkZoomProvider>;
 }
