@@ -31,14 +31,24 @@ Lakomics는 Windows와 Linux PC, Android tablet에서 장시간 사용하는 개
 PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 
 - 가장 왼쪽은 에셋·컬렉션·망가 같은 큰 영역을 바꾸는 좁은 area rail이다.
-- Next to the area rail is the persistent contextual index: Classification and Albums for Assets; 쇼케이스, 신간 and 발매 캘린더 shortcuts for Collections; the matching browsing context for Manga. Collection types, Asset kinds, Manga sources and Notes kinds use the shared section bar. Collections have no Library/Showcase mode.
+- Next to the area rail is the contextual index: Classification and Albums for Assets and the matching browsing context for Manga. Collections use the full content width without a sidebar; 쇼케이스, 신간 and 발매 캘린더 use a second section-bar row and open the existing PC views. Collection types, Asset kinds, Manga sources and Notes kinds use the shared section bar. Collections have no Library/Showcase mode. Manga can hide its sidebar from its header and restore it from the top bar; remember the choice per area and keep catalog search reachable.
 - **Section bar (user, 2026-10-01):** the shared bar sits at the start of the list and scrolls away on both PC and tablet. Once off screen, the top-bar title reads `<area> · <section> ⌄`. On PC, resting the pointer on the top bar for 150 ms drops the bar below it; it closes 300 ms after the pointer leaves both the top bar and the section bar. Clicking the title toggles it. Sort/view controls remain at the bar's right. Merging the section bar into the top bar as one row was considered and declined; scroll-direction auto-hide remains rejected.
-- **Tablet shade (user, 2026-10-01):** pull down the top bar or tap its title to reveal the section bar; picking a section or scrolling the list closes it. The pull-down shade is retained without bounce. An optional second row in the same segmented track carries shortcuts, not selected tabs: Collections uses 쇼케이스 with a work count, game/movie 발매 캘린더 with a new-event count, manga 신간 with an unread count, and AV 쇼케이스 only. Both rows travel together in the shade. PC keeps these shortcuts in its sidebar index. References: `docs/prototypes/section-bar-20261001/README.md` and `docs/prototypes/collection-shortcuts-20261001/README.md`.
+- **Tablet shade (user, 2026-10-01):** pull down the top bar or tap its title to reveal the section bar; picking a section or scrolling the list closes it. The pull-down shade is retained without bounce. An optional second row in the same segmented track carries shortcuts, not selected tabs: Collections uses 쇼케이스 with a work count, game/movie 발매 캘린더 with a new-event count, manga 신간 with an unread count, and AV 쇼케이스 only. Both rows travel together in the shade. PC uses the same second shortcut row (2026-10-02); its shortcuts open existing views rather than tablet overlays. References: `docs/prototypes/section-bar-20261001/README.md` and `docs/prototypes/collection-shortcuts-20261001/README.md`.
 - 본문 위에는 얇은 위치/창 영역만 남기고 예전의 전체 수평 toolbar를 중복하지 않는다.
 - 검색은 평소 돋보기 아이콘만 보인다. 검색을 지원하는 화면에서만 실제 입력 surface를 연다.
-- 에셋의 보기 설정은 인덱스 하단에서 필요할 때만 오른쪽 non-modal panel로 연다. 단순 개폐로 갤러리 폭·스크롤·선택을 바꾸지 않는다.
+- The Asset toolbar holds the title, search and 보기; sort and tile size belong inside 보기. Opening this menu preserves gallery geometry, scroll and selection. The information panel is a separate docked surface (§7).
 - 화면별 정렬·필터·관리 기능은 그 문맥에 가장 가까운 인덱스나 임시 surface에 둔다. 빈 toolbar를 유지하기 위해 기능을 복제하지 않는다.
 - 창 제어는 한 곳에만 둔다. 입력·메뉴·슬라이더가 native drag region으로 오인되지 않아야 한다.
+- **Top bar (2026-10-02):** no square mark before any screen title. Index section labels and selection marks retain their own roles.
+- **더보기:** bottom-align the menu beside its rail button, without a header or close button; outside click and Escape close it.
+- **찾기 (Ctrl+K):** one field searches names across works, artists, note titles, folders, screens and commands in data already on the device. Use scope chips; the current screen's own search is the first row where supported. An empty query shows 확인할 것 and five recent items. See [the accepted Home / More / Find design](docs/prototypes/home-more-find-20261002/README.md).
+
+### Home (accepted 2026-10-02)
+
+- Show what needs attention: nonzero review queues, ledger reminders, open items from pinned 할 일 notes and connection problems. Start 오늘 할 것 with this month's subscription total and the next charge countdown.
+- PC: 오늘 할 것 in the left column, with 1년 전 오늘 immediately below it; 새로 나옴 and the next two weeks of releases in the right column. The tablet follows that reading order. This placement supersedes the prototype's original right-column anniversary block (`6426fd99`, `c538c508`).
+- 새로 나옴 covers works released since the last visit; NEW remains until opened. Catalog bookmarks are favourites to reopen, so bookmarked chapters are excluded. Do not add 이어 읽기.
+- Asset totals belong in 통계, healthy connection status in top-bar 확인, artist/performer picks in 작가, and memo cards/ledger detail in 메모. Reduce excess information within each screen's redesign or bug-fix round.
 
 ## 4. 표면과 형태
 
@@ -70,7 +80,7 @@ PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 - **Parent context / tint**: when a parent level and a more specific child are both current, only the child keeps the slab. The parent (the area rail, Notes scopes) uses `--color-selection-context` with `--color-selection-context-text`; hover uses `--color-selection-context-hover`; no echo or mark. Collection type, `신간`, `발매 캘린더` and update-provider destinations remain slabs.
 - **Index section labels**: follow §12's faint `meta` role and add a 5px square (`--color-section-mark`) followed by a fading 1px hairline (`--section-label-rule`).
 - **복수 선택 필터**: 중성 회색 면, 반복 사각 표식 없음. 누런/올리브 selection은 사용하지 않는다.
-- **자산 자체의 선택 (legacy)**: 좌상단 작은 사각 표식 + 이미지에만 청록색 선택 음영(`--asset-selection-tint`). 2026-09-06 사용자가 기존 중성 회색 음영의 낮은 가시성을 이유로 승인한 값이다. 에셋 화면을 다시 설계할 때는 이 legacy treatment를 `docs/prototypes/pc-assets-20260929/`의 §12 selection treatment로 옮긴다. 바깥 selection outline과 metadata 영역의 색·여백 변화로 선택을 표현하지 않는다.
+- **Asset selection (2026-10-02):** use the shared selected-image treatment and a check only on selected tiles. Do not show a select circle, including on hover (`f901c437` supersedes the first calm-grid mockup). Keep keyboard focus separate from selection.
 - keyboard focus는 selection과 별도 상태다. focus가 이동했다고 선택으로 보이거나, 선택 때문에 focus가 사라지면 안 된다.
 - 일반 icon action은 quiet하게 두고, 한 화면에 강한 primary surface를 여러 개 만들지 않는다.
 
@@ -80,13 +90,15 @@ PC의 기본 shell은 **Chrome 03b B 좌측 중심 구조**다.
 
 PC 자산 기본 보기는 **수집일별 masonry/waterfall**이다. justified row는 대체 보기로 남긴다.
 
-- 이미지는 원본 비율을 존중한다.
-- 날짜 group heading이 수집일을 맡는다.
-- 이미지 바로 아래 한 줄에 왼쪽 작가, 오른쪽 `HH:mm` 수집 시각을 둔다. 날짜를 반복하지 않는다.
-- 정렬·group·시각은 같은 `collectedAt`과 같은 표시 시간대에서 계산한다.
-- 긴 작가명과 누락 메타데이터를 정직하게 처리하고, 가짜 현재 시각을 채우지 않는다.
-- metadata가 켜져 있을 때도 이미지 감상을 방해하는 overlay로 바꾸지 않는다.
-- dense scrolling에서는 hover scale, pointer-tracked transform, 타일별 shadow를 사용하지 않는다.
+- Preserve intrinsic image ratios. Tiles show the image only: no filename, creator or timestamp caption, including on hover; metadata belongs in the information panel and accessible descriptions.
+- The only routine media badge is video duration, such as `▶ 0:42`; hide it on very small tiles. The heart appears on hover and remains visible in the likes view; selection keeps its check (§6).
+- Date headings are small muted text without a rule; counts appear on hover. Use the same local `collectedAt` date for grouping and sorting, and show the date in the scrubber bubble.
+- Sidebar counts appear for selected or hovered entries; folder-group add/more controls appear on hover. Show the folder shelf only at a folder's top level, never stacked above date headings.
+- The information panel docks beside the grid and pushes it aside; `I` toggles it. Preserve scroll/selection while the visible tiles move into place (§10).
+- The heart and membership in the designated 마음에 들어요 album are the same state on PC and tablet. Adding/removing membership sets/clears the heart; the designated album cannot be deleted. A same-named ordinary album does not acquire that role. Each tile heart acts on that tile even when other assets are selected.
+- Dense scrolling has no hover scale, pointer-tracked tile transform or decorative per-tile shadow.
+
+Reference: [accepted calm Asset grid](docs/prototypes/assets-calm-20261002/README.md), with the later selection correction in `f901c437` and likes-album contract in `45d4e4e1` / `260bdc6b`.
 
 ## 8. Collection / Works의 물성
 
@@ -98,7 +110,8 @@ PC 자산 기본 보기는 **수집일별 masonry/waterfall**이다. justified r
 - **Shelf case proportion (user, 2026-10-01):** depth follows the face height at about 8%, rather than a fixed 22px. Keep spine marks (including PS5/Switch heads) and spine text in real package proportions as cases shrink on the tablet.
 - **영화/영상**: 일반 목록은 평면 poster archive다. 게임 케이스나 책 물성을 강제하지 않는다.
 - **상세**: 원본 hero/backdrop 뒤에 표지를 겹치고 하단을 넓게 fade한다. 표지에는 fade를 걸지 않는다.
-- 배경이 없으면 가짜 blurred background를 만들지 않고 상단 공간을 접어 compact 정보 배치로 전환한다.
+- For ordinary game/film detail, keep original artwork roles and collapse a missing hero to compact information. The accepted manga/AV work stage is an explicit exception: a faint, blurred version of the shown manga volume cover or AV jacket sits behind the object (option A, 2026-10-02), with the object kept crisp and dominant.
+- **Work-stage zoom (2026-10-02):** PC wheel and tablet pinch zoom the object from 0.6× to 2.5×; keep drag-to-turn and reset through 정면으로. Tablet one-finger vertical dragging scrolls the page without fling. Clicking empty stage space closes an open case.
 
 물성은 library grid < Detail < Showcase 순으로 강해질 수 있지만, ordinary UI와 Asset tile에는 전염시키지 않는다. 쇼케이스는 매체별로 사용자가 고른 표지만 촘촘히 전시하며 9개까지 3×3, 10개부터 4×4, 16개 초과는 다음 페이지로 이어진다.
 
@@ -116,7 +129,7 @@ PC 자산 기본 보기는 **수집일별 masonry/waterfall**이다. justified r
 
 - Motion은 90/140/200 ms 역할을 따른다: 작은 feedback, open/close, screen transition 순서이며 `--ease-standard`와 no bounce를 쓴다.
 - spring, bounce, 장식용 entrance animation, 상시 animation을 피한다.
-- sidebar/panel open-close는 공간 관계를 이해시키기 위한 짧은 motion만 허용한다.
+- Sidebar/panel motion explains spatial relationships. The Asset information dock slides in 200 ms and visible tiles glide to their new positions; hover controls fade in 90 ms. Home attention rows expand/collapse in 140 ms; refreshes retain content. Reduced motion switches immediately.
 - gallery scroll 중 레이아웃 재계산·shadow·transform을 매 프레임 추가하지 않는다.
 - 게임 case/만화 cover의 작은 lift·depth는 수집품 감상이라는 의미가 있을 때만 제한적으로 허용한다.
 - reduced motion과 keyboard path를 깨지 않는다.
@@ -258,13 +271,26 @@ Release calendars (PC and tablet, 2026-09-29): covers released on the same day s
 - **Segmented drag exception:** the selected thumb lifts to scale 1.04 while it is dragged; this is the only scaling press feedback in the foundation.
 - **Motion:** 90 ms small feedback (press, colour), 140 ms open/close (menus, sheets, popovers), 200 ms screen transitions; `--ease-standard`; no bounce, no looping decoration except the skeleton breathing.
 - **Segment switch:** changing a segmented filter (e.g. 전체/게임/영화/애니, 관심) slides the list 16 px in from the side of the chosen segment and fades it from 0.5 in 200 ms, on both clients (tablet `useSegmentMotion`, PC the same values).
-- **Side panels:** an information panel over a reflowing grid opens as an overlay (slides in, the grid never reflows); a panel beside a single image (viewer) pushes the image aside. Decided for the PC 에셋 screen 2026-09-29 (`docs/prototypes/pc-assets-20260929/`).
+- **Side panels (2026-10-02):** the Asset information panel docks beside the grid and pushes it aside, replacing the former overlay rule. It slides in 200 ms while visible tiles glide into place; a viewer panel also pushes its single image aside. Hover controls fade in 90 ms. Home attention rows expand/collapse in 140 ms. Reduced motion switches instantly, and refreshes never blank content.
+- **Shared list scrubber (2026-10-02):** PC Assets, Collections grids/shelves, local Manga and online catalog/bookmarks use the same scrubber as the tablet, owned by `src/shared/ui/scrubber/`. A thin bar grows on use with a date/position bubble and hides shortly after release. PC Asset labels currently use loaded tiles; a full PC month TOC is not implemented.
 - **Tablet scrubber:** a tap on the bottom band shows the date scrubber at the current position (it hides after about 2.6 s); dragging scrubs. The bar rises in with a slight settle (a small overshoot, the one approved exception to "no bounce", user 2026-09-29), the date bubble grows from the thumb and the list dims; leaving reverses it. The bubble stays on screen at both ends and its pointer follows the thumb.
 - **Toasts:** success is shown in place (the changed row briefly tints toward `--color-success` and a check fades) — no success toast, except "되돌리기" after an undoable action (e.g. moving to the trash). Failures always show a one-line toast with "다시 시도".
 
 ### Theme
 
 The default is the current dark neutral ("먹색") with the ivory accent. A light "종이" theme (`#f3f1ec` page, ink-dark selection instead of ivory) is a later Settings option; colours stay token-driven so themes only swap token values (see `part4.html` for the tried palettes).
+
+### Notes and ledger (accepted 2026-10-02)
+
+Reference: [accepted Notes / Ledger design](docs/prototypes/notes-ledger-20261002/README.md). Note kinds are 메모 (글 / 할 일), 가계부 and 암호 메모; the former checklist kind opens as 할 일.
+
+- **메모:** one editing surface, with the caret at the end on open; no Markdown rendering, clickable Markdown links or separate read/edit mode. 글 uses plain lines without done circles; 할 일 has a done circle per item and folds completed items into 완료 N. Switching to 글 removes done marks; undo restores them. Old Markdown remains literal text.
+- **Sections:** title rows divide blocks; 섹션으로 만들기 replaces one-line pinning. Show section chips only with at least two named sections; a chip filters to one section. Drag section titles to reorder. A plus-only add row and Enter at an item's end add items. Backspace on an empty item joins upward without deleting a section title.
+- **Moving and copying:** PC uses a hover move icon, tablet a long press. Copy in 글 copies the whole section; in 할 일 it copies open items as a plain list. PC writes directly in the note without a quick-add field. Tablet keeps a bottom 메모 작성 field and a section picker that remembers the last section without storing secret titles in plaintext.
+- **Compatibility:** the shared `src/notes/memo/` editor keeps a text body for sections and task marks; legacy checklist notes save as text on their first edit. Concurrent cross-device edits may retain conflict copies; there is no per-item merge of memo text.
+- **가계부:** show 예산 → 고정 → 쓴 돈 → 남은 돈 with a budget meter and a selected wishlist item's effect, then this month's upcoming charges as a dated strip. Everyday spending is manual, with a one-line input; no external import.
+- **Subscriptions:** show cycle tags, next charge and yearly cost per month. The detail dialog covers cycle, trial/first charge, price history, reminders and cancellation through the paid period. Confirmed or skipped charges leave upcoming/reminder rows; a moved confirmed charge counts only in its spending-entry month. Reminders are in-app; native notifications remain future work.
+- **Wishlist:** price, where, priority and optional target month, plus 이번 달에 사면 남는 돈. 샀음 creates spending; 안 사기로 한 것 stays folded with restore/delete actions.
 
 ### Shared components first
 

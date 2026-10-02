@@ -22,6 +22,8 @@ Personal state outranks external score/provider state. Provider refresh must pre
 
 Presentation intensity is **library grid < Detail < Showcase**. Ordinary browsing stays dense; detail can add restrained collectibility; Showcase can breathe more without becoming a second renderer.
 
+Work-stage interaction (2026-10-02): PC wheel and tablet pinch zoom 0.6×–2.5×; retain drag-to-turn and reset with 정면으로. On the tablet, one-finger vertical dragging scrolls the page without fling. Empty stage clicks close an open case. Manga and AV use quiet cover/jacket backdrops as described below; ordinary game/film hero artwork keeps its original role.
+
 ## 2. Manga — volume shelf
 
 Manga is volume-centric. The pleasure is seeing covers together, understanding sequence/release state, and opening a cover for appreciation.
@@ -43,6 +45,7 @@ The volume shelf is the primary content, not a generic metadata hero.
 - clicking a volume primarily opens cover appreciation with previous/next volume navigation;
 - the large cover and the same-edition thumbnail strip occupy separate layout rows; preserve the cover aspect and leave the strip unobscured;
 - retain the gentle cursor tilt, respect reduced motion, and offer an original-image fallback/view;
+- the accepted work-stage backdrop (2026-10-02) is a faint blurred version of the shown volume cover; keep the book crisp and dominant;
 - the selected volume lifts slightly; compact work information stays secondary to the shelf; large lists use row virtualization without losing order, keyboard focus or scroll restoration;
 - ISBN, publisher, provider identity and other deep edition data stay secondary.
 
@@ -89,7 +92,7 @@ Current implementation is movie/film-oriented; future product direction includes
 - year/range, format/status, genres and personal rating;
 - broad lower fade on the backdrop layer only.
 
-If no backdrop exists, collapse the hero rather than fabricating a blurred poster background.
+For ordinary film/series detail, collapse a missing hero rather than fabricating a blurred poster background. AV has an accepted work-stage exception (option A, 2026-10-02): a faint blurred AV jacket behind the crisp package, matching the restrained manga-cover backdrop. Do not extend that exception to every media type.
 
 ### Film
 

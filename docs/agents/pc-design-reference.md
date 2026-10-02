@@ -17,7 +17,7 @@ Lakomics is a **media-first personal archive**, not a dashboard, launcher, strea
 
 The visual system is dark-neutral, square/rectilinear, low-radius, line-icon heavy, and border-led rather than card-led.
 
-Typography (user-approved 2026-09-28, replaces the 2026-09-06 SUIT + Barlow pairing): Pretendard for Korean and Latin UI, creator names and all numbers (Rajdhani retired 2026-09-29); numbers use tabular figures, large standalone ones the `number` role in `DESIGN.md` section 12. Keep the Japanese fallback. Numeric roles use tabular figures; caption times use the meta size. Fonts and OFL notices are bundled for offline use (`styles/fonts.css`, `--font-ui`, `--font-numeric`).
+Typography (user-approved 2026-09-28, replaces the 2026-09-06 SUIT + Barlow pairing): Pretendard for Korean and Latin UI, creator names and all numbers (Rajdhani retired 2026-09-29); numbers use tabular figures, large standalone ones the `number` role in `DESIGN.md` section 12. Keep the Japanese fallback. Numeric roles use tabular figures; dates and information-panel times use the meta size. Fonts and OFL notices are bundled for offline use (`styles/fonts.css`, `--font-ui`, `--font-numeric`).
 
 ## 3. Chrome 03b shell
 
@@ -36,6 +36,7 @@ Typography (user-approved 2026-09-28, replaces the 2026-09-06 SUIT + Barlow pair
 ### Area rail
 
 - Areas start with 홈, 에셋, 컬렉션, 망가, 메모, 전송 (plus 비밀 when the private vault is available). The tail holds `찾기` (the command/search palette, `Ctrl+K` / `Ctrl+F`) and `더보기`, a panel listing pending queues (유사 검토, 미분류, 전송 when they have items) and destinations (작가, 다시보기, 통계, 휴지통, 설정). The `더보기` badge counts only pending similarity review; 전송 shows its own received-file count. The area order and the `작가` entry follow `layout/WorkspaceNavigation.tsx` and `layout/navigationEntries.tsx`.
+- More opens beside its rail button, bottom-aligned, without a header or close button; outside click or Escape dismisses it.
 - Work, sync and error status live in the titlebar status center beside the window controls, not as rail buttons.
 - The rail is narrow and visually weaker than the contextual index; its current area uses the parent-context tint (§7).
 - Switching areas preserves the owning screen state where the code supports it rather than resetting for visual neatness.
@@ -43,30 +44,28 @@ Typography (user-approved 2026-09-28, replaces the 2026-09-06 SUIT + Barlow pair
 ### Contextual index
 
 - **Assets**: broad scopes, Classification tree, Album tree, folder counts and user appearance.
-- **Collections** (2026-10-01 section bar supersedes the earlier sidebar type list): the new-collection menu and 쇼케이스, 신간 and 발매 캘린더 shortcuts stay in the sidebar index. Types (게임/만화/영화/AV) use the shared section bar, with sort/view at its right; 내 별점 remains a contextual filter. There is no Library/Showcase mode. The header shows the title/current section and a back action in drill-downs. An open work replaces type navigation with its title, concise metadata, personal/external rating, management/provider menu and manga edition selector at the top of the index; long descriptions and artwork stay in the body. The detail owns state and callbacks through the shared chrome portal.
-- **Manga**: local/online/catalog context and controls owned by the corresponding browser.
+- **Collections** (2026-10-02): no sidebar index; the list uses the full content width. Types (게임/만화/영화/AV) use the shared section bar, with sort/view at its right. A second shortcut row carries 쇼케이스, 신간 and 발매 캘린더 and opens the existing PC views. There is no Library/Showcase mode. An open work owns its title, personal state, management actions and edition controls in the work screen.
+- **Manga**: local/online/catalog context and controls owned by the corresponding browser. Hide the sidebar from its header and restore it from the top bar, remembering the choice per area; hiding it must leave catalog search reachable.
 - Do not merge a user Classification named “만화”, Collection type `manga`, local Manga Root, and Online Catalog into one concept (`CONTEXT.md`).
 
 ### Main content header
 
-- Keep the native window controls and status center in one thin, stable place.
+- Keep the native window controls and status center in one thin, stable place. No square mark precedes any screen title (2026-10-02); index section and selection marks keep their separate roles.
 - Show current location and only meaningful transient state; do not repeat brand subtitles, “내 라이브러리”, or explanatory prose on every screen.
 - Do not recreate the old full toolbar above the content.
 - Selection-only commands stay in selection/context surfaces. Exception (CHAR-UI-002~006, 2026-09-09): the series/character review screen may expose selection accessories (count, clear, exclude, review entry) as `titleAccessory`; this is not a license to spread selection commands to other headers.
 - One-time setup and rare management actions live in the owning `… 더보기` menu or panel (e.g. `폴더 더보기`, `시리즈 더보기`, `캐릭터 더보기`), not as persistent header buttons. Frequent actions may keep a labeled button (e.g. `캐릭터 만들기`).
 - Do not add persistent refresh buttons: background updates refresh the view automatically; error retry and a context-menu refresh remain for recovery.
 - **Section bar (user, 2026-10-01):** the shared bar sits at the start of the list and scrolls away on both PC and tablet. Once off screen, the top-bar title reads `<area> · <section> ⌄`. On PC, resting the pointer on the top bar for 150 ms drops the bar below it; it closes 300 ms after the pointer leaves both the top bar and the section bar. Clicking the title toggles it. Sort/view controls remain at the bar's right. Merging the section bar into the top bar as one row was considered and declined; scroll-direction auto-hide remains rejected.
-- **Tablet shade (user, 2026-10-01):** pull down the top bar or tap its title to reveal the section bar; picking a section or scrolling the list closes it. The pull-down shade is retained without bounce. An optional second row in the same segmented track carries shortcuts, not selected tabs: Collections uses 쇼케이스 with a work count, game/movie 발매 캘린더 with a new-event count, manga 신간 with an unread count, and AV 쇼케이스 only. Both rows travel together in the shade. PC keeps these shortcuts in its sidebar index. References: `docs/prototypes/section-bar-20261001/README.md` and `docs/prototypes/collection-shortcuts-20261001/README.md`.
+- **Tablet shade (user, 2026-10-01):** pull down the top bar or tap its title to reveal the section bar; picking a section or scrolling the list closes it. The pull-down shade is retained without bounce. An optional second row in the same segmented track carries shortcuts, not selected tabs: Collections uses 쇼케이스 with a work count, game/movie 발매 캘린더 with a new-event count, manga 신간 with an unread count, and AV 쇼케이스 only. Both rows travel together in the shade. PC uses the same second shortcut row (2026-10-02), opening existing views instead of tablet overlays. References: `docs/prototypes/section-bar-20261001/README.md` and `docs/prototypes/collection-shortcuts-20261001/README.md`.
 
 ## 4. View settings
 
-The floating View Settings panel is primarily the Asset browser contract; other areas may place smaller controls directly in the index.
+The Asset toolbar holds the title, search and 보기. Sort and tile size are inside 보기, alongside the supported layout/filter/privacy controls; no retired tile-caption option should return.
 
-- Default closed; the trigger stays at the lower end of the contextual index; the panel opens to the **right of the index**, above the content.
-- Non-modal and internally scrollable when height is limited.
-- Opening/closing must not resize the gallery, reset scroll, collapse trees, clear selection, or refetch data.
-- Setting changes apply immediately and stay owned by the existing state/preference layer; closing is never “cancel”.
-- Asset settings cover the supported subset of sort, media/aspect filters, layout, preview size, metadata visibility, privacy mode, and direct/current-classification-only state. Keep view-conditional availability truthful. Screens without View Settings hide the trigger; do not show a dead one.
+- The menu is anchored to its toolbar button, non-modal and internally scrollable when height is limited.
+- Opening/closing the menu preserves gallery geometry, scroll, selection and loaded data. Setting changes apply immediately through the existing preference owner; closing is never cancel.
+- The information panel is a separate dock: `I` toggles it beside the grid, which moves aside with the accepted 200 ms spatial motion. Do not apply the former overlay-only rule to this dock.
 
 ### Panel dismissal and focus
 
@@ -80,7 +79,7 @@ The floating View Settings panel is primarily the Asset browser contract; other 
 
 Search is not the dominant daily action, so it has no persistent input.
 
-- The rail `찾기` palette (`Ctrl+K`; `Ctrl+F` also works from a field) jumps to names (folders, albums, characters) and runs commands. On a view with a text-search contract it names that scope and applies the typed text to it.
+- The rail 찾기 palette (`Ctrl+K`; `Ctrl+F` also works from a field) searches names across works, artists, note titles, folders, screens and commands using data already on the device. Scope chips narrow results. The current screen's own search is the first row where supported; an empty query shows 확인할 것 and five recent items. The tablet shares the cross-name Find contract (`628b6da3`).
 - An applied query stays visible as a query badge in the view header with a direct `검색 해제` (the palette offers it too). Dismissing the palette never clears an applied query.
 - Online Catalog keeps its own search surface with suggestions/autocomplete and language/scope semantics.
 - Assets have no general text-search query contract. Do not fake one or add a new index/search engine for symmetry.
@@ -91,18 +90,22 @@ Search is not the dominant daily action, so it has no persistent input.
 
 Default PC Asset layout is **date-grouped masonry/waterfall**; justified rows remain an explicit alternative view.
 
-- Preserve intrinsic aspect ratio.
-- Group by `collectedAt` local date using the same timestamp/timezone as sort and caption time.
-- The date heading carries the date (§8); each caption shows artist/creator on the left and `HH:mm` on the right. Do not repeat the date per image.
-- Sparse date groups (user-approved 2026-09-06) share a horizontal row, each using only the columns it needs, with heading and rule within the group's width. Whole groups wrap when columns run out, placing the next row below the tallest preceding group; larger groups keep full-width masonry.
-- Missing data stays honest: an unknown creator leaves the caption's left side empty while the time and its accessible description remain; never synthesize current values.
+- Preserve intrinsic aspect ratio. Tiles show images only, with no filename/creator/time captions on hover or at rest. Metadata remains in the information panel and accessible descriptions.
+- Group by `collectedAt` in local time, consistent with sorting. Date headings are small muted text without rules, with counts on hover; the scrubber bubble shows the date. Sparse date groups retain their compact wrapping layout.
+- Video duration is the only routine media badge (`▶ 0:42`), hidden on very small tiles. Hover reveals the heart; the likes view keeps it visible.
+- Sidebar counts show for selected/hovered entries and folder-group controls on hover. Show the folder shelf only at a folder's top level, never stacked above date headings.
+- The docked information panel pushes the grid aside; visible tiles glide into place while scroll and selection remain stable. Reduced motion swaps immediately.
+- PC lists use `shared/ui/scrubber/` for Assets, Collections grids/shelves, local Manga and online catalog/bookmarks. It grows on use, shows a date/position bubble and hides after release; PC Asset labels use loaded tiles, not a full month TOC.
+
+See the [accepted calm-grid reference](../prototypes/assets-calm-20261002/README.md); the later removal of select circles (`f901c437`) supersedes that part of the mockup.
 
 ### Asset selection
 
 Asset selection is intentionally quieter than navigation selection.
 
-- **Legacy Asset selection:** keep the small top-left square marker and apply `--asset-selection-tint` (teal, user-approved 2026-09-06) to the image area only until the Asset screen is redesigned; then move it to the §12 selection treatment described by `docs/prototypes/pc-assets-20260929/`.
-- No strong outer outline around the tile; do not recolor or reflow the caption because the asset is selected.
+- Use the shared selected-image treatment with a check only on selected tiles. No select circle appears, including on hover.
+- Keep tile geometry stable when selection changes; do not add a caption or decorative outer frame.
+- Heart state is membership in the designated 마음에 들어요 album, which cannot be deleted. The role is stored, not inferred from an arbitrary same-named album. A tile heart acts only on that tile, independent of multi-selection.
 - Keyboard focus stays independently visible.
 - Multi-selection actions use the existing selection bar/context flow without shifting the rail, index or header.
 
@@ -128,7 +131,7 @@ Neutral gray, marker-free: selected filter chips use the `--color-filter-selecte
 - An unchecked box must be visible on dark surfaces: the §12 1.5px `--color-border-strong` border on `--color-bg`, radius 2. Checked uses an accent border with an inner solid accent square; focus uses the `--color-focus` ring; disabled dims.
 - A checkbox/toggle label names the setting (`자동 갱신`, `절약 모드`) or, when the row heading already names it, the current state (`켜짐` / `꺼짐`). Never use action wording (`켜기`) on a checkbox; the box already shows state.
 - Action wording (`절약 모드 켜기` / `끄기`) belongs to one-shot commands in menus or the palette and must follow the current state.
-- A label may read inverted when that is natural (`정보 숨기기` checked = metadata hidden), but the stored preference keeps its meaning (`metadataVisible`); metadata is visible by default.
+- A toggle label and its stored preference must keep the same meaning. Asset tiles remain image-only regardless of older caption/metadata preferences; information stays in the panel.
 
 ## 8. Dates
 
@@ -140,7 +143,7 @@ User-facing dates go through `shared/displayDate.ts` (`displayDate`, `displayDat
 - ranges join both ends with `–`, each formatted independently; equal ends collapse to one value;
 - invalid input passes through unchanged.
 
-This covers Collection cards/info/details, TV seasons/episodes and Asset date headings. Same-day releases use `오늘` as defined in `DESIGN.md` §12. Stored values, grouping/sorting, caption times (`HH:mm`), Revisit date headings and machine-facing values (paths, IDs, diagnostic timestamps) are unchanged.
+This covers Collection cards/info/details, TV seasons/episodes and Asset date headings. Same-day releases use `오늘` as defined in `DESIGN.md` §12. Stored values, grouping/sorting, information-panel times (`HH:mm`), Revisit date headings and machine-facing values (paths, IDs, diagnostic timestamps) are unchanged.
 
 ## 9. Floating surfaces and icon hints
 
@@ -180,7 +183,11 @@ Normal film/video library tiles are flat posters. Physical-media cases are a sep
 
 ### Detail hero
 
-For details with a backdrop: use the chosen original backdrop as the wide background, overlap the foreground cover/package, fade only the background layer broadly into the body, and never blur/darken the whole artwork to manufacture contrast. Preserve user/provider artwork roles. Without a background, collapse the hero into a compact cover + title/info arrangement; never fabricate a blurred cover background. A back chevron left of the detail title exits the detail (Escape/back behave the same).
+For details with a backdrop: use the chosen original backdrop as the wide background, overlap the foreground cover/package, fade only the background layer broadly into the body, and never blur/darken the whole artwork to manufacture contrast. Preserve user/provider artwork roles. Without a background, ordinary game/film detail collapses to compact cover + title/info. The accepted manga/AV work stage is an explicit exception (2026-10-02): a faint blurred current-volume cover or AV jacket sits behind the crisp object. A back chevron left of the detail title exits the detail (Escape/back behave the same).
+
+### Work-stage interaction (2026-10-02)
+
+Wheel on PC and pinch on tablet zoom the object from 0.6× to 2.5×; retain drag-to-turn and reset through 정면으로. Tablet one-finger vertical drag scrolls the page without fling. Empty stage clicks close an open case. Native/device feel remains an acceptance item, not something this design contract proves.
 
 ## 11. Status, progress, and empty space
 
@@ -188,6 +195,10 @@ For details with a backdrop: use the chosen original backdrop as the wide backgr
 - Show real ingestion/progress/error state when it matters (status center).
 - Empty state: use a faint 32px icon and one line; add a button only when there is a real next step.
 - Avoid repeating area names, subtitles and counts already evident from the rail/index/content.
+
+### Home, memo and ledger
+
+The accepted 2026-10-02 contracts live in [DESIGN.md §3 and §12](../../DESIGN.md): attention-first Home with 1년 전 오늘 below 오늘 할 것; 메모 글 / 할 일 with one editing surface, section operations and no Markdown rendering; and the budget/subscriptions/wishlist/manual-spending ledger. Use the shared `notes/memo/` editor and `notes/ledger/` presentation rather than reviving the removed checklist editor or a separate Markdown read view. Tablet differences are its quick-add field, long press and sheets.
 
 ## 12. Responsive and desktop constraints
 
@@ -209,6 +220,8 @@ Keep state with the feature that owns it; the shell relocates controls and prese
 | Status center | `layout/StatusCenter.tsx` |
 | Search | `layout/CommandPalette.tsx`, `ChromeSearch.tsx`, `SearchSurface.tsx` (Online Catalog), owning browser query state |
 | Anchored settings / floating UI | `shared/ui/AnchoredPanel.tsx`, `Menu.tsx`, `ContextMenu.tsx` |
+| Shared list scrubber | `shared/ui/scrubber/` (tablet wrappers import the same implementation) |
+| Memo / ledger | `notes/memo/`, `notes/ledger/` |
 | Date display | `shared/displayDate.ts` |
 | Classification / Albums | `classification/ClassificationSidebar.tsx` |
 | Asset controls / gallery / selection | `assets/AssetToolbar.tsx`, `AssetBrowser.tsx`, `AssetGallery.tsx`, `GalleryDisplaySettings.tsx`, `SelectionBar.tsx` |
@@ -225,7 +238,7 @@ Before accepting a PC UI change, ask:
 - Does media still dominate the first glance?
 - Did the change add a second route to an existing command without a real UX reason?
 - Does selection remain distinct from focus, and is only the most specific level a slab?
-- Does opening a temporary surface leave content layout and scroll stable?
+- Do menus preserve geometry/scroll, and does the docked information panel preserve scroll/selection while the grid moves aside?
 - Does the screen still work with long Korean/Japanese names and narrow windows?
 - Did a flat Asset or poster accidentally inherit collectible shadow/3D?
 - Are colors token names from `tokens.css` rather than new literals?

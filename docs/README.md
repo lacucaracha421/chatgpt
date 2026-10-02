@@ -3,7 +3,9 @@
 This directory maps current Lakomics references and retained historical records.
 Start with the [repository overview](../README.md) for the product and applications.
 
-Documentation reconciliation: 2026-09-09 against source commit `0c61206`. This records
+Documentation reconciliation: 2026-10-02 against `main` through `71855626` for the accepted
+Asset, Home/Find, Notes/Ledger and work-stage designs, removed UI/routes and audit closure
+records, including the Home/server follow-up committed during reconciliation. This records
 source/document consistency, not new native acceptance or production verification.
 
 ## Application entry points
@@ -65,6 +67,21 @@ for the current task; this list is a map, not a mandatory reading sequence.
 - `performance/online-catalog-query-regression-20260905.md` — measured Online Catalog query-plan/performance record.
 - `performance/desktop-navigation-20260912.md` — folder/tab/cover optimization changes, synthetic before/after measurements, targeted checks, and native acceptance limits.
 - `operations/catalog-hybrid-count-gate.md` — retained CATALOG-007A native acceptance evidence.
+
+## Current editors and list controls
+
+- [Notes and ledger design](../DESIGN.md#notes-and-ledger-accepted-2026-10-02): 메모 uses the shared `_tools/app/src/notes/memo/` editor for 글 / 할 일 and sections on PC/tablet; legacy checklists open in 할 일. `NoteChecklist` and `ChecklistEditor` are retired entry points. Markdown rendering and a separate memo read/edit mode are retired; existing markup is literal text.
+- [Asset and list controls](agents/pc-design-reference.md#6-asset-browser): image-only Asset tiles, docked information panel and `_tools/app/src/shared/ui/scrubber/` on PC/tablet replace the old captions and `AssetGalleryScrollbar`.
+- The unused `/v1/extension-backup` routes were removed in `7b90c5ef`. Use the [active collector documentation](../extension-list/README.md) for supported behavior; do not target the removed backup route.
+
+## Performance kits
+
+Follow [the measurement method](agents/implementation.md#performance-work) before optimizing. Kits landed in `888f528c`; their availability does not prove an improvement or target-platform acceptance.
+
+- [Native Linux kit and command overview](../_tools/app/scripts/native-check/README.md#one-command-per-kit): isolated fixture/window scenarios, durations, frames and process samples.
+- [PC render and work-count kit](../_tools/app/scripts/perf/README.md): deterministic fixture counts and diagnostic React timings.
+- [Tablet fixture and Android device kit](../android/tools/PERFORMANCE.md): frontend counters and `LakomicsPerf` device collection.
+- [Local API kit](../server/lakomics-api/tools/PERFORMANCE.md): synthetic in-process requests, bytes and timing; no production target.
 
 ## Execution tracking
 

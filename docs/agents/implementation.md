@@ -75,6 +75,33 @@ Use read-only Git inspection such as `show`, `log`, and `diff`; no fetch, checko
 
 `AGENTS.md` owns the verification policy. For each material claim, keep the command or manual check, its scope, the observed result, and the revision or inputs it covered; the task conversation is enough, no permanent ledger is required.
 
+## Project health commands
+
+From the repository root, run `bash scripts/check-project.sh` before a batch delivery.
+It runs PC and tablet Vitest, both TypeScript checks, `cargo test --lib`, server
+unittest discovery, the performance kit Node tests, and collector tests from their
+owning packages. Suites run sequentially and continue after failures; the final
+table shows every exit result, duration, total time, and the temporary log directory.
+The command exits nonzero if any suite fails and warns below 20 GiB of free disk space.
+Each suite has a 900-second limit (`CHECK_TIMEOUT_SECONDS` overrides it); a timeout
+is reported as a failure. The script requires Bash and GNU coreutils.
+`CARGO_BUILD_JOBS` defaults to `2`; `SERVER_PYTHON` can select an existing interpreter
+instead of `server/lakomics-api/.venv/bin/python`. Install prerequisites separately;
+this command does not install packages, create a commit, or start the app. The results
+cover the current working tree, including concurrent edits, and do not establish
+native, Windows, Android device, or production acceptance.
+
+Run `bash scripts/clean-build-caches.sh` to preview reclaimable Rust build caches;
+add `--apply` only when ready to delete the listed directories. It accepts only the
+app's `target/debug/incremental`, side directories under that `target` other than
+`debug` and `release`, and incremental directories under
+`~/.cache/lakomics-native-check/target`. Side and native-check directories must have
+no entries modified in the last seven days. It reports disk usage, rejects symlinked
+or mounted trees and trees containing protected outputs, and refuses to run if
+Cargo or rustc is visible in the process table. Keep builds stopped for the entire
+cleanup; do not run it in a process namespace that hides other builds. It preserves
+libraries, Git data, node_modules, keystores, APKs, and the main debug/release outputs.
+
 ## Performance work
 
 1. Pick a user-visible path (for example, opening the viewer, scrolling a large Library, first thumbnail on the tablet) and record a baseline on the real platform before changing code.
@@ -85,7 +112,7 @@ Use read-only Git inspection such as `show`, `log`, and `diff`; no fetch, checko
 
 ### How to measure
 
-Use the [performance kit commands and metric definitions](../../_tools/app/scripts/native-check/README.md#one-command-per-kit).
+Use the [performance kit commands and metric definitions](../../_tools/app/scripts/native-check/README.md#one-command-per-kit), with the detailed [PC render kit](../../_tools/app/scripts/perf/README.md), [tablet/device kit](../../android/tools/PERFORMANCE.md) and [local API kit](../../server/lakomics-api/tools/PERFORMANCE.md).
 From the repository root:
 
 ```sh

@@ -2,6 +2,147 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Closure checkpoint — 2026-10-02 — PC polish and audit fixes
+
+Reconciled against `main` through `71855626` (task baseline `260bdc6b`); the concurrent Home/server follow-up committed during this reconciliation is included. This archives source implementation and historical audit findings, not native/device acceptance, a new release, deployment or production-data verification. Other uncommitted health/cleanup changes are excluded from closure claims. Remaining acceptance, performance work and deferred compatibility/features stay in the [active backlog](lakomics-backlog.md#pc-polish-20261002--remaining-polish-and-acceptance).
+
+### PC-POLISH-20261002 — implemented items
+
+The original item numbers are retained; item 5 (the measured performance pass) remains open. Current design rules are in [DESIGN.md](../../DESIGN.md), with the accepted [calm grid](../prototypes/assets-calm-20261002/README.md), [Home / More / Find](../prototypes/home-more-find-20261002/README.md) and [Notes / Ledger](../prototypes/notes-ledger-20261002/README.md) references.
+
+| Item | Implemented scope | Commit references |
+| --- | --- | --- |
+| 1 | Shared PC/tablet list scrubber; PC Asset labels use loaded tiles, without a full PC month TOC. | `b29bd44e`; local-date month fix `9079611b` |
+| 2 | Calm image-only Asset grid, quiet headings/sidebar and docked information panel; later removed hover select circles. | `62e90091`, `f901c437` |
+| 3 | No square mark before any top-bar title. | `b29bd44e` |
+| 4 | More opens beside the rail button; Find searches work/artist/note/folder names on PC and tablet. | `5b8b51c0`, `b1476723`, `628b6da3`; stale-result fix `d0e317c2` |
+| 6 | Full-width PC Collections without the sidebar; shortcuts use the second section-bar row and existing views. | `f90942ec`, `45640138` |
+| 7 | Manga sidebar hide/restore, remembered per area; catalog search stays available. | `b29bd44e` |
+| 8 | Work-stage wheel/pinch zoom 0.6×–2.5×, reset through 정면으로; empty stage click closes a case. | `5b8b51c0`, `cc2ae107` |
+| 9 | Quiet manga-cover and AV-jacket stage backdrops (option A); the earlier AV design choice is resolved. | `5b8b51c0` |
+| 10 | Shared memo editor with 글 / 할 일, section editing/filter/copy/move/reorder, tablet-only 메모 작성 field; legacy checklists edit as task memos. Text-body compatibility and conflict copies remain; old Markdown is literal. | `b29bd44e`, `1f1b3ed6`, `f901c437`, `cc2ae107`; audit corrections `a18f782b`, `afc3fb4c`, `57b9b6e7` |
+| 11 | Ledger budget, recurring cycles/trials/cancellation, price history, in-app reminders, wishlist and manual spending on both clients. Native notifications remain future work. | `8fc0bd1f`, `cb46bd2f`; audit corrections `eccb2ac4`, `afc3fb4c`, `57b9b6e7` |
+| 12 | Attention-first Home; NEW since the last visit, two-week releases and anniversary assets; anniversary moved below 오늘 할 것 on both clients. Bookmarked catalog chapters are excluded. | `62e90091`, `f97599b3`, `6426fd99`, `c538c508`; audit corrections `afc3fb4c`, `9079611b`, `71855626` |
+| 13 | Tablet name suggestions and tag chips, server filters/suggestions, and PC auto-tag publication (source schema v120). First publication/live use still needs acceptance. | `1dd5e2b7`, `a8d19545`, `116875b1`, `1c8e7d24` |
+
+Related source work: heart = designated, undeletable 마음에 들어요 album (`45d4e4e1`), per-tile heart targeting (`9079611b`), and safe server designation/album-queue recovery (`260bdc6b`). Gallery selection/privacy and tablet list information sheet fixes are recorded in `6902ac36`.
+
+Historical delivery records carried from the backlog: server tags/filters/suggestions deployed around 10:50 KST; memo/scrubber entered tablet 0.8.96, with ledger, calm grid, Home and tag chips in 0.8.97. These records do not establish that the later audit fixes are deployed or installed. Earlier manga slices 5–6 are in `4542a6b9` / `02319ffd`; the recorded 07:45 KST server rollout and PC/tablet 0.8.95 delivery leave cross-device pin acceptance open.
+
+### AUDIT-20261002 — 31 findings addressed in source
+
+Original static audit snapshot: `c538c508`, recorded by `99ce672b`. The symptoms and line references below are historical, not current navigation targets. Each source resolution is mapped to its fixing commit; the original audit was not runtime reproduction.
+
+- **P0** Shared API token can obtain a PUT URL for an existing `library/{asset_id}/original` and overwrite the stored
+  original (`server/lakomics-api/app.py:433–459`, `r2.py:39–55`): require publisher + no-overwrite condition. **Source fix:** `001b7bd8`.
+
+- **P0** Notes store `rebaseList` replaces a whole item with the stale newer draft, dropping another device's merged text
+  when the user toggles the same item during a save (`src/notes/store.ts:25–29,168–175`); also secret fields/ledger rows. **Source fix:** `001b7bd8`.
+
+- **P0** Permanent delete can remove the original/thumbnails of an asset ingested with the same bytes right after the
+  shared-file check (`src-tauri/src/library/trash.rs:300–304`, `ingestion.rs:838–848`): serialize with ingestion. **Source fix:** `af2fd1a4`.
+
+- **P0** Work-artwork cleanup can delete another work's file prepared but not yet registered
+  (`work_artwork.rs:566–595,680–682`, `collection_volume.rs:201–224`). **Source fix:** `af2fd1a4`.
+
+- **P0** An unmounted Linux manga root (empty mount dir) makes every series a vanished-folder candidate; purge deletes
+  their metadata (`manga_index.rs:300–306,240–259`): check volume/dir identity before purging. **Source fix:** `af2fd1a4`.
+
+- **P0** Tablet privacy mode: manga spine double-tap opens the original cover viewer (`mobile-client/Collections.tsx:673,200`). **Source fix:** `6902ac36`.
+
+- **P0** Tablet catalog reader ignores privacy mode (`mobile-client/CatalogReader.tsx:15,26`). **Source fix:** `6902ac36`.
+
+- **P1** Legacy `/v1/assets` upsert can change a committed asset's path/kind/hash without authority state (`app.py:352–405`). **Source fix:** `eccb2ac4`.
+
+- **P1** Ledger backup import re-ids notes but keeps month notes' `ledger` references (`library/notes.rs:753–758`). **Source fix:** `eccb2ac4`.
+
+- **P1** A ledger conflict copy (over 300 entries) cannot be edited: saves require derived month ids (`notes.rs:1026–1033,
+  908–914`; Android `NotesRepository.java:139`). **Source fix:** `eccb2ac4`.
+
+- **P1** `info.txt` title/artist edits are skipped by the rescan early return (`manga.rs:293,299–329`). **Source fix:** `eccb2ac4`.
+
+- **P1** Tablet keeps showing its own confirmed record edit after the PC changes it back (`mobile-client/useCollectionEdits.ts:67,120`). **Source fix:** `a18f782b`.
+
+- **P1** An open PC work detail does not reload status/device changed on the tablet (`src/collections/work/useWorkRecord.ts:19`). **Source fix:** `d0e317c2`.
+
+- **P1** A late MangaDex/Kakao refresh of work A lands on work B (`src/collections/CollectionOverlay.tsx:300,323`). **Source fix:** `d0e317c2`.
+
+- **P1** Double-tapping another volume enlarges the previously shown one (`mobile-client/CollectionWork.tsx:211`). **Source fix:** `a18f782b`.
+
+- **P1** Date-only release compares in UTC: on release day 00:00–08:59 KST it is still "upcoming" (`collection_volume.rs:287`). **Source fix:** `eccb2ac4`.
+
+- **P1** PC viewer: returning A→B→A keeps B on screen (`src/shared/ui/StableImage.tsx:29`, `AssetViewer.tsx:349`). **Source fix:** `d0e317c2`.
+
+- **P1** A late source-info save for asset A clears the draft being edited for B (`src/assets/AssetInfoPanel.tsx:141–143`). **Source fix:** `d0e317c2`.
+
+- **P1** Tablet artist list mixes pages from two sort orders (`mobile-client/Artists.tsx:156–163`). **Source fix:** `73d22496`.
+
+- **P1** Tablet artist 영상 filter shows an image fallback instead of an empty result (`mobile-client/Artists.tsx:166`). **Source fix:** `73d22496`.
+
+- **P1** Tablet back gesture in the viewer's 분류 picker closes the whole viewer (`mobile-client/Viewer.tsx:104–109`). **Source fix:** `a18f782b`.
+
+- **P1** Tablet back gesture on the memo section-delete dialog closes the note (`mobile-client/Notes.tsx:193–197`). **Source fix:** `a18f782b`.
+
+- **P1** Escape used to cancel IME composition closes shared dialogs, e.g. the ledger editor (`src/shared/ui/Dialog.tsx:84–86`). **Source fix:** `d0e317c2`.
+
+- **P2** 동기화 상태 복구 re-queues a running upload without the replication lock (`cloud/backfill.rs:168–179,873–881`). **Source fix:** `f0e7153a`.
+
+- **P2** Automatic similarity analysis runs in lightweight mode (`similarity_review_sync.rs:334–336`, `similarity_scan.rs:170–204`). **Source fix:** `f0e7153a`.
+
+- **P2** Windows: a case-only folder rename creates a duplicate manga series (`manga.rs:317–334,354–356`). **Source fix:** `eccb2ac4`.
+
+- **P2** A failed manga thumbnail write leaves a file that later scans treat as valid (`manga.rs:339–347,451–458`). **Source fix:** `eccb2ac4`.
+
+- **P2** Two concurrent uncached remote image requests share one `.bin.partial`, one fails with 502 (`remote_media.rs:126–134,172–180`). **Source fix:** `f0e7153a`.
+
+- **P2** 찾기: Enter can run a result from the previous query while the deferred list catches up (`src/layout/CommandPalette.tsx:60–64,107–109`). **Source fix:** `d0e317c2`.
+
+- **P2** Folder covers blank and reappear on a background refresh (`src/assets/AssetBrowser.tsx:142–158`; no-flash rule). **Source fix:** `d0e317c2`.
+
+- **P2** Tablet transfer thumbnails (base64 JPEGs) accumulate without a cap (`mobile-client/useExchange.ts:37,53–58`). **Source fix:** `a18f782b`.
+
+### AUDIT-20261002B — source fixes and retained finding history
+
+Original static audit snapshot: `7b90c5ef`, recorded by `6b46e96d` as 28 findings (some bullets group several defects). The fixes are mapped below. Explicitly cleared creators and tablet Home unclassified navigation, still open at the task baseline `260bdc6b`, were addressed by `71855626` during reconciliation. Historical line references are retained for traceability.
+
+- **P0** Tablet privacy: a character opened from 찾기 shows thumbnails (`mobile-client/CharacterBrowser.tsx:370` → Gallery without `privacy`). **Resolution:** `afc3fb4c`.
+
+- **P0** Tablet ledger editor merges its stale snapshot over a synced change (price/history revert) (`mobile-client/NoteLedgerSheets.tsx:132`, `NoteLedger.tsx:53`). **Resolution:** `afc3fb4c`.
+
+- **P0** Encrypted notes' section titles are written in plaintext to localStorage by the quick-add section memory (`mobile-client/Notes.tsx:42,49–52`). **Resolution:** `afc3fb4c`.
+
+- **P0** Android document provider: a grant on one album lets another app open any document (`LibraryDocumentsProvider.java:109`). **Resolution:** `c523900b`.
+
+- **P0** Collector: any HTTPS page at `/extension-pair#…` can re-pair the extension to an attacker server (`extension-list/src/pairing-bridge.js:72`, `api-client.js:75`). **Resolution:** `c523900b`.
+
+- **P1** First likes-album creation race between PC (createAlbum) and tablet (ensureLikesAlbum) blocks PC album sync (`album.rs:124`, `album_authority.rs:886`, `album_reconciliation.rs:137`). **Resolution:** `260bdc6b`.
+
+- **P1** Tablet heart toggles the fresh server value instead of the shown one (`mobile-client/useLikesAlbum.ts:39,50–55`, `Artists.tsx:188`). **Resolution:** `afc3fb4c`.
+
+- **P1** A creator explicitly cleared on the PC is still matched via the server's old handle (`asset_filters.py:159–165`, `auto_tag_publication.rs:264–265`). **Resolution:** `71855626` (published null suppresses the legacy creator fallback).
+
+- **P1** Ledger: a charge confirmed then moved to the next month counts twice (`src/notes/ledger/presentation.ts:7–10`); PC double-click confirm creates two entries (`LedgerView.tsx:94–100,205–207`); 안 사기로 함 items vanish with no restore (`LedgerContents.tsx:41`, `LedgerEditors.tsx:103`); skipped charges still show as upcoming/reminders (`presentation.ts:30–37`, `summary.ts:88–96`). **Resolution:** `57b9b6e7`.
+
+- **P1** PC heart on an unselected tile changes the selected assets (`AssetBrowser.tsx:381–385`, `AssetGallery.tsx:439`). **Resolution:** `9079611b`.
+
+- **P1** Memo: editing a task line in a mixed (글) note drops its `- [x]`; editing inside a code fence inserts `\#` (`memoModel.ts:12,77,84,90–97`). **Resolution:** `57b9b6e7`.
+
+- **P1** Home: NEW items missed when the visit mark advances before data loads (`useHomeVisit.ts:19,29`, `homeAttention.ts:62`); tablet 미분류 row opens the last folder (`mobile-client/Home.tsx:192`, `App.tsx:689–694,865`); tablet owned game/movie release NEW path never fires (`Home.tsx:153–156`, `releaseStore.ts:67`). **Resolution:** NEW read handling: `9079611b`; owned releases: `afc3fb4c`; tablet unclassified navigation and successful-read gating on both clients: `71855626`.
+
+- **P1** Android: classification-folder grants cannot open files (contains route not allowlisted) (`LibraryDocumentsProvider.java:105`, `NetworkPolicy.java:27`); exhausted transfer retries hide the manual retry (`ExchangeService.java:907`, `mobile-client/exchange.ts:119`). **Resolution:** `c523900b`.
+
+- **P1** Collector profile queue: an old offline change overwrites a later saved one; a retry added during flush is lost; a late bootstrap from the old server overwrites the new one (`extension-list/src/profile-store.js:42,61,105,136,151,155`). **Resolution:** `c523900b`.
+
+- **P2** A same-named album created right after migration 0121 makes the likes designation ambiguous (`album.rs:152–170`); price paste `10,000.00` saves 1,000,000 (`input.ts:19–23`); Tab-focused first tile ignores ↓/F/C (`AssetGallery.tsx:369–395,433`); scrubber month uses UTC (`scrubberModel.ts:37–40`); collector "saved" marks leak across servers (`save-client.js:169,252`). **Resolution:** Likes designation: `260bdc6b`; price input: `57b9b6e7`; keyboard focus and local months: `9079611b`; collector marks: `c523900b`.
+
+### Documentation and measurement tooling checkpoint
+
+- `b29bd44e` replaced the old checklist editor and Asset scrollbar with shared memo/scrubber modules; `813ba0fc` removed unused tablet NoteChecklist and other dead UI. The active source references now point to `src/notes/memo/` and `src/shared/ui/scrubber/`.
+- `7b90c5ef` removed the unused `/v1/extension-backup` server routes. The active collector remains `extension-list/`; no replacement backup endpoint is implied.
+- `888f528c` supplied the [native kit](../../_tools/app/scripts/native-check/README.md#one-command-per-kit), [PC render kit](../../_tools/app/scripts/perf/README.md), [tablet/device kit](../../android/tools/PERFORMANCE.md) and [local API kit](../../server/lakomics-api/tools/PERFORMANCE.md). Tooling completion is not completion of PC-POLISH item 5 or PERF-ALL-001; measurements and supported platform acceptance remain open.
+- Historical check reports: `001b7bd8` records server 1,730, cloud Rust 208 and Notes/App Vitest 296 passing; `eccb2ac4` records ledger/manga/release, server and Android model checks; `f0e7153a` records Rust 2,219 passed / 53 ignored; `c523900b` records Android provider/network/transfer and collector checks; `9079611b` records PC 2,100 passed / 19 skipped, tablet 1,176 passed and both TypeScript checks; `260bdc6b` records Rust 2,228 passed / 53 ignored; `71855626` records server suite success, PC Home/App 160 passing and tablet Home/gallery test success. These are commit-reported results, not reruns in this documentation batch or evidence of native/device acceptance.
+- Upload hardening in `001b7bd8` has a compatibility-sensitive delivery order: PC release before server rollout. This checkpoint does not authorize or claim either delivery.
+
 ## Closure checkpoint — 2026-09-30 — Design foundation, Home/Settings/calendar redesigns and the 에셋 round
 
 This checkpoint reconciles the 2026-09-28–30 source and history through `c60e57f9` on `main`. The source migration set now reaches `0115` (`0110`–`0115`); the production Linux library's applied version remains v109 only as recorded by the earlier checkpoint and commit history. This records implementation and the supplied device/release evidence; it does not imply a new production migration, deployment or release build.
