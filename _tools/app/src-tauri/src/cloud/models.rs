@@ -220,6 +220,8 @@ pub(crate) struct ReplicationPrepareRequest<'a> {
 pub(crate) struct ReplicationPrepareResponse {
     #[serde(default)]
     pub metadata_revision: Option<u64>,
+    #[serde(default)]
+    pub thumbnail_write_epoch: Option<u64>,
     #[serde(rename = "asset_id")]
     pub _asset_id: String,
     pub already_committed: bool,
@@ -229,14 +231,19 @@ pub(crate) struct ReplicationPrepareResponse {
 
 /// CLOUD-006 복제: 서버 commit 요청. 원본·썸네일 variant와 모바일 브라우징
 /// 메타데이터, 분류 관계를 한 번에 커밋한다.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ReplicationCommitRequest {
     pub expected_revision: u64,
     pub commit_id: String,
     pub asset_id: String,
     pub kind: String,
     pub original: ReplicationVariantPayload,
-    pub thumbnail: ReplicationVariantPayload,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<ReplicationVariantPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_upload_id: Option<String>,
     pub content_type: String,
     pub collected_at: Option<String>,
     pub source_published_at: Option<String>,
@@ -256,7 +263,7 @@ pub(crate) struct ReplicationCommitRequest {
     pub duration_ms: Option<u64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ReplicationVariantPayload {
     pub object_key: String,
     pub content_type: String,

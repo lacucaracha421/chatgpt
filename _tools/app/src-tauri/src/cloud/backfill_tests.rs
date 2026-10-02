@@ -14,6 +14,22 @@ use super::backfill::BackfillControlState;
 use super::client::CloudClient;
 use crate::library::{error::LibraryError, Library};
 
+fn recv_legacy(server: &Server) -> tiny_http::Request {
+    loop {
+        let request = server
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap()
+            .expect("fake server request deadline");
+        if request.url() == "/v1/replication/thumbnails/prepare" {
+            request
+                .respond(json_response(json!({"detail": "Not Found"})).with_status_code(404))
+                .unwrap();
+        } else {
+            return request;
+        }
+    }
+}
+
 fn png_bytes(seed: u32) -> Vec<u8> {
     let image = image::DynamicImage::ImageRgb8(image::ImageBuffer::from_fn(8, 8, |x, _y| {
         image::Rgb([((x * 16 + seed) % 256) as u8, 32, 200])
@@ -838,7 +854,7 @@ fn backfill_worker_prepares_uploads_and_commits_one_image() {
 
     let server_thread = thread::spawn(move || {
         // prepare
-        let mut prepare = server.recv().unwrap();
+        let mut prepare = recv_legacy(&server);
         assert_eq!(prepare.url(), "/v1/replication/prepare");
         assert_eq!(
             header_value(&prepare, "authorization"),
@@ -860,7 +876,7 @@ fn backfill_worker_prepares_uploads_and_commits_one_image() {
         // upload_asset: presign(원본) → PUT → POST /v1/assets 등록.
         // 스텁은 클라이언트가 요청한 object_key를 그대로 되돌려야 한다
         // (validate_presign이 키 일치를 검증한다).
-        let mut presign = server.recv().unwrap();
+        let mut presign = recv_legacy(&server);
         assert_eq!(presign.url(), "/v1/uploads/presign");
         let requested: Value = read_json(&mut presign);
         let requested_key = requested["object_key"].as_str().unwrap().to_owned();
@@ -874,16 +890,16 @@ fn backfill_worker_prepares_uploads_and_commits_one_image() {
                 "required_headers": { "Content-Type": requested["content_type"] }
             })))
             .unwrap();
-        let mut upload = server.recv().unwrap();
+        let mut upload = recv_legacy(&server);
         let mut received = Vec::new();
         std::io::Read::read_to_end(upload.as_reader(), &mut received).unwrap();
         upload.respond(Response::empty(200)).unwrap();
-        let register = server.recv().unwrap();
+        let register = recv_legacy(&server);
         assert_eq!(register.url(), "/v1/assets");
         register.respond(Response::empty(201)).unwrap();
 
         // upload_replication_variant: presign(썸네일) → PUT.
-        let mut thumb_presign = server.recv().unwrap();
+        let mut thumb_presign = recv_legacy(&server);
         assert_eq!(thumb_presign.url(), "/v1/uploads/presign");
         let thumb_requested: Value = read_json(&mut thumb_presign);
         let thumb_key = thumb_requested["object_key"].as_str().unwrap().to_owned();
@@ -896,13 +912,13 @@ fn backfill_worker_prepares_uploads_and_commits_one_image() {
                 "required_headers": { "Content-Type": thumb_requested["content_type"] }
             })))
             .unwrap();
-        let mut thumb_upload = server.recv().unwrap();
+        let mut thumb_upload = recv_legacy(&server);
         let mut thumb_bytes = Vec::new();
         std::io::Read::read_to_end(thumb_upload.as_reader(), &mut thumb_bytes).unwrap();
         thumb_upload.respond(Response::empty(200)).unwrap();
 
         // commit
-        let mut commit = server.recv().unwrap();
+        let mut commit = recv_legacy(&server);
         assert_eq!(commit.url(), "/v1/replication/commit");
         let body: Value = read_json(&mut commit);
         let committed_asset = body["asset_id"].as_str().unwrap();
@@ -963,7 +979,7 @@ fn backfill_commit_carries_local_dimensions_and_omits_unknown_ones() {
         // would be asserting something the contract does not promise. Each commit is
         // recorded and the loop ends once both assets have committed.
         while recorded.lock().expect("captured commits").len() < 2 {
-            let mut request = server.recv().unwrap();
+            let mut request = recv_legacy(&server);
             let url = request.url().to_owned();
             match url.as_str() {
                 "/v1/replication/prepare" => {
@@ -1128,71 +1144,87 @@ fn json_response(value: Value) -> Response<std::io::Cursor<Vec<u8>>> {
 /// 시켜야 한다. 재업로드(presign/PUT)는 발생하지 않아야 한다.
 #[test]
 fn already_committed_asset_recommits_relationships_without_reupload() {
-    let server = Server::http("127.0.0.1:0").unwrap();
-    let origin = format!("http://{}", server.server_addr());
-    let base_url = format!("{origin}/v1");
+    for immutable in [false, true] {
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", server.server_addr());
+        let base_url = format!("{origin}/v1");
 
-    let server_thread = thread::spawn(move || {
-        // prepare: already_committed=true
-        let mut prepare = server.recv().unwrap();
-        assert_eq!(prepare.url(), "/v1/replication/prepare");
-        let body: Value = read_json(&mut prepare);
-        let asset_id = body["asset_id"].as_str().unwrap().to_owned();
-        prepare
+        let server_thread = thread::spawn(move || {
+            // prepare: already_committed=true
+            let mut prepare = recv_legacy(&server);
+            assert_eq!(prepare.url(), "/v1/replication/prepare");
+            let body: Value = read_json(&mut prepare);
+            let asset_id = body["asset_id"].as_str().unwrap().to_owned();
+            prepare
             .respond(json_response(json!({
                 "asset_id": asset_id,
-                "already_committed": true, "metadata_revision": 0,
+                "already_committed": true, "metadata_revision": 0, "thumbnail_write_epoch": if immutable { json!(7) } else { Value::Null },
                 "object_keys": {
                     "original": format!("library/{asset_id}/original"),
-                    "thumbnail": format!("library/{asset_id}/thumbnail"),
+                    "thumbnail": "derived/library-thumbnails/v1/migrated.webp",
                 }
             })))
             .unwrap();
 
-        // 재커밋: 업로드 없이 commit만 온다.
-        let mut commit = server.recv().unwrap();
-        assert_eq!(commit.url(), "/v1/replication/commit");
-        let body: Value = read_json(&mut commit);
-        assert_eq!(body["asset_id"], asset_id.as_str());
-        assert!(body["classification_ids"].is_array());
-        commit
-            .respond(json_response(json!({
-                "ok": true, "committed": true, "asset_id": body["asset_id"]
-            })))
-            .unwrap();
-    });
+            // 재커밋: 업로드 없이 commit만 온다.
+            let mut commit = recv_legacy(&server);
+            assert_eq!(commit.url(), "/v1/replication/commit");
+            let body: Value = read_json(&mut commit);
+            assert_eq!(body["asset_id"], asset_id.as_str());
+            assert!(body["classification_ids"].is_array());
+            if immutable {
+                assert_eq!(body["thumbnail_mode"], "retain");
+                assert!(body.get("thumbnail").is_none());
+                assert!(body.get("thumbnail_upload_id").is_none());
+            } else {
+                assert!(body.get("thumbnail_mode").is_none());
+                assert_eq!(
+                    body["thumbnail"]["object_key"],
+                    format!("library/{asset_id}/thumbnail")
+                );
+            }
+            commit
+                .respond(json_response(json!({
+                    "ok": true, "committed": true, "asset_id": body["asset_id"]
+                })))
+                .unwrap();
+        });
 
-    let temp = tempfile::tempdir().unwrap();
-    let library = Library::open(temp.path()).unwrap();
-    library
-        .set_cloud_settings(
-            super::models::CloudSyncConfig {
-                enabled: true,
-                api_base_url: Some("https://fixture.test".into()),
-            },
-            true,
-        )
-        .unwrap();
-    let source = temp.path().join("committed.png");
-    fs::write(&source, png_bytes(11)).unwrap();
-    let asset_id = ingest_png(&library, &source, "2026-08-30T00:00:00Z");
-    library.seed_cloud_backfill_queue().unwrap();
-    // 자산을 '이미 원격 커밋됨' 상태로 만든다(로컬 큐는 revision=1 pending).
-    // 워커가 prepare에서 already_committed=true를 받으면 업로드 없이
-    // 재커밋하는지 검증한다.
-    let summary = library
-        .run_cloud_backfill_cycle_with_client(&CloudClient::new(&base_url).unwrap(), "test-token")
-        .unwrap();
-    assert_eq!(summary.committed, 1);
-    assert_eq!(summary.permanent_failures, 0);
-    assert_eq!(queue_status(&library, &asset_id).as_deref(), Some("synced"));
-    if let Err(panic) = server_thread.join() {
-        let message = panic
-            .downcast_ref::<&str>()
-            .map(|s| (*s).to_owned())
-            .or_else(|| panic.downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "<non-string panic>".into());
-        panic!("{message}");
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        library
+            .set_cloud_settings(
+                super::models::CloudSyncConfig {
+                    enabled: true,
+                    api_base_url: Some("https://fixture.test".into()),
+                },
+                true,
+            )
+            .unwrap();
+        let source = temp.path().join("committed.png");
+        fs::write(&source, png_bytes(11)).unwrap();
+        let asset_id = ingest_png(&library, &source, "2026-08-30T00:00:00Z");
+        library.seed_cloud_backfill_queue().unwrap();
+        // 자산을 '이미 원격 커밋됨' 상태로 만든다(로컬 큐는 revision=1 pending).
+        // 워커가 prepare에서 already_committed=true를 받으면 업로드 없이
+        // 재커밋하는지 검증한다.
+        let summary = library
+            .run_cloud_backfill_cycle_with_client(
+                &CloudClient::new(&base_url).unwrap(),
+                "test-token",
+            )
+            .unwrap();
+        assert_eq!(summary.committed, 1);
+        assert_eq!(summary.permanent_failures, 0);
+        assert_eq!(queue_status(&library, &asset_id).as_deref(), Some("synced"));
+        if let Err(panic) = server_thread.join() {
+            let message = panic
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_owned())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "<non-string panic>".into());
+            panic!("{message}");
+        }
     }
 }
 
@@ -1214,12 +1246,7 @@ fn spawn_replication_server_with_hook(
     let upload_url = format!("{origin}/r2-upload");
     let handle = thread::spawn(move || {
         // A missing request must fail the contract, not block join() forever.
-        let receive =
-            || {
-                server.recv_timeout(std::time::Duration::from_secs(30))
-            .expect("replication fixture receive failed")
-            .expect("replication fixture did not receive the expected request within 30 seconds")
-            };
+        let receive = || recv_legacy(&server);
         let mut prepare = receive();
         let body: Value = read_json(&mut prepare);
         assert_eq!(body["kind"], expected_kind);
@@ -1328,7 +1355,7 @@ fn video_prepare_upload_and_commit_flow() {
 
     let server_thread = thread::spawn(move || {
         // prepare
-        let mut prepare = server.recv().unwrap();
+        let mut prepare = recv_legacy(&server);
         let body: Value = read_json(&mut prepare);
         assert_eq!(body["kind"], "video");
         let video_asset = body["asset_id"].as_str().unwrap().to_owned();
@@ -1344,7 +1371,7 @@ fn video_prepare_upload_and_commit_flow() {
             .unwrap();
 
         // upload_asset: presign(mp4) -> PUT -> register
-        let mut presign = server.recv().unwrap();
+        let mut presign = recv_legacy(&server);
         let requested: Value = read_json(&mut presign);
         presign
             .respond(json_response(json!({
@@ -1355,17 +1382,17 @@ fn video_prepare_upload_and_commit_flow() {
                 "required_headers": { "Content-Type": requested["content_type"] }
             })))
             .unwrap();
-        let mut upload = server.recv().unwrap();
+        let mut upload = recv_legacy(&server);
         let mut bytes = Vec::new();
         std::io::Read::read_to_end(upload.as_reader(), &mut bytes).unwrap();
         assert_eq!(bytes, b"fake-mp4-bytes");
         upload.respond(Response::empty(200)).unwrap();
-        let register = server.recv().unwrap();
+        let register = recv_legacy(&server);
         assert_eq!(register.url(), "/v1/assets");
         register.respond(Response::empty(201)).unwrap();
 
         // thumbnail: presign -> PUT (요청된 키를 그대로 되돌린다)
-        let mut thumb_presign = server.recv().unwrap();
+        let mut thumb_presign = recv_legacy(&server);
         let thumb_requested: Value = read_json(&mut thumb_presign);
         thumb_presign
             .respond(json_response(json!({
@@ -1376,13 +1403,13 @@ fn video_prepare_upload_and_commit_flow() {
                 "required_headers": { "Content-Type": thumb_requested["content_type"] }
             })))
             .unwrap();
-        let mut thumb_upload = server.recv().unwrap();
+        let mut thumb_upload = recv_legacy(&server);
         let mut thumb = Vec::new();
         std::io::Read::read_to_end(thumb_upload.as_reader(), &mut thumb).unwrap();
         thumb_upload.respond(Response::empty(200)).unwrap();
 
         // commit
-        let mut commit = server.recv().unwrap();
+        let mut commit = recv_legacy(&server);
         let body: Value = read_json(&mut commit);
         assert_eq!(body["original"]["content_type"], "video/mp4");
         assert_eq!(
@@ -1546,14 +1573,14 @@ fn retry_does_not_duplicate_assets_or_relations_and_permanent_failure_is_isolate
     let upload_url = format!("{origin}/r2-upload");
     let base_url = format!("{origin}/v1");
     let server_thread = thread::spawn(move || {
-        let prepare = server.recv().unwrap();
+        let prepare = recv_legacy(&server);
         prepare
             .respond(json_response(json!({
                 "asset_id": "x", "already_committed": false, "metadata_revision": 0,
                 "object_keys": {"original": "a", "thumbnail": "b"}
             })))
             .unwrap();
-        let mut presign = server.recv().unwrap();
+        let mut presign = recv_legacy(&server);
         let requested: Value = read_json(&mut presign);
         presign
             .respond(json_response(json!({
@@ -1563,13 +1590,13 @@ fn retry_does_not_duplicate_assets_or_relations_and_permanent_failure_is_isolate
                 "required_headers": {"Content-Type": requested["content_type"]}
             })))
             .unwrap();
-        let mut upload = server.recv().unwrap();
+        let mut upload = recv_legacy(&server);
         let mut bytes = Vec::new();
         std::io::Read::read_to_end(upload.as_reader(), &mut bytes).unwrap();
         upload.respond(Response::empty(200)).unwrap();
-        let register = server.recv().unwrap();
+        let register = recv_legacy(&server);
         register.respond(Response::empty(201)).unwrap();
-        let mut thumb_presign = server.recv().unwrap();
+        let mut thumb_presign = recv_legacy(&server);
         let thumb_requested: Value = read_json(&mut thumb_presign);
         thumb_presign
             .respond(json_response(json!({
@@ -1579,11 +1606,11 @@ fn retry_does_not_duplicate_assets_or_relations_and_permanent_failure_is_isolate
                 "required_headers": {"Content-Type": thumb_requested["content_type"]}
             })))
             .unwrap();
-        let mut thumb_upload = server.recv().unwrap();
+        let mut thumb_upload = recv_legacy(&server);
         let mut tb = Vec::new();
         std::io::Read::read_to_end(thumb_upload.as_reader(), &mut tb).unwrap();
         thumb_upload.respond(Response::empty(200)).unwrap();
-        let commit = server.recv().unwrap();
+        let commit = recv_legacy(&server);
         commit.respond(Response::empty(500)).unwrap();
     });
 
@@ -1610,14 +1637,14 @@ fn retry_does_not_duplicate_assets_or_relations_and_permanent_failure_is_isolate
     let upload_url2 = format!("{origin2}/r2-upload");
     let base_url2 = format!("{origin2}/v1");
     let server_thread2 = thread::spawn(move || {
-        let prepare = server2.recv().unwrap();
+        let prepare = recv_legacy(&server2);
         prepare
             .respond(json_response(json!({
                 "asset_id": "x", "already_committed": false, "metadata_revision": 0,
                 "object_keys": {"original": "a", "thumbnail": "b"}
             })))
             .unwrap();
-        let mut presign = server2.recv().unwrap();
+        let mut presign = recv_legacy(&server2);
         let requested: Value = read_json(&mut presign);
         presign
             .respond(json_response(json!({
@@ -1627,13 +1654,13 @@ fn retry_does_not_duplicate_assets_or_relations_and_permanent_failure_is_isolate
                 "required_headers": {"Content-Type": requested["content_type"]}
             })))
             .unwrap();
-        let mut upload = server2.recv().unwrap();
+        let mut upload = recv_legacy(&server2);
         let mut bytes = Vec::new();
         std::io::Read::read_to_end(upload.as_reader(), &mut bytes).unwrap();
         upload.respond(Response::empty(200)).unwrap();
-        let register = server2.recv().unwrap();
+        let register = recv_legacy(&server2);
         register.respond(Response::empty(201)).unwrap();
-        let mut thumb_presign = server2.recv().unwrap();
+        let mut thumb_presign = recv_legacy(&server2);
         let thumb_requested: Value = read_json(&mut thumb_presign);
         thumb_presign
             .respond(json_response(json!({
@@ -1643,11 +1670,11 @@ fn retry_does_not_duplicate_assets_or_relations_and_permanent_failure_is_isolate
                 "required_headers": {"Content-Type": thumb_requested["content_type"]}
             })))
             .unwrap();
-        let mut thumb_upload = server2.recv().unwrap();
+        let mut thumb_upload = recv_legacy(&server2);
         let mut tb = Vec::new();
         std::io::Read::read_to_end(thumb_upload.as_reader(), &mut tb).unwrap();
         thumb_upload.respond(Response::empty(200)).unwrap();
-        let commit = server2.recv().unwrap();
+        let commit = recv_legacy(&server2);
         commit
             .respond(json_response(json!({ "ok": true })))
             .unwrap();
@@ -1709,14 +1736,14 @@ fn missing_original_fails_that_asset_only_and_later_assets_still_commit() {
     let upload_url = format!("{origin}/r2-upload");
     let server_thread = thread::spawn(move || {
         // 최신 자산의 전체 흐름(prepare→presign→PUT→register→thumb→commit)
-        let prepare = server.recv().unwrap();
+        let prepare = recv_legacy(&server);
         prepare
             .respond(json_response(json!({
                 "asset_id": "n", "already_committed": false, "metadata_revision": 0,
                 "object_keys": {"original": "a", "thumbnail": "b"}
             })))
             .unwrap();
-        let mut presign = server.recv().unwrap();
+        let mut presign = recv_legacy(&server);
         let requested: Value = read_json(&mut presign);
         presign
             .respond(json_response(json!({
@@ -1726,13 +1753,13 @@ fn missing_original_fails_that_asset_only_and_later_assets_still_commit() {
                 "required_headers": {"Content-Type": requested["content_type"]}
             })))
             .unwrap();
-        let mut upload = server.recv().unwrap();
+        let mut upload = recv_legacy(&server);
         let mut bytes = Vec::new();
         std::io::Read::read_to_end(upload.as_reader(), &mut bytes).unwrap();
         upload.respond(Response::empty(200)).unwrap();
-        let register = server.recv().unwrap();
+        let register = recv_legacy(&server);
         register.respond(Response::empty(201)).unwrap();
-        let mut thumb_presign = server.recv().unwrap();
+        let mut thumb_presign = recv_legacy(&server);
         let thumb_requested: Value = read_json(&mut thumb_presign);
         thumb_presign
             .respond(json_response(json!({
@@ -1742,11 +1769,11 @@ fn missing_original_fails_that_asset_only_and_later_assets_still_commit() {
                 "required_headers": {"Content-Type": thumb_requested["content_type"]}
             })))
             .unwrap();
-        let mut thumb_upload = server.recv().unwrap();
+        let mut thumb_upload = recv_legacy(&server);
         let mut tb = Vec::new();
         std::io::Read::read_to_end(thumb_upload.as_reader(), &mut tb).unwrap();
         thumb_upload.respond(Response::empty(200)).unwrap();
-        let commit = server.recv().unwrap();
+        let commit = recv_legacy(&server);
         commit
             .respond(json_response(json!({ "ok": true })))
             .unwrap();
@@ -2208,4 +2235,117 @@ fn workload_backfill_video_takes_native_preparation_when_profile_changes_during_
         assert_eq!(queue_status(&library, &video).as_deref(), Some("synced"));
         server.join().unwrap();
     }
+}
+
+#[test]
+fn immutable_thumbnail_replication_replays_exact_commit_after_restart() {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let origin = format!("http://{}", server.server_addr());
+    let client = CloudClient::new(&origin).unwrap();
+    let worker = thread::spawn(move || {
+        let mut saved_commit: Option<Value> = None;
+        let mut manifest: Option<Value> = None;
+        loop {
+            let mut request = server
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap()
+                .expect("request deadline");
+            let path = request.url().to_owned();
+            if saved_commit.is_some() {
+                assert_eq!(
+                    path, "/v1/replication/commit",
+                    "restart must replay before preparing or uploading"
+                );
+            }
+            match path.as_str() {
+                "/v1/replication/prepare" => {
+                    let body = read_json(&mut request);
+                    request
+                        .respond(json_response(
+                            json!({"asset_id": body["asset_id"], "already_committed": false,
+                        "metadata_revision": 0, "thumbnail_write_epoch": 0, "object_keys": {}}),
+                        ))
+                        .unwrap();
+                }
+                "/v1/uploads/presign" => {
+                    let body = read_json(&mut request);
+                    assert!(body["object_key"].as_str().unwrap().ends_with("/original"));
+                    request.respond(json_response(json!({"method": "PUT", "object_key": body["object_key"],
+                        "upload_url": format!("{origin}/original"), "expires_in": 600, "required_headers": {}}))).unwrap();
+                }
+                "/original" | "/v1/assets" => {
+                    request.respond(Response::empty(200)).unwrap();
+                }
+                "/v1/replication/thumbnails/prepare" => {
+                    let body = read_json(&mut request);
+                    request.respond(json_response(json!({"asset_id": body["asset_id"], "upload_id": "upload",
+                        "thumbnail_key": format!("derived/library-thumbnails/v1/{}.webp", body["sha256"].as_str().unwrap()),
+                        "committed": false, "upload_url": format!("{origin}/thumbnail"),
+                        "required_headers": {"Content-Type": "image/webp", "Content-Length": body["size_bytes"].as_u64().unwrap().to_string()}}))).unwrap();
+                    manifest = Some(body);
+                }
+                "/thumbnail" => {
+                    let mut bytes = Vec::new();
+                    request.as_reader().read_to_end(&mut bytes).unwrap();
+                    let expected = manifest.as_ref().unwrap();
+                    assert_eq!(expected["size_bytes"], bytes.len());
+                    assert_eq!(expected["sha256"], super::thumbnail_upload::digest(&bytes));
+                    request.respond(Response::empty(200)).unwrap();
+                }
+                "/v1/replication/commit" => {
+                    let body = read_json(&mut request);
+                    assert_eq!(body["thumbnail_mode"], "upload");
+                    assert_eq!(body["thumbnail_upload_id"], "upload");
+                    assert!(body.get("thumbnail").is_none());
+                    if let Some(saved) = saved_commit {
+                        assert_eq!(body, saved, "commit context and IDs must survive restart");
+                        request.respond(json_response(json!({"ok": true}))).unwrap();
+                        break;
+                    }
+                    saved_commit = Some(body);
+                    // Publication succeeded but a gateway lost the successful response.
+                    request
+                        .respond(
+                            json_response(json!({"detail": "gateway lost response"}))
+                                .with_status_code(503),
+                        )
+                        .unwrap();
+                }
+                other => panic!("unexpected request {other}"),
+            }
+        }
+    });
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::open(temp.path()).unwrap();
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
+    let source = temp.path().join("immutable.png");
+    fs::write(&source, png_bytes(44)).unwrap();
+    let asset_id = ingest_png(&library, &source, "2026-10-02T00:00:00Z");
+    library.seed_cloud_backfill_queue().unwrap();
+    let error = library
+        .replicate_next_cloud_asset_with_client(&client, "token")
+        .unwrap_err();
+    assert!(error.is_retryable());
+    assert_eq!(
+        queue_status(&library, &asset_id).as_deref(),
+        Some("pending")
+    );
+    drop(library);
+    let library = Library::open(temp.path()).unwrap();
+    assert_eq!(
+        library
+            .replicate_next_cloud_asset_with_client(&client, "token")
+            .unwrap(),
+        Some(asset_id.clone())
+    );
+    assert_eq!(queue_status(&library, &asset_id).as_deref(), Some("synced"));
+    worker.join().unwrap();
 }

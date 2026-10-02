@@ -16,7 +16,8 @@ use serde::{Deserialize, Serialize};
 use super::client::CloudClient;
 use super::failure::CloudFailureReason;
 use super::models::PreparedAssetUpload;
-use super::sync::{hex_digest, is_retryable_cloud_error};
+use super::sync::is_retryable_cloud_error;
+use super::thumbnail_upload::{self, Journal, Thumbnail};
 use crate::library::error::LibraryError;
 use crate::library::Library;
 
@@ -749,6 +750,28 @@ impl Library {
 
         self.set_backfill_status(&queue_id, "uploading")
             .map_err(CloudBackfillError::Library)?;
+        let journal = client
+            .thumbnail_journal(self.root(), &format!("replication:{queue_id}"))
+            .map_err(CloudBackfillError::Library)?;
+        // Recover the exact commit before consulting fresh metadata or re-uploading.
+        // The server may already have committed even though its response was lost.
+        if let Some(commit) = journal
+            .load()
+            .map_err(CloudBackfillError::Library)?
+            .and_then(|operation| operation.commit)
+        {
+            if let Err(error) =
+                thumbnail_upload::commit_replication(client, &journal, &commit, token)
+            {
+                self.backfill_failure(&queue_id, &error)
+                    .map_err(CloudBackfillError::Library)?;
+                return Err(classify_backfill_error(asset_id, &error));
+            }
+            self.mark_cloud_sync_synced(&queue_id)
+                .map_err(CloudBackfillError::Library)?;
+            self.remember_new_ingest(&asset_id, false);
+            return Ok(Some(asset_id));
+        }
         // 0. 로컬 원본 검증을 네트워크 작업보다 먼저 한다. 원본이 없는 자산은
         // 서버와 아무 통신 없이 영구 실패로 처리된다(개별 자산 격리).
         let source = match self.open_validated_cloud_source(&prepared) {
@@ -782,10 +805,17 @@ impl Library {
             let commit_payload = self
                 .backfill_commit_payload(&prepared)
                 .map_err(|error| classify_backfill_error(asset_id.clone(), &error))?;
-            if let Err(error) = client.commit_replication(
-                &commit_payload_wire(&commit_payload, expected_revision),
-                token,
-            ) {
+            let result = (|| {
+                let mut request = commit_payload_wire(&commit_payload, expected_revision);
+                if prepare_result.thumbnail_write_epoch.is_some()
+                    || client.thumbnail_route_exists(token)?
+                {
+                    request.thumbnail = None;
+                    request.thumbnail_mode = Some("retain".into());
+                }
+                thumbnail_upload::commit_replication(client, &journal, &request, token)
+            })();
+            if let Err(error) = result {
                 self.backfill_failure(&queue_id, &error)
                     .map_err(CloudBackfillError::Library)?;
                 return Err(classify_backfill_error(asset_id, &error));
@@ -811,13 +841,16 @@ impl Library {
                         LibraryError::CloudThumbnailUnavailable
                     })?;
                 }
-                self.upload_backfill_thumbnail(client, &prepared, token)
+                self.upload_backfill_thumbnail(client, &journal, &prepared, token)
             });
-        if let Err(error) = upload_result {
-            self.backfill_failure(&queue_id, &error)
-                .map_err(CloudBackfillError::Library)?;
-            return Err(classify_backfill_error(asset_id, &error));
-        }
+        let thumbnail = match upload_result {
+            Ok(thumbnail) => thumbnail,
+            Err(error) => {
+                self.backfill_failure(&queue_id, &error)
+                    .map_err(CloudBackfillError::Library)?;
+                return Err(classify_backfill_error(asset_id, &error));
+            }
+        };
 
         // 3. 커밋: 메타데이터 + 분류 관계를 원자적으로 기록한다.
         self.set_backfill_status(&queue_id, "committing")
@@ -825,10 +858,17 @@ impl Library {
         let commit_payload = self
             .backfill_commit_payload(&prepared)
             .map_err(|error| classify_backfill_error(asset_id.clone(), &error))?;
-        if let Err(error) = client.commit_replication(
-            &commit_payload_wire(&commit_payload, expected_revision),
-            token,
-        ) {
+        let mut request = commit_payload_wire(&commit_payload, expected_revision);
+        match thumbnail {
+            Thumbnail::Upload(upload_id) => {
+                request.thumbnail = None;
+                request.thumbnail_mode = Some("upload".into());
+                request.thumbnail_upload_id = Some(upload_id);
+            }
+            Thumbnail::Legacy(variant) => request.thumbnail = Some(variant),
+        }
+        if let Err(error) = thumbnail_upload::commit_replication(client, &journal, &request, token)
+        {
             self.backfill_failure(&queue_id, &error)
                 .map_err(CloudBackfillError::Library)?;
             return Err(classify_backfill_error(asset_id, &error));
@@ -975,9 +1015,10 @@ impl Library {
     fn upload_backfill_thumbnail(
         &self,
         client: &CloudClient,
+        journal: &Journal,
         prepared: &PreparedAssetUpload,
         token: &str,
-    ) -> Result<(), LibraryError> {
+    ) -> Result<Thumbnail, LibraryError> {
         let thumbnail_path: Option<String> = self
             .connection()?
             .query_row(
@@ -992,22 +1033,16 @@ impl Library {
         let mut thumbnail = self
             .open_library_media(&thumbnail_path)
             .map_err(|_| LibraryError::CloudThumbnailUnavailable)?;
+        if thumbnail.length > thumbnail_upload::MAX_BYTES as u64 {
+            return Err(LibraryError::CloudThumbnailUnavailable);
+        }
         let mut bytes = Vec::with_capacity(thumbnail.length as usize);
-        std::io::Read::read_to_end(&mut thumbnail.file, &mut bytes)
-            .map_err(|_| LibraryError::CloudThumbnailUnavailable)?;
-        let sha256 = hex_digest(&{
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(&bytes);
-            hasher.finalize()
-        });
-        client.upload_replication_variant(
-            &format!("library/{}/thumbnail", prepared.queue.entity_id),
-            "image/webp",
-            bytes,
-            &sha256,
-            token,
+        std::io::Read::read_to_end(
+            &mut std::io::Read::take(&mut thumbnail.file, thumbnail_upload::MAX_BYTES as u64 + 1),
+            &mut bytes,
         )
+        .map_err(|_| LibraryError::CloudThumbnailUnavailable)?;
+        thumbnail_upload::upload(client, journal, &prepared.queue.entity_id, bytes, token)
     }
 
     /// commit 요청 본문: 서버 계약에 맞는 메타데이터 + 분류 관계.
@@ -1133,12 +1168,14 @@ fn commit_payload_wire(
             size_bytes: payload.original_size_bytes,
             sha256: Some(payload.original_sha256.clone()),
         },
-        thumbnail: super::models::ReplicationVariantPayload {
+        thumbnail_mode: None,
+        thumbnail_upload_id: None,
+        thumbnail: Some(super::models::ReplicationVariantPayload {
             object_key: format!("library/{}/thumbnail", payload.asset_id),
             content_type: "image/webp".into(),
             size_bytes: 1,
             sha256: None,
-        },
+        }),
         content_type: payload.content_type.clone(),
         collected_at: payload.collected_at.clone(),
         source_published_at: payload.source_published_at.clone(),

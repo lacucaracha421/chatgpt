@@ -2710,6 +2710,163 @@ impl CloudClient {
         Ok(())
     }
 
+    pub(super) fn thumbnail_journal(
+        &self,
+        root: &std::path::Path,
+        work: &str,
+    ) -> Result<super::thumbnail_upload::Journal, LibraryError> {
+        super::thumbnail_upload::Journal::open(root, self.base_url.as_str(), work)
+    }
+
+    fn thumbnail_post<T: serde::Serialize>(
+        &self,
+        path: &str,
+        body: &T,
+        token: &str,
+    ) -> Result<serde_json::Value, super::thumbnail_upload::UploadError> {
+        use super::thumbnail_upload::UploadError;
+        let body = serde_json::to_vec(body).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        let mut response = self
+            .agent
+            .post(self.endpoint(path)?)
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .header("Authorization", bearer(token)?)
+            .content_type("application/json")
+            .send(&body)
+            .map_err(|error| map_api_error(error, LibraryError::CloudReplicationCommitRejected))?;
+        let status = response.status().as_u16();
+        let value = read_json::<serde_json::Value>(&mut response);
+        if (200..300).contains(&status) {
+            return value.map_err(Into::into);
+        }
+        // Error proxies may return an empty or non-JSON body; preserve the status
+        // for retries, but never treat an unparseable 404 as an unknown route.
+        let value = value.unwrap_or(serde_json::Value::Null);
+        let detail = &value["detail"];
+        if status == 404 && detail == "Not Found" {
+            return Err(UploadError::UnknownRoute);
+        }
+        let code = detail["code"]
+            .as_str()
+            .or_else(|| detail.as_str())
+            .unwrap_or("");
+        if (status == 410
+            && matches!(
+                code,
+                "thumbnailSessionExpired" | "thumbnailUploadUrlExpired"
+            ))
+            || (status == 409
+                && matches!(
+                    code,
+                    "thumbnailConcurrentChange" | "Stale metadata revision; prepare again"
+                ))
+        {
+            return Err(UploadError::Renew);
+        }
+        // Includes thumbnailUpgradeRequired, lifecycle fences, and resource 404s.
+        Err(UploadError::Failed(map_api_error(
+            ureq::Error::StatusCode(status),
+            LibraryError::CloudReplicationPrepareRejected,
+        )))
+    }
+
+    pub(super) fn prepare_thumbnail(
+        &self,
+        asset_id: &str,
+        operation: &super::thumbnail_upload::Operation,
+        token: &str,
+    ) -> Result<super::thumbnail_upload::PreparedThumbnail, super::thumbnail_upload::UploadError>
+    {
+        let value = self.thumbnail_post("/v1/replication/thumbnails/prepare", &serde_json::json!({
+            "asset_id": asset_id, "operation_id": operation.operation_id,
+            "sha256": operation.sha256, "size_bytes": operation.size_bytes, "content_type": "image/webp",
+        }), token)?;
+        serde_json::from_value(value).map_err(|_| LibraryError::InvalidCloudResponse.into())
+    }
+
+    pub(super) fn put_thumbnail(
+        &self,
+        prepared: &super::thumbnail_upload::PreparedThumbnail,
+        bytes: &[u8],
+    ) -> Result<(), LibraryError> {
+        let url = prepared
+            .upload_url
+            .as_deref()
+            .ok_or(LibraryError::InvalidCloudResponse)?;
+        let parsed = url::Url::parse(url).map_err(|_| LibraryError::InvalidCloudResponse)?;
+        if !matches!(parsed.scheme(), "http" | "https") {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let mut request = self.agent.put(url);
+        for (name, value) in &prepared.required_headers {
+            let name = ureq::http::header::HeaderName::try_from(name.as_str())
+                .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            let value = ureq::http::header::HeaderValue::try_from(value.as_str())
+                .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            request = request.header(name, value);
+        }
+        request.send(bytes).map_err(map_upload_error)?;
+        Ok(())
+    }
+
+    pub(super) fn commit_thumbnail(
+        &self,
+        asset_id: &str,
+        upload_id: &str,
+        token: &str,
+    ) -> Result<(), super::thumbnail_upload::UploadError> {
+        let value = self.thumbnail_post(
+            "/v1/replication/thumbnails/commit",
+            &serde_json::json!({"asset_id": asset_id, "upload_id": upload_id}),
+            token,
+        )?;
+        if value["ok"] != true || value["asset_id"] != asset_id || value["upload_id"] != upload_id {
+            return Err(LibraryError::InvalidCloudResponse.into());
+        }
+        Ok(())
+    }
+
+    pub(super) fn commit_thumbnail_replication(
+        &self,
+        request: &super::models::ReplicationCommitRequest,
+        token: &str,
+    ) -> Result<(), super::thumbnail_upload::UploadError> {
+        let value = self.thumbnail_post("/v1/replication/commit", request, token)?;
+        if value["ok"] != true {
+            return Err(LibraryError::InvalidCloudResponse.into());
+        }
+        Ok(())
+    }
+
+    // A read-only route probe for an older replication prepare response without the
+    // additive epoch field. FastAPI answers 405 for an existing POST-only route.
+    pub(super) fn thumbnail_route_exists(&self, token: &str) -> Result<bool, LibraryError> {
+        let mut response = self
+            .agent
+            .get(self.endpoint("/v1/replication/thumbnails/prepare")?)
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .header("Authorization", bearer(token)?)
+            .call()
+            .map_err(|error| map_api_error(error, LibraryError::CloudReplicationPrepareRejected))?;
+        if response.status().as_u16() == 405 {
+            return Ok(true);
+        }
+        if response.status().as_u16() == 404 {
+            let value: serde_json::Value = read_json(&mut response)?;
+            if value["detail"] == "Not Found" {
+                return Ok(false);
+            }
+        }
+        Err(map_api_error(
+            ureq::Error::StatusCode(response.status().as_u16()),
+            LibraryError::CloudReplicationPrepareRejected,
+        ))
+    }
+
     /// CLOUD-006 복제 prepare. 멱등: 같은 asset_id 재호출은 같은 키를 돌려준다.
     pub(crate) fn replication_prepare(
         &self,
@@ -2728,23 +2885,6 @@ impl CloudClient {
         read_json(&mut response)
     }
 
-    /// CLOUD-006 복제 commit. 원자적으로 메타데이터 + 분류 관계를 커밋한다.
-    pub(crate) fn commit_replication(
-        &self,
-        request: &super::models::ReplicationCommitRequest,
-        token: &str,
-    ) -> Result<(), LibraryError> {
-        let authorization = bearer(token)?;
-        let body = serde_json::to_vec(request).map_err(|_| LibraryError::InvalidCloudResponse)?;
-        self.agent
-            .post(self.endpoint("/v1/replication/commit")?)
-            .header("Authorization", authorization)
-            .content_type("application/json")
-            .send(&body)
-            .map(|_| ())
-            .map_err(|error| map_api_error(error, LibraryError::CloudReplicationCommitRejected))
-    }
-
     /// 복제 variant(썸네일 등) 업로드: presign → R2 PUT. 원본 업로드는
     /// upload_asset이 담당하고, 이 메서드는 임의 variant 하나를 올린다.
     pub(crate) fn upload_replication_variant(
@@ -2752,7 +2892,6 @@ impl CloudClient {
         object_key: &str,
         content_type: &str,
         bytes: Vec<u8>,
-        sha256: &str,
         token: &str,
     ) -> Result<(), LibraryError> {
         let authorization = bearer(token)?;
@@ -2780,7 +2919,6 @@ impl CloudClient {
             request = request.header(name, value);
         }
         request.send(&bytes[..]).map_err(map_upload_error)?;
-        let _ = sha256;
         Ok(())
     }
 
@@ -2946,11 +3084,11 @@ impl CloudClient {
         Ok(copied)
     }
 
-    pub(crate) fn thumbnail_remote_sizes(
+    pub(crate) fn thumbnail_remote_hashes(
         &self,
         asset_ids: &[String],
         token: &str,
-    ) -> Result<Vec<(String, Result<u64, String>)>, LibraryError> {
+    ) -> Result<Vec<(String, Result<String, String>)>, LibraryError> {
         if asset_ids.len() > 50 {
             return Err(LibraryError::InvalidCloudResponse);
         }
@@ -2978,8 +3116,28 @@ impl CloudClient {
             .into_iter()
             .map(|item| {
                 let result = if item.ok {
-                    item.size_bytes
-                        .ok_or_else(|| "missing size_bytes".to_owned())
+                    (|| {
+                        if item.variant != "thumbnail" {
+                            return Err("invalid variant".to_owned());
+                        }
+                        let url = item.url.ok_or_else(|| "missing thumbnail URL".to_owned())?;
+                        let parsed = url::Url::parse(&url).map_err(|error| error.to_string())?;
+                        if !matches!(parsed.scheme(), "http" | "https") {
+                            return Err("invalid thumbnail URL".into());
+                        }
+                        let mut response = self
+                            .agent
+                            .get(parsed.as_str())
+                            .call()
+                            .map_err(|error| error.to_string())?;
+                        let bytes =
+                            read_body_bounded(&mut response, super::thumbnail_upload::MAX_BYTES)
+                                .map_err(|error| error.to_string())?;
+                        if bytes.is_empty() {
+                            return Err("empty thumbnail".into());
+                        }
+                        Ok(super::thumbnail_upload::digest(&bytes))
+                    })()
                 } else {
                     Err(item
                         .error

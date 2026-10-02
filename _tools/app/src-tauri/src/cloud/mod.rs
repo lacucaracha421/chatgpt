@@ -25,6 +25,9 @@ pub(crate) mod similarity_review;
 pub(crate) mod status_watch;
 mod sync;
 pub(crate) mod thumbnail_refresh;
+mod thumbnail_upload;
+#[cfg(test)]
+mod thumbnail_upload_tests;
 
 #[cfg(test)]
 mod contract_tests;
