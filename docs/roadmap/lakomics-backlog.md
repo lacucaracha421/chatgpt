@@ -1013,6 +1013,26 @@ P1 wrong behaviour, P2 edge/robustness.
 - **P2** Folder covers blank and reappear on a background refresh (`src/assets/AssetBrowser.tsx:142–158`; no-flash rule).
 - **P2** Tablet transfer thumbnails (base64 JPEGs) accumulate without a cap (`mobile-client/useExchange.ts:37,53–58`).
 
+## AUDIT-20261002B — second read-only audit (Astra high, snapshot 7b90c5ef)
+
+Status: `TODO` — today's new features, redesigned screens, Android native code and the collector. Static traces.
+
+- **P0** Tablet privacy: a character opened from 찾기 shows thumbnails (`mobile-client/CharacterBrowser.tsx:370` → Gallery without `privacy`).
+- **P0** Tablet ledger editor merges its stale snapshot over a synced change (price/history revert) (`mobile-client/NoteLedgerSheets.tsx:132`, `NoteLedger.tsx:53`).
+- **P0** Encrypted notes' section titles are written in plaintext to localStorage by the quick-add section memory (`mobile-client/Notes.tsx:42,49–52`).
+- **P0** Android document provider: a grant on one album lets another app open any document (`LibraryDocumentsProvider.java:109`).
+- **P0** Collector: any HTTPS page at `/extension-pair#…` can re-pair the extension to an attacker server (`extension-list/src/pairing-bridge.js:72`, `api-client.js:75`).
+- **P1** First likes-album creation race between PC (createAlbum) and tablet (ensureLikesAlbum) blocks PC album sync (`album.rs:124`, `album_authority.rs:886`, `album_reconciliation.rs:137`).
+- **P1** Tablet heart toggles the fresh server value instead of the shown one (`mobile-client/useLikesAlbum.ts:39,50–55`, `Artists.tsx:188`).
+- **P1** A creator explicitly cleared on the PC is still matched via the server's old handle (`asset_filters.py:159–165`, `auto_tag_publication.rs:264–265`).
+- **P1** Ledger: a charge confirmed then moved to the next month counts twice (`src/notes/ledger/presentation.ts:7–10`); PC double-click confirm creates two entries (`LedgerView.tsx:94–100,205–207`); 안 사기로 함 items vanish with no restore (`LedgerContents.tsx:41`, `LedgerEditors.tsx:103`); skipped charges still show as upcoming/reminders (`presentation.ts:30–37`, `summary.ts:88–96`).
+- **P1** PC heart on an unselected tile changes the selected assets (`AssetBrowser.tsx:381–385`, `AssetGallery.tsx:439`).
+- **P1** Memo: editing a task line in a mixed (글) note drops its `- [x]`; editing inside a code fence inserts `\#` (`memoModel.ts:12,77,84,90–97`).
+- **P1** Home: NEW items missed when the visit mark advances before data loads (`useHomeVisit.ts:19,29`, `homeAttention.ts:62`); tablet 미분류 row opens the last folder (`mobile-client/Home.tsx:192`, `App.tsx:689–694,865`); tablet owned game/movie release NEW path never fires (`Home.tsx:153–156`, `releaseStore.ts:67`).
+- **P1** Android: classification-folder grants cannot open files (contains route not allowlisted) (`LibraryDocumentsProvider.java:105`, `NetworkPolicy.java:27`); exhausted transfer retries hide the manual retry (`ExchangeService.java:907`, `mobile-client/exchange.ts:119`).
+- **P1** Collector profile queue: an old offline change overwrites a later saved one; a retry added during flush is lost; a late bootstrap from the old server overwrites the new one (`extension-list/src/profile-store.js:42,61,105,136,151,155`).
+- **P2** A same-named album created right after migration 0121 makes the likes designation ambiguous (`album.rs:152–170`); price paste `10,000.00` saves 1,000,000 (`input.ts:19–23`); Tab-focused first tile ignores ↓/F/C (`AssetGallery.tsx:369–395,433`); scrubber month uses UTC (`scrubberModel.ts:37–40`); collector "saved" marks leak across servers (`save-client.js:169,252`).
+
 ## ASSET-EAGLE-20261001 — PC Asset screen candidates from the Eagle comparison
 
 Status: `HOLD` — user decision 2026-10-01 (night): parked; the order is 망가, then polish (잔손질), then revisit this. PC mockup required before implementation; an unfinished draft is at `docs/prototypes/pc-assets-eagle-20261001/` (not reviewed). Comparison reference: Eagle (`eagle.cool`); these are candidate priorities, not implemented features.
