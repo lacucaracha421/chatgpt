@@ -28,6 +28,18 @@ pub(crate) fn parse_volume_slot(value: &str) -> Option<(i64, u8)> {
     (volume_number > 0 && volume_number <= i64::MAX / 10).then_some((volume_number, edition_index))
 }
 
+fn release_status_at<T: chrono::TimeZone>(value: &str, now: chrono::DateTime<T>) -> Option<String> {
+    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .ok()
+        .map(|date| {
+            if date > now.date_naive() {
+                "upcoming".to_owned()
+            } else {
+                "released".to_owned()
+            }
+        })
+}
+
 fn display_label(volume_number: i64, edition_index: u8) -> String {
     if edition_index == 0 {
         volume_number.to_string()
@@ -281,15 +293,7 @@ impl Library {
                     let edition_index = row.get(2)?;
                     let local_release_date: Option<String> = row.get(4)?;
                     let release_status = local_release_date.as_deref().and_then(|value| {
-                        chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
-                            .ok()
-                            .map(|date| {
-                                if date > chrono::Utc::now().date_naive() {
-                                    "upcoming".to_owned()
-                                } else {
-                                    "released".to_owned()
-                                }
-                            })
+                        release_status_at(value, chrono::Local::now())
                     });
                     Ok(CollectionVolume {
                         id: row.get(0)?,
@@ -544,6 +548,29 @@ mod tests {
         models::{CollectionType, CreateCollection, ExternalBindingInput, MangaDexCoverCandidate},
         Library,
     };
+
+    #[test]
+    fn audit_batch_a_release_day_uses_local_calendar_date() {
+        for time in [
+            "2026-10-02T00:00:00+09:00",
+            "2026-10-02T08:59:59+09:00",
+            "2026-10-02T09:00:00+09:00",
+            "2026-10-02T23:59:59-07:00",
+        ] {
+            let now = chrono::DateTime::parse_from_rfc3339(time).unwrap();
+            assert_eq!(
+                super::release_status_at("2026-10-02", now).as_deref(),
+                Some("released"),
+                "{time}"
+            );
+            assert_eq!(
+                super::release_status_at("2026-10-03", now).as_deref(),
+                Some("upcoming"),
+                "{time}"
+            );
+            assert_eq!(super::release_status_at("unknown", now), None);
+        }
+    }
 
     const MANGA_ID: &str = "d1a9fdeb-f713-407f-960c-8326b586e6fd";
 

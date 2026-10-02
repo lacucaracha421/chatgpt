@@ -549,6 +549,16 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
+fn valid_month_save(key: &[u8], id: &str, existing: Option<&Stored>, content: &Content) -> bool {
+    let ledger_id = content.ledger.as_deref().unwrap_or("");
+    ledger::canonical_uuid(ledger_id)
+        && content.validate().is_ok()
+        && (id == ledger::month_id(key, ledger_id, content.month.as_deref().unwrap_or(""))
+            || matches!(existing, Some(Stored::Typed(old))
+                if old.kind() == LEDGER_MONTH && old.validate().is_ok()
+                    && old.ledger == content.ledger && old.month == content.month))
+}
+
 impl Library {
     fn notes_target(&self) -> String {
         format!(
@@ -749,12 +759,43 @@ impl Library {
         if backup.version != 1 || backup.vault != vault(&key) {
             return Err(INVALID);
         }
-        let mut prepared = vec![];
+        // Authenticate the entire backup before writing. Map every ledger first so
+        // month order in the backup cannot reconnect imported records to the old ledger.
+        let mut values = vec![];
+        let mut ids = std::collections::HashMap::new();
         for item in backup.items {
-            // Re-sealed under a new id exactly as stored, including unknown keys.
-            let value = open_value(&key, &item.id, &item.payload)?;
-            let id = uuid::Uuid::new_v4().to_string();
-            let payload = serde_json::to_string(&seal(&key, &id, &value)?)?;
+            let value = open_value(key, &item.id, &item.payload)?;
+            if ids
+                .insert(item.id.clone(), uuid::Uuid::new_v4().to_string())
+                .is_some()
+            {
+                return Err(INVALID);
+            }
+            values.push((item.id, value));
+        }
+        let mut prepared = vec![];
+        for (old_id, mut value) in values {
+            let mut id = ids[&old_id].clone();
+            if value.get("type").and_then(Value::as_str) == Some(LEDGER_MONTH) {
+                if let (Some(parent), Some(month)) = (
+                    value.get("ledger").and_then(Value::as_str),
+                    value.get("month").and_then(Value::as_str),
+                ) {
+                    if ledger::canonical_uuid(parent) && ledger::valid_month(month) {
+                        let new_parent = ids
+                            .entry(parent.to_owned())
+                            .or_insert_with(|| uuid::Uuid::new_v4().to_string())
+                            .clone();
+                        // Canonical months keep their derived identity; conflict copies
+                        // remain separate, editable notes even for the same month.
+                        if old_id == ledger::month_id(key, parent, month) {
+                            id = ledger::month_id(key, &new_parent, month);
+                        }
+                        value["ledger"] = Value::String(new_parent);
+                    }
+                }
+            }
+            let payload = serde_json::to_string(&seal(key, &id, &value)?)?;
             prepared.push((id, payload));
         }
         {
@@ -822,8 +863,8 @@ impl Library {
     /// it was based on; only an unresolvable collision keeps it as a separate copy.
     fn notes_save_with_key(&self, key: &[u8], draft: Draft) -> Result<Note> {
         uuid::Uuid::parse_str(&draft.id).map_err(|_| INVALID)?;
-        // A month note's content is only written under its derived id (metadata-only saves,
-        // such as trashing a keep-both copy, are exempt).
+        // New months require the derived id. Authenticated existing copies keep their
+        // identity and immutable month association, including after sync or dismissal.
         let month_edit = draft.kind.is_some()
             || draft.entries.is_some()
             || draft.ledger.is_some()
@@ -838,6 +879,7 @@ impl Library {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .optional()?;
+        let mut existing = None;
         let now = chrono::Utc::now().to_rfc3339();
         let id = draft.id.clone();
         let target = self.notes_target();
@@ -849,6 +891,7 @@ impl Library {
             }
             Some((payload, revision, conflict, conflict_copy)) => {
                 let current = open_str(key, &id, &payload)?;
+                existing = Some(current.clone());
                 let stale = revision != draft.expected_revision;
                 let next = match current {
                     // Metadata patches are safe against any newer state.
@@ -907,10 +950,7 @@ impl Library {
         };
         if let Stored::Typed(content) = &stored {
             if month_edit && content.kind() == LEDGER_MONTH {
-                let ledger_id = content.ledger.as_deref().unwrap_or("");
-                if !ledger::canonical_uuid(ledger_id)
-                    || id != ledger::month_id(key, ledger_id, content.month.as_deref().unwrap_or(""))
-                {
+                if !valid_month_save(key, &id, existing.as_ref(), content) {
                     return Err(Error::Message("가계부 월 기록 형식이 올바르지 않습니다."));
                 }
             }
@@ -1770,6 +1810,137 @@ mod ledger_tests {
     }
     fn month_draft(id: &str, revision: i64, entries: Value) -> Value {
         json!({"id":id,"expectedRevision":revision,"type":"ledger-month","title":"가계부 2026년 9월","ledger":"11111111-2222-4333-8444-555555555555","month":"2026-09","income":null,"entries":entries,"archived":true})
+    }
+
+    #[test]
+    fn audit_batch_a_shared_month_save_rules() {
+        let file: Value = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/notes-v2/month-save-vectors.json"
+        ))
+        .unwrap();
+        let key = unhex(file["key"].as_str().unwrap()).unwrap();
+        for vector in file["vectors"].as_array().unwrap() {
+            let existing =
+                (!vector["existing"].is_null()).then(|| Stored::decode(vector["existing"].clone()));
+            let content: Content = serde_json::from_value(vector["content"].clone()).unwrap();
+            assert_eq!(
+                valid_month_save(
+                    &key,
+                    vector["id"].as_str().unwrap(),
+                    existing.as_ref(),
+                    &content
+                ),
+                vector["allowed"].as_bool().unwrap(),
+                "{}",
+                vector["name"]
+            );
+        }
+    }
+
+    #[test]
+    fn audit_batch_a_import_remaps_ledger_months_before_sealing() {
+        let temp = tempfile::tempdir().unwrap();
+        let lib = Library::open(temp.path()).unwrap();
+        let key = [43; 32];
+        let ledger_id = "11111111-2222-4333-8444-555555555555";
+        save(
+            &lib,
+            &key,
+            json!({"id":ledger_id,"expectedRevision":0,"type":"ledger","title":"Budget"}),
+        )
+        .unwrap();
+        let id = ledger::month_id(&key, ledger_id, "2026-09");
+        save(
+            &lib,
+            &key,
+            month_draft(&id, 0, json!([entry("one", "2026-09-01", 10)])),
+        )
+        .unwrap();
+        let mut backup = lib.notes_export_with_key(&key).unwrap();
+        backup.items.sort_by_key(|item| item.id == ledger_id); // Month precedes parent.
+        let state = lib.notes_import_with_key(&key, backup).unwrap();
+        let parent = state
+            .notes
+            .iter()
+            .find(|n| n.content.kind() == LEDGER && n.id != ledger_id)
+            .unwrap();
+        let month = state
+            .notes
+            .iter()
+            .find(|n| n.content.kind() == LEDGER_MONTH && n.id != id)
+            .unwrap();
+        assert_eq!(month.content.ledger.as_deref(), Some(parent.id.as_str()));
+        assert_eq!(month.id, ledger::month_id(&key, &parent.id, "2026-09"));
+        save(
+            &lib,
+            &key,
+            json!({"id":month.id,"expectedRevision":month.local_revision,"income":100}),
+        )
+        .unwrap();
+        assert_eq!(state.notes.len(), 4);
+    }
+
+    #[test]
+    fn audit_batch_a_over_limit_conflict_copy_remains_editable_after_dismissal_and_sync() {
+        let temp = tempfile::tempdir().unwrap();
+        let lib = Library::open(temp.path()).unwrap();
+        let key = [44; 32];
+        let id = ledger::month_id(&key, "11111111-2222-4333-8444-555555555555", "2026-09");
+        let entries: Vec<Value> = (0..300)
+            .map(|i| entry(&format!("e{i}"), "2026-09-01", 1))
+            .collect();
+        let local = save(&lib, &key, month_draft(&id, 0, json!(entries))).unwrap();
+        let mut remote = local.content.clone();
+        remote.entries =
+            Some(serde_json::from_value(json!([entry("remote", "2026-09-02", 2)])).unwrap());
+        remote.normalize();
+        lib.notes_merge(
+            &key,
+            &Remote {
+                id: id.clone(),
+                revision: 1,
+                operation_id: uuid::Uuid::new_v4().to_string(),
+                sequence: 1,
+                payload: seal(&key, &id, &remote).unwrap(),
+            },
+        )
+        .unwrap();
+        let state = lib.notes_state_with_key(&key).unwrap();
+        let copy = state.notes.iter().find(|n| n.conflict_copy).unwrap();
+        assert_eq!(copy.content.entries.as_ref().unwrap().len(), 300);
+        let edited=save(&lib,&key,json!({"id":copy.id,"expectedRevision":copy.local_revision,"entries":[entry("kept","2026-09-01",3)]})).unwrap();
+        lib.notes_dismiss_conflict_copy(&copy.id).unwrap();
+        save(
+            &lib,
+            &key,
+            json!({"id":copy.id,"expectedRevision":edited.local_revision,"income":100}),
+        )
+        .unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let peer = Library::open(other.path()).unwrap();
+        peer.notes_merge(
+            &key,
+            &Remote {
+                id: copy.id.clone(),
+                revision: 1,
+                operation_id: uuid::Uuid::new_v4().to_string(),
+                sequence: 1,
+                payload: seal(&key, &copy.id, &edited.content).unwrap(),
+            },
+        )
+        .unwrap();
+        save(
+            &peer,
+            &key,
+            json!({"id":copy.id,"expectedRevision":1,"income":200}),
+        )
+        .unwrap();
+        assert!(save(
+            &peer,
+            &key,
+            json!({"id":copy.id,"expectedRevision":2,"month":"2026-10"})
+        )
+        .is_err());
     }
 
     #[test]

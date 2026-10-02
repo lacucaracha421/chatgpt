@@ -286,6 +286,27 @@ fn scan_series_folder<F>(
 where
     F: FnMut(&Path, &Path) -> Result<(), LibraryError>,
 {
+    scan_series_folder_for_platform(
+        library,
+        root,
+        relative_path,
+        thumb_dir,
+        thumbnail,
+        cfg!(windows),
+    )
+}
+
+fn scan_series_folder_for_platform<F>(
+    library: &Library,
+    root: &Path,
+    relative_path: &str,
+    thumb_dir: &Path,
+    thumbnail: &mut F,
+    case_insensitive: bool,
+) -> Result<bool, LibraryError>
+where
+    F: FnMut(&Path, &Path) -> Result<(), LibraryError>,
+{
     let recovered = {
         let connection = library.connection()?;
         let recovered: bool = connection.query_row(
@@ -326,27 +347,59 @@ where
         })
         .unwrap_or_else(|_| chrono::Utc::now().to_rfc3339());
 
-    let existing: Option<(String, i64, String, String)> = {
+    let existing = {
         let connection = library.connection()?;
-        connection
+        let read_row = |row: &rusqlite::Row<'_>| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(7)?,
+            ))
+        };
+        let columns = "SELECT id, relative_path, page_count, thumbnail_relative_path, modified_at,
+                              title, author, gallery_id FROM manga_series";
+        let exact = connection
             .query_row(
-                "SELECT id, page_count, thumbnail_relative_path, modified_at FROM manga_series WHERE relative_path = ?1",
+                &format!("{columns} WHERE relative_path = ?1"),
                 [relative_path],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                read_row,
             )
-            .optional()?
+            .optional()?;
+        if exact.is_some() || !case_insensitive {
+            exact
+        } else {
+            // SQLite NOCASE is ASCII-only; Windows folder names may use Unicode.
+            let folded = relative_path.to_lowercase();
+            let mut statement = connection.prepare(columns)?;
+            let rows = statement.query_map([], read_row)?;
+            let mut found = None;
+            for row in rows {
+                let row = row?;
+                if row.1.to_lowercase() == folded {
+                    found = Some(row);
+                    break;
+                }
+            }
+            found
+        }
     };
-    let unchanged = existing.as_ref().is_some_and(|(_, count, thumb, stored)| {
-        *count as usize == page_count
+    let unchanged = existing.as_ref().is_some_and(|(_, path, count, thumb, stored, old_title, old_author, old_gallery)| {
+        path == relative_path && *count as usize == page_count
             && fs::exists(thumb_dir.join(thumb)).unwrap_or(false)
-            && *stored == modified_at
+            && *stored == modified_at && *old_title == title && *old_author == author
+            && *old_gallery == gallery_id
     });
     if unchanged {
         return Ok(false);
     }
 
     let series_id = match existing {
-        Some((id, _, _, _)) => id,
+        Some((id, _, _, _, _, _, _, _)) => id,
         None => uuid::Uuid::new_v4().to_string(),
     };
 
@@ -357,7 +410,7 @@ where
         // 이후 페이지를 순서대로 시도하고, 그래도 실패하면 썸네일 없이 시리즈를 색인한다.
         // UnsupportedImage만 격리한다. DB·파일시스템·쓰기 오류는 그대로 전파해 스캔을 중단시킨다.
         for page in &page_files {
-            match thumbnail(&folder.join(page), &thumb_path) {
+            match thumbnail_atomically(&folder.join(page), &thumb_path, thumbnail) {
                 Ok(()) => break,
                 Err(LibraryError::UnsupportedImage) => continue,
                 Err(error) => return Err(error),
@@ -369,7 +422,8 @@ where
     connection.execute(
         "INSERT INTO manga_series (id, relative_path, title, author, gallery_id, page_count, thumbnail_relative_path, scanned_at, modified_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-         ON CONFLICT(relative_path) DO UPDATE SET
+         ON CONFLICT(id) DO UPDATE SET
+           relative_path = excluded.relative_path,
            title = excluded.title,
            author = excluded.author,
            gallery_id = excluded.gallery_id,
@@ -453,6 +507,28 @@ pub(crate) fn list_page_files(folder: &Path) -> Result<Vec<String>, LibraryError
     Ok(pages.into_iter().map(|(_, name)| name).collect())
 }
 
+fn thumbnail_atomically<F>(
+    source: &Path,
+    target: &Path,
+    thumbnail: &mut F,
+) -> Result<(), LibraryError>
+where
+    F: FnMut(&Path, &Path) -> Result<(), LibraryError>,
+{
+    let temporary = target.with_extension(format!("{}.partial", uuid::Uuid::new_v4()));
+    let result = thumbnail(source, &temporary).and_then(|()| {
+        fs::rename(&temporary, target).map_err(|source| LibraryError::WriteAsset {
+            path: target.to_path_buf(),
+            source,
+        })
+    });
+    if result.is_err() {
+        // Cleanup must not replace the original encoding, flush or rename error.
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
 fn create_thumbnail(source: &Path, target: &Path) -> Result<(), LibraryError> {
     let file = fs::File::open(source).map_err(|source_err| LibraryError::ReadMedia {
         path: source.to_path_buf(),
@@ -468,10 +544,22 @@ fn create_thumbnail(source: &Path, target: &Path) -> Result<(), LibraryError> {
         path: target.to_path_buf(),
         source: source_err,
     })?;
+    use std::io::Write;
+    let mut writer = std::io::BufWriter::new(out);
     image
         .thumbnail(400, 400)
-        .write_to(&mut std::io::BufWriter::new(out), image::ImageFormat::WebP)
-        .map_err(|_| LibraryError::UnsupportedImage)
+        .write_to(&mut writer, image::ImageFormat::WebP)
+        .map_err(|error| LibraryError::WriteAsset {
+            path: target.to_path_buf(),
+            source: match error {
+                image::ImageError::IoError(source) => source,
+                other => std::io::Error::other(other),
+            },
+        })?;
+    writer.flush().map_err(|source| LibraryError::WriteAsset {
+        path: target.to_path_buf(),
+        source,
+    })
 }
 
 pub(crate) fn preview_catalog_recovery(
@@ -1207,6 +1295,187 @@ mod tests {
 
     use super::{list_page_files, parse_series_metadata, scan_with_thumbnail};
     use crate::library::{Library, LibraryError};
+
+    #[test]
+    fn audit_batch_a_info_edits_are_rescanned_without_folder_mtime_change() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("manga");
+        let folder = root.join("series");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("1.webp"), b"page").unwrap();
+        fs::write(
+            folder.join("info.txt"),
+            "제목: Old\n작가: Before\n갤러리 넘버: 1",
+        )
+        .unwrap();
+        let lib = Library::open(temp.path().join("library")).unwrap();
+        lib.set_manga_root(Some(root.to_str().unwrap())).unwrap();
+        scan_with_thumbnail(&lib, |_, target| {
+            fs::write(target, b"thumb").unwrap();
+            Ok(())
+        })
+        .unwrap();
+        let mtime = fs::metadata(&folder).unwrap().modified().unwrap();
+        fs::write(
+            folder.join("info.txt"),
+            "제목: New\n작가: After\n갤러리 넘버: 2",
+        )
+        .unwrap();
+        assert_eq!(fs::metadata(&folder).unwrap().modified().unwrap(), mtime);
+        assert_eq!(
+            scan_with_thumbnail(&lib, |_, _| panic!("thumbnail already exists")).unwrap(),
+            1
+        );
+        let row: (String, String, String) = lib
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT title,author,gallery_id FROM manga_series",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("New".into(), "After".into(), "2".into()));
+        assert_eq!(
+            scan_with_thumbnail(&lib, |_, _| panic!("unchanged")).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn audit_batch_a_case_only_rename_keeps_series_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("manga");
+        fs::create_dir_all(root.join("Series")).unwrap();
+        fs::write(root.join("Series/1.webp"), b"page").unwrap();
+        let thumbs = root.join(super::THUMB_DIR);
+        fs::create_dir_all(&thumbs).unwrap();
+        let lib = Library::open(temp.path().join("library")).unwrap();
+        let mut thumbnail = |_: &std::path::Path, target: &std::path::Path| {
+            fs::write(target, b"thumb").unwrap();
+            Ok(())
+        };
+        super::scan_series_folder_for_platform(
+            &lib,
+            &root,
+            "Series",
+            &thumbs,
+            &mut thumbnail,
+            true,
+        )
+        .unwrap();
+        let id: String = lib
+            .connection()
+            .unwrap()
+            .query_row("SELECT id FROM manga_series", [], |r| r.get(0))
+            .unwrap();
+        fs::rename(root.join("Series"), root.join("temporary")).unwrap();
+        fs::rename(root.join("temporary"), root.join("SERIES")).unwrap();
+        super::scan_series_folder_for_platform(
+            &lib,
+            &root,
+            "SERIES",
+            &thumbs,
+            &mut thumbnail,
+            true,
+        )
+        .unwrap();
+        let db = lib.connection().unwrap();
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM manga_series", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row("SELECT id,relative_path FROM manga_series", [], |r| Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?
+            )))
+            .unwrap(),
+            (id, "SERIES".into())
+        );
+    }
+
+    #[test]
+    fn audit_batch_a_partial_thumbnail_is_removed_and_retried() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("manga");
+        fs::create_dir_all(root.join("series")).unwrap();
+        fs::write(root.join("series/1.webp"), b"page").unwrap();
+        let lib = Library::open(temp.path().join("library")).unwrap();
+        lib.set_manga_root(Some(root.to_str().unwrap())).unwrap();
+        let result = scan_with_thumbnail(&lib, |_, target| {
+            fs::write(target, b"partial").unwrap();
+            Err(LibraryError::WriteAsset {
+                path: target.into(),
+                source: std::io::Error::other("disk full"),
+            })
+        });
+        assert!(
+            matches!(result, Err(LibraryError::WriteAsset { source, .. }) if source.to_string() == "disk full")
+        );
+        assert_eq!(
+            fs::read_dir(root.join(super::THUMB_DIR)).unwrap().count(),
+            0
+        );
+        let mut calls = 0;
+        scan_with_thumbnail(&lib, |_, target| {
+            calls += 1;
+            fs::write(target, b"complete").unwrap();
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn audit_batch_a_case_sensitive_platform_keeps_distinct_series() {
+        if cfg!(windows) {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("manga");
+        let thumbs = root.join(super::THUMB_DIR);
+        fs::create_dir_all(&thumbs).unwrap();
+        let lib = Library::open(temp.path().join("library")).unwrap();
+        for name in ["series", "SERIES"] {
+            fs::create_dir_all(root.join(name)).unwrap();
+            fs::write(root.join(name).join("1.webp"), b"page").unwrap();
+            super::scan_series_folder_for_platform(
+                &lib,
+                &root,
+                name,
+                &thumbs,
+                &mut |_, target| {
+                    fs::write(target, b"thumb").unwrap();
+                    Ok(())
+                },
+                false,
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            lib.connection()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM manga_series", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+    }
+
+    #[test]
+    fn audit_batch_a_unsupported_thumbnail_cleans_temporary_output() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("thumb.webp");
+        let result = super::thumbnail_atomically(temp.path(), &target, &mut |_, output| {
+            fs::write(output, b"partial").unwrap();
+            Err(LibraryError::UnsupportedImage)
+        });
+        assert!(matches!(result, Err(LibraryError::UnsupportedImage)));
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
+    }
 
     fn shared_manga_root(library: &Library) -> Option<String> {
         library

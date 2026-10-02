@@ -1,7 +1,7 @@
 {
  "description": "Ledger (가계부) vectors beyond merge-vectors.json and payload-examples.json (docs/research/budget-notes-design-20260925.md). Shared by the PC (Rust), Android (Java) and TypeScript tests.",
  "monthId": {
-  "note": "Month note id = UUID v4 layout (byte 6 high nibble 4, byte 8 top bits 10) of the first 16 bytes of HMAC-SHA256(k, 'lakomics-ledger-month:1:' + ledger id + ':' + month), where k = HKDF-SHA256(salt 'lakomics-notes-ledger:1', IKM notes key, info 'ledger-month-id', 32 bytes). ledger is a canonical lowercase UUID; clients refuse to write month content under any other id.",
+  "note": "Month note id = UUID v4 layout (byte 6 high nibble 4, byte 8 top bits 10) of the first 16 bytes of HMAC-SHA256(k, 'lakomics-ledger-month:1:' + ledger id + ':' + month), where k = HKDF-SHA256(salt 'lakomics-notes-ledger:1', IKM notes key, info 'ledger-month-id', 32 bytes). ledger is a canonical lowercase UUID; new month notes require this id. Authenticated, validated existing copies keep their id and immutable ledger/month association (month-save-vectors.json).",
   "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
   "ledger": "11111111-2222-4333-8444-555555555555",
   "month": "2026-09",

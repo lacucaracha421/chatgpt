@@ -368,6 +368,18 @@ def create_asset(
 
     try:
         with get_db() as db:
+            # Serialize the ownership check with activation, commit and the upsert.
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute("SELECT * FROM assets WHERE id=?", [asset_id]).fetchone()
+            active = authority.active_domain(db, asset_authority.DOMAIN)
+            if (existing is not None and existing["committed"] == 1
+                    and active is not None and asset_authority.authority_owns_lifecycle(
+                        db, active["libraryId"], asset_id)):
+                fields = ("kind", "object_key", "thumbnail_key", "content_type", "size_bytes", "sha256")
+                if any(existing[field] != getattr(asset, field) for field in fields):
+                    raise HTTPException(status_code=409, detail={"code": "legacyWriterFenced"})
+                # An identical retry must not change timestamps or the authority feed.
+                return {"ok": True, "id": asset_id, "object_key": asset.object_key}
             db.execute(
                 """
                 INSERT INTO assets (

@@ -95,6 +95,15 @@ final class NotesRepository {
   String synced=null;try(Cursor c=db.rawQuery("SELECT synced_at FROM note_state WHERE scope=?",new String[]{v.scope})){if(c.moveToFirst())synced=c.getString(0);}
   return new JSONObject().put("unlocked",true).put("notes",items).put("unreadable",unreadable).put("lastSyncedAt",synced==null?JSONObject.NULL:synced);
  }
+ static boolean validMonthSave(byte[] key,String id,NotesModel.Stored existing,NotesModel.Content content)throws Exception{
+  // A synced or dismissed copy has no local conflict flag. Authenticate and validate its
+  // stored month association instead; new arbitrary month ids remain forbidden.
+  return NotesModel.canonicalUuid(content.ledger)&&content.validate()==null
+   &&(id.equals(NotesModel.monthId(key,content.ledger,content.month==null?"":content.month))
+    ||(existing!=null&&!existing.isRaw()&&NotesModel.LEDGER_MONTH.equals(existing.typed.kind())
+     &&existing.typed.validate()==null&&java.util.Objects.equals(existing.typed.ledger,content.ledger)
+     &&java.util.Objects.equals(existing.typed.month,content.month)));
+ }
  /**
   * Saves a draft that carries only the fields the WebView edits. A draft written against an
   * older local revision (a pull replaced the note while the save was queued) is rebased:
@@ -110,9 +119,11 @@ final class NotesRepository {
    db.beginTransaction();
    try{
     Row old=find(v,id);NotesModel.Stored next;
+    NotesModel.Stored existing=null;
     if(old==null)next=NotesModel.Stored.typed(NotesModel.applyDraft(null,draft,now,touch));
     else{
      NotesModel.Stored current;try{current=open(v,id,old.payload);}catch(Exception unreadable){throw new UserError(INVALID);}
+     existing=current;
      boolean stale=old.localRevision!=draft.expectedRevision;
      // Metadata patches are safe against any newer state.
      if(current.isRaw())next=NotesModel.Stored.raw(NotesModel.patchRaw(current.raw,draft,now));
@@ -134,9 +145,9 @@ final class NotesRepository {
       next=NotesModel.Stored.typed(merged);
      }
     }
-    // A month note's content is only written under its derived id (metadata-only saves are exempt).
+    // New months require derived ids; validated existing copies keep their immutable association.
     boolean monthEdit=draft.kind!=null||draft.entries!=null||draft.ledger!=null||draft.month!=null||draft.hasIncome;
-    if(monthEdit&&!next.isRaw()&&NotesModel.LEDGER_MONTH.equals(next.typed.kind())&&(!NotesModel.canonicalUuid(next.typed.ledger)||!id.equals(NotesModel.monthId(v.key,next.typed.ledger,next.typed.month==null?"":next.typed.month))))
+    if(monthEdit&&!next.isRaw()&&NotesModel.LEDGER_MONTH.equals(next.typed.kind())&&!validMonthSave(v.key,id,existing,next.typed))
      throw new UserError("가계부 월 기록 형식이 올바르지 않습니다.");
     long revision=old==null?1:old.localRevision+1;
     put(v,id,seal(v,id,next.toJson()),revision,old==null?0:old.remoteRevision,true,UUID.randomUUID().toString(),old!=null&&old.conflictCopy,old==null?null:old.base);
