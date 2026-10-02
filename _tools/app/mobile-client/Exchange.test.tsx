@@ -190,3 +190,30 @@ it('explains an empty timeline once, above the send bar', () => {
   expect(screen.getByRole('heading', {name: 'DESKTOP와 주고받은 파일이 없습니다'})).toBeTruthy();
   expect(screen.getByText('DESKTOP(으)로 보내기')).toBeTruthy();
 });
+
+
+it.each([1,3])('masks transfer thumbnails without native image requests (%i rows)',async count=>{
+  localStorage.setItem('lakomics.mobile.privacyMode','1');
+  try {
+    const rows=Array.from({length:count},(_,i)=>row({transferId:`private-${count}-${i}`,batchId:'private-batch',fileName:`${i}.jpg`,state:'saved'}));
+    const {container}=show(snapshot({incoming:rows}));
+    await act(async()=>{});
+    expect(mocks.native.mock.calls.filter(([op])=>op==='exchangeThumbnail')).toHaveLength(0);
+    expect(container.querySelector('img[src]')).toBeNull();
+    expect(container.querySelector('.privacy-mask')).toBeTruthy();
+  } finally {localStorage.clear();}
+});
+
+
+it('removes cached transfer images immediately when privacy turns on',async()=>{
+  const data=snapshot({outgoing:[row({transferId:'toggle-private',fileName:'private.jpg',state:'ready'})]});
+  mocks.native.mockImplementation(async(op:string)=>op==='exchangeThumbnail'?{url:'data:image/jpeg;base64,YQ=='}:data);
+  const {container}=render(<Exchange snapshot={data} onSnapshot={()=>{}} backRef={{current:null}} onClose={()=>{}}/>);
+  await vi.waitFor(()=>expect(container.querySelector('img[src]')).toBeTruthy());
+  const count=mocks.native.mock.calls.filter(([op])=>op==='exchangeThumbnail').length;
+  try {
+    act(()=>{localStorage.setItem('lakomics.mobile.privacyMode','1');window.dispatchEvent(new Event('lakomics-privacy-mode'));});
+    expect(container.querySelector('img[src]')).toBeNull();
+    expect(mocks.native.mock.calls.filter(([op])=>op==='exchangeThumbnail')).toHaveLength(count);
+  } finally {localStorage.clear();}
+});

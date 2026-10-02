@@ -40,6 +40,19 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
    * the pre-edit value; without this the control would flip back and then forward again.
    */
   const [confirmed, setConfirmed] = useState<Record<string, {value: CollectionEditValue; expected: CollectionEditValue}>>({});
+  const observed = useRef(new Map<string, (typeof confirmed)[string]>());
+  // `visible` is also called by child controls. Retire read-back overlays after the
+  // render commits, without scheduling parent updates from a child's render.
+  useEffect(() => {
+    if (!observed.current.size) return;
+    const caughtUp = new Map(observed.current);
+    observed.current.clear();
+    setConfirmed(current => {
+      const next = {...current};
+      for (const [key, value] of caughtUp) if (next[key] === value) delete next[key];
+      return next;
+    });
+  });
   const mounted = useRef(true);
   /** The library the Collection `/status` check last reported; edits are queued under it. */
   const library = useRef<string | null>(null);
@@ -118,6 +131,7 @@ export function useCollectionEdits({active, onSettled}: {active: boolean; onSett
     // Confirmed but not yet re-read: show the confirmed value while the screen still holds the
     // exact pre-edit value. Any other value (the refresh, or a later PC change) wins.
     const settledValue = confirmed[key];
+    if (settledValue && !sameEditValue(authoritative, settledValue.expected)) observed.current.set(key, settledValue);
     if (settledValue && sameEditValue(authoritative, settledValue.expected) && !sameEditValue(authoritative, settledValue.value))
       return {value: settledValue.value as T, pending: false, conflict: null};
     return {value: authoritative, pending: false, conflict: null};

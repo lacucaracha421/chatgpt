@@ -190,3 +190,27 @@ describe('review entry points and viewer add sheet',()=>{
     expect(added).toHaveBeenCalledWith('둘째');
   });
 });
+
+it('masks review images and does not request current or prefetched media in privacy mode',async()=>{
+  const media=await import('./media');
+  vi.mocked(media.loadThumbnail).mockClear();vi.mocked(media.mediaTicket).mockClear();vi.mocked(media.warmThumbnail).mockClear();
+  localStorage.setItem('lakomics.mobile.privacyMode','1');
+  install(feed());mount();
+  await screen.findByLabelText('검토 후보');
+  expect(document.querySelector('img[src]')).toBeNull();
+  expect(document.querySelector('.privacy-mask')).toBeTruthy();
+  expect(media.loadThumbnail).not.toHaveBeenCalled();expect(media.mediaTicket).not.toHaveBeenCalled();expect(media.warmThumbnail).not.toHaveBeenCalled();
+});
+
+it('removes already visible review images and cancels media work when privacy is enabled',async()=>{
+  const media=await import('./media');
+  vi.mocked(media.loadThumbnail).mockClear();vi.mocked(media.mediaTicket).mockClear();vi.mocked(media.warmThumbnail).mockClear();
+  install(feed());mount();
+  await waitFor(()=>expect(document.querySelector('img[src]')).toBeTruthy());
+  const pending=[...vi.mocked(media.loadThumbnail).mock.calls.map(call=>call[1]),...vi.mocked(media.warmThumbnail).mock.calls.map(call=>call[1])];
+  const count=vi.mocked(media.loadThumbnail).mock.calls.length+vi.mocked(media.mediaTicket).mock.calls.length+vi.mocked(media.warmThumbnail).mock.calls.length;
+  act(()=>{localStorage.setItem('lakomics.mobile.privacyMode','1');window.dispatchEvent(new Event('lakomics-privacy-mode'));});
+  expect(document.querySelector('img[src]')).toBeNull();
+  expect(pending.every(signal=>signal?.aborted)).toBe(true);
+  expect(vi.mocked(media.loadThumbnail).mock.calls.length+vi.mocked(media.mediaTicket).mock.calls.length+vi.mocked(media.warmThumbnail).mock.calls.length).toBe(count);
+});

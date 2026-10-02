@@ -12,6 +12,17 @@ vi.mock('./ClassificationAssignmentEditor',()=>({ClassificationAssignmentEditor:
 vi.mock('./ViewerInfo',()=>({ViewerInfo:(props:{asset:Asset;mediaError:string;onClose():void})=>{mocks.info(props);return <div>viewer-info-open<button aria-label="정보 닫기" onClick={props.onClose}/></div>;}}));
 import {Viewer} from './Viewer';
 const items:Asset[]=[{id:'a',kind:'image',preview:'https://test.invalid/thumb-a',creator_name:'A'},{id:'b',kind:'image',preview:'https://test.invalid/thumb-b',creator_name:'B'}];
+it.each([['분류','classification-editor-open'],['앨범','album-editor-open']])('consumes Android Back in the %s picker before closing the viewer',(label,marker)=>{
+  const backRef={current:null as (()=>boolean)|null};
+  const onClose=vi.fn();
+  render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={onClose} backRef={backRef}/>);
+  fireEvent.click(screen.getByRole('button',{name:label}));
+  expect(screen.getByText(marker)).toBeTruthy();
+  act(()=>{expect(backRef.current?.()).toBe(true);});
+  expect(screen.queryByText(marker)).toBeNull();
+  expect(onClose).not.toHaveBeenCalled();
+  expect(backRef.current?.()).toBe(false);
+});
 afterEach(()=>{cleanup();delete window.LakomicsNative;vi.restoreAllMocks();});
 // jsdom has no media playback; the viewer's own calls (resume, release) are observed instead.
 beforeEach(()=>{localStorage.clear();Object.defineProperty(window,'innerWidth',{configurable:true,value:800});Object.defineProperty(window,'innerHeight',{configurable:true,value:1280});vi.spyOn(HTMLMediaElement.prototype,'play').mockResolvedValue(undefined);vi.spyOn(HTMLMediaElement.prototype,'load').mockImplementation(()=>{});vi.spyOn(HTMLMediaElement.prototype,'pause').mockImplementation(()=>{});mocks.ticket.mockReset();mocks.decode.mockReset();mocks.thumbnail.mockReset();mocks.info.mockReset();mocks.ticket.mockImplementation((asset:Asset)=>Promise.resolve({url:`https://test.invalid/original-${asset.id}`}));mocks.thumbnail.mockImplementation(async(asset:Asset)=>({...asset,preview:`https://test.invalid/thumb-loaded-${asset.id}`}));});

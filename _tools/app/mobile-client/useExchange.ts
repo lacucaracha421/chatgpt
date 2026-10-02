@@ -33,9 +33,33 @@ export function useExchange(configured: boolean, endpoint: string, open: boolean
   return {snapshot, setSnapshot, toast: open ? null : toast, dismissToast: () => setToast(null), unseen: snapshot?.unseen ?? 0};
 }
 
-/** Local thumbnails of sent and saved images, kept for the session ('' = none). */
+/** Local thumbnails of sent and saved images; LRU bounded by count and string bytes. */
+const THUMBNAIL_LIMIT = 128;
+const THUMBNAIL_BYTES = 8 * 1024 * 1024;
 const thumbnails = new Map<string, string>();
+let thumbnailBytes = 0;
 const loading = new Map<string, Promise<string>>();
+
+function cachedThumbnail(id: string): string | undefined {
+  const value = thumbnails.get(id);
+  if (value !== undefined) { thumbnails.delete(id); thumbnails.set(id, value); }
+  return value;
+}
+
+function rememberThumbnail(id: string, value: string) {
+  // Charge two bytes per UTF-16 code unit, including the data URL prefix.
+  const bytes = value.length * 2;
+  if (!value || bytes > THUMBNAIL_BYTES) return;
+  const previous = thumbnails.get(id);
+  if (previous !== undefined) { thumbnailBytes -= previous.length * 2; thumbnails.delete(id); }
+  thumbnails.set(id, value);
+  thumbnailBytes += bytes;
+  while (thumbnails.size > THUMBNAIL_LIMIT || thumbnailBytes > THUMBNAIL_BYTES) {
+    const oldest = thumbnails.keys().next().value!;
+    thumbnailBytes -= thumbnails.get(oldest)!.length * 2;
+    thumbnails.delete(oldest);
+  }
+}
 
 /**
  * A small local thumbnail for an image row: made on the device from the sent original or the
@@ -45,13 +69,13 @@ export function useExchangeThumbnail(transferId: string, enabled: boolean): stri
   const [url, setUrl] = useState(() => thumbnails.get(transferId) ?? '');
   useEffect(() => {
     if (!enabled) return;
-    const known = thumbnails.get(transferId);
+    const known = cachedThumbnail(transferId);
     if (known !== undefined) { setUrl(known); return; }
     let active = true;
     let request = loading.get(transferId);
     if (!request) {
       request = native<{url?: string}>('exchangeThumbnail', {transferId}).then(value => value?.url ?? '', () => '')
-        .then(value => { if (value) thumbnails.set(transferId, value); loading.delete(transferId); return value; });
+        .then(value => { rememberThumbnail(transferId, value); loading.delete(transferId); return value; });
       loading.set(transferId, request);
     }
     void request.then(value => { if (active) setUrl(value); });

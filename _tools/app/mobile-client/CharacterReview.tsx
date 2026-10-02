@@ -1,3 +1,4 @@
+import {usePrivacyMode} from './privacyMode';
 import {useCallback, useEffect, useRef, useState, type MutableRefObject} from 'react';
 import {ArrowLeftIcon, ArrowUturnLeftIcon, CheckIcon, ChevronDoubleUpIcon, ChevronRightIcon, PhotoIcon, UserIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {Button, IconButton} from './ui';
@@ -35,9 +36,11 @@ type State =
 
 /** An image shown from its thumbnail at once, then from the original when that decodes. */
 function ReviewImage({asset, className, label}: {asset: Asset; className?: string; label: string}) {
+  const [privacy] = usePrivacyMode();
   const [src, setSrc] = useState<{id: string; url?: string}>({id: asset.id, url: asset.preview});
   const shown = src.id === asset.id ? src.url : asset.preview;
   useEffect(() => {
+    if (privacy) return;
     const controller = new AbortController();
     setSrc({id: asset.id, url: asset.preview});
     void loadThumbnail(asset, controller.signal).then(loaded => {
@@ -50,8 +53,8 @@ function ReviewImage({asset, className, label}: {asset: Asset; className?: strin
       }).catch(() => {});
     }
     return () => controller.abort();
-  }, [asset]);
-  return shown ? <img className={className} src={shown} alt={label} draggable={false}/> : <span className={`${className ?? ''} review-missing`}><PhotoIcon aria-hidden="true"/></span>;
+  }, [asset, privacy]);
+  return privacy ? <span className={`${className ?? ""} privacy-mask`} aria-label="비공개 모드"/> : shown ? <img className={className} src={shown} alt={label} draggable={false}/> : <span className={`${className ?? ''} review-missing`}><PhotoIcon aria-hidden="true"/></span>;
 }
 
 /**
@@ -76,6 +79,7 @@ export function CharacterReview({libraryId, target, series, serverSeries = false
   onClose(): void;
   backRef: MutableRefObject<(() => boolean) | null>;
 }) {
+  const [privacy] = usePrivacyMode();
   const [state, setState] = useState<State>({phase: 'loading'});
   const [queue, setQueue] = useState<ReviewItem[]>([]);
   const [targets, setTargets] = useState<Record<string, ReviewTarget>>({});
@@ -170,9 +174,9 @@ export function CharacterReview({libraryId, target, series, serverSeries = false
   useEffect(() => {
     if (state.phase === 'ready' && queue.length < 5 && cursor.current) void load(false);
     const controller = new AbortController();
-    for (const item of queue.slice(1, 4)) void warmThumbnail(item.asset, controller.signal);
+    if (!privacy) for (const item of queue.slice(1, 4)) void warmThumbnail(item.asset, controller.signal);
     return () => controller.abort();
-  }, [queue, state.phase, load]);
+  }, [queue, state.phase, load, privacy]);
 
   // Skipped candidates wait until everything else is done; then the user can go through them again.
   const replaySkipped = () => {

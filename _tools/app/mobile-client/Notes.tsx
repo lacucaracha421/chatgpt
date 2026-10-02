@@ -129,6 +129,8 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
   const note=compositionNote?.id===selected&&currentNote&&!currentNote.redacted?{...currentNote,body:compositionNote.body,items:compositionNote.items,fields:compositionNote.fields}:currentNote;
   const editor=useNoteEditor();
   const ledgerBack=useRef<(()=>boolean)|null>(null);
+  // MemoEditor's own dialogs and menus take the back gesture before the note closes.
+  const memoBack=useRef<(()=>boolean)|null>(null);
   // Month notes live inside their ledger: out of the list, 보관함, labels and counts.
   const hiddenMonths=useMemo(()=>hiddenLedgerMonths(state.notes),[state.notes]);
   const listed=useMemo(()=>state.notes.filter(n=>!hiddenMonths.has(n.id)),[state.notes,hiddenMonths]);
@@ -181,6 +183,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
   const kind=note?noteKind(note):'text';
   const editable=!!note&&!note.deleted&&!note.readOnly&&!note.redacted;
   useEffect(()=>{backRef.current=()=>{
+    if(memoBack.current?.())return true;
     if(sheet){setSheet(null);return true;}
     if(ledgerOpen&&ledgerBack.current?.())return true;
     if(creatingSecret){setCreatingSecret(false);return true;}
@@ -261,7 +264,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
   const body=!note?null:isSecret(note)&&state.secretLocked&&!note.redacted?<SecretGate key={`resume-${note.id}`} store={store} onOpened={()=>store.resumeSecretSaves()}/>
     :isSecret(note)?(note.redacted?<SecretGate key={note.id} store={store} onOpened={()=>void store.refresh()}/>
       :<SecretEditor fields={note.fields??[]} memo={note.memo??''} readOnly={!editable} onChange={change=>edit(change)}/>)
-    :<MemoEditor noteId={note.id} body={memoSource} touch readOnly={!editable} onChange={body=>edit({body})} revealItem={revealItem}/>;
+    :<MemoEditor noteId={note.id} body={memoSource} touch readOnly={!editable} onChange={body=>edit({body})} revealItem={revealItem} backRef={memoBack}/>;
   const memoTasks=memoItems(parseMemo(memoSource)).filter(item=>item.task);
   const footer=note&&!isSecret(note)?memoEditingMode==='todo'?`${memoTasks.filter(item=>item.done).length}/${memoTasks.length} 완료`:`${memoSource.length.toLocaleString()}자`:null;
   return <section ref={section} className={`mobile-notes ${editing?'note-open':''}`} style={{display:active?undefined:'none',maxHeight:selected&&note?editorHeight:undefined}} aria-label="메모" onCompositionStartCapture={()=>setCompositionNote(currentNote)} onCompositionEndCapture={()=>setCompositionNote(null)}>

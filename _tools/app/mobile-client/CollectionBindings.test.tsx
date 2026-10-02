@@ -407,3 +407,15 @@ it('keeps the large panel while only one side is connected, the connected one qu
   expect(within(row('MangaDex')).getByRole('button', {name: 'MangaDex 다시 연결'})).toBeTruthy();
   expect(row('카카오').getAttribute('aria-label')).toBe('카카오 연결');
 });
+
+
+it.each(['MangaDex','카카오'] as const)('masks %s work-link candidates without image elements',async provider=>{
+  localStorage.setItem('lakomics.mobile.privacyMode','1');
+  try {
+    await renderArea();const sheet=await openSheet(provider);
+    fireEvent.submit(within(sheet).getByRole('searchbox').closest('form')!);
+    await within(sheet).findByText(provider==='MangaDex'?'Yoru no Toshokan':'대원씨아이', {exact:false});
+    expect(sheet.querySelector('img[src]')).toBeNull();
+    expect(sheet.querySelector('.privacy-mask')).toBeTruthy();
+  } finally {localStorage.clear();}
+});

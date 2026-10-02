@@ -208,7 +208,7 @@ export function MangaWork({item, revision, active, privacy, volumes, owned, late
           : <WorkZoomStage className="work-stage manga-work-stage"><WorkZoomObject><MangaBook src={shownVolume.url} title={item.name} author={item.author ?? null} volumeNumber={null} volumeTitle={item.name} focus={null} privacy={privacy} frontReset={reset} onReady={() => undefined}/></WorkZoomObject></WorkZoomStage>}
         <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={() => setReset(value => value + 1)}><ArrowPathIcon aria-hidden="true"/></Button>
       </div>
-      <MangaBookcase touchTargets manga={manga} privacy={privacy} coverUrl={id => spines.urls[id] ?? null} onPick={setWanted} onEnlarge={() => { if (shown) onEnlarge(shown.id); }}/>
+      <MangaBookcase touchTargets manga={manga} privacy={privacy} coverUrl={id => spines.urls[id] ?? null} onPick={setWanted} onEnlarge={onEnlarge}/>
     </div>
     <div className="tablet-work__info">{info}</div>
   </article></WorkZoomProvider>;

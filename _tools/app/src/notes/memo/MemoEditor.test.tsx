@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
 import { MEMO_HOLD_MS, MemoEditor, type MemoEditorProps } from './MemoEditor';
@@ -279,4 +279,17 @@ it('keeps a composing section name mounted after blur and commits only after com
   fireEvent.compositionEnd(name, { data: '한' });
   expect(body()).toBe('## 한\nbody');
   expect(screen.queryByRole('textbox', { name: '섹션 이름' })).not.toBeInTheDocument();
+});
+
+it('lets the tablet back gesture close its own menu before the note', async () => {
+  const backRef: { current: (() => boolean) | null } = { current: null };
+  render(<MemoEditor noteId="n" body={'- [ ] 우유\n- [ ] 계란'} touch onChange={() => true} backRef={backRef} />);
+  expect(backRef.current?.()).toBe(false);
+  fireEvent.contextMenu(screen.getAllByRole('textbox')[0]!.closest('.memo-item')!);
+  expect(await screen.findByRole('menuitem', { name: '섹션으로 만들기' })).toBeInTheDocument();
+  let handled = false;
+  act(() => { handled = backRef.current?.() ?? false; });
+  expect(handled).toBe(true);
+  await waitFor(() => expect(screen.queryByRole('menuitem', { name: '섹션으로 만들기' })).toBeNull());
+  expect(backRef.current?.()).toBe(false);
 });

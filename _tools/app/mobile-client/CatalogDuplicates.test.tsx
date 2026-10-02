@@ -130,3 +130,15 @@ describe('catalog duplicate review',()=>{
     expect(onOpen).toHaveBeenCalled();
   });
 });
+
+
+it('already masks duplicate covers without requesting images in privacy mode',async()=>{
+  const {catalogImageTicket}=await import('./catalogMedia');vi.mocked(catalogImageTicket).mockClear();
+  localStorage.setItem('lakomics.mobile.privacyMode','1');
+  lists.undecided=feed([candidate(C1,'w1','w2')]);mount();
+  await screen.findByText('Title w1');
+  await waitFor(()=>expect(document.querySelector('.privacy-mask')).toBeTruthy());
+  expect(catalogImageTicket).not.toHaveBeenCalled();
+  expect(document.querySelector('img[src]')).toBeNull();
+  expect(document.querySelector('.privacy-mask')).toBeTruthy();
+});

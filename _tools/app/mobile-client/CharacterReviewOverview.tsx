@@ -1,3 +1,4 @@
+import {usePrivacyMode} from './privacyMode';
 import {useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {ArrowLeftIcon, ChevronRightIcon, PhotoIcon} from '@heroicons/react/24/outline';
 import {Button, IconButton} from './ui';
@@ -18,15 +19,16 @@ type State =
 
 /** A character's portrait or a series cover, from the character index's thumbnail Asset. */
 function Portrait({id, paused}: {id?: string | null; paused: boolean}) {
+  const [privacy] = usePrivacyMode();
   const [loaded, setLoaded] = useState<{id: string; preview?: string}>();
   const preview = loaded && loaded.id === id ? loaded.preview : undefined;
   useEffect(() => {
-    if (paused || !id || preview) return;
+    if (privacy || paused || !id || preview) return;
     const controller = new AbortController();
     void loadThumbnail({id, kind: 'image'}, controller.signal).then(asset => { if (!controller.signal.aborted) setLoaded({id, preview: asset.preview}); }, () => {});
     return () => controller.abort();
-  }, [id, paused, preview]);
-  return preview ? <img src={preview} alt=""/> : <PhotoIcon aria-hidden="true"/>;
+  }, [id, paused, preview, privacy]);
+  return privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : preview ? <img src={preview} alt=""/> : <PhotoIcon aria-hidden="true"/>;
 }
 
 /**

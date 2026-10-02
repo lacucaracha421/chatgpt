@@ -1,3 +1,4 @@
+import {usePrivacyMode} from './privacyMode';
 import {displayDate} from '../src/shared/displayDate';
 import {visibleInterval} from './useVisibleInterval';
 import {useCallback, useEffect, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent} from 'react';
@@ -72,27 +73,30 @@ function useBox(ref: MutableRefObject<HTMLElement | null>) {
 
 /** The thumbnail at once; the original once `original` is set (on zoom) and it decodes. */
 function PairImage({side, original, style, label}: {side: SimilaritySide; original: boolean; style?: React.CSSProperties; label: string}) {
+  const [privacy] = usePrivacyMode();
   const asset = side.asset;
   const [src, setSrc] = useState<{id: string; url?: string; full?: boolean}>({id: asset.id, url: asset.preview});
   const shown = src.id === asset.id ? src.url : asset.preview;
   useEffect(() => {
+    if (privacy) return;
     const controller = new AbortController();
     setSrc({id: asset.id, url: asset.preview});
     void loadThumbnail(asset, controller.signal).then(loaded => {
       if (!controller.signal.aborted && loaded.preview) setSrc(current => current.id === asset.id && current.full ? current : {id: asset.id, url: loaded.preview});
     }, () => {});
     return () => controller.abort();
-  }, [asset]);
+  }, [asset, privacy]);
   const full = src.id === asset.id && !!src.full;
   useEffect(() => {
-    if (!original || full || asset.kind === 'video') return;
+    if (privacy || !original || full || asset.kind === 'video') return;
     const controller = new AbortController();
     void mediaTicket(asset, 'original', controller.signal).then(async ticket => {
       await decodeImage(ticket.url, controller.signal);
       if (!controller.signal.aborted) setSrc({id: asset.id, url: ticket.url, full: true});
     }).catch(() => {});
     return () => controller.abort();
-  }, [asset, original, full]);
+  }, [asset, original, full, privacy]);
+  if (privacy) return <span className="similarity-image privacy-mask" style={style} aria-label="비공개 모드"/>;
   return shown
     ? <img className="similarity-image" src={shown} alt={label} draggable={false} style={style} data-original={full ? 'true' : undefined}/>
     : <span className="similarity-image similarity-missing" style={style}><PhotoIcon aria-hidden="true"/></span>;
@@ -225,6 +229,7 @@ function MetaStrip({side, other, name, recommended}: {side: SimilaritySide; othe
  * is not kept goes to Library Trash only when the PC applies the decision.
  */
 export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: MutableRefObject<(() => boolean) | null>}) {
+  const [privacy] = usePrivacyMode();
   const [state, setState] = useState<State>({phase: 'loading'});
   const [queue, setQueue] = useState<SimilarityItem[]>([]);
   const [counts, setCounts] = useState<SimilarityCounts | null>(null);
@@ -311,9 +316,9 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
   useEffect(() => {
     if (state.phase === 'ready' && queue.length < 5 && cursor.current) void load(false);
     const controller = new AbortController();
-    for (const item of queue.slice(1, 3)) for (const side of [item.a, item.b]) void warmThumbnail(side.asset, controller.signal);
+    if (!privacy) for (const item of queue.slice(1, 3)) for (const side of [item.a, item.b]) void warmThumbnail(side.asset, controller.signal);
     return () => controller.abort();
-  }, [queue, state.phase, load]);
+  }, [queue, state.phase, load, privacy]);
 
   const current = queue[0];
   useEffect(() => { setView(FIT); setHeld(false); }, [current?.reviewId]);

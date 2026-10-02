@@ -127,3 +127,14 @@ describe('character review overview',()=>{
     expect(await screen.findByRole('heading',{name:'PC 업데이트가 필요합니다'})).toBeTruthy();
   });
 });
+
+
+it('masks review overview portraits without loading thumbnails',async()=>{
+  const {loadThumbnail}=await import('./media');vi.mocked(loadThumbnail).mockClear();
+  localStorage.setItem('lakomics.mobile.privacyMode','1');
+  mocks.api.mockResolvedValue(head(2,{countsByTarget:[{targetId:'lara',seriesId:'yuri',pending:2}]}));
+  mount();await screen.findByRole('region',{name:'백합 2건'});
+  expect(loadThumbnail).not.toHaveBeenCalled();
+  expect(document.querySelector('img[src]')).toBeNull();
+  expect(document.querySelector('.privacy-mask')).toBeTruthy();
+});

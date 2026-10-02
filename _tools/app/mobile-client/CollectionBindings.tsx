@@ -1,3 +1,4 @@
+import {usePrivacyMode} from './privacyMode';
 import {useEffect, useRef, useState, type FormEvent} from 'react';
 import {createPortal} from 'react-dom';
 import {CheckIcon, ChevronDownIcon, ChevronRightIcon, LinkIcon, MagnifyingGlassIcon, RectangleStackIcon} from '@heroicons/react/24/outline';
@@ -140,8 +141,9 @@ export function CollectionBindings({item, active, refreshKey, sheet, onSheet, pa
 }
 
 function BindThumb({url, provider}: {url: string | null; provider: BindProvider}) {
+  const [privacy] = usePrivacyMode();
   const src = safeImageUrl(url), [broken, setBroken] = useState(false);
-  return <span className={`bind-thumb is-${provider}`}>{src && !broken
+  return <span className={`bind-thumb is-${provider}`}>{privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : src && !broken
     ? <img src={src} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setBroken(true)}/>
     : <span className="bind-thumb-placeholder"><RectangleStackIcon aria-hidden="true"/></span>}</span>;
 }

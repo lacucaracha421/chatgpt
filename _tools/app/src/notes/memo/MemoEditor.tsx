@@ -18,6 +18,8 @@ export type MemoEditorProps = {
   /** Return false if the existing note limits reject the edit. */
   onChange: (body: string, structural: boolean) => boolean | void;
   copyText?: (text: string) => Promise<void>;
+  /** Tablet back gesture: the editor sets a handler that closes its own dialog/menu/rename first (true = handled). */
+  backRef?: { current: (() => boolean) | null };
 };
 const defaultCopy = (text: string) => navigator.clipboard.writeText(text);
 export const MEMO_HOLD_MS = 550;
@@ -76,7 +78,7 @@ function ItemArea({ item, readOnly, onEdit, onKey, onPaste, register }: {
     }}/>
 }
 
-export function MemoEditor({ noteId, body, touch = false, readOnly = false, revealItem, onChange, copyText = defaultCopy }: MemoEditorProps) {
+export function MemoEditor({ noteId, body, touch = false, readOnly = false, revealItem, onChange, copyText = defaultCopy, backRef }: MemoEditorProps) {
   const mode = memoMode(body);
   const documentRef = useRef<{ id: string; doc: MemoDocument }>({ id: noteId, doc: parseMemo(body) });
   const [filter, setFilter] = useState<string | null>(null);
@@ -86,6 +88,17 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [moveMenu, setMoveMenu] = useState<string | null>(null);
   const [sectionMenu, setSectionMenu] = useState<string | null>(null);
+  useEffect(() => {
+    if (!backRef) return;
+    backRef.current = () => {
+      if (deleteTarget) { setDeleteTarget(null); return true; }
+      if (moveMenu) { setMoveMenu(null); return true; }
+      if (sectionMenu) { setSectionMenu(null); return true; }
+      if (rename) { setRename(null); return true; }
+      return false;
+    };
+    return () => { backRef.current = null; };
+  });
   const [status, setStatus] = useState<{ id: string; text: string } | null>(null);
   const statusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const root = useRef<HTMLDivElement>(null);

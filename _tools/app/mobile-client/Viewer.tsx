@@ -113,6 +113,8 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
       // The confirmation is the innermost overlay, so it consumes Back first: dismissing it
       // leaves the viewer open with its media untouched, which is what "취소" means here.
       if (exclusionOpen.current) { setExclusion(null); return true; }
+      if (pickersOpen.current.classificationOpen) { setClassificationOpen(false); return true; }
+      if (pickersOpen.current.albumOpen) { setAlbumOpen(false); return true; }
       if (infoOpen.current) { setInfo(false); return true; }
       return false;
     };
@@ -120,6 +122,8 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   }, [backRef]);
   const [albumOpen, setAlbumOpen] = useState(false);
   const [classificationOpen, setClassificationOpen] = useState(false);
+  const pickersOpen = useRef({albumOpen, classificationOpen});
+  pickersOpen.current = {albumOpen, classificationOpen};
   const [chrome, setChrome] = useState(true);
   const [chromeActivity, setChromeActivity] = useState(0);
   const [filmstripActive, setFilmstripActive] = useState(false);

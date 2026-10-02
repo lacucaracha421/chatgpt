@@ -1,3 +1,4 @@
+import {usePrivacyMode} from './privacyMode';
 import {visibleInterval} from './useVisibleInterval';
 import {useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {ArrowLeftIcon, ArrowUturnLeftIcon, CheckCircleIcon, PhotoIcon, TrashIcon} from '@heroicons/react/24/outline';
@@ -27,6 +28,7 @@ export function LibraryTrash({onClose, backRef, known, onRestored}: {
   /** Assets whose restore was queued, so the library can show them again. */
   onRestored?(ids: string[]): void;
 }) {
+  const [privacy] = usePrivacyMode();
   const [items, setItems] = useState<TrashItem[]>([]);
   const [totals, setTotals] = useState({count: 0, bytes: 0});
   const [cursor, setCursor] = useState<string | null>(null);
@@ -96,6 +98,7 @@ export function LibraryTrash({onClose, backRef, known, onRestored}: {
   // ordinary Asset on the server and uses the ordinary (cached) thumbnail.
   const requested = useRef(new Set<string>());
   useEffect(() => {
+    if (privacy) return;
     const missing = tiles.filter(tile => !requested.current.has(`${tile.onServer}:${tile.id}`) && tile.status !== 'deleted' && tile.asset.thumbnail_available !== false);
     for (const tile of missing) requested.current.add(`${tile.onServer}:${tile.id}`);
     const server = missing.filter(tile => tile.onServer).map(tile => tile.id);
@@ -109,7 +112,7 @@ export function LibraryTrash({onClose, backRef, known, onRestored}: {
         if (alive.current) setThumbs(current => ({...current, [tile.id]: ticket.url}));
       }, () => {});
     }
-  }, [tiles]);
+  }, [tiles, privacy]);
 
   const selectable = tiles.filter(tile => tile.status !== 'restoring');
   const allSelected = selectable.length > 0 && selectable.every(tile => selected.has(tile.id));
@@ -163,7 +166,7 @@ export function LibraryTrash({onClose, backRef, known, onRestored}: {
           return <button key={tile.id} className="trash-tile" data-status={tile.status} aria-pressed={on} disabled={tile.status === 'restoring'}
             aria-label={`${tile.asset.creator_name || tile.asset.creator_handle || '자산'}${label ? `, ${label}` : ''}${tile.trashedAt ? `, ${trashDate(tile.trashedAt)}` : ''}`}
             onClick={() => toggle(tile)}>
-            {thumbs[tile.id] ? <img src={thumbs[tile.id]} alt="" draggable={false}/> : <span className="trash-missing"><PhotoIcon aria-hidden="true"/></span>}
+            {privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : thumbs[tile.id] ? <img src={thumbs[tile.id]} alt="" draggable={false}/> : <span className="trash-missing"><PhotoIcon aria-hidden="true"/></span>}
             {label && <span className="trash-badge">{label}</span>}
             {on && <CheckCircleIcon className="trash-check" aria-hidden="true"/>}
             <span className="trash-date numeric">{trashDate(tile.trashedAt)}</span>

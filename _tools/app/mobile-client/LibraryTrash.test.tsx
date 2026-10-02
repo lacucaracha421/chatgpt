@@ -41,6 +41,19 @@ describe('Library Trash browser',()=>{
     mocks.native.mockImplementation((op:string)=>Promise.resolve(op==='assetLifecycleState'?state([row('p','trash')]):state([row('p','trash'),row('a','restore')])));
   });
 
+  it('masks server trash and pending trash without image tickets in privacy mode',async()=>{
+    const {mediaTicket}=await import('./media');vi.mocked(mediaTicket).mockClear();
+    localStorage.setItem('lakomics.mobile.privacyMode','1');
+    try {
+      const {container}=mount();
+      await screen.findByText('2개 · 3.0 MB · 이동 대기 1');
+      expect(mocks.api.mock.calls.some(([path])=>path.includes('media-tickets'))).toBe(false);
+      expect(mediaTicket).not.toHaveBeenCalled();
+      expect(container.querySelector('img[src]')).toBeNull();
+      expect(container.querySelector('.privacy-mask')).toBeTruthy();
+    } finally {localStorage.clear();}
+  });
+
   it('shows count, size, the PC-only emptying hint and no empty action',async()=>{
     mount();
     expect(await screen.findByText('2개 · 3.0 MB · 이동 대기 1')).toBeTruthy();

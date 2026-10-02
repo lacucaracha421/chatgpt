@@ -1,3 +1,4 @@
+import {usePrivacyMode} from './privacyMode';
 import {Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {
   ArrowLeftIcon, ArrowsUpDownIcon, CheckIcon, ChevronDownIcon, ComputerDesktopIcon, DeviceTabletIcon, EllipsisHorizontalIcon,
@@ -243,8 +244,10 @@ function Bar({percent, striped}: {percent: number; striped?: boolean}) {
 const hasLocalFile = (row: ExchangeRow, incoming: boolean) => incoming ? row.state === 'saved' : row.state !== 'zipping';
 
 function Glyph({row, incoming}: {row: ExchangeRow; incoming: boolean}) {
+  const [privacy] = usePrivacyMode();
   const image = isImageName(row.fileName);
-  const url = useExchangeThumbnail(row.transferId, image && hasLocalFile(row, incoming));
+  const url = useExchangeThumbnail(row.transferId, !privacy && image && hasLocalFile(row, incoming));
+  if (privacy && image) return <span className="exchange-glyph"><span className="privacy-mask" aria-label="비공개 모드"/></span>;
   return url
     ? <span className="exchange-glyph" data-image="true"><img src={url} alt=""/></span>
     : <span className="exchange-glyph" data-zip={/\.zip$/i.test(row.fileName)} aria-hidden="true">{extensionLabel(row.fileName)}</span>;
@@ -301,6 +304,8 @@ function ThumbStrip({rows, incoming, actions}: {rows: ExchangeRow[]; incoming: b
 }
 
 function StripImage({row, incoming}: {row: ExchangeRow; incoming: boolean}) {
-  const url = useExchangeThumbnail(row.transferId, hasLocalFile(row, incoming));
+  const [privacy] = usePrivacyMode();
+  const url = useExchangeThumbnail(row.transferId, !privacy && hasLocalFile(row, incoming));
+  if (privacy) return <span className="privacy-mask" aria-label="비공개 모드"/>;
   return url ? <img src={url} alt=""/> : <span className="exchange-strip-ext" aria-hidden="true">{extensionLabel(row.fileName)}</span>;
 }

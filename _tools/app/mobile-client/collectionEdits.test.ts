@@ -1,4 +1,6 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
+import {act, renderHook} from '@testing-library/react';
+import {useCollectionEdits} from './useCollectionEdits';
 import {outboxKey,setOutboxConnection} from './outboxConnection';
 const CONNECTION='https://a.example';
 
@@ -28,6 +30,27 @@ const sent=()=>mocks.api.mock.calls.filter(([path])=>path===PERSONAL_EDIT_PATH).
 const receipt=(body:Body,changed=true)=>({version:1,operationId:body.operationId,collectionId:body.collectionId,field:body.field,value:body.value,sequence:changed?1:null,revision:'r2',changed});
 
 beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();mocks.api.mockReset();vi.restoreAllMocks();});
+
+it.each([
+  ['myScore',3,4],['status','planned','playing'],['ownedPlatform',null,'Switch 2'],
+] as const)('retires a confirmed %s overlay after read-back so a later PC revert remains visible', async(field,before,saved)=>{
+  const status={...ready,capabilities:{...ready.capabilities,collectionRecordEdit:true}};
+  install(receipt,status);
+  const {result,rerender,unmount}=renderHook(({value}:{value:typeof before|typeof saved})=>{
+    const edits=useCollectionEdits({active:false,onSettled:()=>{}});
+    return {...edits,shown:edits.visible('a',field,value)};
+  },{initialProps:{value:before}});
+  try {
+    act(()=>result.current.observeStatus(status));
+    act(()=>{commitCollectionEdit('a',field,saved,before,LIBRARY);});
+    await act(async()=>{await result.current.flush();});
+    expect(result.current.shown.value).toBe(saved);
+    rerender({value:saved});
+    expect(result.current.shown.value).toBe(saved);
+    rerender({value:before});
+    expect(result.current.shown.value).toBe(before);
+  } finally {unmount();}
+});
 
 describe('collection edit outbox',()=>{
   it('persists one intent per field across a reload and replaces it with a new id',()=>{

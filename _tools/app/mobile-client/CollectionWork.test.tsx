@@ -11,6 +11,14 @@ const volumes = [1, 2].map(n => sharedVolume({id: `v${n}`, volumeNumber: n, edit
 const manga: CollectionDetail = {id: 'manga', name: '만화', type: 'manga', showcase: false, volumes, artworks: []};
 const props = {item: manga, revision: 'r1', active: true, privacy: false, volumes, owned: 1, latestKorean: 2, onEnlarge: vi.fn(), info: null};
 
+it('enlarges the tapped spine while a different volume is displayed',()=>{
+  artwork.urls={c1:'/one',c2:'/two'};
+  const onEnlarge=vi.fn();
+  const {container}=render(<MangaWork {...props} onEnlarge={onEnlarge}/>);
+  fireEvent.doubleClick(container.querySelector('[data-volume-id="v2"]')!);
+  expect(onEnlarge).toHaveBeenCalledExactlyOnceWith('v2');
+});
+
 it('taps empty stage to close an open case, preserves a closed pose/zoom, and leaves controls and case taps working', () => {
   artwork.urls = {};
   const item: CollectionDetail = {...manga, id: 'game', type: 'game'};
