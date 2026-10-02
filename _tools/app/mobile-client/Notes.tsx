@@ -4,7 +4,7 @@ import {SIGNAL_FALLBACK_MS,useSyncSignal} from './syncSignals';
 import {TopBar} from './TopBar';
 import {useSectionShade} from './SectionShade';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type CSSProperties,type MutableRefObject} from 'react';
-import {TagIcon,ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,PaperAirplaneIcon,DocumentTextIcon,EllipsisHorizontalIcon,EyeIcon,EyeSlashIcon,KeyIcon,LockClosedIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
+import {TagIcon,ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,DocumentTextIcon,EllipsisHorizontalIcon,EyeIcon,EyeSlashIcon,KeyIcon,LockClosedIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {PinIcon} from './PinIcon';
 import {Button,IconButton,SectionLabel,SegmentedControl,TextInput} from './ui';
 import {BottomSheet} from './BottomSheet';
@@ -12,7 +12,7 @@ import {usePullToRefresh} from './usePullToRefresh';
 import {useLevelMotion} from './motion';
 import {checklistMarkdown,labelKey,NOTE_COLORS,NOTE_LIMITS,noteColorValue,noteLimitProblem,normalizeLabel,type NoteKind} from '../src/notes/model';
 import {MemoEditor} from '../src/notes/memo/MemoEditor';
-import {appendToSection,memoBody,memoItems,memoMode,memoSections,parseMemo,switchMode,TOP_SECTION} from '../src/notes/memo/memoModel';
+import {memoBody,memoItems,memoMode,parseMemo,switchMode} from '../src/notes/memo/memoModel';
 import {isSecret,noteKind,rebaseList,NotesStore,PIN_REQUIRED_TEXT,type Note} from '../src/notes/store';
 import {genericView,hiddenLedgerMonths,LEDGER} from '../src/notes/ledger/model';
 import {noteMatches,sortNotes} from '../src/notes/noteList';
@@ -38,47 +38,11 @@ export {mobileNotesRequest} from './notesTransport';
 type Scope='all'|'archive'|'trash';
 type Sheet='new'|'color'|'more'|'list'|'recovery'|null;
 const tint=(color:string|null|undefined)=>{const value=noteColorValue(color);return value?({'--note-tint':value} as CSSProperties):undefined;};
-const QUICK_SECTION_KEY='lakomics.notes.quickSection.v2.';
-/** Remove the retired title-bearing preference before any note is opened or unlocked. */
-function clearLegacyQuickSections(){
-  try {for(const key of Object.keys(localStorage))if(key.startsWith('lakomics.notes.quickSection.v1.'))localStorage.removeItem(key);}catch{/* Device preferences are optional. */}
+/** The bottom quick-add field was removed (user, 2026-10-03); clear its device preferences once. */
+function clearQuickSectionPreferences(){
+  try {for(const key of Object.keys(localStorage))if(key.startsWith('lakomics.notes.quickSection.'))localStorage.removeItem(key);}catch{/* Device preferences are optional. */}
 }
-clearLegacyQuickSections();
-function readQuickSection(noteId:string):number|null{
-  try {const value=localStorage.getItem(QUICK_SECTION_KEY+noteId);return value!==null&&/^\d+$/.test(value)?Number(value):null;}catch{return null;}
-}
-function writeQuickSection(noteId:string,index:number){try{localStorage.setItem(QUICK_SECTION_KEY+noteId,String(index));}catch{/* Device preferences are optional. */}}
-
-/** The draft stays in its DOM field through saves and composition; sending never blurs it. */
-function MemoQuickAdd({noteId,body,onAppend}:{noteId:string;body:string;onAppend(body:string,line:number):boolean}){
-  const editor=useNoteEditor(),field=useRef<HTMLInputElement>(null);
-  const doc=parseMemo(body),named=memoSections(doc).filter(section=>section.heading);
-  const [text,setText]=useState(''),[chosen,setChosen]=useState(()=>named[readQuickSection(noteId)??-1]?.heading?.key??null);
-  // Heading keys stay in memory; only the non-content section position reaches storage.
-  const target=named.find(section=>section.heading!.key===chosen)??named[named.length-1];
-  const key=target?.heading?.key??null;
-  useEffect(()=>{if(key){setChosen(key);writeQuickSection(noteId,named.indexOf(target));}},[noteId,key]);
-  function append(){
-    const area=field.current;
-    if(!area||editor.isComposing(area)||!area.value.trim())return;
-    const mode=memoMode(body),targetId=target?.id??TOP_SECTION;
-    const next=appendToSection(doc,targetId,area.value.trim(),mode);
-    const items=memoSections(next).find(section=>section.id===targetId)?.items??[];
-    const added=mode==='text'?[...items].reverse().find(item=>item.raw.trim())?.id:next.nextId>doc.nextId?`line-${doc.nextId}`:next.lines[0]!.id;
-    if(!onAppend(memoBody(next),next.lines.findIndex(line=>line.id===added)))return;
-    setText('');area.value='';area.focus({preventScroll:true});
-  }
-  return <div className="notes-quick">
-    {named.length>0&&<select aria-label="넣을 섹션" value={key??''} onChange={event=>{setChosen(event.target.value);writeQuickSection(noteId,named.findIndex(section=>section.heading!.key===event.target.value));}}>
-      {named.map(section=><option key={section.heading!.key} value={section.heading!.key}>{section.title||'제목 없음'}</option>)}
-    </select>}
-    <TextInput aria-label="빠른 추가" placeholder="메모 작성" enterKeyHint="send" autoComplete="off" {...editor.bind(text,setText,field)} onKeyDown={event=>{
-      if(editor.isComposing(event.currentTarget)||event.nativeEvent.isComposing||event.keyCode===229)return;
-      if(event.key==='Enter'){event.preventDefault();append();}
-    }}/>
-    <Button type="button" size="icon" variant="ghost" aria-label="메모 추가" onPointerDown={event=>event.preventDefault()} onClick={append}><PaperAirplaneIcon aria-hidden="true"/></Button>
-  </div>;
-}
+clearQuickSectionPreferences();
 function LabelEditor({labels,suggestions,readOnly,onChange}:{labels:string[];suggestions:string[];readOnly:boolean;onChange(labels:string[]):void}) {
   const editor=useNoteEditor();
   const [adding,setAdding]=useState(false),[text,setText]=useState('');
@@ -122,14 +86,13 @@ function RecoveryKey({store}:{store:NotesStore}) {
  *  the Home origin and Notes behaves like a normal tab visit from then on. */
 export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findStore}:{active:boolean;findStore?:NotesStore;backRef:MutableRefObject<(()=>boolean)|null>;request?:{id:string;key:number}|null;onReturnHome?:()=>void;onHomeEntryGone?:()=>void}) {
   const stripWheel=useHorizontalWheel();
-  useEffect(clearLegacyQuickSections,[]);
+  useEffect(clearQuickSectionPreferences,[]);
   const [store]=useState(()=>findStore??new NotesStore(mobileNotesRequest));
   const state=useSyncExternalStore(store.subscribe,store.snapshot);
   const [key,setKey]=useState('');
   const [selected,setSelected]=useState<string|null>(null),[scope,setScope]=useState<Scope>('all'),[label,setLabel]=useState<string|null>(null),[query,setQuery]=useState(''),[kindFilter,setKindFilter]=useState<NoteKindFilter>('all');
   const [creatingSecret,setCreatingSecret]=useState(false),[sheet,setSheet]=useState<Sheet>(null),[limitError,setLimitError]=useState<string|null>(null);
   const titleRef=useRef<HTMLInputElement>(null),pane=useRef<HTMLDivElement>(null);
-  const [revealItem,setRevealItem]=useState<{line:number;key:number}|undefined>();
   useEffect(()=>{void store.load();},[store]);
   const trash=scope==='trash';
   const found=state.notes.find(n=>n.id===selected)??null;
@@ -183,7 +146,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
   },[selected,lockSecrets,store]);
   useEffect(()=>{if(!state.moved||compositionNote)return;if(selected===state.moved.from)setSelected(state.moved.to);store.clearMoved();},[state.moved,selected,store,compositionNote]);
   // ---- Navigation
-  const select=(id:string|null)=>{setCompositionNote(null);setCreatingSecret(false);setSelected(id);setRevealItem(undefined);setLimitError(null);};
+  const select=(id:string|null)=>{setCompositionNote(null);setCreatingSecret(false);setSelected(id);setLimitError(null);};
   // Home opens a note by id (its pinned rows); each request opens once.
   useEffect(()=>{if(request){setSheet(null);setScope('all');setLabel(null);setQuery('');select(request.id);}},[request?.key]);
   const leave=()=>{select(null);void store.finish();};
@@ -276,7 +239,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
   const body=!note?null:isSecret(note)&&state.secretLocked&&!note.redacted?<SecretGate key={`resume-${note.id}`} store={store} onOpened={()=>store.resumeSecretSaves()}/>
     :isSecret(note)?(note.redacted?<SecretGate key={note.id} store={store} onOpened={()=>void store.refresh()}/>
       :<SecretEditor fields={note.fields??[]} memo={note.memo??''} readOnly={!editable} onChange={change=>edit(change)}/>)
-    :<MemoEditor noteId={note.id} body={memoSource} touch readOnly={!editable} onChange={body=>edit({body})} revealItem={revealItem} backRef={memoBack}/>;
+    :<MemoEditor noteId={note.id} body={memoSource} touch readOnly={!editable} onChange={body=>edit({body})} backRef={memoBack}/>;
   const memoTasks=memoItems(parseMemo(memoSource)).filter(item=>item.task);
   const footer=note&&!isSecret(note)?memoEditingMode==='todo'?`${memoTasks.filter(item=>item.done).length}/${memoTasks.length} 완료`:`${memoSource.length.toLocaleString()}자`:null;
   return <section ref={section} className={`mobile-notes ${editing?'note-open':''}`} style={{display:active?undefined:'none',maxHeight:selected&&note?editorHeight:undefined}} aria-label="메모" onCompositionStartCapture={()=>setCompositionNote(currentNote)} onCompositionEndCapture={()=>setCompositionNote(null)}>
@@ -315,10 +278,6 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
         {body}
         {footer&&<p className="notes-memo-footer">{footer}</p>}
       </div></div>
-      {editable&&!isSecret(note)&&<MemoQuickAdd key={`quick:${note.id}`} noteId={note.id} body={memoSource} onAppend={(body,line)=>{
-        if(compositionNote||!edit({body}))return false;
-        setRevealItem(current=>({line,key:(current?.key??0)+1}));return true;
-      }}/>}
     </>}
     {/* Always mounted once unlocked so its pull-to-refresh gesture stays attached. */}
     <div className="notes-list-view" style={{display:state.ready&&state.unlocked&&!editing?undefined:'none'}}>

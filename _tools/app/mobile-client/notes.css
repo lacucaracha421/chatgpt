@@ -106,10 +106,4 @@
 .mobile-notes .notes-title-row .notes-title{flex:1;min-width:0}
 .mobile-notes .memo-editor{max-width:none;flex:none}
 .notes-memo-footer{margin:0;color:var(--color-faint);font-size:var(--type-meta)}
-.notes-quick{display:flex;align-items:center;flex-shrink:0;gap:var(--space-2);padding:var(--space-2) var(--mobile-gutter);border-top:1px solid var(--color-border);background:var(--color-bg)}
-.notes-quick>.ui-text-input{flex:1;min-width:0}
-.notes-quick>select{min-width:0;max-width:35%;min-height:var(--control-height);padding:0 var(--space-2);border:0;border-radius:var(--radius-control);background:var(--color-surface);color:var(--color-text);font:inherit;font-size:var(--type-meta)}
-.notes-quick>.ui-button{flex:none}
-.notes-quick~.notes-error{bottom:calc(var(--control-height) + 2 * var(--space-2) + 1px)}
-.notes-quick svg{width:var(--icon-size,24px);height:var(--icon-size,24px)}
 @media(max-width:420px){.mobile-notes .notes-title-row{flex-wrap:wrap}.mobile-notes .notes-title-row .notes-title{flex-basis:100%}}
