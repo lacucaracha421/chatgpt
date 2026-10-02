@@ -3,6 +3,7 @@ use std::{
     fs,
     io::{BufReader, BufWriter},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::Instant,
 };
 
@@ -44,23 +45,50 @@ pub(crate) struct PreparedWorkArtwork {
     pub mime_type: &'static str,
     pub width: u32,
     pub height: u32,
-    absolute_path: PathBuf,
-    thumbnail_absolute_path: PathBuf,
+    pending: PendingArtwork,
+}
+
+/// Published paths stay protected until the caller commits or rolls back.
+struct PendingArtwork {
+    paths: [PathBuf; 2],
+    registry: Arc<Mutex<BTreeSet<PathBuf>>>,
     committed: bool,
 }
 
-impl Drop for PreparedWorkArtwork {
+impl PendingArtwork {
+    fn new(library: &Library, original: &Path, thumbnail: &Path) -> Self {
+        let paths = [original.to_path_buf(), thumbnail.to_path_buf()];
+        let registry = library.pending_work_artwork.clone();
+        registry
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend(paths.iter().cloned());
+        Self {
+            paths,
+            registry,
+            committed: false,
+        }
+    }
+}
+
+impl Drop for PendingArtwork {
     fn drop(&mut self) {
-        if !self.committed {
-            let _ = fs::remove_file(&self.absolute_path);
-            let _ = fs::remove_file(&self.thumbnail_absolute_path);
+        let mut pending = self
+            .registry
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for path in &self.paths {
+            if !self.committed {
+                let _ = fs::remove_file(path);
+            }
+            pending.remove(path);
         }
     }
 }
 
 impl PreparedWorkArtwork {
     pub(crate) fn commit(mut self) {
-        self.committed = true;
+        self.pending.committed = true;
     }
 }
 
@@ -98,6 +126,7 @@ impl Library {
         let absolute_path = self.root().join(&relative_path);
         let thumbnail_relative_path = work_artwork_thumbnail_relative_path(collection_id, &id);
         let thumbnail_absolute_path = self.root().join(&thumbnail_relative_path);
+        let pending = PendingArtwork::new(self, &absolute_path, &thumbnail_absolute_path);
         let directory = absolute_path
             .parent()
             .expect("generated WorkArtwork paths have a parent");
@@ -135,9 +164,7 @@ impl Library {
             mime_type,
             width: image.width(),
             height: image.height(),
-            absolute_path,
-            thumbnail_absolute_path,
-            committed: false,
+            pending,
         })
     }
 
@@ -204,6 +231,9 @@ impl Library {
         let id = uuid::Uuid::new_v4().to_string();
         let relative_path = format!("work-artwork/{collection_id}/{id}.{extension}");
         let absolute_path = self.root().join(&relative_path);
+        let thumbnail_relative_path = work_artwork_thumbnail_relative_path(collection_id, &id);
+        let thumbnail_absolute_path = self.root().join(&thumbnail_relative_path);
+        let pending = PendingArtwork::new(self, &absolute_path, &thumbnail_absolute_path);
         if let Some(parent) = absolute_path.parent() {
             fs::create_dir_all(parent).map_err(|source| LibraryError::WriteWorkArtwork {
                 path: parent.to_path_buf(),
@@ -216,8 +246,6 @@ impl Library {
                 return Ok(None);
             }
         }
-        let thumbnail_relative_path = work_artwork_thumbnail_relative_path(collection_id, &id);
-        let thumbnail_absolute_path = self.root().join(&thumbnail_relative_path);
         if let Some(asset_thumbnail) = asset.thumbnail_relative_path {
             let asset_thumbnail_absolute = self.root().join(&asset_thumbnail);
             if asset_thumbnail_absolute.is_file() {
@@ -239,9 +267,7 @@ impl Library {
             mime_type,
             width,
             height,
-            absolute_path,
-            thumbnail_absolute_path,
-            committed: false,
+            pending,
         }))
     }
 
@@ -564,8 +590,18 @@ impl Library {
     }
 
     pub(crate) fn cleanup_unreferenced_work_artwork(&self) -> Result<(), LibraryError> {
-        let (referenced_artwork, referenced_thumbnails) = {
-            let connection = self.connection()?;
+        // Lock order: database -> pending. Registration/drop may already hold the
+        // database. Pending paths protect registrations newer than the DB snapshot;
+        // hold their gate through unlink, without holding the DB during disk traversal.
+        let connection = self.connection()?;
+        let pending = self
+            .pending_work_artwork
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut referenced_artwork, mut referenced_thumbnails): (
+            BTreeSet<PathBuf>,
+            BTreeSet<PathBuf>,
+        ) = {
             let mut statement = connection.prepare(
                 "SELECT id, collection_id, relative_path
                  FROM collection_work_artworks ORDER BY relative_path",
@@ -592,6 +628,9 @@ impl Library {
                 .collect();
             (artwork, thumbnails)
         };
+        drop(connection);
+        referenced_artwork.extend(pending.iter().cloned());
+        referenced_thumbnails.extend(pending.iter().cloned());
         cleanup_unreferenced_files(&self.root().join("work-artwork"), &referenced_artwork)?;
         cleanup_unreferenced_files(
             &self.root().join("work-artwork-thumbnails"),
@@ -685,13 +724,16 @@ fn cleanup_unreferenced_files(
                 })?;
             }
         }
-        if fs::read_dir(&directory)
-            .map_err(|source| LibraryError::WriteWorkArtwork {
-                path: directory.clone(),
-                source,
-            })?
-            .next()
-            .is_none()
+        if !referenced
+            .iter()
+            .any(|path| path.parent() == Some(directory.as_path()))
+            && fs::read_dir(&directory)
+                .map_err(|source| LibraryError::WriteWorkArtwork {
+                    path: directory.clone(),
+                    source,
+                })?
+                .next()
+                .is_none()
         {
             fs::remove_dir(&directory).map_err(|source| LibraryError::WriteWorkArtwork {
                 path: directory,
@@ -707,6 +749,59 @@ mod tests {
     use std::io::{Cursor, Read};
 
     use image::{DynamicImage, ImageFormat};
+
+    #[test]
+    fn p0_cleanup_preserves_prepared_artwork_until_registration() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let collection = library
+            .create_collection(CreateCollection {
+                name: "Pending work".into(),
+                description: None,
+                collection_type: CollectionType::Manga,
+            })
+            .unwrap();
+        let worker_library = library.clone();
+        let (prepared_tx, prepared_rx) = std::sync::mpsc::channel();
+        let (register_tx, register_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let prepared = worker_library
+                .prepare_work_artwork(&collection.id, &png_bytes())
+                .unwrap();
+            let original = worker_library.root().join(&prepared.relative_path);
+            let thumbnail = prepared.pending.paths[1].clone();
+            prepared_tx.send((original, thumbnail)).unwrap();
+            register_rx.recv().unwrap();
+            let mut c = worker_library.connection().unwrap();
+            let tx = c.transaction().unwrap();
+            Library::select_work_artwork_in_transaction(
+                &tx,
+                &collection.id,
+                "test",
+                "pending",
+                None,
+                &prepared,
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            drop(c);
+            prepared.commit();
+        });
+        let (original, thumbnail) = prepared_rx.recv().unwrap();
+        library.cleanup_unreferenced_work_artwork().unwrap();
+        register_tx.send(()).unwrap();
+        worker.join().unwrap();
+        assert!(
+            original.is_file(),
+            "cleanup removed an original awaiting registration"
+        );
+        assert!(
+            thumbnail.is_file(),
+            "cleanup removed a thumbnail awaiting registration"
+        );
+        library.cleanup_unreferenced_work_artwork().unwrap();
+        assert!(original.is_file() && thumbnail.is_file());
+    }
 
     use crate::library::{
         error::LibraryError,

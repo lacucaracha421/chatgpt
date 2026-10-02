@@ -83,21 +83,30 @@ pub(crate) fn set_manga_root(
             source,
         })?;
     }
+    let identity = path
+        .map(|root| super::manga_root_guard::RootIdentity::read(Path::new(root)))
+        .transpose()?;
     if let Some(settings) = library.machine_settings_path() {
         let library_id = super::library_id_on(connection)?;
-        return machine_settings::set_entry(
+        machine_settings::set_entry(
             &settings,
             &library_id,
             LibraryEntry {
                 manga_root: path.map(str::to_owned),
+                manga_root_identity: identity.clone(),
                 ..Default::default()
             },
-        );
+        )?;
+    } else {
+        connection.execute(
+            "UPDATE library_settings SET manga_root = ?1 WHERE singleton = 1",
+            [path],
+        )?;
     }
-    connection.execute(
-        "UPDATE library_settings SET manga_root = ?1 WHERE singleton = 1",
-        [path],
-    )?;
+    *library
+        .manga_root_identity
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = identity;
     Ok(())
 }
 
@@ -122,6 +131,8 @@ where
     if !root_path.is_dir() {
         return Err(LibraryError::MangaRootNotSet);
     }
+    let root_identity =
+        super::manga_root_guard::require(library, &*library.connection()?, &root_path, true)?;
     let thumb_dir = root_path.join(THUMB_DIR);
     fs::create_dir_all(&thumb_dir).map_err(|source| LibraryError::CreateDirectory {
         path: thumb_dir.clone(),
@@ -152,6 +163,11 @@ where
         )? {
             changed += 1;
         }
+    }
+    {
+        let connection = library.connection()?;
+        root_identity.verify(&connection)?;
+        super::manga_root_guard::record(library, &connection, root_identity)?;
     }
     // Missing folders are retained as soft-orphaned metadata. A root can move or disappear,
     // and the index may be the only surviving record needed for catalog recovery.
@@ -1561,6 +1577,14 @@ mod tests {
         .unwrap();
         fs::remove_dir_all(&series).unwrap();
 
+        assert!(matches!(
+            scan_with_thumbnail(&library, |_, _| panic!(
+                "unsafe root must not generate thumbnails"
+            )),
+            Err(LibraryError::UnsafeMangaRoot(_))
+        ));
+        // A missing series in a still populated, unchanged root remains a valid scan.
+        fs::create_dir(manga_root.join("retained")).unwrap();
         let changed = scan_with_thumbnail(&library, |_, target| {
             fs::write(target, b"thumbnail").unwrap();
             Ok(())

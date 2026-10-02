@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FolderIcon } from "@heroicons/react/24/outline";
 import { useLibrary } from "../library/LibraryContext";
+import { commandErrorMessage } from "../library/errorMessage";
 import type { MangaFrequentIndex, MangaIndexEntry, MangaIndexIdentity, MangaLocalIndex } from "../library/types";
 import { CATALOG_BOOKMARKS_CHANGED_EVENT } from "../app/useCatalogBookmarkSync";
 import { Button } from "../shared/ui/Button";
@@ -55,7 +56,13 @@ export function MangaIndex({ source, filter, onFilter, folder, onFolder, localCo
     let active = true;
     void gateway.getMangaLocalIndex().then(next => {
       if (active) { setLocal(next); loadedLocal.current(next); }
-    }).catch(() => { if (active) setMessage("폴더 목록을 불러오지 못했습니다"); });
+    }).catch(error => {
+      if (active) {
+        setLocal(null); setReview(false); setSelected(new Set());
+        loadedLocal.current({ folders: [], vanished: [] });
+        setMessage(commandErrorMessage(error, "폴더 목록을 불러오지 못했습니다"));
+      }
+    });
     return () => { active = false; };
   }, [gateway, source, revision]);
   const pinnedKeys = new Set(pins.map(mangaIndexKey));
@@ -106,8 +113,23 @@ export function MangaIndex({ source, filter, onFilter, folder, onFolder, localCo
         const next = await gateway.getMangaLocalIndex?.();
         if (next) { setLocal(next); loadedLocal.current(next); }
         if (folder && result.removedFolders.some(f => f.relativePath === folder)) onFolder(null);
-      } catch { setMessage(`${completed}. 목록을 새로 불러오지 못했습니다`); }
-    } catch { setMessage("폴더를 정리하지 못했습니다. 폴더와 백업 상태를 확인하세요"); }
+      } catch (error) {
+        setLocal(null); setSelected(new Set());
+        loadedLocal.current({ folders: [], vanished: [] });
+        const reason = typeof error === "object" && error !== null && "code" in error && error.code === "unsafe_manga_root"
+          ? commandErrorMessage(error, "드라이브 연결 상태를 확인하세요")
+          : "목록을 새로 불러오지 못했습니다";
+        setMessage(`${completed}. ${reason}`);
+      }
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "unsafe_manga_root") {
+        setLocal(null); setReview(false); setSelected(new Set());
+        loadedLocal.current({ folders: [], vanished: [] });
+        setMessage(commandErrorMessage(error, "드라이브 연결 상태를 확인하세요"));
+      } else {
+        setMessage("폴더를 정리하지 못했습니다. 폴더와 백업 상태를 확인하세요");
+      }
+    }
     finally { setBusy(false); }
   }
   return <nav className="manga-index" aria-label="망가 목차">

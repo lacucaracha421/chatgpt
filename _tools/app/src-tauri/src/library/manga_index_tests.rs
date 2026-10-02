@@ -12,6 +12,127 @@ fn fixture() -> (tempfile::TempDir, Library, PathBuf) {
 fn add_series(c: &Connection, id: &str, path: &str) {
     c.execute("INSERT INTO manga_series(id,relative_path,title,author,page_count,thumbnail_relative_path,scanned_at,modified_at) VALUES(?1,?2,?1,'artist',1,'thumb','now','now')",params![id,path]).unwrap();
 }
+
+#[test]
+fn p0_empty_manga_root_never_offers_or_purges_indexed_series() {
+    let (_temp, library, root) = fixture();
+    add_series(&library.connection().unwrap(), "saved", "gone/a");
+    // An unmounted mount point is still a readable directory; cached thumbnails
+    // alone must not be considered evidence that the source disk is mounted.
+    fs::create_dir(root.join(".lakomics-thumbs")).unwrap();
+    let index = library.manga_local_index();
+    let purge = library.purge_vanished_manga_folders(vec!["gone".into()]);
+    assert!(index.is_err(), "empty root offered vanished folders");
+    assert!(purge.is_err(), "empty root allowed metadata deletion");
+    assert_eq!(library.list_manga_series().unwrap().len(), 1);
+}
+
+#[test]
+fn p0_replaced_manga_root_is_rejected_even_when_nonempty() {
+    let (_temp, library, root) = fixture();
+    fs::create_dir(root.join("saved")).unwrap();
+    image::DynamicImage::new_rgb8(4, 4)
+        .save(root.join("saved/001.png"))
+        .unwrap();
+    assert_eq!(library.scan_manga().unwrap(), 1);
+    fs::rename(&root, root.with_extension("original")).unwrap();
+    fs::create_dir_all(root.join("unrelated")).unwrap();
+    let index = library.manga_local_index();
+    let purge = library.purge_vanished_manga_folders(vec!["saved".into()]);
+    assert!(index.is_err(), "replaced root offered vanished folders");
+    assert!(purge.is_err());
+    assert_eq!(library.list_manga_series().unwrap().len(), 1);
+}
+
+#[test]
+fn p0_root_replacement_during_backup_refuses_purge() {
+    let (_temp, library, root) = fixture();
+    fs::create_dir(root.join("keep")).unwrap();
+    add_series(&library.connection().unwrap(), "saved", "gone/a");
+    super::backup::set_before_verify_hook(move || {
+        fs::rename(&root, root.with_extension("original")).unwrap();
+        fs::create_dir_all(root.join("unrelated")).unwrap();
+    });
+    let error = library
+        .purge_vanished_manga_folders(vec!["gone".into()])
+        .unwrap_err();
+    assert!(matches!(error, LibraryError::UnsafeMangaRoot(_)));
+    assert_eq!(library.list_manga_series().unwrap().len(), 1);
+    assert_eq!(library.list_backups().unwrap().len(), 1);
+}
+
+#[test]
+fn p0_root_identity_survives_restart_in_machine_settings() {
+    let (temp, library, root) = fixture();
+    let settings = temp.path().join("machine.json");
+    library.use_machine_settings(settings.clone());
+    library
+        .set_manga_root(Some(root.to_str().unwrap()))
+        .unwrap();
+    fs::create_dir(root.join("saved")).unwrap();
+    image::DynamicImage::new_rgb8(4, 4)
+        .save(root.join("saved/001.png"))
+        .unwrap();
+    assert_eq!(library.scan_manga().unwrap(), 1);
+    drop(library);
+    fs::rename(&root, root.with_extension("original")).unwrap();
+    fs::create_dir_all(root.join("unrelated")).unwrap();
+    let library = Library::open(temp.path().join("library")).unwrap();
+    library.use_machine_settings(settings);
+    assert!(matches!(
+        library.manga_local_index(),
+        Err(LibraryError::UnsafeMangaRoot(_))
+    ));
+    assert!(matches!(
+        library.scan_manga(),
+        Err(LibraryError::UnsafeMangaRoot(_))
+    ));
+    assert!(matches!(
+        library.purge_vanished_manga_folders(vec!["saved".into()]),
+        Err(LibraryError::UnsafeMangaRoot(_))
+    ));
+    assert_eq!(library.list_manga_series().unwrap().len(), 1);
+    fs::remove_dir(root.join("unrelated")).unwrap();
+    fs::remove_dir(&root).unwrap();
+    fs::rename(root.with_extension("original"), &root).unwrap();
+    assert!(library.manga_local_index().unwrap().vanished.is_empty());
+}
+
+#[test]
+fn p0_empty_root_during_backup_keeps_series() {
+    let (_temp, library, root) = fixture();
+    fs::create_dir(root.join("keep")).unwrap();
+    add_series(&library.connection().unwrap(), "saved", "gone/a");
+    super::backup::set_before_verify_hook(move || {
+        fs::remove_dir(root.join("keep")).unwrap();
+    });
+    assert!(matches!(
+        library.purge_vanished_manga_folders(vec!["gone".into()]),
+        Err(LibraryError::UnsafeMangaRoot(_))
+    ));
+    assert_eq!(library.list_manga_series().unwrap().len(), 1);
+}
+
+#[test]
+fn p0_legacy_root_is_adopted_by_a_read_before_any_purge() {
+    let (temp, library, root) = fixture();
+    fs::create_dir(root.join("keep")).unwrap();
+    add_series(&library.connection().unwrap(), "saved", "gone/a");
+    library.use_machine_settings(temp.path().join("machine.json"));
+    // A root never checked on this PC cannot be purged blind ...
+    assert!(matches!(
+        library.purge_vanished_manga_folders(vec!["gone".into()]),
+        Err(LibraryError::UnsafeMangaRoot(_))
+    ));
+    // ... but a non-empty root is adopted by the index read (no re-selection after the update).
+    assert_eq!(library.manga_local_index().unwrap().vanished.len(), 1);
+    // Once adopted, an emptied (unmounted) root is still refused.
+    fs::remove_dir(root.join("keep")).unwrap();
+    assert!(matches!(
+        library.manga_local_index(),
+        Err(LibraryError::UnsafeMangaRoot(_))
+    ));
+}
 fn pin(namespace: &str, value: &str) -> MangaIndexIdentity {
     MangaIndexIdentity {
         kind: if namespace == "artist" {
@@ -221,6 +342,7 @@ fn purge_backs_up_before_removing_only_selected_metadata_and_never_files() {
 #[test]
 fn purge_refuses_reappeared_paths_and_rolls_back_the_whole_selection() {
     let (_temp, library, root) = fixture();
+    fs::create_dir(root.join("keep")).unwrap();
     {
         let c = library.connection().unwrap();
         add_series(&c, "a", "gone/a");
@@ -251,7 +373,8 @@ fn purge_refuses_reappeared_paths_and_rolls_back_the_whole_selection() {
 }
 #[test]
 fn backup_failure_does_not_delete_records() {
-    let (_temp, library, _) = fixture();
+    let (_temp, library, root) = fixture();
+    fs::create_dir(root.join("keep")).unwrap();
     add_series(&library.connection().unwrap(), "a", "gone");
     fs::remove_dir(library.root.join("backups")).unwrap();
     fs::write(library.root.join("backups"), b"blocked").unwrap();
@@ -272,6 +395,7 @@ fn backup_failure_does_not_delete_records() {
 #[test]
 fn purge_refuses_a_folder_restored_during_backup_verification() {
     let (_temp, library, root) = fixture();
+    fs::create_dir(root.join("keep")).unwrap();
     add_series(&library.connection().unwrap(), "a", "gone/a");
     super::backup::set_before_verify_hook(move || {
         fs::create_dir(root.join("gone")).unwrap();
@@ -292,7 +416,8 @@ fn purge_refuses_a_folder_restored_during_backup_verification() {
 }
 #[test]
 fn purge_verification_failure_leaves_library_records_intact() {
-    let (_temp, library, _) = fixture();
+    let (_temp, library, root) = fixture();
+    fs::create_dir(root.join("keep")).unwrap();
     add_series(&library.connection().unwrap(), "a", "gone/a");
     let backups = library.root.join("backups");
     super::backup::set_before_verify_hook(move || {

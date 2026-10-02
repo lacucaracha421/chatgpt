@@ -29,6 +29,39 @@ function mount(gateway: ReturnType<typeof gatewayFixture>, props = {}) {
   return render(<LibraryProvider gateway={gateway as unknown as LibraryGateway}><Fixture {...props} /></LibraryProvider>);
 }
 describe("PC Manga index", () => {
+  it("shows the root safety reason and removes stale purge choices after a failed reload", async () => {
+    const gateway = gatewayFixture();
+    const view = render(<LibraryProvider gateway={gateway as unknown as LibraryGateway}><MangaIndex source="local" filter={null} onFilter={() => {}} folder={null} onFolder={() => {}} localCount={6} revision={0} onLocalIndex={() => {}} onPurge={async () => {}} /></LibraryProvider>);
+    await userEvent.click(await screen.findByRole("button", { name: "목록 보기" }));
+    const message = "망가 폴더 정리를 중단했습니다. 저장된 작품이 있지만 루트 폴더가 비어 있습니다.";
+    gateway.getMangaLocalIndex.mockRejectedValue({ code: "unsafe_manga_root", message });
+    view.rerender(<LibraryProvider gateway={gateway as unknown as LibraryGateway}><MangaIndex source="local" filter={null} onFilter={() => {}} folder={null} onFolder={() => {}} localCount={6} revision={1} onLocalIndex={() => {}} onPurge={async () => {}} /></LibraryProvider>);
+    expect(await screen.findByText(message)).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "목록 보기" })).not.toBeInTheDocument();
+    expect(gateway.purgeVanishedMangaFolders).not.toHaveBeenCalled();
+  });
+  it("withdraws the purge offer when the root changes after the review opens", async () => {
+    const gateway = gatewayFixture();
+    const message = "망가 폴더 정리를 중단했습니다. 루트 폴더 또는 드라이브가 이전과 다릅니다.";
+    gateway.purgeVanishedMangaFolders.mockRejectedValue({ code: "unsafe_manga_root", message });
+    mount(gateway, { local: true });
+    await userEvent.click(await screen.findByRole("button", { name: "목록 보기" }));
+    await userEvent.click(screen.getByRole("button", { name: "백업하고 2개 지우기" }));
+    expect(await screen.findByText(message)).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "목록 보기" })).not.toBeInTheDocument();
+  });
+  it("keeps cleanup success but withdraws remaining choices when the subsequent root check fails", async () => {
+    const gateway = gatewayFixture();
+    mount(gateway, { local: true });
+    await userEvent.click(await screen.findByRole("button", { name: "목록 보기" }));
+    gateway.getMangaLocalIndex.mockRejectedValue({ code: "unsafe_manga_root", message: "루트 드라이브가 이전과 다릅니다." });
+    await userEvent.click(screen.getByRole("button", { name: "백업하고 2개 지우기" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("루트 드라이브가 이전과 다릅니다."));
+    expect(screen.getByRole("status")).toHaveTextContent("백업 완료");
+    expect(screen.queryByRole("button", { name: "목록 보기" })).not.toBeInTheDocument();
+  });
   it("shows 8 tags/5 artists, expands, pins above frequent rows, and clears the single filter", async () => {
     const gateway = gatewayFixture(); mount(gateway);
     await screen.findByText("자주 찾는 태그");

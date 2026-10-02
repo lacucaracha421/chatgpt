@@ -36,6 +36,8 @@ pub(crate) struct LibraryEntry {
     #[serde(default)]
     pub(crate) manga_root: Option<String>,
     #[serde(default)]
+    pub(crate) manga_root_identity: Option<super::manga_root_guard::RootIdentity>,
+    #[serde(default)]
     pub(crate) auto_tag_inbox: super::auto_tag_inbox::Settings,
 }
 
@@ -77,6 +79,21 @@ pub(crate) fn set_entry(
         value.auto_tag_inbox = previous.auto_tag_inbox.clone();
     }
     file.libraries.insert(library_id.to_owned(), value);
+    write_file(path, &file)
+}
+
+/// Update the scan identity without replacing concurrently edited machine settings.
+pub(crate) fn set_manga_root_identity(
+    path: &Path,
+    library_id: &str,
+    identity: super::manga_root_guard::RootIdentity,
+) -> Result<(), LibraryError> {
+    let _guard = FILE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut file = read_file(path)?;
+    let entry = file.libraries.entry(library_id.to_owned()).or_default();
+    entry.manga_root_identity = Some(identity);
     write_file(path, &file)
 }
 

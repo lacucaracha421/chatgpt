@@ -455,6 +455,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::InvalidEncryptedVaultTitle => "invalid_encrypted_vault_title",
             LibraryError::WriteAsset { .. } => "write_asset_failed",
             LibraryError::MangaRootNotSet => "manga_root_not_set",
+            LibraryError::UnsafeMangaRoot(_) => "unsafe_manga_root",
             LibraryError::InvalidMangaIndexRequest => "invalid_manga_index_request",
             LibraryError::MachineSettings { .. } => "machine_settings_failed",
             LibraryError::CollectionSourceRootNotSet => "collection_source_root_not_set",
@@ -1974,14 +1975,12 @@ pub fn get_other_machine_manga_root(
 }
 
 #[tauri::command]
-pub fn set_manga_root(
+pub async fn set_manga_root(
     path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     let library = current_required(state)?;
-    library
-        .set_manga_root(path.as_deref())
-        .map_err(CommandError::from)
+    off_ui_thread(move || library.set_manga_root(path.as_deref()).map_err(CommandError::from)).await
 }
 
 #[tauri::command]

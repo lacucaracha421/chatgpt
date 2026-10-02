@@ -132,6 +132,7 @@ pub(crate) mod auto_tag_inbox;
 mod manga;
 pub mod manga_index;
 pub(crate) mod manga_index_sync;
+mod manga_root_guard;
 pub(crate) mod mangadex;
 mod mangadex_flow;
 pub mod metadata_import;
@@ -236,8 +237,11 @@ pub struct Library {
     canonical_root: PathBuf,
     #[allow(dead_code)] // Keeps the operating-system lease alive for all Library clones.
     lease: Arc<LibraryLease>,
-    // ponytail: one lock per open Library; split by content hash only if ingest throughput demands it.
+    // Serializes ingestion (including rollback) and permanent file deletion.
+    // When combined: trash_lock -> ingestion_lock -> database_lock.
     ingestion_lock: Arc<Mutex<()>>,
+    pending_work_artwork: Arc<Mutex<std::collections::BTreeSet<PathBuf>>>,
+    manga_root_identity: Arc<Mutex<Option<manga_root_guard::RootIdentity>>>,
     // ponytail: one lock per open Library; split by asset only if trash throughput demands it.
     trash_lock: Arc<Mutex<()>>,
     // ponytail: one video preparation at a time; add a bounded worker pool only if profiling needs it.
@@ -376,6 +380,8 @@ impl Library {
             canonical_root,
             lease,
             ingestion_lock: Arc::new(Mutex::new(())),
+            pending_work_artwork: Arc::default(),
+            manga_root_identity: Arc::default(),
             trash_lock: Arc::new(Mutex::new(())),
             video_lock: Arc::new(Mutex::new(())),
             backup_lock: Arc::new(Mutex::new(())),
@@ -568,6 +574,10 @@ impl Library {
     }
 
     pub fn set_manga_root(&self, path: Option<&str>) -> Result<(), LibraryError> {
+        let _scan = self
+            .manga_scan_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let connection = self.connection()?;
         manga::set_manga_root(self, &connection, path)
     }

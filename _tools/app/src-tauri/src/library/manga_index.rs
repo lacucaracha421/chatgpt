@@ -197,7 +197,7 @@ impl Library {
                 vanished: vec![],
             });
         };
-        local_index(&c, Path::new(&root))
+        local_index(self, &c, Path::new(&root))
     }
     pub fn purge_vanished_manga_folders(
         &self,
@@ -221,7 +221,8 @@ impl Library {
         let mut c = self.connection()?;
         let root = manga::manga_root(self, &c)?.ok_or(LibraryError::MangaRootNotSet)?;
         let root = PathBuf::from(root);
-        let index = local_index(&c, &root)?;
+        let root_identity = super::manga_root_guard::require(self, &c, &root, false)?;
+        let index = local_index(self, &c, &root)?;
         let selected: BTreeSet<_> = paths.into_iter().collect();
         let removed: Vec<_> = index
             .vanished
@@ -237,7 +238,7 @@ impl Library {
         // records being removed, without a writer/scan slipping into the gap.
         backup::create_verified_snapshot(&c, &destination)?;
         let tx = c.transaction()?;
-        require_root(&root)?;
+        root_identity.verify(&tx)?;
         let count = removed.iter().map(|folder| folder.series_count).sum();
         for folder in &removed {
             if !is_absent(&root.join(&folder.relative_path))? {
@@ -268,6 +269,7 @@ impl Library {
                 return Err(LibraryError::InvalidMangaIndexRequest);
             }
         }
+        root_identity.verify_before_purge_commit(&tx)?;
         tx.commit()?;
         Ok(MangaFolderPurgeResult {
             removed_folders: removed,
@@ -297,16 +299,12 @@ fn is_absent(path: &Path) -> Result<bool, LibraryError> {
         }),
     }
 }
-fn require_root(root: &Path) -> Result<(), LibraryError> {
-    // A disconnected drive/root must never turn every folder into a purge candidate.
-    fs::read_dir(root).map_err(|source| LibraryError::ReadMedia {
-        path: root.into(),
-        source,
-    })?;
-    Ok(())
-}
-fn local_index(c: &Connection, root: &Path) -> Result<MangaLocalIndex, LibraryError> {
-    require_root(root)?;
+fn local_index(
+    library: &Library,
+    c: &Connection,
+    root: &Path,
+) -> Result<MangaLocalIndex, LibraryError> {
+    let identity = super::manga_root_guard::require(library, c, root, true)?;
     let mut folders = BTreeMap::<String, MangaLocalFolder>::new();
     for entry in fs::read_dir(root).map_err(|source| LibraryError::ReadMedia {
         path: root.into(),
@@ -363,6 +361,7 @@ fn local_index(c: &Connection, root: &Path) -> Result<MangaLocalIndex, LibraryEr
             result.folders.push(folder);
         }
     }
+    identity.verify(c)?;
     Ok(result)
 }
 #[cfg(test)]

@@ -256,6 +256,12 @@ impl Library {
     /// other remaining record. The file primitives never follow a symlink out of the root.
     #[cfg(any(windows, target_os = "linux"))]
     fn delete_accepted_purge_files_locked(&self) -> Result<Vec<String>, LibraryError> {
+        // Lock order: trash -> ingestion -> database. Ingestion holds this gate
+        // from staging through file installation, registration and rollback.
+        let _files = self
+            .ingestion_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let rows = {
             let connection = self.connection()?;
             let rows = connection
@@ -301,6 +307,7 @@ impl Library {
                 kept_shared += recorded.count() - paths.count();
                 paths
             };
+            run_before_accepted_unlink_hook();
             if self.remove_managed_paths(&paths).is_ok() {
                 removed += 1;
                 self.connection()?.execute(
@@ -342,6 +349,10 @@ impl Library {
 
     #[cfg(any(windows, target_os = "linux"))]
     fn purge_candidates(&self, asset_ids: Vec<String>) -> Result<PurgeSummary, LibraryError> {
+        let _files = self
+            .ingestion_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // The library connection lock is not reentrant, so the legacy branch must be
         // decided without holding a second handle to it.
         let authority_adopted = {
@@ -908,6 +919,21 @@ fn run_after_trash_count_hook() {
 #[cfg(not(test))]
 fn run_after_trash_count_hook() {}
 
+#[cfg(test)]
+thread_local! {
+    static BEFORE_ACCEPTED_UNLINK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
+
+fn run_before_accepted_unlink_hook() {
+    #[cfg(test)]
+    BEFORE_ACCEPTED_UNLINK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook();
+        }
+    });
+}
+
 fn decode_cursor(after: Option<AssetCursor>) -> Result<Option<TrashCursor>, LibraryError> {
     after
         .map(|cursor| {
@@ -1055,6 +1081,88 @@ mod tests {
             .unwrap()
             .query_row("SELECT count(*) FROM asset_purge_pending", [], |r| r.get(0))
             .unwrap()
+    }
+
+    #[test]
+    fn p0_accepted_purge_cannot_unlink_a_concurrent_ingests_files() {
+        use crate::library::models::{ImportSource, IngestMediaRequest, IngestOutcome};
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let source = temp.path().join("source.png");
+        image::DynamicImage::new_rgb8(8, 8).save(&source).unwrap();
+        let request = IngestMediaRequest {
+            source_path: source.clone(),
+            classification_id: None,
+            source_url: None,
+            collected_at: None,
+            replace_duplicate_metadata: false,
+            source_published_at: None,
+            creator_name: None,
+            creator_handle: None,
+            creator_url: None,
+            import_source: ImportSource::Direct,
+            import_batch_id: uuid::Uuid::new_v4().to_string(),
+        };
+        let IngestOutcome::Added { asset: old } = library.ingest_media(request.clone()).unwrap()
+        else {
+            panic!("expected added asset");
+        };
+        // The accepted tombstone has retired the old row, leaving its bytes for GC.
+        library
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM assets WHERE id=?", [&old.id])
+            .unwrap();
+        accepted_purge(
+            &library,
+            &old.id,
+            "tombstoned",
+            &old.relative_path,
+            old.thumbnail_relative_path.as_deref().unwrap(),
+        );
+        let worker_library = library.clone();
+        let (start_tx, start_rx) = mpsc::channel();
+        let (blocked_tx, blocked_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            start_rx.recv().unwrap();
+            let blocked = match worker_library.ingestion_lock.try_lock() {
+                Ok(guard) => {
+                    drop(guard);
+                    false
+                }
+                Err(std::sync::TryLockError::WouldBlock) => true,
+                Err(error) => panic!("unexpected poisoned lock: {error}"),
+            };
+            blocked_tx.send(blocked).unwrap();
+            let result = worker_library.ingest_media(request);
+            let _ = finished_tx.send(());
+            result
+        });
+        super::BEFORE_ACCEPTED_UNLINK.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move || {
+                start_tx.send(()).unwrap();
+                // Force the old race: ingestion completes after the shared-path check but
+                // before unlink. With serialization it must instead finish after GC.
+                if !blocked_rx.recv().unwrap() {
+                    finished_rx.recv().unwrap();
+                }
+            }))
+        });
+        let failures = library.delete_accepted_purge_files().unwrap();
+        let IngestOutcome::Added { asset } = worker.join().unwrap().unwrap() else {
+            panic!("expected a new asset");
+        };
+        assert!(failures.is_empty());
+        assert_eq!(
+            std::fs::read(library.root().join(&asset.relative_path)).unwrap(),
+            std::fs::read(source).unwrap()
+        );
+        assert!(library
+            .root()
+            .join(asset.thumbnail_relative_path.unwrap())
+            .is_file());
+        assert!(library.get_asset(&asset.id).is_ok());
     }
 
     #[test]

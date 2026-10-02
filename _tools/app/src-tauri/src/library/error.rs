@@ -627,6 +627,8 @@ pub enum LibraryError {
     },
     #[error("망가 루트 폴더가 설정되지 않았습니다")]
     MangaRootNotSet,
+    #[error("망가 폴더 정리를 중단했습니다. {0}")]
+    UnsafeMangaRoot(&'static str),
     #[error("망가 목차 요청이 올바르지 않거나 폴더가 다시 존재합니다")]
     InvalidMangaIndexRequest,
     #[error("이 PC의 라이브러리 설정 파일을 읽거나 쓸 수 없습니다: {path}")]
