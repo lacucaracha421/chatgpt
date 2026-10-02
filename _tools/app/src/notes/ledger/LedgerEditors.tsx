@@ -30,7 +30,8 @@ export function RecurringEditor({ initial, today = localToday(), onSave, onClose
     const parsed = parseAmount(amount), n = Number(every), freeMonths = Number(months);
     const fail = (message: string) => setProblem(message);
     if (!name.trim() || Array.from(name.trim()).length > LEDGER_LIMITS.nameChars) return fail('이름은 1~100자로 적어 주세요.');
-    if (!parsed || !isDate(start) || !Number.isInteger(n) || n < 1 || n > 120) return fail('가격, 주기와 첫 결제일을 확인해 주세요.');
+    if (!parsed || parsed.in) return fail('가격은 0 이상의 정수로 적어 주세요.');
+    if (!isDate(start) || !Number.isInteger(n) || n < 1 || n > 120) return fail('가격, 주기와 첫 결제일을 확인해 주세요.');
     if (trialChanged && trial && (!isDate(from) || from >= start || !Number.isInteger(freeMonths) || freeMonths < 1 || freeMonths > 120)) return fail('무료 기간과 시작일을 확인해 주세요.');
     let patch: RecurringChanges = { name: name.trim(), amount: parsed.amount, every: n, unit, start, trial, until, memo };
     if (trialChanged) patch.trialFrom = trial ? from : null;
@@ -84,7 +85,8 @@ export function PlanEditor({ initial, month, onSave, onClose, onDelete, error }:
   async function save(dropped = initial?.dropped ?? false) {
     if (lock.current || composing.current) return;
     const parsed = parseAmount(amount);
-    if (!name.trim() || Array.from(name.trim()).length > 100 || !parsed || (when && !isMonth(when)) || Array.from(where).length > 100) { setProblem('이름, 가격, 구매처와 달을 확인해 주세요.'); return; }
+    if (!parsed || parsed.in) { setProblem('가격은 0 이상의 정수로 적어 주세요.'); return; }
+    if (!name.trim() || Array.from(name.trim()).length > 100 || (when && !isMonth(when)) || Array.from(where).length > 100) { setProblem('이름, 가격, 구매처와 달을 확인해 주세요.'); return; }
     const patch: PlanChanges = { name: name.trim(), amount: parsed.amount, month: when || null, memo, dropped };
     if (whereChanged) patch.where = where;
     if (priorityChanged) patch.priority = Number(priority);

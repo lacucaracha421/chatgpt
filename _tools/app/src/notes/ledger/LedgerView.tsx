@@ -6,7 +6,7 @@ import { keyBetween } from "../model";
 import type { Note, NotesStore } from "../store";
 import { addMonths, localToday } from "./cycle";
 import { forkedIds, keepOnly, LEDGER_LIMITS, ledgerLimitProblem, ledgerSizeProblem, monthLabel, signedWon, sortRecurring, validIncomeDay, won, type LedgerEntry, type Planned, type Recurring } from "./model";
-import { baseIncome, ledgerEntries, monthNotesOf, monthSummary, type Charge } from "./summary";
+import { baseIncome, ledgerEntries, monthNotesOf, monthSummary, monthCharges, type Charge } from "./summary";
 import { amountText, dotDate, formatAmountInput, parseAmount, parseDay, weekday } from "./input";
 import { Dialog } from "../../shared/ui/Dialog";
 import { LedgerContents, QuickEntry } from "./LedgerContents";
@@ -39,7 +39,7 @@ function formKeys(submit: () => void, cancel?: () => void) {
 
 function AmountInput({ value, onChange, label, allowIn = false, placeholder = "0", inputRef }: { value: string; onChange: (value: string) => void; label: string; allowIn?: boolean; placeholder?: string; inputRef?: RefObject<HTMLInputElement | null> }) {
   return <span className="ledger-input ledger-amount-input"><span aria-hidden="true">₩</span>
-    <input ref={inputRef} aria-label={label} inputMode="numeric" autoComplete="off" placeholder={placeholder} value={value} onChange={(e) => onChange(formatAmountInput(e.target.value, allowIn))} /></span>;
+    <input ref={inputRef} aria-label={label} inputMode="numeric" autoComplete="off" placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} onBlur={(e) => onChange(formatAmountInput(e.target.value, allowIn))} /></span>;
 }
 
 type EntryDraft = { date: string; amount: number; name: string; in: boolean };
@@ -75,7 +75,7 @@ function EntryForm({ label, month, initial, submitLabel = "추가", link, onUnli
       <span className="ledger-input ledger-amount-input ledger-entry-form__amount">
         <button type="button" tabIndex={-1} className="ledger-kind" aria-pressed={incoming} onClick={() => setAmount(incoming ? amount.replace(/^\s*\+/, "") : `+${amount}`)}>{incoming ? "들어온 돈" : "나간 돈"}</button>
         <span aria-hidden="true">₩</span>
-        <input ref={ref} aria-label="금액" inputMode="numeric" autoComplete="off" placeholder="0" value={amount} onChange={(e) => setAmount(formatAmountInput(e.target.value))} />
+        <input ref={ref} aria-label="금액" inputMode="numeric" autoComplete="off" placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} onBlur={(e) => setAmount(formatAmountInput(e.target.value))} />
       </span>
       <input className="ledger-input ledger-entry-form__name" aria-label="이름" placeholder="이름 (선택)" autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
       <Button variant="primary" onClick={() => void submit()}>{submitLabel}</Button>
@@ -88,16 +88,16 @@ function EntryForm({ label, month, initial, submitLabel = "추가", link, onUnli
 }
 
 /** A derived charge: 실제 금액으로 확정, or 이번 달은 건너뜀 (a 0-won confirmation). */
-function ChargeForm({ charge, onConfirm, onCancel }: { charge: Charge; onConfirm: (amount: number) => Promise<boolean>; onCancel: () => void }) {
+function ChargeForm({ charge, busy, onConfirm, onCancel }: { charge: Charge; busy: boolean; onConfirm: (amount: number) => Promise<boolean>; onCancel: () => void }) {
   const [amount, setAmount] = useState(amountText(charge.amount));
   const [problem, setProblem] = useState("");
-  const confirm = () => { const parsed = parseAmount(amount); if (!parsed) { setProblem("금액을 적어 주세요."); return; } void onConfirm(parsed.amount); };
+  const confirm = () => { const parsed = parseAmount(amount); if (!parsed || parsed.in) { setProblem("금액은 0 이상의 정수로 적어 주세요."); return; } void onConfirm(parsed.amount); };
   return <div className="ledger-entry-form" role="group" aria-label={`${charge.recurring.name} 결제 확정`} onKeyDown={formKeys(confirm, onCancel)}>
     <div className="ledger-entry-form__row">
       <span className="ledger-entry-form__caption">{dotDate(charge.date)} {charge.recurring.name}</span>
       <AmountInput label="실제 금액" value={amount} onChange={setAmount} />
-      <Button variant="primary" onClick={confirm}>실제 금액으로 확정</Button>
-      <Button onClick={() => void onConfirm(0)}>이번 달은 건너뜀</Button>
+      <Button variant="primary" disabled={busy} onClick={confirm}>실제 금액으로 확정</Button>
+      <Button disabled={busy} onClick={() => void onConfirm(0)}>이번 달은 건너뜀</Button>
       <Button variant="ghost" onClick={onCancel}>취소</Button>
     </div>
     {problem && <p className="ledger-problem" role="alert">{problem}</p>}
@@ -153,6 +153,8 @@ function LedgerScreen({ store, ledger, notes, today, actions, children }: { stor
   const [incomeOpen, setIncomeOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const chargeSaving = useRef(false);
+  const [chargeBusy, setChargeBusy] = useState(false);
   const [editingRec, setEditingRec] = useState<string | null>(null);
   const [editingPlan, setEditingPlan] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -204,7 +206,27 @@ function LedgerScreen({ store, ledger, notes, today, actions, children }: { stor
   }
   function addEntry(draft: EntryDraft, extra: Partial<LedgerEntry> = {}) {
     const entry: LedgerEntry = { id: crypto.randomUUID(), date: draft.date, amount: draft.amount, name: draft.name, createdAt: new Date().toISOString(), ...(draft.in ? { in: true } : {}), ...extra };
-    return saveMonth(draft.date.slice(0, 7), (list) => [...list, entry]);
+    return saveMonth(draft.date.slice(0, 7), (list) => {
+      if (entry.recurring) {
+        // Recheck after the asynchronous month creation/flush, including moved confirmations.
+        const all = ledgerEntries(freshMonthNotes());
+        const link = entry.recurring;
+        if (all.some(e => e.recurring?.id === link.id && e.recurring.date === link.date)) return list;
+        const current = store.snapshot().notes.find(n => n.id === ledger.id) ?? ledger;
+        if (monthCharges(current.recurring ?? [], all, link.date.slice(0, 7)).some(c => c.recurring.id === link.id && c.date === link.date && c.confirmedBy)) return list;
+      }
+      return [...list, entry];
+    });
+  }
+  async function confirmCharge(charge: Charge, amount: number): Promise<boolean> {
+    if (chargeSaving.current) return false;
+    chargeSaving.current = true;
+    setChargeBusy(true);
+    try {
+      const ok = await addEntry({ date: charge.date, amount, name: charge.recurring.name, in: false }, { recurring: { id: charge.recurring.id, date: charge.date } });
+      if (ok) setConfirming(null);
+      return ok;
+    } finally { chargeSaving.current = false; setChargeBusy(false); }
   }
   async function updateEntry(old: LedgerEntry, draft: EntryDraft): Promise<boolean> {
     const next: LedgerEntry = { ...old, date: draft.date, amount: draft.amount, name: draft.name };
@@ -263,7 +285,7 @@ function LedgerScreen({ store, ledger, notes, today, actions, children }: { stor
   </li>;
   const chargeRow = (c: Charge) => { const key = `${c.recurring.id}\n${c.date}`; return <li key={key} className="ledger-entry is-derived">
     {confirming === key
-      ? <ChargeForm charge={c} onCancel={() => setConfirming(null)} onConfirm={async amount => { const ok = await addEntry({ date: c.date, amount, name: c.recurring.name, in: false }, { recurring: { id: c.recurring.id, date: c.date } }); if (ok) setConfirming(null); return ok; }} />
+      ? <ChargeForm charge={c} busy={chargeBusy} onCancel={() => setConfirming(null)} onConfirm={amount => confirmCharge(c, amount)} />
       : <button type="button" className="ledger-entry__main" onClick={() => setConfirming(key)}>
           <span className="ledger-entry__icon" aria-hidden="true"><ArrowPathRoundedSquareIcon /></span>
           <span className="ledger-entry__name">{c.recurring.name}</span>

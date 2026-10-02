@@ -39,9 +39,10 @@ export function LedgerContents({ ledger, summary, all, today, spending, quickInp
   const buying = useRef(false);
   const figures = budgetFigures(ledger, summary, all), done = donePlans(all);
   const recurring = sortRecurring(ledger.recurring ?? []), plans = sortRecurring(ledger.planned ?? []).filter(p => !p.dropped && !done.has(p.id));
+  const dropped = sortRecurring(ledger.planned ?? []).filter(p => p.dropped);
   const chosen = plans.find(p => p.id === selected);
   const forksRec = forkedIds(recurring), forksPlan = forkedIds(plans);
-  const events = monthlyEvents(ledger, summary.month, today);
+  const events = monthlyEvents(ledger, summary.month, today, all);
   const ratio = (amount: number) => figures.budget && figures.budget > 0 ? Math.max(0, Math.min(100, amount / figures.budget * 100)) : 0;
   const fixedWidth = ratio(figures.fixed), spentWidth = Math.min(100 - fixedWidth, ratio(figures.spent));
   const planWidth = Math.min(100 - fixedWidth - spentWidth, ratio(chosen?.amount ?? 0));
@@ -91,6 +92,11 @@ export function LedgerContents({ ledger, summary, all, today, spending, quickInp
           {forksPlan.has(p.id) && <div className="ledger-conflict">두 기기에서 다르게 고침 <Button size="sm" variant="quiet" onClick={() => onKeepPlan(p.id)}>이것만 남기기</Button></div>}
         </li>)}</ul>
           {!plans.length && <p className="ledger-empty">사고 싶은 것 없음</p>}
+          {dropped.length > 0 && <details><summary>안 사기로 한 것 {dropped.length}</summary>
+            <ul className="ledger-items">{dropped.map(p => <li key={p.id} className="ledger-wish">
+              <button type="button" className="ledger-wish__main" onClick={() => onPlan(p)}><strong>{p.name}</strong><span className="ledger-value">{won(p.amount)}</span></button>
+            </li>)}</ul>
+          </details>}
           <Button size="sm" variant="quiet" onClick={() => onPlan(null)}>+ 사고 싶은 것</Button>
         </section>
         <section aria-label="지출"><SectionLabel as="h3" title="지출" />{spending}{quickInput}</section>

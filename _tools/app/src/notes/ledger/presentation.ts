@@ -6,7 +6,8 @@ import { chargesInMonth, monthCharges, reminders, type LedgerLike, type MonthSum
 export function budgetFigures(ledger: LedgerLike, summary: MonthSummary, all: LedgerEntry[]) {
   const charges = monthCharges(ledger.recurring ?? [], all, summary.month);
   const confirmed = new Set(charges.flatMap(c => c.confirmedBy ? [c.confirmedBy.id] : []));
-  const fixed = charges.reduce((sum, c) => sum + c.amount, 0);
+  // A moved confirmation still resolves the original charge, but belongs to its entry month.
+  const fixed = charges.filter(c => !c.confirmedBy || c.confirmedBy.date.startsWith(summary.month)).reduce((sum, c) => sum + c.amount, 0);
   const spent = summary.entries.filter(e => !e.in && !confirmed.has(e.id)).reduce((sum, e) => sum + e.amount, 0);
   return { budget: summary.incomeSet ? summary.income : null, fixed, spent, left: summary.incomeSet ? summary.income - fixed - spent : null };
 }
@@ -27,10 +28,12 @@ export function subscriptionPills(r: Recurring, today: string) {
   if (inTrial(r, today) && !isEnded(r, today)) pills.push(`무료 D-${dayNumber(r.start) - dayNumber(today)}`);
   return pills;
 }
-export function monthlyEvents(ledger: LedgerLike, month: string, today: string) {
-  const notices = reminders(ledger, today);
+export function monthlyEvents(ledger: LedgerLike, month: string, today: string, entries: LedgerEntry[] = []) {
+  const notices = reminders(ledger, today, entries);
+  const resolved = monthCharges(ledger.recurring ?? [], entries, month).filter(c => c.confirmedBy);
   const events = chargesInMonth(ledger, month);
   return events
+    .filter(e => e.kind === 'cancellationEnd' || !resolved.some(c => c.recurring.id === e.recurring.id && c.date === e.date))
     .filter(e => month !== today.slice(0, 7) || e.date >= today)
     // A trial end is the first paid charge; keep one dated item with both meanings.
     .filter(e => e.kind !== 'charge' || !events.some(t => t.kind === 'trialEnd' && t.recurring.id === e.recurring.id && t.date === e.date))

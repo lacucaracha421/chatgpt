@@ -9,18 +9,19 @@ import { isDate, isMonth, validAmount } from "./model";
 const pad = (n: number) => String(n).padStart(2, "0");
 const group = (digits: string) => digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
-/** Keeps an optional leading `+`, drops everything but digits (at most 12), and groups them. */
+/** Group valid integers; leave invalid input intact so validation cannot change its value. */
 export function formatAmountInput(text: string, allowIn = true): string {
-  const sign = allowIn && /^\s*\+/.test(text) ? "+" : "";
-  const digits = text.replace(/\D/g, "").replace(/^0+(?=\d)/, "").slice(0, 12);
-  return sign + group(digits);
+  const trimmed = text.trim();
+  const parsed = parseAmount(trimmed);
+  if (!parsed || (parsed.in && !allowIn)) return text;
+  return (parsed.in ? "+" : "") + group(String(parsed.amount));
 }
-/** "+18,000" → {amount: 18000, in: true}; null when empty or out of range. */
+/** "+18,000" → {amount: 18000, in: true}; reject decimals, negatives and malformed groups. */
 export function parseAmount(text: string): { amount: number; in: boolean } | null {
-  const digits = text.replace(/\D/g, "");
-  if (!digits) return null;
-  const amount = Number(digits);
-  return validAmount(amount) ? { amount, in: /^\s*\+/.test(text) } : null;
+  const match = text.trim().match(/^(\+)?(\d+|\d{1,3}(?:,\d{3})+)$/);
+  if (!match) return null;
+  const amount = Number(match[2]!.replace(/,/g, ""));
+  return validAmount(amount) ? { amount, in: !!match[1] } : null;
 }
 /** Plain grouped number for an input's initial value (no ₩). */
 export const amountText = (amount: number | null | undefined) => (amount == null ? "" : group(String(amount)));

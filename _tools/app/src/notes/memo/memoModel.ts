@@ -74,7 +74,7 @@ export function memoSections(doc: MemoDocument): MemoSection[] {
     if (fence) { if (fenceEnd(line.raw, fence)) fence = null; }
     else fence = nextFence;
     const task = fenced ? null : taskPattern.exec(line.raw);
-    current.items.push({ ...line, sectionId: current.id, fenced, task: !!task, done: !!task && task[2] !== ' ', text: task ? task[5]! : line.raw.replace(/^\\(?= {0,3}#{1,6}(?:[ \t]|$))/, '') });
+    current.items.push({ ...line, sectionId: current.id, fenced, task: !!task, done: !!task && task[2] !== ' ', text: task ? task[5]! : fenced ? line.raw : line.raw.replace(/^\\(?= {0,3}#{1,6}(?:[ \t]|$))/, '') });
   }
   return sections;
 }
@@ -90,7 +90,8 @@ function replaceLine(doc: MemoDocument, id: string, raw: string): MemoDocument {
 export function editItem(doc: MemoDocument, id: string, text: string, mode: MemoMode): MemoDocument {
   const item = findItem(doc, id); if (!item) return doc;
   const value = clean(text);
-  if (mode === 'todo') {
+  if (item.fenced) return replaceLine(doc, id, value);
+  if (mode === 'todo' || item.task) {
     const task = taskPattern.exec(item.raw);
     return replaceLine(doc, id, task ? `${task[1]}${task[2]}${task[3]}${task[4] || (value ? ' ' : '')}${value}` : `- [ ]${value ? ` ${value}` : ''}`);
   }

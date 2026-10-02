@@ -85,12 +85,13 @@ export function chargesInMonth(ledger: LedgerLike, month: string): LedgerEvent[]
 }
 
 /** Inclusive reminder window for the next charge and, when applicable, trial end. */
-export function reminders(ledger: LedgerLike, today: string): (LedgerEvent & { kind: "charge" | "trialEnd" })[] {
+export function reminders(ledger: LedgerLike, today: string, entries: LedgerEntry[] = []): (LedgerEvent & { kind: "charge" | "trialEnd" })[] {
   const items: (LedgerEvent & { kind: "charge" | "trialEnd" })[] = [];
   for (const r of ledger.recurring ?? []) {
     if (r.remindDays == null || !Number.isInteger(r.remindDays) || r.remindDays < 0 || r.remindDays > 30) continue;
     const charge = nextCharge(r, today);
     if (!charge || today < addDays(charge.date, -r.remindDays)) continue;
+    if (monthCharges([r], entries, charge.date.slice(0, 7)).some(c => c.date === charge.date && c.confirmedBy)) continue;
     items.push({ recurring: r, kind: "charge", ...charge });
     if (r.trial && charge.date === r.start) items.push({ recurring: r, kind: "trialEnd", ...charge });
   }

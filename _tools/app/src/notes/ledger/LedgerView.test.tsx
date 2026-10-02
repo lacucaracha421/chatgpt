@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { NotesStore, type Note, type NotesRequest } from "../store";
 import { LedgerView } from "./LedgerView";
@@ -211,4 +211,95 @@ it('shows the effective current price separately from the next charge amount', a
   const row = section('구독').getByRole('button', { name: /^가격구독/ });
   expect(row.querySelector('.ledger-value')).toHaveTextContent('₩10,000');
   expect(row.querySelector('.ledger-next')).toHaveTextContent('10.1 · ₩12,000');
+});
+
+it.each(['실제 금액으로 확정', '이번 달은 건너뜀'])('serializes repeated charge actions: %s', async action => {
+  const { store } = await openLedger([ledgerNote({ recurring: [rec('r', '구독', 10000, '2026-09-01')], planned: [] }), monthNote('2026-09', [])]);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const original = store.ledgerMonth.bind(store);
+  const saving = vi.spyOn(store, 'ledgerMonth').mockImplementation(async (...args) => { await gate; return original(...args); });
+  fireEvent.click(section('지출').getByRole('button', { name: /구독/ }));
+  const form = within(screen.getByRole('group', { name: '구독 결제 확정' }));
+  fireEvent.click(form.getByRole('button', { name: action }));
+  fireEvent.click(form.getByRole('button', { name: action }));
+  fireEvent.click(form.getByRole('button', { name: action === '이번 달은 건너뜀' ? '실제 금액으로 확정' : '이번 달은 건너뜀' }));
+  const attempts = saving.mock.calls.length;
+  await act(async () => { release(); await gate; });
+  await settle(store);
+  expect(attempts).toBe(1);
+  expect(store.snapshot().notes.find(n => n.month === '2026-09')?.entries).toHaveLength(1);
+});
+it.each(['실제 금액으로 확정', '이번 달은 건너뜀'])('checks fresh confirmations in every month before writing: %s', async action => {
+  const { store } = await openLedger([ledgerNote({ recurring: [rec('r', '구독', 10000, '2026-09-01')], planned: [] }), monthNote('2026-09', [])]);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const original = store.ledgerMonth.bind(store);
+  vi.spyOn(store, 'ledgerMonth').mockImplementation(async (...args) => { await gate; return original(...args); });
+  fireEvent.click(section('지출').getByRole('button', { name: /구독/ }));
+  fireEvent.click(screen.getByRole('button', { name: action }));
+  act(() => store.edit(monthNote('2026-10', [entry('remote', '2026-10-01', 0, '구독', { recurring: { id: 'r', date: '2026-09-01' } })])));
+  await act(async () => { release(); await gate; });
+  await settle(store);
+  expect(store.snapshot().notes.flatMap(n => n.entries ?? []).filter(e => e.recurring?.id === 'r')).toHaveLength(1);
+});
+it('reopens dropped plans from a folded list, restores them, and can delete them', async () => {
+  const { store } = await openLedger([ledgerNote({ recurring: [], planned: [plan('p', '텐트', 300000, null)] })]);
+  fireEvent.click(section('사고 싶은 것').getByRole('button', { name: /텐트/ }));
+  fireEvent.click(screen.getByRole('button', { name: '고치기' }));
+  fireEvent.click(details().getByRole('button', { name: '안 사기로 함' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  const folded = screen.getByText('안 사기로 한 것 1').closest('details')!;
+  expect(folded).not.toHaveAttribute('open');
+  fireEvent.click(within(folded).getByText('안 사기로 한 것 1'));
+  fireEvent.click(within(folded).getByRole('button', { name: /텐트/ }));
+  fireEvent.click(details().getByRole('button', { name: '다시 사기로' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(store.snapshot().notes.find(n => n.id === 'L')?.planned?.[0]?.dropped).toBe(false);
+  if (!screen.queryByRole('button', { name: '고치기' })) fireEvent.click(section('사고 싶은 것').getByRole('button', { name: /텐트/ }));
+  fireEvent.click(screen.getByRole('button', { name: '고치기' }));
+  fireEvent.click(details().getByRole('button', { name: '안 사기로 함' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  fireEvent.click(screen.getByText('안 사기로 한 것 1'));
+  fireEvent.click(screen.getByRole('button', { name: /텐트/ }));
+  fireEvent.click(details().getByRole('button', { name: '삭제' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(store.snapshot().notes.find(n => n.id === 'L')?.planned).toEqual([]);
+  await settle(store);
+});
+it.each([0, 9000])('hides a resolved charge (%s won) from the shared upcoming strip', async amount => {
+  await openLedger([ledgerNote({ recurring: [rec('r', '구독', 10000, TODAY, { remindDays: 3 })], planned: [] }), monthNote('2026-09', [entry('e', TODAY, amount, '구독', { recurring: { id: 'r', date: TODAY } })])]);
+  expect(section('이번 달 결제 예정').getByText('결제 예정 없음')).toBeInTheDocument();
+});
+
+it('releases the confirmation lock after a failed save so the user can retry', async () => {
+  const { store } = await openLedger([ledgerNote({ recurring: [rec('r', '구독', 10000, '2026-09-01')], planned: [] }), monthNote('2026-09', [])]);
+  vi.spyOn(store, 'ledgerMonth').mockRejectedValueOnce('저장 실패');
+  fireEvent.click(section('지출').getByRole('button', { name: /구독/ }));
+  fireEvent.click(screen.getByRole('button', { name: '실제 금액으로 확정' }));
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('저장 실패'));
+  expect(screen.getByRole('button', { name: '이번 달은 건너뜀' })).not.toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '이번 달은 건너뜀' }));
+  await waitFor(() => expect(store.snapshot().notes.find(n => n.month === '2026-09')?.entries).toMatchObject([{ amount: 0 }]));
+  await settle(store);
+});
+it('keeps an invalid confirmation amount intact and accepts ordinary integer typing', async () => {
+  const { store } = await openLedger([ledgerNote({ recurring: [rec('r', '구독', 10000, '2026-09-01')], planned: [] }), monthNote('2026-09', [])]);
+  fireEvent.click(section('지출').getByRole('button', { name: /구독/ }));
+  const amount = screen.getByLabelText('실제 금액');
+  fireEvent.change(amount, { target: { value: '10,000.00' } });
+  fireEvent.blur(amount);
+  fireEvent.click(screen.getByRole('button', { name: '실제 금액으로 확정' }));
+  expect(amount).toHaveValue('10,000.00');
+  expect(screen.getByRole('alert')).toHaveTextContent('정수');
+  expect(store.snapshot().notes.find(n => n.month === '2026-09')?.entries).toEqual([]);
+  for (const value of ['1', '10', '100', '1000', '10000']) {
+    fireEvent.change(amount, { target: { value } });
+    expect(amount).toHaveValue(value);
+  }
+  fireEvent.blur(amount);
+  expect(amount).toHaveValue('10,000');
+  fireEvent.click(screen.getByRole('button', { name: '실제 금액으로 확정' }));
+  await waitFor(() => expect(store.snapshot().notes.find(n => n.month === '2026-09')?.entries).toMatchObject([{ amount: 10000 }]));
+  await settle(store);
 });

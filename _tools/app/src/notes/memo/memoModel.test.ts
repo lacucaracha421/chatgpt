@@ -166,3 +166,19 @@ it('moves a last section/item without inventing a trailing empty row on reopen',
   expect(memoBody(itemMoved)).toBe('## A\na\nb\n## B');
   expect(parseMemo(memoBody(itemMoved)).lines.map(line => line.raw)).toEqual(itemMoved.lines.map(line => line.raw));
 });
+
+it.each(['- [x] ', '  * [X]  ', '+ [ ] '])('preserves an existing task marker %j when editing a mixed text note', marker => {
+  const doc = parseMemo(`설명\r\n${marker}원문\r\n뒤`);
+  expect(memoMode(memoBody(doc))).toBe('text');
+  expect(memoBody(editItem(doc, doc.lines[1]!.id, '수정', 'text'))).toBe(`설명\r\n${marker}수정\r\n뒤`);
+});
+it.each(['```', '~~~'])('edits heading-like code inside %s without escaping it', fence => {
+  const doc = parseMemo(`${fence}\n# original\n${fence}\nplain`);
+  expect(memoBody(editItem(doc, doc.lines[1]!.id, '# changed', 'text'))).toBe(`${fence}\n# changed\n${fence}\nplain`);
+});
+it('keeps literal backslashes in fenced line display and subsequent edits', () => {
+  const doc = parseMemo('```\n\\# literal\n```');
+  const line = memoItems(doc)[1]!;
+  expect(line.text).toBe('\\# literal');
+  expect(memoBody(editItem(doc, line.id, line.text + '!', 'text'))).toBe('```\n\\# literal!\n```');
+});
