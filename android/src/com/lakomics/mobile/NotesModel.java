@@ -852,11 +852,11 @@ final class NotesModel {
     // collections stay canonical JSON maps; the merge forks an item on a field collision.
     // Charge dates and month figures are computed only by the shared TypeScript.
 
-    static final List<String> RECURRING_KEYS = Collections.unmodifiableList(Arrays.asList("id", "name", "amount", "every", "unit", "start", "trial", "until", "memo", "order", "forkOf"));
-    static final List<String> PLANNED_KEYS = Collections.unmodifiableList(Arrays.asList("id", "name", "amount", "month", "memo", "dropped", "order", "forkOf"));
+    static final List<String> RECURRING_KEYS = Collections.unmodifiableList(Arrays.asList("id", "name", "amount", "every", "unit", "start", "trial", "until", "memo", "order", "forkOf", "priceHistory", "remindDays", "trialFrom"));
+    static final List<String> PLANNED_KEYS = Collections.unmodifiableList(Arrays.asList("id", "name", "amount", "month", "memo", "dropped", "order", "forkOf", "where", "priority"));
     static final List<String> ENTRY_KEYS = Collections.unmodifiableList(Arrays.asList("id", "date", "amount", "name", "in", "createdAt", "recurring", "planned", "forkOf"));
     /** Keys the merge compares (all known keys but `id` and `order`). */
-    private static final List<String> RECURRING_FIELDS = Arrays.asList("name", "amount", "every", "unit", "start", "trial", "until", "memo", "forkOf"), PLANNED_FIELDS = Arrays.asList("name", "amount", "month", "memo", "dropped", "forkOf"), ENTRY_FIELDS = ENTRY_KEYS.subList(1, 9);
+    private static final List<String> RECURRING_FIELDS = Arrays.asList("name", "amount", "every", "unit", "start", "trial", "until", "memo", "forkOf", "priceHistory", "remindDays", "trialFrom"), PLANNED_FIELDS = Arrays.asList("name", "amount", "month", "memo", "dropped", "forkOf", "where", "priority"), ENTRY_FIELDS = ENTRY_KEYS.subList(1, 9);
 
     interface ItemParser { Map<String, Object> parse(Object value) throws Shape; }
 
@@ -876,6 +876,19 @@ final class NotesModel {
         out.put("id", string(m, "id")); out.put("name", string(m, "name")); out.put("amount", count(m, "amount")); out.put("every", count(m, "every"));
         out.put("unit", string(m, "unit")); out.put("start", string(m, "start")); out.put("trial", defaultBool(m, "trial")); out.put("until", optString(m, "until"));
         out.put("memo", m.containsKey("memo") ? string(m, "memo") : ""); out.put("order", string(m, "order")); putOpt(out, "forkOf", optString(m, "forkOf"));
+        if (m.containsKey("priceHistory")) {
+            if (!(m.get("priceHistory") instanceof List)) throw new Shape("priceHistory");
+            List<Map<String, Object>> history = new ArrayList<>();
+            for (Object price : (List<?>) m.get("priceHistory")) {
+                Map<String, Object> source = object(price, "priceHistory"), entry = new LinkedHashMap<>();
+                entry.put("until", string(source, "until")); entry.put("amount", count(source, "amount"));
+                extras(source, entry, Arrays.asList("until", "amount"));
+                history.add(entry);
+            }
+            out.put("priceHistory", history);
+        }
+        if (m.containsKey("remindDays")) out.put("remindDays", unsigned(m.get("remindDays"), "remindDays"));
+        if (m.containsKey("trialFrom")) out.put("trialFrom", optString(m, "trialFrom"));
         extras(m, out, RECURRING_KEYS);
         return out;
     }
@@ -884,6 +897,8 @@ final class NotesModel {
         out.put("id", string(m, "id")); out.put("name", string(m, "name")); out.put("amount", count(m, "amount")); out.put("month", optString(m, "month"));
         out.put("memo", m.containsKey("memo") ? string(m, "memo") : ""); out.put("dropped", defaultBool(m, "dropped")); out.put("order", string(m, "order"));
         putOpt(out, "forkOf", optString(m, "forkOf"));
+        if (m.containsKey("where")) out.put("where", string(m, "where"));
+        if (m.containsKey("priority")) out.put("priority", count(m, "priority"));
         extras(m, out, PLANNED_KEYS);
         return out;
     }
@@ -976,6 +991,20 @@ final class NotesModel {
         String problem = checkList(c.recurring, MAX_RECURRING, "고정·구독은 200개까지 저장할 수 있습니다.", "고정·구독 형식이 올바르지 않습니다.", r -> {
             if (codePoints((String) r.get("name")) > MAX_LEDGER_NAME_CHARS || codePoints((String) r.get("memo")) > MAX_LEDGER_MEMO_CHARS) return NAME_PROBLEM;
             if (!amountOk(r.get("amount"))) return AMOUNT_PROBLEM;
+            if (r.get("remindDays") != null && (Long) r.get("remindDays") > 30) return "알림은 0~30일 전으로 입력해 주세요.";
+            if (r.get("trialFrom") != null && (!validDate((String) r.get("trialFrom")) || ((String) r.get("trialFrom")).compareTo((String) r.get("start")) >= 0)) return "무료 체험 시작일은 첫 결제일보다 앞이어야 합니다.";
+            if (r.containsKey("priceHistory")) {
+                List<?> history = (List<?>) r.get("priceHistory");
+                if (history.size() > 24) return "가격 이력은 24개까지 저장할 수 있습니다.";
+                String previous = "";
+                for (Object price : history) {
+                    Map<?, ?> entry = (Map<?, ?>) price;
+                    String until = (String) entry.get("until");
+                    if (!validDate(until) || until.compareTo(previous) <= 0) return "가격 이력 날짜는 오래된 순서로 입력해 주세요.";
+                    if (!amountOk(entry.get("amount"))) return AMOUNT_PROBLEM;
+                    previous = until;
+                }
+            }
             long every = (Long) r.get("every");
             if (every < 1 || every > MAX_EVERY || !Arrays.asList("week", "month", "year").contains(r.get("unit"))) return "주기는 1~120 사이로 입력해 주세요.";
             if (!validDate((String) r.get("start")) || (r.get("until") != null && !validDate((String) r.get("until"))) || !key(r.get("order"))) return "고정·구독 날짜가 올바르지 않습니다.";
@@ -985,6 +1014,8 @@ final class NotesModel {
         problem = checkList(c.planned, MAX_PLANNED, "계획은 300개까지 저장할 수 있습니다.", "계획 형식이 올바르지 않습니다.", p -> {
             if (codePoints((String) p.get("name")) > MAX_LEDGER_NAME_CHARS || codePoints((String) p.get("memo")) > MAX_LEDGER_MEMO_CHARS) return NAME_PROBLEM;
             if (!amountOk(p.get("amount"))) return AMOUNT_PROBLEM;
+            if (p.containsKey("where") && codePoints((String) p.get("where")) > 100) return "살 곳은 100자까지 쓸 수 있습니다.";
+            if (p.containsKey("priority") && (Long) p.get("priority") > 2) return "우선순위는 0~2 중에서 골라 주세요.";
             if ((p.get("month") != null && !validMonth((String) p.get("month"))) || !key(p.get("order"))) return "계획 형식이 올바르지 않습니다.";
             return null;
         });

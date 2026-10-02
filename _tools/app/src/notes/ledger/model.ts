@@ -8,6 +8,7 @@ export const LEDGER = "ledger";
 export const LEDGER_MONTH = "ledger-month";
 export type LedgerKind = typeof LEDGER | typeof LEDGER_MONTH;
 export type LedgerUnit = "week" | "month" | "year";
+export type PriceHistoryEntry = { until: string; amount: number; [extra: string]: unknown };
 
 /** A recurring charge (subscription or fixed bill). `start` is the first paid charge and the day anchor. */
 export type Recurring = {
@@ -15,12 +16,17 @@ export type Recurring = {
   /** Free trial until `start`. */ trial: boolean;
   /** No charge on or after this date (cancelled or ends); null = open-ended. */ until: string | null;
   memo: string; order: string;
+  priceHistory?: PriceHistoryEntry[];
+  remindDays?: number | null;
+  trialFrom?: string | null;
   /** Set on the local copy when two devices changed the same item differently. */ forkOf?: string;
   [extra: string]: unknown;
 };
 /** Something to buy; `month` null = 언젠가. Done is derived (an entry references it), never stored. */
 export type Planned = {
   id: string; name: string; amount: number; month: string | null; memo: string; dropped: boolean; order: string;
+  where?: string;
+  priority?: number;
   forkOf?: string; [extra: string]: unknown;
 };
 /** One record in a month note. `in` = money in (refund or one-off income). */
@@ -36,6 +42,7 @@ export const LEDGER_LIMITS = {
   /** Per month note: 300 worst-case entries (UUID ids, refs, 100-char Korean names) fit 256 KiB. */ entries: 300, nameChars: 100, memoChars: 500,
   /** Amounts are integer won, 0 <= x < 10^12. */ amountBound: 1_000_000_000_000,
   everyMax: 120, bodyBytes: 24 * 1024,
+  priceHistoryMax: 24, remindDaysMax: 30, whereChars: 100, priorityMax: 2,
   /** 들어오는 날: day of the month 1–31; past the month's end it means the last day. */ incomeDayMax: 31,
 } as const;
 
@@ -46,7 +53,8 @@ const utf8Bytes = (text: string) => new TextEncoder().encode(text).length;
 // Calendar strings: `YYYY-MM-DD` local dates and `YYYY-MM` months, no time zone.
 
 export function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (month === 2) return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 ? 29 : 28;
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
 }
 export function isMonth(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}$/.test(value)) return false;
@@ -121,6 +129,17 @@ export function ledgerLimitProblem(note: LedgerContent): string | null {
     if (!validAmount(r.amount)) return AMOUNT_PROBLEM;
     if (!Number.isInteger(r.every) || r.every < 1 || r.every > LEDGER_LIMITS.everyMax || !["week", "month", "year"].includes(r.unit)) return "주기는 1~120 사이로 입력해 주세요.";
     if (!isDate(r.start) || (r.until !== null && !isDate(r.until)) || !validKey(r.order)) return "고정·구독 날짜가 올바르지 않습니다.";
+    if (r.trialFrom != null && (!isDate(r.trialFrom) || r.trialFrom >= r.start)) return "무료 체험 시작일은 첫 결제일보다 앞이어야 합니다.";
+    if (r.remindDays != null && (!Number.isInteger(r.remindDays) || r.remindDays < 0 || r.remindDays > LEDGER_LIMITS.remindDaysMax)) return "알림은 0~30일 전으로 입력해 주세요.";
+    if (r.priceHistory !== undefined) {
+      if (!Array.isArray(r.priceHistory) || r.priceHistory.length > LEDGER_LIMITS.priceHistoryMax) return "가격 이력은 24개까지 저장할 수 있습니다.";
+      let previous = "";
+      for (const price of r.priceHistory) {
+        if (!price || !isDate(price.until) || price.until <= previous) return "가격 이력 날짜는 오래된 순서로 입력해 주세요.";
+        if (!validAmount(price.amount)) return AMOUNT_PROBLEM;
+        previous = price.until;
+      }
+    }
     return null;
   });
   if (recurring) return recurring;
@@ -128,6 +147,8 @@ export function ledgerLimitProblem(note: LedgerContent): string | null {
     if (codePoints(p.name) > LEDGER_LIMITS.nameChars || codePoints(p.memo) > LEDGER_LIMITS.memoChars) return NAME_PROBLEM;
     if (!validAmount(p.amount)) return AMOUNT_PROBLEM;
     if ((p.month !== null && !isMonth(p.month)) || !validKey(p.order)) return "계획 형식이 올바르지 않습니다.";
+    if (p.where !== undefined && (typeof p.where !== "string" || codePoints(p.where) > LEDGER_LIMITS.whereChars)) return "살 곳은 100자까지 쓸 수 있습니다.";
+    if (p.priority !== undefined && (!Number.isInteger(p.priority) || p.priority < 0 || p.priority > LEDGER_LIMITS.priorityMax)) return "우선순위는 0~2 중에서 골라 주세요.";
     return null;
   });
   if (planned) return planned;

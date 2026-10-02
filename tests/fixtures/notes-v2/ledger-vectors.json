@@ -185,5 +185,2029 @@
    "first": "# 가계부",
    "last": "… 429건 더"
   }
- }
+ },
+ "fieldValidation": [
+  {
+   "name": "all new fields",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": [
+       {
+        "until": "2026-09-15",
+        "amount": 13500
+       },
+       {
+        "until": "2026-10-15",
+        "amount": 15000
+       }
+      ],
+      "remindDays": 3,
+      "trialFrom": "2026-08-02"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": true
+  },
+  {
+   "name": "remindDays 0",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "remindDays": 0
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": true
+  },
+  {
+   "name": "remindDays 30",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "remindDays": 30
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": true
+  },
+  {
+   "name": "remindDays None",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "remindDays": null
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": true
+  },
+  {
+   "name": "invalid remindDays -1",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "remindDays": -1
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid remindDays 31",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "remindDays": 31
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid remindDays 1.5",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "remindDays": 1.5
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid remindDays 3",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "remindDays": "3"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid remindDays True",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "remindDays": true
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "trialFrom None",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "trialFrom": null
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": true
+  },
+  {
+   "name": "trialFrom 2026-11-01",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "trialFrom": "2026-11-01"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": true
+  },
+  {
+   "name": "trialFrom 2026-11-02",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "trialFrom": "2026-11-02"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "trialFrom 2026-11-03",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "trialFrom": "2026-11-03"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "trialFrom 2026-02-29",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "trialFrom": "2026-02-29"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "trialFrom 3",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "trialFrom": 3
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "history length 0",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": []
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": true
+  },
+  {
+   "name": "history length 24",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": [
+       {
+        "until": "2026-01-01",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-02",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-03",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-04",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-05",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-06",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-07",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-08",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-09",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-10",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-11",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-12",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-13",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-14",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-15",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-16",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-17",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-18",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-19",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-20",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-21",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-22",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-23",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-24",
+        "amount": 999999999999
+       }
+      ]
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": true
+  },
+  {
+   "name": "history length 25",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": [
+       {
+        "until": "2026-01-01",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-02",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-03",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-04",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-05",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-06",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-07",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-08",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-09",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-10",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-11",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-12",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-13",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-14",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-15",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-16",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-17",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-18",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-19",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-20",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-21",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-22",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-23",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-24",
+        "amount": 999999999999
+       },
+       {
+        "until": "2026-01-25",
+        "amount": 999999999999
+       }
+      ]
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid history None",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": null
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid history {}",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": {}
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid history [None]",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": [
+       null
+      ]
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid history [{'until': '2026-02-30', 'amount': 1}]",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": [
+       {
+        "until": "2026-02-30",
+        "amount": 1
+       }
+      ]
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid history [{'until': '2026-01-01', 'amount': 1000000000000}]",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": [
+       {
+        "until": "2026-01-01",
+        "amount": 1000000000000
+       }
+      ]
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid history [{'until': '2026-01-01', 'amount': -1}]",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": [
+       {
+        "until": "2026-01-01",
+        "amount": -1
+       }
+      ]
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid history [{'until': '2026-01-01', 'amount': 1.5}]",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": [
+       {
+        "until": "2026-01-01",
+        "amount": 1.5
+       }
+      ]
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid history [{'until': '2026-01-01', 'amount': True}]",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": [
+       {
+        "until": "2026-01-01",
+        "amount": true
+       }
+      ]
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid history [{'until': '2026-02-01', 'amount': 1}, {'until': '2026-02-01', 'amount': 2}]",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": [
+       {
+        "until": "2026-02-01",
+        "amount": 1
+       },
+       {
+        "until": "2026-02-01",
+        "amount": 2
+       }
+      ]
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "invalid history [{'until': '2026-02-01', 'amount': 1}, {'until': '2026-01-01', 'amount': 2}]",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": [
+       {
+        "until": "2026-02-01",
+        "amount": 1
+       },
+       {
+        "until": "2026-01-01",
+        "amount": 2
+       }
+      ]
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "history on leap day year 0000",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": [
+       {
+        "until": "0000-02-29",
+        "amount": 0
+       }
+      ]
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": true
+  },
+  {
+   "name": "priority 0",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "priority": 0
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": true
+  },
+  {
+   "name": "priority 1",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "priority": 1
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": true
+  },
+  {
+   "name": "priority 2",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "priority": 2
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": true
+  },
+  {
+   "name": "priority -1",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "priority": -1
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "priority 3",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "priority": 3
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "priority 0.5",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "priority": 0.5
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "priority None",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "priority": null
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "priority 2",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "priority": "2"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "priority True",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "priority": true
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "where ",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "where": ""
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": true
+  },
+  {
+   "name": "where 🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "where": "🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": true
+  },
+  {
+   "name": "where 🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "where": "🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒🛒"
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "where None",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "where": null
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  },
+  {
+   "name": "where 1",
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "where": 1
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   },
+   "valid": false
+  }
+ ]
 }

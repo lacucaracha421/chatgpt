@@ -23,6 +23,8 @@ pub const MAX_MEMO_CHARS: usize = 500;
 pub const AMOUNT_BOUND: u64 = 1_000_000_000_000;
 pub const MAX_EVERY: u64 = 120;
 pub const MAX_INCOME_DAY: u64 = 31;
+pub const MAX_PRICE_HISTORY: usize = 24;
+pub const MAX_REMIND_DAYS: u64 = 30;
 pub const MAX_FALLBACK_BYTES: usize = 24 * 1024;
 
 pub fn is_ledger_kind(kind: &str) -> bool {
@@ -34,6 +36,14 @@ fn is_false(value: &bool) -> bool {
 }
 
 /// A recurring charge; `start` is the first paid charge and the day anchor.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PriceHistoryEntry {
+    pub until: String,
+    pub amount: u64,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Recurring {
@@ -50,6 +60,24 @@ pub struct Recurring {
     #[serde(default)]
     pub memo: String,
     pub order: String,
+    #[serde(
+        default,
+        deserialize_with = "model::present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub price_history: Option<Vec<PriceHistoryEntry>>,
+    #[serde(
+        default,
+        deserialize_with = "model::present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub remind_days: Option<Option<u64>>,
+    #[serde(
+        default,
+        deserialize_with = "model::present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub trial_from: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_of: Option<String>,
     #[serde(flatten)]
@@ -70,6 +98,19 @@ pub struct Planned {
     #[serde(default)]
     pub dropped: bool,
     pub order: String,
+    #[serde(
+        default,
+        deserialize_with = "model::present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[serde(rename = "where")]
+    pub where_: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "model::present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub priority: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_of: Option<String>,
     #[serde(flatten)]
@@ -114,7 +155,18 @@ pub trait Keyed: Clone + Serialize + DeserializeOwned {
 }
 impl Keyed for Recurring {
     const FIELDS: &'static [&'static str] = &[
-        "name", "amount", "every", "unit", "start", "trial", "until", "memo", "forkOf",
+        "name",
+        "amount",
+        "every",
+        "unit",
+        "start",
+        "trial",
+        "until",
+        "memo",
+        "forkOf",
+        "priceHistory",
+        "remindDays",
+        "trialFrom",
     ];
     fn id(&self) -> &str {
         &self.id
@@ -124,8 +176,9 @@ impl Keyed for Recurring {
     }
 }
 impl Keyed for Planned {
-    const FIELDS: &'static [&'static str] =
-        &["name", "amount", "month", "memo", "dropped", "forkOf"];
+    const FIELDS: &'static [&'static str] = &[
+        "name", "amount", "month", "memo", "dropped", "forkOf", "where", "priority",
+    ];
     fn id(&self) -> &str {
         &self.id
     }
@@ -276,6 +329,32 @@ pub fn validate(c: &Content) -> Result<(), &'static str> {
                     return Err(NAMES);
                 }
                 amount_ok(r.amount)?;
+                if r.remind_days
+                    .flatten()
+                    .is_some_and(|days| days > MAX_REMIND_DAYS)
+                {
+                    return Err("알림은 0~30일 전으로 입력해 주세요.");
+                }
+                if r.trial_from
+                    .as_ref()
+                    .and_then(|date| date.as_deref())
+                    .is_some_and(|date| !valid_date(date) || date >= r.start.as_str())
+                {
+                    return Err("무료 체험 시작일은 첫 결제일보다 앞이어야 합니다.");
+                }
+                if let Some(history) = &r.price_history {
+                    if history.len() > MAX_PRICE_HISTORY {
+                        return Err("가격 이력은 24개까지 저장할 수 있습니다.");
+                    }
+                    let mut previous = "";
+                    for price in history {
+                        if !valid_date(&price.until) || price.until.as_str() <= previous {
+                            return Err("가격 이력 날짜는 오래된 순서로 입력해 주세요.");
+                        }
+                        amount_ok(price.amount)?;
+                        previous = &price.until;
+                    }
+                }
                 if !(1..=MAX_EVERY).contains(&r.every)
                     || !matches!(r.unit.as_str(), "week" | "month" | "year")
                 {
@@ -303,6 +382,15 @@ pub fn validate(c: &Content) -> Result<(), &'static str> {
                     return Err(NAMES);
                 }
                 amount_ok(p.amount)?;
+                if p.where_
+                    .as_deref()
+                    .is_some_and(|text| chars(text) > MAX_NAME_CHARS)
+                {
+                    return Err("살 곳은 100자까지 쓸 수 있습니다.");
+                }
+                if p.priority.is_some_and(|priority| priority > 2) {
+                    return Err("우선순위는 0~2 중에서 골라 주세요.");
+                }
                 if p.month.as_deref().is_some_and(|m| !valid_month(m))
                     || !model::valid_key(&p.order)
                 {
@@ -844,6 +932,40 @@ mod tests {
     }
 
     #[test]
+    fn new_fields_match_shared_validation_and_survive_the_view_and_save() {
+        let file = fixture("ledger-vectors.json");
+        for v in file["fieldValidation"].as_array().unwrap() {
+            let valid = serde_json::from_value::<Content>(v["payload"].clone())
+                .is_ok_and(|content| content.validate().is_ok());
+            assert_eq!(valid, v["valid"].as_bool().unwrap(), "{}", v["name"]);
+        }
+        let examples = fixture("payload-examples.json");
+        let source = examples["examples"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| {
+                v["name"]
+                    == "ledger with price history, reminders, trial start and wishlist details"
+            })
+            .unwrap()["payload"]
+            .clone();
+        let mut old = parse(&source);
+        old.recurring.as_mut().unwrap()[0]
+            .extra
+            .insert("future".into(), serde_json::json!({"x": 1}));
+        old.planned.as_mut().unwrap()[0]
+            .extra
+            .insert("future".into(), serde_json::json!([1, 2]));
+        let mut shown = old.clone();
+        clear_extra(&mut shown);
+        assert_eq!(serde_json::to_value(&shown).unwrap(), source);
+        restore_extra(shown.recurring.as_mut().unwrap(), old.recurring.as_ref());
+        restore_extra(shown.planned.as_mut().unwrap(), old.planned.as_ref());
+        assert_eq!(shown, old);
+    }
+
+    #[test]
     fn month_and_fork_ids_match_the_shared_vectors() {
         let file = fixture("ledger-vectors.json");
         let v = &file["monthId"];
@@ -919,6 +1041,9 @@ mod tests {
                 until: None,
                 memo: String::new(),
                 order: format!("a{i:03}"),
+                price_history: None,
+                remind_days: None,
+                trial_from: None,
                 fork_of: None,
                 extra: Map::new(),
             })
@@ -932,6 +1057,8 @@ mod tests {
                 memo: String::new(),
                 dropped: false,
                 order: format!("a{i:03}"),
+                where_: None,
+                priority: None,
                 fork_of: None,
                 extra: Map::new(),
             })
@@ -1011,6 +1138,9 @@ mod tests {
             until: None,
             memo: String::new(),
             order: "V".into(),
+            price_history: None,
+            remind_days: None,
+            trial_from: None,
             fork_of: None,
             extra: Map::new(),
         };

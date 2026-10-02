@@ -73,6 +73,18 @@ export function nextCharges(r: Cycle, from: string, count = 1): string[] {
   return dates;
 }
 
+/** Price intervals are half-open: the boundary day uses the following price. */
+export function chargeAmount(r: Pick<Recurring, "amount" | "priceHistory">, date: string): number {
+  return r.priceHistory?.find((price) => date < price.until)?.amount ?? r.amount;
+}
+
+/** First paid charge on or after today; a trial has no charges before start. */
+export function nextCharge(r: Recurring, today: string): { date: string; amount: number } | null {
+  if (!isDate(today)) return null;
+  const date = nextCharges(r, today)[0];
+  return date ? { date, amount: chargeAmount(r, date) } : null;
+}
+
 /** Monthly equivalent, rounded to the won. */
 export function monthlyEquivalent(r: Pick<Recurring, "amount" | "every" | "unit">): number {
   if (!Number.isInteger(r.every) || r.every < 1 || !["week", "month", "year"].includes(r.unit) || !Number.isFinite(r.amount)) return 0;

@@ -91,3 +91,18 @@ describe("totals and labels", () => {
     expect(cycleLabel(r({ start: "2026-09-21", unit: "week", every: 2 }))).toBe("2주마다 월요일");
   });
 });
+
+describe("next charge and historical prices", () => {
+  it("uses half-open price intervals including the exact boundary day", async () => {
+    const { chargeAmount, nextCharge } = await import("./cycle");
+    const subscription = r({ start: "2026-01-15", priceHistory: [{ until: "2026-03-15", amount: 8000 }, { until: "2026-05-15", amount: 9000 }] });
+    expect(chargeAmount(subscription, "2026-03-14")).toBe(8000);
+    expect(nextCharge(subscription, "2026-03-15")).toEqual({ date: "2026-03-15", amount: 9000 });
+    expect(nextCharge(subscription, "2026-05-15")).toEqual({ date: "2026-05-15", amount: 10000 });
+    expect(nextCharge(r({ trial: true, trialFrom: "2026-08-01", start: "2026-11-01", priceHistory: [{ until: "2026-12-01", amount: 5000 }] }), "2026-10-01"))
+      .toEqual({ date: "2026-11-01", amount: 5000 });
+    expect(nextCharge(r({ until: "2026-02-28" }), "2026-02-01")).toBeNull();
+    expect(nextCharge(r({ every: 0 }), "2026-01-01")).toBeNull();
+    expect(nextCharge(subscription, "invalid")).toBeNull();
+  });
+});

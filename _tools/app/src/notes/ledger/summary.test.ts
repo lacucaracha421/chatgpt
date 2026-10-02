@@ -170,3 +170,42 @@ describe("income day (들어오는 날)", () => {
     expect({ ...a, incomeDate: null, incomeUpcoming: false }).toEqual(b);
   });
 });
+
+describe("price history, calendar markers and reminders", () => {
+  const subscription = rec("r", "Subscription", 17000, "2026-09-02", { trial: true, trialFrom: "2026-06-02", remindDays: 3, priceHistory: [{ until: "2026-10-02", amount: 13500 }] });
+  it("uses historical prices in past and future summaries and keeps actual confirmations", () => {
+    expect(monthSummary({ recurring: [subscription] }, [], "2026-09", "2026-09-01").scheduledCharges).toBe(13500);
+    expect(monthSummary({ recurring: [subscription] }, [], "2026-09", "2026-10-01").spent).toBe(13500);
+    expect(monthSummary({ recurring: [subscription] }, [], "2026-10", "2026-09-01").scheduledCharges).toBe(17000);
+    const actual = entry("e", "2026-09-02", 12000, "Actual", { recurring: { id: "r", date: "2026-09-02" } });
+    expect(monthSummary({ recurring: [subscription] }, [monthNote("2026-09", [actual])], "2026-09", "2026-09-02").spent).toBe(12000);
+  });
+  it("lists trial-end and cancellation markers without counting them as charges", async () => {
+    const { chargesInMonth } = await import("./summary");
+    const result = chargesInMonth({ recurring: [{ ...subscription, until: "2026-09-30" }] }, "2026-09");
+    expect(result.map(({ kind, date, amount }) => ({ kind, date, amount }))).toEqual([
+      { kind: "charge", date: "2026-09-02", amount: 13500 },
+      { kind: "trialEnd", date: "2026-09-02", amount: 13500 },
+      { kind: "cancellationEnd", date: "2026-09-30", amount: 0 },
+    ]);
+    expect(chargesInMonth({ recurring: [{ ...subscription, until: subscription.start }] }, "2026-09").map((e) => e.kind)).toEqual(["cancellationEnd"]);
+    expect(chargesInMonth({}, "2026-09")).toEqual([]);
+  });
+  it("covers the inclusive window, disables absent/null, and suppresses cancelled renewals", async () => {
+    const { reminders } = await import("./summary");
+    const ledger = { recurring: [subscription] };
+    expect(reminders(ledger, "2026-08-29")).toEqual([]);
+    for (const today of ["2026-08-30", "2026-09-01", "2026-09-02"])
+      expect(reminders(ledger, today).map(({ kind, date, amount }) => ({ kind, date, amount }))).toEqual([
+        { kind: "charge", date: "2026-09-02", amount: 13500 }, { kind: "trialEnd", date: "2026-09-02", amount: 13500 },
+      ]);
+    expect(reminders(ledger, "2026-09-03")).toEqual([]);
+    expect(reminders(ledger, "2026-09-30").map((e) => [e.kind, e.amount])).toEqual([["charge", 17000]]);
+    for (const remindDays of [undefined, null, 0]) {
+      expect(reminders({ recurring: [{ ...subscription, remindDays }] }, "2026-09-01")).toEqual([]);
+      if (remindDays === 0) expect(reminders({ recurring: [{ ...subscription, remindDays }] }, "2026-09-02")).toHaveLength(2);
+    }
+    expect(reminders({ recurring: [{ ...subscription, until: "2026-09-02" }] }, "2026-09-01")).toEqual([]);
+    expect(reminders({ recurring: [{ ...subscription, unit: "week", trial: false, start: "2026-09-01", remindDays: 30 }] }, "2026-09-02")).toHaveLength(1);
+  });
+});

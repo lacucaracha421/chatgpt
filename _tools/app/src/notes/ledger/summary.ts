@@ -3,7 +3,7 @@
  * dedupe entries by id, derive unconfirmed charges and compute
  * 쓸 수 있는 돈 = 수입 − 쓴 돈 − 예정.
  */
-import { chargesInMonth, dayNumber, monthEnd, monthStart, addDays } from "./cycle";
+import { chargesInMonth as cycleChargesInMonth, chargeAmount, nextCharge, validCycle, dayNumber, monthEnd, monthStart, addDays } from "./cycle";
 import { byEntryOrder, incomeDateIn, LEDGER_MONTH, type LedgerEntry, type Planned, type Recurring } from "./model";
 
 /** What a reader needs from a month note (a decrypted `ledger-month` Note fits). */
@@ -56,7 +56,7 @@ export function monthCharges(recurring: Recurring[], entries: LedgerEntry[], mon
     if (entry.recurring && entry.recurring.date.startsWith(month)) confirmations.set(entry.recurring.id, [...(confirmations.get(entry.recurring.id) ?? []), entry]);
   const charges: Charge[] = [];
   for (const r of recurring) {
-    const own = chargesInMonth(r, month).map((date): Charge => ({ recurring: r, date, amount: r.amount, confirmedBy: null }));
+    const own = cycleChargesInMonth(r, month).map((date): Charge => ({ recurring: r, date, amount: chargeAmount(r, date), confirmedBy: null }));
     const pending = [...(confirmations.get(r.id) ?? [])];
     for (const charge of own) {
       const at = pending.findIndex((e) => e.recurring!.date === charge.date);
@@ -67,6 +67,34 @@ export function monthCharges(recurring: Recurring[], entries: LedgerEntry[], mon
     charges.push(...own);
   }
   return charges.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+export type LedgerEvent = { recurring: Recurring; kind: "charge" | "trialEnd" | "cancellationEnd"; date: string; amount: number };
+
+/** Calendar events; markers never contribute extra spending to monthSummary. */
+export function chargesInMonth(ledger: LedgerLike, month: string): LedgerEvent[] {
+  const events: LedgerEvent[] = [];
+  for (const r of ledger.recurring ?? []) {
+    if (!validCycle(r)) continue;
+    for (const date of cycleChargesInMonth(r, month)) events.push({ recurring: r, kind: "charge", date, amount: chargeAmount(r, date) });
+    if (r.trial && r.start.startsWith(`${month}-`) && (r.until === null || r.start < r.until))
+      events.push({ recurring: r, kind: "trialEnd", date: r.start, amount: chargeAmount(r, r.start) });
+    if (r.until?.startsWith(`${month}-`)) events.push({ recurring: r, kind: "cancellationEnd", date: r.until, amount: 0 });
+  }
+  return events.sort((a, b) => a.date.localeCompare(b.date) || a.recurring.id.localeCompare(b.recurring.id) || a.kind.localeCompare(b.kind));
+}
+
+/** Inclusive reminder window for the next charge and, when applicable, trial end. */
+export function reminders(ledger: LedgerLike, today: string): (LedgerEvent & { kind: "charge" | "trialEnd" })[] {
+  const items: (LedgerEvent & { kind: "charge" | "trialEnd" })[] = [];
+  for (const r of ledger.recurring ?? []) {
+    if (r.remindDays == null || !Number.isInteger(r.remindDays) || r.remindDays < 0 || r.remindDays > 30) continue;
+    const charge = nextCharge(r, today);
+    if (!charge || today < addDays(charge.date, -r.remindDays)) continue;
+    items.push({ recurring: r, kind: "charge", ...charge });
+    if (r.trial && charge.date === r.start) items.push({ recurring: r, kind: "trialEnd", ...charge });
+  }
+  return items.sort((a, b) => a.date.localeCompare(b.date) || a.recurring.id.localeCompare(b.recurring.id) || a.kind.localeCompare(b.kind));
 }
 
 export type MonthSummary = {

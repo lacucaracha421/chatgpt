@@ -36,6 +36,11 @@ describe("fallback body", () => {
 });
 
 describe("limits", () => {
+  it("agrees with the shared new-field validation vectors", () => {
+    for (const vector of vectors.fieldValidation) {
+      expect(ledgerLimitProblem(vector.payload as unknown as Parameters<typeof ledgerLimitProblem>[0]) === null, vector.name).toBe(vector.valid);
+    }
+  });
   const month = (entries: LedgerEntry[]) => ({ type: LEDGER_MONTH, ledger: "L", month: "2026-09", income: null, entries });
   it("accepts the maximum and refuses one more", () => {
     expect(ledgerLimitProblem({ type: LEDGER, income: 999_999_999_999, recurring: Array.from({ length: 200 }, (_, i) => rec(i)), planned: Array.from({ length: 300 }, (_, i) => plan(i)) })).toBeNull();

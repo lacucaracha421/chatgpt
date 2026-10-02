@@ -164,6 +164,22 @@ public final class NotesModelTest {
  /** Ledger (가계부) vectors shared with the PC and TypeScript (tests/fixtures/notes-v2/ledger-vectors.json). */
  static void ledger()throws Exception{
   Map<String,Object> file=map(fixture("ledger-vectors.json")),mid=map(file.get("monthId")),fork=map(file.get("forkId"));
+  for(Object entry:list(file.get("fieldValidation"))){
+   Map<String,Object> v=map(entry);boolean valid;
+   try{valid=NotesModel.parse(v.get("payload")).validate()==null;}catch(NotesModel.Shape expected){valid=false;}
+   check(valid==Boolean.TRUE.equals(v.get("valid")),(String)v.get("name"));
+  }
+  for(Object entry:list(map(fixture("payload-examples.json")).get("examples"))){
+   Map<String,Object> v=map(entry);String name=(String)v.get("name");
+   if(!name.equals("ledger with price history, reminders, trial start and wishlist details")&&!name.equals("ledger with explicit empty and null optional fields"))continue;
+   NotesModel.Content original=NotesModel.parse(v.get("payload"));
+   original.recurring.get(0).put("future", "opaque");original.planned.get(0).put("future", "opaque");
+   Map<String,Object> shown=NotesModel.view("id",NotesModel.Stored.typed(original),1,true,false,true);
+   check(!NotesModel.write(shown).contains("opaque")&&map(list(shown.get("recurring")).get(0)).containsKey("priceHistory")&&map(list(shown.get("planned")).get(0)).containsKey("priority"),"new fields visible, unknown keys hidden");
+   Map<String,Object> draft=new LinkedHashMap<>();draft.put("id","id");draft.put("expectedRevision",1L);draft.put("recurring",shown.get("recurring"));draft.put("planned",shown.get("planned"));
+   NotesModel.Content saved=NotesModel.applyDraft(original,NotesModel.draft(draft),original.updatedAt,()->true);
+   check(roundtrip(saved.toMap()).equals(roundtrip(original.toMap())),"view/save keeps new and unknown fields");
+  }
   check(NotesModel.monthId(NotesCrypto.unhex((String)mid.get("key")),(String)mid.get("ledger"),(String)mid.get("month")).equals(mid.get("id")),"month id vector");
   check(NotesModel.canonicalUuid((String)mid.get("id"))&&((String)mid.get("id")).charAt(14)=='4',"month id is a v4-shaped note id");
   check(NotesModel.canonicalUuid("11111111-2222-4333-8444-555555555555")&&!NotesModel.canonicalUuid("11111111-2222-4333-8444-55555555555A")&&!NotesModel.canonicalUuid("111111112222433384445555555555555"),"canonical ledger ids");

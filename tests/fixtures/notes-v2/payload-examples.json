@@ -395,6 +395,107 @@
     "createdAt": "2026-09-01T00:00:00Z",
     "updatedAt": "2026-09-01T00:00:00Z"
    }
+  },
+  {
+   "name": "ledger with price history, reminders, trial start and wishlist details",
+   "supported": true,
+   "valid": true,
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": [
+       {
+        "until": "2026-09-15",
+        "amount": 13500
+       },
+       {
+        "until": "2026-10-15",
+        "amount": 15000
+       }
+      ],
+      "remindDays": 3,
+      "trialFrom": "2026-08-02"
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "where": "쿠팡 🛒",
+      "priority": 2
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
+  },
+  {
+   "name": "ledger with explicit empty and null optional fields",
+   "supported": true,
+   "valid": true,
+   "payload": {
+    "schema": 2,
+    "type": "ledger",
+    "title": "Ledger",
+    "body": "# Ledger\n\n## 고정·구독\n- Subscription ₩17,000 · 매월 · 2026-11-02부터 · 무료 체험\n\n## 사고 싶은 것\n- Wishlist ₩89,000 · 언젠가",
+    "income": null,
+    "recurring": [
+     {
+      "id": "r",
+      "name": "Subscription",
+      "amount": 17000,
+      "every": 1,
+      "unit": "month",
+      "start": "2026-11-02",
+      "trial": true,
+      "until": null,
+      "memo": "",
+      "order": "V",
+      "priceHistory": [],
+      "remindDays": null,
+      "trialFrom": null
+     }
+    ],
+    "planned": [
+     {
+      "id": "p",
+      "name": "Wishlist",
+      "amount": 89000,
+      "month": null,
+      "memo": "",
+      "dropped": false,
+      "order": "V",
+      "where": "",
+      "priority": 0
+     }
+    ],
+    "pinned": false,
+    "deleted": false,
+    "createdAt": "2026-09-01T00:00:00Z",
+    "updatedAt": "2026-09-01T00:00:00Z"
+   }
   }
  ],
  "undecodableDescription": "Payloads that authenticate but that a v2 client must not decode as v2: newer schema, unknown type, or any key with an unexpected JSON type or a missing required key. The note is listed read-only with the readable title/body; pin, trash, archive and restore patch only those keys (plus updatedAt) and keep every other byte of the payload. Never fail the whole vault or sync because of one note.",
