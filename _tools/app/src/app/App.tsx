@@ -143,7 +143,6 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const workload = useWorkloadProfile();
   useOnlineCatalogUpdate(gateway, libraryRoot);
   useCloudBackfillSupervisor(gateway, libraryRoot);
-  useMobilePublications(gateway, libraryRoot);
   useCatalogBookmarkSync(gateway, libraryRoot);
   useAssetAuthoritySync(gateway, libraryRoot);
   useAlbumAuthoritySync(gateway, libraryRoot);
@@ -162,6 +161,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const collectionWorkOrderRef = useRef<string[]>([]);
   const collectionReturnViewRef = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
   const [preferences, setPreferences] = useState<UiPreferences>(loadUiPreferences);
+  useMobilePublications(gateway, libraryRoot, preferences.classificationOrderIds);
   const appZoomError = useAppZoom(preferences.appZoom);
   useEffect(() => {
     setPreferences((current) => applyInitialCountOrder(entries, current));

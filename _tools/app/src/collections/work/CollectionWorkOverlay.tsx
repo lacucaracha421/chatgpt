@@ -6,8 +6,6 @@ import { usePrivacy } from "../../privacy/PrivacyContext";
 import { useBackHandler, useBackNavigationContext } from "../../shared/navigation/BackNavigation";
 import { Button } from "../../shared/ui/Button";
 import { Dialog } from "../../shared/ui/Dialog";
-import { Toast } from "../../shared/ui/Toast";
-import { useAutoDismiss } from "../../shared/ui/useAutoDismiss";
 import { requestMissingGameSpine, selectedSpine, useSpineArtworkRevision } from "../launchBoxSpines";
 import { Skeleton } from "../../shared/ui/Skeleton";
 import { avError, avGateway } from "../avClient";
@@ -30,8 +28,6 @@ export type CollectionWorkOverlayProps = {
 export function CollectionWorkOverlay({ collection, collections, listOrder, initialTmdbSearch, onTmdbSearchConsumed, onExit, onChanged, onOpenSettings, onOpenCollection, api = avGateway }: CollectionWorkOverlayProps) {
   const { gateway, library } = useLibrary();
   const spineRevision = useSpineArtworkRevision(gateway, library?.root ?? "", collection.id);
-  const [spineError, setSpineError] = useState<string | null>(null);
-  useAutoDismiss(spineError, setSpineError);
   const { privacyMode } = usePrivacy();
   const personal = useWorkRecord(collection);
   const [provider, setProvider] = useState<{ id: string; connected: boolean }>({ id: collection.id, connected: false });
@@ -55,6 +51,7 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
   const orderKey = order.join("|");
   useEffect(() => {
     let active = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     setError(null);
     void (async () => {
       try {
@@ -72,11 +69,21 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
         setLoaded(current => ({ collection, av, covers, related, tmdb: tmdbRef.current.id === collection.id ? tmdbRef.current.connection : current?.collection.id === collection.id ? current.tmdb : null, artworks: artworks.filter(item => !["cover", "spine", "back", "volume_cover"].includes(item.kind)), providerConnected: false, position: order.indexOf(collection.id) + 1, total: order.length,
           case: { title: av?.titleJa?.trim() || collection.name, platform: collection.type === "av" ? "av" : collection.type === "movie" ? "film" : casePlatform(collection.platforms), publisher: collection.publisher, privacy: privacyMode, front, spine: covers ? artworkUrl(covers.spineId) : spine ? workArtworkUrl(spine.id) : null, back: covers ? artworkUrl(covers.backId) : null },
         }));
-        const request = artworkLoaded ? requestMissingGameSpine(gateway, library?.root ?? "", collection, artworks, () => changedRef.current().catch(reason => { if (active) setError(avError(reason)); })) : null;
-        if (request) void request.then(outcome => { if (active && outcome.informationError) setSpineError(outcome.informationError); }).catch(reason => { if (active) setSpineError(avError(reason)); });
+        if (artworkLoaded && collection.type === "game" && gateway.fetchLaunchBoxSpine) {
+          const attempt = () => {
+            if (!active) return;
+            if (document.hidden) { retry = setTimeout(attempt, 30_000); return; }
+            const request = requestMissingGameSpine(gateway, library?.root ?? "", collection, artworks, () => changedRef.current());
+            if (!request) { retry = setTimeout(attempt, 30_000); return; }
+            void request.then(outcome => {
+              if (active && !outcome) retry = setTimeout(attempt, 30_000);
+            });
+          };
+          attempt();
+        }
       } catch (reason) { if (active) setError(avError(reason)); }
     })();
-    return () => { active = false; };
+    return () => { active = false; if (retry) clearTimeout(retry); };
   }, [api, gateway, collection, reload, privacyMode, orderKey, spineRevision, library?.root]);
   useEffect(() => {
     if (collection.type !== "movie") return;
@@ -169,7 +176,6 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
   // Editors retain their exact target even if a route request changes behind them.
   return <>
     {screenData ? <CollectionWorkScreen data={screenData} pending={screenData.collection.id !== collection.id} actions={actions} /> : <div className="work-loading"><Skeleton label="작품 화면" /><Button onClick={onExit}>닫기</Button></div>}
-    {spineError && <Toast tone="error" onDismiss={() => setSpineError(null)}>{spineError}</Toast>}
     {error && <div className="work-error" role="alert">{error} <Button size="sm" onClick={() => setReload(value => value + 1)}>다시 시도</Button></div>}
     {panel?.kind === "edit" && <CollectionEditDialog open mode={{ kind: "edit", collection: panel.data.collection }} onClose={() => setPanel(null)} onSubmit={async input => { await gateway.updateCollection(panel.data.collection.id, input as UpdateCollection); await onChanged(); setReload(value => value + 1); }} />}
     {tmdbPanel && <TmdbMovieDialog open target={tmdbPanel} onClose={() => setTmdbPanel(null)} onOpenSettings={() => { setTmdbPanel(null); onOpenSettings(); }} onApplied={async () => { setTmdbPanel(null); await mutate(async () => undefined); }} />}

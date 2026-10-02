@@ -13,6 +13,9 @@ mod launchbox_tests;
 #[cfg(test)]
 #[path = "collections_features_tests.rs"]
 mod features_tests;
+#[cfg(test)]
+#[path = "collections_change_tests.rs"]
+mod change_tests;
 use super::publication::{report, Reporter};
 use super::client::CloudClient;
 use crate::library::{
@@ -231,7 +234,114 @@ struct Snapshot {
     files: BTreeMap<String, LocalBlob>,
 }
 
+const ARTWORK_RECHECK_SECS: u64 = 30 * 60;
+#[derive(Serialize, Deserialize)]
+struct PublishedSnapshot {
+    digest: String,
+    revision: String,
+    checked_at: u64,
+    blobs: std::collections::BTreeSet<String>,
+}
+fn snapshot_digest(replica: &CollectionReplica) -> Result<String, LibraryError> {
+    let mut value =
+        serde_json::to_value(replica).map_err(|_| LibraryError::InvalidCloudResponse)?;
+    value
+        .as_object_mut()
+        .ok_or(LibraryError::InvalidCloudResponse)?
+        .remove("baseRevision");
+    // A timestamp-only UPDATE can dirty the lane without changing its visible data.
+    if let Some(collections) = value.get_mut("collections").and_then(|v| v.as_array_mut()) {
+        for collection in collections {
+            collection
+                .as_object_mut()
+                .ok_or(LibraryError::InvalidCloudResponse)?
+                .remove("updatedAt");
+        }
+    }
+    let bytes = serde_json::to_vec(&value).map_err(|_| LibraryError::InvalidCloudResponse)?;
+    Ok(Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
+}
+impl PublishedSnapshot {
+    fn current(&self, revision: Option<&str>, now: u64) -> bool {
+        revision == Some(self.revision.as_str())
+            && now.saturating_sub(self.checked_at) < ARTWORK_RECHECK_SECS
+    }
+}
+
 impl Library {
+    fn publish_changed_snapshot(
+        &self,
+        client: &CloudClient,
+        endpoint: &str,
+        token: &str,
+        replica_token: &str,
+        snapshot: &Snapshot,
+        progress: Reporter<'_>,
+    ) -> Result<CloudCollectionsPublishResult, LibraryError> {
+        let digest = snapshot_digest(&snapshot.replica)?;
+        let key: String = Sha256::digest(endpoint.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let path = self
+            .root()
+            .join(".cache/mobile-collections/publications")
+            .join(format!("{key}.json"));
+        let previous: Option<PublishedSnapshot> = std::fs::read(&path)
+            .ok()
+            .filter(|b| b.len() <= 2 * 1024 * 1024)
+            .and_then(|b| serde_json::from_slice(&b).ok());
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let same_revision = previous.as_ref().is_some_and(|p| {
+            snapshot.replica.base_revision.as_deref() == Some(p.revision.as_str())
+        });
+        let unchanged = same_revision && previous.as_ref().is_some_and(|p| p.digest == digest);
+        let verified = previous
+            .as_ref()
+            .filter(|p| p.current(snapshot.replica.base_revision.as_deref(), now));
+        if unchanged && verified.is_some() {
+            return Ok(snapshot_result(
+                snapshot,
+                0,
+                previous.as_ref().unwrap().revision.clone(),
+            ));
+        }
+        let result = publish_snapshot_verified(
+            client,
+            token,
+            replica_token,
+            snapshot,
+            progress,
+            verified.map(|p| &p.blobs),
+            unchanged.then(|| previous.as_ref().unwrap().revision.as_str()),
+        )?;
+        let receipt = PublishedSnapshot {
+            digest,
+            revision: result.revision.clone(),
+            checked_at: verified.map_or(now, |p| p.checked_at),
+            blobs: snapshot.files.keys().cloned().collect(),
+        };
+        // Derived optimization only: failure to save the receipt must leave the next pass free
+        // to verify again, without changing a successful publication into a failed one.
+        if let Some(parent) = path.parent() {
+            let saved = (|| -> std::io::Result<()> {
+                std::fs::create_dir_all(parent)?;
+                let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+                serde_json::to_writer(&mut temp, &receipt)?;
+                temp.as_file().sync_all()?;
+                temp.persist(&path).map_err(|e| e.error)?;
+                Ok(())
+            })();
+            let _ = saved;
+        }
+        Ok(result)
+    }
     pub(crate) fn push_cloud_collections(
         &self,
         progress: Reporter<'_>,
@@ -279,16 +389,21 @@ impl Library {
         let mut snapshot = self.cloud_collections_snapshot_with_features(base_revision, feature.as_ref(), features, progress)?;
         let Some(publisher) = snapshot.replica.personal_edit.as_ref().and(publisher) else {
             snapshot.replica.personal_edit = None;
-            return publish_snapshot_as(client, token, token, &snapshot, progress);
+            return self
+                .publish_changed_snapshot(client, endpoint, token, token, &snapshot, progress);
         };
-        let active = status.capabilities.as_ref().is_some_and(|c| c.collection_personal_edit);
-        match publish_snapshot_as(client, token, publisher, &snapshot, progress) {
+        let active = status
+            .capabilities
+            .as_ref()
+            .is_some_and(|c| c.collection_personal_edit);
+        match self.publish_changed_snapshot(client, endpoint, token, publisher, &snapshot, progress)
+        {
             // The server refuses the handshake while it has no linked library (its state row
             // does not exist yet, so it cannot have accepted any edit): publish the legacy
             // form instead so Collection publication never breaks.
             Err(LibraryError::CollectionPersonalEditUnsupported) if !active => {
                 snapshot.replica.personal_edit = None;
-                publish_snapshot_as(client, token, token, &snapshot, progress)
+                self.publish_changed_snapshot(client, endpoint, token, token, &snapshot, progress)
             }
             result => result,
         }
@@ -340,23 +455,69 @@ fn publish_snapshot(client: &CloudClient, token: &str, snapshot: Snapshot, progr
 }
 
 /// `token` authorizes the artwork routes; `replica_token` the replica PUT.
-fn publish_snapshot_as(client: &CloudClient, token: &str, replica_token: &str, snapshot: &Snapshot, progress: Reporter<'_>) -> Result<CloudCollectionsPublishResult, LibraryError> {
-        let metadata = serde_json::to_vec(&snapshot.replica)
-            .map_err(|_| LibraryError::InvalidCloudResponse)?;
-        if metadata.len() > MAX_METADATA_BYTES {
-            return Err(LibraryError::InvalidCloudResponse);
-        }
-        // Bound simultaneous file buffers/PUTs, while retaining the all-artwork-before-
-        // metadata barrier. Completed immutable objects are reused after interruption.
-        let descriptors:Vec<_>=snapshot.files.values().map(|file|&file.descriptor).collect();
-        let missing=client.missing_collection_artworks(&descriptors,token)?;
-        let files: Vec<_> = snapshot.files.values().filter(|file|missing.contains(&file.descriptor.sha256)).collect();
-        let stopped = std::sync::atomic::AtomicBool::new(false);
-        let completed = std::sync::Mutex::new(0u64);
-        let total = files.len() as u64;
-        report(progress, "uploading", 0, Some(total), "files");
-        let uploaded = std::thread::scope(|scope| {
-            let workers: Vec<_> = files.chunks(files.len().div_ceil(4).max(1)).map(|chunk| {
+#[cfg(test)]
+fn publish_snapshot_as(
+    client: &CloudClient,
+    token: &str,
+    replica_token: &str,
+    snapshot: &Snapshot,
+    progress: Reporter<'_>,
+) -> Result<CloudCollectionsPublishResult, LibraryError> {
+    publish_snapshot_verified(client, token, replica_token, snapshot, progress, None, None)
+}
+fn snapshot_result(
+    snapshot: &Snapshot,
+    uploaded: usize,
+    revision: String,
+) -> CloudCollectionsPublishResult {
+    CloudCollectionsPublishResult {
+        collections: snapshot.replica.collections.len(),
+        artworks: snapshot
+            .replica
+            .collections
+            .iter()
+            .map(|c| c.artworks.len())
+            .sum(),
+        uploaded,
+        revision,
+    }
+}
+fn publish_snapshot_verified(
+    client: &CloudClient,
+    token: &str,
+    replica_token: &str,
+    snapshot: &Snapshot,
+    progress: Reporter<'_>,
+    verified: Option<&std::collections::BTreeSet<String>>,
+    existing_revision: Option<&str>,
+) -> Result<CloudCollectionsPublishResult, LibraryError> {
+    let metadata =
+        serde_json::to_vec(&snapshot.replica).map_err(|_| LibraryError::InvalidCloudResponse)?;
+    if metadata.len() > MAX_METADATA_BYTES {
+        return Err(LibraryError::InvalidCloudResponse);
+    }
+    // Bound simultaneous file buffers/PUTs, while retaining the all-artwork-before-
+    // metadata barrier. Completed immutable objects are reused after interruption.
+    let descriptors: Vec<_> = snapshot
+        .files
+        .values()
+        .filter(|file| !verified.is_some_and(|set| set.contains(&file.descriptor.sha256)))
+        .map(|file| &file.descriptor)
+        .collect();
+    let missing = client.missing_collection_artworks(&descriptors, token)?;
+    let files: Vec<_> = snapshot
+        .files
+        .values()
+        .filter(|file| missing.contains(&file.descriptor.sha256))
+        .collect();
+    let stopped = std::sync::atomic::AtomicBool::new(false);
+    let completed = std::sync::Mutex::new(0u64);
+    let total = files.len() as u64;
+    report(progress, "uploading", 0, Some(total), "files");
+    let uploaded = std::thread::scope(|scope| {
+        let workers: Vec<_> = files
+            .chunks(files.len().div_ceil(4).max(1))
+            .map(|chunk| {
                 let stopped = &stopped;
                 let completed = &completed;
                 scope.spawn(move || {
@@ -374,22 +535,25 @@ fn publish_snapshot_as(client: &CloudClient, token: &str, replica_token: &str, s
                     }
                     Ok(uploaded)
                 })
-            }).collect();
-            workers.into_iter().map(|worker| worker.join().unwrap_or(Err(LibraryError::InvalidCloudResponse))).collect::<Result<Vec<_>, _>>()
-        })?.into_iter().sum();
-        report(progress, "publishing", 0, None, "items");
-        let revision = client.publish_collections(&metadata, replica_token)?;
-        Ok(CloudCollectionsPublishResult {
-            collections: snapshot.replica.collections.len(),
-            artworks: snapshot
-                .replica
-                .collections
-                .iter()
-                .map(|c| c.artworks.len())
-                .sum(),
-            uploaded,
-            revision,
-        })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .map(|worker| {
+                worker
+                    .join()
+                    .unwrap_or(Err(LibraryError::InvalidCloudResponse))
+            })
+            .collect::<Result<Vec<_>, _>>()
+    })?
+    .into_iter()
+    .sum();
+    report(progress, "publishing", 0, None, "items");
+    let revision = match existing_revision {
+        Some(revision) => revision.to_owned(),
+        None => client.publish_collections(&metadata, replica_token)?,
+    };
+    Ok(snapshot_result(snapshot, uploaded, revision))
 }
 
 fn upload_local_blob(client: &CloudClient, token: &str, local: &LocalBlob) -> Result<bool, LibraryError> {

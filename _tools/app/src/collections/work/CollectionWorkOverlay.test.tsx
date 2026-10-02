@@ -32,7 +32,7 @@ function fixtures(type: "game" | "av" | "movie" = "game") {
   return { gateway, api, exit, changed, Harness };
 }
 describe("Collection work open path", () => {
-  it.each(["no_match", "ambiguous", "failed"])("asks once per session after %s, including reopening", async status => {
+  it.each(["no_match", "ambiguous"])("asks once per session after %s, including reopening", async status => {
     const { Harness, gateway } = fixtures();
     gateway.fetchLaunchBoxSpine.mockResolvedValue({ collectionId: "a", status });
     render(<Harness />); const user = userEvent.setup();
@@ -45,12 +45,21 @@ describe("Collection work open path", () => {
     expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledOnce();
     expect(screen.queryByRole("status")).toBeNull();
   });
-  it("uses a shared toast for a rejected spine command without a blocking dialog", async () => {
+  it("silences a rejected automatic spine command and retries while the work stays open", async () => {
     const { Harness, gateway } = fixtures();
     gateway.fetchLaunchBoxSpine.mockRejectedValue(new Error("요청 실패"));
-    render(<Harness />); await userEvent.setup().dblClick(screen.getByRole("button", { name: /^가 작품/ }));
-    expect(await screen.findByRole("alert")).toHaveClass("ui-toast");
-    expect(screen.queryByRole("dialog")).toBeNull();
+    vi.useFakeTimers();
+    try {
+      render(<Harness />); fireEvent.doubleClick(screen.getByRole("button", { name: /^가 작품/ }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledOnce();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.queryByRole("dialog")).toBeNull();
+      gateway.fetchLaunchBoxSpine.mockResolvedValue({ collectionId: "a", status: "no_match" });
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole("alert")).toBeNull();
+    } finally { vi.useRealTimers(); }
   });
   it("does not assume a spine is missing when artwork inspection fails", async () => {
     const { Harness, gateway } = fixtures();

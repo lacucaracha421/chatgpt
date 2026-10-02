@@ -76,6 +76,14 @@ pub async fn fetch_launchbox_spines(
             information_only,
         } => (job_id, limit, after_collection_id, information_only),
     };
+    if limit == 0
+        || limit > launchbox::MAX_BATCH
+        || after
+            .as_ref()
+            .is_some_and(|id| uuid::Uuid::parse_str(id).is_err())
+    {
+        return Err(Error::InvalidRequest.into());
+    }
     let library = current_required(state)?;
     let cache = app
         .path()
@@ -87,6 +95,7 @@ pub async fn fetch_launchbox_spines(
         .join("launchbox");
     let job = Job::register(job_id)?;
     tauri::async_runtime::spawn_blocking(move || {
+        launchbox::refresh(&cache, &job.cancel)?;
         let (mut runner, _lease) = launchbox::reserve(&cache)?;
         let report = |progress| {
             let _ = on_progress.send(progress);

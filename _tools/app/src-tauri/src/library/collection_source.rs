@@ -498,10 +498,12 @@ impl Library {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(collection_id.to_owned(), source_signature);
-        eprintln!(
-            "collection artwork import: {imported} new in {:?}",
-            import_started.elapsed(),
-        );
+        if imported > 0 {
+            eprintln!(
+                "collection artwork import: {imported} new in {:?}",
+                import_started.elapsed()
+            );
+        }
         Ok(imported)
     }
 
@@ -1056,10 +1058,23 @@ mod tests {
             ]
         );
 
+        let generation = || {
+            library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT generation FROM mobile_publication_state WHERE kind='collections'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+        };
+        let published_input = generation();
         let again = library
             .import_local_collection_artworks(COLLECTION_ID)
             .unwrap();
         assert_eq!(again, 0);
+        assert_eq!(generation(), published_input);
 
         write_png(
             &collection_dir.join(COVERS_DIR).join("poster_c.png"),
@@ -1070,6 +1085,7 @@ mod tests {
             .import_local_collection_artworks(COLLECTION_ID)
             .unwrap();
         assert_eq!(after_source_change, 1);
+        assert!(generation() > published_input);
     }
 
     fn set_game_collection(library: &Library) {

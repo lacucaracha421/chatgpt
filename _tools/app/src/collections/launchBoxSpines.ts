@@ -7,7 +7,8 @@ const idle: BatchState = { phase: "책등", running: false, cancelling: false, p
 type Session = {
   batch: BatchState;
   listeners: Set<() => void>;
-  attempts: Map<string, Promise<LaunchBoxSpineOutcome>>;
+  attempts: Map<string, Promise<LaunchBoxSpineOutcome | null>>;
+  retryAfter: Map<string, number>;
   revisions: Map<string, number>;
   cancelRequested: boolean;
   jobId: string | null;
@@ -19,7 +20,7 @@ function session(gateway: LibraryGateway, scope: string): Session {
   if (!scopes) { scopes = new Map(); sessions.set(gateway, scopes); }
   let value = scopes.get(scope);
   if (!value) {
-    value = { batch: idle, listeners: new Set(), attempts: new Map(), revisions: new Map(), cancelRequested: false, jobId: null };
+    value = { batch: idle, listeners: new Set(), attempts: new Map(), retryAfter: new Map(), revisions: new Map(), cancelRequested: false, jobId: null };
     scopes.set(scope, value);
   }
   return value;
@@ -38,17 +39,28 @@ export function selectedSpine(artworks: WorkArtworkSummary[]) {
   return spines.find(item => item.selected) ?? spines[0];
 }
 /** Information is checked even with an existing spine; native storage preserves that artwork.
- * Attempts (including rejected commands) survive work navigation for this library session. */
+ * Completed matches/misses survive navigation; transient failures have a short cooldown. */
 export function requestMissingGameSpine(gateway: LibraryGateway, scope: string, collection: CollectionSummary, _artworks: WorkArtworkSummary[], onInformationChanged?: () => Promise<void>) {
   if (collection.type !== "game" || !gateway.fetchLaunchBoxSpine) return null;
   const value = session(gateway, scope);
+  if ((value.retryAfter.get(collection.id) ?? 0) > Date.now()) return null;
   let request = value.attempts.get(collection.id);
   if (!request) {
     const fetch = gateway.fetchLaunchBoxSpine;
     request = Promise.resolve().then(() => fetch(collection.id)).then(outcome => {
       if (outcome.status === "matched" || outcome.platformsFilled) artworkChanged(value, collection.id);
-      if (outcome.informationUpdated) void onInformationChanged?.();
+      if (outcome.informationUpdated) void onInformationChanged?.().catch(() => undefined);
+      if (outcome.status === "failed" || outcome.informationError) {
+        value.attempts.delete(collection.id);
+        value.retryAfter.set(collection.id, Date.now() + 30_000);
+        return null;
+      }
+      value.retryAfter.delete(collection.id);
       return outcome;
+    }).catch(() => {
+      value.attempts.delete(collection.id);
+      value.retryAfter.set(collection.id, Date.now() + 30_000);
+      return null;
     });
     value.attempts.set(collection.id, request);
   }

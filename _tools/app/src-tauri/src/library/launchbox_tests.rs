@@ -11,6 +11,7 @@ struct FakeHttp {
     requests: RefCell<Vec<(String, u64)>>,
     waits: RefCell<Vec<u64>>,
     fail_bulk: Cell<bool>,
+    stall_bulk: Cell<bool>,
     cancel_on_wait: Cell<bool>,
 }
 impl FakeHttp {
@@ -35,6 +36,7 @@ impl FakeHttp {
             requests: RefCell::new(Vec::new()),
             waits: RefCell::new(Vec::new()),
             fail_bulk: Cell::new(false),
+            stall_bulk: Cell::new(false),
             cancel_on_wait: Cell::new(false),
         }
     }
@@ -87,6 +89,9 @@ impl Transport for FakeHttp {
             out.write_all(&bytes[..bytes.len() / 2])?;
             return Err(Error::Http("fixture_partial_failure".into()));
         }
+        if url == BULK_URL && self.stall_bulk.get() {
+            self.now.set(self.now.get() + STALL_WINDOW_MS);
+        }
         out.write_all(bytes)?;
         Ok(())
     }
@@ -133,7 +138,7 @@ const ID2: &str = "00000000-0000-4000-8000-000000000002";
 const ID3: &str = "00000000-0000-4000-8000-000000000003";
 
 #[test]
-fn launchbox_bulk_reuses_daily_cache_and_preserves_good_copy_after_partial_failure() {
+fn launchbox_bulk_reuses_weekly_cache_and_preserves_good_copy_after_partial_failure() {
     let cache = tempfile::tempdir().unwrap();
     let io = FakeHttp::new(&metadata(
         &[("1", "Game", "Windows")],
@@ -153,7 +158,7 @@ fn launchbox_bulk_reuses_daily_cache_and_preserves_good_copy_after_partial_failu
         state.generation.as_ref().unwrap()
     ));
     let bytes = fs::read(&good).unwrap();
-    io.now.set(io.now.get() + DAY_MS - 1);
+    io.now.set(io.now.get() + WEEK_MS - 1);
     ensure_index(cache.path(), &io, &cancel).unwrap();
     assert_eq!(io.bulk_count(), 1);
     io.now.set(io.now.get() + 1);
@@ -166,7 +171,7 @@ fn launchbox_bulk_reuses_daily_cache_and_preserves_good_copy_after_partial_failu
     assert_eq!(after.downloaded_at, state.downloaded_at);
     ensure_index(cache.path(), &io, &cancel).unwrap();
     assert_eq!(io.bulk_count(), 2);
-    assert_eq!(fs::read_dir(cache.path()).unwrap().count(), 3);
+    assert_eq!(fs::read_dir(cache.path()).unwrap().count(), 4);
 }
 #[test]
 fn launchbox_failed_download_is_retried_after_a_short_pause_and_cleans_leftovers() {
@@ -1009,4 +1014,120 @@ fn launchbox_information_cancel_never_fetches_launchbox_or_starts_spines() {
     assert_eq!(result.next_cursor, None);
     assert_eq!(io.bulk_count(), 0);
     assert!(io.image_requests().is_empty());
+}
+
+#[test]
+fn launchbox_lookup_uses_old_index_under_refresh_lease_and_never_downloads() {
+    let (_temp, library, cache, io) = fixture();
+    insert(&library, ID1, "Example II: Adventure", "Switch");
+    let cancel = AtomicBool::new(false);
+    ensure_index(cache.path(), &io, &cancel).unwrap();
+    io.now.set(io.now.get() + WEEK_MS);
+    let lease =
+        super::super::lock::LibraryLease::acquire(&cache.path().join("refresh-lease")).unwrap();
+    let (mut runner, _lookup_lease) = reserve(cache.path()).unwrap();
+    let loaded = ensure_index(cache.path(), &io, &cancel).unwrap();
+    assert_eq!(loaded.games.len(), 2);
+    let result = runner
+        .one_with(
+            &library,
+            cache.path(),
+            &load_game(&library, ID1).unwrap(),
+            &io,
+            &cancel,
+            &mut None,
+            &|_| {},
+        )
+        .unwrap();
+    assert_eq!(result.status, OutcomeStatus::Matched);
+    assert_eq!(io.bulk_count(), 1);
+    drop(lease);
+}
+
+#[test]
+fn launchbox_automatic_lookup_without_index_returns_retryable_failure_without_download() {
+    let (_temp, library, cache, io) = fixture();
+    insert(&library, ID1, "Example II: Adventure", "Switch");
+    let mut runner = FetchState {
+        lookup_only: true,
+        ..FetchState::default()
+    };
+    let result = runner
+        .one_with(
+            &library,
+            cache.path(),
+            &load_game(&library, ID1).unwrap(),
+            &io,
+            &AtomicBool::new(false),
+            &mut None,
+            &|_| {},
+        )
+        .unwrap();
+    assert_eq!(result.status, OutcomeStatus::Failed);
+    assert_eq!(io.bulk_count(), 0);
+}
+
+#[test]
+fn launchbox_stalled_bulk_preserves_current_generation_and_cleans_partial_file() {
+    let cache = tempfile::tempdir().unwrap();
+    let io = FakeHttp::new("<LaunchBox></LaunchBox>");
+    let cancel = AtomicBool::new(false);
+    ensure_index(cache.path(), &io, &cancel).unwrap();
+    let before: BulkState = read_json(&cache.path().join("bulk-state.json"), 4096).unwrap();
+    io.now.set(io.now.get() + WEEK_MS);
+    io.stall_bulk.set(true);
+    ensure_index(cache.path(), &io, &cancel).unwrap();
+    let after: BulkState = read_json(&cache.path().join("bulk-state.json"), 4096).unwrap();
+    assert_eq!(before.generation, after.generation);
+    assert_eq!(before.downloaded_at, after.downloaded_at);
+    assert!(!fs::read_dir(cache.path())
+        .unwrap()
+        .flatten()
+        .any(|e| e.file_name().to_string_lossy().starts_with(".tmp")));
+    let mut progress = DownloadProgress::new(0);
+    assert!(progress.check(STALL_WINDOW_MS - 1, 1).is_ok());
+    assert!(progress
+        .check(STALL_WINDOW_MS, 17 * 1024 * STALL_WINDOW_MS / 1000)
+        .is_err());
+    let mut progress = DownloadProgress::new(0);
+    assert!(progress
+        .check(
+            STALL_WINDOW_MS,
+            MIN_BULK_BYTES_PER_SEC * STALL_WINDOW_MS / 1000
+        )
+        .is_ok());
+}
+
+#[test]
+fn launchbox_idle_due_respects_week_and_failure_cooldown() {
+    let cache = tempfile::tempdir().unwrap();
+    let io = FakeHttp::new("<LaunchBox></LaunchBox>");
+    ensure_index(cache.path(), &io, &AtomicBool::new(false)).unwrap();
+    let now = io.now_ms();
+    assert!(!refresh_due(cache.path(), now + DAY_MS));
+    assert!(!refresh_due(cache.path(), now + WEEK_MS - 1));
+    assert!(refresh_due(cache.path(), now + WEEK_MS));
+    let mut state: BulkState = read_json(&cache.path().join("bulk-state.json"), 4096).unwrap();
+    state.last_attempt_at = Some(now + WEEK_MS);
+    write_json(&cache.path().join("bulk-state.json"), &state).unwrap();
+    assert!(!refresh_due(cache.path(), now + WEEK_MS + RETRY_MS - 1));
+    assert!(refresh_due(cache.path(), now + WEEK_MS + RETRY_MS));
+}
+
+#[test]
+fn launchbox_stall_caps_a_socket_wait_even_without_body_bytes() {
+    use ureq::unversioned::transport::time::Duration as HttpDuration;
+    let long = NextTimeout {
+        after: HttpDuration::from_secs(1800),
+        reason: ureq::Timeout::RecvBody,
+    };
+    assert_eq!(
+        capped_read_timeout(long).after,
+        HttpDuration::from_millis(STALL_WINDOW_MS)
+    );
+    let short = NextTimeout {
+        after: HttpDuration::from_secs(30),
+        ..long
+    };
+    assert_eq!(capped_read_timeout(short), short);
 }

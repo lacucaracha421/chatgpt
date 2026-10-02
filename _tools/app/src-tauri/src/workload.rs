@@ -499,6 +499,8 @@ fn start_timers(app: tauri::AppHandle) {
             .profile();
         let mut publications = Instant::now() - Duration::from_secs(10);
         let mut replication = publications;
+        let mut launchbox_check = publications;
+        static LAUNCHBOX_BUSY: AtomicBool = AtomicBool::new(false);
         static PUBLICATIONS_BUSY: AtomicBool = AtomicBool::new(false);
         static REPLICATION_BUSY: AtomicBool = AtomicBool::new(false);
         static ASSETS_BUSY: AtomicBool = AtomicBool::new(false);
@@ -577,6 +579,42 @@ fn start_timers(app: tauri::AppHandle) {
                 continue;
             };
             crate::library::av_link::tick(library.clone(), profile.restricted || !focused);
+            // Bulk metadata is maintenance: never start it just because a work was opened.
+            let idle = runtime()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .inactive_since
+                .is_some_and(|since| since.elapsed() >= Duration::from_secs(120));
+            if idle && !profile.restricted && launchbox_check.elapsed() >= Duration::from_secs(60) {
+                launchbox_check = Instant::now();
+                let has_games = library
+                    .connection()
+                    .and_then(|db| {
+                        db.query_row(
+                            "SELECT EXISTS(SELECT 1 FROM collections WHERE type='game')",
+                            [],
+                            |row| row.get::<_, bool>(0),
+                        )
+                        .map_err(Into::into)
+                    })
+                    .unwrap_or(false);
+                if let (true, Ok(cache)) = (has_games, app.path().app_cache_dir()) {
+                    let cache = cache.join("launchbox");
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    if crate::library::launchbox::refresh_due(&cache, now)
+                        && !LAUNCHBOX_BUSY.swap(true, Ordering::AcqRel)
+                    {
+                        std::thread::spawn(move || {
+                            let _reset = Reset(&LAUNCHBOX_BUSY);
+                            let _ =
+                                crate::library::launchbox::refresh(&cache, &AtomicBool::new(false));
+                        });
+                    }
+                }
+            }
             // A moved publisher log head (seen by the watcher or a pass) runs the lanes now.
             let publication_wake = crate::cloud::status_watch::take_publication_wake();
             if publication_wake || publications.elapsed() >= Duration::from_secs(10) {

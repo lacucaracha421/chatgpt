@@ -8,7 +8,7 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::{BufRead, BufReader, Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, LazyLock, Mutex, MutexGuard,
@@ -19,8 +19,11 @@ use std::{
 const BULK_URL: &str = "https://gamesdb.launchbox-app.com/Metadata.zip";
 const IMAGE_BASE: &str = "https://images.launchbox-app.com/";
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
+const WEEK_MS: u64 = 7 * DAY_MS;
+const STALL_WINDOW_MS: u64 = 3 * 60 * 1000;
+const MIN_BULK_BYTES_PER_SEC: u64 = 32 * 1024;
 /// A failed or interrupted bulk download may be retried after this pause (user, 2026-10-01);
-/// a successful download still holds for a day.
+/// a successful download still holds for a week.
 const RETRY_MS: u64 = 30 * 60 * 1000;
 const IMAGE_INTERVAL_MS: u64 = 1000;
 const MAX_BULK_BYTES: u64 = 256 * 1024 * 1024;
@@ -158,6 +161,7 @@ static JOBS: LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static FETCH_STATE: Mutex<FetchState> = Mutex::new(FetchState {
     last_image_at: None,
+    lookup_only: true,
 });
 
 pub struct Job {
@@ -200,10 +204,11 @@ fn check_cancel(cancel: &AtomicBool) -> Result<()> {
     }
 }
 
-// One shared lock covers bulk downloads, image pacing and cache updates across both commands.
+// Lookup leases preserve image pacing and outcome writes; refresh uses a separate lease.
 #[derive(Default)]
 pub struct FetchState {
     last_image_at: Option<u64>,
+    lookup_only: bool,
 }
 pub fn reserve(
     cache: &Path,
@@ -211,10 +216,13 @@ pub fn reserve(
     let runner = FETCH_STATE.try_lock().map_err(|_| Error::Busy)?;
     fs::create_dir_all(cache)?;
     // The existing OS lease also excludes another app process and releases on a crash.
-    let lease = super::lock::LibraryLease::acquire(cache).map_err(|error| match error {
-        super::error::LibraryError::LibraryInUse => Error::Busy,
-        other => Error::Library(other),
-    })?;
+    fs::create_dir_all(cache.join("lookup-lease"))?;
+    let lease = super::lock::LibraryLease::acquire(&cache.join("lookup-lease")).map_err(
+        |error| match error {
+            super::error::LibraryError::LibraryInUse => Error::Busy,
+            other => Error::Library(other),
+        },
+    )?;
     Ok((runner, lease))
 }
 
@@ -229,26 +237,80 @@ trait Transport {
         cancel: &AtomicBool,
     ) -> Result<()>;
 }
+use ureq::unversioned::transport::{
+    Buffers, ConnectionDetails, Connector, DefaultConnector, NextTimeout,
+    Transport as HttpTransport,
+};
+
+#[derive(Debug)]
+struct StallConnector;
+impl Connector<Box<dyn HttpTransport>> for StallConnector {
+    type Out = Box<dyn HttpTransport>;
+    fn connect(
+        &self,
+        _: &ConnectionDetails,
+        chained: Option<Box<dyn HttpTransport>>,
+    ) -> std::result::Result<Option<Self::Out>, ureq::Error> {
+        Ok(chained.map(|inner| Box::new(StallTransport(inner)) as Self::Out))
+    }
+}
+#[derive(Debug)]
+struct StallTransport(Box<dyn HttpTransport>);
+fn capped_read_timeout(mut timeout: NextTimeout) -> NextTimeout {
+    timeout.after = timeout
+        .after
+        .min(ureq::unversioned::transport::time::Duration::from_millis(
+            STALL_WINDOW_MS,
+        ));
+    timeout
+}
+impl HttpTransport for StallTransport {
+    fn buffers(&mut self) -> &mut dyn Buffers {
+        self.0.buffers()
+    }
+    fn transmit_output(
+        &mut self,
+        amount: usize,
+        timeout: NextTimeout,
+    ) -> std::result::Result<(), ureq::Error> {
+        self.0.transmit_output(amount, timeout)
+    }
+    fn await_input(&mut self, timeout: NextTimeout) -> std::result::Result<bool, ureq::Error> {
+        // A body with zero further bytes cannot reach the progress writer. Bound each
+        // socket wait as well as checking throughput, without capping a healthy whole body.
+        self.0.await_input(capped_read_timeout(timeout))
+    }
+    fn is_open(&mut self) -> bool {
+        self.0.is_open()
+    }
+    fn is_tls(&self) -> bool {
+        self.0.is_tls()
+    }
+}
+
 pub struct Http {
     agent: ureq::Agent,
 }
 impl Default for Http {
     fn default() -> Self {
         Self {
-            agent: ureq::Agent::config_builder()
-                .https_only(true)
-                .max_redirects(0)
-                .user_agent(concat!(
-                    "Lakomics/",
-                    env!("CARGO_PKG_VERSION"),
-                    " (LaunchBox spine artwork lookup)"
-                ))
-                .timeout_connect(Some(Duration::from_secs(10)))
-                .timeout_recv_response(Some(Duration::from_secs(30)))
-                .timeout_recv_body(Some(Duration::from_secs(180)))
-                .timeout_global(Some(Duration::from_secs(180)))
-                .build()
-                .into(),
+            agent: ureq::Agent::with_parts(
+                ureq::Agent::config_builder()
+                    .https_only(true)
+                    .max_redirects(0)
+                    .user_agent(concat!(
+                        "Lakomics/",
+                        env!("CARGO_PKG_VERSION"),
+                        " (LaunchBox spine artwork lookup)"
+                    ))
+                    .timeout_connect(Some(Duration::from_secs(10)))
+                    .timeout_recv_response(Some(Duration::from_secs(30)))
+                    .timeout_recv_body(Some(Duration::from_secs(180)))
+                    .timeout_global(Some(Duration::from_secs(180)))
+                    .build(),
+                DefaultConnector::default().chain(StallConnector),
+                ureq::unversioned::resolver::DefaultResolver::default(),
+            ),
         }
     }
 }
@@ -277,12 +339,13 @@ impl Transport for Http {
         cancel: &AtomicBool,
     ) -> Result<()> {
         check_cancel(cancel)?;
-        let timeout = if url == BULK_URL { 180 } else { 30 };
+        let timeout = if url == BULK_URL { 30 * 60 } else { 30 };
         let mut response = self
             .agent
             .get(url)
             .config()
             .timeout_global(Some(Duration::from_secs(timeout)))
+            .timeout_recv_body(Some(Duration::from_secs(timeout)))
             .build()
             .call()
             .map_err(|e| match e {
@@ -396,32 +459,127 @@ fn fresh(now: u64, then: Option<u64>) -> bool {
 fn within(now: u64, then: Option<u64>, span: u64) -> bool {
     then.is_some_and(|t| now.saturating_sub(t) < span)
 }
-fn cached_index(cache: &Path, state: &BulkState, cancel: &AtomicBool) -> Result<Index> {
+static INDEX_CACHE: LazyLock<Mutex<Option<(PathBuf, (u64, SystemTime), Arc<Index>)>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+struct DownloadProgress {
+    since: u64,
+    bytes: u64,
+}
+impl DownloadProgress {
+    fn new(now: u64) -> Self {
+        Self {
+            since: now,
+            bytes: 0,
+        }
+    }
+    fn check(&mut self, now: u64, total: u64) -> Result<()> {
+        let elapsed = now.saturating_sub(self.since);
+        if elapsed >= STALL_WINDOW_MS {
+            if total.saturating_sub(self.bytes) < MIN_BULK_BYTES_PER_SEC * elapsed / 1000 {
+                return Err(Error::Http("bulk_download_stalled".into()));
+            }
+            self.since = now;
+            self.bytes = total;
+        }
+        Ok(())
+    }
+}
+
+struct BulkWriter<'a, T> {
+    output: &'a mut dyn Write,
+    io: &'a T,
+    total: u64,
+    progress: DownloadProgress,
+}
+impl<T: Transport> Write for BulkWriter<'_, T> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.progress
+            .check(self.io.now_ms(), self.total + bytes.len() as u64)
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        let written = self.output.write(bytes)?;
+        self.total += written as u64;
+        Ok(written)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.output.flush()
+    }
+}
+
+fn current_index(cache: &Path, cancel: &AtomicBool) -> Result<Arc<Index>> {
+    let state: BulkState = read_json(&cache.join("bulk-state.json"), 4096)?;
+    cached_index(cache, &state, cancel, false)
+}
+fn cached_index(
+    cache: &Path,
+    state: &BulkState,
+    cancel: &AtomicBool,
+    rebuild: bool,
+) -> Result<Arc<Index>> {
     check_cancel(cancel)?;
     let generation = state.generation.as_deref().ok_or(Error::InvalidMetadata)?;
     uuid::Uuid::parse_str(generation).map_err(|_| Error::InvalidMetadata)?;
     let bulk_path = cache.join(format!("Metadata-{generation}.zip"));
     let index_path = cache.join(format!("index-{generation}.json"));
+    let stamp = fs::metadata(&index_path)
+        .ok()
+        .and_then(|m| Some((m.len(), m.modified().ok()?)));
+    {
+        let memory = INDEX_CACHE.lock().map_err(|_| Error::Busy)?;
+        if let Some((path, cached_stamp, index)) = memory.as_ref() {
+            if *path == index_path && stamp.as_ref() == Some(cached_stamp) && bulk_path.is_file() {
+                return Ok(index.clone());
+            }
+        }
+    }
     if let Ok(index) = read_json::<Index>(&index_path, MAX_INDEX_BYTES) {
         if index.version == INDEX_VERSION && bulk_path.is_file() {
+            let index = Arc::new(index);
+            *INDEX_CACHE.lock().map_err(|_| Error::Busy)? = Some((
+                index_path.clone(),
+                (
+                    fs::metadata(&index_path)?.len(),
+                    fs::metadata(&index_path)?.modified()?,
+                ),
+                index.clone(),
+            ));
             return Ok(index);
         }
+    }
+    if !rebuild {
+        return Err(Error::InvalidMetadata);
     }
     // A lost/corrupt derived index is rebuilt from the good ZIP, never redownloaded.
     let index = parse_zip(&bulk_path, cancel)?;
     write_json(&index_path, &index)?;
+    let index = Arc::new(index);
+    *INDEX_CACHE.lock().map_err(|_| Error::Busy)? = Some((
+        index_path.clone(),
+        (
+            fs::metadata(&index_path)?.len(),
+            fs::metadata(&index_path)?.modified()?,
+        ),
+        index.clone(),
+    ));
     Ok(index)
 }
-fn ensure_index(cache: &Path, io: &impl Transport, cancel: &AtomicBool) -> Result<Index> {
+fn ensure_index(cache: &Path, io: &impl Transport, cancel: &AtomicBool) -> Result<Arc<Index>> {
     fs::create_dir_all(cache)?;
+    let lease_dir = cache.join("refresh-lease");
+    fs::create_dir_all(&lease_dir)?;
+    let _lease = match super::lock::LibraryLease::acquire(&lease_dir) {
+        Ok(lease) => lease,
+        Err(super::error::LibraryError::LibraryInUse) => return current_index(cache, cancel),
+        Err(error) => return Err(error.into()),
+    };
     let state_path = cache.join("bulk-state.json");
-    // Invalid bookkeeping fails closed rather than bypassing the daily limit.
+    // Invalid bookkeeping fails closed rather than bypassing the weekly limit.
     let mut state: BulkState = if state_path.exists() {
         read_json(&state_path, 4096)?
     } else {
         BulkState::default()
     };
-    // An index upgrade uses the existing ZIP even when its daily refresh is due.
+    // An index upgrade uses the existing ZIP even when its weekly refresh is due.
     if let Some(generation) = state.generation.as_deref() {
         uuid::Uuid::parse_str(generation).map_err(|_| Error::InvalidMetadata)?;
         let index_path = cache.join(format!("index-{generation}.json"));
@@ -429,17 +587,17 @@ fn ensure_index(cache: &Path, io: &impl Transport, cancel: &AtomicBool) -> Resul
             && read_json::<Index>(&index_path, MAX_INDEX_BYTES)
                 .map_or(true, |index| index.version != INDEX_VERSION)
         {
-            return cached_index(cache, &state, cancel);
+            return cached_index(cache, &state, cancel, true);
         }
     }
-    if fresh(io.now_ms(), state.downloaded_at) {
-        return cached_index(cache, &state, cancel);
+    if within(io.now_ms(), state.downloaded_at, WEEK_MS) {
+        return cached_index(cache, &state, cancel, true);
     }
     if within(io.now_ms(), state.last_attempt_at, RETRY_MS) {
         if state.generation.is_none() {
             return Err(Error::Http("bulk_download_cooldown".into()));
         }
-        return cached_index(cache, &state, cancel);
+        return cached_index(cache, &state, cancel, true);
     }
     // Leftovers of a download the app did not finish (closed mid-way) are removed before retrying.
     if let Ok(entries) = fs::read_dir(cache) {
@@ -449,12 +607,35 @@ fn ensure_index(cache: &Path, io: &impl Transport, cancel: &AtomicBool) -> Resul
             }
         }
     }
+    if let Ok(entries) = fs::read_dir(cache) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let generation = name
+                .strip_prefix("Metadata-")
+                .and_then(|s| s.strip_suffix(".zip"))
+                .or_else(|| {
+                    name.strip_prefix("index-")
+                        .and_then(|s| s.strip_suffix(".json"))
+                });
+            if generation.is_some_and(|g| {
+                uuid::Uuid::parse_str(g).is_ok() && Some(g) != state.generation.as_deref()
+            }) {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
     state.last_attempt_at = Some(io.now_ms());
     write_json(&state_path, &state)?; // A failed attempt pauses retries for RETRY_MS.
     let previous = state.generation.clone();
     let attempt = (|| {
         let mut temp = tempfile::NamedTempFile::new_in(cache)?;
-        io.download(BULK_URL, MAX_BULK_BYTES, &mut temp, cancel)?;
+        let mut output = BulkWriter {
+            output: &mut temp,
+            io,
+            total: 0,
+            progress: DownloadProgress::new(io.now_ms()),
+        };
+        io.download(BULK_URL, MAX_BULK_BYTES, &mut output, cancel)?;
         temp.as_file().sync_all()?;
         let index = parse_zip(temp.path(), cancel)?;
         check_cancel(cancel)?;
@@ -474,23 +655,52 @@ fn ensure_index(cache: &Path, io: &impl Transport, cancel: &AtomicBool) -> Resul
             let _ = fs::remove_file(index_path);
             return Err(error);
         }
+        let index = Arc::new(index);
+        *INDEX_CACHE.lock().map_err(|_| Error::Busy)? = Some((
+            index_path.clone(),
+            (
+                fs::metadata(&index_path)?.len(),
+                fs::metadata(&index_path)?.modified()?,
+            ),
+            index.clone(),
+        ));
         Ok(index)
     })();
     match attempt {
         Ok(index) => {
-            if let Some(old) = previous.filter(|s| uuid::Uuid::parse_str(s).is_ok()) {
-                let _ = fs::remove_file(cache.join(format!("Metadata-{old}.zip")));
-                let _ = fs::remove_file(cache.join(format!("index-{old}.json")));
-            }
+            // Readers may have captured the previous manifest. Keep that generation until
+            // the next refresh; the refresh lease excludes competing cleanup/downloads.
             Ok(index)
         }
         Err(Error::Cancelled) => Err(Error::Cancelled),
         Err(error) => {
             // A failed refresh leaves the previous good cache usable, including offline.
             state.generation = previous;
-            cached_index(cache, &state, cancel).or(Err(error))
+            cached_index(cache, &state, cancel, true).or(Err(error))
         }
     }
+}
+
+pub fn refresh_due(cache: &Path, now: u64) -> bool {
+    let state: BulkState = read_json(&cache.join("bulk-state.json"), 4096).unwrap_or_default();
+    let needs_index = state.generation.as_ref().is_some_and(|g| {
+        let path = cache.join(format!("index-{g}.json"));
+        // Read only the current index header, not the game array, on the scheduler thread.
+        File::open(path).ok().and_then(|mut file| {
+            let mut header = [0; 64];
+            let n = file.read(&mut header).ok()?;
+            Some(
+                String::from_utf8_lossy(&header[..n])
+                    .contains(&format!("\"version\":{INDEX_VERSION},")),
+            )
+        }) != Some(true)
+    });
+    needs_index
+        || (!within(now, state.downloaded_at, WEEK_MS)
+            && !within(now, state.last_attempt_at, RETRY_MS))
+}
+pub fn refresh(cache: &Path, cancel: &AtomicBool) -> Result<()> {
+    ensure_index(cache, &Http::default(), cancel).map(|_| ())
 }
 
 /// Stream one record at a time, keeping only the fields needed for spine lookup.
@@ -1053,6 +1263,13 @@ fn fill_launchbox_platforms(
 }
 
 impl FetchState {
+    fn index(&self, cache: &Path, io: &impl Transport, cancel: &AtomicBool) -> Result<Arc<Index>> {
+        if self.lookup_only {
+            current_index(cache, cancel)
+        } else {
+            ensure_index(cache, io, cancel)
+        }
+    }
     pub fn fetch_one(
         &mut self,
         library: &Library,
@@ -1081,7 +1298,7 @@ impl FetchState {
                 .as_deref()
                 .map_or(true, |s| s.trim().is_empty())
         {
-            match ensure_index(cache, &Http::default(), cancel) {
+            match current_index(cache, cancel) {
                 Ok(loaded) => {
                     index = Some(loaded);
                     if fill_launchbox_platforms(library, id, index.as_ref().unwrap(), cancel)? {
@@ -1221,7 +1438,7 @@ impl FetchState {
             {
                 let attempt = (|| {
                     if index.is_none() {
-                        index = Some(ensure_index(cache, io, cancel)?);
+                        index = Some(self.index(cache, io, cancel)?);
                     }
                     fill_launchbox_platforms(library, &id, index.as_ref().unwrap(), cancel)
                 })();
@@ -1259,7 +1476,7 @@ impl FetchState {
         game: &Game,
         io: &impl Transport,
         cancel: &AtomicBool,
-        index: &mut Option<Index>,
+        index: &mut Option<Arc<Index>>,
         phase: &dyn Fn(&str),
     ) -> Result<SpineOutcome> {
         check_cancel(cancel)?;
@@ -1305,7 +1522,7 @@ impl FetchState {
             }
             if index.is_none() {
                 phase("loading_metadata");
-                *index = Some(ensure_index(cache, io, cancel)?);
+                *index = Some(self.index(cache, io, cancel)?);
             }
             let (candidate, image, matched_by) = match match_game(game, index.as_ref().unwrap()) {
                 Ok(found) => found,

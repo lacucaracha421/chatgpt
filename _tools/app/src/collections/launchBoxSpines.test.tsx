@@ -101,11 +101,30 @@ it("excludes manga and scopes single attempts to their library", async () => {
   expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledTimes(2);
 });
 
-it("retains rejected single commands as attempts for the rest of the session", async () => {
-  const gateway = { fetchLaunchBoxSpine: vi.fn().mockRejectedValue(new Error("요청 실패")) } as unknown as LibraryGateway;
-  await expect(requestMissingGameSpine(gateway, "", game, [])).rejects.toThrow("요청 실패");
-  await expect(requestMissingGameSpine(gateway, "", game, [])).rejects.toThrow("요청 실패");
-  expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledOnce();
+it("silently backs off rejected automatic commands and retries later", async () => {
+  vi.useFakeTimers();
+  try {
+    const gateway = { fetchLaunchBoxSpine: vi.fn().mockRejectedValueOnce({ code: "launchbox_busy", message: "LaunchBox lookup is already running" }).mockResolvedValue(outcome("a", "no_match")) } as unknown as LibraryGateway;
+    await expect(requestMissingGameSpine(gateway, "", game, [])).resolves.toBeNull();
+    expect(requestMissingGameSpine(gateway, "", game, [])).toBeNull();
+    expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(30_000);
+    await expect(requestMissingGameSpine(gateway, "", game, [])).resolves.toMatchObject({ status: "no_match" });
+    await requestMissingGameSpine(gateway, "", game, []);
+    expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledTimes(2);
+  } finally { vi.useRealTimers(); }
+});
+it("retries failed outcomes and information failures without a warning", async () => {
+  vi.useFakeTimers();
+  try {
+    for (const failure of [outcome("a", "failed"), { ...outcome("a", "skipped"), informationError: "offline" }]) {
+      const gateway = { fetchLaunchBoxSpine: vi.fn().mockResolvedValueOnce(failure).mockResolvedValue(outcome("a", "matched")) } as unknown as LibraryGateway;
+      await expect(requestMissingGameSpine(gateway, "", game, [])).resolves.toBeNull();
+      vi.advanceTimersByTime(30_000);
+      await expect(requestMissingGameSpine(gateway, "", game, [])).resolves.toMatchObject({ status: "matched" });
+      expect(gateway.fetchLaunchBoxSpine).toHaveBeenCalledTimes(2);
+    }
+  } finally { vi.useRealTimers(); }
 });
 
 it("counts all visited games across cursor pages, including existing spines", async () => {
