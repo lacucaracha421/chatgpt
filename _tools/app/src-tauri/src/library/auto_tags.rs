@@ -1,4 +1,4 @@
-//! 자동 태그 (automatic image tags). PC-only; nothing here is published to the server.
+//! 자동 태그 (automatic image tags). PC-owned; effective display tags are published by `auto_tag_publication`.
 //!
 //! An external tagger's output arrives as an import file written by
 //! `character-runtime/auto_tags_export.py`: a small SQLite database with a `meta` table
@@ -114,7 +114,7 @@ fn validate_tag(tag: &str) -> Result<(), LibraryError> {
 
 /// Guessed characters count only from this score, as in the inspector (`CHARACTER_MIN_SCORE`
 /// in `autoTagModel.ts`); weaker character guesses stay stored but never match or count.
-const CHARACTER_MIN_SCORE: f64 = 0.85;
+pub(crate) const CHARACTER_MIN_SCORE: f64 = 0.85;
 
 /// Whether the machine row aliased `tagged` counts as carried.
 fn machine_row_counts_sql(alias: &str) -> String {

@@ -284,12 +284,14 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
 
     @app.get(PREFIX + "/assets")
     def browse(request: Request, node: NodeID, revision: Revision, filter: Filter = "all",
-               cursor: str | None = Query(default=None, max_length=1024),
+               cursor: str | None = Query(default=None, max_length=16384),
                limit: int = Query(default=40, ge=1, le=100),
                media_kind: asset_filters.MediaKind | None = Query(default=None, pattern="^(images|videos)$"),
                aspect_ratio: asset_filters.AspectRatio | None = Query(default=None, pattern="^(square|landscape|portrait)$"),
                duration_ms_min: int | None = Query(default=None, ge=0, le=asset_filters.BOUND_MAX),
                duration_ms_max: int | None = Query(default=None, ge=0, le=asset_filters.BOUND_MAX),
+               tag: list[str] | None = Query(default=None),
+               artist: str | None = Query(default=None),
                authorization: str | None = Header(default=None)):
         """One Character scope's Assets, with the shared media filters applied in SQL.
 
@@ -320,10 +322,10 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
         # cursor, a silently ignored parameter would let a client believe a page was
         # filtered when it was not, so the parameter set is closed explicitly.
         if request.query_params.keys() - {"node", "revision", "filter", "cursor", "limit",
-                                           "media_kind", "aspect_ratio",
+                                           "media_kind", "aspect_ratio", "tag", "artist",
                                            "duration_ms_min", "duration_ms_max"}:
             raise HTTPException(422, "Invalid character scope request")
-        filters = asset_filters.parse(media_kind, aspect_ratio, duration_ms_min, duration_ms_max)
+        filters = asset_filters.parse(media_kind, aspect_ratio, duration_ms_min, duration_ms_max, tag, artist)
         filter_clause, filter_params = asset_filters.filter_clause(filters)
         position = -1
         if cursor is not None:
@@ -380,7 +382,8 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                 item = json.loads(row["payload"])
                 item.update(asset_filters.technical_fields(row))
                 items.append(item)
-            return {"revision": revision, "filterVersion": asset_filters.FILTER_VERSION,
+            return {"revision": revision, "filterVersion": asset_filters.FILTER_VERSION, "searchVersion": 1,
+                    "searchFilters": {"tag": list(filters.tags), "artist": filters.artist},
                     "items": items, "totalCount": total,
                     "sourceCount": scope["sourceCount"], "has_more": more,
                     "next_cursor": next_cursor}

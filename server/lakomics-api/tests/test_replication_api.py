@@ -54,6 +54,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "album_authority.register_album_authority.<locals>.<lambda>",
             "classification_authority.register_classification_authority.<locals>.<lambda>",
             "asset_authority.register_asset_authority.<locals>.<lambda>",
+            "library_search.register.<locals>.startup",
             "extension_settings.register.<locals>.startup",
             "app.startup_image_thumbnails",
         ]
@@ -81,6 +82,11 @@ class ReplicationStartupTests(unittest.TestCase):
         async def run_lifespan():
             async with api_app.app.router.lifespan_context(api_app.app):
                 self.assertEqual(calls, expected_startup + ["async_startup"])
+                with api_app.get_db() as db:
+                    tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                    triggers = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+                    self.assertTrue({"library_tag_counts", "library_tag_visibility"} <= tables)
+                    self.assertTrue({"tag_canonical_insert", "tag_domain_insert"} <= triggers)
             self.assertEqual(calls, expected_startup + ["async_startup"]
                              + expected_shutdown + ["async_shutdown"])
             self.assertIsNone(api_app._image_thumbnail_worker)

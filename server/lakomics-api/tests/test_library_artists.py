@@ -1,5 +1,8 @@
 """작가 list: PC snapshot upload (replace, idempotent), tablet list and detail reads with ETag."""
 import unittest
+import json
+import sqlite3
+from unittest import mock
 from urllib.parse import quote
 
 import library_artists as artists
@@ -89,6 +92,56 @@ class ArtistRoutes(HomeFixture):
                          (["artist:a3"], []))
         missing = self.client.get(PREFIX + "/artist:a1", headers=self.auth)
         self.assertEqual((missing.status_code, self.code(missing)), (404, "artistNotFound"))
+
+    def test_startup_reads_and_rebuilds_under_one_write_lock(self):
+        first = snapshot()
+        self.ok(self.put(first))
+        newer = snapshot(items=[artist("artist:new", keys=["new-key"])], assignments=[
+            {"assetId": "asset-new", "artistId": "artist:new", "source": "manual"}])
+        state_reader = artists._state
+        blocked = []
+
+        def read_with_competing_publish(db):
+            row = state_reader(db)
+            with self.get_db() as writer:
+                writer.execute("PRAGMA busy_timeout=0")
+                try:
+                    writer.execute("BEGIN IMMEDIATE")
+                except sqlite3.OperationalError as error:
+                    self.assertIn("locked", str(error))
+                    blocked.append(True)
+                else:
+                    # Simulate a publication exactly after startup's document read.
+                    document = {**newer, "revision": 2, "publishedAt": "2026-10-01T00:00:00Z"}
+                    writer.execute("UPDATE library_artist_state SET revision=2,document=?",
+                                   [artists.encode(document)])
+                    artists.search_projection(writer, newer)
+                    writer.commit()
+            return row
+
+        with mock.patch.object(artists, "_state", side_effect=read_with_competing_publish):
+            with self.get_db() as db:
+                artists.startup_db(db)
+                db.commit()  # Match the owning startup hook, including the old implementation.
+        with self.get_db() as db:
+            stored = json.loads(state_reader(db)["document"])
+            expected_keys = sorted((key, item["id"]) for item in stored["artists"] for key in item["keys"])
+            actual_keys = [tuple(row) for row in db.execute(
+                "SELECT creator_key,artist_id FROM library_artist_keys ORDER BY creator_key")]
+            expected_assignments = sorted((row["assetId"], row["artistId"]) for row in stored["assignments"])
+            actual_assignments = [tuple(row) for row in db.execute(
+                "SELECT asset_id,artist_id FROM library_artist_assignments ORDER BY asset_id")]
+        self.assertEqual(actual_keys, expected_keys)
+        self.assertEqual(actual_assignments, expected_assignments)
+        self.assertEqual(blocked, [True])
+        self.ok(self.put(newer))
+        unchanged = self.ok(self.put(newer))
+        self.assertFalse(unchanged["changed"])
+        with self.get_db() as db:
+            self.assertEqual([tuple(row) for row in db.execute("SELECT * FROM library_artist_keys")],
+                             [("new-key", "artist:new")])
+            self.assertEqual([tuple(row) for row in db.execute("SELECT * FROM library_artist_assignments")],
+                             [("asset-new", "artist:new")])
 
     def test_signal(self):
         def signal():

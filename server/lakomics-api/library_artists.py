@@ -69,11 +69,36 @@ CREATE TABLE IF NOT EXISTS library_artist_state(
 INSERT OR IGNORE INTO library_artist_state VALUES(1,0,NULL,NULL,NULL);
 CREATE TABLE IF NOT EXISTS library_artists(
  artist_id TEXT PRIMARY KEY, position INTEGER NOT NULL, payload TEXT NOT NULL, assigned INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS library_artist_keys(
+ creator_key TEXT PRIMARY KEY, artist_id TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS library_artist_keys_by_artist ON library_artist_keys(artist_id,creator_key);
+CREATE TABLE IF NOT EXISTS library_artist_assignments(
+ asset_id TEXT PRIMARY KEY, artist_id TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS library_artist_assignments_by_artist ON library_artist_assignments(artist_id,asset_id);
 """
 
 
 def startup_db(db):
     db.executescript(DDL)
+    # Materialize the already published snapshot for rolling server-first upgrades.
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        row = _state(db)
+        if row["document"] is not None:
+            search_projection(db, json.loads(row["document"]))
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+
+
+def search_projection(db, body):
+    db.execute("DELETE FROM library_artist_keys")
+    db.execute("DELETE FROM library_artist_assignments")
+    db.executemany("INSERT INTO library_artist_keys VALUES(?,?)",
+                   [(key, artist["id"]) for artist in body["artists"] for key in artist["keys"]])
+    db.executemany("INSERT INTO library_artist_assignments VALUES(?,?)",
+                   [(row["assetId"], row["artistId"]) for row in body.get("assignments", [])])
 
 
 def encode(value):
@@ -163,6 +188,7 @@ def register(app, get_db, require_client, require_publisher):
                 document = {"version": 1, "revision": revision, "publishedAt": published, **body}
                 db.execute("UPDATE library_artist_state SET revision=?,published_at=?,digest=?,document=? "
                            "WHERE singleton=1", (revision, published, digest, conditional.encode(document).decode()))
+                search_projection(db, body)
                 db.execute("DELETE FROM library_artists")
                 db.executemany("INSERT INTO library_artists VALUES(?,?,?,?)",
                                [(artist["id"], index, encode(artist), assigned.get(artist["id"], 0))

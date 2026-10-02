@@ -632,7 +632,7 @@ def parse_asset_filters(params, fail):
             and values["duration_ms_min"] >= values["duration_ms_max"]):
         fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
     filters = asset_filters.Filters(media, aspect, values["duration_ms_min"],
-                                    values["duration_ms_max"])
+                                    values["duration_ms_max"], params.getlist("tag"), params.get("artist"))
     clause, bindings = asset_filters.filter_clause(filters)
     return filters, clause, bindings
 
@@ -1407,7 +1407,7 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
         if toc == 1 and cursor is not None:
             fail(400, "invalidAlbumAssets", "toc and cursor are mutually exclusive")
         if not set(request.query_params) <= {"libraryId", "epoch", "albumId", "cursor", "limit",
-                                             "sort", "toc", "utcOffsetMinutes", "media_kind", "aspect_ratio",
+                                             "sort", "toc", "utcOffsetMinutes", "media_kind", "aspect_ratio", "tag", "artist",
                                              "duration_ms_min", "duration_ms_max"}:
             fail(422, "invalidAlbumAssets", "앨범 자산 요청이 올바르지 않습니다.")
         if (not LIBRARY_ID_PATTERN.fullmatch(libraryId) or epoch < 1
@@ -1445,10 +1445,11 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                     " JOIN visible_assets AS asset ON asset.id = member.asset_id",
                     "member.library_id = ? AND member.album_id = ?"
                     f" AND member.desired_state = 1 AND asset.committed = 1 {filter_clause}",
-                    clause_params, sort)
+                    clause_params, sort, prefer_id_lookup=filters.artist is not None)
                 if toc:
-                    return query.toc(db, generation, lambda previous: encode_asset_cursor(
+                    payload = query.toc(db, generation, lambda previous: encode_asset_cursor(
                         albumId, previous, filters, sort), applied_offset)
+                    return payload
                 request_cursor = encode_asset_cursor(albumId, after, filters, sort) if after else None
                 rows = query.page(db, limit + 1, after)
                 has_more = len(rows) > limit
@@ -1468,13 +1469,14 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                              "앨범 자산 페이지 커서가 진행하지 않았습니다.", albumId=albumId)
                 page = {"libraryId": row["libraryId"], "epoch": row["epoch"],
                         "contractVersion": row["contractVersion"], "albumId": albumId,
-                        "filterVersion": asset_filters.FILTER_VERSION,
+                        "filterVersion": asset_filters.FILTER_VERSION, "searchVersion": 1,
+                        "searchFilters": {"tag": list(filters.tags), "artist": filters.artist},
                         "items": items, "nextCursor": next_cursor, "hasMore": has_more}
                 if generation is not None:
                     page["listGeneration"] = generation
                 return page
 
-        return conditional.json_response(await run_in_threadpool(run), if_none_match)
+        return asset_filters.search_response(await run_in_threadpool(run), filters, if_none_match, albumId)
 
     @app.get(PREFIX + "/changes")
     async def album_changes(request: Request, libraryId: str, epoch: int, after: int = 0,

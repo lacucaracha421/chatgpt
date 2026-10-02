@@ -23,13 +23,16 @@ class AssetListQuery:
     this same selection and ordering, including visibility through ``visible_assets``.
     """
 
-    def __init__(self, from_clause, where_clause, params, sort):
+    def __init__(self, from_clause, where_clause, params, sort, *, prefer_id_lookup=False):
         self.from_clause = from_clause
         self.where_clause = where_clause
         self.params = list(params)
         self.sort = sort
         self.direction = "DESC" if sort == "newest" else "ASC"
         self.comparison = "<" if sort == "newest" else ">"
+        # Unary + preserves values/order but stops the date index from winning over
+        # an indexed artist candidate set. Sort the selected ids, not all Assets.
+        self.order_at = f"+{SORT_AT}" if prefer_id_lookup else SORT_AT
 
     def select(self, columns, *, after=None, limit=None):
         where = self.where_clause
@@ -39,7 +42,7 @@ class AssetListQuery:
                       f" OR ({SORT_AT} = ? AND asset.id {self.comparison} ?))")
             params.extend([after[0], after[0], after[1]])
         sql = (f"SELECT {columns} FROM {self.from_clause} WHERE {where}"
-               f" ORDER BY {SORT_AT} {self.direction}, asset.id {self.direction}")
+               f" ORDER BY {self.order_at} {self.direction}, asset.id {self.direction}")
         if limit is not None:
             sql += " LIMIT ?"
             params.append(limit)

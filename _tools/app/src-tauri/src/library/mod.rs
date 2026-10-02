@@ -149,6 +149,7 @@ pub(crate) mod artist_style;
 #[cfg(test)]
 mod artists_tests;
 pub(crate) mod auto_tags;
+pub(crate) mod auto_tag_publication;
 pub(crate) mod tagger_review;
 pub(crate) mod character_suggestions;
 #[cfg(test)]

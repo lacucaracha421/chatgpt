@@ -295,7 +295,9 @@ def list_generation(db):
                          "WHERE domain IN ('assets','classifications','albums') ORDER BY domain").fetchall() if 'authority_domains' in tables else []
     characters = db.execute("SELECT revision FROM mobile_character_state WHERE singleton=1").fetchone() if 'mobile_character_state' in tables else None
     snapshot = db.execute("SELECT revision FROM classification_snapshots WHERE singleton=1").fetchone() if 'classification_snapshots' in tables else None
-    value = [generation,[list(row) for row in domains],list(characters) if characters else None,list(snapshot) if snapshot else None]
+    search_revisions = [list(db.execute(f"SELECT revision FROM {table} WHERE singleton=1").fetchone() or [])
+                        if table in tables else None for table in ("library_tag_state", "library_artist_state")]
+    value = [search_revisions,generation,[list(row) for row in domains],list(characters) if characters else None,list(snapshot) if snapshot else None]
     return hashlib.sha256(json.dumps(value,separators=(',',':')).encode()).hexdigest()
 
 
@@ -308,7 +310,7 @@ def asset_list_generation(authorization: str | None = Header(default=None)):
     # `filterVersion` is the same "does this server know about X" probe, carried on the
     # call every gallery already makes before a page fetch: an older server omits the
     # field, and the client then refuses to present an unfiltered list as a filtered one.
-    return {"generation": generation, "filterVersion": asset_filters.FILTER_VERSION}
+    return {"generation": generation, "filterVersion": asset_filters.FILTER_VERSION, "searchVersion": 1}
 
 
 lifecycle(app).on_startup(startup_replication)
@@ -1967,7 +1969,9 @@ def _authority_memberships(db, active, rows):
 
 @app.get("/v1/library/assets")
 def list_mobile_classification_assets(
-    classification_id: str | None = None,
+    classification_id: list[str] | None = Query(default=None),
+    tag: list[str] | None = Query(default=None),
+    artist: str | None = Query(default=None),
     authorization: str | None = Header(default=None),
     cursor: str | None = None,
     toc: int = Query(default=0, ge=0, le=1),
@@ -2008,7 +2012,10 @@ def list_mobile_classification_assets(
             applied_offset = asset_list_query.parse_utc_offset_minutes(utc_offset_minutes)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-    filters = asset_filters.parse(media_kind, aspect_ratio, duration_ms_min, duration_ms_max)
+    filters = asset_filters.parse(media_kind, aspect_ratio, duration_ms_min, duration_ms_max, tag, artist)
+    classifications = asset_filters.identifiers(classification_id, 8, 200)
+    # Preserve the shipped cursor scope for absent/single classification requests.
+    classification_id = classifications[0] if len(classifications) == 1 else list(classifications) if classifications else None
     classification_clause = ""
     after = None
     if cursor is not None:
@@ -2020,6 +2027,8 @@ def list_mobile_classification_assets(
         parsed = asset_filters.decode_cursor(cursor, "library-assets", filters,
                                              400, "Invalid cursor")
         if len(parsed) == 3:
+            if len(classifications) > 1:
+                raise HTTPException(status_code=400, detail="Invalid cursor")
             # Pre-filter layout. It has no scope slots — the classification is the parameter
             # the request arrived with — so the sort slot is all there is to bind.
             if parsed[0] != sort:
@@ -2055,7 +2064,7 @@ def list_mobile_classification_assets(
         # lifecycle predicate here: one rule means a trashed Asset cannot be hidden on
         # one route and visible on another. The projection fails closed, so an Asset
         # whose canonical row is missing is hidden rather than exposed.
-        if classification_id is not None:
+        for classification in classifications:
             # Written as a membership test over the classification's own index rather
             # than a correlated EXISTS: the planner turned the latter into a walk of the
             # whole library in sort order with one probe per Asset (about 30 ms for
@@ -2064,7 +2073,7 @@ def list_mobile_classification_assets(
             if active is not None:
                 # Single-valued by contract, so this is an exact equality against the
                 # authority's canonical assignment rather than a legacy relation test.
-                classification_clause = """
+                classification_clause += """
                     AND asset.id IN (
                         SELECT assignment.asset_id
                         FROM classification_authority_assignments AS assignment
@@ -2073,24 +2082,24 @@ def list_mobile_classification_assets(
                     )
                 """
                 clause_params.append(active["libraryId"])
-                clause_params.append(classification_id)
+                clause_params.append(classification)
             else:
-                classification_clause = """
+                classification_clause += """
                     AND asset.id IN (
                         SELECT relationship.asset_id
                         FROM asset_classifications AS relationship
                         WHERE relationship.classification_id = ?
                     )
                 """
-                clause_params.append(classification_id)
+                clause_params.append(classification)
         query = asset_list_query.AssetListQuery(
             "visible_assets AS asset",
             f"asset.committed = 1 {classification_clause} {filter_clause}",
-            clause_params + filter_params, sort)
+            clause_params + filter_params, sort, prefer_id_lookup=filters.artist is not None)
         if toc:
             payload = query.toc(db, generation, lambda previous: asset_filters.encode_cursor(
                 "library-assets", filters, [sort, classification_id, *previous]), applied_offset)
-            return conditional.json_response(payload, if_none_match)
+            return asset_filters.search_response(payload, filters, if_none_match, list(classifications))
         rows = query.page(db, limit + 1, after)
         has_more = len(rows) > limit
         page_rows = rows[:limit]
@@ -2145,7 +2154,8 @@ def list_mobile_classification_assets(
     # of bracketing the fetch with two `/v1/library/list-generation` reads.
     return conditional.json_response(
         {"items": items, "next_cursor": next_cursor, "has_more": has_more,
-         "filterVersion": asset_filters.FILTER_VERSION, "listGeneration": generation},
+         "filterVersion": asset_filters.FILTER_VERSION, "searchVersion": 1, "listGeneration": generation,
+         "searchFilters": {"tag": list(filters.tags), "artist": filters.artist, "classification_id": list(classifications)}},
         if_none_match)
 
 
@@ -3402,6 +3412,7 @@ import home_av_pick
 import home_publications
 import home_upcoming
 import library_artists
+import library_search
 
 # Late-bound like the Collection routes, so the shared token is read per request.
 def _home_client(authorization):
@@ -3525,6 +3536,10 @@ from asset_authority import register_asset_authority
 
 startup_asset_authority = register_asset_authority(
     app, get_db, require_client, require_publisher)
+
+# Tag counts observe the shared lifecycle schema, including future activation.
+lifecycle(app).on_startup(library_search.register(app, get_db, _home_client, require_publisher))
+
 
 # Collector semicircle-menu order and hidden folders, so a reinstall restores them.
 from extension_settings import register as register_extension_settings

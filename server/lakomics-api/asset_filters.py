@@ -25,6 +25,8 @@ import binascii
 import json
 from typing import Literal
 
+import conditional
+
 from fastapi import HTTPException
 
 #: Advertised contract version. Present on every filtered *and* unfiltered response
@@ -55,9 +57,12 @@ class Filters:
     the request stays byte-identical to the pre-filter contract.
     """
 
-    __slots__ = ("aspect", "duration_max", "duration_min", "media")
+    __slots__ = ("aspect", "duration_max", "duration_min", "media", "tags", "artist")
 
-    def __init__(self, media=None, aspect=None, duration_min=None, duration_max=None):
+    def __init__(self, media=None, aspect=None, duration_min=None, duration_max=None, tags=None, artist=None):
+        self.tags = identifiers(tags, 8, 200)
+        self.artist = identifiers([artist] if artist is not None else [], 1, 1024)
+        self.artist = self.artist[0] if self.artist else None
         self.media = media
         self.aspect = aspect
         self.duration_min = duration_min
@@ -65,7 +70,7 @@ class Filters:
 
     @property
     def active(self) -> bool:
-        return any(value is not None for value in
+        return bool(self.tags or self.artist) or any(value is not None for value in
                    (self.media, self.aspect, self.duration_min, self.duration_max))
 
     @property
@@ -80,10 +85,20 @@ class Filters:
 
     def identity(self) -> list:
         """Stable JSON-able identity, used as the cursor's filter binding."""
-        return [self.media, self.aspect, self.duration_min, self.duration_max]
+        return [self.media, self.aspect, self.duration_min, self.duration_max] + (
+            [list(self.tags), self.artist] if self.tags or self.artist else [])
 
 
-def parse(media=None, aspect=None, duration_min=None, duration_max=None) -> Filters:
+def identifiers(values, maximum, length):
+    values = values or []
+    if len(values) > maximum or any(not isinstance(v, str) or not v or v.strip() != v
+                                  or len(v) > length or any(ord(c) < 32 or ord(c) == 127 for c in v)
+                                  for v in values):
+        raise HTTPException(422, "Invalid search filter")
+    return tuple(sorted(set(values)))
+
+
+def parse(media=None, aspect=None, duration_min=None, duration_max=None, tags=None, artist=None) -> Filters:
     """Resolve the query parameters, or reject the request.
 
     Bounds are compared as integers, so ``min == max`` — an empty range that can never
@@ -91,7 +106,7 @@ def parse(media=None, aspect=None, duration_min=None, duration_max=None) -> Filt
     """
     if duration_min is not None and duration_max is not None and duration_min >= duration_max:
         raise HTTPException(400, "duration_ms_min must be less than duration_ms_max")
-    return Filters(media, aspect, duration_min, duration_max)
+    return Filters(media, aspect, duration_min, duration_max, tags, artist)
 
 
 def filter_clause(filters: Filters, alias: str = "asset") -> tuple[str, list]:
@@ -127,9 +142,38 @@ def filter_clause(filters: Filters, alias: str = "asset") -> tuple[str, list]:
             bounds.append(f"{alias}.duration_ms < ?")
             params.append(filters.duration_max)
         conditions.append(f"({known} AND {' AND '.join(bounds)})")
+    for tag in filters.tags:
+        conditions.append(f"{alias}.id IN (SELECT asset_id FROM library_asset_tags WHERE tag_id=?)")
+        params.append(tag)
+    if filters.artist is not None:
+        # A manual/source-url assignment wins over the original creator key, as on PC.
+        conditions.append(f"""{alias}.id IN (
+            SELECT asset_id FROM library_artist_assignments WHERE artist_id=?
+            UNION
+            SELECT tagged.asset_id FROM library_artist_keys keys
+            JOIN library_tag_assets tagged ON tagged.creator_key=keys.creator_key
+            WHERE keys.artist_id=?
+              AND NOT EXISTS(SELECT 1 FROM library_artist_assignments assigned
+                             WHERE assigned.asset_id=tagged.asset_id)
+            UNION
+            SELECT original.id FROM library_artist_keys keys
+            JOIN assets original ON original.creator_handle=keys.creator_key
+            WHERE keys.artist_id=?
+              AND NOT EXISTS(SELECT 1 FROM library_tag_assets tagged
+                             WHERE tagged.asset_id=original.id AND tagged.creator_key IS NOT NULL)
+              AND NOT EXISTS(SELECT 1 FROM library_artist_assignments assigned
+                             WHERE assigned.asset_id=original.id))""")
+        params.extend([filters.artist] * 3)
     if not conditions:
         return "", params
     return " AND " + " AND ".join(conditions), params
+
+
+def search_response(payload, filters, if_none_match=None, scope=None):
+    """Bind ETags without changing the shipped TOC response shape."""
+    body = conditional.encode(payload)
+    etag = conditional.etag_for(conditional.encode([payload, filters.identity(), scope]))
+    return conditional.encoded_response(body, etag, if_none_match)
 
 
 def encode_cursor(kind: str, filters: Filters, payload: list) -> str:
