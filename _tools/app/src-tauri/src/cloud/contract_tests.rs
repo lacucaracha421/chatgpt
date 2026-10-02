@@ -369,7 +369,7 @@ fn bookmark_reconciliation_reads_the_authority_snapshot_and_changes() {
     let server_thread = thread::spawn(move || {
         let mut requests = Vec::new();
 
-        let mut status = server.recv().unwrap();
+        let status = server.recv().unwrap();
         assert_eq!(status.method(), &Method::Get);
         assert_eq!(status.url(), "/v1/mobile-catalog/status");
         assert_eq!(
@@ -386,7 +386,7 @@ fn bookmark_reconciliation_reads_the_authority_snapshot_and_changes() {
             })))
             .unwrap();
 
-        let mut snapshot = server.recv().unwrap();
+        let snapshot = server.recv().unwrap();
         assert_eq!(snapshot.method(), &Method::Get);
         assert_eq!(
             snapshot.url(),
@@ -408,7 +408,7 @@ fn bookmark_reconciliation_reads_the_authority_snapshot_and_changes() {
             })))
             .unwrap();
 
-        let mut changes = server.recv().unwrap();
+        let changes = server.recv().unwrap();
         assert_eq!(changes.method(), &Method::Get);
         assert_eq!(
             changes.url(),
@@ -467,7 +467,7 @@ fn an_inactive_authority_reports_absent_metadata_without_failing() {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}/v1", server.server_addr());
     let server_thread = thread::spawn(move || {
-        let mut request = server.recv().unwrap();
+        let request = server.recv().unwrap();
         // The domain is still PC-owned: every authority field is null.
         request
             .respond(json_response(json!({
@@ -494,7 +494,7 @@ fn a_cursor_beyond_the_server_cursor_is_its_own_recovery_state() {
     let base_url = format!("http://{}/v1", server.server_addr());
     let library_id = "a".repeat(32);
     let server_thread = thread::spawn(move || {
-        let mut request = server.recv().unwrap();
+        let request = server.recv().unwrap();
         request
             .respond(
                 Response::from_data(b"{}".to_vec())
@@ -526,7 +526,7 @@ fn a_coded_cursor_expiry_is_distinct_from_an_uncoded_conflict() {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}/v1", server.server_addr());
     let thread = thread::spawn(move || {
-        let mut request = server.recv().unwrap();
+        let request = server.recv().unwrap();
         request
             .respond(
                 Response::from_data(
@@ -556,7 +556,7 @@ fn a_coded_cursor_expiry_is_distinct_from_an_uncoded_conflict() {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}/v1", server.server_addr());
     let thread = thread::spawn(move || {
-        let mut request = server.recv().unwrap();
+        let request = server.recv().unwrap();
         request
             .respond(
                 Response::from_data(
@@ -587,7 +587,7 @@ fn publication_requires_publisher_authority() {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}/v1", server.server_addr());
     let thread = thread::spawn(move || {
-        let mut request = server.recv().unwrap();
+        let request = server.recv().unwrap();
         // The credential actually sent is the one the caller supplied: publication
         // does not silently borrow another stored credential.
         let authorization = request
@@ -629,7 +629,7 @@ fn authority_identity_mismatch_and_contract_skew_are_distinguishable() {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}/v1", server.server_addr());
     let thread = thread::spawn(move || {
-        let mut request = server.recv().unwrap();
+        let request = server.recv().unwrap();
         request
             .respond(
                 Response::from_data(b"{}".to_vec())
@@ -652,7 +652,7 @@ fn authority_identity_mismatch_and_contract_skew_are_distinguishable() {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}/v1", server.server_addr());
     let thread = thread::spawn(move || {
-        let mut request = server.recv().unwrap();
+        let request = server.recv().unwrap();
         request
             .respond(
                 Response::from_data(b"{}".to_vec())
@@ -939,7 +939,7 @@ mod bookmark_command {
         let base_url = format!("http://{}/v1", server.server_addr());
         let operation = "00000000-0000-4000-8000-000000000007";
         let server_thread = thread::spawn(move || {
-            let mut request = server.recv().unwrap();
+            let request = server.recv().unwrap();
             assert_eq!(request.url(), "/v1/mobile-catalog/bookmarks/kHentai/07");
             let mut body = result_body(operation);
             body["workId"] = json!("07");

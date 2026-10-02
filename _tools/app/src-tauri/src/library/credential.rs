@@ -216,11 +216,13 @@ pub(crate) fn delete_notes_test_key(target: &str) {
 }
 
 /// OS credential-store target of an encrypted Private Vault master key (ADR-0039).
+#[cfg(not(test))]
 fn vault_key_target(vault_id: &str) -> String {
     format!("Lakomics/PrivateVault/{vault_id}")
 }
 
 #[cfg(any(windows, target_os = "linux"))]
+#[cfg(not(test))]
 pub(crate) fn vault_key(vault_id: &str) -> Result<Option<Vec<u8>>, LibraryError> {
     OsCredentialBackend
         .read(&vault_key_target(vault_id))
@@ -228,6 +230,7 @@ pub(crate) fn vault_key(vault_id: &str) -> Result<Option<Vec<u8>>, LibraryError>
 }
 
 #[cfg(any(windows, target_os = "linux"))]
+#[cfg(not(test))]
 pub(crate) fn set_vault_key(vault_id: &str, value: &[u8]) -> Result<(), LibraryError> {
     OsCredentialBackend
         .write(&vault_key_target(vault_id), value)
@@ -235,6 +238,7 @@ pub(crate) fn set_vault_key(vault_id: &str, value: &[u8]) -> Result<(), LibraryE
 }
 
 #[cfg(any(windows, target_os = "linux"))]
+#[cfg(not(test))]
 pub(crate) fn delete_vault_key(vault_id: &str) -> Result<(), LibraryError> {
     OsCredentialBackend
         .delete(&vault_key_target(vault_id))
@@ -242,16 +246,19 @@ pub(crate) fn delete_vault_key(vault_id: &str) -> Result<(), LibraryError> {
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(test))]
 pub(crate) fn vault_key(_vault_id: &str) -> Result<Option<Vec<u8>>, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(test))]
 pub(crate) fn set_vault_key(_vault_id: &str, _value: &[u8]) -> Result<(), LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(test))]
 pub(crate) fn delete_vault_key(_vault_id: &str) -> Result<(), LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
@@ -497,17 +504,6 @@ pub(crate) fn read_cloud_api_token_os() -> Result<CloudCredential, LibraryError>
     super::credential_broker::broker().credential(CredentialTarget::CloudApi)
 }
 
-/// Read the Cloud API credential directly from the OS store, bypassing the session cache.
-///
-/// The broker's own loader, and nothing else's: a caller that wants a fresh value must
-/// invalidate the cache and go through [`read_cloud_api_token_os`].
-#[cfg(any(windows, target_os = "linux"))]
-pub(crate) fn read_cloud_api_token_from_store() -> Result<CloudCredential, LibraryError> {
-    Ok(CloudCredential::new(read_cloud_api_token(
-        &OsCredentialBackend,
-    )?))
-}
-
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn cloud_publisher_token_status() -> Result<bool, LibraryError> {
     cloud_publisher_token_status_with(&OsCredentialBackend)
@@ -533,15 +529,6 @@ pub(crate) fn delete_cloud_publisher_token_os() -> Result<(), LibraryError> {
 #[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn read_cloud_publisher_token_os() -> Result<CloudCredential, LibraryError> {
     super::credential_broker::broker().credential(CredentialTarget::CloudPublisher)
-}
-
-/// Read the publisher credential directly from the OS store; see
-/// [`read_cloud_api_token_from_store`].
-#[cfg(any(windows, target_os = "linux"))]
-pub(crate) fn read_cloud_publisher_token_from_store() -> Result<CloudCredential, LibraryError> {
-    Ok(CloudCredential::new(read_cloud_publisher_token(
-        &OsCredentialBackend,
-    )?))
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -600,11 +587,6 @@ pub(crate) fn read_cloud_api_token_os() -> Result<CloudCredential, LibraryError>
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-pub(crate) fn read_cloud_api_token_from_store() -> Result<CloudCredential, LibraryError> {
-    Err(LibraryError::CredentialStoreUnavailable)
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn cloud_publisher_token_status() -> Result<bool, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
@@ -621,11 +603,6 @@ pub(crate) fn delete_cloud_publisher_token_os() -> Result<(), LibraryError> {
 
 #[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn read_cloud_publisher_token_os() -> Result<CloudCredential, LibraryError> {
-    Err(LibraryError::CredentialStoreUnavailable)
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
-pub(crate) fn read_cloud_publisher_token_from_store() -> Result<CloudCredential, LibraryError> {
     Err(LibraryError::CredentialStoreUnavailable)
 }
 
@@ -1009,6 +986,7 @@ fn set_cloud_api_token<B: CredentialBackend>(backend: &B, token: &str) -> Result
     set_secret(backend, CLOUD_API_TARGET, token)
 }
 
+#[cfg(test)]
 fn read_cloud_api_token<B: CredentialBackend>(backend: &B) -> Result<String, LibraryError> {
     read_secret(backend, CLOUD_API_TARGET)
 }
@@ -1024,6 +1002,7 @@ fn set_cloud_publisher_token<B: CredentialBackend>(
     set_secret(backend, CLOUD_PUBLISHER_TARGET, token)
 }
 
+#[cfg(test)]
 fn read_cloud_publisher_token<B: CredentialBackend>(backend: &B) -> Result<String, LibraryError> {
     read_secret(backend, CLOUD_PUBLISHER_TARGET)
 }

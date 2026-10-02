@@ -99,7 +99,7 @@ pub enum CoverSurface {
     Back,
 }
 impl CoverSurface {
-    pub fn kind(self) -> super::work_artwork::WorkArtworkKind {
+    pub(crate) fn kind(self) -> super::work_artwork::WorkArtworkKind {
         match self {
             Self::Front => super::work_artwork::WorkArtworkKind::Cover,
             Self::Spine => super::work_artwork::WorkArtworkKind::Spine,

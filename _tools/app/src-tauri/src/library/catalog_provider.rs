@@ -57,6 +57,7 @@ impl CatalogWorkIdentity {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn key(&self) -> String {
         format!("{}:{}", self.provider.as_str(), self.provider_work_id)
     }

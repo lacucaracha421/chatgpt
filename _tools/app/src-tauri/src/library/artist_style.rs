@@ -7,6 +7,7 @@ use super::{
     Library,
 };
 use artist_style_math::{Vector, DIM};
+#[cfg(test)]
 use artist_style_math as math;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::Serialize;
@@ -196,6 +197,7 @@ struct Inputs {
     assets: Vec<Asset>,
     artists: BTreeMap<String, ArtistSummary>,
     dismissals: Vec<(String, String)>,
+    #[cfg(test)]
     excluded_classifications: Vec<String>,
     stamp: String,
 }
@@ -233,6 +235,7 @@ fn inputs(conn: &Connection) -> Result<Inputs, LibraryError> {
         assets,
         artists,
         dismissals,
+        #[cfg(test)]
         excluded_classifications,
         stamp,
     })

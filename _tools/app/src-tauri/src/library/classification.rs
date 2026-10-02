@@ -1569,7 +1569,7 @@ mod tests {
         // Flow C 회귀: 관계-only 변경은 원본 재업로드 없이 복제본에 수렴해야
         // 한다. 다음 revision의 pending 큐 row가 트랜잭션 안에서 만들어지는지
         // 검증한다.
-        let mut fixture = ClassificationFixture::new();
+        let fixture = ClassificationFixture::new();
         insert_asset(&fixture.library, "asset-a");
         fixture
             .library

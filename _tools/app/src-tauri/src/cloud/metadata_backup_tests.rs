@@ -87,7 +87,7 @@ fn sync_status_body(
 }
 
 fn answer_status(server: &Server, active: bool, domains: serde_json::Value) {
-    let mut request = server.recv().unwrap();
+    let request = server.recv().unwrap();
     assert_eq!(request.method(), &Method::Get);
     assert_eq!(request.url(), "/v1/sync/status");
     assert_eq!(

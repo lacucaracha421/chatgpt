@@ -85,6 +85,7 @@ pub(crate) enum RemoteCaptureKind {
     Video,
 }
 
+#[cfg(test)]
 impl RemoteCaptureKind {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
@@ -219,9 +220,11 @@ pub(crate) struct ReplicationPrepareRequest<'a> {
 pub(crate) struct ReplicationPrepareResponse {
     #[serde(default)]
     pub metadata_revision: Option<u64>,
-    pub asset_id: String,
+    #[serde(rename = "asset_id")]
+    pub _asset_id: String,
     pub already_committed: bool,
-    pub object_keys: BTreeMap<String, String>,
+    #[serde(rename = "object_keys")]
+    pub _object_keys: BTreeMap<String, String>,
 }
 
 /// CLOUD-006 복제: 서버 commit 요청. 원본·썸네일 variant와 모바일 브라우징

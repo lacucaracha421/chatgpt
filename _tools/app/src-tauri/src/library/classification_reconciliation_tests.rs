@@ -3790,7 +3790,6 @@ mod integration {
     /// state that happened to result.
     fn read_request_body(request: &mut tiny_http::Request) -> serde_json::Value {
         let mut body = String::new();
-        use std::io::Read;
         request.as_reader().read_to_string(&mut body).unwrap();
         serde_json::from_str(&body).unwrap_or(serde_json::Value::Null)
     }
@@ -4650,33 +4649,6 @@ fn a_clean_outbox_permits_the_receive() {
     // -----------------------------------------------------------------------
     // Deleting a Classification that holds Assets converges end to end
     // -----------------------------------------------------------------------
-
-    /// The delete command body the server would accept, keyed to a real queued intent.
-    fn delete_change_row(sequence: i64, classification_id: &str, to: Option<&str>, affects: i64,
-                         operation_id: &str) -> serde_json::Value {
-        serde_json::json!({
-            "sequence": sequence,
-            "authorityCursor": sequence,
-            "commandType": "deleteClassification",
-            "operationId": operation_id,
-            "changedAt": "2026-09-17T00:00:00Z",
-            "classification": {
-                "id": classification_id,
-                "kind": "tag",
-                "name": "삭제됨",
-                "parentId": null,
-                "iconKey": null,
-                "colorKey": null,
-                "deleted": true,
-                "entityRevision": 2
-            },
-            "assignmentTransition": {
-                "fromClassificationId": classification_id,
-                "toClassificationId": to,
-                "affectsAssignments": affects
-            }
-        })
-    }
 
     /// One accepted delete: the tombstone, the transition, and the cursor it occupies.
     fn accepted_delete(operation_id: &str, classification_id: &str, to: Option<&str>,
@@ -5765,7 +5737,7 @@ fn a_clean_outbox_permits_the_receive() {
             ["deleteClassification", "setAssetClassification"],
             "strict FIFO keeps the delete ahead of the reassignment"
         );
-        let (delete_op, _, delete_payload) = queued[0].clone();
+        let (delete_op, _, _delete_payload) = queued[0].clone();
         let (assign_op, _, assign_payload) = queued[1].clone();
         let queued_assign: serde_json::Value = serde_json::from_str(&assign_payload).unwrap();
         assert_eq!(

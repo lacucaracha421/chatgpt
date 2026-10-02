@@ -23,7 +23,6 @@ pub(super) enum ReviewState {
     Unresolved,
     PartiallyResolved,
     Resolved,
-    Failed,
 }
 impl ReviewState {
     fn stored(self) -> &'static str {
@@ -32,7 +31,6 @@ impl ReviewState {
             Self::Unresolved => "unresolved",
             Self::PartiallyResolved => "partially_resolved",
             Self::Resolved => "resolved",
-            Self::Failed => "failed",
         }
     }
 }

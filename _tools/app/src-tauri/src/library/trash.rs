@@ -891,7 +891,7 @@ fn run_before_handle_delete_hook(path: &Path) {
     });
 }
 
-#[cfg(not(all(test, windows)))]
+#[cfg(all(windows, not(test)))]
 fn run_before_handle_delete_hook(_path: &Path) {}
 
 #[cfg(test)]

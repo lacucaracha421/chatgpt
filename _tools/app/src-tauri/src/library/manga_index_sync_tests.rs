@@ -298,7 +298,7 @@ fn manga_pins_old_server_does_not_destroy_local_pins_or_the_queue() {
 #[test]
 fn manga_pins_upgrade_118_keeps_existing_pins_as_outgoing_intent() {
     let temp = tempfile::tempdir().unwrap();
-    let mut c = Connection::open(temp.path().join("test.sqlite")).unwrap();
+    let c = Connection::open(temp.path().join("test.sqlite")).unwrap();
     c.execute_batch(include_str!("../../migrations/0118_manga_index_pins.sql"))
         .unwrap();
     c.execute(

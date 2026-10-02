@@ -1,6 +1,10 @@
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::params;
+#[cfg(test)]
+use rusqlite::{OptionalExtension, Row};
 
-use super::models::{CloudSyncConfig, CloudSyncQueueItem};
+use super::models::CloudSyncConfig;
+#[cfg(test)]
+use super::models::CloudSyncQueueItem;
 use crate::library::{error::LibraryError, Library};
 
 impl Library {
@@ -20,6 +24,7 @@ impl Library {
             .map_err(Into::into)
     }
 
+    #[cfg(test)]
     pub(crate) fn set_cloud_sync_config(
         &self,
         config: CloudSyncConfig,
@@ -50,6 +55,7 @@ impl Library {
         Ok(config)
     }
 
+    #[cfg(test)]
     pub(crate) fn cloud_sync_queue_item(
         &self,
         id: &str,
@@ -158,6 +164,7 @@ pub(crate) fn enqueue_asset_upsert(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn queue_item_from_row(row: &Row<'_>) -> rusqlite::Result<CloudSyncQueueItem> {
     Ok(CloudSyncQueueItem {
         id: row.get(0)?,

@@ -544,9 +544,6 @@ pub(crate) enum AlbumCommandOutcome {
 /// hostile or broken server from forcing unbounded work in the restore guard.
 const MAX_SYNC_DOMAINS: usize = 512;
 
-/// The shared domain name the server reports Classification authority under.
-pub(crate) const CLASSIFICATION_DOMAIN: &str = "classifications";
-
 /// The Classification domain contract this build speaks.
 pub(crate) const CLASSIFICATION_CONTRACT_VERSION: i64 = 1;
 

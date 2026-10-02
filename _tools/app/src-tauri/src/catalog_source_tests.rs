@@ -5,7 +5,7 @@
 //! 2. 일시적 실패는 backoff 재시도 후 회복, 영구 4xx는 즉시 표면화.
 //! 3. VPS 장애 시 로컬 카탈로그(검색·상세·북마크)가 영향 없이 계속 읽힌다.
 
-use crate::catalog_source::{retry_transient, CatalogSource, VpsCatalogSource};
+use crate::catalog_source::{retry_transient, VpsCatalogSource};
 use crate::library::error::LibraryError;
 use serde_json::json;
 use tiny_http::{Header, Server};
@@ -15,7 +15,7 @@ fn header(name: &'static str, value: &'static str) -> Header {
 }
 
 fn respond_json(request: tiny_http::Request, value: &serde_json::Value) {
-    let mut request = request;
+    let request = request;
     let body = serde_json::to_vec(value).unwrap();
     let _ = request.respond(
         tiny_http::Response::from_data(body)
@@ -32,7 +32,7 @@ fn serve_bearer(
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}", server.server_addr());
     let handle = std::thread::spawn(move || {
-        let mut request = server.recv().unwrap();
+        let request = server.recv().unwrap();
         assert_eq!(request.url(), url_path);
         let authorization = request
             .headers()
@@ -54,7 +54,7 @@ fn vps_gallery_source_returns_khentai_html_and_binds_ids_to_the_path() {
         {"name":"001.webp","image":{"url":"https://a.siam-cdn.net/1.webp?expires=4102444800","width":1200,"height":1800}},
         {"name":"002.webp","image":{"url":"https://a.siam-cdn.net/2.webp?expires=4102444800","width":1200,"height":1800}}
     ]};</script></html>"#;
-    let (base_url, handle) = serve_bearer(
+    let (_base_url, handle) = serve_bearer(
         "test-token",
         "/v1/catalog/gallery/42",
         json!({ "works": [] }),
@@ -64,7 +64,7 @@ fn vps_gallery_source_returns_khentai_html_and_binds_ids_to_the_path() {
     let server2 = Server::http("127.0.0.1:0").unwrap();
     let base_url2 = format!("http://{}", server2.server_addr());
     let handle2 = std::thread::spawn(move || {
-        let mut request = server2.recv().unwrap();
+        let request = server2.recv().unwrap();
         assert_eq!(request.url(), "/v1/catalog/gallery/42");
         let authorization = request
             .headers()
@@ -133,7 +133,7 @@ fn permanent_4xx_is_not_retried() {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}", server.server_addr());
     let handle = std::thread::spawn(move || {
-        let mut request = server.recv().unwrap();
+        let request = server.recv().unwrap();
         let _ = request.respond(
             tiny_http::Response::from_string(r#"{"error":"unknown work"}"#)
                 .with_status_code(404)
@@ -185,7 +185,7 @@ fn vps_search_page_requests_the_vps_api_path_not_the_upstream_path() {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}", server.server_addr());
     let handle = std::thread::spawn(move || {
-        let mut request = server.recv().unwrap();
+        let request = server.recv().unwrap();
         assert_eq!(request.url(), "/v1/catalog/search-page?cursor=4127793");
         let authorization = request
             .headers()
@@ -211,7 +211,7 @@ fn vps_first_search_page_omits_the_cursor_query() {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}", server.server_addr());
     let handle = std::thread::spawn(move || {
-        let mut request = server.recv().unwrap();
+        let request = server.recv().unwrap();
         assert_eq!(request.url(), "/v1/catalog/search-page");
         respond_json(request, &json!([]));
     });

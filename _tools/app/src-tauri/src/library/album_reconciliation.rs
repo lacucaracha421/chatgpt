@@ -660,6 +660,7 @@ impl Library {
     }
 
     /// Apply one change page and advance the cursor in the same transaction.
+    #[cfg(test)]
     fn apply_album_page(&self, items: &[AlbumChange], cursor: i64) -> Result<(), LibraryError> {
         self.apply_album_page_guarded(items, cursor, None)
     }

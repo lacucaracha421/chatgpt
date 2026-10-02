@@ -1965,7 +1965,7 @@ mod integration {
             adopt(&library, 1, 0);
             create_root(&library, "게임");
 
-            let (base, receiver, handle) = coded_rejection_server(code, status, None);
+            let (base, _receiver, handle) = coded_rejection_server(code, status, None);
             let client = CloudClient::new(&base).unwrap();
             let report = library
                 .flush_classification_outbox_with_credentials(
@@ -2157,7 +2157,7 @@ mod integration {
             })
             .unwrap();
 
-        let (base, receiver, handle) = coded_rejection_server(
+        let (base, _receiver, handle) = coded_rejection_server(
             "revisionConflict",
             409,
             Some(serde_json::json!({
@@ -2285,7 +2285,7 @@ mod integration {
         adopt(&library, 1, 0);
         create_root(&library, "게임");
 
-        let (base, receiver, handle) = coded_rejection_server("authorityLibraryMismatch", 409, None);
+        let (base, _receiver, handle) = coded_rejection_server("authorityLibraryMismatch", 409, None);
         let client = CloudClient::new(&base).unwrap();
         let error = library
             .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
@@ -2312,7 +2312,7 @@ mod integration {
         adopt(&library, 1, 0);
         create_root(&library, "게임");
 
-        let (base, receiver, handle) = coded_rejection_server("operationConflict", 409, None);
+        let (base, _receiver, handle) = coded_rejection_server("operationConflict", 409, None);
         let client = CloudClient::new(&base).unwrap();
         let error = library
             .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
@@ -2340,7 +2340,7 @@ mod integration {
         adopt(&library, 1, 0);
         create_root(&library, "게임");
 
-        let (base, receiver, handle) = coded_rejection_server("somethingNew", 422, None);
+        let (base, _receiver, handle) = coded_rejection_server("somethingNew", 422, None);
         let client = CloudClient::new(&base).unwrap();
         let error = library
             .flush_classification_outbox_with_credentials(&client, "client-token", "publisher-token")
@@ -2377,7 +2377,7 @@ mod integration {
             adopt(&library, 1, 0);
             create_root(&library, "게임");
 
-            let (base, receiver, handle) = coded_rejection_server(code, 422, None);
+            let (base, _receiver, handle) = coded_rejection_server(code, 422, None);
             let client = CloudClient::new(&base).unwrap();
             let error = library
                 .flush_classification_outbox_with_credentials(

@@ -531,7 +531,6 @@ enum IngestionStatus {
     Added,
     DuplicateTagged,
     DuplicateUnchanged,
-    ExactDuplicate,
     ReviewPending,
 }
 

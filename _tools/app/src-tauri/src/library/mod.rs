@@ -192,6 +192,7 @@ use models::{
     MangaCatalogRecoverySelection, MangaSeries, TrashPolicy,
 };
 use rusqlite::{Connection, OptionalExtension};
+#[cfg(test)]
 pub(crate) use video_media::VideoProbe;
 pub(crate) use work_artwork::MAX_WORK_ARTWORK_BYTES;
 

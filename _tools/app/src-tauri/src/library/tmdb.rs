@@ -18,6 +18,7 @@ const SEARCH_LIMIT: usize = 20;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TmdbImageSize {
     W342,
+    #[cfg(test)]
     W500,
     W780,
     Original,
@@ -27,6 +28,7 @@ impl TmdbImageSize {
     fn as_str(self) -> &'static str {
         match self {
             Self::W342 => "w342",
+            #[cfg(test)]
             Self::W500 => "w500",
             Self::W780 => "w780",
             Self::Original => "original",

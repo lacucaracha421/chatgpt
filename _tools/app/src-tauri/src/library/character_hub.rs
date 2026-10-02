@@ -491,6 +491,7 @@ impl Library {
 }
 
 // Manual scans stay in-series; automatic evidence may also come from its ancestors.
+#[cfg(test)]
 pub(super) fn candidate_image(
     connection: &Connection,
     series: &str,

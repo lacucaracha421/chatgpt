@@ -70,6 +70,7 @@ impl Library {
         self.apply_fetched_mangadex_checked(request, fetched, bytes.as_deref(), check)
     }
 
+    #[cfg(test)]
     pub(crate) fn apply_fetched_mangadex(
         &self,
         request: MangaDexApplyRequest,

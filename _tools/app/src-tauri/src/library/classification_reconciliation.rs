@@ -52,7 +52,7 @@ use crate::cloud::client::{
     CLASSIFICATION_BASELINE_ASSIGNMENTS_SECTION, CLASSIFICATION_BASELINE_SECTIONS_SECTION,
 };
 use crate::library::classification_authority::{
-    assignments_naming, has_unresolved_intents, read_authority, read_classification_revision,
+    assignments_naming, has_unresolved_intents, read_authority,
     preapplied_delete_covers, read_preapplied_delete,
     retire_preapplied_delete, write_assignment_revision, PreappliedDelete,
     write_authority, write_classification_revision, write_role, ClassificationAuthority,
@@ -719,6 +719,7 @@ impl Library {
     /// if the same preconditions still hold inside this transaction — no intent has appeared
     /// — and the page still continues from the cursor that is stored *now* rather than the
     /// one the request was issued with.
+    #[cfg(test)]
     fn apply_classification_page(
         &self,
         items: &[ClassificationChange],

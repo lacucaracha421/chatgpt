@@ -195,6 +195,7 @@ fn node(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn snapshot_from_connection(
     connection: &mut Connection,
     base_revision: Option<String>,

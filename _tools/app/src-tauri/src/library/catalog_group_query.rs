@@ -41,6 +41,7 @@ pub(super) struct GroupQueryPlan {
     bookmark_candidates: Option<i64>,
     seed_page: bool,
     pub(super) route: CountRoute,
+    #[cfg(test)]
     pub(super) hot_cutoff: Option<i64>,
 }
 
@@ -183,6 +184,7 @@ impl GroupQueryPlan {
             values,
             seed,
             route,
+            #[cfg(test)]
             hot_cutoff,
             bookmark_candidates,
             seed_page: false,
@@ -262,6 +264,7 @@ impl GroupQueryPlan {
         );
         Some((sql, values))
     }
+    #[cfg(test)]
     pub(super) fn count_statement(&self) -> Option<(String, Vec<Value>)> {
         if self.route == CountRoute::Prepared {
             return None;
@@ -271,6 +274,7 @@ impl GroupQueryPlan {
     pub(super) fn generic_count_statement(&self) -> (String, Vec<Value>) {
         (format!("{} SELECT COUNT(DISTINCT member.group_id) FROM matching work CROSS JOIN online_catalog_group_members member ON member.provider='kHentai' AND member.catalog_work_id=work.Id",self.cte("NOT INDEXED")),self.values.clone())
     }
+    #[cfg(test)]
     pub(super) fn raw_count_statement(&self) -> (String, Vec<Value>) {
         (
             format!("{} SELECT COUNT(*) FROM matching work", self.cte("")),
@@ -321,6 +325,7 @@ fn generic_count(connection: &Connection, plan: &GroupQueryPlan) -> Result<u64, 
 
 // Historical backend tests exercise arbitrary direct mutations without running
 // the preparation lifecycle. Production callers must preserve pending counts.
+#[cfg(test)]
 pub(super) fn select_groups(
     connection: &Connection,
     query: &CatalogSearchQuery,

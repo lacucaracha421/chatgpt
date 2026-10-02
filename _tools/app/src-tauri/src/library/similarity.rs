@@ -1076,7 +1076,6 @@ mod tests {
         candidate_id: String,
         review_id: String,
         old_tag: String,
-        requested_tag: String,
         candidate_asset_path: PathBuf,
         candidate_thumbnail_path: PathBuf,
     }
@@ -2279,7 +2278,6 @@ mod tests {
             candidate_id,
             review_id,
             old_tag,
-            requested_tag,
             candidate_asset_path,
             candidate_thumbnail_path,
         }

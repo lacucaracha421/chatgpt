@@ -2,11 +2,12 @@
 
 #[cfg(any(target_os = "linux", test))]
 use std::collections::BTreeSet;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(test)))]
 use std::fs;
 use std::path::PathBuf;
 
 #[cfg(target_os = "linux")]
+#[cfg(not(test))]
 pub(super) fn mounted_root_candidates() -> Vec<PathBuf> {
     fs::read_to_string("/proc/self/mountinfo")
         .map(|text| parse_linux_mountinfo(&text))
@@ -19,6 +20,7 @@ fn windows_drive_root(letter: u8) -> PathBuf {
 }
 
 #[cfg(target_os = "windows")]
+#[cfg(not(test))]
 pub(super) fn mounted_root_candidates() -> Vec<PathBuf> {
     (b'A'..=b'Z')
         .map(windows_drive_root)
@@ -27,6 +29,7 @@ pub(super) fn mounted_root_candidates() -> Vec<PathBuf> {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[cfg(not(test))]
 pub(super) fn mounted_root_candidates() -> Vec<PathBuf> {
     Vec::new()
 }

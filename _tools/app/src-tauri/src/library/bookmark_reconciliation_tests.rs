@@ -421,7 +421,7 @@ mod integration {
         let log = Arc::clone(&seen);
         let handle = thread::spawn(move || {
             // 1. status: authority is active at cursor 2.
-            let mut request = server.recv().unwrap();
+            let request = server.recv().unwrap();
             assert_eq!(request.method(), &Method::Get);
             log.lock().unwrap().push(request.url().to_owned());
             request
@@ -434,7 +434,7 @@ mod integration {
                 .unwrap();
 
             // 2. baseline snapshot: one live bookmark at cursor 1.
-            let mut request = server.recv().unwrap();
+            let request = server.recv().unwrap();
             log.lock().unwrap().push(request.url().to_owned());
             request
                 .respond(json_response(serde_json::json!({
@@ -451,7 +451,7 @@ mod integration {
                 .unwrap();
 
             // 3. first page after the baseline cursor: one add, more to come.
-            let mut request = server.recv().unwrap();
+            let request = server.recv().unwrap();
             log.lock().unwrap().push(request.url().to_owned());
             assert!(request.url().contains("after=1"), "{}", request.url());
             request
@@ -472,7 +472,7 @@ mod integration {
                 .unwrap();
 
             // 4. second page: end of the log.
-            let mut request = server.recv().unwrap();
+            let request = server.recv().unwrap();
             log.lock().unwrap().push(request.url().to_owned());
             assert!(request.url().contains("after=2"), "{}", request.url());
             request
@@ -500,7 +500,7 @@ mod integration {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&seen);
         let handle = thread::spawn(move || {
-            let mut request = server.recv().unwrap();
+            let request = server.recv().unwrap();
             log.lock().unwrap().push(request.url().to_owned());
             request
                 .respond(json_response(serde_json::json!({
@@ -512,7 +512,7 @@ mod integration {
                 .unwrap();
 
             // The stale cursor is refused with the coded expiry.
-            let mut request = server.recv().unwrap();
+            let request = server.recv().unwrap();
             log.lock().unwrap().push(request.url().to_owned());
             assert!(request.url().contains("after=1"), "{}", request.url());
             request
@@ -526,7 +526,7 @@ mod integration {
 
             // The recovery baseline includes the local intent's entity as the
             // authority already holds it, plus the local intent's own row.
-            let mut request = server.recv().unwrap();
+            let request = server.recv().unwrap();
             log.lock().unwrap().push(request.url().to_owned());
             assert!(request.url().contains("/bookmarks?"), "{}", request.url());
             request
@@ -547,7 +547,7 @@ mod integration {
                 .unwrap();
 
             // Nothing remained after the fresh cursor.
-            let mut request = server.recv().unwrap();
+            let request = server.recv().unwrap();
             log.lock().unwrap().push(request.url().to_owned());
             assert!(request.url().contains("after=5"), "{}", request.url());
             request
@@ -574,7 +574,7 @@ mod integration {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&seen);
         let handle = thread::spawn(move || {
-            let mut request = server.recv().unwrap();
+            let request = server.recv().unwrap();
             log.lock().unwrap().push(request.url().to_owned());
             request
                 .respond(json_response(serde_json::json!({
@@ -584,7 +584,7 @@ mod integration {
                     "authorityCursor": 9
                 })))
                 .unwrap();
-            let mut request = server.recv().unwrap();
+            let request = server.recv().unwrap();
             log.lock().unwrap().push(request.url().to_owned());
             request
                 .respond(

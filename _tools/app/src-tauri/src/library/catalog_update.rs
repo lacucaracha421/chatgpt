@@ -4,7 +4,9 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
+#[cfg(test)]
+use rusqlite::OptionalExtension;
 use serde_json::Value;
 use tauri::AppHandle;
 

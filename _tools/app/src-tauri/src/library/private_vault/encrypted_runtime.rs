@@ -79,9 +79,10 @@ pub(crate) trait VaultKeyStore: Send + Sync {
     }
 }
 
-#[cfg_attr(test, allow(dead_code))]
+#[cfg(not(test))]
 struct OsVaultKeyStore;
 
+#[cfg(not(test))]
 impl VaultKeyStore for OsVaultKeyStore {
     fn read(&self, vault_id: &str) -> Result<Option<Vec<u8>>, LibraryError> {
         crate::library::credential::vault_key(vault_id)

@@ -6,10 +6,12 @@ use super::error::LibraryError;
 
 pub(super) struct ReconciledHandles {
     pub member_groups: HashMap<String, String>,
+    #[cfg(test)]
     pub resolved_handles: HashMap<String, String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(super) struct GroupPreference {
     pub anchor_work_id: String,
     pub selected_work_id: Option<String>,
@@ -35,6 +37,7 @@ pub(super) fn set_preference(
     )?)
 }
 
+#[cfg(test)]
 pub(super) fn load_preferences(
     connection: &Connection,
     provider: &str,
@@ -94,6 +97,7 @@ pub(super) fn reconcile_handles(
             }
         }
     }
+    #[cfg(test)]
     let resolved_handles = handles
         .into_iter()
         .filter_map(|(anchor, (handle, _))| {
@@ -104,6 +108,7 @@ pub(super) fn reconcile_handles(
         .collect();
     Ok(ReconciledHandles {
         member_groups,
+        #[cfg(test)]
         resolved_handles,
     })
 }

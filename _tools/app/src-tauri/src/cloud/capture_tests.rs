@@ -87,13 +87,10 @@ enum AcknowledgeMode {
     SucceedWithMetadata,
     AfterPublication(std::sync::Arc<std::sync::atomic::AtomicBool>, u16),
     FailWith(u16),
-    Never,
 }
 
 enum PendingListMode {
     OneCapture,
-    Malformed,
-    ServerError(u16),
 }
 
 /// fake VPS 플로우: 목록 → 티켓 → 미디어 GET → (acknowledge) 요청 순서를 검증하고
@@ -106,12 +103,12 @@ fn serve_capture_flow(
 ) -> (String, thread::JoinHandle<Vec<String>>) {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}/v1", server.server_addr());
-    let (urls_tx, urls_rx) = std::sync::mpsc::channel::<String>();
+    let (urls_tx, _urls_rx) = std::sync::mpsc::channel::<String>();
     let handle = thread::spawn(move || {
         let mut seen = Vec::new();
         let publish_metadata = matches!(&acknowledge, AcknowledgeMode::SucceedWithMetadata);
         for _ in 0..if publish_metadata { 7 } else { 4 } {
-            let mut request = match server.recv() {
+            let request = match server.recv() {
                 Ok(request) => request,
                 Err(_) => break,
             };
@@ -127,15 +124,6 @@ fn serve_capture_flow(
                         PendingListMode::OneCapture => {
                             let payload = json!({ "captures": [pending_capture_json(capture_id)] });
                             request.respond(json_response(payload)).unwrap();
-                        }
-                        PendingListMode::Malformed => {
-                            request
-                                .respond(json_response(json!({ "captures": [{ "id": "x" }] })))
-                                .unwrap();
-                        }
-                        PendingListMode::ServerError(status) => {
-                            request.respond(Response::empty(*status)).unwrap();
-                            break;
                         }
                     }
                 }
@@ -162,7 +150,6 @@ fn serve_capture_flow(
                             assert!(published.load(std::sync::atomic::Ordering::Acquire));
                             request.respond(Response::empty(*status)).unwrap();
                         }
-                        AcknowledgeMode::Never => unreachable!("acknowledge should not be sent"),
                     }
                     if !publish_metadata {
                         break;
@@ -345,18 +332,18 @@ fn thread_handle_with_failing_download() -> (String, thread::JoinHandle<()>) {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}/v1", server.server_addr());
     let handle = thread::spawn(move || {
-        let mut list = server.recv().unwrap();
+        let list = server.recv().unwrap();
         list.respond(json_response(
             json!({ "captures": [pending_capture_json("capture-1")] }),
         ))
         .unwrap();
-        let mut ticket = server.recv().unwrap();
+        let ticket = server.recv().unwrap();
         ticket
             .respond(json_response(download_ticket(
                 server.server_addr().to_string(),
             )))
             .unwrap();
-        let mut download = server.recv().unwrap();
+        let download = server.recv().unwrap();
         download.respond(Response::empty(403)).unwrap();
     });
     (base_url, handle)
@@ -558,7 +545,7 @@ fn malformed_capture_record_cannot_escape_staging() {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}/v1", server.server_addr());
     let handle = thread::spawn(move || {
-        let mut list = server.recv().unwrap();
+        let list = server.recv().unwrap();
         list.respond(json_response(json!({ "captures": [{ "id": "x" }] })))
             .unwrap();
     });
@@ -583,7 +570,7 @@ fn unknown_media_kind_is_rejected() {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}/v1", server.server_addr());
     let handle = thread::spawn(move || {
-        let mut list = server.recv().unwrap();
+        let list = server.recv().unwrap();
         let mut capture = pending_capture_json("capture-1");
         capture["kind"] = json!("animated_webp");
         list.respond(json_response(json!({ "captures": [capture] })))
@@ -607,7 +594,7 @@ fn empty_capture_list_is_a_clean_noop() {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}/v1", server.server_addr());
     let handle = thread::spawn(move || {
-        let mut list = server.recv().unwrap();
+        let list = server.recv().unwrap();
         list.respond(json_response(json!({ "captures": [] })))
             .unwrap();
     });
@@ -630,15 +617,15 @@ fn broken_capture_does_not_block_a_healthy_later_capture() {
     let addr = server.server_addr().to_string();
     let handle = thread::spawn(move || {
         // 한 번의 목록에 broken + good이 함께 온다. 폴은 목록을 한 번만 받는다.
-        let mut list = server.recv().unwrap();
+        let list = server.recv().unwrap();
         list.respond(json_response(json!({
             "captures": [pending_capture_json("capture-broken"), pending_capture_json("capture-good")],
         })))
         .unwrap();
         // broken 티켓이 500 → 소비자는 그 캡처를 건너뛰고 good을 계속 처리한다.
-        let mut ticket = server.recv().unwrap();
+        let ticket = server.recv().unwrap();
         ticket.respond(Response::empty(500)).unwrap();
-        let mut ticket2 = server.recv().unwrap();
+        let ticket2 = server.recv().unwrap();
         ticket2
             .respond(json_response(download_ticket(addr)))
             .unwrap();
@@ -646,7 +633,7 @@ fn broken_capture_does_not_block_a_healthy_later_capture() {
         let mut bytes = Vec::new();
         download.as_reader().read_to_end(&mut bytes).unwrap();
         download.respond(Response::from_data(media)).unwrap();
-        let mut acknowledge = server.recv().unwrap();
+        let acknowledge = server.recv().unwrap();
         acknowledge.respond(Response::empty(200)).unwrap();
     });
     let temp = tempfile::tempdir().unwrap();
@@ -698,18 +685,18 @@ fn thread_handle_with_invalid_media() -> (String, thread::JoinHandle<()>) {
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}/v1", server.server_addr());
     let handle = thread::spawn(move || {
-        let mut list = server.recv().unwrap();
+        let list = server.recv().unwrap();
         list.respond(json_response(
             json!({ "captures": [pending_capture_json("capture-1")] }),
         ))
         .unwrap();
-        let mut ticket = server.recv().unwrap();
+        let ticket = server.recv().unwrap();
         ticket
             .respond(json_response(download_ticket(
                 server.server_addr().to_string(),
             )))
             .unwrap();
-        let mut download = server.recv().unwrap();
+        let download = server.recv().unwrap();
         download
             .respond(Response::from_data(b"definitely-not-a-png".to_vec()))
             .unwrap();
@@ -719,11 +706,11 @@ fn thread_handle_with_invalid_media() -> (String, thread::JoinHandle<()>) {
 
 #[test]
 fn inbound_captures_and_outbound_queue_remain_independent() {
-    let media = png_bytes();
+    let _media = png_bytes();
     let server = Server::http("127.0.0.1:0").unwrap();
     let base_url = format!("http://{}/v1", server.server_addr());
     let handle = thread::spawn(move || {
-        let mut list = server.recv().unwrap();
+        let list = server.recv().unwrap();
         list.respond(json_response(json!({ "captures": [] })))
             .unwrap();
     });
@@ -1411,7 +1398,7 @@ fn post_adoption_album_generations_are_consumed_without_a_legacy_request() {
         // Two full cycles: the second must send no album-snapshot request even though the
         // first cycle's Album work dirtied the legacy generation.
         for _ in 0..4 {
-            let mut request = server
+            let request = server
                 .recv_timeout(std::time::Duration::from_secs(5))
                 .unwrap()
                 .expect("expected capture or metadata request");
@@ -1595,7 +1582,7 @@ fn post_adoption_classification_generations_are_consumed_without_a_legacy_reques
         // Two full cycles: the second must send no snapshot request for the change the
         // first cycle consumed.
         for _ in 0..4 {
-            let mut request = server
+            let request = server
                 .recv_timeout(std::time::Duration::from_secs(5))
                 .unwrap()
                 .expect("expected capture or metadata request");
@@ -1679,7 +1666,7 @@ fn pre_adoption_classification_dirty_state_still_publishes_the_legacy_snapshot()
     let handle = thread::spawn(move || {
         let mut urls = Vec::new();
         for index in 0..4 {
-            let mut request = server
+            let request = server
                 .recv_timeout(std::time::Duration::from_secs(10))
                 .unwrap()
                 .unwrap_or_else(|| panic!("expected a request, saw {urls:?} before #{index}"));
@@ -1744,7 +1731,7 @@ fn post_adoption_remote_apply_dirtied_classification_generation_is_consumed_quie
     let handle = thread::spawn(move || {
         let mut urls = Vec::new();
         for _ in 0..3 {
-            let mut request = server
+            let request = server
                 .recv_timeout(std::time::Duration::from_secs(5))
                 .unwrap()
                 .expect("expected capture or metadata request");
@@ -2190,7 +2177,7 @@ fn a_warm_credential_cache_keeps_publishing_metadata_after_the_keyring_locks() {
 #[test]
 fn a_rejected_credential_is_dropped_and_a_retryable_failure_is_not() {
     let temp = tempfile::tempdir().unwrap();
-    let library = Library::open(temp.path()).unwrap();
+    let _library = Library::open(temp.path()).unwrap();
     let backend = CountingBackend::default();
     backend.set("Lakomics/CloudApi", "test-token");
     let broker = CredentialBroker::new(backend.clone());

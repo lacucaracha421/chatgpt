@@ -198,6 +198,7 @@ impl Library {
         MovieImportFlow::new(self).replace_artwork(request)
     }
 
+    #[cfg(test)]
     pub(crate) fn apply_fetched_tmdb_movie(
         &self,
         request: TmdbApplyRequest,
@@ -369,6 +370,7 @@ impl Library {
         Ok(summary)
     }
 
+    #[cfg(test)]
     pub(crate) fn refresh_fetched_tmdb_movie(
         &self,
         collection_id: &str,

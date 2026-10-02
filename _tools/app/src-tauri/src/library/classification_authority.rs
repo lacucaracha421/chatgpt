@@ -690,7 +690,7 @@ impl Library {
     }
 
     /// The send pass against an explicit credential source.
-    pub(crate) fn flush_classification_outbox_with_source(
+    pub(super) fn flush_classification_outbox_with_source(
         &self,
         client: &CloudClient,
         credentials: &dyn CredentialSource,
@@ -713,6 +713,7 @@ impl Library {
     /// Both tokens are supplied so an HTTP fixture can prove the credential split: a
     /// structural command presents the publisher token, an assignment presents the client
     /// token, and neither substitutes for the other.
+    #[cfg(test)]
     pub(crate) fn flush_classification_outbox_with_credentials(
         &self,
         client: &CloudClient,
@@ -772,11 +773,13 @@ impl CredentialSource for OsCredentials {
 }
 
 /// A credential source with both tokens supplied by the caller, for HTTP fixtures.
+#[cfg(test)]
 pub(super) struct FixedCredentials<'a> {
     pub client_token: &'a str,
     pub publisher_token: &'a str,
 }
 
+#[cfg(test)]
 impl CredentialSource for FixedCredentials<'_> {
     fn client(&self) -> Result<std::borrow::Cow<'_, str>, LibraryError> {
         Ok(std::borrow::Cow::Borrowed(self.client_token))

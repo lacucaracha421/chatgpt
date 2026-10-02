@@ -996,16 +996,15 @@ mod tests {
         let slate = {
             let connection = library.connection().unwrap();
             get_or_create_revisit_slate(&connection, "2026-08-30", "2026-08-30T09:00:00Z").unwrap()
-        };;
+        };
         let target_index = 1;
         let target = slate.bundles[target_index].clone();
         let previous = slate.bundles[0].clone();
         let next = slate.bundles.get(target_index + 1).cloned();
-;
         let reshuffled = {
             let connection = library.connection().unwrap();
             reshuffle_revisit_bundle(&connection, "2026-08-30", &target.id, "2026-08-30T09:30:00Z").unwrap()
-        };;;
+        };
         assert_ne!(reshuffled.bundles[target_index].asset_ids, Vec::<String>::new());
         assert_eq!(reshuffled.bundles[target_index].revision, target.revision + 1);
         assert_eq!(reshuffled.bundles[0], previous);
@@ -1013,8 +1012,8 @@ mod tests {
             assert_eq!(reshuffled.bundles[target_index + 1], next);
         };
         {
-            let connection = library.connection().unwrap();;
-            let count = connection.query_row::<i64, _, _>("SELECT COUNT(*) FROM revisit_preferences", [], |row| row.get(0)).unwrap();;
+            let connection = library.connection().unwrap();
+            let count = connection.query_row::<i64, _, _>("SELECT COUNT(*) FROM revisit_preferences", [], |row| row.get(0)).unwrap();
             assert_eq!(count, 0);
         };
     }

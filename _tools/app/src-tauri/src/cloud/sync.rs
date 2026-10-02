@@ -1,16 +1,20 @@
 use std::io::{Read, Seek, SeekFrom};
 
+#[cfg(test)]
 use rusqlite::OptionalExtension;
 use sha2::{Digest, Sha256};
 
+use super::models::PreparedAssetUpload;
+#[cfg(test)]
 use super::{
     client::CloudClient,
-    models::{CloudSyncQueueItem, PreparedAssetUpload},
+    models::CloudSyncQueueItem,
     queue::queue_item_from_row,
 };
 use crate::library::{error::LibraryError, Library};
 
 impl Library {
+    #[cfg(test)]
     pub(crate) fn claim_next_asset_upload(
         &self,
     ) -> Result<Option<PreparedAssetUpload>, LibraryError> {
@@ -84,6 +88,7 @@ impl Library {
         }))
     }
 
+    #[cfg(test)]
     pub(crate) fn sync_next_cloud_asset(&self) -> Result<Option<CloudSyncQueueItem>, LibraryError> {
         let config = self.cloud_sync_config()?;
         if !config.enabled {
@@ -99,6 +104,7 @@ impl Library {
         self.sync_next_cloud_asset_with(&client, &token)
     }
 
+    #[cfg(test)]
     pub(super) fn sync_next_cloud_asset_with(
         &self,
         client: &CloudClient,

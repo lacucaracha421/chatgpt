@@ -121,9 +121,6 @@ impl Default for IgdbClient {
 }
 
 impl IgdbClient {
-    pub fn new() -> Self {
-        Self::default()
-    }
     pub(crate) fn with_cache(token_cache: IgdbTokenCache) -> Self {
         Self::with_cache_and_limiter(token_cache, IgdbRequestLimiter::default())
     }
@@ -512,6 +509,7 @@ fn encode_form(value: &str) -> String {
         .collect()
 }
 
+#[cfg(test)]
 fn minimum_request_wait(last: Option<Instant>, now: Instant) -> Duration {
     last.map_or(Duration::ZERO, |last| {
         Duration::from_millis(250).saturating_sub(now.saturating_duration_since(last))
