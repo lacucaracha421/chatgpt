@@ -8,6 +8,42 @@ use super::client::CloudClient;
 use crate::library::{error::LibraryError, Library};
 
 #[test]
+fn configured_original_uploads_require_publisher_without_claiming_the_queue() {
+    use crate::library::credential::{
+        delete_cloud_api_token_os, delete_cloud_publisher_token_os, set_cloud_api_token_os,
+    };
+
+    // Unit-test credentials are thread-local and never access the OS keyring.
+    set_cloud_api_token_os("shared-client-only").unwrap();
+    delete_cloud_publisher_token_os().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let library = library_with_pending_asset(temp.path());
+    library
+        .set_cloud_settings(
+            super::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("https://fixture.test".into()),
+            },
+            true,
+        )
+        .unwrap();
+
+    assert!(matches!(
+        library.sync_next_cloud_asset(),
+        Err(LibraryError::CloudCredentialNotConfigured)
+    ));
+    assert!(matches!(
+        library.run_cloud_backfill_cycle(),
+        Err(LibraryError::CloudCredentialNotConfigured)
+    ));
+    assert_eq!(
+        library.cloud_sync_queue_item("queue-1").unwrap().unwrap().status,
+        "pending"
+    );
+    delete_cloud_api_token_os().unwrap();
+}
+
+#[test]
 fn uploads_directly_with_presigned_headers_then_registers_the_asset() {
     let server = Server::http("127.0.0.1:0").unwrap();
     let origin = format!("http://{}", server.server_addr());

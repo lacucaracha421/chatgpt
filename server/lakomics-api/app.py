@@ -117,6 +117,13 @@ def require_auth(authorization: str | None):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+def require_upload_client(authorization: str | None):
+    """Keep legacy upload calls working while the PC publishes with its own role."""
+    if API_TOKEN and authorization == f"Bearer {API_TOKEN}":
+        return
+    require_publisher(authorization)
+
+
 def _bearer_value(authorization: str | None) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -354,7 +361,7 @@ def create_asset(
     asset: AssetCreate,
     authorization: str | None = Header(default=None),
 ):
-    require_auth(authorization)
+    require_upload_client(authorization)
 
     asset_id = asset.id or str(uuid.uuid4())
     ts = now_iso()
@@ -430,7 +437,7 @@ def create_upload_presign(
     request: PresignRequest,
     authorization: str | None = Header(default=None),
 ):
-    require_auth(authorization)
+    require_upload_client(authorization)
 
     allowed_prefixes = (
         "images/",
@@ -449,6 +456,28 @@ def create_upload_presign(
     if ".." in request.object_key or request.object_key.startswith("/"):
         raise HTTPException(status_code=400, detail="Invalid object key")
 
+    with get_db() as db:
+        committed = db.execute(
+            "SELECT 1 FROM assets WHERE object_key=? AND committed=1",
+            (request.object_key,),
+        ).fetchone() is not None
+    # Cover the replication key and the legacy image/video upload paths. A stored
+    # original is protected even when its key predates those naming conventions.
+    original = committed or request.object_key.startswith(("images/", "videos/")) or (
+        request.object_key.startswith("library/") and request.object_key.endswith("/original")
+    )
+    if original:
+        require_publisher(authorization)
+        if committed:
+            try:
+                _s3.head_object(Bucket=R2_BUCKET, Key=request.object_key)
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code") not in ("404", "NoSuchKey", "NotFound"):
+                    raise HTTPException(status_code=503, detail="Original storage check failed") from exc
+            else:
+                raise HTTPException(status_code=409, detail="Committed original already exists")
+    # Uncommitted objects may be uploaded again after a failed commit. A retry
+    # after a successful commit gets already_committed from replication/prepare.
     from r2 import presign_put
 
     expires_in = 600
@@ -2985,7 +3014,7 @@ def replication_prepare(
     request: ReplicationPrepare,
     authorization: str | None = Header(default=None),
 ):
-    require_auth(authorization)
+    require_upload_client(authorization)
     if request.kind not in ALLOWED_KINDS:
         raise HTTPException(status_code=400, detail="Invalid media kind")
     ts = now_iso()
@@ -3042,7 +3071,7 @@ def replication_commit(
     request: ReplicationCommit,
     authorization: str | None = Header(default=None),
 ):
-    require_auth(authorization)
+    require_upload_client(authorization)
     if request.kind not in ALLOWED_KINDS:
         raise HTTPException(status_code=400, detail="Invalid media kind")
     ts = now_iso()

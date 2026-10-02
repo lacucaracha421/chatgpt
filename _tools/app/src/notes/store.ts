@@ -18,15 +18,26 @@ export const PIN_REQUIRED_TEXT="복구키를 보려면 암호 메모 PIN을 먼�
 /** Fields a draft carries; used to rebase a newer queued draft onto a merged save. */
 const DRAFT_KEYS=["title","body","pinned","deleted","archived","concealed","type","color","labels","items","fields","memo","income","incomeDay","recurring","planned","entries"] as const;
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
-/** Keyed lists rebase per id, so a newer draft never drops what a merged save added. */
+/** Keyed lists rebase per field, preserving unrelated changes from a merged save. */
 const LIST_KEYS=new Set<string>(["items","fields","recurring","planned","entries"]);
 type Keyed={id:string};
-/** Applies what `newer` changed relative to `draft` (added, removed or edited ids) onto `saved`. */
+/** Applies only newer edits; an edited row survives a merged deletion. */
 export function rebaseList<T extends Keyed>(saved:T[],draft:T[],newer:T[]):T[]{
   const before=new Map(draft.map(e=>[e.id,e])),after=new Map(newer.map(e=>[e.id,e]));
   const changed=(id:string)=>after.has(id)&&(!before.has(id)||!same(after.get(id),before.get(id)));
-  const out=saved.filter(e=>!(before.has(e.id)&&!after.has(e.id))).map(e=>changed(e.id)?after.get(e.id)!:e);
-  for(const e of newer)if(!before.has(e.id)&&!out.some(o=>o.id===e.id))out.push(e);
+  const out=saved.filter(e=>!(before.has(e.id)&&!after.has(e.id))).map(e=>{
+    if(!changed(e.id))return e;
+    const base=before.get(e.id),next=after.get(e.id)!;
+    if(!base)return next;
+    const merged={...e};
+    for(const key of new Set([...Object.keys(base),...Object.keys(next)]) as Set<keyof T>){
+      if(same(base[key],next[key]))continue;
+      if(Object.prototype.hasOwnProperty.call(next,key))merged[key]=next[key];
+      else delete merged[key];
+    }
+    return merged;
+  });
+  for(const e of newer)if(changed(e.id)&&!out.some(o=>o.id===e.id))out.push(e);
   return out;
 }
 const redact=(n:Note):Note=>({...n,body:"",memo:undefined,fields:undefined,labels:undefined,redacted:true});

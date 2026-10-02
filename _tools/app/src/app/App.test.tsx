@@ -310,7 +310,7 @@ describe("App", () => {
     await userEvent.click(await screen.findByRole("button", { name: "다른 저장소 열기" }));
 
     // The new library's workspace starts over on Home.
-    expect(await screen.findByRole("region", { name: "검토" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: /^오늘 할 것/ }, { timeout: 5000 })).toBeInTheDocument();
     await openAssets();
     expect(await screen.findByRole("treeitem", { name: "New library" })).toBeVisible();
     expect(screen.queryByRole("treeitem", { name: "Old library" })).not.toBeInTheDocument();
@@ -381,7 +381,7 @@ describe("App", () => {
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     const rail = await screen.findByRole("navigation", { name: "주요 영역" });
-    expect(await screen.findByRole("region", { name: "검토" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: /^오늘 할 것/ }, { timeout: 5000 })).toBeInTheDocument();
     expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("toolbar", { name: "자산 도구" })).not.toBeInTheDocument();
 
@@ -389,20 +389,21 @@ describe("App", () => {
     await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({ classificationId: null, unclassifiedOnly: false })));
     expect(screen.getByRole("button", { name: "전체" })).toHaveAttribute("aria-current", "page");
     await userEvent.click(within(rail).getByRole("button", { name: "홈" }));
-    expect(await screen.findByRole("region", { name: "검토" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: /^오늘 할 것/ })).toBeInTheDocument();
   });
 
   it("opens Home from the rail and leaves it for the screen a row owns", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listSimilarityReviews).mockResolvedValue({ items: [], nextCursor: null, totalCount: 1 });
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     const rail = await screen.findByRole("navigation", { name: "주요 영역" });
     await userEvent.click(within(rail).getByRole("button", { name: "홈" }));
-    expect(await screen.findByRole("region", { name: "검토" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: /^오늘 할 것/ }, { timeout: 5000 })).toBeInTheDocument();
     expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page");
-    await userEvent.click(screen.getByRole("button", { name: "메모 전체" }));
-    await waitFor(() => expect(within(rail).getByRole("button", { name: "메모" })).toHaveAttribute("aria-current", "page"));
+    await userEvent.click(await screen.findByRole("button", { name: /유사 이미지 검토/ }));
+    expect(await screen.findByRole("region", { name: "유사 검토" })).toBeInTheDocument();
   });
 
   it("renders the trash workspace without loading an asset page", async () => {
@@ -634,12 +635,13 @@ describe("App", () => {
   it("returns to Home with back from a screen Home opened, but not after a rail switch", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     const libraryGateway = gateway();
+    vi.mocked(libraryGateway.listSimilarityReviews).mockResolvedValue({ items: [], nextCursor: null, totalCount: 1 });
     const user = userEvent.setup();
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     const rail = await screen.findByRole("navigation", { name: "주요 영역" });
-    expect(await screen.findByRole("region", { name: "검토" }, { timeout: 5000 })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "메모 전체" }));
-    await waitFor(() => expect(within(rail).getByRole("button", { name: "메모" })).toHaveAttribute("aria-current", "page"));
+    expect(await screen.findByRole("region", { name: /^오늘 할 것/ }, { timeout: 5000 })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /유사 이미지 검토/ }));
+    expect(await screen.findByRole("region", { name: "유사 검토" })).toBeInTheDocument();
     fireEvent.mouseUp(window, { button: 3 });
     await waitFor(() => expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page"));
     await user.click(within(rail).getByRole("button", { name: "메모" }));
@@ -838,11 +840,12 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
     await openAssets();
 
-    expect(await screen.findByRole("button", { name: "정렬" })).toHaveTextContent("오래된순");
+    await user.click(screen.getByRole("button", { name: "보기" }));
+    expect(screen.getByRole("radio", { name: "오래된순" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("complementary", { name: "탐색 인덱스" }).style.getPropertyValue("--workspace-index-width")).toBe("264px");
 
-    await user.click(screen.getByRole("button", { name: "정렬" }));
-    await user.click(screen.getByRole("menuitemradio", { name: "랜덤" }));
+    await user.click(screen.getByRole("radio", { name: "랜덤" }));
+    await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "게임 접기" }));
     const resizeHandle = screen.getByRole("separator", { name: "사이드바 너비 조절" });
     Object.defineProperties(resizeHandle, {
@@ -883,6 +886,7 @@ describe("App", () => {
     vi.mocked(libraryGateway.listClassifications).mockResolvedValue([games]);
 
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} />);
+    await openAssets();
     const sidebar = await screen.findByRole("complementary", { name: "탐색 인덱스" });
     const resizeHandle = screen.getByRole("separator", { name: "사이드바 너비 조절" });
     Object.defineProperties(resizeHandle, {

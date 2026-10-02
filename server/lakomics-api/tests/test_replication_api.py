@@ -24,6 +24,7 @@ sys.path.insert(0, str(SERVER_DIR))
 from tests.test_capture_api_stub import fake_s3  # noqa: E402
 
 import app as api_app  # noqa: E402
+import api_auth  # noqa: E402
 from fastapi.testclient import TestClient
 
 
@@ -119,6 +120,11 @@ class ReplicationTestCase(unittest.TestCase):
         api_app.API_TOKEN = "test-token"
         api_app.startup()
         api_app.startup_replication()
+        api_auth.startup(api_app.get_db)
+        with api_app.get_db() as db:
+            _, self.publisher_token = api_auth.provision_token(db, "publisher", "upload-test")
+            db.commit()
+        fake_s3.objects.clear()
         self.client = TestClient(api_app.app)
 
     def tearDown(self) -> None:
@@ -167,7 +173,7 @@ class ReplicationTestCase(unittest.TestCase):
     def presign(self, object_key: str):
         return self.client.post(
             "/v1/uploads/presign",
-            headers=self.auth,
+            headers={"Authorization": f"Bearer {self.publisher_token}"},
             json={"object_key": object_key, "content_type": "application/octet-stream"},
         )
 

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { NotesStore, type Note, type NotesRequest } from "./store";
+import { NotesStore, rebaseList, type Note, type NotesRequest } from "./store";
 const note:Note={id:"a",title:"first",body:"",pinned:false,deleted:false,createdAt:"now",updatedAt:"now",localRevision:1,pending:false,conflict:false};
 afterEach(()=>vi.useRealTimers());
 it("serializes typing and retains newer input when an earlier local save completes",async()=>{
@@ -98,4 +98,47 @@ it("rebases a queued ledger draft per entry, keeping an entry a merged save brou
   store.edit({...month,entries:[e("a"),e("b"),e("c")].map(x=>x.id==="a"?{...x,amount:2000}:x)});
   finish({...month,entries:[e("a"),e("b"),e("R")],localRevision:2,pending:true});await vi.advanceTimersByTimeAsync(0);
   expect(saves[1].entries.map((x:any)=>[x.id,x.amount])).toEqual([["a",2000],["b",1000],["R",1000],["c",1000]]);
+});
+
+const listCases = [
+  { key: "items", type: "checklist", row: { id: "row", text: "draft", checked: false, order: "a" }, remote: { text: "remote text" }, local: { checked: true } },
+  { key: "fields", type: "secret", row: { id: "row", label: "login", value: "draft", order: "a" }, remote: { value: "remote secret" }, local: { label: "account" } },
+  { key: "recurring", type: "ledger", row: { id: "row", name: "bill", amount: 1000, every: 1, unit: "month", start: "2026-09-01", trial: false, until: null, memo: "", order: "a" }, remote: { amount: 2000 }, local: { memo: "local memo" } },
+  { key: "planned", type: "ledger", row: { id: "row", name: "plan", amount: 1000, month: null, memo: "", dropped: false, order: "a" }, remote: { name: "remote plan" }, local: { dropped: true } },
+  { key: "entries", type: "ledger-month", row: { id: "row", name: "entry", date: "2026-09-25", amount: 1000, createdAt: "now" }, remote: { name: "remote entry" }, local: { amount: 2000 } },
+] as const;
+it.each(listCases)("preserves merged $key fields while saving a newer edit", async ({key,type,row,remote,local}) => {
+  vi.useFakeTimers();
+  const base: Note = {...note,type,[key]:[row]};
+  const draft: Note = {...base,title:"saving"};
+  const saves: Record<string,unknown>[] = [];
+  let finish!: (saved: Note) => void;
+  const request = vi.fn(async (op:string,input:Record<string,unknown>) => {
+    if(op === "save") {
+      saves.push(input);
+      if(saves.length === 1) return new Promise<Note>(resolve => {finish=resolve;});
+      return {...base,...input,localRevision:3};
+    }
+    return {unlocked:true,notes:[base],lastSyncedAt:null};
+  }) as NotesRequest;
+  const store = new NotesStore(request); await store.load();
+  store.edit(draft);
+  store.edit({...draft,[key]:[{...row,...local}]});
+  finish({...draft,[key]:[{...row,...remote}],localRevision:2});
+  await store.flush();
+  expect(saves).toHaveLength(2);
+  expect(saves[1]).toMatchObject({expectedRevision:2,[key]:[{...row,...remote,...local}]});
+  expect(store.snapshot().notes[0][key]).toEqual([{...row,...remote,...local}]);
+});
+it.each(listCases)("keeps an edited $key row when the merged save deleted it", ({row,local}) => {
+  const edited = {...row,...local};
+  expect(rebaseList<{id:string} & Record<string,unknown>>([], [row], [edited])).toEqual([edited]);
+  expect(rebaseList([], [row], [row])).toEqual([]);
+});
+it("rebases additions, removals and optional fields without mutating input", () => {
+  const draft = [{id:"a",text:"before",optional:"remove"},{id:"deleted",text:"delete"}];
+  const saved = [{id:"a",text:"remote",optional:"remove",extra:"remote"},{id:"deleted",text:"remote delete"},{id:"remote",text:"new"}];
+  const newer = [{id:"a",text:"before"},{id:"local",text:"new"}];
+  expect(rebaseList(saved,draft,newer)).toEqual([{id:"a",text:"remote",extra:"remote"},{id:"remote",text:"new"},{id:"local",text:"new"}]);
+  expect(saved[0].optional).toBe("remove");
 });
