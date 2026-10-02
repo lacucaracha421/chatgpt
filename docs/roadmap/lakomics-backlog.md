@@ -968,6 +968,51 @@ Status: `TODO` — requested by the user 2026-10-02 (while trying the release bu
 13. **IMPLEMENTED 2026-10-02 (`1dd5e2b7` name suggestions, `a8d19545` server tags/filters/suggestions deployed ~10:50 KST + PC auto-tag publication (library v120), tablet tag chips in 0.8.97; first PC publication and live use unverified) — Tablet search using the existing tags:** add a search feature to the tablet app (assets first) that reuses the tags the library already has (auto tags, classifications/characters, artists) — suggestions while typing, tag chips as filters; check what the server already exposes (catalog tag suggestions exist) before adding routes.
 
 
+## AUDIT-20261002 — read-only bug audit findings (Astra high, snapshot c538c508)
+
+Status: `TODO` — four read-only audits on 2026-10-02 (sync/server, PC library on disk, collections/manga, front-end
+robustness); all findings are static traces, not reproduced. Re-check each against current code before fixing (the
+likes album, tablet 찾기 and privacy thumbnails were excluded while they changed). Severity: P0 data loss/security,
+P1 wrong behaviour, P2 edge/robustness.
+
+- **P0** Shared API token can obtain a PUT URL for an existing `library/{asset_id}/original` and overwrite the stored
+  original (`server/lakomics-api/app.py:433–459`, `r2.py:39–55`): require publisher + no-overwrite condition.
+- **P0** Notes store `rebaseList` replaces a whole item with the stale newer draft, dropping another device's merged text
+  when the user toggles the same item during a save (`src/notes/store.ts:25–29,168–175`); also secret fields/ledger rows.
+- **P0** Permanent delete can remove the original/thumbnails of an asset ingested with the same bytes right after the
+  shared-file check (`src-tauri/src/library/trash.rs:300–304`, `ingestion.rs:838–848`): serialize with ingestion.
+- **P0** Work-artwork cleanup can delete another work's file prepared but not yet registered
+  (`work_artwork.rs:566–595,680–682`, `collection_volume.rs:201–224`).
+- **P0** An unmounted Linux manga root (empty mount dir) makes every series a vanished-folder candidate; purge deletes
+  their metadata (`manga_index.rs:300–306,240–259`): check volume/dir identity before purging.
+- **P0** Tablet privacy mode: manga spine double-tap opens the original cover viewer (`mobile-client/Collections.tsx:673,200`).
+- **P0** Tablet catalog reader ignores privacy mode (`mobile-client/CatalogReader.tsx:15,26`).
+- **P1** Legacy `/v1/assets` upsert can change a committed asset's path/kind/hash without authority state (`app.py:352–405`).
+- **P1** Ledger backup import re-ids notes but keeps month notes' `ledger` references (`library/notes.rs:753–758`).
+- **P1** A ledger conflict copy (over 300 entries) cannot be edited: saves require derived month ids (`notes.rs:1026–1033,
+  908–914`; Android `NotesRepository.java:139`).
+- **P1** `info.txt` title/artist edits are skipped by the rescan early return (`manga.rs:293,299–329`).
+- **P1** Tablet keeps showing its own confirmed record edit after the PC changes it back (`mobile-client/useCollectionEdits.ts:67,120`).
+- **P1** An open PC work detail does not reload status/device changed on the tablet (`src/collections/work/useWorkRecord.ts:19`).
+- **P1** A late MangaDex/Kakao refresh of work A lands on work B (`src/collections/CollectionOverlay.tsx:300,323`).
+- **P1** Double-tapping another volume enlarges the previously shown one (`mobile-client/CollectionWork.tsx:211`).
+- **P1** Date-only release compares in UTC: on release day 00:00–08:59 KST it is still "upcoming" (`collection_volume.rs:287`).
+- **P1** PC viewer: returning A→B→A keeps B on screen (`src/shared/ui/StableImage.tsx:29`, `AssetViewer.tsx:349`).
+- **P1** A late source-info save for asset A clears the draft being edited for B (`src/assets/AssetInfoPanel.tsx:141–143`).
+- **P1** Tablet artist list mixes pages from two sort orders (`mobile-client/Artists.tsx:156–163`).
+- **P1** Tablet artist 영상 filter shows an image fallback instead of an empty result (`mobile-client/Artists.tsx:166`).
+- **P1** Tablet back gesture in the viewer's 분류 picker closes the whole viewer (`mobile-client/Viewer.tsx:104–109`).
+- **P1** Tablet back gesture on the memo section-delete dialog closes the note (`mobile-client/Notes.tsx:193–197`).
+- **P1** Escape used to cancel IME composition closes shared dialogs, e.g. the ledger editor (`src/shared/ui/Dialog.tsx:84–86`).
+- **P2** 동기화 상태 복구 re-queues a running upload without the replication lock (`cloud/backfill.rs:168–179,873–881`).
+- **P2** Automatic similarity analysis runs in lightweight mode (`similarity_review_sync.rs:334–336`, `similarity_scan.rs:170–204`).
+- **P2** Windows: a case-only folder rename creates a duplicate manga series (`manga.rs:317–334,354–356`).
+- **P2** A failed manga thumbnail write leaves a file that later scans treat as valid (`manga.rs:339–347,451–458`).
+- **P2** Two concurrent uncached remote image requests share one `.bin.partial`, one fails with 502 (`remote_media.rs:126–134,172–180`).
+- **P2** 찾기: Enter can run a result from the previous query while the deferred list catches up (`src/layout/CommandPalette.tsx:60–64,107–109`).
+- **P2** Folder covers blank and reappear on a background refresh (`src/assets/AssetBrowser.tsx:142–158`; no-flash rule).
+- **P2** Tablet transfer thumbnails (base64 JPEGs) accumulate without a cap (`mobile-client/useExchange.ts:37,53–58`).
+
 ## ASSET-EAGLE-20261001 — PC Asset screen candidates from the Eagle comparison
 
 Status: `HOLD` — user decision 2026-10-01 (night): parked; the order is 망가, then polish (잔손질), then revisit this. PC mockup required before implementation; an unfinished draft is at `docs/prototypes/pc-assets-eagle-20261001/` (not reviewed). Comparison reference: Eagle (`eagle.cool`); these are candidate priorities, not implemented features.
