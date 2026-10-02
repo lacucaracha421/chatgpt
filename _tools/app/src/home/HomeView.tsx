@@ -273,7 +273,9 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
         else if (row.key.startsWith('connection:')) { const problem = problems.find(p => `connection:${p.key}` === row.key); if (problem) onNavigate(problem.view); }
         else todos.find(todo => todo.key === row.key)?.open();
       }} loading={reviewUnknown.length || (store && !notesState.ready) ? <>{reviewUnknown.some(r => r.failed) ? <p role="status">검토 수를 확인할 수 없습니다 <Button variant="quiet" onClick={retryOverview}>다시 시도</Button></p> : <Skeleton label="오늘 할 것" />}</> : undefined} />}
-        right={<><HomePresence items={rightSections} /><HomeRevisit gateway={gateway} localDate={today} privacyMode={privacyMode} onOpenAsset={onOpenAsset} /></>} />
+        // 1년 전 오늘 sits under 오늘 할 것 so a short to-do list does not leave the left column empty.
+        leftAfter={<HomeRevisit gateway={gateway} localDate={today} privacyMode={privacyMode} onOpenAsset={onOpenAsset} />}
+        right={<HomePresence items={rightSections} />} />
     </div></div>
     {dialogs}
     {releaseDetail && <UiDialog open title={releaseDetail.title} onClose={() => setReleaseDetail(null)}><div className="home-release-detail">

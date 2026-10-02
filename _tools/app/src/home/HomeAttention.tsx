@@ -45,6 +45,6 @@ export type HomeReleaseCard = { key: string; name: string; date: string | null; 
 export function HomeReleaseList({ rows, today }: { rows: HomeReleaseCard[]; today: string }) {
   return <HomePresence items={rows.map(row => ({ key: row.key, content: <button type="button" className="home-arrival-row" onClick={row.onOpen}>{row.cover && <span className="home-arrival-cover">{row.cover}</span>}<span className="home-attention-copy"><span>{row.name}</span><small>{[row.date ? displayDate(row.date, new Date(`${today}T12:00:00`)) : '', row.detail].filter(Boolean).join(' · ')}</small></span>{row.fresh ? <Badge variant="accent">NEW</Badge> : row.date && <Badge>{ddayLabel(daysAfter(row.date, today))}</Badge>}</button> }))} />;
 }
-export function HomeAttentionLayout({ today, right, tablet = false }: { today: ReactNode; right: ReactNode; tablet?: boolean }) {
-  return <div className={`home-attention-layout${tablet ? ' is-tablet' : ''}`}><div className="home-attention-left">{today}</div><div className="home-attention-right">{right}</div></div>;
+export function HomeAttentionLayout({ today, leftAfter, right, tablet = false }: { today: ReactNode; leftAfter?: ReactNode; right: ReactNode; tablet?: boolean }) {
+  return <div className={`home-attention-layout${tablet ? ' is-tablet' : ''}`}><div className="home-attention-left">{today}{leftAfter}</div><div className="home-attention-right">{right}</div></div>;
 }
