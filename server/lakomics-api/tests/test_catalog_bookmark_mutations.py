@@ -30,7 +30,7 @@ SNAPSHOT = "/v1/mobile-catalog/bookmarks"
 CHANGES = "/v1/mobile-catalog/bookmarks/changes"
 
 
-class MutationFixture(unittest.TestCase):
+class MutationFixture:
     """Wires the catalog routes with explicit client/publisher guards."""
 
     def setUp(self):
@@ -145,6 +145,8 @@ class MutationFixture(unittest.TestCase):
         self.assertEqual(self.activate().status_code, 200)
         return self.revision()
 
+
+class BookmarkMutationTests(MutationFixture, unittest.TestCase):
     # --- 1. auth ---
     def test_mutation_requires_client_auth(self):
         self.activated()
@@ -553,7 +555,7 @@ class MutationFixture(unittest.TestCase):
         self.assertTrue(status["capabilities"]["bookmarkWrite"])
 
 
-class AuthorizationRoleTests(MutationFixture):
+class AuthorizationRoleTests(MutationFixture, unittest.TestCase):
     """The publisher/client boundary. The legacy shared token is client-only."""
 
     def test_legacy_shared_token_reads_and_mutates_but_cannot_publish(self):

@@ -4,23 +4,14 @@ import time
 import unittest
 import uuid
 
-from tests.test_catalog_bookmark_mutations import MutationFixture, AUTH, LIBRARY
+from tests import test_catalog_bookmark_mutations as bookmarks
+from tests.test_catalog_bookmark_mutations import AUTH, LIBRARY
 import manga_index
 import mobile_catalog_replica as replica
 from mobile_catalog import normalize
 
 
-class MangaIndexTests(unittest.TestCase):
-    setUp = MutationFixture.setUp
-    tearDown = MutationFixture.tearDown
-    add_client = MutationFixture.add_client
-    headers = MutationFixture.headers
-    publish = MutationFixture.publish
-    revision = MutationFixture.revision
-    activate = MutationFixture.activate
-    activated = MutationFixture.activated
-    command = MutationFixture.command
-
+class MangaIndexTests(bookmarks.MutationFixture, unittest.TestCase):
     def put(self, desired=True, expected=0, value="tag", label="태그", operation=None, **extra):
         body = {"libraryId": LIBRARY, "epoch": 1, "contractVersion": 1,
                 "operationId": operation or str(uuid.uuid4()), "expectedRevision": expected,
