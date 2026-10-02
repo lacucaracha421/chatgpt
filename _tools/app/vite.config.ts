@@ -31,7 +31,7 @@ export default defineConfig(async ({ mode }) => {
     },
     test: {
       // mobile-client tests run under vitest.mobile.config.ts (npm run mobile:test).
-      exclude: [...configDefaults.exclude, "**/.tmp/**", "mobile-client/**"],
+      exclude: [...configDefaults.exclude, "**/.tmp/**", "mobile-client/**", "scripts/**/*.test.mjs"], // node --test suites for the perf kit
       environment: "jsdom",
       setupFiles: ["./src/test/setup.ts"],
       css: { include: [/src\/styles\/(?:tokens|global)\.css$/] },

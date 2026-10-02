@@ -12,8 +12,10 @@ The numbers are relative (one process, no network, no TLS); use them to compare 
 change against the same script on the same machine, not as production latency.
 """
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
+import math
 import os
 import statistics
 import sys
@@ -27,6 +29,7 @@ sys.path.insert(0, str(ROOT))
 SHARED_TOKEN = "bench-shared-token"
 # The shared token is read from the environment at import time by app.py.
 os.environ["LAKOMICS_API_TOKEN"] = SHARED_TOKEN
+os.environ["LAKOMICS_EXCHANGE_ENABLED"] = "0"
 
 import tests.test_capture_api_stub as stub  # noqa: E402  (installs the R2 stub)
 
@@ -48,7 +51,28 @@ SIZES = {
 }
 
 
+MARKER = ".lakomics-poll-benchmark.json"
+DATASET_VERSION = 2
+
+
+def prepare_root(root: Path):
+    """Refuse existing user data before any SQLite open, migration or token read."""
+    if root.is_symlink() or any(parent.is_symlink() for parent in root.parents):
+        raise ValueError("benchmark directory must not use symlinks")
+    root.mkdir(parents=True, exist_ok=True)
+    expected = {"version": DATASET_VERSION, "sizes": SIZES}
+    marker = root / MARKER
+    if any(root.iterdir()):
+        if not marker.is_file() or marker.is_symlink() or json.loads(marker.read_text()) != expected:
+            raise ValueError("--keep requires an empty directory or a matching benchmark marker")
+        if any(path.is_symlink() for path in root.rglob("*")):
+            raise ValueError("benchmark data must not contain symlinks")
+    else:
+        marker.write_text(json.dumps(expected))
+
+
 def boot(root: Path):
+    prepare_root(root)
     api.DB_PATH = root / "lakomics.sqlite3"
 
     @api.app.get("/_bench/noop")
@@ -58,7 +82,27 @@ def boot(root: Path):
     for handler in lifecycle(api.app).startup_handlers:
         if handler.__name__ == "startup_image_thumbnails":
             continue  # background R2 worker; not part of any polling path
+        owner = getattr(handler, "__self__", None)
+        if owner is not None and owner.__class__.__name__ == "RefreshWorker":
+            # Its startup creates tables AND starts a network-capable background thread.
+            import mobile_catalog_refresh
+            with api.get_db() as db:
+                db.executescript(mobile_catalog_refresh.DDL)
+            continue
+        if owner is not None and handler.__name__ == "start":
+            continue  # Artifact pruning thread; not request work.
         handler()
+
+
+@contextmanager
+def benchmark_client():
+    # boot() has explicitly initialized schemas without background workers. TestClient's
+    # context manager would run startup a second time, including the thumbnail worker.
+    client = TestClient(api.app)
+    try:
+        yield client
+    finally:
+        client.close()
 
 
 def sha(text):
@@ -190,6 +234,16 @@ def populate(root: Path):
             rows.append([values.get(c) for c in capture_cols])
         db.executemany(f"INSERT INTO captures({','.join(capture_cols)}) VALUES({','.join('?' for _ in capture_cols)})", rows)
 
+        # Nonempty tags/artists: suggestions and filtered pages must exercise real work.
+        db.executemany("INSERT INTO library_tag_vocabulary VALUES(?,?,?)",
+                       [(f"tag-{i}", f"Tag {i}", "general") for i in range(100)])
+        db.executemany("INSERT INTO library_tag_assets VALUES(?,?,?)",
+                       [(f"asset-{i:05d}", sha(f"tags-{i}"), f"creator-{i % 40}") for i in range(SIZES["assets"])])
+        db.executemany("INSERT INTO library_artist_keys VALUES(?,?)",
+                       [(f"creator-{i}", f"artist-{i}") for i in range(40)])
+        db.executemany("INSERT INTO library_asset_tags VALUES(?,?)",
+                       [(f"asset-{i:05d}", f"tag-{i % 100}") for i in range(SIZES["assets"])])
+
         _, client_token = api_auth.provision_token(db, "client", "bench-client")
         _, publisher_token = api_auth.provision_token(db, "publisher", "bench-publisher")
         db.commit()
@@ -276,6 +330,22 @@ def endpoints(client_token, publisher_token):
         ("GET /v1/library/assets", "GET", "/v1/library/assets", shared, {"limit": 50}, None),
         ("GET /v1/library/assets?classification_id", "GET", "/v1/library/assets", shared,
          {"limit": 50, "classification_id": "class-007"}, None),
+        ("GET /v1/library/assets (images, portrait)", "GET", "/v1/library/assets", device,
+         {"limit": 50, "media_kind": "images", "aspect_ratio": "portrait"}, None),
+        ("GET /v1/library/assets (videos, duration, oldest)", "GET", "/v1/library/assets", device,
+         {"limit": 50, "media_kind": "videos", "duration_ms_min": 10000, "duration_ms_max": 20000, "sort": "oldest"}, None),
+        ("GET /v1/library/assets (tag and artist)", "GET", "/v1/library/assets", device,
+         {"limit": 50, "tag": "tag-1", "artist": "artist-1"}, None),
+        ("GET /v1/library/assets (TOC)", "GET", "/v1/library/assets", device,
+         {"toc": 1, "utcOffsetMinutes": 540}, None),
+        ("GET /v1/library/assets (filtered TOC)", "GET", "/v1/library/assets", device,
+         {"toc": 1, "utcOffsetMinutes": 540, "media_kind": "images", "aspect_ratio": "portrait", "tag": "tag-1"}, None),
+        ("GET /v1/library/search/suggestions", "GET", "/v1/library/search/suggestions", device,
+         {"text": "Tag 1", "limit": 10}, None),
+        ("GET /v1/library/search/suggestions (popular)", "GET", "/v1/library/search/suggestions", device,
+         {"limit": 10}, None),
+        ("GET /v1/mobile-catalog/suggestions", "GET", "/v1/mobile-catalog/suggestions", device,
+         {"text": "artist-1", "limit": 10}, None),
         ("GET /v1/library/list-generation", "GET", "/v1/library/list-generation", shared, None, None),
         ("GET /v1/captures/pending", "GET", "/v1/captures/pending", shared, None, None),
         ("POST /v1/library/media-tickets (3 assets)", "POST", "/v1/library/media-tickets", shared, None,
@@ -290,12 +360,18 @@ def endpoints(client_token, publisher_token):
 
 def measure(client, spec, runs, warmup):
     name, method, path, headers, params, body = spec
+    if runs < 1 or warmup < 0:
+        raise ValueError("runs must be positive and warmup non-negative")
     samples = []
+    byte_samples = []
     status = None
+    expected = 304 if "304)" in name else 200
     if "304)" in name:
         # Conditional poll: the client sends back the ETag of the answer it already has.
         first = client.get(path, headers=headers, params=params)
-        headers = {**headers, "If-None-Match": first.headers.get("ETag", "")}
+        if first.status_code != 200 or not first.headers.get("ETag"):
+            raise RuntimeError(f"{name}: missing successful ETag preflight")
+        headers = {**headers, "If-None-Match": first.headers["ETag"]}
     for i in range(warmup + runs):
         start = time.perf_counter()
         if method == "GET":
@@ -304,14 +380,18 @@ def measure(client, spec, runs, warmup):
             response = client.post(path, headers=headers, json=body)
         elapsed = (time.perf_counter() - start) * 1000
         status = response.status_code
+        if status != expected:
+            raise RuntimeError(f"{name}: expected {expected}, got {status}: {response.text[:200]}")
         if i >= warmup:
             samples.append(elapsed)
+            byte_samples.append(len(response.content))
     samples.sort()
     return {"status": status, "runs": runs,
             "p50_ms": round(statistics.median(samples), 3),
-            "p95_ms": round(samples[int(len(samples) * 0.95) - 1], 3),
+            "p95_ms": round(samples[math.ceil(len(samples) * 0.95) - 1], 3),
             "mean_ms": round(statistics.fmean(samples), 3),
-            "bytes": len(response.content)}
+            "bytes": len(response.content), "bytes_min": min(byte_samples), "bytes_max": max(byte_samples),
+            "requests": warmup + runs + (1 if expected == 304 else 0)}
 
 
 def main(argv=None):
@@ -321,21 +401,21 @@ def main(argv=None):
     parser.add_argument("--json", type=Path, default=None, help="write the results as JSON here")
     parser.add_argument("--keep", type=Path, default=None, help="reuse/keep the data directory")
     arguments = parser.parse_args(argv)
+    if arguments.runs < 1 or arguments.warmup < 0:
+        parser.error("--runs must be positive and --warmup non-negative")
 
     temp = None
     if arguments.keep is not None:
         root = arguments.keep
-        root.mkdir(parents=True, exist_ok=True)
     else:
         temp = tempfile.TemporaryDirectory(prefix="lakomics-poll-benchmark-")
         root = Path(temp.name)
-    os.environ.setdefault("LAKOMICS_CATALOG_REFRESH_DISABLED", "1")
     try:
         boot(root)
         with api.get_db() as db:
             populated = db.execute("SELECT COUNT(*) FROM assets").fetchone()[0]
         client_token, publisher_token = (None, None)
-        with TestClient(api.app) as client:
+        with benchmark_client() as client:
             if not populated:
                 started = time.perf_counter()
                 client_token, publisher_token = populate(root)
@@ -350,7 +430,7 @@ def main(argv=None):
                 line = results[spec[0]]
                 print(f"{spec[0]:<62} {line['status']}  p50 {line['p50_ms']:7.3f} ms  p95 {line['p95_ms']:7.3f} ms"
                       f"  {line['bytes']:>6} B")
-        report = {"sizes": SIZES, "python": sys.version.split()[0], "results": results}
+        report = {"sizes": SIZES, "python": sys.version.split()[0], "evidence": "in-process synthetic TestClient, no network or production target", "datasetVersion": DATASET_VERSION, "results": results}
         if arguments.json:
             arguments.json.write_text(json.dumps(report, indent=1))
     finally:

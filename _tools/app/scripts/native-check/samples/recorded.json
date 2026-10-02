@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "evidence": "Synthetic recording for offline report regression; NOT a native performance baseline",
+  "frameBudgetMs": 16.666666666666668,
+  "scenarios": [
+    {
+      "id": "deep-scroll", "durationMs": 4010, "hostDurationMs": 4050,
+      "frames": [16, 16.8, 17, 34, 16.4, 50],
+      "longTasksSupported": true, "longTasks": [{"startTime": 120, "duration": 55}],
+      "heapBytes": null,
+      "processSamples": [
+        {"atMs": 250, "elapsedMs": 250, "cpuPercent": 24, "rssBytes": 104857600, "processes": 3},
+        {"atMs": 500, "elapsedMs": 250, "cpuPercent": 40, "rssBytes": 115343360, "processes": 3}
+      ]
+    },
+    {"id": "idle-hidden", "durationMs": 60001, "frames": [], "longTasksSupported": false, "longTasks": [], "processSamples": []}
+  ]
+}

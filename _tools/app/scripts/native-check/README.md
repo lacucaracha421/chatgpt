@@ -1,35 +1,129 @@
-# Native check
+# Native check and performance kit
 
-Opens the real Lakomics window (WebKitGTK and the Rust core, not the browser preview) on a **test library** and drives it over WebDriver, so UI changes can be checked and captured without the user at the PC. Linux only.
+Drives a real Linux Lakomics WebKitGTK window on a disposable **test library**.
+Screenshot mode is preserved. Performance mode records a single JSON scenario suite,
+WebView marks, motion frame intervals and app process samples. It never builds the app.
 
-## Run
+## Prerequisites and safety
+
+The controller must separately prepare the embedded-frontend binary at
+`~/.cache/lakomics-native-check/target/debug/lakomics`. Do not launch the ordinary
+`src-tauri/target/debug/lakomics` binary. Needs Node >=24, `sqlite3`, `dbus-daemon`,
+`ss`, `getconf`, `~/.cargo/bin/tauri-driver` and `~/.cargo/bin/WebKitWebDriver`.
+
+Use an already prepared library at `~/.cache/lakomics-native-check/library` with
+`.lakomics-dev-library` and disabled/empty cloud settings. The runner rejects a
+symlink library/database. Perf also requires `manga_root`, `collection_source_root`
+and `private_vault_last_root` to be NULL, preventing copied settings from opening
+external folders. It does not open a source library or repair the fixture on launch.
+
+`make_test_library.py <source-root> [<empty-test-root>]` remains the separately
+invoked read-only-copy helper. It reads the source through SQLite backup, copies
+artwork/thumbnails/catalogs, clears cloud and external root settings and marks the
+copy. It now refuses a nonempty target, instead of deleting its database. Source
+copying needs its own task authorization; it is not part of measurement or dry-run.
+
+The copy helper does **not** copy originals. For a successful perf run, prepare a
+fully local disposable fixture with at least 1,000 images, original image files for
+the first six assets, thumbnails, a populated first folder, collections and an offline
+catalog. Use generated/test-owned media, never links into the real library. Keep a
+fixture snapshot and describe its size/media/build with the results. Missing/broken
+visible media is a failed scenario, not a fast successful viewer measurement. An
+empty catalog measures only empty-state entry; label that condition explicitly.
+
+Safety layers are retained for both live modes:
+
+- Test marker and no cloud URL, sync or capture; no supplied production-library path.
+- A private D-Bus session without service directories, so the host keyring is unavailable.
+- Fresh private XDG config/data/cache/runtime directories for each run, under
+  `~/.cache/lakomics-native-check/home-*`; no stale remembered library path.
+- HTTP/HTTPS/all proxies point to a closed port. Perf ignores `NATIVE_CHECK_ALLOW_HOSTS`;
+  screenshot mode keeps the existing explicit host override. This is defense in depth,
+  **not OS network isolation**: code that ignores proxies is not sandboxed.
+- `connections.txt` records the driver's app process tree connections at the end; it
+  does not prove absence of earlier traffic. Config/cache folders remain for diagnosis.
+
+## One command per kit
+
+All commands here use repository-root paths unless a `cd` is shown.
 
 ```sh
-# 1. Test library: a read-only copy of a real library, server settings removed, dev marker added.
-python3 _tools/app/scripts/native-check/make_test_library.py "<real library root>"   # → ~/.cache/lakomics-native-check/library
+# Native performance (already built binary and prepared test fixture only).
+node _tools/app/scripts/native-check/run.mjs --perf _tools/app/scripts/native-check/scenarios/perf-all.json /tmp/native-before
+node _tools/app/scripts/native-check/run.mjs --perf _tools/app/scripts/native-check/scenarios/perf-all.json /tmp/native-after --baseline /tmp/native-before/perf.json
 
-# 2. The app with the frontend embedded, built into its own target folder (never src-tauri/target/debug).
-cd _tools/app && CARGO_TARGET_DIR=$HOME/.cache/lakomics-native-check/target npx tauri build --debug --no-bundle
+# Existing screenshots; the file is the same JSON list as before.
+node _tools/app/scripts/native-check/run.mjs steps.json /tmp/native-shots
 
-# 3. Steps → screenshots.
-node _tools/app/scripts/native-check/run.mjs steps.json out/
+# PC render/commit counts, compact table + complete JSON.
+(cd _tools/app && node scripts/perf/run.mjs --out /tmp/pc-before.json)
+(cd _tools/app && node scripts/perf/run.mjs --out /tmp/pc-after.json --baseline /tmp/pc-before.json)
+
+# Tablet deterministic work counts (verbose prints the existing [perf] lines).
+(cd _tools/app && npm run mobile:test -- --maxWorkers=2 --reporter=verbose mobile-client/perf.test.ts mobile-client/Collections.perf.test.tsx mobile-client/thumbnailWarm.perf.test.ts)
+
+# Server, synthetic local FastAPI instance only; no listener or production URL.
+(cd server/lakomics-api && timeout 300 .venv/bin/python tools/poll_benchmark.py --runs 200 --warmup 20 --json /tmp/server-before.json)
 ```
 
-Steps are a JSON list: `{"waitFor": css}`, `{"eval": "js returning a value"}`, `{"click": css}`, `{"dblclick": css}`, `{"key": "ArrowRight"}`, `{"resize": [w, h]}`, `{"wait": ms}`, `{"shot": "name"}`. Example: open 컬렉션 → 게임, wait for `.collection-light-case`, double-click it, shoot.
+PC details: [render harness](../perf/README.md). Android device log capture and
+summary: [tablet/device guide](../../../../android/tools/PERFORMANCE.md).
+Server details: [local benchmark](../../../../server/lakomics-api/tools/PERFORMANCE.md).
 
-Needs `~/.cargo/bin/tauri-driver` and `~/.cargo/bin/WebKitWebDriver`, `dbus-daemon`, `sqlite3`, Node ≥ 24.
+## Native scenarios and outputs
 
-## What keeps it away from real data and the server
+`scenarios/perf-all.json` covers startup to assets, folder switch, 16,000 px deep
+scroll, viewer open / next five / close, Collections, manga, notes open/type,
+Home, Find open/type, visible idle 60 seconds and actually minimized/hidden idle
+60 seconds. `setup` is unmeasured and resets to the all-assets grid at the top;
+`steps` are measured. The viewport is 1440x1000. Adapt selectors/fixture-specific
+folder choice in the JSON rather than inserting production app hooks.
 
-- **Test library only.** `make_test_library.py` reads the real `library.sqlite` through SQLite's online backup from a read-only connection and copies artwork/thumbnail folders (not `assets/` originals or videos). It checks the real database's size and mtime are unchanged afterwards. `run.mjs` refuses to start unless the test library has the dev marker and no server settings.
-- **No server settings.** In the copy, `cloud_sync_enabled = 0`, `cloud_capture_enabled = 0`, `cloud_api_base_url = NULL`.
-- **No credentials.** The app gets a private D-Bus session with no service directories, so the Secret Service (where the cloud tokens live) cannot be reached or started.
-- **Own config.** `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` point under `~/.cache/lakomics-native-check/home/`, so the app's remembered library path and machine settings are not the user's; `run.mjs` sets the test library path itself.
-- **Proxies to a closed port** for any HTTP the app might still try.
-- **Evidence per run:** `out/connections.txt` lists every TCP connection of the app's process at the end (only `127.0.0.1` is expected).
+The Notes scenario installs a **measurement-only in-memory notes IPC fixture in
+this WebView**, intercepting only `notes_request`. It neither persists notes nor
+unlocks the personal keyring. Its input/render timing is useful; it is not native
+notes encryption, storage or sync latency. All other commands use the real backend.
+This is enabled explicitly by `notesFixture: true` in the suite; no app source hook
+was added. A run without it needs separate safe credential fixtures to edit notes.
 
-Verified 2026-10-01: two runs; the real `library.sqlite` and `-wal` size/mtime unchanged; `~/.config/com.lakomics.desktop/` untouched; connections local only (the WebDriver link).
+`perf.json` holds raw frame intervals, long tasks, per-step measures, process samples,
+capabilities, definitions, summaries and baseline deltas. `perf.md` is the compact
+summary; the driver prints it. Reports are written after each scenario, preserving
+partial failures; any failed scenario makes the live command exit nonzero.
 
-## Limits
+| Number | Meaning and limits |
+|---|---|
+| WebView duration | `performance.mark/measure` from before action to the configured readiness check, including driver round trips and deliberate typing/wait cadence. Per-step records separate the action and settle cost. |
+| Host duration | Monotonic driver duration. Startup includes fresh process/session creation and grid readiness, after an unmeasured path bootstrap. File/OS caches are warm; this is not cold boot. |
+| Settled | Target exists and is visible, no visible busy/error/skeleton state, decoded visible images, 300 ms without subtree mutations, then two rAF callbacks. Bounded to 15 s; not proof of background/network idle. Viewer next also requires the visible original source to change, avoiding timing the retained previous image. |
+| Frame p50/p95 | Nearest-rank positive rAF deltas during motion scenarios (including their settle tail). Not GPU presentation timestamps. Jank = delta > 1.5 x `frameBudgetMs`; set the budget to the display refresh interval and keep it fixed across baselines. |
+| Long tasks | Supported PerformanceObserver long tasks during each instrumented scenario, count and total duration. Unsupported WebKit reports null, not zero. Startup tasks before probe installation cannot be observed. |
+| JS heap | `performance.memory.usedJSHeapSize` at scenario end if exposed; null otherwise. Not WebView/native total memory. |
+| CPU/RSS | `/proc` samples every ~250 ms for this driver's exact app executable and descendants, including WebKit. CPU uses utime+stime deltas divided by real elapsed time and CLK_TCK; 100% = one core, may exceed 100%. RSS sums pages using host PAGESIZE; shared pages can be double-counted. Short-lived exited children may be missed. No system-wide or unrelated Lakomics processes. |
+| Idle hidden | Requires real `document.visibilityState === hidden` after WebDriver minimize; no spoofing. Unsupported minimize/visibility becomes a failure. No rAF statistics are inferred while hidden. |
+| Baseline delta | After minus before, percentage undefined when before=0. Missing/unsupported metrics stay null; failed scenarios are excluded from deltas. New/missing scenarios are listed. A changed frame budget is rejected. Conditions and fixture/build must match manually. |
 
-The OS cannot enforce the isolation here (unprivileged namespaces are not allowed), so the guarantees are the layers above, not a sandbox. Screenshots cover the app's web content only (no OS dialogs, tray, drag between apps). Motion and feel still need a person. The window appears on the desktop while a run is active. The test library is a snapshot; rebuild it to pick up newer data.
+The initial session only remembers the test path; performance starts in a fresh
+second process without arbitrary startup sleeps. Probes install when the new session
+becomes available, so WebView duration is shorter than launch-to-grid host duration.
+No initial-load long-task coverage is implied. Keep window/refresh rate, build profile,
+power mode, fixture, display scale and cache condition fixed. Repeat several runs;
+wall-clock percentiles are evidence, not standalone regression gates.
+
+The screenshot step list still accepts `waitFor`, `eval`, `click`, `dblclick`, `key`,
+`resize`, `wait` and `shot`. Perf schema accepts the documented suite operations only;
+unknown flags/steps fail before app launch. `assert` is trusted measurement JavaScript.
+
+## Offline validation (no app or library access)
+
+```sh
+node --test --test-isolation=none _tools/app/scripts/native-check/perf.test.mjs _tools/app/scripts/perf/report.test.mjs
+node _tools/app/scripts/native-check/run.mjs --perf _tools/app/scripts/native-check/scenarios/perf-all.json /tmp/native-dry --dry-run
+node _tools/app/scripts/native-check/run.mjs --perf _tools/app/scripts/native-check/scenarios/perf-all.json /tmp/native-sample --sample _tools/app/scripts/native-check/samples/recorded.json --baseline _tools/app/scripts/native-check/samples/recorded.json
+```
+
+The checked-in recording is deliberately synthetic report input, not measured native
+performance. `--sample` can also re-summarize a previously captured `perf.json`; output
+is labelled offline. These exits happen before binary/library checks, D-Bus or app
+launch. Live selector readiness, minimize behavior, startup persistence, image decoding,
+process coverage and screenshot compatibility still need the controller's built binary.

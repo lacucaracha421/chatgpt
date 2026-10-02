@@ -1,0 +1,555 @@
+{
+  "version": 1,
+  "frameBudgetMs": 16.666666666666668,
+  "conditions": {
+    "viewport": "1440x1000",
+    "fixture": "Prepared test library with >=1000 images and local thumbnails/originals, nonempty folder, offline catalog and collections. No source library reads.",
+    "notes": "Synthetic in-memory notes IPC installed by driver; no keyring or persistence measurement."
+  },
+  "notesFixture": true,
+  "scenarios": [
+    {
+      "id": "startup",
+      "steps": [
+        {
+          "waitFor": ".workspace-rail"
+        },
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "에셋"
+          }
+        },
+        {
+          "settle": {
+            "selector": ".asset-gallery__scroll",
+            "requireImages": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "folder-switch",
+      "setup": [
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "에셋"
+          }
+        },
+        {
+          "waitFor": ".asset-index__top button"
+        },
+        {
+          "click": ".asset-index__top button"
+        },
+        {
+          "settle": {
+            "selector": ".asset-gallery__scroll",
+            "requireImages": true
+          }
+        },
+        {
+          "scroll": {
+            "selector": ".asset-gallery__scroll",
+            "pixels": -10000000,
+            "durationMs": 1
+          }
+        }
+      ],
+      "steps": [
+        {
+          "click": ".classification-sidebar [role=\"treeitem\"]"
+        },
+        {
+          "settle": {
+            "selector": ".asset-gallery__scroll",
+            "requireImages": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "deep-scroll",
+      "motion": true,
+      "setup": [
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "에셋"
+          }
+        },
+        {
+          "waitFor": ".asset-index__top button"
+        },
+        {
+          "click": ".asset-index__top button"
+        },
+        {
+          "settle": {
+            "selector": ".asset-gallery__scroll",
+            "requireImages": true
+          }
+        },
+        {
+          "scroll": {
+            "selector": ".asset-gallery__scroll",
+            "pixels": -10000000,
+            "durationMs": 1
+          }
+        }
+      ],
+      "steps": [
+        {
+          "scroll": {
+            "selector": ".asset-gallery__scroll",
+            "pixels": 16000,
+            "durationMs": 4000
+          }
+        },
+        {
+          "settle": {
+            "selector": ".asset-gallery__scroll",
+            "requireImages": true
+          }
+        },
+        {
+          "assert": "document.querySelector(\".asset-gallery__scroll\").scrollTop >= 8000"
+        }
+      ]
+    },
+    {
+      "id": "viewer",
+      "motion": true,
+      "setup": [
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "에셋"
+          }
+        },
+        {
+          "waitFor": ".asset-index__top button"
+        },
+        {
+          "click": ".asset-index__top button"
+        },
+        {
+          "settle": {
+            "selector": ".asset-gallery__scroll",
+            "requireImages": true
+          }
+        },
+        {
+          "scroll": {
+            "selector": ".asset-gallery__scroll",
+            "pixels": -10000000,
+            "durationMs": 1
+          }
+        }
+      ],
+      "steps": [
+        {
+          "dblclick": ".asset-gallery__scroll [role=\"option\"]"
+        },
+        {
+          "settle": {
+            "selector": ".asset-viewer__media:not([data-stable-image-loading])",
+            "requireImages": true
+          }
+        },
+        {
+          "key": "ArrowRight"
+        },
+        {
+          "settle": {
+            "selector": ".asset-viewer__media:not([data-stable-image-loading])",
+            "requireImages": true
+          }
+        },
+        {
+          "key": "ArrowRight"
+        },
+        {
+          "settle": {
+            "selector": ".asset-viewer__media:not([data-stable-image-loading])",
+            "requireImages": true
+          }
+        },
+        {
+          "key": "ArrowRight"
+        },
+        {
+          "settle": {
+            "selector": ".asset-viewer__media:not([data-stable-image-loading])",
+            "requireImages": true
+          }
+        },
+        {
+          "key": "ArrowRight"
+        },
+        {
+          "settle": {
+            "selector": ".asset-viewer__media:not([data-stable-image-loading])",
+            "requireImages": true
+          }
+        },
+        {
+          "key": "ArrowRight"
+        },
+        {
+          "settle": {
+            "selector": ".asset-viewer__media:not([data-stable-image-loading])",
+            "requireImages": true
+          }
+        },
+        {
+          "assert": "document.querySelector(\".asset-viewer__position b\").textContent === \"6\""
+        },
+        {
+          "click": "[aria-label=\"감상 화면 닫기\"]"
+        },
+        {
+          "settle": {
+            "selector": ".asset-gallery__scroll",
+            "requireImages": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "collections",
+      "setup": [
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "에셋"
+          }
+        },
+        {
+          "waitFor": ".asset-index__top button"
+        },
+        {
+          "click": ".asset-index__top button"
+        },
+        {
+          "settle": {
+            "selector": ".asset-gallery__scroll",
+            "requireImages": true
+          }
+        },
+        {
+          "scroll": {
+            "selector": ".asset-gallery__scroll",
+            "pixels": -10000000,
+            "durationMs": 1
+          }
+        }
+      ],
+      "steps": [
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "컬렉션"
+          }
+        },
+        {
+          "settle": {
+            "selector": "[aria-label=\"컬렉션\"][role=\"region\"], section[aria-label=\"컬렉션\"]",
+            "requireImages": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "manga",
+      "setup": [
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "에셋"
+          }
+        },
+        {
+          "waitFor": ".asset-index__top button"
+        },
+        {
+          "click": ".asset-index__top button"
+        },
+        {
+          "settle": {
+            "selector": ".asset-gallery__scroll",
+            "requireImages": true
+          }
+        },
+        {
+          "scroll": {
+            "selector": ".asset-gallery__scroll",
+            "pixels": -10000000,
+            "durationMs": 1
+          }
+        }
+      ],
+      "steps": [
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "망가"
+          }
+        },
+        {
+          "settle": {
+            "selector": ".online-catalog",
+            "requireImages": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "notes",
+      "setup": [
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "에셋"
+          }
+        },
+        {
+          "waitFor": ".asset-index__top button"
+        },
+        {
+          "click": ".asset-index__top button"
+        },
+        {
+          "settle": {
+            "selector": ".asset-gallery__scroll",
+            "requireImages": true
+          }
+        },
+        {
+          "scroll": {
+            "selector": ".asset-gallery__scroll",
+            "pixels": -10000000,
+            "durationMs": 1
+          }
+        }
+      ],
+      "steps": [
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "메모"
+          }
+        },
+        {
+          "settle": {
+            "selector": ".notes-workspace",
+            "requireImages": false
+          }
+        },
+        {
+          "click": "[data-note-id=\"native-check-note\"]"
+        },
+        {
+          "waitFor": "textarea[aria-label=\"메모 본문\"]"
+        },
+        {
+          "type": {
+            "selector": "textarea[aria-label=\"메모 본문\"]",
+            "text": "abcdefghij",
+            "intervalMs": 100
+          }
+        },
+        {
+          "settle": {
+            "selector": ".notes-workspace",
+            "requireImages": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "home",
+      "setup": [
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "에셋"
+          }
+        },
+        {
+          "waitFor": ".asset-index__top button"
+        },
+        {
+          "click": ".asset-index__top button"
+        },
+        {
+          "settle": {
+            "selector": ".asset-gallery__scroll",
+            "requireImages": true
+          }
+        },
+        {
+          "scroll": {
+            "selector": ".asset-gallery__scroll",
+            "pixels": -10000000,
+            "durationMs": 1
+          }
+        }
+      ],
+      "steps": [
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "홈"
+          }
+        },
+        {
+          "settle": {
+            "selector": ".home-view",
+            "requireImages": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "find",
+      "setup": [
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "에셋"
+          }
+        },
+        {
+          "waitFor": ".asset-index__top button"
+        },
+        {
+          "click": ".asset-index__top button"
+        },
+        {
+          "settle": {
+            "selector": ".asset-gallery__scroll",
+            "requireImages": true
+          }
+        },
+        {
+          "scroll": {
+            "selector": ".asset-gallery__scroll",
+            "pixels": -10000000,
+            "durationMs": 1
+          }
+        }
+      ],
+      "steps": [
+        {
+          "click": ".workspace-rail [aria-label=\"찾기\"]"
+        },
+        {
+          "waitFor": ".command-palette [role=\"combobox\"]"
+        },
+        {
+          "type": {
+            "selector": ".command-palette [role=\"combobox\"]",
+            "text": "native",
+            "intervalMs": 100
+          }
+        },
+        {
+          "settle": {
+            "selector": ".command-palette",
+            "requireImages": false
+          }
+        },
+        {
+          "key": "Escape"
+        }
+      ]
+    },
+    {
+      "id": "idle-visible",
+      "setup": [
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "에셋"
+          }
+        },
+        {
+          "waitFor": ".asset-index__top button"
+        },
+        {
+          "click": ".asset-index__top button"
+        },
+        {
+          "settle": {
+            "selector": ".asset-gallery__scroll",
+            "requireImages": true
+          }
+        },
+        {
+          "scroll": {
+            "selector": ".asset-gallery__scroll",
+            "pixels": -10000000,
+            "durationMs": 1
+          }
+        }
+      ],
+      "steps": [
+        {
+          "assert": "document.visibilityState === \"visible\""
+        },
+        {
+          "wait": 60000
+        },
+        {
+          "assert": "document.visibilityState === \"visible\""
+        }
+      ]
+    },
+    {
+      "id": "idle-hidden",
+      "setup": [
+        {
+          "clickText": {
+            "selector": ".workspace-rail button",
+            "text": "에셋"
+          }
+        },
+        {
+          "waitFor": ".asset-index__top button"
+        },
+        {
+          "click": ".asset-index__top button"
+        },
+        {
+          "settle": {
+            "selector": ".asset-gallery__scroll",
+            "requireImages": true
+          }
+        },
+        {
+          "hidden": true
+        },
+        {
+          "scroll": {
+            "selector": ".asset-gallery__scroll",
+            "pixels": -10000000,
+            "durationMs": 1
+          }
+        }
+      ],
+      "steps": [
+        {
+          "assert": "document.visibilityState === \"hidden\""
+        },
+        {
+          "wait": 60000
+        },
+        {
+          "assert": "document.visibilityState === \"hidden\""
+        }
+      ]
+    }
+  ]
+}

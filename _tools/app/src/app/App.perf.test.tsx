@@ -6,8 +6,8 @@
 // "Performance work"). Raise one only with a measured, justified reason.
 // Method: the whole App sits under one React <Profiler>; `commits` counts its onRender
 // callbacks (one per React commit that touched the tree). Selected components are wrapped
-// through vi.mock so their render-function calls are counted, and `tiles` counts gallery
-// tile renders via `thumbnailUrl`/`assetThumbnailUrl`. Status reads return fresh objects, like real IPC.
+// through vi.mock so their render-function calls are counted. Thumbnail URL helper calls
+// are counted separately (not exact tile renders). Status reads return fresh objects, like real IPC.
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { Profiler, type ProfilerOnRenderCallback } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -64,8 +64,8 @@ vi.mock("../assets/mediaUrl", async (original) => {
   const m = await original<typeof import("../assets/mediaUrl")>();
   return {
     ...m,
-    thumbnailUrl: (...args: Parameters<typeof m.thumbnailUrl>) => { probe.count("tile(thumbnailUrl)"); return m.thumbnailUrl(...args); },
-    assetThumbnailUrl: (...args: Parameters<typeof m.assetThumbnailUrl>) => { probe.count("tile(thumbnailUrl)"); return m.assetThumbnailUrl(...args); },
+    thumbnailUrl: (...args: Parameters<typeof m.thumbnailUrl>) => { probe.count("thumbnailUrlCalls"); return m.thumbnailUrl(...args); },
+    assetThumbnailUrl: (...args: Parameters<typeof m.assetThumbnailUrl>) => { probe.count("thumbnailUrlCalls"); return m.assetThumbnailUrl(...args); },
   };
 });
 vi.mock("../assets/masonryLayout", async (original) => {
@@ -167,10 +167,11 @@ async function startWorkspace(gateway: ReturnType<typeof perfGateway>) {
 // Shared by the measurement suite and the idle gate.
 // Lazy views resolve through real module loading; warm them so fake time can drive them.
 beforeAll(async () => {
-  await Promise.all([import("../collections/CollectionBrowser"), import("../notes/NotesView"), import("../collections/CollectionOverlay")]);
+  await Promise.all([import("../collections/CollectionBrowser"), import("../notes/NotesView"), import("../collections/CollectionOverlay"), import("../manga/MangaBrowser"), import("../home/HomeView")]);
 });
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date", "requestAnimationFrame", "cancelAnimationFrame"] });
+  vi.setSystemTime(new Date("2026-10-02T03:00:00Z"));
   localStorage.clear();
   localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
   Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: { invoke: nativeInvoke } });
@@ -194,7 +195,7 @@ describe.skipIf(!RUN)("desktop render/commit baseline (PERF-ALL-001)", () => {
   it("startup: open library to a settled Library grid", async () => {
     const gateway = gw();
     await startWorkspace(gateway);
-    report("startup(5s)", snapshot(gateway));
+    report("startup(fake7s)", snapshot(gateway));
   });
 
   it("idle: 60 s with the window visible and focused, nothing happening", async () => {
@@ -294,12 +295,12 @@ describe.skipIf(!RUN)("desktop render/commit baseline (PERF-ALL-001)", () => {
     await advance(1_000);
     report("viewer-next(1st,+1s)", snapshot(gateway));
     probe.reset(); resetCalls(gateway);
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 4; index += 1) {
       await act(async () => { fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowRight" }); });
       await advance(200);
     }
     await advance(1_000);
-    report("viewer-next(x5 cumulative)", snapshot(gateway));
+    report("viewer-next(remaining4 cumulative)", snapshot(gateway));
     probe.reset(); resetCalls(gateway);
     await act(async () => { fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "감상 화면 닫기" })); });
     await advance(1_000);
@@ -332,8 +333,7 @@ describe.skipIf(!RUN)("desktop render/commit baseline (PERF-ALL-001)", () => {
     report("notes-open(+3s)", snapshot(gateway));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Draft/ })); });
     await advance(500);
-    await act(async () => { fireEvent.click(screen.getByText("여기에 적어보세요…")); });
-    await advance(500);
+    expect(screen.getByRole("textbox", { name: "메모 본문" })).toBeInTheDocument();
     probe.reset(); resetCalls(gateway);
     let text = "";
     for (let index = 0; index < 10; index += 1) {
@@ -346,6 +346,38 @@ describe.skipIf(!RUN)("desktop render/commit baseline (PERF-ALL-001)", () => {
     probe.reset(); resetCalls(gateway);
     await advance(60_000);
     report("notes-idle(60s)", snapshot(gateway));
+  });
+
+  it.each([['홈', '.home-view'], ['망가', '.online-catalog']])("navigation: open %s", async (label, selector) => {
+    const gateway = gw();
+    await startWorkspace(gateway);
+    await advance(30_000);
+    probe.reset(); resetCalls(gateway);
+    await act(async () => { fireEvent.click(within(screen.getByRole("navigation", { name: "주요 영역" })).getByRole("button", { name: label })); });
+    await advance(3_000);
+    expect(document.querySelector(selector)).not.toBeNull();
+    report(`${label}-open(+3s)`, snapshot(gateway));
+  });
+
+  it("find: open and type a query", async () => {
+    const gateway = gw();
+    await startWorkspace(gateway);
+    await advance(30_000);
+    probe.reset(); resetCalls(gateway);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "찾기" })); });
+    await advance(1_000);
+    expect(screen.getByRole("combobox")).toBeInTheDocument();
+    report("find-open(+1s)", snapshot(gateway));
+    probe.reset(); resetCalls(gateway);
+    let query = "";
+    for (const char of "Draft") {
+      query += char;
+      await act(async () => { fireEvent.change(screen.getByRole("combobox"), { target: { value: query } }); });
+      await advance(100, 100);
+    }
+    await advance(1_000);
+    expect(screen.getByRole("combobox")).toHaveValue("Draft");
+    report("find-type(5 chars,+1s)", snapshot(gateway));
   });
 
   it("native events: one asset-authority change, one album change, one bookmarks change", async () => {
@@ -418,7 +450,7 @@ describe("desktop idle re-render gate (PERF-ALL-001)", () => {
     expect(idle.gateway.getEncryptedVaultStatus ?? 0).toBe(0);
     expect(idle.invoke.character_incremental_status).toBeGreaterThan(0);
     expect(idle.renders.AppShell ?? 0).toBeLessThanOrEqual(IDLE_GATE.rootRenders);
-    expect(idle.renders["tile(thumbnailUrl)"] ?? 0).toBeLessThanOrEqual(IDLE_GATE.tileRenders);
+    expect(idle.renders["thumbnailUrlCalls"] ?? 0).toBeLessThanOrEqual(IDLE_GATE.tileRenders);
     expect(Object.keys(idle.renders).filter(name => name !== "StatusCenter")).toEqual([]);
     expect(idle.commits).toBeLessThanOrEqual(IDLE_GATE.commitsPerMinute);
   });

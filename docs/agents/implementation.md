@@ -82,3 +82,30 @@ Use read-only Git inspection such as `show`, `log`, and `diff`; no fetch, checko
 3. Confirm the metric moves with real latency on that path before relying on it; drop a metric that does not.
 4. After a verified improvement, lock it with a test or check whose threshold only tightens. A later change that raises the metric fails until it is justified and the threshold is deliberately updated.
 5. Report before/after numbers with platform and conditions. Browser or fixture numbers do not prove native Tauri or Galaxy Tab performance.
+
+### How to measure
+
+Use the [performance kit commands and metric definitions](../../_tools/app/scripts/native-check/README.md#one-command-per-kit).
+From the repository root:
+
+```sh
+# Real Linux window: controller-provided binary + disposable fixture required.
+node _tools/app/scripts/native-check/run.mjs --perf _tools/app/scripts/native-check/scenarios/perf-all.json /tmp/native-perf
+# PC deterministic work counts and diagnostic React timing.
+(cd _tools/app && node scripts/perf/run.mjs --out /tmp/pc-perf.json)
+# Tablet jsdom counts; device adb collection is documented in android/tools/PERFORMANCE.md.
+(cd _tools/app && npm run mobile:test -- --maxWorkers=2 --reporter=verbose mobile-client/perf.test.ts mobile-client/Collections.perf.test.tsx mobile-client/thumbnailWarm.perf.test.ts)
+# Local synthetic server instance only; never a production target.
+(cd server/lakomics-api && timeout 300 .venv/bin/python tools/poll_benchmark.py --runs 200 --json /tmp/server-perf.json)
+```
+
+Native output is `perf.json` + `perf.md` (interaction/settle durations, motion rAF p50/p95
+and jank, supported long tasks/heap, sampled process CPU/RSS). Native and PC commands
+accept `--baseline <previous-json>` for descriptive deltas. PC/tablet counters describe
+mocked render/request/bridge work; Android logs measure media operation phases and DOM
+commit; server bytes/request counts accompany in-process median/p95. None substitutes
+for latency on the target platform. Unsupported measurements are not zero, failed
+scenarios are not wins, and timing alone is not a gate. Match fixture, build, display,
+cache and power conditions, show that the chosen count tracks native latency, then
+add only justified tighten-only thresholds. Native Notes currently uses an in-memory
+measurement fixture because the private D-Bus deliberately blocks the personal keyring.

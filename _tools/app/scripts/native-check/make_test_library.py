@@ -26,6 +26,8 @@ def main() -> None:
         sys.exit("the test library must be outside the real library")
     database = source / "library.sqlite"
     before = database.stat()
+    if target.exists() and any(target.iterdir()):
+        sys.exit("the test target must be empty; choose a new disposable path")
     target.mkdir(parents=True, exist_ok=True)
 
     copy = target / "library.sqlite"
@@ -38,6 +40,11 @@ def main() -> None:
 
     # The copy must never reach the server: no sync, no capture, no address.
     test.execute("UPDATE library_settings SET cloud_sync_enabled = 0, cloud_capture_enabled = 0, cloud_api_base_url = NULL")
+    # A copied setting must not send later navigation back into a source library/vault.
+    columns = {row[1] for row in test.execute("PRAGMA table_info(library_settings)")}
+    for column in ("manga_root", "collection_source_root", "private_vault_last_root"):
+        if column in columns:
+            test.execute(f"UPDATE library_settings SET {column}=NULL")
     test.commit()
     settings = test.execute("SELECT cloud_sync_enabled, cloud_capture_enabled, cloud_api_base_url FROM library_settings").fetchall()
     test.close()

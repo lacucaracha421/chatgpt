@@ -53,9 +53,9 @@ export function perfCollection(index: number): CollectionSummary {
 const TOTAL_ASSETS = 1000;
 
 /** Keyset pages of `PERF_PAGE_SIZE` over `TOTAL_ASSETS` synthetic assets. */
-function listAssetsPaged(query: { after?: { token: string } | null }) {
+function listAssetsPaged(query: { after?: { token: string } | null; limit?: number }) {
   const start = query.after ? Number(query.after.token) : 0;
-  const end = Math.min(TOTAL_ASSETS, start + PERF_PAGE_SIZE);
+  const end = Math.min(TOTAL_ASSETS, start + (query.limit ?? PERF_PAGE_SIZE));
   const items = Array.from({ length: end - start }, (_, offset) => perfAsset(start + offset));
   return Promise.resolve({ items, nextCursor: end < TOTAL_ASSETS ? { token: String(end) } : null, totalCount: TOTAL_ASSETS });
 }
