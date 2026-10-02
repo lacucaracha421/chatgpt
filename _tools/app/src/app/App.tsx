@@ -1,11 +1,9 @@
-import { ConnectionStatusBlock } from "../layout/ConnectionStatusBlock";
 import { useWorkloadProfile } from "./workloadProfile";
 import {ASSET_LIFECYCLE_CHANGED_EVENT, useAssetAuthoritySync} from './useAssetAuthoritySync';
 import {useMobilePublications} from './useMobilePublications';
 import {useCatalogBookmarkSync} from './useCatalogBookmarkSync';
-import {ALBUM_AUTHORITY_CHANGED_EVENT, useAlbumAuthoritySync} from './useAlbumAuthoritySync';
+import {useAlbumAuthoritySync} from './useAlbumAuthoritySync';
 import {
-  CLASSIFICATION_AUTHORITY_CHANGED_EVENT,
   useClassificationAuthoritySync,
 } from './useClassificationAuthoritySync';
 import { useCharacterAutomation } from "../characters/useCharacterAutomation";
@@ -13,8 +11,7 @@ import { useCharacterHub } from "../characters/useCharacterHub";
 import { CharacterFolderContent } from "../characters/CharacterFolderContent";
 import { applyInitialCountOrder, reorderFolders } from "../classification/folderOrder";
 import { useNotesCloseGuard } from "../notes/useNotesCloseGuard";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { AssetBrowser, type AssetBrowserStatus, type AssetNavigationMemory } from "../assets/AssetBrowser";
 import { startAssetDrag as nativeStartAssetDrag, type StartAssetDrag } from "../drag-out/startAssetDrag";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
@@ -29,12 +26,10 @@ import {
   useFileDrop,
 } from "../ingestion/useFileDrop";
 import { DropOverlay } from "../ingestion/DropOverlay";
-import { executeMetadataImport, type MetadataImportWork } from "../ingestion/metadataImport";
 import { AppShell } from "../layout/AppShell";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { WorkspaceNavigation } from "../layout/WorkspaceNavigation";
 import { LightweightModeIndicator, WindowControls } from "../layout/WindowControls";
-import { StatusCenter, type StatusCenterProps } from "../layout/StatusCenter";
 import { libraryGateway } from "../library/client";
 import { commandErrorMessage } from "../library/errorMessage";
 import { LibraryProvider, useLibrary } from "../library/LibraryContext";
@@ -54,7 +49,7 @@ import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { DragLayer } from "../shared/ui/DragLayer";
-import { pointerDragReducer, type ClassificationDropTarget, type InternalDragPayload, type PointerDragState } from "../shared/interaction/pointerDrag";
+import { pointerDragReducer, type InternalDragPayload, type PointerDragState } from "../shared/interaction/pointerDrag";
 import { useSimilarityIndex } from "../similarity/useSimilarityIndex";
 import { useSimilarityReviewInbound } from "../similarity/useSimilarityReviewInbound";
 import { useVideoPreparation } from "../video/useVideoPreparation";
@@ -62,7 +57,6 @@ import { useDesktopInteractions } from "./useDesktopInteractions";
 import { useOnlineCatalogUpdate } from "./useOnlineCatalogUpdate";
 import { useCloudCaptureSync } from "./useCloudCaptureSync";
 import { useCloudBackfillSupervisor } from "./useCloudBackfillSupervisor";
-import { useAuthoritySyncHealth, useCloudSyncStatus } from "./useCloudProblems";
 import { useCollectionOpen } from "../statistics/useCollectionOpen";
 import { useReleaseWatchCheck } from "./useReleaseWatchCheck";
 import { useExternalVaultAvailability, type VaultLeaveReason } from "../external-vault/useExternalVaultAvailability";
@@ -70,6 +64,15 @@ import { confirmLeaveVaultRecovery } from "../external-vault/vaultRecoveryGuard"
 import { reattachVaultImport } from "../external-vault/vaultImportJob";
 import { BackNavigationProvider, useBackHandler, useBackRequest } from "../shared/navigation/BackNavigation";
 import { FaultGameProvider } from "../games/FaultGame";
+
+import { CloudStatusCenter } from "./CloudStatusCenter";
+import { backNavigationTab, initialWorkspaceView } from "./workspaceNavigation";
+import { nativeDropClientPoint, outsideViewport, sameAssetIds, sidebarTargetAt, type SidebarDropTarget } from "./workspaceDragTargets";
+import { subscribeToExtensionIngest, useExtensionIngest, useNativeDragEnd, useWorkspaceAuthorityEvents, useWorkspaceShortcuts, type ExtensionIngestListener } from "./useWorkspaceEvents";
+import { useMetadataImport } from "./useMetadataImport";
+import { useDailyLibraryMaintenance } from "./useDailyLibraryMaintenance";
+
+export { subscribeToExtensionIngest, type ExtensionIngestListener } from "./useWorkspaceEvents";
 
 const CollectionBrowser = lazy(() => import("../collections/CollectionBrowser").then((module) => ({ default: module.CollectionBrowser })));
 const CollectionOverlay = lazy(() => import("../collections/CollectionOverlay").then((module) => ({ default: module.CollectionOverlay })));
@@ -86,11 +89,6 @@ const MangaBrowser = lazy(() => import("../manga/MangaBrowser").then((module) =>
 const MangaViewer = lazy(() => import("../manga/MangaViewer").then((module) => ({ default: module.MangaViewer })));
 const ExternalVaultBrowser = lazy(() => import("../external-vault/ExternalVaultBrowser").then((module) => ({ default: module.ExternalVaultBrowser })));
 
-export type ExtensionIngestListener = (handler: (outcome: IngestOutcome) => void) => Promise<() => void>;
-
-export const subscribeToExtensionIngest: ExtensionIngestListener = async (handler) =>
-  listen<IngestOutcome>("extension://ingestion", (event) => handler(event.payload));
-
 type AppProps = {
   gateway?: LibraryGateway;
   selectFolder?: FolderPicker;
@@ -98,16 +96,6 @@ type AppProps = {
   startAssetDrag?: StartAssetDrag;
   subscribeExtensionIngest?: ExtensionIngestListener;
 };
-
-function backNavigationTab(view: AssetView): string {
-  switch (view.kind) {
-    // The 작가 hub is an asset quick view: back from it returns to the folder it was opened from.
-    case "classification": case "albums": case "album":
-    case "artists": case "creator": return "assets";
-    case "collection": case "collections": return "collections";
-    default: return view.kind;
-  }
-}
 
 export function App({
   gateway = libraryGateway,
@@ -148,28 +136,6 @@ function LibraryScreen({
   return library
     ? <LibraryWorkspace key={library.root} libraryRoot={library.root} subscribeDrops={subscribeDrops} startAssetDrag={startAssetDrag} subscribeExtensionIngest={subscribeExtensionIngest} />
     : <LibrarySetup selectFolder={selectFolder} />;
-}
-
-type SidebarDropTarget = Exclude<ClassificationDropTarget, { kind: "character" }>;
-
-function initialWorkspaceView(): AssetView {
-  if (!__LAKOMICS_PREVIEW__) return { kind: "home" };
-  switch (new URLSearchParams(window.location.search).get("view")) {
-    case "assets": return { kind: "classification", classificationId: null };
-    case "assets-folder": return { kind: "classification", classificationId: "class-reverse" };
-    case "assets-parent": return { kind: "classification", classificationId: "class-game" };
-    case "artists": return { kind: "artists" };
-    case "artist": return { kind: "creator", creatorKey: "artist-1" };
-    case "albums": return { kind: "albums" };
-    case "collections": return { kind: "collections", typeFilter: "game", showcase: false };
-    case "collection-detail": return { kind: "collection", collectionId: "game-1" };
-    case "calendar": return { kind: "collections", typeFilter: "game", showcase: false, releaseCalendar: true };
-    case "manga":
-    case "manga-catalog": return { kind: "manga" };
-    case "notes": return { kind: "notes" };
-    case "settings": return { kind: "settings", section: "frequent" };
-    default: return { kind: "home" };
-  }
 }
 
 function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscribeExtensionIngest }: { libraryRoot: string; subscribeDrops: DropSubscriber; startAssetDrag: StartAssetDrag; subscribeExtensionIngest: ExtensionIngestListener }) {
@@ -234,8 +200,6 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const activeNativeDragAssetIdsRef = useRef<string[] | null>(null);
   const nativeDragAssetsRef = useRef(new Map<string, string[]>());
   const [nativeDragWorks, setNativeDragWorks] = useState<IngestionWork[]>([]);
-  const [metadataImportWorks, setMetadataImportWorks] = useState<MetadataImportWork[]>([]);
-  const metadataImportRunningRef = useRef(false);
   const [requestedAsset, setRequestedAsset] = useState<AssetSummary | null>(null);
   const [reviewCount, setReviewCount] = useState(0);
   const [videoReviewAssetIds, setVideoReviewAssetIds] = useState<string[]>([]);
@@ -323,43 +287,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     if (result.videoAdded > 0) setVideoPreparationTrigger((current) => current + 1);
     if (result.reviewPending > 0) void refreshReviewCount();
   }, [refreshMembershipCounts, refreshReviewCount]);
-  // A remote Album change lands in the local replica without a local action, so both the
-  // sidebar and the visible AssetBrowser have to re-read it; the sync loop announces only
-  // passes whose result actually changed local Album state. The asset refresh matters for
-  // membership changes: Album metadata/counts can look identical while the set of Assets
-  // in the open Album gallery has changed underneath.
-  useEffect(() => {
-    const refresh = () => {
-      void refreshAlbums();
-      setAssetRefresh((current) => current + 1);
-    };
-    window.addEventListener(ALBUM_AUTHORITY_CHANGED_EVENT, refresh);
-    return () => window.removeEventListener(ALBUM_AUTHORITY_CHANGED_EVENT, refresh);
-  }, [refreshAlbums]);
-  // A remote Classification change lands in the local replica without a local action, so
-  // the sidebar and any open Classification view have to re-read it. The asset refresh
-  // matters for assignment changes: the Classification list can look identical while the
-  // set of Assets in the open folder has changed underneath.
-  useEffect(() => {
-    const refresh = () => {
-      void refreshClassifications();
-      setAssetRefresh((current) => current + 1);
-    };
-    window.addEventListener(CLASSIFICATION_AUTHORITY_CHANGED_EVENT, refresh);
-    return () => window.removeEventListener(CLASSIFICATION_AUTHORITY_CHANGED_EVENT, refresh);
-  }, [refreshClassifications]);
-  // A trash or restore from another device changes the trash count without a local action.
-  // Assets materialized from the server (e.g. a video saved on mobile) arrive the same way
-  // and need their preview prepared, which nothing else would start.
-  useEffect(() => {
-    const refresh = () => {
-      void refreshTrashCount().catch(() => undefined);
-      setAssetRefresh((current) => current + 1);
-      setVideoPreparationTrigger((current) => current + 1);
-    };
-    window.addEventListener(ASSET_LIFECYCLE_CHANGED_EVENT, refresh);
-    return () => window.removeEventListener(ASSET_LIFECYCLE_CHANGED_EVENT, refresh);
-  }, [refreshTrashCount]);
+  useWorkspaceAuthorityEvents({ refreshAlbums, refreshClassifications, refreshTrashCount, setAssetRefresh, setVideoPreparationTrigger });
   // A mobile similarity decision applied on this PC trashed an image and resolved a pair.
   const handleSimilarityInbound = useCallback(() => {
     void refreshReviewCount().catch(() => undefined);
@@ -367,17 +295,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }, [refreshReviewCount]);
   useSimilarityReviewInbound(gateway, handleSimilarityInbound);
   useCloudCaptureSync(gateway, libraryRoot, handleCloudCaptureSync);
-  const handleIngestedRef = useRef(handleIngested);
-  useLayoutEffect(() => { handleIngestedRef.current = handleIngested; }, [handleIngested]);
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    let active = true;
-    void subscribeExtensionIngest((outcome) => {
-      if (!active) return;
-      handleIngestedRef.current(outcome);
-    }).then((stop) => { if (active) unlisten = stop; else stop(); }).catch(() => undefined);
-    return () => { active = false; unlisten?.(); };
-  }, [subscribeExtensionIngest]);
+  useExtensionIngest(subscribeExtensionIngest, handleIngested);
   const videoPreparation = useVideoPreparation({
     enabled: maintenance === null && !workload.restricted,
     trigger: videoPreparationTrigger,
@@ -429,33 +347,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     } catch (error) { setMessage(commandErrorMessage(error, "가져올 파일을 선택하지 못했습니다.")); }
   }
 
-  const beginMetadataImport = useCallback(async (folder: string, existingWorkId?: string) => {
-    if (metadataImportRunningRef.current) return false;
-    metadataImportRunningRef.current = true;
-    const workId = existingWorkId ?? crypto.randomUUID();
-    const update = (work: MetadataImportWork) => setMetadataImportWorks((current) => {
-      const previous = current.find((item) => item.id === work.id);
-      // 같은 workId를 재사용하므로 실패해도 이전 시도의 중복·검토 대기 성과는 유지한다.
-      const withPrevious = previous && work.status === "failed"
-        ? { ...work, total: previous.total, completed: previous.completed, added: previous.added, foldersCreated: previous.foldersCreated, pathsReused: previous.pathsReused, exactDuplicates: previous.exactDuplicates, reviewPending: previous.reviewPending, skipped: previous.skipped }
-        : work;
-      return current.some((item) => item.id === work.id)
-        ? current.map((item) => item.id === work.id ? withPrevious : item)
-        : [...current, withPrevious];
-    });
-    try {
-      await executeMetadataImport(gateway, folder, update, workId);
-      await refreshClassifications();
-      setAssetRefresh((current) => current + 1);
-      await refreshReviewCount();
-      return true;
-    } catch (error) {
-      update({ kind: "metadata_import", id: workId, folder, total: 0, completed: 0, added: 0, foldersCreated: 0, pathsReused: 0, exactDuplicates: [], reviewPending: [], skipped: [], failures: [{ fileName: "폴더 검사", message: commandErrorMessage(error, "가져오기 폴더를 검사하지 못했습니다.") }], status: "failed" });
-      return false;
-    } finally {
-      metadataImportRunningRef.current = false;
-    }
-  }, [gateway, refreshClassifications, refreshReviewCount]);
+  const { metadataImportWorks, setMetadataImportWorks, beginMetadataImport } = useMetadataImport(gateway, refreshClassifications, refreshReviewCount, setAssetRefresh);
   useAutoDismiss(message, setMessage);
 
   useEffect(() => {
@@ -465,29 +357,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     void refreshReviewCount().catch((error) => setMessage(commandErrorMessage(error, "유사 검토 개수를 불러오지 못했습니다.")));
     void refreshTrashCount().catch((error) => setMessage(commandErrorMessage(error, "휴지통 개수를 불러오지 못했습니다.")));
   }, [refreshReviewCount, refreshTrashCount]);
-  useEffect(() => {
-    if (workload.restricted) return;
-    let active = true;
-    void (async () => {
-      try {
-        await gateway.ensureDailyBackup();
-      } catch (error) {
-        if (active) appendMessage(commandErrorMessage(error, "관리 정보 자동 백업에 실패했습니다."));
-      }
-      if (!active) return;
-      try {
-        const result = await gateway.purgeExpiredTrash();
-        if (active && result.failedAssetIds.length > 0) {
-          appendMessage(`자동 삭제하지 못한 자산이 ${result.failedAssetIds.length}개 있습니다.`);
-        }
-      } catch (error) {
-        if (active) appendMessage(commandErrorMessage(error, "휴지통 자동 정리를 실행하지 못했습니다."));
-      } finally {
-        if (active) void refreshTrashCount().catch(() => undefined);
-      }
-    })();
-    return () => { active = false; };
-  }, [appendMessage, gateway, refreshTrashCount, workload.restricted]);
+  useDailyLibraryMaintenance(gateway, workload.restricted, appendMessage, refreshTrashCount);
   useReleaseWatchCheck(gateway, libraryRoot, async (result) => {
     await refreshCollections();
     if (result.changedCollections > 0) appendMessage(`${result.provider === "mangadex" ? "MangaDex 새 권" : "Kakao 신간"} 정보가 있는 작품 ${result.changedCollections}개`);
@@ -508,26 +378,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     document.body.classList.toggle("is-pointer-dragging", dragState.phase === "dragging");
     return () => document.body.classList.remove("is-pointer-dragging");
   }, [dragState.phase]);
-  useEffect(() => {
-    let active = true;
-    let unlisten: (() => void) | undefined;
-    let clearTimer: number | null = null;
-    void listen<string[]>("asset-drag://ended", (event) => {
-      if (!active) return;
-      if (clearTimer !== null) window.clearTimeout(clearTimer);
-      clearTimer = window.setTimeout(() => {
-        clearTimer = null;
-        if (!sameAssetIds(activeNativeDragAssetIdsRef.current, event.payload)) return;
-        activeNativeDragAssetIdsRef.current = null;
-        setDragTarget(null);
-      }, 100);
-    }).then((stop) => { if (active) unlisten = stop; else stop(); }).catch(() => undefined);
-    return () => {
-      active = false;
-      if (clearTimer !== null) window.clearTimeout(clearTimer);
-      unlisten?.();
-    };
-  }, []);
+  useNativeDragEnd(activeNativeDragAssetIdsRef, setDragTarget);
   useEffect(() => {
     const cancel = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || dragStateRef.current.phase === "idle") return;
@@ -537,30 +388,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     window.addEventListener("keydown", cancel);
     return () => window.removeEventListener("keydown", cancel);
   }, []);
-  useEffect(() => {
-    const shortcut = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const editing = target?.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
-      if (editing || !event.ctrlKey || event.metaKey) return;
-      const key = event.key.toLowerCase();
-      if (key === "n") {
-        event.preventDefault();
-        if (["collections", "collection", "manga", "settings", "trash", "similarity_review"].includes(view.kind)) navigateView({ kind: "classification", classificationId: null });
-        setCreateClassificationRequest((current) => current + 1);
-        return;
-      }
-      if (key === "1" || key === "2") {
-        event.preventDefault();
-        const quickViews: AssetView[] = [
-          { kind: "classification", classificationId: null },
-          { kind: "unsorted" },
-        ];
-        navigateView(quickViews[Number(key) - 1]);
-      }
-    };
-    window.addEventListener("keydown", shortcut);
-    return () => window.removeEventListener("keydown", shortcut);
-  }, [view]);
+  useWorkspaceShortcuts(view, navigateView, setCreateClassificationRequest);
 
   function updatePreferences(update: Partial<UiPreferences>) {
     setPreferences((current) => ({ ...current, ...update }));
@@ -990,77 +818,6 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   );
 }
 
-// Owns the cloud snapshot so each progress event re-renders only the status indicator, not the workspace.
-function CloudStatusCenter({ gateway, libraryRoot, onOpenChange, ...props }: Omit<StatusCenterProps, "cloud" | "authorityHealth"> & { gateway: LibraryGateway; libraryRoot: string }) {
-  const authority = useAuthoritySyncHealth(gateway, libraryRoot);
-  const cloud = useCloudSyncStatus(gateway, libraryRoot);
-  return <StatusCenter {...props} cloud={cloud} authorityHealth={authority.health}
-    connections={(go) => <ConnectionStatusBlock gateway={gateway} cloud={cloud} authorityHealth={authority.health} onNavigate={go} />}
-    onOpenChange={(open) => { if (open) authority.refresh(); onOpenChange?.(open); }} />;
-}
-
 function DeferredViewFallback() {
   return <div className="library-content__deferred" role="status" aria-label="화면 불러오는 중" />;
-}
-
-function sidebarTargetAt(x: number, y: number, payload: InternalDragPayload, entries: ClassificationEntry[], albums: AlbumEntry[]): SidebarDropTarget | null {
-  const element = document.elementFromPoint?.(x, y)?.closest<HTMLElement>("[data-classification-id], [data-album-id]");
-  const kind = element?.dataset.albumId ? "album" : "classification";
-  const entryId = kind === "album" ? element?.dataset.albumId : element?.dataset.classificationId;
-  if (!element || !entryId) return null;
-  const rect = element.getBoundingClientRect();
-  const fraction = rect.height > 0 ? (y - rect.top) / rect.height : 0.5;
-  const position = payload.kind === "classification" && kind === "classification"
-    ? fraction < 0.25 ? "before" : fraction > 0.75 ? "after" : "inside"
-    : "inside";
-  const target = { kind, entryId, position, valid: true } as const;
-  const valid = payload.kind === "assets"
-    || payload.kind === kind && (kind === "album"
-      ? validTreeDrop(payload.entryId, entryId, albums)
-      : validClassificationDrop(payload.entryId, target, entries));
-  return { ...target, valid };
-}
-
-function validClassificationDrop(entryId: string, target: SidebarDropTarget, entries: ClassificationEntry[]) {
-  const entry = entries.find((candidate) => candidate.id === entryId);
-  const destination = entries.find((candidate) => candidate.id === target.entryId);
-  if (!entry || !destination || entry.id === destination.id) return false;
-  const parentId = target.position === "inside" ? destination.id : destination.parentId;
-  const parent = entries.find((candidate) => candidate.id === parentId);
-  if (target.position === "inside" && entry.parentId === parentId) return false;
-  if (isDescendant(parentId, entry.id, entries)) return false;
-  if (entries.some((candidate) => candidate.id !== entry.id && candidate.parentId === parentId && candidate.name.toLocaleLowerCase() === entry.name.toLocaleLowerCase())) return false;
-  return entry.kind !== "work" || parent?.kind === "root";
-}
-
-function validTreeDrop(entryId: string, parentId: string, entries: Array<{ id: string; name: string; parentId: string | null }>) {
-  const entry = entries.find((candidate) => candidate.id === entryId);
-  const parent = entries.find((candidate) => candidate.id === parentId);
-  return Boolean(entry && parent
-    && entry.parentId !== parent.id
-    && parent.id !== entry.id
-    && !isDescendant(parent.id, entry.id, entries)
-    && !entries.some((candidate) => candidate.id !== entry.id && candidate.parentId === parent.id && candidate.name.toLocaleLowerCase() === entry.name.toLocaleLowerCase()));
-}
-
-function isDescendant(candidateId: string | null, ancestorId: string, entries: Array<{ id: string; parentId: string | null }>) {
-  let current = entries.find((entry) => entry.id === candidateId);
-  while (current) {
-    if (current.id === ancestorId) return true;
-    current = entries.find((entry) => entry.id === current?.parentId);
-  }
-  return false;
-}
-
-function nativeDropClientPoint(position: { x: number; y: number }) {
-  const scale = Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
-  return { x: position.x / scale, y: position.y / scale };
-}
-
-function sameAssetIds(left: string[] | null, right: string[]) {
-  return Boolean(left && left.length === right.length && left.every((id, index) => id === right[index]));
-}
-
-function outsideViewport(x: number, y: number) {
-  return x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight;
 }
