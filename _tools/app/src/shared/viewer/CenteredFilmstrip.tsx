@@ -10,6 +10,8 @@ type Props = {
 };
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+/** While the rail is dragged, flung or wheeled, the main image follows only an item that holds the slot this long (or where the rail settles), so a fast pass does not load every image on the way (user, 2026-10-03). */
+export const FILMSTRIP_DWELL_MS = 180;
 
 /** The media viewer is its own control surface: a fixed selection slot with a moving, virtual rail. */
 export function CenteredFilmstrip({items, index, height = 124, grown = false, className = '', renderThumbnail, onIndex, onSwipeUp, onInteract, onInteractionChange}: Props) {
@@ -28,9 +30,15 @@ export function CenteredFilmstrip({items, index, height = 124, grown = false, cl
   const [windowRange, setWindowRange] = useState({start: Math.max(0, index - 8), end: Math.min(items.length, index + 9)});
   const latest = useRef({onIndex, onInteract, onInteractionChange, index, grown, layout, width, height});
   latest.current = {onIndex, onInteract, onInteractionChange, index, grown, layout, width, height};
-  const state = useRef({off: -(layout[index]?.c ?? 0), target: -(layout[index]?.c ?? 0), velocity: 0, raf: 0, last: 0, free: false, selected: index, dragged: false});
+  const state = useRef({off: -(layout[index]?.c ?? 0), target: -(layout[index]?.c ?? 0), velocity: 0, raf: 0, last: 0, free: false, selected: index, reported: index, dragged: false});
   const drag = useRef<{id: number; x: number; y: number; off: number; samples: [number, number][]} | null>(null);
   const wheelTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const dwell = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const report = useCallback((n: number) => {
+    clearTimeout(dwell.current); dwell.current = undefined;
+    const s = state.current;
+    if (n !== s.reported) { s.reported = n; latest.current.onIndex(n); }
+  }, []);
   const nearest = useCallback((off: number) => {
     const boxes = latest.current.layout;
     let lo = 0, hi = boxes.length - 1;
@@ -42,11 +50,11 @@ export function CenteredFilmstrip({items, index, height = 124, grown = false, cl
     if (rail.current) rail.current.style.transform = `translate3d(${s.off}px,0,0)`;
     const n = nearest(s.off), box = current.layout[n];
     if (slot.current && box) slot.current.style.setProperty('--slot-width', `${box.w}px`);
-    if (s.free && n !== s.selected) { s.selected = n; current.onIndex(n); }
+    if (s.free && n !== s.selected) { s.selected = n; clearTimeout(dwell.current); dwell.current = setTimeout(() => report(n), FILMSTRIP_DWELL_MS); }
     const half = current.width / (current.grown ? 2 : 1) + current.height;
     const start = Math.max(0, nearest(s.off + half) - 1), end = Math.min(current.layout.length, nearest(s.off - half) + 2);
     setWindowRange(range => range.start === start && range.end === end ? range : {start, end});
-  }, [nearest]);
+  }, [nearest, report]);
   const tick = useCallback(function frame(now: number) {
     const s = state.current;
     const dt = Math.min(.032, Math.max(0, (now - s.last) / 1000)); s.last = now;
@@ -56,15 +64,15 @@ export function CenteredFilmstrip({items, index, height = 124, grown = false, cl
       s.off += s.velocity * h;
     }
     if (Math.abs(s.target - s.off) < .3 && Math.abs(s.velocity) < 6) {
-      s.off = s.target; s.velocity = 0; s.raf = 0; apply(); s.free = false; return;
+      s.off = s.target; s.velocity = 0; s.raf = 0; apply(); if (s.free) report(s.selected); s.free = false; return;
     }
     apply(); s.raf = requestAnimationFrame(frame);
-  }, [apply]);
+  }, [apply, report]);
   const kick = useCallback(() => {
     const s = state.current;
-    if (reduced()) { cancelAnimationFrame(s.raf); s.raf = 0; s.off = s.target; s.velocity = 0; apply(); s.free = false; return; }
+    if (reduced()) { cancelAnimationFrame(s.raf); s.raf = 0; s.off = s.target; s.velocity = 0; apply(); if (s.free) report(s.selected); s.free = false; return; }
     if (!s.raf) { s.last = performance.now(); s.raf = requestAnimationFrame(tick); }
-  }, [apply, tick]);
+  }, [apply, tick, report]);
   const bindWheel = useHorizontalWheel({
     getLeft: () => -state.current.target - (latest.current.layout[0]?.c ?? 0),
     pan: delta => {
@@ -87,14 +95,14 @@ export function CenteredFilmstrip({items, index, height = 124, grown = false, cl
   }, [bindWheel]);
   useLayoutEffect(() => {
     const s = state.current;
-    if (!s.free && !drag.current) { s.selected = index; s.target = -(layout[index]?.c ?? 0); kick(); }
+    if (!s.free && !drag.current) { s.selected = index; s.reported = index; s.target = -(layout[index]?.c ?? 0); kick(); }
     apply();
   }, [index, layout, grown, width, apply, kick]);
   useEffect(() => {
     const query = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
     const change = () => { if (query?.matches) kick(); };
     query?.addEventListener?.('change', change);
-    return () => { query?.removeEventListener?.('change', change); cancelAnimationFrame(state.current.raf); clearTimeout(wheelTimer.current); if (drag.current) latest.current.onInteractionChange?.(false); };
+    return () => { query?.removeEventListener?.('change', change); cancelAnimationFrame(state.current.raf); clearTimeout(wheelTimer.current); clearTimeout(dwell.current); if (drag.current) latest.current.onInteractionChange?.(false); };
   }, [kick]);
   if (items.length < 2) return null;
   const finish = (id: number, canceled = false) => {

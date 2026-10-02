@@ -1,6 +1,6 @@
 import {act, cleanup, fireEvent, render, screen} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
-import {CenteredFilmstrip} from './CenteredFilmstrip';
+import {CenteredFilmstrip, FILMSTRIP_DWELL_MS} from './CenteredFilmstrip';
 const items = Array.from({length: 1000}, (_, i) => ({id: `${i}`, width: i % 2 ? 200 : 100, height: 100}));
 const thumb = () => <span/>;
 beforeEach(() => {vi.stubGlobal('matchMedia', vi.fn(() => ({matches:false, addEventListener:vi.fn(), removeEventListener:vi.fn()}))); vi.useFakeTimers();});
@@ -47,9 +47,10 @@ it('drags with inertia, snaps and suppresses the drag click', () => {
   fireEvent.pointerMove(strip, {pointerId:1, clientX:0, clientY:20});
   fireEvent.pointerUp(strip, {pointerId:1, clientX:0, clientY:20});
   fireEvent.click(button);
+  // The main image follows once the flung rail settles, not on every item it passes.
+  act(() => vi.advanceTimersByTime(2000));
   expect(onIndex.mock.calls.some(([i]) => i > 500)).toBe(true);
   expect(onIndex).not.toHaveBeenCalledWith(500);
-  act(() => vi.advanceTimersByTime(2000));
   expect(strip.querySelectorAll('button').length).toBeLessThan(25);
 });
 it('keeps a wheel gesture latched through the rail end', () => {
@@ -64,4 +65,21 @@ it('keeps a wheel gesture latched through the rail end', () => {
   expect(first.defaultPrevented).toBe(true);
   expect(end.defaultPrevented).toBe(true);
   expect(parent).not.toHaveBeenCalled();
+});
+it('shows only an item that holds the slot or where a fast drag settles', () => {
+  const onIndex = vi.fn();
+  render(<CenteredFilmstrip items={items} index={500} grown onIndex={onIndex} renderThumbnail={thumb}/>);
+  const strip = screen.getByRole('navigation');
+  fireEvent.pointerDown(strip, {pointerId:1, clientX:900, clientY:20});
+  for (let x = 860; x >= 100; x -= 40) { act(() => vi.advanceTimersByTime(16)); fireEvent.pointerMove(strip, {pointerId:1, clientX:x, clientY:20}); }
+  expect(onIndex).not.toHaveBeenCalled();
+  act(() => vi.advanceTimersByTime(FILMSTRIP_DWELL_MS));
+  expect(onIndex).toHaveBeenCalledTimes(1);
+  const held = onIndex.mock.calls[0][0];
+  expect(held).toBeGreaterThan(500);
+  fireEvent.pointerMove(strip, {pointerId:1, clientX:20, clientY:20});
+  fireEvent.pointerUp(strip, {pointerId:1, clientX:20, clientY:20});
+  act(() => vi.advanceTimersByTime(3000));
+  expect(onIndex.mock.calls.length).toBeLessThanOrEqual(3);
+  expect(onIndex.mock.calls[onIndex.mock.calls.length - 1]![0]).toBeGreaterThanOrEqual(held);
 });
