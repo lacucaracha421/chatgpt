@@ -66,6 +66,10 @@ class HeadMetadataCache:
         HEADs, but do not serialize the existing bounded ticket request pool.
         """
         namespace = _storage_namespace(storage)
+        # A mutable thumbnail has no committed digest checked by its downloader.
+        # PUT signing invalidation is insufficient: a HEAD can refill the cache
+        # before that still-valid URL overwrites storage without a DB commit.
+        # Keep those keys live even when their six-field DB identity is unchanged.
         if namespace is None or not (_IMMUTABLE_KEY.fullmatch(key) or verified_original):
             return storage.head_object(Bucket=bucket, Key=key)
         if identity is None or fresh:

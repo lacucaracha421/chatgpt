@@ -1489,7 +1489,9 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                 clause_params = [libraryId, albumId] + filter_params
                 query = asset_list_query.AssetListQuery(
                     "album_authority_members AS member"
-                    " JOIN visible_assets AS asset ON asset.id = member.asset_id",
+                    # Read this Album's members before probing Assets, including
+                    # empty Albums. The date index otherwise invites a library scan.
+                    " CROSS JOIN visible_assets AS asset ON asset.id = member.asset_id",
                     "member.library_id = ? AND member.album_id = ?"
                     f" AND member.desired_state = 1 AND asset.committed = 1 {filter_clause}",
                     clause_params, sort, prefer_id_lookup=filters.artist is not None)

@@ -200,7 +200,7 @@ class HeadCacheTests(unittest.TestCase):
         client = mock.Mock()
         client.meta.endpoint_url = ENDPOINT
         boto = mock.Mock()
-        boto.client.side_effect = [client, self.storage]
+        boto.client.side_effect = [client, mock.Mock(), self.storage]
         spec = importlib.util.spec_from_file_location("r2_cache_test", Path(head_cache.__file__).with_name("r2.py"))
         module = importlib.util.module_from_spec(spec)
         env = {"R2_ENDPOINT": ENDPOINT, "R2_ACCESS_KEY_ID": "test",
@@ -210,13 +210,24 @@ class HeadCacheTests(unittest.TestCase):
             worker_client = module.thumbnail_storage_client()
             self.assertIs(worker_client, self.storage)
             self.assertIsNot(worker_client, module._s3)
-            self.assertEqual([call.kwargs["endpoint_url"] for call in boto.client.call_args_list], [ENDPOINT, ENDPOINT])
+            self.assertEqual([call.kwargs["endpoint_url"] for call in boto.client.call_args_list], [ENDPOINT] * 3)
             self.head()
             module.presign_put(KEY, "image/webp", 123)
             self.head()
         self.assertEqual(self.storage.head_object.call_count, 2)
         client.generate_presigned_url.assert_called_once_with(
             "put_object", Params={"Bucket": "bucket", "Key": KEY, "ContentType": "image/webp"}, ExpiresIn=123)
+
+    def test_mutable_thumbnail_put_after_signing_and_head_without_commit_stays_live(self):
+        key = "library/id/thumbnail"
+        identity = ("library/id/original", "a" * 64, "image/png", 100, 1, "unchanged")
+        self.cache.invalidate(self.storage, "bucket", key)  # Presigned PUT issued.
+        self.assertEqual(self.head(key, identity=identity), METADATA)  # Before PUT.
+        overwritten = {"ContentType": "image/jpeg", "ContentLength": 99}
+        self.storage.head_object.return_value = overwritten  # PUT, no DB commit.
+        self.assertEqual(self.head(key, identity=identity), overwritten)
+        self.assertEqual(self.storage.head_object.call_count, 2)
+        self.assertFalse(self.cache._entries)
 
 
 if __name__ == "__main__":

@@ -306,8 +306,12 @@ def _schema(schema):
     return schema
 
 
+class _PublicationMoved(Exception):
+    """The scanned artifact is no longer the publication we may replace from."""
+
+
 @_index_writer
-def rebuild_title_index(db, catalog_conn, *, schema="catalog", digest=None):
+def rebuild_title_index(db, catalog_conn, *, schema="catalog", digest=None, publication=None):
     """Rebuild the hashed title-key index from a catalog artifact. One streamed pass.
 
     O(works), ~1-2 s for 131k works: call it after a PC publication (off the request
@@ -329,6 +333,12 @@ def rebuild_title_index(db, catalog_conn, *, schema="catalog", digest=None):
     entries.sort()
     db.execute("BEGIN IMMEDIATE")
     try:
+        if publication is not None:
+            import mobile_catalog_replica as replica
+            current = replica.current(db)
+            if current is None or any(current[key] != publication[key]
+                                      for key in ("revision", "content_digest")):
+                raise _PublicationMoved()
         db.execute("DELETE FROM catalog_duplicate_title_index")
         db.executemany("INSERT OR IGNORE INTO catalog_duplicate_title_index VALUES(?,?)", entries)
         db.execute("UPDATE catalog_duplicate_state SET index_digest=?,index_built_at=?,index_rows=? WHERE singleton=1",
@@ -503,14 +513,23 @@ class TitleIndexRebuilder:
             except Exception:
                 LOG.error("Catalog duplicate title index rebuild failed; the previous index is kept")
 
+    @_index_writer
     def rebuild_once(self):
-        """Rebuild from the current publication (read-only; no catalog lock needed)."""
+        """Choose the artifact after taking the writer lock and fence replacement.
+
+        Publication writers do not take this lock. If one publishes during the scan,
+        the transaction keeps the old index intact and we reopen the current artifact.
+        """
         import mobile_catalog_replica as replica
-        if self._stale() is None:
-            return None
-        with replica.open_publication(self.root(), self.get_db) as (catalog, publication):
-            with self.get_db() as db:
-                return rebuild_title_index(db, catalog, digest=publication["content_digest"])
+        while self._stale() is not None:
+            with replica.open_publication(self.root(), self.get_db) as (catalog, publication):
+                with self.get_db() as db:
+                    try:
+                        return rebuild_title_index(db, catalog, digest=publication["content_digest"],
+                                                   publication=publication)
+                    except _PublicationMoved:
+                        continue
+        return None
 
 
 # ---------------------------------------------------------------------------------------

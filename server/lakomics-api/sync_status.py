@@ -135,6 +135,9 @@ def register_sync_status(app, get_db, require_client, exchange_status=None, *,
         authority.startup(get_db)
 
     lifecycle(app).on_startup(startup)
+    if write_signal is not None:
+        lifecycle(app).on_startup(write_signal.reset)
+        lifecycle(app).on_drain(write_signal.close)
 
     waiters = _Waiters(max_waiters, max_waiters_per_principal)
     extra_headers = {WAIT_HEADER: format(max_wait, "g")} if write_signal is not None else None
@@ -212,7 +215,7 @@ def register_sync_status(app, get_db, require_client, exchange_status=None, *,
                 await asyncio.wait({waiting, gone}, return_when=asyncio.FIRST_COMPLETED)
                 if gone.done():
                     break  # nobody is left to answer
-                if waiting.result() != generation:
+                if waiting.result() != generation and not write_signal.closed:
                     await asyncio.sleep(debounce)
                     generation = write_signal.generation
                     body, etag = await shared_document(generation, principal, want_signals)
@@ -223,6 +226,8 @@ def register_sync_status(app, get_db, require_client, exchange_status=None, *,
                 if not conditional.matches(if_none_match, etag):
                     # New data only to a credential that is still accepted.
                     await run_in_threadpool(require_client, authorization)
+                    break
+                if write_signal.closed:
                     break
         finally:
             children = [gone] if waiting is None else [gone, waiting]
@@ -245,7 +250,7 @@ def register_sync_status(app, get_db, require_client, exchange_status=None, *,
         # change, so a client that sends the previous ETag back gets 304 and can skip
         # every per-domain change-feed poll until the aggregate moves.
         principal, body, etag = await run_in_threadpool(authenticated_document, authorization, want_signals)
-        if seconds <= 0 or not conditional.matches(if_none_match, etag) or not waiters.enter(principal):
+        if seconds <= 0 or (write_signal is not None and write_signal.closed) or not conditional.matches(if_none_match, etag) or not waiters.enter(principal):
             return conditional.encoded_response(body, etag, if_none_match, extra_headers)
         try:
             return await hold(request, authorization, principal, want_signals, if_none_match,

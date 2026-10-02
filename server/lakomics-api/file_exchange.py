@@ -736,9 +736,11 @@ class ExchangeSweeper:
         self.thread.start()
 
     def stop(self, timeout=5):
+        from app_lifecycle import join_worker
+
         self.stop_event.set()
         if self.thread is not None:
-            self.thread.join(timeout=timeout)
+            join_worker(self.thread, timeout)
 
     def loop(self):
         delay = self.initial_delay

@@ -43,6 +43,8 @@ Safety rules enforced here, in order of how they fail
 """
 from __future__ import annotations
 
+from app_lifecycle import join_worker
+
 import contextlib
 import hashlib
 import json
@@ -373,6 +375,10 @@ MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
 DOWNLOAD_CHUNK_BYTES = 256 * 1024
 
 
+class _StopRequested(Exception):
+    """Leave the durable claim for recovery instead of recording a job failure."""
+
+
 class ImageThumbnailWorker:
     """Durable, single-threaded, low-priority image thumbnail worker."""
 
@@ -414,7 +420,7 @@ class ImageThumbnailWorker:
                                         daemon=True)
         self._thread.start()
 
-    def stop(self, timeout: float = 5.0) -> bool:
+    def stop(self, timeout: float = 5.0, on_stopped=None) -> bool:
         """Request a stop and return whether the thread finished within ``timeout``.
 
         The handle is retained when the join times out. Clearing it would let a later
@@ -430,11 +436,17 @@ class ImageThumbnailWorker:
         thread = self._thread
         if thread is None:
             return True
-        thread.join(timeout=timeout)
-        if not thread.is_alive():
-            self._thread = None
-            return True
-        return False
+        def stopped():
+            if self._thread is thread:
+                self._thread = None
+            if on_stopped is not None:
+                on_stopped()
+
+        return join_worker(thread, timeout, stopped)
+
+    def _check_stop(self):
+        if self._stop.is_set():
+            raise _StopRequested()
 
     def _loop(self) -> None:
         if not self._lock.acquire():
@@ -547,12 +559,17 @@ class ImageThumbnailWorker:
 
     def run_once(self) -> bool:
         """Process at most one claimed job. Returns whether one was claimed."""
+        if self._stop.is_set():
+            return False
         claim = self.claim()
         if claim is None:
             return False
         asset_id = claim["asset_id"]
         try:
+            self._check_stop()
             self._process(asset_id)
+        except _StopRequested:
+            pass  # The running lease is recovered after expiry on the next start.
         except _TerminalError as error:
             self._finish(asset_id, STATE_FAILED, error.code)
             LOG.info("thumbnail job terminal: %s", error.code)
@@ -610,9 +627,12 @@ class ImageThumbnailWorker:
             source = os.path.join(directory, "source")
             output = os.path.join(directory, "thumbnail.webp")
             self._download(object_key, source, size_bytes, sha256, source_limit)
+            self._check_stop()
             self._encode(asset_id, source, output, kind)
+            self._check_stop()
             payload = self._read_output(output)
             metadata = self._read_metadata(output + ".json", kind)
+            self._check_stop()
             self._publish(asset_id, sha256, payload, metadata, row, kind)
 
     def _eligible_row(self, asset_id):
@@ -634,6 +654,7 @@ class ImageThumbnailWorker:
         Bounded three ways: bytes read, an absolute monotonic deadline checked around
         every read, and a digest/size check before anything downstream sees the file.
         """
+        self._check_stop()
         deadline = time.monotonic() + DOWNLOAD_TIMEOUT_SECONDS
         hasher = hashlib.sha256()
         total = 0
@@ -649,7 +670,9 @@ class ImageThumbnailWorker:
                 raise _TransientError(E_RETRY["storageReadFailed"])
             with open(path, "wb") as handle:
                 while True:
+                    self._check_stop()
                     chunk = body.read(DOWNLOAD_CHUNK_BYTES)
+                    self._check_stop()
                     if not chunk:
                         break
                     total += len(chunk)
@@ -662,7 +685,7 @@ class ImageThumbnailWorker:
                         raise _TransientError(E_RETRY["storageReadFailed"])
                     hasher.update(chunk)
                     handle.write(chunk)
-        except (_TerminalError, _TransientError):
+        except (_StopRequested, _TerminalError, _TransientError):
             raise
         except Exception:
             raise _TransientError(E_RETRY["storageReadFailed"])
@@ -683,6 +706,7 @@ class ImageThumbnailWorker:
         preexec_fn. Windows fails closed because this worker needs POSIX limits and
         process-group cleanup; other application paths remain portable.
         """
+        self._check_stop()
         if os.name != "posix":
             raise _TerminalError(E_TERMINAL["encodeUnsupportedPlatform"])
         command = [sys.executable, self.encoder_script, source, output, kind]
@@ -692,7 +716,19 @@ class ImageThumbnailWorker:
                 command, start_new_session=True,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL)
-            code = process.wait(timeout=VIDEO_ENCODE_TIMEOUT_SECONDS if kind == "video" else ENCODE_TIMEOUT_SECONDS)
+            deadline = time.monotonic() + (
+                VIDEO_ENCODE_TIMEOUT_SECONDS if kind == "video" else ENCODE_TIMEOUT_SECONDS)
+            while True:
+                self._check_stop()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, 0)
+                try:
+                    code = process.wait(timeout=min(0.1, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    if time.monotonic() >= deadline:
+                        raise
         except subprocess.TimeoutExpired:
             raise _TransientError(E_RETRY["encodeTimedOut"])
         except (OSError, subprocess.SubprocessError):
@@ -703,7 +739,7 @@ class ImageThumbnailWorker:
                 # the session's original group id, not getpgid(a now-reaped leader).
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=5)
+                process.wait(timeout=1)
         if code == 0:
             return
         if code == EXIT_TOOL_UNAVAILABLE:

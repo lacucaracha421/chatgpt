@@ -174,6 +174,58 @@ class PruneCatalogTests(unittest.TestCase):
         self.assert_kept(fresh, "mtime within 1h")
         self.assert_kept(unknown, "unrecognized name (including backups)")
 
+    def test_stale_temp_sidecars_are_removed_including_orphans(self):
+        stale = []
+        for index, suffix in enumerate(("-journal", "-wal", "-shm")):
+            # Both complete families and sidecars whose base vanished after a crash.
+            stale.append(self.file("catalog-ab12cd34.sqlite" + suffix, prune.TEMP_SECONDS + 1))
+            stale.append(self.file(f"users-ab12cd3{index}.sqlite" + suffix, prune.TEMP_SECONDS + 1))
+        stale.append(self.file("catalog-ab12cd34.sqlite", prune.TEMP_SECONDS + 1))
+        self.assertTrue(all(self.decisions()[path.name].delete for path in stale))
+        self.assertEqual(self.execute(apply=True)[0], 0)
+        self.assertTrue(all(not path.exists() for path in stale))
+
+    def test_a_recent_temp_base_or_sidecar_retains_the_entire_family(self):
+        for fresh_suffix in ("", "-journal", "-wal", "-shm"):
+            paths = [self.file("catalog-ab12cd34.sqlite" + suffix,
+                               0 if suffix == fresh_suffix else prune.TEMP_SECONDS + 1)
+                     for suffix in ("", "-journal", "-wal", "-shm")]
+            self.assert_kept(paths, "mtime within 1h")
+            self.assertEqual(self.execute(apply=True)[0], 0)
+            self.assertTrue(all(path.exists() for path in paths))
+
+    def test_temp_sidecars_keep_active_jobs_and_publication_pc_retention(self):
+        _, _, current = self.publication("current", current=True)
+        _, pc = self.artifact("latest-pc", ready="10")
+        protected = [self.file(path.name + suffix) for path in [*current, pc]
+                     for suffix in ("-journal", "-wal", "-shm")]
+        temporary = [self.file("refresh-content-ab12cd34.sqlite" + suffix)
+                     for suffix in ("", "-journal", "-wal", "-shm")]
+        with self.get_db() as db:
+            db.execute("""INSERT INTO mobile_catalog_refresh_jobs
+                (id,language,state,created,updated,lease,watermark,pending_max,page_limit)
+                VALUES('job','korean','running',0,0,0,0,0,1)""")
+            db.commit()
+        self.assert_kept(temporary, "queued/running refresh; source uncertain")
+        self.assertEqual(self.execute(apply=True)[0], 0)
+        self.assertTrue(all(path.exists() for path in [*temporary, *protected, *current, pc]))
+
+    def test_active_catalog_lock_prevents_temp_sidecar_cleanup(self):
+        paths = [self.file("catalog-ab12cd34.sqlite" + suffix)
+                 for suffix in ("", "-journal", "-wal", "-shm")]
+        with replica.catalog_lock(self.root, exclusive=False):
+            self.assertIsNone(prune.prune_live(self.root, self.get_db))
+        self.assertTrue(all(path.exists() for path in paths))
+        prune.prune_live(self.root, self.get_db, output=io.StringIO())
+        self.assertTrue(all(not path.exists() for path in paths))
+
+    def test_protected_temp_base_retains_its_sidecars(self):
+        base = self.root / "catalog-ab12cd34.sqlite"
+        shutil.copyfile(self.db_path, base)
+        os.utime(base, (0, 0))
+        paths = [base, self.file(base.name + "-journal")]
+        self.assert_kept(paths, "control backup or uncertain SQLite file")
+
     def test_symlinks_directories_control_db_and_disguised_backup_are_kept(self):
         outside = self.directory / "outside"
         outside.write_bytes(b"do not touch")

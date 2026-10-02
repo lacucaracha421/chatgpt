@@ -32,6 +32,7 @@ class WriteSignal:
         self._lock = threading.Lock()
         self._generation = 0
         self._waiters = set()
+        self._closed = False
 
     @property
     def generation(self):
@@ -43,16 +44,37 @@ class WriteSignal:
         with self._lock:
             return len(self._waiters)
 
+    @property
+    def closed(self):
+        with self._lock:
+            return self._closed
+
+    def reset(self):
+        """Reopen when the owning application starts a new lifespan."""
+        with self._lock:
+            self._closed = False
+
+    def close(self):
+        """Release all waiters without inventing a write generation."""
+        with self._lock:
+            self._closed = True
+            waiters = list(self._waiters)
+        self._wake(waiters)
+
+    @staticmethod
+    def _wake(waiters):
+        for loop, future in waiters:
+            try:
+                loop.call_soon_threadsafe(_resolve, future)
+            except RuntimeError:
+                pass  # The owning event loop has already closed.
+
     def bump(self):
         """Advance the generation and wake every parked waiter. Thread-safe."""
         with self._lock:
             self._generation += 1
             waiters = list(self._waiters)
-        for loop, future in waiters:
-            try:
-                loop.call_soon_threadsafe(_resolve, future)
-            except RuntimeError:
-                pass  # that loop has closed; its waiter deregisters itself or is gone
+        self._wake(waiters)
 
     async def wait_beyond(self, generation, timeout):
         """Wait until the generation differs from ``generation`` or ``timeout`` seconds pass.
@@ -61,7 +83,7 @@ class WriteSignal:
         """
         loop = asyncio.get_running_loop()
         with self._lock:
-            if self._generation != generation:
+            if self._closed or self._generation != generation:
                 return self._generation
             entry = (loop, loop.create_future())
             self._waiters.add(entry)

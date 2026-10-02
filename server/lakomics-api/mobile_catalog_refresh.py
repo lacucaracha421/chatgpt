@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 
-from app_lifecycle import lifecycle
+from app_lifecycle import join_worker, lifecycle
 from fastapi import Header, Request
 import catalog_duplicates
 import mobile_catalog_replica as replica
@@ -77,7 +77,7 @@ class RefreshWorker:
         self.stop.set()
         self.wake.set()
         if self.thread:
-            self.thread.join(timeout=1)
+            join_worker(self.thread, 1)
 
     def status(self):
         with self.get_db() as db:

@@ -979,6 +979,20 @@ library, PC render harness, tablet 0.8.98 on device online, server). Numbers bel
   to unwarmed areas. A fix would move thumbnails to immutable `derived/` keys (server + PC replication), not drop the HEAD.
 - **Tablet viewer (device, warm):** prepared next image 3.5 ms to commit; first open ~106 ms; uncached original
   ~500 ms download for ~400 KB.
+- **Server incident (fixed, 4dd26743):** the similarity review feed ran assets × assets for hours per request; 8 stuck
+  worker threads held the 1-vCPU VPS at 100% CPU. Query-plan audit + read time budget in progress.
+- **Server audit 2026-10-02 (read-only, two Astra auditors) — in progress as S1/S2, rest queued:**
+  - S1 (in progress): long-polls and sequential shutdown joins exceed systemd's 10 s stop (SIGKILL on 2 of 3 restarts);
+    `library_snapshots` runs `BEGIN IMMEDIATE` on the event loop; stray `*.sqlite-journal` temp files never pruned.
+  - S2 (in progress): per-request 8-thread HEAD pools with no global bound/deadline; one transport timeout fails a whole
+    ticket batch; R2 client without explicit timeouts; mutable thumbnail keys bypass the HEAD cache.
+  - Queued after the SQL worker (touches `app.py`): **P0** catalog HTML cache in `app.py` never evicts expired entries
+    (unbounded memory on a 1.6 GB box); late duplicate-index rebuild can delete newly indexed works
+    (`catalog_duplicates.py`); capture downloads have no overall deadline and orphan R2 objects on DB failure.
+  - Later (P2): catalog publication rewrites ~187 MB + 19 MB per change (6× today) — coalesce languages / slow down
+    hot-count churn; refresh/ledger history without retention; collections list does ~144 extra queries per 48-item
+    page; suggestion caches rebuilt on every publication; startup re-aggregates all tag counts; move thumbnails to
+    immutable `derived/` keys (removes most ticket HEADs).
 
 ## EXTERNAL-REFS-20261002 — external projects worth borrowing from (reference list)
 

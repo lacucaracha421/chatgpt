@@ -189,8 +189,12 @@ class SavedXMediaUploadTests(ServerFixture):
             self.assertEqual(client.get(PATH, headers=self.auth).json()["keys"], ["3:1"])
 
     def test_no_application_wide_body_middleware_remains(self):
-        """Other routes must not pay for, or fail through, the upload bound."""
-        self.assertEqual([m.cls.__name__ for m in api_app.app.user_middleware], [])
+        """Other routes must not pay for, or fail through, the upload bound.
+
+        The read budget middleware only marks GET/HEAD requests in a context
+        variable; it never reads or bounds a request body.
+        """
+        self.assertEqual([m.cls.__name__ for m in api_app.app.user_middleware], ["ReadBudgetMiddleware"])
 
 
 class ConditionalPollTests(ServerFixture):

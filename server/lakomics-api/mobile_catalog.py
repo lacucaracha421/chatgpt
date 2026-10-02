@@ -6,6 +6,7 @@ import hmac
 import json
 import re
 import sqlite3
+import read_budget
 import tempfile
 import threading
 import time
@@ -254,8 +255,7 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
                 or payload["authorityCursor"] != snapshot["cursor"]):
             raise HTTPException(409, "Catalog bookmarks changed; refresh")
     def budget(db):
-        deadline = time.monotonic() + 10
-        db.set_progress_handler(lambda: int(time.monotonic() > deadline), 10000)
+        read_budget.install(db, seconds=10)
     def unavailable(exc):
         if isinstance(exc, sqlite3.OperationalError) and "interrupted" in str(exc):
             raise HTTPException(503, "Catalog query took too long; refine the search") from exc

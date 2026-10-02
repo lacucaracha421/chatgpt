@@ -19,6 +19,7 @@ from starlette.requests import ClientDisconnect
 import asset_filters
 import asset_visibility
 import change_signal
+import read_budget
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "lakomics.sqlite3"
@@ -28,6 +29,7 @@ API_TOKEN = os.environ.get("LAKOMICS_API_TOKEN", "")
 DB_BUSY_TIMEOUT_SECONDS = 10
 
 app = FastAPI(title="Lakomics Cloud API", version="0.1.0")
+app.add_middleware(read_budget.ReadBudgetMiddleware)
 
 
 def now_iso() -> str:
@@ -43,9 +45,14 @@ write_signal = change_signal.WriteSignal()
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=DB_BUSY_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
-    asset_visibility.install(conn)
+    budget = read_budget.install(conn) if read_budget.http_read.get() else None
     try:
+        asset_visibility.install(conn)
         yield conn
+    except sqlite3.OperationalError as exc:
+        if budget is not None:
+            budget.translate(exc)
+        raise
     finally:
         changed = conn.total_changes > 0
         conn.close()
@@ -349,8 +356,21 @@ CATALOG_MAX_BODY_BYTES = 5 * 1024 * 1024
 # requests do not hit k-hentai at all. Gallery HTML embeds its own signed-URL
 # expiry, and update pages are short-lived, so 60s is safely conservative.
 CATALOG_CACHE_TTL_SECONDS = 60
+CATALOG_CACHE_MAX_BYTES = 32 * 1024 * 1024
+CATALOG_CACHE_MAX_ENTRIES = 128
 CATALOG_CURSOR_MAX = 9223372036854775807
+from threading import Lock as _CatalogCacheLock
+
+# Dict insertion order is the LRU order; hits move to the end without renewing TTL.
 _catalog_cache: dict[str, tuple[float, int, bytes]] = {}
+_catalog_cache_lock = _CatalogCacheLock()
+
+
+def _catalog_cache_expire(now: float) -> None:
+    """Called only with the cache lock held, on reads and after slow fetches."""
+    for key, (created, _, _) in list(_catalog_cache.items()):
+        if now - created >= CATALOG_CACHE_TTL_SECONDS:
+            del _catalog_cache[key]
 
 
 def _catalog_fetch_once(url: str) -> tuple[int, bytes]:
@@ -426,10 +446,13 @@ def _catalog_fetch_with_retry(url: str) -> tuple[int, bytes]:
 
 def _catalog_cached_get(url: str) -> Response:
     now = time.monotonic()
-    cached = _catalog_cache.get(url)
-    if cached is not None and now - cached[0] < CATALOG_CACHE_TTL_SECONDS:
-        _, status, body = cached
-        return Response(content=body, status_code=status, media_type="text/html")
+    with _catalog_cache_lock:
+        _catalog_cache_expire(now)
+        cached = _catalog_cache.pop(url, None)
+        if cached is not None:
+            _catalog_cache[url] = cached
+            _, status, body = cached
+            return Response(content=body, status_code=status, media_type="text/html")
     status, body = _catalog_fetch_with_retry(url)
     if status == 0:
         raise HTTPException(
@@ -448,7 +471,17 @@ def _catalog_cached_get(url: str) -> Response:
         raise HTTPException(status_code=502, detail=f"k-hentai returned HTTP {status} with no content")
     if len(body) > CATALOG_MAX_BODY_BYTES:
         raise HTTPException(status_code=502, detail="k-hentai response too large")
-    _catalog_cache[url] = (now, status, body)
+    with _catalog_cache_lock:
+        finished = time.monotonic()
+        _catalog_cache_expire(finished)
+        if (finished - now < CATALOG_CACHE_TTL_SECONDS
+                and len(body) <= CATALOG_CACHE_MAX_BYTES and CATALOG_CACHE_MAX_ENTRIES > 0):
+            _catalog_cache.pop(url, None)
+            _catalog_cache[url] = (now, status, body)
+            total = sum(len(entry[2]) for entry in _catalog_cache.values())
+            while total > CATALOG_CACHE_MAX_BYTES or len(_catalog_cache) > CATALOG_CACHE_MAX_ENTRIES:
+                oldest = next(iter(_catalog_cache))
+                total -= len(_catalog_cache.pop(oldest)[2])
     return Response(content=body, status_code=200, media_type="text/html")
 
 
@@ -1030,6 +1063,15 @@ def startup_image_thumbnails():
 
 @lifecycle(app).on_shutdown
 def shutdown_image_thumbnails():
-    global _image_thumbnail_worker
-    if _image_thumbnail_worker is not None and _image_thumbnail_worker.stop():
-        _image_thumbnail_worker = None
+    worker = _image_thumbnail_worker
+    if worker is None:
+        return
+
+    def released():
+        # Lifecycle shutdown defers the join; release the handle only once it exits.
+        global _image_thumbnail_worker
+        if _image_thumbnail_worker is worker:
+            _image_thumbnail_worker = None
+
+    if worker.stop(on_stopped=released):
+        released()

@@ -51,6 +51,7 @@ class ReplicationStartupTests(unittest.TestCase):
             "mobile_collections.register_collections.<locals>.startup_collections",
             "mobile_characters.register_characters.<locals>.startup",
             "sync_status.register_sync_status.<locals>.startup",
+            "change_signal.WriteSignal.reset",
             "album_authority.register_album_authority.<locals>.<lambda>",
             "classification_authority.register_classification_authority.<locals>.<lambda>",
             "asset_authority.register_asset_authority.<locals>.<lambda>",

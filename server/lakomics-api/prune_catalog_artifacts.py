@@ -45,6 +45,8 @@ import sys
 import threading
 import time
 
+from app_lifecycle import join_worker
+
 import api_auth
 import mobile_catalog_replica as replica
 from mobile_catalog import TTL
@@ -62,7 +64,7 @@ CONTENT = re.compile(rf"({DIGEST})\.sqlite")
 USERS = re.compile(rf"({DIGEST})-users(?:-v2)?\.sqlite")
 # tempfile's random suffix is eight characters. In particular, do not sweep
 # arbitrary .sqlite files, backups, or digest-named files with a temp prefix.
-TEMP = re.compile(r"(?:upload-[a-z0-9_]{8}\.ndjson|(?:catalog|users|refresh-content)-[a-z0-9_]{8}\.sqlite)")
+TEMP = re.compile(r"(upload-[a-z0-9_]{8}\.ndjson|(?:catalog|users|refresh-content)-[a-z0-9_]{8}\.sqlite)(?:-(?:journal|wal|shm))?")
 LOG = logging.getLogger(__name__)
 
 
@@ -226,8 +228,8 @@ def plan(db, root_fd, control_info, now, retention=RETENTION_SECONDS):
             entry.kind, entry.key = "content", content[1]
         elif users:
             entry.kind, entry.key = "users", users[1]
-        elif TEMP.fullmatch(name):
-            entry.kind = "temp"
+        elif temporary := TEMP.fullmatch(name):
+            entry.kind, entry.key = "temp", temporary[1]
         else:
             entry.reasons.add("unrecognized name (including backups)")
             continue
@@ -250,6 +252,19 @@ def plan(db, root_fd, control_info, now, retention=RETENTION_SECONDS):
         if entry.reasons and entry.kind == "content":
             for reason in entry.reasons:
                 keep(contents, entry.key, reason)
+
+    # Sidecars may outlive their base file after a crash. Only known tempfile
+    # families qualify; a fresh or protected member retains the entire family.
+    # Apply still holds the exclusive catalog lock, excluding every live writer.
+    temp_reasons = {}
+    for entry in entries:
+        temporary = TEMP.fullmatch(entry.name)
+        if temporary:
+            for reason in entry.reasons:
+                keep(temp_reasons, temporary[1], reason)
+    for entry in entries:
+        if entry.kind == "temp":
+            entry.reasons.update(temp_reasons.get(entry.key, ()))
 
     for row in publications:
         for reason in retained.get(row["revision"], ()):
@@ -436,7 +451,7 @@ class AutoPruner:
         self.stop_event.set()
         self.wake.set()
         if self.thread is not None:
-            self.thread.join(timeout=timeout)
+            join_worker(self.thread, timeout)
 
     def loop(self):
         deadline = time.monotonic() + self.initial_delay

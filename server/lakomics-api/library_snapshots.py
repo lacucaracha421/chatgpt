@@ -79,6 +79,13 @@ async def publish_classification_snapshot(
     staged_version, payload, snapshot_digest = classification_snapshot.stage(body)
     incoming_published_at = classification_snapshot._parse_published_at(body["published_at"])
 
+    return await run_in_threadpool(
+        _store_classification_snapshot, body, version, payload, snapshot_digest,
+        incoming_published_at)
+
+
+def _store_classification_snapshot(body, version, payload, snapshot_digest, incoming_published_at):
+    """Keep the complete SQLite write transaction off the ASGI event loop."""
     with api.get_db() as db:
         # One write transaction covers the authority fence, staleness read and replacement.
         # The fence is inert before cutover; after activation it prevents an old PC

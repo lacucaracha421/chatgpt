@@ -3,15 +3,19 @@
 The application module is supplied at registration so its shared services and
 compatibility hooks are resolved at call time, including test monkeypatches.
 """
+import asyncio
 import logging
-from concurrent.futures import ThreadPoolExecutor
+import threading
+import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timedelta, timezone
 from types import ModuleType
 from typing import Literal
 
-from botocore.exceptions import ClientError
-from fastapi import HTTPException, Header, Query
+from botocore.exceptions import ClientError, ConnectionError, HTTPClientError
+from fastapi import HTTPException, Header, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
 import asset_authority
 import head_cache
@@ -45,6 +49,69 @@ def get_library_metadata_backup(authorization: str | None = Header(default=None)
 
 
 MEDIA_TICKET_TTL_SECONDS = 300
+
+# Reserve before submitting: the executor's internal queue must never accumulate
+# one batch per caller. A timed-out running HEAD retains its slot until it exits.
+MEDIA_TICKET_DEADLINE_SECONDS = 5.0
+_HEAD_WORKERS = 8
+_head_executor = ThreadPoolExecutor(max_workers=_HEAD_WORKERS, thread_name_prefix="ticket-head")
+_head_slots = threading.BoundedSemaphore(_HEAD_WORKERS)
+_TRANSPORT_ERRORS = (ConnectionError, HTTPClientError)
+
+
+def _bounded_ticket_work(items, resolve, *, deadline, cancelled):
+    """Return ordered results, with None for work unfinished by the deadline."""
+    results = [None] * len(items)
+    pending = {}
+    next_index = 0
+    stopped = threading.Event()
+
+    def run(item):
+        if stopped.is_set() or cancelled.is_set() or time.monotonic() >= deadline:
+            return None
+        value = resolve(item)
+        return time.monotonic(), value
+
+    def release_slot(_future):
+        _head_slots.release()
+
+    try:
+        while (next_index < len(items) or pending) and not cancelled.is_set():
+            if time.monotonic() >= deadline:
+                break
+            while next_index < len(items) and not cancelled.is_set() and time.monotonic() < deadline:
+                if not _head_slots.acquire(blocking=False):
+                    break
+                try:
+                    future = _head_executor.submit(run, items[next_index])
+                except BaseException:
+                    _head_slots.release()
+                    raise
+                future.add_done_callback(release_slot)
+                pending[future] = next_index
+                next_index += 1
+            remaining = max(0, deadline - time.monotonic())
+            if pending:
+                done, _ = wait(pending, timeout=min(0.025, remaining), return_when=FIRST_COMPLETED)
+                for future in done:
+                    index = pending.pop(future)
+                    completed = future.result()
+                    if completed is not None and completed[0] <= deadline:
+                        results[index] = completed[1]
+            else:
+                cancelled.wait(min(0.025, remaining))
+        # Include completions that raced the deadline, but never late results.
+        for future, index in pending.items():
+            if future.done():
+                completed = future.result()
+                if completed is not None and completed[0] <= deadline:
+                    results[index] = completed[1]
+        return results
+    finally:
+        stopped.set()
+        # Do not cancel queued futures: ThreadPoolExecutor retains cancelled queue
+        # entries. Retain their permits until a worker drains them, bounding even
+        # repeated disconnects while all eight workers are stuck in storage.
 
 
 class MediaTicketRequest(BaseModel):
@@ -146,16 +213,28 @@ def create_mobile_media_ticket(
     object_key = asset["object_key"] if request.variant == "original" else asset["thumbnail_key"]
     if not object_key:
         raise HTTPException(status_code=409, detail="Requested media variant is unavailable")
-    thumbnail_metadata_fills = []
-    try:
+
+    def resolve(_):
+        fills = []
         metadata = api._ticket_head(asset, request.variant, object_key, fresh_head=fresh_head,
-                                verify_digest=verify_digest, thumbnail_metadata_fills=thumbnail_metadata_fills)
+                                    verify_digest=verify_digest, thumbnail_metadata_fills=fills)
+        return metadata, fills
+
+    try:
+        resolved = _bounded_ticket_work(
+            [None], resolve, deadline=time.monotonic() + MEDIA_TICKET_DEADLINE_SECONDS,
+            cancelled=threading.Event())[0]
     except ClientError as exc:
         code = str(exc.response.get("Error", {}).get("Code", ""))
         if code in ("404", "NoSuchKey", "NotFound"):
             raise HTTPException(status_code=409, detail="Requested media variant is unavailable")
         raise HTTPException(status_code=502, detail="Media storage is unavailable")
+    except _TRANSPORT_ERRORS:
+        raise HTTPException(status_code=502, detail="Media storage is unavailable")
+    if resolved is None:
+        raise HTTPException(status_code=502, detail="Media storage is unavailable")
 
+    metadata, thumbnail_metadata_fills = resolved
     api._persist_thumbnail_metadata(thumbnail_metadata_fills)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=api.MEDIA_TICKET_TTL_SECONDS)
     return {
@@ -191,11 +270,16 @@ def create_mobile_media_tickets(
     lifecycle: Literal["trash"] | None = Query(default=None),
     fresh_head: bool = Query(default=False),
     verify_digest: bool = Query(default=False),
+    *,
+    _cancelled=None,
+    _deadline=None,
 ):
     """바운스된 썸네일 티켓 묶음 발급. 개별 티켓과 동일한 인증/변형 화이트
     리스트/서명 규칙을 적용하며, 개별 항목 실패는 배치 전체를 실패시키지
     않는다. 임의 object key는 절대 요청할 수 없다 (asset id만 허용).
     """
+    cancelled = _cancelled if _cancelled is not None else threading.Event()
+    deadline = _deadline if _deadline is not None else time.monotonic() + MEDIA_TICKET_DEADLINE_SECONDS
     api.client_guard(api.get_db, api.API_TOKEN)(authorization)
 
     # 중복 제거: 같은 asset+variant는 한 번만 서명한다.
@@ -220,24 +304,30 @@ def create_mobile_media_tickets(
                 ).fetchall()
             }
 
-    thumbnail_metadata_fills = []
+    def failure(pair, error):
+        return {"asset_id": pair[0], "variant": pair[1], "ok": False, "error": error}
 
-    def resolve_ticket(pair: tuple[str, str]) -> dict:
+    def resolve_ticket(pair: tuple[str, str]):
         asset_id, variant = pair
         asset = assets_by_id.get(asset_id)
         if asset is None:
-            return {"asset_id": asset_id, "variant": variant, "ok": False, "error": "not_found"}
+            return failure(pair, "not_found"), []
         object_key = asset["object_key"] if variant == "original" else asset["thumbnail_key"]
         if not object_key:
-            return {"asset_id": asset_id, "variant": variant, "ok": False, "error": "unavailable"}
+            return failure(pair, "unavailable"), []
+        fills = []
         try:
             metadata = api._ticket_head(asset, variant, object_key, fresh_head=fresh_head,
-                                    verify_digest=verify_digest, thumbnail_metadata_fills=thumbnail_metadata_fills)
+                                    verify_digest=verify_digest, thumbnail_metadata_fills=fills)
         except ClientError as exc:
             code = str(exc.response.get("Error", {}).get("Code", ""))
             if code in ("404", "NoSuchKey", "NotFound"):
-                return {"asset_id": asset_id, "variant": variant, "ok": False, "error": "unavailable"}
-            return {"asset_id": asset_id, "variant": variant, "ok": False, "error": "storage_unavailable"}
+                return failure(pair, "unavailable"), []
+            return failure(pair, "storage_unavailable"), []
+        except _TRANSPORT_ERRORS:
+            return failure(pair, "storage_unavailable"), []
+        if cancelled.is_set() or time.monotonic() >= deadline:
+            return failure(pair, "storage_unavailable"), []
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=api.MEDIA_TICKET_TTL_SECONDS)
         return {
             "asset_id": asset_id,
@@ -248,15 +338,55 @@ def create_mobile_media_tickets(
             "size_bytes": metadata.get("ContentLength"),
             **api._ticket_digest(asset, variant),
             "expires_at": expires_at.isoformat(),
-        }
+        }, fills
 
-    # boto clients support concurrent request use; keep the pool bounded to avoid
-    # turning a 50-thumbnail Home batch into 50 serial R2 round trips.
-    workers = min(8, len(pairs))
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        results = list(executor.map(resolve_ticket, pairs))
-    api._persist_thumbnail_metadata(thumbnail_metadata_fills)
+    completed = _bounded_ticket_work(pairs, resolve_ticket, deadline=deadline, cancelled=cancelled)
+    results, thumbnail_metadata_fills = [], []
+    for pair, result in zip(pairs, completed):
+        if result is None:
+            results.append(failure(pair, "storage_unavailable"))
+        else:
+            ticket, fills = result
+            results.append(ticket)
+            thumbnail_metadata_fills.extend(fills)
+    if not cancelled.is_set():
+        api._persist_thumbnail_metadata(thumbnail_metadata_fills)
     return {"items": results}
+
+
+async def _create_mobile_media_tickets_http(
+    request: MediaTicketBatchRequest,
+    http_request: Request,
+    authorization: str | None = Header(default=None),
+    lifecycle: Literal["trash"] | None = Query(default=None),
+    fresh_head: bool = Query(default=False),
+    verify_digest: bool = Query(default=False),
+):
+    # The body has already been parsed by FastAPI; only disconnect remains on the
+    # receive channel. Keep DB/auth work off the event loop, using AnyIO's limiter.
+    cancelled = threading.Event()
+    deadline = time.monotonic() + MEDIA_TICKET_DEADLINE_SECONDS
+
+    async def disconnected():
+        while True:
+            if (await http_request.receive())["type"] == "http.disconnect":
+                cancelled.set()
+                return
+
+    work = asyncio.create_task(run_in_threadpool(
+        create_mobile_media_tickets, request, authorization, lifecycle, fresh_head, verify_digest,
+        _cancelled=cancelled, _deadline=deadline))
+    disconnect = asyncio.create_task(disconnected())
+    try:
+        done, _ = await asyncio.wait((work, disconnect), return_when=asyncio.FIRST_COMPLETED)
+        if disconnect in done:
+            raise asyncio.CancelledError
+        return await work
+    finally:
+        cancelled.set()
+        work.cancel()
+        disconnect.cancel()
+        await asyncio.gather(work, disconnect, return_exceptions=True)
 
 
 def register_metadata_backup(app, services):
@@ -269,4 +399,4 @@ def register(app, services):
     global api
     api = services
     app.post("/v1/library/assets/{asset_id}/media-ticket")(create_mobile_media_ticket)
-    app.post("/v1/library/media-tickets")(create_mobile_media_tickets)
+    app.post("/v1/library/media-tickets", name="create_mobile_media_tickets")(_create_mobile_media_tickets_http)

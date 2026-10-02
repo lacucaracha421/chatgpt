@@ -165,6 +165,11 @@ CREATE INDEX IF NOT EXISTS asset_authority_changes_operation
  ON asset_authority_changes(library_id,epoch,operation_id);
 CREATE INDEX IF NOT EXISTS asset_authority_changes_prune
  ON asset_authority_changes(library_id,epoch,changed_at);
+-- Startup's lifecycle timestamp repair needs the newest trash for one Asset.
+-- Index only trash events and keys, never the JSON payload or other commands.
+CREATE INDEX IF NOT EXISTS asset_authority_last_trash
+ ON asset_authority_changes(library_id,asset_id,epoch DESC,sequence DESC)
+ WHERE command_type='trashAsset';
 CREATE TABLE IF NOT EXISTS asset_authority_retention(
  library_id TEXT NOT NULL,
  epoch INTEGER NOT NULL,

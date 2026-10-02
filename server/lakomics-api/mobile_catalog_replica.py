@@ -18,6 +18,7 @@ except ImportError:  # Non-POSIX hosts import this module; they get no lock and 
     fcntl = None
 from fastapi import HTTPException
 import catalog_bookmarks
+import read_budget
 from mobile_catalog_query import count_groups, freeze_query, search_groups
 
 MAX_CONTENT = 512 * 1024 * 1024
@@ -514,6 +515,7 @@ def open_publication(root, get_db, revision=None, bookmarks=None):
         publication_paths(root, publication)
         raise
     db.row_factory = sqlite3.Row
+    budget = read_budget.install(db) if read_budget.http_read.get() else None
     try:
         if bookmarks is not None:
             # Server-owned bookmarks shadow the baked copy before the immutable
@@ -528,5 +530,9 @@ def open_publication(root, get_db, revision=None, bookmarks=None):
         db.execute("PRAGMA query_only=ON")
         db.execute("BEGIN")
         yield db, publication
+    except sqlite3.OperationalError as exc:
+        if budget is not None:
+            budget.translate(exc)
+        raise
     finally:
         db.close()

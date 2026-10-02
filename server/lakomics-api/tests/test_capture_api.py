@@ -64,8 +64,9 @@ class FakeResponse:
         self._chunks = chunks or []
         self._iteration_error = iteration_error
 
-    def iter_bytes(self, _chunk_size):
-        yield from self._chunks
+    async def aiter_bytes(self):
+        for chunk in self._chunks:
+            yield chunk
         if self._iteration_error is not None:
             raise self._iteration_error
 
@@ -79,10 +80,10 @@ class FakeStream:
         self.calls.append((args, kwargs))
         return self
 
-    def __enter__(self):
+    async def __aenter__(self):
         return self.response
 
-    def __exit__(self, _type, _value, _traceback):
+    async def __aexit__(self, _type, _value, _traceback):
         return False
 
 
@@ -94,7 +95,7 @@ class CaptureStoreTests(unittest.TestCase):
 
     def fetch(self, response: FakeResponse, url: str, key: str, media_type: str):
         stream = FakeStream(response)
-        with mock.patch.object(capture_store.httpx, "stream", stream):
+        with mock.patch.object(capture_store, "_media_stream", stream):
             result = capture_store.fetch_media_to_r2(url, key, media_type)
         return result, stream
 
@@ -108,7 +109,7 @@ class CaptureStoreTests(unittest.TestCase):
     def test_legacy_image_download_still_streams_to_r2(self):
         image = b"png-image"
         stream = FakeStream(FakeResponse([image], content_type="image/png"))
-        with mock.patch.object(capture_store.httpx, "stream", stream):
+        with mock.patch.object(capture_store, "_media_stream", stream):
             result = capture_store.fetch_image_to_r2(
                 "https://pbs.twimg.com/media/IMAGE?format=png&name=orig",
                 "images/inbox/capture-1/original",
@@ -148,7 +149,7 @@ class CaptureStoreTests(unittest.TestCase):
 
     def test_arbitrary_host_is_rejected_before_network_access(self):
         stream = FakeStream(FakeResponse([b"bad"], content_type="video/mp4"))
-        with mock.patch.object(capture_store.httpx, "stream", stream):
+        with mock.patch.object(capture_store, "_media_stream", stream):
             with self.assertRaises(capture_store.CaptureValidationError):
                 capture_store.fetch_media_to_r2(
                     "https://example.com/private.mp4",
@@ -162,7 +163,7 @@ class CaptureStoreTests(unittest.TestCase):
     def test_redirect_is_rejected_without_contacting_destination(self):
         response = FakeResponse(status_code=302, content_type="text/html")
         stream = FakeStream(response)
-        with mock.patch.object(capture_store.httpx, "stream", stream):
+        with mock.patch.object(capture_store, "_media_stream", stream):
             with self.assertRaises(capture_store.CaptureDownloadError):
                 capture_store.fetch_media_to_r2(
                     "https://video.twimg.com/redirect.mp4",
@@ -282,7 +283,7 @@ class CaptureStoreTests(unittest.TestCase):
     def test_generic_web_rejects_private_dns_before_network(self):
         stream = FakeStream(FakeResponse([b"image"], content_type="image/png"))
         with mock.patch.object(capture_store.socket, "getaddrinfo", return_value=[(2, 1, 6, "", ("127.0.0.1", 443))]):
-            with mock.patch.object(capture_store.httpx, "stream", stream):
+            with mock.patch.object(capture_store, "_media_stream", stream):
                 with self.assertRaises(capture_store.CaptureValidationError):
                     capture_store.fetch_media_to_r2(
                         "https://example.test/image.png",
@@ -303,7 +304,7 @@ class CaptureStoreTests(unittest.TestCase):
         first_dns = [(2, 1, 6, "", ("93.184.216.34", 443))]
         rotated_dns = [(2, 1, 6, "", ("1.1.1.1", 443))]
         with mock.patch.object(capture_store.socket, "getaddrinfo", side_effect=[first_dns, rotated_dns]) as resolver:
-            with mock.patch.object(capture_store.httpx, "stream", stream):
+            with mock.patch.object(capture_store, "_media_stream", stream):
                 result = capture_store.fetch_media_to_r2(
                     "https://example.test/image.png",
                     "images/inbox/rotating/original",
@@ -325,7 +326,7 @@ class CaptureStoreTests(unittest.TestCase):
         stream = FakeStream(response)
         public_dns = [(2, 1, 6, "", ("93.184.216.34", 443))]
         with mock.patch.object(capture_store.socket, "getaddrinfo", return_value=public_dns):
-            with mock.patch.object(capture_store.httpx, "stream", stream):
+            with mock.patch.object(capture_store, "_media_stream", stream):
                 with self.assertRaisesRegex(capture_store.CaptureValidationError, "connection address was not validated"):
                     capture_store.fetch_media_to_r2(
                         "https://example.test/image.png",

@@ -74,6 +74,13 @@ LATEST_PENDING = """(SELECT d.decision FROM mobile_character_review_decisions d
     WHERE d.target_id=i.target_id AND d.asset_id=i.asset_id AND d.sequence>?
     ORDER BY d.sequence DESC LIMIT 1)"""
 
+# Without statistics SQLite can probe every target for every committed Asset,
+# even when there are no candidates. Keep all three feed reads candidate-first.
+FEED_FROM = f"""FROM mobile_character_review_items i
+    CROSS JOIN visible_assets a ON a.id=i.asset_id AND a.committed=1
+    WHERE i.target_id IN (SELECT value FROM json_each(?))
+    AND COALESCE({LATEST_PENDING},'cleared')='cleared'"""
+
 
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -395,10 +402,7 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
             _, index = published_index(db)
             nodes = character_nodes(index)
             series = {n["sourceId"]: n for n in (index or {}).get("nodes", []) if n["kind"] == "series"}
-            base = f"""FROM mobile_character_review_items i
-                JOIN visible_assets a ON a.id=i.asset_id AND a.committed=1
-                WHERE i.target_id IN (SELECT value FROM json_each(?))
-                AND COALESCE({LATEST_PENDING},'cleared')='cleared'"""
+            base = FEED_FROM
             selected = {k for k, n in nodes.items() if (target is None or k == target)
                         and (series_id is None or n["seriesId"] == series_id)}
             params = [json.dumps(sorted(selected)), current["feed_cursor"]]

@@ -4,7 +4,9 @@ The application module is supplied at registration so its shared services and
 compatibility hooks are resolved at call time, including test monkeypatches.
 """
 import sqlite3
+import threading
 import uuid
+from contextlib import contextmanager
 from types import ModuleType
 from typing import Literal
 from urllib.parse import urlparse
@@ -16,10 +18,29 @@ import asset_authority
 import authority
 import classification_authority
 import classification_snapshot
-from capture_store import CaptureDownloadError, CaptureValidationError
+from capture_store import CaptureBusyError, CaptureDownloadError, CaptureValidationError, MAX_CAPTURE_DOWNLOADS
 
 
 api: ModuleType
+_capture_lock = threading.Lock()
+_capture_inflight: set[tuple[str, str, str]] = set()
+
+
+@contextmanager
+def _reserve_capture(identity):
+    # One uvicorn process: bound both downloading and the post-upload DB phase.
+    # A retry must not start another upload before the first row is committed.
+    with _capture_lock:
+        if identity in _capture_inflight:
+            raise HTTPException(503, "Capture in progress; retry shortly", headers={"Retry-After": "5"})
+        if len(_capture_inflight) >= MAX_CAPTURE_DOWNLOADS:
+            raise HTTPException(503, "Capture downloads busy; retry shortly", headers={"Retry-After": "5"})
+        _capture_inflight.add(identity)
+    try:
+        yield
+    finally:
+        with _capture_lock:
+            _capture_inflight.remove(identity)
 
 
 class CaptureCreate(BaseModel):
@@ -87,6 +108,12 @@ def create_capture(
     if not api.valid_capture_source_url(capture.source_url, capture.source):
         raise HTTPException(status_code=400, detail="Invalid source URL")
 
+    with _reserve_capture((capture.source_url, capture.media_url, classification_id)):
+        return _create_capture_reserved(capture, classification_id)
+
+
+def _create_capture_reserved(capture, classification_id):
+    # Recheck persisted identity after reserving, including retries of completed work.
     with api.get_db() as db:
         existing = db.execute(
             """
@@ -118,6 +145,8 @@ def create_capture(
         )
     except CaptureValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except CaptureBusyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "5"})
     except CaptureDownloadError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
@@ -126,6 +155,7 @@ def create_capture(
     stored_media_type = "animated_gif" if content_type == "image/gif" else capture.media_type
     ts = api.now_iso()
     asset_created = False
+    committed = False
 
     try:
         with api.get_db() as db:
@@ -182,11 +212,18 @@ def create_capture(
                     promotion_state = exc.detail["code"]
                 db.execute("UPDATE captures SET promotion_state=? WHERE id=?",[promotion_state,capture_id])
             db.commit()
-    except sqlite3.IntegrityError:
-        try:
-            api.delete_r2_object(object_key)
-        except Exception:
-            pass
+            committed = True
+    except BaseException as exc:
+        # Includes open/execute/commit failures and interrupted transactions. The
+        # connection has closed (and rolled back) before we remove the upload.
+        if not committed:
+            try:
+                api.delete_r2_object(object_key)
+            except Exception:
+                pass
+
+        if not isinstance(exc, sqlite3.IntegrityError):
+            raise
 
         with api.get_db() as db:
             existing = db.execute(
@@ -424,3 +461,101 @@ def register(app, services):
     app.get("/v1/captures")(list_captures)
     app.post("/v1/captures/{capture_id}/imported")(mark_capture_imported)
     app.post("/v1/captures/{capture_id}/acknowledge")(acknowledge_capture_imported)
+
+
+def _inbox_references(db, keys):
+    placeholders = ",".join("?" for _ in keys)
+    referenced = set()
+    # Read canonical authority without visibility filters, including retained rows.
+    for table in ("captures", "assets", "asset_authority_state"):
+        if table == "asset_authority_state" and not db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", [table]).fetchone():
+            continue
+        referenced.update(row[0] for row in db.execute(
+            f"SELECT object_key FROM {table} WHERE object_key IN ({placeholders})", keys))
+    referenced.update(row[0] for row in db.execute(
+        f"SELECT thumbnail_key FROM assets WHERE thumbnail_key IN ({placeholders})", keys))
+    return referenced
+
+
+def reclaim_orphaned_inbox(get_db, storage, bucket, *, cursor=None, limit=25, now=None):
+    """Reclaim at most one page per inbox prefix; no request/startup sweep.
+
+    Run periodically against the API's control DB and R2 bucket, passing the returned
+    `cursor` to the next invocation so referenced early keys cannot starve later ones.
+    Only UUID capture originals older than 24 hours qualify (well beyond a download
+    or upload). Keep *all* capture/Asset references, including trash and tombstones.
+    A control-DB write lock fences each final reference check and deletion. It is
+    released between objects so a page does not monopolize the API's database.
+    Missing core tables, listing errors or reference-query errors fail closed.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    if not 1 <= limit <= 100:
+        raise ValueError("limit must be between 1 and 100 per prefix")
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=24)
+    positions = dict(cursor or {})
+    result = {"scanned": 0, "deleted": 0, "errors": 0, "cursor": positions}
+    for prefix in ("images/inbox/", "videos/inbox/"):
+        after = positions.get(prefix)
+        if after is not None and not after.startswith(prefix):
+            raise ValueError("Invalid inbox cursor")
+        listing = storage.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=limit,
+                                         **({"StartAfter": after} if after else {}))
+        objects = listing.get("Contents", [])[:limit]
+        candidates = []
+        for item in objects:
+            result["scanned"] += 1
+            key, modified = item.get("Key", ""), item.get("LastModified")
+            if not key.startswith(prefix):
+                continue
+            parts = key[len(prefix):].split("/")
+            if len(parts) != 2 or parts[1] != "original":
+                continue
+            try:
+                if str(uuid.UUID(parts[0])) != parts[0]:
+                    continue
+            except ValueError:
+                continue
+            if not isinstance(modified, datetime) or modified.tzinfo is None or modified >= cutoff:
+                continue
+            candidates.append(key)
+        if candidates:
+            with get_db() as db:
+                referenced = _inbox_references(db, candidates)
+            for key in candidates:
+                if key in referenced:
+                    continue
+                with get_db() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    try:
+                        if _inbox_references(db, [key]):
+                            continue
+                        try:
+                            storage.delete_object(Bucket=bucket, Key=key)
+                            result["deleted"] += 1
+                        except Exception:
+                            result["errors"] += 1
+                    finally:
+                        db.rollback()
+        positions[prefix] = objects[-1]["Key"] if listing.get("IsTruncated") and objects else None
+    return result
+
+
+if __name__ == "__main__":
+    # Example periodic invocation (persist the returned cursor between runs):
+    # python capture_routes.py --reclaim-inbox --cursor '{"images/inbox/": null}'
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(description="Reclaim aged, unreferenced capture inbox originals")
+    parser.add_argument("--reclaim-inbox", action="store_true", required=True)
+    parser.add_argument("--limit", type=int, default=25)
+    parser.add_argument("--cursor", default="{}", help="Previous result's cursor JSON")
+    args = parser.parse_args()
+    import app as services
+    from r2 import R2_BUCKET, _s3
+
+    print(json.dumps(reclaim_orphaned_inbox(services.get_db, _s3, R2_BUCKET,
+                                          limit=args.limit, cursor=json.loads(args.cursor))))
