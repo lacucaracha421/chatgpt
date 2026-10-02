@@ -126,12 +126,11 @@ impl Library {
                 "INSERT INTO albums(id,name,created_at) VALUES(?1,?2,?3)",
                 params![id, LIKES_ALBUM_NAME, chrono::Utc::now().to_rfc3339()],
             )?;
-            let fields = serde_json::json!({"name":LIKES_ALBUM_NAME,"parentId":null,"iconKey":null,"colorKey":null});
-            enqueue_structural(
+            Library::enqueue_album_intent(
                 &transaction,
-                album_authority::CREATE,
+                album_authority::ENSURE_LIKES,
                 &id,
-                fields.as_object().unwrap().clone(),
+                serde_json::Map::new(),
             )?;
             transaction.execute(
                 "UPDATE library_settings SET likes_album_id=?1 WHERE singleton=1",
@@ -153,6 +152,11 @@ impl Library {
         let name = normalized_name(request.name)?;
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        // Preserve a unique legacy designation before another same-named album
+        // can make migration 0121's read-only fallback ambiguous.
+        if available_likes_album_id(&transaction)?.is_some() {
+            adopt_likes_album(&transaction)?;
+        }
         if let Some(parent_id) = request.parent_id.as_deref() {
             require_album(&transaction, parent_id)?;
         }
@@ -448,6 +452,57 @@ mod tests {
         models::{AlbumEntry, AssetAlbumPatch, CreateAlbum},
         Library,
     };
+
+    #[test]
+    fn likes_album_adoption_survives_a_same_named_album_after_migration() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let parent = library
+            .create_album(CreateAlbum {
+                name: "Parent".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let original = library
+            .create_album(CreateAlbum {
+                name: super::LIKES_ALBUM_NAME.into(),
+                parent_id: None,
+            })
+            .unwrap();
+        insert_asset(&library, "liked");
+        library
+            .patch_asset_albums(AssetAlbumPatch {
+                asset_ids: vec!["liked".into()],
+                add_album_ids: vec![original.id.clone()],
+                remove_album_ids: vec![],
+            })
+            .unwrap();
+        // Migration 0121 leaves the designation unset and reads the unique name.
+        library
+            .connection()
+            .unwrap()
+            .execute("UPDATE library_settings SET likes_album_id=NULL", [])
+            .unwrap();
+        assert!(library.get_asset("liked").unwrap().favorite);
+        library
+            .create_album(CreateAlbum {
+                name: super::LIKES_ALBUM_NAME.into(),
+                parent_id: Some(parent.id),
+            })
+            .unwrap();
+        assert!(library.get_asset("liked").unwrap().favorite);
+        assert_eq!(library.ensure_likes_album().unwrap().id, original.id);
+        let stored: Option<String> = library
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT likes_album_id FROM library_settings WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored.as_deref(), Some(original.id.as_str()));
+    }
 
     #[test]
     fn likes_album_adopts_creates_and_keeps_renamed_id_protected() {

@@ -39,6 +39,7 @@ pub(crate) const ALBUM_CONTRACT_VERSION: i64 = 1;
 
 /// Command names, matching the server's exactly.
 pub(crate) const CREATE: &str = "createAlbum";
+pub(crate) const ENSURE_LIKES: &str = "ensureLikesAlbum";
 pub(crate) const RENAME: &str = "renameAlbum";
 pub(crate) const MOVE: &str = "moveAlbum";
 pub(crate) const APPEARANCE: &str = "updateAlbumAppearance";
@@ -318,14 +319,15 @@ pub(super) fn drop_album_intents_for_assets(
 
 /// Whether any Album intent still stands between the replica and a receive.
 ///
-/// Membership intents waiting for their Asset's upload do not count: the server cannot
+/// Refused intents remain as evidence, but no longer defer receive. Membership
+/// intents waiting for their Asset's upload also do not count: the server cannot
 /// describe that Asset yet, so no received change can overwrite their optimistic effect.
 pub(super) fn has_unresolved_intents(connection: &Connection) -> Result<bool, LibraryError> {
     Ok(connection.query_row(
         &format!(
             "SELECT EXISTS(SELECT 1 FROM album_authority_outbox o
-                 WHERE NOT (o.state = 'pending' AND o.command_type = '{MEMBERSHIP}'
-                            AND {waiting}))",
+                 WHERE o.state = 'pending'
+                   AND NOT (o.command_type = '{MEMBERSHIP}' AND {waiting}))",
             waiting = asset_waiting_sql("o.asset_id"),
         ),
         [],
@@ -508,13 +510,13 @@ pub(super) fn predicted_album_revision(
         Some((revision, false)) => revision,
     };
     let mut statement = connection
-        .prepare("SELECT command_type FROM album_authority_outbox WHERE album_id = ?1 ORDER BY seq")?;
+        .prepare("SELECT command_type FROM album_authority_outbox WHERE album_id = ?1 AND state = 'pending' ORDER BY seq")?;
     let commands = statement
         .query_map([album_id], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     for command in commands {
         match command.as_str() {
-            CREATE => revision = 1,
+            CREATE | ENSURE_LIKES => revision = 1,
             RENAME | MOVE | APPEARANCE | DELETE => revision += 1,
             _ => {}
         }
@@ -537,10 +539,12 @@ pub(super) fn predicted_membership_revision(
         .unwrap_or(0);
     let mut statement = connection.prepare(
         "SELECT 1 FROM album_authority_outbox
-         WHERE command_type = ?1 AND album_id = ?2 AND asset_id = ?3",
+         WHERE command_type = ?1 AND album_id = ?2 AND asset_id = ?3 AND state = 'pending'",
     )?;
     let queued = statement
-        .query_map(params![MEMBERSHIP, album_id, asset_id], |row| row.get::<_, i64>(0))?
+        .query_map(params![MEMBERSHIP, album_id, asset_id], |row| {
+            row.get::<_, i64>(0)
+        })?
         .collect::<Result<Vec<_>, _>>()?;
     revision += queued.len() as i64;
     Ok(revision)
@@ -724,12 +728,10 @@ impl Library {
 // Flush (Scope F)
 // ---------------------------------------------------------------------------
 
-/// Send pending Album intents oldest-first, stopping at the first unresolved one.
-///
-/// Stopping is the point: a later operation may depend on an earlier one, so sending
-/// around a blocked or unresolved intent could apply a rename before its create. A
-/// retry of one logical operation always presents the same operation id and the same
-/// stored bytes.
+/// Send pending Album intents oldest-first. A transport failure stops the pass;
+/// a definitive refusal is preserved for review along with dependent intents, while
+/// independent albums proceed. Only pending intents defer the receive half.
+/// Retrying an unchanged logical operation keeps its operation ID and stored bytes.
 ///
 /// One exception: a membership whose Asset's upload has not committed is skipped (it
 /// *waits*) rather than stopping the pass, and one that can never apply is retired with
@@ -741,6 +743,16 @@ pub(super) fn flush_outbox(
     token: &str,
     now: &str,
 ) -> Result<AlbumOutboxFlush, LibraryError> {
+    flush_outbox_using(library, now, &|body| client.album_command(body, token))
+}
+
+/// The production queue state machine, with transport supplied independently.
+pub(super) fn flush_outbox_using(
+    library: &Library,
+    now: &str,
+    send: &dyn Fn(&serde_json::Value) -> Result<AlbumCommandOutcome, LibraryError>,
+) -> Result<AlbumOutboxFlush, LibraryError> {
+    recover_legacy_likes_create(library)?;
     let mut report = AlbumOutboxFlush::default();
     // The lock is released between the two reads: `Library::connection()` takes a
     // non-reentrant mutex, so holding one guard across the other would deadlock.
@@ -754,10 +766,8 @@ pub(super) fn flush_outbox(
         entries.iter().filter(|entry| entry.state == "pending").count(),
     )
     .unwrap_or(u32::MAX);
-    report.blocked = u32::try_from(
-        entries.iter().filter(|entry| entry.is_blocked()).count(),
-    )
-    .unwrap_or(u32::MAX);
+    report.blocked = u32::try_from(entries.iter().filter(|entry| entry.is_blocked()).count())
+        .unwrap_or(u32::MAX);
     if entries.is_empty() {
         return Ok(report);
     }
@@ -772,7 +782,23 @@ pub(super) fn flush_outbox(
         return Err(LibraryError::AlbumAuthorityInactive);
     };
     let mut readiness_by_asset = PassReadiness::default();
-    for entry in entries {
+    let mut refused_albums = std::collections::HashSet::new();
+    let mut refused_memberships = std::collections::HashSet::new();
+    for snapshot in entries {
+        // Confirmation of ensureLikesAlbum can rewrite later rows. Read by sequence
+        // so this pass never sends the stale IDs from its initial bounded snapshot.
+        let entry = {
+            let connection = library.connection()?;
+            connection.query_row(
+                "SELECT seq, operation_id, command_type, album_id, asset_id, epoch, payload, state,
+                        conflict_code, conflict_detail, created_at
+                 FROM album_authority_outbox WHERE seq = ?1",
+                [snapshot.seq], decode_entry,
+            ).optional()?
+        };
+        let Some(entry) = entry else {
+            continue;
+        };
         if entry.is_blocked() {
             if entry.command_type == DELETE
                 && entry.conflict_code.as_deref() == Some(NOT_FOUND)
@@ -785,10 +811,39 @@ pub(super) fn flush_outbox(
                 report.dropped += 1;
                 continue;
             }
-            // An unresolved structural conflict stops delivery: a later operation may
-            // depend on this one, and receiving over the optimistic state would hide it.
-            report.stopped = true;
-            return Ok(report);
+            if entry.command_type == MEMBERSHIP {
+                refused_memberships.insert((entry.album_id.clone(), entry.asset_id.clone()));
+            } else {
+                refused_albums.insert(entry.album_id.clone());
+            }
+            continue;
+        }
+        if refused_albums.contains(&entry.album_id)
+            || (entry.command_type == MEMBERSHIP
+                && refused_memberships.contains(&(entry.album_id.clone(), entry.asset_id.clone())))
+            || entry
+                .payload
+                .get("parentId")
+                .and_then(|value| value.as_str())
+                .is_some_and(|parent| refused_albums.contains(parent))
+        {
+            // Keep dependent intent for review, but do not send it against a state
+            // its refused predecessor never established.
+            block_entry(
+                library,
+                entry.seq,
+                "albumDependencyRejected",
+                serde_json::Value::Null,
+                now,
+            )?;
+            if entry.command_type == MEMBERSHIP {
+                refused_memberships.insert((entry.album_id.clone(), entry.asset_id.clone()));
+            } else {
+                refused_albums.insert(entry.album_id.clone());
+            }
+            report.blocked += 1;
+            report.pending -= 1;
+            continue;
         }
         if entry.command_type == MEMBERSHIP {
             // A membership depends only on its own relation's earlier intents and on its
@@ -825,13 +880,19 @@ pub(super) fn flush_outbox(
             // under another epoch cannot present a meaningful expectation. It is
             // blocked rather than silently re-pointed, because guessing a cross-epoch
             // mapping is exactly the kind of implicit rebase this domain forbids.
-            block_entry(library, entry.seq, "epochMismatch", serde_json::Value::Null, now)?;
+            block_entry(
+                library,
+                entry.seq,
+                "epochMismatch",
+                serde_json::Value::Null,
+                now,
+            )?;
             report.blocked += 1;
             report.pending -= 1;
             report.stopped = true;
             return Ok(report);
         }
-        match client.album_command(&entry.payload, token)? {
+        match send(&entry.payload)? {
             AlbumCommandOutcome::Accepted(result) => {
                 confirm(library, &entry, &result, now)?;
                 report.pending -= 1;
@@ -887,12 +948,154 @@ pub(super) fn flush_outbox(
                 block_entry(library, entry.seq, &conflict.code, conflict.detail, now)?;
                 report.blocked += 1;
                 report.pending -= 1;
-                report.stopped = true;
-                return Ok(report);
+                if entry.command_type == MEMBERSHIP {
+                    refused_memberships.insert((entry.album_id.clone(), entry.asset_id.clone()));
+                } else {
+                    refused_albums.insert(entry.album_id.clone());
+                }
             }
         }
     }
     Ok(report)
+}
+
+/// Upgrade only the designated album's legacy create, including the known refusal.
+/// A fresh operation ID is required because the payload changes; the server may
+/// already have a receipt for the old create after a lost response.
+fn recover_legacy_likes_create(library: &Library) -> Result<(), LibraryError> {
+    let mut connection = library.connection()?;
+    let transaction = connection.transaction()?;
+    let designated: Option<String> = transaction.query_row(
+        "SELECT likes_album_id FROM library_settings WHERE singleton = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    let authority = read_authority(&transaction)?;
+    if let (Some(id), Some(authority)) = (designated, authority) {
+        for entry in read_outbox(&transaction)? {
+            if entry.album_id != id
+                || entry.command_type != CREATE
+                || entry.epoch != authority.epoch
+                || (entry.is_blocked()
+                    && entry.conflict_code.as_deref() != Some("duplicateAlbumName"))
+            {
+                continue;
+            }
+            let operation = uuid::Uuid::new_v4().to_string();
+            let body = serde_json::json!({
+                "libraryId":authority.library_id, "epoch":authority.epoch,
+                "contractVersion":ALBUM_CONTRACT_VERSION, "operationId":operation,
+                "commandType":ENSURE_LIKES, "albumId":id,
+            });
+            transaction.execute(
+                "UPDATE album_authority_outbox SET command_type = ?1, operation_id = ?2,
+                    payload = ?3, state = 'pending', conflict_code = NULL, conflict_detail = NULL WHERE seq = ?4",
+                params![ENSURE_LIKES, operation, body.to_string(), entry.seq],
+            )?;
+        }
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
+/// Adopt the server's stable designation and relink all local intent atomically.
+/// The local fields keep later optimistic edits until their commands settle.
+fn adopt_likes_result(
+    transaction: &Transaction<'_>,
+    entry: &AlbumOutboxEntry,
+    album: &crate::cloud::client::AlbumProjection,
+) -> Result<(), LibraryError> {
+    let old = &entry.album_id;
+    let new = &album.id;
+    if old != new {
+        // Updating the primary key and every reference is one deferred-FK transaction.
+        transaction.execute_batch("PRAGMA defer_foreign_keys = ON")?;
+        let exists: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM albums WHERE id = ?1)",
+            [new],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            transaction.execute("UPDATE albums SET id = ?2 WHERE id = ?1", params![old, new])?;
+        }
+        transaction.execute(
+            "UPDATE albums SET parent_id = ?2 WHERE parent_id = ?1",
+            params![old, new],
+        )?;
+        transaction.execute(
+            "INSERT OR IGNORE INTO asset_albums(asset_id, album_id)
+             SELECT asset_id, ?2 FROM asset_albums WHERE album_id = ?1",
+            params![old, new],
+        )?;
+        transaction.execute("DELETE FROM asset_albums WHERE album_id = ?1", [old])?;
+        transaction.execute("DELETE FROM albums WHERE id = ?1", [old])?;
+        transaction.execute(
+            "INSERT OR IGNORE INTO album_authority_membership_revisions
+                (album_id, asset_id, desired_state, entity_revision, updated_at)
+             SELECT ?2, asset_id, desired_state, entity_revision, updated_at
+             FROM album_authority_membership_revisions WHERE album_id = ?1",
+            params![old, new],
+        )?;
+        transaction.execute(
+            "DELETE FROM album_authority_membership_revisions WHERE album_id = ?1",
+            [old],
+        )?;
+        transaction.execute(
+            "DELETE FROM album_authority_revisions WHERE album_id = ?1",
+            [old],
+        )?;
+    }
+    transaction.execute(
+        "UPDATE library_settings SET likes_album_id = ?1 WHERE singleton = 1",
+        [new],
+    )?;
+    let mut revision = album.entity_revision;
+    for queued in read_outbox(transaction)? {
+        if queued.seq == entry.seq {
+            continue;
+        }
+        let mut body = queued.payload.clone();
+        let targets_likes = queued.album_id == *old;
+        let mut changed = false;
+        if targets_likes && old != new {
+            body["albumId"] = new.clone().into();
+            changed = true;
+        }
+        if body.get("parentId").and_then(|value| value.as_str()) == Some(old.as_str()) && old != new
+        {
+            body["parentId"] = new.clone().into();
+            changed = true;
+        }
+        // An ensure can return a renamed album at any revision. Only its unsent
+        // successors use this confirmed starting point; membership has its own CAS.
+        if targets_likes
+            && queued.seq > entry.seq
+            && queued.state == "pending"
+            && matches!(
+                queued.command_type.as_str(),
+                RENAME | MOVE | APPEARANCE | DELETE
+            )
+        {
+            if body
+                .get("expectedRevision")
+                .and_then(|value| value.as_i64())
+                != Some(revision)
+            {
+                body["expectedRevision"] = revision.into();
+                changed = true;
+            }
+            revision += 1;
+        }
+        if changed {
+            let operation = uuid::Uuid::new_v4().to_string();
+            body["operationId"] = operation.clone().into();
+            transaction.execute(
+                "UPDATE album_authority_outbox SET album_id = ?1, operation_id = ?2, payload = ?3 WHERE seq = ?4",
+                params![if targets_likes {new} else {&queued.album_id}, operation, body.to_string(), queued.seq],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Record one accepted operation and retire its intent in a single transaction.
@@ -910,6 +1113,9 @@ fn confirm(
     let mut connection = library.connection()?;
     let transaction = connection.transaction()?;
     if let Some(album) = &result.album {
+        if entry.command_type == ENSURE_LIKES {
+            adopt_likes_result(&transaction, entry, album)?;
+        }
         write_album_revision(
             &transaction,
             &album.id,
@@ -965,11 +1171,10 @@ fn drop_entry(
 
 /// Preserve an intent the authority rejected on structural grounds.
 ///
-/// The row keeps its payload and operation id, and the optimistic local effect stays
-/// visible. Rename/move/delete/membership conflicts are never rebased automatically:
-/// choosing a winner for a structural edit is a user decision, and the conflict
-/// resolution UI is a later batch. What matters now is that the conflict is durable
-/// and observable, so no other writer can be enabled on top of it.
+/// The row keeps its payload, operation ID and refusal detail for review. Refused
+/// commands are never retried or rebased automatically, but no longer prevent the
+/// receive half from projecting the server's accepted state. Sync status exposes
+/// the blocked count separately from deliverable work.
 pub(super) fn block_entry(
     library: &Library,
     seq: i64,

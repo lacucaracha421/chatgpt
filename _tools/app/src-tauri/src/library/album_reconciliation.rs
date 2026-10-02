@@ -258,6 +258,18 @@ impl Library {
                 })
             }
             Some(authority) => {
+                // Refused optimistic creates/renames can occupy a name needed by
+                // the accepted remote row. Replace from the complete baseline so
+                // that a uniqueness collision cannot wedge incremental receive.
+                // Rejected payloads remain in the outbox for review.
+                let has_refused: bool = self.connection()?.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM album_authority_outbox WHERE state = 'blocked')",
+                    [],
+                    |row| row.get(0),
+                )?;
+                if has_refused {
+                    return self.adopt_album_baseline(client, token, remote, true, Some(authority));
+                }
                 match self.apply_album_changes(client, token, authority) {
                     Ok((applied, cursor)) => Ok(AlbumReconciliation {
                         adopted: true,

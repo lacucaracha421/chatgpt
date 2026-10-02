@@ -3470,6 +3470,8 @@ fn classify_album_rejection(code: &str) -> AlbumRejection {
         "albumCycle" => AlbumRejection::Structural("albumCycle"),
         "albumHasChildren" => AlbumRejection::Structural("albumHasChildren"),
         "likesAlbumProtected" => AlbumRejection::Structural("likesAlbumProtected"),
+        "likesAlbumAmbiguous" => AlbumRejection::Structural("likesAlbumAmbiguous"),
+        "likesAlbumMissing" => AlbumRejection::Structural("likesAlbumMissing"),
         "albumExists" => AlbumRejection::Structural("albumExists"),
         "albumNotFound" => AlbumRejection::Structural("albumNotFound"),
         "invalidAlbumParent" => AlbumRejection::Structural("invalidAlbumParent"),
@@ -3608,10 +3610,13 @@ impl AlbumCommandResult {
             return Err(LibraryError::InvalidCloudResponse);
         }
         let album_id = field("albumId").ok_or(LibraryError::InvalidCloudResponse)?;
+        let ensure_likes =
+            field("commandType") == Some(crate::library::album_authority::ENSURE_LIKES);
         match (&self.album, &self.membership) {
             // A membership command answers with the relation it was asked about.
             (None, Some(membership)) => {
-                if membership.album_id != album_id
+                if ensure_likes
+                    || membership.album_id != album_id
                     || field("assetId") != Some(membership.asset_id.as_str())
                 {
                     return Err(LibraryError::InvalidCloudResponse);
@@ -3619,7 +3624,12 @@ impl AlbumCommandResult {
             }
             // A structural command answers with its own Album projection.
             (Some(album), None) => {
-                if album.id != album_id {
+                // Only ensureLikesAlbum may resolve the proposed ID to an existing
+                // designation. All envelope identity checks above still apply.
+                if (album.id != album_id && !ensure_likes)
+                    || (ensure_likes
+                        && (album.id.is_empty() || album.deleted || album.entity_revision < 1))
+                {
                     return Err(LibraryError::InvalidCloudResponse);
                 }
             }
@@ -4058,3 +4068,52 @@ impl CloudClient {
 
 #[path = "home_publications.rs"]
 mod home_publications;
+
+#[cfg(test)]
+mod album_likes_result_tests {
+    use super::*;
+
+    #[test]
+    fn album_ensure_accepts_an_existing_id_without_relaxing_other_identity_checks() {
+        let command = serde_json::json!({"libraryId":"library", "epoch":1,
+            "contractVersion":1, "operationId":"operation", "commandType":"ensureLikesAlbum",
+            "albumId":"local-likes"});
+        let body = serde_json::json!({"libraryId":"library", "epoch":1,
+            "contractVersion":1, "operationId":"operation", "commandType":"ensureLikesAlbum",
+            "changed":false, "changeSequence":null, "authorityCursor":3,
+            "updatedAt":"2026-10-02T00:00:00Z", "membership":null,
+            "album":{"id":"server-likes", "name":"Renamed likes", "parentId":null,
+                "iconKey":null, "colorKey":null, "deleted":false, "entityRevision":3}});
+        let result: AlbumCommandResult = serde_json::from_value(body.clone()).unwrap();
+        assert!(result.validate_against(&command).is_ok());
+        for (key, value) in [
+            ("libraryId", serde_json::json!("other")),
+            ("operationId", serde_json::json!("other")),
+            ("epoch", serde_json::json!(2)),
+            ("contractVersion", serde_json::json!(2)),
+            ("commandType", serde_json::json!("createAlbum")),
+        ] {
+            let mut invalid = body.clone();
+            invalid[key] = value;
+            let result: AlbumCommandResult = serde_json::from_value(invalid).unwrap();
+            assert!(result.validate_against(&command).is_err(), "{key}");
+        }
+        for (key, value) in [
+            ("deleted", serde_json::json!(true)),
+            ("id", serde_json::json!("")),
+            ("entityRevision", serde_json::json!(0)),
+        ] {
+            let mut invalid = body.clone();
+            invalid["album"][key] = value;
+            let result: AlbumCommandResult = serde_json::from_value(invalid).unwrap();
+            assert!(result.validate_against(&command).is_err(), "{key}");
+        }
+        // Ordinary creates must continue to echo the proposed ID exactly.
+        let mut create = command;
+        create["commandType"] = "createAlbum".into();
+        let mut response = body;
+        response["commandType"] = "createAlbum".into();
+        let result: AlbumCommandResult = serde_json::from_value(response).unwrap();
+        assert!(result.validate_against(&create).is_err());
+    }
+}

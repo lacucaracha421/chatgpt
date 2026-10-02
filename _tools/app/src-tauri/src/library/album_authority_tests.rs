@@ -378,7 +378,7 @@ mod integration {
             (report.dropped, report.no_op, report.blocked, report.pending),
             (2, 2, 1, 0)
         );
-        assert!(report.stopped);
+        assert!(!report.stopped);
         let queued = outbox(&library.connection().unwrap());
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].1, "renameAlbum");
@@ -393,7 +393,7 @@ mod integration {
     }
 
     #[test]
-    fn not_found_rename_and_relation_still_block_on_later_passes() {
+    fn not_found_rename_and_relation_remain_recorded_on_later_passes() {
         for relation in [false, true] {
             let (_temp, library) = open();
             let id = library
@@ -422,12 +422,12 @@ mod integration {
                 .flush_album_outbox_with(&client, "publisher-token")
                 .unwrap();
             handle.join().unwrap();
-            assert!(report.stopped);
+            assert!(!report.stopped);
             assert_eq!((report.blocked, report.dropped, report.pending), (1, 0, 0));
             let second = library
                 .flush_album_outbox_with(&client, "publisher-token")
                 .unwrap();
-            assert!(second.stopped);
+            assert!(!second.stopped);
             assert_eq!((second.blocked, second.dropped), (1, 0));
             let connection = library.connection().unwrap();
             assert_eq!(outbox(&connection).len(), 1);
@@ -467,7 +467,7 @@ mod integration {
             let report = library
                 .flush_album_outbox_with(&client, "publisher-token")
                 .unwrap();
-            assert!(report.stopped);
+            assert!(!report.stopped);
             assert_eq!((report.blocked, report.dropped), (1, 0));
             assert_eq!(outbox(&library.connection().unwrap()).len(), 1);
         }
@@ -826,10 +826,10 @@ mod integration {
     /// A structural conflict preserves the intent instead of discarding or rebasing it.
     ///
     /// Selecting a winner for a rename is a user decision. What must hold now is that
-    /// the conflict is durable and observable, that the optimistic local effect stays
-    /// visible, and that delivery stops rather than sending a dependent command over it.
+    /// the conflict is durable and observable. Its local effect remains until a
+    /// receive projects accepted server state, without stopping unrelated delivery.
     #[test]
-    fn a_structural_conflict_blocks_the_queue_and_keeps_the_local_edit() {
+    fn a_structural_conflict_is_preserved_without_stopping_the_queue() {
         let (_temp, library) = open();
         adopt(&library, 1, 0);
         let album = library
@@ -859,8 +859,12 @@ mod integration {
         handle.join().unwrap();
 
         assert_eq!(report.blocked, 1);
-        assert!(report.stopped);
-        assert_eq!(seen.lock().unwrap().len(), 1, "a blocked queue sends nothing more");
+        assert!(!report.stopped);
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            1,
+            "the refused command is sent only once"
+        );
 
         let connection = library.connection().unwrap();
         // The intent survives with its original identity and payload.
@@ -1169,7 +1173,7 @@ mod integration {
             handle.join().unwrap();
 
             assert_eq!(report.blocked, 1, "{code} must block, not retry");
-            assert!(report.stopped, "{code} must stop the FIFO pass");
+            assert!(!report.stopped, "{code} must not stop unrelated delivery");
             assert_eq!(
                 library
                     .connection()
@@ -1747,5 +1751,326 @@ mod waiting_for_asset_upload {
             sent.iter().map(|body| body["desiredState"].as_bool().unwrap()).collect::<Vec<_>>(),
             [true, false]
         );
+    }
+}
+
+mod likes_creation_race {
+    use super::*;
+
+    // A deterministic tablet-first response through the production validation and flush.
+    fn flush(
+        library: &Library,
+    ) -> (
+        Result<super::super::album_authority::AlbumOutboxFlush, LibraryError>,
+        Vec<serde_json::Value>,
+    ) {
+        use crate::cloud::client::{AlbumCommandOutcome, AlbumCommandResult, AlbumConflict};
+        let seen = std::cell::RefCell::new(Vec::new());
+        let report = super::super::album_authority::flush_outbox_using(
+            library,
+            "2026-10-02T00:00:00Z",
+            &|body| {
+                seen.borrow_mut().push(body.clone());
+                let kind = body["commandType"].as_str().unwrap();
+                if kind == "createAlbum"
+                    && (body["name"] == "마음에 들어요" || body["name"] == "Refused")
+                {
+                    return Ok(AlbumCommandOutcome::Conflict(AlbumConflict {
+                        code: "duplicateAlbumName".into(),
+                        detail: serde_json::json!({"code":"duplicateAlbumName"}),
+                    }));
+                }
+                let id = if kind == "ensureLikesAlbum" {
+                    "tablet-likes".into()
+                } else {
+                    body["albumId"].clone()
+                };
+                let member = kind == "setAlbumMembership";
+                let result: AlbumCommandResult = serde_json::from_value(serde_json::json!({
+                "libraryId":body["libraryId"], "epoch":body["epoch"], "contractVersion":1,
+                "operationId":body["operationId"], "commandType":kind,
+                "changed":kind != "ensureLikesAlbum", "changeSequence":null, "authorityCursor":5,
+                "updatedAt":"2026-10-02T00:00:00Z",
+                "album":if member { serde_json::Value::Null } else { serde_json::json!({
+                    "id":id,"name":"마음에 들어요","parentId":null,"iconKey":null,"colorKey":null,
+                    "deleted":false,"entityRevision":5
+                }) },
+                "membership":if member { serde_json::json!({"albumId":id,"assetId":body["assetId"],
+                    "desiredState":body["desiredState"],"entityRevision":1}) } else { serde_json::Value::Null }
+            })).unwrap();
+                result.validate_against(body)?;
+                Ok(AlbumCommandOutcome::Accepted(Box::new(result)))
+            },
+        );
+        (report, seen.into_inner())
+    }
+
+    #[test]
+    fn likes_race_queues_only_the_idempotent_envelope() {
+        let (_temp, library) = open();
+        adopt(&library, 1, 0);
+        let likes = library.ensure_likes_album().unwrap();
+        let rows = outbox(&library.connection().unwrap());
+        let body: serde_json::Value = serde_json::from_str(&rows[0].2).unwrap();
+        assert_eq!(body["commandType"], "ensureLikesAlbum");
+        assert_eq!(body["albumId"], likes.id);
+        assert_eq!(body.as_object().unwrap().len(), 6);
+    }
+
+    fn race(legacy_blocked: bool, force_ensure: bool) {
+        let (temp, library) = open();
+        adopt(&library, 1, 0);
+        let likes = library.ensure_likes_album().unwrap();
+        insert_asset(&library, "liked");
+        library
+            .patch_asset_albums(AssetAlbumPatch {
+                asset_ids: vec!["liked".into()],
+                add_album_ids: vec![likes.id.clone()],
+                remove_album_ids: vec![],
+            })
+            .unwrap();
+        let child = library
+            .create_album(CreateAlbum {
+                name: "Child".into(),
+                parent_id: Some(likes.id.clone()),
+            })
+            .unwrap();
+        library.rename_album(&likes.id, "My likes").unwrap();
+        if legacy_blocked || force_ensure {
+            let connection = library.connection().unwrap();
+            let rows = outbox(&connection);
+            let old: serde_json::Value = serde_json::from_str(&rows[0].2).unwrap();
+            let mut body = serde_json::json!({"libraryId":old["libraryId"],"epoch":1,"contractVersion":1,
+                "operationId":old["operationId"],"albumId":likes.id,"commandType":"ensureLikesAlbum"});
+            if legacy_blocked {
+                body["commandType"] = "createAlbum".into();
+                body["name"] = "마음에 들어요".into();
+                for key in ["parentId", "iconKey", "colorKey"] {
+                    body[key] = serde_json::Value::Null;
+                }
+            }
+            connection.execute("UPDATE album_authority_outbox SET command_type=?1,payload=?2,state=?3,conflict_code=?4 WHERE operation_id=?5",
+                rusqlite::params![body["commandType"].as_str().unwrap(),body.to_string(),
+                    if legacy_blocked {"blocked"} else {"pending"},if legacy_blocked {Some("duplicateAlbumName")} else {None},rows[0].0]).unwrap();
+        }
+        let (report, requests) = flush(&library);
+        let report = report.unwrap();
+        assert_eq!(
+            (report.pending, report.blocked, report.stopped),
+            (0, 0, false)
+        );
+        assert_eq!(requests.len(), 4);
+        assert_eq!(requests[0]["commandType"], "ensureLikesAlbum");
+        assert_eq!(requests[1]["albumId"], "tablet-likes");
+        assert_eq!(requests[2]["commandType"], "createAlbum");
+        assert_eq!(requests[2]["parentId"], "tablet-likes");
+        assert_eq!(requests[3]["albumId"], "tablet-likes");
+        assert_eq!(requests[3]["expectedRevision"], 5);
+        assert_eq!(library.ensure_likes_album().unwrap().id, "tablet-likes");
+        assert!(library.get_asset("liked").unwrap().favorite);
+        let connection = library.connection().unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT parent_id FROM albums WHERE id=?1",
+                    [&child.id],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+            "tablet-likes"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM albums WHERE id=?1",
+                    [&likes.id],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+            0
+        );
+        drop(connection);
+        drop(library);
+        let reopened = Library::open(temp.path()).unwrap();
+        assert_eq!(reopened.ensure_likes_album().unwrap().id, "tablet-likes");
+        assert!(reopened.get_asset("liked").unwrap().favorite);
+    }
+
+    #[test]
+    fn likes_race_adopts_the_tablet_id_and_relinks_pending_intents() {
+        race(false, false);
+    }
+
+    #[test]
+    fn likes_race_accepts_a_different_id_only_for_ensure() {
+        race(false, true);
+    }
+
+    #[test]
+    fn likes_race_recovers_a_previously_refused_legacy_create() {
+        race(true, false);
+    }
+
+    #[test]
+    fn likes_race_refused_membership_does_not_block_other_assets_in_the_album() {
+        use crate::cloud::client::{AlbumCommandOutcome, AlbumCommandResult, AlbumConflict};
+        let (_temp, library) = open();
+        let album = library.ensure_likes_album().unwrap();
+        adopt(&library, 1, 0);
+        for asset in ["conflicted", "independent"] {
+            insert_asset(&library, asset);
+            library
+                .patch_asset_albums(AssetAlbumPatch {
+                    asset_ids: vec![asset.into()],
+                    add_album_ids: vec![album.id.clone()],
+                    remove_album_ids: vec![],
+                })
+                .unwrap();
+        }
+        let seen = std::cell::RefCell::new(Vec::new());
+        let report = super::super::album_authority::flush_outbox_using(
+            &library,
+            "2026-10-02T00:00:00Z",
+            &|body| {
+                seen.borrow_mut().push(body["assetId"].clone());
+                if body["assetId"] == "conflicted" {
+                    return Ok(AlbumCommandOutcome::Conflict(AlbumConflict {
+                        code: "revisionConflict".into(),
+                        detail: serde_json::Value::Null,
+                    }));
+                }
+                let result: AlbumCommandResult = serde_json::from_value(serde_json::json!({
+                    "libraryId":body["libraryId"], "epoch":1, "contractVersion":1,
+                    "operationId":body["operationId"], "commandType":body["commandType"],
+                    "changed":true, "changeSequence":1, "authorityCursor":1,
+                    "updatedAt":"2026-10-02T00:00:00Z", "album":null,
+                    "membership":{"albumId":body["albumId"], "assetId":body["assetId"],
+                        "desiredState":true, "entityRevision":1}
+                }))
+                .unwrap();
+                result.validate_against(body)?;
+                Ok(AlbumCommandOutcome::Accepted(Box::new(result)))
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            (report.sent, report.blocked, report.pending, report.stopped),
+            (1, 1, 0, false)
+        );
+        assert_eq!(
+            seen.into_inner(),
+            vec![
+                serde_json::json!("conflicted"),
+                serde_json::json!("independent")
+            ]
+        );
+    }
+
+    #[test]
+    fn likes_race_relink_rolls_back_with_the_receipt_on_write_failure() {
+        let (_temp, library) = open();
+        adopt(&library, 1, 0);
+        let likes = library.ensure_likes_album().unwrap();
+        insert_asset(&library, "liked");
+        library
+            .patch_asset_albums(AssetAlbumPatch {
+                asset_ids: vec!["liked".into()],
+                add_album_ids: vec![likes.id.clone()],
+                remove_album_ids: vec![],
+            })
+            .unwrap();
+        let before = outbox(&library.connection().unwrap());
+        library
+            .connection()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER reject_relink BEFORE UPDATE ON album_authority_outbox
+             WHEN OLD.command_type = 'setAlbumMembership'
+             BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+            )
+            .unwrap();
+        assert!(flush(&library).0.is_err());
+        assert_eq!(outbox(&library.connection().unwrap()), before);
+        assert_eq!(library.ensure_likes_album().unwrap().id, likes.id);
+        assert!(library.get_asset("liked").unwrap().favorite);
+        assert!(!library
+            .list_albums()
+            .unwrap()
+            .iter()
+            .any(|a| a.id == "tablet-likes"));
+        library
+            .connection()
+            .unwrap()
+            .execute_batch("DROP TRIGGER reject_relink")
+            .unwrap();
+        assert!(flush(&library).0.is_ok());
+        assert_eq!(library.ensure_likes_album().unwrap().id, "tablet-likes");
+        assert!(library.get_asset("liked").unwrap().favorite);
+    }
+
+    #[test]
+    fn likes_race_refused_command_preserves_evidence_but_allows_send_and_receive() {
+        let (_temp, library) = open();
+        adopt(&library, 1, 0);
+        // A refusal of an ordinary create must not stop an independent album.
+        let refused = library
+            .create_album(CreateAlbum {
+                name: "Refused".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        library.rename_album(&refused.id, "Dependent edit").unwrap();
+        library
+            .create_album(CreateAlbum {
+                name: "Independent".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let (report, seen) = flush(&library);
+        let report = report.unwrap();
+        assert!(!report.stopped);
+        assert_eq!((report.blocked, report.pending), (2, 0));
+        assert_eq!(seen.len(), 2);
+        assert!(!super::super::album_authority::has_unresolved_intents(
+            &library.connection().unwrap()
+        )
+        .unwrap());
+        let change: crate::cloud::client::AlbumChange = serde_json::from_value(serde_json::json!({
+            "sequence":1,"authorityCursor":1,"commandType":"createAlbum",
+            "album":{"id":"remote","name":"Remote","parentId":null,"iconKey":null,"colorKey":null,"deleted":false,"entityRevision":1},
+            "membership":null,"changedAt":"2026-10-02T00:00:00Z","operationId":"remote-op"
+        })).unwrap();
+        library.apply_album_page_for_test(&[change], 1).unwrap();
+        assert!(library
+            .list_albums()
+            .unwrap()
+            .iter()
+            .any(|a| a.id == "remote"));
+        let second = flush(&library).0.unwrap();
+        assert!(!second.stopped);
+        assert_eq!(second.blocked, 2);
+        // A complete receive removes the refused optimistic name before installing
+        // the independently accepted server album with that same name.
+        let remote: crate::cloud::client::AlbumProjection =
+            serde_json::from_value(serde_json::json!({
+                "id":"server-winner", "name":"Dependent edit", "parentId":null,
+                "iconKey":null, "colorKey":null, "deleted":false, "entityRevision":1
+            }))
+            .unwrap();
+        library
+            .install_album_baseline_for_test(&[remote], &[], LIBRARY, 1, 1, 2)
+            .unwrap();
+        assert_eq!(library.list_albums().unwrap().len(), 1);
+        assert_eq!(library.list_albums().unwrap()[0].id, "server-winner");
+        assert_eq!(library.album_sync_status().unwrap().blocked_count, 2);
     }
 }
