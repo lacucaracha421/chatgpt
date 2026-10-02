@@ -3,6 +3,7 @@
 The application module is supplied at registration so its shared services and
 compatibility hooks are resolved at call time, including test monkeypatches.
 """
+import json
 import sqlite3
 from types import ModuleType
 from typing import Literal
@@ -13,6 +14,8 @@ from pydantic import BaseModel, Field
 import asset_authority
 import authority
 import classification_authority
+import library_thumbnails as thumbs
+import thumbnail_uploads
 
 
 api: ModuleType
@@ -56,7 +59,9 @@ class ReplicationCommit(BaseModel):
     asset_id: str = Field(min_length=1, max_length=64)
     kind: Literal["image", "gif", "video"]
     original: ReplicationVariant
-    thumbnail: ReplicationVariant
+    thumbnail: ReplicationVariant | None = None
+    thumbnail_mode: Literal["legacy", "retain", "upload"] = "legacy"
+    thumbnail_upload_id: str | None = Field(default=None, min_length=1, max_length=64)
     content_type: str
     collected_at: str | None = None
     source_published_at: str | None = None
@@ -78,6 +83,15 @@ def replication_variant_keys(asset_id: str) -> dict[str, str]:
         "original": f"library/{asset_id}/original",
         "thumbnail": f"library/{asset_id}/thumbnail",
     }
+
+
+def stored_variant_keys(row):
+    # The installed PC deserializes this as Map[str, str]. Omit a missing thumbnail
+    # rather than emit JSON null or invent a mutable object that was never published.
+    keys = {"original": row["object_key"]}
+    if row["thumbnail_key"]:
+        keys["thumbnail"] = row["thumbnail_key"]
+    return keys
 
 
 def _replication_row(db: sqlite3.Connection, asset_id: str) -> sqlite3.Row | None:
@@ -125,7 +139,8 @@ def replication_prepare(
                 "asset_id": request.asset_id,
                 "already_committed": True,
                 "metadata_revision": existing["metadata_revision"],
-                "object_keys": keys,
+                "object_keys": stored_variant_keys(existing),
+                "thumbnail_write_epoch": existing["thumbnail_write_epoch"],
             }
         if existing["object_key"] != keys["original"]:
             raise HTTPException(
@@ -134,6 +149,7 @@ def replication_prepare(
             )
     return {
         "asset_id": request.asset_id,
+        "thumbnail_write_epoch": existing["thumbnail_write_epoch"],
         "already_committed": False,
         "metadata_revision": existing["metadata_revision"],
         "object_keys": keys,
@@ -149,16 +165,22 @@ def replication_commit(
         raise HTTPException(status_code=400, detail="Invalid media kind")
     ts = api.now_iso()
     keys = api.replication_variant_keys(request.asset_id)
-    if (
-        request.original.object_key != keys["original"]
-        or request.thumbnail.object_key != keys["thumbnail"]
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Variant object keys do not match deterministic keys",
-        )
-    if request.thumbnail.size_bytes <= 0:
-        raise HTTPException(status_code=400, detail="Thumbnail variant required")
+    if request.original.object_key != keys["original"]:
+        raise HTTPException(status_code=400, detail="Variant object keys do not match deterministic keys")
+    if request.thumbnail_mode == "legacy":
+        if (request.thumbnail is None or request.thumbnail.object_key != keys["thumbnail"]
+                or request.thumbnail.size_bytes <= 0 or request.thumbnail_upload_id is not None):
+            raise HTTPException(status_code=400, detail="Valid legacy thumbnail variant required")
+    elif request.thumbnail is not None or (request.thumbnail_mode == "upload") != bool(request.thumbnail_upload_id):
+        raise HTTPException(status_code=400, detail="Use exactly one thumbnail mode")
+    if request.thumbnail_mode == "upload" and (request.expected_revision is None or not request.commit_id):
+        raise HTTPException(status_code=400, detail="Thumbnail upload requires expected_revision and commit_id")
+    context = thumbs.encode(request.model_dump())
+    verified = None
+    thumbnail_result = None
+    if request.thumbnail_mode == "upload":
+        verified = thumbs.verify_upload(api.get_db, thumbnail_uploads.storage(), api.R2_BUCKET,
+                                        request.asset_id, request.thumbnail_upload_id, context)
 
     with api.get_db() as db:
         db.execute("BEGIN IMMEDIATE")
@@ -200,10 +222,34 @@ def replication_commit(
             if not request.commit_id:
                 raise HTTPException(status_code=400, detail="commit_id required")
             if row["metadata_commit_id"] == request.commit_id:
-                return {"ok": True, "asset_id": request.asset_id, "committed": True,
-                        "committed_at": row["committed_at"], "object_keys": keys}
+                if verified is not None and verified.session["state"] != "committed":
+                    thumbs.fail(409, "thumbnailOperationConflict")
+                result = {"ok": True, "asset_id": request.asset_id, "committed": True,
+                          "committed_at": row["committed_at"],
+                          "object_keys": stored_variant_keys(row)}
+                if verified is not None:
+                    result["thumbnail_result"] = json.loads(verified.session["result"])
+                return result
             if row["metadata_revision"] != request.expected_revision:
                 raise HTTPException(status_code=409, detail="Stale metadata revision; prepare again")
+        if request.thumbnail_mode == "retain" and not row["committed"]:
+            thumbs.fail(409, "thumbnailAssetNotCommitted")
+        if verified is not None:
+            if verified.session["state"] == "committed":
+                # A session cannot be used to replay metadata after another commit.
+                thumbs.fail(409, "thumbnailOperationConflict")
+            thumbnail_result = thumbs.apply_upload(db, verified, context)
+            thumbnail_key = thumbnail_result["thumbnail_key"]
+        elif request.thumbnail_mode == "retain" or thumbs.is_immutable(row["thumbnail_key"]):
+            thumbnail_key = row["thumbnail_key"]
+        else:
+            thumbnail_key = request.thumbnail.object_key
+            if thumbnail_key != row["thumbnail_key"]:
+                db.execute("UPDATE assets SET thumbnail_metadata_key=NULL,thumbnail_size_bytes=NULL, "
+                           "thumbnail_content_type=NULL,thumbnail_sha256=NULL,thumbnail_revision=NULL, "
+                           "thumbnail_verified=0 WHERE id=?", (request.asset_id,))
+            db.execute("UPDATE assets SET thumbnail_write_epoch=thumbnail_write_epoch+1 WHERE id=?", (request.asset_id,))
+        thumbs.remember_key(db, thumbnail_key)
         db.execute(
             """
             INSERT INTO assets (
@@ -239,7 +285,7 @@ def replication_commit(
                 request.asset_id,
                 request.kind,
                 request.original.object_key,
-                request.thumbnail.object_key,
+                thumbnail_key,
                 request.content_type,
                 request.original.size_bytes,
                 request.original.sha256,
@@ -282,8 +328,12 @@ def replication_commit(
         if request.expected_revision is not None:
             db.execute("UPDATE assets SET metadata_revision=metadata_revision+1, metadata_commit_id=? WHERE id=?",
                        (request.commit_id, request.asset_id))
+        keys = stored_variant_keys({"object_key": request.original.object_key, "thumbnail_key": thumbnail_key})
         db.commit()
+    if verified is not None:
+        thumbs.cleanup_temp(thumbnail_uploads.storage(), api.R2_BUCKET, verified.session)
     return {
+        **({"thumbnail_result": thumbnail_result} if thumbnail_result is not None else {}),
         "ok": True,
         "asset_id": request.asset_id,
         "committed": True,

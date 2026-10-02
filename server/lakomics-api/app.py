@@ -165,14 +165,8 @@ from asset_uploads import (
 THUMBNAIL_RECEIPT_COLUMNS = ("thumbnail_metadata_key", "thumbnail_size_bytes", "thumbnail_content_type")
 
 
-def thumbnail_revision(row):
-    """Opaque token that changes whenever the Asset's thumbnail object changes.
-
-    Thumbnail keys are content-addressed (`derived/...`), so a regenerated thumbnail gets a
-    new key; clients key their caches and local URLs by this token.
-    """
-    key = row["thumbnail_key"]
-    return hashlib.sha256(key.encode()).hexdigest()[:16] if key else None
+from library_thumbnails import revision as thumbnail_revision
+import library_thumbnails
 
 
 def startup_replication():
@@ -209,17 +203,7 @@ def startup_replication():
         for column, definition in additions.items():
             if column not in columns:
                 db.execute(f"ALTER TABLE assets ADD COLUMN {column} {definition}")
-        # The ticket-only thumbnail receipt is filled lazily on cold tickets. Writing it must
-        # not move the Asset list generation, or every fill would look like a library change
-        # to the tablets (list re-reads, Photo Picker walks). Recreate the update trigger to
-        # fire on every column except the receipt, from the live column list.
-        watched = [row["name"] for row in db.execute("PRAGMA table_info(assets)")
-                   if row["name"] not in THUMBNAIL_RECEIPT_COLUMNS]
-        db.execute("DROP TRIGGER IF EXISTS asset_list_update")
-        db.execute("CREATE TRIGGER asset_list_update AFTER UPDATE OF "
-                   + ",".join(f'"{name}"' for name in watched)
-                   + " ON assets BEGIN UPDATE asset_list_generation SET generation=generation+1 "
-                     "WHERE singleton=1; END")
+        library_thumbnails.install(db)
         db.execute("CREATE INDEX IF NOT EXISTS idx_assets_committed ON assets(committed)")
         db.execute(
             """
@@ -327,6 +311,8 @@ def health():
 
 
 asset_uploads.register(app, sys.modules[__name__])
+import thumbnail_uploads
+thumbnail_uploads.register(app, sys.modules[__name__])
 
 
 # --- Online catalog transport v1 (PC -> VPS -> k-hentai) --------------------

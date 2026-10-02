@@ -85,7 +85,7 @@ class MediaWorkerTests(Fixture):
         for asset in ('gif', 'legacy'):
             self.assertEqual(self.metadata(asset), (800, 400, None))
             key = self.thumbnail_key(asset)
-            self.assertIn('/gif/', key)
+            self.assertTrue(key.startswith('derived/library-thumbnails/v1/'))
             with Image.open(io.BytesIO(self.s3.objects[key]['body'])) as tile:
                 self.assertEqual(tile.size, (512, 256))
                 self.assertEqual(getattr(tile, 'n_frames', 1), 1)
@@ -123,7 +123,7 @@ class MediaWorkerTests(Fixture):
             self.assertEqual((width, height), (160, 90))
             self.assertTrue(900 <= duration <= 1100)
             self.assertEqual(self.db.execute('SELECT kind FROM assets WHERE id=?', [asset]).fetchone()[0], kind)
-            self.assertIn('/video/', self.thumbnail_key(asset))
+            self.assertTrue(self.thumbnail_key(asset).startswith('derived/library-thumbnails/v1/'))
 
     def test_install_upgrades_old_image_only_trigger_without_historical_enqueue(self):
         self.db.executescript("DROP TRIGGER image_thumbnail_jobs_insert; CREATE TRIGGER image_thumbnail_jobs_insert AFTER INSERT ON assets WHEN NEW.kind='image' BEGIN INSERT OR IGNORE INTO image_thumbnail_jobs(asset_id,state,created_at,updated_at) VALUES(NEW.id,'queued',0,0); END;")

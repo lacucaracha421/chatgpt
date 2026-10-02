@@ -247,6 +247,8 @@ def _use_kind_limits(kind):
 
 
 def main(argv):
+    if len(argv) == 3 and argv[1] == "--verify-webp":
+        return verify_webp(argv[2])
     if len(argv) < 3 or len(argv) > 4:
         return EXIT_USAGE
     input_path, output_path = argv[1], argv[2]
@@ -283,6 +285,31 @@ def main(argv):
     if not _publish(output_path, payload, metadata):
         return EXIT_ENCODE_FAILED
     return EXIT_OK
+
+
+def verify_webp(input_path):
+    """Decode only, under the existing process limits; never rewrite the bytes."""
+    _use_kind_limits(KIND_IMAGE)
+    if not _apply_own_resource_limits():
+        return EXIT_UNSUPPORTED_PLATFORM
+    if not _pillow_available():
+        return EXIT_TOOL_UNAVAILABLE
+    from PIL import Image, ImageFile
+    ImageFile.LOAD_TRUNCATED_IMAGES = False
+    Image.MAX_IMAGE_PIXELS = MAX_PIXELS
+    warnings.simplefilter("error", Image.DecompressionBombWarning)
+    try:
+        if not 0 < os.path.getsize(input_path) <= MAX_OUTPUT_BYTES:
+            return EXIT_UNSUPPORTED_INPUT
+        with Image.open(input_path) as image:
+            if image.format != "WEBP":
+                return EXIT_UNSUPPORTED_INPUT
+            _check_pixel_budget(image.width, image.height)
+            _reject_animated(image)
+            image.load()
+        return EXIT_OK
+    except Exception:
+        return EXIT_UNSUPPORTED_INPUT
 
 
 def _publish(output_path, payload, metadata):

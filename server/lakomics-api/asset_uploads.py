@@ -11,6 +11,7 @@ from botocore.exceptions import ClientError
 from fastapi import HTTPException, Header
 from pydantic import BaseModel, Field
 
+import library_thumbnails as thumbs
 import asset_authority
 import authority
 
@@ -48,7 +49,10 @@ def list_assets(
             (limit,),
         ).fetchall()
 
-    return {"items": [dict(row) for row in rows]}
+    # Preserve the pre-v1 raw-list wire shape; adding a revision here would switch
+    # installed clients from ID-only cache keys before their adoption rollout.
+    internal = {"thumbnail_sha256", "thumbnail_revision", "thumbnail_write_epoch", "thumbnail_verified"}
+    return {"items": [{key: row[key] for key in row.keys() if key not in internal} for row in rows]}
 
 
 def create_asset(
@@ -65,12 +69,19 @@ def create_asset(
             # Serialize the ownership check with activation, commit and the upsert.
             db.execute("BEGIN IMMEDIATE")
             existing = db.execute("SELECT * FROM assets WHERE id=?", [asset_id]).fetchone()
+            thumbnail_key = asset.thumbnail_key
+            if existing is not None and thumbs.is_immutable(existing["thumbnail_key"]):
+                thumbnail_key = existing["thumbnail_key"]
+            if thumbnail_key and thumbnail_key.startswith(thumbs.PREFIX) and (
+                    existing is None or thumbnail_key != existing["thumbnail_key"]):
+                thumbs.fail(409, "thumbnailVerifiedUploadRequired")
+            thumbs.remember_key(db, thumbnail_key)
             active = authority.active_domain(db, asset_authority.DOMAIN)
             if (existing is not None and existing["committed"] == 1
                     and active is not None and asset_authority.authority_owns_lifecycle(
                         db, active["libraryId"], asset_id)):
                 fields = ("kind", "object_key", "thumbnail_key", "content_type", "size_bytes", "sha256")
-                if any(existing[field] != getattr(asset, field) for field in fields):
+                if any(existing[field] != (thumbnail_key if field == "thumbnail_key" else getattr(asset, field)) for field in fields):
                     raise HTTPException(status_code=409, detail={"code": "legacyWriterFenced"})
                 # An identical retry must not change timestamps or the authority feed.
                 return {"ok": True, "id": asset_id, "object_key": asset.object_key}
@@ -101,7 +112,7 @@ def create_asset(
                     asset_id,
                     asset.kind,
                     asset.object_key,
-                    asset.thumbnail_key,
+                    thumbnail_key,
                     asset.content_type,
                     asset.size_bytes,
                     asset.sha256,
@@ -109,6 +120,10 @@ def create_asset(
                     ts,
                 ),
             )
+            if existing is not None and thumbnail_key != existing["thumbnail_key"]:
+                db.execute("UPDATE assets SET thumbnail_metadata_key=NULL,thumbnail_size_bytes=NULL, "
+                           "thumbnail_content_type=NULL,thumbnail_sha256=NULL,thumbnail_revision=NULL, "
+                           "thumbnail_verified=0,thumbnail_write_epoch=thumbnail_write_epoch+1 WHERE id=?", (asset_id,))
             db.commit()
     except sqlite3.IntegrityError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
@@ -160,6 +175,10 @@ def create_upload_presign(
 
     if ".." in request.object_key or request.object_key.startswith("/"):
         raise HTTPException(status_code=400, detail="Invalid object key")
+
+    if (thumbs.block_legacy_uploads() and request.object_key.startswith("library/")
+            and request.object_key.endswith("/thumbnail")):
+        thumbs.fail(409, "thumbnailUpgradeRequired")
 
     with api.get_db() as db:
         committed = db.execute(

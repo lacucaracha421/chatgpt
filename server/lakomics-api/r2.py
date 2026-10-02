@@ -55,11 +55,11 @@ class _R2Client:
 _s3 = _R2Client()
 
 
-def thumbnail_storage_client():
+def thumbnail_storage_client(*, total_max_attempts=2):
     """Keep background transfers bounded without changing interactive media clients."""
     return _storage_client(Config(
         signature_version="s3v4", connect_timeout=5, read_timeout=15,
-        retries={"mode": "standard", "total_max_attempts": 2},
+        retries={"mode": "standard", "total_max_attempts": total_max_attempts},
         max_pool_connections=1,
     ))
 

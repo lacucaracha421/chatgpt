@@ -28,7 +28,7 @@ Safety rules enforced here, in order of how they fail
 * *Nothing is decoded in the API process.* The child is the only place Pillow exists,
   and it is bounded by wall clock, CPU time, address space and priority.
 * *Originals are never replaced.* The derived key is content-addressed
-  (legacy image namespace or a kind-specific media namespace), distinct from
+  (the encoded thumbnail byte digest), distinct from
   legacy ``library/{asset_id}/...`` keys, and it can be shared by identical content.
 * *Publication is compare-and-set.* ``thumbnail_key`` is written only when the Asset
   still has the same ``sha256``, still has no thumbnail, and is still a visible,
@@ -60,6 +60,7 @@ import time
 from pathlib import Path
 
 import head_cache
+import library_thumbnails as thumbs
 
 LOG = logging.getLogger("lakomics.image-thumbnails")
 
@@ -120,6 +121,7 @@ CAPTURE_IMPORT_SOURCE = "capture"
 # Error vocabulary. Stable strings, safe to log and safe to compare in tests.
 # ---------------------------------------------------------------------------
 E_RETRY = {
+    "thumbnailWriteInProgress": "thumbnailWriteInProgress",
     "storageReadFailed": "storageReadFailed",
     "storageWriteFailed": "storageWriteFailed",
     "encodeFailed": "encodeFailed",
@@ -185,7 +187,7 @@ def install(db) -> None:
 
 
 def derived_key(sha256: str, kind: str = IMAGE_KIND) -> str:
-    """Keys for future encodes; published keys are never rewritten on recipe changes."""
+    """Legacy recipe-key lookup; new encodes publish through thumbs.publish_buffer."""
     if kind == IMAGE_KIND:
         return f"{DERIVED_PREFIX}/{sha256}.webp"
     version = "v2" if kind == "video" else "v1"
@@ -623,6 +625,36 @@ class ImageThumbnailWorker:
                                  if size_bytes > source_limit
                                  else E_TERMINAL["sourceSizeUnknown"])
 
+        # Register write intent before the first network operation. PC prepare can
+        # supersede it by advancing the same epoch; migration observes the running job.
+        connection = self._connection()
+        with connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = visible_asset(connection, asset_id)
+            if current is None or not current["committed"]:
+                raise _TerminalError(E_TERMINAL["assetNotVisible"])
+            if any(current[field] != row[field] for field in thumbs.CAS_FIELDS):
+                raise _TerminalError(E_TERMINAL["assetChanged"])
+            if current["thumbnail_key"] is not None:
+                raise _TerminalError(E_TERMINAL["thumbnailAlreadyPresent"])
+            now = time.time()
+            session = connection.execute(
+                "SELECT MAX(expires_at) FROM thumbnail_upload_sessions "
+                "WHERE asset_id=? AND state='pending' AND expires_at>?",
+                [asset_id, now]).fetchone()
+            if session[0] is not None:
+                # Waiting for a PC upload is not a failed encode. Refund this claim
+                # and persist the wait atomically with the session check; a renewed
+                # session will be checked again when this job next becomes due.
+                connection.execute(
+                    f"UPDATE {TABLE} SET state='queued',attempts=attempts-1,lease_until=?,"
+                    f"last_error=?,updated_at=? WHERE asset_id=?",
+                    [session[0], E_RETRY["thumbnailWriteInProgress"], now, asset_id])
+                return
+            connection.execute("UPDATE assets SET thumbnail_write_epoch=thumbnail_write_epoch+1 WHERE id=?", [asset_id])
+            row = visible_asset(connection, asset_id)
+            before = thumbs.snapshot(connection, row)
+
         with tempfile.TemporaryDirectory(prefix="lakomics-thumb-") as directory:
             source = os.path.join(directory, "source")
             output = os.path.join(directory, "thumbnail.webp")
@@ -633,7 +665,7 @@ class ImageThumbnailWorker:
             payload = self._read_output(output)
             metadata = self._read_metadata(output + ".json", kind)
             self._check_stop()
-            self._publish(asset_id, sha256, payload, metadata, row, kind)
+            self._publish(asset_id, sha256, payload, metadata, row, kind, before)
 
     def _eligible_row(self, asset_id):
         """The visible Asset for a claimed job, or ``None``.
@@ -795,12 +827,12 @@ class ImageThumbnailWorker:
         except (OSError, ValueError, TypeError):
             raise _TerminalError(E_TERMINAL["metadataInvalid"]) from None
 
-    def _publish(self, asset_id, sha256, payload, metadata, source_row, kind):
+    def _publish(self, asset_id, sha256, payload, metadata, source_row, kind, before):
         """Publish thumbnail and missing display metadata in one guarded transaction."""
-        key = derived_key(sha256, kind)
+        digest = hashlib.sha256(payload).hexdigest()
         try:
-            self.s3.put_object(Bucket=self.bucket, Key=key, Body=payload,
-                               ContentType=DERIVED_CONTENT_TYPE)
+            thumbs.validate_webp(payload)
+            key = thumbs.publish_buffer(self.s3, self.bucket, payload, digest, deadline=time.monotonic() + 60)
         except Exception:
             raise _TransientError(E_RETRY["storageWriteFailed"])
         head_cache.ticket_heads.invalidate(self.s3, self.bucket, key)
@@ -823,6 +855,9 @@ class ImageThumbnailWorker:
             if row["thumbnail_key"] is not None:
                 connection.execute("ROLLBACK")
                 raise _TerminalError(E_TERMINAL["thumbnailAlreadyPresent"])
+            if not thumbs.matches(connection, row, before):
+                connection.execute("ROLLBACK")
+                raise _TerminalError(E_TERMINAL["assetChanged"])
             # The compare-and-set is one statement, so the guard and the write cannot be
             # separated: the row is updated only while it is *still* this content, still
             # lacks a thumbnail, and is still committed. A concurrent replication
@@ -836,10 +871,11 @@ class ImageThumbnailWorker:
             updated = connection.execute(
                 "UPDATE assets SET thumbnail_key=?, thumbnail_metadata_key=?, "
                 "thumbnail_size_bytes=?, thumbnail_content_type=?, updated_at=?, "
+                "thumbnail_sha256=?,thumbnail_revision=?,thumbnail_verified=1,thumbnail_write_epoch=thumbnail_write_epoch+1, "
                 "width=COALESCE(width,?), height=COALESCE(height,?), "
                 "duration_ms=COALESCE(duration_ms,?) "
                 "WHERE id=? AND sha256=? AND thumbnail_key IS NULL AND committed=1 AND kind=?",
-                [key, key, len(payload), DERIVED_CONTENT_TYPE, _now_iso(), width, height, metadata["duration_ms"],
+                [key, key, len(payload), DERIVED_CONTENT_TYPE, _now_iso(), digest, "t1." + digest, width, height, metadata["duration_ms"],
                  asset_id, sha256, source_row["kind"]]).rowcount
             if not updated:
                 connection.execute("ROLLBACK")

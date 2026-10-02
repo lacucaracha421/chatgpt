@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import io
+import hashlib
 import os
 import sqlite3
 import subprocess
@@ -17,6 +18,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 from contextlib import closing
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,7 @@ sys.path.insert(0, str(SERVER_DIR))
 
 import image_thumbnail_encode as encoder
 import image_thumbnails as worker_module
+import library_thumbnails as thumbs
 
 try:
     from PIL import Image
@@ -159,7 +162,7 @@ class FakeS3:
         body = stored["body"]
         if isinstance(body, Exception):
             raise body
-        return {"Body": io.BytesIO(body)}
+        return {"Body": io.BytesIO(body), "ContentLength": len(body), "ContentType": stored["content_type"]}
 
     def put_object(self, *, Bucket, Key, Body, ContentType):
         if self.put_failures > 0:
@@ -210,6 +213,7 @@ class Fixture(unittest.TestCase):
                  thumbnail_metadata_key TEXT, thumbnail_size_bytes INTEGER, thumbnail_content_type TEXT,
                  width INTEGER, height INTEGER, duration_ms INTEGER,
                  committed INTEGER NOT NULL DEFAULT 0, import_source TEXT,
+                 metadata_revision INTEGER NOT NULL DEFAULT 0, metadata_commit_id TEXT,
                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
                 CREATE TABLE asset_list_generation(singleton INTEGER PRIMARY KEY CHECK(singleton=1),generation INTEGER NOT NULL);
                 INSERT INTO asset_list_generation VALUES(1,0);
@@ -221,6 +225,7 @@ class Fixture(unittest.TestCase):
                  UPDATE asset_list_generation SET generation=generation+1 WHERE singleton=1; END;
                 CREATE TEMP VIEW visible_assets AS SELECT * FROM assets;
             """)
+            thumbs.install(db)
             worker_module.install(db)
             db.commit()
         self.db = self.open()
@@ -313,6 +318,7 @@ class TriggerTests(Fixture):
                 "VALUES('hist','image','images/inbox/hist/original','image/png',10,"
                 "'%s',1,'capture','t','t')" % ("a" * 64))
             db.commit()
+            thumbs.install(db)
             worker_module.install(db)
             db.commit()
             self.assertEqual(
@@ -626,12 +632,48 @@ class EncoderBehaviourTests(unittest.TestCase):
 @requires_pillow
 @requires_posix
 class WorkerRunTests(Fixture):
+    def test_pending_upload_wait_preserves_attempts_and_resumes_at_expiry(self):
+        for attempts in (0, worker_module.MAX_ATTEMPTS - 1):
+            with self.subTest(attempts=attempts):
+                asset_id = f'pending-{attempts}'
+                self.seed(asset_id, png_bytes())
+                self.db.execute(f'UPDATE {worker_module.TABLE} SET attempts=? WHERE asset_id=?',
+                                [attempts, asset_id])
+                self.db.commit()
+                session = thumbs.prepare(self.db, {
+                    'operation_id': asset_id, 'asset_id': asset_id,
+                    'sha256': 'a' * 64, 'size_bytes': 100, 'content_type': 'image/webp',
+                }, now=1000)
+                worker = self.worker()
+                epoch = session['epoch']
+                with mock.patch.object(worker_module.time, 'time', return_value=1000) as clock, \
+                        mock.patch.object(worker, '_download', wraps=worker._download) as download:
+                    self.assertTrue(worker.run_once())
+                    row = self.jobs(asset_id)[0]
+                    self.assertEqual((row['state'], row['attempts'], row['last_error']),
+                                     ('queued', attempts, 'thumbnailWriteInProgress'))
+                    self.assertEqual(row['lease_until'], session['expires_at'])
+                    for offset in (15, 75, 899):
+                        clock.return_value = 1000 + offset
+                        self.assertFalse(worker.run_once())
+                    download.assert_not_called()
+                    self.assertIsNone(self.thumbnail_key(asset_id))
+                    self.assertEqual(self.db.execute(
+                        'SELECT thumbnail_write_epoch FROM assets WHERE id=?',
+                        [asset_id]).fetchone()[0], epoch)
+                    clock.return_value = session['expires_at']
+                    self.assertTrue(worker.run_once())
+                    download.assert_called_once()
+                self.assertIsNotNone(self.thumbnail_key(asset_id))
+                row = self.jobs(asset_id)[0]
+                self.assertEqual((row['state'], row['attempts']), ('done', attempts + 1))
+
     def test_a_queued_asset_is_thumbnailed_and_published_with_a_derived_key(self):
         digest = self.seed(ASSET_IMAGE, png_bytes(size=(1600, 900)))
         worker = self.worker()
         self.assertTrue(worker.run_once())
         key = self.thumbnail_key(ASSET_IMAGE)
-        self.assertEqual(key, f"derived/image-thumbnails/v2/{digest}.webp")
+        self.assertEqual(key, thumbs.immutable_key(hashlib.sha256(self.s3.objects[key]["body"]).hexdigest()))
         self.assertIn(key, self.s3.puts)
         self.assertEqual(self.s3.objects[key]["content_type"], "image/webp")
         receipt = self.db.execute(
@@ -823,8 +865,7 @@ class WorkerRunTests(Fixture):
                         [ASSET_IMAGE])
         self.db.commit()
         self.assertTrue(worker.run_once())
-        self.assertEqual(self.thumbnail_key(ASSET_IMAGE),
-                         f"derived/image-thumbnails/v2/{digest}.webp")
+        self.assertTrue(self.thumbnail_key(ASSET_IMAGE).startswith(thumbs.PREFIX))
 
     def test_a_trashed_asset_is_not_published(self):
         self.seed(ASSET_IMAGE, png_bytes())
@@ -883,8 +924,7 @@ class WorkerRunTests(Fixture):
         worker = self.worker()
         worker.run_once()
         worker.run_once()
-        self.assertEqual(self.s3.puts,
-                         [f"derived/image-thumbnails/v2/{digest}.webp"] * 2)
+        self.assertEqual(self.s3.puts, [self.thumbnail_key(ASSET_IMAGE)])
         self.assertEqual(self.thumbnail_key(ASSET_IMAGE), self.thumbnail_key(ASSET_VIDEO))
 
     def test_a_timed_out_encoder_is_transient_and_leaves_no_artifact(self):
@@ -1108,8 +1148,7 @@ class WorkerLifecycleTests(Fixture):
                 time.sleep(0.05)
         finally:
             worker.stop()
-        self.assertEqual(self.thumbnail_key(ASSET_IMAGE),
-                         f"derived/image-thumbnails/v2/{digest}.webp")
+        self.assertTrue(self.thumbnail_key(ASSET_IMAGE).startswith(thumbs.PREFIX))
         self.assertEqual(self.jobs(ASSET_IMAGE)[0]["state"], "done")
 
 

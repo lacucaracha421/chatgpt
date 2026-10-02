@@ -1,9 +1,10 @@
 """Worker event delivery and ticket metadata invalidation, using local fixtures."""
+import hashlib
 import threading
 from unittest import mock
 
 import head_cache
-import image_thumbnails
+import library_thumbnails as thumbs
 from tests.test_image_thumbnails import Fixture, ASSET_IMAGE, png_bytes, requires_pillow, requires_posix
 
 
@@ -42,7 +43,6 @@ class WorkerOptimizationTests(Fixture):
     def test_publishing_derived_bytes_invalidates_previous_ticket_metadata(self):
         digest = self.seed(ASSET_IMAGE, png_bytes())
         worker = self.worker()
-        key = image_thumbnails.derived_key(digest)
         endpoint = "https://" + "a" * 32 + ".r2.cloudflarestorage.com"
         self.s3.meta = mock.Mock(endpoint_url=endpoint)
         storage = mock.Mock()
@@ -50,11 +50,17 @@ class WorkerOptimizationTests(Fixture):
         self.assertIsNot(storage, worker.s3)
         storage.head_object.return_value = {"ContentType": "image/webp", "ContentLength": 1}
         cache = head_cache.HeadMetadataCache()
-        with mock.patch.object(head_cache, "ticket_heads", cache):
+        publish = worker._publish
+        def publish_with_cached_head(asset_id, source_digest, payload, *args):
+            key = thumbs.immutable_key(hashlib.sha256(payload).hexdigest())
             cache.head(storage, worker.bucket, key, identity=(digest,))
             cache.head(storage, worker.bucket, key, identity=(digest,))
             storage.head_object.assert_called_once()
+            return publish(asset_id, source_digest, payload, *args)
+        with mock.patch.object(head_cache, "ticket_heads", cache), mock.patch.object(
+                worker, "_publish", side_effect=publish_with_cached_head):
             self.assertTrue(worker.run_once())
+            key = self.thumbnail_key(ASSET_IMAGE)
             size = len(self.s3.objects[key]["body"])
             storage.head_object.return_value = {"ContentType": "image/webp", "ContentLength": size}
             metadata = cache.head(storage, worker.bucket, key, identity=(digest,))

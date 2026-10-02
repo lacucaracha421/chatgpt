@@ -12,17 +12,19 @@ from collections import OrderedDict
 # Legacy artwork/thumbnail and backup keys still always use a fresh HEAD.
 _IMMUTABLE_KEY = re.compile(
     r"(?:work-artwork/mobile/[a-f0-9]{64}|"
-    r"derived/(?:image-thumbnails/v[12]|media-thumbnails/v1/gif|"
+    r"derived/(?:library-thumbnails/v1|image-thumbnails/v[12]|media-thumbnails/v1/gif|"
     r"media-thumbnails/v2/video)/[a-f0-9]{64}\.webp)"
 )
 
 
-def immutable_metadata(key, size_bytes, content_type):
+def immutable_metadata(key, size_bytes, content_type, *, verified=False):
     """Use only with a committed, key-bound receipt, never upload input alone.
 
     Missing/legacy metadata falls back to HEAD. Fresh recovery requests must
     bypass this helper; it does not establish object existence in storage.
     """
+    if key.startswith("derived/library-thumbnails/") and not verified:
+        return None
     if (_IMMUTABLE_KEY.fullmatch(key) and type(size_bytes) is int and size_bytes > 0
             and isinstance(content_type, str) and content_type.strip()):
         return {"ContentLength": size_bytes, "ContentType": content_type}

@@ -17,6 +17,7 @@ from fastapi import HTTPException, Header, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
+import library_thumbnails
 import asset_authority
 import head_cache
 
@@ -137,7 +138,8 @@ def _ticket_head(asset, variant, object_key, *, fresh_head=False, verify_digest=
         if (variant == "thumbnail" and object_key.startswith("derived/")
                 and object_key == fields.get("thumbnail_metadata_key")):
             metadata = head_cache.immutable_metadata(
-                object_key, fields.get("thumbnail_size_bytes"), fields.get("thumbnail_content_type"))
+                object_key, fields.get("thumbnail_size_bytes"), fields.get("thumbnail_content_type"),
+                verified=library_thumbnails.trusted_receipt(fields))
         elif verified_original and object_key == f"work-artwork/mobile/{digest}":
             # This is the existing byte-addressed original namespace. Neither
             # library/{id}/original nor inbox keys become immutable from a DB SHA.

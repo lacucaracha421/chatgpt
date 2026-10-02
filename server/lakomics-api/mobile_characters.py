@@ -9,6 +9,7 @@ from fastapi import Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from starlette.concurrency import run_in_threadpool
 
+import library_thumbnails
 import asset_filters
 import asset_list_query
 import character_exclusions
@@ -392,6 +393,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                 else:
                     sql, params = query.select(
                         f"a.payload, asset.width, asset.height, asset.duration_ms, asset.created_at, "
+                        f"asset.thumbnail_key, asset.thumbnail_revision, "
                         f"asset.collected_at, asset.id, {asset_list_query.SORT_AT} AS mobile_sort_at",
                         after=after, limit=limit + 1)
                     rows = db.execute(sql, params).fetchall()
@@ -403,6 +405,9 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                     for row in rows:
                         item = json.loads(row["payload"])
                         item.update(asset_filters.technical_fields(row))
+                        item["thumbnail_available"] = bool(row["thumbnail_key"])
+                        if "thumbnail_revision" in item:
+                            item["thumbnail_revision"] = library_thumbnails.revision(row)
                         item.update(collected_at=row["collected_at"], created_at=row["created_at"])
                         items.append(item)
                     payload = {"revision": revision, "filterVersion": asset_filters.FILTER_VERSION,
@@ -415,7 +420,8 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             # technical fields, so a page cannot show a dimension from one instant while
             # hiding from another, and metadata repair is visible to the filter itself.
             rows = db.execute(f"""SELECT m.position, a.payload,
-                                        asset.width, asset.height, asset.duration_ms
+                                        asset.width, asset.height, asset.duration_ms,
+                                        asset.thumbnail_key, asset.thumbnail_revision
                                   FROM mobile_character_members AS m
                                   JOIN mobile_character_assets AS a ON a.id = m.asset_id
                                   JOIN visible_assets AS asset ON asset.id = m.asset_id
@@ -444,8 +450,12 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             for row in rows:
                 item = json.loads(row["payload"])
                 item.update(asset_filters.technical_fields(row))
+                item["thumbnail_available"] = bool(row["thumbnail_key"])
+                if "thumbnail_revision" in item:
+                    item["thumbnail_revision"] = library_thumbnails.revision(row)
                 items.append(item)
             return {"revision": revision, "filterVersion": asset_filters.FILTER_VERSION, "searchVersion": 1,
+                    "listGeneration": list_generation(db),
                     "searchFilters": {"tag": list(filters.tags), "artist": filters.artist},
                     "items": items, "totalCount": total,
                     "sourceCount": scope["sourceCount"], "has_more": more,
