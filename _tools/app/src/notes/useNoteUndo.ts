@@ -31,21 +31,26 @@ export function useNoteUndo(noteId: string | null, apply: (field: NoteUndoField,
     clear();
   }, [clear, noteId]);
 
+  const grouping = useRef(true);
+  const breakGroup = useCallback(() => { grouping.current = false; }, []);
+
   const record = useCallback((field: NoteUndoField, before: NoteUndoValue, after: NoteUndoValue) => {
     if (!activeNote.current || JSON.stringify(before) === JSON.stringify(after)) return;
     const now = Date.now();
     const current = past.current[past.current.length - 1];
-    if (current && current.field === field && now - current.at <= NOTE_UNDO_GROUP_MS) {
+    if (grouping.current && current && current.field === field && now - current.at <= NOTE_UNDO_GROUP_MS) {
       current.after = copyValue(after);
       current.at = now;
     } else {
       past.current.push({ field, before: copyValue(before), after: copyValue(after), at: now });
     }
+    grouping.current = true;
     future.current = [];
     setVersion((value) => value + 1);
   }, []);
 
   const undo = useCallback(() => {
+    grouping.current = false;
     const step = past.current.pop();
     if (!step) return false;
     future.current.push(step);
@@ -55,6 +60,7 @@ export function useNoteUndo(noteId: string | null, apply: (field: NoteUndoField,
   }, []);
 
   const redo = useCallback(() => {
+    grouping.current = false;
     const step = future.current.pop();
     if (!step) return false;
     past.current.push(step);
@@ -64,5 +70,5 @@ export function useNoteUndo(noteId: string | null, apply: (field: NoteUndoField,
   }, []);
 
   void version;
-  return { record, undo, redo, canUndo: past.current.length > 0, canRedo: future.current.length > 0, clear };
+  return { record, breakGroup, undo, redo, canUndo: past.current.length > 0, canRedo: future.current.length > 0, clear };
 }

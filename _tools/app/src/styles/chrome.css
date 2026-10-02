@@ -30,7 +30,7 @@
 .workspace-index__scroll.workspace-index__scroll::-webkit-scrollbar-thumb { min-height: 32px; border-radius: 3px; background: transparent; }
 .workspace-index__scroll.workspace-index__scroll:is(:hover, :focus-within)::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--color-muted) 45%, transparent); }
 .workspace-index__scroll.workspace-index__scroll::-webkit-scrollbar-thumb:hover, .workspace-index__scroll.workspace-index__scroll::-webkit-scrollbar-thumb:active { background: color-mix(in srgb, var(--color-muted) 70%, transparent); }
-.workspace-index__assets[hidden] { display: none; }
+.workspace-index__assets[hidden], .workspace-index[hidden] { display: none; }
 .workspace-index .classification-sidebar--embedded { width: 100%; min-width: 0; max-width: none; height: auto; padding: 0 var(--space-1) var(--space-2) var(--space-2); overflow: visible; border: 0; scrollbar-gutter: auto; }
 .workspace-index .classification-sidebar__all { display: grid; gap: 2px; padding: var(--space-2) 0; }
 /* 즐겨찾기: one wrapping row of chips instead of full rows that repeat the tree. */
@@ -95,7 +95,6 @@
 .workspace-content > .library-content { flex: 1; min-height: 0; height: auto; }
 .view-toolbar.view-toolbar--context { justify-content: flex-start; min-height: var(--chrome-context-height); height: var(--chrome-context-height); gap: var(--space-2); padding: 0 var(--space-4); background: var(--color-bg); border-bottom: 1px solid var(--color-border); }
 .view-toolbar.view-toolbar--context h2 { min-width: 0; max-width: 52%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-lg); font-weight: 500; }
-.chrome-location-mark { width: 6px; height: 6px; flex: none; background: var(--color-accent); opacity: .8; }
 .chrome-context-status { margin-left: auto; color: var(--color-muted); display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--text-sm); white-space: nowrap; }
 .workspace-content .collection-browser__heading { display: none; }
 .workspace-content .collection-browser__stage { padding-top: var(--space-4); }

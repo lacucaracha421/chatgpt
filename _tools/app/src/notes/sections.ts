@@ -37,14 +37,14 @@ function linesOf(body: string): Line[] {
   return lines;
 }
 
-function fenceStart(text: string): { mark: "`" | "~"; length: number } | null {
+export function fenceStart(text: string): { mark: "`" | "~"; length: number } | null {
   const match = /^ {0,3}(`{3,}|~{3,})/.exec(text);
   if (!match) return null;
   if (match[1]![0] === "`" && text.slice(match[0].length).includes("`")) return null;
   return { mark: match[1]![0] as "`" | "~", length: match[1]!.length };
 }
 
-function fenceEnd(text: string, fence: { mark: "`" | "~"; length: number }): boolean {
+export function fenceEnd(text: string, fence: { mark: "`" | "~"; length: number }): boolean {
   const trimmed = text.trim();
   if (trimmed.length < fence.length) return false;
   if (!trimmed[0] || trimmed[0] !== fence.mark) return false;

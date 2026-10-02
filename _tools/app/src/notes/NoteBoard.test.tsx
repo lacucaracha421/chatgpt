@@ -41,8 +41,8 @@ it("shows only the title of a hidden note on its card", async () => {
   expect(card).not.toHaveTextContent("sk-secret-value");
 });
 
-it("keeps line breaks but not Markdown syntax in text previews", () => {
-  expect(previewLines("# 오늘\n\n\n- [ ] 우유\n**빵**\n```\ncode\n```")).toBe("오늘\n\n우유\n빵\ncode");
+it("keeps plain lines and literal formatting while removing heading/task markers in previews", () => {
+  expect(previewLines("# 오늘\n\n\n- [ ] 우유\n**빵**\n```\ncode\n```")).toBe("오늘\n\n\n우유\n**빵**\n```\ncode\n```");
 });
 
 it("shows pinned notes first with a pin mark, and checklist, secret, label and sync-pending states on the cards", async () => {
@@ -88,7 +88,6 @@ it("replaces the board with a full editor, and closes it with the button or Esc 
   await userEvent.keyboard("{Escape}");
   expect(screen.queryByRole("textbox", { name: "메모 제목" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: /둘째 메모/ }));
-  await userEvent.click(screen.getByText("둘", { selector: ".notes-rendered *" }));
   await waitFor(() => expect(screen.getByRole("textbox", { name: "메모 본문" })).toHaveFocus());
   await userEvent.keyboard("{Escape}");
   expect(screen.queryByRole("textbox", { name: "메모 제목" })).not.toBeInTheDocument();

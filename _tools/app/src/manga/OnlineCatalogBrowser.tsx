@@ -1,6 +1,8 @@
+import { Scrubber } from "../shared/ui/scrubber/Scrubber";
+import type { ScrubberSort } from "../shared/ui/scrubber/scrubberModel";
 import { EllipsisHorizontalIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { SearchSurface } from "../layout/SearchSurface";
 import { ChromeQueryBadge } from "../layout/ChromeSearch";
@@ -682,6 +684,8 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     observer.observe(target);
     return () => observer.disconnect();
   }, [canAutoLoad, results]);
+  const scrubberSort = useMemo<ScrubberSort>(() => results && displayedView.current?.sort === "latest"
+    ? {kind: "date", values: results.works.map(work => work.posted)} : {kind: "fallback"}, [results]);
   return <section className="manga-browser online-catalog" aria-label="온라인 망가">
     {active && <MangaToolbar source={requestedSource ?? scope} onSourceChange={selectSource} localCount={localCount} bookmarkCount={bookmarkCount ?? knownBookmarkCount}
       filterToken={<MangaIndexToken filter={indexFilter} onClear={() => onClearIndexFilter?.()} />}
@@ -710,7 +714,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     </div>}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     <div className="online-catalog__workspace">
-    <div ref={gridScroll} className="manga-browser__content online-catalog__content">
+    <div ref={gridScroll} tabIndex={0} className="manga-browser__content online-catalog__content">
       <div className="online-catalog__frame" style={{ display: "contents" }} inert={loading || requestedSource === "local"}>
       {loadError && !results ? <EmptyState title="온라인 카탈로그를 불러오지 못했습니다" />
         : !status ? <MangaSkeletonGrid />
@@ -741,6 +745,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
         </>}
       </div>
     </div>
+    <Scrubber input="pointer" scrollRef={gridScroll} total={results?.works.length ?? 0} sort={scrubberSort} hidden={!active || loading || requestedSource === "local" || detailOpen || !!viewer} onEndReached={moreAvailable ? () => { void loadMoreRef.current(); } : undefined} />
     <div ref={panelHost} className="online-catalog__panel-host">
       {!viewer && active && <OverlayPanel open={detailOpen} title="상세" ariaLabel="망가 상세" closeLabel="상세 닫기" width={380} returnFocusRef={detailReturnFocus}
         onOpenChange={(open) => { if (!open) closeDetail(); }} actions={detailGroup && detailGroup.versionCount >= 2 && <span onKeyDown={(event) => {

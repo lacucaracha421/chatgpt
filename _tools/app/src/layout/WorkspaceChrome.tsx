@@ -19,7 +19,24 @@ export type ViewChromeSpec = {
   searchSurface?: ChromeSearchSurfaceSpec;
   status?: ReactNode;
 };
+const INDEX_HIDDEN_KEY = "lakomics.workspace.indexHidden.v1";
+function readIndexHidden(): Record<string, true> {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(INDEX_HIDDEN_KEY) ?? "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter(([, hidden]) => hidden === true));
+  } catch {
+    return {};
+  }
+}
 export function WorkspaceChromeProvider({ scope, children }: PropsWithChildren<{ scope: string }>) {
+  const [indexHidden, updateIndexHidden] = useState(readIndexHidden);
+  const setIndexHidden = useCallback((area: string, hidden: boolean) => {
+    const next = { ...indexHidden };
+    if (hidden) next[area] = true; else delete next[area];
+    updateIndexHidden(next);
+    try { localStorage.setItem(INDEX_HIDDEN_KEY, JSON.stringify(next)); } catch { /* Keep the toggle usable when storage is unavailable. */ }
+  }, [indexHidden]);
   const [targets, setTargets] = useState<Targets>({ navigation: null, actions: null, search: null, settings: null, header: null, details: null });
   const [registration, setRegistration] = useState<ChromeMeta | null>(null);
   const setTarget = useCallback((slot: Slot, element: HTMLElement | null) => {
@@ -39,8 +56,8 @@ export function WorkspaceChromeProvider({ scope, children }: PropsWithChildren<{
   const owner = meta?.search ? meta.owner : null;
   const applySearch = useCallback((query: string) => { if (owner) searchActions.current.get(owner)?.apply?.(query); }, [owner]);
   const openSearch = useCallback((draft: string) => { if (owner) searchActions.current.get(owner)?.open?.(draft); }, [owner]);
-  const value = useMemo(() => ({ scope, targets, setTarget, publish, unpublish, meta, setSearchActions, applySearch, openSearch }),
-    [scope, targets, setTarget, publish, unpublish, meta, setSearchActions, applySearch, openSearch]);
+  const value = useMemo(() => ({ scope, targets, setTarget, publish, unpublish, meta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden }),
+    [scope, targets, setTarget, publish, unpublish, meta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden]);
   return <ChromeContext.Provider value={value}><ChromePresenceContext.Provider value>{children}</ChromePresenceContext.Provider></ChromeContext.Provider>;
 }
 

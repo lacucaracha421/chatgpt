@@ -1,27 +1,19 @@
 import { EyeSlashIcon, LockClosedIcon, WalletIcon } from "@heroicons/react/24/outline";
 import { BookmarkIcon } from "../shared/ui/ArchiveIcons";
-import { byOrder, noteColorValue, stripMarkdown } from "./model";
-import { isSecret, noteKind, type Note } from "./store";
+import { byOrder, checklistMarkdown, noteColorValue } from "./model";
+import { isSecret, type Note } from "./store";
 import { LEDGER } from "./ledger/model";
 import { ledgerCard } from "./ledger/card";
+import { memoItems, memoMode, memoPreview, parseMemo } from "./memo/memoModel";
 import { noteDateLabel } from "./format";
 import type { CSSProperties } from "react";
 
 const CHECKLIST_ROWS = 8;
 const BODY_LINES = 12;
 
-/** Text preview that keeps line breaks but not Markdown syntax; never runs the renderer. */
+/** Plain preview with section and task markers removed; retains line breaks and literal formatting. */
 export function previewLines(body: string): string {
-  const lines: string[] = [];
-  for (const raw of body.split("\n")) {
-    if (/^\s*```/.test(raw)) continue;
-    const line = stripMarkdown(raw);
-    if (!line && (!lines.length || !lines[lines.length - 1])) continue;
-    lines.push(line);
-    if (lines.length >= BODY_LINES + 1) break;
-  }
-  while (lines.length && !lines[lines.length - 1]) lines.pop();
-  return lines.join("\n");
+  return memoPreview(body).split(/\r\n|\n|\r/).slice(0, BODY_LINES + 1).join("\n").trimEnd();
 }
 
 export function CardBody({ note, notes }: { note: Note; notes: Note[] }) {
@@ -46,13 +38,14 @@ export function CardBody({ note, notes }: { note: Note; notes: Note[] }) {
       {card.next && <span className="notes-card__ledger-next">{card.next}</span>}
     </span>;
   }
-  if (noteKind(note) === "checklist" && !note.readOnly) {
-    const items = [...(note.items ?? [])].sort((a, b) => Number(a.checked) - Number(b.checked) || byOrder(a, b));
+  const body = note.type === "checklist" ? checklistMarkdown(note.items ?? []) : note.body;
+  if (note.type === "checklist" || memoMode(body) === "todo") {
+    const items = memoItems(parseMemo(body)).filter(item => item.task).map(item => ({ id: item.id, text: item.text, checked: item.done })).sort((a,b) => Number(a.checked)-Number(b.checked));
     if (!items.length) return <span className="notes-card__text is-empty">빈 체크리스트</span>;
     const done = items.filter((item) => item.checked).length;
     const shown = items.slice(0, CHECKLIST_ROWS);
     return <>
-      <span className="notes-card__progress"><span className="notes-card__progress-bar" aria-hidden="true"><span style={{ width: `${(done / items.length) * 100}%` }} /></span><span>{done}/{items.length}</span></span>
+      <span className="notes-card__progress"><span className="notes-card__progress-bar" aria-hidden="true"><span style={{ width: `${(done / items.length) * 100}%` }} /></span><span>{done}/{items.length} 완료</span></span>
       <span className="notes-card__checklist">
         {shown.map((item) => <span key={item.id} className={`notes-card__check${item.checked ? " is-done" : ""}`}><span className="notes-card__box" aria-hidden="true" /><span className="notes-card__check-text">{item.text.trim() || " "}</span></span>)}
         {items.length > shown.length && <span className="notes-card__more">외 {items.length - shown.length}개</span>}

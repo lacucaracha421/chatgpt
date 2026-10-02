@@ -102,7 +102,19 @@
       "pillRadius": 0,
       "legacyToken": 11
     },
+    "_tools/app/src/collections/case/CaseMaterials.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
     "_tools/app/src/collections/case/CollectionCase.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/collections/case/LightCase.css": {
       "offScaleSpacing": 0,
       "offRoleFontSize": 0,
       "pillRadius": 0,
@@ -119,6 +131,12 @@
       "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 3
+    },
+    "_tools/app/src/collections/mangaShelf.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
     },
     "_tools/app/src/collections/physical/physicalCollections.css": {
       "offScaleSpacing": 3,
@@ -204,11 +222,35 @@
       "pillRadius": 0,
       "legacyToken": 0
     },
+    "_tools/app/src/manga/MangaDetail.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/manga/MangaIndex.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/src/manga/reader.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
     "_tools/app/src/notes/ledger/ledger.css": {
       "offScaleSpacing": 32,
       "offRoleFontSize": 5,
       "pillRadius": 0,
       "legacyToken": 24
+    },
+    "_tools/app/src/notes/memo/memo.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
     },
     "_tools/app/src/notes/noteCard.css": {
       "offScaleSpacing": 0,
@@ -217,10 +259,10 @@
       "legacyToken": 0
     },
     "_tools/app/src/notes/notes.css": {
-      "offScaleSpacing": 17,
+      "offScaleSpacing": 12,
       "offRoleFontSize": 0,
       "pillRadius": 0,
-      "legacyToken": 8
+      "legacyToken": 7
     },
     "_tools/app/src/shared/markdown/markdown.css": {
       "offScaleSpacing": 1,
@@ -233,6 +275,12 @@
       "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 5
+    },
+    "_tools/app/src/shared/ui/scrubber/scrubber.css": {
+      "offScaleSpacing": 2,
+      "offRoleFontSize": 1,
+      "pillRadius": 0,
+      "legacyToken": 0
     },
     "_tools/app/src/similarity/video/VideoSimilarity.css": {
       "offScaleSpacing": 0,
@@ -251,6 +299,12 @@
       "offRoleFontSize": 2,
       "pillRadius": 0,
       "legacyToken": 21
+    },
+    "_tools/app/src/styles/collectionSpines.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
     },
     "_tools/app/src/styles/controls.css": {
       "offScaleSpacing": 0,
@@ -279,8 +333,8 @@
   },
   "tablet": {
     "_tools/app/mobile-client/Catalog.css": {
-      "offScaleSpacing": 24,
-      "offRoleFontSize": 21,
+      "offScaleSpacing": 23,
+      "offRoleFontSize": 20,
       "pillRadius": 1,
       "legacyToken": 0
     },
@@ -350,6 +404,12 @@
       "pillRadius": 0,
       "legacyToken": 0
     },
+    "_tools/app/mobile-client/collectionShelf.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
     "_tools/app/mobile-client/exchange.css": {
       "offScaleSpacing": 30,
       "offRoleFontSize": 19,
@@ -393,8 +453,14 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/notes.css": {
-      "offScaleSpacing": 18,
-      "offRoleFontSize": 11,
+      "offScaleSpacing": 16,
+      "offRoleFontSize": 10,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/overlay.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 0
     },
@@ -405,8 +471,14 @@
       "legacyToken": 0
     },
     "_tools/app/mobile-client/scrubber.css": {
-      "offScaleSpacing": 2,
-      "offRoleFontSize": 3,
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
+      "pillRadius": 0,
+      "legacyToken": 0
+    },
+    "_tools/app/mobile-client/sectionShade.css": {
+      "offScaleSpacing": 0,
+      "offRoleFontSize": 0,
       "pillRadius": 0,
       "legacyToken": 0
     },

@@ -1,7 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { MagnifyingGlassPlusIcon } from "@heroicons/react/24/outline";
 import { HeartIcon } from "@heroicons/react/24/solid";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AssetSummary } from "../library/types";
 import { artistHandle } from "../artists/format";
 import { assetDragIds, type InternalDragPayload } from "../shared/interaction/pointerDrag";
@@ -12,7 +12,8 @@ import { buildJustifiedRows } from "./justifiedRows";
 import { buildJustifiedGalleryRows, type JustifiedGalleryRow } from "./galleryRows";
 import { buildMasonryLayout, collectedDate, masonryMove, type GalleryLayout } from "./masonryLayout";
 import { assetThumbnailUrl, assetUrl, thumbnailUrl, vaultAssetUrl, vaultPlaybackUrl, vaultThumbnailUrl } from "./mediaUrl";
-import { AssetGalleryScrollbar } from "./AssetGalleryScrollbar";
+import { Scrubber } from "../shared/ui/scrubber/Scrubber";
+import type { ScrubberSort } from "../shared/ui/scrubber/scrubberModel";
 import { AssetVideoTileMedia } from "./AssetVideoTileMedia";
 import "../styles/tokens.css";
 
@@ -34,6 +35,7 @@ type AssetGalleryProps = {
   fullDateHeadings?: boolean;
   scopeKey?: string;
   totalCount?: number | null;
+  scrubberHidden?: boolean;
   selectedAssetIds?: ReadonlySet<string>;
   focusAssetId?: string | null;
   targetRowHeight?: number;
@@ -66,7 +68,7 @@ type AssetGalleryProps = {
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
-export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, totalCount = null, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, totalCount = null, scrubberHidden = false, selectedAssetIds = new Set(), focusAssetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   void _metadataVisible;
   const scrollRef = useRef<HTMLDivElement>(null);
   const introRef = useRef<HTMLDivElement>(null);
@@ -288,6 +290,20 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
       return tiles;
     });
   }, [layout, masonry, rows, gap]);
+  const scrubberOrder = useMemo<ScrubberSort>(() => groupDates
+    ? {kind: "date", values: items.map(asset => asset.collectedAt)} : {kind: "fallback"}, [groupDates, items]);
+  const seekAsset = useCallback((index: number) => {
+    const tile = positionedTiles[index], element = scrollRef.current;
+    if (!tile || !element) return;
+    element.scrollTop = Math.max(0, Math.min(introHeight + tile.top, element.scrollHeight - element.clientHeight));
+    setScrollTop(Math.max(0, element.scrollTop - introHeight));
+    if (index >= items.length - 1 && hasNextPage) onLoadNextPage?.();
+  }, [positionedTiles, introHeight, items.length, hasNextPage, onLoadNextPage]);
+  const indexAtScroll = useCallback(() => {
+    const top = (scrollRef.current?.scrollTop ?? 0) - introHeight;
+    const tile = positionedTiles.find(tile => tile.top + tile.height > top);
+    return tile?.index ?? Math.max(0, items.length - 1);
+  }, [positionedTiles, introHeight, items.length]);
   // Reflow may move a painted tile just outside overscan. Retain those cells until the next
   // scroll/scope change, so a count or layout change never reloads their media elements.
   const paintedRef = useRef({ scopeKey, scrollTop, ids: new Set<string>() });
@@ -300,7 +316,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
     <div
       ref={scrollRef}
       className="asset-gallery__scroll"
-      data-native-scrollbar="true"
+      tabIndex={0}
       role={intro ? undefined : "listbox"}
       aria-label={intro ? undefined : "자산"}
       aria-multiselectable={intro ? undefined : true}
@@ -380,7 +396,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
       </div>
     </div>
     {quickPreview && !privacyMode && <div className="asset-gallery__quick-preview" style={quickPreviewLayout(quickPreview)}><img src={mediaSource === "vault" ? vaultAssetUrl(quickPreview.asset.id) : assetUrl(quickPreview.asset.id)} alt={`${quickPreview.asset.title || quickPreview.asset.originalName} 빠른 미리보기`} draggable={false} onError={cancelQuickPreview} /></div>}
-    <AssetGalleryScrollbar scrollRef={scrollRef} totalHeight={reservedTotal + introHeight} />
+    <Scrubber input="pointer" hidden={scrubberHidden} scrollRef={scrollRef} total={items.length} sort={scrubberOrder} onSeek={seekAsset} indexAtScroll={indexAtScroll} />
   </div>;
 }
 

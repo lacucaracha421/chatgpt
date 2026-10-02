@@ -71,12 +71,12 @@ describe('home model', () => {
   it('shows the five checklist lines and falls back to latest ledger entries when categories are absent', () => {
     const rows = memoRows(pinnedNotes(), '2026-09-25');
     expect(rows[0]).toMatchObject({kind: 'checklist', done: 2, total: 3});
-    expect((rows[0] as Extract<typeof rows[number], {kind: 'checklist'}>).items[0]).toEqual({text: '우유', checked: true});
+    expect((rows[0] as Extract<typeof rows[number], {kind: 'checklist'}>).items[0]).toEqual({text: '계란', checked: false});
     expect(rows[1]).toMatchObject({kind: 'ledger', amount: 750000, available: 750000, spent: 250000, categories: [], latest: [{label: '마트', amount: 250000}]});
   });
-  it('unescapes Markdown punctuation in the Home memo preview', () => {
+  it('keeps literal formatting in the shared plain memo preview', () => {
     const rows = memoRows([note('plain', {type: 'text', title: '메모', body: '\\# nai \\# 확장 **읽기**'})], '2026-09-25');
-    expect(rows[0]).toMatchObject({kind: 'text', snippet: '# nai # 확장 읽기'});
+    expect(rows[0]).toMatchObject({kind: 'text', snippet: '# nai \\# 확장 **읽기**'});
   });
   it('keeps shelf ordering and today counts deterministic', () => {
     const release = (id: string, date: string | null) => ({id, name: id, unread: 1, caption: {kind: 'new' as const, text: '신간 1권', date}});

@@ -101,3 +101,18 @@ describe("nextInSeriesRows", () => {
     expect(seriesRows(collections, new Map([["unknown", value]]), new Map())).toEqual([]);
   });
 });
+
+it('previews body-derived todos and legacy checklists in the existing Home row shape', async () => {
+  const { memoRows } = await import('./homeModel');
+  const base = { title: '메모', body: '', pinned: true, deleted: false, createdAt: '2026-10-02', updatedAt: '2026-10-02', localRevision: 1, pending: false, conflict: false };
+  const rows = memoRows([
+    { ...base, id: 'todo', body: '## 오늘\n* [X] 끝\n+ [ ] 시작' },
+    { ...base, id: 'legacy', type: 'checklist', items: [{ id: 'a', text: '**literal**', checked: false, order: 'A' }] },
+    { ...base, id: 'mixed', body: '## 글\n- [ ] 할 일\n**literal**' },
+    { ...base, id: 'fenced', body: '```\n- [ ] code\n```' },
+  ], '2026-10-02');
+  expect(rows[0]).toMatchObject({ kind: 'checklist', done: 1, total: 2, items: [{ text: '시작', checked: false }, { text: '끝', checked: true }] });
+  expect(rows[1]).toMatchObject({ kind: 'checklist', items: [{ text: '**literal**', checked: false }] });
+  expect(rows[2]).toMatchObject({ kind: 'text', snippet: '글 할 일 **literal**' });
+  expect(rows[3]).toMatchObject({ kind: 'text', snippet: '``` - [ ] code ```' });
+});

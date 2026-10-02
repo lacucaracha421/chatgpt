@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>홈 · 더보기 · 찾기</title>
+<!-- Loads the app's real tokens; the frames and proposed parts are local. -->
+<link rel="stylesheet" href="../../../_tools/app/src/styles/tokens.css">
+<style>
+/* Layout: one section per proposal (홈, 더보기, 찾기), each with a short decision text and a PC frame. */
+:root { --page: #0e0f10; color-scheme: dark;
+  --c1: linear-gradient(150deg, #4f7d5a, #b9c98f 60%, #3d3550); --c2: linear-gradient(150deg, #5a6aa8, #c4a2c0 60%, #353a50);
+  --c3: linear-gradient(150deg, #a8645a, #e0b58f 60%, #3b2f3a); --c4: linear-gradient(150deg, #3f8a8a, #9fd0c0 60%, #2f3d48); }
+body { margin: 0; background: var(--page); color: var(--color-text); font: 400 var(--type-body)/var(--line-ui) var(--font-ui); }
+.doc { max-width: 1240px; margin: 0 auto; padding-block: 32px 80px; padding-inline: 16px; display: flex; flex-direction: column; gap: 40px; }
+h1 { margin: 0; font-size: var(--text-title-large); font-weight: 600; text-wrap: balance; }
+h2 { margin: 0; font-size: var(--type-title); font-weight: 600; }
+.lead { margin: 8px 0 0; color: var(--color-muted); max-width: 80ch; line-height: var(--line-copy); }
+section.prop { display: flex; flex-direction: column; gap: 12px; }
+.notes { margin: 0; padding-left: 20px; color: var(--color-muted); max-width: 92ch; line-height: var(--line-copy); display: flex; flex-direction: column; gap: 5px; }
+.notes b { color: var(--color-text); font-weight: 600; }
+.scroll { overflow-x: auto; padding-bottom: 4px; }
+.pick { display: inline-flex; padding: 2px; background: var(--color-surface); border-radius: var(--radius-control); align-self: flex-start; }
+.pick button { min-height: 30px; padding: 0 14px; border: 0; border-radius: var(--radius-mark); background: transparent; color: var(--color-muted); font: inherit; cursor: pointer; }
+.pick button[aria-pressed="true"] { background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+.pick button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+
+/* PC frame */
+.win { position: relative; width: 1180px; height: 640px; display: grid; grid-template-columns: 64px minmax(0, 1fr); border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; background: var(--color-bg); }
+.rail { background: var(--color-sidebar); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 4px; color: var(--color-faint); font-size: 11px; }
+.rail span { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 52px; padding: 6px 0; border-radius: var(--radius-control); }
+.rail span i { width: 18px; height: 16px; border: 1.5px solid currentColor; border-radius: 3px; }
+.rail span.on { color: var(--color-text); background: var(--color-surface); }
+.rail .grow { flex: 1; }
+.rail .more.on { color: var(--color-text); background: var(--color-surface-hover); }
+.main { display: flex; flex-direction: column; min-width: 0; }
+.top { height: var(--toolbar-height); flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--color-border); }
+.top b { font-weight: 600; } .top small { color: var(--color-faint); font-size: var(--type-meta); }
+.label { display: flex; align-items: center; gap: 8px; color: var(--color-faint); font-size: var(--type-meta); }
+.label::before { content: ""; width: 5px; height: 5px; background: var(--color-section-mark); flex: none; }
+.label::after { content: ""; flex: 1; height: 1px; background: var(--color-border); }
+.num { font-variant-numeric: tabular-nums; }
+[hidden] { display: none !important; }
+
+/* Home proposal */
+.home { padding: 20px 24px; display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 28px; overflow: hidden; }
+.todo { display: flex; flex-direction: column; gap: 4px; }
+.todo .row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 40px; padding: 0 8px; border-radius: var(--radius-mark); }
+.todo .row:hover { background: var(--color-surface); }
+.todo .row i { width: 16px; height: 16px; border: 1.5px solid var(--color-muted); border-radius: 3px; }
+.todo .row i.round { border-radius: 50%; }
+.todo .row small { color: var(--color-faint); font-size: var(--type-meta); display: block; }
+.todo .row .n { color: var(--color-text); font-weight: 600; }
+.todo .row .soon { color: var(--color-filter-text); background: var(--color-filter-selected); font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: var(--radius-mark); }
+.todo .warn i { border-color: var(--color-danger); }
+.shelf { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.shelf div { display: flex; flex-direction: column; gap: 6px; font-size: var(--type-meta); color: var(--color-faint); }
+.shelf div b { color: var(--color-text); font-weight: 500; font-size: var(--type-body); }
+.shelf span.cv { aspect-ratio: 3 / 4; border-radius: 2px; max-width: 100%; }
+.shelf .d { display: flex; justify-content: space-between; }
+.shelf .d .dd { color: var(--color-text); }
+.right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.revisit { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 4px; height: 150px; }
+.revisit span { border-radius: 2px; }
+.moved { color: var(--color-faint); font-size: var(--type-meta); line-height: var(--line-copy); }
+.moved b { color: var(--color-muted); font-weight: 500; }
+.now { padding: 20px 24px; display: grid; grid-template-columns: 220px 1fr 260px; gap: 18px; overflow: hidden; }
+.now .box { background: var(--color-surface); border-radius: var(--radius-mark); min-height: 80px; display: grid; place-items: center; color: var(--color-faint); font-size: var(--type-meta); }
+
+/* 더보기 anchored to the rail */
+.more-panel { position: absolute; left: 68px; bottom: 8px; width: 280px; background: var(--color-surface-elevated); border: 1px solid var(--color-border-strong); box-shadow: var(--shadow-dialog); padding: 8px; display: flex; flex-direction: column; gap: 2px; z-index: 4; }
+.more-panel .h { padding: 6px 8px; color: var(--color-faint); font-size: var(--type-meta); }
+.more-panel .it { display: flex; justify-content: space-between; align-items: center; min-height: 34px; padding: 0 8px; border-radius: var(--radius-mark); }
+.more-panel .it:hover, .more-panel .it.on { background: var(--color-surface-hover); }
+.more-panel .it small { color: var(--color-faint); }
+.more-panel hr { border: 0; border-top: 1px solid var(--color-border); margin: 4px 0; width: 100%; }
+.old-panel { position: absolute; left: 280px; top: 470px; width: 318px; height: 150px; border: 1px dashed var(--color-border-strong); color: var(--color-faint); font-size: var(--type-meta); display: grid; place-items: center; }
+
+/* 찾기 */
+.find { position: absolute; left: 50%; top: 70px; transform: translateX(-50%); width: 640px; background: var(--color-surface-elevated); border: 1px solid var(--color-border-strong); box-shadow: var(--shadow-dialog); z-index: 4; display: flex; flex-direction: column; }
+.find .q { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 16px; border-bottom: 1px solid var(--color-border); }
+.find .q b { font-weight: 500; } .find .q .caret { width: 1.5px; height: 20px; background: var(--color-text); }
+.find .q small { margin-left: auto; color: var(--color-faint); font-size: var(--type-meta); }
+.find .scopes { display: flex; gap: 6px; padding: 10px 16px 0; flex-wrap: wrap; }
+.find .scopes span { font-size: var(--type-meta); padding: 3px 9px; border-radius: var(--radius-mark); box-shadow: inset 0 0 0 1px var(--color-border); color: var(--color-muted); }
+.find .scopes span.on { background: var(--color-filter-selected); color: var(--color-filter-text); box-shadow: none; font-weight: 600; }
+.find .grp { padding: 8px 8px 4px; display: flex; flex-direction: column; gap: 2px; }
+.find .grp > small { padding: 4px 8px; color: var(--color-faint); font-size: var(--type-meta); }
+.find .r { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; min-height: 42px; padding: 0 8px; border-radius: var(--radius-mark); }
+.find .r.on { background: var(--color-surface-hover); }
+.find .r .th { width: 30px; height: 38px; border-radius: 2px; }
+.find .r .th.sq { height: 30px; border-radius: 50%; }
+.find .r .th.ic { background: transparent; border: 1.5px solid var(--color-muted); width: 18px; height: 18px; border-radius: 3px; margin-left: 6px; }
+.find .r small { color: var(--color-faint); font-size: var(--type-meta); display: block; }
+.find .r em { font-style: normal; color: var(--color-accent); }
+.find .r kbd { font: inherit; font-size: 11px; color: var(--color-faint); }
+.find .foot { display: flex; gap: 14px; padding: 10px 16px; border-top: 1px solid var(--color-border); color: var(--color-faint); font-size: var(--type-meta); }
+.dim { position: absolute; inset: 0; background: var(--color-overlay); z-index: 3; }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <h1>홈 줄이기 · 더보기 위치 · 찾기 다시 그리기</h1>
+    <p class="lead">백로그 12번(홈), 4번(더보기 · 찾기) 시안입니다. 세 가지 모두 PC를 먼저 그렸고, 정해지면 태블릿은 같은 규칙으로 따라갑니다.</p>
+  </header>
+
+  <section class="prop" aria-labelledby="h-home">
+    <h2 id="h-home">1. 홈: 지금 손댈 것만</h2>
+    <ol class="notes">
+      <li><b>왼쪽 「오늘 할 것」</b> 한 줄 목록: 검토할 것(0이 아닌 것만), 가계부 알림(무료 끝남 D-3, 결제 예정), 고정한 할 일 메모의 남은 항목, 문제가 있을 때만 연결 상태. 아무것도 없으면 「오늘 할 것이 없습니다」 한 줄.</li>
+      <li><b>오른쪽</b>: 2주 안에 나오는 신간(D-n)과 「1년 전 오늘」만 남깁니다. 둘 다 날짜가 지나면 의미가 없는 것들입니다.</li>
+      <li><b>빠지는 것</b>: 자산 현황 → 통계, 상태(정상일 때) → 상단 「확인」, 작가 · AV 배우 추천 → 작가 화면, 메모 카드 전체 · 가계부 숫자 → 메모 화면.</li>
+    </ol>
+    <div class="pick" id="homePick"><button type="button" aria-pressed="true" data-v="new">제안</button><button type="button" aria-pressed="false" data-v="old">지금 (칸 8개)</button></div>
+    <div class="scroll"><div class="win">
+      <nav class="rail" aria-label="화면"><span class="on"><i></i>홈</span><span><i></i>에셋</span><span><i></i>컬렉션</span><span><i></i>망가</span><span><i></i>메모</span><span><i></i>전송</span><span class="grow"></span><span><i></i>찾기</span><span><i></i>더보기</span></nav>
+      <div class="main"><div class="top"><b>홈</b><small>10.2 금요일</small></div>
+        <div id="homeNew" class="home">
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div class="label">오늘 할 것 · 6</div>
+            <div class="todo">
+              <div class="row"><i class="round"></i><span>Netflix 무료 끝남<small>11.02부터 ₩17,000 결제</small></span><span class="soon">D-3</span></div>
+              <div class="row"><i class="round"></i><span>Claude Max 결제<small>10.09 · ₩145,000</small></span><span class="soon">D-7</span></div>
+              <div class="row"><i></i><span>미분류 에셋</span><span class="n num">27</span></div>
+              <div class="row"><i></i><span>유사 이미지 검토</span><span class="n num">2쌍</span></div>
+              <div class="row"><i></i><span>처리 대기</span><span class="n num">3</span></div>
+              <div class="row"><i class="round"></i><span>피드백 · PC 앱<small>남은 항목 5개</small></span><span class="n num">5</span></div>
+            </div>
+          </div>
+          <div class="right">
+            <div class="label">2주 안에 나오는 신간</div>
+            <div class="shelf">
+              <div><span class="cv" style="background:var(--c1)"></span><span class="d"><span>10.8</span><span class="dd">D-6</span></span><b>별과 바다 사이 4</b></div>
+              <div><span class="cv" style="background:var(--c2)"></span><span class="d"><span>10.9</span><span class="dd">D-7</span></span><b>안녕, 에리 5</b></div>
+              <div><span class="cv" style="background:var(--c3)"></span><span class="d"><span>10.10</span><span class="dd">D-8</span></span><b>룩 백 6</b></div>
+              <div><span class="cv" style="background:var(--c4)"></span><span class="d"><span>10.14</span><span class="dd">D-12</span></span><b>유리 정원 2</b></div>
+              <div><span class="cv" style="background:var(--c1)"></span><span class="d"><span>10.15</span><span class="dd">D-13</span></span><b>새벽 우체국 3</b></div>
+            </div>
+            <div class="label">1년 전 오늘 · 8장</div>
+            <div class="revisit"><span style="background:var(--c3)"></span><span style="background:var(--c2)"></span><span style="background:var(--c4)"></span></div>
+          </div>
+        </div>
+        <div id="homeOld" class="now" hidden>
+          <div class="box">메모 카드 · 가계부 숫자</div><div class="box">캘린더 (신간 · 발매)</div><div class="box">AV 배우</div>
+          <div class="box">자산 현황</div><div class="box">다시 보기 · 작가</div><div class="box">검토</div>
+          <div class="box">상태 (서버 · 태블릿 · 클라우드 · 카탈로그)</div><div class="box" style="visibility:hidden"></div><div class="box" style="visibility:hidden"></div>
+        </div>
+      </div>
+    </div></div>
+  </section>
+
+  <section class="prop" aria-labelledby="h-more">
+    <h2 id="h-more">2. 더보기: 누른 버튼 옆에서 열기</h2>
+    <ol class="notes">
+      <li>지금은 화면 가운데쯤(점선 자리)에 떠서 어디서 나온 건지 알기 어렵습니다. <b>왼쪽 아래 더보기 버튼 바로 오른쪽에, 아래끝을 맞춰</b> 엽니다.</li>
+      <li>내용은 그대로(확인할 것 · 이동), 머리 제목과 닫기 버튼은 뺍니다. 밖을 누르거나 Esc로 닫힙니다.</li>
+    </ol>
+    <div class="scroll"><div class="win">
+      <nav class="rail" aria-label="화면"><span class="on"><i></i>홈</span><span><i></i>에셋</span><span><i></i>컬렉션</span><span><i></i>망가</span><span><i></i>메모</span><span><i></i>전송</span><span class="grow"></span><span><i></i>찾기</span><span class="more on"><i></i>더보기</span></nav>
+      <div class="main"><div class="top"><b>홈</b><small>10.2 금요일</small></div></div>
+      <div class="old-panel">지금 열리는 자리</div>
+      <div class="more-panel" role="menu" aria-label="더보기">
+        <div class="h">확인할 것</div>
+        <div class="it on"><span>유사 검토</span><small class="num">2</small></div>
+        <div class="it"><span>미분류</span><small class="num">27</small></div>
+        <hr>
+        <div class="h">이동</div>
+        <div class="it"><span>작가</span></div><div class="it"><span>통계</span></div><div class="it"><span>휴지통</span><small class="num">4</small></div><div class="it"><span>설정</span></div>
+      </div>
+    </div></div>
+  </section>
+
+  <section class="prop" aria-labelledby="h-find">
+    <h2 id="h-find">3. 찾기 (Ctrl K): 이름으로 바로 찾기</h2>
+    <ol class="notes">
+      <li>지금은 화면 이동과 명령만 찾고 「이 화면은 검색이 없어…」 같은 안내가 붙습니다. <b>한 칸에 쓰면 작품 · 작가 · 메모 제목 · 폴더 · 화면 · 명령을 함께</b> 찾습니다(이미 기기에 있는 이름만, 서버 검색 없음).</li>
+      <li>위쪽 범위 칩으로 좁힐 수 있고, 지금 화면에 자체 검색이 있으면 첫 줄이 「망가에서 ‘별과’ 검색」처럼 그 화면 검색으로 넘깁니다.</li>
+      <li>아무것도 안 쓰면 확인할 것 + 최근 연 것 5개.</li>
+    </ol>
+    <div class="scroll"><div class="win">
+      <nav class="rail" aria-label="화면"><span><i></i>홈</span><span><i></i>에셋</span><span><i></i>컬렉션</span><span class="on"><i></i>망가</span><span><i></i>메모</span><span><i></i>전송</span><span class="grow"></span><span class="more on"><i></i>찾기</span><span><i></i>더보기</span></nav>
+      <div class="main"><div class="top"><b>망가</b><small>18개 작품</small></div></div>
+      <div class="dim"></div>
+      <div class="find" role="dialog" aria-label="찾기">
+        <div class="q"><b>별과</b><span class="caret"></span><small>Esc 닫기</small></div>
+        <div class="scopes"><span class="on">전체</span><span>작품</span><span>작가</span><span>메모</span><span>폴더</span><span>화면 · 명령</span></div>
+        <div class="grp"><small>이 화면에서</small>
+          <div class="r on"><span class="th ic"></span><span>망가에서 「별과」 검색<small>제목 · 작가</small></span><kbd>Enter</kbd></div></div>
+        <div class="grp"><small>작품</small>
+          <div class="r"><span class="th" style="background:var(--c1)"></span><span><em>별과</em> 바다 사이<small>만화 · 4권까지</small></span><kbd></kbd></div>
+          <div class="r"><span class="th" style="background:var(--c2)"></span><span><em>별과</em> 고양이의 밤<small>게임 · PS5</small></span><kbd></kbd></div></div>
+        <div class="grp"><small>작가 · 메모</small>
+          <div class="r"><span class="th sq" style="background:var(--c3)"></span><span><em>별과</em>자리<small>작가 · 에셋 142장</small></span><kbd></kbd></div>
+          <div class="r"><span class="th ic"></span><span><em>별과</em> 바다 사이 신간 메모<small>메모 · 할 일 2개</small></span><kbd></kbd></div></div>
+        <div class="foot"><span>↑↓ 선택</span><span>Enter 열기</span><span>Tab 범위 바꾸기</span></div>
+      </div>
+    </div></div>
+  </section>
+</div>
+<script>
+document.getElementById('homePick').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#homePick button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  document.getElementById('homeNew').hidden = b.dataset.v !== 'new';
+  document.getElementById('homeOld').hidden = b.dataset.v !== 'old';
+});
+</script>
+</body>
+</html>

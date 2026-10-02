@@ -7,6 +7,8 @@ import { useLibrary } from "../library/LibraryContext";
 import type { CatalogScope, MangaCatalogRecoveryPreview, MangaSeries, MangaIndexIdentity, MangaLocalIndex } from "../library/types";
 import { mangaCoverUrl } from "../assets/mediaUrl";
 import { usePrivacy } from "../privacy/PrivacyContext";
+import { Scrubber } from "../shared/ui/scrubber/Scrubber";
+import type { ScrubberSort } from "../shared/ui/scrubber/scrubberModel";
 import { Button } from "../shared/ui/Button";
 import { EmptyState } from "../shared/ui/EmptyState";
 import { Toast } from "../shared/ui/Toast";
@@ -41,6 +43,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const [series, setSeries] = useState<MangaSeries[] | null>(null);
   const [scanning, setScanning] = useState(false);
   const [query, setQuery] = useState("");
+  const gridScroll = useRef<HTMLDivElement>(null);
   const [sort, setSort] = useState<MangaSort>("recent");
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -85,6 +88,10 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
       return leftValue.localeCompare(rightValue, "ko", { numeric: true, sensitivity: "base" });
     });
   }, [query, series, sort, localFolder, localIndex]);
+
+  const scrubberSort = useMemo<ScrubberSort>(() => sort === "title_asc" || sort === "author_asc"
+    ? {kind: "name", values: visibleSeries.map(entry => sort === "author_asc" ? entry.author : entry.title)}
+    : {kind: "fallback"}, [sort, visibleSeries]);
 
   async function refreshSeries(active = () => true) {
     if (!active()) return;
@@ -215,7 +222,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
       }} />}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     {recovery && <MangaRecoveryPanel preview={recovery} busy={recoveryBusy} onRemoteLookup={gateway.refreshMangaCatalogRecoveryRemote ? () => void refreshRecoveryRemote() : undefined} onApply={() => void applyRecovery()} onApplySelection={(mangaId, workId) => void applyRecoverySelection(mangaId, workId)} onClose={() => setRecovery(null)} />}
-    <div className="manga-browser__content" inert={source !== "local"}>
+    <div ref={gridScroll} tabIndex={0} className="manga-browser__content" inert={source !== "local"}>
       {loadError && !series ? <EmptyState title="망가 목록을 불러오지 못했습니다" />
         : root === null ? <EmptyState title="망가 폴더가 설정되지 않았습니다">설정에서 망가 폴더를 선택하면 여기에 표시됩니다.</EmptyState>
         : !series ? <MangaSkeletonGrid /> : series.length === 0 ? (
@@ -224,6 +231,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
         <EmptyState title="검색 결과가 없습니다">다른 제목이나 작가 이름으로 검색하세요.</EmptyState>
       ) : <div className="manga-grid">{visibleSeries.map(entry => <MangaCard key={entry.id} title={entry.title} artist={entry.author} pageCount={entry.pageCount} coverUrl={mangaCoverUrl(entry.id)} privacyMode={privacyMode} onOpen={() => onOpenSeries?.(entry)} />)}</div>}
     </div>
+    <Scrubber input="pointer" scrollRef={gridScroll} total={visibleSeries.length} sort={scrubberSort} hidden={source !== "local" || displayedSource !== "local"} />
   </section>}</>;
 }
 

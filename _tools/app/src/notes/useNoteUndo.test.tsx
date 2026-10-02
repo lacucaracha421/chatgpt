@@ -28,3 +28,16 @@ it("starts a new step after the typing window", () => {
   act(() => result.current.undo());
   expect(result.current.canUndo).toBe(true);
 });
+
+it("isolates structural operations from adjacent typing even inside the grouping window", () => {
+  const apply = vi.fn();
+  const { result } = renderHook(() => useNoteUndo("a", apply));
+  act(() => {
+    result.current.record("body", "", "typed");
+    result.current.breakGroup(); result.current.record("body", "typed", "- [ ] typed"); result.current.breakGroup();
+    result.current.record("body", "- [ ] typed", "- [ ] typed more");
+  });
+  act(() => result.current.undo()); expect(apply).toHaveBeenLastCalledWith("body", "- [ ] typed");
+  act(() => result.current.undo()); expect(apply).toHaveBeenLastCalledWith("body", "typed");
+  act(() => result.current.undo()); expect(apply).toHaveBeenLastCalledWith("body", "");
+});

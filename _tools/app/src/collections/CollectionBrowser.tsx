@@ -7,6 +7,9 @@ import type { AssetView, CollectionSummary, CollectionType, CollectionUpdateProv
 import type { ViewChromeSpec } from "../layout/WorkspaceChrome";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useInWorkspaceChrome } from "../layout/WorkspaceChromeContext";
+import { Scrubber } from "../shared/ui/scrubber/Scrubber";
+import type { ScrubberSort } from "../shared/ui/scrubber/scrubberModel";
+import { useScrubberList } from "../shared/ui/scrubber/useScrubberList";
 import { Button } from "../shared/ui/Button";
 import { ViewOptionsMenu } from "../shared/ui/ViewOptionsMenu";
 import { useLaunchBoxSpineBatch } from "./launchBoxSpines";
@@ -353,6 +356,12 @@ export function CollectionBrowser({
     search: showcase ? undefined : { scope: releaseCalendar ? "발매 캘린더" : releaseProvider ? "신간" : `${sectionLabel} 컬렉션`, query: libraryState.query, label: "제목 검색", placeholder: "작품 제목 검색", onApply: (query) => patchLibraryState({ query }) },
   };
 
+  const scrubberSort = useMemo<ScrubberSort>(() => libraryState.sort === "name"
+    ? {kind: "name", values: visible.map(work => work.name)}
+    : {kind: "date", values: visible.map(work => libraryState.sort === "recent" ? work.createdAt : work.releaseDate ?? work.createdAt)},
+  [visible, libraryState.sort]);
+  const scrubberList = useScrubberList(stageRef, mangaBookcase ? ".manga-shelf-list__item" : ".collection-list__cell");
+
   return (
     <section className="collection-browser" aria-label="컬렉션">
       {(!releaseProvider || releaseCalendar) && <ViewToolbar sectionDrop={sectionDrop}
@@ -387,13 +396,14 @@ export function CollectionBrowser({
           {!inbox && showcase && visible.length > 0 && <><SectionDropMount host=".collection-browser" target=".collection-exhibition">{sectionDrop.inline}</SectionDropMount>
             <CollectionExhibition items={visible} page={exhibition.page} onPageChange={changeExhibitionPage} render={collection => renderCollection(collection)} scrollRef={stageRef} /></>}
           {!inbox && showcase && visible.length === 0 && <div className="collection-browser__showcase-scroll">{sectionDrop.inline}<div className="collection-browser__empty"><EmptyState title="쇼케이스에 컬렉션이 없습니다.">라이브러리에서 쇼케이스에 추가한 컬렉션이 여기에 표시됩니다.</EmptyState></div></div>}
-          {!inbox && !showcase && <div ref={stageRef} className="collection-browser__list-scroll" data-cover-scroll-root="">
+          {!inbox && !showcase && <div ref={stageRef} className="collection-browser__list-scroll" tabIndex={0} data-cover-scroll-root="">
             {sectionDrop.inline}
             {leading}
             {mangaBookcase ? mangaShelfList(libraryItems, `${sectionLabel} 작품 목록`)
               : <CollectionList items={libraryItems} windowRows pickedId={pickedId} restoredFocusId={navigationMemory?.get(scope)?.focusId} view={viewSettings} render={renderCollection} label={`${sectionLabel} 작품 목록`} onPick={setPickedId} />}
             {visible.length === 0 && <div className="collection-browser__empty">{emptyLibrary}</div>}
           </div>}
+          {!inbox && !showcase && <Scrubber key={`${typeFilter}:${viewSettings.layout}`} input="pointer" scrollRef={stageRef} total={visible.length} sort={scrubberSort} {...scrubberList} />}
 
         </div>
       </div>

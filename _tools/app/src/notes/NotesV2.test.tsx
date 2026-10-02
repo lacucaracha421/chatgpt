@@ -44,53 +44,36 @@ function surface(store: NotesStore) {
 const last = <T,>(list: T[]) => list[list.length - 1];
 const settle = (store: NotesStore) => waitFor(() => expect(store.snapshot().saving).toBe(false));
 
-it("renders text notes as Markdown and ticking a task rewrites that line", async () => {
+it("opens mixed notes as plain rows without Markdown, then rewrites only the toggled task after switching mode", async () => {
   const fake = backend([base("할 일", { body: "# 오늘\n- [ ] 우유\n- [ ] 빵\n\n설명" })]);
   const store = new NotesStore(fake.request); surface(store);
   await userEvent.click(await screen.findByRole("button", { name: /할 일/ }));
-  expect(screen.getByRole("button", { name: "오늘" })).toBeInTheDocument();
-  expect(screen.queryByRole("textbox", { name: "메모 본문" })).not.toBeInTheDocument();
-  await userEvent.click(screen.getAllByRole("checkbox")[1]!);
+  expect(screen.getByRole("heading", { name: "오늘" })).toBeInTheDocument();
+  expect(screen.getAllByRole("textbox", { name: "메모 본문" }).map(area=>(area as HTMLTextAreaElement).value)).toEqual(["우유","빵","","설명"]);
+  expect(fake.saves()).toHaveLength(0);
+  expect(screen.queryByRole("button", {name:"마크다운 도움말"})).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("radio",{name:"할 일"}));
+  await userEvent.click(screen.getAllByRole("button",{name:"완료"})[1]!);
   await settle(store);
-  expect(last(fake.saves())).toMatchObject({ body: "# 오늘\n- [ ] 우유\n- [x] 빵\n\n설명", type: "text" });
-  // No visible 보기/편집 toggle: clicking the text edits it; Esc returns to the list.
-  expect(screen.queryByRole("button", { name: "편집" })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "마크다운 도움말" })).toBeInTheDocument();
-  await userEvent.click(screen.getByText("설명", { selector: ".markdown p" }));
-  const source = screen.getByRole("textbox", { name: "메모 구간 본문" });
-  await waitFor(() => expect(source).toHaveFocus());
-  expect(source).toHaveValue("- [ ] 우유\n- [x] 빵\n\n설명");
+  expect(last(fake.saves())).toMatchObject({body:"# 오늘\n- [ ] 우유\n- [x] 빵\n- [ ] 설명",type:"text"});
   await userEvent.keyboard("{Escape}");
-  expect(screen.queryByRole("textbox", { name: "메모 구간 본문" })).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "오늘" }));
-  expect(screen.queryByText("우유", { selector: ".markdown__task span" })).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "오늘" }));
-  await userEvent.click(screen.getByRole("button", { name: "메모 닫기" }));
-  await userEvent.click(screen.getByRole("button", { name: /할 일/ }));
-  await userEvent.click(screen.getByText("설명", { selector: ".markdown p" }));
-  await waitFor(() => expect(screen.getByRole("textbox", { name: "메모 구간 본문" })).toHaveFocus());
-  await userEvent.click(screen.getByRole("textbox", { name: "메모 제목" }));
-  expect(screen.queryByRole("textbox", { name: "메모 구간 본문" })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "오늘" })).toBeInTheDocument();
+  expect(screen.queryByRole("textbox", {name:"메모 본문"})).not.toBeInTheDocument();
 });
 
-it("edits only one fixed section and remembers its fold state after remount", async () => {
-  const fake = backend([base("sections", { body: "# 첫째\n첫 본문\n## 둘째\n둘째 본문\n## 셋째\n셋째 본문" })]);
-  const store = new NotesStore(fake.request); surface(store);
-  await userEvent.click(await screen.findByRole("button", { name: /sections/ }));
-  await userEvent.click(screen.getByText("첫 본문", { selector: ".markdown p" }));
-  const editor = await screen.findByRole("textbox", { name: "메모 구간 본문" });
-  fireEvent.change(editor, { target: { value: "첫 변경" } });
-  await settle(store);
-  expect(last(fake.saves())).toMatchObject({ body: "# 첫째\n첫 변경\n## 둘째\n둘째 본문\n## 셋째\n셋째 본문" });
-  await userEvent.keyboard("{Escape}");
-  await userEvent.click(screen.getByRole("button", { name: "둘째" }));
-  expect(screen.queryByText("둘째 본문", { selector: ".markdown p" })).not.toBeInTheDocument();
-  cleanup();
-  surface(store);
-  await userEvent.click(await screen.findByRole("button", { name: /sections/ }));
-  expect(screen.queryByText("둘째 본문", { selector: ".markdown p" })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "둘째" })).toHaveAttribute("aria-expanded", "false");
+it("edits one section without touching its neighbors and resets section chips on reopen", async () => {
+  const fake=backend([base("sections",{body:"# 첫째\n첫 본문\n## 둘째\n둘째 본문\n## 셋째\n셋째 본문"})]);
+  const store=new NotesStore(fake.request);surface(store);
+  await userEvent.click(await screen.findByRole("button",{name:/sections/}));
+  const areas=screen.getAllByRole("textbox",{name:"메모 본문"});
+  fireEvent.change(areas[0]!,{target:{value:"첫 변경"}});await settle(store);
+  expect(last(fake.saves())).toMatchObject({body:"# 첫째\n첫 변경\n## 둘째\n둘째 본문\n## 셋째\n셋째 본문"});
+  await userEvent.click(screen.getByRole("button",{name:"둘째"}));
+  expect(screen.getAllByRole("textbox",{name:"메모 본문"})).toHaveLength(1);
+  expect(screen.getByRole("textbox",{name:"메모 본문"})).toHaveValue("둘째 본문");
+  await userEvent.click(screen.getByRole("button",{name:"메모 닫기"}));
+  await userEvent.click(await screen.findByRole("button",{name:/sections/}));
+  expect(screen.getAllByRole("textbox",{name:"메모 본문"})).toHaveLength(3);
+  expect(localStorage.getItem("lakomics.notes.sectionFolds.v1")).toBeNull();
 });
 
 it("filters kinds in the top chips and scopes and labels in the 보기 menu", async () => {
@@ -105,9 +88,11 @@ it("filters kinds in the top chips and scopes and labels in the 보기 menu", as
   const list = () => within(screen.getByLabelText("메모 목록"));
   expect(await screen.findByRole("radio", { name: "가계부" })).toBeInTheDocument();
   expect(screen.getByRole("radio", { name: "암호" })).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("radio", { name: "체크리스트" }));
+  await userEvent.click(screen.getByRole("radio", { name: "메모" }));
   expect(list().getByRole("button", { name: /체크/ })).toBeInTheDocument();
-  expect(list().queryByRole("button", { name: /메모 일반/ })).not.toBeInTheDocument();
+  expect(list().getByRole("button", { name: /메모 일반/ })).toBeInTheDocument();
+  expect(list().queryByRole("button", {name:/가계부/})).not.toBeInTheDocument();
+  expect(screen.queryByRole("radio",{name:"체크리스트"})).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("radio", { name: "전체" }));
   await userEvent.click(screen.getByRole("button", { name: /보기/ }));
   expect(await screen.findByRole("menuitem", { name: /보관함/ })).toBeInTheDocument();
@@ -122,24 +107,20 @@ it("filters kinds in the top chips and scopes and labels in the 보기 menu", as
   await userEvent.click(screen.getByRole("menuitem", { name: "라벨 해제" }));
 });
 
-it("maps a rendered-text click to a source caret and falls back to the body end", async () => {
-  const fake = backend([base("note", { body: "첫 줄\n\n아래 줄의 본문" })]);
-  const store = new NotesStore(fake.request); surface(store);
-  const caretPositionFromPoint = vi.fn(() => {
-    const mirror = [...document.body.children].find((element) => (element as HTMLElement).style.position === "fixed" && (element as HTMLElement).style.visibility === "hidden") as HTMLElement | undefined;
-    return mirror?.firstChild ? { offsetNode: mirror.firstChild, offset: 7 } : null;
-  });
-  const originalCaretPositionFromPoint = (document as Document & { caretPositionFromPoint?: unknown }).caretPositionFromPoint;
-  Object.defineProperty(document, "caretPositionFromPoint", { configurable: true, value: caretPositionFromPoint });
-  try {
-    await userEvent.click(await screen.findByRole("button", { name: /note/ }));
-    fireEvent.click(screen.getByText("아래 줄의 본문"), { clientX: 120, clientY: 200 });
-    const area = await screen.findByRole("textbox", { name: "메모 본문" }) as HTMLTextAreaElement;
-    await waitFor(() => expect(area.selectionStart).toBe(7));
-    expect(caretOffsetAtPoint(area, 120, 200)).toBe(7);
-  } finally {
-    Object.defineProperty(document, "caretPositionFromPoint", { configurable: true, value: originalCaretPositionFromPoint });
-  }
+it("opens with the caret at the last row end and preserves point-to-caret helper coverage", async () => {
+  const fake=backend([base("note",{body:"첫 줄\n\n아래 줄의 본문"})]);
+  const store=new NotesStore(fake.request);surface(store);
+  const original=(document as Document & {caretPositionFromPoint?:unknown}).caretPositionFromPoint;
+  Object.defineProperty(document,"caretPositionFromPoint",{configurable:true,value:()=>{
+    const mirror=[...document.body.children].find(element=>(element as HTMLElement).style.position==="fixed"&&(element as HTMLElement).style.visibility==="hidden");
+    return mirror?.firstChild?{offsetNode:mirror.firstChild,offset:3}:null;
+  }});
+  try{
+    await userEvent.click(await screen.findByRole("button",{name:/note/}));
+    const area=screen.getAllByRole("textbox",{name:"메모 본문"})[2] as HTMLTextAreaElement;
+    expect(area).toHaveFocus();expect(area.selectionStart).toBe(area.value.length);
+    expect(caretOffsetAtPoint(area,120,200)).toBe(3);
+  }finally{Object.defineProperty(document,"caretPositionFromPoint",{configurable:true,value:original});}
 });
 
 it("undoes and redoes title and body edits per open note", async () => {
@@ -148,7 +129,6 @@ it("undoes and redoes title and body edits per open note", async () => {
   await userEvent.click(await screen.findByRole("button", { name: /원래 제목/ }));
   const title = screen.getByRole("textbox", { name: "메모 제목" });
   fireEvent.change(title, { target: { value: "새 제목" } });
-  await userEvent.click(screen.getByText("원래 본문", { selector: ".notes-rendered *" }));
   const body = await screen.findByRole("textbox", { name: "메모 본문" });
   fireEvent.change(body, { target: { value: "새 본문" } });
   expect(screen.getByRole("button", { name: "되돌리기" })).toBeEnabled();
@@ -165,32 +145,20 @@ it("undoes and redoes title and body edits per open note", async () => {
   expect(screen.getByRole("button", { name: "되돌리기" })).toBeDisabled();
 });
 
-it("creates a checklist, adds items with Enter, checks one into the 완료 group and reorders with Alt+Arrow", async () => {
-  const fake = backend([]);
-  const store = new NotesStore(fake.request); surface(store);
-  await userEvent.click(await screen.findByRole("button", { name: "새 메모" }));
-  await userEvent.click(await screen.findByRole("menuitem", { name: "체크리스트" }));
-  await userEvent.click(screen.getByRole("button", { name: "항목 추가" }));
-  await userEvent.keyboard("우유{Enter}빵{Enter}달걀");
-  await settle(store);
-  const items = () => store.snapshot().notes[0]!.items!;
-  expect(items().map((i) => i.text).sort()).toEqual(["달걀", "빵", "우유"]);
-  const open = within(screen.getByRole("list", { name: "할 일" }));
-  expect(open.getAllByRole("textbox").map((i) => (i as HTMLInputElement).value)).toEqual(["우유", "빵", "달걀"]);
-  // Alt+Up moves 달걀 above 빵 by rewriting only its order key.
-  const before = new Map(items().map((i) => [i.text, i.order]));
-  fireEvent.keyDown(open.getAllByRole("textbox")[2]!, { key: "ArrowUp", altKey: true });
-  await settle(store);
-  expect(open.getAllByRole("textbox").map((i) => (i as HTMLInputElement).value)).toEqual(["우유", "달걀", "빵"]);
-  expect(items().find((i) => i.text === "빵")!.order).toBe(before.get("빵"));
-  await userEvent.click(screen.getByRole("checkbox", { name: "우유 완료" }));
-  await settle(store);
-  const done = screen.getByRole("list", { name: "완료한 항목" });
-  expect(within(done).getByRole("textbox")).toHaveValue("우유");
-  await userEvent.click(screen.getByRole("button", { name: "완료 1" }));
-  expect(screen.queryByRole("list", { name: "완료한 항목" })).not.toBeInTheDocument();
-  expect(last(fake.saves())).toMatchObject({ type: "checklist", items: expect.arrayContaining([expect.objectContaining({ text: "우유", checked: true })]) });
-  expect(last(fake.saves())).not.toHaveProperty("body");
+it("creates text memos in todo mode, adds with Enter and folds completed rows", async () => {
+  const fake=backend([]);const store=new NotesStore(fake.request);surface(store);
+  await userEvent.click(await screen.findByRole("button",{name:"새 메모"}));
+  expect(screen.queryByRole("menuitem",{name:"체크리스트"})).not.toBeInTheDocument();
+  await userEvent.click(await screen.findByRole("menuitem",{name:"메모"}));
+  await userEvent.click(screen.getByRole("radio",{name:"할 일"}));
+  await userEvent.click(screen.getByRole("textbox",{name:"메모 본문"}));
+  await userEvent.keyboard("우유{Enter}빵{Enter}달걀");await settle(store);
+  expect(last(fake.saves())).toMatchObject({type:"text",body:"- [ ] 우유\n- [ ] 빵\n- [ ] 달걀"});
+  await userEvent.click(screen.getAllByRole("button",{name:"완료"})[0]!);await settle(store);
+  expect(screen.getAllByRole("textbox",{name:"메모 본문"}).map(area=>(area as HTMLTextAreaElement).value)).toEqual(["빵","달걀"]);
+  await userEvent.click(screen.getByRole("button",{name:/완료 1/}));
+  expect(screen.getAllByRole("textbox",{name:"메모 본문"}).map(area=>(area as HTMLTextAreaElement).value)).toEqual(["빵","달걀","우유"]);
+  expect(last(fake.saves())).toMatchObject({type:"text",body:"- [x] 우유\n- [ ] 빵\n- [ ] 달걀"});
 });
 
 it("colours, labels, label filter, search and archive", async () => {
@@ -307,25 +275,31 @@ it("hides a note's content on the board from the 더보기 menu and shows it aga
   expect(last(fake.saves())).toMatchObject({ id: "API", concealed: false });
 });
 
-it("the convert button turns a text note into a checklist and back, and the colour button shows the colour", async () => {
-  const fake = backend([base("할 일", { body: "- [ ] 우유\n- [x] 빵\n달걀", color: "blue" })]);
-  const store = new NotesStore(fake.request); surface(store);
-  await userEvent.click(await screen.findByRole("button", { name: /할 일/ }));
-  const dot = screen.getByRole("button", { name: "메모 색상" }).querySelector(".notes-color-dot") as HTMLElement;
-  expect(dot.style.background).not.toBe("");
-  const toChecklist = screen.getByRole("button", { name: "체크리스트로 바꾸기" });
-  expect(toChecklist).toHaveAttribute("title", expect.stringContaining("체크리스트로 바꾸기"));
-  await userEvent.click(toChecklist);
-  await settle(store);
-  expect(last(fake.saves())).toMatchObject({ type: "checklist", items: [
-    expect.objectContaining({ text: "우유", checked: false }), expect.objectContaining({ text: "빵", checked: true }), expect.objectContaining({ text: "달걀", checked: false }),
-  ] });
-  expect(screen.getByRole("list", { name: "할 일" })).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "메모로 바꾸기" }));
-  await settle(store);
-  expect(last(fake.saves())).toMatchObject({ type: "text", body: "우유\n\n달걀\n\n빵" });
-  // Sync is an icon button at the bottom; the old footer texts are gone.
-  expect(screen.getByRole("button", { name: "동기화" })).toBeInTheDocument();
-  expect(screen.queryByText(/자동 저장/)).not.toBeInTheDocument();
-  expect(screen.queryByText(/암호화된 메모/)).not.toBeInTheDocument();
+it("switches memo modes with body undo and keeps colour and sync controls", async () => {
+  const fake=backend([base("할 일",{body:"- [ ] 우유\n- [x] 빵\n달걀",color:"blue"})]);
+  const store=new NotesStore(fake.request);surface(store);
+  await userEvent.click(await screen.findByRole("button",{name:/할 일/}));
+  const dot=screen.getByRole("button",{name:"메모 색상"}).querySelector(".notes-color-dot") as HTMLElement;expect(dot.style.background).not.toBe("");
+  expect(screen.queryByRole("button",{name:"체크리스트로 바꾸기"})).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("radio",{name:"할 일"}));await settle(store);
+  expect(last(fake.saves())).toMatchObject({type:"text",body:"- [ ] 우유\n- [x] 빵\n- [ ] 달걀"});
+  await userEvent.click(screen.getByRole("radio",{name:"글"}));await settle(store);
+  expect(last(fake.saves())).toMatchObject({type:"text",body:"우유\n빵\n달걀"});
+  await userEvent.click(screen.getByRole("button",{name:"되돌리기"}));
+  expect(store.snapshot().notes[0]!.body).toBe("- [ ] 우유\n- [x] 빵\n- [ ] 달걀");
+  fireEvent.keyDown(screen.getAllByRole("textbox",{name:"메모 본문"})[0]!,{key:"y",ctrlKey:true});
+  expect(store.snapshot().notes[0]!.body).toBe("우유\n빵\n달걀");
+  expect(screen.getByRole("button",{name:"동기화"})).toBeInTheDocument();
+});
+
+it("opens a legacy checklist without writing and converts on its first edit",async()=>{
+  const fake=backend([base("legacy",{type:"checklist",body:"fallback",items:[{id:"a",text:"open",checked:false,order:"A"},{id:"b",text:"done",checked:true,order:"B"}]})]);
+  const store=new NotesStore(fake.request);surface(store);
+  await userEvent.click(await screen.findByRole("button",{name:/legacy/}));
+  expect(fake.saves()).toHaveLength(0);expect(screen.getByRole("radio",{name:"할 일"})).toHaveAttribute("aria-checked","true");
+  fireEvent.change(screen.getByRole("textbox",{name:"메모 본문"}),{target:{value:"updated"}});await settle(store);
+  expect(last(fake.saves())).toMatchObject({type:"text",body:"- [ ] updated\n- [x] done"});
+  expect(last(fake.saves())).not.toHaveProperty("items");
+  await userEvent.click(screen.getByRole("button",{name:"되돌리기"}));
+  expect(store.snapshot().notes[0]!.body).toBe("- [ ] open\n- [x] done");
 });

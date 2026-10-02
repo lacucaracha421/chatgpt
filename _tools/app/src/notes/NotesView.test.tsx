@@ -56,8 +56,6 @@ it("keeps typing status stable without delaying local writes",async()=>{
   const request=vi.fn(async(op:string,input:any)=>op==="save"?{...note,...input,localRevision:1,pending:true}:{unlocked:true,notes:[note],lastSyncedAt:null});
   const store=new NotesStore(request as NotesRequest);surface(store);
   await userEvent.click(await screen.findByRole("button",{name:/Draft/}));
-  // Existing text notes open in the rendered view; clicking the text switches to the source.
-  await userEvent.click(screen.getByLabelText("메모 쓰기"));
   vi.useFakeTimers();
   try {
     fireEvent.change(screen.getByRole("textbox",{name:"메모 본문"}),{target:{value:"typing"}});

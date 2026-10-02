@@ -2088,43 +2088,6 @@ textarea:focus-visible {
    Gallery tile gutters must not add another band above it (20px in masonry). */
 .asset-gallery__scroll:has(> .asset-gallery__intro > .ui-section-drop-slot) { padding-top: 0; }
 
-/* The native scrollbar is hidden: its thumb length is engine-computed and
-   cannot be floored, so a huge virtual range shrinks it to an ungrabbable
-   sliver. AssetGalleryScrollbar draws the visible thumb instead while this
-   container keeps owning all scrolling. */
-.asset-gallery__scroll {
-  scrollbar-width: none;
-}
-
-.asset-gallery__scroll::-webkit-scrollbar {
-  display: none;
-}
-
-.asset-gallery__scrollbar {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 1;
-  width: var(--gallery-scrollbar-width);
-}
-
-.asset-gallery__scrollbar-thumb {
-  position: absolute;
-  top: 0;
-  right: 4px;
-  width: 10px;
-  min-height: 32px;
-  touch-action: none;
-  background: color-mix(in srgb, var(--color-muted) 46%, transparent);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.asset-gallery__scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--color-muted) 78%, transparent);
-}
-
 .asset-gallery__virtual-space {
   position: relative;
   width: 100%;

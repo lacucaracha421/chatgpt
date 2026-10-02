@@ -6,9 +6,17 @@ import { BackNavigationProvider } from "../shared/navigation/BackNavigation";
 import { SearchSurface } from "./SearchSurface";
 import { ViewToolbar } from "./ViewToolbar";
 import { WorkspaceChromeProvider } from "./WorkspaceChrome";
+import { ChromeTarget } from "./WorkspaceChrome";
 import { WorkspaceNavigation } from "./WorkspaceNavigation";
+import { MangaToolbar } from "../manga/MangaToolbar";
+import type { AssetView } from "../library/types";
 
-afterEach(cleanup);
+const indexHiddenKey = "lakomics.workspace.indexHidden.v1";
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  localStorage.removeItem(indexHiddenKey);
+});
 it("returns from collection detail to the last collection list when its rail button is clicked", async () => {
   const onNavigate = vi.fn();
   const props = { collectionType: "av" as const, width: 208, onWidthChange: vi.fn(), onNavigate,
@@ -29,6 +37,95 @@ it("offers a collection list when detail was opened without a remembered list", 
 
 const baseProps = { collectionType: "game" as const, width: 208, onWidthChange: vi.fn(), assetNavigation: null, reviewCount: 0, trashCount: 0 };
 const assetsView = { kind: "classification" as const, classificationId: null };
+
+function IndexToggleWorkspace({ view = { kind: "manga" } }: { view?: AssetView }) {
+  return <WorkspaceChromeProvider scope={view.kind}>
+    <WorkspaceNavigation {...baseProps} width={256} view={view} onNavigate={vi.fn()} />
+    <ChromeTarget name="header" />
+    <section className="manga-browser">
+      {view.kind === "manga" ? <MangaToolbar source="all" onSourceChange={vi.fn()} chrome={{ navigation: <nav aria-label="망가 인덱스">고정</nav> }} /> : <ViewToolbar title={view.kind} chrome={{}} />}
+      <div className="manga-browser__content" data-testid="manga-grid"><input aria-label="그리드 선택 상태" defaultValue="선택 유지" /></div>
+    </section>
+  </WorkspaceChromeProvider>;
+}
+
+it("hides and restores the manga index without replacing the grid or its state", async () => {
+  const user = userEvent.setup();
+  render(<IndexToggleWorkspace />);
+  const grid = screen.getByTestId("manga-grid");
+  const selection = screen.getByRole("textbox", { name: "그리드 선택 상태" });
+  await user.type(selection, " 3");
+  const hide = screen.getByRole("button", { name: "사이드바 숨기기" });
+  expect(hide.closest(".workspace-index__head-actions")).not.toBeNull();
+  expect(hide).toHaveClass("ui-button", "ui-button--icon", "ui-button--ghost");
+  await user.click(hide);
+  expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("separator", { name: "사이드바 너비 조절" })).not.toBeInTheDocument();
+  expect(JSON.parse(localStorage.getItem(indexHiddenKey)!)).toEqual({ manga: true });
+  const show = screen.getByRole("button", { name: "사이드바 보이기" });
+  expect(show.closest(".view-toolbar--context")?.firstElementChild).toBe(show);
+  expect(show).toHaveClass("ui-button", "ui-button--icon", "ui-button--ghost");
+  expect(screen.getByTestId("manga-grid")).toBe(grid);
+  expect(selection).toHaveValue("선택 유지 3");
+  await user.click(show);
+  expect(screen.getByRole("complementary", { name: "탐색 인덱스" }).style.getPropertyValue("--workspace-index-width")).toBe("256px");
+  expect(screen.getByRole("separator", { name: "사이드바 너비 조절" })).toHaveAttribute("aria-valuenow", "256");
+  expect(screen.getByRole("navigation", { name: "망가 인덱스" })).toBeInTheDocument();
+  expect(screen.getByTestId("manga-grid")).toBe(grid);
+  expect(screen.getByRole("textbox", { name: "그리드 선택 상태" })).toBe(selection);
+  expect(selection).toHaveValue("선택 유지 3");
+});
+
+it("remembers hidden and shown manga index states across workspace remounts", async () => {
+  const user = userEvent.setup();
+  const first = render(<IndexToggleWorkspace />);
+  await user.click(screen.getByRole("button", { name: "사이드바 숨기기" }));
+  first.unmount();
+  const second = render(<IndexToggleWorkspace />);
+  expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "사이드바 보이기" }));
+  second.unmount();
+  render(<IndexToggleWorkspace />);
+  expect(screen.getByRole("complementary", { name: "탐색 인덱스" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "사이드바 보이기" })).not.toBeInTheDocument();
+});
+
+it("limits index toggling to manga and preserves preferences for other areas", async () => {
+  localStorage.setItem(indexHiddenKey, JSON.stringify({ assets: true, notes: true }));
+  const user = userEvent.setup();
+  const { rerender } = render(<IndexToggleWorkspace />);
+  await user.click(screen.getByRole("button", { name: "사이드바 숨기기" }));
+  expect(JSON.parse(localStorage.getItem(indexHiddenKey)!)).toEqual({ assets: true, notes: true, manga: true });
+  for (const view of [assetsView, { kind: "home" }, { kind: "collection", collectionId: "m1" }] as AssetView[]) {
+    rerender(<IndexToggleWorkspace view={view} />);
+    expect(screen.getByRole("complementary", { name: "탐색 인덱스" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "사이드바 숨기기" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "사이드바 보이기" })).not.toBeInTheDocument();
+  }
+  for (const view of [{ kind: "collections", typeFilter: "game", showcase: false }, { kind: "notes" }] as AssetView[]) {
+    rerender(<IndexToggleWorkspace view={view} />);
+    expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "사이드바 보이기" })).not.toBeInTheDocument();
+  }
+  rerender(<IndexToggleWorkspace />);
+  await user.click(screen.getByRole("button", { name: "사이드바 보이기" }));
+  expect(JSON.parse(localStorage.getItem(indexHiddenKey)!)).toEqual({ assets: true, notes: true });
+});
+
+it.each(["broken", "null", "[]", '"manga"', '{"manga":"true"}'])("shows the manga index for invalid storage: %s", value => {
+  localStorage.setItem(indexHiddenKey, value);
+  render(<IndexToggleWorkspace />);
+  expect(screen.getByRole("complementary", { name: "탐색 인덱스" })).toBeInTheDocument();
+});
+
+it("keeps the toggle usable when localStorage reads and writes fail", async () => {
+  vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage unavailable"); });
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Storage unavailable"); });
+  render(<IndexToggleWorkspace />);
+  await userEvent.click(screen.getByRole("button", { name: "사이드바 숨기기" }));
+  await userEvent.click(screen.getByRole("button", { name: "사이드바 보이기" }));
+  expect(screen.getByRole("complementary", { name: "탐색 인덱스" })).toBeInTheDocument();
+});
 
 it("keeps 홈, 에셋, 컬렉션, 망가, 메모 and 전송 in the rail, 비밀 while its USB is attached, then 찾기 and 더보기", async () => {
   const onNavigate = vi.fn();

@@ -161,8 +161,8 @@ describe("HomeView", () => {
     const index = screen.getByRole("navigation", { name: "홈 인덱스" });
     await waitFor(() => expect(within(index).getByRole("button", { name: /장보기/ })).toBeInTheDocument());
     expect(index.querySelectorAll(".home-memo-tile")).toHaveLength(2);
-    expect(within(index).getByRole("button", { name: /장보기/ })).toHaveTextContent("우유커피 원두세제 리필건전지 AA택배 상자");
-    expect(within(index).queryByText("여섯 번째")).not.toBeInTheDocument();
+    expect(within(index).getByRole("button", { name: /장보기/ })).toHaveTextContent("[세제 리필](https://example.test)건전지 AA택배 상자여섯 번째**우유**");
+    expect(within(index).queryByText("- [ ] 커피 원두")).not.toBeInTheDocument();
     expect(within(index).getByRole("button", { name: /가계부/ })).toHaveTextContent("500,000원쓴 돈0하루100,000");
     expect(within(index).queryByText("세 번째 메모")).not.toBeInTheDocument();
     await user().click(within(index).getByRole("button", { name: "메모 전체" }));

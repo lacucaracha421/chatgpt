@@ -1,7 +1,8 @@
 import type { AuthoritySyncHealth, CloudBackfillProgress, CollectionSummary, ReleaseBoardEntry, ReleaseInboxItem, ReleaseWishlistItem } from "../library/types";
 import { koreanReleases, releaseCaption, shortReleaseDate, type ReleaseCaption } from "../collections/releaseCaption";
 import { releaseEventLine } from "../collections/releaseCalendarFormat";
-import { byOrder, noteColorValue, stripMarkdown } from "../notes/model";
+import { checklistMarkdown, noteColorValue } from "../notes/model";
+import { memoItems, memoMode, memoPreview, parseMemo } from "../notes/memo/memoModel";
 import type { Note } from "../notes/store";
 import type { AvPerformerProfile } from "../collections/avTypes";
 import { LEDGER, LEDGER_MONTH } from "../notes/ledger/model";
@@ -198,12 +199,12 @@ export function memoRows(notes: Note[], today: string): MemoRow[] {
           amount: summary.available ?? summary.spent, available: summary.available, spent: summary.spent, scheduled: summary.scheduled, perDay: summary.perDay,
           categories, latest };
       }
-      if (note.type === "checklist" && !note.readOnly) {
-        const items = [...(note.items ?? [])].sort(byOrder);
-        return { ...base, kind: "checklist", done: items.filter((item) => item.checked).length, total: items.length,
-          items: items.slice(0, 5).map((item) => ({ text: stripMarkdown(item.text), checked: item.checked })) };
+      const body = note.type === "checklist" ? checklistMarkdown(note.items ?? []) : note.body;
+      if (note.type === "checklist" || memoMode(body) === "todo") {
+        const items = memoItems(parseMemo(body)).filter(item => item.task).map(item => ({ text: item.text, checked: item.done })).sort((a,b) => Number(a.checked)-Number(b.checked));
+        return { ...base, kind: "checklist", done: items.filter((item) => item.checked).length, total: items.length, items: items.slice(0, 5) };
       }
-      return { ...base, kind: "text", snippet: note.body.split("\n").map(stripMarkdown).map((line) => line.replace(/\\([\\`*_{}[\]()#+.!><-])/g, "$1").trim()).filter(Boolean).join(" ").slice(0, 160) };
+      return { ...base, kind: "text", snippet: memoPreview(body).split(/\r\n|\n|\r/).map(line => line.trim()).filter(Boolean).join(" ").slice(0, 160) };
     });
 }
 

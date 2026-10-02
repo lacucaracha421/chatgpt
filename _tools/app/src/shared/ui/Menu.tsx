@@ -23,6 +23,8 @@ export type MenuItem = {
 };
 
 type MenuProps = {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   label: string;
   items?: MenuItem[];
   content?: ReactNode;
@@ -33,11 +35,11 @@ type MenuProps = {
   align?: "start" | "center" | "end";
 };
 
-export function Menu({ items = [], content, label, trigger, disabled = false, triggerClassName, contentClassName, align = "start" }: MenuProps): ReactNode {
+export function Menu({ open, onOpenChange, items = [], content, label, trigger, disabled = false, triggerClassName, contentClassName, align = "start" }: MenuProps): ReactNode {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [panelOwner, setPanelOwner] = useState<string | undefined>();
   return (
-    <DropdownMenu.Root modal={false} onOpenChange={(open) => setPanelOwner(open ? triggerRef.current?.closest("[data-workspace-popover]")?.getAttribute("data-workspace-popover") ?? undefined : undefined)}>
+    <DropdownMenu.Root open={open} modal={false} onOpenChange={(next) => { setPanelOwner(next ? triggerRef.current?.closest("[data-workspace-popover]")?.getAttribute("data-workspace-popover") ?? undefined : undefined); onOpenChange?.(next); }}>
       <DropdownMenu.Trigger asChild>
         <button ref={triggerRef} className={`ui-menu__trigger${triggerClassName ? ` ${triggerClassName}` : ""}`} type="button" aria-label={label} aria-description={label} disabled={disabled}>
           {trigger}

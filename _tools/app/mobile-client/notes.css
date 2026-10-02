@@ -34,11 +34,11 @@
 .notes-fab svg{width:22px;stroke-width:2}
 .notes-editor{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;padding:0 var(--mobile-gutter) 16px}
 .notes-editor__inner{display:flex;flex-direction:column;flex:1 0 auto;width:100%;max-width:760px;margin:0 auto}
-.notes-editor input,.notes-editor textarea{background:none;border:0;outline:none;color:inherit;font:inherit;resize:none;padding:0;min-width:0}
-.notes-editor input{font:600 var(--type-title)/1.45 var(--font-ui);padding:var(--space-2) 0 var(--space-1)}
-.notes-editor textarea{flex:1 0 auto;min-height:40vh;overflow:hidden;font:var(--type-body)/1.85 var(--font-ui)}
+.notes-editor :where(input:not(.memo-rename),textarea:not(.memo-item-text)){background:none;border:0;outline:none;color:inherit;font:inherit;resize:none;padding:0;min-width:0}
+.notes-editor :where(input:not(.memo-rename)){font:600 var(--type-title)/1.45 var(--font-ui);padding:var(--space-2) 0 var(--space-1)}
+.notes-editor :where(textarea:not(.memo-item-text)){flex:1 0 auto;min-height:40vh;overflow:hidden;font:var(--type-body)/1.85 var(--font-ui)}
 .notes-editor input::placeholder,.notes-editor textarea::placeholder{color:var(--color-muted)}
-.notes-editor input:focus-visible,.notes-editor textarea:focus-visible{outline:none}
+.notes-editor :where(input:not(.memo-rename),textarea:not(.memo-item-text)):focus-visible{outline:none}
 .notes-when{margin:0 0 var(--space-3);padding-bottom:var(--space-3);border-bottom:1px solid var(--color-border);font-size:var(--type-meta);color:var(--color-muted)}
 .notes-restore{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px;padding:6px 6px 6px 12px;border-radius:var(--radius-sm);background:var(--color-surface);font-size:13px;color:var(--color-muted)}
 .notes-conflict{margin:var(--space-2) 0 0;padding:var(--space-2) var(--space-3);border-radius:var(--radius-control);background:color-mix(in srgb,var(--color-danger) 12%,transparent);color:var(--color-danger);font-size:var(--type-meta)}
@@ -49,7 +49,7 @@
 .notes-unlock input{min-height:48px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);color:inherit;padding:8px 12px;font:inherit;min-width:0}
 .notes-error{position:absolute;bottom:0;left:0;right:0;z-index:4;padding:12px var(--mobile-gutter);background:var(--color-surface);border-top:1px solid var(--color-border);font-size:12px;display:flex;align-items:center;justify-content:space-between}
 
-/* Notes v2: rendered Markdown, checklists, labels, secret notes (touch-first). */
+/* Notes v2: labels and secret notes. */
 .notes-label-filter{flex:none;padding:0;flex-wrap:nowrap}
 .notes-label-filter .filter-chip{background:var(--color-surface-elevated);border:0;box-shadow:none;border-radius:var(--radius-control)}
 .notes-label-filter .numeric{margin-left:4px;opacity:.7}
@@ -65,9 +65,6 @@
 .sheet-option>svg{width:20px;height:20px}
 .notes-editor.has-tint{background:color-mix(in srgb,var(--note-tint) 8%,var(--color-bg))}
 .notes-editor .notes-title{font:600 var(--type-title)/1.45 var(--font-ui);padding:var(--space-2) 0 var(--space-1)}
-.notes-rendered{flex:1 0 auto;min-height:40vh;font:var(--type-body)/1.85 var(--font-ui);cursor:text;overflow-wrap:anywhere}
-.notes-rendered__empty{color:var(--color-muted);margin:0}
-.notes-rendered .markdown__task input{width:22px;height:22px}
 .notes-readonly,.notes-limit{margin:var(--space-2) 0 0;padding:var(--space-2) var(--space-3);border-radius:var(--radius-control);background:var(--color-surface);font-size:var(--type-meta);color:var(--color-muted)}
 .notes-limit{color:var(--color-danger)}
 .notes-conflict{display:flex;align-items:center;justify-content:space-between;gap:12px}
@@ -78,45 +75,9 @@
 .notes-label-add{display:inline-flex;align-items:center;gap:var(--space-1);min-height:var(--control-height-compact);padding:0 var(--space-3);border:0;border-radius:var(--radius-control);background:var(--color-surface-elevated);color:var(--color-muted);font:inherit;font-size:var(--type-meta)}
 .notes-label-add svg{width:14px;height:14px}
 .notes-editor .notes-label-input{font-size:var(--type-body);font-weight:400;min-height:var(--control-height);padding:0 var(--space-3);border:0;border-radius:var(--radius-control);background:var(--color-surface);box-shadow:inset 0 -2px 0 var(--color-focus);width:10em}
-/* Fixed Markdown headings: tablet keeps every heading in place while one section body is edited. */
-.notes-sections{flex:1 0 auto;min-height:40vh;overflow-wrap:anywhere;padding-bottom:12px}
-.notes-section{min-width:0}
-.notes-section-heading-row{display:flex;align-items:center;min-height:44px;margin-top:16px;border-bottom:1px solid var(--color-border)}
-.notes-section-heading{display:flex;align-items:stretch;flex:1;min-width:0;height:44px;margin:0;font:inherit}
-.notes-section-heading>button{display:flex;align-items:center;gap:8px;flex:1;min-width:0;padding:0;border:0;background:transparent;color:var(--color-text);font:600 var(--type-body)/1.3 inherit;text-align:left}
-.notes-section-heading>button>svg{width:16px;height:16px;flex:none;color:var(--color-faint);transition:transform 120ms ease}
-.notes-section-heading>button>svg.is-open{transform:rotate(90deg)}
-.notes-section[data-level="4"] .notes-section-heading>button,.notes-section[data-level="5"] .notes-section-heading>button,.notes-section[data-level="6"] .notes-section-heading>button{color:var(--color-muted)}
-.notes-section-heading>button>span:nth-child(2){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.notes-section-more{display:grid;place-items:center;width:44px;height:44px;flex:none;border:0;background:transparent;color:var(--color-muted)}
-.notes-section-more svg{width:18px;height:18px}
-.notes-section-body{min-height:28px;padding:8px 0 4px var(--space-6);cursor:text}
-.notes-section-body.is-empty{color:var(--color-muted)}
-.notes-section-body-editor{display:block;width:calc(100% - 20px);min-height:88px;margin:8px 0 4px var(--space-4);box-sizing:border-box;padding:var(--space-2);border:0;border-radius:var(--radius-control) var(--radius-control) 0 0;outline:none;resize:vertical;background:var(--color-surface);box-shadow:inset 0 -2px 0 var(--color-focus);color:inherit;font:var(--type-body)/1.85 inherit;white-space:pre-wrap;tab-size:4}
-.notes-section-body-editor:focus-visible{outline:none}
-.notes-section-rename{width:min(100%,32ch);height:40px;margin:2px 0;padding:0 var(--space-2);border:0;border-radius:var(--radius-control);outline:none;background:var(--color-surface);box-shadow:inset 0 -2px 0 var(--color-focus);color:inherit;font:600 var(--type-body)/1.3 inherit}
-.notes-section-add{display:inline-flex;align-items:center;min-height:44px;margin-top:12px;padding:0 4px;border:0;background:transparent;color:var(--color-faint);font:inherit}
-.notes-section-action-up{transform:rotate(-90deg)}
-.notes-section-action-down{transform:rotate(90deg)}
-/* Checklist: 44px targets; the handle drags after a long press and never scrolls the page. */
-.notes-checklist ul{list-style:none;margin:0;padding:0}
-.notes-check{display:flex;align-items:center;gap:2px;min-height:48px;border-radius:var(--radius-sm)}
-.notes-check.is-dragging{opacity:.45}
-.notes-check.is-drop-target,.notes-check__drop-end{box-shadow:inset 0 2px 0 var(--color-accent)}
-.notes-check__drop-end{height:4px}
-.notes-check__handle{display:grid;place-items:center;width:36px;height:44px;flex-shrink:0;border:0;background:transparent;color:var(--color-muted);touch-action:none;-webkit-user-select:none;user-select:none}
-.notes-check__handle svg{width:18px;height:18px}
-.notes-check__box{display:grid;place-items:center;width:44px;height:44px;flex-shrink:0}
-.notes-check__box input{width:22px;height:22px;margin:0;accent-color:var(--color-accent)}
-.notes-editor .notes-check__text{flex:1;font-size:16px;font-weight:400;padding:10px 0}
-.notes-check.is-checked .notes-check__text{color:var(--color-muted);text-decoration:line-through}
-.notes-check__remove{display:grid;place-items:center;width:44px;height:44px;flex-shrink:0;border:0;background:transparent;color:var(--color-muted)}
-.notes-check__remove svg{width:18px;height:18px}
+/* Secret notes still use this add-row control. */
 .notes-checklist__add{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 8px 0 40px;border:0;background:transparent;color:var(--color-muted);font:inherit;font-size:15px}
 .notes-checklist__add svg{width:18px;height:18px}
-.notes-checklist__done{margin-top:12px;border-top:1px solid var(--color-border);padding-top:4px}
-.notes-checklist__done-toggle{display:inline-flex;align-items:center;gap:6px;min-height:44px;border:0;background:transparent;color:var(--color-muted);font:inherit;font-size:13px}
-.notes-checklist__done-toggle svg{width:16px;height:16px}
 /* Secret notes */
 .notes-secret__fields{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
 .notes-secret__field{display:flex;flex-direction:column;gap:2px;padding:8px 0;border-bottom:1px solid var(--color-border)}
@@ -138,4 +99,17 @@
 .notes-recovery{display:flex;flex-direction:column;gap:12px;padding-bottom:12px}
 .notes-recovery form{display:flex;flex-direction:column;gap:12px}
 
-.notes-rendered__empty svg { width:20px; height:20px; color:var(--color-faint); }
+
+/* The scroll pane shrinks above the IME; the quick bar remains its fixed flex sibling. */
+.mobile-notes.note-open{overflow:hidden}
+.mobile-notes .notes-title-row{max-width:760px;margin-bottom:var(--space-3);gap:var(--space-3)}
+.mobile-notes .notes-title-row .notes-title{flex:1;min-width:0}
+.mobile-notes .memo-editor{max-width:none;flex:none}
+.notes-memo-footer{margin:0;color:var(--color-faint);font-size:var(--type-meta)}
+.notes-quick{display:flex;align-items:center;flex-shrink:0;gap:var(--space-2);padding:var(--space-2) var(--mobile-gutter);border-top:1px solid var(--color-border);background:var(--color-bg)}
+.notes-quick>.ui-text-input{flex:1;min-width:0}
+.notes-quick>select{min-width:0;max-width:35%;min-height:var(--control-height);padding:0 var(--space-2);border:0;border-radius:var(--radius-control);background:var(--color-surface);color:var(--color-text);font:inherit;font-size:var(--type-meta)}
+.notes-quick>.ui-button{flex:none}
+.notes-quick~.notes-error{bottom:calc(var(--control-height) + 2 * var(--space-2) + 1px)}
+.notes-quick svg{width:var(--icon-size,24px);height:var(--icon-size,24px)}
+@media(max-width:420px){.mobile-notes .notes-title-row{flex-wrap:wrap}.mobile-notes .notes-title-row .notes-title{flex-basis:100%}}

@@ -43,7 +43,7 @@
 .notes-card__checklist { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-2); font-size: var(--type-meta); line-height: 1.4; }
 .notes-card__check { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .notes-card__check-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.notes-card__box { position: relative; flex: none; width: var(--checkbox-size); height: var(--checkbox-size); box-sizing: border-box; border: 1.5px solid var(--color-muted); border-radius: var(--radius-mark); }
+.notes-card__box { position: relative; flex: none; width: var(--checkbox-size); height: var(--checkbox-size); box-sizing: border-box; border: 1.5px solid var(--color-muted); border-radius: 50%; }
 .notes-card__check.is-done { color: var(--color-muted); }
 .notes-card__check.is-done .notes-card__check-text { text-decoration: line-through; }
 .notes-card__check.is-done .notes-card__box { border-color: var(--color-muted); background: var(--color-muted); }

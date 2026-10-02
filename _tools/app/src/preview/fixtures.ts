@@ -384,7 +384,12 @@ function notesRequest(args: Record<string, unknown>): unknown {
   if (["state", "sync", "unlock", "unlockKeyring"].includes(operation)) return { unlocked: true, keyringLocked: false, unreadable: 0, notes: previewNotes, lastSyncedAt: "2026-09-29T06:30:00.000Z" };
   if (operation === "secretStatus" || operation === "secretTouch") return { pinSet: true, unlocked: true };
   if (operation === "ledgerMonthId") return { id: "note-ledger-month-2026-09" };
-  if (operation === "save") return { ...(args.input as object), localRevision: 2, pending: false, conflict: false };
+  if (operation === "save") {
+    const input = args.input as { id?: string };
+    const stored = previewNotes.find(note => note.id === input.id);
+    const now = new Date().toISOString();
+    return { createdAt: now, ...stored, ...input, updatedAt: now, localRevision: 2, pending: false, conflict: false };
+  }
   return null;
 }
 

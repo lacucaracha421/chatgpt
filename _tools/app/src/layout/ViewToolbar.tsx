@@ -27,7 +27,6 @@ export function ViewToolbar({ title, titleContent, leadingAction, titleAccessory
       <ChromeContribution title={title} spec={chrome} />
       {sectionDrop?.overlay}
       {place(<header ref={sectionDrop?.barRef} className="view-toolbar view-toolbar--context" role="toolbar" aria-label={ariaLabel} data-tauri-drag-region="deep">
-        <span className="chrome-location-mark" aria-hidden="true" />
         {leadingAction}
         <h2 aria-description={title}>{sectionDrop ? sectionDrop.title(titleContent ?? title, sectionDrop.area ?? title) : titleContent ?? title}</h2>
         {titleAccessory}

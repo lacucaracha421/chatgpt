@@ -11,57 +11,49 @@ beforeEach(()=>{mock.native.mockReset();mock.native.mockImplementation(state([no
 afterEach(()=>{cleanup();localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals();});
 async function openNote(title:string){fireEvent.click(await screen.findByText(title));}
 async function openTrash(){fireEvent.click(await screen.findByRole('button',{name:'메모 목록 더보기'}));fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:/^휴지통/}));}
-const rendered=(text:string)=>screen.findByText(text,{selector:'.notes-rendered p, .notes-section-body p, .notes-section-body .markdown p'});
-async function editBody(){const current=screen.queryByRole('textbox',{name:'메모 내용'});if(current)return current;fireEvent.click(await rendered('내용'));return await screen.findByRole('textbox',{name:'메모 내용'});}
+const rows=()=>screen.getAllByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement[];
+async function editBody(){return await screen.findByRole('textbox',{name:'메모 본문'});}
 
-it('opens the last section for editing and returns to the rendered view when leaving the text',async()=>{
- mock.native.mockImplementation(state([{...note,body:'# 제목줄\n- [ ] 우유\n\n내용'}]));
+it('opens text as shared items with the caret at the end and switches modes beside the title',async()=>{
+ mock.native.mockImplementation(state([{...note,body:'## 장보기\n우유\n빵'}]));
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
- expect(await screen.findByRole('button',{name:'제목줄'})).toBeTruthy();
- const openedArea=await screen.findByRole('textbox',{name:'메모 구간 본문'});
- await waitFor(()=>expect(document.activeElement).toBe(openedArea));
- fireEvent.blur(openedArea,{relatedTarget:screen.getByRole('textbox',{name:'메모 제목'})});
- expect(screen.queryByRole('button',{name:/^(보기|편집)$/})).toBeNull();
- expect(screen.getByRole('button',{name:'마크다운 도움말'})).toBeTruthy();
- // A rendered task checkbox rewrites its line.
- fireEvent.click(screen.getByRole('checkbox'));
- await waitFor(()=>expect(saves().some(s=>String(s.body).includes('- [x] 우유'))).toBe(true));
- fireEvent.click(await rendered('내용'));
- const area=await screen.findByRole('textbox',{name:'메모 구간 본문'});
- // Tapping the rest of the note (here its title) leaves the source view.
- fireEvent.blur(area,{relatedTarget:screen.getByRole('textbox',{name:'메모 제목'})});
- await waitFor(()=>expect(screen.queryByRole('textbox',{name:'메모 구간 본문'})).toBeNull());
+ expect(rows().map(row=>row.value)).toEqual(['우유','빵']);
+ expect(document.activeElement).toBe(rows()[1]);expect(rows()[1]!.selectionStart).toBe(1);
+ expect(document.activeElement).not.toBe(screen.getByPlaceholderText('메모 작성'));
+ expect(document.querySelector('.memo-editor--touch')).toBeTruthy();
+ expect(screen.queryByRole('button',{name:'마크다운 도움말'})).toBeNull();
+ const modes=within(screen.getByRole('radiogroup',{name:'메모 방식'}));
+ expect(modes.getByRole('radio',{name:'글'}).getAttribute('aria-checked')).toBe('true');
+ fireEvent.click(modes.getByRole('radio',{name:'할 일'}));
+ await waitFor(()=>expect(saves().at(-1)?.body).toBe('## 장보기\n- [ ] 우유\n- [ ] 빵'));
+ fireEvent.click(screen.getAllByRole('button',{name:'완료'})[0]!);
+ await waitFor(()=>expect(saves().at(-1)?.body).toBe('## 장보기\n- [x] 우유\n- [ ] 빵'));
+ expect(rows().map(row=>row.value)).toEqual(['빵']);
+ fireEvent.click(screen.getByRole('button',{name:/완료 1/}));
+ expect(rows().map(row=>row.value)).toEqual(['빵','우유']);
+ fireEvent.click(modes.getByRole('radio',{name:'글'}));
+ await waitFor(()=>expect(saves().at(-1)?.body).toBe('## 장보기\n우유\n빵'));
+ expect(rows().map(row=>row.value)).toEqual(['우유','빵']);
 });
-it('folds fixed sections on the tablet, remembers the fold, and renames from the bottom sheet',async()=>{
- localStorage.clear();
- const fixed={...note,body:'# 하나\n첫 본문\n## 둘\n둘째 본문'};
- mock.native.mockImplementation(state([fixed]));
- const backRef={current:null};render(<Notes active backRef={backRef}/>);await openNote('제목');
- fireEvent.click(await screen.findByRole('button',{name:'하나'}));
- expect(screen.queryByText('첫 본문',{selector:'.notes-section-body p'})).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'둘 더보기'}));
- const sheet=within(await screen.findByRole('dialog'));fireEvent.click(sheet.getByRole('button',{name:'이름 바꾸기'}));
- const rename=await screen.findByRole('textbox',{name:'제목 이름'});fireEvent.change(rename,{target:{value:'둘 변경'}});fireEvent.keyDown(rename,{key:'Enter'});
- await waitFor(()=>expect(saves().some(save=>save.body==='# 하나\n첫 본문\n## 둘 변경\n둘째 본문')).toBe(true));
- cleanup();render(<Notes active backRef={{current:null}}/>);await openNote('제목');
- expect(screen.queryByText('첫 본문',{selector:'.notes-section-body p'})).toBeNull();
+
+it('opens legacy checklist as 할 일 and saves it as text on the first edit',async()=>{
+ mock.native.mockImplementation(state([{...note,type:'checklist',body:'',items:[{id:'one',text:'우유',checked:false,order:'A'},{id:'two',text:'빵',checked:true,order:'B'}]}]));
+ render(<Notes active backRef={{current:null}}/>);await openNote('제목');
+ expect(screen.getByRole('radio',{name:'할 일'}).getAttribute('aria-checked')).toBe('true');
+ expect(rows().map(row=>row.value)).toEqual(['우유']);expect(saves()).toHaveLength(0);
+ fireEvent.change(rows()[0]!,{target:{value:'두유'}});
+ await waitFor(()=>expect(saves().at(-1)).toMatchObject({type:'text',body:'- [ ] 두유\n- [x] 빵'}));
+ expect(saves().at(-1)?.items).toBeUndefined();
 });
-it('places the source caret under the rendered text that was tapped',async()=>{
- const caretPositionFromPoint=vi.fn(()=>{
-  const mirror=[...document.body.children].find(element=>{const style=(element as HTMLElement).style;return style.position==='fixed'&&style.visibility==='hidden';}) as HTMLElement|undefined;
-  return mirror?.firstChild?{offsetNode:mirror.firstChild,offset:7}:null;
- });
- Object.defineProperty(document,'caretPositionFromPoint',{configurable:true,value:caretPositionFromPoint});
- mock.native.mockImplementation(state([{...note,body:'첫 줄\n\n아래 줄의 본문'}]));
- try {
-  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
-  const openedArea=await screen.findByRole('textbox',{name:'메모 내용'});
-  fireEvent.blur(openedArea,{relatedTarget:screen.getByRole('textbox',{name:'메모 제목'})});
-  fireEvent.click(await rendered('아래 줄의 본문'),{clientX:120,clientY:200});
-  const area=await screen.findByRole('textbox',{name:'메모 내용'}) as HTMLTextAreaElement;
-  await waitFor(()=>expect(area.selectionStart).toBe(7));
- } finally {delete (document as Document & {caretPositionFromPoint?:unknown}).caretPositionFromPoint;}
+
+it('keeps the same item nodes on blur and never uses the retired section fold preference',async()=>{
+ localStorage.setItem('lakomics.notes.sectionFolds.v1',JSON.stringify({[`${note.id}:["하나",0]`]:true}));
+ mock.native.mockImplementation(state([{...note,body:'## 하나\n첫 본문\n## 둘\n둘째 본문'}]));
+ render(<Notes active backRef={{current:null}}/>);await openNote('제목');
+ const first=rows()[0]!;fireEvent.blur(first,{relatedTarget:screen.getByRole('textbox',{name:'메모 제목'})});
+ expect(rows()[0]).toBe(first);expect(rows().map(row=>row.value)).toEqual(['첫 본문','둘째 본문']);
 });
+
 it('does not show the saved indicator while an open note is being edited',async()=>{
  mock.native.mockImplementation(state([{...note,pending:true}]));
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
@@ -76,7 +68,7 @@ it('keeps typing made during a save and writes it against the acknowledged local
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
  fireEvent.change(await editBody(),{target:{value:'first'}});
  await waitFor(()=>expect(finish).toBeTypeOf('function'));
- fireEvent.change(screen.getByRole('textbox',{name:'메모 내용'}),{target:{value:'second'}});
+ fireEvent.change(screen.getByRole('textbox',{name:'메모 본문'}),{target:{value:'second'}});
  await act(async()=>finish({...note,body:'first',localRevision:2,pending:true}));
  await waitFor(()=>expect(saves().some(p=>p.body==='second'&&p.expectedRevision===2)).toBe(true));
  expect(saves()[0]).toMatchObject({id:note.id,expectedRevision:1,type:'text',body:'first'});
@@ -118,9 +110,9 @@ it('groups pinned notes, keeps the trash behind a small link and returns with Ba
 it('creates notes from the floating button and moves an open note to the trash',async()=>{
  render(<Notes active backRef={{current:null}}/>);await screen.findByText('제목');
  fireEvent.click(screen.getByRole('button',{name:'새 메모'}));
- fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'체크리스트'}));
- expect(await screen.findByRole('button',{name:/항목 추가/})).toBeTruthy();
- await waitFor(()=>expect(saves().some(s=>s.type==='checklist'&&Array.isArray(s.items))).toBe(true));
+ fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'메모'}));
+ expect(await screen.findByRole('button',{name:'+ 줄 추가'})).toBeTruthy();
+ await waitFor(()=>expect(saves().some(s=>s.type==='text')).toBe(true));
  fireEvent.click(screen.getByRole('button',{name:'메모 목록'}));
  await openNote('제목');fireEvent.click(await screen.findByRole('button',{name:'고정'}));
  expect(screen.getByRole('button',{name:'고정 해제'})).toBeTruthy();
@@ -133,27 +125,17 @@ it('shows a trashed note read-only with a restore action',async()=>{
  render(<Notes active backRef={{current:null}}/>);await screen.findByText('제목');await openTrash();
  fireEvent.click(await screen.findByText('지운 메모'));
  expect(await screen.findByText('휴지통에 있는 메모입니다.')).toBeTruthy();
- fireEvent.click(await rendered('내용'));expect(screen.queryByRole('textbox',{name:'메모 내용'})).toBeNull();
+ expect((await editBody() as HTMLTextAreaElement).readOnly).toBe(true);
+ expect(screen.queryByPlaceholderText('메모 작성')).toBeNull();
  expect((screen.getByRole('textbox',{name:'메모 제목'}) as HTMLInputElement).readOnly).toBe(true);
  fireEvent.click(screen.getByRole('button',{name:'복원'}));
  await waitFor(()=>expect(screen.queryByText('휴지통에 있는 메모입니다.')).toBeNull());
 });
-it('converts between text and checklist with one tap, colours with a circle and archives from the ⋯ menu',async()=>{
- mock.native.mockImplementation(state([{...note,body:'- [x] 우유\n빵'}]));
+it('colours with a circle and archives from the more sheet',async()=>{
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
- fireEvent.click(await screen.findByRole('button',{name:'체크리스트로 바꾸기'}));
- await waitFor(()=>expect(saves().some(s=>s.type==='checklist')).toBe(true));
- const converted=saves().find(s=>s.type==='checklist')!;
- expect((converted.items as {text:string;checked:boolean}[]).map(i=>[i.text,i.checked])).toEqual([['우유',true],['빵',false]]);
- expect(await screen.findByRole('button',{name:'메모로 바꾸기'})).toBeTruthy();
- expect(screen.getByRole('button',{name:'완료 1'})).toBeTruthy();
- fireEvent.click(screen.getByRole('button',{name:'메모로 바꾸기'}));
- await waitFor(()=>expect(saves().some(s=>s.type==='text'&&s.body==='빵\n\n우유')).toBe(true));
- expect(saves().find(s=>s.type==='text'&&s.body==='빵\n\n우유')?.body).not.toContain('- [');
  fireEvent.click(screen.getByRole('button',{name:'메모 색상'}));
  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('radio',{name:'청록'}));
  await waitFor(()=>expect(saves().some(s=>s.color==='teal')).toBe(true));
- expect(screen.queryByRole('button',{name:/^보관/})).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'메모 더보기'}));
  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'보관함으로 보내기'}));
  await waitFor(()=>expect(saves().some(s=>s.archived===true)).toBe(true));
@@ -161,6 +143,7 @@ it('converts between text and checklist with one tap, colours with a circle and 
  fireEvent.click(await screen.findByRole('button',{name:'보관함 1'}));
  expect(await screen.findByText('제목')).toBeTruthy();
 });
+
 it('filters by label chips and searches secret notes by title only',async()=>{
  const secret:MobileNote={...note,id:'d'.repeat(32),type:'secret',schema:2,title:'서버 계정',body:'',redacted:true};
  const labelled:MobileNote={...note,id:'e'.repeat(32),title:'여행',labels:['개인']};
@@ -241,11 +224,11 @@ it('keeps a newer-schema note read-only and follows a stale save into its keep-b
  render(<Notes active backRef={{current:null}}/>);await openNote('미래 메모');
  expect(await screen.findByText('새 버전의 앱에서 만든 메모입니다. 앱을 업데이트하면 편집할 수 있습니다.')).toBeTruthy();
  expect(screen.queryByRole('button',{name:'체크리스트로 바꾸기'})).toBeNull();
- fireEvent.click(await rendered('대체 본문'));expect(screen.queryByRole('textbox',{name:'메모 내용'})).toBeNull();
+ expect((await editBody() as HTMLTextAreaElement).readOnly).toBe(true);expect(screen.queryByPlaceholderText('메모 작성')).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'메모 목록'}));
  await openNote('제목');fireEvent.change(await editBody(),{target:{value:'내 수정'}});
  expect(await screen.findByText(/두 내용을 모두 보관했습니다/)).toBeTruthy();
- expect((screen.getByRole('textbox',{name:'메모 내용'}) as HTMLTextAreaElement).value).toBe('내 수정');
+ expect((screen.getByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('내 수정');
 });
 
 it('fits the editor above the visual keyboard, follows viewport panning, and restores on close',async()=>{
@@ -263,10 +246,11 @@ it('fits the editor above the visual keyboard, follows viewport panning, and res
  expect(section.style.maxHeight).toBe('736px');
  act(()=>{viewport.offsetTop=100;viewport.dispatchEvent(new Event('scroll'));});
  expect(section.style.maxHeight).toBe('836px');
- // The keyboard closing (Back) leaves the source view.
+ // The keyboard closing keeps the shared editor and quick bar mounted.
  act(()=>{viewport.height=1280;viewport.offsetTop=0;viewport.dispatchEvent(new Event('resize'));});
  expect(section.style.maxHeight).toBe('1216px');
- await waitFor(()=>expect(screen.queryByRole('textbox',{name:'메모 내용'})).toBeNull());
+ expect(screen.getByRole('textbox',{name:'메모 본문'})).toBe(body);
+ expect(screen.getByPlaceholderText('메모 작성').closest('.notes-quick')?.parentElement).toBe(section);
  fireEvent.click(screen.getByRole('button',{name:'메모 목록'}));await screen.findByRole('button',{name:'새 메모'});
  expect(section.style.maxHeight).toBe('');
 });
@@ -305,7 +289,7 @@ it('shows sticky-note cards: pin, checklist progress with done items struck, mas
  const card=(await screen.findByText('장보기')).closest('button')!;
  expect(within(card).getByLabelText('고정됨')).toBeTruthy();
  expect(card.style.getPropertyValue('--note-tint')).not.toBe('');
- expect(card.querySelector('.notes-card__progress')!.textContent).toBe('1/3');
+ expect(card.querySelector('.notes-card__progress')!.textContent).toBe('1/3 완료');
  // Open items first, then done ones (struck through).
  expect([...card.querySelectorAll('.notes-card__checklist>.notes-card__check')].map(el=>[el.querySelector('.notes-card__check-text')?.textContent,el.className])).toEqual([['우유','notes-card__check'],['대파','notes-card__check'],['두부','notes-card__check is-done']]);
  expect(within(card).getByLabelText('동기화 대기')).toBeTruthy();
@@ -315,7 +299,7 @@ it('shows sticky-note cards: pin, checklist progress with done items struck, mas
  expect(secretCard.textContent).not.toContain('hunter2');expect(secretCard.textContent).not.toContain('비밀 메모');
  expect(within(secretCard).queryByLabelText('고정됨')).toBeNull();
  const textCard=screen.getByText('제목 없는 메모').closest('button')!;
- expect(textCard.querySelector('.notes-card__text')!.textContent).toBe('택배 보관함');
+ expect(textCard.querySelector('.notes-card__text')!.textContent).toBe('**택배** 보관함');
  expect(textCard.querySelector('.notes-card__labels')!.textContent).toBe('작업');
  // Pinned and recent notes keep their own masonry blocks; a tap still opens the note.
  expect(document.querySelectorAll('.notes-grid')).toHaveLength(2);
@@ -332,13 +316,12 @@ it('forgets the Home origin after the note opened from Home is trashed, so anoth
  mock.native.mockImplementation(state([note,other]));
  const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
  render(<HomeHost backRef={backRef} id={note.id} home={home}/>);
- expect((await screen.findByRole('textbox',{name:'메모 내용'}) as HTMLTextAreaElement).value).toBe('내용');
+ expect((await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('내용');
  fireEvent.click(screen.getByRole('button',{name:'메모 휴지통으로'}));
  await openNote('다른 메모');
- expect((await screen.findByRole('textbox',{name:'메모 내용'}) as HTMLTextAreaElement).value).toBe('다른 내용');
+ expect((await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('다른 내용');
  act(()=>{expect(backRef.current!()).toBe(true);});
  expect(home).not.toHaveBeenCalled();
- act(()=>{expect(backRef.current!()).toBe(true);});
  expect(await screen.findByText('다른 메모')).toBeTruthy();
  expect(screen.queryByRole('textbox',{name:'메모 제목'})).toBeNull();
 });
@@ -346,7 +329,7 @@ it('leaves the list to App after the note opened from Home is trashed from its s
  mock.native.mockImplementation(state([note]));
  const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
  render(<HomeHost backRef={backRef} id={note.id} home={home}/>);
- expect((await screen.findByRole('textbox',{name:'메모 내용'}) as HTMLTextAreaElement).value).toBe('내용');
+ expect((await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('내용');
  fireEvent.click(screen.getByRole('button',{name:'메모 더보기'}));
  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button',{name:'휴지통으로 보내기'}));
  await waitFor(()=>expect(saves().some(s=>s.deleted===true)).toBe(true));
@@ -358,19 +341,17 @@ it('opens the note Home asks for, once per request',async()=>{
  const other={...note,id:'b'.repeat(32),title:'다른 메모',body:'다른 내용'};
  mock.native.mockImplementation(state([note,other]));
  const view=render(<Notes active backRef={{current:null}} request={{id:other.id,key:1}}/>);
- expect((await screen.findByRole('textbox',{name:'메모 내용'}) as HTMLTextAreaElement).value).toBe('다른 내용');
+ expect((await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('다른 내용');
  expect((screen.getByRole('textbox',{name:'메모 제목'}) as HTMLInputElement).value).toBe('다른 메모');
  view.rerender(<Notes active backRef={{current:null}} request={{id:note.id,key:2}}/>);
- expect((await screen.findByRole('textbox',{name:'메모 내용'}) as HTMLTextAreaElement).value).toBe('내용');
+ expect((await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('내용');
 });
 it('returns a note opened from Home to Home, closing a deeper sheet first',async()=>{
  mock.native.mockImplementation(state([note]));
  const backRef:{current:(()=>boolean)|null}={current:null},home=vi.fn();
  const view=render(<Notes active backRef={backRef} request={{id:note.id,key:1}} onReturnHome={home}/>);
- expect((await screen.findByRole('textbox',{name:'메모 내용'}) as HTMLTextAreaElement).value).toBe('내용');
+ expect((await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('내용');
  fireEvent.click(screen.getByRole('button',{name:'메모 더보기'}));
- act(()=>{expect(backRef.current!()).toBe(true);});
- expect(home).not.toHaveBeenCalled();
  act(()=>{expect(backRef.current!()).toBe(true);});
  expect(home).not.toHaveBeenCalled();
  act(()=>{expect(backRef.current!()).toBe(true);});
@@ -389,7 +370,7 @@ it('returns a note opened from Home to Home, closing a deeper sheet first',async
 
 it('opens a text editor at the end so native Backspace can delete immediately',async()=>{
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
- await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole('textbox',{name:'메모 내용'})));
+ await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole('textbox',{name:'메모 본문'})));
  const area=document.activeElement as HTMLTextAreaElement;
  expect(area.selectionStart).toBe(area.value.length);
  // jsdom has no native editing default action: apply the deletion at the actual selection.
@@ -401,7 +382,7 @@ it('keeps save feedback quiet through repeated typing and delayed save acknowled
  let finish!:(value:MobileNote)=>void;
  mock.native.mockImplementation(async(op,p)=>op==='notesSave'?new Promise(resolve=>{finish=resolve;}):{unlocked:true,notes:[note]});
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
- const area=screen.queryByRole('textbox',{name:'메모 내용'})??await editBody();
+ const area=screen.queryByRole('textbox',{name:'메모 본문'})??await editBody();
  const indicator=document.querySelector('.note-open .notes-top .notes-save-state')!;
  const initial=indicator.textContent;
  fireEvent.change(area,{target:{value:'한'}});
@@ -417,7 +398,7 @@ it('does not save or rewrite intermediate jamo, even when an earlier save return
  let finish!:(value:MobileNote)=>void;
  mock.native.mockImplementation(async(op,p)=>op==='notesSave'&&p.body==='before'?new Promise(resolve=>{finish=resolve;}):op==='notesSave'?{...note,...p,localRevision:3,pending:true}:{unlocked:true,notes:[note]});
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
- const area=(screen.queryByRole('textbox',{name:'메모 내용'})??await editBody()) as HTMLTextAreaElement;
+ const area=(screen.queryByRole('textbox',{name:'메모 본문'})??await editBody()) as HTMLTextAreaElement;
  act(()=>area.focus());fireEvent.change(area,{target:{value:'before'}});
  fireEvent.compositionStart(area);
  fireEvent.compositionUpdate(area,{data:'ㅎ'});fireEvent.input(area,{target:{value:'beforeㅎ'},isComposing:true});
@@ -433,38 +414,33 @@ it('does not save or rewrite intermediate jamo, even when an earlier save return
 });
 
 
-it('keeps a section node and its unnormalised composing value through save and viewport updates',async()=>{
- const fixed={...note,body:'# 하나\n첫 본문\n## 둘\n둘째 본문'};
- mock.native.mockImplementation(state([fixed]));
+it('keeps a section item and composing value through viewport updates, ignoring Enter and Backspace',async()=>{
+ mock.native.mockImplementation(state([{...note,body:'## 하나\n첫 본문\n## 둘\n둘째 본문'}]));
  const viewport=Object.assign(new EventTarget(),{height:800,offsetTop:0,scale:1});vi.stubGlobal('visualViewport',viewport);
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
- fireEvent.click(await rendered('첫 본문'));
- const area=screen.getByRole('textbox',{name:'메모 구간 본문'}) as HTMLTextAreaElement;
- await waitFor(()=>expect(document.activeElement).toBe(area));
- fireEvent.compositionStart(area);fireEvent.compositionUpdate(area,{data:'ㅎ'});
- fireEvent.input(area,{target:{value:'ㅎ'},isComposing:true});
+ const area=rows()[0]!;act(()=>area.focus());
+ fireEvent.compositionStart(area);fireEvent.input(area,{target:{value:'ㅎ'},isComposing:true});
  const setter=vi.spyOn(area,'value','set');
  act(()=>{viewport.height=1100;viewport.dispatchEvent(new Event('resize'));});
- expect(screen.getByRole('textbox',{name:'메모 구간 본문'})).toBe(area);
- expect(area.value).toBe('ㅎ');expect(setter).not.toHaveBeenCalled();expect(saves()).toHaveLength(0);
+ fireEvent.keyDown(area,{key:'Enter'});fireEvent.keyDown(area,{key:'Backspace'});
+ expect(rows()[0]).toBe(area);expect(area.value).toBe('ㅎ');expect(setter).not.toHaveBeenCalled();expect(saves()).toHaveLength(0);
  setter.mockRestore();
- fireEvent.compositionUpdate(area,{data:'하'});fireEvent.input(area,{target:{value:'하'},isComposing:true});
  fireEvent.input(area,{target:{value:'한'},isComposing:true});
  const finalSetter=vi.spyOn(area,'value','set');fireEvent.compositionEnd(area,{data:'한'});
- await waitFor(()=>expect(saves().at(-1)?.body).toBe('# 하나\n한\n## 둘\n둘째 본문'));
- expect(screen.getByRole('textbox',{name:'메모 구간 본문'})).toBe(area);
- expect(area.value).toBe('한');expect(finalSetter).not.toHaveBeenCalled();
+ await waitFor(()=>expect(saves().at(-1)?.body).toBe('## 하나\n한\n## 둘\n둘째 본문'));
+ expect(rows()[0]).toBe(area);expect(area.value).toBe('한');expect(finalSetter).not.toHaveBeenCalled();
 });
-it('keeps a plain source node when typing introduces a Markdown heading',async()=>{
+
+it('keeps an item node when typing heading syntax as literal text',async()=>{
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
- const area=await screen.findByRole('textbox',{name:'메모 내용'});
- fireEvent.change(area,{target:{value:'# 제목\n'}});
- expect(screen.getByRole('textbox',{name:'메모 내용'})).toBe(area);
- fireEvent.compositionStart(area);fireEvent.input(area,{target:{value:'# 제목\nㅎ'},isComposing:true});
- fireEvent.input(area,{target:{value:'# 제목\n한'},isComposing:true});fireEvent.compositionEnd(area,{data:'한'});
- await waitFor(()=>expect(saves().at(-1)?.body).toBe('# 제목\n한'));
- expect(screen.getByRole('textbox',{name:'메모 내용'})).toBe(area);
+ const area=await editBody();fireEvent.change(area,{target:{value:'## 제목'}});
+ expect(rows()[0]).toBe(area);
+ fireEvent.compositionStart(area);fireEvent.input(area,{target:{value:'## 제목ㅎ'},isComposing:true});
+ fireEvent.input(area,{target:{value:'## 제목한'},isComposing:true});fireEvent.compositionEnd(area,{data:'한'});
+ await waitFor(()=>expect(saves().at(-1)?.body).toBe('\\## 제목한'));
+ expect(rows()[0]).toBe(area);
 });
+
 it('composes the note title without saving intermediate jamo',async()=>{
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
  const title=screen.getByRole('textbox',{name:'메모 제목'}) as HTMLInputElement;act(()=>title.focus());
@@ -479,24 +455,83 @@ it('keeps composition on the same node until a keep-both save moves it, then sav
  const copyId='b'.repeat(32);let finish!:(value:MobileNote)=>void;
  mock.native.mockImplementation(async(op,p)=>op==='notesSave'&&p.body==='before'?new Promise(resolve=>{finish=resolve;}):op==='notesSave'?{...note,...p,localRevision:2,pending:true}:{unlocked:true,notes:[note]});
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
- const area=await screen.findByRole('textbox',{name:'메모 내용'}) as HTMLTextAreaElement;
+ const area=await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement;
  fireEvent.change(area,{target:{value:'before'}});fireEvent.compositionStart(area);
  fireEvent.input(area,{target:{value:'beforeㅎ'},isComposing:true});
  await act(async()=>finish({...note,body:'remote',copiedTo:copyId,localRevision:2,pending:true}));
- expect(screen.getByRole('textbox',{name:'메모 내용'})).toBe(area);expect(area.value).toBe('beforeㅎ');
+ expect(screen.getByRole('textbox',{name:'메모 본문'})).toBe(area);expect(area.value).toBe('beforeㅎ');
  fireEvent.input(area,{target:{value:'before한'},isComposing:true});fireEvent.compositionEnd(area,{data:'한'});
  await waitFor(()=>expect(saves().at(-1)).toMatchObject({id:copyId,body:'before한'}));
- expect((screen.getByRole('textbox',{name:'메모 내용'}) as HTMLTextAreaElement).value).toBe('before한');
+ expect((screen.getByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement).value).toBe('before한');
 });
 
 
 it('waits for compositionend before leaving a body that lost focus',async()=>{
  render(<Notes active backRef={{current:null}}/>);await openNote('제목');
- const area=await screen.findByRole('textbox',{name:'메모 내용'}) as HTMLTextAreaElement;
+ const area=await screen.findByRole('textbox',{name:'메모 본문'}) as HTMLTextAreaElement;
  fireEvent.compositionStart(area);fireEvent.input(area,{target:{value:'ㅎ'},isComposing:true});
  act(()=>screen.getByRole('textbox',{name:'메모 제목'}).focus());
- expect(screen.getByRole('textbox',{name:'메모 내용'})).toBe(area);expect(saves()).toHaveLength(0);
+ expect(screen.getByRole('textbox',{name:'메모 본문'})).toBe(area);expect(saves()).toHaveLength(0);
  fireEvent.input(area,{target:{value:'한'},isComposing:true});fireEvent.compositionEnd(area,{data:'한'});
  await waitFor(()=>expect(saves().at(-1)?.body).toBe('한'));
- expect(await rendered('한')).toBeTruthy();
+ expect(rows()[0]).toBe(area);expect(area.value).toBe('한');
+});
+
+
+it('offers the PC kinds and new menu with checklist counted as memo',async()=>{
+ const checklist={...note,id:'b'.repeat(32),title:'장보기',type:'checklist' as const,body:'',items:[{id:'one',text:'우유',checked:false,order:'A'}]};
+ const secret={...note,id:'c'.repeat(32),title:'암호 계정',type:'secret' as const,body:'',redacted:true};
+ mock.native.mockImplementation(state([note,checklist,secret]));
+ render(<Notes active backRef={{current:null}}/>);await screen.findByText('장보기');
+ const kinds=within(screen.getByRole('radiogroup',{name:'메모 종류'}));
+ expect(kinds.getAllByRole('radio').map(radio=>radio.getAttribute('aria-label'))).toEqual(['전체','메모','가계부','암호']);
+ fireEvent.click(kinds.getByRole('radio',{name:'메모'}));
+ expect(screen.getByText('장보기')).toBeTruthy();expect(screen.getByText('제목')).toBeTruthy();expect(screen.queryByText('암호 계정')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'새 메모'}));
+ const sheet=within(await screen.findByRole('dialog'));
+ expect(sheet.getByRole('button',{name:'메모'})).toBeTruthy();expect(sheet.getByRole('button',{name:'암호 메모'})).toBeTruthy();expect(sheet.getByRole('button',{name:'가계부'})).toBeTruthy();expect(sheet.queryByRole('button',{name:'체크리스트'})).toBeNull();
+});
+it('quick-add remembers the section per note, reveals it and keeps input focus through saves',async()=>{
+ const fixed={...note,body:'## 하나\n첫 본문\n## 둘\n둘째 본문'};
+ mock.native.mockImplementation(state([fixed]));
+ const scroll=vi.fn();Object.defineProperty(HTMLElement.prototype,'scrollIntoView',{configurable:true,value:scroll});
+ const view=render(<Notes active backRef={{current:null}}/>);await openNote('제목');
+ const picker=screen.getByRole('combobox',{name:'넣을 섹션'}) as HTMLSelectElement;
+ expect(picker.selectedOptions[0]!.textContent).toBe('둘');
+ fireEvent.change(picker,{target:{value:JSON.stringify(['하나',0])}});
+ fireEvent.click(within(screen.getByLabelText('메모 섹션')).getByRole('button',{name:'둘'}));
+ const quick=screen.getByPlaceholderText('메모 작성') as HTMLInputElement;act(()=>quick.focus());
+ fireEvent.change(quick,{target:{value:'추가한 줄'}});fireEvent.keyDown(quick,{key:'Enter'});
+ expect(quick.value).toBe('');expect(document.activeElement).toBe(quick);expect(scroll).toHaveBeenCalledWith({block:'nearest'});
+ await waitFor(()=>expect(saves().at(-1)?.body).toBe('## 하나\n첫 본문\n추가한 줄\n## 둘\n둘째 본문'));
+ expect(document.activeElement).toBe(quick);expect(rows().map(row=>row.value)).toContain('추가한 줄');
+ view.unmount();mock.native.mockImplementation(state([fixed]));
+ render(<Notes active backRef={{current:null}}/>);await openNote('제목');
+ expect((screen.getByRole('combobox',{name:'넣을 섹션'}) as HTMLSelectElement).selectedOptions[0]!.textContent).toBe('하나');
+});
+it('quick-add appends an open todo, ignores composing Enter and supports the send button',async()=>{
+ mock.native.mockImplementation(state([{...note,body:'## 장보기\n- [ ] 우유\n- [x] 빵'}]));
+ render(<Notes active backRef={{current:null}}/>);await openNote('제목');
+ const quick=screen.getByPlaceholderText('메모 작성') as HTMLInputElement;act(()=>quick.focus());
+ fireEvent.compositionStart(quick);fireEvent.input(quick,{target:{value:'ㅎ'},isComposing:true});
+ fireEvent.keyDown(quick,{key:'Enter'});fireEvent.keyDown(quick,{key:'Enter',keyCode:229});fireEvent.click(screen.getByRole('button',{name:'메모 추가'}));
+ expect(saves()).toHaveLength(0);expect(quick.value).toBe('ㅎ');
+ fireEvent.input(quick,{target:{value:'한'},isComposing:true});fireEvent.compositionEnd(quick,{data:'한'});
+ expect(saves()).toHaveLength(0);
+ fireEvent.keyDown(quick,{key:'Enter',isComposing:true});expect(saves()).toHaveLength(0);
+ fireEvent.pointerDown(screen.getByRole('button',{name:'메모 추가'}));fireEvent.click(screen.getByRole('button',{name:'메모 추가'}));
+ await waitFor(()=>expect(saves().at(-1)?.body).toBe('## 장보기\n- [ ] 우유\n- [ ] 한\n- [x] 빵'));
+ expect(quick.value).toBe('');expect(document.activeElement).toBe(quick);
+ fireEvent.change(quick,{target:{value:'다음'}});fireEvent.keyDown(quick,{key:'Enter'});
+ await waitFor(()=>expect(saves().at(-1)?.body).toContain('- [ ] 한\n- [ ] 다음'));
+});
+it('falls back from a missing remembered section and tolerates unavailable localStorage',async()=>{
+ localStorage.setItem('lakomics.notes.quickSection.v1.'+note.id,JSON.stringify(['사라짐',0]));
+ mock.native.mockImplementation(state([{...note,body:'## 하나\n첫 줄\n## 마지막\n끝 줄'}]));
+ render(<Notes active backRef={{current:null}}/>);await openNote('제목');
+ expect((screen.getByRole('combobox',{name:'넣을 섹션'}) as HTMLSelectElement).selectedOptions[0]!.textContent).toBe('마지막');
+ cleanup();vi.spyOn(Storage.prototype,'getItem').mockImplementation(()=>{throw new Error('blocked');});vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new Error('blocked');});
+ render(<Notes active backRef={{current:null}}/>);await openNote('제목');
+ const quick=screen.getByPlaceholderText('메모 작성');fireEvent.change(quick,{target:{value:'새 줄'}});fireEvent.keyDown(quick,{key:'Enter'});
+ await waitFor(()=>expect(saves().at(-1)?.body).toBe('## 하나\n첫 줄\n## 마지막\n끝 줄\n새 줄'));
 });

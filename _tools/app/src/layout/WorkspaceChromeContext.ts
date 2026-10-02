@@ -20,6 +20,8 @@ type ChromeContextValue = {
   setSearchActions: (owner: string, actions: ChromeSearchActions | null) => void;
   applySearch: (query: string) => void;
   openSearch: (draft: string) => void;
+  indexHidden: Record<string, true>;
+  setIndexHidden: (area: string, hidden: boolean) => void;
 };
 
 // Keep the context identity independent of Fast Refresh component updates,

@@ -2,18 +2,17 @@ import {useVisibleInterval} from './useVisibleInterval';
 import {SIGNAL_FALLBACK_MS,useSyncSignal} from './syncSignals';
 import {TopBar} from './TopBar';
 import {useSectionShade} from './SectionShade';
-import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type CSSProperties,type MouseEvent,type MutableRefObject} from 'react';
-import {TagIcon,ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,ChevronRightIcon,DocumentTextIcon,EllipsisHorizontalIcon,EyeIcon,EyeSlashIcon,KeyIcon,ListBulletIcon,LockClosedIcon,MagnifyingGlassIcon,PencilSquareIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
+import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type CSSProperties,type MutableRefObject} from 'react';
+import {TagIcon,ArchiveBoxIcon,ArrowLeftIcon,ArrowPathIcon,PaperAirplaneIcon,DocumentTextIcon,EllipsisHorizontalIcon,EyeIcon,EyeSlashIcon,KeyIcon,LockClosedIcon,MagnifyingGlassIcon,PlusIcon,TrashIcon,WalletIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {PinIcon} from './PinIcon';
-import {Button,IconButton,SectionLabel,TextInput} from './ui';
+import {Button,IconButton,SectionLabel,SegmentedControl,TextInput} from './ui';
 import {BottomSheet} from './BottomSheet';
 import {usePullToRefresh} from './usePullToRefresh';
 import {native,errorText} from './transport';
 import {useLevelMotion} from './motion';
-import {MarkdownView} from '../src/shared/markdown/MarkdownView';
-import {toggleMarkdownTask} from '../src/shared/markdown/markdown';
-import {MarkdownHelpButton} from './MarkdownHelp';
-import {checklistText,labelKey,NOTE_COLORS,NOTE_LIMITS,noteColorValue,noteLimitProblem,normalizeLabel,textToItems,type NoteKind} from '../src/notes/model';
+import {checklistMarkdown,labelKey,NOTE_COLORS,NOTE_LIMITS,noteColorValue,noteLimitProblem,normalizeLabel,type NoteKind} from '../src/notes/model';
+import {MemoEditor} from '../src/notes/memo/MemoEditor';
+import {appendToSection,memoBody,memoItems,memoMode,memoSections,parseMemo,switchMode,TOP_SECTION} from '../src/notes/memo/memoModel';
 import {isSecret,noteKind,rebaseList,NotesStore,PIN_REQUIRED_TEXT,type Note} from '../src/notes/store';
 import {genericView,hiddenLedgerMonths,LEDGER} from '../src/notes/ledger/model';
 import {noteMatches,sortNotes} from '../src/notes/noteList';
@@ -21,10 +20,8 @@ import {noteDateLabel} from '../src/notes/format';
 import {NOTE_KIND_DEFINITIONS,type NoteKindFilter} from '../src/notes/noteFilters';
 import {NoteCard} from '../src/notes/NoteCard';
 import {NoteLedger} from './NoteLedger';
-import {NoteChecklist} from './NoteChecklist';
 import {copySecret,SecretEditor,SecretGate} from './NoteSecret';
-import {caretOffsetAtPoint,focusNoteEnd,revealCaret,useNoteEditor} from './noteCaret';
-import {appendSection,deleteSection,moveSection,renameSection,replaceSectionBody,splitSections,unfixSection,type NoteSection,type Range} from '../src/notes/sections';
+import {revealCaret,useNoteEditor} from './noteCaret';
 import '../src/notes/noteCard.css';
 import './notes.css';
 import {Scrubber} from './Scrubber';
@@ -48,13 +45,40 @@ export function mobileNotesRequest<T>(operation:string,input:unknown={}):Promise
 }
 
 type Scope='all'|'archive'|'trash';
-type Sheet='new'|'color'|'more'|'list'|'recovery'|'sectionMore'|null;
+type Sheet='new'|'color'|'more'|'list'|'recovery'|null;
 const tint=(color:string|null|undefined)=>{const value=noteColorValue(color);return value?({'--note-tint':value} as CSSProperties):undefined;};
-const NOTE_SECTION_FOLDS_KEY='lakomics.notes.sectionFolds.v1';
-type SectionFolds=Record<string,boolean>;
-function readSectionFolds():SectionFolds{try{const value=JSON.parse(localStorage.getItem(NOTE_SECTION_FOLDS_KEY)??'null') as unknown;if(!value||typeof value!=='object')return{};return Object.fromEntries(Object.entries(value).filter(([,folded])=>typeof folded==='boolean')) as SectionFolds;}catch{return{};}}
-function writeSectionFolds(value:SectionFolds){try{localStorage.setItem(NOTE_SECTION_FOLDS_KEY,JSON.stringify(value));}catch{/* Device preferences are optional. */}}
-function sectionFoldKey(noteId:string,section:NoteSection){return `${noteId}:${section.key}`;}
+const QUICK_SECTION_KEY='lakomics.notes.quickSection.v1.';
+function readQuickSection(noteId:string):string|null{try{return localStorage.getItem(QUICK_SECTION_KEY+noteId);}catch{return null;}}
+function writeQuickSection(noteId:string,key:string){try{localStorage.setItem(QUICK_SECTION_KEY+noteId,key);}catch{/* Device preferences are optional. */}}
+
+/** The draft stays in its DOM field through saves and composition; sending never blurs it. */
+function MemoQuickAdd({noteId,body,onAppend}:{noteId:string;body:string;onAppend(body:string,line:number):boolean}){
+  const editor=useNoteEditor(),field=useRef<HTMLInputElement>(null);
+  const [text,setText]=useState(''),[chosen,setChosen]=useState(()=>readQuickSection(noteId));
+  const doc=parseMemo(body),named=memoSections(doc).filter(section=>section.heading);
+  // Persist the heading key (title + occurrence), not the editor's session-only row id.
+  const target=named.find(section=>section.heading!.key===chosen)??named[named.length-1];
+  const key=target?.heading?.key??null;
+  useEffect(()=>{if(key){setChosen(key);writeQuickSection(noteId,key);}},[noteId,key]);
+  function append(){
+    const area=field.current;
+    if(!area||editor.isComposing(area)||!area.value.trim())return;
+    const next=appendToSection(doc,target?.id??TOP_SECTION,area.value.trim(),memoMode(body));
+    const added=next.nextId>doc.nextId?`line-${doc.nextId}`:next.lines[0]!.id;
+    if(!onAppend(memoBody(next),next.lines.findIndex(line=>line.id===added)))return;
+    setText('');area.value='';area.focus({preventScroll:true});
+  }
+  return <div className="notes-quick">
+    {named.length>0&&<select aria-label="넣을 섹션" value={key??''} onChange={event=>{setChosen(event.target.value);writeQuickSection(noteId,event.target.value);}}>
+      {named.map(section=><option key={section.heading!.key} value={section.heading!.key}>{section.title||'제목 없음'}</option>)}
+    </select>}
+    <TextInput aria-label="빠른 추가" placeholder="메모 작성" enterKeyHint="send" autoComplete="off" {...editor.bind(text,setText,field)} onKeyDown={event=>{
+      if(editor.isComposing(event.currentTarget)||event.nativeEvent.isComposing||event.keyCode===229)return;
+      if(event.key==='Enter'){event.preventDefault();append();}
+    }}/>
+    <Button type="button" size="icon" variant="ghost" aria-label="메모 추가" onPointerDown={event=>event.preventDefault()} onClick={append}><PaperAirplaneIcon aria-hidden="true"/></Button>
+  </div>;
+}
 function LabelEditor({labels,suggestions,readOnly,onChange}:{labels:string[];suggestions:string[];readOnly:boolean;onChange(labels:string[]):void}) {
   const editor=useNoteEditor();
   const [adding,setAdding]=useState(false),[text,setText]=useState('');
@@ -101,8 +125,9 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   const state=useSyncExternalStore(store.subscribe,store.snapshot);
   const [key,setKey]=useState('');
   const [selected,setSelected]=useState<string|null>(null),[scope,setScope]=useState<Scope>('all'),[label,setLabel]=useState<string|null>(null),[query,setQuery]=useState(''),[kindFilter,setKindFilter]=useState<NoteKindFilter>('all');
-  const [editingBody,setEditingBody]=useState(false),[editingSectionKey,setEditingSectionKey]=useState<string|null>(null),[renamingSectionKey,setRenamingSectionKey]=useState<string|null>(null),[sectionActionKey,setSectionActionKey]=useState<string|null>(null),[sectionFolds,setSectionFolds]=useState<SectionFolds>(readSectionFolds),[creatingSecret,setCreatingSecret]=useState(false),[sheet,setSheet]=useState<Sheet>(null),[limitError,setLimitError]=useState<string|null>(null);
-  const bodyRef=useRef<HTMLTextAreaElement>(null),sectionBodyRef=useRef<HTMLTextAreaElement>(null),titleRef=useRef<HTMLInputElement>(null),renameRef=useRef<HTMLInputElement>(null),pane=useRef<HTMLDivElement>(null);
+  const [creatingSecret,setCreatingSecret]=useState(false),[sheet,setSheet]=useState<Sheet>(null),[limitError,setLimitError]=useState<string|null>(null);
+  const titleRef=useRef<HTMLInputElement>(null),pane=useRef<HTMLDivElement>(null);
+  const [revealItem,setRevealItem]=useState<{line:number;key:number}|undefined>();
   useEffect(()=>{void store.load();},[store]);
   const trash=scope==='trash';
   const found=state.notes.find(n=>n.id===selected)??null;
@@ -154,7 +179,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   },[selected,lockSecrets,store]);
   useEffect(()=>{if(!state.moved||compositionNote)return;if(selected===state.moved.from)setSelected(state.moved.to);store.clearMoved();},[state.moved,selected,store,compositionNote]);
   // ---- Navigation
-  const select=(id:string|null,editBody=false)=>{setCompositionNote(null);openedEditor.current=null;initialFocus.current=false;setCreatingSecret(false);setSelected(id);setEditingBody(editBody);setEditingSectionKey(null);setRenamingSectionKey(null);setSectionActionKey(null);setLimitError(null);};
+  const select=(id:string|null)=>{setCompositionNote(null);setCreatingSecret(false);setSelected(id);setRevealItem(undefined);setLimitError(null);};
   // Home opens a note by id (its pinned rows); each request opens once.
   useEffect(()=>{if(request){setSheet(null);setScope('all');setLabel(null);setQuery('');select(request.id);}},[request?.key]);
   const leave=()=>{select(null);void store.finish();};
@@ -165,11 +190,9 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   const openFromList=(id:string)=>{onHomeEntryGone?.();select(id);};
   const kind=note?noteKind(note):'text';
   const editable=!!note&&!note.deleted&&!note.readOnly&&!note.redacted;
-  const stopBodyEdit=()=>{setEditingBody(false);setEditingSectionKey(null);bodyRef.current?.blur();sectionBodyRef.current?.blur();};
   useEffect(()=>{backRef.current=()=>{
     if(sheet){setSheet(null);return true;}
     if(ledgerOpen&&ledgerBack.current?.())return true;
-    if((editingBody||editingSectionKey!==null)&&note&&!note.deleted){stopBodyEdit();return true;}
     if(creatingSecret){setCreatingSecret(false);return true;}
     if(selected){close();return true;}
     if(scope!=='all'){setScope('all');return true;}
@@ -179,8 +202,8 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   function newNote(kind:NoteKind){
     setSheet(null);setScope('all');setLabel(null);setQuery('');onHomeEntryGone?.();
     if(kind==='secret'&&!revealed){setSelected(null);setCreatingSecret(true);return;}
-    select(store.create(kind),kind==='text');
-    requestAnimationFrame(()=>(kind==='text'?bodyRef.current:titleRef.current)?.focus());
+    select(store.create(kind));
+    if(kind==='secret')requestAnimationFrame(()=>titleRef.current?.focus());
   }
   /** One 가계부: opens the existing ledger, restores it from the trash, or creates it (pinned). */
   function openLedger(){
@@ -190,109 +213,30 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
     if(!existing&&trashed)store.edit({...trashed,deleted:false});
     select(existing?existing.id:trashed?trashed.id:store.create(LEDGER));
   }
+  const memoSource=note?(kind==='checklist'?checklistMarkdown(note.items??[])||'- [ ]':note.body):'';
+  const memoEditingMode=memoMode(memoSource);
   function edit(change:Partial<Note>){
-    if(!note)return;
+    if(!note)return false;
+    if(kind==='checklist')change={type:'text',body:memoSource,items:undefined,...change};
     const snapshot=store.snapshot(),id=snapshot.moved?.from===note.id?snapshot.moved.to:note.id;
     const latest=snapshot.notes.find(entry=>entry.id===id)??note;
     if(change.items)change={...change,items:rebaseList(latest.items??[],note.items??[],change.items)};
     if(change.fields)change={...change,fields:rebaseList(latest.fields??[],note.fields??[],change.fields)};
     const problem=noteLimitProblem({...latest,...change});setLimitError(problem);
-    if(!problem)store.edit({...latest,...change});
+    if(problem)return false;
+    store.edit({...latest,...change});return true;
   }
-  const canConvert=!!note&&editable&&!isSecret(note);
-  function convert(){
-    if(!note||!canConvert)return;
-    if(kind==='checklist')edit({type:'text',body:checklistText(note.items??[]),items:undefined});
-    else{setEditingBody(false);edit({type:'checklist',items:textToItems(note.body)});}
-  }
-  function startBodyEdit(event?:MouseEvent){
-    if(event&&(event.target as HTMLElement).closest('a,button,input,label'))return;
-    const point=event?{x:event.clientX,y:event.clientY}:null;
-    setEditingSectionKey(null);setEditingBody(true);requestAnimationFrame(()=>{
-      const area=bodyRef.current;
-      if(!area)return;
-      area.focus();const offset=point?caretOffsetAtPoint(area,point.x,point.y):null;const next=offset??area.value.length;area.setSelectionRange(next,next);
-    });
-  }
-  const noteSections=note&&kind==='text'?splitSections(note.body):null;
-  const structuredText=!!noteSections?.sections.length&&!editingBody;
-  const openedEditor=useRef<string|null>(null),initialFocus=useRef(false);
-  useLayoutEffect(()=>{
-    if(!selected){openedEditor.current=null;return;}
-    if(!active||!editable||openedEditor.current===selected||kind!=='text')return;
-    openedEditor.current=selected;initialFocus.current=true;
-    const sections=noteSections?.sections??[];
-    const last=[...sections].reverse().find(entry=>!sectionFolds[sectionFoldKey(selected,entry)])??sections[sections.length-1];
-    if(last){setSectionFolds(current=>({...current,[sectionFoldKey(selected,last)]:false}));setEditingSectionKey(last.key);}
-    else setEditingBody(true);
-  },[active,selected,editable,kind,request?.key]);
-  useLayoutEffect(()=>{if(!initialFocus.current)return;const area=sectionBodyRef.current??bodyRef.current;if(area){initialFocus.current=false;focusNoteEnd(area);}},[selected,editingBody,editingSectionKey]);
-  const sectionEditing=editingBody||editingSectionKey!==null;
-  const startSectionEdit=(key:string,event?:MouseEvent)=>{
-    if(!editable||!noteSections)return;
-    if(event&&(event.target as HTMLElement).closest('a,button,input,label'))return;
-    const point=event?{x:event.clientX,y:event.clientY}:null;
-    setSheet(null);setRenamingSectionKey(null);setEditingBody(false);setEditingSectionKey(key);
-    requestAnimationFrame(()=>{
-      const area=sectionBodyRef.current;if(!area)return;
-      area.focus();const offset=point?caretOffsetAtPoint(area,point.x,point.y):null;const next=offset??area.value.length;area.setSelectionRange(next,next);revealCaret(pane.current);
-    });
-  };
-  const toggleSectionFold=(section:NoteSection)=>{
-    if(!note)return;
-    const key=sectionFoldKey(note.id,section);setSectionFolds(current=>{const next={...current,[key]:!current[key]};writeSectionFolds(next);return next;});
-    if(editingSectionKey===section.key)setEditingSectionKey(null);
-  };
-  const sectionBodyValue=(range:Range)=>note?note.body.slice(range.start,range.end):'';
-  const changeSectionBody=(section:NoteSection|null,value:string)=>{
-    if(!note)return;
-    const snapshot=store.snapshot(),id=snapshot.moved?.from===note.id?snapshot.moved.to:note.id;
-    const latestBody=snapshot.notes.find(entry=>entry.id===id)?.body??note.body;
-    const parsed=splitSections(latestBody),current=section?parsed.sections.find(entry=>entry.key===section.key):null;
-    edit({body:section?replaceSectionBody(latestBody,current??section,value):value+latestBody.slice(parsed.preamble.end)});
-  };
-  const renderSectionBody=(section:NoteSection|null,range:Range,key:string)=>{
-    if(!note)return null;
-    const value=sectionBodyValue(range),editing=editingSectionKey===key;
-    const onTask=editable?(line:number,checked:boolean)=>changeSectionBody(section,toggleMarkdownTask(value,line,checked)):undefined;
-    if(editing&&editable)return <textarea {...editor.bind(value,value=>changeSectionBody(section,value),sectionBodyRef)} className="notes-section-body-editor" aria-label="메모 구간 본문" spellCheck={false} onInput={()=>revealCaret(pane.current)} onBlur={event=>{if(editor.isComposing(event.currentTarget))return;editor.bind(value,value=>changeSectionBody(section,value)).onBlur(event);const next=event.relatedTarget as Node|null;if(!next||!event.currentTarget.closest('.notes-section')?.contains(next))setEditingSectionKey(null);}}/>;
-    return <div className={`notes-section-body${value.trim()?'':' is-empty'}`} onClick={editable?event=>startSectionEdit(key,event):undefined}>{value.trim()?<MarkdownView source={value} onOpenLink={href=>void native('openExternal',{url:href}).catch(()=>{})} onToggleTask={onTask}/>:<p className="notes-rendered__empty" aria-label="메모 쓰기"><PencilSquareIcon aria-hidden="true"/></p>}</div>;
-  };
-  const sectionAction=noteSections?.sections.find(section=>section.key===sectionActionKey)??null;
-  const commitSectionRename=(section:NoteSection,value:string)=>{if(note)edit({body:renameSection(note.body,section,value)});setRenamingSectionKey(null);};
-  useEffect(()=>{if(!renamingSectionKey)return;requestAnimationFrame(()=>{renameRef.current?.focus();renameRef.current?.select();});},[renamingSectionKey]);
-  const sectionEditor=structuredText&&note&&noteSections?<div className="notes-sections" onClick={event=>{if(event.target===event.currentTarget)stopBodyEdit();}}>
-    {noteSections.preamble.end>noteSections.preamble.start&&renderSectionBody(null,noteSections.preamble,'preamble')}
-    {noteSections.sections.map(section=>{
-      const folded=!!sectionFolds[sectionFoldKey(note.id,section)],renaming=renamingSectionKey===section.key;
-      return <section key={section.key} data-level={section.level} className={`notes-section${folded?' is-folded':''}`}>
-        <div className="notes-section-heading-row">
-          <h2 className="notes-section-heading">
-            {renaming?<input ref={renameRef} className="notes-section-rename" aria-label="제목 이름" defaultValue={section.title} onClick={event=>event.stopPropagation()} onKeyDown={event=>{if(compositionNote||event.nativeEvent.isComposing||event.keyCode===229)return;if(event.key==='Enter'){event.preventDefault();commitSectionRename(section,event.currentTarget.value);}else if(event.key==='Escape'){event.preventDefault();setRenamingSectionKey(null);}}}/>:<button type="button" aria-label={section.title||'제목 없음'} aria-expanded={!folded} onClick={()=>toggleSectionFold(section)}><ChevronRightIcon className={folded?undefined:'is-open'} aria-hidden="true"/><span>{section.title||'제목 없음'}</span></button>}
-          </h2>
-          <button type="button" className="notes-section-more" aria-label={`${section.title||'제목 없음'} 더보기`} onClick={()=>{setSectionActionKey(section.key);setSheet('sectionMore');}}><EllipsisHorizontalIcon aria-hidden="true"/></button>
-        </div>
-        {!folded&&renderSectionBody(section,section.bodyRange,section.key)}
-      </section>;
-    })}
-    <button type="button" className="notes-section-add" onClick={()=>{if(!note)return;const next=appendSection(note.body);edit({body:next});const sections=splitSections(next).sections;const appended=sections[sections.length-1];if(appended)setRenamingSectionKey(appended.key);setEditingSectionKey(null);}}>＋ 제목 추가</button>
-  </div>:null;
   // ---- Keyboard: fit the editor to the visible area above the keyboard and keep the caret in view.
   const section=useRef<HTMLElement>(null);
   const [editorHeight,setEditorHeight]=useState<number>();
-  const editingRef=useRef(sectionEditing);editingRef.current=sectionEditing;
   useLayoutEffect(()=>{
     const viewport=window.visualViewport;
     if(!active||!selected||!viewport){setEditorHeight(undefined);return;}
-    let lastHeight=viewport.height;
     const update=()=>{
       // Limit the editor to the visible bottom, rather than subtracting the IME
       // twice when Android has already resized the WebView or applied insets.
       const top=section.current?.getBoundingClientRect().top??0;
       setEditorHeight(viewport.scale===1?Math.max(0,viewport.offsetTop+viewport.height-top):undefined);
-      // The keyboard closed (Back hides it before any page Back): leave the source view.
-      if(viewport.height-lastHeight>150&&!editor.isComposing(document.activeElement as HTMLTextAreaElement)&&editingRef.current&&(document.activeElement===bodyRef.current||document.activeElement===sectionBodyRef.current)){stopBodyEdit();}
-      lastHeight=viewport.height;
       requestAnimationFrame(()=>revealCaret(pane.current));
     };
     update();
@@ -301,16 +245,14 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
     window.addEventListener('resize',update);
     return()=>{viewport.removeEventListener('resize',update);viewport.removeEventListener('scroll',update);window.removeEventListener('resize',update);};
   },[active,selected]);
-  // The source text grows with its content inside the scrolling editor, so the caret is
-  // revealed by scrolling the editor rather than hidden inside a fixed-height box.
-  useLayoutEffect(()=>{const area=sectionBodyRef.current??bodyRef.current;if(!area)return;area.style.height='auto';area.style.height=`${area.scrollHeight}px`;revealCaret(pane.current);},[note?.body,editingBody,editingSectionKey,selected]);
+  useLayoutEffect(()=>{revealCaret(pane.current);},[note?.body,selected]);
   const editing=!!(selected&&note)||creatingSecret;
   useLevelMotion(section,active&&state.ready&&state.unlocked?(editing?'edit':scope!=='all'?scope:'list'):null,(editing?1:0)+(scope!=='all'?1:0));
   // ---- List
   const allLabels=useMemo(()=>{const map=new Map<string,{label:string;count:number}>();for(const n of listed)if(!n.deleted)for(const l of n.labels??[]){const k=labelKey(l);const e=map.get(k);if(e)e.count++;else map.set(k,{label:l,count:1});}return [...map.values()].sort((a,b)=>a.label.localeCompare(b.label,'ko'));},[listed]);
   const filterable=listed.filter(n=>(trash?n.deleted:!n.deleted&&(scope==='archive'?!!n.archived:!n.archived))&&(trash||!label||(n.labels??[]).some(l=>labelKey(l)===labelKey(label)))&&noteMatches(n,trash?'':query));
-  const kindOptions=[{value:'all' as const,label:'전체'},...NOTE_KIND_DEFINITIONS.filter(([value])=>filterable.some(n=>noteKind(n)===value)||kindFilter===value).map(([value,label])=>({value,label}))];
-  const visible=sortNotes(filterable.filter(n=>kindFilter==='all'||noteKind(n)===kindFilter));
+  const kindOptions=[{value:'all' as const,label:'전체'},...NOTE_KIND_DEFINITIONS.filter(([value])=>value!=='checklist').map(([value,label])=>({value,label}))];
+  const visible=sortNotes(filterable.filter(n=>kindFilter==='all'||(noteKind(n)==='checklist'?'text':noteKind(n))===kindFilter));
   // The kinds are the list's first row; scrolled away, the top bar pulls them down.
   const kinds=useSectionShade<NoteKindFilter>({label:'메모 종류',options:kindOptions,value:kindFilter,onChange:setKindFilter},{active:active&&state.ready&&state.unlocked&&!editing});
   const pinned=scope!=='all'?[]:visible.filter(n=>n.pinned),recent=scope!=='all'?visible:visible.filter(n=>!n.pinned);
@@ -329,14 +271,10 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
   const body=!note?null:isSecret(note)&&state.secretLocked&&!note.redacted?<SecretGate key={`resume-${note.id}`} store={store} onOpened={()=>store.resumeSecretSaves()}/>
     :isSecret(note)?(note.redacted?<SecretGate key={note.id} store={store} onOpened={()=>void store.refresh()}/>
       :<SecretEditor fields={note.fields??[]} memo={note.memo??''} readOnly={!editable} onChange={change=>edit(change)}/>)
-    :kind==='checklist'&&!note.readOnly?<NoteChecklist items={note.items??[]} readOnly={!editable} onChange={items=>edit({items})}/>
-    :structuredText?sectionEditor
-    :note.readOnly||note.deleted||!editingBody?<div className="notes-rendered" onClick={note.readOnly||note.deleted?undefined:startBodyEdit}>{note.body.trim()?<MarkdownView source={note.body} onOpenLink={href=>void native('openExternal',{url:href}).catch(()=>{})} onToggleTask={note.readOnly||note.deleted?undefined:(line,checked)=>edit({body:toggleMarkdownTask(note.body,line,checked)})}/>:note.deleted?<p className="notes-rendered__empty">내용 없음</p>:<p className="notes-rendered__empty" aria-label="메모 쓰기"><PencilSquareIcon aria-hidden="true"/></p>}</div>
-    :<textarea {...editor.bind(note.body,value=>edit({body:value}),bodyRef)} className="notes-body" aria-label="메모 내용" spellCheck={false} onInput={()=>revealCaret(pane.current)}
-        // Leaving the text for the rest of the note (or a blank spot) returns to the rendered view;
-        // focus moving to the header (help, colour) keeps editing.
-        onBlur={event=>{if(editor.isComposing(event.currentTarget))return;editor.bind(note.body,value=>edit({body:value})).onBlur(event);const next=event.relatedTarget as Node|null;if(next?pane.current?.contains(next):document.hasFocus())setEditingBody(false);}}/>;
-  return <section ref={section} className={`mobile-notes ${editing?'note-open':''}`} style={{display:active?undefined:'none',maxHeight:selected&&note?editorHeight:undefined}} aria-label="메모">
+    :<MemoEditor noteId={note.id} body={memoSource} touch readOnly={!editable} onChange={body=>edit({body})} revealItem={revealItem}/>;
+  const memoTasks=memoItems(parseMemo(memoSource)).filter(item=>item.task);
+  const footer=note&&!isSecret(note)?memoEditingMode==='todo'?`${memoTasks.filter(item=>item.done).length}/${memoTasks.length} 완료`:`${memoSource.length.toLocaleString()}자`:null;
+  return <section ref={section} className={`mobile-notes ${editing?'note-open':''}`} style={{display:active?undefined:'none',maxHeight:selected&&note?editorHeight:undefined}} aria-label="메모" onCompositionStartCapture={()=>setCompositionNote(currentNote)} onCompositionEndCapture={()=>setCompositionNote(null)}>
     {!state.ready?<TopBar title="메모" loading="메모 불러오는 중"/>:!state.unlocked?<>
       <TopBar title="메모"/>
       <form className="notes-unlock" onSubmit={event=>{event.preventDefault();void store.unlock(key).then(ok=>{if(ok)setKey('');});}}><h2>메모 연결</h2><p>PC 메모에서 사용하는 복구 키를 한 번 입력하세요.</p><input type="password" aria-label="메모 복구 키" value={key} autoComplete="off" spellCheck={false} autoCapitalize="none" onChange={event=>setKey(event.target.value)}/><Button type="submit" variant="primary" disabled={key.trim().length!==64}>메모 열기</Button></form>
@@ -349,25 +287,33 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
       saveState={editorStatus}/>}
     {state.ready&&state.unlocked&&note&&!ledgerOpen&&<>
       <header className="notes-top is-sub"><IconButton label="메모 목록" icon={ArrowLeftIcon} onClick={close}/><span className="notes-save-state" role="status">{editorStatus}</span><span className="notes-top__space"/>
-        {canConvert&&<IconButton label={kind==='checklist'?'메모로 바꾸기':'체크리스트로 바꾸기'} icon={kind==='checklist'?DocumentTextIcon:ListBulletIcon} onClick={convert}/>}
-        {!note.deleted&&kind==='text'&&!note.readOnly&&<MarkdownHelpButton/>}
         {!note.deleted&&isSecret(note)&&!note.redacted&&<IconButton label="지금 잠그기" icon={LockClosedIcon} onClick={lockSecrets}/>}
         {!note.deleted&&<><IconButton label={note.pinned?'고정 해제':'고정'} icon={PinIcon} active={note.pinned} onClick={()=>edit({pinned:!note.pinned})}/>
           <Button type="button" size="icon" variant="ghost" aria-label="메모 색상" onClick={()=>setSheet('color')}><span className={`notes-color-dot${colorValue?'':' is-empty'}`} style={colorValue?{background:colorValue}:undefined} aria-hidden="true"/></Button>
           <IconButton label="메모 더보기" icon={EllipsisHorizontalIcon} onClick={()=>setSheet('more')}/>
           <IconButton label="메모 휴지통으로" icon={TrashIcon} onClick={trashNote}/></>}
       </header>
-      <div key={note.id} ref={pane} onCompositionStartCapture={()=>setCompositionNote(currentNote)} onCompositionEndCapture={event=>{setCompositionNote(null);if(document.activeElement!==event.target){if(event.target===bodyRef.current)setEditingBody(false);if(event.target===sectionBodyRef.current)setEditingSectionKey(null);}}} className={`notes-editor${colorValue?' has-tint':''}`} style={tint(note.color)} onClick={event=>{if(sectionEditing&&event.target===event.currentTarget)stopBodyEdit();}}><div className="notes-editor__inner">
+      <div key={note.id} ref={pane} className={`notes-editor${colorValue?' has-tint':''}`} style={tint(note.color)} onInput={()=>revealCaret(pane.current)} onFocus={()=>revealCaret(pane.current)}><div className="notes-editor__inner">
         {note.deleted&&<div className="notes-restore"><span>휴지통에 있는 메모입니다.</span><Button variant="ghost" onClick={()=>edit({deleted:false})}>복원</Button></div>}
         {note.conflictCopy&&<div className="notes-conflict" role="status"><span>다른 기기의 수정과 겹쳐 두 내용을 모두 보관했습니다. 이 메모는 이 태블릿에서 쓴 내용입니다.</span><Button variant="ghost" onClick={()=>void store.dismissConflictCopy(note.id)}>확인</Button></div>}
         {note.readOnly&&<p className="notes-readonly" role="status">새 버전의 앱에서 만든 메모입니다. 앱을 업데이트하면 편집할 수 있습니다.</p>}
         {isSecret(note)&&state.secretLocked&&!note.redacted&&<p className="notes-readonly" role="status">잠금이 풀린 사이 저장하지 못한 변경이 있습니다. PIN을 입력하면 이어서 저장합니다.</p>}
         {limitError&&<p className="notes-limit" role="alert">{limitError}</p>}
-        <input className="notes-title" aria-label="메모 제목" placeholder={isSecret(note)?'암호 메모 제목':'제목'} maxLength={NOTE_LIMITS.title} {...editor.bind(note.title,value=>edit({title:value}),titleRef)} readOnly={note.deleted||!!note.readOnly}/>
+        <div className="notes-title-row">
+          <input className="notes-title" aria-label="메모 제목" placeholder={isSecret(note)?'암호 메모 제목':'제목'} maxLength={NOTE_LIMITS.title} {...editor.bind(note.title,value=>edit({title:value}),titleRef)} readOnly={note.deleted||!!note.readOnly}/>
+          {!isSecret(note)&&(editable?<SegmentedControl label="메모 방식" options={[{value:'text',label:'글'},{value:'todo',label:'할 일'}]} value={memoEditingMode} onChange={mode=>{
+            if(mode!==memoEditingMode&&!compositionNote)edit({type:'text',items:undefined,body:memoBody(switchMode(parseMemo(memoSource),mode))});
+          }}/>:<span>{memoEditingMode==='todo'?'할 일':'글'}</span>)}
+        </div>
         <p className="notes-when">{noteDateLabel(note.updatedAt)} 수정{note.archived&&' · 보관함'}</p>
         {!note.redacted&&(editable||(note.labels??[]).length>0)&&<LabelEditor key={note.id} labels={note.labels??[]} suggestions={allLabels.map(l=>l.label)} readOnly={!editable} onChange={labels=>edit({labels})}/>}
         {body}
+        {footer&&<p className="notes-memo-footer">{footer}</p>}
       </div></div>
+      {editable&&!isSecret(note)&&<MemoQuickAdd key={`quick:${note.id}`} noteId={note.id} body={memoSource} onAppend={(body,line)=>{
+        if(compositionNote||!edit({body}))return false;
+        setRevealItem(current=>({line,key:(current?.key??0)+1}));return true;
+      }}/>}
     </>}
     {/* Always mounted once unlocked so its pull-to-refresh gesture stays attached. */}
     <div className="notes-list-view" style={{display:state.ready&&state.unlocked&&!editing?undefined:'none'}}>
@@ -394,7 +340,6 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
     </div>
     {sheet==='new'&&<BottomSheet title="새 메모" onClose={()=>setSheet(null)}>
       <button className="sheet-option" onClick={()=>newNote('text')}><DocumentTextIcon aria-hidden="true"/>메모</button>
-      <button className="sheet-option" onClick={()=>newNote('checklist')}><ListBulletIcon aria-hidden="true"/>체크리스트</button>
       <button className="sheet-option" onClick={()=>newNote('secret')}><LockClosedIcon aria-hidden="true"/>암호 메모</button>
       <button className="sheet-option" onClick={openLedger}><WalletIcon aria-hidden="true"/>가계부</button>
     </BottomSheet>}
@@ -407,13 +352,6 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone}:{act
       {(kind==='text'||kind==='checklist')&&editable&&<button className="sheet-option" onClick={()=>{edit({concealed:!note.concealed});setSheet(null);}}>{note.concealed?<EyeIcon aria-hidden="true"/>:<EyeSlashIcon aria-hidden="true"/>}{note.concealed?'목록에서 내용 보이기':'목록에서 내용 숨기기'}</button>}
       <button className="sheet-option" onClick={()=>{edit({archived:!note.archived});setSheet(null);}}><ArchiveBoxIcon aria-hidden="true"/>{note.archived?'보관 해제':'보관함으로 보내기'}</button>
       <button className="sheet-option" onClick={()=>{setSheet(null);trashNote();}}><TrashIcon aria-hidden="true"/>휴지통으로 보내기</button>
-    </BottomSheet>}
-    {sheet==='sectionMore'&&note&&sectionAction&&<BottomSheet title={sectionAction.title||'제목 없음'} onClose={()=>setSheet(null)}>
-      <button className="sheet-option" onClick={()=>{setSheet(null);setRenamingSectionKey(sectionAction.key);}}><DocumentTextIcon aria-hidden="true"/>이름 바꾸기</button>
-      <button className="sheet-option" disabled={moveSection(note.body,sectionAction,'up')===note.body} onClick={()=>{edit({body:moveSection(note.body,sectionAction,'up')});setSheet(null);}}><ChevronRightIcon className="notes-section-action-up" aria-hidden="true"/>위로</button>
-      <button className="sheet-option" disabled={moveSection(note.body,sectionAction,'down')===note.body} onClick={()=>{edit({body:moveSection(note.body,sectionAction,'down')});setSheet(null);}}><ChevronRightIcon className="notes-section-action-down" aria-hidden="true"/>아래로</button>
-      <button className="sheet-option" onClick={()=>{edit({body:unfixSection(note.body,sectionAction)});setSheet(null);}}><XMarkIcon aria-hidden="true"/>고정 풀기</button>
-      <button className="sheet-option is-danger" onClick={()=>{setSheet(null);if(window.confirm('이 구간을 삭제할까요?'))edit({body:deleteSection(note.body,sectionAction)});}}><TrashIcon aria-hidden="true"/>구간 삭제</button>
     </BottomSheet>}
     {/* Rarely used places sit behind the top bar's ⋯, out of the way of the notes. */}
     {sheet==='list'&&<BottomSheet title="메모 더보기" onClose={()=>setSheet(null)}>

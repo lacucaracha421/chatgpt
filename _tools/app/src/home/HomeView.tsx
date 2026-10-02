@@ -439,7 +439,7 @@ function HomeIndex({ memos, locked, overview, trashCount, privacyMode, connectio
       <SectionLabel title="메모" onOpen={() => onNavigate({ kind: "notes" })} />
       <div className="home-index__memo-stack">
         {memos.slice(0, 2).map((memo) => <button key={memo.id} type="button" className="home-memo-tile" onClick={() => onNavigate({ kind: "notes", noteId: memo.id })}>
-          <span className="home-memo-tile__head"><MemoIcon memo={memo} /><b>{memo.title || "제목 없음"}</b>{memo.kind === "checklist" && <em className="numeric">{memo.done}/{memo.total}</em>}{memo.kind === "ledger" && <em>{memo.month}월</em>}</span>
+          <span className="home-memo-tile__head"><MemoIcon memo={memo} /><b>{memo.title || "제목 없음"}</b>{memo.kind === "checklist" && <em className="numeric">{memo.done}/{memo.total} 완료</em>}{memo.kind === "ledger" && <em>{memo.month}월</em>}</span>
           <MemoTileBody memo={memo} />
         </button>)}
         <button type="button" className="home-memo-add" onClick={() => onNavigate({ kind: "notes" })} aria-label={memos.length === 0 && locked ? "메모 잠금 해제" : "새 메모"}>

@@ -1,4 +1,6 @@
 import { BookmarkIcon, BookOpenIcon, ExchangeIcon, FolderIcon, HomeIcon, MagnifyingGlassIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon } from "../shared/ui/ArchiveIcons";
+import { ViewColumnsIcon } from "@heroicons/react/24/outline";
+import { Button } from "../shared/ui/Button";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType } from "../library/types";
@@ -81,7 +83,10 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
     && !chrome?.meta?.navigation
     && !chrome?.meta?.actions
     && chrome?.meta?.search?.kind !== "surface";
+  const canToggleIndex = area === "manga" && chrome != null;
   const hideIndex = view.kind === "collections" || hideEmptyNotesIndex;
+  // Hidden by the user, the index stays mounted: its search dialog and content survive and come back without reloading.
+  const indexHiddenByUser = canToggleIndex && chrome.indexHidden[area] === true;
   const assetTotalCount = useAssetTotalCount(area === "assets");
   const artistOverview = useArtistOverview();
   const enterArea = (next: RailArea) => {
@@ -138,10 +143,11 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
         <MorePanel entries={moreEntries} current={area === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />
       </div>
     </nav>
-    {!hideIndex && <aside className="workspace-index" style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
+    {!hideIndex && <aside className="workspace-index" hidden={indexHiddenByUser} style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
       <header className="workspace-index__head" aria-label={areaName} data-tauri-drag-region="deep">
         <span className="workspace-index__title" aria-hidden="true">{areaTitle}</span>
         <div className="workspace-index__head-actions">
+          {canToggleIndex && <Button type="button" size="icon" variant="ghost" aria-label="사이드바 숨기기" onClick={() => chrome.setIndexHidden(area, true)}><ViewColumnsIcon aria-hidden="true" /></Button>}
           <ChromeTarget name="search" />
           <ChromeTarget name="actions" />
           {area === "assets" && !chrome?.meta?.actions && onImportFiles && <button type="button" className="ui-button ui-button--icon ui-button--ghost" aria-label="파일 가져오기" aria-description="선택한 파일을 라이브러리로 가져오기" onClick={onImportFiles}><PlusIcon aria-hidden="true" /></button>}
