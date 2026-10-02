@@ -36,7 +36,7 @@ export function scrubberRatioAt(index: number, total: number) {
 
 function dateParts(value: ScrubberDateValue): {year: number; month: number} | null {
   if (typeof value === 'string') {
-    const match = /^(\d{4})-(\d{1,2})/.exec(value.trim());
+    const match = /^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/.exec(value.trim());
     if (match) return {year: Number(match[1]), month: Number(match[2])};
   }
   const date = value instanceof Date ? value : typeof value === 'number' ? new Date(Math.abs(value) < 100_000_000_000 ? value * 1000 : value) : typeof value === 'string' ? new Date(value) : null;

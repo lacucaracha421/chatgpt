@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readHomeVisit, writeHomeVisit } from "./homeAttention";
 import { resetReleaseDataForTests } from "../collections/releaseData";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import type { AuthoritySyncHealth, HomeOverview, ReleaseWishlistItem } from "../library/types";
@@ -186,5 +187,39 @@ describe('Home attention', () => {
     await user.click(screen.getByRole('button', {name:'홈으로 돌아가기'}));
     expect(await screen.findByRole('button', {name:/캐릭터2/})).toBeTruthy();
     expect(shadowApi.page).toHaveBeenCalled();
+  });
+});
+
+describe("Home visit read acknowledgement", () => {
+  const previous = new Date(2026, 8, 24, 12).toISOString();
+  const seedVisit = () => writeHomeVisit("fixture", { lastVisit: previous, pending: [], opened: [] });
+
+  it("keeps the previous visit when leaving before release data arrives", async () => {
+    seedVisit();
+    gateway.releaseCalendar.wishlist.mockReturnValueOnce(new Promise(() => {}));
+    const first = renderHome();
+    await act(async () => {});
+    expect(readHomeVisit("fixture").lastVisit).toBe(previous);
+    first.view.unmount();
+    gateway.releaseCalendar.wishlist.mockResolvedValue([title("late", "Late release", "game", "2026-09-25")]);
+    renderHome();
+    await screen.findByText("Late release");
+    await waitFor(() => expect(readHomeVisit("fixture").pending).toContain("title:late:2026-09-25:"));
+    expect(readHomeVisit("fixture").lastVisit).toBe(NOW.toISOString());
+  });
+
+  it.each(["wishlist", "calendar", "board"])("does not advance a visit after a failed %s read", async source => {
+    seedVisit();
+    const read = source === "board" ? gateway.collectionTracking.releaseBoard : gateway.releaseCalendar[source as "wishlist" | "calendar"];
+    read.mockRejectedValueOnce(new Error("offline"));
+    const first = renderHome();
+    await act(async () => {});
+    expect(readHomeVisit("fixture").lastVisit).toBe(previous);
+    first.view.unmount();
+    gateway.releaseCalendar.wishlist.mockResolvedValue([title("retry", "Recovered release", "game", "2026-09-25")]);
+    renderHome();
+    await screen.findByText("Recovered release");
+    await waitFor(() => expect(readHomeVisit("fixture").lastVisit).toBe(NOW.toISOString()));
+    expect(readHomeVisit("fixture").pending).toContain("title:retry:2026-09-25:");
   });
 });

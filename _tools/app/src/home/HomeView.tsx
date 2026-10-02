@@ -90,13 +90,20 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
   const [calendar, setCalendar] = useState<ReleaseCalendar | null>(null);
   const [releaseDetail, setReleaseDetail] = useState<ReleaseTitle | null>(null);
   const [shelfRetry, setShelfRetry] = useState(0);
+  const [calendarRead, setCalendarRead] = useState<{ api: typeof calendarApi; root: string; retry: number } | null>(null);
   useEffect(() => {
     if (!calendarApi) return;
     let live = true;
-    void calendarApi.wishlist().then((items) => { if (live) { setWishlist(items ?? []); setWishlistReady(true); setWishlistError(false); } }, () => { if (live) setWishlistError(true); });
-    void calendarApi.calendar().then(value => { if (live) setCalendar(value); }, () => undefined);
+    const wishlistRead = calendarApi.wishlist().then((items) => {
+      if (live) { setWishlist(items ?? []); setWishlistReady(true); setWishlistError(false); }
+      return true;
+    }, () => { if (live) setWishlistError(true); return false; });
+    const releaseRead = calendarApi.calendar().then(value => { if (live) setCalendar(value); return true; }, () => false);
+    void Promise.all([wishlistRead, releaseRead]).then(results => {
+      if (live && results.every(Boolean)) setCalendarRead({ api: calendarApi, root, retry: shelfRetry });
+    });
     return () => { live = false; };
-  }, [calendarApi, shelfRetry]);
+  }, [calendarApi, root, shelfRetry]);
 
   const [queueRead, setQueueRead] = useState(0);
   const [overview, setOverview] = useState<HomeOverview | null>(null);
@@ -218,7 +225,9 @@ export function HomeView({ collections, reviewCount, unsortedCount, trashCount, 
 
   const releases = newlyReleasedRows(collections, board, inbox, wishlist, today, calendar?.entries ?? []);
   const arrivalItems = releases.map(row => ({ ...row, date: row.date ?? null, token: `${row.key}:${row.date ?? ''}:${row.volume ?? ''}`, fresh: row.caption.kind === 'new' }));
-  const visit = useHomeVisit(root, arrivalItems, today, true, at.toISOString());
+  const arrivalsReady = (!tracking || Boolean(release.data && !release.loading && !release.error))
+    && (!calendarApi || (calendarRead?.api === calendarApi && calendarRead.root === root && calendarRead.retry === shelfRetry));
+  const visit = useHomeVisit(root, arrivalItems, today, true, at.toISOString(), arrivalsReady);
   const upcoming = upcomingRows(collections, board, inbox, wishlist, today).filter(row => daysAfter(row.date, today) <= 14);
   const openRelease = (row: ReleaseRow & { token: string }) => {
     visit.opened(row.token);

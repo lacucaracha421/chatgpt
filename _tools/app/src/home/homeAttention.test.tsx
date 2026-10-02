@@ -59,6 +59,29 @@ describe('device visit and NEW', () => {
     act(()=>next.result.current.opened(item.token)); expect(next.result.current.arrivals).toEqual([]);
     expect(readHomeVisit('pc').opened).toContain(item.token);
   });
+  it('preserves the visit boundary when a shown arrival opens during a partial read', () => {
+    const previous = new Date(2026, 9, 30).toISOString();
+    const entered = new Date(2026, 10, 2).toISOString();
+    writeHomeVisit('pc', { lastVisit: previous, pending: [], opened: [] });
+    const hook = renderHook(({ ready }) => useHomeVisit('pc', [item], '2026-11-02', true, entered, ready), { initialProps: { ready: false } });
+    expect(hook.result.current.arrivals).toEqual([item]);
+    expect(readHomeVisit('pc')).toMatchObject({ lastVisit: previous, pending: [item.token] });
+    act(() => hook.result.current.opened(item.token));
+    expect(readHomeVisit('pc')).toMatchObject({ lastVisit: previous, pending: [], opened: [item.token] });
+    hook.rerender({ ready: true });
+    expect(readHomeVisit('pc').lastVisit).toBe(entered);
+    expect(hook.result.current.arrivals).toEqual([]);
+  });
+  it('acknowledges a successful empty first read without announcing old history', () => {
+    const entered = new Date(2026, 10, 2).toISOString();
+    const hook = renderHook(({ ready }) => useHomeVisit('pc', [], '2026-11-02', true, entered, ready), { initialProps: { ready: false } });
+    expect(readHomeVisit('pc').lastVisit).toBeNull();
+    hook.rerender({ ready: true });
+    expect(readHomeVisit('pc').lastVisit).toBe(entered);
+    hook.unmount();
+    const next = renderHook(() => useHomeVisit('pc', [item], '2026-11-03', true, new Date(2026, 10, 3).toISOString(), true));
+    expect(next.result.current.arrivals).toEqual([]);
+  });
   it('adopts each scope and paused visit without copying pending NEW to another connection', () => {
     writeHomeVisit('pc',{lastVisit:'2026-10-30T00:00:00Z',pending:[],opened:[]});
     const hook=renderHook(({scope,active})=>useHomeVisit(scope,[item],'2026-11-02',active,'2026-11-02T12:00:00Z'),{initialProps:{scope:'pc',active:true}});

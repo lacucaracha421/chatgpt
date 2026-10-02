@@ -20,6 +20,42 @@ beforeEach(() => Object.defineProperties(HTMLElement.prototype, {
 }));
 
 describe("AssetBrowser", () => {
+  it("toggles only the clicked tile heart while F still toggles the selection", async () => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: [asset(0), asset(1), asset(2)], nextCursor: null });
+    renderBrowser(gateway);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    fireEvent.click(first, { ctrlKey: true });
+    fireEvent.click(screen.getByRole("option", { name: "asset-1.png" }), { ctrlKey: true });
+    await user.click(screen.getByRole("button", { name: "asset-2.png 좋아요" }));
+    expect(gateway.setAssetFavorite).toHaveBeenCalledExactlyOnceWith("asset-2", true);
+    expect(gateway.setAssetsFavorite).not.toHaveBeenCalled();
+    expect(first).toHaveAttribute("aria-selected", "true");
+    act(() => first.focus());
+    await user.keyboard("f");
+    expect(gateway.setAssetsFavorite).toHaveBeenCalledWith(["asset-0", "asset-1"], true);
+  });
+
+  it.each(["ArrowDown", "f", "c"])("handles %s on the first tile reached by Tab", async key => {
+    const user = userEvent.setup();
+    const gateway = createGateway({ items: Array.from({ length: 12 }, (_, index) => asset(index)), nextCursor: null });
+    const { container } = renderBrowser(gateway);
+    const first = await screen.findByRole("option", { name: "asset-0.png" });
+    // Date headings immediately precede their first tile in the tab order.
+    act(() => container.querySelector<HTMLElement>(".asset-gallery__date")!.focus());
+    await user.tab();
+    expect(first).toHaveFocus();
+    await user.keyboard(key === "ArrowDown" ? "{ArrowDown}" : key);
+    if (key === "ArrowDown") {
+      expect(first).not.toHaveFocus();
+      expect(document.activeElement).toHaveAttribute("role", "option");
+    } else if (key === "f") {
+      expect(gateway.setAssetFavorite).toHaveBeenCalledWith("asset-0", true);
+    } else {
+      expect(screen.getByRole("toolbar", { name: "선택 작업" })).toHaveTextContent("1개 선택");
+    }
+  });
+
   it("shows a bounded return snapshot inert until the current request validates it", async () => {
     const memory: AssetNavigationMemory = new Map();
     const gateway = createGateway({ items: [asset(0)], nextCursor: null });

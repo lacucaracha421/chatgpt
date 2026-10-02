@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { newHomeArrivals, readHomeVisit, writeHomeVisit, type HomeArrival } from './homeAttention';
 
-export function useHomeVisit<T extends HomeArrival>(scope: string, items: T[], today: string, active = true, visitedAt?: string) {
+export function useHomeVisit<T extends HomeArrival>(scope: string, items: T[], today: string, active = true, visitedAt?: string, readReady = true) {
   const [state, setState] = useState(() => ({ scope, visit: readHomeVisit(scope), session: 0 }));
   const started = useRef(false);
   const session = useRef(0);
@@ -16,7 +16,6 @@ export function useHomeVisit<T extends HomeArrival>(scope: string, items: T[], t
     enteredAt.current = visitedAt ?? new Date().toISOString();
     const saved = readHomeVisit(scope);
     setState({ scope, visit: saved, session: session.current });
-    writeHomeVisit(scope, { ...saved, lastVisit: enteredAt.current });
   }, [scope, active, visitedAt]);
   const visit = state.scope === scope ? state.visit : readHomeVisit(scope);
   const arrivals = useMemo(() => newHomeArrivals(items, visit, today), [items, visit, today]);
@@ -26,15 +25,16 @@ export function useHomeVisit<T extends HomeArrival>(scope: string, items: T[], t
     if (!active || state.scope !== scope || state.session !== session.current) return;
     const saved = readHomeVisit(scope);
     const pending = [...new Set([...saved.pending, ...visit.pending, ...arrivals.map(i => i.token)])].filter(token => !visit.opened.includes(token));
-    writeHomeVisit(scope, { ...visit, pending, lastVisit: enteredAt.current });
+    // Preserve discoveries from partial reads, but acknowledge the visit only after all sources succeeded.
+    writeHomeVisit(scope, { ...visit, pending, lastVisit: readReady ? enteredAt.current : saved.lastVisit });
     // Retain discoveries in memory too, including when localStorage is unavailable.
     if (pending.some(token => !visit.pending.includes(token))) setState(previous => ({ ...previous, visit: { ...previous.visit, pending } }));
     // Arrival content can change independently; only its tokens affect persistence.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, active, pendingKey, state]);
+  }, [scope, active, readReady, pendingKey, state]);
   const opened = (token: string) => {
     const next = { ...visit, pending: visit.pending.filter(t => t !== token), opened: [...new Set([...visit.opened, token])] };
-    writeHomeVisit(scope, { ...next, lastVisit: enteredAt.current });
+    writeHomeVisit(scope, { ...next, lastVisit: readHomeVisit(scope).lastVisit });
     setState(previous => ({ ...previous, visit: next }));
   };
   return { arrivals, opened };

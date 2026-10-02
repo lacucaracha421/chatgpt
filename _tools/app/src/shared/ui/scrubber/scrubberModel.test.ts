@@ -49,3 +49,16 @@ describe('scrubber model',()=>{
     expect(clampScrubberTag(0,400,100)).toBe(50);expect(clampScrubberTag(400,400,100)).toBe(350);expect(clampScrubberTag(200,400,100)).toBe(200);
   });
 });
+
+it('uses local month and year for timestamps while preserving date-only buckets', () => {
+  const timestamps = ['2026-01-01T00:30:00+14:00', '2025-12-31T23:30:00-12:00', '2026-03-01T00:30:00+14:00'];
+  for (const timestamp of timestamps) {
+    const date = new Date(timestamp);
+    const localDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-15`;
+    const model = buildScrubberModel({ kind: 'date', values: [timestamp, localDate] });
+    expect(model.labelAt(0)).toBe(`${date.getFullYear()}년 ${date.getMonth() + 1}월`);
+    expect(model.ticks).toHaveLength(1);
+  }
+  expect(scrubberLabelAt({ kind: 'date', values: ['2026-01-01'] }, 0)).toBe('2026년 1월');
+  expect(scrubberLabelAt({ kind: 'date', values: ['2026-03'] }, 0)).toBe('2026년 3월');
+});

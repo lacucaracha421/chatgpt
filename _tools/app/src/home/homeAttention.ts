@@ -3,7 +3,7 @@ import { checklistMarkdown } from '../notes/model';
 import { memoItems, memoMode, parseMemo } from '../notes/memo/memoModel';
 import { LEDGER, won } from '../notes/ledger/model';
 import { nextCharge } from '../notes/ledger/cycle';
-import { monthNotesOf, monthSummary, reminders } from '../notes/ledger/summary';
+import { ledgerEntries, monthNotesOf, monthSummary, reminders } from '../notes/ledger/summary';
 import type { Note } from '../notes/store';
 import { daysAfter } from './homeModel';
 
@@ -24,7 +24,8 @@ export function attentionRows(notes: Note[], reviews: ReviewCount[], connections
     const next = charges[0];
     rows.push({ key: 'subscriptions', label: `구독 이번 달 ${won(total)}`, secondary: next ? `다음 결제 ${daysAfter(next.date, today)}일 후 · ${next.name}` : '다음 결제 없음', value: `${subscribed.reduce((n, l) => n + (l.recurring?.length ?? 0), 0)}개`, noteId: next?.noteId ?? subscribed[0]!.id });
   }
-  const notices = ledgers.flatMap(n => reminders(n, today)
+  // Confirmed or skipped charges (month-note entries) are no longer reminders.
+  const notices = ledgers.flatMap(n => reminders(n, today, ledgerEntries(monthNotesOf(notes, n.id)))
     // Trial end and its first charge share one reminder.
     .filter(e => e.kind !== 'charge' || !n.recurring?.find(r => r.id === e.recurring.id && r.trial && r.start === e.date))
     .map(e => ({ key: `reminder:${n.id}:${e.recurring.id}:${e.date}`, label: `${e.recurring.name} ${e.kind === 'trialEnd' ? '무료 끝남' : '결제'}`, secondary: `${displayDate(e.date, new Date(`${today}T12:00:00`))} · ${won(e.amount)}${e.kind === 'trialEnd' ? '부터 결제' : ''}`, days: daysAfter(e.date, today), noteId: n.id })));
