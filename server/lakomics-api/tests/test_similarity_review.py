@@ -168,6 +168,16 @@ class SimilarityReviewTests(unittest.TestCase):
         self.assertEqual(self.put_feed(replaced).status_code, 200)
         self.assertEqual(self.reviews(), ['r3'])
 
+    def test_feed_query_loops_over_review_items_not_assets(self):
+        # Production once ran this as assets x assets (hours per request) while the
+        # review table was empty; the review items must stay the outer loop.
+        with api_app.get_db() as db:
+            plan = [row[3] for row in db.execute(
+                f"EXPLAIN QUERY PLAN SELECT COUNT(*) {similarity_review.FEED_FROM}", ['[]'] * 3)]
+        tables = [step for step in plan if step.startswith(('SCAN', 'SEARCH')) and 'json_each' not in step]
+        self.assertEqual(tables[0], 'SCAN i', plan)
+        self.assertTrue(all('asset' not in step or 'id=?' in step for step in tables[1:]), plan)
+
     def test_overlay_hides_decided_pairs_and_pairs_with_pending_trash(self):
         self.adopt()
         receipt = self.decide(self.command('r1', 'keep_existing'))

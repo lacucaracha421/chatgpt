@@ -130,6 +130,18 @@ class Command(Strict):
     basis: Basis
 
 
+# The overlay: a decided pair leaves the queue, and so does every pair that holds an image
+# a pending decision will trash. Changed or hidden Assets drop out too. CROSS JOIN pins
+# the review items as the outer loop: with plain JOINs SQLite once chose assets x assets
+# (9.7k^2 pairs, hours per request on the VPS) and stuck request threads saturated it.
+FEED_FROM = """FROM mobile_similarity_review_items i
+    CROSS JOIN visible_assets a ON a.id=i.a_asset_id AND a.committed=1 AND a.sha256=i.a_sha256
+    CROSS JOIN visible_assets b ON b.id=i.b_asset_id AND b.committed=1 AND b.sha256=i.b_sha256
+    WHERE i.review_id NOT IN (SELECT value FROM json_each(?))
+    AND i.a_asset_id NOT IN (SELECT value FROM json_each(?))
+    AND i.b_asset_id NOT IN (SELECT value FROM json_each(?))"""
+
+
 def fail(status, code, message):
     raise HTTPException(status, {"code": code, "message": message})
 
@@ -335,14 +347,7 @@ def register(app, get_db, require_client, require_publisher, asset_item, asset_m
             pending = pending_decisions(db, current)
             decided = json.dumps(sorted({row["review_id"] for row in pending}))
             trashed = json.dumps(sorted({row["trash_asset_id"] for row in pending if row["trash_asset_id"]}))
-            # The overlay: a decided pair leaves the queue, and so does every pair that holds
-            # an image a pending decision will trash. Changed or hidden Assets drop out too.
-            base = """FROM mobile_similarity_review_items i
-                JOIN visible_assets a ON a.id=i.a_asset_id AND a.committed=1 AND a.sha256=i.a_sha256
-                JOIN visible_assets b ON b.id=i.b_asset_id AND b.committed=1 AND b.sha256=i.b_sha256
-                WHERE i.review_id NOT IN (SELECT value FROM json_each(?))
-                AND i.a_asset_id NOT IN (SELECT value FROM json_each(?))
-                AND i.b_asset_id NOT IN (SELECT value FROM json_each(?))"""
+            base = FEED_FROM  # see FEED_FROM for the overlay and the join order
             params = [decided, trashed, trashed]
             total = db.execute(f"SELECT COUNT(*) {base}", params).fetchone()[0]
             rows = db.execute(f"SELECT i.* {base} AND i.position>? ORDER BY i.position LIMIT ?",
