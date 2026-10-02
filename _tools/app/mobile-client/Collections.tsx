@@ -1,3 +1,4 @@
+import {TrackingRows} from './CollectionTracking';
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {usePublicationCheck} from './usePublicationCheck';
 import {CollectionPersonal,PersonalActions,PersonalRecord,workRecordFacts,type PersonalSheet} from './CollectionPersonal';
@@ -598,13 +599,13 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   const editionVolumesShared=item?.type==='manga'?volumes.map(volume=>sharedVolume(volume,today)):[];
   const mangaInfo=item?.type==='manga'&&<>
     <header className="tablet-work__identity"><h1>{item.name}</h1>{originalTitle(item)&&<small>{originalTitle(item)}</small>}</header>
-    <PersonalRecord item={item} edits={edits} onSheet={setPersonalSheet}/>
-    {editionOptions.length>1&&<div ref={filterWheel} className="filter-chips collection-editions" role="radiogroup" aria-label="판본">{editionOptions.map(value=><button key={value} role="radio" aria-checked={edition===value} className={`filter-chip ${edition===value?'selected':''}`} onClick={()=>{setEdition(value);setCoverIndex(null);}}>{value===0?'기본판':`판본 ${value+1}`}</button>)}</div>}
-    <CollectionBindings key={item.id} item={item} active={active&&!paused} refreshKey={`${detailRefresh}:${detail!.revision}`} sheet={bindSheet} onSheet={setBindSheet} panelHost={bindHost}/>
-    <div ref={setBindHost} className="collection-bind-host"/>
+    {(item.ownedVolumes!=null||item.releaseWatch!=null||editionOptions.length>1)&&<section className="collection-personal" aria-label="소장"><SectionLabel title="소장"/><TrackingRows item={item} edits={edits} onOwned={edition=>setPersonalSheet(`owned-${edition}`)}/>{editionOptions.length>1&&<div ref={filterWheel} className="filter-chips collection-editions" role="radiogroup" aria-label="판본">{editionOptions.map(value=><button key={value} role="radio" aria-checked={edition===value} className={`filter-chip ${edition===value?'selected':''}`} onClick={()=>{setEdition(value);setCoverIndex(null);}}>{value===0?'기본판':`판본 ${value+1}`}</button>)}</div>}</section>}
+    <PersonalRecord item={item} edits={edits} onSheet={setPersonalSheet} includeTracking={false}/>
     <CollectionPersonal item={item} edits={edits} sheet={personalSheet} onSheet={setPersonalSheet}/>
     <section className="work-info" aria-label="작품 정보"><SectionLabel title="작품 정보"/><CaseFacts rows={[...workFacts(item,null),...moreWorkFacts(item,null,null)]}/>
       {koreanGenres(item.genres).length>0&&<ul className="collection-genres" aria-label="장르">{koreanGenres(item.genres).map(genre=><li key={genre}>{genre}</li>)}</ul>}</section>
+    <CollectionBindings key={item.id} item={item} active={active&&!paused} refreshKey={`${detailRefresh}:${detail!.revision}`} sheet={bindSheet} onSheet={setBindSheet} panelHost={bindHost}/>
+    <div ref={setBindHost} className="collection-bind-host"/>
   </>;
   return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
     <div style={{display:'contents'}} inert={overlayOpen&&!selected&&!performer||undefined}>{header}</div>

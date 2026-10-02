@@ -1,3 +1,4 @@
+import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { ViewToolbar } from "../layout/ViewToolbar";
@@ -209,6 +210,7 @@ function MainSection({ onNavigate, privacyMode }: { onNavigate: Navigate; privac
   const addRows = () => setRowsState((value) => (mainRows = value + MAIN_ROWS_STEP));
   // Columns follow the grid's container queries (5 · 4 · 3), so read them from the rendered grid.
   const gridRef = useRef<HTMLDivElement | null>(null);
+  useFirstAppearance(gridRef, page?.artists.length ?? 0, true, "classification-artists", ".artist-card");
   const [columns, setColumns] = useState(5);
   useLayoutEffect(() => {
     const grid = gridRef.current;
@@ -416,11 +418,13 @@ export function OthersList({ initialBucket, onNavigate, privacyMode }: { initial
 function SinglesMosaic({ onNavigate, privacyMode }: { onNavigate: Navigate; privacyMode: boolean }) {
   const [limit, setLimit] = useState(PAGE);
   const page = useArtistRead((gateway) => gateway.list({ bucket: "single", sort: "recent", limit }), `singles:${limit}`).data;
+  const grid = useRef<HTMLDivElement>(null);
+  useFirstAppearance(grid, page?.artists.length ?? 0, true, "classification-artists-singles", ".artist-mosaic__tile");
   if (!page) return <Skeleton className="artist-hub__skeleton" label="작가를 불러오는 중" />;
   if (page.artists.length === 0) return <EmptyState title="한 장뿐인 작가가 없습니다" />;
   return <>
     <p className="artist-muted artist-hub__lead">이름 대신 그림으로 훑어보기 · 마음에 들면 작가 페이지로</p>
-    <div className="artist-mosaic">
+    <div ref={grid} className="artist-mosaic">
       {page.artists.map((artist) => <button key={artist.id} type="button" className="artist-mosaic__tile" aria-label={`${artist.label} 작가 페이지`} onClick={() => onNavigate({ kind: "creator", creatorKey: artist.id })}>
         {!privacyMode && artist.coverAssetIds[0] && <img src={thumbnailUrl(artist.coverAssetIds[0])} alt="" loading="lazy" decoding="async" draggable={false} />}
         <span className="artist-name">{artist.label}</span>

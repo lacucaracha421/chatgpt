@@ -1,3 +1,4 @@
+import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {useEffect,useRef,useState} from 'react';
 import {ChevronRightIcon} from '@heroicons/react/24/outline';
@@ -64,9 +65,11 @@ export function Albums({tree,paused,revision,onSelect,query='',parentId}:{tree:A
   const stripWheel=useHorizontalWheel();
   const known=new Set(tree.albums.map(album=>album.id)),search=query.trim(),matches=createKoreanMatcher(search);
   const items=tree.albums.filter(album=>search?matches(album.name):parentId?album.parentId===parentId&&album.id!==parentId:!album.parentId||!known.has(album.parentId));
+  const host=useRef<HTMLDivElement>(null);
+  useFirstAppearance(host,items.length,!paused&&!search&&tree.adopted,"classification-albums",".library-folder");
   const {covers,onVisible}=useAlbumCovers(tree,items,paused,revision);
   if(!tree.adopted||!tree.libraryId||tree.epoch===null)return null;
-  return <div ref={parentId&&!search?stripWheel:undefined} className={search?'library-results':parentId?'library-children':'library-folder-grid'}>{items.map(album=>search
+  return <div ref={element=>{host.current=element;return stripWheel(parentId&&!search?element:null);}} className={search?'library-results':parentId?'library-children':'library-folder-grid'}>{items.map(album=>search
     ? <AlbumResult key={album.id} album={album} path={albumAncestors(tree.albums,album.id).map(parent=>parent.name).join(' › ')||'최상위'} items={covers[album.id]??[]} paused={paused} onVisible={onVisible} onSelect={()=>onSelect(albumView(tree,album))}/>
     : <FolderCard key={album.id} id={album.id} name={album.name} count={album.assetCount} items={covers[album.id]??[]} paused={paused} childrenLabel={tree.albums.some(child=>child.parentId===album.id&&child.id!==album.id)?`하위 앨범 ${tree.albums.filter(child=>child.parentId===album.id&&child.id!==album.id).length}`:undefined} onVisible={onVisible} onSelect={()=>onSelect(albumView(tree,album))}/>
   )}{search&&!items.length&&<p className="hint">일치하는 앨범이 없습니다.</p>}</div>;

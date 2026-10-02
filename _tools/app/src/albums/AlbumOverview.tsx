@@ -1,3 +1,4 @@
+import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { assetThumbnailUrl } from "../assets/mediaUrl";
 import { useLibrary } from "../library/LibraryContext";
@@ -20,6 +21,8 @@ export function AlbumOverview({ albums, onNavigate, onCreateAlbum, onChanged }: 
   const { privacyMode } = usePrivacy();
   const topLevelAlbums = useMemo(() => albums.filter((album) => album.parentId === null), [albums]);
   const [visibleAlbumIds, setVisibleAlbumIds] = useState<Set<string>>(() => new Set());
+  const host = useRef<HTMLElement>(null);
+  useFirstAppearance(host, topLevelAlbums.length, true, "classification-albums", ".album-overview__card-wrap");
   const covers = useAlbumCovers(gateway, visibleAlbumIds, privacyMode);
   const requestCreate = useCallback(() => {
     if (onCreateAlbum) {
@@ -33,7 +36,7 @@ export function AlbumOverview({ albums, onNavigate, onCreateAlbum, onChanged }: 
   }, []);
   const createButton = <Button type="button" size="sm" variant="quiet" onClick={requestCreate}><PlusIcon aria-hidden="true" />새 앨범</Button>;
 
-  return <section className="album-overview" aria-label="앨범">
+  return <section ref={host} className="album-overview" aria-label="앨범">
     <ViewToolbar title="앨범" titleAccessory={<span className="album-overview__toolbar-count">{albums.length.toLocaleString("ko-KR")}</span>} ariaLabel="앨범 도구" actions={createButton} chrome={{ status: createButton }} />
     {topLevelAlbums.length > 0 ? <div className="album-overview__grid">
       {topLevelAlbums.map((album) => <AlbumCard key={album.id} album={album} subAlbumCount={albums.filter((candidate) => candidate.parentId === album.id).length} covers={covers[album.id] ?? []} privacyMode={privacyMode} onVisible={markVisible} onNavigate={onNavigate} />)}

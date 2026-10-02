@@ -134,9 +134,9 @@ export function CaseWork({item, revision, active, privacy, position, total, scor
   const people = work.av?.people ?? [];
   const label = work.type === 'av' ? 'AV 작품 화면' : work.type === 'movie' ? '영화 작품 화면' : '게임 작품 화면';
   return <WorkZoomProvider workId={work.id} reset={reset}><article className="tablet-work" aria-label={label} aria-busy={waiting} inert={waiting || undefined}>
-    <div className="tablet-work__frame">
+    <div className="tablet-work__frame" style={{"--work-strip-height": work.type === 'av' || strip.length ? '76px' : '0px'} as CSSProperties}>
       {shown.urls.hero && <HeroBand src={shown.urls.hero} manga={false} onReady={() => undefined}/>}
-      <WorkZoomStage stageRef={stage} className="work-stage tablet-work__stage" enabled={isObject || mode === 'flat'} {...swipe} onEmptyClick={() => { if (mode === 'open') pick('case'); }}>
+      <WorkZoomStage stageRef={stage} className="work-stage tablet-work__stage" enabled={isObject || mode === 'flat'} {...swipe} onEmptyClick={() => { if (mode !== 'case' || picked !== 'case') pick('case'); }}>
         {work.type === 'av' && !privacy && <WorkBackdrop src={data.front}/>}
         <WorkZoomObject>
         <div className="work-case-slot" style={isObject ? undefined : {...hidden, position: 'absolute', inset: 0}} inert={!isObject || undefined} aria-hidden={!isObject}>
@@ -152,7 +152,7 @@ export function CaseWork({item, revision, active, privacy, position, total, scor
         <StageEdges previous={position > 1} next={position < total} onStep={onStep}/>
         <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={() => setReset(value => value + 1)}><ArrowPathIcon aria-hidden="true"/></Button>
       </WorkZoomStage>
-      <WorkStrip av={work.type === 'av'} mode={picked} artworks={strip} privacy={privacy} thumbnailUrl={id => thumbs.urls[id] ?? null} onPick={pick}/>
+      <WorkStrip av={work.type === 'av'} mode={picked} frontThumbnailUrl={data.front} artworks={strip} privacy={privacy} thumbnailUrl={id => thumbs.urls[id] ?? null} onPick={pick}/>
     </div>
     <header className="tablet-work__identity">
       <h1>{data.title}</h1>

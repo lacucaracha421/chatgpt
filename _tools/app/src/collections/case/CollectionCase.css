@@ -12,8 +12,10 @@
 /* Opening slides the case right as it unfolds; one eased move for the case, hinge and lid (user, 2026-10-01). A drag follows the pointer without easing. */
 .collection-case .kase { transition: transform 560ms var(--ease-standard); }
 .collection-case .kase.is-dragging { transition: none; }
-/* Scale the entire reference object, including paper, type and media, as one unit. */
-.collection-case--fitted .kase { --ch: 520px; --cw: calc(var(--ch) * var(--ratio)); --cd: 34px; position: absolute; left: calc(50% - var(--cw) / 2); top: calc(50% - var(--ch) / 2); transform: scale(var(--case-scale)) rotateX(-5deg) rotateY(var(--ry)) translateX(calc(var(--open) * (var(--cw) + var(--cd)) * .5)); }
+/* Scale the entire reference object, including paper, type and media, as one unit.
+   The fit scale lives in `scale`, outside the transitioned `transform`: the model appears at its
+   size instead of growing and shrinking while the stage and cover proportions settle (user, 2026-10-03). */
+.collection-case--fitted .kase { --ch: 520px; --cw: calc(var(--ch) * var(--ratio)); --cd: 34px; position: absolute; left: calc(50% - var(--cw) / 2); top: calc(50% - var(--ch) / 2); scale: var(--case-scale); transform: rotateX(-5deg) rotateY(var(--ry)) translateX(calc(var(--open) * (var(--cw) + var(--cd)) * .5)); }
 .collection-case .k-hinge, .collection-case .k-lid { transition-duration: 560ms; }
 .collection-case .kase > span, .collection-case .k-hinge > span, .collection-case .k-lid > span { position: absolute; display: block; backface-visibility: hidden; }
 /* The case opens like a real one: the spine folds flat on the back-left edge and the lid folds on the spine, so lid, spine and tray end up side by side. */

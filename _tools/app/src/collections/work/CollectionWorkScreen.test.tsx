@@ -83,7 +83,7 @@ describe("merged work screen", () => {
     const { container } = view(data);
     const stage = container.querySelector('.work-stage')!;
     const object = container.querySelector('.work-zoom-object')!;
-    fireEvent.click(screen.getByRole('button', { name: '안쪽' }));
+    fireEvent.keyDown(screen.getByRole('group', { name: '케이스' }), { key: 'Enter' });
     fireEvent.wheel(stage, { deltaY: -100 }); expect(Number(object.getAttribute('data-zoom'))).toBeGreaterThan(1);
     fireEvent.click(screen.getByRole('button', { name: '펼친 표지' }));
     fireEvent.wheel(stage, { deltaY: -100 }); const flatZoom = object.getAttribute('data-zoom');
@@ -96,7 +96,7 @@ describe("merged work screen", () => {
   it("updates metadata in the painted surface without busy states or slot swaps", async () => {
     const first = { ...value(), record: { status: "playing", ownedPlatform: "PC", myScore: 3.5, memo: "메모" } };
     const actions = callbacks(); const { container, rerender } = view(first, actions);
-    await userEvent.click(screen.getByRole("button", { name: "안쪽" }));
+    fireEvent.keyDown(screen.getByRole("group", { name: "케이스" }), { key: "Enter" });
     const object = screen.getByRole("group", { name: "케이스" });
     const label = screen.getByRole("button", { name: "상태" });
     const busy: string[] = [];
@@ -123,12 +123,13 @@ describe("merged work screen", () => {
     expect(container.querySelector(".work-surface")).toHaveClass("work-surface--info");
     await user.click(screen.getByRole("button", { name: "정보" }));
     expect(screen.queryByRole("complementary", { name: "작품 정보" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "안쪽" }));
+    fireEvent.keyDown(screen.getByRole("group", { name: "케이스" }), { key: "Enter" });
     expect(screen.getByRole("group", { name: "케이스" })).toHaveAttribute("aria-expanded", "true");
     expect(container.querySelector(".cart-slot")).not.toBeNull();
-    expect(container.querySelector(".work-strip-separator")).toBeNull();
+    expect(container.querySelector(".work-strip")).toBeNull();
+    expect(container.querySelector(".work-stage")).toHaveClass("work-stage--no-strip");
     expect(screen.queryByText("개요는 표시하지 않음")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "케이스" }));
+    fireEvent.click(container.querySelector(".work-stage")!);
     expect(screen.getByRole("group", { name: "케이스" })).toHaveAttribute("aria-expanded", "false");
   });
   it("keeps the same screen and old work until the incoming cover decodes", async () => {
@@ -159,13 +160,14 @@ describe("merged work screen", () => {
     await userEvent.click(screen.getByRole("button", { name: "펼친 표지" }));
     const flat = screen.getByLabelText("펼친 표지", { selector: "div" });
     expect(within(flat).getAllByRole("img").map(img => img.getAttribute("src"))).toEqual(["/back", "/spine", "/front"]);
-    await userEvent.click(screen.getByRole("button", { name: "안쪽" }));
+    fireEvent.click(screen.getByRole("button", { name: "펼친 표지" }));
+    fireEvent.keyDown(screen.getByRole("group", { name: "케이스" }), { key: "Enter" });
     expect(container.querySelector(".disc")).not.toBeNull();
   });
   it("keeps the case until a picked screenshot decodes, then displays it large", async () => {
     const data = { ...value(), artworks: [{ id: "screenshot", kind: "screenshot", selected: false }] };
     const { container } = view(data);
-    expect(container.querySelector(".work-strip-separator")).not.toBeNull();
+    expect(container.querySelector(".work-strip-separator")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "아트워크 1" }));
     expect(screen.getByRole("group", { name: "케이스" })).toBeInTheDocument();
     const image = container.querySelector<HTMLImageElement>(".work-art img")!;
@@ -177,6 +179,15 @@ describe("merged work screen", () => {
     expect(screen.queryByRole("group", { name: "케이스" })).toBeNull();
     expect(screen.getByRole("img", { name: "게임 하나 아트워크" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "아트워크 1" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", {name: "아트워크 1"}));
+    expect(screen.getByRole("group", {name: "케이스"})).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", {name: "아트워크 1"}));
+    await act(async () => fireEvent.load(container.querySelector(".work-art img")!));
+    expect(screen.queryByRole("group", {name: "케이스"})).toBeNull();
+    fireEvent.click(screen.getByRole("img", {name: "게임 하나 아트워크"}));
+    expect(screen.queryByRole("group", {name: "케이스"})).toBeNull();
+    fireEvent.click(container.querySelector(".work-art")!);
+    expect(screen.getByRole("group", {name: "케이스"})).toHaveAttribute("aria-expanded", "false");
   });
   it("auto-saves the clicked stars, preserves a stored half and offers quiet record menus", async () => {
     const { actions, container } = view(); const user = userEvent.setup();
@@ -272,7 +283,7 @@ it("opens the film form with a plain disc case, concise facts and film record op
   expect(container.querySelector(".asset-viewer__title small")).toHaveTextContent("감독 이름 · 9.1");
   expect(container.querySelector(".asset-viewer__position")).toHaveTextContent("2 / 3");
   for (const name of ["쇼케이스", "편집", "작품 관리", "정면으로", "정보", "닫기"]) expect(screen.getByRole("button", { name })).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "안쪽" }));
+  fireEvent.keyDown(screen.getByRole("group", { name: "케이스" }), { key: "Enter" });
   expect(container.querySelector(".disc")).not.toBeNull();
   expect(container.querySelector(".cart-slot")).toBeNull();
   expect(container.querySelector("[data-spine-template]")).toBeNull();

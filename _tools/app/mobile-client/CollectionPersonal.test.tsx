@@ -357,7 +357,9 @@ describe('manga detail layout',()=>{
     expect(screen.getByRole('button',{name:'3권 보기'}).classList.contains('manga-spine--missing')).toBe(true);
     expect(screen.getByRole('button',{name:'2권 보기'}).classList.contains('manga-spine--missing')).toBe(false);
     expect(screen.queryByText('provider')).toBeNull();
-    const owned=within(personal()).getByRole('button',{name:'소장 2권까지, 바꾸기'});
+    const owned=within(info.getByRole('region',{name:'소장'})).getByRole('button',{name:'소장 2권까지, 바꾸기'});
+    const sections=[...column().querySelectorAll(':scope > section')].map(section=>section.getAttribute('aria-label'));
+    expect(sections).toEqual(['소장','내 기록','내 메모','작품 정보']);
     expect(owned.textContent).toContain('2권까지 / 전체 4권');
     fireEvent.click(owned);
     expect(await screen.findByRole('dialog',{name:'소장 권수'})).toBeTruthy();

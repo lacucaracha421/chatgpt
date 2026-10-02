@@ -121,3 +121,36 @@ it('switches after the readiness cap when the incoming view stays busy', async (
   expect(screen.queryByText('old')).toBeNull();
   expect(screen.getByText('busy').closest('[inert]')).toBeNull();
 });
+
+function Cards({surface, count = 2, enabled = true}: {surface: string; count?: number; enabled?: boolean}) {
+  const host = useRef<HTMLDivElement>(null);
+  useFirstAppearance(host, count, enabled, surface, '.classification-card');
+  return <div ref={host}>{Array.from({length: count}, (_, i) => <button className="classification-card" key={i}><img alt=""/>card {i}</button>)}</div>;
+}
+it('moves custom card containers without fading their thumbnails and remembers each segment separately', () => {
+  const tree = (surface: string, count = 2, enabled = true, mounted = true) => <MotionScope>{mounted && <Cards key={surface} surface={surface} count={count} enabled={enabled}/>}</MotionScope>;
+  const view = render(tree('folders', 0));
+  view.rerender(tree('folders', 2, false)); expect(animate).not.toHaveBeenCalled();
+  view.rerender(tree('folders')); expect(animate).toHaveBeenCalledTimes(2);
+  expect(animate.mock.contexts.every(tile => (tile as HTMLElement).matches('button.classification-card'))).toBe(true);
+  expect(animate.mock.calls[0][0]).toEqual([{transform: 'translateY(8px) scale(.98)'}, {transform: 'none'}]);
+  view.rerender(tree('characters')); view.rerender(tree('albums')); view.rerender(tree('artists'));
+  expect(animate).toHaveBeenCalledTimes(8);
+  view.rerender(tree('folders', 8)); view.rerender(tree('albums', 3));
+  view.rerender(tree('artists', 0, true, false)); view.rerender(tree('artists'));
+  expect(animate).toHaveBeenCalledTimes(8);
+});
+it('consumes custom card appearances without motion when reduced motion is enabled', () => {
+  reduce = true; const view = render(<MotionScope><Cards surface="folders"/></MotionScope>);
+  reduce = false; view.rerender(<MotionScope><Cards surface="folders" count={4}/></MotionScope>);
+  expect(animate).not.toHaveBeenCalled();
+});
+
+it('creates no stacking layer at rest, so fixed overlays inside a view stack against the app', async () => {
+  const view = render(<AreaSwitch activeKey="home" views={{home: <b>home</b>}} />);
+  expect(screen.getByText('home').closest<HTMLElement>('[data-motion-view]')?.style.zIndex).toBe('');
+  view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b>assets</b>}} />); await tick();
+  expect(screen.getByText('assets').closest<HTMLElement>('[data-motion-view]')?.style.zIndex).toBe('1');
+  await tick(160);
+  expect(screen.getByText('assets').closest<HTMLElement>('[data-motion-view]')?.style.zIndex).toBe('');
+});

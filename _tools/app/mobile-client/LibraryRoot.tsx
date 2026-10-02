@@ -105,14 +105,14 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
     {sections.inline}
     <div style={{display:segment==='folders'?undefined:'none'}}>
       <button className="library-all" onClick={()=>onSelect(ALL_ASSETS)}><span className="all-covers">{items.slice(0,4).map(asset=><Cover key={asset.id} asset={asset} paused={paused||segment!=='folders'}/>)}</span><span className="result-name"><strong>모든 자산</strong><small>최근 저장한 순서</small></span>{total!==undefined&&<span className="numeric muted">{total}</span>}<ChevronRightIcon/></button>
-      <section className="library-root-folders" ref={folders}><SectionLabel as="h2" className="section-label" title="분류" count={topFolders.length ? topFolders.length : undefined}/><FolderCards items={topFolders} entries={entries} characters={characters} paused={paused||segment!=='folders'} revision={revision} onSelect={onSelect}/>{!entries.length&&<p className="hint">아직 게시된 분류가 없습니다.</p>}
+      <section className="library-root-folders" ref={folders}><SectionLabel as="h2" className="section-label" title="분류" count={topFolders.length ? topFolders.length : undefined}/><FolderCards items={topFolders} entries={entries} characters={characters} paused={paused||!active||segment!=='folders'||searchOpen} revision={revision} onSelect={onSelect}/>{!entries.length&&<p className="hint">아직 게시된 분류가 없습니다.</p>}
       {fit&&fit.hidden>0&&!scrolled&&<p className="library-end-line"><ChevronDownIcon aria-hidden="true"/>아래에 분류 {fit.hidden}개 더</p>}</section>
     </div>
     <div style={{display:segment==='albums'?undefined:'none'}}>
       {albumError&&<p className="error-message">{albumError}</p>}
-      {albumTree&&<Albums key={`${albumTree.libraryId}:${albumTree.epoch}`} tree={albumTree} revision={revision} paused={paused||segment!=='albums'} onSelect={onSelect}/>}
+      {albumTree&&<Albums key={`${albumTree.libraryId}:${albumTree.epoch}`} tree={albumTree} revision={revision} paused={paused||!active||segment!=='albums'||searchOpen} onSelect={onSelect}/>}
     </div>
-    <div style={{display:segment==='artists'?undefined:'none'}}><ArtistGrid artists={artistList.artists} state={artistList.state} paused={paused} onOpenArtist={onOpenArtist} onVisibleNames={onVisibleArtistNames}/></div>
+    <div style={{display:segment==='artists'?undefined:'none'}}><ArtistGrid artists={artistList.artists} state={artistList.state} paused={paused||!active||segment!=='artists'||searchOpen} onOpenArtist={onOpenArtist} onVisibleNames={onVisibleArtistNames}/></div>
     <Scrubber scrollRef={host} total={scrubberValues.length} sort={scrubberSort} hidden={!active||paused||queueOpen||searchOpen}/>
   </div>
   </div>

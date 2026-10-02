@@ -1,5 +1,4 @@
 import { useHorizontalWheel } from "../../shared/ui/useHorizontalWheel";
-import { BookOpenIcon, Square2StackIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { workArtworkThumbnailUrl } from "../../assets/mediaUrl";
 import { displayDate } from "../../shared/displayDate";
@@ -25,13 +24,14 @@ export function workMeta(collection: WorkMetaSource, platform: CaseData["platfor
 export function heroArtwork(collection: { type: string; selectedHeroArtworkId?: string | null; selectedBackdropArtworkId?: string | null }) {
   return collection.selectedHeroArtworkId || (collection.type === "movie" ? collection.selectedBackdropArtworkId : null) || null;
 }
-/** The views of the object (case, inside, AV flat jacket), then the work's artworks. Plain data: each client passes its own thumbnail URLs. */
-export function WorkStrip({ av, mode, artworks, privacy, thumbnailUrl = workArtworkThumbnailUrl, onPick }: { av: boolean; mode: string; artworks: { id: string }[]; privacy: boolean; thumbnailUrl?(id: string): string | null; onPick(id: string): void }) {
+/** Artwork thumbnails, with the AV flat jacket first. Shared by PC and tablet. */
+export function WorkStrip({ av, mode, artworks, privacy, frontThumbnailUrl, thumbnailUrl = workArtworkThumbnailUrl, onPick }: { av: boolean; mode: string; artworks: { id: string }[]; privacy: boolean; frontThumbnailUrl?: string | null; thumbnailUrl?(id: string): string | null; onPick(id: string): void }) {
   const stripWheel = useHorizontalWheel();
+  if (!av && !artworks.length) return null;
+  const pick = (id: string) => onPick(mode === id ? "case" : id);
   return <div ref={stripWheel} className="work-strip" aria-label="작품 보기">
-    {([ ["case", "케이스", Square2StackIcon], ["open", "안쪽", BookOpenIcon], ...(av ? [["flat", "펼친 표지", BookOpenIcon]] : []) ] as const).map(([id, label, Icon]) => <button className="work-strip-tile" key={String(id)} aria-pressed={mode === id} onClick={() => onPick(String(id))}><span className="work-strip-pic"><Icon /></span>{String(label)}</button>)}
-    {artworks.length > 0 && <span className="work-strip-separator" />}
-    {artworks.map((item, index) => { const src = privacy ? null : thumbnailUrl(item.id); return <button className="work-strip-tile work-strip-art" key={item.id} aria-label={`아트워크 ${index + 1}`} aria-pressed={mode === item.id} onClick={() => onPick(item.id)}><span className="work-strip-pic">{src && <img src={src} alt="" draggable={false} />}</span></button>; })}
+    {av && <button className="work-strip-tile work-strip-art" aria-label="펼친 표지" aria-pressed={mode === "flat"} onClick={() => pick("flat")}><span className="work-strip-pic">{!privacy && frontThumbnailUrl && <img src={frontThumbnailUrl} alt="" draggable={false} />}</span></button>}
+    {artworks.map((item, index) => { const src = privacy ? null : thumbnailUrl(item.id); return <button className="work-strip-tile work-strip-art" key={item.id} aria-label={`아트워크 ${index + 1}`} aria-pressed={mode === item.id} onClick={() => pick(item.id)}><span className="work-strip-pic">{src && <img src={src} alt="" draggable={false} />}</span></button>; })}
   </div>;
 }
 export function HeroBand({ src, manga, onReady }: { src: string; manga: boolean; onReady(): void }) {

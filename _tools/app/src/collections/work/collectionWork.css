@@ -5,20 +5,22 @@
 .collection-work .asset-viewer__title strong { max-width: 100%; }
 .collection-work .asset-viewer__topbar .ui-menu__trigger { flex: none; }
 .work-surface { position: absolute; inset: 56px 0 0; }
-.work-stage { position: absolute; inset: 0 0 112px; overflow: hidden; }
+.work-stage { position: absolute; inset: 0 0 76px; overflow: hidden; }
 .work-surface--info .work-stage, .work-surface--info .work-strip { right: 340px; }
 .work-case-slot { width: 100%; height: 100%; }
 .work-stage { z-index: 1; }
+.work-stage--no-strip { bottom: 0; }
 .work-stage[data-zoom-enabled] { touch-action: none; }
 .work-zoom-object { position: absolute; inset: 0; transform: scale(var(--work-zoom, 1)); transform-origin: center; transition: transform 90ms linear; }
 .work-cover-band { position: absolute; inset: 56px 0 184px; overflow: hidden; pointer-events: none; }
-.work-cover-band--av { bottom: 112px; }
+.work-cover-band--av { bottom: 76px; }
 .work-cover-band--info { right: 340px; }
 .work-backdrop { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 .work-backdrop img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scale(1.15); filter: blur(48px) saturate(.85); opacity: 0; transition: opacity 240ms linear; }
 .work-backdrop img.is-painted { opacity: .16; }
 @media (prefers-reduced-motion: reduce) { .work-zoom-object, .work-backdrop img { transition: none; } }
-.work-hero-band { position: absolute; inset: 0 0 112px; overflow: hidden; pointer-events: none; }
+.work-surface:has(> .work-stage--no-strip) .work-hero-band { bottom: 0; }
+.work-hero-band { position: absolute; inset: 0 0 76px; overflow: hidden; pointer-events: none; }
 .work-surface--info .work-hero-band { right: 340px; }
 .work-hero-band--manga { bottom: 184px; }
 .work-hero-band img { position: absolute; top: 0; left: 0; width: 100%; height: 62%; object-fit: cover; display: block; opacity: .9; mask-image: linear-gradient(180deg, black 0, black 55%, transparent 100%); -webkit-mask-image: linear-gradient(180deg, black 0, black 55%, transparent 100%); }
@@ -27,16 +29,14 @@
 .work-stage .asset-viewer__edge { top: 30%; bottom: 30%; width: 56px; background: transparent; }
 .work-stage .asset-viewer__edge:hover { background: transparent; }
 .work-stage .asset-viewer__edge:disabled { visibility: hidden; }
-.work-strip { position: absolute; bottom: 0; left: 0; right: 0; height: 112px; display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding: 0 var(--space-6); overflow-x: auto; background: transparent; }
+.work-strip { position: absolute; bottom: 0; left: 0; right: 0; height: 76px; display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding: 0 var(--space-6); overflow-x: auto; background: transparent; }
 /* These object-view tiles are the media viewer's strip, not ordinary buttons. */
 .work-strip-tile { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); flex: none; color: var(--color-muted); font-size: var(--type-meta); line-height: var(--line-meta); }
 .work-strip-pic { width: 72px; height: 56px; display: grid; place-items: center; background: var(--color-surface); border-radius: var(--radius-mark); overflow: hidden; }
-.work-strip-pic svg { width: 40px; height: 40px; }
 .work-strip-pic img { width: 100%; height: 100%; object-fit: cover; }
 .work-strip-art .work-strip-pic { width: 96px; }
 .work-strip-tile[aria-pressed="true"] { color: var(--color-text); font-weight: 600; }
 .work-strip-tile[aria-pressed="true"] .work-strip-pic { outline: 2px solid var(--color-accent); outline-offset: 1px; }
-.work-strip-separator { width: 1px; height: 56px; background: var(--color-border); margin: 0 var(--space-2); flex: none; }
 .work-dock { position: absolute; inset: 0 0 0 auto; width: 340px; }
 .work-dock .asset-viewer__dock-body { padding-top: var(--space-4); }
 .work-info { display: flex; flex-direction: column; gap: var(--space-6); }
@@ -99,7 +99,7 @@
 .manga-work-stage.work-stage { bottom: 184px; }
 /* The approved book is one physical object, scaled with its material and spine type. */
 .manga-work-book { --bh: 560px; --bd: 34px; --bw: calc(var(--bh) * var(--ratio)); position: absolute; inset: var(--space-4) 96px var(--space-8); perspective: 1800px; }
-.manga-bigbook { position: absolute; left: calc(50% - var(--bw) / 2); top: calc(50% - var(--bh) / 2); width: var(--bw); height: var(--bh); transform-style: preserve-3d; transform: scale(var(--book-scale)) rotateY(var(--ty)); cursor: grab; touch-action: none; user-select: none; transition: transform 520ms var(--ease-standard); }
+.manga-bigbook { position: absolute; left: calc(50% - var(--bw) / 2); top: calc(50% - var(--bh) / 2); width: var(--bw); height: var(--bh); transform-style: preserve-3d; scale: var(--book-scale); transform: rotateY(var(--ty)); cursor: grab; touch-action: none; user-select: none; transition: transform 520ms var(--ease-standard); }
 .manga-bigbook.is-dragging { transition: none; cursor: grabbing; }
 .manga-bigbook > span { position: absolute; display: block; backface-visibility: hidden; overflow: hidden; }
 .manga-bb-front { inset: 0; transform: translateZ(calc(var(--bd) / 2)); border-radius: var(--radius-mark); background: var(--color-surface); }

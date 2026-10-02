@@ -25,15 +25,15 @@
 /* Work screen: a full-bleed stage under the bar, then the information as a page section. */
 .tablet-work { display: flex; flex-direction: column; min-width: 0; }
 .tablet-work__frame { position: relative; margin: 0 calc(var(--mobile-gutter) * -1); background: var(--color-viewer-bg); }
-.tablet-work .work-hero-band { inset: 0 0 112px; }
+.tablet-work .work-hero-band { inset: 0 0 var(--work-strip-height, 76px); }
 .tablet-work--manga .work-hero-band { inset: 0 0 184px; }
-.tablet-work .work-stage.tablet-work__stage { position: relative; inset: auto; height: clamp(320px, 52vh, 640px); touch-action: pan-y; }
+.tablet-work .work-stage.tablet-work__stage { position: relative; inset: auto; height: calc(clamp(320px, 52vh, 640px) + 112px - var(--work-strip-height, 76px)); touch-action: pan-y; }
 .tablet-work__manga-stage { position: relative; height: clamp(320px, 52vh, 640px); touch-action: pan-y; }
 .tablet-work__manga-stage .work-stage.manga-work-stage { position: absolute; inset: 0; }
 .tablet-work .manga-work-book { inset: var(--space-4) var(--space-8) var(--space-8); }
 /* The stage owns turning and two-finger zoom; scrolling remains available outside it. */
 .tablet-work .work-stage[data-zoom-enabled], .tablet-work .collection-case .kase, .tablet-work .manga-bigbook { touch-action: none; }
-.tablet-work .work-strip { position: relative; inset: auto; height: 112px; justify-content: flex-start; padding: 0 var(--mobile-gutter); scrollbar-width: none; }
+.tablet-work .work-strip { position: relative; inset: auto; height: 76px; justify-content: flex-start; padding: 0 var(--mobile-gutter); scrollbar-width: none; }
 .tablet-work .work-strip::-webkit-scrollbar { display: none; }
 .tablet-work .work-strip-tile { min-width: var(--touch-target); padding: 0; background: transparent; border: 0; font: inherit; font-size: var(--type-meta); }
 .tablet-work .manga-bookcase.work-strip { height: 184px; padding: 0; }

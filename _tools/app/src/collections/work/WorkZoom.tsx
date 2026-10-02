@@ -18,7 +18,7 @@ export function WorkZoomObject({ children }: { children: ReactNode }) {
   return <div className="work-zoom-object" data-zoom={zoom} style={{ "--work-zoom": zoom } as CSSProperties}>{children}</div>;
 }
 
-const isEmptyStage = (target: EventTarget | null) => target instanceof Element && !target.closest('.kase,.manga-bigbook,.work-flat-slot,.work-art,button,a,input,textarea,select,[role="button"]');
+const isEmptyStage = (target: EventTarget | null) => target instanceof Element && !target.closest('.kase,.manga-bigbook,.work-flat-slot,.work-art img,.work-art .privacy-mask,button,a,input,textarea,select,[role="button"]');
 
 export function WorkZoomStage({ enabled = true, stageRef, onEmptyClick, children, ...props }: HTMLAttributes<HTMLDivElement> & { enabled?: boolean; stageRef?: Ref<HTMLDivElement>; onEmptyClick?: () => void; children: ReactNode }) {
   const model = useContext(ZoomContext);

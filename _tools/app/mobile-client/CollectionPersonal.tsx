@@ -69,7 +69,7 @@ const PendingSlot = ({shown}: {shown: boolean}) => <span className="collection-p
  * `collectionPersonalEdit` (tracking: `collectionTrackingEdit`); otherwise they are shown
  * read-only without an error. A queued value shows at once with the bookmark-style "전송 대기" mark.
  */
-export function PersonalRecord({item, edits, onSheet}: {item: CollectionDetail; edits: PersonalEdits; onSheet(sheet: PersonalSheet): void}) {
+export function PersonalRecord({item, edits, onSheet, includeTracking = true}: {item: CollectionDetail; edits: PersonalEdits; onSheet(sheet: PersonalSheet): void; includeTracking?: boolean}) {
   const score = edits.visible(item.id, 'myScore', item.myScore ?? null);
   const showcase = edits.visible(item.id, 'showcase', item.showcase);
   const memo = edits.visible(item.id, 'memo', item.description ?? null);
@@ -84,7 +84,7 @@ export function PersonalRecord({item, edits, onSheet}: {item: CollectionDetail; 
         </button>
       : <div className={`collection-personal-row${score.pending ? ' is-pending' : ''}`}><span className="collection-personal-label">내 평점</span><span className="collection-personal-value numeric">{scoreText(score.value)}</span>{score.pending && <Pending/>}</div>}
     <RecordRows item={item} edits={edits} onSheet={onSheet}/>
-    <TrackingRows item={item} edits={edits} onOwned={edition => onSheet(`owned-${edition}`)}/>
+    {includeTracking && <TrackingRows item={item} edits={edits} onOwned={edition => onSheet(`owned-${edition}`)}/>}
     {anyPending && edits.failure && <p className="collection-personal-failure" role="alert">{edits.failure}</p>}
     {edits.notice && <p className="collection-personal-failure" role="alert">{edits.notice}</p>}
   </section>;

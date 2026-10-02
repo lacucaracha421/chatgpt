@@ -104,6 +104,7 @@ export function CharacterGroups({ seriesId, members, groups: providedGroups, act
     {/* A group view starts with its member tiles: the breadcrumb returns to the series and 그룹 편집 lives in the titlebar menu. */}
     {(labelParts.length > 0 || headerAccessory) && <FolderShelf
       label={labelParts.map(([kind, count]) => `${kind} ${count.toLocaleString()}`).join(" · ")}
+      appearanceKey="classification-characters"
       cards={cards}
       accessory={headerAccessory}
       className="series-characters"

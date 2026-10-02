@@ -51,7 +51,8 @@ async function openDetail(){
   fireEvent.click(await screen.findByText(base.name));
   await screen.findByRole('region',{name:'내 기록'});
 }
-const section=()=>screen.getByRole('region',{name:'내 기록'});
+const section=()=>screen.getByRole('region',{name:'소장'});
+const personalSection=()=>screen.getByRole('region',{name:'내 기록'});
 /** 신간 알림 is a bell in the detail's top bar. */
 const actions=()=>screen.getByRole('group',{name:'작품 동작'});
 const watchSwitch=async()=>{await screen.findByRole('group',{name:'작품 동작'});return within(actions()).findByRole('button',{name:/^신간 알림/});};
@@ -154,7 +155,7 @@ it('drops an edit the server refuses as unavailable and says why',async()=>{
   command=()=>new ApiError('알라딘 또는 카카오와 연결된 만화만 신간 알림을 켤 수 있습니다.',409,{detail:{code:'releaseWatchUnavailable',message:'x'}});
   await openDetail();
   fireEvent.click(await watchSwitch());
-  expect((await within(section()).findByRole('alert')).textContent).toContain('신간 알림을 켤 수 있어 되돌렸습니다');
+  expect((await within(personalSection()).findByRole('alert')).textContent).toContain('신간 알림을 켤 수 있어 되돌렸습니다');
   expect(readCollectionEdits()).toEqual({});
   expect((await watchSwitch()).getAttribute('aria-pressed')).toBe('false');
 });
@@ -172,7 +173,7 @@ it('shows tracking read-only with a short note while the PC has not been upgrade
   expect(within(section()).queryByRole('button',{name:/소장/})).toBeNull();
   expect(within(section()).getByText('3권까지')).toBeTruthy();
   // Rating stays editable: only the tracking fields wait for the PC.
-  expect(within(section()).getByRole('button',{name:/내 평점/})).toBeTruthy();
+  expect(within(personalSection()).getByRole('button',{name:/내 평점/})).toBeTruthy();
 });
 
 it('withholds a queued tracking edit until the capability returns, while other edits still send',async()=>{
@@ -192,14 +193,14 @@ it('withholds a queued tracking edit until the capability returns, while other e
 it('shows nothing extra for a legacy manga publication or other Collection types',async()=>{
   item={...base,releaseWatch:undefined,ownedVolumes:undefined};
   await openDetail();
-  await waitFor(()=>expect(within(section()).getByRole('button',{name:/내 평점/})).toBeTruthy());
-  expect(within(section()).queryByText(/신간 알림|소장/)).toBeNull();
+  await waitFor(()=>expect(within(personalSection()).getByRole('button',{name:/내 평점/})).toBeTruthy());
+  expect(within(personalSection()).queryByText(/신간 알림|소장/)).toBeNull();
   expect(within(actions()).queryByRole('button',{name:/신간 알림/})).toBeNull();
   cleanup();
   item={...base,type:'game',volumes:[]};
   await openDetail();
-  await waitFor(()=>expect(within(section()).getByRole('button',{name:/내 평점/})).toBeTruthy());
-  expect(within(section()).queryByText(/신간 알림|소장/)).toBeNull();
+  await waitFor(()=>expect(within(personalSection()).getByRole('button',{name:/내 평점/})).toBeTruthy());
+  expect(within(personalSection()).queryByText(/신간 알림|소장/)).toBeNull();
 });
 
 it('keeps one queue entry per edition and compares owned entries by content',()=>{

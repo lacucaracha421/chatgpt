@@ -92,9 +92,11 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady}:
       const incoming = key === activeKey;
       const visible = key === shown || (incoming && arriving === key);
       const interactive = incoming && (activeKey === shown || arriving === key);
+      // A stacking layer only while two views overlap: at rest, fixed overlays inside a view
+      // (the collection work screen) must stack against the whole app, not inside this stage.
       return <div key={key} ref={element => { if (element) hosts.current.set(key, element); else hosts.current.delete(key); }}
         className="motion-stage__view" data-motion-view={key} inert={!interactive || undefined} aria-hidden={!interactive || undefined}
-        style={{display: key !== shown && !incoming ? 'none' : undefined, visibility: visible ? undefined : 'hidden', zIndex: incoming ? 1 : 0}}>
+        style={{display: key !== shown && !incoming ? 'none' : undefined, visibility: visible ? undefined : 'hidden', zIndex: incoming && arriving === key ? 1 : undefined}}>
         <AreaVisible.Provider value={visible && incoming}>{nodes.current.get(key)}</AreaVisible.Provider>
       </div>;
     })}

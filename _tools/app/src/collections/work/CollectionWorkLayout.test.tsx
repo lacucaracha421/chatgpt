@@ -46,3 +46,16 @@ it("keeps provider cards in one column inside the work dock at any window width"
   expect(getComputedStyle(container.querySelector(".work-dock .manga-connections__choices")!).gridTemplateColumns).toBe("minmax(0, 1fr)");
   expect(getComputedStyle(container.lastElementChild!).gridTemplateColumns).toBe("repeat(2, minmax(0, 1fr))");
 });
+
+it('gives the PC object the freed strip height, including with the information dock open', () => {
+  styles(false);
+  const {container} = render(<div className="work-surface work-surface--info"><div className="work-stage"/><div className="work-strip"/></div>);
+  const stage=container.querySelector('.work-stage')!;
+  const strip=container.querySelector('.work-strip')!;
+  // jsdom keeps inset as a shorthand; native geometry still needs a window check.
+  expect(getComputedStyle(stage).getPropertyValue('inset')).toBe('0 0 76px');
+  expect(getComputedStyle(strip).height).toBe('76px');
+  expect(getComputedStyle(stage).right).toBe(getComputedStyle(strip).right);
+  stage.classList.add('work-stage--no-strip');
+  expect(getComputedStyle(stage).bottom).toBe('0px');
+});

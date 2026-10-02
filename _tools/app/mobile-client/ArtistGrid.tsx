@@ -1,4 +1,5 @@
-import {useEffect,useMemo,useState} from 'react';
+import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
+import {useEffect,useMemo,useRef,useState} from 'react';
 import {ArrowsUpDownIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
 import {ArtistImage,EmptyArtists} from './Artists';
@@ -38,6 +39,8 @@ export function ArtistGrid({artists,state,paused,onOpenArtist,onVisibleNames}:{a
   const [sort,setSort] = useState<ArtistSort>(readSort);
   const [sortOpen,setSortOpen] = useState(false);
   const visible = useMemo(() => sortArtists(artists.some(artist=>artist.main)?artists.filter(artist=>artist.main):artists,sort),[artists,sort]);
+  const host=useRef<HTMLDivElement>(null);
+  useFirstAppearance(host,visible.length,!paused&&state==='ready',"classification-artists",".artist-grid-card");
   useEffect(() => { onVisibleNames?.(visible.map(artistName)); }, [onVisibleNames,visible]);
 
   const chooseSort = (value:ArtistSort) => {
@@ -46,7 +49,7 @@ export function ArtistGrid({artists,state,paused,onOpenArtist,onVisibleNames}:{a
     setSortOpen(false);
   };
 
-  return <div className="artist-grid-pane" aria-label="작가 목록">
+  return <div ref={host} className="artist-grid-pane" aria-label="작가 목록">
     <div className="artist-grid-toolbar">
       <button type="button" className="artist-grid-sort" aria-label={`정렬: ${SORT_LABELS[sort]}`} onClick={() => setSortOpen(true)}><ArrowsUpDownIcon aria-hidden="true"/>{SORT_LABELS[sort]}</button>
     </div>

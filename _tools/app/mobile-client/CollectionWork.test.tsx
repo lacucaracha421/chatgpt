@@ -140,3 +140,39 @@ it('pinches a case without opening or turning it, resets, and uses the AV jacket
   expect(view.container.querySelector('.work-zoom-object')!.getAttribute('data-zoom')).toBe('1'); expect(object.getAttribute('data-angle')).toBe('0');
   expect(view.container.querySelector('.work-backdrop img')?.getAttribute('src')).toBe('/cover');
 });
+
+it('keeps only thumbnails, returns to the case on a repeated artwork tap or empty stage tap, and frees the strip row without tiles', async () => {
+  artwork.urls = {art: '/art'};
+  const item: CollectionDetail = {...manga, id: 'game', type: 'game', artworks: [{id: 'art', kind: 'screenshot', selected: false}]};
+  const props = {item, revision: 'r1', active: true, privacy: false, position: 1, total: 1, score: () => null, onStep: vi.fn(), info: () => null};
+  const view = render(<CaseWork {...props}/>);
+  expect(screen.queryByRole('button', {name: '케이스'})).toBeNull();
+  expect(screen.queryByRole('button', {name: '안쪽'})).toBeNull();
+  const tile = screen.getByRole('button', {name: '아트워크 1'});
+  fireEvent.click(tile);
+  expect(screen.queryByRole('group', {name: '케이스'})).toBeNull();
+  fireEvent.click(tile);
+  expect(screen.getByRole('group', {name: '케이스'}).getAttribute('aria-expanded')).toBe('false');
+  fireEvent.click(tile);
+  fireEvent.click(view.container.querySelector('.work-art img')!);
+  expect(screen.queryByRole('group', {name: '케이스'})).toBeNull();
+  fireEvent.click(view.container.querySelector('.work-art')!);
+  expect(screen.getByRole('group', {name: '케이스'})).toBeTruthy();
+  view.rerender(<CaseWork {...props} item={{...item, artworks: []}}/>);
+  expect(view.container.querySelector('.work-strip')).toBeNull();
+  expect((view.container.querySelector('.tablet-work__frame') as HTMLElement).style.getPropertyValue('--work-strip-height')).toBe('0px');
+});
+
+it('keeps the AV front-thumbnail flat tile first and returns from it on a repeated tap', async () => {
+  artwork.urls = {front: '/front', art: '/art'};
+  const item: CollectionDetail = {...manga, id: 'av', type: 'av', selectedWorkArtworkId: 'front', artworks: [{id: 'art', kind: 'screenshot', selected: false}]};
+  const view = render(<CaseWork item={item} revision="r1" active privacy={false} position={1} total={1} score={() => null} onStep={vi.fn()} info={() => null}/>);
+  const flat = screen.getByRole('button', {name: '펼친 표지'});
+  expect(view.container.querySelector('.work-strip button')).toBe(flat);
+  expect(flat.querySelector('img')?.getAttribute('src')).toBe('/front');
+  expect(flat.textContent).toBe('');
+  await act(async () => {view.container.querySelectorAll('.work-flat img').forEach(image => fireEvent.load(image));});
+  fireEvent.click(flat); expect(flat.getAttribute('aria-pressed')).toBe('true');
+  expect(screen.queryByRole('group', {name: '케이스'})).toBeNull();
+  fireEvent.click(flat); expect(screen.getByRole('group', {name: '케이스'})).toBeTruthy();
+});

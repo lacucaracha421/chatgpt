@@ -596,7 +596,7 @@ describe('read-only collections',()=>{
     // The shared work screen: the case on its stage, the strip of views, the information below.
     expect(screen.getByRole('article',{name:'게임 작품 화면'})).toBeTruthy();
     expect(screen.getByRole('group',{name:'케이스'})).toBeTruthy();
-    expect(screen.getByLabelText('작품 보기')).toBeTruthy();
+    expect(screen.queryByLabelText('작품 보기')).toBeNull();
     // Work information is shown, not hidden behind a disclosure.
     expect(metadataBlock().tagName).toBe('DL');
     act(()=>{expect(backRef.current?.()).toBe(true);});

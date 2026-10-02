@@ -171,3 +171,31 @@ it('marks character folders apart from asset folders with a glyph and a card cla
  expect(series.classList.contains('is-character')).toBe(true);expect(series.querySelector('.character-glyph')).not.toBeNull();
  expect(series.getAttribute('aria-description')).toBe('캐릭터 시리즈');
 });
+
+it('animates folder, album and artist cards once each on their first visible segment, without fading images', async () => {
+ const animate=vi.fn(()=>({cancel(){}}));
+ Object.defineProperty(HTMLElement.prototype,'animate',{configurable:true,value:animate});
+ const original=mocks.api.getMockImplementation()!;
+ mocks.api.mockImplementation(async(path:string,signal?:AbortSignal)=>path==='/v1/library/artists'?{artists:[libraryArtist('appearance','작가',{main:true})]}:original(path,signal));
+ const tree={adopted:true,libraryId:'a'.repeat(32),epoch:1,code:'',albums:[{id:'album',parentId:null,name:'앨범',iconKey:null,colorKey:null}]};
+ try {
+  const {MotionScope}=await import('../src/shared/motion/AreaSwitch');
+  function Root(){const [segment,onSegment]=useState<'folders'|'albums'|'artists'>('folders');return <MotionScope><LibraryRoot {...props} albumTree={tree} segment={segment} onSegment={onSegment}/></MotionScope>;}
+  render(<Root/>);
+  const appearances=()=>animate.mock.calls.filter(call=>(call as unknown as [unknown,KeyframeAnimationOptions])[1].duration===560);
+  const first=appearances().length;expect(first).toBeGreaterThan(0);
+  expect((animate.mock.contexts as HTMLElement[]).every(tile=>tile.matches('.library-folder'))).toBe(true);
+  fireEvent.click(screen.getByRole('radio',{name:'앨범'}));
+  expect(appearances().length).toBe(first+1);
+  fireEvent.click(screen.getByRole('radio',{name:'작가'}));
+  await waitFor(()=>expect(appearances().length).toBe(first+2));
+  fireEvent.click(screen.getByRole('radio',{name:'분류'}));
+  fireEvent.click(screen.getByRole('radio',{name:'앨범'}));
+  fireEvent.click(screen.getByRole('radio',{name:'작가'}));
+  expect(appearances().length).toBe(first+2);
+  expect(appearances().every(call=>JSON.stringify(call[0]).includes('opacity')===false)).toBe(true);
+ } finally {
+  delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
+  mocks.api.mockImplementation(original);
+ }
+});

@@ -115,7 +115,7 @@ function WorkSurface({ data, privacy, info, reset, actions, onReady }: { data: C
   return <>
     {heroSrc && <HeroBand src={heroSrc} manga={Boolean(data.manga)} onReady={() => ready("hero")} />}
     {data.manga ? <><MangaStage manga={data.manga} privacy={privacy} title={data.collection.name} author={data.collection.author} frontReset={reset} onPick={id => actions.onPickVolume?.(id)} onReady={() => ready("object")} /><MangaBookcase manga={data.manga} privacy={privacy} onPick={id => actions.onPickVolume?.(id)} onEnlarge={actions.onEnlargeManga} /></> : <>
-    <WorkZoomStage stageRef={stage} className="work-stage" enabled={isObject || mode === "flat"} onEmptyClick={() => { if (mode === "open") pick("case"); }}>
+    <WorkZoomStage stageRef={stage} className={`work-stage${data.collection.type !== "av" && !data.artworks.length ? " work-stage--no-strip" : ""}`} enabled={isObject || mode === "flat"} onEmptyClick={() => { if (mode !== "case" || picked !== "case") pick("case"); }}>
       <WorkZoomObject>
       <div style={isObject ? undefined : { position: "absolute", inset: 0, visibility: "hidden", pointerEvents: "none" }} className="work-case-slot" inert={!isObject} aria-hidden={!isObject}>
         <CollectionCase data={caseData} large stageBox={stageBox} open={mode === "open"} onOpenChange={open => pick(open ? "open" : "case")} frontReset={reset}
@@ -132,7 +132,7 @@ function WorkSurface({ data, privacy, info, reset, actions, onReady }: { data: C
       <button className="asset-viewer__edge asset-viewer__edge--left" aria-label="이전 작품" disabled={data.position <= 1} onClick={() => actions.onStep(-1)}><ChevronLeftIcon /></button>
       <button className="asset-viewer__edge asset-viewer__edge--right" aria-label="다음 작품" disabled={data.position >= data.total} onClick={() => actions.onStep(1)}><ChevronRightIcon /></button>
     </WorkZoomStage>
-    <WorkStrip av={data.collection.type === "av"} mode={mode} artworks={data.artworks} privacy={privacy} onPick={pick} />
+    <WorkStrip av={data.collection.type === "av"} mode={picked} frontThumbnailUrl={caseData.front} artworks={data.artworks} privacy={privacy} onPick={pick} />
     </>}
     <aside className="asset-viewer__dock work-dock" aria-label="작품 정보" style={info ? undefined : { visibility: "hidden", pointerEvents: "none" }} aria-hidden={!info} inert={!info}><div className="asset-viewer__dock-body">{data.manga?.ownership}<WorkInfo collection={data.collection} av={data.av} related={data.related} tmdb={data.tmdb} record={record}
       onSave={edit => actions.onSave(data.collection, edit)} onOpenPerson={actions.onOpenPerson} onOpenCollection={actions.onOpenCollection} onCopyCode={() => actions.onCopyCode(data.av?.productCode ?? null)} />{data.manga?.management}</div></aside>

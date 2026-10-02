@@ -174,7 +174,7 @@ it('keeps series filters usable while folded and offers folding inside a group',
 it('keeps the same shelf available when rotating from a folded portrait strip',async()=>{
   let rotate!:()=>void;
   const media={matches:false,addEventListener:(_name:string,listener:()=>void)=>{rotate=listener;},removeEventListener:()=>{}};
-  vi.stubGlobal('matchMedia',()=>media);
+  vi.stubGlobal('matchMedia',(query:string)=>query.includes('orientation')?media:{matches:false,addEventListener(){},removeEventListener(){}});
   const many=structuredClone(index);
   many.nodes.push(...Array.from({length:9},(_,i)=>node('character',`extra-${i}`,`Extra ${i}`,'series:s')));
   mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?many:page());
@@ -293,7 +293,7 @@ it('distinguishes an older server from an unpublished character view',async()=>{
  it('uses the PC overview in landscape and keeps the compact portrait view on rotation',async()=>{
   let rotate!:()=>void;
   const media={matches:true,addEventListener:(_name:string,listener:()=>void)=>{rotate=listener;},removeEventListener:()=>{}};
-  vi.stubGlobal('matchMedia',()=>media);
+  vi.stubGlobal('matchMedia',(query:string)=>query.includes('orientation')?media:{matches:false,addEventListener(){},removeEventListener(){}});
   const withHero=structuredClone(index);withHero.nodes[0].heroAssetId='hero';
   mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?withHero:page());
   render(<CharacterBrowser {...props}/>);

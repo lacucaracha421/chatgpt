@@ -6,8 +6,11 @@
   min-height: 0;
   width: 100%;
   box-sizing: border-box;
-  background: transparent;
+  background: var(--color-viewer-bg);
 }
+/* Only the asset viewer fades its own backdrop layer for the zoom; other screens that share this
+   frame (collection work screen, manga reader) keep an opaque background. */
+.asset-viewer:has(> .asset-viewer__backdrop) { background: transparent; }
 
 .asset-viewer--docked { grid-template-columns: minmax(0, 1fr) 340px; }
 
@@ -219,7 +222,7 @@
   }
 }
 
-.ui-dialog--fullscreen:has(>.asset-viewer) { background: transparent; }
+.ui-dialog--fullscreen:has(> .asset-viewer > .asset-viewer__backdrop) { background: transparent; }
 
 .asset-viewer__load-error { position: absolute; bottom: 160px; padding: 8px 12px; background: var(--color-surface); color: var(--color-muted); }
 

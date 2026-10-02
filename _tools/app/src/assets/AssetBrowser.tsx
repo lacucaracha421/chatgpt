@@ -558,6 +558,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     <FolderShelf
       label={`폴더 ${folderChildren.length.toLocaleString()}`}
       ariaLabel="하위 폴더"
+      appearanceKey="classification-folders"
       cards={folderChildren.map(child => <article className="folder-shelf__card" key={child.id}>
         <button type="button" className="folder-shelf__card-open" aria-label={`${child.name} 폴더 열기`} onClick={() => onViewChange?.({ kind: "classification", classificationId: child.id })}>
           {folderThumbnails.get(child.id) && !privacyMode

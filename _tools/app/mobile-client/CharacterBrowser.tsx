@@ -1,3 +1,4 @@
+import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
 import {usePrivacyMode} from './privacyMode';
 import {assetSearchSelectionKey,type AssetSearchName} from '../src/assets/assetSearch';
 import {invalidSearchChoices} from './assetSearchModel';
@@ -338,6 +339,7 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   useLevelMotion(host,search?.length?'asset-search':level.current?.key??null,level.current?.depth??0);
   const stale=!!shown&&filterPending||(!page&&busy&&!error&&!!where.node&&!!lastPage.current);
   const galleryItems=page?.items??(stale?lastPage.current!.items:[]);
+  useFirstAppearance(host,children.length,active&&!paused&&!stale&&!busy,"classification-characters",".character-card");
   const foldable=folderStrip&&children.length>0;
   const childCharacterCount=children.filter(child=>child.kind!=='folder').length;
   const childFolderCount=children.filter(child=>child.kind==='folder').length;

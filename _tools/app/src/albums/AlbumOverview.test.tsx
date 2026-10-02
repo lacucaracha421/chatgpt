@@ -51,3 +51,19 @@ describe("AlbumOverview", () => {
     expect(onCreateAlbum).toHaveBeenCalledOnce();
   });
 });
+
+it('moves the album card containers once per library session and keeps thumbnails unfaded on refresh and revisit', async () => {
+  const {MotionScope} = await import('../shared/motion/AreaSwitch');
+  const animate = vi.fn((_frames: Keyframe[], _options: KeyframeAnimationOptions) => ({cancel(){}}));
+  Object.defineProperty(HTMLElement.prototype, 'animate', {configurable: true, value: animate});
+  const albums = [{id: 'album', name: 'Album', parentId: null, iconKey: null, colorKey: null}];
+  const libraryGateway = gateway();
+  const tree = (mounted = true) => <MotionScope><LibraryProvider gateway={libraryGateway}>{mounted && <AlbumOverview albums={albums} onNavigate={vi.fn()}/>}</LibraryProvider></MotionScope>;
+  try {
+    const view = render(tree()); await waitFor(() => expect(animate).toHaveBeenCalledOnce());
+    expect((animate.mock.contexts[0] as HTMLElement).matches('.album-overview__card-wrap')).toBe(true);
+    expect(animate.mock.calls[0][0]).toEqual([{transform: 'translateY(8px) scale(.98)'}, {transform: 'none'}]);
+    view.rerender(tree()); view.rerender(tree(false)); view.rerender(tree());
+    expect(animate).toHaveBeenCalledOnce();
+  } finally {delete (HTMLElement.prototype as Partial<HTMLElement>).animate;}
+});

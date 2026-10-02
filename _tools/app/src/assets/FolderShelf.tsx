@@ -1,11 +1,13 @@
+import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
 import { InformationCircleIcon } from "@heroicons/react/24/outline";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import { Button } from "../shared/ui/Button";
 import { SegmentedControl, type SegmentedOption } from "../shared/ui/SegmentedControl";
 import { ShelfScroller } from "../shared/ui/ShelfScroller";
 
 type FolderShelfProps = {
+  appearanceKey?: string;
   label: string;
   cards: ReactNode[];
   accessory?: ReactNode;
@@ -14,11 +16,13 @@ type FolderShelfProps = {
   labelClassName?: string;
 };
 
-export function FolderShelf({ label, cards, accessory, ariaLabel, className, labelClassName }: FolderShelfProps) {
+export function FolderShelf({ label, cards, accessory, ariaLabel, className, labelClassName, appearanceKey = "classification-folder-shelf" }: FolderShelfProps) {
+  const host = useRef<HTMLElement>(null);
+  useFirstAppearance(host, cards.length, true, appearanceKey, ".folder-shelf__card");
   const shelfClassName = ["folder-shelf", className].filter(Boolean).join(" ");
   const sectionLabelClassName = ["ui-section-label", "folder-shelf__label", labelClassName].filter(Boolean).join(" ");
   const labelRowClassName = ["folder-shelf__label-row", labelClassName].filter(Boolean).join(" ");
-  return <section className={shelfClassName} aria-label={ariaLabel ?? label}>
+  return <section ref={host} className={shelfClassName} aria-label={ariaLabel ?? label}>
     <div className={labelRowClassName}>
       <h3 className={sectionLabelClassName} aria-label={label}>
         <span className="ui-section-label__title">{label}</span>
