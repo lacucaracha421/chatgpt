@@ -171,12 +171,15 @@ MOVE = "moveAlbum"
 APPEARANCE = "updateAlbumAppearance"
 DELETE = "deleteAlbum"
 MEMBERSHIP = "setAlbumMembership"
-COMMAND_TYPES = (CREATE, RENAME, MOVE, APPEARANCE, DELETE, MEMBERSHIP)
+ENSURE_LIKES = "ensureLikesAlbum"
+LIKES_NAME = "마음에 들어요"
+COMMAND_TYPES = (CREATE, RENAME, MOVE, APPEARANCE, DELETE, MEMBERSHIP, ENSURE_LIKES)
 
 #: Common envelope plus the exact per-command keys. A body carrying anything else is
 #: a caller bug rather than a silently ignored hint.
 ENVELOPE_KEYS = {"libraryId", "epoch", "contractVersion", "operationId", "commandType"}
 COMMAND_KEYS = {
+    ENSURE_LIKES: {"albumId"},
     CREATE: {"albumId", "name", "parentId", "iconKey", "colorKey"},
     RENAME: {"albumId", "name", "expectedRevision"},
     MOVE: {"albumId", "parentId", "expectedRevision"},
@@ -188,6 +191,8 @@ COMMAND_KEYS = {
 }
 
 DDL = """
+CREATE TABLE IF NOT EXISTS album_library_settings(
+ library_id TEXT PRIMARY KEY, likes_album_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS album_authority_state(
  library_id TEXT NOT NULL,
  album_id TEXT NOT NULL,
@@ -724,7 +729,7 @@ def asset_classification_ids(db, rows):
 
 
 def encode_page(library_id, epoch, contract_version, snapshot_cursor, section, items,
-                next_after, has_more):
+                next_after, has_more, likes_id=None):
     """One bounded baseline page, or an explicit oversized rejection.
 
     A page never contains more than one section, so no single response can be mistaken
@@ -734,7 +739,7 @@ def encode_page(library_id, epoch, contract_version, snapshot_cursor, section, i
     payload = {
         "libraryId": library_id, "epoch": epoch, "contractVersion": contract_version,
         "snapshotCursor": snapshot_cursor, "section": section,
-        "items": items, "nextAfter": next_after, "hasMore": has_more,
+        "items": items, "nextAfter": next_after, "hasMore": has_more, "likesAlbumId": likes_id,
         "complete": section == MEMBERSHIPS_SECTION and not has_more,
     }
     encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -793,7 +798,7 @@ def public_state(library_id, epoch, contract_version, cursor, baseline_digest,
 
 
 def activate(db, *, library_id, rows, pairs, baseline_digest, baseline_revision, now,
-             snapshot_version):
+             snapshot_version, likes_id=None):
     """One-time activation inside the caller's ``BEGIN IMMEDIATE``.
 
     ``rows`` and ``pairs`` must already be derived from the stored snapshot by
@@ -842,6 +847,11 @@ def activate(db, *, library_id, rows, pairs, baseline_digest, baseline_revision,
     db.execute(
         "INSERT INTO album_authority_retention(library_id,epoch,pruned_through,pruned_at)"
         " VALUES(?,?,0,NULL) ON CONFLICT(library_id,epoch) DO NOTHING", [library_id, 1])
+    if likes_id is not None:
+        if not valid_album_id(likes_id) or likes_id not in {row["album_id"] for row in rows}:
+            fail(422, "invalidLikesAlbum", "지정된 마음에 들어요 앨범을 찾을 수 없습니다.")
+        db.execute("INSERT INTO album_library_settings(library_id,likes_album_id) VALUES(?,?)",
+                   [library_id, likes_id])
     state = public_state(library_id, 1, CONTRACT_VERSION, 0, baseline_digest,
                          baseline_revision, now, rows, pairs)
     state["snapshotVersion"] = snapshot_version
@@ -951,6 +961,25 @@ def _creates_cycle(db, library_id, album_id, parent_id):
     return False
 
 
+def likes_album_id(db, library_id, *, persist=False, require_unique=True):
+    stored = db.execute("SELECT likes_album_id FROM album_library_settings WHERE library_id=?",
+                        [library_id]).fetchone()
+    if stored is not None:
+        return stored[0]
+    matches = db.execute("SELECT album_id FROM album_authority_state WHERE library_id=?"
+                         " AND deleted=0 AND name=? COLLATE BINARY LIMIT 2",
+                         [library_id, LIKES_NAME]).fetchall()
+    if len(matches) > 1:
+        if not require_unique:
+            return None
+        fail(409, "likesAlbumAmbiguous", "마음에 들어요라는 이름의 앨범이 여러 개 있습니다.")
+    album_id = matches[0][0] if matches else None
+    if persist and album_id is not None:
+        db.execute("INSERT INTO album_library_settings(library_id,likes_album_id) VALUES(?,?)",
+                   [library_id, album_id])
+    return album_id
+
+
 def apply_command(db, *, library_id, epoch, contract_version, command_type, operation_id,
                   entity, now):
     """Execute one typed Album command inside the caller's ``BEGIN IMMEDIATE``.
@@ -987,7 +1016,19 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
     asset_id = entity.get("assetId")
     cursor = row["cursor"]
 
-    if command_type == CREATE:
+    designated = likes_album_id(db, library_id, persist=True, require_unique=command_type == ENSURE_LIKES)
+    if command_type == ENSURE_LIKES and designated is not None:
+        current = album_row(db, library_id, designated)
+        if current is None or current["deleted"]:
+            fail(409, "likesAlbumMissing", "지정된 마음에 들어요 앨범을 찾을 수 없습니다.")
+        result = result_body(row, command_type=command_type, changed=False, sequence=None,
+                             cursor=cursor, operation_id=operation_id, now=now,
+                             album=album_projection({"album_id": designated, **dict(current)}))
+        _record(db, library_id, epoch, operation_id, payload_sha, command_type,
+                designated, None, result, now)
+        return result
+
+    if command_type in (CREATE, ENSURE_LIKES):
         if album_row(db, library_id, album_id) is not None:
             # A tombstoned id is not reusable: reviving it would resurrect membership
             # the delete already removed.
@@ -1007,6 +1048,7 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
         except sqlite3.IntegrityError:
             fail(409, "duplicateAlbumName", "같은 위치에 같은 이름의 앨범이 있습니다.",
                  albumId=album_id)
+        likes_album_id(db, library_id, persist=True, require_unique=False)
         sequence = cursor + 1
         album = album_projection({"album_id": album_id, "name": entity["name"],
                                   "parent_id": parent_id, "icon_key": entity["iconKey"],
@@ -1014,7 +1056,7 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
                                   "entity_revision": 1})
         result = result_body(row, command_type=command_type, changed=True, sequence=sequence,
                              cursor=sequence, operation_id=operation_id, now=now, album=album)
-        return _accept(db, library_id, epoch, operation_id, payload_sha, command_type,
+        return _accept(db, library_id, epoch, operation_id, payload_sha, CREATE,
                        album_id, None, result, sequence, now)
 
     current = album_row(db, library_id, album_id)
@@ -1062,6 +1104,9 @@ def apply_command(db, *, library_id, epoch, contract_version, command_type, oper
             membership=membership_projection(album_id, asset_id, desired, new_revision))
         return _accept(db, library_id, epoch, operation_id, payload_sha, command_type,
                        album_id, asset_id, result, sequence, now)
+
+    if command_type == DELETE and designated == album_id:
+        fail(409, "likesAlbumProtected", "마음에 들어요 앨범은 삭제할 수 없습니다.", albumId=album_id)
 
     if current["entity_revision"] != entity["expectedRevision"]:
         raise album_conflict(row, album_id, current)
@@ -1179,7 +1224,9 @@ def parse_command(body):
     if not valid_album_id(album_id):
         fail(422, "invalidAlbumCommand", "앨범 ID가 올바르지 않습니다.")
     entity = {"albumId": album_id}
-    if command_type == CREATE:
+    if command_type == ENSURE_LIKES:
+        entity.update(name=LIKES_NAME, parentId=None, iconKey=None, colorKey=None)
+    elif command_type == CREATE:
         parent_id = body["parentId"]
         if parent_id is not None and not valid_album_id(parent_id):
             fail(422, "invalidAlbumCommand", "부모 앨범 ID가 올바르지 않습니다.")
@@ -1323,7 +1370,7 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                     state = activate(db, library_id=library_id, rows=rows, pairs=pairs,
                                      baseline_digest=baseline_identity(rows, pairs),
                                      baseline_revision=expected, now=now,
-                                     snapshot_version=snapshot_version)
+                                     snapshot_version=snapshot_version, likes_id=json.loads(stored).get("likesAlbumId"))
                     db.commit()
                     return state
                 except BaseException:
@@ -1378,7 +1425,7 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                     next_after = (membership_key(items[-1]["albumId"], items[-1]["assetId"])
                                   if has_more and items else None)
                 return encode_page(row["libraryId"], row["epoch"], row["contractVersion"],
-                                   snapshot_cursor, section, items, next_after, has_more)
+                                   snapshot_cursor, section, items, next_after, has_more, likes_album_id(db, libraryId, require_unique=False))
         return await run_in_threadpool(run)
 
     @app.get(PREFIX + "/assets")
@@ -1517,6 +1564,27 @@ def register_album_authority(app, get_db, require_client, require_publisher, ass
                         "contractVersion": row["contractVersion"], "cursor": cursor,
                         "items": items, "nextAfter": next_after, "hasMore": next_after < cursor}
         return conditional.json_response(await run_in_threadpool(run), if_none_match)
+
+    @app.get(PREFIX + "/likes")
+    async def album_likes(libraryId: str, epoch: int, assetIds: str = "",
+                          authorization: str | None = Header(default=None)):
+        require_client(authorization)
+        ids = list(dict.fromkeys(assetIds.split(","))) if assetIds else []
+        if len(ids) > 100 or any(not valid_asset_id(asset_id) for asset_id in ids):
+            fail(422, "invalidLikesAssets", "좋아요 조회 대상이 올바르지 않습니다.")
+        def run():
+            with get_db() as db:
+                row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
+                if row["epoch"] != epoch:
+                    fail(409, authority.CODE_AUTHORITY_LIBRARY_MISMATCH)
+                designated = likes_album_id(db, libraryId)
+                members = []
+                for asset_id in ids:
+                    member = membership_row(db, libraryId, designated, asset_id) if designated else None
+                    members.append({"assetId": asset_id, "desiredState": bool(member["desired_state"]) if member else False,
+                                    "entityRevision": member["entity_revision"] if member else 0})
+                return {"albumId": designated, "memberships": members}
+        return await run_in_threadpool(run)
 
     @app.put(PREFIX + "/commands")
     async def album_command(request: Request, authorization: str | None = Header(default=None)):

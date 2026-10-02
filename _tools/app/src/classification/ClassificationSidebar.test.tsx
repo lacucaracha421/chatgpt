@@ -397,6 +397,19 @@ describe("ClassificationSidebar", () => {
     expect(fixtureGateway.createAlbum).toHaveBeenCalledWith({ name: "표지", parentId: null });
   });
 
+  it("hides delete and ignores Delete for the designated album even after renaming", () => {
+    const fixtureGateway = gateway();
+    renderSidebar(fixtureGateway, {albums: [{id: "likes", name: "Renamed likes", parentId: null, iconKey: null, colorKey: null, isLikesAlbum: true}], view: {kind: "albums"}});
+    const row = screen.getByRole("treeitem", {name: "Renamed likes"});
+    fireEvent.contextMenu(row);
+    expect(screen.queryByRole("menuitem", {name: "삭제"})).not.toBeInTheDocument();
+    fireEvent.keyDown(row, {key: "Escape"});
+    row.focus();
+    fireEvent.keyDown(row, {key: "Delete"});
+    expect(screen.queryByRole("dialog", {name: "앨범 삭제"})).not.toBeInTheDocument();
+    expect(fixtureGateway.deleteAlbum).not.toHaveBeenCalled();
+  });
+
   it("shows a nested album section and selects an album", async () => {
     const user = userEvent.setup();
     const onViewChange = vi.fn();

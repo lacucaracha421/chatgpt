@@ -188,6 +188,15 @@ async function classificationMutation<T>(run: () => Promise<T>): Promise<T> {
   return result;
 }
 
+/** Hearts are album membership; these compatibility method names never write the old flag. */
+async function setLikesMembership(assetIds: string[], liked: boolean): Promise<void> {
+  if (!assetIds.length) return;
+  const album = await albumMutation(() => invoke<AlbumEntry>("ensure_likes_album"));
+  await albumMutation(() => invoke<void>("patch_asset_albums", { patch: {
+    assetIds, addAlbumIds: liked ? [album.id] : [], removeAlbumIds: liked ? [] : [album.id],
+  } }));
+}
+
 type DesktopHomeDataGateway = Required<Pick<LibraryGateway,
   | "setAvFavorite"
   | "listAvFavorites"
@@ -465,10 +474,8 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   listMetadataBackups: () => invoke<MetadataBackup[]>("list_metadata_backups"),
   restoreMetadataBackup: (backupId) => invoke("restore_metadata_backup", { backupId }),
   purgeExpiredTrash: () => invoke<PurgeSummary>("purge_expired_trash"),
-  setAssetFavorite: (assetId, favorite) =>
-    invoke("set_asset_favorite", { assetId, favorite }),
-  setAssetsFavorite: (assetIds, favorite) =>
-    invoke("set_assets_favorite", { assetIds, favorite }),
+  setAssetFavorite: (assetId, favorite) => setLikesMembership([assetId], favorite),
+  setAssetsFavorite: (assetIds, favorite) => setLikesMembership(assetIds, favorite),
   getAssetClassifications: (assetId) =>
     invoke<string[]>("get_asset_classifications", { assetId }),
   setAssetClassification: (request) =>

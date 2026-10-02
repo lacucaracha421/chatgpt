@@ -56,7 +56,7 @@ it("toggles favorite and moves to trash from the keyboard and buttons", () => {
   expect(onToggleFavorite).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
   fireEvent.keyDown(dialog, { key: "Delete" });
   expect(onTrash).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
-  fireEvent.click(screen.getByRole("button", { name: "즐겨찾기 켜기" }));
+  fireEvent.click(screen.getByRole("button", { name: "좋아요" }));
   expect(onToggleFavorite).toHaveBeenCalledTimes(2);
   fireEvent.click(screen.getByRole("button", { name: "휴지통으로 이동" }));
   expect(onTrash).toHaveBeenCalledTimes(2);
@@ -65,7 +65,7 @@ it("toggles favorite and moves to trash from the keyboard and buttons", () => {
 it("hides library management actions when handlers are absent", () => {
   render(<AssetViewer items={[asset("a", "a.gif")]} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
 
-  expect(screen.queryByRole("button", { name: "즐겨찾기 켜기" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "좋아요" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "휴지통으로 이동" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "캐릭터" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "앨범" })).not.toBeInTheDocument();

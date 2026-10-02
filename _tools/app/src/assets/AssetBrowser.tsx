@@ -373,19 +373,20 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     try {
       await gateway.setAssetFavorite(asset.id, !asset.favorite);
       refresh();
+      onMembershipChanged();
     } catch (error) {
-      setMessage(commandErrorMessage(error, "즐겨찾기를 변경하지 못했습니다."));
+      setMessage(commandErrorMessage(error, "좋아요를 변경하지 못했습니다."));
     }
   })();
   const toggleFocusedFavorite = (asset: AssetSummary) => {
     if (selectedIds.length > 0) {
       const favorite = !selectedAssets.every((selected) => selected.favorite);
-      void runBatch(() => gateway.setAssetsFavorite(selectedIds, favorite), "즐겨찾기를 변경하지 못했습니다.");
+      void runBatch(() => gateway.setAssetsFavorite(selectedIds, favorite), "좋아요를 변경하지 못했습니다.").then(changed => { if (changed) onMembershipChanged(); });
       return;
     }
     toggleFavorite(asset);
   };
-  const setSelectionFavorite = (favorite: boolean) => void runBatch(() => gateway.setAssetsFavorite(selectedIds, favorite), "즐겨찾기를 변경하지 못했습니다.");
+  const setSelectionFavorite = (favorite: boolean) => void runBatch(() => gateway.setAssetsFavorite(selectedIds, favorite), "좋아요를 변경하지 못했습니다.").then(changed => { if (changed) onMembershipChanged(); });
   const removeFromCollection = () => void (async () => {
     if (view.kind !== "collection") return;
     await runBatch(() => gateway.patchAssetCollections({

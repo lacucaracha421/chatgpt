@@ -3226,6 +3226,7 @@ class AlbumReplicaMembership(BaseModel):
 
 
 class AlbumReplicaPublish(BaseModel):
+    likes_album_id: str | None = Field(default=None, alias="likesAlbumId", min_length=1, max_length=128)
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     #: The wire name is camelCase, matching the Rust publisher. Without this alias the
     #: model would reject the field as unknown under `extra="forbid"`, so the documented
@@ -3283,6 +3284,8 @@ def publish_album_replica(snapshot: AlbumReplicaPublish, authorization: str | No
         for album in snapshot.albums:
             if not album_authority.valid_appearance(album.icon_key, album.color_key):
                 raise HTTPException(400, "Invalid album appearance")
+    if snapshot.likes_album_id is not None and snapshot.likes_album_id not in ids:
+        raise HTTPException(400, "Invalid likes album")
     memberships = None
     if version >= album_authority.SNAPSHOT_VERSION:
         # Canonical membership is its own collection precisely because it is *not*
@@ -3300,7 +3303,8 @@ def publish_album_replica(snapshot: AlbumReplicaPublish, authorization: str | No
             seen.add(key)
         memberships = sorted(seen)
     payload = json.dumps(
-        {"snapshotVersion": version,
+        {**({"likesAlbumId": snapshot.likes_album_id} if snapshot.likes_album_id is not None else {}),
+         "snapshotVersion": version,
          "albums": [a.model_dump() for a in snapshot.albums],
          "media": [m.model_dump() for m in snapshot.media],
          "memberships": [{"albumId": album_id, "assetId": asset_id}

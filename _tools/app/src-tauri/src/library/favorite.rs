@@ -33,7 +33,7 @@ impl Library {
 
 #[cfg(test)]
 #[test]
-fn favorite_can_be_toggled_and_filtered() {
+fn legacy_favorite_flag_does_not_fill_album_hearts() {
     let temp = tempfile::tempdir().unwrap();
     let library = Library::open(temp.path()).unwrap();
     insert_asset(&library, "asset-a", "hash-a", "2026-07-30T00:00:00Z");
@@ -44,8 +44,9 @@ fn favorite_can_be_toggled_and_filtered() {
         .list_assets(query(AssetSort::Newest, true, 20))
         .unwrap();
 
-    assert_eq!(ids(&page), ["asset-a"]);
-    assert!(page.items[0].favorite);
+    assert!(page.items.is_empty());
+    assert!(!library.get_asset("asset-a").unwrap().favorite);
+    assert_eq!(legacy_favorite_ids(&library), ["asset-a"]);
 
     library.set_asset_favorite("asset-a", false).unwrap();
     assert!(library
@@ -78,9 +79,7 @@ fn batch_favorite_update_is_atomic() {
         .set_assets_favorite(&["asset-a".into(), "asset-b".into()], true)
         .unwrap();
     assert_eq!(
-        ids(&library
-            .list_assets(query(AssetSort::Newest, true, 20))
-            .unwrap()),
+        legacy_favorite_ids(&library),
         ["asset-b", "asset-a"]
     );
 
@@ -89,9 +88,7 @@ fn batch_favorite_update_is_atomic() {
         .unwrap_err();
     assert!(matches!(error, LibraryError::AssetNotFound));
     assert_eq!(
-        ids(&library
-            .list_assets(query(AssetSort::Newest, true, 20))
-            .unwrap()),
+        legacy_favorite_ids(&library),
         ["asset-b", "asset-a"]
     );
 }
@@ -114,8 +111,10 @@ fn query(sort: AssetSort, favorite_only: bool, limit: u32) -> AssetQuery {
 }
 
 #[cfg(test)]
-fn ids(page: &crate::library::models::AssetPage) -> Vec<&str> {
-    page.items.iter().map(|asset| asset.id.as_str()).collect()
+fn legacy_favorite_ids(library: &Library) -> Vec<String> {
+    let connection = library.connection().unwrap();
+    let mut query = connection.prepare("SELECT id FROM assets WHERE favorite=1 ORDER BY collected_at DESC,id DESC").unwrap();
+    query.query_map([], |row| row.get(0)).unwrap().collect::<Result<Vec<_>, _>>().unwrap()
 }
 
 #[cfg(test)]

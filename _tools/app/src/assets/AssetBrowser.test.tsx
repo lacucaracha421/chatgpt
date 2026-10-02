@@ -956,7 +956,7 @@ describe("AssetBrowser", () => {
     expect(screen.getByRole("button", { name: "실행 취소" })).toBeVisible();
     act(() => vi.advanceTimersByTime(5_000));
     fireEvent.doubleClick(screen.getByRole("option", { name: "asset-0.png" }));
-    fireEvent.click(screen.getByRole("button", { name: "즐겨찾기 켜기" }));
+    fireEvent.click(screen.getByRole("button", { name: "좋아요" }));
     await act(async () => { await Promise.resolve(); });
 
     expect(gateway.setAssetFavorite).toHaveBeenCalledWith("asset-0", true);

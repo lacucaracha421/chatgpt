@@ -62,6 +62,7 @@ type SidebarTreeEntry = {
   members?: { id: string; name: string }[];
   seriesId?: string;
   treeKind: "classification" | "album";
+  isLikesAlbum?: boolean;
   id: string;
   name: string;
   parentId: string | null;
@@ -254,6 +255,7 @@ export function ClassificationSidebar({
   }
 
   function openDelete(entry: SidebarTreeEntry) {
+    if (entry.isLikesAlbum) return;
     if (isOriginalsRoot(entry)) { setMessage("오리지널 기본 영역은 삭제하지 않습니다."); return; }
     const siblings = entry.treeKind === "album" ? albumEntries : classificationEntries;
     if (siblings.some((candidate) => candidate.parentId === entry.id)) {
@@ -707,7 +709,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
     ...(!originalsRoot ? [{ id: "rename", label: "이름 변경", onSelect: () => onRename(node.entry) }] : []),
     { id: "appearance", label: "아이콘 및 색상", onSelect: () => onAppearance(node.entry) },
     ...(!originalsRoot ? [{ id: "move", label: node.entry.treeKind === "album" ? "앨범 이동" : "폴더 이동", onSelect: () => onMove(node.entry) }] : []),
-    ...(!originalsRoot ? [{ id: "delete", label: hasChildren ? "삭제 — 하위 폴더 있음" : "삭제", destructive: true, disabled: hasChildren, onSelect: () => onDelete(node.entry) }] : []),
+    ...(!originalsRoot && !node.entry.isLikesAlbum ? [{ id: "delete", label: hasChildren ? "삭제 — 하위 폴더 있음" : "삭제", destructive: true, disabled: hasChildren, onSelect: () => onDelete(node.entry) }] : []),
   ];
 
   return (

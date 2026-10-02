@@ -143,9 +143,9 @@ it('uses one duration pill and touch-only selection indicators, with quiet date 
  expect(container.querySelector('.gallery-date-heading')?.getAttribute('tabindex')).toBe('0');
  rerender(<Gallery {...props} selectedIds={new Set(['two'])}/>);
  expect(container.querySelectorAll('.tile-select')).toHaveLength(2);
- expect(container.querySelector('.tile-favorite')).not.toBeNull();
+ expect(container.querySelector('.tile-favorite')).toBeNull();
  rerender(<Gallery {...props} favoritesView/>);
- expect(container.querySelector('.tile-favorite')).not.toBeNull();
+ expect(container.querySelector('.tile-favorite')).toBeNull();
 });
 
 it('hides the video pill on tiny tiles while keeping video metadata accessible',()=>{

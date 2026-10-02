@@ -3,7 +3,8 @@ import {usePullToRefresh} from './usePullToRefresh';
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,type PointerEvent,type ReactNode} from 'react';
 import {defaultRangeExtractor, observeElementOffset, observeElementRect, useVirtualizer, type Virtualizer} from '@tanstack/react-virtual';
 import {PhotoIcon} from '@heroicons/react/24/outline';
-import {HeartIcon} from '@heroicons/react/24/solid';
+import {HeartIcon} from '@heroicons/react/24/outline';
+import {useLikesAlbum} from './useLikesAlbum';
 import {collectedDate} from '../src/assets/masonryLayout';
 import {formatDuration} from '../src/video/formatDuration';
 import {revealGalleryDateCount} from '../src/assets/galleryDateFeedback';
@@ -22,7 +23,7 @@ import {buildJustifiedGalleryRows, GALLERY_DATE_HEADING_HEIGHT, type GalleryRowA
  */
 export type GalleryVaultSource = {label(asset: Asset): string};
 
-function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, vault, selectionMode, selected, favoritesView, onSelect, onToggle, onPressStart, onPressEnd}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
+function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, vault, selectionMode, selected, favoritesView, onSelect, onToggle, onPressStart, onPressEnd, liked, likePending, onLike}: {liked:boolean;likePending:boolean;onLike?:()=>void;asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
   selectionMode:boolean; selected:boolean; favoritesView:boolean; onSelect?: (id:string)=>void; onToggle?: (id:string)=>void; onPressStart?: (cancel:()=>void)=>void; onPressEnd?: (cancel:()=>void)=>void}) {
   const timer=useRef<number|null>(null), pressStart=useRef<{x:number;y:number}|null>(null), suppressClick=useRef(false), pressCancel=useRef<()=>void>(()=>{});
   const host=useRef<HTMLButtonElement>(null), image=useRef<HTMLImageElement>(null);
@@ -73,7 +74,7 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, va
     setRetried(true); invalidateTicket(asset, 'thumbnail');
     void mediaTicket(asset, 'thumbnail').then(t => setPreview(t.url), () => {});
   };
-  return <button ref={host} className="media-tile ui-selectable-media" style={{width}} onClick={() => {
+  return <div className="media-tile-shell" style={{width,position:'relative',flexShrink:0}}><button ref={host} className="media-tile ui-selectable-media" style={{width}} onClick={() => {
     if(suppressClick.current){suppressClick.current=false;return;}
     if(selectionMode){onToggle?.(asset.id);return;}
     if(!privacy) onOpen(index);
@@ -86,10 +87,9 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, va
         void (typeof element.decode === 'function' ? element.decode() : Promise.resolve()).catch(() => {}).then(settle);
       }}/> : <PhotoIcon className="missing-media" aria-hidden="true"/>}
       {asset.kind === 'video' && width > 100 && <span className="video-mark" aria-label="영상">▶ {formatDuration(asset.duration_ms)}</span>}
-      {asset.favorite && (selectionMode || favoritesView) && <span className="tile-favorite" aria-label="좋아요"><HeartIcon /></span>}
       {(selectionMode || favoritesView) && onSelect && <span className="tile-select" data-selected={selected} aria-hidden="true">{selected && <span className="ui-selection-check"/>}</span>}
     </span>
-  </button>;
+  </button>{onLike&&<button type="button" className="tile-favorite" aria-label="좋아요" aria-pressed={liked} disabled={likePending} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();onLike();}}><HeartIcon fill={liked?'currentColor':'none'}/></button>}</div>;
 }
 
 /**
@@ -131,6 +131,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   /** A double tap on empty gallery space (not a tile) leaves selection mode. */onClearSelection?():void;
   /** Private Vault mode: same layout and gestures, no library media client. */
   vault?:GalleryVaultSource}) {
+  const likes=useLikesAlbum(items.map(item=>item.id),!paused&&!privacy&&!vault,identity);
   const parent = useRef<HTMLDivElement>(null);
   const activePress = useRef<(() => void)|null>(null);
   const registerPress=(cancel:()=>void)=>{activePress.current?.();activePress.current=cancel;};
@@ -294,7 +295,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   return <div className={`gallery-scroll${stale?' is-stale':''}`} ref={parent} onPointerOver={event => { if (event.pointerType !== "touch") revealGalleryDateCount(parent.current, event.target); }} onPointerLeave={() => revealGalleryDateCount(parent.current, document.activeElement)} onFocusCapture={event => { if (event.target.matches(":focus-visible")) revealGalleryDateCount(parent.current, event.target); }} onBlurCapture={event => revealGalleryDateCount(parent.current, event.relatedTarget)} onPointerUp={backgroundTap} onScroll={event => {cancelActivePress();if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" aria-busy={stale||undefined} inert={stale||undefined} tabIndex={0}>
     {/* The refresh pill is a zero-height sticky overlay, so it never changes the intro height. */}
     {pull}
-    {intro!=null&&<div ref={introduction}>{intro}</div>}
+    {(intro!=null||likes.error)&&<div ref={introduction}>{likes.error&&<p className="error-message" role="alert">{likes.error}</p>}{intro}</div>}
     <div className="gallery-canvas" style={{height: virtualizer.getTotalSize()}}>
       {virtualizer.getVirtualItems().map(virtual => {
         const row = rows[virtual.index];
@@ -302,7 +303,7 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
         if(row.spacer)return <div key={virtual.key} className="gallery-sparse-spacer" aria-hidden="true" data-spacer-start={row.startIndex} style={{position:'absolute',width:'100%',height:row.height,transform:`translateY(${virtual.start-introHeight}px)`}}/>;
         const hasDateHeadings = Boolean(row.dateHeadings?.length);
         const packedHeadings = row.dateHeadings && row.dateHeadings.length > 1 ? row.dateHeadings : null;
-        const renderTile = (item: GalleryRowItem) => <Tile key={item.asset.id} {...item} height={row.height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} favoritesView={favoritesView} selectionMode={Boolean(onSelectAsset&&selectedIds?.size)} selected={selectedIds?.has(item.asset.id)??false} onSelect={onSelectAsset} onToggle={onToggleSelection} onPressStart={registerPress} onPressEnd={releasePress}/>;
+        const renderTile = (item: GalleryRowItem) => <Tile key={item.asset.id} {...item} height={row.height} onOpen={onOpen} onReady={onReady} paused={paused} privacy={privacy} vault={vault} favoritesView={favoritesView} selectionMode={Boolean(onSelectAsset&&selectedIds?.size)} selected={selectedIds?.has(item.asset.id)??false} onSelect={onSelectAsset} onToggle={onToggleSelection} onPressStart={registerPress} onPressEnd={releasePress} liked={likes.liked.has(item.asset.id)} likePending={likes.pending.has(item.asset.id)} onLike={likes.available&&!privacy&&!vault?()=>void likes.toggle(item.asset.id):undefined}/>;
         let itemOffset = 0;
         const tileContent = packedHeadings
           ? packedHeadings.map(heading => {

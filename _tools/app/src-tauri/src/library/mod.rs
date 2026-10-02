@@ -1,6 +1,6 @@
 pub(crate) mod aladin;
 mod aladin_flow;
-mod album;
+pub(crate) mod album;
 pub(crate) mod album_authority;
 #[cfg(test)]
 #[path = "album_authority_tests.rs"]

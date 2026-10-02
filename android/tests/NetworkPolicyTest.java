@@ -136,6 +136,9 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/albums/assets/extra","GET"));
  reject(()->NetworkPolicy.api("/v1/albums/assetsx","GET"));
  reject(()->NetworkPolicy.api("/v1/albums/../albums/assets","GET"));
+ pass(()->NetworkPolicy.api("/v1/albums/likes?libraryId=a&epoch=1&assetIds=one,two","GET"));
+ for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/albums/likes",method));
+ reject(()->NetworkPolicy.api("/v1/albums/likes/extra","GET"));
  // Membership outbox delivery gets exactly one write route.
  pass(()->NetworkPolicy.api("/v1/albums/commands","PUT"));
  for(String method:new String[]{"GET","POST","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/albums/commands",method));

@@ -6,7 +6,7 @@ import {
   InformationCircleIcon,
   LinkIcon,
   RectangleStackIcon,
-  StarIcon,
+  HeartIcon,
   TrashIcon,
   UserIcon,
   XMarkIcon,
@@ -321,7 +321,7 @@ export function AssetViewer({
             </span>}
             {albums && onAddToAlbum && <Menu label="앨범" triggerClassName="asset-viewer__vbtn asset-viewer__vbtn--text" disabled={albums.length === 0} trigger={<><RectangleStackIcon aria-hidden="true" /><span>앨범</span></>} items={albumItems} />}
             {asset.sourceUrl && <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="출처 열기" onClick={() => void openUrl(asset.sourceUrl!).catch(() => undefined)}><LinkIcon aria-hidden="true" /></Button>}
-            {onToggleFavorite && <Button className="asset-viewer__vbtn asset-viewer__favorite" size="icon" variant="ghost" aria-label={asset.favorite ? "즐겨찾기 끄기" : "즐겨찾기 켜기"} aria-pressed={asset.favorite} onClick={() => onToggleFavorite(asset)}><StarIcon aria-hidden="true" /></Button>}
+            {onToggleFavorite && <Button className="asset-viewer__vbtn asset-viewer__favorite" size="icon" variant="ghost" aria-label={asset.favorite ? "좋아요 취소" : "좋아요"} aria-pressed={asset.favorite} onClick={() => onToggleFavorite(asset)}><HeartIcon aria-hidden="true" fill={asset.favorite ? "currentColor" : "none"} /></Button>}
             {folders && onMoveToFolder && <Menu label="이동" triggerClassName="asset-viewer__vbtn" trigger={<FolderArrowDownIcon aria-hidden="true" />} items={folderItems} />}
             {onExport && <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="내보내기" aria-description="PC 폴더로 내보내기" onClick={() => onExport(asset)}><ArrowDownTrayIcon aria-hidden="true" /></Button>}
             {onTrash && <Button className="asset-viewer__vbtn" size="icon" variant="danger" aria-label="휴지통으로 이동" onClick={() => onTrash(asset)}><TrashIcon aria-hidden="true" /></Button>}

@@ -70,12 +70,12 @@ const CHRONO_ASC_HALF_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 ) , album_descendants(id) AS (
     SELECT ?5 WHERE ?5 IS NOT NULL
     UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
-) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
+) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url,
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
 asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
 asset.import_source, asset.import_batch_id, asset.original_modified_at
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
-WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
 AND (?13 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?13, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?13))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
@@ -106,12 +106,12 @@ const CHRONO_DESC_HALF_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 ) , album_descendants(id) AS (
     SELECT ?5 WHERE ?5 IS NOT NULL
     UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
-) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
+) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url,
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
 asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
 asset.import_source, asset.import_batch_id, asset.original_modified_at
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
-WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
 AND (?13 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?13, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?13))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
@@ -150,7 +150,7 @@ const ASSET_COUNT_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?2 WHERE ?2 IS NOT NULL
     UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
 ) SELECT COUNT(*) FROM assets AS asset
-WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
 AND (?4 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?4, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?4))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?5 AND link.classification_id = ?1) OR (NOT ?5 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?6 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
@@ -302,7 +302,7 @@ impl Library {
         if asset_ids.len() > 500 { return Err(LibraryError::InvalidAssetPageLimit); }
         let (start, end) = collected_range_bounds(&query)?;
         let connection = self.connection()?;
-        let select = "SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url, asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, asset.import_source, asset.import_batch_id, asset.original_modified_at FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id";
+        let select = "SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url, asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, asset.import_source, asset.import_batch_id, asset.original_modified_at FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id";
         let sql = with_auto_tag_filter(ASSET_COUNT_SQL.into(), &query)?
             .replace("SELECT COUNT(*) FROM assets AS asset", select)
             + " AND asset.id IN (SELECT value FROM json_each(?12))";
@@ -882,7 +882,7 @@ pub(crate) fn asset_summaries_by_ids(
         return Ok(Vec::new());
     }
     let placeholders = std::iter::repeat_n("?", asset_ids.len()).collect::<Vec<_>>().join(",");
-    let sql = format!("SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url, asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, asset.import_source, asset.import_batch_id, asset.original_modified_at FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id=asset.id WHERE asset.status='normal' AND asset.id IN ({placeholders})");
+    let sql = format!("SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url, asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, asset.import_source, asset.import_batch_id, asset.original_modified_at FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id=asset.id WHERE asset.status='normal' AND asset.id IN ({placeholders})");
     let mut statement = connection.prepare(&sql)?;
     let rows = statement
         .query_map(rusqlite::params_from_iter(asset_ids.iter()), asset_summary_from_row)?
@@ -943,18 +943,18 @@ const FAVORITES_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 ) , album_descendants(id) AS (
     SELECT ?5 WHERE ?5 IS NOT NULL
     UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
-) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
+) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url,
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
 asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
 asset.import_source, asset.import_batch_id, asset.original_modified_at
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
-WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
 AND (?13 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?13, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?13))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
 AND (?5 IS NULL OR EXISTS (SELECT 1 FROM asset_albums AS album_link WHERE album_link.asset_id = asset.id AND album_link.album_id IN (SELECT id FROM album_descendants)))
 AND (?10 IS NULL OR EXISTS (SELECT 1 FROM collection_assets AS collection_link WHERE collection_link.asset_id = asset.id AND collection_link.collection_id = ?10))
-AND (?6 IS NULL OR asset.favorite < ?6 OR (asset.favorite = ?6 AND (asset.collected_at < ?7 OR (asset.collected_at = ?7 AND asset.id < ?8))))
+AND (?6 IS NULL OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) < ?6 OR (EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = ?6 AND (asset.collected_at < ?7 OR (asset.collected_at = ?7 AND asset.id < ?8))))
 AND (?14 IS NULL OR asset.collected_at >= ?14)
 AND (?15 IS NULL OR asset.collected_at < ?15)
 AND (
@@ -968,7 +968,7 @@ AND (
   OR (?12 = 'landscape' AND asset.width * 4 > asset.height * 5)
   OR (?12 = 'portrait' AND asset.width * 5 < asset.height * 4)
 )
-ORDER BY asset.favorite DESC, asset.collected_at DESC, asset.id DESC LIMIT ?9";
+ORDER BY EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) DESC, asset.collected_at DESC, asset.id DESC LIMIT ?9";
 
 const RANDOM_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
@@ -976,13 +976,13 @@ const RANDOM_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 ) , album_descendants(id) AS (
     SELECT ?5 WHERE ?5 IS NOT NULL
     UNION ALL SELECT child.id FROM albums AS child JOIN album_descendants ON child.parent_id = album_descendants.id
-) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
+) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url,
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
 asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
 asset.import_source, asset.import_batch_id, asset.original_modified_at,
 asset.content_hash, CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END
 FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
-WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
 AND (?14 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?14, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?14))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
 AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
@@ -1013,7 +1013,7 @@ const CREATORS_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 ), scoped AS MATERIALIZED (
     SELECT asset.id, asset.creator_name, asset.creator_handle, asset.creator_url, asset.collected_at
     FROM assets AS asset
-    WHERE asset.status = 'normal' AND (?3 = 0 OR asset.favorite = 1)
+    WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
     AND COALESCE(asset.creator_handle, asset.creator_url) IS NOT NULL
     AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
     AND (?4 = 0 OR NOT EXISTS (SELECT 1 FROM asset_classifications AS unsorted_link WHERE unsorted_link.asset_id = asset.id))
@@ -1102,7 +1102,7 @@ mod tests {
         let ids = (0..250).map(|i| format!("retained-{i}")).collect::<Vec<_>>();
         assert_eq!(library.refresh_assets(AssetQuery::default(),ids.clone()).unwrap().len(),250);
         library.connection().unwrap().execute("UPDATE assets SET status='trash',trashed_at='2026-08-07' WHERE id='retained-249'",[]).unwrap();
-        library.connection().unwrap().execute("UPDATE assets SET favorite=1 WHERE id='retained-248'",[]).unwrap();
+        set_liked(&library, "retained-248");
         let rows=library.refresh_assets(AssetQuery {favorite_only:true,..Default::default()},ids).unwrap();
         assert_eq!(rows.len(),1);assert_eq!(rows[0].id,"retained-248");
     }
@@ -1868,6 +1868,7 @@ mod tests {
                 ],
             )
             .unwrap();
+        if favorite { set_liked(library, id); }
     }
 
     fn matrix_totals(library: &Library, mutate: impl FnOnce(&mut AssetQuery)) -> (usize, u64) {
@@ -2511,6 +2512,15 @@ mod tests {
         insert_asset_with_fields(library, id, &format!("hash-{id}"), collected_at, false);
     }
 
+    fn set_liked(library: &Library, id: &str) {
+        let album = library.ensure_likes_album().unwrap();
+        library.patch_asset_albums(AssetAlbumPatch {
+            asset_ids: vec![id.into()],
+            add_album_ids: vec![album.id],
+            remove_album_ids: vec![],
+        }).unwrap();
+    }
+
     fn insert_asset_with_fields(
         library: &Library,
         id: &str,
@@ -2537,6 +2547,7 @@ mod tests {
                 ],
             )
             .unwrap();
+        if favorite { set_liked(library, id); }
     }
 
     fn insert_filter_asset(

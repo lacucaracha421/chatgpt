@@ -541,3 +541,23 @@ it("routes Manga index identities and selected folder paths through the library 
   await libraryGateway.purgeVanishedMangaFolders?.(["selected"]);
   expect(invoke).toHaveBeenLastCalledWith("purge_vanished_manga_folders", { paths: ["selected"] });
 });
+
+
+describe("heart album membership", () => {
+  beforeEach(() => { invoke.mockReset(); });
+  it("adopts or creates the likes album before adding/removing membership and kicks sync", async () => {
+    invoke.mockImplementation(async command => command === "ensure_likes_album" ? { id: "designated-id" } : undefined);
+    await libraryGateway.setAssetFavorite("one", true);
+    expect(invoke).toHaveBeenCalledWith("ensure_likes_album");
+    expect(invoke).toHaveBeenCalledWith("patch_asset_albums", { patch: { assetIds: ["one"], addAlbumIds: ["designated-id"], removeAlbumIds: [] } });
+    await libraryGateway.setAssetsFavorite(["one", "two"], false);
+    expect(invoke).toHaveBeenCalledWith("patch_asset_albums", { patch: { assetIds: ["one", "two"], addAlbumIds: [], removeAlbumIds: ["designated-id"] } });
+    expect(invoke).toHaveBeenCalledWith("flush_album_outbox");
+    expect(invoke.mock.calls.some(([command]) => command === "set_asset_favorite" || command === "set_assets_favorite")).toBe(false);
+  });
+  it("does not patch membership when designation fails", async () => {
+    invoke.mockRejectedValue(new Error("ambiguous album"));
+    await expect(libraryGateway.setAssetFavorite("one", true)).rejects.toThrow("ambiguous album");
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+});

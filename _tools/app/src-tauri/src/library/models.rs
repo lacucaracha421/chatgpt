@@ -829,6 +829,8 @@ pub struct AlbumEntry {
     pub color_key: Option<String>,
     #[serde(default)]
     pub asset_count: u64,
+    #[serde(default)]
+    pub is_likes_album: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

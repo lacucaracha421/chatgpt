@@ -59,7 +59,96 @@ const ASSET_ALBUMS_SQL: &str =
      WHERE link.asset_id = ?1
      ORDER BY album.name COLLATE NOCASE, album.id";
 
+pub(super) const LIKES_ALBUM_NAME: &str = "마음에 들어요";
+
+/// Resolve by stable id; the exact name is used only for first-time adoption.
+pub(super) fn likes_album_id(connection: &Connection) -> Result<Option<String>, LibraryError> {
+    let stored: Option<String> = connection.query_row(
+        "SELECT likes_album_id FROM library_settings WHERE singleton = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    if stored.is_some() {
+        return Ok(stored);
+    }
+    let mut query =
+        connection.prepare("SELECT id FROM albums WHERE name = ?1 COLLATE BINARY LIMIT 2")?;
+    let ids = query
+        .query_map([LIKES_ALBUM_NAME], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    match ids.as_slice() {
+        [] => Ok(None),
+        [id] => Ok(Some(id.clone())),
+        _ => Err(LibraryError::LikesAlbumAmbiguous),
+    }
+}
+
+pub(crate) fn available_likes_album_id(
+    connection: &Connection,
+) -> Result<Option<String>, LibraryError> {
+    match likes_album_id(connection) {
+        Err(LibraryError::LikesAlbumAmbiguous) => Ok(None),
+        result => result,
+    }
+}
+
+pub(super) fn adopt_likes_album(connection: &Connection) -> Result<Option<String>, LibraryError> {
+    let id = likes_album_id(connection)?;
+    if let Some(id) = &id {
+        connection.execute(
+            "UPDATE library_settings SET likes_album_id = ?1 WHERE singleton = 1",
+            [id],
+        )?;
+    }
+    Ok(id)
+}
+
+pub(super) fn refuse_likes_album_delete(
+    connection: &Connection,
+    id: &str,
+) -> Result<(), LibraryError> {
+    if available_likes_album_id(connection)?.as_deref() == Some(id) {
+        return Err(LibraryError::LikesAlbumProtected);
+    }
+    Ok(())
+}
+
 impl Library {
+    pub fn ensure_likes_album(&self) -> Result<AlbumEntry, LibraryError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let id = if let Some(id) = adopt_likes_album(&transaction)? {
+            require_album(&transaction, &id)?;
+            id
+        } else {
+            let id = uuid::Uuid::new_v4().to_string();
+            transaction.execute(
+                "INSERT INTO albums(id,name,created_at) VALUES(?1,?2,?3)",
+                params![id, LIKES_ALBUM_NAME, chrono::Utc::now().to_rfc3339()],
+            )?;
+            let fields = serde_json::json!({"name":LIKES_ALBUM_NAME,"parentId":null,"iconKey":null,"colorKey":null});
+            enqueue_structural(
+                &transaction,
+                album_authority::CREATE,
+                &id,
+                fields.as_object().unwrap().clone(),
+            )?;
+            transaction.execute(
+                "UPDATE library_settings SET likes_album_id=?1 WHERE singleton=1",
+                [&id],
+            )?;
+            id
+        };
+        let mut entry = transaction.query_row(
+            "SELECT id,name,parent_id,icon_key,color_key,0 FROM albums WHERE id=?1",
+            [&id],
+            album_from_row,
+        )?;
+        entry.is_likes_album = true;
+        transaction.commit()?;
+        Ok(entry)
+    }
+
     pub fn create_album(&self, request: CreateAlbum) -> Result<AlbumEntry, LibraryError> {
         let name = normalized_name(request.name)?;
         let mut connection = self.connection()?;
@@ -74,6 +163,7 @@ impl Library {
             icon_key: None,
             color_key: None,
             asset_count: 0,
+            is_likes_album: false,
         };
         transaction
             .execute(
@@ -106,16 +196,29 @@ impl Library {
     pub fn list_albums(&self) -> Result<Vec<AlbumEntry>, LibraryError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(LIST_ALBUMS_SQL)?;
+        let designated = likes_album_id(&connection).or_else(|error| match error {
+            LibraryError::LikesAlbumAmbiguous => Ok(None),
+            error => Err(error),
+        })?;
         let entries = statement
             .query_map([], album_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(entries)
+        Ok(entries
+            .into_iter()
+            .map(|mut entry| {
+                entry.is_likes_album = designated.as_deref() == Some(entry.id.as_str());
+                entry
+            })
+            .collect())
     }
 
     pub fn rename_album(&self, id: &str, name: &str) -> Result<(), LibraryError> {
         let name = normalized_name(name.to_owned())?;
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
+        if available_likes_album_id(&transaction)?.is_some() {
+            adopt_likes_album(&transaction)?;
+        }
         let changed = transaction
             .execute(
                 "UPDATE albums SET name = ?1 WHERE id = ?2",
@@ -176,6 +279,7 @@ impl Library {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         require_album(&transaction, id)?;
+        refuse_likes_album_delete(&transaction, id)?;
         let has_children: bool = transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM albums WHERE parent_id = ?1)",
             [id],
@@ -322,6 +426,7 @@ fn album_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AlbumEntry> {
         icon_key: row.get(3)?,
         color_key: row.get(4)?,
         asset_count: u64::try_from(row.get::<_, i64>(5)?).unwrap_or(0),
+        is_likes_album: false,
     })
 }
 
@@ -343,6 +448,121 @@ mod tests {
         models::{AlbumEntry, AssetAlbumPatch, CreateAlbum},
         Library,
     };
+
+    #[test]
+    fn likes_album_adopts_creates_and_keeps_renamed_id_protected() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let album = library
+            .create_album(CreateAlbum {
+                name: super::LIKES_ALBUM_NAME.into(),
+                parent_id: None,
+            })
+            .unwrap();
+        assert!(library.list_albums().unwrap()[0].is_likes_album);
+        assert!(matches!(
+            library.delete_album(&album.id),
+            Err(LibraryError::LikesAlbumProtected)
+        ));
+        assert_eq!(library.ensure_likes_album().unwrap().id, album.id);
+        library.rename_album(&album.id, "My likes").unwrap();
+        assert_eq!(library.ensure_likes_album().unwrap().id, album.id);
+        assert!(matches!(
+            library.delete_album(&album.id),
+            Err(LibraryError::LikesAlbumProtected)
+        ));
+        assert_eq!(library.list_albums().unwrap().len(), 1);
+        let other = tempfile::tempdir().unwrap();
+        let empty = Library::open(other.path()).unwrap();
+        let created = empty.ensure_likes_album().unwrap();
+        assert_eq!(created.name, super::LIKES_ALBUM_NAME);
+        assert_eq!(empty.ensure_likes_album().unwrap().id, created.id);
+    }
+
+    #[test]
+    fn likes_album_membership_drives_filled_state_and_sort_without_changing_old_flag() {
+        use crate::library::models::{AssetQuery, AssetSort};
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        insert_asset(&library, "liked");
+        insert_asset(&library, "old-flag");
+        library.set_asset_favorite("old-flag", true).unwrap();
+        let likes = library.ensure_likes_album().unwrap();
+        library
+            .patch_asset_albums(AssetAlbumPatch {
+                asset_ids: vec!["liked".into()],
+                add_album_ids: vec![likes.id.clone()],
+                remove_album_ids: vec![],
+            })
+            .unwrap();
+        assert!(library.get_asset("liked").unwrap().favorite);
+        assert!(!library.get_asset("old-flag").unwrap().favorite);
+        let query = AssetQuery {
+            sort: AssetSort::Favorites,
+            limit: 50,
+            ..Default::default()
+        };
+        assert_eq!(library.list_assets(query).unwrap().items[0].id, "liked");
+        library
+            .patch_asset_albums(AssetAlbumPatch {
+                asset_ids: vec!["liked".into()],
+                add_album_ids: vec![],
+                remove_album_ids: vec![likes.id],
+            })
+            .unwrap();
+        assert!(!library.get_asset("liked").unwrap().favorite);
+        assert_eq!(
+            library
+                .connection()
+                .unwrap()
+                .query_row(
+                    "SELECT favorite FROM assets WHERE id='old-flag'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn likes_album_refuses_ambiguous_adoption_and_parent_deletion() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let parent = library
+            .create_album(CreateAlbum {
+                name: "parent".into(),
+                parent_id: None,
+            })
+            .unwrap();
+        let child = library
+            .create_album(CreateAlbum {
+                name: super::LIKES_ALBUM_NAME.into(),
+                parent_id: Some(parent.id.clone()),
+            })
+            .unwrap();
+        library.ensure_likes_album().unwrap();
+        assert!(matches!(
+            library.delete_album(&parent.id),
+            Err(LibraryError::AlbumHasChildren)
+        ));
+        library
+            .create_album(CreateAlbum {
+                name: super::LIKES_ALBUM_NAME.into(),
+                parent_id: None,
+            })
+            .unwrap();
+        assert_eq!(library.ensure_likes_album().unwrap().id, child.id);
+        library
+            .connection()
+            .unwrap()
+            .execute("UPDATE library_settings SET likes_album_id=NULL", [])
+            .unwrap();
+        assert!(matches!(
+            library.ensure_likes_album(),
+            Err(LibraryError::LikesAlbumAmbiguous)
+        ));
+    }
 
     #[test]
     fn creates_lists_and_renames_nested_albums() {
@@ -374,6 +594,7 @@ mod tests {
                     icon_key: None,
                     color_key: None,
                     asset_count: 0,
+                    is_likes_album: false,
                 },
             ]
         );

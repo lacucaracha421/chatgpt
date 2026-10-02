@@ -41,7 +41,7 @@ final class NetworkPolicy {
   // separately below with its first durable-outbox consumer.
   get=get || p.equals("/v1/sync/status") || p.equals("/v1/albums/baseline") || p.equals("/v1/albums/changes");
   // The authority-backed Album contents read is still GET-only.
-  get=get || p.equals("/v1/albums/assets");
+  get=get || p.equals("/v1/albums/assets") || p.equals("/v1/albums/likes");
   // Classification authority reads. Exactly the two read routes.
   get=get || p.equals("/v1/classifications/authority/baseline") || p.equals("/v1/classifications/authority/changes");
   // The Classification assignment command: one desired-state write per Asset, and nothing

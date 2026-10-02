@@ -423,6 +423,8 @@ pub(crate) struct AlbumMembershipProjection {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AlbumBaselinePage {
+    #[serde(default)]
+    pub likes_album_id: Option<String>,
     pub library_id: String,
     pub epoch: i64,
     pub contract_version: i64,
@@ -3467,6 +3469,7 @@ fn classify_album_rejection(code: &str) -> AlbumRejection {
         "duplicateAlbumName" => AlbumRejection::Structural("duplicateAlbumName"),
         "albumCycle" => AlbumRejection::Structural("albumCycle"),
         "albumHasChildren" => AlbumRejection::Structural("albumHasChildren"),
+        "likesAlbumProtected" => AlbumRejection::Structural("likesAlbumProtected"),
         "albumExists" => AlbumRejection::Structural("albumExists"),
         "albumNotFound" => AlbumRejection::Structural("albumNotFound"),
         "invalidAlbumParent" => AlbumRejection::Structural("invalidAlbumParent"),

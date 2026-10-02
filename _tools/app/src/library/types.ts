@@ -414,6 +414,7 @@ export type ClassificationEntry = {
 export type CharacterSidebarCounts = { targets: Record<string, number>; groups: Record<string, number> };
 
 export type AlbumEntry = {
+  isLikesAlbum?: boolean;
   id: string;
   name: string;
   parentId: string | null;

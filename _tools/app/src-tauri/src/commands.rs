@@ -340,6 +340,8 @@ impl From<LibraryError> for CommandError {
             LibraryError::DuplicateAlbumName => "duplicate_album_name",
             LibraryError::AlbumCycle => "album_cycle",
             LibraryError::AlbumHasChildren => "album_has_children",
+            LibraryError::LikesAlbumProtected => "likes_album_protected",
+            LibraryError::LikesAlbumAmbiguous => "likes_album_ambiguous",
             LibraryError::InvalidAlbumAppearance => "invalid_album_appearance",
             LibraryError::EmptyCollectionName => "empty_collection_name",
             LibraryError::CollectionNameTooLong => "collection_name_too_long",
@@ -1039,6 +1041,13 @@ pub async fn list_albums(state: State<'_, AppState>) -> Result<Vec<AlbumEntry>, 
     tauri::async_runtime::spawn_blocking(move || library
         .list_albums())
         .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn ensure_likes_album(state: State<'_, AppState>) -> Result<AlbumEntry, CommandError> {
+    current_required(state)?
+        .ensure_likes_album()
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]

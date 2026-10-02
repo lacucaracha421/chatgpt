@@ -1,6 +1,6 @@
-import { FolderIcon, MinusCircleIcon, PhotoIcon, StarIcon, TrashIcon, UserIcon, UserPlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { FolderIcon, MinusCircleIcon, PhotoIcon, HeartIcon, TrashIcon, UserIcon, UserPlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import type { ReactNode } from "react";
-import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
+import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
 import type { AssetView } from "../library/types";
 import { Button } from "../shared/ui/Button";
 import "./SelectionBar.css";
@@ -43,8 +43,8 @@ export function SelectionBar({
       </div>}
       {extraActions}
       {onFavorite && <>
-        <Button aria-label="좋아요 켜기" size="icon" variant="ghost" disabled={batchPending} onClick={() => onFavorite(true)}><StarSolidIcon aria-hidden="true" /></Button>
-        <Button aria-label="좋아요 끄기" size="icon" variant="ghost" disabled={batchPending} onClick={() => onFavorite(false)}><StarIcon aria-hidden="true" /></Button>
+        <Button aria-label="좋아요 켜기" size="icon" variant="ghost" disabled={batchPending} onClick={() => onFavorite(true)}><HeartSolidIcon aria-hidden="true" /></Button>
+        <Button aria-label="좋아요 끄기" size="icon" variant="ghost" disabled={batchPending} onClick={() => onFavorite(false)}><HeartIcon aria-hidden="true" /></Button>
       </>}
       {inCollection && <Button aria-label="이 컬렉션에서 제거" size="icon" variant="ghost" disabled={batchPending} onClick={onRemoveFromCollection}><MinusCircleIcon aria-hidden="true" /></Button>}
       {inCollection && selectedCount === 1 && <Button aria-label="대표 이미지로 지정" size="icon" variant="ghost" disabled={batchPending} onClick={onSetCover}><PhotoIcon aria-hidden="true" /></Button>}

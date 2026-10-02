@@ -66,6 +66,7 @@ pub struct AlbumReconciliation {
 /// The complete Album state a baseline describes, accumulated across pages.
 #[derive(Default)]
 struct Baseline {
+    likes_album_id: Option<String>,
     albums: Vec<AlbumProjection>,
     memberships: Vec<AlbumMembershipProjection>,
     cursor: i64,
@@ -351,7 +352,7 @@ impl Library {
         let mut snapshot: Option<i64> = None;
         let mut section = ALBUM_BASELINE_ALBUMS_SECTION;
         let mut after: Option<String> = None;
-        for _ in 0..MAX_PAGES {
+        for page_index in 0..MAX_PAGES {
             let page: AlbumBaselinePage = client.album_baseline_page(
                 &remote.library_id,
                 remote.epoch,
@@ -379,6 +380,11 @@ impl Library {
                 return Err(LibraryError::InvalidCloudResponse);
             }
             let (albums, memberships) = page.decode()?;
+            if page_index == 0 {
+                baseline.likes_album_id = page.likes_album_id.clone();
+            } else if baseline.likes_album_id != page.likes_album_id {
+                return Err(LibraryError::AlbumBaselineChanged);
+            }
             baseline.albums.extend(albums);
             baseline.memberships.extend(memberships);
             if page.has_more {
@@ -519,6 +525,23 @@ impl Library {
         };
         // Materialization is replaced wholesale: the baseline is the authority's
         // complete live state, so merging would leave behind rows the server removed.
+        let designated = super::album::available_likes_album_id(&transaction)?;
+        let retained = baseline.albums.iter()
+            .filter(|album| !album.deleted)
+            .map(|album| album.id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        if designated.as_deref().is_some_and(|id| !retained.contains(id)) {
+            return Err(LibraryError::LikesAlbumProtected);
+        }
+        if let Some(id) = &baseline.likes_album_id {
+            if designated.as_deref().is_some_and(|local| local != id) {
+                return Err(LibraryError::AlbumAuthorityMismatch);
+            }
+            if !retained.contains(id.as_str()) {
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+            transaction.execute("UPDATE library_settings SET likes_album_id=?1 WHERE singleton=1", [id])?;
+        }
         transaction.execute("DELETE FROM asset_albums", [])?;
         transaction.execute("DELETE FROM albums", [])?;
         transaction.execute("DELETE FROM album_authority_revisions", [])?;
@@ -924,6 +947,11 @@ fn apply_album_projection(
     album: &AlbumProjection,
     now: &str,
 ) -> Result<(), LibraryError> {
+    if album.deleted {
+        super::album::refuse_likes_album_delete(transaction, &album.id)?;
+    } else if super::album::available_likes_album_id(transaction)?.is_some() {
+        super::album::adopt_likes_album(transaction)?;
+    }
     write_album_revision(
         transaction,
         &album.id,
@@ -1032,6 +1060,7 @@ impl Library {
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         self.require_first_adoption_match(&transaction, &Baseline {
+            likes_album_id: None,
             albums: albums.to_vec(),
             memberships: memberships.to_vec(),
             cursor: 0,
@@ -1054,6 +1083,7 @@ impl Library {
         cursor: i64,
     ) -> Result<(), LibraryError> {
         let baseline = Baseline {
+            likes_album_id: None,
             albums: albums.to_vec(),
             memberships: memberships.to_vec(),
             cursor,
@@ -1084,6 +1114,7 @@ impl Library {
         cursor: i64,
     ) -> Result<(), LibraryError> {
         let baseline = Baseline {
+            likes_album_id: None,
             albums: albums.to_vec(),
             memberships: memberships.to_vec(),
             cursor,

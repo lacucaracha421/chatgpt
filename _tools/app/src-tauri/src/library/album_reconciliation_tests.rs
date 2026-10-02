@@ -1722,3 +1722,17 @@ fn a_baseline_keeps_a_membership_waiting_for_its_asset_upload() {
     );
     assert_eq!(outbox_len(&connection), 1, "the waiting intent is untouched");
 }
+
+
+#[test]
+fn likes_album_rejects_received_deletion_and_baseline_removal() {
+    let (_temp, library) = open();
+    pin_library_id(&library);
+    let likes = library.ensure_likes_album().unwrap();
+    library.install_album_baseline_for_test(&[album(&likes.id, "마음에 들어요", None, 1)], &[], LIBRARY, 1, 1, 0).unwrap();
+    let mut tombstone = album(&likes.id, "마음에 들어요", None, 2);
+    tombstone.deleted = true;
+    assert!(matches!(library.apply_album_page_for_test(&[album_change(1, tombstone)], 1), Err(LibraryError::LikesAlbumProtected)));
+    assert!(matches!(library.install_album_baseline_for_test(&[], &[], LIBRARY, 1, 1, 1), Err(LibraryError::LikesAlbumProtected)));
+    assert_eq!(library.list_albums().unwrap()[0].id, likes.id);
+}

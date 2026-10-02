@@ -366,6 +366,10 @@ pub enum LibraryError {
     AlbumCycle,
     #[error("하위 앨범이 있는 앨범은 삭제할 수 없습니다")]
     AlbumHasChildren,
+    #[error("마음에 들어요 앨범은 삭제할 수 없습니다.")]
+    LikesAlbumProtected,
+    #[error("마음에 들어요라는 이름의 앨범이 여러 개 있습니다. 하나만 남긴 뒤 다시 시도해 주세요.")]
+    LikesAlbumAmbiguous,
     #[error("지원하지 않는 앨범 아이콘 또는 색상입니다")]
     InvalidAlbumAppearance,
     #[error("컬렉션 이름은 비어 있을 수 없습니다")]

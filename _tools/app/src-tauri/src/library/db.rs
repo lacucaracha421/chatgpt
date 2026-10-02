@@ -4,9 +4,9 @@ use rusqlite::Connection;
 
 use super::{backup, error::LibraryError};
 
-pub(crate) const SCHEMA_VERSION: i64 = 120;
+pub(crate) const SCHEMA_VERSION: i64 = 121;
 
-/// Test helper: undoes migrations 0103 through 0120 so older-version fixtures can be rebuilt.
+/// Test helper: undoes migrations 0103 through 0121 so older-version fixtures can be rebuilt.
 /// Tests that simulate an older library run this before lowering `user_version`; extend it
 /// whenever a later migration adds objects.
 #[cfg(test)]
@@ -46,6 +46,8 @@ pub(crate) const UNDO_AFTER_102: &str = "
     LEFT JOIN artist_members AS member ON member.creator_key = COALESCE(asset.creator_handle, asset.creator_url);
     DROP TABLE artist_style_dismissals;
     ALTER TABLE artists DROP COLUMN reposter;
+    DROP VIEW asset_likes;
+    ALTER TABLE library_settings DROP COLUMN likes_album_id;
     DROP TABLE home_publication_state;
     DROP TABLE collection_person_profiles;
     DROP TABLE collection_person_portraits;
@@ -718,6 +720,9 @@ fn migrate_to_latest(connection: &mut Connection, version: i64) -> Result<(), Li
         }
         if version <= 119 {
             transaction.execute_batch(include_str!("../../migrations/0120_auto_tag_publication.sql"))?;
+        }
+        if version <= 120 {
+            transaction.execute_batch(include_str!("../../migrations/0121_likes_album.sql"))?;
         }
         // Validate before commit so a failed migration leaves the old DB intact.
         if transaction

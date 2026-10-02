@@ -249,7 +249,7 @@ Status: `VERIFY` — option B implemented in `c4d1819e`, mockup at `docs/prototy
 
 ## ASSET-TOC-20261001 — Query TOC and stable tablet scrubber seeks
 
-Status: `PARTIAL` — phase 1 done and device-accepted (user, 2026-10-01 night): server `toc=1` + `utcOffsetMinutes` deployed (`77b35a86`, `114bc018`), tablet 에셋 전체/최근, folders and albums use it (`ae87efcc`, Android 0.8.94). Remaining: phase 2 (creator, revisit, characters, trash) and phase 3 (catalog, rank-ordered with signed cursors).
+Status: `PARTIAL` — phase 1 done and device-accepted (user, 2026-10-01 night): server `toc=1` + `utcOffsetMinutes` deployed (`77b35a86`, `114bc018`), tablet 에셋 전체/최근, folders and albums use it (`ae87efcc`, Android 0.8.94). Remaining (user, 2026-10-02): phase 2 only for the artist page and characters; revisit and trash are dropped from phase 2, and phase 3 (catalog) is dropped — the user reads 망가 once and does not scrub far in the catalog.
 
 - On existing list routes, opt-in `toc=1` returns per-month counts and seek cursors for the current query. Use the same filters and one snapshot; carry `listGeneration` so the TOC and list share a generation.
 - Draw the tablet scrubber from this TOC and seek by bucket, using estimated-height spacers for unloaded ranges. No flash: keep the current viewport until the destination is ready.

@@ -310,6 +310,46 @@ class AlbumAuthorityFixture(unittest.TestCase):
             return row[0] if row else None
 
 
+class LikesAlbumTests(AlbumAuthorityFixture):
+    def test_likes_album_creation_rename_protection_and_membership(self):
+        self.publish()
+        self.activate()
+        created = self.command(album_authority.ENSURE_LIKES, album_id="likes")
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertEqual(created.json()["album"]["id"], "likes")
+        self.assertEqual(self.command(album_authority.ENSURE_LIKES, album_id="likes").json(), created.json())
+        renamed = self.command(album_authority.RENAME, operation_id=R2, album_id="likes", name="Renamed", expectedRevision=1)
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        removed = self.command(album_authority.DELETE, operation_id=R3, album_id="likes", expectedRevision=2)
+        self.assertEqual(removed.status_code, 409, removed.text)
+        self.assertEqual(removed.json()["detail"]["code"], "likesAlbumProtected")
+        self.assertEqual(self.baseline().json()["likesAlbumId"], "likes")
+        again = self.command(album_authority.ENSURE_LIKES, operation_id=R4, album_id="unused")
+        self.assertEqual(again.json()["album"]["id"], "likes")
+        added = self.command(album_authority.MEMBERSHIP, operation_id=R5, album_id="likes", assetId=ASSET, desiredState=True, expectedRevision=0)
+        self.assertEqual(added.status_code, 200, added.text)
+        state = self.client.get("/v1/albums/likes", headers=self.client_auth, params={"libraryId": LIBRARY, "epoch": 1, "assetIds": ASSET}).json()
+        self.assertTrue(state["memberships"][0]["desiredState"])
+        self.assertEqual(state["albumId"], "likes")
+        removed = self.command(album_authority.MEMBERSHIP, operation_id=R6, album_id="likes", assetId=ASSET, desiredState=False, expectedRevision=1)
+        self.assertEqual(removed.status_code, 200, removed.text)
+        self.assertFalse(removed.json()["membership"]["desiredState"])
+        self.assertEqual(self.changes().json()["items"][0]["commandType"], album_authority.CREATE)
+
+    def test_likes_album_adopts_exact_single_name_and_guards_parent(self):
+        snapshot = fixture_snapshot()
+        snapshot["albums"][1]["name"] = album_authority.LIKES_NAME
+        self.publish(snapshot)
+        self.activate({"libraryId": LIBRARY, "expectedSnapshotDigest": self.snapshot_digest(snapshot)})
+        refused = self.command(album_authority.DELETE, album_id="child", expectedRevision=1)
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertEqual(refused.json()["detail"]["code"], "likesAlbumProtected")
+        ensured = self.command(album_authority.ENSURE_LIKES, operation_id=R2, album_id="new-id")
+        self.assertEqual(ensured.json()["album"]["id"], "child")
+        parent = self.command(album_authority.DELETE, operation_id=R3, expectedRevision=1)
+        self.assertEqual(parent.json()["detail"]["code"], "albumHasChildren")
+
+
 class InactiveAlbumAuthorityTests(AlbumAuthorityFixture):
     def test_legacy_route_is_unchanged_with_zero_authority_rows(self):
         response = self.publish()

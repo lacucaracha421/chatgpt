@@ -93,9 +93,11 @@ impl Library {
                 .expect("constructed as array")
                 .push(json!(album));
         }
-        Ok(
-            json!({"snapshotVersion":SNAPSHOT_VERSION,"published_at":published_at,"albums":albums,"memberships":memberships,"media":media.into_values().collect::<Vec<_>>()}),
-        )
+        let mut snapshot = json!({"snapshotVersion":SNAPSHOT_VERSION,"published_at":published_at,"albums":albums,"memberships":memberships,"media":media.into_values().collect::<Vec<_>>()});
+        if let Some(id) = crate::library::album::available_likes_album_id(&transaction)? {
+            snapshot["likesAlbumId"] = json!(id);
+        }
+        Ok(snapshot)
     }
 
     pub(super) fn publish_album_replica_with(
@@ -111,6 +113,15 @@ impl Library {
 mod tests {
     use super::*;
     use crate::library::models::{AssetAlbumPatch, CreateAlbum};
+    #[test]
+    fn album_snapshot_retains_the_likes_id_after_renaming() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let likes = library.ensure_likes_album().unwrap();
+        library.rename_album(&likes.id, "Renamed likes").unwrap();
+        assert_eq!(library.album_replica_snapshot().unwrap()["likesAlbumId"], json!(likes.id));
+    }
+
     #[test]
     fn album_snapshot_tracks_membership_removal_and_hides_trashed_assets() {
         let temp = tempfile::tempdir().unwrap();

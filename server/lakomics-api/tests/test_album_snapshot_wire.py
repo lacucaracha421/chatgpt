@@ -50,6 +50,12 @@ class AlbumSnapshotModelTests(unittest.TestCase):
         model = api_app.AlbumReplicaPublish.model_validate(body(3))
         self.assertEqual(model.resolved_version(), 3)
 
+    def test_likes_album_id_is_accepted_independently_of_its_name(self):
+        document = body(3)
+        document["albums"][0]["name"] = "Renamed likes"
+        document["likesAlbumId"] = "root"
+        self.assertEqual(api_app.AlbumReplicaPublish.model_validate(document).likes_album_id, "root")
+
     def test_an_omitted_version_is_the_legacy_display_snapshot(self):
         model = api_app.AlbumReplicaPublish.model_validate(body(None))
         self.assertEqual(model.resolved_version(), 1)
@@ -99,6 +105,24 @@ class AlbumSnapshotRouteTests(unittest.TestCase):
                 " VALUES(?,'image',?,'1','2026-09-15T00:00:00Z','2026-09-15T00:00:00Z')",
                 (ASSET, f"images/{ASSET}/original"))
             db.commit()
+
+    def test_renamed_likes_designation_survives_publication_and_activation(self):
+        document = body(3)
+        document["albums"][0]["name"] = "Renamed likes"
+        document["likesAlbumId"] = "root"
+        published = self.client.put(SNAPSHOT, headers={"Authorization": "Bearer album-wire-token"}, json=document)
+        self.assertEqual(published.status_code, 200, published.text)
+        import api_auth
+        import authority
+        authority.startup(api_app.get_db)
+        api_auth.startup(api_app.get_db)
+        with api_app.get_db() as db:
+            _, token = api_auth.provision_token(db, "publisher", "likes-wire-test")
+            db.commit()
+        activation = self.client.post("/v1/albums/authority/activate", headers={"Authorization": f"Bearer {token}"}, json={"libraryId": LIBRARY, "expectedSnapshotDigest": published.json()["snapshotDigest"]})
+        self.assertEqual(activation.status_code, 200, activation.text)
+        with api_app.get_db() as db:
+            self.assertEqual(album_authority.likes_album_id(db, LIBRARY), "root")
 
     def tearDown(self):
         self.client.close()

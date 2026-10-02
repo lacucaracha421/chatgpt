@@ -269,6 +269,7 @@ pub fn run() {
             commands::delete_classification,
             commands::list_albums,
             commands::create_album,
+            commands::ensure_likes_album,
             commands::rename_album,
             commands::move_album,
             commands::update_album_appearance,

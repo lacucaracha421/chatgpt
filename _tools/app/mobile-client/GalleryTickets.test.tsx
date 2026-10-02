@@ -17,6 +17,7 @@ it('warms intersecting gallery images only and keeps valid tickets across visibi
     disconnect(){}
   });
   mocks.native.mockImplementation(async(op:string,payload:{assetIds:string[]})=>{
+    if(op==='albumTree')return {adopted:false,albums:[]};
     expect(op).toBe('mediaTickets');
     return {items:payload.assetIds.map(assetId=>({assetId,expires_at:new Date(Date.now()+300_000).toISOString()}))};
   });
@@ -26,12 +27,12 @@ it('warms intersecting gallery images only and keeps valid tickets across visibi
   const a=view.container.querySelector('[data-asset-id="a"]')!;
   expect(observers.has(a)).toBe(true);
   await act(async()=>{observers.get(a)!(true);await vi.advanceTimersByTimeAsync(0);});
-  expect(mocks.native).toHaveBeenCalledTimes(1);
-  expect(mocks.native.mock.calls[0][1]).toEqual({assetIds:['a']});
+  expect(mocks.native.mock.calls.filter(([operation])=>operation==='mediaTickets')).toHaveLength(1);
+  expect(mocks.native.mock.calls.find(([operation])=>operation==='mediaTickets')?.[1]).toEqual({assetIds:['a']});
   view.rerender(<Gallery {...props} items={[...items,{id:'c',kind:'image',preview:'https://test.invalid/c'}]}/>);
   await act(async()=>{observers.get(a)!(false);observers.get(a)!(true);await vi.advanceTimersByTimeAsync(0);});
-  expect(mocks.native).toHaveBeenCalledTimes(1);
+  expect(mocks.native.mock.calls.filter(([operation])=>operation==='mediaTickets')).toHaveLength(1);
   view.rerender(<Gallery {...props} items={items} paused/>);
   await act(async()=>{await vi.advanceTimersByTimeAsync(300_000);});
-  expect(mocks.native).toHaveBeenCalledTimes(1);
+  expect(mocks.native.mock.calls.filter(([operation])=>operation==='mediaTickets')).toHaveLength(1);
 });
