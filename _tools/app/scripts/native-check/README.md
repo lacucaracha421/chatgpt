@@ -142,3 +142,49 @@ performance. `--sample` can also re-summarize a previously captured `perf.json`;
 is labelled offline. These exits happen before binary/library checks, D-Bus or app
 launch. Live selector readiness, minimize behavior, startup persistence, image decoding,
 process coverage and screenshot compatibility still need the controller's built binary.
+
+## PC viewer and Collections phase timing (W4)
+
+The app enables these User Timing probes only when `window.__nativeCheckPerf` is
+installed by this kit. Ordinary production sessions create no marks, cover observers
+or extra decode calls. Marks use a `w4:` prefix and contain no asset IDs or URLs.
+`perf-webview.mjs` exports app measures into `perf.json` at
+`scenarios[].measures` alongside the existing driver step measures. Each app measure
+has `name`, `startTime` (relative to the WebView time origin) and `duration` in ms.
+Internal start marks are cleared on completion/unmount; app measures are cleared
+at the next scenario start. The Markdown summary still reports whole scenarios.
+
+| Measure | Meaning |
+| --- | --- |
+| `w4:viewer.open-to-visible` | Captured gallery double-click to the first image's paint opportunity. |
+| `w4:viewer.next-to-visible` | Captured arrow key to the requested image's paint opportunity. |
+| `w4:viewer.request.loaded` | Requested source commit to its DOM load event; absent for an already prefetched image. |
+| `w4:viewer.request.decoded` | Requested source commit to decoded, active DOM image. Includes loading and React promotion; near zero for a warmed image. |
+| `w4:viewer.request.visible` | The same request through two animation-frame boundaries after promotion. |
+| `w4:viewer.decode.done` / `w4:viewer.prefetch-decode.done` | The actual element's `decode()` promise after load, for requested/speculative media. Cache-dependent; a rejected decode is treated as settled as before. |
+| `w4:collections.query.arrived` | `list_collections` IPC dispatch to result. Usually in startup, not Collections entry, because the shell already holds the list. |
+| `w4:collections.list-to-first-cover.loaded` / `.decoded` / `.visible` | List props committed to the browser through the first visible front cover's load, decode and paint opportunity. Includes layout/mount work after that commit; does not wait for every cover. |
+| `w4:collections.open-to-visible` | Captured rail click to that first cover's paint opportunity. |
+
+Two rAF boundaries are a paint opportunity, not proof of compositor presentation.
+No cover measure is emitted for an empty/private list or failed image; missing is
+not zero. An interrupted viewer request has no visible measure. Decode time after
+`load` can be short even if WebKit spent CPU decoding during the load. These spans
+cannot separate native protocol queue/file reads from WebKit loading; use the
+requested-load span plus native process/frame samples for that boundary.
+
+Keep the original scenario and quiet window for before/after comparisons. The
+viewer scenario has **seven** settles (open, five next, close), each with a default
+300 ms quiet window, 25 ms polling and two rAFs. At least 2.1 seconds of its total
+is therefore deliberate quiet time, plus driver overhead; it is not six image
+latencies. Collections has one such settle, observes the whole section (including
+late shelf metadata/cover changes), and does not require any images for success.
+The first-cover measure distinguishes usable content from that final quiet window.
+
+The viewer warms one next library image only after the current image decodes. It
+retains two actual DOM image slots, so promotion does not rely on WebKit reusing a
+separate `new Image()` preload. Originals and zoom/animation fidelity are preserved;
+there is no screen-size original variant in this path. Privacy mode, vault originals
+and adjacent video media are not prefetched. A missing speculative image cannot
+fail the current view. Supply at least seven local originals to measure all six
+requested images with the final look-ahead present, and match the fixture in both runs.

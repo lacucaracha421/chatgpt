@@ -8,9 +8,19 @@ export function installProbe() {
   const observer = supported ? new PerformanceObserver(list => appendTasks(list.getEntries())) : null;
   observer?.observe({ type: 'longtask', buffered: true });
   const frame = now => { if (previous !== null) frames.push(now - previous); previous = now; frameId = requestAnimationFrame(frame); };
+  // Capture input before React, so app phases can be related to the real opening/navigation action.
+  const actions = [];
+  const input = event => {
+    const target = event.target;
+    if (event.type === 'dblclick' && target.closest?.('.asset-gallery__scroll [role="option"]')) actions.push({ name: 'viewer.open', at: performance.now() });
+    if (event.type === 'keydown' && ['ArrowRight', 'ArrowLeft'].includes(event.key) && document.querySelector('.asset-viewer')) actions.push({ name: 'viewer.next', at: performance.now() });
+    if (event.type === 'click' && target.closest?.('.workspace-rail button')?.textContent.trim() === '컬렉션') actions.push({ name: 'collections.open', at: performance.now() });
+  };
+  for (const type of ['dblclick', 'keydown', 'click']) document.addEventListener(type, input, true);
   window.__nativeCheckPerf = {
     start(name, motion) {
-      frames.length = 0; measures.length = 0; previous = null;
+      frames.length = 0; measures.length = 0; actions.length = 0; previous = null;
+      for (const entry of performance.getEntriesByType('measure')) if (entry.name.startsWith('w4:')) performance.clearMeasures(entry.name);
       active = { name, at: performance.now(), visibility: document.visibilityState };
       performance.mark(`${name}:start`);
       if (motion) frameId = requestAnimationFrame(frame);
@@ -24,12 +34,19 @@ export function installProbe() {
       const end = performance.now();
       performance.mark(`${active.name}:end`);
       performance.measure(active.name, `${active.name}:start`, `${active.name}:end`);
-      return { durationMs: end - active.at, frames: [...frames], measures: [...measures],
+      const appMeasures = performance.getEntriesByType('measure').filter(e => e.name.startsWith('w4:') && e.startTime >= active.at)
+        .map(e => ({ name: e.name, startTime: e.startTime, duration: e.duration }));
+      for (const entry of appMeasures) {
+        const kind = entry.name === 'w4:viewer.request.visible' ? 'viewer.' : entry.name === 'w4:collections.list-to-first-cover.visible' ? 'collections.' : null;
+        const action = kind && actions.findLast(a => a.name.startsWith(kind) && a.at <= entry.startTime);
+        if (action) measures.push({ name: `w4:${action.name}-to-visible`, startTime: action.at, duration: entry.startTime + entry.duration - action.at });
+      }
+      return { durationMs: end - active.at, frames: [...frames], measures: [...measures, ...appMeasures],
         longTasksSupported: supported, longTasks: longTasks.filter(e => e.startTime >= active.at && e.startTime < end),
         heapBytes: performance.memory?.usedJSHeapSize ?? null, visibility: [active.visibility, document.visibilityState],
         navigation: performance.getEntriesByType('navigation').map(e => ({ domContentLoadedMs: e.domContentLoadedEventEnd, loadMs: e.loadEventEnd })) };
     },
-    dispose() { observer?.disconnect(); if (frameId !== null) cancelAnimationFrame(frameId); }
+    dispose() { for (const type of ['dblclick', 'keydown', 'click']) document.removeEventListener(type, input, true); observer?.disconnect(); if (frameId !== null) cancelAnimationFrame(frameId); }
   };
   return { userAgent: navigator.userAgent, timeOrigin: performance.timeOrigin, longTasksSupported: supported, heapSupported: !!performance.memory };
 }

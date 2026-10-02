@@ -98,17 +98,23 @@ export function CollectionList<T extends ShelfItem>({ items, view, render, label
     // headings, padding, resize and a folded Showcase need no estimated offsets.
     const cells = (showcase ? positions.map((_, index) => ({ row: index + 1, index })) : rowStarts).map(({ row, index }) => ({ row,
       cell: element.querySelector<HTMLElement>(`[data-list-index="${index}"]`)! }));
+    let lastGeometry: number[] | null = null;
     const measure = () => {
       if (root.clientHeight <= 0) return;
       const top = root.getBoundingClientRect().top + root.clientTop;
+      const bounds = element.getBoundingClientRect();
+      // Cell shells have fixed track heights. Parent updates often leave all geometry unchanged;
+      // avoid rereading every row then, while still noticing a moved list or restored scroll.
+      const geometry = [top, root.scrollTop, root.clientHeight, bounds.top, bounds.left, bounds.width, bounds.height, element.scrollLeft];
+      if (lastGeometry && geometry.every((value, index) => value === lastGeometry![index])) return;
+      lastGeometry = geometry;
       const overscan = root.clientHeight * SHELF_OVERSCAN_VIEWPORTS;
-      const bounds = showcase ? element.getBoundingClientRect() : null;
       const horizontalMargin = element.clientWidth * SHELF_OVERSCAN_VIEWPORTS;
       const next = new Set(cells.filter(({ cell }) => {
         const rect = cell.getBoundingClientRect();
         const verticallyNear = rect.bottom >= top - overscan && rect.top <= top + root.clientHeight + overscan;
         if (!showcase) return verticallyNear;
-        return verticallyNear && rect.right >= bounds!.left - horizontalMargin && rect.left <= bounds!.right + horizontalMargin;
+        return verticallyNear && rect.right >= bounds.left - horizontalMargin && rect.left <= bounds.right + horizontalMargin;
       }).map(({ row }) => row));
       setNearRows(current => current.size === next.size && [...next].every(row => current.has(row)) ? current : next);
     };

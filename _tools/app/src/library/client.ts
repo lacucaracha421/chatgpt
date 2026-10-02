@@ -1,3 +1,4 @@
+import { beginNativePhase } from "../shared/nativePerf";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
@@ -483,7 +484,14 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   patchAssetAlbums: (patch: AssetAlbumPatch) =>
     albumMutation(() => invoke("patch_asset_albums", { patch })),
   getAssetAlbums: (assetId) => invoke<string[]>("get_asset_albums", { assetId }),
-  listCollections: () => invoke<CollectionSummary[]>("list_collections"),
+  listCollections: async () => {
+    const phase = beginNativePhase("collections.query");
+    try {
+      const items = await invoke<CollectionSummary[]>("list_collections");
+      phase?.mark("arrived");
+      return items;
+    } finally { phase?.cancel(); }
+  },
   searchMangaDex: (query) =>
     invoke<MangaDexSearchResult[]>("search_mangadex", { query }),
   previewMangaDex: (mangaId) =>

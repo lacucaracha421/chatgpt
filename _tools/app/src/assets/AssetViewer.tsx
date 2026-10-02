@@ -145,7 +145,7 @@ export function AssetViewer({
   useEffect(() => {
     setImageFailed(false);
     setCharacterOpen(false);
-    setZoom({ scale: 1, x: 0, y: 0 });
+    setZoom(current => current.scale === 1 && current.x === 0 && current.y === 0 ? current : { scale: 1, x: 0, y: 0 });
   }, [asset?.id]);
 
 
@@ -346,7 +346,7 @@ export function AssetViewer({
             ? <VideoPlayer ref={videoPlayerRef} key={asset.id} source={mediaSource} asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} />
             : imageFailed
               ? <EmptyState title="이미지를 불러오지 못했습니다">다른 자산으로 이동하면 자동으로 다시 시도합니다.</EmptyState>
-              : <StableImage className="asset-viewer__media" style={zoom.scale > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined} src={mediaSource === "vault" ? vaultAssetUrl(asset.id) : assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setImageFailed(true)} />}
+              : <StableImage perfName="viewer" prefetchSrc={mediaSource === "library" && next?.media.kind === "image" ? assetUrl(next.id) : undefined} className="asset-viewer__media" style={zoom.scale > 1 ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined} src={mediaSource === "vault" ? vaultAssetUrl(asset.id) : assetUrl(asset.id)} alt={asset.title || asset.originalName} draggable={false} onError={() => setImageFailed(true)} onPreloadError={() => setImageFailed(true)} />}
       </div>
       {infoOpen && renderInfo && <aside className="asset-viewer__dock" role="complementary" aria-label="자산 정보">
         <header className="asset-viewer__dock-header"><span>정보</span><Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="정보 닫기" onClick={() => setInfoOpen(false)}><XMarkIcon aria-hidden="true" /></Button></header>

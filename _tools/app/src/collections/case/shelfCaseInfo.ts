@@ -10,7 +10,7 @@ const remembered = new Map<string, ShelfInfo>();
 
 export const shelfInfoKey = (root: string, collectionId: string) => `${root}\n${collectionId}`;
 export const rememberedShelfInfo = (key: string) => remembered.get(key);
-export const sameShelfInfo = (a: ShelfInfo | undefined, b: ShelfInfo) => a?.ownedPlatform === b.ownedPlatform && a.spineArtworkId === b.spineArtworkId;
+export const sameShelfInfo = (a: ShelfInfo | undefined, b: ShelfInfo) => (a?.ownedPlatform ?? null) === b.ownedPlatform && (a?.spineArtworkId ?? null) === b.spineArtworkId;
 /** Test seam: forget remembered shelf cases between tests. */
 export function resetShelfCasesForTests() { remembered.clear(); }
 

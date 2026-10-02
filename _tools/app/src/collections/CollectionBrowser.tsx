@@ -26,6 +26,7 @@ import { Menu } from "../shared/ui/Menu";
 import { SectionDropMount, useSectionDrop } from "../shared/ui/useSectionDrop";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
+import { useCollectionCoverPerf } from "./collectionPerf";
 import { CollectionCard } from "./CollectionCard";
 import { CollectionExhibition, exhibitionPage } from "./physical/CollectionExhibition";
 import { CollectionEditDialog, type CollectionEditMode } from "./CollectionEditDialog";
@@ -133,6 +134,7 @@ export function CollectionBrowser({
   const stageRef = useRef<HTMLDivElement>(null);
   const [pageMemory, setPageMemory] = useState<{ scope: string; page: number } | null>(null);
   const scope = JSON.stringify([library?.root ?? "", typeFilter, showcase, libraryState.query, libraryState.sort, libraryState.direction, libraryState.rating, releaseProvider, releaseCalendar]);
+  useCollectionCoverPerf(stageRef, scope, collections);
   useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
@@ -155,9 +157,9 @@ export function CollectionBrowser({
     return () => { cancelAnimationFrame(restoreFrame); clearTimeout(timeout); observer?.disconnect(); navigationMemory?.set(scope, { ...navigationMemory.get(scope), scrollTop: stage.scrollTop, focusId: navigationMemory.get(scope)?.focusId ?? null }); };
   }, [scope, navigationMemory]);
 
-  const showcaseItems = collections.filter((collection) => collection.type === typeFilter && collection.showcase).sort((a, b) => (a.showcaseOrder ?? Number.MAX_SAFE_INTEGER) - (b.showcaseOrder ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  const showcaseItems = useMemo(() => collections.filter((collection) => collection.type === typeFilter && collection.showcase).sort((a, b) => (a.showcaseOrder ?? Number.MAX_SAFE_INTEGER) - (b.showcaseOrder ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id)), [collections, typeFilter]);
   const libraryItems = useMemo(() => deriveCollectionLibrary(collections, typeFilter, libraryState), [collections, typeFilter, libraryState]);
-  const visible = showcase ? showcaseItems : viewSettings.layout === "shelf" && typeFilter === "game" ? shelfGroups(libraryItems, viewSettings.grouping).flatMap(group => group.items) : libraryItems;
+  const visible = useMemo(() => showcase ? showcaseItems : viewSettings.layout === "shelf" && typeFilter === "game" ? shelfGroups(libraryItems, viewSettings.grouping).flatMap(group => group.items) : libraryItems, [showcase, showcaseItems, viewSettings.layout, viewSettings.grouping, typeFilter, libraryItems]);
   const filtered = Boolean(libraryState.query.trim()) || libraryState.rating !== "all";
   const sectionLabel = TYPE_LABEL[typeFilter];
   const exhibition = exhibitionPage(visible.length, pageMemory?.scope === scope ? pageMemory.page : navigationMemory?.get(scope)?.page ?? 0);

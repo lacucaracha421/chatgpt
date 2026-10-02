@@ -44,3 +44,38 @@ test('complete shipped scenario list validates, fails closed on unrecognized ste
   assert.throws(() => validateScenarios({ ...config, scenarios: [{ id: 'x', steps: [{ clickIfPresent: '' }] }] }));
   assert.throws(() => validateScenarios({ ...config, scenarios: [{ id: 'x', steps: [{ typo: true }] }] }));
 });
+
+test('probe exports app phase measures and input-to-visible spans without changing step measures', async () => {
+  const { runInNewContext } = await import('node:vm');
+  const { installProbe } = await import('./perf-webview.mjs');
+  let now = 0;
+  const entries = [], handlers = new Map();
+  const context = {
+    window: {}, navigator: { userAgent: 'test' },
+    document: { visibilityState: 'visible', addEventListener: (type, fn) => handlers.set(type, fn), removeEventListener: type => handlers.delete(type), querySelector: () => ({}) },
+    performance: {
+      now: () => now, timeOrigin: 0,
+      mark: name => entries.push({ name, entryType: 'mark', startTime: now }),
+      measure: (name, from, to) => {
+        const start = entries.findLast(e => e.name === from).startTime;
+        const end = to ? entries.findLast(e => e.name === to).startTime : now;
+        const entry = { name, entryType: 'measure', startTime: start, duration: end - start };
+        entries.push(entry); return entry;
+      },
+      getEntriesByType: type => entries.filter(e => e.entryType === type),
+      clearMeasures: name => { for (let i = entries.length - 1; i >= 0; i--) if (entries[i].entryType === 'measure' && entries[i].name === name) entries.splice(i, 1); },
+    },
+  };
+  runInNewContext(`(${installProbe.toString()})()`, context);
+  const probe = context.window.__nativeCheckPerf;
+  probe.start('viewer', false);
+  now = 10; handlers.get('dblclick')({ type: 'dblclick', target: { closest: () => ({}) } });
+  now = 20; context.performance.mark('app-start');
+  now = 50; context.performance.measure('w4:viewer.request.visible', 'app-start');
+  const result = probe.stop();
+  assert.equal(result.measures.find(e => e.name === 'w4:viewer.open-to-visible').duration, 40);
+  assert.equal(result.measures.find(e => e.name === 'w4:viewer.request.visible').duration, 30);
+  now = 60; probe.start('collections', false);
+  assert.equal(probe.stop().measures.length, 0);
+  probe.dispose(); assert.equal(handlers.size, 0);
+});

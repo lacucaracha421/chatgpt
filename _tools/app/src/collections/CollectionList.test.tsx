@@ -246,3 +246,18 @@ it("windows opted-in horizontal performer shelves in the tablet scroll root", ()
   root.scrollTop = 0; list.scrollLeft = 0; fireEvent.scroll(root);
   expect(container.querySelector('[data-collection-id="work-0"]')).not.toBeNull();
 });
+
+it("skips row rectangle reads on unrelated parent updates but remeasures after scrolling", () => {
+  shelfGeometry();
+  const { container, rerender } = render(windowedShelf());
+  const measure = vi.mocked(HTMLElement.prototype.getBoundingClientRect);
+  const rowReads = () => measure.mock.contexts.filter(element => (element as HTMLElement).classList.contains("collection-list__cell")).length;
+  measure.mockClear();
+  rerender(windowedShelf());
+  expect(rowReads()).toBe(0);
+  const root = container.firstElementChild as HTMLElement;
+  root.scrollTop = 2000;
+  fireEvent.scroll(root);
+  expect(rowReads()).toBeGreaterThan(0);
+  expect(container.querySelector('[data-collection-id="work-48"]')).not.toBeNull();
+});

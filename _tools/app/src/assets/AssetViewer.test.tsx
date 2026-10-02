@@ -368,3 +368,22 @@ function asset(id: string, originalName: string): AssetSummary {
 function videoAsset(id: string, originalName: string): AssetSummary {
   return { ...asset(id, originalName), media: { kind: "video", durationMs: 60_000, preparationState: "ready", scrubFrameCount: 6 } };
 }
+
+it("warms only the next library image, never vault, private or video media", () => {
+  const items = [asset("a", "a.png"), asset("b", "b.png"), asset("c", "c.png")];
+  const draw = (extra = {}) => <AssetViewer items={items} activeId="a" onActiveIdChange={vi.fn()} onClose={vi.fn()} {...extra} />;
+  const { rerender } = render(draw());
+  fireEvent.load(screen.getByRole("img", { name: "a.png" }));
+  expect(document.querySelectorAll('.asset-viewer__media')).toHaveLength(2);
+  expect(document.querySelector('.asset-viewer__media[src$="/asset/b"]')).toHaveAttribute("aria-hidden", "true");
+  expect(document.querySelector('.asset-viewer__media[src$="/asset/c"]')).toBeNull();
+  rerender(draw({ privacyMode: true }));
+  expect(document.querySelector('.asset-viewer__media')).toBeNull();
+  rerender(draw({ mediaSource: "vault" }));
+  fireEvent.load(screen.getByRole("img", { name: "a.png" }));
+  expect(document.querySelectorAll('.asset-viewer__media')).toHaveLength(1);
+  rerender(draw({ privacyMode: true }));
+  rerender(draw({ items: [items[0], videoAsset("v", "v.mp4")] }));
+  fireEvent.load(screen.getByRole("img", { name: "a.png" }));
+  expect(document.querySelectorAll('.asset-viewer__media')).toHaveLength(1);
+});
