@@ -607,17 +607,57 @@ it('does not request media when opened while privacy is enabled',()=>{
  expect(mocks.ticket).not.toHaveBeenCalled();expect(document.querySelector('img[src]')).toBeNull();expect(close).toHaveBeenCalledOnce();
 });
 
-it('grows after an upward strip swipe and shrinks on a picture tap',()=>{
-  render(<Viewer items={items} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+it.each(['image', 'video'])('grows after a strip swipe and shrinks on a %s surface tap',(kind)=>{
+  render(<Viewer items={[{...items[0],kind},items[1]]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
+  const viewer=document.querySelector<HTMLElement>('.viewer')!;
   const strip=screen.getByRole('navigation',{name:'주변 자산'});
+  expect(strip.classList.contains('is-grown')).toBe(false);
+  expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('70px');
   fireEvent.pointerDown(strip,{pointerId:91,clientX:100,clientY:150});
   fireEvent.pointerMove(strip,{pointerId:91,clientX:100,clientY:70});
   fireEvent.pointerUp(strip,{pointerId:91,clientX:100,clientY:70});
   expect(strip.classList.contains('is-grown')).toBe(true);
+  expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('144px');
   const surface=document.querySelector('.viewer-surface')!;
   fireEvent.pointerDown(surface,{pointerId:92,clientX:100,clientY:100});
   fireEvent.pointerUp(surface,{pointerId:92,clientX:100,clientY:100});
   expect(strip.classList.contains('is-grown')).toBe(false);
+  expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('70px');
+});
+
+it('drops playback controls when the strip hides and restores their grown offset on pause',()=>{
+  vi.useFakeTimers();
+  try {
+    const props={items:[{...items[0],kind:'video'},items[1]],index:0,onIndex:()=>{},onClose:()=>{}};
+    const view=render(<Viewer {...props}/>);
+    const viewer=document.querySelector<HTMLElement>('.viewer')!;
+    const strip=screen.getByRole('navigation',{name:'주변 자산'});
+    const surface=document.querySelector('.viewer-surface');
+    const video=document.querySelector('video')!;
+    const player=document.querySelector('.video-player')!;
+    expect(viewer.dataset.filmstripVisible).toBe('true');
+    expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('70px');
+    fireEvent.pointerDown(strip,{pointerId:91,clientX:100,clientY:150});
+    fireEvent.pointerMove(strip,{pointerId:91,clientX:100,clientY:70});
+    fireEvent.pointerUp(strip,{pointerId:91,clientX:100,clientY:70});
+    expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('144px');
+    fireEvent.play(video);
+    expect(viewer.dataset.filmstripVisible).toBe('false');
+    expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('0px');
+    expect(player.getAttribute('data-controls-visible')).toBe('true');
+    act(()=>vi.advanceTimersByTime(2000));
+    expect(player.getAttribute('data-controls-visible')).toBe('false');
+    fireEvent.pause(video);
+    expect(viewer.dataset.filmstripVisible).toBe('true');
+    expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('144px');
+    expect(player.getAttribute('data-controls-visible')).toBe('true');
+    expect(document.querySelector('.viewer-surface')).toBe(surface);
+    expect(document.querySelector('video')).toBe(video);
+    view.rerender(<Viewer {...props} items={[props.items[0]]}/>);
+    expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('0px');
+    view.rerender(<Viewer {...props} vault={{original:()=>'',label:()=>''}}/>);
+    expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('0px');
+  } finally {vi.useRealTimers();}
 });
 
 it('keeps the actual painted slot until the next original loads and decodes',async()=>{

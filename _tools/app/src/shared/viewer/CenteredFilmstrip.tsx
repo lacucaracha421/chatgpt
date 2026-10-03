@@ -13,6 +13,12 @@ const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n
 /** While the rail is dragged, flung or wheeled, the main image follows only an item that holds the slot this long (or where the rail settles), so a fast pass does not load every image on the way (user, 2026-10-03). */
 export const FILMSTRIP_DWELL_MS = 180;
 
+/** Painted strip top: 12px bottom inset + its scaled (thumbnail + 16px frame) height.
+ * Playback controls already sit 16px above the bottom edge; lift only the remaining distance. */
+export function filmstripControlsOffset(height: number, grown: boolean, visible: boolean) {
+  return visible ? 12 + (height + 16) * (grown ? 1 : .5) - 16 : 0;
+}
+
 /** The media viewer is its own control surface: a fixed selection slot with a moving, virtual rail. */
 export function CenteredFilmstrip({items, index, height = 124, grown = false, className = '', renderThumbnail, onIndex, onSwipeUp, onInteract, onInteractionChange}: Props) {
   const layout = useMemo(() => {

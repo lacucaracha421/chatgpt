@@ -7,6 +7,19 @@ vi.mock('./media', () => ({loadThumbnail:load}));
 const assets: Asset[] = Array.from({length:100}, (_, i) => ({id:`asset-${i}`,kind:'image',preview:`thumb:${i}`,width:100,height:200}));
 beforeEach(() => {vi.stubGlobal('matchMedia', () => ({matches:true}));});
 afterEach(() => {cleanup();vi.unstubAllGlobals();vi.clearAllMocks();});
+it.each([false, true])('keeps image and video strip geometry identical when grown=%s', grown => {
+  const mixed: Asset[] = [assets[0], {...assets[1], kind:'video'}];
+  const props = {items:mixed, grown, onIndex:vi.fn()};
+  const view = render(<ViewerFilmstrip {...props} index={0}/>);
+  const strip = screen.getByRole('navigation');
+  const imageClass = strip.className;
+  expect(strip.style.getPropertyValue('--filmstrip-height')).toBe('132px');
+  expect(strip.classList.contains('is-grown')).toBe(grown);
+  view.rerender(<ViewerFilmstrip {...props} index={1}/>);
+  expect(strip.className).toBe(imageClass);
+  expect(strip.style.getPropertyValue('--filmstrip-height')).toBe('132px');
+  expect(strip.style.bottom).toBe('');
+});
 it('bounds the visible window even after distant navigation', () => {
   const props = {items:assets,onIndex:vi.fn()};
   const view = render(<ViewerFilmstrip {...props} index={50}/>);

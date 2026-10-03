@@ -12,8 +12,8 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { CenteredFilmstrip } from "../shared/viewer/CenteredFilmstrip";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { CenteredFilmstrip, filmstripControlsOffset } from "../shared/viewer/CenteredFilmstrip";
 import { useViewerMotion, type TileRect } from "../shared/viewer/useViewerMotion";
 import { artistHandle } from "../artists/format";
 import { useOptionalLibrary } from "../library/LibraryContext";
@@ -209,6 +209,7 @@ export function AssetViewer({
   const next = items[index + 1];
   const move = (target: AssetSummary | undefined) => { if (target) onActiveIdChange(target.id); };
   const seekable = asset.media.kind === "video" && !privacyMode;
+  const filmstripVisible = showFilmstrip && !videoPlaying && (chromeVisible || seekable);
   const artistLabel = getArtistLabel(asset);
   const dateLabel = [displayDate(asset.collectedAt), displayTime(asset.collectedAt)].filter(Boolean).join(" ");
   const metaLabel = [folderPath, dateLabel].filter(Boolean).join(" · ");
@@ -302,6 +303,8 @@ export function AssetViewer({
       ref={motion.bind}
       className={`asset-viewer${chromeVisible ? "" : " asset-viewer--chrome-hidden"}${infoOpen ? " asset-viewer--docked" : ""}${videoPlaying ? " asset-viewer--playing" : ""}`}
       data-chrome-visible={chromeVisible}
+      data-filmstrip-visible={filmstripVisible}
+      style={{"--viewer-controls-offset": `${filmstripControlsOffset(124, stripGrown, filmstripVisible)}px`} as CSSProperties}
       onPointerMove={(event) => {
         keyboardFocusRef.current = false; revealChrome();
         if (stripActive.current) return;
@@ -351,7 +354,7 @@ export function AssetViewer({
           </div>
           {previous && <button className="asset-viewer__edge asset-viewer__edge--left" type="button" aria-label="이전 자산" onClick={() => move(previous)} {...chromeHover}><ChevronLeftIcon aria-hidden="true" /></button>}
           {next && <button className="asset-viewer__edge asset-viewer__edge--right" type="button" aria-label="다음 자산" onClick={() => move(next)} {...chromeHover}><ChevronRightIcon aria-hidden="true" /></button>}
-          {showFilmstrip && <CenteredFilmstrip items={items} index={index} height={seekable ? 84 : 124} grown={seekable || stripGrown} className="asset-viewer__filmstrip" onIndex={i => onActiveIdChange(items[i].id)} onInteract={revealChrome} onInteractionChange={active => { stripActive.current = active; if (active) setStripGrown(true); revealChrome(); }} renderThumbnail={(_, i) => privacyMode ? <span className="centered-filmstrip__placeholder" /> : <img src={mediaSource === "vault" ? vaultThumbnailUrl(items[i].id) : assetThumbnailUrl(items[i])} alt="" loading="lazy" decoding="async" draggable={false} />} />}
+          {showFilmstrip && <CenteredFilmstrip items={items} index={index} height={124} grown={stripGrown} className="asset-viewer__filmstrip" onIndex={i => onActiveIdChange(items[i].id)} onInteract={revealChrome} onInteractionChange={active => { stripActive.current = active; if (active) setStripGrown(true); revealChrome(); }} renderThumbnail={(_, i) => privacyMode ? <span className="centered-filmstrip__placeholder" /> : <img src={mediaSource === "vault" ? vaultThumbnailUrl(items[i].id) : assetThumbnailUrl(items[i])} alt="" loading="lazy" decoding="async" draggable={false} />} />}
         </div>
         <div data-viewer-media className="asset-viewer__media-surface">
         {privacyMode

@@ -181,7 +181,8 @@
 
 .viewer-surface .video-player__controls {
   position: absolute;
-  z-index: 3;
+  /* Stay clickable above the slim strip's unscaled hit box. */
+  z-index: 5;
   right: var(--space-6);
   bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
   left: var(--space-6);
@@ -192,14 +193,15 @@
   border-radius: var(--radius-control);
   opacity: 1;
   touch-action: none;
-  transition: opacity var(--motion-standard) var(--ease-standard), visibility 0s linear 0s;
+  transform: translateY(calc(-1 * var(--viewer-controls-offset, 0px)));
+  transition: opacity var(--motion-standard) var(--ease-standard), visibility 0s linear 0s, transform 200ms var(--ease-sheet);
 }
 
 .viewer-surface .video-player--controls-hidden .video-player__controls {
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  transition-delay: 0s, var(--motion-standard);
+  transition-delay: 0s, var(--motion-standard), 0s;
 }
 
 .viewer-surface .video-player__timeline-wrap { position: relative; width: 100%; height: 44px; }
@@ -250,9 +252,8 @@
 .empty-inline { padding: 24px; color: var(--color-muted); }
 
 .viewer-filmstrip.centered-filmstrip { bottom: calc(12px + env(safe-area-inset-bottom)); opacity: 0; pointer-events: none; }
-.chrome-visible .viewer-filmstrip, .viewer-filmstrip:focus-within { opacity: 1; pointer-events: auto; }
-.viewer.is-video .viewer-filmstrip { bottom: calc(120px + env(safe-area-inset-bottom)); }
-.viewer.is-playing .viewer-filmstrip { opacity: 0; transform: translateY(24px); pointer-events: none; visibility: hidden; }
+.viewer[data-filmstrip-visible="true"] .viewer-filmstrip { opacity: 1; pointer-events: auto; }
+.viewer[data-filmstrip-visible="false"] .viewer-filmstrip { visibility: hidden; }
 .viewer.is-playing .viewer-bar { opacity: 0; pointer-events: none; }
 .viewer-backdrop { position: absolute; inset: 0; background: var(--color-viewer-bg, #101112); pointer-events: none; }
 .viewer[data-viewer-closing] .viewer-bar, .viewer[data-viewer-closing] .viewer-filmstrip { visibility: hidden; }
@@ -333,5 +334,3 @@
 .viewer { background: transparent; }
 
 [role="dialog"]:has(> .viewer) { background: transparent; }
-
-.viewer.is-video:not(.is-playing) .viewer-filmstrip { opacity: 1; pointer-events: auto; }

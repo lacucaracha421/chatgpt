@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent} from 'react';
 import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, HeartIcon, InformationCircleIcon, ArrowPathIcon, FolderIcon, Square2StackIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
-import type {ComponentType, SVGProps} from 'react';
+import type {ComponentType, CSSProperties, SVGProps} from 'react';
 import {Dialog, DialogDescription, IconButton, Button} from './ui';
 import {BottomSheet} from './BottomSheet';
 import type {Asset} from './types';
@@ -16,6 +16,7 @@ import {usePrivacyMode} from './privacyMode';
 import {StableImage} from '../src/shared/ui/StableImage';
 import {useViewerMotion} from '../src/shared/viewer/useViewerMotion';
 import {ViewerFilmstrip} from './ViewerFilmstrip';
+import {filmstripControlsOffset} from '../src/shared/viewer/CenteredFilmstrip';
 import {useLikesAlbum} from './useLikesAlbum';
 import {VideoPlayerSurface} from '../src/video/VideoPlayer';
 
@@ -286,6 +287,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   };
   const imageSrc = original || (!vault ? decoded?.url : undefined) || asset.preview;
   const playerAsset = {id:asset.id,title:vault?vault.label(asset):artistLabel,originalName:vault?vault.label(asset):artistLabel,thumbnailRevision:asset.thumbnail_revision,media:{durationMs:asset.duration_ms ?? 0,scrubFrameCount:0}};
+  const filmstripVisible = !vault && items.length > 1 && !videoPlaying && (chrome || asset.kind === 'video');
   return <Dialog open title="미디어 감상" variant="fullscreen" onClose={motion.close} onKeyDown={event => {
     if (event.key === 'Escape' && info) { event.preventDefault(); setInfo(false); return; }
     if (event.target instanceof HTMLVideoElement || (event.target instanceof HTMLElement && event.target.closest('.video-player'))) return;
@@ -296,7 +298,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
     if (event.key === 'ArrowRight') { event.preventDefault(); change(index + 1); }
   }}>
     <DialogDescription className="sr-only">이미지는 두 손가락으로 확대할 수 있습니다. 좌우로 밀거나 버튼을 눌러 같은 목록의 이전·다음 자산을 봅니다. 미디어 정보를 열면 그 패널이 키보드 조작을 우선합니다.</DialogDescription>
-    <div ref={motion.bind} className={`viewer ${chrome ? 'chrome-visible' : ''}${asset.kind === 'video' ? ' is-video' : ''}${videoPlaying ? ' is-playing' : ''}${vault ? ' is-vault' : ''}${info && landscape && !vault ? ' has-info-panel' : ''}`}>
+    <div ref={motion.bind} className={`viewer ${chrome ? 'chrome-visible' : ''}${asset.kind === 'video' ? ' is-video' : ''}${videoPlaying ? ' is-playing' : ''}${vault ? ' is-vault' : ''}${info && landscape && !vault ? ' has-info-panel' : ''}`} data-filmstrip-visible={filmstripVisible} style={{'--viewer-controls-offset': `${filmstripControlsOffset(132, stripGrown, filmstripVisible)}px`} as CSSProperties}>
       <div data-viewer-backdrop className="viewer-backdrop"/>
       <div className="viewer-main">
       <header className="viewer-bar">

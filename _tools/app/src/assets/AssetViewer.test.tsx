@@ -104,15 +104,64 @@ it("renders a bounded filmstrip and moves from a thumbnail", () => {
 it("shows the video strip when paused, hides it while playing, and omits it for single assets", () => {
   const { rerender } = render(<AssetViewer items={[videoAsset("video", "video.webm"), asset("b", "b.png")]} activeId="video" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
   expect(document.querySelector(".asset-viewer__filmstrip")).toBeInTheDocument();
+  const viewer = document.querySelector<HTMLElement>('.asset-viewer')!;
+  expect(viewer).toHaveAttribute('data-filmstrip-visible', 'true');
+  expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('66px');
   fireEvent.play(document.querySelector('video')!);
   expect(document.querySelector('.asset-viewer')).toHaveClass('asset-viewer--playing');
+  expect(viewer).toHaveAttribute('data-filmstrip-visible', 'false');
+  expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('0px');
   fireEvent.pause(document.querySelector('video')!);
   expect(document.querySelector('.asset-viewer')).not.toHaveClass('asset-viewer--playing');
+  expect(viewer).toHaveAttribute('data-filmstrip-visible', 'true');
+  expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('66px');
   // The video layout keeps the edge areas off the player's control bar.
   expect(document.querySelector(".asset-viewer__stage")).toHaveClass("asset-viewer__stage--video");
 
   rerender(<AssetViewer items={[asset("only", "only.png")]} activeId="only" onActiveIdChange={vi.fn()} onClose={vi.fn()} />);
   expect(document.querySelector(".asset-viewer__filmstrip")).not.toBeInTheDocument();
+  expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('0px');
+});
+
+it('preserves strip geometry across images and videos and rides above the grown strip', () => {
+  vi.useFakeTimers();
+  try {
+    const items = [asset('a','a.png'), videoAsset('v','v.webm')];
+    const props = {items, onActiveIdChange:vi.fn(), onClose:vi.fn()};
+    const view = render(<AssetViewer {...props} activeId="a"/>);
+    const viewer = document.querySelector<HTMLElement>('.asset-viewer')!;
+    const strip = screen.getByRole('navigation', {name:'주변 자산'});
+    const imageClass = strip.className;
+    expect(strip.style.getPropertyValue('--filmstrip-height')).toBe('124px');
+    expect(strip).not.toHaveClass('is-grown');
+    view.rerender(<AssetViewer {...props} activeId="v"/>);
+    expect(strip.className).toBe(imageClass);
+    expect(strip.style.getPropertyValue('--filmstrip-height')).toBe('124px');
+    expect(strip.style.bottom).toBe('');
+    const stage = document.querySelector('.asset-viewer__media-surface');
+    const media = document.querySelector('video')!;
+    vi.spyOn(viewer, 'getBoundingClientRect').mockReturnValue({bottom:800} as DOMRect);
+    fireEvent.pointerMove(viewer, {clientY:700});
+    expect(strip).toHaveClass('is-grown');
+    expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('136px');
+    fireEvent.play(media);
+    expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('0px');
+    act(() => vi.advanceTimersByTime(2000));
+    expect(document.querySelector('.video-player')).toHaveAttribute('data-controls-visible', 'false');
+    fireEvent.pause(media);
+    expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('136px');
+    expect(document.querySelector('.video-player')).toHaveAttribute('data-controls-visible', 'true');
+    fireEvent.pointerMove(viewer, {clientY:100});
+    act(() => vi.advanceTimersByTime(220));
+    expect(strip).not.toHaveClass('is-grown');
+    expect(viewer.style.getPropertyValue('--viewer-controls-offset')).toBe('66px');
+    expect(document.querySelector('.asset-viewer__media-surface')).toBe(stage);
+    expect(document.querySelector('video')).toBe(media);
+    view.rerender(<AssetViewer {...props} activeId="a"/>);
+    fireEvent.pointerMove(viewer, {clientY:700});
+    expect(strip.style.getPropertyValue('--filmstrip-height')).toBe('124px');
+    expect(strip).toHaveClass('is-grown');
+  } finally { vi.useRealTimers(); }
 });
 
 it("uses full-height edge controls and omits them at the ends", () => {

@@ -28,5 +28,5 @@ function Thumbnail({asset, privacy}: {asset: Asset; privacy: boolean}) {
   return privacy || !preview ? <span className="centered-filmstrip__placeholder" aria-hidden="true"/> : <img src={preview} alt="" loading="lazy" decoding="async" draggable={false}/>;
 }
 export function ViewerFilmstrip({items, index, privacy = false, grown, onIndex, onSwipeUp, onInteract, onInteractionChange}: ViewerFilmstripProps) {
-  return <CenteredFilmstrip items={items} index={index} height={items[index]?.kind === 'video' ? 96 : 132} grown={items[index]?.kind === 'video' || grown} className="viewer-filmstrip" onIndex={onIndex} onSwipeUp={onSwipeUp} onInteract={onInteract} onInteractionChange={onInteractionChange} renderThumbnail={(_, i) => <Thumbnail asset={items[i]} privacy={privacy}/>}/>;
+  return <CenteredFilmstrip items={items} index={index} height={132} grown={grown} className="viewer-filmstrip" onIndex={onIndex} onSwipeUp={onSwipeUp} onInteract={onInteract} onInteractionChange={onInteractionChange} renderThumbnail={(_, i) => <Thumbnail asset={items[i]} privacy={privacy}/>}/>;
 }
