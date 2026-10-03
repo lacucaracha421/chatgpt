@@ -355,20 +355,28 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
             replica.fail(409, "A catalog projection is already uploading")
         path = None
         try:
-            root().mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(prefix="upload-", suffix=".ndjson", dir=root(), delete=False) as file:
-                path = Path(file.name)
+            def open_upload():
+                root().mkdir(parents=True, exist_ok=True)
+                return tempfile.NamedTemporaryFile(prefix="upload-", suffix=".ndjson", dir=root(), delete=False)
+
+            file = await run_in_threadpool(open_upload)
+            path = Path(file.name)
+            try:
                 size = 0
                 async for chunk in request.stream():
                     size += len(chunk)
                     if size > replica.MAX_CONTENT:
                         replica.fail(413)
-                    file.write(chunk)
+                    await run_in_threadpool(file.write, chunk)
+            finally:
+                await run_in_threadpool(file.close)
             return await run_in_threadpool(replica.import_content, path, digest, root(), get_db)
         finally:
-            if path:
-                path.unlink(missing_ok=True)
-            upload_lock.release()
+            try:
+                if path:
+                    await run_in_threadpool(path.unlink, missing_ok=True)
+            finally:
+                upload_lock.release()
 
     @app.put(PREFIX + "/publication")
     async def publish(request: Request, authorization: str | None = Header(default=None),
@@ -383,7 +391,7 @@ def register_mobile_catalog(app, get_db, require_auth, artifact_root, secret, ga
             body = json.loads(data)
         except (ValueError, UnicodeError):
             replica.fail()
-        authority = catalog_bookmarks.load(get_db)
+        authority = await run_in_threadpool(catalog_bookmarks.load, get_db)
         if authority is not None and (library is None or library != authority["libraryId"]):
             # Fast rejection only. The real fence runs inside replica.publish's
             # commit transaction.

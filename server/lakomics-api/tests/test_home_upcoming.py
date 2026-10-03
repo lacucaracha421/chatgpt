@@ -232,7 +232,8 @@ class UpcomingRoutes(HomeFixture):
         self.assertEqual(reply["acknowledgedThrough"], 2)
         self.assertEqual([p["sequence"] for p in self.ok(self.get())["pending"]], [3])
         # The cursor never moves back, and never beyond the log.
-        self.assertEqual(self.ok(self.put(snapshot(cursor=1)))["acknowledgedThrough"], 2)
+        reply = self.put(snapshot(cursor=1))
+        self.assertEqual((reply.status_code, self.code(reply)), (409, "upcomingIntentCursorRejected"))
         reply = self.put(snapshot(cursor=9))
         self.assertEqual((reply.status_code, self.code(reply)), (409, "upcomingIntentCursorRejected"))
         reply = self.log(after=9)

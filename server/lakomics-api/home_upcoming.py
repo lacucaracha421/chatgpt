@@ -249,7 +249,9 @@ def register(app, get_db, require_client, require_publisher):
             db.execute("BEGIN IMMEDIATE")
             state = _state(db)
             cursor = upload.intentCursor
-            if cursor is not None and cursor > state["intent_sequence"]:
+            if ((cursor is None and state["acknowledged_through"] > 0)
+                    or (cursor is not None and (cursor < state["acknowledged_through"]
+                                               or cursor > state["intent_sequence"]))):
                 db.rollback()
                 fail(409, "upcomingIntentCursorRejected", "발매 예정 요청 위치를 확인해 주세요.")
             acknowledged = max(state["acknowledged_through"], cursor or 0)

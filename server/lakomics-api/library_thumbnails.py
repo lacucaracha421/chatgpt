@@ -109,13 +109,21 @@ def install(db):
                "ON thumbnail_upload_sessions(asset_id,state,expires_at)")
     db.execute("CREATE INDEX IF NOT EXISTS thumbnail_sessions_expiry "
                "ON thumbnail_upload_sessions(expires_at,reclaimed_at)")
-    ignored = set(THUMB_FIELDS)
-    watched = [r[1] for r in db.execute("PRAGMA table_info(assets)") if r[1] not in ignored]
-    # Other fields preserve the old UPDATE-OF behavior, even on a same-value write.
+    # Tablet list payload fields, plus eligibility/order inputs. Authority lifecycle,
+    # classification and search changes have their own generation signals. Receipts,
+    # commit bookkeeping and ticket-only digests do not alter this list projection.
+    visible = {
+        "id", "kind", "object_key", "content_type", "size_bytes", "created_at",
+        "committed", "committed_at", "collected_at", "source_published_at",
+        "source_url", "creator_name", "creator_handle", "import_source",
+        "width", "height", "duration_ms",
+    }
+    watched = [r[1] for r in db.execute("PRAGMA table_info(assets)") if r[1] in visible]
     db.execute("DROP TRIGGER IF EXISTS asset_list_update")
     db.execute("CREATE TRIGGER asset_list_update AFTER UPDATE OF "
                + ",".join('"' + name + '"' for name in watched)
-               + " ON assets BEGIN UPDATE asset_list_generation SET generation=generation+1 WHERE singleton=1; END")
+               + " ON assets WHEN " + " OR ".join(f'OLD."{name}" IS NOT NEW."{name}"' for name in watched)
+               + " BEGIN UPDATE asset_list_generation SET generation=generation+1 WHERE singleton=1; END")
     def effective(alias):
         return (f"CASE WHEN COALESCE({alias}.thumbnail_key,'')='' THEN NULL ELSE "
                 f"COALESCE(NULLIF({alias}.thumbnail_revision,''), "

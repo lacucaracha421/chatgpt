@@ -995,9 +995,9 @@ def finalize_items(db, library_id, items, *, detail=False, today=None):
                 SELECT member.work_id, member.asset_id, requested.cover_id,
                        ROW_NUMBER() OVER (PARTITION BY member.work_id
                            ORDER BY member.added_at, member.asset_id) AS position
-                FROM requested JOIN collection_authority_members AS member
+                FROM requested CROSS JOIN collection_authority_members AS member
                   ON member.work_id=requested.work_id AND member.library_id=?
-                JOIN visible_assets AS asset ON asset.id=member.asset_id AND asset.committed=1
+                CROSS JOIN visible_assets AS asset ON asset.id=member.asset_id AND asset.committed=1
                 WHERE member.desired_state=1)
             SELECT work_id, COUNT(*), MAX(CASE WHEN position=1 THEN asset_id END),
                    MAX(CASE WHEN asset_id=cover_id THEN asset_id END)

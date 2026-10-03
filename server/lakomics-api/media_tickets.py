@@ -121,6 +121,17 @@ class MediaTicketRequest(BaseModel):
     variant: Literal["thumbnail", "original"]
 
 
+def _thumbnail_receipt(asset, object_key, *, fresh_head=False):
+    fields = dict(asset)
+    if (fields.get("committed") == 1 and not fresh_head
+            and object_key == fields.get("thumbnail_metadata_key")
+            and object_key.startswith("derived/")):
+        return head_cache.immutable_metadata(
+            object_key, fields.get("thumbnail_size_bytes"), fields.get("thumbnail_content_type"),
+            verified=library_thumbnails.trusted_receipt(fields))
+    return None
+
+
 def _ticket_head(asset, variant, object_key, *, fresh_head=False, verify_digest=False,
                  thumbnail_metadata_fills=None):
     # Replication commit updates all of these fields, but presigned PUT can overwrite
@@ -137,9 +148,7 @@ def _ticket_head(asset, variant, object_key, *, fresh_head=False, verify_digest=
         metadata = None
         if (variant == "thumbnail" and object_key.startswith("derived/")
                 and object_key == fields.get("thumbnail_metadata_key")):
-            metadata = head_cache.immutable_metadata(
-                object_key, fields.get("thumbnail_size_bytes"), fields.get("thumbnail_content_type"),
-                verified=library_thumbnails.trusted_receipt(fields))
+            metadata = _thumbnail_receipt(asset, object_key, fresh_head=fresh_head)
         elif verified_original and object_key == f"work-artwork/mobile/{digest}":
             # This is the existing byte-addressed original namespace. Neither
             # library/{id}/original nor inbox keys become immutable from a DB SHA.
@@ -309,7 +318,7 @@ def create_mobile_media_tickets(
     def failure(pair, error):
         return {"asset_id": pair[0], "variant": pair[1], "ok": False, "error": error}
 
-    def resolve_ticket(pair: tuple[str, str]):
+    def resolve_ticket(pair: tuple[str, str], metadata=None):
         asset_id, variant = pair
         asset = assets_by_id.get(asset_id)
         if asset is None:
@@ -319,8 +328,9 @@ def create_mobile_media_tickets(
             return failure(pair, "unavailable"), []
         fills = []
         try:
-            metadata = api._ticket_head(asset, variant, object_key, fresh_head=fresh_head,
-                                    verify_digest=verify_digest, thumbnail_metadata_fills=fills)
+            if metadata is None:
+                metadata = api._ticket_head(asset, variant, object_key, fresh_head=fresh_head,
+                                           verify_digest=verify_digest, thumbnail_metadata_fills=fills)
         except ClientError as exc:
             code = str(exc.response.get("Error", {}).get("Code", ""))
             if code in ("404", "NoSuchKey", "NotFound"):
@@ -342,7 +352,26 @@ def create_mobile_media_tickets(
             "expires_at": expires_at.isoformat(),
         }, fills
 
-    completed = _bounded_ticket_work(pairs, resolve_ticket, deadline=deadline, cancelled=cancelled)
+    # Key-bound receipts need no storage work. Resolve them before admission so
+    # stalled original HEADs cannot consume thumbnail ticket capacity.
+    completed = [None] * len(pairs)
+    head_pairs, head_indices = [], []
+    for index, pair in enumerate(pairs):
+        if cancelled.is_set() or time.monotonic() >= deadline:
+            break
+        asset = assets_by_id.get(pair[0])
+        key = (asset["object_key"] if pair[1] == "original" else asset["thumbnail_key"]) if asset else None
+        metadata = (_thumbnail_receipt(asset, key, fresh_head=fresh_head)
+                    if asset and key and pair[1] == "thumbnail" else None)
+        if asset is None or not key or metadata is not None:
+            completed[index] = resolve_ticket(pair, metadata)
+        else:
+            head_pairs.append(pair)
+            head_indices.append(index)
+    if head_pairs:
+        heads = _bounded_ticket_work(head_pairs, resolve_ticket, deadline=deadline, cancelled=cancelled)
+        for index, result in zip(head_indices, heads):
+            completed[index] = result
     results, thumbnail_metadata_fills = [], []
     for pair, result in zip(pairs, completed):
         if result is None:

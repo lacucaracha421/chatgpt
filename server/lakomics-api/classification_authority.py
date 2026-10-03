@@ -1441,6 +1441,9 @@ def register_classification_authority(app, get_db, require_client, require_publi
                 db.execute("BEGIN")
                 try:
                     row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
+                    if epoch != row["epoch"]:
+                        fail(409, "baselineChanged", "분류 기준선이 변경되었습니다. 다시 시작해 주세요.",
+                             authorityEpoch=row["epoch"])
                     cursor = row["cursor"]
                     if snapshot is None:
                         snapshot_cursor = cursor
@@ -1515,6 +1518,9 @@ def register_classification_authority(app, get_db, require_client, require_publi
                 db.execute("BEGIN")
                 try:
                     row = authority.require_active(db, DOMAIN, libraryId, CONTRACT_VERSION)
+                    if epoch != row["epoch"]:
+                        fail(409, "baselineChanged", "분류 기준선이 변경되었습니다. 다시 시작해 주세요.",
+                             authorityEpoch=row["epoch"])
                     cursor = row["cursor"]
                     if after > cursor:
                         # A cursor beyond the server is authority skew, not retention. A
