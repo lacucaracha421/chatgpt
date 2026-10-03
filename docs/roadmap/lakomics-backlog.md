@@ -50,7 +50,7 @@ Committed HEAD does not establish completion of the concurrent changes or deploy
 
 Status: `PARTIAL` — single performance lane, including `PERF-20261002`, `MOBILE-PERF-002`, `PC-POLISH-20261002` item 5 and `HOME-OPT-001` measurements. Follow [Performance work](../agents/implementation.md#performance-work); measure the real platform before changing it.
 
-- **PC idle residue:** after `06b063ff`, `fcc1edac`, `c60dc0a6`, recorded quiet-release CPU fell 21% → 3.4% average; remaining 3–6% of a core is mostly the UI thread. Attribute window probes, idle pollers, hover frames and animation work; today's specific findings remain unchanged in `AUDIT-20261003`.
+- **Done 2026-10-03 — PC idle residue:** quiet release, 10 min idle: 3.6 % → 1.6 % app (process median 1 %). Causes: ~12 publication threads spawned every 10 s with costly due checks (`0edba28c`, `7e2a83d8`), auto-tag publication re-walking all assets, Home bodies rebuilt every 60 s, review feeds every 5 min (`6025718e`), per-second window queries and unfocused pollers (`ffb44561`). Remaining ~1 %: catalog duplicate poll (60 s), AV link and a tokio worker; re-measure on the new PC.
 - **PC Collections first open:** `6d6c00e0` improved native test-library/debug first open 3.15 → 2.36 s, list-to-first-cover 1.94 → 1.32 s; warm reopen ~0.65 s. Measure the remaining cover/paint cost on the quiet target PC; do not reuse the pre-fix 1.7 s estimate as current.
 - **Tablet cold thumbnails/startup:** measure first visits, cleared-cache/new-image cases, startup UI work, request counts/bytes and battery. `d8996552` / `4023d37a` implement immutable thumbnail keys; `0fb4afe0`, `15b33c62`, `8ba96f04`, `af8321ea`, `e85df550` implement cache, warming and catalog-entry improvements. Whole-migration completion and new cold-device timings are (unverified 2026-10-03).
 - **PC-POLISH-20261002 item 5 / Home:** measure screen/type/section entry, long-list scrolling, viewer open/close, first useful Home paint, section requests and idle CPU on PC dev/release and tablet cold/warm. Recheck lightweight-mode gates (`05b18b6`, `bf40389b`, `f0e7153a`) and background battery cost against new features.
@@ -239,11 +239,7 @@ unless marked verified; measure on the device/PC before optimising.
   `announced` history and the single executor queue grow for the session; Notes status decrypts and returns every body
   each sync; a full 3 GiB thumbnail cache re-sorts every file on each miss; `signal.cancel()` disconnects sockets on
   the UI thread in onPause/onStop.
-- **PC idle residue (follow-up to PERF-20261002):** verified — `workload.rs` asks the window `is_focused`/`is_visible`
-  every second (each a main-loop round trip); `character_incremental_status` polls every 5 s idle,
-  `cloud_backfill_progress` and `similarity_review_inbound_status` every 10 s even unfocused. Unverified: video hover
-  preview keeps swapping frames every 720 ms after Alt-Tab if the pointer stays on a tile; `CollectionReleases` sets a
-  fresh status object every 5 s; 48 px blur layer on the work screen and a permanent `will-change` on the filmstrip.
+- **PC idle residue:** fixed 2026-10-03 (see PERF-ALL-001).
 - **Server:** ticket executor threads are joined without a deadline at shutdown (a hung HEAD/DNS outlives the 6 s
   bound); thumbnail temp objects/sessions and CAS-lost final objects are never collected (manual CLI only); search
   suggestions normalise the whole vocabulary per keystroke and catalog fallback pages build the matching set twice;
