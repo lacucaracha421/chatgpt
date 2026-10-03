@@ -107,6 +107,7 @@ class FakeS36Cache:
 
     def __init__(self):
         self.entries, self.reads, self.writes = {}, [], []
+        self.identity = augmentation.feature_identity()
 
     def read(self, content_hash, boxes):
         self.reads.append(content_hash)

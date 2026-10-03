@@ -9,6 +9,7 @@ mod http_agent;
 pub mod library;
 mod window_size;
 mod workload;
+mod performance;
 pub use cloud::backfill::BackfillControlState;
 pub use cloud::thumbnail_refresh::{
     refresh_cloud_thumbnails, CloudThumbnailRefreshOptions, CloudThumbnailRefreshReport,
@@ -219,6 +220,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             workload::workload_profile,
+            performance::performance_profile,
             workload::workload_quit,
             workload::workload_close_window,
             workload::workload_cancel_scans,

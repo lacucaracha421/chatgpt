@@ -1,6 +1,7 @@
 """Pinned local S36 extraction for the standalone classifier; no network or DB."""
 from __future__ import annotations
 import ast
+import json
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +31,21 @@ def extraction_digest(source=None):
         elif isinstance(node, ast.ClassDef) and node.name == "SmallEncoder":
             for method in node.body:
                 if isinstance(method, ast.FunctionDef) and method.name in methods:
+                    # Scheduling does not change vector identity. Normalize only the
+                    # two thread arguments to the original CPU constructor; model,
+                    # provider and preprocessing changes still invalidate features.
+                    if method.name == "__init__":
+                        thread_names = {"intra_threads", "inter_threads"}
+                        remaining = [(arg, default) for arg, default in
+                                     zip(method.args.kwonlyargs, method.args.kw_defaults)
+                                     if arg.arg not in thread_names]
+                        method.args.kwonlyargs = [arg for arg, _ in remaining]
+                        method.args.kw_defaults = [default for _, default in remaining]
+                        for statement in method.body:
+                            if (isinstance(statement, ast.Assign)
+                                    and ast.dump(statement.value) == ast.dump(ast.parse(
+                                        "intra_threads, inter_threads", mode="eval").body)):
+                                statement.value = ast.parse("2, 1", mode="eval").body
                     selected.append(ast.dump(method, include_attributes=False))
                     found.add(method.name)
     if found != names | methods:
@@ -45,6 +61,40 @@ def contract(source=None):
 
 def feature_id():
     return fingerprint(contract())
+
+
+def pinned_feature_id():
+    from holdout_rules import is_hash
+    identity = json.loads(Path(__file__).with_name("s36_policy.json").read_text())["feature_id"]
+    if not is_hash(identity):
+        raise ValueError("Invalid pinned S36 feature identity")
+    return identity
+
+
+def s36_compatibility(models):
+    """Machine-local verification only; never infer equivalence from cache names."""
+    from holdout_rules import is_hash
+    path = Path(models) / "s36-compatibility.json"
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    if not isinstance(receipt, dict) or not all(
+            is_hash(key) and is_hash(value) for key, value in receipt.items()):
+        raise ValueError("Invalid S36 compatibility receipt")
+    return receipt
+
+
+def effective_feature_id(models=None):
+    computed = feature_id()
+    if models is not None:
+        try:
+            pinned = pinned_feature_id()
+            if s36_compatibility(models).get(computed) == pinned:
+                return pinned
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            pass
+    return computed
 
 
 def checked_image(path, expected_hash=None):
@@ -74,7 +124,7 @@ def validate(feature):
     return feature
 
 
-def load_feature(path, expected_hash):
+def load_feature(path, expected_hash, *, expected_feature_id=None):
     if Path(path).stat().st_size > 2 * 1024 * 1024:
         raise ValueError("Feature file exceeds budget")
     import zipfile
@@ -82,7 +132,8 @@ def load_feature(path, expected_hash):
         if sum(info.file_size for info in archive.infolist()) > 2 * 1024 * 1024:
             raise ValueError("Expanded feature file exceeds budget")
     with np.load(path, allow_pickle=False) as f:
-        if str(f["feature_id"].item()) != feature_id() or str(f["content_hash"].item()) != expected_hash:
+        identity = feature_id() if expected_feature_id is None else expected_feature_id
+        if str(f["feature_id"].item()) != identity or str(f["content_hash"].item()) != expected_hash:
             raise ValueError("Stale feature contract or source hash")
         boxes = f["boxes"]
         if boxes.ndim != 2 or boxes.shape[1] != 4 or not np.issubdtype(boxes.dtype, np.integer):
@@ -92,13 +143,13 @@ def load_feature(path, expected_hash):
 
 
 class SmallEncoder:
-    def __init__(self, small_model, detector_model):
+    def __init__(self, small_model, detector_model, *, intra_threads=2, inter_threads=1):
         if sha256(Path(small_model)) != SMALL_SHA256:
             raise ValueError("Unexpected S36 model")
         if sha256(Path(detector_model)) != BASELINE["sha256"]["character-detector.onnx"]:
             raise ValueError("Unexpected detector")
         opts = ort.SessionOptions()
-        opts.intra_op_num_threads, opts.inter_op_num_threads = 2, 1
+        opts.intra_op_num_threads, opts.inter_op_num_threads = intra_threads, inter_threads
         opts.add_session_config_entry("session.intra_op.allow_spinning", "0")
         self.feature = ort.InferenceSession(str(small_model), sess_options=opts, providers=["CPUExecutionProvider"])
         self.detector_path, self.options, self.detector = detector_model, opts, None

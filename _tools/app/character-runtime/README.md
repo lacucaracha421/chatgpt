@@ -327,6 +327,47 @@ reference leakage, and reports automatic/recommendation metrics without inferenc
 
 ## S36 primary-model preparation (stage 2a, code only)
 
+### Verify feature equivalence after moving PCs or upgrading Python
+
+Python build details are part of the computed B36/S36 fingerprints. Before reusing
+old features on another PC or Python build, run the installed runtime Python with
+`-B` from this directory (close the worker before verification):
+
+```text
+python -B feature_equivalence.py --library /fixture/library --models /existing/models --sample 60 --kind both
+python -B feature_equivalence.py --library /fixture/library --models /existing/models --sample 60 --kind both --write
+```
+
+The default is a dry-run that still recomputes a random sample of 60 cached images
+per kind. S36 always checks the namespace pinned by `s36_policy.json`. B36 selects
+the namespace containing the most recently written `.npz` entry; use
+`--from <full-old-b36-id>` to select it explicitly (also with `--kind both`).
+`--kind s36` and `--kind b36` verify only that kind. Sources are resolved through
+`library.sqlite` opened with `mode=ro`, restricted to normal image assets.
+Entries without a matching normal image in the DB are excluded before sampling
+and counted as `skipped_unresolvable`, not mismatches. If fewer than the requested
+number remain, all are checked; at least 20 resolvable entries per kind are required,
+and `--sample` must be at least 20.
+
+Every sampled source must be available and hash-valid; recomputed boxes, fallback
+and vectors must match exactly (`max_diff == 0`). Too few entries, corrupt caches,
+missing sources or any mismatch refuse receipt writes. JSON output includes the
+computed/old IDs, resolvable-entry and skipped counts, actual sample size,
+mismatches, maximum difference and errors. Exit 0
+means verification succeeded; failure returns 1. Sampling is evidence for those
+images, not a proof for every possible image.
+
+Only `--write`, after every requested kind passes, merges receipts in the models
+directory, replacing each file atomically. S36 uses `s36-compatibility.json`
+(`{"<computed-id>": "<pinned-id>"}`); B36 uses the existing
+`cache-compatibility.json` (`{"<computed-id>": ["<old-id>"]}`). Malformed existing
+receipts are never overwritten. The models directory must be outside the library.
+The tool never writes the library, database or feature caches. Restart the worker
+after writing. S36 uses the pinned identity and namespace only for an exact local
+receipt match; missing/malformed receipts retain the computed identity. Fingerprint
+computation, policy and thresholds are unchanged. Rerun verification after the
+runtime changes; do not copy another machine's receipt as verification.
+
 The primary native classifier remains B36. `baseline.json` and manual region
 bindings are unchanged. S36 `feature_id` now hashes only the encoder's contract,
 image validation, session setup, detector crop selection and extraction AST,

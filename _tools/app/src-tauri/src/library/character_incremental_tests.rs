@@ -557,6 +557,7 @@ for line in sys.stdin:
               'evidence':[{'matchedReferences':[0,1,2,3],'referenceDistances':[0.1]*len(refs)}]})
 "#).unwrap();
     RuntimeConfig {
+        performance: crate::performance::Profile::Laptop.budgets(),
         python: std::env::var_os("LAKOMICS_CHARACTER_TEST_PYTHON")
             .expect("explicit test Python")
             .into(),
@@ -1182,6 +1183,7 @@ fn real_native_incremental_queue_reuses_kisaki_references() {
         .unwrap();
     let target = f.ready("Kisaki");
     let config = RuntimeConfig {
+        performance: crate::performance::Profile::Laptop.budgets(),
         python: std::env::var_os("LAKOMICS_CHARACTER_TEST_PYTHON")
             .unwrap()
             .into(),
@@ -2352,6 +2354,7 @@ fn idle_config(f: &Fixture) -> RuntimeConfig {
     let mut s36 = crate::library::character_worker::S36Publication::default();
     s36.s36_series.insert(f.series.clone());
     RuntimeConfig {
+        performance: crate::performance::Profile::Laptop.budgets(),
         python: f.temp.path().join("no-python"),
         script,
         models: f.temp.path().into(),

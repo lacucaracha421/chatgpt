@@ -138,10 +138,10 @@ def potential_additions(native_accepted, bundle, head_decision, policy):
     return additions
 
 
-def feature_identity():
+def feature_identity(models=None):
     """Identity of the S36 feature contract (never of a model file on disk)."""
-    from character_encoder import contract
-    return fingerprint(contract())
+    from character_encoder import effective_feature_id
+    return effective_feature_id(models)
 
 
 def _sha256(path):
@@ -180,9 +180,9 @@ def augmentation_available(models, augmentation_model):
 class S36FeatureCache:
     """Atomic S36 features in the caller's cache, namespaced away from B36."""
 
-    def __init__(self, root, implementation=None, *, cleanup=True):
-        self.root = (Path(root) / S36_NAMESPACE
-                     / (feature_identity() if implementation is None else implementation))
+    def __init__(self, root, implementation=None, *, cleanup=True, models=None):
+        self.identity = feature_identity(models) if implementation is None else implementation
+        self.root = Path(root) / S36_NAMESPACE / self.identity
         if cleanup:
             # Do not unlink another process's active atomic write. Old legacy
             # hash.part names have no owner and receive a 24-hour grace period.
@@ -214,7 +214,7 @@ class S36FeatureCache:
             with zipfile.ZipFile(path) as archive:
                 if sum(info.file_size for info in archive.infolist()) > MAX_CACHE_BYTES:
                     return None
-            feature = load_feature(path, content_hash)
+            feature = load_feature(path, content_hash, expected_feature_id=self.identity)
         except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile):
             return None
         if [tuple(box) for box in feature.boxes] != [tuple(box) for box in boxes] or feature.fallback:
@@ -222,7 +222,6 @@ class S36FeatureCache:
         return feature
 
     def write(self, feature):
-        from character_encoder import feature_id
         self.root.mkdir(parents=True, exist_ok=True)
         destination = self.path(feature.content_hash)
         temporary = None
@@ -232,7 +231,7 @@ class S36FeatureCache:
                 temporary = Path(stream.name)
                 np.savez(stream, content_hash=feature.content_hash, vectors=feature.vectors,
                          boxes=np.asarray(feature.boxes, dtype=np.int64).reshape(-1, 4),
-                         fallback=feature.fallback, feature_id=feature_id())
+                         fallback=feature.fallback, feature_id=self.identity)
             os.replace(temporary, destination)
         finally:
             if temporary is not None:
@@ -302,7 +301,7 @@ class Session:
                 "references": sorted(self.references_key()),
                 "snapshot": self.snapshot_id, "snapshot_fingerprint": self.snapshot_fingerprint(),
                 "split": self.split, "exposures": sorted(self.exposure_hashes),
-                "sources": _source_identity(), "s36": feature_identity()}
+                "sources": _source_identity(), "s36": self.s36_cache.identity}
 
     def references_key(self):
         return ((target_id, reference["assetId"], reference["hash"], reference["role"])
@@ -598,7 +597,7 @@ class Model:
 
     def _prepare(self, request):
         candidate = Session(request, self.engine, self.b36_cache,
-                            S36FeatureCache(self.cache_root), self.encoder_for)
+                            S36FeatureCache(self.cache_root, models=self.models), self.encoder_for)
         resident = self.session
         if (resident is not None and resident.snapshot_id == candidate.snapshot_id
                 and resident.identity == candidate.identity):

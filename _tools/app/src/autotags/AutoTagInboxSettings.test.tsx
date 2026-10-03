@@ -90,3 +90,20 @@ it("keeps background success and errors in the shell status until dismissed", as
   act(() => result.current.dismiss());
   expect(result.current.status).toBeNull();
 });
+
+it("leaves inbox cadence to the native owner and handles completion events without a catch-up timer", async () => {
+  vi.useFakeTimers();
+  try {
+    const hook = renderHook(useAutoTagInboxStatus);
+    await act(async () => { await Promise.resolve(); });
+    const callback = vi.mocked(listen).mock.calls.find(([name]) => name === "library://auto-tag-inbox")![1];
+    for (const seconds of [120, 300, 3600]) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(seconds * 1000); });
+      expect(invoke).not.toHaveBeenCalledWith("run_auto_tag_inbox_now");
+    }
+    act(() => callback({ payload: { message: "가져오기 완료", error: false } } as never));
+    expect(hook.result.current.status).toEqual({ message: "가져오기 완료", error: false });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3600_000); });
+    expect(invoke).not.toHaveBeenCalledWith("run_auto_tag_inbox_now");
+  } finally { vi.useRealTimers(); }
+});

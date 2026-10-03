@@ -41,13 +41,27 @@ def read_requests(inbox, shadow_cancel):
         inbox.put(line)
 
 
-def main():
+def runtime_arguments(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--models", type=Path, required=True)
     parser.add_argument("--cache", type=Path, required=True)
     # Optional native-ready augmentation. No flag means no import at all.
     parser.add_argument("--augmentation-model", type=Path)
-    args = parser.parse_args()
+    parser.add_argument("--s36-intra-threads", type=int, choices=(2, 4), default=2)
+    parser.add_argument("--s36-inter-threads", type=int, choices=(1,), default=1)
+    parser.add_argument("--reference-cache-bytes", type=int,
+                        choices=(64 * 1024 * 1024, 128 * 1024 * 1024), default=64 * 1024 * 1024)
+    return parser.parse_args(argv)
+
+
+def configured_encoder(args):
+    from character_encoder import SmallEncoder
+    return SmallEncoder(args.augmentation_model, args.models / "character-detector.onnx",
+                        intra_threads=args.s36_intra_threads, inter_threads=args.s36_inter_threads)
+
+
+def main():
+    args = runtime_arguments()
     sys.stdin.reconfigure(encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")
     inbox = queue.Queue(maxsize=1)
@@ -69,7 +83,8 @@ def main():
         try:
             import character_augmentation
             augmenter, _ = character_augmentation.augmenter(args.models, args.augmentation_model,
-                                                            args.cache, engine, cache)
+                                                            args.cache, engine, cache,
+                                                            encoder_factory=lambda: configured_encoder(args))
             augmentation_available = augmenter is not None
             if augmenter is None:
                 augmenter = character_augmentation.Unavailable("model_unavailable")
@@ -78,8 +93,8 @@ def main():
     shadow_feature_id = None
     if augmentation_available:
         try:
-            from character_encoder import feature_id
-            shadow_feature_id = feature_id()
+            from character_encoder import effective_feature_id
+            shadow_feature_id = effective_feature_id(args.models)
         except Exception:
             pass
     emit({"type": "ready", "baselineFingerprint": FINGERPRINT,
@@ -95,7 +110,7 @@ def main():
     refs = None
     projected = None
     selections = []
-    bundles = ReferenceBundles(cache)
+    bundles = ReferenceBundles(cache, max_bytes=args.reference_cache_bytes)
     resident = None
     resident_path = None
     while True:

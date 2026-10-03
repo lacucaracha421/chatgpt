@@ -1,3 +1,5 @@
+import { getPerformanceProfile } from "../../app/performanceProfile";
+import { getWorkloadProfile } from "../../app/workloadProfile";
 import { drawGameCase } from "../drawGameCase";
 import { PaperbackEngine, PAPERBACK_FINAL, type BookTexture } from "./PaperbackEngine";
 import { RenderCache, THUMBNAIL_LIMIT, type Rank, type RenderResult, type Snapshot } from "./RenderCache";
@@ -79,7 +81,7 @@ export function attachLiveBook(host:HTMLElement, request:CoverRequest, onReady:(
     if(document.hidden) {cancelFrame(); return;}
     dirty=true;
     if(busy||timer!==null||raf) return;
-    timer=setTimeout(()=>{timer=null;raf=requestAnimationFrame(()=>{raf=0;void draw();});},Math.max(0,1000/30-(performance.now()-last)));
+    timer=setTimeout(()=>{timer=null;raf=requestAnimationFrame(()=>{raf=0;void draw();});},Math.max(0,1000/(getWorkloadProfile().restricted?30:getPerformanceProfile().budgets.liveBookFps)-(performance.now()-last)));
   }
   async function draw() {
     if(!current()||document.hidden||contextLost) return;

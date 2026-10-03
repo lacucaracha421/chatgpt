@@ -13,8 +13,8 @@ from collections import OrderedDict
 import numpy as np
 
 from character_augmentation import S36FeatureCache
-from character_encoder import feature_id, load_feature, validate
-from feature_cache import extraction_fingerprint, FeatureCache
+from character_encoder import effective_feature_id, load_feature, validate
+from feature_cache import compatible_feature_caches, extraction_fingerprint, FeatureCache
 from runtime import sha256
 from s36_scoring import knn, unit
 
@@ -35,10 +35,17 @@ def extract_query(model, request, cancelled=lambda: False):
     # Native queue has already extracted this image. Pure read: a missing B36
     # checkpoint abstains, it does not rerun detection or populate B36 caches.
     reader = FeatureCache.__new__(FeatureCache)
-    base = reader._read(Path(model.cache_root) / extraction_fingerprint() / (h + ".npz"), h)
+    computed = extraction_fingerprint()
+    models = getattr(model, "models", None)
+    compatible = compatible_feature_caches(models, computed) if models is not None else []
+    base = None
+    for identity in [computed, *compatible]:
+        base = reader._read(Path(model.cache_root) / identity / (h + ".npz"), h)
+        if base is not None:
+            break
     if base is None or base.fallback:
         return None
-    cache = S36FeatureCache(model.cache_root, cleanup=False)
+    cache = S36FeatureCache(model.cache_root, cleanup=False, models=getattr(model, "models", None))
     # Refuse redirected cache writes, including same-library symlinks.
     for directory in [Path(model.cache_root), *Path(model.cache_root).parents, cache.root.parent, cache.root, cache.path(h)]:
         if directory.is_symlink():
@@ -90,7 +97,7 @@ def cached_feature(cache, h):
     if any(p.is_symlink() for p in [path, *path.parents]):
         raise ValueError("S36 cache path must not contain symlinks")
     try:
-        feature = load_feature(path, h)
+        feature = load_feature(path, h, expected_feature_id=cache.identity)
     except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile):
         return None
     return None if feature.fallback else feature
@@ -101,7 +108,8 @@ def handle(model, request, cancelled=lambda: False):
         return handle_batch(model, request, cancelled)
     from replay_eval import time_ns
     check_cancel(cancelled)
-    if request["featureId"] != feature_id():
+    identity = effective_feature_id(getattr(model, "models", None))
+    if request["featureId"] != identity:
         raise ValueError("Shadow S36 feature identity mismatch")
     snapshot = Path(request["snapshotPath"])
     if snapshot.stat().st_size > 32 * 1024 * 1024:
@@ -114,7 +122,7 @@ def handle(model, request, cancelled=lambda: False):
     if not is_hash(request["hash"]):
         raise ValueError("Invalid query hash")
     features = {}
-    cache = S36FeatureCache(model.cache_root, cleanup=False)
+    cache = S36FeatureCache(model.cache_root, implementation=identity, cleanup=False)
     hashes = {row["asset_hash"] for row in data["references"]}
     hashes.update(row["asset_hash"] for row in data["decisions"])
     # No automatic labels or other targets are included in the native snapshot.
@@ -151,7 +159,7 @@ def handle(model, request, cancelled=lambda: False):
     scores = score(data, features, request["hash"], time_ns(request["scoredAt"]), cancelled, groups=groups, crops=crops)
     return {"type": "s36_shadow_result", "assetId": request["assetId"],
             "queryAvailable": query is not None and not query.fallback,
-            "contentHash": request["hash"], "featureId": feature_id(),
+            "contentHash": request["hash"], "featureId": identity,
             "scores": scores, "crops": crops}
 
 
@@ -243,7 +251,7 @@ def handle_batch(model, request, cancelled=lambda: False):
     from holdout_rules import is_hash
     from replay_eval import duplicate_groups, time_ns
     check_cancel(cancelled)
-    identity = feature_id()
+    identity = effective_feature_id(getattr(model, "models", None))
     if request["featureId"] != identity:
         raise ValueError("Shadow S36 feature identity mismatch")
     queries = request["queries"]
@@ -259,7 +267,7 @@ def handle_batch(model, request, cancelled=lambda: False):
     ids = [row["id"] for row in data["targets"]]
     if ids != request["targets"] or len(set(ids)) != len(ids) or not ids:
         raise ValueError("Shadow target roster mismatch")
-    cache = S36FeatureCache(model.cache_root, cleanup=False)
+    cache = S36FeatureCache(model.cache_root, implementation=identity, cleanup=False)
     resident = getattr(model, "shadow_features", None)
     if not isinstance(resident, GalleryFeatures) or resident.root != cache.root:
         resident = model.shadow_features = GalleryFeatures(cache)

@@ -245,12 +245,23 @@ impl Library {
 }
 
 /// Called by the existing native workload timer; no frontend timer or app startup I/O.
-#[derive(Default)]
 pub(crate) struct Schedule {
     root: Option<PathBuf>,
     due: Option<std::time::Instant>,
+    success_seconds: u64,
+    in_flight: Option<std::sync::mpsc::Receiver<bool>>,
+}
+impl Default for Schedule {
+    fn default() -> Self { Self::new(crate::performance::budgets().inbox_success_seconds) }
 }
 impl Schedule {
+    fn new(success_seconds: u64) -> Self {
+        Self { root: None, due: None, success_seconds, in_flight: None }
+    }
+    pub(crate) fn running(&mut self, completion: std::sync::mpsc::Receiver<bool>) {
+        self.in_flight = Some(completion);
+    }
+
     pub(crate) fn tick(
         &mut self,
         library: Option<&Library>,
@@ -260,12 +271,21 @@ impl Schedule {
         let root = library.map(|l| l.root().to_path_buf());
         if self.root != root {
             self.root = root;
+            self.in_flight = None;
             self.due = Some(now + Duration::from_secs(120));
+        }
+        if let Some(completion) = &self.in_flight {
+            match completion.try_recv() {
+                Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+                Ok(true) => {},
+                _ => self.due = Some(now + Duration::from_secs(RETRY_SECONDS as u64)),
+            }
+            self.in_flight = None;
         }
         if library.is_none() || restricted || !self.due.is_some_and(|due| now >= due) {
             return false;
         }
-        self.due = Some(now + Duration::from_secs(3600));
+        self.due = Some(now + Duration::from_secs(self.success_seconds));
         true
     }
 }

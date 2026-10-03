@@ -28,7 +28,6 @@ pub(crate) fn media_response(
     media_response_with_range(library, method, path, None)
 }
 
-const PREVIEW_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
 const PREVIEW_CACHE_CONTROL: &str = "private, max-age=86400";
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -143,7 +142,7 @@ impl PreviewCache {
 static PREVIEW_CACHE: OnceLock<Mutex<PreviewCache>> = OnceLock::new();
 
 fn preview_cache() -> &'static Mutex<PreviewCache> {
-    PREVIEW_CACHE.get_or_init(|| Mutex::new(PreviewCache::new(PREVIEW_CACHE_MAX_BYTES)))
+    PREVIEW_CACHE.get_or_init(|| Mutex::new(PreviewCache::new(crate::performance::budgets().preview_cache_bytes)))
 }
 
 fn cached_preview(

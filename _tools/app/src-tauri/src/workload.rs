@@ -448,6 +448,7 @@ pub(crate) fn close_to_tray(app: &tauri::AppHandle) -> bool {
 pub(crate) fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let _ = APP.set(app.clone());
     let path = app.path().app_config_dir()?.join("library-machine.json");
+    crate::performance::setup(&path)?;
     {
         let mut state = runtime()
             .lock()
@@ -617,8 +618,15 @@ fn start_timers(app: tauri::AppHandle) {
             if inbox.tick(current.as_ref(), profile.restricted, Instant::now()) {
                 if let Some(library) = current.clone() {
                     let handle = app.clone();
+                    let (finished, completion) = std::sync::mpsc::channel();
+                    inbox.running(completion);
                     std::thread::spawn(move || {
-                        let _ = crate::commands::auto_tags::run_inbox_and_report(&handle, &library);
+                        let result = crate::commands::auto_tags::run_inbox_and_report(&handle, &library);
+                        let success = result.is_ok_and(|result| {
+                            !result.processed.iter().any(|name| result.settings.last.as_ref()
+                                .and_then(|last| last.get(name)).is_some_and(|last| last.error.is_some()))
+                        });
+                        let _ = finished.send(success);
                     });
                 }
             }

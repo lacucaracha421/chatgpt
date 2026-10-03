@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { Select } from "../shared/ui/Select";
+import { usePerformanceProfile, updatePerformanceProfile, type MachinePerformance } from "./performanceProfile";
 import { Switch } from "../shared/ui/Switch";
 import { TextInput } from "../shared/ui/TextInput";
 import { useWorkloadProfile, updateWorkloadSettings, nativeWorkload } from "./workloadProfile";
@@ -28,6 +30,8 @@ export function LightweightModeToggle() {
 
 /** Settings rows for lightweight mode. The surrounding screen owns the group label. */
 export function WorkloadControls() {
+  const performance = usePerformanceProfile();
+  const [savingPerformance, setSavingPerformance] = useState(false);
   const profile = useWorkloadProfile();
   const [busy, setBusy] = useState(false);
   const [minutes, setMinutes] = useState(String(profile.autoEnterMinutes ?? 30));
@@ -44,7 +48,25 @@ export function WorkloadControls() {
     void updateWorkloadSettings({ autoEnterMinutes: value });
   };
   const status = profile.lightweight ? "절약 모드" : profile.restricted ? "절약 모드 해제 중" : "일반 모드";
+  const selectPerformance = async (value: MachinePerformance) => {
+    setSavingPerformance(true);
+    try { await updatePerformanceProfile(value); }
+    finally { setSavingPerformance(false); }
+  };
   return <>
+    <dl className="settings-view__property">
+      <dt>이 컴퓨터의 성능</dt>
+      <dd className="settings-view__inline-controls">
+        <Select label="이 컴퓨터의 성능" value={performance.selected} disabled={!performance.ready || savingPerformance}
+          onChange={event => void selectPerformance(event.target.value as MachinePerformance)}>
+          <option value="laptop">노트북</option>
+          <option value="main">메인 PC</option>
+        </Select>
+      </dd>
+    </dl>
+    <p className="settings-view__row-message">메인 PC는 CPU와 메모리를 더 사용합니다. 재시작 후 적용되며 절약 모드가 우선합니다.</p>
+    {performance.ready && performance.selected !== performance.active && <p className="settings-view__row-message" role="status">재시작 후 적용 · 현재 {performance.active === "main" ? "메인 PC" : "노트북"}</p>}
+    {performance.error && <p className="settings-view__row-message" role="alert">{performance.error}</p>}
     <dl className="settings-view__property">
       <dt>절약 모드</dt>
       <dd className="settings-view__status">{status}</dd>

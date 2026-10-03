@@ -14,7 +14,6 @@ const PAIRS_PER_BATCH: usize = 100_000;
 const PAIRS_PER_BATCH: usize = 2;
 const MATCHES_PER_BATCH: usize = 128;
 /// Queued Assets one automatic comparison pass handles.
-const AUTO_ASSETS_PER_BATCH: usize = 16;
 /// Review pairs one newly materialized Asset may open, closest first.
 const AUTO_MATCHES_PER_ASSET: usize = 16;
 static SCAN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -155,8 +154,7 @@ impl Library {
     /// similarity check at ingestion. Migration 0094 queues each one when its original bytes
     /// land here (`asset_authority_state.materialization` turns `complete`). This pass is run
     /// by the background `similarity` publication lane on every tick (at most every ten
-    /// seconds, never on the UI thread) and handles up to [`AUTO_ASSETS_PER_BATCH`] queued
-    /// Assets:
+    /// seconds, never on the UI thread) and handles a machine-profile-bounded batch of queued Assets:
     ///
     /// * a missing PDQ hash is computed through the lazy indexing path (one decode each);
     /// * each Asset is compared with every hashed library image using the explicit scan's
@@ -168,12 +166,21 @@ impl Library {
     /// Processed Assets leave the queue, including ones that cannot be compared (video, trash,
     /// low-quality or undecodable images). Returns the number of pairs created.
     pub(crate) fn run_similarity_auto_compare_batch(&self) -> Result<u64, LibraryError> {
-        self.run_similarity_auto_compare_with_policy(crate::workload::is_restricted)
+        self.run_similarity_auto_compare_with_budget(crate::workload::is_restricted, crate::performance::budgets().similarity_auto_assets)
     }
 
+    #[cfg(test)]
     fn run_similarity_auto_compare_with_policy(
         &self,
         is_restricted: impl Fn() -> bool,
+    ) -> Result<u64, LibraryError> {
+        self.run_similarity_auto_compare_with_budget(is_restricted, crate::performance::Profile::Laptop.budgets().similarity_auto_assets)
+    }
+
+    fn run_similarity_auto_compare_with_budget(
+        &self,
+        is_restricted: impl Fn() -> bool,
+        assets_per_batch: usize,
     ) -> Result<u64, LibraryError> {
         if is_restricted() {
             return Ok(0);
@@ -185,7 +192,7 @@ impl Library {
                  ORDER BY queued_at, asset_id LIMIT ?1",
             )?;
             let ids = statement
-                .query_map([AUTO_ASSETS_PER_BATCH as i64], |row| row.get(0))?
+                .query_map([assets_per_batch as i64], |row| row.get(0))?
                 .collect::<Result<Vec<_>, _>>()?;
             ids
         };
@@ -394,6 +401,32 @@ mod tests {
         models::{SimilarityDecision, SimilarityDecisionRequest},
         Library,
     };
+
+    #[test]
+    fn automatic_similarity_profiles_bound_each_pass_and_preserve_final_reviews() {
+        let mut results = Vec::new();
+        for profile in [crate::performance::Profile::Laptop, crate::performance::Profile::Main] {
+            let temp = TempDir::new().unwrap();
+            let library = Library::open(temp.path()).unwrap();
+            for index in 0..40 {
+                let id = format!("asset-{index:02}");
+                insert_asset(&library, &id, [0; 32], [0; 32]);
+                library.connection().unwrap().execute("INSERT INTO similarity_auto_compare_queue(asset_id,queued_at) VALUES(?1,'t')", [&id]).unwrap();
+            }
+            let budget = profile.budgets().similarity_auto_assets;
+            assert_eq!(library.run_similarity_auto_compare_with_budget(|| true, budget).unwrap(), 0);
+            library.run_similarity_auto_compare_with_budget(|| false, budget).unwrap();
+            let remaining: i64 = library.connection().unwrap().query_row("SELECT count(*) FROM similarity_auto_compare_queue", [], |r| r.get(0)).unwrap();
+            assert_eq!(remaining, 40 - budget as i64);
+            while library.connection().unwrap().query_row("SELECT count(*) FROM similarity_auto_compare_queue", [], |r| r.get::<_, i64>(0)).unwrap() > 0 {
+                library.run_similarity_auto_compare_with_budget(|| false, budget).unwrap();
+            }
+            let reviews = library.list_similarity_reviews(None, 200).unwrap();
+            results.push(reviews.total_count);
+        }
+        assert!(results[0] > 0);
+        assert_eq!(results[0], results[1]);
+    }
 
     #[test]
     fn automatic_comparison_keeps_queued_work_while_restricted_then_resumes() {

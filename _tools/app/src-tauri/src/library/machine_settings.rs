@@ -22,10 +22,18 @@ use super::error::LibraryError;
 struct MachineSettingsFile {
     #[serde(default)]
     workload: crate::workload::Settings,
+    #[serde(default, deserialize_with = "present_value", skip_serializing_if = "Option::is_none")]
+    performance: Option<serde_json::Value>,
+    #[serde(flatten)]
+    extra: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     new_ingests: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     libraries: BTreeMap<String, LibraryEntry>,
+}
+
+fn present_value<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error> {
+    serde_json::Value::deserialize(deserializer).map(Some)
 }
 
 /// A present entry is authoritative for this machine; `manga_root: None` means
@@ -235,4 +243,75 @@ pub(crate) fn set_auto_tag_inbox(
     let mut file = read_file(path)?;
     file.libraries.entry(library_id.to_owned()).or_default().auto_tag_inbox = value;
     write_file(path, &file)
+}
+
+/// Unknown versions/profiles remain opaque on unrelated writes.
+pub(crate) fn performance(path: &Path) -> Result<crate::performance::Profile, LibraryError> {
+    let value = read_file(path)?.performance;
+    Ok(match value.as_ref() {
+        Some(value) if value.get("version").and_then(serde_json::Value::as_u64) == Some(1)
+            && value.get("profile").and_then(serde_json::Value::as_str) == Some("main") => crate::performance::Profile::Main,
+        _ => crate::performance::Profile::Laptop,
+    })
+}
+pub(crate) fn set_performance(path: &Path, profile: crate::performance::Profile) -> Result<(), LibraryError> {
+    let _guard = FILE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut file = read_file(path)?;
+    file.performance = Some(serde_json::json!({ "version": 1, "profile": profile }));
+    write_file(path, &file)
+}
+
+#[cfg(test)]
+mod performance_tests {
+    use super::*;
+    use crate::performance::Profile;
+
+    #[test]
+    fn missing_and_unknown_profiles_are_conservative_without_startup_writes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("machine.json");
+        assert_eq!(performance(&path).unwrap(), Profile::Laptop);
+        assert!(!path.exists());
+        for value in [serde_json::json!({}), serde_json::json!({"performance": null}),
+            serde_json::json!({"performance": {"version": 2, "profile": "main", "future": true}}),
+            serde_json::json!({"performance": {"version": 1, "profile": "future"}}),
+            serde_json::json!({"performance": {"profile": "main"}}),
+            serde_json::json!({"performance": "unknown"})] {
+            let bytes = serde_json::to_vec(&value).unwrap();
+            fs::write(&path, &bytes).unwrap();
+            assert_eq!(performance(&path).unwrap(), Profile::Laptop);
+            assert_eq!(fs::read(&path).unwrap(), bytes);
+            set_workload(&path, crate::workload::Settings::default()).unwrap();
+            set_entry(&path, "a", LibraryEntry::default()).unwrap();
+            set_new_ingests(&path, "a", BTreeSet::new()).unwrap();
+            set_auto_tag_inbox(&path, "a", Default::default()).unwrap();
+            let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            assert_eq!(saved.get("performance"), value.get("performance"));
+        }
+    }
+
+    #[test]
+    fn performance_is_per_machine_and_preserves_saving_preferences_and_library_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = temp.path().join("first/machine.json");
+        let second = temp.path().join("second/machine.json");
+        let workload_settings = crate::workload::Settings { lightweight: true, auto_enter_minutes: Some(15), close_to_tray: false };
+        for path in [&first, &second] {
+            set_entry(path, "same-library", LibraryEntry { manga_root: Some("/local/manga".into()), ..Default::default() }).unwrap();
+            set_entry(path, "another-library", LibraryEntry::default()).unwrap();
+            set_workload(path, workload_settings.clone()).unwrap();
+        }
+        set_performance(&first, Profile::Main).unwrap();
+        assert_eq!(performance(&first).unwrap(), Profile::Main);
+        assert_eq!(performance(&second).unwrap(), Profile::Laptop);
+        assert_eq!(workload(&first).unwrap(), workload_settings);
+        assert_eq!(entry(&first, "same-library").unwrap(), entry(&second, "same-library").unwrap());
+        assert_eq!(entry(&first, "another-library").unwrap(), entry(&second, "another-library").unwrap());
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&first).unwrap()).unwrap();
+        assert_eq!(saved["performance"], serde_json::json!({"version": 1, "profile": "main"}));
+        assert!(saved["libraries"]["same-library"].get("performance").is_none());
+        fs::write(&first, b"invalid").unwrap();
+        assert!(set_performance(&first, Profile::Laptop).is_err());
+        assert_eq!(fs::read(&first).unwrap(), b"invalid");
+    }
 }

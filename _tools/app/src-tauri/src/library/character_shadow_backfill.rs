@@ -423,6 +423,7 @@ mod tests {
         )
         .unwrap();
         RuntimeConfig {
+            performance: crate::performance::Profile::Laptop.budgets(),
             python: std::env::var_os("LAKOMICS_CHARACTER_TEST_PYTHON")
                 .map(Into::into)
                 .unwrap_or_else(|| "unused".into()),

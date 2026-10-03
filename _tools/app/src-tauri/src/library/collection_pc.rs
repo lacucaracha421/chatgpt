@@ -480,6 +480,7 @@ mod tests {
         std::fs::write(t.path().join("cover.png"), b"fixture bytes").unwrap();
         std::fs::write(&script, "print('{\"focusX\":0.25,\"method\":\"head\"}')").unwrap();
         let config = RuntimeConfig {
+            performance: crate::performance::Profile::Laptop.budgets(),
             python: std::path::PathBuf::from("/usr/bin/python3"),
             script: t.path().join("scan_worker.py"),
             models: t.path().into(),

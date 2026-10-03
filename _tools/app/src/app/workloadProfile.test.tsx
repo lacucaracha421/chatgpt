@@ -1,6 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 const bridge = vi.hoisted(() => ({ invoke: vi.fn(), handlers: new Map<string, (event: { payload: unknown }) => void>() }));
+vi.mock("./performanceProfile", () => ({ loadPerformanceProfile: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: bridge.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async (name, callback) => { bridge.handlers.set(name, callback); return () => bridge.handlers.delete(name); }) }));
 afterEach(() => { cleanup(); Reflect.deleteProperty(window, "__TAURI_INTERNALS__"); bridge.handlers.clear(); vi.resetModules(); vi.clearAllMocks(); });

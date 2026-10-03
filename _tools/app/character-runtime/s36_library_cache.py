@@ -16,7 +16,7 @@ import time
 import zipfile
 
 from character_augmentation import S36FeatureCache
-from character_encoder import SmallEncoder, checked_image, feature_id, load_feature, validate
+from character_encoder import SmallEncoder, checked_image, effective_feature_id, load_feature, validate
 from feature_cache import FeatureCache, extraction_fingerprint
 from holdout_rules import is_hash
 from replay_dataset import load_dataset, locate
@@ -64,9 +64,9 @@ def prepare(items, library, models, *, cpu_minutes, stop, limit=None,
     import math
     if not math.isfinite(cpu_minutes) or cpu_minutes < 0 or (limit is not None and limit < 0):
         raise ValueError("CPU budget and limit must be finite and nonnegative")
-    identity = feature_id()
+    identity = effective_feature_id(models)
     if not dry_run and expect_namespace != identity:
-        raise ValueError("--expect-namespace must match the computed feature_id")
+        raise ValueError("--expect-namespace must match the effective feature_id")
     if expect_namespace is not None and expect_namespace != identity:
         raise ValueError("Unexpected S36 feature namespace")
     if any(not is_hash(h) or not isinstance(kind, str) for h, kind in items.items()):
@@ -113,7 +113,7 @@ def prepare(items, library, models, *, cpu_minutes, stop, limit=None,
         if destination.is_symlink():
             raise ValueError("Cache entry must not be a symlink")
         try:
-            saved = load_feature(destination, h)
+            saved = load_feature(destination, h, expected_feature_id=identity)
         except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile):
             saved = None
         if saved is not None and not saved.fallback:
@@ -175,7 +175,7 @@ def prepare(items, library, models, *, cpu_minutes, stop, limit=None,
         if halted():
             break
         cache_path_guard(cache.root, library)
-        if feature_id() != identity:
+        if effective_feature_id(models) != identity:
             raise ValueError("S36 feature namespace changed during extraction")
         cache.write(feature)
         report["written"] += 1

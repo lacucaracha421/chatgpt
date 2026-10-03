@@ -335,9 +335,14 @@ class ShadowTests(unittest.TestCase):
                     if warm:
                         read.assert_not_called()
 
-    def test_feature_identity_still_matches_pinned_policy(self):
+    def test_feature_identity_matches_pinned_policy_only_with_local_receipt(self):
+        from character_encoder import effective_feature_id
         policy = json.loads(Path(__file__).with_name("s36_policy.json").read_text())
-        self.assertEqual(feature_id(), policy["feature_id"])
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertEqual(effective_feature_id(folder), feature_id())
+            (Path(folder) / "s36-compatibility.json").write_text(
+                json.dumps({feature_id(): policy["feature_id"]}))
+            self.assertEqual(effective_feature_id(folder), policy["feature_id"])
 
     def test_multi_person_manual_witness_without_references_abstains(self):
         data = dataset(); data["references"] = []

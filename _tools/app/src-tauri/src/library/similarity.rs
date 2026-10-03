@@ -27,7 +27,6 @@ use super::{
 pub(super) const PDQ_QUALITY_MIN: u8 = 50;
 pub(super) const PDQ_DISTANCE_MAX: u32 = 20;
 const INDEX_BATCH_SIZE: u32 = 50;
-const INDEX_WORKERS: usize = 2;
 // Bound decoding across overlapping UI requests, including a reopened library.
 static INDEX_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -519,6 +518,10 @@ impl Library {
     }
 
     pub fn index_missing_similarity_hashes(&self) -> Result<SimilarityIndexProgress, LibraryError> {
+        self.index_missing_similarity_hashes_with_budget(crate::performance::budgets())
+    }
+
+    fn index_missing_similarity_hashes_with_budget(&self, budget: crate::performance::Budgets) -> Result<SimilarityIndexProgress, LibraryError> {
         let _index = INDEX_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -541,7 +544,8 @@ impl Library {
         };
 
         let workers =
-            std::thread::available_parallelism().map_or(1, |count| count.get().min(INDEX_WORKERS));
+            budget.indexing_workers(
+                std::thread::available_parallelism().map_or(1, |count| count.get()));
         std::thread::scope(|scope| {
             let handles: Vec<_> = asset_ids
                 .chunks(asset_ids.len().div_ceil(workers).max(1))
@@ -1291,6 +1295,24 @@ mod tests {
             .find_similar_asset(&low_quality_target, (100, 100))
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn similarity_profiles_produce_identical_hashes_and_keep_the_fifty_asset_batch() {
+        let mut snapshots = Vec::new();
+        for profile in [crate::performance::Profile::Laptop, crate::performance::Profile::Main] {
+            let fixture = library_with_unindexed_assets(51);
+            let first = fixture.library.index_missing_similarity_hashes_with_budget(profile.budgets()).unwrap();
+            assert_eq!((first.remaining, first.failed), (1, 1));
+            let second = fixture.library.index_missing_similarity_hashes_with_budget(profile.budgets()).unwrap();
+            assert_eq!((second.remaining, second.failed), (0, 1));
+            let connection = fixture.library.connection().unwrap();
+            let mut query = connection.prepare("SELECT id, perceptual_hash, perceptual_hash_error FROM assets ORDER BY id").unwrap();
+            let rows = query.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<Vec<u8>>>(1)?, r.get::<_, Option<String>>(2)?))).unwrap()
+                .collect::<Result<Vec<_>, _>>().unwrap();
+            snapshots.push(rows);
+        }
+        assert_eq!(snapshots[0], snapshots[1]);
     }
 
     #[test]

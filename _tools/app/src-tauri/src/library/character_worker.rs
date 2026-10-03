@@ -19,6 +19,8 @@ const MAX_MESSAGE: u64 = 256 * 1024;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeConfig {
+    #[serde(skip, default = "crate::performance::budgets")]
+    pub(super) performance: crate::performance::Budgets,
     pub(super) python: PathBuf,
     pub(super) script: PathBuf,
     pub(super) models: PathBuf,
@@ -93,6 +95,14 @@ impl SavedRuntime {
 }
 
 impl RuntimeConfig {
+    fn performance_args(&self) -> [String; 6] {
+        [
+            "--s36-intra-threads".into(), self.performance.s36_intra_threads.to_string(),
+            "--s36-inter-threads".into(), self.performance.s36_inter_threads.to_string(),
+            "--reference-cache-bytes".into(), self.performance.reference_cache_bytes.to_string(),
+        ]
+    }
+
     fn load(script: PathBuf, settings: &Path) -> Result<SavedRuntime> {
         let baseline_override = std::env::var_os("LAKOMICS_CHARACTER_PYTHON").is_some()
             || std::env::var_os("LAKOMICS_CHARACTER_MODELS").is_some();
@@ -119,6 +129,7 @@ impl RuntimeConfig {
             || std::env::var_os("LAKOMICS_CHARACTER_MODELS").is_some()
         {
             Self {
+                performance: crate::performance::budgets(),
                 python: path("LAKOMICS_CHARACTER_PYTHON")?,
                 models: path("LAKOMICS_CHARACTER_MODELS")?,
                 script,
@@ -405,6 +416,7 @@ impl RuntimeConfig {
         settings: &Path,
     ) -> Result<()> {
         let config = Self {
+            performance: crate::performance::budgets(),
             python,
             models,
             script,
@@ -640,6 +652,7 @@ impl Worker {
             .arg(&config.script)
             .arg("--models")
             .arg(&config.models)
+            .args(config.performance_args())
             .arg("--cache")
             .arg(cache)
             .stdin(Stdio::piped())

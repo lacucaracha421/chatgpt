@@ -243,6 +243,7 @@ fn wait(library: &Library) -> ScanStatus {
 
 fn config(script: PathBuf, models: PathBuf) -> RuntimeConfig {
     RuntimeConfig {
+        performance: crate::performance::Profile::Laptop.budgets(),
         python: std::env::var_os("LAKOMICS_CHARACTER_TEST_PYTHON")
             .expect("set test Python")
             .into(),

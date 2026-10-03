@@ -186,7 +186,7 @@ class LibraryCacheTests(unittest.TestCase):
         self.b36(h)
         before = self.snapshot()
         identity = feature_id()
-        with patch.object(tool, 'feature_id', side_effect=[identity, 'f'*64]):
+        with patch.object(tool, 'effective_feature_id', side_effect=[identity, 'f'*64]):
             with self.assertRaisesRegex(ValueError, 'namespace changed'):
                 self.run_prepare({h: 'image'})
         self.assertEqual(self.snapshot(), before)

@@ -11,6 +11,7 @@ fn augmentation_settings_keep_the_selected_model_when_disabled() {
         std::fs::write(path, b"fixture").unwrap();
     }
     let config = RuntimeConfig {
+        performance: crate::performance::Profile::Laptop.budgets(),
         python: python_path,
         script: script.clone(),
         models: temp.path().to_owned(),
@@ -49,6 +50,7 @@ fn invalid_augmentation_model_does_not_overwrite_settings() {
     let model = temp.path().join("augmentation").join("model_feat.onnx");
     std::fs::write(&script, b"fixture").unwrap();
     let config = RuntimeConfig {
+        performance: crate::performance::Profile::Laptop.budgets(),
         python: script.clone(),
         script: script.clone(),
         models: temp.path().to_owned(),
@@ -77,6 +79,7 @@ fn preconnected_model_is_resolved_without_enabling_legacy_runtime() {
     std::fs::write(&model, b"fixture").unwrap();
     std::fs::write(&script, b"fixture").unwrap();
     let config = RuntimeConfig {
+        performance: crate::performance::Profile::Laptop.budgets(),
         python: script.clone(),
         script: script.clone(),
         models: temp.path().to_owned(),
@@ -159,6 +162,7 @@ fn child_cancellation_deadline_exit_and_oversized_output_are_bounded() {
         .unwrap();
         let cancel = Arc::new(AtomicBool::new(false));
         let config = RuntimeConfig {
+            performance: crate::performance::Profile::Laptop.budgets(),
             python: python(),
             script,
             models: temp.path().into(),
@@ -250,6 +254,7 @@ fn character_shadow_worker_response_is_preemptible() {
     let script = temp.path().join("worker.py");
     std::fs::write(&script, "import sys,json\nfor line in sys.stdin:\n r=json.loads(line)\n print(json.dumps({'type':'s36_shadow_unavailable' if r['type']=='s36_shadow_cancel' else 'native_still_ready'}),flush=True)\n").unwrap();
     let config = RuntimeConfig {
+        performance: crate::performance::Profile::Laptop.budgets(),
         python: std::env::var_os("LAKOMICS_CHARACTER_TEST_PYTHON")
             .unwrap()
             .into(),
@@ -271,4 +276,23 @@ fn character_shadow_worker_response_is_preemptible() {
     assert!(start.elapsed() < Duration::from_secs(1));
     worker.send(&serde_json::json!({"type":"native"})).unwrap();
     assert_eq!(worker.receive().unwrap()["type"], "native_still_ready");
+}
+
+#[test]
+fn performance_budgets_reach_worker_arguments_but_not_saved_runtime_settings() {
+    for profile in [crate::performance::Profile::Laptop, crate::performance::Profile::Main] {
+        let config = RuntimeConfig {
+            performance: profile.budgets(), python: "python".into(), script: "worker.py".into(),
+            models: "models".into(), augmentation_model: None, s36_shadow_disabled: false,
+            shadow_model: None, s36: Default::default(),
+        };
+        assert_eq!(config.performance_args(), [
+            "--s36-intra-threads".to_string(), profile.budgets().s36_intra_threads.to_string(),
+            "--s36-inter-threads".to_string(), "1".to_string(),
+            "--reference-cache-bytes".to_string(), profile.budgets().reference_cache_bytes.to_string(),
+        ]);
+        let saved = serde_json::to_value(&config).unwrap();
+        assert!(saved.get("performance").is_none());
+        assert!(saved.get("s36_intra_threads").is_none());
+    }
 }

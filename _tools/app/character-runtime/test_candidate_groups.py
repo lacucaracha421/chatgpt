@@ -5,11 +5,12 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 import candidate_groups as cg
-from character_encoder import feature_id
+from character_encoder import effective_feature_id, feature_id, pinned_feature_id
 
 SCHEMA_SQL = """
 CREATE TABLE assets(id, content_hash, media_kind, width, height, thumbnail_relative_path, source_url,
@@ -90,7 +91,13 @@ class ReportTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.library = Path(temp.name) / "library"
-        features = self.library / ".cache/characters" / cg.S36_NAMESPACE / feature_id()
+        self.models = Path(temp.name) / "models"
+        self.models.mkdir()
+        (self.models / "s36-compatibility.json").write_text(
+            json.dumps({feature_id(): pinned_feature_id()}))
+        identity = effective_feature_id(self.models)
+        self.assertEqual(identity, pinned_feature_id())
+        features = self.library / ".cache/characters" / cg.S36_NAMESPACE / identity
         features.mkdir(parents=True)
         rng = np.random.default_rng(0)
         axes = np.eye(768, dtype=np.float32)
@@ -99,7 +106,7 @@ class ReportTests(unittest.TestCase):
         for n, (axis, prefix) in enumerate([(0, "a")] * 8 + [(1, "b")] * 6 + [(2, "c")]):
             h = f"{n:064x}"
             vector = axes[axis] + 0.005 * rng.standard_normal(768).astype(np.float32)
-            np.savez(features / f"{h}.npz", feature_id=feature_id(), content_hash=h,
+            np.savez(features / f"{h}.npz", feature_id=identity, content_hash=h,
                      boxes=np.asarray([[0, 0, 50, 100]], np.int32), vectors=vector[None], fallback=False)
             rows.append((f"{prefix}{n}", h, "image", 100, 200, f"thumbnails/{h}.webp",
                          f"https://x.com/u/status/{n}/photo/1", None, None, "normal", None))
@@ -118,7 +125,10 @@ class ReportTests(unittest.TestCase):
 
     def build(self):
         stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout):
+        # The standalone CLI has no models argument; provide the fixture's
+        # receipt-backed identity at its contract boundary, including cache reads.
+        identity = effective_feature_id(self.models)
+        with contextlib.redirect_stdout(stdout), patch("character_encoder.feature_id", return_value=identity):
             cg.main(["build", "--library", str(self.library), "--database", str(self.database),
                      "--output-dir", str(self.output)])
         return json.loads((self.output / "report.json").read_text(encoding="utf-8"))
@@ -131,6 +141,7 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(set(report), {"schema", "policy", "shadow_only", "label_rule", "summary",
                                        "expand_known", "new_candidates", "library_root", "generated_at"})
         summary = report["summary"]
+        self.assertEqual(report["policy"]["feature_id"], pinned_feature_id())
         self.assertEqual((summary["expand_known_groups"], summary["expand_known_suggested_assets"],
                           summary["new_candidate_groups"]), (1, 5, 1))
         group = report["expand_known"][0]
@@ -157,6 +168,16 @@ class ReportTests(unittest.TestCase):
             for key in ("total_seconds", "graph_and_clustering_seconds"):
                 r["summary"].pop(key)
         self.assertEqual(report, again)
+
+    def test_unverified_identity_is_rejected(self):
+        (self.models / "s36-compatibility.json").unlink()
+        with patch("character_encoder.feature_id", return_value="f" * 64), \
+                contextlib.redirect_stderr(io.StringIO()) as stderr:
+            with self.assertRaises(SystemExit) as error:
+                self.build()
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn("feature_id differs", stderr.getvalue())
+        self.assertFalse((self.output / "report.json").exists())
 
 
 if __name__ == "__main__":

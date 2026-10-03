@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { loadPerformanceProfile } from "./performanceProfile";
 
 export type WorkloadSettings = { lightweight: boolean; autoEnterMinutes: number | null; closeToTray: boolean };
 export type WorkloadProfile = WorkloadSettings & { restricted: boolean; hidden: boolean; trayAvailable: boolean; ready: boolean; error: string | null };
@@ -13,6 +14,7 @@ function accept(next: Omit<WorkloadProfile, "ready" | "error">) { publish({ ...n
 async function start() {
   if (started || !nativeWorkload()) return;
   started = true;
+  void loadPerformanceProfile();
   try {
     let received = false;
     await listen<Omit<WorkloadProfile, "ready" | "error">>("workload://changed", ({ payload }) => { received = true; accept(payload); });

@@ -127,3 +127,31 @@ fn auto_tag_inbox_schedule_waits_two_minutes_then_hourly() {
     assert!(schedule.tick(Some(&f.library), false, now + Duration::from_secs(3721)));
     assert!(!schedule.tick(None, false, now + Duration::from_secs(7321)));
 }
+
+#[test]
+fn inbox_profiles_keep_initial_delay_recovery_gate_and_error_backoff_without_catchup() {
+    let f = Fixture::new();
+    for profile in [crate::performance::Profile::Laptop, crate::performance::Profile::Main] {
+        let seconds = profile.budgets().inbox_success_seconds;
+        let now = std::time::Instant::now();
+        let mut schedule = Schedule::new(seconds);
+        assert!(!schedule.tick(Some(&f.library), false, now));
+        assert!(!schedule.tick(Some(&f.library), false, now + Duration::from_secs(119)));
+        assert!(!schedule.tick(Some(&f.library), true, now + Duration::from_secs(120)));
+        assert!(schedule.tick(Some(&f.library), false, now + Duration::from_secs(121)));
+        let (send, receive) = std::sync::mpsc::channel();
+        schedule.running(receive);
+        assert!(!schedule.tick(Some(&f.library), false, now + Duration::from_secs(122 + seconds)));
+        send.send(true).unwrap();
+        assert!(schedule.tick(Some(&f.library), false, now + Duration::from_secs(122 + seconds)));
+        assert!(!schedule.tick(Some(&f.library), false, now + Duration::from_secs(122 + seconds)));
+        let (send, receive) = std::sync::mpsc::channel();
+        schedule.running(receive);
+        send.send(false).unwrap();
+        let failed = now + Duration::from_secs(123 + seconds);
+        assert!(!schedule.tick(Some(&f.library), false, failed));
+        assert!(!schedule.tick(Some(&f.library), false, failed + Duration::from_secs(3599)));
+        assert!(schedule.tick(Some(&f.library), false, failed + Duration::from_secs(3600)));
+        assert!(!schedule.tick(Some(&f.library), false, failed + Duration::from_secs(3600)));
+    }
+}
