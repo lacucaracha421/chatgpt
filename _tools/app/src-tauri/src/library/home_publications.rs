@@ -208,7 +208,7 @@ impl Library {
         // Cover uploads go through the Collections artwork route, which takes the device API
         // token (as the Collections replica does); the home PUT/intent routes take the publisher.
         let api = super::credential::read_cloud_api_token_os()?;
-        let client = CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         self.run_home_with(
             &ApiArtwork {
                 client: &client,
@@ -277,6 +277,7 @@ impl Library {
                     }
                 }
             }
+            if self.sync_held(&endpoint) { return Ok(()); }
             if !build_due && state.next_build > clock && state.cursor == previous_cursor {
                 return Ok(());
             }

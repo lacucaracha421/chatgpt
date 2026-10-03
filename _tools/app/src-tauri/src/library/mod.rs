@@ -138,6 +138,7 @@ pub mod legacy_migration;
 pub mod legacy_package_migration;
 mod lock;
 pub(crate) mod machine_settings;
+pub mod sync_hold;
 mod manga;
 pub mod manga_index;
 pub(crate) mod manga_index_sync;
@@ -297,6 +298,7 @@ pub struct Library {
     // Machine-local settings file (app config dir) for per-computer values such as
     // the manga root. None keeps the legacy shared-database behaviour (tests, tools).
     machine_settings_path: Arc<RwLock<Option<PathBuf>>>,
+    sync_hold_session: Arc<sync_hold::Session>,
     pub(crate) new_ingests: Arc<Mutex<std::collections::BTreeSet<String>>>,
     pub(crate) replication_lock: Arc<Mutex<()>>,
     pub(crate) collection_publication_defer: Arc<Mutex<crate::cloud::auto_publication::Deferral>>,
@@ -412,6 +414,7 @@ impl Library {
             igdb_token_cache: igdb::IgdbTokenCache::default(),
             igdb_request_limiter: igdb::IgdbRequestLimiter::default(),
             machine_settings_path: Arc::default(),
+            sync_hold_session: sync_hold::process_session(),
             new_ingests: Arc::default(),
             replication_lock: Arc::default(),
             collection_publication_defer: Arc::default(),
@@ -458,6 +461,9 @@ impl Library {
             .machine_settings_path
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(path);
+        if let Ok(config) = self.cloud_sync_config() {
+            if let Some(endpoint) = config.api_base_url { let _ = self.sync_gate(&endpoint); }
+        }
     }
 
     pub(crate) fn remember_new_ingest(&self, id: &str, pending: bool) {

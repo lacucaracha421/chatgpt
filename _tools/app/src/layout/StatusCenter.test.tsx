@@ -301,3 +301,14 @@ it("reports skipped mobile character exclusions as information", () => {
   expect(summary.problemCount).toBe(0);
   expect(summary.notes).toEqual(["적용하지 못한 모바일 캐릭터 제외 2개 · 최근: 삭제된 캐릭터"]);
 });
+
+it("reports held lanes and missing tablet targets as waiting, retaining receive failures", () => {
+  const summary = authoritySyncSummary({ ...healthy, authorityHeld: true,
+    assets: { ...healthy.assets, held: true },
+    syncHold: { held: true, releaseAfterRestart: false, tabletWait: { count: 2, targetIds: ["asset-a", "collection-b"] } },
+    assetLaneFailure: { code: "unauthorized", at: "2026-10-04" },
+  });
+  expect(summary.problemCount).toBe(1);
+  expect(summary.problems).toEqual(["서버 동기화 실패 · 서버가 인증을 거부함"]);
+  expect(summary.notes).toEqual(["삭제·복원 변경 · 송신 보류", "앨범·분류 변경 · 송신 보류로 대기", "태블릿 변경 2개가 누락된 항목을 기다립니다 · asset-a, collection-b"]);
+});

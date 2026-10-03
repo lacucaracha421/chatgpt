@@ -1100,7 +1100,10 @@ impl Library {
         self.notes_sync_with(&key, &endpoint, &token)
     }
     fn notes_sync_with(&self, key: &[u8], endpoint: &str, token: &str) -> Result<State> {
-        let client = crate::cloud::client::CloudClient::new(&endpoint)?;
+        let client = self.cloud_client(&endpoint)?;
+        self.notes_sync_with_client(key, endpoint, token, &client)
+    }
+    fn notes_sync_with_client(&self, key: &[u8], endpoint: &str, token: &str, client: &crate::cloud::client::CloudClient) -> Result<State> {
         {
             let db = self.connection()?;
             if let Some(bound) = state_value(&db, "endpoint")? {
@@ -1127,6 +1130,7 @@ impl Library {
             let db = self.connection()?;
             set_state(&db, "endpoint", &endpoint)?;
         }
+        if self.sync_held(endpoint) || client.held() { return self.notes_state_with_key(key); }
         let pending = {
             let db = self.connection()?;
             let mut stmt=db.prepare("SELECT id,payload,remote_revision,operation_id,local_revision FROM notes WHERE dirty=1 AND conflict IS NULL")?;
@@ -1168,6 +1172,24 @@ impl Library {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn receive_only_hold_keeps_notes_dirty_after_reading_remote_notes() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        let endpoint = "http://127.0.0.1";
+        library.use_machine_settings(temp.path().join("machine.json"));
+        library.set_cloud_sync_hold(endpoint, true).unwrap();
+        let key = [24; 32];
+        let id = uuid::Uuid::new_v4().to_string();
+        library.notes_save_with_key(&key, draft(&id, "Pending note", 0)).unwrap();
+        let (client, requests) = crate::cloud::client::CloudClient::home_test_client(vec![serde_json::json!({"items":[],"nextCursor":null})]);
+        let state = library.notes_sync_with_client(&key, endpoint, "api", &client).unwrap();
+        assert!(state.notes.iter().any(|note| note.id == id && note.pending));
+        assert_eq!(state.last_synced_at, None);
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].starts_with(b"GET /v1/notes/"));
+    }
     #[test]
     #[cfg(any(windows, target_os = "linux"))]
     #[ignore = "Opt-in native credential store integration; isolated temporary library"]

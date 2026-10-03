@@ -346,9 +346,10 @@ impl Library {
         &self,
         progress: Reporter<'_>,
     ) -> Result<CloudCollectionsPublishResult, LibraryError> {
+        self.ensure_cloud_send()?;
         report(progress, "connecting", 0, None, "items");
         let config = self.cloud_sync_config()?;
-        let client = CloudClient::new(
+        let client = self.cloud_client(
             config
                 .api_base_url
                 .as_deref()
@@ -377,6 +378,8 @@ impl Library {
         publisher: Option<&str>,
         progress: Reporter<'_>,
     ) -> Result<CloudCollectionsPublishResult, LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         let status = client.collections_status(token)?;
         // Receive before the revision and snapshot are read, so the snapshot reflects every
         // edit up to the cursor it advertises.

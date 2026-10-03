@@ -364,6 +364,7 @@ impl Library {
         &self,
         endpoint: &str,
     ) -> Result<FeedOutcome, LibraryError> {
+        self.ensure_send_to(endpoint)?;
         let config = self.cloud_sync_config()?;
         if !config.enabled || config.api_base_url.as_deref() != Some(endpoint) {
             return Ok(FeedOutcome::NotReady);
@@ -377,7 +378,7 @@ impl Library {
             Err(error) => return Err(error),
         };
         let token = credential::read_cloud_api_token_os()?;
-        let client = CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         let s36 = self.character_s36_series();
         self.publish_due_character_review_feed_with(
             &client,
@@ -403,6 +404,8 @@ impl Library {
         endpoint: &str,
         s36_series: Option<&BTreeSet<String>>,
     ) -> Result<FeedOutcome, LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         let library_id = self.library_id()?;
         if self.character_exclusion_adoption(endpoint)?.is_none() {
             return Ok(FeedOutcome::NotReady);

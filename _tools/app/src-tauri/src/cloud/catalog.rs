@@ -7,15 +7,15 @@
 //! which is client-scoped; neither credential implies the other.
 use crate::library::{credential,error::LibraryError,Library};
 use super::publication::{report, Reporter};
-use super::client::CloudClient;
 #[derive(Debug,serde::Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct MobileCatalogPublishResult { pub publication_revision:String,pub published_at:String,pub works:u64,pub bytes:u64 }
 impl Library {
     pub(crate) fn push_cloud_catalog(&self, progress: Reporter<'_>)->Result<MobileCatalogPublishResult,LibraryError>{
+        self.ensure_cloud_send()?;
         report(progress, "connecting", 0, None, "items");
         let config=self.cloud_sync_config()?;
-        let client=CloudClient::new(config.api_base_url.as_deref().ok_or(LibraryError::InvalidCloudSyncConfig)?)?;
+        let client=self.cloud_client(config.api_base_url.as_deref().ok_or(LibraryError::InvalidCloudSyncConfig)?)?;
         let token=credential::read_cloud_publisher_token_os()?;
         let token = token.expose();
         let library_id=self.library_id()?;

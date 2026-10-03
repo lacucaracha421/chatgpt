@@ -492,7 +492,7 @@ impl Library {
             Err(LibraryError::CloudCredentialNotConfigured) => return Ok(()),
             Err(error) => return Err(error),
         };
-        let client = CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         // Always through the handshake rule, so an unlinked server library (which refuses the
         // feed) keeps the legacy path instead of failing every poll.
         let token = credential::read_cloud_api_token_os()?;
@@ -544,7 +544,7 @@ impl Library {
                 .map(|(_, cursor)| cursor)
                 .ok_or(LibraryError::CollectionPersonalEditCursorRejected)?;
             cursor = durable;
-            if !page.has_more || durable <= page.after {
+            if !page.has_more || durable <= page.after || durable < page.next_cursor {
                 break;
             }
         }
@@ -565,6 +565,7 @@ impl Library {
         if !super::is_valid_library_id(library_id) || self.library_id()? != library_id {
             return Err(LibraryError::CollectionPersonalEditCursorRejected);
         }
+        let held = self.sync_held(endpoint);
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         let (before_generation, published_generation): (i64, i64) = transaction.query_row(
@@ -582,7 +583,8 @@ impl Library {
         let mut highest = durable;
         let mut outcome = PageOutcome::default();
         let now = chrono::Utc::now().to_rfc3339();
-        for item in items {
+        let mut waiting = super::sync_hold::TabletWait::default();
+        for (index, item) in items.iter().enumerate() {
             let value = parse_value(&item.field, &item.value)?;
             let value_json = item.value.to_string();
             let consumed = receipt_matches(&transaction, item, &value_json, endpoint, library_id)?;
@@ -601,6 +603,19 @@ impl Library {
             if consumed {
                 outcome.already_consumed += 1;
             } else {
+                if held {
+                    let missing = super::sync_hold::missing_targets_on(
+                        &transaction,
+                        &[("collections", &item.collection_id)],
+                    )?;
+                    if !missing.is_empty() {
+                        waiting = super::sync_hold::TabletWait {
+                            count: items.len() - index,
+                            target_ids: missing,
+                        };
+                        break;
+                    }
+                }
                 // AV supports ordinary personal edits, but never manga tracking edits.
                 // Deleted and hidden legacy rows are skipped (PC deletion wins).
                 let publishable: bool = transaction
@@ -660,6 +675,7 @@ impl Library {
             bump_collections_generation(&transaction)?;
         }
         let after_generation: i64 = transaction.query_row("SELECT generation FROM mobile_publication_state WHERE kind='collections'", [], |row| row.get(0))?;
+        super::sync_hold::record_tablet_wait_on(&transaction, endpoint, "personalEdits", &waiting)?;
         transaction.commit()?;
         if highest > durable {
             self.collection_publication_defer.lock().unwrap_or_else(std::sync::PoisonError::into_inner)

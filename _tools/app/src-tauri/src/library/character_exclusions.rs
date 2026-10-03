@@ -31,6 +31,10 @@
 //! `skip_reason`, which the sync-state panel reads. Holding the cursor
 //! on such an entry would retry it forever and block every later correction behind it.
 //!
+//! While receive-only hold is active, missing local prerequisites are temporary: stop
+//! before that entry without a receipt, retaining the applied prefix and reporting the
+//! known waiting entries and missing target IDs. Other skip rules remain unchanged.
+//!
 //! Only errors that may clear on retry (database or I/O failures) still fail the whole page
 //! closed: no decision is written and the cursor does not move.
 //!
@@ -171,7 +175,7 @@ impl Library {
             Err(LibraryError::CloudCredentialNotConfigured) => return Ok(false),
             Err(error) => return Err(error),
         };
-        let client = CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         self.bootstrap_character_exclusions_with(&client, publisher.expose(), endpoint)
     }
 
@@ -218,7 +222,7 @@ impl Library {
         // The log is publisher-only.
         let publisher = credential::read_cloud_publisher_token_os()?;
         let publisher = publisher.expose();
-        let client = CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         self.receive_character_exclusions_with(&client, publisher, endpoint)
     }
 
@@ -263,7 +267,7 @@ impl Library {
             cursor = durable;
             // `has_more` with no forward movement would spin, so it ends the pass; the next
             // tick resumes from the durable cursor.
-            if !page.has_more || durable <= page.after {
+            if !page.has_more || durable <= page.after || durable < page.next_cursor {
                 break;
             }
         }
@@ -304,6 +308,7 @@ impl Library {
         if self.library_id()? != library_id {
             return Err(LibraryError::CharacterExclusionCursorRejected);
         }
+        let held = self.sync_held(endpoint);
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         let durable: i64 = transaction
@@ -321,7 +326,8 @@ impl Library {
         let mut already_consumed = 0;
         let mut skipped = 0;
         let now = chrono::Utc::now().to_rfc3339();
-        for item in items {
+        let mut waiting = super::sync_hold::TabletWait::default();
+        for (index, item) in items.iter().enumerate() {
             let consumed =
                 Self::exclusion_receipt_matches(&transaction, item, endpoint, library_id)?;
             if item.sequence <= durable {
@@ -344,6 +350,22 @@ impl Library {
             if consumed {
                 already_consumed += 1;
             } else {
+                if held {
+                    let missing = super::sync_hold::missing_targets_on(
+                        &transaction,
+                        &[
+                            ("character_targets", &item.target_id),
+                            ("assets", &item.asset_id),
+                        ],
+                    )?;
+                    if !missing.is_empty() {
+                        waiting = super::sync_hold::TabletWait {
+                            count: items.len() - index,
+                            target_ids: missing,
+                        };
+                        break;
+                    }
+                }
                 let mut skip_reason = None;
                 match self.write_inbound_character_rejection(
                     &transaction,
@@ -403,6 +425,12 @@ impl Library {
                 [],
             )?;
         }
+        super::sync_hold::record_tablet_wait_on(
+            &transaction,
+            endpoint,
+            "characterExclusions",
+            &waiting,
+        )?;
         transaction.commit()?;
         Ok((applied, already_consumed, skipped))
     }

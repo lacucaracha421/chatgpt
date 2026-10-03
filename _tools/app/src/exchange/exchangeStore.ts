@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 /** PC ↔ tablet file exchange (보내기/받기). The native side owns every transfer; this store mirrors its snapshot. */
-export type ExchangeAvailability = { state: "starting" | "ready" | "offline" | "unavailable"; message: string | null; needsToken: boolean };
+export type ExchangeAvailability = { state: "starting" | "ready" | "offline" | "unavailable" | "held"; message: string | null; needsToken: boolean };
 export type ExchangeDevice = { deviceId: string; name: string; kind: string };
 export type OutgoingState = "queued" | "zipping" | "hashing" | "uploading" | "waiting" | "delivered" | "expired" | "cancelled" | "interrupted" | "failed";
 export type ExchangeOutgoing = {

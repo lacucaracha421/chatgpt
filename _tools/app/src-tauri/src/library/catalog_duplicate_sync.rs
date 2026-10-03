@@ -823,7 +823,7 @@ impl Library {
         // Reports go through the client route; the server's `require_client` also accepts the
         // publisher role, so the publisher token serves when no client token is stored.
         let api = credential::read_cloud_api_token_os().ok();
-        let client = CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         let reporter = api
             .as_ref()
             .map(|token| token.expose())
@@ -867,6 +867,10 @@ impl Library {
             }
         };
         let mut changed = self.apply_catalog_duplicate_decisions()?;
+        if self.sync_held(endpoint) || client.held() {
+            if changed { self.request_catalog_preparation(); }
+            return received;
+        }
         let uploaded = self.upload_due_catalog_duplicates(client, publisher_token, endpoint);
         match &uploaded {
             Ok(merged) => changed |= *merged,
@@ -981,6 +985,8 @@ impl Library {
         publisher_token: &str,
         endpoint: &str,
     ) -> Result<bool, LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         let (uploaded, retry): (Option<String>, bool) = self.connection()?.query_row(
             "SELECT uploaded_input,retry_after<=unixepoch() FROM catalog_duplicate_sync WHERE endpoint=?1",
             [endpoint],
@@ -1052,6 +1058,8 @@ impl Library {
         api_token: &str,
         endpoint: &str,
     ) -> Result<usize, LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         let uploaded: Option<String> = self.connection()?.query_row(
             "SELECT uploaded_input FROM catalog_duplicate_sync WHERE endpoint=?1",
             [endpoint],

@@ -71,6 +71,10 @@ impl Inputs {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(generation);
     }
+    #[cfg(test)]
+    pub(super) fn checked_generation(&self, lane: usize) -> Option<u64> {
+        *self.checked[lane].lock().unwrap()
+    }
     fn dirty(&self, lane: usize) -> bool {
         *self.checked[lane]
             .lock()

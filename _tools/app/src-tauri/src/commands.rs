@@ -172,6 +172,7 @@ impl From<LibraryError> for CommandError {
             LibraryError::CloudRequestTimedOut => "cloud_request_timed_out",
             LibraryError::CloudReplicationUpgradeRequired => "cloud_replication_upgrade_required",
             LibraryError::CloudRequestUnavailable => "cloud_request_unavailable",
+            LibraryError::CloudSyncHeld => "cloud_sync_held",
             LibraryError::InvalidCloudResponse => "invalid_cloud_response",
             LibraryError::CloudMetadataBackupNotFound => "cloud_metadata_backup_not_found",
             LibraryError::CloudMetadataBackupTooLarge => "cloud_metadata_backup_too_large",
@@ -2817,10 +2818,13 @@ pub async fn authority_sync_health(
     let library = current_required(state)?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut health = library.authority_sync_health()?;
-        let (authority, assets, stopped) = crate::workload::lane_health(library.root());
+        let (authority, assets, stopped, authority_held, asset_held) =
+            crate::workload::lane_health(library.root());
         health.authority_pass_failure = authority;
         health.asset_lane_failure = assets;
         health.assets.stopped = stopped;
+        health.assets.held = asset_held;
+        health.authority_held = authority_held;
         Ok::<_, crate::library::error::LibraryError>(health)
     })
     .await
@@ -3999,4 +4003,18 @@ pub async fn start_collection_cover_focus(
     .await
     .map_err(|_| background_task_error())?
     .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_cloud_sync_hold(endpoint: String, state: State<'_, AppState>) -> Result<crate::library::sync_hold::Status, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.cloud_sync_hold(&endpoint))
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn set_cloud_sync_hold(endpoint: String, held: bool, state: State<'_, AppState>) -> Result<crate::library::sync_hold::Status, CommandError> {
+    let library = current_required(state)?;
+    tauri::async_runtime::spawn_blocking(move || library.set_cloud_sync_hold(&endpoint, held))
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
 }

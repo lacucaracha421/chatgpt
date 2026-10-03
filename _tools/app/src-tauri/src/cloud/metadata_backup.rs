@@ -32,6 +32,7 @@ struct RestoreTarget {
 
 impl Library {
     pub(crate) fn push_cloud_metadata_backup(&self) -> Result<u64, LibraryError> {
+        self.ensure_cloud_send()?;
         let (client, token) = self.metadata_backup_client()?;
         let staging = self.metadata_backup_staging_path("upload");
         let result = (|| {
@@ -245,7 +246,7 @@ impl Library {
             .api_base_url
             .ok_or(LibraryError::InvalidCloudSyncConfig)?;
         let token = credential::read_cloud_api_token_os()?;
-        Ok((CloudClient::new(&base_url)?, token))
+        Ok((self.cloud_client(&base_url)?, token))
     }
 
     fn metadata_backup_staging_path(&self, operation: &str) -> PathBuf {

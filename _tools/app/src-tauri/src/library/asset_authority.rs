@@ -74,6 +74,7 @@ pub struct AssetSyncResult {
     pub materialized: u32,
     pub flushed: u32,
     pub stopped: bool,
+    pub held: bool,
     pub materialization_failures: u32,
 }
 fn invalid<T>() -> Result<T, LibraryError> {
@@ -568,7 +569,7 @@ impl Library {
         if !config.enabled {
             return Ok(AssetSyncResult::default());
         }
-        let client = CloudClient::new(
+        let client = self.cloud_client(
             config
                 .api_base_url
                 .as_deref()
@@ -615,7 +616,16 @@ impl Library {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let status = read_status()?;
-        let Some((a, applied)) = self.receive_assets(client, token, &status, skip_unchanged)?
+        let received = match self.receive_assets(client, token, &status, skip_unchanged) {
+            Err(LibraryError::CloudSyncHeld) => {
+                return Ok(AssetSyncResult {
+                    held: true,
+                    ..Default::default()
+                })
+            }
+            result => result?,
+        };
+        let Some((a, applied)) = received
         else {
             return Ok(AssetSyncResult::default());
         };
@@ -630,7 +640,8 @@ impl Library {
             [],
             |r| r.get(0),
         )?;
-        if pending > 0 {
+        result.held = pending > 0 && (self.sync_held(client.base()) || client.held());
+        if pending > 0 && !result.held {
             if let Some(publisher) = publisher {
                 self.flush_assets(client, publisher, &a, &mut result)?;
             } else {
@@ -748,6 +759,14 @@ impl Library {
         token: &str,
         a: &Authority,
     ) -> Result<(), LibraryError> {
+        // A new baseline may retire or reissue lifecycle intents. During recovery those
+        // choices stay queued; defer this baseline instead of claiming catch-up completed.
+        if self.sync_held(client.base()) || client.held() {
+            let pending: bool = self.connection()?.query_row(
+                "SELECT EXISTS(SELECT 1 FROM asset_lifecycle_outbox)", [], |row| row.get(0),
+            )?;
+            if pending { return Err(LibraryError::CloudSyncHeld); }
+        }
         let mut after: Option<String> = None;
         let mut cursor = None;
         let mut all = Vec::new();
@@ -904,6 +923,8 @@ impl Library {
         a: &Authority,
         result: &mut AssetSyncResult,
     ) -> Result<(), LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         for _ in 0..100 {
             let row:Option<(i64,String,String,String,i64)>=self.connection()?.query_row("SELECT sequence,operation_id,asset_id,desired,expected_revision FROM asset_lifecycle_outbox ORDER BY sequence LIMIT 1",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional()?;
             let Some((seq, operation, id, desired, expected)) = row else {

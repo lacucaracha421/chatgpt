@@ -21,6 +21,10 @@
 //! * Deterministic failures (missing target/asset, changed bytes, protected reference, failed
 //!   eligibility) are `skipped:<reason>` and the cursor still advances; only transport/DB
 //!   errors, malformed pages, gaps and receipt conflicts hold it.
+//! While receive-only hold is active, missing local prerequisites are temporary: stop
+//! before that entry without a receipt, retaining the applied prefix and reporting the
+//! known waiting entries and missing target IDs. Other skip rules remain unchanged.
+//!
 //! * Each page is applied in one transaction that re-reads and advances the durable cursor, so a
 //!   replay is a no-op and a stale page can never rewind it.
 use rusqlite::{params, Connection, OptionalExtension};
@@ -285,7 +289,7 @@ impl Library {
             Err(LibraryError::CloudCredentialNotConfigured) => return Ok(()),
             Err(error) => return Err(error),
         };
-        let client = CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         self.prepare_character_review(&client, endpoint, publisher.expose())?;
         Ok(())
     }
@@ -317,7 +321,7 @@ impl Library {
                 .map(|(_, cursor)| cursor)
                 .ok_or(LibraryError::CharacterReviewCursorRejected)?;
             cursor = durable;
-            if !page.has_more || durable <= page.after {
+            if !page.has_more || durable <= page.after || durable < page.next_cursor {
                 break;
             }
         }
@@ -335,6 +339,7 @@ impl Library {
         if !super::is_valid_library_id(library_id) || self.library_id()? != library_id {
             return Err(LibraryError::CharacterReviewCursorRejected);
         }
+        let held = self.sync_held(endpoint);
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         let durable: i64 = transaction
@@ -350,7 +355,8 @@ impl Library {
         let mut highest = durable;
         let mut outcome = ReviewPageOutcome::default();
         let now = chrono::Utc::now().to_rfc3339();
-        for item in items {
+        let mut waiting = super::sync_hold::TabletWait::default();
+        for (index, item) in items.iter().enumerate() {
             let consumed = receipt_matches(&transaction, item, endpoint, library_id)?;
             if item.sequence <= durable {
                 // Below the cursor only a receipt explains the entry; anything else is a
@@ -367,6 +373,22 @@ impl Library {
             if consumed {
                 outcome.already_consumed += 1;
             } else {
+                if held {
+                    let missing = super::sync_hold::missing_targets_on(
+                        &transaction,
+                        &[
+                            ("character_targets", &item.target_id),
+                            ("assets", &item.asset_id),
+                        ],
+                    )?;
+                    if !missing.is_empty() {
+                        waiting = super::sync_hold::TabletWait {
+                            count: items.len() - index,
+                            target_ids: missing,
+                        };
+                        break;
+                    }
+                }
                 let (result, decision_sequence) =
                     match self.apply_review_entry(&transaction, item)? {
                         EntryOutcome::Applied(Some(sequence)) => {
@@ -427,6 +449,12 @@ impl Library {
                 [],
             )?;
         }
+        super::sync_hold::record_tablet_wait_on(
+            &transaction,
+            endpoint,
+            "characterReview",
+            &waiting,
+        )?;
         transaction.commit()?;
         Ok(outcome)
     }

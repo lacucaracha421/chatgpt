@@ -157,10 +157,15 @@ pub(crate) struct AuthorityPassOutcome {
     pub failure: Option<&'static str>,
     /// A live status watcher vouched for the status this pass used.
     pub live: bool,
+    pub held: bool,
 }
 
 impl AuthorityPassOutcome {
     fn failed(&mut self, error: &LibraryError) {
+        if matches!(error, LibraryError::CloudSyncHeld) {
+            self.held = true;
+            return;
+        }
         self.unauthorized |= matches!(error, LibraryError::CloudUnauthorized);
         self.failure
             .get_or_insert(CloudFailureReason::from_error(error).code());
@@ -175,6 +180,7 @@ pub(crate) struct AssetLaneOutcome {
     /// The lifecycle queue stopped at a head intent the server neither accepted nor
     /// definitively refused; it is retried on the next pass.
     pub stopped: bool,
+    pub held: bool,
 }
 
 impl AuthorityPassOutcome {
@@ -227,7 +233,7 @@ impl Library {
         if !config.enabled {
             return Ok(None);
         }
-        let client = CloudClient::new(
+        let client = self.cloud_client(
             config
                 .api_base_url
                 .as_deref()
@@ -258,6 +264,7 @@ impl Library {
         Ok(AssetLaneOutcome {
             changed: result.applied_changes > 0 || result.materialized > 0 || result.flushed > 0,
             stopped: result.stopped,
+            held: result.held,
         })
     }
 
@@ -269,6 +276,7 @@ impl Library {
         token: &str,
         credentials: &dyn CredentialSource,
     ) -> (AuthorityPassOutcome, Option<SyncStatus>) {
+        let held = self.sync_held(client.base()) || client.held();
         let mut outcome = AuthorityPassOutcome::default();
         // One status per pass, shared by every lane (and handed to the Asset lane
         // afterwards): the live watcher's document when there is one, otherwise one
@@ -322,7 +330,7 @@ impl Library {
         // Albums: flush first; receive only over a clean queue. A domain this pass
         // just wrote to is not skipped, because the shared status predates the write.
         if relations_ready {
-            match self.flush_album_outbox_with(client, token) {
+            match if held { Ok(super::album_authority::AlbumOutboxFlush::default()) } else { self.flush_album_outbox_with(client, token) } {
                 Ok(flush) => {
                     let wrote = flush.sent > 0 || flush.no_op > 0;
                     outcome.sent |= wrote;
@@ -345,7 +353,7 @@ impl Library {
                 Err(error) => outcome.failed(&error),
             }
 
-            match self.flush_classification_outbox_with_source(client, credentials) {
+            match if held { Ok(super::classification_authority::ClassificationOutboxFlush::default()) } else { self.flush_classification_outbox_with_source(client, credentials) } {
                 Ok(flush) => {
                     let wrote = flush.sent > 0 || flush.no_op > 0 || flush.rebased > 0;
                     outcome.sent |= wrote;
@@ -384,7 +392,7 @@ impl Library {
             let received = self.reconcile_catalog_bookmarks_from(client, token, authority, true)?;
             let mut changed = received.applied_changes > 0 || received.adopted_baseline;
             let mut sent = false;
-            if self.pending_intent_count()? > 0 {
+            if !held && self.pending_intent_count()? > 0 {
                 let flushed = self.flush_catalog_bookmark_outbox_with(client, token)?;
                 if flushed.sent > 0 || flushed.already_current > 0 || flushed.rebased {
                     sent = true;
@@ -464,6 +472,7 @@ pub(crate) struct AssetSyncHealth {
     pub rejected_reason: Option<String>,
     /// The last lane run stopped at an unresolved head intent (runtime state).
     pub stopped: bool,
+    pub held: bool,
 }
 
 /// Mobile character exclusions this PC consumed without applying (durable receipts).
@@ -494,15 +503,25 @@ pub(crate) struct AuthoritySyncHealth {
     pub character_exclusions: CharacterExclusionHealth,
     pub authority_pass_failure: Option<LaneFailure>,
     pub asset_lane_failure: Option<LaneFailure>,
+    pub sync_hold: Option<super::sync_hold::Status>,
+    pub authority_held: bool,
 }
 
 impl Library {
     /// The database half of [`AuthoritySyncHealth`]: a few local counts, no network.
     /// The runtime fields (lane failures, `assets.stopped`) are left for the caller.
     pub(crate) fn authority_sync_health(&self) -> Result<AuthoritySyncHealth, LibraryError> {
+        let config = self.cloud_sync_config()?;
+        let sync_hold = config
+            .api_base_url
+            .as_deref()
+            .filter(|_| config.enabled)
+            .map(|endpoint| self.cloud_sync_hold(endpoint))
+            .transpose()?;
         let albums = self.album_sync_status()?;
         let classifications = self.classification_sync_status()?;
         let mut health = AuthoritySyncHealth {
+            sync_hold,
             albums: DomainSyncHealth {
                 blocked_count: albums.blocked_count,
                 waiting_count: albums.waiting_count,
@@ -1114,5 +1133,101 @@ mod tests {
         assert_eq!(schedule.finished(false, false, true, t0), LIVE_IDLE);
         schedule.begin();
         assert_eq!(schedule.finished(true, false, true, t0), Duration::from_secs(5));
+    }
+    #[test]
+    fn held_authority_pass_receives_bookmarks_and_pins_without_sending_pending_intents() {
+        let (temp, library) = adopted();
+        let endpoint = "http://127.0.0.1";
+        library.use_machine_settings(temp.path().join("machine.json"));
+        library.set_cloud_sync_hold(endpoint, true).unwrap();
+        library
+            .add_manga_index_pin(super::super::manga_index::MangaIndexIdentity {
+                kind: "tag".into(),
+                namespace: "female".into(),
+                value: "local".into(),
+                label: "Local".into(),
+            })
+            .unwrap();
+        library.connection().unwrap().execute_batch("INSERT INTO catalog_bookmark_outbox(operation_id,provider,work_id,desired_state,epoch,base_revision,created_at) VALUES('local-bookmark','khentai','remote',0,1,0,'now');").unwrap();
+        let pin_before: String = library
+            .connection()
+            .unwrap()
+            .query_row("SELECT operation_id FROM manga_index_pin_outbox", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let domain = |name, cursor| json!({"domain":name,"libraryId":LIB,"epoch":1,"contractVersion":1,"cursor":cursor});
+        let (client, requests) = CloudClient::home_test_client(vec![
+            json!({"protocolVersion":1,"active":true,"libraryId":LIB,"domains":[domain("assets",3),domain("albums",5),domain("classifications",7),domain("catalog-bookmarks",10),domain("manga-index-pins",1)]}),
+            json!({"libraryId":LIB,"epoch":1,"contractVersion":1,"cursor":10,"nextAfter":10,"hasMore":false,"items":[{"sequence":10,"provider":"khentai","workId":"remote","desiredState":true,"entityRevision":1,"createdAt":"2026-10-04T00:00:00Z"}]}),
+            json!({"libraryId":LIB,"epoch":1,"contractVersion":1,"revision":1,"items":[]}),
+        ]);
+        let credentials = FixedCredentials {
+            client_token: TOKEN,
+            publisher_token: "publisher",
+        };
+        let (outcome, _) = library.authority_pass_with(&client, TOKEN, &credentials);
+        assert_eq!(outcome.failure, None, "{outcome:?}");
+        assert!(outcome.bookmarks && !outcome.sent);
+        let db = library.connection().unwrap();
+        assert_eq!(
+            db.query_row("SELECT cursor FROM catalog_bookmark_sync", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            10
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM online_catalog_bookmarks WHERE work_id='remote'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0,
+            "pending removal overlays received bookmark"
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM catalog_bookmark_outbox", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row("SELECT operation_id FROM manga_index_pin_outbox", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            pin_before
+        );
+        drop(db);
+        assert_eq!(library.list_manga_index_pins().unwrap().len(), 1);
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests.iter().all(|r| r.starts_with(b"GET ")));
+    }
+
+    #[test]
+    fn held_asset_baseline_marks_relation_lanes_waiting_without_failure() {
+        let (temp, library) = adopted();
+        let endpoint = "http://127.0.0.1";
+        library.use_machine_settings(temp.path().join("machine.json"));
+        library.set_cloud_sync_hold(endpoint, true).unwrap();
+        library.connection().unwrap().execute("INSERT INTO asset_lifecycle_outbox(operation_id,library_id,epoch,contract_version,asset_id,desired,expected_revision,created_at) VALUES('queued',?1,1,1,'a','trash',1,'now')", [LIB]).unwrap();
+        let domain = |name, epoch, cursor| json!({"domain":name,"libraryId":LIB,"epoch":epoch,"contractVersion":1,"cursor":cursor});
+        let (client, requests) = CloudClient::home_test_client(vec![
+            json!({"protocolVersion":1,"active":true,"libraryId":LIB,"domains":[domain("assets",2,0),domain("albums",1,5),domain("classifications",1,7),domain("catalog-bookmarks",1,9)]}),
+        ]);
+        let credentials = FixedCredentials {
+            client_token: TOKEN,
+            publisher_token: "publisher",
+        };
+        let (outcome, status) = library.authority_pass_with(&client, TOKEN, &credentials);
+        assert!(outcome.held);
+        assert_eq!(outcome.failure, None);
+        assert!(!outcome.albums && !outcome.classifications && !outcome.sent);
+        let assets = library
+            .asset_lane_with(&client, TOKEN, None, false, &status.unwrap())
+            .unwrap();
+        assert!(assets.held && !assets.stopped);
+        assert_eq!(requests.lock().unwrap().len(), 1);
     }
 }

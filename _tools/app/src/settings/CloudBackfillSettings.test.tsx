@@ -177,3 +177,22 @@ it("shows current counts beside the maintenance tools", async () => {
   expect(await screen.findByText("1 / 4개 (25%)")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "사전 점검" })).toBeEnabled();
 });
+
+it("shows receive-only hold instead of completed publication", async () => {
+  renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, syncHeld: true, completed: 10 }) });
+  expect(await screen.findByText("받기만 · 송신 보류")).toBeVisible();
+  expect(screen.getByText("송신 보류")).toBeVisible();
+  expect(screen.queryByText("동기화됨 · 문제 없음")).toBeNull();
+});
+
+it("shows receive authentication failures while held", async () => {
+  renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, syncHeld: true, activity: [{ direction: "capture", lastError: "CloudUnauthorized", lastReason: "unauthorized" }] }) });
+  expect(await screen.findByText("동기화 문제 1개 · 아래에서 확인하세요")).toBeInTheDocument();
+  expect(screen.queryByText("받기만 · 송신 보류")).not.toBeInTheDocument();
+});
+
+it("shows receive materialization failures while held", async () => {
+  renderSection({ cloudBackfillProgress: vi.fn().mockResolvedValue({ ...inactive, syncHeld: true, failed: 1, lastError: "materialization failed" }) });
+  expect(await screen.findByText("동기화 문제 1개 · 아래에서 확인하세요")).toBeInTheDocument();
+  expect(screen.getByText("materialization failed")).toBeInTheDocument();
+});

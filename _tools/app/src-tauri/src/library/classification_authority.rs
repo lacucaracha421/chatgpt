@@ -674,6 +674,7 @@ impl Library {
     /// intent and every intent behind it durable and pending, because the pass stops at
     /// the first unresolved row.
     pub fn flush_classification_outbox(&self) -> Result<ClassificationOutboxFlush, LibraryError> {
+        self.ensure_cloud_send()?;
         let config = self.cloud_sync_config()?;
         if !config.enabled {
             return Err(LibraryError::InvalidCloudSyncConfig);
@@ -682,7 +683,7 @@ impl Library {
             .api_base_url
             .as_deref()
             .ok_or(LibraryError::InvalidCloudSyncConfig)?;
-        let client = CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         // Neither secret is resolved here. Every credential is obtained through the
         // source, and only when a command of that class is actually sent — so this
         // function performs no credential IO of its own. See [`CredentialSource`].
@@ -695,6 +696,8 @@ impl Library {
         client: &CloudClient,
         credentials: &dyn CredentialSource,
     ) -> Result<ClassificationOutboxFlush, LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         // Every Classification delivery entry point funnels through here, so the domain's
         // single-flight gate covers all of them — the mutation kick, the periodic sync hook and
         // the focus/online events alike. See [`Library::flush_outbox_single_flight`].

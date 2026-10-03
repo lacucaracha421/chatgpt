@@ -199,7 +199,7 @@ impl Library {
             Err(LibraryError::CloudCredentialNotConfigured) => return Ok(()),
             Err(error) => return Err(error),
         };
-        let client = CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         self.sync_collection_releases_with(&client, publisher.expose(), endpoint)
     }
 
@@ -240,6 +240,7 @@ impl Library {
         } else {
             Ok(())
         };
+        if self.sync_held(endpoint) || client.held() { return received; }
         let uploaded = self.upload_due_collection_releases(client, publisher_token, endpoint);
         received.and(uploaded)
     }
@@ -347,6 +348,8 @@ impl Library {
         publisher_token: &str,
         endpoint: &str,
     ) -> Result<(), LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         let now = unix_now();
         let (state, items, fingerprint) = {
             let c = self.connection()?;

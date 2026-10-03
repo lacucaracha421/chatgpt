@@ -307,7 +307,7 @@ export function ExchangeView({ store = exchangeStore, pickFiles = pickWithDialog
   });
 
   const all = items(snapshot);
-  const statusText = availability.state === "ready" ? (snapshot.selfName ? `이 PC · ${snapshot.selfName}` : "연결됨") : availability.state === "starting" ? "연결 중…" : availability.state === "offline" ? "서버에 연결할 수 없음 — 자동 재시도" : "사용할 수 없음";
+  const statusText = availability.state === "held" ? "받기만 · 파일 교환 보류" : availability.state === "ready" ? (snapshot.selfName ? `이 PC · ${snapshot.selfName}` : "연결됨") : availability.state === "starting" ? "연결 중…" : availability.state === "offline" ? "서버에 연결할 수 없음 — 자동 재시도" : "사용할 수 없음";
   const navigation = <div className="exchange-index">
     <div className="exchange-index-body">
       <span className="workspace-section-label">기기</span>

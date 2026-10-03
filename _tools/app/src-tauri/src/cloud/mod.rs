@@ -9,6 +9,8 @@ mod backfill_tests;
 mod capture_tests;
 pub(crate) mod captures;
 pub(crate) mod client;
+#[cfg(test)]
+mod hold_tests;
 pub(crate) mod failure;
 pub(crate) mod collections;
 pub(crate) mod catalog;

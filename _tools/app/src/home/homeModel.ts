@@ -117,6 +117,7 @@ export type CloudLine = { tone: "ok" | "busy" | "idle" | "off"; text: string };
 /** The cloud replication state in the status panel's words. */
 export function cloudLine(progress: CloudBackfillProgress | null, problemCount: number): CloudLine | null {
   if (problemCount > 0) return { tone: "off", text: `문제 ${problemCount.toLocaleString()}개` };
+  if (progress?.syncHeld) return { tone: "idle", text: "받기만 · 송신 보류" };
   if (!progress) return null;
   const remaining = progress.queued + progress.preparing + progress.uploading + progress.committing;
   if (progress.replicationEnabled === false) return { tone: "idle", text: "동기화 꺼짐" };

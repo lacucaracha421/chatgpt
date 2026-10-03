@@ -161,9 +161,11 @@ export function CloudBackfillMaintenance() {
 
 function conclusion(progress: CloudBackfillProgress | null, error: string | null, connectionReady: boolean | null): string {
   if (connectionReady === false) return "서버 연결 정보가 필요합니다 · 아래 서버 연결 설정을 확인하세요";
+  if (error && progress?.syncHeld) return "동기화 상태를 확인하지 못했습니다";
   if (!progress) return error ? "동기화 상태를 확인하지 못했습니다" : "동기화 상태 확인 중…";
   const problems = cloudProblemCount(progress);
   if (problems > 0) return `동기화 문제 ${problems.toLocaleString()}개 · 아래에서 확인하세요`;
+  if (progress?.syncHeld) return "받기만 · 송신 보류";
   if (progress.replicationEnabled === false) return "PC → 클라우드 자동 복제가 꺼져 있습니다";
   if (progress.controlState === "paused") return "동기화가 일시정지되어 있습니다";
   if (progress.queued + progress.preparing + progress.uploading + progress.committing > 0) return "동기화 중 · 문제 없음";
@@ -172,6 +174,7 @@ function conclusion(progress: CloudBackfillProgress | null, error: string | null
 
 function stateLabel(progress: CloudBackfillProgress | null, settled: boolean): string {
   if (!progress) return "상태 확인 중…";
+  if (progress.syncHeld) return "송신 보류";
   if (progress.replicationEnabled === false) return "자동 복제 꺼짐";
   if (progress.controlState === "paused") return "동기화 일시정지";
   if (progress.queued + progress.preparing + progress.uploading + progress.committing > 0) return "복제 대기·진행 중";

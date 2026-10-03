@@ -694,6 +694,7 @@ impl Library {
     /// this intent and every intent behind it durable and pending, because the pass
     /// stops at the first unresolved row.
     pub fn flush_album_outbox(&self) -> Result<AlbumOutboxFlush, LibraryError> {
+        self.ensure_cloud_send()?;
         let config = self.cloud_sync_config()?;
         if !config.enabled {
             return Err(LibraryError::InvalidCloudSyncConfig);
@@ -704,7 +705,7 @@ impl Library {
             .ok_or(LibraryError::InvalidCloudSyncConfig)?;
         let token = crate::library::credential::read_cloud_api_token_os()?;
         let token = token.expose();
-        let client = CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         self.flush_album_outbox_with(&client, &token)
     }
 
@@ -716,6 +717,8 @@ impl Library {
         client: &CloudClient,
         token: &str,
     ) -> Result<AlbumOutboxFlush, LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         // Every Album delivery entry point funnels through here, so the domain's single-flight
         // gate covers all of them. See [`Library::flush_outbox_single_flight`].
         self.flush_outbox_single_flight(&self.album_flush_lock, || {

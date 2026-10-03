@@ -392,6 +392,7 @@ impl Library {
     /// authorization failure propagates as its typed state and leaves the intent,
     /// and the intents behind it, durable and pending.
     pub fn flush_catalog_bookmark_outbox(&self) -> Result<BookmarkOutboxFlush, LibraryError> {
+        self.ensure_cloud_send()?;
         let config = self.cloud_sync_config()?;
         if !config.enabled {
             return Err(LibraryError::InvalidCloudSyncConfig);
@@ -402,7 +403,7 @@ impl Library {
             .ok_or(LibraryError::InvalidCloudSyncConfig)?;
         let token = credential::read_cloud_api_token_os()?;
         let token = token.expose();
-        let client = CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         self.flush_catalog_bookmark_outbox_with(&client, &token)
     }
 
@@ -414,6 +415,8 @@ impl Library {
         client: &CloudClient,
         token: &str,
     ) -> Result<BookmarkOutboxFlush, LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         let mut outcome = BookmarkOutboxFlush {
             sent: 0,
             already_current: 0,

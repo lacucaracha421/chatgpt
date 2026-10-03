@@ -129,6 +129,14 @@ impl Library {
         }
     }
 
+    pub(crate) fn hold_claimed_cloud_upload(&self, id: &str) -> Result<(), LibraryError> {
+        self.connection()?.execute(
+            "UPDATE cloud_sync_queue SET status='pending' WHERE id=?1 AND status IN ('processing','preparing','uploading','committing')",
+            [id],
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn requeue_interrupted_cloud_sync(&self) -> Result<(), LibraryError> {
         let now = chrono::Utc::now().to_rfc3339();
         self.connection()?.execute(

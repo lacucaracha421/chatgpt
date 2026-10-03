@@ -700,6 +700,7 @@ impl Library {
         &self,
         progress: Reporter<'_>,
     ) -> Result<CharacterPublishResult, LibraryError> {
+        self.ensure_cloud_send()?;
         report(progress, "connecting", 0, None, "items");
         let config = self.cloud_sync_config()?;
         let endpoint = config
@@ -707,7 +708,7 @@ impl Library {
             .as_deref()
             .ok_or(LibraryError::InvalidCloudSyncConfig)?
             .to_string();
-        let client = CloudClient::new(&endpoint)?;
+        let client = self.cloud_client(&endpoint)?;
         let token = credential::read_cloud_api_token_os()?;
         // A PC with no publisher credential cannot read or bind the correction logs, so the
         // features are simply unavailable to it; the legacy path stays open only while
@@ -739,6 +740,8 @@ impl Library {
         s36_series: Option<&std::collections::BTreeSet<String>>,
         progress: Reporter<'_>,
     ) -> Result<CharacterPublishResult, LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         let endpoint = endpoint.to_string();
         // The exclusion log is a publisher read, and it must run *before* the revision and
         // snapshot are read. Recording a correction changes local character decisions, so a

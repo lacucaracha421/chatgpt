@@ -104,6 +104,7 @@ fn manga_pins_confirm_and_pull_remote_delete_without_resurrection() {
     let outcome = library
         .sync_pins_using(
             &domain,
+            false,
             || {
                 *reads.borrow_mut() += 1;
                 Ok(if *reads.borrow() == 1 {
@@ -131,6 +132,7 @@ fn manga_pins_transport_retry_keeps_operation_and_durable_local_intent() {
     let operation = RefCell::new(String::new());
     let error = library.sync_pins_using(
         &domain,
+        false,
         || Ok(snapshot(&domain, 0, vec![])),
         |_, command| {
             *operation.borrow_mut() = command["operationId"].as_str().unwrap().into();
@@ -144,6 +146,7 @@ fn manga_pins_transport_retry_keeps_operation_and_durable_local_intent() {
     library
         .sync_pins_using(
             &domain,
+            false,
             || Ok(snapshot(&domain, 1, vec![row("female", "tag", true, 1)])),
             |_, command| {
                 assert_eq!(command["operationId"], operation.borrow().as_str());
@@ -163,6 +166,7 @@ fn manga_pins_conflict_rebases_user_intent_with_a_new_receipt_id() {
     library
         .sync_pins_using(
             &domain,
+            false,
             || Ok(snapshot(&domain, 3, vec![row("female", "tag", true, 3)])),
             |_, command| {
                 calls.borrow_mut().push(command.clone());
@@ -190,6 +194,7 @@ fn manga_pins_confirmation_does_not_retire_superseding_user_action() {
     library
         .sync_pins_using(
             &domain,
+            false,
             || Ok(snapshot(&domain, 1, vec![row("female", "tag", true, 1)])),
             |_, _| {
                 library
@@ -235,6 +240,7 @@ fn manga_pins_malformed_cross_library_and_stale_snapshots_are_inert() {
     assert!(library
         .sync_pins_using(
             &other_domain,
+            false,
             || panic!("must fence before reading"),
             |_, _| panic!("must not send")
         )
@@ -257,6 +263,7 @@ fn manga_pins_failed_final_read_cannot_leave_a_retired_overlay_at_an_equal_curso
     let reads = RefCell::new(0);
     let result = library.sync_pins_using(
         &domain,
+        false,
         || {
             *reads.borrow_mut() += 1;
             if *reads.borrow() == 1 {
@@ -272,6 +279,7 @@ fn manga_pins_failed_final_read_cannot_leave_a_retired_overlay_at_an_equal_curso
     library
         .sync_pins_using(
             &domain,
+            false,
             || Ok(snapshot(&domain, 2, vec![row("female", "tag", false, 2)])),
             |_, _| panic!("receipt already retired"),
         )
@@ -288,6 +296,7 @@ fn manga_pins_old_server_does_not_destroy_local_pins_or_the_queue() {
     library
         .sync_pins_using(
             &domain,
+            false,
             || Err(LibraryError::CatalogBookmarkSyncRejected(404)),
             |_, _| panic!("old server must never receive pins"),
         )
@@ -333,4 +342,36 @@ fn manga_pins_upgrade_118_keeps_existing_pins_as_outgoing_intent() {
             .unwrap()
             .contains(&DOMAIN)
     );
+}
+
+#[test]
+fn held_pins_skip_unchanged_and_tolerate_older_servers() {
+    let (_temp, library, domain) = setup();
+    for status in [404, 405] {
+        let outcome = library
+            .sync_pins_using(
+                &domain,
+                true,
+                || Err(LibraryError::CatalogBookmarkSyncRejected(status)),
+                |_, _| panic!("held pin command"),
+            )
+            .unwrap();
+        assert!(!outcome.changed && !outcome.sent);
+    }
+    library
+        .apply_pin_snapshot(
+            &snapshot(&domain, 0, vec![]),
+            &domain.library_id,
+            domain.epoch,
+        )
+        .unwrap();
+    let outcome = library
+        .sync_pins_using(
+            &domain,
+            true,
+            || panic!("unchanged snapshot downloaded"),
+            |_, _| panic!("held pin command"),
+        )
+        .unwrap();
+    assert!(!outcome.changed && !outcome.sent);
 }

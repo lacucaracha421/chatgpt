@@ -262,6 +262,8 @@ fn each_decision_moves_the_right_image_to_trash_and_queues_its_lifecycle_command
         ("keep_both", None),
     ] {
         let f = fixture();
+        f.library.use_machine_settings(f.temp.path().join("machine.json"));
+        f.library.set_cloud_sync_hold(ENDPOINT, true).unwrap();
         eligible(&f, &["a", "b"]);
         review(&f, "r1", "a", "b", "historical", "open", 1);
         f.library

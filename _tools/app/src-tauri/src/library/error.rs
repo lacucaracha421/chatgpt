@@ -44,6 +44,8 @@ pub enum LibraryError {
     CloudRequestTimedOut,
     #[error("클라우드 API에 연결할 수 없습니다")]
     CloudRequestUnavailable,
+    #[error("받기만 — 이 PC의 클라우드 송신이 보류 중입니다")]
+    CloudSyncHeld,
     #[error("자산 동기화를 계속하려면 서버를 revision 지원 버전으로 업데이트해 주세요.")]
     CloudReplicationUpgradeRequired,
     #[error("클라우드 API 응답이 올바르지 않습니다")]

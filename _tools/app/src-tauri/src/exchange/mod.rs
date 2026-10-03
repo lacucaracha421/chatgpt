@@ -715,10 +715,24 @@ fn token() -> Result<String, Availability> {
 
 fn context(app: &AppHandle) -> Result<Context, Availability> {
     let base = endpoint(app)?;
-    let token = token()?;
-    let device_id = lock().stored.device_id.clone();
-    let client = ExchangeClient::new(&base, &token, &device_id)
+    let library = app.state::<crate::commands::AppState>().current_library()
+        .ok_or_else(|| Availability::unavailable("라이브러리를 열어 주세요."))?;
+    context_with(&library, &base, token, || lock().stored.device_id.clone())
+}
+
+fn context_with(
+    library: &crate::library::Library,
+    base: &str,
+    read_token: impl FnOnce() -> Result<String, Availability>,
+    device_id: impl FnOnce() -> String,
+) -> Result<Context, Availability> {
+    let gate = library.sync_gate(base).map_err(|_| Availability::unavailable("받기만 — 파일 교환 보류"))?;
+    if gate.held() { return Err(Availability { state: "held", message: Some("받기만 — 파일 교환 보류".into()), needs_token: false }); }
+    let token = read_token()?;
+    let device_id = device_id();
+    let mut client = ExchangeClient::new(&base, &token, &device_id)
         .map_err(|_| Availability::unavailable("서버 주소나 토큰 형식을 확인해 주세요."))?;
+    client.gate = gate;
     use sha2::Digest;
     let digest = sha2::Sha256::digest(token.as_bytes());
     let key = format!(
@@ -736,6 +750,7 @@ fn message(error: &ApiError) -> String {
         ApiError::Invalid => "서버 응답을 확인할 수 없음".to_owned(),
         ApiError::Corrupt => "받은 파일이 보낸 파일과 다름".to_owned(),
         ApiError::Refused(message) => message.clone(),
+        ApiError::Held => "받기만 — 파일 교환 보류".to_owned(),
         ApiError::Cancelled => "취소됨".to_owned(),
         ApiError::Local(error) if files::is_disk_full(error) => "저장 공간 부족".to_owned(),
         ApiError::Local(_) => "파일을 읽거나 쓸 수 없음".to_owned(),
@@ -1170,7 +1185,7 @@ fn acknowledge(context: &Context, transfer_id: &str, sha256: &str) -> Result<(),
         Err(error) if matches!(error.code(), Some("transferUnknown" | "transferGone")) => {}
         // Retried on the next pass; the ledger keeps the file from being saved twice.
         Err(error)
-            if error.transient()
+            if matches!(error, ApiError::Held) || error.transient()
                 || error.status() == Some(401)
                 || error.code() == Some("exchangeDeviceUnknown") =>
         {
@@ -1349,6 +1364,7 @@ fn settle_abandoned(
 /// Save one inbox item. Transient failures return `Err` (the pass backs off); anything
 /// else is shown on the row and waits for the user.
 fn receive(app: &AppHandle, context: &Context, item: &InboxItem) -> Result<(), ApiError> {
+    drop(context.client.gate.permit().map_err(|_| ApiError::Held)?);
     let (ledger, skip, parts) = {
         let state = lock();
         let ledger = state.stored.ledger(&item.transfer_id).cloned();
@@ -1660,6 +1676,7 @@ fn build_zip(
 }
 
 fn run_send(context: &Context, transfer_id: &str) -> Result<(), ApiError> {
+    drop(context.client.gate.permit().map_err(|_| ApiError::Held)?);
     let Some((mut send, cancel)) =
         with_job(transfer_id, |job| (job.stored.clone(), job.cancel.clone()))
     else {
@@ -1756,7 +1773,7 @@ fn run_send(context: &Context, transfer_id: &str) -> Result<(), ApiError> {
         match (created.transfer.state.as_str(), created.upload) {
             ("ready" | "delivered", _) => return finish(&current),
             ("uploading", Some(upload)) => {
-                client::upload(&upload, tracked(&cancel, &current)?, stored.size_bytes)?;
+                client::upload(&context.client.gate, &upload, tracked(&cancel, &current)?, stored.size_bytes)?;
                 context.client.complete(&current)?;
                 return finish(&current);
             }
@@ -1835,6 +1852,7 @@ fn sender_loop(app: AppHandle) {
                 let result = context(&app).map(|context| context.client.cancel(&transfer_id));
                 let delay = match result {
                     Ok(Ok(_)) => None,
+                    Ok(Err(ApiError::Held)) => Some(WAIT_FOR_USER),
                     Ok(Err(error)) if error.transient() => Some(UNAVAILABLE_RETRY),
                     // Unknown or already final there: nothing left to withdraw.
                     Ok(Err(_)) => None,
@@ -1917,7 +1935,10 @@ fn settle(cancel: &Arc<AtomicBool>, result: Result<(), ApiError>) {
         } else {
             0
         };
-        if error.transient() && job.timeouts < MAX_TIMEOUTS {
+        if matches!(error, ApiError::Held) {
+            job.phase = Phase::Queued;
+            job.retry_at = Instant::now() + WAIT_FOR_USER;
+        } else if error.transient() && job.timeouts < MAX_TIMEOUTS {
             job.phase = Phase::Queued;
             job.retry_at = Instant::now()
                 + Duration::from_secs(SEND_RETRY[job.attempts.min(SEND_RETRY.len() - 1)]);
@@ -2701,5 +2722,30 @@ mod tests {
         assert!(reloaded.ledger(&theirs.transfer_id).is_none());
         // The empty reservation went; someone else's file stayed.
         assert_eq!(names(&downloads), ["a.bin", "c.bin"]);
+    }
+}
+
+#[cfg(test)]
+mod hold_tests {
+    use super::*;
+    #[test]
+    fn context_returns_held_before_reading_tokens_or_device_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = crate::library::Library::open(temp.path().join("library")).unwrap();
+        library.use_machine_settings(temp.path().join("machine.json"));
+        library
+            .set_cloud_sync_hold("https://fixture.invalid", true)
+            .unwrap();
+        let result = context_with(
+            &library,
+            "https://fixture.invalid",
+            || panic!("token read while held"),
+            || panic!("device read while held"),
+        );
+        let Err(availability) = result else {
+            panic!("held exchange acquired a context")
+        };
+        assert_eq!(availability.state, "held");
+        assert!(!availability.needs_token);
     }
 }

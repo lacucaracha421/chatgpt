@@ -121,6 +121,7 @@ pub struct BackfillProgress {
     pub last_error: Option<String>,
     pub activity: Vec<super::activity::CloudActivity>,
     pub replication_enabled: bool,
+    pub sync_held: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -401,6 +402,7 @@ impl Library {
     /// 백필 큐의 영속 상태 요약(queued/preparing/uploading/committing/
     /// completed/failed).
     pub fn cloud_backfill_progress(&self) -> Result<BackfillProgress, LibraryError> {
+        let sync_held = self.cloud_sync_config()?.api_base_url.is_some_and(|endpoint| self.sync_held(&endpoint));
         let connection = self.connection()?;
         let count = |status: &str| -> Result<u64, LibraryError> {
             Ok(connection.query_row(
@@ -516,6 +518,7 @@ impl Library {
             active_workers: preparing + uploading + committing,
             last_error,
             activity,
+            sync_held,
             replication_enabled: connection.query_row(
                 "SELECT cloud_sync_enabled FROM library_settings WHERE singleton = 1",
                 [],
@@ -548,6 +551,7 @@ impl Library {
     /// 않는다. 재시도 가능 오류는 해당 워커가 잠시 대기 후 다음 자산을
     /// 계속 가져간다.
     pub fn run_cloud_backfill_cycle(&self) -> Result<BackfillRunSummary, LibraryError> {
+        self.ensure_cloud_send()?;
         let config = self.cloud_sync_config()?;
         if !config.enabled {
             return Ok(BackfillRunSummary::default());
@@ -567,6 +571,7 @@ impl Library {
         self.begin_cloud_activity("replication")?;
         let result = self.run_configured_cloud_backfill_cycle(config);
         let (processed, problems, error, reason) = match &result {
+            Err(LibraryError::CloudSyncHeld) => (0, 0, None, None),
             Ok(summary) => (summary.committed, summary.retry_scheduled + summary.permanent_failures,
                 (summary.retry_scheduled + summary.permanent_failures > 0).then_some(REPLICATION_ITEM_FAILURE_MESSAGE), None),
             Err(LibraryError::CloudReplicationUpgradeRequired) => (0, 1, Some("서버 업데이트가 필요하여 동기화를 일시정지했습니다. 서버 업데이트 후 실패 항목 재시도와 계속을 선택해 주세요."), None),
@@ -637,7 +642,7 @@ impl Library {
         // Original upload tickets require the publisher principal.
         let token = crate::library::credential::read_cloud_publisher_token_os()?;
         let token = token.expose();
-        let client = CloudClient::new(&base_url)?;
+        let client = self.cloud_client(&base_url)?;
         self.run_cloud_backfill_cycle_with_workload(&client, &token, BackfillWorkload::current)
     }
 
@@ -656,6 +661,8 @@ impl Library {
         token: &str,
         workload: impl Fn() -> BackfillWorkload + Sync,
     ) -> Result<BackfillRunSummary, LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         let Ok(_flight) = self.replication_lock.try_lock() else {
             return Ok(BackfillRunSummary::default());
         };
@@ -779,6 +786,8 @@ impl Library {
         current_workload: impl Fn() -> BackfillWorkload,
         prepare_video: impl Fn(&str) -> Result<(), LibraryError>,
     ) -> Result<Option<String>, CloudBackfillError> {
+        self.ensure_send_to(client.base()).map_err(CloudBackfillError::Library)?;
+        client.ensure_send().map_err(CloudBackfillError::Library)?;
         let Some(prepared) = self.claim_backfill_with_policy(policy.restricted) else {
             return Ok(None);
         };
@@ -1044,7 +1053,9 @@ impl Library {
     }
 
     fn backfill_failure(&self, queue_id: &str, error: &LibraryError) -> Result<(), LibraryError> {
-        if is_retryable_cloud_error(error) {
+        if matches!(error, LibraryError::CloudSyncHeld) {
+            self.hold_claimed_cloud_upload(queue_id)
+        } else if is_retryable_cloud_error(error) {
             self.mark_cloud_sync_retry(queue_id, &error.to_string())
         } else {
             self.mark_cloud_sync_failed(queue_id, &error.to_string())
@@ -1174,6 +1185,7 @@ impl std::fmt::Display for CloudBackfillError {
 }
 
 fn classify_backfill_error(asset_id: String, error: &LibraryError) -> CloudBackfillError {
+    if matches!(error, LibraryError::CloudSyncHeld) { return CloudBackfillError::Library(LibraryError::CloudSyncHeld); }
     let message = error.to_string();
     if is_retryable_cloud_error(error) {
         CloudBackfillError::Retryable(asset_id, message)

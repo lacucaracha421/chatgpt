@@ -78,12 +78,16 @@ struct LaneHealth {
     authority: Option<LaneFailure>,
     assets: Option<LaneFailure>,
     asset_stopped: bool,
+    authority_held: bool,
+    asset_held: bool,
 }
 static LANE_HEALTH: Mutex<LaneHealth> = Mutex::new(LaneHealth {
     root: None,
     authority: None,
     assets: None,
     asset_stopped: false,
+    authority_held: false,
+    asset_held: false,
 });
 
 /// Record one lane run; a success clears that lane's failure. Emits
@@ -94,6 +98,7 @@ fn record_lane(
     assets: bool,
     failure: Option<&'static str>,
     stopped: bool,
+    held: bool,
 ) {
     let changed = {
         let mut guard = LANE_HEALTH
@@ -111,6 +116,8 @@ fn record_lane(
                 h.authority.as_ref().map(|f| f.code),
                 h.assets.as_ref().map(|f| f.code),
                 h.asset_stopped,
+                h.authority_held,
+                h.asset_held,
             )
         };
         let before = visible(health);
@@ -132,6 +139,9 @@ fn record_lane(
         }
         if assets {
             health.asset_stopped = stopped;
+            health.asset_held = held;
+        } else {
+            health.authority_held = held;
         }
         before != visible(health)
     };
@@ -140,18 +150,22 @@ fn record_lane(
     }
 }
 
-/// The recorded lane failures and Asset-lane stop for `root`: `(authority, assets, stopped)`.
-pub(crate) fn lane_health(root: &Path) -> (Option<LaneFailure>, Option<LaneFailure>, bool) {
+/// Recorded failures, Asset stop, and the authority/Asset hold states for `root`.
+pub(crate) fn lane_health(
+    root: &Path,
+) -> (Option<LaneFailure>, Option<LaneFailure>, bool, bool, bool) {
     let health = LANE_HEALTH
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if health.root.as_deref() != Some(root) {
-        return (None, None, false);
+        return (None, None, false, false, false);
     }
     (
         health.authority.clone(),
         health.assets.clone(),
         health.asset_stopped,
+        health.authority_held,
+        health.asset_held,
     )
 }
 
@@ -713,7 +727,14 @@ fn start_timers(app: tauri::AppHandle) {
                         };
                         (outcome, None)
                     });
-                    record_lane(&handle, lib.root(), false, outcome.failure, false);
+                    record_lane(
+                        &handle,
+                        lib.root(),
+                        false,
+                        outcome.failure,
+                        false,
+                        outcome.held,
+                    );
                     finish.changed = outcome.changed();
                     finish.live = outcome.live && outcome.failure.is_none();
                     for (changed, event) in [
@@ -738,16 +759,17 @@ fn start_timers(app: tauri::AppHandle) {
                     }
                     std::thread::spawn(move || {
                         let _reset = Reset(&ASSETS_BUSY);
-                        let (changed, failure, stopped) =
+                        let (changed, failure, stopped, held) =
                             match lib.run_asset_lane(&status, restricted) {
-                                Ok(lane) => (lane.changed, None, lane.stopped),
+                                Ok(lane) => (lane.changed, None, lane.stopped, lane.held),
                                 Err(error) => (
                                     false,
                                     Some(CloudFailureReason::from_error(&error).code()),
                                     false,
+                                    false,
                                 ),
                             };
-                        record_lane(&handle, lib.root(), true, failure, stopped);
+                        record_lane(&handle, lib.root(), true, failure, stopped, held);
                         if changed {
                             let _ = handle.emit("library://asset-authority-changed", ());
                             schedule

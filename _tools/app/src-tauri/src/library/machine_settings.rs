@@ -30,6 +30,8 @@ struct MachineSettingsFile {
     new_ingests: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     libraries: BTreeMap<String, LibraryEntry>,
+    #[serde(default)]
+    receive_only_holds: BTreeMap<String, BTreeMap<String, bool>>,
 }
 
 fn present_value<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error> {
@@ -47,6 +49,8 @@ pub(crate) struct LibraryEntry {
     pub(crate) manga_root_identity: Option<super::manga_root_guard::RootIdentity>,
     #[serde(default)]
     pub(crate) auto_tag_inbox: super::auto_tag_inbox::Settings,
+    #[serde(flatten)]
+    pub(crate) extra: BTreeMap<String, serde_json::Value>,
 }
 
 fn error(path: &Path, source: io::Error) -> LibraryError {
@@ -85,8 +89,26 @@ pub(crate) fn set_entry(
     let mut value = value;
     if let Some(previous) = file.libraries.get(library_id) {
         value.auto_tag_inbox = previous.auto_tag_inbox.clone();
+        value.extra = previous.extra.clone();
     }
     file.libraries.insert(library_id.to_owned(), value);
+    write_file(path, &file)
+}
+
+pub(crate) fn receive_only_hold(path: &Path, library: &str, endpoint: &str) -> bool {
+    read_file(path).map_or(true, |file| {
+        file.receive_only_holds.get(library)
+            .and_then(|holds| holds.get(endpoint)).copied().unwrap_or(false)
+    })
+}
+
+pub(crate) fn set_receive_only_hold(
+    path: &Path, library: &str, endpoint: &str, held: bool,
+) -> Result<(), LibraryError> {
+    let _guard = FILE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut file = read_file(path)?;
+    file.receive_only_holds.entry(library.to_owned()).or_default()
+        .insert(endpoint.to_owned(), held);
     write_file(path, &file)
 }
 
@@ -138,6 +160,25 @@ pub(crate) fn usable_directory(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn receive_only_hold_and_unknown_fields_survive_machine_setting_writes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("library-machine.json");
+        let original = serde_json::json!({
+            "receiveOnlyHolds": {"lib-a": {"https://cloud.invalid/": true}},
+            "futureSetting": {"value": 7},
+            "libraries": {"lib-a": {"mangaRoot": null, "futureLibrarySetting": true}}
+        });
+        fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+        set_entry(&path, "lib-a", LibraryEntry::default()).unwrap();
+        set_workload(&path, crate::workload::Settings::default()).unwrap();
+        set_new_ingests(&path, "lib-a", BTreeSet::from(["asset".into()])).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["receiveOnlyHolds"], original["receiveOnlyHolds"]);
+        assert_eq!(saved["futureSetting"], original["futureSetting"]);
+        assert_eq!(saved["libraries"]["lib-a"]["futureLibrarySetting"], true);
+    }
 
     #[test]
     fn entries_are_kept_per_library_and_survive_rewrites() {

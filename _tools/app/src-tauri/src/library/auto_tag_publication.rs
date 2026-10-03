@@ -206,6 +206,7 @@ impl Library {
     }
 
     pub(crate) fn run_due_auto_tag_publication(&self, endpoint: &str) -> Result<(), LibraryError> {
+        self.ensure_send_to(endpoint)?;
         // This lane walks the local tag index; lightweight mode holds background work.
         if crate::workload::is_lightweight() {
             return Ok(());
@@ -227,7 +228,7 @@ impl Library {
             Err(error) => return Err(error),
         };
         self.run_auto_tags_with(
-            &crate::cloud::client::CloudClient::new(endpoint)?,
+            &self.cloud_client(endpoint)?,
             token.expose(),
             endpoint,
             Utc::now().timestamp(),

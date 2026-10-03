@@ -84,9 +84,29 @@ pub fn refresh_cloud_thumbnails(
         return Ok(report);
     }
 
+    // This standalone maintenance command has no AppHandle. Resolve the same native
+    // config location as Tauri; an unavailable location must never enable uploads.
+    let config_dir = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(std::path::PathBuf::from)
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".config")))
+    }.filter(|path| path.is_absolute()).ok_or(LibraryError::CloudSyncHeld)?;
+    let config: serde_json::Value = serde_json::from_str(include_str!("../../tauri.conf.json"))
+        .map_err(|_| LibraryError::CloudSyncHeld)?;
+    let identifier = config["identifier"].as_str().ok_or(LibraryError::CloudSyncHeld)?;
+    let settings = config_dir.join(identifier).join("library-machine.json");
+    require_machine_settings(&settings)?;
+    let gate = crate::library::sync_hold::process_session().gate(
+        settings,
+        crate::library::library_id_on(&connection)?,
+        crate::library::sync_hold::endpoint_key(&base_url)?,
+    );
+    let client = CloudClient::with_gate(&base_url, gate)?;
+    client.ensure_send()?;
     let token = credential::read_cloud_api_token_os()?;
     let token = token.expose();
-    let client = CloudClient::new(&base_url)?;
     let selected = select_stale_candidates(
         root,
         &client,
@@ -99,6 +119,13 @@ pub fn refresh_cloud_thumbnails(
     report.bytes_selected = selected.iter().map(|candidate| candidate.bytes).sum();
     upload_candidates(root, &client, &token, &selected, &mut report);
     Ok(report)
+}
+
+fn require_machine_settings(path: &Path) -> Result<(), LibraryError> {
+    if !path.is_file() {
+        return Err(LibraryError::CloudSyncHeld);
+    }
+    Ok(())
 }
 
 fn load_candidates(root: &Path, connection: &Connection) -> Result<Vec<Candidate>, LibraryError> {
@@ -360,5 +387,25 @@ mod tests {
             all: true,
         })
         .is_ok());
+    }
+}
+
+#[cfg(test)]
+mod hold_tests {
+    use super::*;
+    #[test]
+    fn missing_machine_settings_fail_closed_at_a_valid_location() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("library-machine.json");
+        assert!(matches!(
+            require_machine_settings(&path),
+            Err(LibraryError::CloudSyncHeld)
+        ));
+        assert!(matches!(
+            require_machine_settings(temp.path()),
+            Err(LibraryError::CloudSyncHeld)
+        ));
+        std::fs::write(&path, "{}").unwrap();
+        require_machine_settings(&path).unwrap();
     }
 }

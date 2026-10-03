@@ -38,7 +38,7 @@ export function useCloudBackfillSupervisor(gateway: LibraryGateway, libraryRoot:
         const progress = await gateway.cloudBackfillProgress();
         if (disposed || !progress) return;
         const workerActive = worker.current?.gateway === gateway && worker.current.root === libraryRoot;
-        const enabled = progress.replicationEnabled !== false && progress.controlState !== "paused";
+        const enabled = !progress.syncHeld && progress.replicationEnabled !== false && progress.controlState !== "paused";
         if (enabled && remainingWork(progress) > 0) {
           nextDelay = ACTIVE_DELAY_MS;
           if (!workerActive && !nativeWorkload()) {

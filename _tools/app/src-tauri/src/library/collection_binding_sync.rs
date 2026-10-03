@@ -448,6 +448,7 @@ impl Library {
 
     /// The `bindings` publication lane.
     pub(crate) fn run_due_collection_bindings(&self, endpoint: &str) -> Result<(), LibraryError> {
+        self.ensure_send_to(endpoint)?;
         let config = self.cloud_sync_config()?;
         if !config.enabled || config.api_base_url.as_deref() != Some(endpoint) {
             return Ok(());
@@ -457,7 +458,7 @@ impl Library {
             Err(LibraryError::CloudCredentialNotConfigured) => return Ok(()),
             Err(error) => return Err(error),
         };
-        let client = CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         self.sync_collection_bindings_with(&client, publisher.expose(), endpoint, &LiveApplier)
     }
 
@@ -473,6 +474,8 @@ impl Library {
         endpoint: &str,
         applier: &dyn BindingApplier,
     ) -> Result<(), LibraryError> {
+        self.ensure_send_to(endpoint)?;
+        client.ensure_send()?;
         use crate::cloud::status_watch::{log_due, LogKind, LogPosition};
         let now = unix_now();
         let state = self.collection_binding_sync_state(endpoint)?;

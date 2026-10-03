@@ -122,6 +122,17 @@ impl Library {
     }
     /// Returns the number of jobs actually submitted (zero for a quiet tick).
     pub(crate) fn run_saved_mobile_publications(&self) -> Result<usize, LibraryError> {
+        self.run_saved_mobile_publications_with(
+            |slot, work| RUNNING[slot].submit("mobile-publication", work),
+            Self::run_mobile_publication_lane,
+        )
+    }
+
+    fn run_saved_mobile_publications_with(
+        &self,
+        mut submit: impl FnMut(usize, Box<dyn FnOnce() + Send>) -> std::io::Result<bool>,
+        run: fn(&Library, &str, &str) -> Result<(), LibraryError>,
+    ) -> Result<usize, LibraryError> {
         let config = self.cloud_sync_config()?;
         let endpoint = config.api_base_url.unwrap_or_default();
         if !config.enabled || endpoint.is_empty() {
@@ -158,77 +169,31 @@ impl Library {
         .into_iter()
         .enumerate()
         {
-            if !due[slot] {
+            if !due[slot] || (self.sync_held(&endpoint) && matches!(kind, "visibility" | "bindings" | "metadata" | "avPick" | "artists" | "autoTags")) {
                 continue;
             }
             let library = self.clone();
             let worker_endpoint = endpoint.clone();
             let generation = library.publication_inputs.generation(slot);
             // Return after dispatch so the native owner's next tick can service every free lane.
-            let started =
-                RUNNING[slot]
-                    .submit("mobile-publication", move || {
-                        let endpoint = worker_endpoint;
-                        // `similarity`: automatic comparison of newly materialized Assets, then mobile
-                        // similarity decisions and the pair feed (`similarity_review_sync.rs`).
-                        let result =
-                            match kind {
-                                "upcoming" | "avPick" | "artists" => library
-                                    .run_due_home_publication(kind, &endpoint)
-                                    .map_err(|error| {
-                                        eprintln!("home publication {kind}: {error}");
-                                        error
-                                    }),
-                                "autoTags" => library
-                                    .run_due_auto_tag_publication(&endpoint)
-                                    .map_err(|error| {
-                                        eprintln!("auto tag publication: {error}");
-                                        error
-                                    }),
-                                "visibility" => library.publish_due_catalog_visibility(&endpoint),
-                                "similarity" => library
-                                    .run_due_similarity_review(&endpoint)
-                                    .map_err(|error| {
-                                        eprintln!("similarity review: {error}");
-                                        error
-                                    }),
-                                // Manga Catalog duplicate editions (`catalog_duplicate_sync.rs`).
-                                "catalogDuplicates" => library
-                                    .run_due_catalog_duplicates(&endpoint)
-                                    .map_err(|error| {
-                                        eprintln!("catalog duplicates: {error}");
-                                        error
-                                    }),
-                                // Manga release notifications shared with mobile (`collection_release_sync.rs`).
-                                "releases" => library
-                                    .run_due_collection_releases(&endpoint)
-                                    .map_err(|error| {
-                                        eprintln!("collection releases: {error}");
-                                        error
-                                    }),
-                                // Tablet-requested MangaDex / Kakao connections (`collection_binding_sync.rs`).
-                                "bindings" => library
-                                    .run_due_collection_bindings(&endpoint)
-                                    .map_err(|error| {
-                                        eprintln!("collection bindings: {error}");
-                                        error
-                                    }),
-                                // Classification / saved-X / Album read snapshots (`captures.rs`), no longer
-                                // tied to the capture poll's cadence.
-                                "metadata" => library.publish_due_cloud_metadata(&endpoint),
-                                _ => library.publish_due_mobile_kind(kind, &endpoint),
-                            };
-                        if result.is_ok()
-                            && slot != 2
-                            && (slot != 5
-                                || library.collection_release_sync_state(&endpoint).is_ok_and(
-                                    |state| state.retry_after <= chrono::Utc::now().timestamp(),
-                                ))
-                        {
-                            library.publication_inputs.checked(slot, generation);
-                        }
-                    })
-                    .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            let started = submit(
+                slot,
+                Box::new(move || {
+                    let endpoint = worker_endpoint;
+                    let result = run(&library, kind, &endpoint);
+                    if result.is_ok()
+                        && !library.sync_held(&endpoint)
+                        && slot != 2
+                        && (slot != 5
+                            || library.collection_release_sync_state(&endpoint).is_ok_and(
+                                |state| state.retry_after <= chrono::Utc::now().timestamp(),
+                            ))
+                    {
+                        library.publication_inputs.checked(slot, generation);
+                    }
+                }),
+            )
+            .map_err(|_| LibraryError::InvalidCloudResponse)?;
             if !started {
                 // A log wake racing an active lane is retried by the owner next second.
                 super::status_watch::wake_publications();
@@ -239,6 +204,47 @@ impl Library {
             }
         }
         Ok(dispatched)
+    }
+
+    fn run_mobile_publication_lane(&self, kind: &str, endpoint: &str) -> Result<(), LibraryError> {
+        match kind {
+            "upcoming" | "avPick" | "artists" => self
+                .run_due_home_publication(kind, endpoint)
+                .map_err(|error| {
+                    eprintln!("home publication {kind}: {error}");
+                    error
+                }),
+            "autoTags" => self
+                .run_due_auto_tag_publication(endpoint)
+                .map_err(|error| {
+                    eprintln!("auto tag publication: {error}");
+                    error
+                }),
+            "visibility" => self.publish_due_catalog_visibility(endpoint),
+            "similarity" => self.run_due_similarity_review(endpoint).map_err(|error| {
+                eprintln!("similarity review: {error}");
+                error
+            }),
+            // Manga Catalog duplicate editions (`catalog_duplicate_sync.rs`).
+            "catalogDuplicates" => self.run_due_catalog_duplicates(endpoint).map_err(|error| {
+                eprintln!("catalog duplicates: {error}");
+                error
+            }),
+            // Manga release notifications shared with mobile (`collection_release_sync.rs`).
+            "releases" => self.run_due_collection_releases(endpoint).map_err(|error| {
+                eprintln!("collection releases: {error}");
+                error
+            }),
+            // Tablet-requested MangaDex / Kakao connections (`collection_binding_sync.rs`).
+            "bindings" => self.run_due_collection_bindings(endpoint).map_err(|error| {
+                eprintln!("collection bindings: {error}");
+                error
+            }),
+            // Classification / saved-X / Album read snapshots (`captures.rs`), no longer
+            // tied to the capture poll's cadence.
+            "metadata" => self.publish_due_cloud_metadata(endpoint),
+            _ => self.publish_due_mobile_kind(kind, endpoint),
+        }
     }
 
     fn update_publication_endpoint_on(
@@ -257,25 +263,38 @@ impl Library {
     }
 
     fn publish_due_mobile_kind(&self, kind: &str, endpoint: &str) -> Result<(), LibraryError> {
+        self.publish_due_mobile_kind_with_receive(kind, endpoint, || {
+            if kind == "characters" {
+                // Receive even when no local changes have dirtied the publication. Order:
+                // exclusions → mobile review decisions → snapshot → candidate feed. The two
+                // receives are independent channels, so a failing exclusion pass must not starve
+                // the review receive; the first error still ends this tick.
+                both(
+                    || self.run_due_character_exclusions(endpoint),
+                    || self.run_due_character_review(endpoint),
+                )?;
+            } else if kind == "collections" {
+                // Same for mobile personal edits (at most once a minute, durably throttled).
+                // An applied edit dirties the lane through the 0074 triggers; the publication
+                // itself receives again before it reads the snapshot.
+                self.run_due_collection_personal_edits(endpoint)?;
+            }
+            Ok(())
+        })
+    }
+
+    fn publish_due_mobile_kind_with_receive(
+        &self,
+        kind: &str,
+        endpoint: &str,
+        receive: impl FnOnce() -> Result<(), LibraryError>,
+    ) -> Result<(), LibraryError> {
         let config = self.cloud_sync_config()?;
         if !config.enabled || config.api_base_url.as_deref() != Some(endpoint) {
             return Ok(());
         }
-        if kind == "characters" {
-            // Receive even when no local changes have dirtied the publication. Order:
-            // exclusions → mobile review decisions → snapshot → candidate feed. The two
-            // receives are independent channels, so a failing exclusion pass must not starve
-            // the review receive; the first error still ends this tick.
-            both(
-                || self.run_due_character_exclusions(endpoint),
-                || self.run_due_character_review(endpoint),
-            )?;
-        } else if kind == "collections" {
-            // Same for mobile personal edits (at most once a minute, durably throttled).
-            // An applied edit dirties the lane through the 0074 triggers; the publication
-            // itself receives again before it reads the snapshot.
-            self.run_due_collection_personal_edits(endpoint)?;
-        }
+        receive()?;
+        if self.sync_held(endpoint) { return Ok(()); }
         let generation: Option<i64> = {
             use rusqlite::OptionalExtension;
             // Collections are small to publish (the list query is ~6 ms) and a new or edited
@@ -611,6 +630,7 @@ impl Library {
     }
 
     fn publish_due_catalog_visibility(&self, endpoint: &str) -> Result<(), LibraryError> {
+        self.ensure_send_to(endpoint)?;
         let generation = self.publication_inputs.generation(2);
         let (body, digest) = {
             let db = self.connection()?;
@@ -627,7 +647,7 @@ impl Library {
         if !due {
             return Ok(());
         }
-        let client = super::client::CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         let token = crate::library::credential::read_cloud_api_token_os()?;
         let token = token.expose();
         client.publish_catalog_visibility(&body, &token)?;
@@ -653,5 +673,103 @@ mod workload_tests {
         assert!(!d.deferred(5, now, true));
         d.mobile_edit(3, 5, 3, now, true);
         assert!(!d.deferred(5, now, false));
+    }
+    #[test]
+    fn held_saved_publications_dispatch_only_receive_lanes_and_do_not_record_checked() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        library.use_machine_settings(temp.path().join("machine.json"));
+        library
+            .set_cloud_sync_config(crate::cloud::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some("http://127.0.0.1".into()),
+            })
+            .unwrap();
+        library
+            .set_cloud_sync_hold("http://127.0.0.1", true)
+            .unwrap();
+        let mut slots = Vec::new();
+        let count = library
+            .run_saved_mobile_publications_with(
+                |slot, job| {
+                    slots.push(slot);
+                    job();
+                    Ok(true)
+                },
+                |_, kind, _| {
+                    assert!(matches!(
+                        kind,
+                        "collections"
+                            | "characters"
+                            | "similarity"
+                            | "catalogDuplicates"
+                            | "releases"
+                            | "upcoming"
+                    ));
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(count, 6);
+        assert_eq!(slots, [0, 1, 3, 4, 5, 8]);
+        for slot in 0..12 {
+            assert_eq!(library.publication_inputs.checked_generation(slot), None);
+        }
+    }
+
+    #[test]
+    fn held_collection_lane_receives_then_stops_before_publication() {
+        use crate::cloud::client::CloudClient;
+        use serde_json::json;
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path().join("library")).unwrap();
+        library.use_machine_settings(temp.path().join("machine.json"));
+        let endpoint = "http://127.0.0.1";
+        library
+            .set_cloud_sync_config(crate::cloud::models::CloudSyncConfig {
+                enabled: true,
+                api_base_url: Some(endpoint.into()),
+            })
+            .unwrap();
+        library.set_cloud_sync_hold(endpoint, true).unwrap();
+        let id = library.library_id().unwrap();
+        library
+            .adopt_collection_personal_edit_library(endpoint, &id)
+            .unwrap();
+        library.connection().unwrap().execute("INSERT INTO collections(id,name,type,created_at,updated_at) VALUES('known','Known','game','now','now')", []).unwrap();
+        Library::update_publication_endpoint_on(&library.connection().unwrap(), endpoint).unwrap();
+        let (mut client, requests) = CloudClient::home_test_client(vec![
+            json!({"version":1,"libraryId":id,"after":0,"nextCursor":1,"hasMore":false,"items":[{"sequence":1,"operationId":"op-1","collectionId":"known","field":"showcase","value":true,"previous":false,"createdAt":"2026-10-04T00:00:00Z"}]}),
+        ]);
+        client.gate = library.sync_gate(endpoint).unwrap();
+        let before: i64 = library.connection().unwrap().query_row("SELECT published_generation FROM mobile_publication_state WHERE kind='collections'", [], |r| r.get(0)).unwrap();
+        library
+            .publish_due_mobile_kind_with_receive("collections", endpoint, || {
+                library
+                    .receive_collection_personal_edits_with(&client, "publisher", endpoint, 1)
+                    .map(|_| ())
+            })
+            .unwrap();
+        assert_eq!(
+            library
+                .collection_personal_edit_adoption(endpoint)
+                .unwrap()
+                .unwrap()
+                .1,
+            1
+        );
+        let db = library.connection().unwrap();
+        assert!(db
+            .query_row(
+                "SELECT showcase FROM collections WHERE id='known'",
+                [],
+                |r| r.get::<_, bool>(0)
+            )
+            .unwrap());
+        let (published, retry): (i64,i64) = db.query_row("SELECT published_generation,retry_after FROM mobile_publication_state WHERE kind='collections'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+        assert_eq!((published, retry), (before, 0));
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].starts_with(b"GET "));
     }
 }

@@ -759,3 +759,43 @@ fn upcoming_intent_poll_keeps_legacy_cadence_without_rebuilding_unchanged_body()
     );
     assert_eq!(fake.requests.borrow().len(), 2);
 }
+
+#[test]
+fn held_upcoming_receives_intents_without_publishing_or_marking_inputs_observed() {
+    let (temp, lib) = setup();
+    lib.use_machine_settings(temp.path().join("machine.json"));
+    lib.set_cloud_sync_hold("https://fake.invalid", true)
+        .unwrap();
+    cache(&lib, &[game()]);
+    let fake = Fake::default();
+    fake.pages
+        .borrow_mut()
+        .push_back(page(0, vec![intent(1, "add", &game().id)]));
+    run(&lib, &fake, "upcoming", 0);
+    assert_eq!(
+        State::load(
+            &*lib.connection().unwrap(),
+            "https://fake.invalid/",
+            "upcoming"
+        )
+        .unwrap()
+        .cursor,
+        1
+    );
+    assert_eq!(
+        lib.connection()
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM release_watch_items WHERE id=?1",
+                [&game().id],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        1
+    );
+    assert!(fake.requests.borrow().is_empty());
+    assert!(fake.uploads.borrow().is_empty());
+    assert!(lib
+        .publication_inputs
+        .inputs_changed(8, "https://fake.invalid/"));
+}

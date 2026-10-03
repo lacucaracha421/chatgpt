@@ -24,6 +24,10 @@
 //! * Deterministic outcomes (`skipped:resolvedOnPc|stale|changed|assetGone|withdrawn`)
 //!   advance the cursor and are reported in the next feed PUT; only transport/DB errors,
 //!   malformed pages and receipt divergences hold it.
+//! While receive-only hold is active, missing local prerequisites are temporary: stop
+//! before that entry without a receipt, retaining the applied prefix and reporting the
+//! known waiting entries and missing target IDs. Other skip rules remain unchanged.
+//!
 use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -344,7 +348,7 @@ impl Library {
             Err(LibraryError::CloudCredentialNotConfigured) => return Ok(()),
             Err(error) => return Err(error),
         };
-        let client = CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         let received = if self.claim_similarity_review_poll(endpoint)? {
             match self.receive_similarity_review_with(&client, publisher.expose(), endpoint) {
                 Ok(_) | Err(LibraryError::SimilarityReviewUnsupported) => Ok(()),
@@ -353,7 +357,7 @@ impl Library {
         } else {
             Ok(())
         };
-        if self.similarity_review_adoption(endpoint)?.is_some() {
+        if !self.sync_held(endpoint) && self.similarity_review_adoption(endpoint)?.is_some() {
             let published = credential::read_cloud_api_token_os().and_then(|token| {
                 self.publish_due_similarity_review_feed_with(
                     &client,
@@ -448,7 +452,9 @@ impl Library {
                 .filter_map(|item| item.withdraws),
         );
         let mut outcome = PageOutcome::default();
-        for item in items {
+        let held = self.sync_held(endpoint);
+        let mut waiting = super::sync_hold::TabletWait::default();
+        for (index, item) in items.iter().enumerate() {
             let durable = self.similarity_received_cursor(endpoint, library_id)?;
             let consumed = {
                 let connection = self.connection()?;
@@ -463,6 +469,23 @@ impl Library {
             }
             if item.sequence != durable + 1 || consumed {
                 return Err(LibraryError::SimilarityReviewInvalid);
+            }
+            if held {
+                let missing = super::sync_hold::missing_targets_on(
+                    &*self.connection()?,
+                    &[
+                        ("similarity_reviews", &item.review_id),
+                        ("assets", &item.a_asset_id),
+                        ("assets", &item.b_asset_id),
+                    ],
+                )?;
+                if !missing.is_empty() {
+                    waiting = super::sync_hold::TabletWait {
+                        count: items.len() - index,
+                        target_ids: missing,
+                    };
+                    break;
+                }
             }
             let result = if withdrawn.contains(&item.sequence) {
                 Outcome::Skipped("withdrawn")
@@ -511,6 +534,12 @@ impl Library {
             }
             transaction.commit()?;
         }
+        super::sync_hold::record_tablet_wait_on(
+            &*self.connection()?,
+            endpoint,
+            "similarityReview",
+            &waiting,
+        )?;
         Ok(outcome)
     }
 
@@ -669,6 +698,8 @@ impl Library {
         api_token: &str,
         endpoint: &str,
     ) -> Result<FeedOutcome, LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         let library_id = self.library_id()?;
         let cursor: Option<i64> = self
             .connection()?

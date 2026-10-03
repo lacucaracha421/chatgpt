@@ -990,17 +990,36 @@ impl ClassificationCommandResult {
 pub(crate) struct CloudClient {
     agent: ureq::Agent,
     base_url: url::Url,
+    pub(super) gate: std::sync::Arc<crate::library::sync_hold::Gate>,
+    #[cfg(test)]
+    test_transport: Option<ureq::Agent>,
 }
 
 impl CloudClient {
+    fn agent_with_config(&self, config: ureq::config::Config) -> ureq::Agent {
+        #[cfg(test)]
+        if let Some(agent) = &self.test_transport { return agent.clone(); }
+        crate::http_agent::agent(config)
+    }
+    pub(crate) fn with_gate(base_url: &str, gate: std::sync::Arc<crate::library::sync_hold::Gate>) -> Result<Self, LibraryError> {
+        let mut client = Self::new(base_url)?;
+        client.gate = gate;
+        Ok(client)
+    }
+    pub(crate) fn held(&self) -> bool { self.gate.held() }
+    pub(crate) fn ensure_send(&self) -> Result<(), LibraryError> { self.send_permit().map(|_| ()) }
+    pub(crate) fn send_permit(&self) -> Result<std::sync::RwLockReadGuard<'_, bool>, LibraryError> {
+        self.gate.permit()
+    }
     pub(crate) fn manga_index_pin_snapshot(&self, library_id: &str, epoch: i64, token: &str) -> Result<crate::library::manga_index_sync::PinSnapshot, LibraryError> {
         if !crate::library::is_valid_library_id(library_id) || epoch < 1 { return Err(LibraryError::InvalidCloudResponse); }
         let body = self.conditional_get_bounded(&format!("/v1/mobile-catalog/index/pins?libraryId={library_id}&epoch={epoch}"),token,|error|map_bookmark_read_error(error,LibraryError::CatalogBookmarkAuthorityMismatch),3*1024*1024)?;
         serde_json::from_slice(&body).map_err(|_|LibraryError::InvalidCloudResponse)
     }
     pub(crate) fn manga_index_pin_command(&self, identity: &crate::library::manga_index::MangaIndexIdentity, command: &serde_json::Value, token: &str) -> Result<crate::library::manga_index_sync::PinReply, LibraryError> {
+        let _send = self.send_permit()?;
         use crate::library::manga_index_sync::{PinReply,PinResult,PinState};
-        let agent=crate::http_agent::agent(ureq::Agent::config_builder().max_redirects(0).http_status_as_error(false).timeout_global(Some(SHORT_NETWORK_TIMEOUT)).build());
+        let agent=self.agent_with_config(ureq::Agent::config_builder().max_redirects(0).http_status_as_error(false).timeout_global(Some(SHORT_NETWORK_TIMEOUT)).build());
         let body=serde_json::to_vec(command).map_err(|_|LibraryError::InvalidCloudResponse)?;
         let mut response=agent.put(self.endpoint(&format!("/v1/mobile-catalog/index/pins/{}/{}",identity.kind,identity.namespace))?).header("Authorization",bearer(token)?).content_type("application/json").send(&body).map_err(map_bookmark_command_error)?;
         let status=response.status().as_u16();
@@ -1051,7 +1070,7 @@ impl CloudClient {
     /// requested wait, so it is allowed `recv_response` instead of the usual 30 s.
     pub(crate) fn for_status_watch(base_url: &str, recv_response: Duration) -> Result<Self, LibraryError> {
         let mut client = Self::new(base_url)?;
-        client.agent = crate::http_agent::agent(
+        client.agent = client.agent_with_config(
             ureq::Agent::config_builder()
                 .timeout_connect(Some(SHORT_NETWORK_TIMEOUT))
                 .timeout_send_request(Some(SHORT_NETWORK_TIMEOUT))
@@ -1216,7 +1235,7 @@ impl CloudClient {
         // pages, and the authority codes when the identity/epoch/contract no longer
         // matches. Those demand different recovery, and collapsing them into one
         // generic rejection would make a retryable re-base look like a fatal error.
-        let agent = crate::http_agent::agent(
+        let agent = self.agent_with_config(
             ureq::Agent::config_builder()
                 .max_redirects(0)
                 .http_status_as_error(false)
@@ -1264,7 +1283,7 @@ impl CloudClient {
         // `http_status_as_error` is disabled for this request so the coded 409 body
         // survives: an expired cursor and a cursor ahead of the server share a status
         // but demand different recovery, and neither may be read as "no changes".
-        let agent = crate::http_agent::agent(
+        let agent = self.agent_with_config(
             ureq::Agent::config_builder()
                 .max_redirects(0)
                 .http_status_as_error(false)
@@ -1352,7 +1371,7 @@ impl CloudClient {
         // pages, and the shared authority codes when the identity/epoch/contract no
         // longer matches. Those demand different recovery, and collapsing them into one
         // generic rejection would make a retryable re-base look like a fatal error.
-        let agent = crate::http_agent::agent(
+        let agent = self.agent_with_config(
             ureq::Agent::config_builder()
                 .max_redirects(0)
                 .http_status_as_error(false)
@@ -1407,7 +1426,7 @@ impl CloudClient {
         // survives: an expired cursor, a cursor ahead of the server and a changed
         // baseline share a status but demand different recovery, and none may be read
         // as "no changes".
-        let agent = crate::http_agent::agent(
+        let agent = self.agent_with_config(
             ureq::Agent::config_builder()
                 .max_redirects(0)
                 .http_status_as_error(false)
@@ -1460,11 +1479,12 @@ impl CloudClient {
         body: &serde_json::Value,
         token: &str,
     ) -> Result<AlbumCommandOutcome, LibraryError> {
+        let _send = self.send_permit()?;
         let bytes = serde_json::to_vec(body).map_err(|_| LibraryError::InvalidCloudResponse)?;
         if bytes.len() > 16 * 1024 {
             return Err(LibraryError::InvalidCloudResponse);
         }
-        let agent = crate::http_agent::agent(
+        let agent = self.agent_with_config(
             ureq::Agent::config_builder()
                 .max_redirects(0)
                 .http_status_as_error(false)
@@ -1535,6 +1555,7 @@ impl CloudClient {
         body: &serde_json::Value,
         token: &str,
     ) -> Result<ClassificationCommandOutcome, LibraryError> {
+        let _send = self.send_permit()?;
         let bytes = serde_json::to_vec(body).map_err(|_| LibraryError::InvalidCloudResponse)?;
         // The server bounds the route body at 16 KiB; refusing here keeps a local
         // representation error from being reported as a transport failure.
@@ -1545,7 +1566,7 @@ impl CloudClient {
         // survives: the route uses one status for an authority identity failure, a
         // compare-and-set conflict and a semantic structural rejection, and those demand
         // different handling. Collapsing them would make an automatic rebase impossible.
-        let agent = crate::http_agent::agent(
+        let agent = self.agent_with_config(
             ureq::Agent::config_builder()
                 .max_redirects(0)
                 .http_status_as_error(false)
@@ -1599,9 +1620,10 @@ impl CloudClient {
     }
 
     pub(crate) fn publish_catalog_visibility(&self,body:&serde_json::Value,token:&str)->Result<(),LibraryError>{
+        let _send = self.send_permit()?;
         let bytes=serde_json::to_vec(body).map_err(|_|LibraryError::InvalidCloudResponse)?;
         if bytes.len()>crate::library::mobile_catalog::MAX_USERS{return Err(LibraryError::InvalidCloudResponse)}
-        let agent=crate::http_agent::agent(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build());
+        let agent=self.agent_with_config(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build());
         let mut response=agent.put(self.endpoint("/v1/mobile-catalog/visibility")?).header("Authorization",bearer(token)?).content_type("application/json").send(&bytes).map_err(map_registration_error)?;
         let value:serde_json::Value=read_json(&mut response)?;
         if value["publicationRevision"].as_str().is_none(){return Err(LibraryError::InvalidCloudResponse)} Ok(())
@@ -1612,8 +1634,9 @@ impl CloudClient {
         Ok(read_json::<Status>(&mut response)?.publication_revision)
     }
     pub(crate) fn upload_mobile_catalog(&self,digest:&str,file:File,token:&str,progress: super::publication::Reporter<'_>)->Result<(),LibraryError>{
+        let _send = self.send_permit()?;
         if digest.len()!=64 || !digest.bytes().all(|b|b.is_ascii_hexdigit()) || file.metadata().map_err(|_|LibraryError::InvalidOnlineCatalog)?.len()>crate::library::mobile_catalog::MAX_CONTENT {return Err(LibraryError::InvalidOnlineCatalog);}
-        let agent=crate::http_agent::agent(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build());
+        let agent=self.agent_with_config(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build());
         let total = file.metadata().map_err(|_|LibraryError::InvalidOnlineCatalog)?.len();
         let mut reader = PublicationReader { file, progress, total, completed: 0, reported: 0 };
         let mut response=agent.put(self.endpoint(&format!("/v1/mobile-catalog/replicas/{digest}"))?).header("Authorization",bearer(token)?).content_type("application/x-ndjson").header("Content-Length", total.to_string()).send(ureq::SendBody::from_reader(&mut reader)).map_err(map_registration_error)?;
@@ -1621,10 +1644,11 @@ impl CloudClient {
         if body["contentDigest"].as_str()!=Some(digest) || body["ready"]!=true {return Err(LibraryError::InvalidCloudResponse);} Ok(())
     }
     pub(crate) fn publish_mobile_catalog(&self,body:&serde_json::Value,token:&str,library_id:&str)->Result<(String,String),LibraryError>{
+        let _send = self.send_permit()?;
         if !crate::library::is_valid_library_id(library_id) {return Err(LibraryError::InvalidCloudResponse);}
         let bytes=serde_json::to_vec(body).map_err(|_|LibraryError::InvalidCloudResponse)?;
         if bytes.len()>crate::library::mobile_catalog::MAX_USERS+4096 {return Err(LibraryError::InvalidCloudResponse);}
-        let agent=crate::http_agent::agent(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build());
+        let agent=self.agent_with_config(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build());
         let mut response=agent.put(self.endpoint("/v1/mobile-catalog/publication")?).header("Authorization",bearer(token)?).header("X-Lakomics-Library-Id",library_id).content_type("application/json").send(&bytes).map_err(map_registration_error)?;
         let value:serde_json::Value=read_json(&mut response)?;
         let revision=value["publicationRevision"].as_str().filter(|s|s.len()==64).ok_or(LibraryError::InvalidCloudResponse)?;
@@ -1709,7 +1733,7 @@ impl CloudClient {
         // `http_status_as_error` is disabled for this one request so the coded 409
         // body survives: the route distinguishes a cursor *ahead* of the server
         // from a cursor whose history has expired, and the two share a status.
-        let agent = crate::http_agent::agent(
+        let agent = self.agent_with_config(
             ureq::Agent::config_builder()
                 .max_redirects(0)
                 .http_status_as_error(false)
@@ -1770,6 +1794,7 @@ impl CloudClient {
         command: &MobileCatalogBookmarkCommand,
         token: &str,
     ) -> Result<MobileCatalogBookmarkCommandResult, LibraryError> {
+        let _send = self.send_permit()?;
         if !matches!(provider, "kHentai" | "heliotrope") {
             return Err(LibraryError::InvalidCloudResponse);
         }
@@ -1799,7 +1824,7 @@ impl CloudClient {
             .map_err(|_| LibraryError::InvalidCloudSyncConfig)?
             .pop_if_empty()
             .extend([provider, work_id]);
-        let agent = crate::http_agent::agent(
+        let agent = self.agent_with_config(
             ureq::Agent::config_builder()
                 .max_redirects(0)
                 .http_status_as_error(false)
@@ -1847,15 +1872,16 @@ impl CloudClient {
     }
 
     pub(crate) fn notes_list(&self, vault: &str, cursor:i64, token:&str) -> crate::library::notes::Result<crate::library::notes::Page> {
-        let agent=crate::http_agent::agent(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build());
+        let agent=self.agent_with_config(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build());
         let mut response=agent.get(self.endpoint(&format!("/v1/notes/{vault}?after={cursor}&limit=10"))?)
             .header("Authorization",bearer(token)?).call()
             .map_err(|_|crate::library::notes::Error::Message("메모 서버에 연결하지 못했습니다. PC 저장 내용은 유지됩니다."))?;
         Ok(read_json_bounded(&mut response,8*1024*1024)?)
     }
     pub(crate) fn notes_put(&self,vault:&str,id:&str,revision:i64,operation:&str,payload:&crate::library::notes::Envelope,token:&str)->crate::library::notes::Result<crate::library::notes::Remote> {
+        let _send = self.send_permit()?;
         let body=serde_json::to_vec(&serde_json::json!({"expectedRevision":revision,"operationId":operation,"payload":payload}))?;
-        let agent=crate::http_agent::agent(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build());
+        let agent=self.agent_with_config(ureq::Agent::config_builder().max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build());
         let mut response=agent.put(self.endpoint(&format!("/v1/notes/{vault}/{id}"))?).header("Authorization",bearer(token)?)
             .content_type("application/json").send(&body).map_err(|error|match error {
                 ureq::Error::StatusCode(409)=>crate::library::notes::Error::Message("다른 기기에서 메모가 변경됐습니다. 다시 동기화해 두 버전을 확인해 주세요."),
@@ -1895,7 +1921,7 @@ impl CloudClient {
         if !crate::library::is_valid_library_id(library_id) || after < 0 || !(1..=100).contains(&limit) || !(1..=3).contains(&edit_version) {
             return Err(LibraryError::InvalidCloudResponse);
         }
-        let agent = crate::http_agent::agent(
+        let agent = self.agent_with_config(
             ureq::Agent::config_builder()
                 .max_redirects(0)
                 .http_status_as_error(false)
@@ -1940,6 +1966,7 @@ impl CloudClient {
     }
 
     pub(crate) fn upload_collection_artwork(&self, blob: &super::collections::ArtworkBlob, bytes: &[u8], token: &str) -> Result<bool, LibraryError> {
+        let _send = self.send_permit()?;
         #[derive(serde::Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Prepared { object_key: String, upload_url: Option<String>, required_headers: std::collections::BTreeMap<String, String> }
@@ -1957,7 +1984,7 @@ impl CloudClient {
             return Err(LibraryError::InvalidCloudResponse);
         }
         // Signed storage requests never carry the API token, cookies or follow redirects.
-        let upload_agent = crate::http_agent::agent(ureq::Agent::config_builder().max_redirects(0)
+        let upload_agent = self.agent_with_config(ureq::Agent::config_builder().max_redirects(0)
             .timeout_global(Some(UPLOAD_BODY_TIMEOUT)).build());
         let request = upload_agent.put(url.as_str()).content_type(&blob.content_type);
         for (name, value) in prepared.required_headers {
@@ -1979,6 +2006,7 @@ impl CloudClient {
     }
 
     pub(crate) fn missing_collection_artworks(&self, blobs: &[&super::collections::ArtworkBlob], token: &str) -> Result<std::collections::BTreeSet<String>, LibraryError> {
+        let _send = self.send_permit()?;
         #[derive(serde::Deserialize)]
         struct Checked { missing: Vec<String> }
         let mut missing=std::collections::BTreeSet::new();
@@ -1998,12 +2026,13 @@ impl CloudClient {
     }
 
     pub(crate) fn publish_collections(&self, metadata: &[u8], token: &str) -> Result<String, LibraryError> {
+        let _send = self.send_permit()?;
         #[derive(serde::Deserialize)]
         struct Published { revision: String }
         if metadata.len() > super::collections::MAX_METADATA_BYTES { return Err(LibraryError::InvalidCloudResponse); }
         // Status codes are read here so a coded personal-edit 409 (e.g. the server library
         // is not linked) is distinguishable from a stale base revision.
-        let agent = crate::http_agent::agent(
+        let agent = self.agent_with_config(
             ureq::Agent::config_builder()
                 .max_redirects(0)
                 .http_status_as_error(false)
@@ -2038,6 +2067,15 @@ impl CloudClient {
     }
 
     pub(crate) fn new(base_url: &str) -> Result<Self, LibraryError> {
+        let client = Self::new_unconfigured(base_url)?;
+        #[cfg(test)]
+        let client = Self {
+            gate: std::sync::Arc::new(crate::library::sync_hold::Gate::new(false)),
+            ..client
+        };
+        Ok(client)
+    }
+    pub(super) fn new_unconfigured(base_url: &str) -> Result<Self, LibraryError> {
         let parsed =
             url::Url::parse(base_url.trim()).map_err(|_| LibraryError::InvalidCloudSyncConfig)?;
         if !matches!(parsed.scheme(), "http" | "https")
@@ -2057,6 +2095,9 @@ impl CloudClient {
                     .build(),
             ),
             base_url: parsed,
+            #[cfg(test)]
+            test_transport: None,
+            gate: std::sync::Arc::new(crate::library::sync_hold::Gate::default()),
         })
     }
 
@@ -2066,6 +2107,7 @@ impl CloudClient {
         source: File,
         token: &str,
     ) -> Result<(), LibraryError> {
+        let _send = self.send_permit()?;
         let token = token.trim();
         if token.is_empty() {
             return Err(LibraryError::InvalidCloudCredentialValue);
@@ -2125,6 +2167,7 @@ impl CloudClient {
     }
 
     pub(crate) fn create_extension_pairing(&self, token: &str) -> Result<ExtensionPairingResponse, LibraryError> {
+        let _send = self.send_permit()?;
         let mut response = self.agent
             .post(self.endpoint("/v1/extension/pairings")?)
             .header("Authorization", bearer(token)?)
@@ -2219,6 +2262,7 @@ impl CloudClient {
         token: &str,
         imported_at: &str,
     ) -> Result<(), LibraryError> {
+        let _send = self.send_permit()?;
         let authorization = bearer(token)?;
         let body = serde_json::to_vec(&AcknowledgeCaptureRequest {
             imported_at: imported_at.to_string(),
@@ -2244,6 +2288,7 @@ impl CloudClient {
     }
 
     pub(crate) fn publish_characters(&self, token: &str, body: &[u8]) -> Result<super::characters::CharacterPublishResult, LibraryError> {
+        let _send = self.send_permit()?;
         let mut response=self.agent.put(self.endpoint("/v1/library/characters/replica")?)
             .header("Authorization",bearer(token)?).content_type("application/json").send(body)
             .map_err(map_character_publication_error)?;
@@ -2331,6 +2376,7 @@ impl CloudClient {
         token: &str,
         body: &[u8],
     ) -> Result<Option<CharacterReviewFeedResult>, LibraryError> {
+        let _send = self.send_permit()?;
         if body.len() > 8 * 1024 * 1024 {
             return Err(LibraryError::CharacterPublicationTooLarge);
         }
@@ -2397,6 +2443,7 @@ impl CloudClient {
         token: &str,
         body: &[u8],
     ) -> Result<Option<super::similarity_review::FeedResult>, LibraryError> {
+        let _send = self.send_permit()?;
         if body.len() > 8 * 1024 * 1024 {
             return Err(LibraryError::SimilarityReviewSyncRejected(413));
         }
@@ -2436,6 +2483,7 @@ impl CloudClient {
         token: &str,
         body: &[u8],
     ) -> Result<Option<super::catalog_duplicates::PublicationResult>, LibraryError> {
+        let _send = self.send_permit()?;
         if body.len() > 8 * 1024 * 1024 {
             return Err(LibraryError::CatalogDuplicateSyncRejected(413));
         }
@@ -2479,6 +2527,7 @@ impl CloudClient {
         token: &str,
         command: &super::catalog_duplicates::DecisionCommand,
     ) -> Result<super::catalog_duplicates::CommandOutcome, LibraryError> {
+        let _send = self.send_permit()?;
         use super::catalog_duplicates::CommandOutcome;
         let body = serde_json::to_vec(command).map_err(|_| LibraryError::InvalidCloudResponse)?;
         let request = self.coded_agent()?.post(self.endpoint("/v1/mobile-catalog/duplicates/decisions")?)
@@ -2505,6 +2554,7 @@ impl CloudClient {
         token: &str,
         body: &[u8],
     ) -> Result<Option<super::collection_releases::ReleaseUploadResult>, LibraryError> {
+        let _send = self.send_permit()?;
         if body.len() > 4 * 1024 * 1024 {
             return Err(LibraryError::ReleaseSyncRejected(413));
         }
@@ -2597,6 +2647,7 @@ impl CloudClient {
         request_id: i64,
         result: &super::collection_bindings::BindResult,
     ) -> Result<super::collection_bindings::ResultOutcome, LibraryError> {
+        let _send = self.send_permit()?;
         use super::collection_bindings::{ResultOutcome, MAX_CURSOR};
         if !(1..=MAX_CURSOR).contains(&request_id) {
             return Err(LibraryError::InvalidCloudResponse);
@@ -2631,7 +2682,7 @@ impl CloudClient {
     }
 
     fn coded_agent(&self) -> Result<ureq::Agent, LibraryError> {
-        Ok(crate::http_agent::agent(
+        Ok(self.agent_with_config(
             ureq::Agent::config_builder()
                 .max_redirects(0)
                 .http_status_as_error(false)
@@ -2655,6 +2706,7 @@ impl CloudClient {
     }
 
     pub(crate) fn publish_album_replica(&self, token: &str, snapshot: &serde_json::Value) -> Result<(), LibraryError> {
+        let _send = self.send_permit()?;
         let body = serde_json::to_vec(snapshot).map_err(|_| LibraryError::InvalidCloudResponse)?;
         self.agent.put(self.endpoint("/v1/library/album-snapshot")?)
             .header("Authorization", bearer(token)?)
@@ -2671,6 +2723,7 @@ impl CloudClient {
         token: &str,
         snapshot: &ClassificationSnapshotPublish,
     ) -> Result<(), LibraryError> {
+        let _send = self.send_permit()?;
         let authorization = bearer(token)?;
         let body = serde_json::to_vec(snapshot).map_err(|_| LibraryError::InvalidCloudResponse)?;
         self.agent
@@ -2693,6 +2746,7 @@ impl CloudClient {
         token: &str,
         snapshot: &SavedXMediaSnapshotPublish,
     ) -> Result<(), LibraryError> {
+        let _send = self.send_permit()?;
         let authorization = bearer(token)?;
         let body = serde_json::to_vec(snapshot).map_err(|_| LibraryError::InvalidCloudResponse)?;
         self.agent
@@ -2724,6 +2778,7 @@ impl CloudClient {
         body: &T,
         token: &str,
     ) -> Result<serde_json::Value, super::thumbnail_upload::UploadError> {
+        let _send = self.send_permit()?;
         use super::thumbnail_upload::UploadError;
         let body = serde_json::to_vec(body).map_err(|_| LibraryError::InvalidCloudResponse)?;
         let mut response = self
@@ -2791,6 +2846,7 @@ impl CloudClient {
         prepared: &super::thumbnail_upload::PreparedThumbnail,
         bytes: &[u8],
     ) -> Result<(), LibraryError> {
+        let _send = self.send_permit()?;
         let url = prepared
             .upload_url
             .as_deref()
@@ -2873,6 +2929,7 @@ impl CloudClient {
         request: super::models::ReplicationPrepareRequest<'_>,
         token: &str,
     ) -> Result<super::models::ReplicationPrepareResponse, LibraryError> {
+        let _send = self.send_permit()?;
         let authorization = bearer(token)?;
         let body = serde_json::to_vec(&request).map_err(|_| LibraryError::InvalidCloudResponse)?;
         let mut response = self
@@ -2894,6 +2951,7 @@ impl CloudClient {
         bytes: Vec<u8>,
         token: &str,
     ) -> Result<(), LibraryError> {
+        let _send = self.send_permit()?;
         let authorization = bearer(token)?;
         let presign_body = serde_json::to_vec(&PresignUploadRequest {
             object_key,
@@ -2927,6 +2985,7 @@ impl CloudClient {
         source: File,
         token: &str,
     ) -> Result<(), LibraryError> {
+        let _send = self.send_permit()?;
         let authorization = bearer(token)?;
         let presign_body = serde_json::to_vec(&PresignUploadRequest {
             object_key: METADATA_BACKUP_OBJECT_KEY,
@@ -4194,7 +4253,10 @@ mod publication_progress_tests {
 
 impl CloudClient {
     pub(crate) fn asset_request(&self,path:&str,body:Option<&serde_json::Value>,token:&str)->Result<serde_json::Value,LibraryError>{
-        let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).http_status_as_error(false).timeout_global(Some(SHORT_NETWORK_TIMEOUT)).build().into();
+        let _send = if body.is_some() && !is_download_ticket_path(path) {
+            Some(self.send_permit()?)
+        } else { None };
+        let agent=self.agent_with_config(ureq::Agent::config_builder().max_redirects(0).http_status_as_error(false).timeout_global(Some(SHORT_NETWORK_TIMEOUT)).build());
         let endpoint=self.endpoint(path)?;
         let authorization=bearer(token)?;
         let mut response=match body {
@@ -4271,4 +4333,10 @@ mod album_likes_result_tests {
         let result: AlbumCommandResult = serde_json::from_value(response).unwrap();
         assert!(result.validate_against(&create).is_err());
     }
+}
+
+fn is_download_ticket_path(path: &str) -> bool {
+    path.strip_prefix("/v1/library/assets/")
+        .and_then(|rest| rest.strip_suffix("/media-ticket"))
+        .is_some_and(|id| !id.is_empty() && id.len() <= 128 && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_'))
 }

@@ -1,3 +1,4 @@
+import { CloudSyncHold } from "./CloudSyncHold";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { displayDate, displayDateTime } from "../shared/displayDate";
 import { getVersion } from "@tauri-apps/api/app";
@@ -507,6 +508,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             {editingCloudToken && <InlineEdit><TextInput aria-label="서버 연결 키" type="password" autoComplete="off" value={cloudToken} onChange={event => setCloudToken(event.target.value)} /><Button size="sm" variant="quiet" disabled={!cloudToken.trim() || cloudBusy} onClick={() => void saveCloudToken()}>저장</Button><Button size="sm" variant="quiet" onClick={() => { setEditingCloudToken(false); setCloudToken(""); }}>취소</Button></InlineEdit>}
             {confirmingCloudTokenDelete && <ConfirmLine text="저장된 연결 키를 삭제할까요?" onCancel={() => setConfirmingCloudTokenDelete(false)} onConfirm={() => void deleteCloudToken()} busy={cloudBusy} />}
             <SimpleRow name="연결 상태" status={serverRow ? joinStatus(serverRow.value, serverRow.time) : "확인 중…"} tone={serverRow?.tone} control={<Button size="sm" variant="secondary" disabled={cloudBusy || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured} onClick={() => void testCloudConnection()}>연결 확인</Button>} />
+            {cloudSettings?.apiBaseUrl && gateway.getCloudSyncHold && gateway.setCloudSyncHold && <CloudSyncHold endpoint={cloudSettings.apiBaseUrl} read={gateway.getCloudSyncHold} save={gateway.setCloudSyncHold} />}
             <SimpleRow name="클라우드에서 받기" control={<Switch aria-label="클라우드에서 받기" checked={cloudSettings?.captureEnabled ?? cloudSettings?.enabled ?? false} disabled={cloudBusy || !cloudSettings?.apiBaseUrl} onChange={event => void saveCloudSettings(cloudSettings?.enabled, event.target.checked)} />} />
             <SimpleRow name="클라우드로 복제" control={<Switch aria-label="클라우드로 복제" checked={cloudSettings?.enabled ?? false} disabled={cloudBusy || !cloudSettings?.apiBaseUrl} onChange={event => void saveCloudSettings(event.target.checked, cloudSettings?.captureEnabled ?? cloudSettings?.enabled)} />} />
           </SettingsGroup>

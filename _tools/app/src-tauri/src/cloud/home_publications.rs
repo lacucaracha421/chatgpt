@@ -11,6 +11,7 @@ impl HomeTransport for CloudClient {
         body: Option<&Value>,
         token: &str,
     ) -> Result<Value, LibraryError> {
+        let _send = self.send_permit()?;
         let mut response = if let Some(body) = body {
             let bytes = serde_json::to_vec(body).map_err(|_| LibraryError::InvalidCloudResponse)?;
             let limit = match path {
@@ -138,10 +139,11 @@ mod fake_http {
             };
             let mut client = Self::new("http://127.0.0.1").unwrap();
             client.agent = ureq::Agent::with_parts(
-                ureq::Agent::config_builder().proxy(None).build(),
+                ureq::Agent::config_builder().proxy(None).http_status_as_error(false).max_redirects(0).build(),
                 connector,
                 ureq::unversioned::resolver::DefaultResolver::default(),
             );
+            client.test_transport = Some(client.agent.clone());
             (client, requests)
         }
     }

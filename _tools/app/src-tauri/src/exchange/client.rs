@@ -45,6 +45,7 @@ pub(crate) enum ApiError {
     /// Refused locally before any request, with the Korean message for the row.
     Refused(String),
     Cancelled,
+    Held,
 }
 
 impl ApiError {
@@ -73,6 +74,23 @@ impl ApiError {
 }
 
 type Result<T> = std::result::Result<T, ApiError>;
+
+#[cfg(test)]
+mod hold_tests {
+    use super::*;
+    #[test]
+    fn hold_refuses_every_exchange_write_and_signed_put() {
+        let mut client = ExchangeClient::new("http://127.0.0.1:9", "fixture-token", "device").unwrap();
+        client.gate = std::sync::Arc::new(crate::library::sync_hold::Gate::new(true));
+        assert!(matches!(client.register("PC"), Err(ApiError::Held)));
+        assert!(matches!(client.create(&CreateRequest { transfer_id: "transfer", batch_id: "batch", to_device: "tablet", file_name: "file", size_bytes: 1, sha256: "hash" }), Err(ApiError::Held)));
+        assert!(matches!(client.complete("transfer"), Err(ApiError::Held)));
+        assert!(matches!(client.ticket("transfer"), Err(ApiError::Held)));
+        assert!(matches!(client.ack("transfer", "hash"), Err(ApiError::Held)));
+        assert!(matches!(client.cancel("transfer"), Err(ApiError::Held)));
+        assert!(matches!(upload(&client.gate, &Upload { method: "PUT".into(), url: "http://127.0.0.1:9/signed".into(), required_headers: Default::default() }, std::io::Cursor::new(vec![1]), 1), Err(ApiError::Held)));
+    }
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -192,6 +210,7 @@ pub(crate) struct ExchangeClient {
     base: url::Url,
     authorization: String,
     device_id: String,
+    pub(crate) gate: std::sync::Arc<crate::library::sync_hold::Gate>,
 }
 
 fn agent(send_body: Duration, recv_body: Duration) -> ureq::Agent {
@@ -396,6 +415,7 @@ impl ExchangeClient {
             base,
             authorization: format!("Bearer {token}"),
             device_id: device_id.to_owned(),
+            gate: std::sync::Arc::new(crate::library::sync_hold::Gate::new(!cfg!(test))),
         })
     }
 
@@ -424,6 +444,7 @@ impl ExchangeClient {
 
     /// Register or rename this device (`kind: "pc"`).
     pub(crate) fn register(&self, name: &str) -> Result<Device> {
+        let _send = self.gate.permit().map_err(|_| ApiError::Held)?;
         let body = serde_json::json!({ "name": name, "kind": "pc" }).to_string();
         let response = self
             .agent
@@ -537,6 +558,7 @@ impl ExchangeClient {
     /// Idempotent on `transferId`: a retry with the same body returns the same row
     /// and a fresh upload URL while the upload is still open.
     pub(crate) fn create(&self, request: &CreateRequest<'_>) -> Result<Created> {
+        let _send = self.gate.permit().map_err(|_| ApiError::Held)?;
         let body = serde_json::to_vec(request).map_err(|_| ApiError::Invalid)?;
         let response = self
             .post("/v1/exchange/transfers")?
@@ -547,6 +569,7 @@ impl ExchangeClient {
     }
 
     pub(crate) fn complete(&self, transfer_id: &str) -> Result<Transfer> {
+        let _send = self.gate.permit().map_err(|_| ApiError::Held)?;
         let response = self
             .post(&format!("/v1/exchange/transfers/{transfer_id}/complete"))?
             .send_empty()
@@ -555,6 +578,7 @@ impl ExchangeClient {
     }
 
     pub(crate) fn ticket(&self, transfer_id: &str) -> Result<Ticket> {
+        let _send = self.gate.permit().map_err(|_| ApiError::Held)?;
         let response = self
             .post(&format!("/v1/exchange/transfers/{transfer_id}/ticket"))?
             .send_empty()
@@ -563,6 +587,7 @@ impl ExchangeClient {
     }
 
     pub(crate) fn ack(&self, transfer_id: &str, sha256: &str) -> Result<Transfer> {
+        let _send = self.gate.permit().map_err(|_| ApiError::Held)?;
         let body = serde_json::json!({ "sha256": sha256 }).to_string();
         let response = self
             .post(&format!("/v1/exchange/transfers/{transfer_id}/ack"))?
@@ -574,6 +599,7 @@ impl ExchangeClient {
 
     /// Withdraw (sender) or decline (receiver); idempotent once the transfer is final.
     pub(crate) fn cancel(&self, transfer_id: &str) -> Result<Transfer> {
+        let _send = self.gate.permit().map_err(|_| ApiError::Held)?;
         let response = self
             .agent
             .delete(self.url(&format!("/v1/exchange/transfers/{transfer_id}"))?)
@@ -587,7 +613,8 @@ impl ExchangeClient {
 
 /// Stream `source` to a presigned PUT with an explicit `Content-Length` (R2 rejects
 /// chunked uploads). `source` reports progress and may fail with `Interrupted` on cancel.
-pub(crate) fn upload(upload: &Upload, source: impl Read + Send + 'static, size: u64) -> Result<()> {
+pub(crate) fn upload(gate: &crate::library::sync_hold::Gate, upload: &Upload, source: impl Read + Send + 'static, size: u64) -> Result<()> {
+    let _send = gate.permit().map_err(|_| ApiError::Held)?;
     if upload.method != "PUT" {
         return Err(ApiError::Invalid);
     }

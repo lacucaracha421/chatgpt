@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CollectionSummary, ReleaseWishlistItem } from '../library/types';
-import { daysAfter, newlyReleasedRows, releaseRows, upcomingRows } from './homeModel';
+import { cloudLine, daysAfter, newlyReleasedRows, releaseRows, upcomingRows } from './homeModel';
 const title = (id: string, date: string, extra: Partial<ReleaseWishlistItem> = {}) => ({ id, title: id, kind:'game', provider:'igdb', date, precision:'exact', platforms:[], unread:[], muted:false, released:false, ...extra }) as ReleaseWishlistItem;
 describe('Home release sources', () => {
   it('includes existing unread NEW notices and dated releases without a new read', () => {
@@ -20,4 +20,12 @@ describe('Home release sources', () => {
     expect(daysAfter('2027-01-01','2026-12-31')).toBe(1);
     expect(daysAfter('2028-03-01','2028-02-28')).toBe(2);
   });
+});
+
+it('shows the hold when no sync problems are reported', () => {
+  expect(cloudLine({ syncHeld: true } as import('../library/types').CloudBackfillProgress, 0)).toEqual({ tone: 'idle', text: '받기만 · 송신 보류' });
+});
+
+it("shows receive problems ahead of a hold", () => {
+  expect(cloudLine({ syncHeld: true } as import('../library/types').CloudBackfillProgress, 2)).toEqual({ tone: 'off', text: '문제 2개' });
 });

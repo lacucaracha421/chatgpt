@@ -79,6 +79,7 @@ impl Library {
     /// imported로 표시한다. 방향은 클라우드 → 로컬이며 `cloud_sync_queue`(로컬 →
     /// 클라우드)와 상태를 공유하지 않는다.
     pub(crate) fn sync_next_cloud_capture(&self, on_ingested: &dyn Fn(&IngestOutcome)) -> Result<CloudCaptureSyncResult, LibraryError> {
+        self.ensure_cloud_send()?;
         if !self.cloud_capture_enabled()? {
             // The metadata replica remains independent of receiving captures.
             if self.cloud_sync_config()?.enabled { return self.sync_configured_cloud_capture(on_ingested); }
@@ -87,6 +88,7 @@ impl Library {
         self.begin_cloud_activity("capture")?;
         let result = self.sync_configured_cloud_capture(on_ingested);
         let (processed, problems, error, reason) = match &result {
+            Err(LibraryError::CloudSyncHeld) => (0, 0, None, None),
             Ok(summary) => (u64::from(summary.acknowledged), u64::from(summary.failed + summary.review_pending),
                 if summary.failed > 0 { Some("수신하지 못한 자료가 있습니다. 서버 연결을 확인한 뒤 다시 시도해 주세요.") }
                 else if summary.review_pending > 0 { Some("유사 자료 검토를 완료해 주세요.") } else { None },
@@ -112,16 +114,18 @@ impl Library {
         on_ingested: &dyn Fn(&IngestOutcome),
         broker: &crate::library::credential_broker::CredentialBroker<B>,
     ) -> Result<CloudCaptureSyncResult, LibraryError> {
+        self.ensure_cloud_send()?;
         let config = self.cloud_sync_config()?;
         let base_url = config
             .api_base_url
             .ok_or(LibraryError::InvalidCloudSyncConfig)?;
         let result = (|| {
             let token = broker.credential(credential::CredentialTarget::CloudApi)?;
-            let client = CloudClient::new(&base_url)?;
+            let client = self.cloud_client(&base_url)?;
             self.sync_next_cloud_capture_cycle_with_progress(&client, token.expose(), on_ingested)
         })();
         if let Err(error) = &result {
+            if matches!(error, LibraryError::CloudSyncHeld) { return result; }
             broker.invalidate_on_auth_rejection(credential::CredentialTarget::CloudApi, error);
             if config.enabled {
                 self.record_cloud_metadata_activity_with(
@@ -146,6 +150,8 @@ impl Library {
         token: &str,
         on_ingested: &dyn Fn(&IngestOutcome),
     ) -> Result<CloudCaptureSyncResult, LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         let result = if self.cloud_capture_enabled()? { self.sync_next_cloud_capture_with_progress(client, token, on_ingested)? } else { CloudCaptureSyncResult::default() };
         if !self.cloud_sync_config()?.enabled { return Ok(result); }
         self.publish_due_cloud_metadata_with(client, token, true)?;
@@ -158,11 +164,12 @@ impl Library {
     /// network are touched only when a snapshot is due. Claims are atomic, so running
     /// beside the capture poll never publishes one generation twice.
     pub(crate) fn publish_due_cloud_metadata(&self, endpoint: &str) -> Result<(), LibraryError> {
+        self.ensure_send_to(endpoint)?;
         let config = self.cloud_sync_config()?;
         if !config.enabled || config.api_base_url.as_deref() != Some(endpoint) {
             return Ok(());
         }
-        let client = CloudClient::new(endpoint)?;
+        let client = self.cloud_client(endpoint)?;
         let due: bool = self.connection()?.query_row(
             "SELECT EXISTS(SELECT 1 FROM cloud_metadata_publication_state
              WHERE (generation<>published_generation OR endpoint<>?1) AND retry_after<=?2)",
@@ -187,6 +194,8 @@ impl Library {
         token: &str,
         record_idle: bool,
     ) -> Result<bool, LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         // 수집 폴과 같은 주기로 변경된 모바일 읽기 스냅샷만 게시한다. 세대는
         // DB에 남으므로 재시작 후에도 이미 게시한 전체 스냅샷을 반복하지 않는다.
         let mut attempted = false;
@@ -252,6 +261,7 @@ impl Library {
                 )?,
                 Err(error) => {
                     publish_failed = true;
+                    if matches!(error, LibraryError::CloudSyncHeld) { return Err(error); }
                     // A refusal is definitive: drop the cached credential so the next
                     // cycle re-reads the store instead of resending a rejected bearer.
                     // A timeout or 5xx is not a refusal and leaves the cache alone.
@@ -318,17 +328,18 @@ impl Library {
     }
 
     pub(crate) fn create_extension_pairing(&self) -> Result<super::models::ExtensionPairingResponse, LibraryError> {
+        self.ensure_cloud_send()?;
         let config = self.cloud_sync_config()?;
         let base_url = config.api_base_url.ok_or(LibraryError::InvalidCloudSyncConfig)?;
         let token = crate::library::credential::read_cloud_api_token_os()?;
-        CloudClient::new(&base_url)?.create_extension_pairing(token.expose())
+        self.cloud_client(&base_url)?.create_extension_pairing(token.expose())
     }
 
     pub(crate) fn test_cloud_capture_connection(&self) -> Result<u32, LibraryError> {
         let config = self.cloud_sync_config()?;
         let base_url = config.api_base_url.ok_or(LibraryError::InvalidCloudSyncConfig)?;
         let token = crate::library::credential::read_cloud_api_token_os()?;
-        let client = CloudClient::new(&base_url)?;
+        let client = self.cloud_client(&base_url)?;
         Ok(client.list_pending_captures(token.expose())?.len() as u32)
     }
 
@@ -408,6 +419,8 @@ impl Library {
         token: &str,
         on_ingested: &dyn Fn(&IngestOutcome),
     ) -> Result<CloudCaptureSyncResult, LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         // 한 번의 폴에서 상한까지 계속 소진한다. 실패한 캡처는 건너뛰고 다음
         // 캡처로 진행하므로 한 건의 오류가 이후 캡처를 막지 않는다.
         let endpoint = client.capture_endpoint();

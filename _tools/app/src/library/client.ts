@@ -329,6 +329,8 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
     language === undefined
       ? invoke<CatalogUpdateResult | null>("run_due_online_catalog_update")
       : invoke<CatalogUpdateResult | null>("run_due_online_catalog_update", { language }),
+  getCloudSyncHold: (endpoint) => invoke("get_cloud_sync_hold", { endpoint }),
+  setCloudSyncHold: (endpoint, held) => invoke("set_cloud_sync_hold", { endpoint, held }),
   getCloudCaptureSettings: () =>
     invoke<CloudCaptureSettings>("get_cloud_capture_settings"),
   setCloudCaptureSettings: (enabled, apiBaseUrl, captureEnabled) =>

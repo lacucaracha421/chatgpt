@@ -545,6 +545,8 @@ pub fn run() {
             commands::reset_japanese_catalog_checkpoint,
             commands::run_due_online_catalog_update,
             commands::get_cloud_capture_settings,
+            commands::get_cloud_sync_hold,
+            commands::set_cloud_sync_hold,
             commands::set_cloud_capture_settings,
             commands::set_cloud_api_token,
             commands::set_cloud_publisher_token,

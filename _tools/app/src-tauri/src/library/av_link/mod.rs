@@ -362,7 +362,7 @@ impl Library {
         let Some(endpoint) = config.api_base_url.filter(|s| !s.trim().is_empty()) else {
             return Ok(());
         };
-        let client = crate::cloud::client::CloudClient::new(&endpoint)?;
+        let client = self.cloud_client(&endpoint)?;
         let endpoint = client.capture_endpoint();
         let now = chrono::Utc::now().timestamp();
         let Some(after) = self.claim_av_link_poll(endpoint, now, restricted)? else {

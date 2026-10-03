@@ -90,6 +90,7 @@ impl Library {
 
     #[cfg(test)]
     pub(crate) fn sync_next_cloud_asset(&self) -> Result<Option<CloudSyncQueueItem>, LibraryError> {
+        self.ensure_cloud_send()?;
         let config = self.cloud_sync_config()?;
         if !config.enabled {
             return Ok(None);
@@ -100,7 +101,7 @@ impl Library {
         // Original upload tickets require the publisher principal.
         let token = crate::library::credential::read_cloud_publisher_token_os()?;
         let token = token.expose();
-        let client = CloudClient::new(&base_url)?;
+        let client = self.cloud_client(&base_url)?;
         self.sync_next_cloud_asset_with(&client, &token)
     }
 
@@ -110,6 +111,8 @@ impl Library {
         client: &CloudClient,
         token: &str,
     ) -> Result<Option<CloudSyncQueueItem>, LibraryError> {
+        self.ensure_send_to(client.base())?;
+        client.ensure_send()?;
         let Some(prepared) = self.claim_next_asset_upload()? else {
             return Ok(None);
         };
@@ -119,6 +122,10 @@ impl Library {
             .and_then(|source| client.upload_asset(&prepared, source, token));
         match upload {
             Ok(()) => self.mark_cloud_sync_synced(&queue_id)?,
+            Err(LibraryError::CloudSyncHeld) => {
+                self.hold_claimed_cloud_upload(&queue_id)?;
+                return Err(LibraryError::CloudSyncHeld);
+            }
             Err(error) => {
                 if is_retryable_cloud_error(&error) {
                     self.mark_cloud_sync_retry(&queue_id, &error.to_string())?;

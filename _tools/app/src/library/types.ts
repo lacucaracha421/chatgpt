@@ -90,6 +90,7 @@ export type CloudActivity = {
 };
 
 export type CloudBackfillProgress = {
+  syncHeld?: boolean;
   activity?: CloudActivity[];
   replicationEnabled?: boolean;
   controlState: CloudBackfillControlState;
@@ -217,9 +218,11 @@ export type AuthorityDomainHealth = {
 export type AuthorityLaneFailure = { code: string; at: string };
 /** Local-only view of silent server-sync trouble; reading it never contacts the server. */
 export type AuthoritySyncHealth = {
+  syncHold?: CloudSyncHoldStatus | null;
+  authorityHeld?: boolean;
   albums: AuthorityDomainHealth;
   classifications: AuthorityDomainHealth;
-  assets: { rejectedCount: number; rejectedReason: string | null; stopped: boolean };
+  assets: { rejectedCount: number; rejectedReason: string | null; stopped: boolean; held?: boolean };
   /** Mobile character exclusions this PC could never apply (e.g. the character was deleted). */
   characterExclusions: { skippedCount: number; lastSkipReason: string | null; lastSkippedAt: string | null };
   authorityPassFailure: AuthorityLaneFailure | null;
@@ -1350,7 +1353,7 @@ export interface LibraryGateway {
   setOnlineCatalogBookmark(identity: CatalogWorkIdentity, bookmarked: boolean): Promise<void>;
   reconcileCatalogBookmarks?(): Promise<BookmarkReconciliationResult>;
   flushCatalogBookmarkOutbox?(): Promise<BookmarkOutboxFlushResult>;
-  syncAssetAuthority?(): Promise<{adopted:boolean;appliedChanges:number;materialized:number;flushed:number;stopped:boolean;materializationFailures:number}>;
+  syncAssetAuthority?(): Promise<{adopted:boolean;appliedChanges:number;materialized:number;flushed:number;stopped:boolean;held?:boolean;materializationFailures:number}>;
   reconcileAlbumAuthority?(): Promise<AlbumReconciliationResult>;
   reconcileClassificationAuthority?(): Promise<ClassificationReconciliationResult>;
   flushClassificationOutbox?(): Promise<ClassificationOutboxFlushResult>;
@@ -1363,6 +1366,8 @@ export interface LibraryGateway {
   setOnlineCatalogUpdateSettings(enabled: boolean, intervalSeconds: number): Promise<CatalogStatus>;
   runDueOnlineCatalogUpdate(language?: CatalogLanguage): Promise<CatalogUpdateResult | null>;
   getCloudCaptureSettings(): Promise<CloudCaptureSettings>;
+  getCloudSyncHold?(endpoint: string): Promise<CloudSyncHoldStatus>;
+  setCloudSyncHold?(endpoint: string, held: boolean): Promise<CloudSyncHoldStatus>;
   setCloudCaptureSettings(enabled: boolean, apiBaseUrl: string | null, captureEnabled?: boolean): Promise<CloudCaptureSettings>;
   setCloudApiToken(token: string): Promise<CloudCredentialStatus>;
   deleteCloudApiToken(): Promise<CloudCredentialStatus>;
@@ -1767,3 +1772,5 @@ export type LaunchBoxSpineBatchResult = {
   nextCursor: string | null;
   hasMore: boolean;
 };
+
+export type CloudSyncHoldStatus = { held: boolean; releaseAfterRestart: boolean; tabletWait?: { count: number; targetIds: string[] } };

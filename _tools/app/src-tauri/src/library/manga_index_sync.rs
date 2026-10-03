@@ -194,6 +194,7 @@ impl Library {
     ) -> Result<PinSyncOutcome, LibraryError> {
         self.sync_pins_using(
             domain,
+            self.sync_held(client.base()) || client.held(),
             || client.manga_index_pin_snapshot(&domain.library_id, domain.epoch, token),
             |identity, command| client.manga_index_pin_command(identity, command, token),
         )
@@ -201,6 +202,7 @@ impl Library {
     fn sync_pins_using(
         &self,
         domain: &SyncAuthorityDomain,
+        held: bool,
         mut read: impl FnMut() -> Result<PinSnapshot, LibraryError>,
         mut send: impl FnMut(&MangaIndexIdentity, &serde_json::Value) -> Result<PinReply, LibraryError>,
     ) -> Result<PinSyncOutcome, LibraryError> {
@@ -225,6 +227,9 @@ impl Library {
             Err(e) => return Err(e),
         };
         outcome.changed |= self.apply_pin_snapshot(&snapshot, &domain.library_id, domain.epoch)?;
+        if held {
+            return Ok(outcome);
+        }
         for mut intent in pending {
             if intent.epoch != domain.epoch {
                 let old_operation = intent.operation.clone();
