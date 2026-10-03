@@ -126,3 +126,23 @@ Recommended: a server-side provider proxy, `server/lakomics-api/work_providers.p
 
 5. Activate without waiting for the Windows PC; it is updated later in its own environment (WIN-SYNC-001), accepting that edits made on its old build are not carried over (salvage report only).
 6. Provider secrets (TMDB, IGDB/Twitch, Kakao) move to a server-side secret file placed by the user following instructions; the assistant never extracts or copies credentials.
+
+## 7. Revision 2026-10-03 (current-code review and user decisions)
+
+A read-only comparison against `HEAD 2f027a63` found the design still sound, but the shared data grew after 2026-09-24 and slice 0 is no longer a bare skeleton:
+- **Slice 0 today:** server stores, commands, receipts/change feed, digest staging, activation and the 30-day trash already exist in `collection_authority.py`; `mobile_collections.py` serves the authority projection once an epoch is active. Production activation is not recorded.
+- **Activating it now would regress the tablet:** the projection drops status/owned platform, cover focus, people/portraits, release watch/owned volumes/schedule and the selected-spine meaning; the personal-edit shim rejects v2 tracking and v3 records; bindings and releases still go through PC requests; AV works make the baseline check fail (the authority rejects AV while the PC publishes it).
+- **New shared data to include:** work record (status, owned platform, score, memo), cover focus, LaunchBox spines, people with StashDB profiles/portraits/crops and AV role relations, volume ranges and release subscriptions.
+
+**User decisions 2026-10-03 (supersede §6.1 and refine §6.3):**
+1. AV moves to the server domain with the rest: shared AV metadata, people, relations and portraits are server-owned; the tablet keeps its current AV reading. AV editing on the tablet and moving AV lookups to the server come later.
+2. Upload every image the screens use: selected cover/backdrop/hero, spines, person portraits, season and volume covers. Unselected provider candidates are still not uploaded.
+
+**Revised slices (replace §5 slices 1–3):**
+- **1A — current baseline and dry run:** extend the server schema and PC exporter to every field above; drain personal edits, binding requests and release reads; compare the full published payload with the staged baseline (generation, revision, cursor bound) in a verification-only path that writes nothing. User gets a report that nothing would be lost.
+- **1B — PC replica and the first tablet UI together:** `library/collection_authority.rs` with a migration for sync identity, cursors, revisions, a durable outbox and artwork materialization; route every PC write path through the outbox or an explicit fence (list in the 2026-10-03 investigation: collection, collection_pc, work_artwork, collection_source, collection_volume(_range), collection_tracking, release_watch, provider flows, collection_updates, binding/release sync, launchbox, migrations, similarity cover changes, AV modules) with a test guard; server commands for the new fields and a v3 shim; tablet create/rename/basic info/record/cover editing with its outbox.
+- **1C — fenced activation (separately authorized):** final drain and verification, digest-bound epoch, legacy PUT fence, stop the PC collections lane. User gets Collection creation and editing on the tablet with the PC off.
+- **2 — server jobs for provider apply and release detection** (MangaDex/Kakao first; TMDB/IGDB after the user places server credentials), then AV lookups.
+- **3 — retire** the personal-edit bridge, publication triggers 0074/0117 and manual publication controls after the retention window.
+
+A partial cutover where the PC keeps overwriting other fields of the same work with full snapshots is not safe; existing data must be preserved completely and every related PC write goes through the outbox or a fence. Rollback after activation stays: pause writes, restore the server authority backup, rebuild replicas; never republish a PC snapshot (the cloud PC backup strips portraits/profiles and is not an authority backup).
