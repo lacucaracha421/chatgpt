@@ -315,6 +315,71 @@ fn library() -> (tempfile::TempDir, Library) {
 }
 
 #[test]
+fn calendar_keeps_the_past_week_using_the_local_date_for_fetch_and_cached_reads() {
+    let (_temp, library) = library();
+    let now = at("2026-10-02T15:30:00Z");
+    let local = now.with_timezone(&chrono::FixedOffset::east_opt(9 * 3600).unwrap());
+    let today = local.date_naive();
+    assert_eq!(today, day("2026-10-03"));
+    let transport = MockTransport::default();
+    transport.igdb_pages.borrow_mut().push(Ok(json!([
+        igdb_game(
+            1,
+            "Too old",
+            json!([release("2026-09-25", "YYYYMMMMDD", "korea", 6)])
+        ),
+        igdb_game(
+            2,
+            "Last week",
+            json!([release("2026-09-26", "YYYYMMMMDD", "korea", 6)])
+        ),
+        igdb_game(
+            3,
+            "Yesterday",
+            json!([release("2026-10-02", "YYYYMMMMDD", "korea", 6)])
+        ),
+        igdb_game(
+            4,
+            "Today",
+            json!([release("2026-10-03", "YYYYMMMMDD", "korea", 6)])
+        ),
+    ])));
+    transport.tmdb.borrow_mut().push((
+        "/discover/movie".into(),
+        json!({"results": [], "total_pages": 1}),
+    ));
+    let calendar = library
+        .refresh_release_calendar_with(&transport, false, now, today)
+        .unwrap();
+    assert_eq!(calendar.range_start, "2026-09-26");
+    assert_eq!(calendar.range_end, "2027-04-04");
+    assert_eq!(
+        serde_json::to_value(&calendar).unwrap()["rangeStart"],
+        "2026-09-26"
+    );
+    assert_eq!(
+        calendar
+            .entries
+            .iter()
+            .map(|item| item.title.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["igdb:2", "igdb:3", "igdb:4"]
+    );
+    let requests = transport.requests.borrow().join("\n");
+    assert!(requests.contains(&format!("release_dates.date >= {}", ts("2026-09-26"))));
+    assert!(requests.contains("release_date.gte=2026-09-26"));
+    assert!(requests.contains("air_date.gte=2026-09-26"));
+    let next = library.release_calendar_at(now, day("2026-10-04")).unwrap();
+    assert_eq!(
+        next.entries
+            .iter()
+            .map(|item| item.title.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["igdb:3", "igdb:4"]
+    );
+}
+
+#[test]
 fn calendar_refreshes_at_most_daily_backs_off_after_failures_and_expires_old_tmdb_data() {
     let (_temp, library) = library();
     let today = day("2026-09-26");
@@ -333,7 +398,7 @@ fn calendar_refreshes_at_most_daily_backs_off_after_failures_and_expires_old_tmd
     assert_eq!(calendar.entries.len(), 1);
     assert_eq!(
         (calendar.range_start.as_str(), calendar.range_end.as_str()),
-        ("2026-09-26", "2027-03-28")
+        ("2026-09-19", "2027-03-28")
     );
     let tmdb = calendar
         .sources

@@ -1,4 +1,5 @@
 import type { ReleaseDatePrecision, ReleaseTitle, ReleaseWishlistEvent } from "../library/types";
+import { localDay } from "../shared/displayDate";
 
 /**
  * Precision-aware wording for the 발매 캘린더: "10월 22일", "10월 중", "2027 Q1", "2027년 중",
@@ -44,16 +45,51 @@ export function releaseEventLine<T extends Pick<ReleaseWishlistEvent, "kind" | "
 
 export type ReleaseGroup<T> = { key: string; label: string; items: T[] };
 
+/** Use calendar arithmetic on the viewer's local date, including across DST changes. */
+export function releaseCalendarStart(now = new Date()): string {
+  const start = new Date(now);
+  start.setDate(start.getDate() - 7);
+  return localDay(start);
+}
+
+/** Imprecise dates remain while their stated period overlaps the calendar window. */
+export function isVisibleCalendarRelease(item: Pick<ReleaseTitle, "date" | "precision">, now = new Date()): boolean {
+  if (!item.date || item.precision === "tbd") return true;
+  const start = releaseCalendarStart(now);
+  if (item.precision === "exact") return item.date >= start;
+  const [year, month] = item.date.split("-").map(Number);
+  const until = item.precision === "month" ? new Date(year, month, 1)
+    : item.precision === "quarter" ? new Date(year, Math.ceil(month / 3) * 3, 1)
+    : new Date(year + 1, 0, 1);
+  return localDay(until) > start;
+}
+
+/** Keep one heading per date/precision, reversing only the recent section. */
+export function groupReleaseDays<T extends Pick<ReleaseTitle, "date" | "precision">>(items: T[], newestFirst = false): T[][] {
+  const days = new Map<string, T[]>();
+  for (const item of items) {
+    const key = `${item.date ?? "9999-99-99"}|${item.precision}`;
+    const day = days.get(key) ?? [];
+    day.push(item);
+    days.set(key, day);
+  }
+  return [...days.entries()].sort(([a], [b]) => newestFirst ? b.localeCompare(a) : a.localeCompare(b)).map(([, day]) => day);
+}
+
 /**
- * Month sections for exact and month dates; a quarter or year that is not narrowed further
+ * The past week first, then month sections; a quarter or year that is not narrowed further
  * gets its own section after the last month it covers; TBD last.
  */
-export function groupReleases<T extends Pick<ReleaseTitle, "date" | "precision">>(items: T[]): Array<ReleaseGroup<T>> {
+export function groupReleases<T extends Pick<ReleaseTitle, "date" | "precision">>(items: T[], now = new Date()): Array<ReleaseGroup<T>> {
   const groups = new Map<string, { order: string; label: string; items: T[] }>();
+  const today = localDay(now);
   for (const item of items) {
+    if (!isVisibleCalendarRelease(item, now)) continue;
     const parts = item.date ? /^(\d{4})-(\d{2})/.exec(item.date) : null;
     let key = "tbd"; let order = "9999-99-z"; let label = "미정";
-    if (parts && item.precision !== "tbd") {
+    if (item.precision === "exact" && item.date && item.date < today) {
+      key = "recent"; order = "0000"; label = "지난 7일";
+    } else if (parts && item.precision !== "tbd") {
       const year = parts[1]!; const month = Number(parts[2]);
       if (item.precision === "exact" || item.precision === "month") {
         key = `${year}-${parts[2]}`; order = `${key}-a`; label = `${year}년 ${month}월`;

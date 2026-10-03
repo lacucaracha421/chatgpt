@@ -10,6 +10,9 @@
 .release-calendar-scroll { flex:1; min-height:0; overflow:auto; padding:0 var(--space-6) var(--space-8); overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:var(--color-border) transparent; }
 .release-calendar-month { padding-top:var(--space-6); }
 .release-calendar-month-heading { margin:0 0 var(--space-3); }
+.release-calendar-month.is-recent .ui-section-label__title,
+.release-calendar-month.is-recent .release-calendar-date,
+.release-calendar-month.is-recent .release-calendar-title { color:var(--color-muted); }
 /* Days pack into one four-column grid (six in landscape); a day block spans as many columns as it has
    covers (up to four) and its covers use the same column width, so every cover is the same size. */
 .release-calendar-days { --calendar-cols:4; display:grid; grid-template-columns:repeat(var(--calendar-cols),minmax(0,1fr)); gap:var(--space-6) var(--space-3); }

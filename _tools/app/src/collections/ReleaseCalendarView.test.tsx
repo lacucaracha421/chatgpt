@@ -1,13 +1,17 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
 import type { LibraryGateway, ReleaseCalendar, ReleaseCalendarGateway, ReleaseTitle, ReleaseWishlistItem } from "../library/types";
-import { groupReleases, releaseDateLabel, releaseEventLine, releaseTokenLabel } from "./releaseCalendarFormat";
+import { groupReleaseDays, groupReleases, releaseCalendarStart, releaseDateLabel, releaseEventLine, releaseTokenLabel } from "./releaseCalendarFormat";
 import { upcomingRows } from "../home/homeModel";
 import { ReleaseCalendarView } from "./ReleaseCalendarView";
 
-afterEach(cleanup);
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 8, 27, 12));
+});
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 function title(id: string, name: string, date: string | null, precision: ReleaseTitle["precision"], kind: ReleaseTitle["kind"] = "game"): ReleaseTitle {
   return { id, kind, provider: kind === "game" ? "igdb" : "tmdb", externalId: id.slice(id.indexOf(":") + 1), title: name, originalTitle: null, cover: null,
@@ -46,6 +50,22 @@ function mount(api: ReleaseCalendarGateway, onWishlistChange = vi.fn(), props: {
 }
 
 describe("release calendar wording", () => {
+  it("keeps today minus seven, drops minus eight, and uses local calendar days across DST", () => {
+    const now = new Date(2026, 9, 3, 0, 30);
+    expect(releaseCalendarStart(now)).toBe("2026-09-26");
+    expect(releaseCalendarStart(new Date(2026, 2, 9, 0, 30))).toBe("2026-03-02");
+    const groups = groupReleases([
+      title("igdb:old", "Too old", "2026-09-25", "exact"),
+      title("igdb:week", "Week", "2026-09-26", "exact"),
+      title("igdb:yesterday", "Yesterday", "2026-10-02", "exact"),
+      title("igdb:today", "Today", "2026-10-03", "exact"),
+      title("igdb:month", "September", "2026-09-01", "month"),
+      title("igdb:expired", "August", "2026-08-01", "month"),
+    ], now);
+    expect(groups.map(group => group.label)).toEqual(["지난 7일", "2026년 9월", "2026년 10월"]);
+    expect(groupReleaseDays(groups[0]!.items, true).flat().map(item => item.id)).toEqual(["igdb:yesterday", "igdb:week"]);
+    expect(groups.flatMap(group => group.items).map(item => item.id)).not.toContain("igdb:old");
+  });
   it("states each precision the way it is known", () => {
     expect(releaseDateLabel("2026-10-22", "exact", 2026)).toBe("10.22");
     expect(releaseDateLabel("2026-10-01", "month", 2026)).toBe("10월 중");
@@ -73,6 +93,31 @@ describe("release calendar wording", () => {
 });
 
 describe("ReleaseCalendarView", () => {
+  it("shows the past week first, newest first, and keeps its wishlist controls working", async () => {
+    vi.setSystemTime(new Date(2026, 9, 3, 0, 30));
+    const entries = [
+      title("igdb:old", "8일 전", "2026-09-25", "exact"),
+      title("igdb:week", "7일 전", "2026-09-26", "exact"),
+      title("igdb:yesterday", "어제 작품", "2026-10-02", "exact"),
+      title("igdb:today", "오늘 작품", "2026-10-03", "exact"),
+    ].map(item => ({ ...item, watched: false }));
+    const api = gateway(calendar(entries));
+    mount(api);
+    const recent = await screen.findByRole("region", { name: "지난 7일" });
+    expect(recent).toHaveClass("is-recent");
+    expect(within(recent).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("어제 작품"), expect.stringContaining("7일 전")]);
+    expect(screen.queryByText("8일 전")).not.toBeInTheDocument();
+    expect(within(recent).queryByText(/D-|오늘/)).not.toBeInTheDocument();
+    expect(screen.getByText("오늘")).toBeInTheDocument();
+    expect(recent.compareDocumentPosition(screen.getByRole("region", { name: "2026년 10월" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await userEvent.click(within(recent).getByRole("button", { name: "7일 전 관심 목록에 추가" }));
+    await waitFor(() => expect(api.add).toHaveBeenCalledWith("igdb:week"));
+    await screen.findByRole("button", { name: "7일 전 관심 목록에서 빼기" });
+    await userEvent.click(screen.getByRole("button", { name: "관심 1" }));
+    expect(screen.getByText("7일 전")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "7일 전 관심 목록에서 빼기" }));
+    await waitFor(() => expect(api.remove).toHaveBeenCalledWith("igdb:week"));
+  });
   it("lists upcoming titles by month and toggles the wishlist", async () => {
     const api = gateway(calendar([
       { ...title("igdb:1", "기다리는 게임", "2026-10-22", "exact"), watched: false },

@@ -2,7 +2,7 @@ import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-libr
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ApiError} from './transport';
 import {ReleaseCalendar} from './ReleaseCalendar';
-import {groupReleaseEntries, releaseDateLabel, releaseEventLine, type ReleaseCalendarEntry} from './releaseCalendarModel';
+import {filterReleaseEntries, groupReleaseEntries, releaseDateLabel, releaseEventLine, type ReleaseCalendarEntry} from './releaseCalendarModel';
 import {setOutboxConnection} from './outboxConnection';
 
 const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn()}));
@@ -25,6 +25,8 @@ const reply = {
 };
 
 beforeEach(() => {
+  vi.useFakeTimers({toFake: ['Date']});
+  vi.setSystemTime(new Date(2026, 8, 27, 12));
   localStorage.clear();
   setOutboxConnection('https://example.invalid');
   mocks.api.mockReset(); mocks.native.mockReset();
@@ -35,9 +37,19 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => { cleanup(); setOutboxConnection(null); delete window.LakomicsNative; });
+afterEach(() => { cleanup(); vi.useRealTimers(); setOutboxConnection(null); delete window.LakomicsNative; });
 
 describe('release calendar model', () => {
+  it('uses the local date and drops today minus eight from entries and interest filters', () => {
+    const now = new Date(2026, 9, 3, 0, 30);
+    const entries = [entry('old', 'game', '2026-09-25', 'exact'), entry('week', 'game', '2026-09-26', 'exact'), entry('yesterday', 'game', '2026-10-02', 'exact'), entry('today', 'game', '2026-10-03', 'exact')];
+    const visible = filterReleaseEntries(entries, 'all', true, new Set(['old', 'week', 'yesterday', 'today']), now);
+    expect(visible.map(item => item.id)).toEqual(['week', 'yesterday', 'today']);
+    const groups = groupReleaseEntries(visible, now);
+    expect(groups[0]?.label).toBe('지난 7일');
+    expect(groups[0]?.days.flatMap(day => day.items.map(item => item.id))).toEqual(['yesterday', 'week']);
+    expect(groups[1]?.days.flatMap(day => day.items.map(item => item.id))).toEqual(['today']);
+  });
   it('keeps PC precision wording and groups exact dates inside month sections', () => {
     expect(releaseDateLabel('2026-10-01', 'exact', 2026)).toBe('10.1');
     expect(releaseDateLabel('2026-10-01', 'month', 2026)).toBe('10월 중');
@@ -53,6 +65,31 @@ describe('release calendar model', () => {
 });
 
 describe('ReleaseCalendar', () => {
+  it('shows recent releases in the Collections overlay with their interest controls', async () => {
+    vi.setSystemTime(new Date(2026, 9, 3, 0, 30));
+    const entries = [entry('old', 'game', '2026-09-25', 'exact'), entry('week', 'game', '2026-09-26', 'exact'), entry('yesterday', 'game', '2026-10-02', 'exact'), entry('today', 'game', '2026-10-03', 'exact')];
+    mocks.api.mockImplementation(async (path: string) => {
+      if (path === '/v1/home/upcoming') return {...reply, entries, wishlist: [entries[0], entries[1]], pending: []};
+      if (path === '/v1/home/upcoming/wishlist') return {version: 1, operationId: 'op', sequence: 1, revision: 2};
+      throw new Error(`unexpected path ${path}`);
+    });
+    render(<ReleaseCalendar embedded initialKind="game" onClose={vi.fn()} />);
+    const recent = await screen.findByRole('region', {name: '지난 7일'});
+    expect(recent.classList.contains('is-recent')).toBe(true);
+    expect(within(recent).getAllByRole('listitem').map(item => item.querySelector('strong')?.textContent)).toEqual(['yesterday', 'week']);
+    expect(screen.queryByText('old')).toBeNull();
+    expect(within(recent).queryByText(/D-|오늘/)).toBeNull();
+    expect(screen.getByText('오늘')).toBeTruthy();
+    expect(recent.compareDocumentPosition(screen.getByRole('region', {name: '2026년 10월'})) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(within(recent).getByRole('button', {name: 'yesterday 관심 목록에 추가'}));
+    expect(within(recent).getByRole('button', {name: /yesterday 관심 목록에서 빼기/}).getAttribute('aria-pressed')).toBe('true');
+    await waitFor(() => expect(mocks.api.mock.calls.some(([path, , body]) => path === '/v1/home/upcoming/wishlist' && body?.action === 'add' && body?.itemId === 'yesterday')).toBe(true));
+    fireEvent.click(screen.getByRole('button', {name: /^관심 목록/}));
+    expect(screen.getByText('week')).toBeTruthy();
+    expect(screen.queryByText('old')).toBeNull();
+    fireEvent.click(screen.getByRole('button', {name: 'week 관심 목록에서 빼기'}));
+    await waitFor(() => expect(mocks.api.mock.calls.some(([path, , body]) => path === '/v1/home/upcoming/wishlist' && body?.action === 'remove' && body?.itemId === 'week')).toBe(true));
+  });
   it('asks native for hashed Home covers when the Android bridge is available', async () => {
     const sha256 = 'b'.repeat(64);
     const hashed = {...reply, entries: reply.entries.map((row, index) => index === 0 ? {...row, cover: {sha256}} : row)};

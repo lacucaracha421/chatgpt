@@ -14,7 +14,7 @@ import { SegmentedControl } from "../shared/ui/SegmentedControl";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { SectionLabel } from "../shared/ui/SectionLabel";
 import { PlatformBadges } from "./PlatformBadges";
-import { groupReleases, RELEASE_SOURCE_PROBLEM, releaseDateLabel, releaseEventLine } from "./releaseCalendarFormat";
+import { groupReleaseDays, groupReleases, isVisibleCalendarRelease, RELEASE_SOURCE_PROBLEM, releaseDateLabel, releaseEventLine } from "./releaseCalendarFormat";
 import "./releaseCalendar.css";
 import { createKoreanMatcher } from "../shared/koreanSearch";
 
@@ -62,16 +62,6 @@ function LoadingCalendarState() {
  */
 /** A day block spans at most this many grid columns. */
 const DAY_SPAN_MAX = 4;
-/** Tiles with the same date and precision form one release day, earliest day first. */
-function releaseDays<T extends { date: string | null; precision: string }>(items: T[]): T[][] {
-  const days = new Map<string, T[]>();
-  for (const item of items) {
-    const key = `${item.date ?? "9999-99-99"}|${item.precision}`;
-    days.set(key, [...(days.get(key) ?? []), item]);
-  }
-  return [...days.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, day]) => day);
-}
-
 // The last calendar and 관심 list, kept for the app session so reopening the calendar shows them at once
 // while the fresh copy loads behind them.
 const lastShown = new WeakMap<object, { calendar: ReleaseCalendar | null; wishlist: ReleaseWishlistItem[] | null }>();
@@ -122,8 +112,8 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
   const wishById = useMemo(() => new Map((wishlist ?? []).map(item => [item.id, item])), [wishlist]);
   const needle = query.trim();
   const matchesQuery = createKoreanMatcher(needle);
-  const matches = (title: ReleaseTitle) => (kind === "all" || title.kind === kind) && matchesQuery([title.title, title.originalTitle]);
-  const currentEntries = (calendar?.entries ?? []).filter(entry => matchesQuery([entry.title, entry.originalTitle]));
+  const matches = (title: ReleaseTitle) => isVisibleCalendarRelease(title) && (kind === "all" || title.kind === kind) && matchesQuery([title.title, title.originalTitle]);
+  const currentEntries = (calendar?.entries ?? []).filter(entry => isVisibleCalendarRelease(entry) && matchesQuery([entry.title, entry.originalTitle]));
   const kindCounts = {
     all: currentEntries.length,
     game: currentEntries.filter(entry => entry.kind === "game").length,
@@ -203,10 +193,10 @@ export function ReleaseCalendarView({ query = "", onWishlistChange, onOpenSettin
       {calendar && groups.length === 0 && (watchOnly
         ? <EmptyCalendarState title="관심 목록 비어 있음" icon={BookmarkOutlineIcon} />
         : needle ? <EmptyCalendarState title="검색 결과 없음" icon={MagnifyingGlassIcon} /> : <EmptyCalendarState title="6개월 안의 발매 정보 없음" icon={CalendarDaysIcon} />)}
-      {groups.map(group => <section key={group.key} className="release-calendar__month" aria-label={group.label}>
+      {groups.map(group => <section key={group.key} className={`release-calendar__month${group.key === "recent" ? " is-recent" : ""}`} aria-label={group.label}>
         <SectionLabel as="h3" title={groupHeadingLabel(group.label, referenceYear)} count={group.items.length} />
         <div className="release-calendar__days">
-          {releaseDays(group.items).map(day => {
+          {groupReleaseDays(group.items, group.key === "recent").map(day => {
             // One heading per release day; the day's covers sit side by side under it (up to four).
             const first = day[0]!;
             const dDay = first.released === true || first.precision !== "exact" ? null : displayDDay(first.date);

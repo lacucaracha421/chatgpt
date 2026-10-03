@@ -1,3 +1,4 @@
+import {groupReleaseDays, groupReleases, isVisibleCalendarRelease, releaseDateLabel} from '../src/collections/releaseCalendarFormat';
 export type ReleasePrecision = 'exact' | 'month' | 'quarter' | 'year' | 'tbd';
 export {releaseDateLabel,releaseEventLine,releaseTokenLabel} from '../src/collections/releaseCalendarFormat';
 export type ReleaseKind = 'game' | 'movie' | 'anime';
@@ -154,43 +155,23 @@ export function releaseDaysUntil(date: string | null, today = new Date()): numbe
   return Math.round((Date.UTC(year, month - 1, day) - start) / 86_400_000);
 }
 
-function periodOf(entry: ReleaseCalendarEntry): {monthKey: string; monthLabel: string; dayKey: string; dayLabel: string; order: string} {
-  const parts = entry.date ? DATE_RE.exec(entry.date) : null;
-  if (!parts || entry.precision === 'tbd') return {monthKey: 'tbd', monthLabel: '미정', dayKey: 'tbd', dayLabel: '날짜 미정', order: '9999-99-z'};
-  const year = Number(parts[1]);
-  const month = Number(parts[2]);
-  if (entry.precision === 'exact') return {monthKey: `${parts[1]}-${parts[2]}`, monthLabel: `${year}년 ${month}월`, dayKey: entry.date!, dayLabel: `${month}.${Number(parts[3])}`, order: `${entry.date}-a`};
-  if (entry.precision === 'month') return {monthKey: `${parts[1]}-${parts[2]}`, monthLabel: `${year}년 ${month}월`, dayKey: `${parts[1]}-${parts[2]}-month`, dayLabel: `${month}월 중`, order: `${parts[1]}-${parts[2]}-b`};
-  if (entry.precision === 'quarter') {
-    const quarter = Math.floor((month - 1) / 3) + 1;
-    return {monthKey: `${parts[1]}-Q${quarter}`, monthLabel: `${year} Q${quarter} · 월 미정`, dayKey: `${parts[1]}-Q${quarter}`, dayLabel: `${year} Q${quarter} · 월 미정`, order: `${year}-${String(quarter * 3).padStart(2, '0')}-c`};
-  }
-  return {monthKey: `${parts[1]}-year`, monthLabel: `${year}년 · 시기 미정`, dayKey: `${parts[1]}-year`, dayLabel: `${year}년 · 시기 미정`, order: `9999-${year}-d`};
+/** PC and tablet share the window, section order and within-section date order. */
+export function groupReleaseEntries(items: ReleaseCalendarEntry[], now = new Date()): ReleaseMonthGroup[] {
+  return groupReleases(items, now).map(group => ({
+    key: group.key,
+    label: group.label,
+    items: group.items.length,
+    days: groupReleaseDays(group.items, group.key === 'recent').map(day => {
+      const first = day[0]!;
+      return {
+        key: `${group.key}:${first.date ?? 'tbd'}:${first.precision}`,
+        label: first.precision === 'tbd' ? '날짜 미정' : releaseDateLabel(first.date, first.precision, now.getFullYear()),
+        items: day,
+      };
+    }),
+  }));
 }
 
-/** Group exact dates within month sections while retaining PC's broader period buckets. */
-export function groupReleaseEntries(items: ReleaseCalendarEntry[]): ReleaseMonthGroup[] {
-  const months = new Map<string, {order: string; label: string; days: Map<string, {order: string; label: string; items: ReleaseCalendarEntry[]}>}>();
-  items.forEach((entry, index) => {
-    const period = periodOf(entry);
-    const month = months.get(period.monthKey) ?? {order: period.order, label: period.monthLabel, days: new Map()};
-    const day = month.days.get(period.dayKey) ?? {order: period.order, label: period.dayLabel, items: []};
-    day.items.push(entry);
-    day.order = `${day.order}:${String(index).padStart(5, '0')}`.slice(0, 32);
-    month.days.set(period.dayKey, day);
-    month.order = month.order < period.order ? month.order : period.order;
-    months.set(period.monthKey, month);
-  });
-  return [...months.entries()]
-    .sort(([, left], [, right]) => left.order.localeCompare(right.order))
-    .map(([key, month]) => ({
-      key,
-      label: month.label,
-      items: [...month.days.values()].reduce((sum, day) => sum + day.items.length, 0),
-      days: [...month.days.values()].sort((left, right) => left.order.localeCompare(right.order)).map(day => ({key: `${key}:${day.label}`, label: day.label, items: day.items})),
-    }));
-}
-
-export function filterReleaseEntries(entries: ReleaseCalendarEntry[], kind: KindFilter, wishlistOnly: boolean, wishlist: Set<string>): ReleaseCalendarEntry[] {
-  return entries.filter(entry => (kind === 'all' || entry.kind === kind) && (!wishlistOnly || wishlist.has(entry.id)));
+export function filterReleaseEntries(entries: ReleaseCalendarEntry[], kind: KindFilter, wishlistOnly: boolean, wishlist: Set<string>, now = new Date()): ReleaseCalendarEntry[] {
+  return entries.filter(entry => isVisibleCalendarRelease(entry, now) && (kind === 'all' || entry.kind === kind) && (!wishlistOnly || wishlist.has(entry.id)));
 }

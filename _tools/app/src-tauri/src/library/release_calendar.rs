@@ -39,7 +39,7 @@ use serde_json::Value;
 
 use super::{credential, error::LibraryError, igdb::IgdbClient, tmdb::TmdbClient, Library};
 
-/// The calendar window: today and the following six months.
+/// The calendar window: the past seven days and the following six months.
 pub(crate) const CALENDAR_DAYS: i64 = 183;
 const REFRESH_INTERVAL_HOURS: i64 = 24;
 const RETRY_AFTER_FAILURE_MINUTES: i64 = 60;
@@ -334,7 +334,10 @@ fn overlaps(title: &ReleaseTitle, start: NaiveDate, end: NaiveDate) -> bool {
 }
 
 pub(crate) fn window(today: NaiveDate) -> (NaiveDate, NaiveDate) {
-    (today, today + Duration::days(CALENDAR_DAYS))
+    (
+        today - Duration::days(7),
+        today + Duration::days(CALENDAR_DAYS),
+    )
 }
 
 // ---------------------------------------------------------------------------------------------

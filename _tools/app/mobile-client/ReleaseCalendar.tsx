@@ -86,7 +86,7 @@ function CalendarBody({reply, kind, wishlistOnly, visibleIds, privacy, reference
   const groups = groupReleaseEntries(entries);
   if (!entries.length) return <EmptyCalendar wishlistOnly={wishlistOnly} />;
   return <div className="release-calendar-groups">
-    {groups.map(month => <section key={month.key} className="release-calendar-month" aria-label={month.label}>
+    {groups.map(month => <section key={month.key} className={`release-calendar-month${month.key === 'recent' ? ' is-recent' : ''}`} aria-label={month.label}>
       <SectionLabel as="h2" className="release-calendar-month-heading" title={month.label} count={month.items} />
       <div className="release-calendar-days">
         {month.days.map(day => {
@@ -212,7 +212,7 @@ export function ReleaseCalendar({onClose, backRef, initialKind, embedded=false, 
   }
 
   const kindCounts = useMemo(() => {
-    const entries = reply?.entries ?? [];
+    const entries = filterReleaseEntries(reply?.entries ?? [], 'all', false, visibleIds);
     return {all: entries.length, game: entries.filter(entry => entry.kind === 'game').length, movie: entries.filter(entry => entry.kind === 'movie').length, anime: entries.filter(entry => entry.kind === 'anime').length};
   }, [reply]);
   const kindOptions = ([
