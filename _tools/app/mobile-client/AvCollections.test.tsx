@@ -87,11 +87,21 @@ describe('tablet AV collections',()=>{
     expect(screen.getByRole('heading',{level:1,name:'午後の窓辺と、ひとりの時間'})).toBeTruthy();
     // Front, spine and back come from the published artworks; the strip offers the flat jacket.
     await waitFor(()=>expect(screenArticle.querySelectorAll('.kase img.cv')).toHaveLength(3));
-    expect(screen.getByRole('button',{name:'펼친 표지'})).toBeTruthy();
-    expect(screen.getByText(/LMNS-123 · 8\.14 · 1 \/ 2/)).toBeTruthy();
+    const flat=screen.getByRole('button',{name:'펼친 표지'});
+    expect(flat.closest('.work-strip')?.firstElementChild).toBe(flat);
+    expect(screen.queryByRole('button',{name:'케이스'})).toBeNull();
+    expect(screen.queryByRole('button',{name:'안쪽'})).toBeNull();
+    expect(screen.getByText(/^LMNS-123 · (?:2026\.)?8\.14$/)).toBeTruthy();
+    await act(async()=>screenArticle.querySelectorAll('img').forEach(image=>fireEvent.load(image)));
+    fireEvent.click(flat);expect(flat.getAttribute('aria-pressed')).toBe('true');
+    expect((screenArticle.querySelector('.work-flat-slot') as HTMLElement).style.visibility).toBe('');
+    fireEvent.click(flat);expect(flat.getAttribute('aria-pressed')).toBe('false');
     // The next work replaces this one once its faces are ready.
     fireEvent.click(screen.getByRole('button',{name:'다음 작품'}));
-    await waitFor(()=>expect(screen.getByText(/LMNS-124 · 8\.14 · 2 \/ 2/)).toBeTruthy());
+    await waitFor(()=>expect(screenArticle.querySelector('[data-work-pending] img')).toBeTruthy());
+    expect(screen.getByRole('heading',{level:1,name:'午後の窓辺と、ひとりの時間'})).toBeTruthy();
+    await act(async()=>screenArticle.querySelectorAll('[data-work-pending] img').forEach(image=>fireEvent.load(image)));
+    await waitFor(()=>expect(within(screenArticle).getByText(/^LMNS-124 · (?:2026\.)?8\.14$/, {selector:'[aria-hidden="false"] small'})).toBeTruthy());
     expect((screen.getByRole('button',{name:'다음 작품'}) as HTMLButtonElement).disabled).toBe(true);
   });
 

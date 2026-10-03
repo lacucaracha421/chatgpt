@@ -1,4 +1,4 @@
-import {act,cleanup,render,screen,waitFor} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 const mocks=vi.hoisted(()=>({thumbnail:vi.fn(),ticket:vi.fn(),artwork:vi.fn()}));
 vi.mock('./media',()=>({loadThumbnail:mocks.thumbnail}));
@@ -12,7 +12,7 @@ import {usePrivacyMode} from './privacyMode';
 let setPrivacy:(value:boolean)=>void;
 function Preference(){[,setPrivacy]=usePrivacyMode();return null;}
 beforeEach(()=>{localStorage.clear();vi.clearAllMocks();});
-afterEach(()=>cleanup());
+afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 const enable=()=>act(()=>setPrivacy(true));
 const item={provider:'kHentai' as const,providerWorkId:'1',thumbnailUrl:'https://example.invalid/cover'};
 
@@ -37,9 +37,13 @@ it('masks every catalog cover use without a ticket and reports no cover URL',()=
  expect(mocks.ticket).not.toHaveBeenCalled();expect(onUrl).toHaveBeenLastCalledWith(null);
 });
 it('immediately removes a decoded catalog cover and clears its published URL',async()=>{
+ vi.stubGlobal('IntersectionObserver',class{constructor(private callback:(entries:{isIntersecting:boolean}[])=>void){} observe(){this.callback([{isIntersecting:true}]);} disconnect(){}});
  mocks.ticket.mockResolvedValue({url:'https://app.lakomics.local/media-cache/cover'});const onUrl=vi.fn();
  const {container}=render(<><Preference/><CatalogCover item={item} revision="r" active onUrl={onUrl}/></>);
  await waitFor(()=>expect(container.querySelector('img')).toBeTruthy());
+ await act(async()=>fireEvent.load(container.querySelector('img')!));
+ expect(container.querySelector('[data-catalog-decoded="true"]')).toBeTruthy();
+ expect(onUrl).toHaveBeenLastCalledWith('https://app.lakomics.local/media-cache/cover');
  enable();expect(container.querySelector('img[src]')).toBeNull();expect(onUrl).toHaveBeenLastCalledWith(null);
 });
 it('masks collection artwork in seasons, release shelves and original cover surfaces without tickets',()=>{

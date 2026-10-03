@@ -260,11 +260,16 @@ describe('mobile catalog reads',()=>{
     await waitFor(()=>expect((document.querySelector('.catalog-reader-spread') as HTMLElement).style.transform).toContain('scale(1.5)'));expect(screen.getByRole('button',{name:'화면에 맞추기'})).toBeTruthy();
   });
   it('refreshes an expired reader manifest only once when nearby pages fail together',async()=>{
-    mocks.native.mockRejectedValue(new Error('expired'));
+    const failure=Promise.withResolvers<never>();
+    mocks.native.mockReturnValue(failure.promise);
     render(<Catalog active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText('밤의 도서관'));await screen.findByRole('button',{name:'읽기'});fireEvent.click(screen.getByRole('button',{name:'읽기'}));
     await screen.findByRole('button',{name:'읽기 닫기'});
-    await waitFor(()=>expect(mocks.api.mock.calls.filter(([path])=>path.includes('/reader?'))).toHaveLength(2));
-    await new Promise(resolve=>setTimeout(resolve,20));expect(mocks.api.mock.calls.filter(([path])=>path.includes('/reader?'))).toHaveLength(2);
+    const readerRequests=()=>mocks.api.mock.calls.filter(([path])=>path.includes('/reader?'));
+    // Start page failures after opening: canceled detail prefetches are not reader refreshes.
+    const opened=readerRequests().length;
+    await act(async()=>failure.reject(new Error('expired')));
+    await waitFor(()=>expect(readerRequests()).toHaveLength(opened+1));
+    await new Promise(resolve=>setTimeout(resolve,20));expect(readerRequests()).toHaveLength(opened+1);
   });
   it('switches between the catalog and bookmarks from the list\'s first row',async()=>{
     render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');

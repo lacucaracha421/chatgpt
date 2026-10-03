@@ -92,15 +92,17 @@ it('keeps slow thumbnails and decoded images in place without fading',async()=>{
  expect(animate).not.toHaveBeenCalled();
 });
 
-it('fades a catalog cover in once it decodes, in its already sized box',async()=>{
+it('keeps a catalog cover in its sized box without a late fade when it decodes',async()=>{
  vi.stubGlobal('IntersectionObserver',class{constructor(private callback:(entries:{isIntersecting:boolean}[])=>void){} observe(){this.callback([{isIntersecting:true}]);} disconnect(){}});
  vi.spyOn(catalogMedia,'catalogImageTicket').mockResolvedValue({url:'data:image/png;base64,AA'} as Awaited<ReturnType<typeof catalogMedia.catalogImageTicket>>);
  render(<CatalogCover item={{provider:'p',providerWorkId:'w',thumbnailUrl:'https://example.test/c.jpg'}} revision="r" active/>);
  await act(async()=>{});
  const image=document.querySelector('.catalog-cover-image img') as HTMLImageElement;
- expect(image.style.opacity).toBe('0');
+ expect(image.style.opacity).not.toBe('0');
+ expect(image.parentElement?.dataset.catalogDecoded).toBeUndefined();
  fireEvent.load(image);
  await act(async()=>{});
  expect(image.style.opacity).toBe('');
- expect(animate.mock.calls.filter(([element])=>element===image)).toHaveLength(1);
+ expect(image.parentElement?.dataset.catalogDecoded).toBe('true');
+ expect(animate.mock.calls.filter(([element])=>element===image)).toHaveLength(0);
 });

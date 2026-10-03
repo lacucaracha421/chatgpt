@@ -173,7 +173,7 @@ it('does not show an edit the device could not store as queued',async()=>{
 
 describe('artwork across a confirmed Showcase edit',()=>{
   // The list card's cover, then the work screen's book (its front face).
-  const artwork=()=>[...document.querySelectorAll<HTMLImageElement>('.collection-grid:not(.collection-showcase) .collection-art img, .collection-detail .manga-bb-front img')];
+  const artwork=()=>[...document.querySelectorAll<HTMLImageElement>('.collection-grid:not(.collection-showcase) .collection-art img, .collection-detail [aria-hidden="false"] .manga-bb-front img')];
   const detailCalls=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/w');
   const artworkCalls=()=>mocks.native.mock.calls.filter(([op])=>op==='collectionArtwork');
   /** The list card loads before the detail opens (a hidden list does not load artwork). */
@@ -209,6 +209,7 @@ describe('artwork across a confirmed Showcase edit',()=>{
     const next=Promise.withResolvers<{url:string}>();
     mocks.native.mockImplementation(async(_op:string,payload:{revision:string})=>payload.revision==='r1'?{url:'https://example.invalid/r1'}:next.promise);
     await openWithArtwork();
+    await act(async()=>document.querySelectorAll('img').forEach(image=>fireEvent.load(image)));
     const before=artwork();
     fireEvent.click(within(actions()).getByRole('button',{name:/쇼케이스/}));
     await waitFor(()=>expect(artworkCalls().some(([, payload])=>payload.revision==='r2')).toBe(true));
@@ -216,13 +217,23 @@ describe('artwork across a confirmed Showcase edit',()=>{
     expect(document.querySelector('.collection-art-placeholder')).toBeNull();
     expect(artwork().map(image=>image.getAttribute('src'))).toEqual(['https://example.invalid/r1','https://example.invalid/r1']);
     await act(async()=>next.resolve({url:'https://example.invalid/r2'}));
-    // The open detail swaps in place; the hidden list card follows once it is shown again.
+    // Ticket readiness stages the next work; the actual book and backdrop must decode too.
+    await waitFor(()=>expect(document.querySelector('[data-work-pending] .manga-bb-front img')).toBeTruthy());
+    const pending=document.querySelector('[data-work-pending]')!;
+    const replacement=pending.querySelector<HTMLImageElement>('.manga-bb-front img')!;
+    const decode=Promise.withResolvers<void>();
+    Object.defineProperty(pending.querySelector('.work-backdrop img')!, 'decode', {value:()=>decode.promise});
+    await act(async()=>pending.querySelectorAll('img').forEach(image=>fireEvent.load(image)));
+    expect(artwork()[1]).toBe(before[1]);
+    expect(artwork()[1].getAttribute('src')).toBe('https://example.invalid/r1');
+    await act(async()=>decode.resolve());
     await waitFor(()=>expect(artwork()[1].getAttribute('src')).toBe('https://example.invalid/r2'));
+    expect(artwork()[1]).toBe(replacement);
     expect(artwork()[0].getAttribute('src')).toBe('https://example.invalid/r1');
     fireEvent.click(screen.getByRole('button',{name:'뒤로'}));
     await waitFor(()=>expect(artwork()[0].getAttribute('src')).toBe('https://example.invalid/r2'));
     expect(document.querySelector('.collection-scroll .collection-art-placeholder')).toBeNull();
-    artwork().slice(0,1).forEach((image,index)=>expect(image).toBe(before[index]));
+    expect(artwork()[0]).toBe(before[0]);
   });
 });
 

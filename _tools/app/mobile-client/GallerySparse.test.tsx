@@ -153,7 +153,8 @@ it.each([50_000,500_000])('bounds seek commits and loaded work independently of 
   release(25_000,total);await settleDestination();await waitFor(()=>expect(scroll.scrollTop).toBeGreaterThan(0));
   const seekCommits=commits,elapsed=performance.now()-started;
   expect(current.items.length).toBeLessThanOrEqual(120);expect(document.querySelectorAll('.media-tile').length).toBeLessThan(100);
-  expect(seekCommits).toBeLessThanOrEqual(7);expect(mocks.renders).toBeLessThanOrEqual(7);
+  // StableImage records the first loaded slot in one extra child commit; Gallery's work stays bounded.
+  expect(seekCommits).toBeLessThanOrEqual(8);expect(mocks.renders).toBeLessThanOrEqual(7);
   console.info(`TOC seek total=${total}: renders=${mocks.renders}, commits=${seekCommits}, loaded=${current.items.length}, ms=${elapsed.toFixed(1)}`);
 });
 it('loads across a spacer with bounded commits',async()=>{
