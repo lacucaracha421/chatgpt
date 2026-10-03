@@ -1,4 +1,5 @@
 import { useWorkloadProfile } from "../app/workloadProfile";
+import { isWindowFocused, subscribeWindowFocus, windowPollDelay } from "../app/windowFocus";
 import { useEffect } from "react";
 import type { LibraryGateway } from "../library/types";
 
@@ -39,7 +40,16 @@ export function useSimilarityReviewInbound(gateway: LibraryGateway, onChange: ()
       }
     };
     void poll();
-    const timer = window.setInterval(() => void poll(), restricted ? 60_000 : POLL_MS);
-    return () => { active = false; window.clearInterval(timer); };
+    let timer: number;
+    const schedule = () => {
+      window.clearInterval(timer);
+      timer = window.setInterval(() => void poll(), windowPollDelay(restricted ? 60_000 : POLL_MS));
+    };
+    const unsubscribeFocus = subscribeWindowFocus(() => {
+      if (isWindowFocused()) void poll();
+      schedule();
+    });
+    schedule();
+    return () => { active = false; window.clearInterval(timer); unsubscribeFocus(); };
   }, [gateway, onChange, restricted, hidden]);
 }

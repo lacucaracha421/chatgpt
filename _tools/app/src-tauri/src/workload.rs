@@ -21,6 +21,45 @@ use tauri::{
 static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 static REPLICATION_WORK: AtomicBool = AtomicBool::new(false);
 
+/// Events and explicit tray actions own this state. The timer only reconciles it
+/// every 30 s for platforms that omit a visibility/minimize event.
+struct WindowActivity {
+    focused: AtomicBool,
+    hidden: AtomicBool,
+}
+impl WindowActivity {
+    const fn new(focused: bool, hidden: bool) -> Self {
+        Self {
+            focused: AtomicBool::new(focused),
+            hidden: AtomicBool::new(hidden),
+        }
+    }
+    fn record(&self, hidden: bool, focused: bool) {
+        self.focused.store(focused && !hidden, Ordering::Release);
+        self.hidden.store(hidden, Ordering::Release);
+    }
+    fn snapshot(&self) -> (bool, bool) {
+        let hidden = self.hidden.load(Ordering::Acquire);
+        (hidden, self.focused.load(Ordering::Acquire) && !hidden)
+    }
+}
+static WINDOW_ACTIVITY: WindowActivity = WindowActivity::new(false, false);
+const WINDOW_RECONCILE: Duration = Duration::from_secs(30);
+
+pub(crate) fn window_visibility(app: &tauri::AppHandle, hidden: bool) {
+    activity(app, hidden, WINDOW_ACTIVITY.snapshot().1);
+}
+
+fn reconcile_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        activity(
+            app,
+            !window.is_visible().unwrap_or(true) || window.is_minimized().unwrap_or(false),
+            window.is_focused().unwrap_or(false),
+        );
+    }
+}
+
 pub(crate) fn note_replication_work() {
     REPLICATION_WORK.store(true, Ordering::Release);
 }
@@ -364,13 +403,14 @@ pub(crate) fn set_received_indicator(app: &tauri::AppHandle, count: usize) {
 }
 fn open(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+        if window.show().is_ok() && window.unminimize().is_ok() {
+            let focused = window.set_focus().is_ok();
+            activity(app, false, focused);
+        }
     }
-    activity(app, false, true);
 }
 pub(crate) fn activity(app: &tauri::AppHandle, hidden: bool, focused: bool) {
+    WINDOW_ACTIVITY.record(hidden, focused);
     let mut state = runtime()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -490,6 +530,7 @@ pub(crate) fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Er
         }
         Err(error) => eprintln!("system tray unavailable: {error}"),
     }
+    reconcile_window(app);
     start_timers(app.clone());
     Ok(())
 }
@@ -517,14 +558,15 @@ fn start_timers(app: tauri::AppHandle) {
         let mut watcher = crate::cloud::status_watch::Supervisor::default();
         let mut inbox = crate::library::auto_tag_inbox::Schedule::default();
         let mut was_focused = false;
+        let mut window_checked = Instant::now();
         let mut authority_root: Option<PathBuf> = None;
         loop {
             std::thread::sleep(Duration::from_secs(1));
-            let mut focused = false;
-            if let Some(window) = app.get_webview_window("main") {
-                focused = window.is_focused().unwrap_or(false);
-                activity(&app, !window.is_visible().unwrap_or(true), focused);
+            if window_checked.elapsed() >= WINDOW_RECONCILE {
+                reconcile_window(&app);
+                window_checked = Instant::now();
             }
+            let (_, focused) = WINDOW_ACTIVITY.snapshot();
             // Returning to the window or queueing a local write wants fresh state now.
             let gained_focus = focused && !was_focused;
             was_focused = focused;
@@ -798,6 +840,31 @@ impl Drop for Reset {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn window_activity_records_initial_focus_hide_and_restore() {
+        for (focused, hidden, expected) in [
+            (false, false, (false, false)),
+            (true, false, (false, true)),
+            (false, true, (true, false)),
+            (true, true, (true, false)),
+        ] {
+            let state = WindowActivity::new(false, false);
+            state.record(hidden, focused);
+            assert_eq!(state.snapshot(), expected);
+        }
+        let state = WindowActivity::new(false, false);
+        assert_eq!(state.snapshot(), (false, false));
+        state.record(false, true);
+        assert_eq!(state.snapshot(), (false, true));
+        state.record(false, false);
+        assert_eq!(state.snapshot(), (false, false));
+        state.record(true, false);
+        assert_eq!(state.snapshot(), (true, false));
+        state.record(false, false);
+        assert_eq!(state.snapshot(), (false, false));
+        state.record(false, true);
+        assert_eq!(state.snapshot(), (false, true));
+    }
     #[test]
     fn replication_backs_off_only_when_idle_and_keeps_new_work_wakes() {
         let now = Instant::now();

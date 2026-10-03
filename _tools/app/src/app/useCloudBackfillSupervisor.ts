@@ -1,4 +1,5 @@
 import { nativeWorkload, workloadPollDelay, getWorkloadProfile } from "./workloadProfile";
+import { isWindowFocused, subscribeWindowFocus, windowPollDelay } from "./windowFocus";
 import { useEffect, useRef } from "react";
 import type { CloudBackfillProgress, LibraryGateway } from "../library/types";
 
@@ -22,6 +23,7 @@ export function useCloudBackfillSupervisor(gateway: LibraryGateway, libraryRoot:
     let disposed = false;
     let checking = false;
     let timer: number | null = null;
+    let nextDelay = INACTIVE_DELAY_MS;
     const schedule = (delay: number) => {
       if (disposed) return;
       if (timer !== null) window.clearTimeout(timer);
@@ -31,7 +33,7 @@ export function useCloudBackfillSupervisor(gateway: LibraryGateway, libraryRoot:
       if (disposed || checking) return;
       if (getWorkloadProfile().hidden) { schedule(60_000); return; }
       checking = true;
-      let nextDelay = INACTIVE_DELAY_MS;
+      nextDelay = INACTIVE_DELAY_MS;
       try {
         const progress = await gateway.cloudBackfillProgress();
         if (disposed || !progress) return;
@@ -55,16 +57,20 @@ export function useCloudBackfillSupervisor(gateway: LibraryGateway, libraryRoot:
         console.error("cloud backfill supervisor failed", error);
       } finally {
         checking = false;
-        schedule(workloadPollDelay(nextDelay));
+        schedule(windowPollDelay(workloadPollDelay(nextDelay)));
       }
     };
     const wake = () => schedule(0);
     window.addEventListener(CONTROL_EVENT, wake);
+    const unsubscribeFocus = subscribeWindowFocus(() => {
+      schedule(isWindowFocused() ? 0 : windowPollDelay(workloadPollDelay(nextDelay)));
+    });
     schedule(0);
     return () => {
       disposed = true;
       if (timer !== null) window.clearTimeout(timer);
       window.removeEventListener(CONTROL_EVENT, wake);
+      unsubscribeFocus();
     };
   }, [gateway, libraryRoot]);
 }

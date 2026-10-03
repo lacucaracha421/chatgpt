@@ -1,10 +1,13 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useCharacterAutomation, type AutomaticCharacterApi, type IncrementalStatus } from "./useCharacterAutomation";
+
+beforeEach(() => { vi.spyOn(document, "hasFocus").mockReturnValue(true); });
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 const idle = {
@@ -16,6 +19,50 @@ const idle = {
   historyRefreshActive: false,
   persistentError: null,
 } satisfies IncrementalStatus;
+
+it.each([false, true])("keeps the focused cadence and slows on blur (work active: %s)", async workActive => {
+  vi.useFakeTimers();
+  let completed = 0;
+  const api: AutomaticCharacterApi = {
+    status: vi.fn(async () => ({ ...idle, workActive, completed })),
+    pause: vi.fn(),
+  };
+  const changed = vi.fn();
+  const { unmount } = renderHook(() => useCharacterAutomation(changed, api));
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(api.status).toHaveBeenCalledTimes(1);
+  const cadence = workActive ? 1000 : 5000;
+  await act(async () => { await vi.advanceTimersByTimeAsync(cadence - 1); });
+  expect(api.status).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(api.status).toHaveBeenCalledTimes(2);
+
+  act(() => window.dispatchEvent(new Event("blur")));
+  await act(async () => { await vi.advanceTimersByTimeAsync(59_999); });
+  expect(api.status).toHaveBeenCalledTimes(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(api.status).toHaveBeenCalledTimes(3);
+  completed = 1;
+  await act(async () => { window.dispatchEvent(new Event("focus")); });
+  expect(api.status).toHaveBeenCalledTimes(4);
+  expect(changed).toHaveBeenCalledWith(false);
+  await act(async () => { await vi.advanceTimersByTimeAsync(cadence); });
+  expect(api.status).toHaveBeenCalledTimes(5);
+  unmount();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(api.status).toHaveBeenCalledTimes(5);
+});
+
+it("starts slowly when the visible window is already unfocused", async () => {
+  vi.useFakeTimers();
+  vi.mocked(document.hasFocus).mockReturnValue(false);
+  const api = { status: vi.fn().mockResolvedValue(idle), pause: vi.fn() };
+  renderHook(() => useCharacterAutomation(vi.fn(), api));
+  await act(async () => { await vi.advanceTimersByTimeAsync(59_999); });
+  expect(api.status).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(api.status).toHaveBeenCalledTimes(2);
+});
 
 it("publishes current character and durable refresh totals for the work center", async () => {
   vi.useFakeTimers();

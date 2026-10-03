@@ -1,9 +1,38 @@
-import { renderHook, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { LibraryGateway } from "../library/types";
 import { SIMILARITY_REVIEW_CHANGED_EVENT, useSimilarityReviewInbound } from "./useSimilarityReviewInbound";
 
-afterEach(() => vi.useRealTimers());
+beforeEach(() => { vi.spyOn(document, "hasFocus").mockReturnValue(true); });
+
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
+
+it("slows visible unfocused polling and preserves the baseline across focus changes", async () => {
+  vi.useFakeTimers();
+  let applied = 2;
+  const read = vi.fn(async () => ({ applied }));
+  const onChange = vi.fn();
+  const gateway = { similarityReviewInboundStatus: read } as unknown as LibraryGateway;
+  const { unmount } = renderHook(() => useSimilarityReviewInbound(gateway, onChange));
+  await act(async () => { await vi.advanceTimersByTimeAsync(9_999); });
+  expect(read).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(read).toHaveBeenCalledTimes(2);
+  act(() => window.dispatchEvent(new Event("blur")));
+  await act(async () => { await vi.advanceTimersByTimeAsync(59_999); });
+  expect(read).toHaveBeenCalledTimes(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(read).toHaveBeenCalledTimes(3);
+  applied = 3;
+  await act(async () => { window.dispatchEvent(new Event("focus")); });
+  expect(read).toHaveBeenCalledTimes(4);
+  expect(onChange).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  expect(read).toHaveBeenCalledTimes(5);
+  unmount();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(read).toHaveBeenCalledTimes(5);
+});
 
 it("announces each change after the baseline reading", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });

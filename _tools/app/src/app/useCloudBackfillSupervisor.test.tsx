@@ -1,5 +1,5 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { LibraryGateway } from "../library/types";
 import { CLOUD_PROGRESS_EVENT, notifyCloudBackfillSupervisor, useCloudBackfillSupervisor } from "./useCloudBackfillSupervisor";
 
@@ -10,7 +10,37 @@ function Harness({ gateway }: { gateway: LibraryGateway }) {
 
 const running = { controlState: "running" as const, totalAssets: 2, queued: 2, preparing: 0, uploading: 0, committing: 0, completed: 0, failed: 0, activeWorkers: 0, lastError: null };
 
-afterEach(() => cleanup());
+beforeEach(() => { vi.spyOn(document, "hasFocus").mockReturnValue(true); });
+
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
+
+it("polls idle progress every 10 s focused, every 60 s blurred, and immediately on return", async () => {
+  vi.useFakeTimers();
+  const progress = vi.fn().mockResolvedValue({ ...running, controlState: "idle", queued: 0 });
+  const gateway = { cloudBackfillProgress: progress } as unknown as LibraryGateway;
+  const { unmount } = render(<Harness gateway={gateway} />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(progress).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(9_999); });
+  expect(progress).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(progress).toHaveBeenCalledTimes(2);
+  act(() => window.dispatchEvent(new Event("blur")));
+  await act(async () => { await vi.advanceTimersByTimeAsync(59_999); });
+  expect(progress).toHaveBeenCalledTimes(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(progress).toHaveBeenCalledTimes(3);
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(progress).toHaveBeenCalledTimes(4);
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  expect(progress).toHaveBeenCalledTimes(5);
+  unmount();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(progress).toHaveBeenCalledTimes(5);
+});
 
 it("runs queued work from one application-level supervisor", async () => {
   const run = vi.fn().mockResolvedValue({ committed: 2, retryScheduled: 0, permanentFailures: 0 });

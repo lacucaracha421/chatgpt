@@ -130,13 +130,19 @@ pub fn run() {
                         }
                     }
                     tauri::WindowEvent::Resized(_) => {
+                        workload::window_visibility(
+                            window.app_handle(),
+                            !window.is_visible().unwrap_or(true)
+                                || window.is_minimized().unwrap_or(false),
+                        );
                         if let Some(main) = window.app_handle().get_webview_window("main") {
                             window_size::remember(&main, false);
                         }
                     }
                     tauri::WindowEvent::Focused(focused) => workload::activity(
                         window.app_handle(),
-                        !window.is_visible().unwrap_or(true),
+                        !window.is_visible().unwrap_or(true)
+                            || window.is_minimized().unwrap_or(false),
                         *focused,
                     ),
                     _ => {}

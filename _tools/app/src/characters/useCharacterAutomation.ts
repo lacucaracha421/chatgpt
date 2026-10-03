@@ -1,4 +1,5 @@
 import { workloadPollDelay, getWorkloadProfile } from "../app/workloadProfile";
+import { isWindowFocused, subscribeWindowFocus, windowPollDelay } from "../app/windowFocus";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -92,6 +93,12 @@ export function useCharacterAutomation(
     let interval = 5000;
     let polling = false;
     let noticedError = "";
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void poll(), windowPollDelay(
+        workloadPollDelay(document.visibilityState === "hidden" ? 15000 : interval),
+      ));
+    };
 
     const publishError = (error: string | null) => {
       const next = error ?? "";
@@ -135,10 +142,7 @@ export function useCharacterAutomation(
         polling = false;
       }
       if (active) {
-        timer = setTimeout(
-          () => void poll(),
-          workloadPollDelay(document.visibilityState === "hidden" ? 15000 : interval),
-        );
+        schedule();
       }
     }
 
@@ -146,10 +150,15 @@ export function useCharacterAutomation(
       if (document.visibilityState === "visible") void poll();
     };
     document.addEventListener("visibilitychange", onVisible);
+    const unsubscribeFocus = subscribeWindowFocus(() => {
+      if (isWindowFocused()) void poll();
+      else schedule();
+    });
     void poll();
     return () => {
       active = false;
       clearTimeout(timer);
+      unsubscribeFocus();
       document.removeEventListener("visibilitychange", onVisible);
     }; // Navigation never cancels native work.
   }, [api]);
