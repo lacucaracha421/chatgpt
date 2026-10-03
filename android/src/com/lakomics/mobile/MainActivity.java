@@ -17,6 +17,8 @@ public final class MainActivity extends Activity {
  private WebView web; private SecureSettings settings; private CloudClient client; private MediaRepository media; private NotesRepository notes;
  private final ThreadPoolExecutor workers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(48));
  private final ThreadPoolExecutor mediaWorkers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(24));
+ // Covers have their own lane: slow originals cannot occupy its six workers.
+ private final ThreadPoolExecutor catalogCoverWorkers=new ThreadPoolExecutor(6,6,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(24));
  private final PerfLog.Pool perfPool=new PerfLog.Pool();
  private final ConcurrentHashMap<String,CancellationSignal> active=new ConcurrentHashMap<>();
  private final ConcurrentHashMap<String,CancellationSignal> nonEssential=new ConcurrentHashMap<>();
@@ -246,6 +248,7 @@ public final class MainActivity extends Activity {
   @JavascriptInterface public void cancel(String id){CancellationSignal s=active.remove(id);if(s!=null)s.cancel();}
   /** Local startup hint only: never exposes the saved token or performs a network check. */
   @JavascriptInterface public String localStatus(){try{return settings.status().toString();}catch(Exception ignored){return "{\"configured\":false,\"endpoint\":\"\"}";}}
+  @JavascriptInterface public boolean perfEnabled(){return PerfLog.enabled();}
   @JavascriptInterface public void request(String id,String operation,String payload){
    if("perfLog".equals(operation)){PerfLog.javascript(payload);return;}
    // A note save carries up to 128 KiB of text (256 KiB plaintext); every other request stays small.
@@ -262,10 +265,14 @@ public final class MainActivity extends Activity {
    if("vaultLock".equals(operation)){vault.lock("보관함이 잠겼습니다");try{reply(id,true,vault.state(),null);}catch(JSONException ignored){}active.remove(id);return;}
    final long vaultEpoch=vault.epoch();
    if(optionalWork(operation)){synchronized(MainActivity.this){nonEssential.put(id,signal);if(stopped)cancelOptional(id,signal);}}
-   final PerfLog.Op perf=operation.equals("thumbnail")||operation.equals("media")?perfPool.submit(operation,mediaWorkers.getQueue().size()):null;
+   boolean cover=false;
+   if("catalogImage".equals(operation))try{cover="cover".equals(new JSONObject(payload).optString("kind"));}catch(JSONException ignored){}
+   final boolean catalogCover=cover;
+   final ThreadPoolExecutor mediaLane=catalogCover?catalogCoverWorkers:mediaWorkers;
+   final PerfLog.Op perf=operation.equals("thumbnail")||operation.equals("media")||catalogCover&&PerfLog.enabled()?perfPool.submit(catalogCover?"catalogCover":operation,mediaLane.getQueue().size()):null;
    final boolean mediaWork=operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("homeCover") || operation.equals("catalogImage");
    final Runnable task=()->{if(perf!=null)perfPool.start(perf);try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
-    if(perf!=null){perf.asset=PerfLog.id(p.optString("assetId"));perf.request=PerfLog.id(p.optString("perfId"));}
+    if(perf!=null){perf.asset=PerfLog.id(p.optString(catalogCover?"workId":"assetId"));perf.request=PerfLog.id(p.optString("perfId"));if(catalogCover)perf.jsQueue=PerfLog.millis(p,"jsQueueMs");}
     switch(operation){
      case "vaultPick":data=vault.pick();break;
      case "vaultState":data=vault.inspect();break;
@@ -356,7 +363,7 @@ public final class MainActivity extends Activity {
     public boolean isCanceled(){return signal.isCanceled();}
     public void setListener(Runnable listener){signal.setOnCancelListener(listener==null?null:listener::run);}
    },task,status->{active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){if(status!=null)perf.status=status;perfPool.remove(perf);perf.finish(payload);}});
-   try{dispatch.submit(mediaWork?mediaWorkers:workers,mediaWork);}catch(RejectedExecutionException e){
+   try{dispatch.submit(mediaWork?mediaLane:workers,mediaWork);}catch(RejectedExecutionException e){
     // A full media queue means the request never started: the "media_busy" code lets a visible caller retry it later instead of showing it as broken.
     if(!signal.isCanceled())reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.",null,mediaWork?mediaBusy():null);}
   }
@@ -415,5 +422,5 @@ public final class MainActivity extends Activity {
  @Override protected void onStop(){if(vault!=null)vault.stopped();
   // Secret notes lock when the app goes to the background; the WebView drops their content.
   if(notes!=null){notes.lockSecrets();emit("lakomics-notes-locked",null);}stopNonEssential();super.onStop();}
- @Override protected void onDestroy(){destroyed=true;deviceSignals.unregister();if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);AlbumReplicaService.get(this).setSignalsListener(null);ExchangeService.get(this).removeListener(exchangeListener);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
+ @Override protected void onDestroy(){destroyed=true;deviceSignals.unregister();if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);AlbumReplicaService.get(this).setSignalsListener(null);ExchangeService.get(this).removeListener(exchangeListener);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();catalogCoverWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
 }

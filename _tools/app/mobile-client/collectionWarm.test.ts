@@ -5,6 +5,7 @@ import {startCollectionWarm} from './collectionWarm';
 import {START_DELAY} from './warmScheduler';
 import {setWarmEnabled} from './thumbnailWarm';
 import {artworkTicket} from './collectionArtwork';
+import {catalogImageTicket} from './catalogMedia';
 import {clearMediaCache} from './media';
 import type {CollectionSummary} from './collectionModel';
 const KEY='lakomics.mobile.collectionWarm';
@@ -65,6 +66,13 @@ it('cancels in-flight warming for a foreground cover and waits until it finishes
   const visible=artworkTicket(work(99),'cover','r1',false,new AbortController().signal);await advance(0);
   expect(active).toBe(1);const before=downloads().length;await advance(4000);expect(downloads()).toHaveLength(before);
   await advance(1000);await visible;delay=0;await advance(3100);expect(progress().completedAt).not.toBeNull();
+});
+it('also yields the collection warm workers to pending catalog covers',async()=>{
+  delay=5000;stop=startCollectionWarm('endpoint');await advance(START_DELAY+1);expect(active).toBe(2);
+  const cover=catalogImageTicket({workId:'42',revision:'a'.repeat(64),kind:'cover',index:0,url:'https://ehgt.org/42.jpg'},new AbortController().signal);
+  await advance(0);expect(active).toBe(1);
+  const before=downloads().length;await advance(4000);expect(downloads()).toHaveLength(before);
+  await advance(1000);await cover;delay=0;await advance(3100);expect(progress().completedAt).not.toBeNull();
 });
 it.each(['scroll','pointerdown','wheel'])('pauses for %s and resumes after idle',async event=>{
   delay=5000;stop=startCollectionWarm('endpoint');await advance(START_DELAY+1);window.dispatchEvent(new Event(event));await advance(0);expect(active).toBe(0);

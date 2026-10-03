@@ -6,6 +6,9 @@ import java.util.Locale;
 
 /** Measurements only. No request scheduling, payloads, credentials or URLs. */
 final class PerfLog {
+ // Android's tag property is opt-in (DEBUG); ordinary INFO logging does not enable catalog timing.
+ static boolean enabled(){return Log.isLoggable("LakomicsPerf",Log.DEBUG);}
+ static double millis(JSONObject p,String key){double value=p.optDouble(key,-1);return Double.isNaN(value)||Double.isInfinite(value)||value<0||value>180000?-1:value;}
  static final ThreadLocal<Op> current=new ThreadLocal<>();
  static String id(String value){return value!=null&&value.matches("[A-Za-z0-9_-]{1,128}")?value:"-";}
  static String ms(long nanos){return String.format(Locale.ROOT,"%.3f",nanos/1_000_000.0);}
@@ -35,6 +38,8 @@ final class PerfLog {
   boolean started;
   String asset="-",request="-",cache="unknown",status="error";
   long queue,lock,ticket,permit,download,bytes,commit,obtain;
+  double jsQueue=-1;
+  int downloads,httpStatus,rateLimited;
   final StringBuilder batches=new StringBuilder();
   Op(String operation,int it,int im,int qt,int qm,int q){this.operation=operation;inflightThumb=it;inflightMedia=im;queuedThumb=qt;queuedMedia=qm;queued=q;}
   void batch(TicketBatcher.Batch timing){
@@ -45,12 +50,13 @@ final class PerfLog {
   void finish(String payload){
    long total=System.nanoTime()-submitted;
    // Canceled-before-start and rejected ops never reach the normal payload parse.
-   if(asset.equals("-"))try{JSONObject p=new JSONObject(payload);asset=id(p.optString("assetId"));request=id(p.optString("perfId"));}catch(Exception ignored){}
+   if(asset.equals("-"))try{JSONObject p=new JSONObject(payload);asset=id(p.optString(operation.equals("catalogCover")?"workId":"assetId"));request=id(p.optString("perfId"));jsQueue=millis(p,"jsQueueMs");}catch(Exception ignored){}
    write(operation+" id="+asset+" req="+request+" status="+status+" cache="+cache+
     " queueMs="+(started?ms(queue):"-1")+" lockMs="+ms(lock)+" ticketMs="+ms(ticket)+
     " batch="+(batches.length()==0?"-":batches)+" permitMs="+ms(permit)+" downloadMs="+ms(download)+
     " bytes="+bytes+" commitMs="+ms(commit)+" obtainMs="+ms(obtain)+" totalMs="+ms(total)+
-    " inflightThumb="+inflightThumb+" inflightMedia="+inflightMedia+" queuedThumb="+queuedThumb+" queuedMedia="+queuedMedia+" queued="+queued);
+    " inflightThumb="+inflightThumb+" inflightMedia="+inflightMedia+" queuedThumb="+queuedThumb+" queuedMedia="+queuedMedia+" queued="+queued+
+    (operation.equals("catalogCover")?" jsQueueMs="+String.format(Locale.ROOT,"%.3f",jsQueue)+" nativeQueueMs="+(started?ms(queue):"-1")+" storeMs="+ms(commit)+" downloads="+downloads+" httpStatus="+httpStatus+" rateLimited="+rateLimited:""));
   }
  }
  /** One-way bridge: fixed vocabulary and numeric fields only, never arbitrary JS text. */
@@ -58,6 +64,15 @@ final class PerfLog {
   try{
    if(payload==null||payload.length()>2048)return;
    JSONObject p=new JSONObject(payload);
+   if("catalog_screen".equals(p.optString("event"))){
+    if(!enabled())return;
+    int visible=p.optInt("visible",0),loaded=p.optInt("loaded",-1);
+    String status=p.optString("status");
+    if(visible<1||visible>200||loaded<0||loaded>visible||!status.matches("ok|incomplete"))return;
+    write("js catalogScreen="+id(p.optString("screen"))+" status="+status+" visible="+visible+" loaded="+loaded+
+     " firstCoverMs="+String.format(Locale.ROOT,"%.3f",millis(p,"firstCoverMs"))+" visible90Ms="+String.format(Locale.ROOT,"%.3f",millis(p,"visible90Ms")));
+    return;
+   }
    if("video".equals(p.optString("event"))){
     // Library video element state: fixed event names and small integers only.
     String media=p.optString("media"),name=p.optString("name");

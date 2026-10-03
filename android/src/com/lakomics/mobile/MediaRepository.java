@@ -24,10 +24,12 @@ final class MediaRepository {
  private final CloudClient client;
  private final ThumbnailCache cache;
  private final Semaphore transfers=new Semaphore(8,true);
+ // A global cover cap is also a conservative six-per-host limit, across every caller.
+ private final Semaphore coverTransfers=new Semaphore(6,true);
  private final Set<CancellationSignal> active=ConcurrentHashMap.newKeySet();
  private final Map<String,LockEntry> locks=new HashMap<>();
  private static final class LockEntry{final ReentrantLock lock=new ReentrantLock();int users;}
- private static final class Scope{String key,ticketGroup;long generation;JSONObject connection;ThumbnailCache.Kind kind=ThumbnailCache.Kind.VIEW;}
+ private static final class Scope{boolean cover;String key,ticketGroup;long generation;JSONObject connection;ThumbnailCache.Kind kind=ThumbnailCache.Kind.VIEW;}
  private MediaRepository(Context context)throws IOException{
   settings=new SecureSettings(context);client=new CloudClient(settings);
   cache=new ThumbnailCache(new File(context.getCacheDir(),"thumbnail-media"));
@@ -231,15 +233,16 @@ final class MediaRepository {
  private void fillFrom(String variant,Scope scope,CancellationSignal signal,JSONObject first,TicketSource source)throws Exception{
   PerfLog.Op perf=PerfLog.current.get();
   LockEntry entry=retainLock(scope.key);
-  boolean locked=false,permit=false;active.add(signal);
+  boolean locked=false,permit=false,coverPermit=false;active.add(signal);
   try{
    long deadline=System.currentTimeMillis()+180000;
    long lockStarted=System.nanoTime();
    try{lock(entry,signal);locked=true;}finally{if(perf!=null)perf.lock+=System.nanoTime()-lockStarted;}
    signal.throwIfCanceled();
-   try{cache.file(scope.key,scope.generation,scope.kind);return;}catch(FileNotFoundException ignored){}
+   try{cache.file(scope.key,scope.generation,scope.kind);if(perf!=null&&scope.cover)perf.cache="hit";return;}catch(FileNotFoundException ignored){}
    long permitStarted=System.nanoTime();
-   try{while(!(permit=transfers.tryAcquire(100,TimeUnit.MILLISECONDS))){signal.throwIfCanceled();if(System.currentTimeMillis()>deadline)throw new IOException("Media busy");}}
+   try{if(scope.cover)while(!(coverPermit=coverTransfers.tryAcquire(100,TimeUnit.MILLISECONDS))){signal.throwIfCanceled();if(System.currentTimeMillis()>deadline)throw new IOException("Media busy");}
+    while(!(permit=transfers.tryAcquire(100,TimeUnit.MILLISECONDS))){signal.throwIfCanceled();if(System.currentTimeMillis()>deadline)throw new IOException("Media busy");}}
    finally{if(perf!=null)perf.permit+=System.nanoTime()-permitStarted;}
    long maximum=variant.equals("thumbnail")?ThumbnailCache.MAX_FILE:MAX_ORIGINAL;
    JSONObject initial=first==null?source.read(false):first;
@@ -251,12 +254,21 @@ final class MediaRepository {
     try{JSONObject current=initial;
     for(int attempt=0;;attempt++){
      signal.throwIfCanceled();
-     try{client.download(current.getString("url"),file,reservation,signal);MediaTransfer.verifyTicket(file,current.optLong("size_bytes",0),current.isNull("sha256")?"":current.optString("sha256"));signal.throwIfCanceled();return;}
-     catch(Exception failure){signal.throwIfCanceled();if(attempt>=1 || !retryable(failure))throw failure;current=source.read(true);}
+     try{
+      if(perf!=null&&scope.cover)perf.downloads++;
+      client.download(current.getString("url"),file,reservation,signal);
+      if(perf!=null&&scope.cover)perf.httpStatus=200;
+      MediaTransfer.verifyTicket(file,current.optLong("size_bytes",0),current.isNull("sha256")?"":current.optString("sha256"));signal.throwIfCanceled();return;
+     }catch(Exception failure){
+      if(perf!=null&&scope.cover&&failure instanceof CloudClient.HttpFailure){
+       perf.httpStatus=((CloudClient.HttpFailure)failure).status;if(perf.httpStatus==429)perf.rateLimited++;
+      }
+      signal.throwIfCanceled();if(attempt>=1 || !retryable(failure))throw failure;current=source.read(true);
+     }
     }
     }finally{callbackNanos[0]+=System.nanoTime()-callbackStarted;}
    });}finally{if(perf!=null){long elapsed=System.nanoTime()-obtainStarted;perf.obtain+=elapsed;perf.commit+=elapsed-callbackNanos[0];}}
-  }finally{active.remove(signal);if(permit)transfers.release();releaseLock(scope.key,entry,locked);}
+  }finally{active.remove(signal);if(permit)transfers.release();if(coverPermit)coverTransfers.release();releaseLock(scope.key,entry,locked);}
  }
  private String cachedImageMime(Scope scope)throws Exception{
   try(InputStream raw=cache.open(scope.key,scope.generation,scope.kind);BufferedInputStream input=new BufferedInputStream(raw)){
@@ -269,8 +281,10 @@ final class MediaRepository {
  JSONObject catalogImage(String workId,String revision,String kind,int index,String url,CancellationSignal signal)throws Exception{
   if(workId==null || !workId.matches("[1-9][0-9]{0,18}") || !(kind.equals("cover") || kind.equals("page")) || index<0 || index>=2000 || kind.equals("cover")&&index!=0)throw new IllegalArgumentException();
   NetworkPolicy.catalogImage(workId,revision,kind,index,url);Scope scope=scopedIdentity("catalog/kHentai/"+workId+"/"+kind+"/"+index+"/"+ThumbnailCache.key(url));
-  scope.kind=kind.equals("cover")?ThumbnailCache.Kind.KEEP:ThumbnailCache.Kind.VIEW;
-  try{String mime=cachedImageMime(scope);if(imageMime(mime))return local(scope,mime);cache.remove(scope.key,scope.generation);}catch(FileNotFoundException ignored){}
+  scope.cover=kind.equals("cover");scope.kind=scope.cover?ThumbnailCache.Kind.KEEP:ThumbnailCache.Kind.VIEW;
+  signal.throwIfCanceled();PerfLog.Op perf=PerfLog.current.get();
+  try{String mime=cachedImageMime(scope);if(imageMime(mime)){if(perf!=null)perf.cache="hit";return local(scope,mime);}cache.remove(scope.key,scope.generation);}catch(FileNotFoundException ignored){}
+  if(perf!=null)perf.cache="miss";
   JSONObject external=new JSONObject().put("url",url).put("size_bytes",0);
   try{fillFrom("thumbnail",scope,signal,external,fresh->external);}catch(CloudClient.HttpFailure failure){if(failure.status==403)throw new IOException("Catalog image URL expired");throw failure;}
   signal.throwIfCanceled();String mime=cachedImageMime(scope);if(!imageMime(mime)){cache.remove(scope.key,scope.generation);throw new IOException("Catalog image type is unsupported");}return local(scope,mime);

@@ -37,7 +37,7 @@ const mount=()=>{const onClose=vi.fn();render(<CatalogDuplicates context="ctx" o
 const posted=()=>mocks.api.mock.calls.filter(([path])=>path===DUPLICATE_DECISIONS_PATH).map(([, ,body])=>body as Body);
 
 beforeEach(()=>{setOutboxConnection(CONNECTION);localStorage.clear();mocks.api.mockReset();decide=body=>({operationId:body.operationId});lists={undecided:feed([]),decided:feed([])};install();});
-afterEach(()=>{cleanup();localStorage.clear();});
+afterEach(()=>{cleanup();localStorage.clear();vi.unstubAllGlobals();});
 
 describe('catalog duplicate review',()=>{
   it('shows a friendly empty state and the PC note',async()=>{
@@ -48,6 +48,8 @@ describe('catalog duplicate review',()=>{
     expect(await screen.findByText('처리한 판본이 없어요')).toBeTruthy();
   });
   it('lists pairs with covers, titles, pages, creators, language and the reason; a missing cover is a placeholder',async()=>{
+    // Covers load near the viewport; this review is all on screen.
+    vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{isIntersecting:true,target} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} disconnect(){} unobserve(){}});
     lists.undecided=feed([candidate(C1,'w1','w2'),candidate(C2,'w3','w4')]);
     mount();
     expect(await screen.findByText('Title w1')).toBeTruthy();

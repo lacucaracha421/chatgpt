@@ -196,8 +196,9 @@ export type CardArrival={waiting():boolean;ready():void};
  * reports ready, then rises in as one piece (cover, title and meta together). A cover that is
  * still not decoded ARRIVE_WAIT_MS after the card comes into view does not hold the card any
  * longer: the card rises in with its placeholder and the cover fades in by itself later.
+ * Catalog disables late image fading so a displayed cover always stays visible.
  */
-export function useCardArrival(host:RefObject<HTMLElement|null>,arriving:boolean,onArrived:()=>void):CardArrival{
+export function useCardArrival(host:RefObject<HTMLElement|null>,arriving:boolean,onArrived:()=>void,fadeLateImage=true):CardArrival{
   const waiting=useRef(false),done=useRef(onArrived);done.current=onArrived;
   useLayoutEffect(()=>{
     if(!arriving)return;
@@ -214,7 +215,7 @@ export function useCardArrival(host:RefObject<HTMLElement|null>,arriving:boolean
     const giveUp=()=>{
       if(!waiting.current)return;
       // The cover's image, if it is already in place but not decoded, fades in on its own load.
-      holdImage(element.querySelector('img'));
+      if(fadeLateImage)holdImage(element.querySelector('img'));
       arrival.ready();
     };
     const start=()=>{if(!timer)timer=window.setTimeout(giveUp,ARRIVE_WAIT_MS);};

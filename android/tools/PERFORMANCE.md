@@ -15,6 +15,51 @@ log events and cancellation; it does not simulate device speed.
 
 For the whole mobile suite use `npm run mobile:test -- --maxWorkers=2`.
 
+## Catalog covers
+
+Catalog timing is opt-in; the existing Library logs remain unchanged. On a build
+containing `catalogPerf.ts` and the catalog changes in `PerfLog.java`, enable the
+Android tag property before entering Catalog:
+
+```sh
+adb -s SERIAL shell setprop log.tag.LakomicsPerf DEBUG
+adb -s SERIAL logcat -v threadtime -T 1 -s LakomicsPerf:I '*:S' > /tmp/catalog-after.log
+# Stop capture with Ctrl+C, then disable catalog timing:
+adb -s SERIAL shell setprop log.tag.LakomicsPerf INFO
+```
+
+Use the same device, orientation, network, query, sort, visible cover count and
+power/warm settings for before and after. Capture a first visit, an immediate
+revisit, and quick two-row down/up scrolling as separate runs; repeat each three
+times. Do not clear app storage or the media cache. A first visit is not proof of
+a cache miss: classify requests by the logged `cache` field. Do not compare a
+cold before run with a warmed after run.
+
+`catalogCover` reports `jsQueueMs`, `nativeQueueMs`, `cache`, `downloadMs`, `bytes`,
+`storeMs`, `permitMs` and `status`. `storeMs` is cache bookkeeping/reservation and
+commit outside the download callback; phases overlap and must not be summed.
+`js catalogScreen` reports `firstCoverMs` and `visible90Ms` from list DOM layout
+to decoded covers for the visible cohort frozen at entry (excluding preloads).
+Keep the list still until the summary, then scroll. Leaving before 90% produces
+`status=incomplete` and `visible90Ms=-1`. These timings are decode readiness, not
+GPU paint timings. Cache-only or already decoded revisits remain distinct.
+
+Older builds have no catalog timing. For an equivalent logged baseline the
+controller must supply a build with only this instrumentation and the original
+scheduling/range. Otherwise record both builds' screens and count frames from
+list appearance to first/90% visible covers; native catalog breakdown is then
+available only after the change. `perf_summary.py` does not parse catalog lines.
+Compare screen median/p90, request miss/cancel/error counts, total bytes and 429
+failures directly in these logs; check quick scrolling for blanks or fading.
+
+The offline six-slot fixture uses a fixed 200 ms native reply and twelve visible
+covers; it is a queue regression measurement, not an Android speed estimate:
+
+```sh
+cd _tools/app
+npm run mobile:test -- --maxWorkers=2 mobile-client/catalogMedia.test.ts mobile-client/CatalogCover.test.tsx mobile-client/catalogPerf.test.ts mobile-client/thumbnailWarm.test.ts mobile-client/collectionWarm.test.ts
+```
+
 ## Existing Android instrumentation
 
 Use an already installed build containing `PerfLog.java` and `mobile-client/perf.ts`.

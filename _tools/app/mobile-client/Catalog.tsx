@@ -9,6 +9,7 @@ import {SearchButton,TopBar,TopBarSearch} from './TopBar';
 import {Button,IconButton} from './ui';
 import {api,errorText} from './transport';
 import {CatalogCover} from './CatalogCover';
+import {catalogScreenTiming} from './catalogPerf';
 import {CatalogReader} from './CatalogReader';
 import {usePrivacyMode} from './privacyMode';
 import {CatalogRefreshBanner,CatalogRefreshControl,useCatalogRefresh,useNow} from './CatalogRefresh';
@@ -34,7 +35,7 @@ function lruSet<K,V>(map:Map<K,V>,key:K,value:V,limit:number){map.delete(key);ma
 
 /** A list card; one appended by scrolling stays hidden until its cover is decoded, then rises in whole. */
 function ArrivingCard({arriving,onArrived,disabled,onClick,children}:{arriving:boolean;onArrived():void;disabled:boolean;onClick():void;children(arrival:CardArrival):ReactNode}){
-  const host=useRef<HTMLButtonElement>(null),arrival=useCardArrival(host,arriving,onArrived);
+  const host=useRef<HTMLButtonElement>(null),arrival=useCardArrival(host,arriving,onArrived,false);
   return <button ref={host} className="catalog-card" disabled={disabled} onClick={onClick}>{children(arrival)}</button>;
 }
 
@@ -406,6 +407,11 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
   // 카탈로그 · 북마크 is the list's first row; scrolled away, the top bar pulls it down. 북마크 lists newest first.
   const sources=useSectionShade<CatalogQuery['scope']>({label:'카탈로그 출처',options:SOURCES,value:query.scope,onChange:scope=>{if(scope!==query.scope)change(scope==='bookmarked'?{scope,sort:'latest'}:{scope});},extra:viewControls},{active:active&&!paused&&!selected&&!reader&&!settings&&!duplicates});
   const revision=page?.publicationRevision??'0'.repeat(64);
+  const shownList=active&&!paused&&!selected&&!reader&&!privacy&&page?.ready&&committed.current===key;
+  const shownListKey=shownList?committed.current:null;
+  useLayoutEffect(()=>{
+    if(shownListKey&&list.current)return catalogScreenTiming(list.current);
+  },[shownListKey,revision]);
   const scrubberSort=useMemo(()=>query.sort==='latest' ? {kind:'date' as const,values:items.map(item=>item.posted)} : {kind:'fallback' as const},[items,query.sort]);
 
   useLevelMotion(section,active?(selected?'detail':'list'):null,selected?1:0);

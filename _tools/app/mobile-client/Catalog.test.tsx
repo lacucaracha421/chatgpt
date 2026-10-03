@@ -27,7 +27,7 @@ beforeEach(()=>{Object.defineProperty(window,'innerWidth',{configurable:true,val
 const CHOICES:Record<string,string>={korean:'한국어',japanese:'일본어',all:'전체 언어',latest:'최신순',views:'조회순',hotDay:'오늘 인기',hotWeek:'이번 주 인기',hotMonth:'이번 달 인기'};
 /** Open a chip's sheet and pick one option, as a user does. */
 function choose(group:'카탈로그 언어'|'카탈로그 정렬',value:string){fireEvent.click(screen.getByRole('button',{name:new RegExp(`^${group}`)}));fireEvent.click(screen.getByRole('radio',{name:CHOICES[value]}));}
-afterEach(cleanup);
+afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 describe('catalog cover retention',()=>{
   const preview='https://app.lakomics.local/media-cache/cover';
   const props={active:true,paused:false,backRef:{current:null}};
@@ -454,6 +454,7 @@ describe('mobile catalog reads',()=>{
     expect(screen.getByText('밤의 도서관')).toBeTruthy();
   });
   it('keeps the detail cover and back action without a decorative backdrop',async()=>{
+    vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{target,isIntersecting:true} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} disconnect(){}});
     mocks.api.mockImplementation(async(path:string)=>{
       if(path.includes('/status'))return capableStatus;
       if(path.includes('/works/'))return {publicationRevision:'p1',item:{...item,thumbnailUrl:'https://example.invalid/cover.jpg',tagGroups:[],uploader:null,category:1,updated:null,fileSize:null,rating:null}};
@@ -781,7 +782,26 @@ describe('appended card arrival',()=>{
   const animate=vi.fn();
   beforeEach(()=>{animate.mockReset();(HTMLElement.prototype as unknown as {animate:unknown}).animate=function(this:HTMLElement,...args:unknown[]){animate(this,...args);};});
   afterEach(()=>{delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
+  it('never hides or fades the late cover after the appended card timeout',async()=>{
+    vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{target,isIntersecting:true} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} disconnect(){}});
+    const second:CatalogItem={...item,providerWorkId:'43',groupId:'group-2',title:'계절의 기록',thumbnailUrl:'https://example.test/c.jpg',versionCount:1};
+    vi.spyOn(catalogMedia,'catalogImageTicket').mockResolvedValue({url:'data:image/png;base64,AA'} as Awaited<ReturnType<typeof catalogMedia.catalogImageTicket>>);
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path.includes('/status'))return capableStatus;
+      if(path.includes('/count?'))return {publicationRevision:'p1',totalCount:2};
+      return path.includes('cursor=c2')?{...page,items:[second],nextCursor:null}:{...page,nextCursor:'c2'};
+    });
+    render(<Catalog active paused={false} backRef={{current:null}}/>);
+    const card=(await screen.findByText('계절의 기록')).closest('.catalog-card') as HTMLElement;
+    await waitFor(()=>expect(card.querySelector('img')).not.toBeNull());
+    const cover=card.querySelector('img')!;
+    await act(()=>new Promise(resolve=>setTimeout(resolve,650)));
+    expect(card.style.opacity).toBe('');expect(cover.style.opacity).toBe('');
+    fireEvent.load(cover);await act(async()=>{});
+    expect(animate.mock.calls.filter(([element])=>element===cover)).toHaveLength(0);
+  });
   it('holds a card appended by scrolling until its cover decodes, then rises the whole card in once',async()=>{
+    vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{target,isIntersecting:true} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} disconnect(){}});
     const second:CatalogItem={...item,providerWorkId:'43',groupId:'group-2',title:'계절의 기록',thumbnailUrl:'https://example.test/c.jpg',versionCount:1};
     vi.spyOn(catalogMedia,'catalogImageTicket').mockResolvedValue({url:'data:image/png;base64,AA'} as Awaited<ReturnType<typeof catalogMedia.catalogImageTicket>>);
     mocks.api.mockImplementation(async(path:string)=>{

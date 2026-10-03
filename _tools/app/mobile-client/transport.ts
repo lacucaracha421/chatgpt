@@ -1,6 +1,6 @@
 import {onVisible} from './useVisibleInterval';
 declare global {
-  interface Window { LakomicsNative?: {request(id: string, operation: string, payload: string): void; cancel(id: string): void; localStatus?(): string} }
+  interface Window { LakomicsNative?: {request(id: string, operation: string, payload: string): void; cancel(id: string): void; localStatus?(): string; perfEnabled?():boolean} }
 }
 type Reply = {id: string; ok: boolean; cancelled?:boolean; data?: unknown; error?: string; status?: number; details?: unknown};
 type Pending = {resume?():void;resolve(value: unknown): void; reject(error: Error): void; cleanup(): void};

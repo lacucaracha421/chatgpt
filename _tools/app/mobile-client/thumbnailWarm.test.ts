@@ -2,6 +2,7 @@ import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 const mocks = vi.hoisted(() => ({api:vi.fn(), native:vi.fn()}));
 vi.mock('./transport', () => ({api:mocks.api, native:mocks.native}));
 import {clearMediaCache} from './media';
+import {catalogImageTicket} from './catalogMedia';
 import {resetWarmProgress, setWarmEnabled, startThumbnailWarm, START_DELAY, warmState} from './thumbnailWarm';
 
 const asset = (id:string) => ({id, kind:'image'});
@@ -23,6 +24,24 @@ beforeEach(() => {
   });
 });
 afterEach(() => { vi.useRealTimers(); stop?.(); stop = null; clearMediaCache(); mocks.api.mockReset(); mocks.native.mockReset(); vi.unstubAllGlobals(); });
+
+it('yields an active asset warm pass to a pending catalog cover and resumes after idle',async()=>{
+  const pending=Promise.withResolvers<{url:string}>(),signals:AbortSignal[]=[];
+  const original=mocks.native.getMockImplementation()!;
+  mocks.native.mockImplementation((op:string,...args:unknown[])=>op==='catalogImage'?pending.promise:original(op,...args));
+  mocks.api.mockImplementation((_path:string,signal:AbortSignal)=>{
+    signals.push(signal);
+    return new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true}));
+  });
+  stop=startThumbnailWarm('https://server.invalid');await vi.advanceTimersByTimeAsync(START_DELAY+1);
+  expect(signals).toHaveLength(1);
+  const cover=catalogImageTicket({workId:'42',revision:'a'.repeat(64),kind:'cover',index:0,url:'https://ehgt.org/42.jpg'},new AbortController().signal);
+  expect(signals[0].aborted).toBe(true);
+  await vi.advanceTimersByTimeAsync(5000);expect(signals).toHaveLength(1);
+  mocks.api.mockImplementation(async(path:string)=>pages[new URL(path,'https://x.invalid').searchParams.get('cursor')??'first']);
+  pending.resolve({url:'https://app.lakomics.local/media-cache/42'});await cover;
+  await vi.advanceTimersByTimeAsync(3001);expect(warmState().status).toBe('done');
+});
 
 it('walks every Library page once, asking native for each thumbnail, then reports done', async () => {
   stop = startThumbnailWarm('https://server.invalid');

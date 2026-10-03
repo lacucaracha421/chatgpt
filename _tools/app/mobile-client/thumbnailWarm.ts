@@ -1,4 +1,5 @@
 import {scheduleWarm} from './warmScheduler';
+import {SHELF_ACTIVITY,shelfForegroundBusy} from './shelfWarmActivity';
 export {START_DELAY} from './warmScheduler';
 export {meteredConnection} from './warmNetwork';
 import {api,native} from './transport';
@@ -156,5 +157,6 @@ async function pass(scope:string, signal:AbortSignal) {
  * one-minute retry or `lakomics-network` (reconnected), whichever comes first.
  */
 export function startThumbnailWarm(scope:string) {
-  return scheduleWarm({enabled:warmEnabled,pass:signal=>pass(scope,signal),publish,progress:()=>saved(scope),repeatAfter:REPEAT_AFTER,event:EVENT});
+  return scheduleWarm({enabled:warmEnabled,pass:signal=>pass(scope,signal),publish,progress:()=>saved(scope),repeatAfter:REPEAT_AFTER,event:EVENT,
+    blocked:shelfForegroundBusy,wakeEvents:[SHELF_ACTIVITY]});
 }
