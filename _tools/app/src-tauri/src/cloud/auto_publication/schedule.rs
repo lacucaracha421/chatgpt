@@ -283,10 +283,12 @@ impl Library {
         .unwrap_or(true);
         due[6] = crate::library::collection_binding_sync::publication_due_on(&db, endpoint, now)
             .unwrap_or(true);
+        // Metadata stores CloudClient's parsed base URL, unlike the raw-key lanes above.
+        let metadata_endpoint = crate::cloud::status_watch::endpoint_key(endpoint);
         due[7] = db.query_row(
             "SELECT EXISTS(SELECT 1 FROM cloud_metadata_publication_state
             WHERE (generation<>published_generation OR endpoint<>?1) AND retry_after<=?2)",
-            rusqlite::params![endpoint, now],
+            rusqlite::params![metadata_endpoint, now],
             |r| r.get(0),
         )?;
         for (slot, kind) in [(8, "upcoming"), (9, "avPick"), (10, "artists")] {
@@ -314,7 +316,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         let endpoint = format!(
-            "https://{}.invalid/",
+            "https://{}.invalid",
             temp.path()
                 .file_name()
                 .unwrap()
@@ -322,6 +324,14 @@ mod tests {
                 .replace('.', "")
         )
         .to_ascii_lowercase();
+        // Home/auto-tags use endpoint_key; metadata stores CloudClient's parsed URL.
+        let normalized_endpoint = status_watch::endpoint_key(&endpoint);
+        let metadata_endpoint = crate::cloud::client::CloudClient::new(&endpoint)
+            .unwrap()
+            .capture_endpoint()
+            .to_owned();
+        assert!(!endpoint.ends_with('/'));
+        assert_eq!(metadata_endpoint, normalized_endpoint);
         let now = chrono::Utc::now().timestamp();
         library.publication_inputs.character_sources(&library);
         let library_id = library.library_id().unwrap();
@@ -336,7 +346,7 @@ mod tests {
             [&endpoint],
         )
         .unwrap();
-        db.execute("UPDATE cloud_metadata_publication_state SET endpoint=?1,published_generation=generation", [&endpoint]).unwrap();
+        db.execute("UPDATE cloud_metadata_publication_state SET endpoint=?1,published_generation=generation", [&metadata_endpoint]).unwrap();
         for table in [
             "mobile_collection_personal_edit_poll",
             "mobile_character_exclusion_poll",
@@ -350,6 +360,7 @@ mod tests {
             .unwrap();
         }
         for table in [
+            "mobile_collection_personal_edit_sync",
             "mobile_character_exclusion_sync",
             "mobile_character_review_sync",
             "mobile_similarity_review_sync",
@@ -370,6 +381,13 @@ mod tests {
                 rusqlite::params![endpoint, library_id, now]).unwrap();
         }
         db.execute("INSERT INTO mobile_catalog_visibility_state(endpoint,digest,published_digest,first_dirty,last_dirty) VALUES(?1,'same','same',0,0)", [&endpoint]).unwrap();
+        std::fs::create_dir_all(temp.path().join("catalogs")).unwrap();
+        std::fs::write(temp.path().join("catalogs/kdata.db"), []).unwrap();
+        db.execute(
+            "INSERT INTO catalog_duplicate_sync(endpoint,last_polled,updated_at) VALUES(?1,?2,'fixture')",
+            rusqlite::params![endpoint, now],
+        )
+        .unwrap();
         for (key, value) in [
             (
                 format!("collectionReleaseSync:{endpoint}"),
@@ -390,7 +408,7 @@ mod tests {
             db.execute(
                 "INSERT INTO home_publication_state(endpoint,kind,state_json) VALUES(?1,?2,?3)",
                 rusqlite::params![
-                    endpoint,
+                    normalized_endpoint,
                     kind,
                     json!({"next_build":now+300,"last_poll":now}).to_string()
                 ],
@@ -399,7 +417,10 @@ mod tests {
         }
         db.execute(
             "INSERT INTO auto_tag_publication_state(endpoint,state_json) VALUES(?1,?2)",
-            rusqlite::params![endpoint, json!({"retry_after":now+300}).to_string()],
+            rusqlite::params![
+                normalized_endpoint,
+                json!({"retry_after":now+300}).to_string()
+            ],
         )
         .unwrap();
         drop(db);
@@ -535,6 +556,7 @@ mod tests {
                 .library
                 .publication_lanes_due(&f.endpoint, f.now + offset, false, false)
                 .unwrap();
+            assert_eq!(due, [false; 12], "idle tick at +{offset}s");
             for _ in due.into_iter().filter(|due| *due) {
                 dispatches += 1;
                 builds += 1; // The fake worker builds a snapshot whenever dispatched.
