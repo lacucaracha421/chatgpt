@@ -14,12 +14,3 @@
   min-height: var(--touch-target);
   min-width: var(--touch-target);
 }
-/* The batch picker uses the tablet sheet frame, while its tree stays shared with the viewer. */
-.ui-dialog:has(.classification-batch-sheet) {
-  top: auto;
-  bottom: 0;
-  transform: translateX(-50%);
-  width: min(540px, 100vw);
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
-  padding-bottom: calc(var(--space-6) + env(safe-area-inset-bottom));
-}
