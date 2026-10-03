@@ -40,6 +40,37 @@ beforeEach(()=>{
   });
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();delete window.LakomicsNative;delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
+it('prewarms the two retained list areas only after startup paint and idle, without mounting Notes',async()=>{
+  vi.useFakeTimers();
+  let sequence=0,idle:IdleRequestCallback|undefined;
+  const frames=new Map<number,FrameRequestCallback>();
+  vi.stubGlobal('requestAnimationFrame',(callback:FrameRequestCallback)=>{const id=++sequence;frames.set(id,callback);return id;});
+  vi.stubGlobal('cancelAnimationFrame',(id:number)=>frames.delete(id));
+  vi.stubGlobal('requestIdleCallback',(callback:IdleRequestCallback)=>{idle=callback;return 1;});
+  vi.stubGlobal('cancelIdleCallback',()=>{idle=undefined;});
+  window.LakomicsNative={localStatus:()=>JSON.stringify({configured:true,endpoint:'https://example.invalid'}),request:vi.fn(),cancel:vi.fn()};
+  const original=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async(path:string)=>{
+    if(path==='/v1/mobile-catalog/status')return {publicationRevision:'p1',capabilities:{displayPreferencesVersion:1}};
+    if(path.startsWith('/v1/mobile-catalog/search?'))return {ready:true,publicationRevision:'p1',items:[],nextCursor:null,countStatus:'ready'};
+    if(path.startsWith('/v1/collections?'))return {ready:true,filterVersion:1,revision:'r1',items:[],nextCursor:null};
+    return original(path);
+  });
+  try {
+    render(<App/>);await act(async()=>{});
+    const listReads=()=>mocks.api.mock.calls.filter(([path])=>path.startsWith('/v1/mobile-catalog/search?')||path.startsWith('/v1/collections?'));
+    expect(listReads()).toHaveLength(0);expect(document.querySelector('.mobile-catalog, .mobile-collections')).toBeNull();
+    for(let index=0;index<2;index++)await act(async()=>{const callbacks=[...frames.values()];frames.clear();callbacks.forEach(callback=>callback(performance.now()));});
+    await act(async()=>{vi.advanceTimersByTime(1500);});
+    expect(listReads()).toHaveLength(0);expect(idle).toBeDefined();
+    await act(async()=>idle!({didTimeout:false,timeRemaining:()=>50}));
+    expect(listReads()).toHaveLength(2);
+    expect(document.querySelector('[data-motion-view="catalog"] .mobile-catalog')).not.toBeNull();
+    expect(document.querySelector('[data-motion-view="collections"] .mobile-collections')).not.toBeNull();
+    expect(document.querySelector('.mobile-notes')).toBeNull();
+    expect(mocks.native.mock.calls.some(([op])=>op==='notesState'||op==='catalogImage'||op==='collectionArtwork')).toBe(false);
+  } finally {cleanup();vi.unstubAllGlobals();vi.useRealTimers();}
+});
 it('keeps the visible folder and scroll DOM through a delayed foreground refresh without replaying area motion',async()=>{
   let visibility:DocumentVisibilityState='visible';
   const visibilitySpy=vi.spyOn(document,'visibilityState','get').mockImplementation(()=>visibility);

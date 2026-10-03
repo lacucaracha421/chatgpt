@@ -1,5 +1,6 @@
 import {ClassificationBatchSheet} from './ClassificationBatchSheet';
 import {AreaSwitch, MotionScope, viewReady} from '../src/shared/motion/AreaSwitch';
+import {useAreaPrewarm} from './useAreaPrewarm';
 import {AssetInfoSheet} from './AssetInfoSheet';
 import {FindContext,FindButton} from './FindContext';
 import {FindSheet} from './FindSheet';
@@ -782,6 +783,7 @@ export function App() {
   const seriesEntry=entries.find(item=>item.id===seriesNode?.seriesId);
   const characterCrumbs=[{id:'root',name:'에셋',onSelect:openRoot},...ancestorsOf(entries,seriesEntry?.id).map(entry=>({id:entry.id,name:entry.name,onSelect:()=>select(entryView(entry))}))];
   const paused=area!=='assets'||settings||!!viewer||!!fault||similarity||trash.open||exchangeOpen||artistsOpen||calendarOpen;
+  const areaPrewarm=useAreaPrewarm(status.endpoint,status.configured&&!checking&&!busy&&!paused&&!privacyMode&&!vaultOpen&&!findOpen&&!assetSearchOpen&&!viewSettings&&!filtersOpen&&!sortOpen,appRef);
   const exchangeSending=sendingSummary(exchange.snapshot);
   const exchangeUnseen=exchange.snapshot?.unseen ?? 0;
   const exchangeBadge=exchangeUnseen>0 ? (exchangeUnseen>99 ? '99+' : String(exchangeUnseen)) : exchangeSending ? (exchangeSending.progress===null ? '…' : `${Math.round(exchangeSending.progress*100)}%`) : '';
@@ -906,9 +908,9 @@ export function App() {
   const motionViews={
     library: assetAreaNode,
     home: homeAreaNode,
-    collections: collectionsVisited && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest} onReturnHome={homeOrigin?.area==='collections'?returnHome:undefined}/>,
+    collections: (collectionsVisited||areaPrewarm.mounted) && <Collections key={`collections:${status.endpoint}`} active={area==='collections'} prefetch={areaPrewarm.prefetch&&!collectionsVisited} paused={settings || !!viewer} backRef={collectionBack} request={collectionRequest} onReturnHome={homeOrigin?.area==='collections'?returnHome:undefined}/>,
     notes: notesVisited && <Notes findStore={findStore} key={`notes:${status.endpoint}`} active={area==='notes'&&!settings} backRef={notesBack} request={noteRequest} onReturnHome={homeOrigin?.area==='notes'?returnHome:undefined} onHomeEntryGone={homeOrigin?.area==='notes'?forgetHome:undefined}/>,
-    catalog: catalogVisited && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} paused={settings || !!viewer} backRef={catalogBack} openDuplicates={duplicateRequest} onReturnHome={homeOrigin?.area==='catalog'?returnHome:undefined}/>,
+    catalog: (catalogVisited||areaPrewarm.mounted) && <Catalog key={`catalog:${status.endpoint}`} endpoint={status.endpoint} active={area==='catalog'} prefetch={areaPrewarm.prefetch&&!catalogVisited} paused={settings || !!viewer} backRef={catalogBack} openDuplicates={duplicateRequest} onReturnHome={homeOrigin?.area==='catalog'?returnHome:undefined}/>,
   };
   const tabReady=(host:HTMLElement,key:string)=>{
     const has=(selector:string)=>Array.from(host.querySelectorAll(selector)).some(element=>!element.closest('[style*="display: none"]'));

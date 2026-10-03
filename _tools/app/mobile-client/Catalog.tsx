@@ -44,7 +44,7 @@ type ReaderPrefetch={cacheKey:string;owner:string;controller:AbortController;pro
 function readerCacheKey(item:Pick<CatalogItem,'provider'|'providerWorkId'>,revision:string,filterKey:string){return `${revision}:${filterKey}:${item.provider}:${item.providerWorkId}`;}
 
 const SOURCES:readonly {value:CatalogQuery['scope'];label:string}[]=[{value:'all',label:'카탈로그'},{value:'bookmarked',label:'북마크'}];
-export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onReturnHome}:{active:boolean;paused:boolean;backRef:MutableRefObject<(()=>boolean)|null>;endpoint?:string;
+export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDuplicates=0,onReturnHome}:{active:boolean;prefetch?:boolean;paused:boolean;backRef:MutableRefObject<(()=>boolean)|null>;endpoint?:string;
   /** Bumped by Home's 중복 판본 tile: opens the duplicate-edition review. */
   openDuplicates?:number;
   /** Set while 중복 검토 was opened from Home: closing it returns there. */
@@ -73,6 +73,9 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
   const [detailError,setDetailError]=useState(''),[detailRefresh,setDetailRefresh]=useState(0);
   const [editions,setEditions]=useState<CatalogEditions|null>(null),[editionCursor,setEditionCursor]=useState<string|null>(null),[editionError,setEditionError]=useState('');
   const [privacy] = usePrivacyMode();
+  const listEnabled=!paused&&(active||(prefetch&&!privacy));
+  const warmStatusAttempted=useRef(false),warmListAttempted=useRef(false);
+  const listPending=useRef(false);
   const [reader,setReader]=useState<CatalogReaderManifest|null>(null),[readerBusy,setReaderBusy]=useState(false),[readerError,setReaderError]=useState('');
   const section=useRef<HTMLElement>(null),committed=useRef(''),list=useRef<HTMLDivElement>(null),scroll=useRef(0),publication=useRef<string|null>(null);
   const authorityCursor=useRef<number|null|undefined>(undefined);
@@ -131,6 +134,14 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
     retryKey:capabilityRetry,
     onError:()=>setCapability(current=>current==='checking'?'failed':current),
   });
+  useEffect(()=>{
+    // The hidden list needs the capability decision, but must never subscribe to polling.
+    if(active||!listEnabled||capability!=='checking'||warmStatusAttempted.current)return;
+    warmStatusAttempted.current=true;
+    const controller=new AbortController();
+    void api(statusPath,controller.signal).then(reply=>{if(!controller.signal.aborted)onStatus(reply,false);},()=>{if(!controller.signal.aborted)setCapability('failed');});
+    return()=>controller.abort();
+  },[active,listEnabled]);
   const bookmarks=useBookmarks({active:active&&!paused,authority});
   const index=useMangaIndex({active:active&&!paused,open:settings,authority,query,revision:refresh});
   const catalogQuery={...query,text:withMangaIndexQuery(query.text,mangaIndexQuery(indexFilter)),sort:indexFilter?'latest' as const:query.sort};
@@ -167,23 +178,34 @@ export function Catalog({active,paused,backRef,endpoint='',openDuplicates=0,onRe
     if(revision)publication.current=revision;
   };
   const prefetchNext=(result:CatalogPage)=>{
+    if(!active||paused)return;
     if(!result.nextCursor||!result.publicationRevision)return;const next=catalogPath(catalogQuery,result.nextCursor,{searchMode});
     if(pageCache.current.has(next)||prefetches.current.has(next))return;
     const controller=new AbortController();prefetches.current.set(next,controller);
-    void api<CatalogPage>(next,controller.signal).then(value=>{if(!controller.signal.aborted&&value.publicationRevision===result.publicationRevision)lruSet(pageCache.current,next,value,12);}).catch(()=>{}).finally(()=>prefetches.current.delete(next));
+    void api<CatalogPage>(next,controller.signal).then(value=>{if(!controller.signal.aborted&&value.publicationRevision===result.publicationRevision)lruSet(pageCache.current,next,value,12);}).catch(()=>{}).finally(()=>{if(prefetches.current.get(next)===controller)prefetches.current.delete(next);});
   };
   useEffect(()=>()=>{for(const controller of prefetches.current.values())controller.abort();readerRequest.current?.abort();readerPrefetch.current?.controller.abort();},[]);
   useEffect(()=>{
-    if(!active||paused||!listReady||committed.current===key)return;
+    if(!listEnabled||!listReady||committed.current===key)return;
+    if(!active){if(warmListAttempted.current)return;warmListAttempted.current=true;}
     const cached=lruGet(pageCache.current,path);
-    if(cached){resetPublicationCaches(cached.publicationRevision);committed.current=key;resetMore();setPage(cached);setBusy(false);setError('');prefetchNext(cached);return;}
-    const controller=new AbortController();setBusy(true);setError('');setCountError('');
+    if(cached){resetPublicationCaches(cached.publicationRevision);committed.current=key;resetMore();setPage(cached);setBusy(false);setError('');return;}
+    const controller=new AbortController();listPending.current=true;setBusy(true);setError('');setCountError('');
     void api<CatalogPage>(path,controller.signal).then(result=>{
       if(controller.signal.aborted)return;resetPublicationCaches(result.publicationRevision);lruSet(pageCache.current,path,result,12);
-      committed.current=key;resetMore();setPage(result);setBusy(false);if(list.current)list.current.scrollTop=0;prefetchNext(result);
-    }).catch(reason=>{if(!controller.signal.aborted){setError(catalogError(reason)||errorText(reason));setBusy(false);}});
-    return()=>controller.abort();
-  },[active,paused,key,path,query,listReady]);
+      committed.current=key;resetMore();setPage(result);setBusy(false);if(list.current)list.current.scrollTop=0;
+    }).catch(reason=>{if(!controller.signal.aborted){setError(catalogError(reason)||errorText(reason));setBusy(false);}}).finally(()=>{if(!controller.signal.aborted)listPending.current=false;});
+    return()=>{controller.abort();listPending.current=false;};
+  },[listEnabled,key,path,query,listReady]);
+  useEffect(()=>{
+    // A canceled/failed warm-up gets the ordinary user-initiated retry. A live
+    // warm request keeps its owner through activation and is never duplicated.
+    if(active&&warmListAttempted.current&&!listPending.current&&committed.current!==key)setRefresh(value=>value+1);
+  },[active]);
+  useEffect(()=>{
+    if(active&&!paused&&page&&committed.current===key)prefetchNext(page);
+    else {for(const controller of prefetches.current.values())controller.abort();prefetches.current.clear();}
+  },[active,paused,page,key]);
   useEffect(()=>{
     if(!active||paused||!listReady||!page?.countToken||page.countStatus==='ready')return;
     const controller=new AbortController(),countToken=page.countToken;setCountError('');

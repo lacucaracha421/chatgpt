@@ -257,10 +257,12 @@ function settleWithin(work:Promise<unknown>,ms:number){
  * publication revision has been read since. A refresh (`key` changes), a new search or filter
  * within the slot, or a revision change while fetching reads the server as before.
  */
-function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:boolean,{slot='',validate,prepare}:{slot?:string;validate?:(page:CollectionPage)=>void;prepare?:(page:CollectionPage,signal:AbortSignal)=>Promise<unknown>}={}) {
+function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:boolean,{slot='',validate,prepare,allowMore=true,warm=false}:{slot?:string;validate?:(page:CollectionPage)=>void;prepare?:(page:CollectionPage,signal:AbortSignal)=>Promise<unknown>;allowMore?:boolean;warm?:boolean}={}) {
   const [state,setState]=useState<ListState>(EMPTY_LIST);
   const latest=useRef(state);latest.current=state;
   const committed=useRef('');
+  const warmAttempted=useRef(false);
+  const firstPending=useRef(false);
   const memory=useRef(new Map<string,ListState>()),shownSlot=useRef(slot),newest=useRef<string|null>(null);
   const [nonce,setNonce]=useState(0),[revalidating,setRevalidating]=useState(false);
   const pathRef=useRef(path);pathRef.current=path;
@@ -275,7 +277,9 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
     setRevalidating(false);
     if(!enabled)return;
     if(committed.current===key){setState(current=>current.busy?{...current,busy:false}:current);return;}
+    if(warm){if(warmAttempted.current)return;warmAttempted.current=true;}
     const controller=new AbortController();
+    firstPending.current=true;
     const firstPage=()=>api<CollectionPage>(pathRef.current(null),controller.signal).then(result=>{validateRef.current?.(result);newest.current=result.revision;return result;});
     const commit=(result:CollectionPage)=>{committed.current=key;setState({key,items:result.items,page:result,next:result.nextCursor,busy:false,more:false,error:'',moreError:'',legacy:false});};
     const kept=slot!==shownSlot.current?memory.current.get(slot):undefined;
@@ -287,7 +291,7 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
         setRevalidating(true);
         void firstPage().then(result=>{if(!controller.signal.aborted){commit(result);setRevalidating(false);}}).catch(()=>{if(!controller.signal.aborted)setRevalidating(false);});
       }
-      return()=>controller.abort();
+      return()=>{controller.abort();firstPending.current=false;};
     }
     const swapping=latest.current.items.length>0;
     setState(current=>({...current,key,busy:true,error:'',legacy:false,moreError:''}));
@@ -297,15 +301,18 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
       if(swapping&&prepareRef.current)await settleWithin(prepareRef.current(result,controller.signal),SWAP_PREPARE_MS);
       if(controller.signal.aborted)return;
       commit(result);
-    }).catch(reason=>{if(controller.signal.aborted)return;const legacy=(reason as {status?:number}).status===404;setState(current=>({...current,busy:false,legacy,error:legacy?'':errorText(reason)}));});
-    return()=>controller.abort();
+    }).catch(reason=>{if(controller.signal.aborted)return;const legacy=(reason as {status?:number}).status===404;setState(current=>({...current,busy:false,legacy,error:legacy?'':errorText(reason)}));}).finally(()=>{if(!controller.signal.aborted)firstPending.current=false;});
+    return()=>{controller.abort();firstPending.current=false;};
   },[key,enabled,nonce]);
+  useEffect(()=>{
+    if(!warm&&enabled&&warmAttempted.current&&!firstPending.current&&committed.current!==key)setNonce(value=>value+1);
+  },[warm,enabled]);
   const restart=useCallback(()=>{committed.current='';setNonce(n=>n+1);},[]);
   // This effect runs only after the first page has committed. Collections are small: keep
   // the shown list stable while draining the cursor, then append in one render. On failure,
   // publish the pages already received and retain the failed cursor for explicit retry.
   useEffect(()=>{
-    if(!enabled||revalidating||state.busy||state.error||state.moreError||!state.next||state.key!==key||state.key!==committed.current)return;
+    if(!enabled||!allowMore||revalidating||state.busy||state.error||state.moreError||!state.next||state.key!==key||state.key!==committed.current)return;
     const controller=new AbortController(),current=state;
     const items=[...current.items],seen=new Set(items.map(work=>work.id));
     let next=current.next;
@@ -326,7 +333,7 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
       } catch(reason){if(!controller.signal.aborted)append(errorText(reason));}
     })();
     return()=>controller.abort();
-  },[key,enabled,nonce,revalidating,state.key,state.page,state.next,state.busy,state.error,state.moreError,restart]);
+  },[key,enabled,allowMore,nonce,revalidating,state.key,state.page,state.next,state.busy,state.error,state.moreError,restart]);
   // Scroll and scrubber callers can still signal the end; the committed-page effect owns I/O.
   const loadMore=useCallback(()=>{},[]);
   const retryMore=useCallback(()=>{setState(value=>({...value,moreError:''}));},[]);
@@ -363,7 +370,7 @@ function RatingFilterSlider({value,onChange}:{value:Filters['rating'];onChange(v
 export type CollectionsPlace={kind:'releases'}|{kind:'work';id:string};
 export type CollectionsRequest=CollectionsPlace&{key:number};
 /** `onReturnHome`: set while the screen was opened from Home; closing that entry level (신간 or the work opened) returns there. */
-export function Collections({active,paused,backRef,request,onReturnHome}:{active:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>;request?:CollectionsRequest|null;onReturnHome?:()=>void}) {
+export function Collections({active,prefetch=false,paused,backRef,request,onReturnHome}:{active:boolean;prefetch?:boolean;paused:boolean;backRef:React.MutableRefObject<(()=>boolean)|null>;request?:CollectionsRequest|null;onReturnHome?:()=>void}) {
   const filterWheel=useHorizontalWheel();
   const [tab,setTab]=useState<CollectionTab>('game'),[query,setQuery]=useState(''),[search,setSearch]=useState('');
   const [privacyMode]=usePrivacyMode();
@@ -404,6 +411,7 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   const sectionRef=useRef<HTMLElement>(null),listRef=useRef<HTMLDivElement>(null),showcaseRef=useRef<HTMLDivElement>(null),detailRef=useRef<HTMLDivElement>(null),performerRef=useRef<HTMLDivElement>(null);
   const listScroll=useRef(0);
   const live=active&&!paused;
+  const warming=prefetch&&!privacyMode&&!paused;
   useEffect(()=>{if(privacyMode)setCoverIndex(null);},[privacyMode]);
   useEffect(()=>{if(privacyMode&&tab==='av'){setTab('game');setSelected(null);setPerformer(null);setDetail(null);}else if(privacyMode)setPerformer(null);},[privacyMode,tab]);
   const filtered=!!search||filters.rating!=='all';
@@ -416,8 +424,8 @@ export function Collections({active,paused,backRef,request,onReturnHome}:{active
   const [artworks]=useState(()=>new ArtworkMemory());
   const prepareCovers=useCallback((page:CollectionPage,signal:AbortSignal)=>artworks.preload(page.items.slice(0,FIRST_SCREEN_COVERS),page.revision??'',signal),[artworks]);
   const mainKey=JSON.stringify([collectionPath(type,search,false,null,filters),refresh]);
-  const main=useCollectionList(cursor=>collectionPath(type,search,false,cursor,filters),mainKey,live,
-    {slot:type,prepare:prepareCovers,validate:result=>{if(result.ready&&result.filterVersion!==1)throw new Error('별점 필터와 정렬을 사용하려면 서버 업데이트가 필요합니다.');}});
+  const main=useCollectionList(cursor=>collectionPath(type,search,false,cursor,filters),mainKey,live||warming,
+    {slot:type,allowMore:live,warm:!live,prepare:live?prepareCovers:undefined,validate:result=>{if(result.ready&&result.filterVersion!==1)throw new Error('별점 필터와 정렬을 사용하려면 서버 업데이트가 필요합니다.');}});
   const wantShowcase=live;
   const showcaseKey=JSON.stringify([collectionPath(type,'',true,null),refresh]);
   const showcase=useCollectionList(cursor=>collectionPath(type,'',true,cursor),showcaseKey,wantShowcase,{slot:type,prepare:prepareCovers});
