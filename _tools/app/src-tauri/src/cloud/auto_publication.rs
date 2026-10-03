@@ -2,20 +2,61 @@
 use crate::library::{error::LibraryError, Library};
 use rusqlite::params;
 use std::sync::Mutex;
+mod schedule;
+pub(crate) use schedule::Inputs;
 // Separate lanes prevent slow artwork uploads from blocking character/settings changes.
-static RUNNING: [Mutex<()>; 12] = [const { Mutex::new(()) }; 12];
-fn dispatch(
-    running: &'static Mutex<()>,
-    work: impl FnOnce() + Send + 'static,
-) -> std::io::Result<std::thread::JoinHandle<()>> {
-    std::thread::Builder::new()
-        .name("mobile-publication".into())
-        .spawn(move || {
-            let Ok(_permit) = running.try_lock() else {
-                return;
-            };
-            work();
-        })
+static RUNNING: [Worker; 12] = [const { Worker::new() }; 12];
+
+/// Lazily started, isolated single-flight workers sleep on their channels between jobs.
+pub(crate) struct Worker {
+    sender: Mutex<Option<std::sync::mpsc::Sender<Box<dyn FnOnce() + Send>>>>,
+    busy: std::sync::atomic::AtomicBool,
+}
+impl Worker {
+    pub(crate) const fn new() -> Self {
+        Self {
+            sender: Mutex::new(None),
+            busy: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+    pub(crate) fn submit(
+        &'static self,
+        name: &str,
+        work: impl FnOnce() + Send + 'static,
+    ) -> std::io::Result<bool> {
+        use std::sync::atomic::Ordering;
+        if self.busy.swap(true, Ordering::AcqRel) {
+            return Ok(false);
+        }
+        let result = (|| {
+            let mut sender = self
+                .sender
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if sender.is_none() {
+                let (tx, rx) = std::sync::mpsc::channel::<Box<dyn FnOnce() + Send>>();
+                let busy = &self.busy;
+                std::thread::Builder::new()
+                    .name(name.into())
+                    .spawn(move || {
+                        for job in rx {
+                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                            busy.store(false, Ordering::Release);
+                        }
+                    })?;
+                *sender = Some(tx);
+            }
+            if sender.as_ref().unwrap().send(Box::new(work)).is_err() {
+                *sender = None;
+                return Err(std::io::Error::other("publication worker stopped"));
+            }
+            Ok(true)
+        })();
+        if result.is_err() {
+            self.busy.store(false, Ordering::Release);
+        }
+        result
+    }
 }
 
 /// Run both steps, then report the first error.
@@ -79,16 +120,27 @@ impl Library {
         self.connection()?.execute("UPDATE mobile_publication_state SET navigation_order=?1,generation=generation+1,first_dirty=CASE WHEN generation=published_generation THEN unixepoch() ELSE first_dirty END,last_dirty=unixepoch() WHERE kind='characters' AND navigation_order<>?1", [&order])?;
         Ok(())
     }
-    pub(crate) fn run_saved_mobile_publications(&self) -> Result<(), LibraryError> {
+    /// Returns the number of jobs actually submitted (zero for a quiet tick).
+    pub(crate) fn run_saved_mobile_publications(&self) -> Result<usize, LibraryError> {
         let config = self.cloud_sync_config()?;
         let endpoint = config.api_base_url.unwrap_or_default();
         if !config.enabled || endpoint.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
         {
             let c = self.connection()?;
             Self::update_publication_endpoint_on(&c, &endpoint)?;
         }
+        let due = self.publication_lanes_due(
+            &endpoint,
+            chrono::Utc::now().timestamp(),
+            crate::workload::is_lightweight(),
+            crate::workload::is_restricted(),
+        )?;
+        let due =
+            self.publication_inputs
+                .lanes_to_dispatch(&endpoint, due, std::time::Instant::now());
+        let mut dispatched = 0;
         for (slot, kind) in [
             "collections",
             "characters",
@@ -106,66 +158,87 @@ impl Library {
         .into_iter()
         .enumerate()
         {
+            if !due[slot] {
+                continue;
+            }
             let library = self.clone();
-            let endpoint = endpoint.clone();
+            let worker_endpoint = endpoint.clone();
+            let generation = library.publication_inputs.generation(slot);
             // Return after dispatch so the native owner's next tick can service every free lane.
-            dispatch(&RUNNING[slot], move || {
-                // `similarity`: automatic comparison of newly materialized Assets, then mobile
-                // similarity decisions and the pair feed (`similarity_review_sync.rs`).
-                let _ = match kind {
-                    "upcoming" | "avPick" | "artists" => library
-                        .run_due_home_publication(kind, &endpoint)
-                        .map_err(|error| {
-                            eprintln!("home publication {kind}: {error}");
-                            error
-                        }),
-                    "autoTags" => {
-                        library
-                            .run_due_auto_tag_publication(&endpoint)
-                            .map_err(|error| {
-                                eprintln!("auto tag publication: {error}");
-                                error
-                            })
-                    }
-                    "visibility" => library.publish_due_catalog_visibility(&endpoint),
-                    "similarity" => library
-                        .run_due_similarity_review(&endpoint)
-                        .map_err(|error| {
-                            eprintln!("similarity review: {error}");
-                            error
-                        }),
-                    // Manga Catalog duplicate editions (`catalog_duplicate_sync.rs`).
-                    "catalogDuplicates" => {
-                        library
-                            .run_due_catalog_duplicates(&endpoint)
-                            .map_err(|error| {
-                                eprintln!("catalog duplicates: {error}");
-                                error
-                            })
-                    }
-                    // Manga release notifications shared with mobile (`collection_release_sync.rs`).
-                    "releases" => library
-                        .run_due_collection_releases(&endpoint)
-                        .map_err(|error| {
-                            eprintln!("collection releases: {error}");
-                            error
-                        }),
-                    // Tablet-requested MangaDex / Kakao connections (`collection_binding_sync.rs`).
-                    "bindings" => library
-                        .run_due_collection_bindings(&endpoint)
-                        .map_err(|error| {
-                            eprintln!("collection bindings: {error}");
-                            error
-                        }),
-                    // Classification / saved-X / Album read snapshots (`captures.rs`), no longer
-                    // tied to the capture poll's cadence.
-                    "metadata" => library.publish_due_cloud_metadata(&endpoint),
-                    _ => library.publish_due_mobile_kind(kind, &endpoint),
-                };
-            })
-            .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            let started =
+                RUNNING[slot]
+                    .submit("mobile-publication", move || {
+                        let endpoint = worker_endpoint;
+                        // `similarity`: automatic comparison of newly materialized Assets, then mobile
+                        // similarity decisions and the pair feed (`similarity_review_sync.rs`).
+                        let result =
+                            match kind {
+                                "upcoming" | "avPick" | "artists" => library
+                                    .run_due_home_publication(kind, &endpoint)
+                                    .map_err(|error| {
+                                        eprintln!("home publication {kind}: {error}");
+                                        error
+                                    }),
+                                "autoTags" => library
+                                    .run_due_auto_tag_publication(&endpoint)
+                                    .map_err(|error| {
+                                        eprintln!("auto tag publication: {error}");
+                                        error
+                                    }),
+                                "visibility" => library.publish_due_catalog_visibility(&endpoint),
+                                "similarity" => library
+                                    .run_due_similarity_review(&endpoint)
+                                    .map_err(|error| {
+                                        eprintln!("similarity review: {error}");
+                                        error
+                                    }),
+                                // Manga Catalog duplicate editions (`catalog_duplicate_sync.rs`).
+                                "catalogDuplicates" => library
+                                    .run_due_catalog_duplicates(&endpoint)
+                                    .map_err(|error| {
+                                        eprintln!("catalog duplicates: {error}");
+                                        error
+                                    }),
+                                // Manga release notifications shared with mobile (`collection_release_sync.rs`).
+                                "releases" => library
+                                    .run_due_collection_releases(&endpoint)
+                                    .map_err(|error| {
+                                        eprintln!("collection releases: {error}");
+                                        error
+                                    }),
+                                // Tablet-requested MangaDex / Kakao connections (`collection_binding_sync.rs`).
+                                "bindings" => library
+                                    .run_due_collection_bindings(&endpoint)
+                                    .map_err(|error| {
+                                        eprintln!("collection bindings: {error}");
+                                        error
+                                    }),
+                                // Classification / saved-X / Album read snapshots (`captures.rs`), no longer
+                                // tied to the capture poll's cadence.
+                                "metadata" => library.publish_due_cloud_metadata(&endpoint),
+                                _ => library.publish_due_mobile_kind(kind, &endpoint),
+                            };
+                        if result.is_ok()
+                            && slot != 2
+                            && (slot != 5
+                                || library.collection_release_sync_state(&endpoint).is_ok_and(
+                                    |state| state.retry_after <= chrono::Utc::now().timestamp(),
+                                ))
+                        {
+                            library.publication_inputs.checked(slot, generation);
+                        }
+                    })
+                    .map_err(|_| LibraryError::InvalidCloudResponse)?;
+            if !started {
+                // A log wake racing an active lane is retried by the owner next second.
+                super::status_watch::wake_publications();
+            } else {
+                self.publication_inputs
+                    .dispatched(&endpoint, slot, std::time::Instant::now());
+                dispatched += 1;
+            }
         }
-        Ok(())
+        Ok(dispatched)
     }
 
     fn update_publication_endpoint_on(
@@ -290,42 +363,52 @@ mod tests {
 
     #[test]
     fn blocked_collection_does_not_block_repeated_character_ticks_or_duplicate_work() {
-        use std::sync::{mpsc, Mutex};
+        use std::sync::mpsc;
         use std::time::Duration;
-        static COLLECTION: Mutex<()> = Mutex::new(());
-        static CHARACTER: Mutex<()> = Mutex::new(());
+        static COLLECTION: super::Worker = super::Worker::new();
+        static CHARACTER: super::Worker = super::Worker::new();
+        fn idle(worker: &super::Worker) {
+            let start = std::time::Instant::now();
+            while worker.busy.load(std::sync::atomic::Ordering::Acquire) {
+                assert!(start.elapsed() < Duration::from_secs(2));
+                std::thread::yield_now();
+            }
+        }
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        let collection = super::dispatch(&COLLECTION, move || {
-            started_tx.send(()).unwrap();
-            release_rx.recv().unwrap();
-        })
-        .unwrap();
-        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        super::dispatch(&COLLECTION, || panic!("duplicated in-flight collection"))
-            .unwrap()
-            .join()
-            .unwrap();
+        assert!(COLLECTION
+            .submit("publication-test", move || {
+                started_tx.send(std::thread::current().id()).unwrap();
+                release_rx.recv().unwrap();
+            })
+            .unwrap());
+        let first = started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(!COLLECTION
+            .submit("publication-test", || panic!(
+                "duplicated in-flight collection"
+            ))
+            .unwrap());
         for _ in 0..2 {
             let (tx, rx) = mpsc::channel();
-            let character = super::dispatch(&CHARACTER, move || {
-                tx.send(()).unwrap();
-            })
-            .unwrap();
+            assert!(CHARACTER
+                .submit("publication-test", move || {
+                    tx.send(()).unwrap();
+                })
+                .unwrap());
             rx.recv_timeout(Duration::from_secs(2))
                 .expect("character tick waited for collection");
-            character.join().unwrap();
+            idle(&CHARACTER);
         }
         release_tx.send(()).unwrap();
-        collection.join().unwrap();
+        idle(&COLLECTION);
         let (tx, rx) = mpsc::channel();
-        super::dispatch(&COLLECTION, move || {
-            tx.send(()).unwrap();
-        })
-        .unwrap()
-        .join()
-        .unwrap();
-        rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(COLLECTION
+            .submit("publication-test", move || {
+                tx.send(std::thread::current().id()).unwrap();
+            })
+            .unwrap());
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), first);
+        idle(&COLLECTION);
     }
     #[test]
     fn character_review_runs_after_an_exclusion_failure_and_the_first_error_is_reported() {
@@ -370,8 +453,16 @@ mod tests {
             [],
         )
         .unwrap();
-        db.execute("INSERT INTO online_catalog_blocked_tags(namespace,value,created_at) VALUES('tag','blocked','2026-09-13')",[]).unwrap();
         drop(db);
+        library
+            .set_catalog_tag_blocked(
+                crate::library::models::CatalogBlockedTag {
+                    namespace: "tag".into(),
+                    value: "blocked".into(),
+                },
+                true,
+            )
+            .unwrap();
         library.publish_due_catalog_visibility(endpoint).unwrap();
         let db = library.connection().unwrap();
         let changed: (String, String, i64) = db
@@ -520,6 +611,7 @@ impl Library {
     }
 
     fn publish_due_catalog_visibility(&self, endpoint: &str) -> Result<(), LibraryError> {
+        let generation = self.publication_inputs.generation(2);
         let (body, digest) = {
             let db = self.connection()?;
             let body = crate::library::mobile_catalog::visibility_snapshot(&db)?;
@@ -530,6 +622,8 @@ impl Library {
             let c = self.connection()?;
             Self::catalog_visibility_tick_on(&c, endpoint, &digest)?
         };
+        // The digest is now durable even if the network attempt fails or is backed off.
+        self.publication_inputs.checked(2, generation);
         if !due {
             return Ok(());
         }

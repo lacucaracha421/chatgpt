@@ -636,6 +636,12 @@ impl Library {
 
     /// Cheap fingerprint of what the feed depends on (see the migration 0094 notes).
     fn similarity_review_feed_input(&self, cursor: i64) -> Result<String, LibraryError> {
+        self.publication_inputs.cached_input(3, cursor.to_string(), || {
+            self.build_similarity_review_feed_input(cursor)
+        })
+    }
+
+    fn build_similarity_review_feed_input(&self, cursor: i64) -> Result<String, LibraryError> {
         let (reviews, authority): (Option<String>, Option<String>) = self.connection()?.query_row(
             "SELECT (SELECT COUNT(*) || ':' || COALESCE(MAX(created_at), '') || ':'
                             || COALESCE(MAX(resolved_at), '') || ':' || COALESCE(SUM(status = 'open'), 0)

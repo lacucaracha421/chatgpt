@@ -405,6 +405,28 @@ pub(crate) fn log_due(
     last_checked: Option<i64>,
     now: i64,
 ) -> bool {
+    log_ready(endpoint, kind, position, last_checked, now, true)
+}
+
+/// Readiness only: the dispatcher must not consume a head before the lane receives it.
+pub(crate) fn log_pending(
+    endpoint: &str,
+    kind: LogKind,
+    position: LogPosition,
+    last_checked: Option<i64>,
+    now: i64,
+) -> bool {
+    log_ready(endpoint, kind, position, last_checked, now, false)
+}
+
+fn log_ready(
+    endpoint: &str,
+    kind: LogKind,
+    position: LogPosition,
+    last_checked: Option<i64>,
+    now: i64,
+    claim: bool,
+) -> bool {
     let mut hub = hub();
     let entry = hub.entry(endpoint_key(endpoint)).or_default();
     let head = entry
@@ -421,7 +443,7 @@ pub(crate) fn log_due(
         checked_head.as_ref(),
         now,
     );
-    if due {
+    if due && claim {
         entry.checked.insert(kind, (head, now));
     }
     due

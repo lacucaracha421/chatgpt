@@ -332,7 +332,11 @@ impl Library {
             remove_file_if_exists(&recovery)
         })();
         match post_swap {
-            Ok(()) => remove_file_if_exists(&intent_path),
+            Ok(()) => {
+                // Local and cloud restores replace the visibility policies without row hooks.
+                self.note_catalog_visibility_changed();
+                remove_file_if_exists(&intent_path)
+            }
             Err(error) => {
                 if rollback_restore(&self.root, &current, &recovery).is_err() {
                     return Err(LibraryError::RestoreFailed {
@@ -1281,6 +1285,27 @@ mod tests {
         assert!(matches!(error, LibraryError::InvalidBackup));
         let classifications = library.list_classifications().unwrap();
         assert!(classifications.iter().any(|entry| entry.name == "Current only"));
+    }
+
+    #[test]
+    fn catalog_visibility_inputs_are_invalidated_by_local_and_cloud_restores() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let snapshot = temp.path().join("visibility-snapshot.sqlite");
+        library.create_cloud_metadata_snapshot(&snapshot).unwrap();
+        let backup = library
+            .ensure_daily_backup(Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap())
+            .unwrap().unwrap();
+        library.set_catalog_category_hidden(2, true).unwrap();
+        let before = library.publication_inputs.generation(2);
+        library.restore_backup(&backup.id).unwrap();
+        assert!(library.publication_inputs.generation(2) > before);
+        assert!(library.catalog_visibility_policy().unwrap().hidden_categories.is_empty());
+        library.set_catalog_category_hidden(2, true).unwrap();
+        let before = library.publication_inputs.generation(2);
+        library.restore_cloud_metadata_snapshot(&snapshot).unwrap();
+        assert!(library.publication_inputs.generation(2) > before);
+        assert!(library.catalog_visibility_policy().unwrap().hidden_categories.is_empty());
     }
 
     #[test]

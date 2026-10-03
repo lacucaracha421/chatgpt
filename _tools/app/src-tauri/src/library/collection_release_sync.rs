@@ -61,6 +61,27 @@ fn unix_now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
+pub(crate) fn publication_due_on(
+    db: &Connection,
+    endpoint: &str,
+    now: i64,
+    dirty: bool,
+) -> Result<bool, LibraryError> {
+    use crate::cloud::status_watch::{log_pending, LogKind, LogPosition};
+    let state = read_state(db, endpoint)?;
+    Ok(log_pending(
+        endpoint,
+        LogKind::ReleaseReads,
+        LogPosition::cursor(Some(state.read_cursor)),
+        Some(state.last_polled),
+        now,
+    ) || (state.retry_after <= now
+        && (dirty
+            || state.full_upload
+            || state.uploaded.is_none()
+            || state.uploaded_at <= now - REFRESH_SECONDS)))
+}
+
 fn state_key(endpoint: &str) -> String {
     format!("{STATE_PREFIX}{endpoint}")
 }

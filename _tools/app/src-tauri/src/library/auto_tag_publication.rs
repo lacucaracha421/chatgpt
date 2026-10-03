@@ -190,6 +190,15 @@ fn validate_reply(reply: &Value, body: &Value) -> Result<(), LibraryError> {
 }
 
 impl Library {
+    pub(crate) fn auto_tag_publication_due_on(
+        db: &Connection,
+        endpoint: &str,
+        now: i64,
+    ) -> Result<bool, LibraryError> {
+        let endpoint = crate::cloud::status_watch::endpoint_key(endpoint);
+        Ok(State::load(db, &endpoint)?.retry_after <= now)
+    }
+
     pub(crate) fn run_due_auto_tag_publication(&self, endpoint: &str) -> Result<(), LibraryError> {
         // This lane walks the local tag index; lightweight mode holds background work.
         if crate::workload::is_lightweight() {

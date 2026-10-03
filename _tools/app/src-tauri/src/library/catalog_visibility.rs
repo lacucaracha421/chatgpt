@@ -42,6 +42,15 @@ pub(crate) fn append_visibility_predicates(
 }
 
 impl Library {
+    pub(crate) fn note_catalog_visibility_changed(&self) {
+        // These WITHOUT ROWID policies do not reach SQLite's update hook.
+        self.publication_inputs
+            .changed_table("online_catalog_hidden_categories");
+        self.publication_inputs
+            .changed_table("online_catalog_blocked_tags");
+        crate::cloud::status_watch::wake_publications();
+    }
+
     pub fn catalog_visibility_policy(&self) -> Result<CatalogVisibilityPolicy, LibraryError> {
         let connection = self.connection()?;
         let hidden_categories = {
@@ -83,17 +92,20 @@ impl Library {
             return Err(LibraryError::InvalidCatalogVisibilityPolicy);
         }
         let connection = self.connection()?;
-        if hidden {
+        let changed = if hidden {
             connection.execute(
                 "INSERT INTO online_catalog_hidden_categories (category, created_at)
                  VALUES (?1, ?2) ON CONFLICT(category) DO NOTHING",
                 params![category, chrono::Utc::now().to_rfc3339()],
-            )?;
+            )?
         } else {
             connection.execute(
                 "DELETE FROM online_catalog_hidden_categories WHERE category = ?1",
                 [category],
-            )?;
+            )?
+        };
+        if changed > 0 {
+            self.note_catalog_visibility_changed();
         }
         drop(connection);
         self.request_catalog_preparation();
@@ -111,18 +123,21 @@ impl Library {
             return Err(LibraryError::InvalidCatalogVisibilityPolicy);
         }
         let connection = self.connection()?;
-        if blocked {
+        let changed = if blocked {
             connection.execute(
                 "INSERT INTO online_catalog_blocked_tags (namespace, value, created_at)
                  VALUES (?1, ?2, ?3) ON CONFLICT(namespace, value) DO NOTHING",
                 params![namespace, value, chrono::Utc::now().to_rfc3339()],
-            )?;
+            )?
         } else {
             connection.execute(
                 "DELETE FROM online_catalog_blocked_tags
                  WHERE namespace = ?1 AND value = ?2",
                 params![namespace, value],
-            )?;
+            )?
+        };
+        if changed > 0 {
+            self.note_catalog_visibility_changed();
         }
         drop(connection);
         self.request_catalog_preparation();

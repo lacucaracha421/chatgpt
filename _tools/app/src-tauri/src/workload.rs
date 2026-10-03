@@ -549,7 +549,6 @@ fn start_timers(app: tauri::AppHandle) {
         let mut replication_restricted = None;
         let mut launchbox_check = publications;
         static LAUNCHBOX_BUSY: AtomicBool = AtomicBool::new(false);
-        static PUBLICATIONS_BUSY: AtomicBool = AtomicBool::new(false);
         static ASSETS_BUSY: AtomicBool = AtomicBool::new(false);
         // Shared-authority lane: one conditional status read per pass for every domain,
         // with idle backoff (see `library::authority_pass`).
@@ -666,17 +665,9 @@ fn start_timers(app: tauri::AppHandle) {
             // A moved publisher log head (seen by the watcher or a pass) runs the lanes now.
             let publication_wake = crate::cloud::status_watch::take_publication_wake();
             if publication_wake || publications.elapsed() >= Duration::from_secs(10) {
-                if !PUBLICATIONS_BUSY.swap(true, Ordering::AcqRel) {
-                    publications = Instant::now();
-                    let lib = library.clone();
-                    std::thread::spawn(move || {
-                        let _reset = Reset(&PUBLICATIONS_BUSY);
-                        let _ = lib.run_saved_mobile_publications();
-                    });
-                } else if publication_wake {
-                    // Still dispatching the previous tick: try again next second.
-                    crate::cloud::status_watch::wake_publications();
-                }
+                publications = Instant::now();
+                // Read-only readiness runs here; only a ready lane wakes its isolated worker.
+                let _ = library.run_saved_mobile_publications();
             }
             let start_authority = {
                 let mut schedule = authority

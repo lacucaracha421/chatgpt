@@ -19,6 +19,8 @@ use std::{
 };
 static WORKER: Mutex<()> = Mutex::new(());
 static TICK_RUNNING: AtomicBool = AtomicBool::new(false);
+static TICK_WORKER: crate::cloud::auto_publication::Worker =
+    crate::cloud::auto_publication::Worker::new();
 static WORK_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static TICK_SCHEDULE: Mutex<TickSchedule> = Mutex::new(TickSchedule {
     root: None,
@@ -597,6 +599,15 @@ impl Library {
         Ok(true)
     }
     fn next_av_link_tick(&self, restricted: bool) -> Result<std::time::Duration, AvError> {
+        let now = chrono::Utc::now().timestamp();
+        let delay = self
+            .next_av_link_due_at(restricted)?
+            .map(|due| due.saturating_sub(now).clamp(1, 60) as u64)
+            .unwrap_or(60);
+        Ok(std::time::Duration::from_secs(delay))
+    }
+
+    fn next_av_link_due_at(&self, restricted: bool) -> Result<Option<i64>, AvError> {
         let c = self.connection()?;
         let pending: Option<i64> = c.query_row(
             "SELECT MIN(next_attempt_at) FROM av_link_inbox WHERE normalized_code IS NOT NULL AND status IN ('queued','fetching')",
@@ -610,26 +621,24 @@ impl Library {
         let spacing = if restricted { 60 } else { 15 };
         let poll = endpoint
             .filter(|e| !e.trim().is_empty())
-            .and_then(|e| crate::cloud::client::CloudClient::new(&e).ok())
-            .map(|client| -> Result<i64, AvError> {
+            .and_then(|e| url::Url::parse(e.trim()).ok())
+            .filter(|url| {
+                matches!(url.scheme(), "http" | "https")
+                    && url.username().is_empty()
+                    && url.password().is_none()
+            })
+            .map(|endpoint| -> Result<i64, AvError> {
                 let last: Option<i64> = c
                     .query_row(
                         "SELECT last_poll_at FROM av_link_poll_cursor WHERE endpoint=?1",
-                        [client.capture_endpoint()],
+                        [endpoint.as_str()],
                         |r| r.get(0),
                     )
                     .optional()?;
                 Ok(last.unwrap_or(0) + spacing)
             })
             .transpose()?;
-        let now = chrono::Utc::now().timestamp();
-        let delay = [pending, poll]
-            .into_iter()
-            .flatten()
-            .map(|due| due.saturating_sub(now).clamp(1, 60) as u64)
-            .min()
-            .unwrap_or(60);
-        Ok(std::time::Duration::from_secs(delay))
+        Ok([pending, poll].into_iter().flatten().min())
     }
 
     fn finish_av_link_error(
@@ -662,31 +671,45 @@ pub(crate) fn tick(library: Library, restricted: bool) {
         TICK_RUNNING.store(false, Ordering::Release);
         return;
     }
-    let spawned = std::thread::Builder::new()
-        .name("av-link".into())
-        .spawn(move || {
-            struct Reset;
-            impl Drop for Reset {
-                fn drop(&mut self) {
-                    TICK_RUNNING.store(false, Ordering::Release);
-                }
-            }
-            let _reset = Reset;
-            let Ok(_worker) = WORKER.try_lock() else {
-                return;
-            };
-            let http = NetworkClient::new();
-            let _ = library.poll_av_links(&http, restricted);
-            let _ = library.fetch_next_av_link_with(&http, chrono::Utc::now().timestamp());
-            let delay = library
-                .next_av_link_tick(restricted)
-                .unwrap_or(std::time::Duration::from_secs(1));
+    // An empty local queue without a configured feed never starts a worker. A future
+    // retry stays asleep too; table writes and mode/endpoint changes invalidate ready().
+    if let Ok(deadline) = library.next_av_link_due_at(restricted) {
+        let now = chrono::Utc::now().timestamp();
+        if deadline.is_none_or(|due| due > now) {
+            let delay = deadline
+                .map(|due| due.saturating_sub(now).clamp(1, 60) as u64)
+                .unwrap_or(60);
             TICK_SCHEDULE
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .due = Some(std::time::Instant::now() + delay);
-        });
-    if spawned.is_err() {
+                .due = Some(std::time::Instant::now() + std::time::Duration::from_secs(delay));
+            TICK_RUNNING.store(false, Ordering::Release);
+            return;
+        }
+    }
+    let spawned = TICK_WORKER.submit("av-link", move || {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                TICK_RUNNING.store(false, Ordering::Release);
+            }
+        }
+        let _reset = Reset;
+        let Ok(_worker) = WORKER.try_lock() else {
+            return;
+        };
+        let http = NetworkClient::new();
+        let _ = library.poll_av_links(&http, restricted);
+        let _ = library.fetch_next_av_link_with(&http, chrono::Utc::now().timestamp());
+        let delay = library
+            .next_av_link_tick(restricted)
+            .unwrap_or(std::time::Duration::from_secs(1));
+        TICK_SCHEDULE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .due = Some(std::time::Instant::now() + delay);
+    });
+    if !matches!(spawned, Ok(true)) {
         TICK_RUNNING.store(false, Ordering::Release);
     }
 }

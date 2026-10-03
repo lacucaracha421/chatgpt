@@ -148,6 +148,26 @@ fn title(value: &ReleaseTitle) -> Value {
 }
 
 impl Library {
+    pub(crate) fn home_publication_due_on(
+        db: &Connection,
+        endpoint: &str,
+        kind: &str,
+        clock: i64,
+    ) -> Result<bool, LibraryError> {
+        let endpoint = status_watch::endpoint_key(endpoint);
+        let state = State::load(db, &endpoint, kind)?;
+        Ok(state.retry_after <= clock
+            && (state.next_build <= clock
+                || (kind == "upcoming"
+                    && status_watch::log_pending(
+                        &endpoint,
+                        LogKind::UpcomingIntents,
+                        LogPosition::cursor(Some(state.cursor)),
+                        Some(state.last_poll.unwrap_or(0)),
+                        clock,
+                    ))))
+    }
+
     pub(crate) fn run_due_home_publication(
         &self,
         kind: &str,

@@ -902,3 +902,20 @@ fn av_link_idle_delay_honors_a_pending_retry_and_queue_write_wakes() {
         delay >= std::time::Duration::from_secs(1) && delay <= std::time::Duration::from_secs(3)
     );
 }
+
+#[test]
+fn av_link_empty_tick_has_no_work_and_future_retries_stay_asleep() {
+    let (_dir, lib) = setup();
+    assert_eq!(lib.next_av_link_due_at(false).unwrap(), None);
+    let now = chrono::Utc::now().timestamp();
+    lib.connection().unwrap().execute(
+        "INSERT INTO av_link_inbox(id,request_id,product_code,normalized_code,received_at,status,next_attempt_at)
+         VALUES('future','request','ABW-100','ABW-100','2026','fetching',?1)", [now+30]
+    ).unwrap();
+    assert_eq!(lib.next_av_link_due_at(false).unwrap(), Some(now + 30));
+    lib.connection()
+        .unwrap()
+        .execute("UPDATE av_link_inbox SET next_attempt_at=?1", [now])
+        .unwrap();
+    assert_eq!(lib.next_av_link_due_at(false).unwrap(), Some(now));
+}

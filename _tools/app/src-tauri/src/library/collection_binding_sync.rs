@@ -88,6 +88,19 @@ impl BindingSyncState {
     }
 }
 
+pub(crate) fn publication_due_on(
+    db: &Connection, endpoint: &str, now: i64,
+) -> Result<bool, LibraryError> {
+    use crate::cloud::status_watch::{log_pending, LogKind, LogPosition};
+    let state = read_state(db, endpoint)?;
+    let epoch = state.epoch.as_deref().map(|text| {
+        serde_json::from_str::<String>(text).unwrap_or_else(|_| text.to_owned())
+    });
+    Ok(state.retry_after <= now && log_pending(endpoint, LogKind::Bindings,
+        LogPosition { cursor: Some(state.cursor), epoch: epoch.as_deref() },
+        Some(state.last_polled), now))
+}
+
 /// A precondition the apply runs inside the transaction that writes the binding, after its
 /// provider requests; an error rolls the apply back.
 pub(crate) type CommitCheck<'a> = &'a dyn Fn(&Connection) -> Result<(), LibraryError>;

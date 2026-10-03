@@ -300,6 +300,7 @@ pub struct Library {
     pub(crate) new_ingests: Arc<Mutex<std::collections::BTreeSet<String>>>,
     pub(crate) replication_lock: Arc<Mutex<()>>,
     pub(crate) collection_publication_defer: Arc<Mutex<crate::cloud::auto_publication::Deferral>>,
+    pub(crate) publication_inputs: Arc<crate::cloud::auto_publication::Inputs>,
     // Encrypted Private Vault (ADR-0039): lock state, decrypted index and write serialization.
     encrypted_vault: Arc<external_vault::EncryptedVaultRuntime>,
 }
@@ -414,6 +415,7 @@ impl Library {
             new_ingests: Arc::default(),
             replication_lock: Arc::default(),
             collection_publication_defer: Arc::default(),
+            publication_inputs: Arc::default(),
             encrypted_vault: Arc::default(),
         };
         library.backfill_legacy_collection_kinds()?;
@@ -541,8 +543,10 @@ impl Library {
         // can block until one of them commits instead of polling the queue.
         let character_queue_changed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let changed = character_queue_changed.clone();
+        let publication_inputs = self.publication_inputs.clone();
         connection.update_hook(Some(
             move |_: rusqlite::hooks::Action, _: &str, table: &str, _: i64| {
+                publication_inputs.changed_table(table);
                 if character_incremental::is_queue_table(table) {
                     changed.store(true, std::sync::atomic::Ordering::Relaxed);
                 }

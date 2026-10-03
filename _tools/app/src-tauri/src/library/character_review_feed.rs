@@ -322,6 +322,18 @@ impl Library {
         acknowledged: i64,
         s36_series: Option<&BTreeSet<String>>,
     ) -> Result<String, LibraryError> {
+        self.publication_inputs.character_sources(self);
+        let key = serde_json::json!([acknowledged, s36_series]).to_string();
+        self.publication_inputs.cached_input(1, key, || {
+            self.build_character_review_feed_input(acknowledged, s36_series)
+        })
+    }
+
+    fn build_character_review_feed_input(
+        &self,
+        acknowledged: i64,
+        s36_series: Option<&BTreeSet<String>>,
+    ) -> Result<String, LibraryError> {
         let scored = super::character_shadow_review::shadow_cache_scored_marker(self.root())
             .map_err(character_error)?;
         let connection = self.connection()?;
