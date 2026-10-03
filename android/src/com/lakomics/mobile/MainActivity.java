@@ -29,6 +29,7 @@ public final class MainActivity extends Activity {
  private WebView web; private SecureSettings settings; private CloudClient client; private MediaRepository media; private NotesRepository notes;
  private final ThreadPoolExecutor workers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(48));
  private final ThreadPoolExecutor mediaWorkers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(24));
+ private final ThreadPoolExecutor thumbnailWorkers=new ThreadPoolExecutor(8,8,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(48));
  // Covers have their own lane: slow originals cannot occupy its six workers.
  private final ThreadPoolExecutor catalogCoverWorkers=new ThreadPoolExecutor(6,6,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(24));
  private final PerfLog.Pool perfPool=new PerfLog.Pool();
@@ -299,11 +300,22 @@ public final class MainActivity extends Activity {
    boolean cover=false;
    if("catalogImage".equals(operation))try{cover="cover".equals(new JSONObject(payload).optString("kind"));}catch(JSONException ignored){}
    final boolean catalogCover=cover;
-   final ThreadPoolExecutor mediaLane=catalogCover?catalogCoverWorkers:mediaWorkers;
-   final PerfLog.Op perf=operation.equals("thumbnail")||operation.equals("media")||catalogCover&&PerfLog.enabled()?perfPool.submit(catalogCover?"catalogCover":operation,mediaLane.getQueue().size()):null;
+   boolean small=operation.equals("thumbnail")||operation.equals("homeCover");
+   if(operation.equals("collectionArtwork"))try{small="thumbnail".equals(new JSONObject(payload).optString("variant"));}catch(JSONException ignored){}
+   final ThreadPoolExecutor mediaLane=catalogCover?catalogCoverWorkers:small?thumbnailWorkers:mediaWorkers;
+   final PerfLog.Op perf=operation.equals("thumbnail")||operation.equals("media")||(catalogCover||operation.equals("collectionArtwork"))&&PerfLog.enabled()?perfPool.submit(catalogCover?"catalogCover":operation,mediaLane.getQueue().size()):null;
    final boolean mediaWork=operation.equals("thumbnail") || operation.equals("media") || operation.equals("collectionArtwork") || operation.equals("homeCover") || operation.equals("catalogImage");
+   final MediaRepository.PreparedThumbnail prepared;
+   try{
+    JSONObject p=operation.equals("thumbnail")&&media!=null?new JSONObject(payload):null;
+    prepared=p==null?null:media.prepareThumbnail(p.getString("assetId"),p.optString("revision",""),signal);
+   }catch(Exception e){
+    active.remove(id,signal);nonEssential.remove(id,signal);
+    if(perf!=null){if(signal.isCanceled())perf.status="canceled";perfPool.remove(perf);perf.finish(payload);}
+    if(!signal.isCanceled())reply(id,false,null,errorMessage(e));return;
+   }
    final Runnable task=()->{if(perf!=null)perfPool.start(perf);try{signal.throwIfCanceled();JSONObject p=new JSONObject(payload);Object data;
-    if(perf!=null){perf.asset=PerfLog.id(p.optString(catalogCover?"workId":"assetId"));perf.request=PerfLog.id(p.optString("perfId"));if(catalogCover)perf.jsQueue=PerfLog.millis(p,"jsQueueMs");}
+    if(perf!=null){perf.asset=PerfLog.id(p.optString(catalogCover?"workId":operation.equals("collectionArtwork")?"artworkId":"assetId"));perf.request=PerfLog.id(p.optString("perfId"));if(catalogCover)perf.jsQueue=PerfLog.millis(p,"jsQueueMs");}
     switch(operation){
      case "vaultPick":data=vault.pick();break;
      case "vaultState":data=vault.inspect();break;
@@ -326,7 +338,7 @@ public final class MainActivity extends Activity {
      case "status":data=connectionStatus();break;
      case "cacheStatus":data=cacheStatus();break;
      case "clearCache":if(media==null)throw new IOException();media.clear();data=cacheStatus();break;
-     case "thumbnail":data=thumbnail(p.getString("assetId"),p.optString("revision",""),signal);break;
+     case "thumbnail":data=prepared==null?thumbnail(p.getString("assetId"),p.optString("revision",""),signal):media.browser(p.getString("assetId"),"thumbnail","image/webp",p.optString("revision",""),signal,prepared);break;
      case "thumbnailsCached":if(media==null)throw new IOException("Cache unavailable");data=media.thumbnailsCached(p.getJSONArray("assetIds"),p.optJSONArray("revisions"),signal);break;
      case "collectionArtworksCached":if(media==null)throw new IOException("Cache unavailable");data=media.collectionArtworksCached(p.getJSONArray("items"),signal);break;
      case "collectionArtwork":if(media==null)throw new IOException("Cache unavailable");data=media.collectionArtwork(p.getString("collectionId"),p.getString("artworkId"),p.getString("variant"),p.getString("revision"),p.optString("digest",""),signal);break;
@@ -393,7 +405,7 @@ public final class MainActivity extends Activity {
    CancellableDispatch dispatch=new CancellableDispatch(new CancellableDispatch.Cancellation(){
     public boolean isCanceled(){return signal.isCanceled();}
     public void setListener(Runnable listener){signal.setOnCancelListener(listener==null?null:listener::run);}
-   },task,status->{active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){if(status!=null)perf.status=status;perfPool.remove(perf);perf.finish(payload);}});
+   },task,status->{if(prepared!=null)prepared.close();active.remove(id,signal);nonEssential.remove(id,signal);if(perf!=null){if(status!=null)perf.status=status;perfPool.remove(perf);perf.finish(payload);}});
    try{dispatch.submit(mediaWork?mediaLane:workers,mediaWork);}catch(RejectedExecutionException e){
     // A full media queue means the request never started: the "media_busy" code lets a visible caller retry it later instead of showing it as broken.
     if(!signal.isCanceled())reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.",null,mediaWork?mediaBusy():null);}
@@ -454,5 +466,5 @@ public final class MainActivity extends Activity {
  @Override protected void onStop(){if(vault!=null)vault.stopped();
   // Secret notes lock when the app goes to the background; the WebView drops their content.
   if(notes!=null){notes.lockSecrets();emit("lakomics-notes-locked",null);}stopNonEssential();super.onStop();}
- @Override protected void onDestroy(){destroyed=true;if(resumeCover!=null)resumeCover.clear();deviceSignals.unregister();if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);AlbumReplicaService.get(this).setSignalsListener(null);ExchangeService.get(this).removeListener(exchangeListener);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();catalogCoverWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
+ @Override protected void onDestroy(){destroyed=true;if(resumeCover!=null)resumeCover.clear();deviceSignals.unregister();if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);AlbumReplicaService.get(this).setSignalsListener(null);ExchangeService.get(this).removeListener(exchangeListener);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();thumbnailWorkers.shutdownNow();catalogCoverWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
 }

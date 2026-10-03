@@ -1,4 +1,4 @@
-import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {CollectionSummary} from './collectionModel';
 import type {ExchangeSnapshot} from './exchange';
@@ -229,4 +229,43 @@ it('preserves the visit after a failed release read and advances after a success
   fireEvent.touchEnd(home);
   await screen.findByRole('button',{name:/밤의 도서관/});
   await waitFor(()=>expect(JSON.parse(localStorage.getItem(key)!).lastVisit).not.toBe(previous));
+});
+
+
+it('reserves the revisit geometry before a delayed cold reply and reveals lower sections afterwards', async () => {
+  const read = mocks.api.getMockImplementation()!;
+  let finish!: (value: unknown) => void;
+  mocks.api.mockImplementation((path, ...args) => path.startsWith('/v1/library/revisit?') ? new Promise(resolve => {finish = resolve;}) : read(path, ...args));
+  render(<Home {...props()}/>);
+  const reserved = screen.getByRole('region', {name: '1년 전 오늘'});
+  expect(reserved.querySelector('.home-revisit')).toBeTruthy();
+  await screen.findByRole('button', {name: /Todo남은 항목/});
+  expect(screen.queryByRole('region', {name: '새로 나옴 · 지난번 이후'})).toBeNull();
+  await act(async () => {finish(revisitReply);});
+  expect(screen.getByRole('region', {name: '1년 전 오늘 · 2장'}).querySelector('.home-revisit')).toBeTruthy();
+  expect(await screen.findByRole('region', {name: '새로 나옴 · 지난번 이후'})).toBeTruthy();
+});
+
+it('restores the same-day revisit snapshot on the first render after a process-style cache reset', async () => {
+  const first = render(<Home {...props()}/>);
+  await screen.findByRole('region', {name: '1년 전 오늘 · 2장'});
+  first.unmount(); resetHomeSourceCache();
+  const read = mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation((path, ...args) => path.startsWith('/v1/library/revisit?') ? new Promise(() => {}) : read(path, ...args));
+  render(<Home {...props()}/>);
+  expect(screen.getByRole('button', {name: '1년 전 오늘 2장'})).toBeTruthy();
+});
+
+it('makes no HTTP source reads during nine minutes of visible idle with live signals', async () => {
+  vi.useFakeTimers();
+  const signals = {collections: 'r1', releases: 1, listGeneration: 'a', catalog: 1, upcoming: 1, notes: 1};
+  window.dispatchEvent(new CustomEvent('lakomics-sync-signals', {detail: {live: true, signals}}));
+  render(<Home {...props()}/>);
+  await act(async () => {await vi.advanceTimersByTimeAsync(1000);});
+  const initial = mocks.api.mock.calls.length;
+  expect(initial).toBeGreaterThan(0);
+  await act(async () => {await vi.advanceTimersByTimeAsync(9 * 60_000);});
+  expect(mocks.api).toHaveBeenCalledTimes(initial);
+  await act(async () => {window.dispatchEvent(new CustomEvent('lakomics-sync-signals', {detail: {live: true, signals: {...signals, upcoming: 2}}}));});
+  expect(mocks.api).toHaveBeenCalledTimes(initial + 1);
 });

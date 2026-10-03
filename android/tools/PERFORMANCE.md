@@ -48,7 +48,7 @@ Older builds have no catalog timing. For an equivalent logged baseline the
 controller must supply a build with only this instrumentation and the original
 scheduling/range. Otherwise record both builds' screens and count frames from
 list appearance to first/90% visible covers; native catalog breakdown is then
-available only after the change. `perf_summary.py` does not parse catalog lines.
+available only after the change. `perf_summary.py` parses native cover and JS screen lines.
 Compare screen median/p90, request miss/cancel/error counts, total bytes and 429
 failures directly in these logs; check quick scrolling for blanks or fading.
 
@@ -59,6 +59,37 @@ covers; it is a queue regression measurement, not an Android speed estimate:
 cd _tools/app
 npm run mobile:test -- --maxWorkers=2 mobile-client/catalogMedia.test.ts mobile-client/CatalogCover.test.tsx mobile-client/catalogPerf.test.ts mobile-client/thumbnailWarm.test.ts mobile-client/collectionWarm.test.ts
 ```
+
+## Thumbnail cohorts and Collection artwork
+
+Thumbnail bridge requests prepare cache misses for the existing 50-item ticket endpoint
+before entering the download queue. The frontend admits 24 visible requests plus at most
+three speculative requests; native runs eight small downloads with a 48-entry queue.
+Cache hits skip tickets. Cancellation detaches queued tickets and downloads. Original
+media keeps its own four workers, eight transfer permits and ticket executor. Catalog
+covers retain six workers/permits and no longer compete for original transfer permits.
+Collection thumbnails use eight frontend slots; original artwork bypasses that queue.
+Collection artwork still uses one ticket POST per miss: the current server has no batch
+artwork route. No server change is required for Library thumbnail batches.
+
+Enable `log.tag.LakomicsPerf DEBUG` as above to record `collectionArtwork` alongside
+`catalogCover`. Artwork lines include cache, queue, lock, ticket, permit, download, bytes,
+store, status and download retry counters. Identifiers are sanitized; payloads, tokens
+and signed URLs are never logged. Disable with `INFO` after collection.
+
+The parser includes both operations and `js catalogScreen`. Per-operation batch values
+are overlapping observations; `native/ticketBatches unique` counts each batch once.
+Split inputs at process restarts because batch IDs restart. Thumbnail `ticketMs` measures
+only the worker's remaining wait; the ticket POST can overlap its native queue time.
+Compare unique batch sizes/counts, cold queue/download timing and viewer latency under
+matched conditions. Fixture counts do not establish device improvement.
+
+Home uses same-day revisit snapshots (at most seven date images) for first paint and
+reserves the existing mosaic geometry without a snapshot. Its lower sections wait for
+that first revisit answer, including an empty/error answer, so they are not pushed down.
+Live source signals refresh Home immediately; unchanged Home uses a ten-minute safety
+read. Similarity has no dedicated server signal and uses that safety read plus its local
+change events. Unsupported signals retain the one-minute fallback. Refreshes keep values.
 
 ## Existing Android instrumentation
 

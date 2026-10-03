@@ -106,7 +106,7 @@ export async function prepareAssets(items: Asset[], signal?: AbortSignal): Promi
 // native still bounds real transfers separately. Prefetch and the Library warm-up never
 // decode and never hold more than PREFETCH_LIMIT slots, so a newly visible tile always has
 // free capacity instead of waiting behind slow background downloads.
-const THUMBNAIL_LIMIT = 10, PREFETCH_LIMIT = 3;
+const THUMBNAIL_LIMIT = 24, PREFETCH_LIMIT = 3;
 let activeThumbnails = 0, activePrefetch = 0;
 const thumbnailQueue: (() => void)[] = [];
 const prefetchQueue: (() => void)[] = [];

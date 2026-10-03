@@ -164,8 +164,33 @@ public final class TicketBatcherTest {
   TicketBatcher<String,Long>.Waiter account=batcher.submit("b/1","b","image","original",()->false);
   scheduler.flush();account.await();check(calls.get()==4);
  }
+ private static void queuedCohortTicketsDoNotNeedDownloadWorkers()throws Exception{
+  Scheduler scheduler=new Scheduler();List<Integer> sizes=new ArrayList<>();
+  TicketBatcher<String,String> batcher=new TicketBatcher<>(scheduler,(connection,items)->{sizes.add(items.size());return values(connection,items);});
+  ExecutorService downloads=Executors.newFixedThreadPool(8);
+  CountDownLatch occupied=new CountDownLatch(8),release=new CountDownLatch(1);
+  try{
+   for(int i=0;i<8;i++)downloads.submit(()->{occupied.countDown();try{latch(release);}catch(Exception e){throw new RuntimeException(e);}});
+   latch(occupied);
+   List<TicketBatcher<String,String>.Waiter> cohort=new ArrayList<>();
+   List<Future<String>> images=new ArrayList<>();
+   for(int i=0;i<24;i++){
+    TicketBatcher<String,String>.Waiter ticket=batcher.submit("a/1","a","visible"+i,"thumbnail",()->false);
+    cohort.add(ticket);images.add(downloads.submit(ticket::await));
+   }
+   // Fast scrolling detaches four queued requests before the ticket POST.
+   for(int i=20;i<24;i++)cohort.get(i).close();
+   scheduler.flush();check(sizes.equals(Arrays.asList(20)));
+   // Every download worker is still occupied: tickets were acquired ahead of them.
+   for(Future<String> image:images)check(!image.isDone());
+   release.countDown();
+   for(int i=0;i<20;i++)check(images.get(i).get(3,TimeUnit.SECONDS).equals("a/visible"+i+"/thumbnail"));
+   for(int i=20;i<24;i++)try{images.get(i).get(3,TimeUnit.SECONDS);throw new AssertionError("Canceled ticket reused");}catch(ExecutionException expected){check(expected.getCause() instanceof CancellationException);}
+   check(sizes.size()==1);
+  }finally{release.countDown();downloads.shutdownNow();scheduler.shutdownNow();check(downloads.awaitTermination(3,TimeUnit.SECONDS));}
+ }
  public static void main(String[] args)throws Exception{
-  prewarmedOriginalExpiryAndFreshRetry();coalescesAndPrunes();inFlightSharing();cancelOneInFlight();scopesAndVariants();failureAndFreshRetry();boundsAndLaterBatchCancellation();clearDuringFlight();interruptionAndRejectedScheduler();
+  queuedCohortTicketsDoNotNeedDownloadWorkers();prewarmedOriginalExpiryAndFreshRetry();coalescesAndPrunes();inFlightSharing();cancelOneInFlight();scopesAndVariants();failureAndFreshRetry();boundsAndLaterBatchCancellation();clearDuringFlight();interruptionAndRejectedScheduler();
   System.out.println("TicketBatcher: "+checks+" checks passed");
  }
 }

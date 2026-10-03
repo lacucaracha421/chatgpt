@@ -23,7 +23,8 @@ Prepared entries measure the next observed DOM commit after effect start; they
 may already be visible. Commit is not paint. Memory/shared/pending/bypass and
 unmatched traces are reported separately, never guessed to be disk cache hits.
 Failures/cancellations/rejections are counted separately and excluded from timing
-statistics. p90 uses nearest rank. Native batch totals are per op, not unique HTTPs.
+statistics. p90 uses nearest rank. Native per-op batch totals overlap. The ticketBatches group deduplicates batch IDs
+within one process log; split logs at process restarts (the sequence restarts).
 """
 import argparse
 from collections import Counter, defaultdict
@@ -34,7 +35,8 @@ import sys
 
 NATIVE_PHASES = ('queueMs', 'lockMs', 'ticketMs', 'permitMs', 'downloadMs',
                  'commitMs', 'obtainMs', 'totalMs', 'bytes', 'inflightThumb',
-                 'inflightMedia', 'queuedThumb', 'queuedMedia', 'queued')
+                 'inflightMedia', 'queuedThumb', 'queuedMedia', 'queued',
+                 'jsQueueMs', 'nativeQueueMs', 'storeMs', 'downloads', 'httpStatus', 'rateLimited')
 
 
 def number(value):
@@ -49,7 +51,7 @@ def records(lines):
     for line in lines:
         if 'LakomicsPerf' in line:
             line = re.sub(r'^.*?\bLakomicsPerf\b[^:]*:\s*', '', line)
-        match = re.match(r'\s*(media|thumbnail|js)\s+(.*)', line)
+        match = re.match(r'\s*(media|thumbnail|collectionArtwork|catalogCover|js)\s+(.*)', line)
         if match:
             yield match[1], dict(re.findall(r'(\w+)=([^\s]+)', match[2]))
 
@@ -58,6 +60,7 @@ def summarize(lines):
     rows = list(records(lines))
     groups = defaultdict(lambda: defaultdict(list))
     excluded = Counter()
+    batches_seen = set()
     native = {(p.get('req'), p.get('id')): p for op, p in rows
               if op == 'media' and p.get('req') not in (None, '-')}
 
@@ -69,6 +72,13 @@ def summarize(lines):
     for op, p in rows:
         status = p.get('status', 'unknown')
         if op != 'js':
+            # A batch can serve successful and canceled operations; count it once.
+            for batch in p.get('batch', '-').split(','):
+                fields = batch.split(':')
+                if len(fields) == 3 and fields[0] not in batches_seen:
+                    batches_seen.add(fields[0])
+                    add('native/ticketBatches unique', 'size', fields[1])
+                    add('native/ticketBatches unique', 'httpMs', fields[2])
             if status != 'ok':
                 excluded[f'{op}/{status}'] += 1
                 continue
@@ -82,6 +92,13 @@ def summarize(lines):
                     values = [number(b[index]) for b in batches]
                     if all(v is not None for v in values):
                         add(group, name, sum(values))
+            continue
+        if 'catalogScreen' in p:
+            if status != 'ok':
+                excluded[f'catalogScreen/{status}'] += 1
+                continue
+            for phase in ('firstCoverMs', 'visible90Ms', 'visible', 'loaded'):
+                add('js/catalogScreen', phase, p.get(phase))
             continue
         event = p.get('event')
         if event not in ('commit', 'end', 'prefetch_finish'):

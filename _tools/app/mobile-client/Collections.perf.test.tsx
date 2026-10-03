@@ -80,12 +80,14 @@ async function coldCovers(latencyMs:number){
   return {requested,peak,allFirstScreenMs:finished[FIRST_SCREEN-1]??-1,firstCoverMs:finished[0]??-1};
 }
 
-it('cold start: first-screen game covers are fetched at most four at a time', async()=>{
+it('cold start: first-screen game covers use eight slots and finish within two fixture waves', async()=>{
   // One uncached cover costs a ticket (~0.1-0.2 s + a cold R2 HEAD on the server) plus the
   // R2 download (~1.5-2.4 s measured on the tablet, MOBILE-PERF-002): model 2 s.
   const result=await coldCovers(2000);
   console.info(`[perf] collections cold covers: firstScreen=${FIRST_SCREEN} requested=${result.requested} peakConcurrent=${result.peak} firstCoverMs=${result.firstCoverMs} allFirstScreenMs=${result.allFirstScreenMs} (2000 ms per uncached cover)`);
   expect(result.requested).toBeGreaterThanOrEqual(FIRST_SCREEN);
+  expect(result.peak).toBe(8);
+  expect(result.allFirstScreenMs).toBeLessThanOrEqual(4000);
   expect(result.allFirstScreenMs).toBeGreaterThan(0);
 });
 

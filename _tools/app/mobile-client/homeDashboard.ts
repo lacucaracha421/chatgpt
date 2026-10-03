@@ -147,15 +147,26 @@ export function revisitGroups(reply: Revisit | null | undefined, now = Date.now(
   return groups;
 }
 export const REVISIT_PATH = '/v1/library/revisit?limit=12';
-/**
- * Reads 다시 보기 once per visit (the server's groups only change by day) and again after
- * `key` moves (다시 연결). A failed read keeps what was shown; nothing shown means no section.
- */
+/** Keep a bounded, same-day revisit snapshot in the existing Home cache for first paint. */
 export function useHomeRevisit(enabled: boolean, scope: string, forceKey?: unknown) {
-  return useCachedHomeSource({
-    enabled, scope, source: 'revisit', signalKey: 'listGeneration', initial: [] as RevisitGroup[], forceKey,
-    read: async signal => revisitGroups(await api<Revisit>(REVISIT_PATH, signal)),
+  const today = localToday();
+  const saved = readHomeSnapshot(scope).revisit;
+  const initial = saved?.day === today && Array.isArray(saved.groups) ? saved.groups : null;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [scope]);
+  const {value} = useCachedHomeSourceRead<RevisitGroup[] | null>({
+    enabled, scope, source: `revisit:${today}`, signalKey: 'listGeneration', initial, forceKey,
+    read: async signal => {
+      const groups = revisitGroups(await api<Revisit>(REVISIT_PATH, signal));
+      if (!signal.aborted) {
+        writeHomeSnapshot({...readHomeSnapshot(scope), revisit: {day: today,
+          groups: groups.filter(group => group.key === 'date').map(group => ({...group, items: group.items.slice(0, 7)}))}});
+      }
+      return groups;
+    },
+    onError: () => setFailed(true),
   });
+  return value ?? (failed ? [] : null);
 }
 
 export type HomeMemos = {notes: Note[]; locked: boolean} | null;
@@ -263,6 +274,7 @@ export type HomeSnapshot = {
   releases?: Stamped<ReleaseRow[]>;
   upcoming?: Stamped<UpcomingRow[]>;
   summary?: Stamped<LibrarySummary>;
+  revisit?: {day: string; groups: RevisitGroup[]};
 };
 const SNAPSHOT_ROWS = 6;
 export function readHomeSnapshot(scope: string): HomeSnapshot {

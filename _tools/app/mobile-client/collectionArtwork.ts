@@ -11,23 +11,26 @@ import {collectionCover, type CollectionSummary} from './collectionModel';
 import type {Ticket} from './types';
 import {beginShelfForeground} from './shelfWarmActivity';
 
-// Only visible artwork requests (covers, spines, performer portraits) enter this small queue,
-// at most four at a time; native owns the disk cache.
-let artworkActive=0;
-const artworkQueue:(()=>void)[]=[];
-function queued(run:()=>Promise<Ticket>,signal:AbortSignal):Promise<Ticket> {
+// Visible covers and spines use eight slots; native owns the disk cache.
+// Portraits keep four separate slots because homeCover tickets are not batched.
+type ArtworkQueue={active:number;limit:number;pending:(()=>void)[]};
+const artworkQueue:ArtworkQueue={active:0,limit:8,pending:[]};
+const portraitQueue:ArtworkQueue={active:0,limit:4,pending:[]};
+function queued(run:()=>Promise<Ticket>,signal:AbortSignal,queue=artworkQueue):Promise<Ticket> {
   const finish=beginShelfForeground();
   return new Promise<Ticket>((resolve,reject)=>{
-    const cancel=()=>{const index=artworkQueue.indexOf(start);if(index>=0)artworkQueue.splice(index,1);reject(new DOMException('Cancelled','AbortError'));};
-    const start=()=>{if(signal.aborted){cancel();return;} artworkActive++;
-      void run().then(resolve,reject).finally(()=>{signal.removeEventListener('abort',cancel);artworkActive--;while(artworkActive<4&&artworkQueue.length)artworkQueue.shift()!();});
+    const cancel=()=>{const index=queue.pending.indexOf(start);if(index>=0)queue.pending.splice(index,1);reject(new DOMException('Cancelled','AbortError'));};
+    const start=()=>{if(signal.aborted){cancel();return;} queue.active++;
+      void run().then(resolve,reject).finally(()=>{signal.removeEventListener('abort',cancel);queue.active--;while(queue.active<queue.limit&&queue.pending.length)queue.pending.shift()!();});
     };
     if(signal.aborted){cancel();return;}
-    signal.addEventListener('abort',cancel,{once:true}); if(artworkActive<4)start();else artworkQueue.push(start);
+    signal.addEventListener('abort',cancel,{once:true}); if(queue.active<queue.limit)start();else queue.pending.push(start);
   }).finally(finish);
 }
 export function artworkTicket(item:CollectionSummary, artworkId:string|undefined|null, revision:string, original:boolean, signal:AbortSignal):Promise<Ticket> {
-  return queued(()=>artworkId ? native<Ticket>('collectionArtwork',{collectionId:item.id,artworkId,variant:original?'original':'thumbnail',revision,digest:item.artworkVersions?.[artworkId]?.[original?'original':'thumbnail']??''},signal) : mediaTicket({id:item.coverAssetId!,kind:'image'},original?'original':'thumbnail',signal),signal);
+  const read=()=>artworkId ? native<Ticket>('collectionArtwork',{collectionId:item.id,artworkId,variant:original?'original':'thumbnail',revision,digest:item.artworkVersions?.[artworkId]?.[original?'original':'thumbnail']??''},signal) : mediaTicket({id:item.coverAssetId!,kind:'image'},original?'original':'thumbnail',signal);
+  if(original){const finish=beginShelfForeground();return read().finally(finish);}
+  return queued(read,signal);
 }
 /**
  * What identifies an artwork's bytes. A published digest names them exactly, and native keys its
@@ -195,7 +198,7 @@ function loadPortrait(sha256:string,signal:AbortSignal):Promise<string> {
   let load=portraitLoads.get(sha256);
   if(!load){
     const controller=new AbortController();
-    const entry:{promise:Promise<string>;controller:AbortController;users:number}={controller,users:0,promise:queued(()=>native<Ticket>('homeCover',{sha256},controller.signal),controller.signal).then(async ticket=>{
+    const entry:{promise:Promise<string>;controller:AbortController;users:number}={controller,users:0,promise:queued(()=>native<Ticket>('homeCover',{sha256},controller.signal),controller.signal,portraitQueue).then(async ticket=>{
       if(!validArtworkUrl(ticket.url))throw new Error('Invalid portrait');
       await decoded(ticket.url);
       portraitUrls.set(sha256,{url:ticket.url,until:Date.now()+(ticket.expires_in?ticket.expires_in*1000:ARTWORK_KEEP_MS)});

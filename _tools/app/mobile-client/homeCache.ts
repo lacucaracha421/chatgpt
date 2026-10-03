@@ -1,8 +1,8 @@
 import {useEffect, useRef, useState} from 'react';
-import {useSyncSignal, syncSignal} from './syncSignals';
+import {useSyncSignal, syncSignal, syncSignalsLive, SIGNAL_FALLBACK_MS} from './syncSignals';
 import {useVisibleInterval} from './useVisibleInterval';
 
-/** Home keeps a source for one minute while the tab is unmounted and remounted. */
+/** Legacy fallback when native change signals are unavailable. */
 export const HOME_SOURCE_TTL = 60_000;
 
 type Entry = {value: unknown; at: number; signal?: string};
@@ -29,8 +29,12 @@ function store(key: string, entry: Entry) {
   }
 }
 
+function sourceTtl(signalKey?: string) {
+  return (signalKey ? syncSignal(signalKey) !== undefined : syncSignalsLive()) ? SIGNAL_FALLBACK_MS : HOME_SOURCE_TTL;
+}
+
 function isFresh(entry: Entry | undefined, signalKey?: string) {
-  if (!entry || Date.now() - entry.at >= HOME_SOURCE_TTL) return false;
+  if (!entry || Date.now() - entry.at >= sourceTtl(signalKey)) return false;
   const current = signalKey ? syncSignal(signalKey) : undefined;
   return current === undefined || entry.signal === undefined || current === entry.signal;
 }
@@ -69,7 +73,7 @@ export function useCachedHomeSourceRead<T>({enabled, scope, source, signalKey, i
 
   const [readState, setReadState] = useState(() => ({key, forceKey, signalRevision, ready: !forceChanged && isFresh(currentEntry(scope, source), signalKey)}));
 
-  useSyncSignal(signalKey ?? '', () => {
+  const signalsLive = useSyncSignal(signalKey ?? '', () => {
     const entry = cache.get(key);
     if (entry) store(key, {...entry, at: 0});
     setSignalRevision(revision => revision + 1);
@@ -101,10 +105,10 @@ export function useCachedHomeSourceRead<T>({enabled, scope, source, signalKey, i
       if (live && !controller.signal.aborted) errorRef.current?.(reason);
     });
     return () => { live = false; controller.abort(); };
-  }, [enabled, key, signalKey, forceKey, signalRevision]); // read/onError intentionally use refs
+  }, [enabled, key, signalKey, forceKey, signalRevision, signalsLive]); // read/onError intentionally use refs
 
   const entry = currentEntry(scope, source);
-  const nextCheck = enabled ? Math.max(1_000, (entry?.at && entry.at > 0 ? entry.at : Date.now()) + HOME_SOURCE_TTL - Date.now()) : null;
+  const nextCheck = enabled ? Math.max(1_000, (entry?.at && entry.at > 0 ? entry.at : Date.now()) + sourceTtl(signalKey) - Date.now()) : null;
   useVisibleInterval(() => setSignalRevision(revision => revision + 1), nextCheck);
   const ready = readState.key === key && Object.is(readState.forceKey, forceKey)
     && readState.signalRevision === signalRevision && readState.ready;

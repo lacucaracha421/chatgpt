@@ -50,13 +50,13 @@ final class PerfLog {
   void finish(String payload){
    long total=System.nanoTime()-submitted;
    // Canceled-before-start and rejected ops never reach the normal payload parse.
-   if(asset.equals("-"))try{JSONObject p=new JSONObject(payload);asset=id(p.optString(operation.equals("catalogCover")?"workId":"assetId"));request=id(p.optString("perfId"));jsQueue=millis(p,"jsQueueMs");}catch(Exception ignored){}
+   if(asset.equals("-"))try{JSONObject p=new JSONObject(payload);asset=id(p.optString(operation.equals("catalogCover")?"workId":operation.equals("collectionArtwork")?"artworkId":"assetId"));request=id(p.optString("perfId"));jsQueue=millis(p,"jsQueueMs");}catch(Exception ignored){}
    write(operation+" id="+asset+" req="+request+" status="+status+" cache="+cache+
     " queueMs="+(started?ms(queue):"-1")+" lockMs="+ms(lock)+" ticketMs="+ms(ticket)+
     " batch="+(batches.length()==0?"-":batches)+" permitMs="+ms(permit)+" downloadMs="+ms(download)+
     " bytes="+bytes+" commitMs="+ms(commit)+" obtainMs="+ms(obtain)+" totalMs="+ms(total)+
     " inflightThumb="+inflightThumb+" inflightMedia="+inflightMedia+" queuedThumb="+queuedThumb+" queuedMedia="+queuedMedia+" queued="+queued+
-    (operation.equals("catalogCover")?" jsQueueMs="+String.format(Locale.ROOT,"%.3f",jsQueue)+" nativeQueueMs="+(started?ms(queue):"-1")+" storeMs="+ms(commit)+" downloads="+downloads+" httpStatus="+httpStatus+" rateLimited="+rateLimited:""));
+    ((operation.equals("catalogCover")||operation.equals("collectionArtwork"))?" jsQueueMs="+String.format(Locale.ROOT,"%.3f",jsQueue)+" nativeQueueMs="+(started?ms(queue):"-1")+" storeMs="+ms(commit)+" downloads="+downloads+" httpStatus="+httpStatus+" rateLimited="+rateLimited:""));
   }
  }
  /** One-way bridge: fixed vocabulary and numeric fields only, never arbitrary JS text. */

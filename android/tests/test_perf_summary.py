@@ -48,6 +48,23 @@ class PerfSummaryTest(unittest.TestCase):
         self.assertEqual(groups['viewer/image cache=memory']['openToCommitMs'], [2])
         self.assertEqual(groups['prefetch/image cache=memory']['totalMs'], [3])
 
+    def test_artwork_catalog_and_unique_batches(self):
+        groups, excluded = perf.summarize([
+            'collectionArtwork id=A status=ok cache=miss ticketMs=12 downloadMs=34 bytes=23000 totalMs=50',
+            'catalogCover id=B status=ok cache=hit jsQueueMs=1 nativeQueueMs=2 storeMs=0 downloads=0 totalMs=3',
+            'catalogCover id=C status=error cache=miss rateLimited=1 totalMs=99',
+            'thumbnail status=ok cache=miss batch=7:24:112 totalMs=300',
+            'thumbnail status=canceled cache=miss batch=7:24:112 totalMs=400',
+            'js catalogScreen=S status=ok visible=12 loaded=11 firstCoverMs=120 visible90Ms=300',
+            'js catalogScreen=T status=incomplete visible=12 loaded=1 firstCoverMs=120 visible90Ms=-1',
+        ])
+        self.assertEqual(groups['native/collectionArtwork cache=miss']['ticketMs'], [12])
+        self.assertEqual(groups['native/catalogCover cache=hit']['jsQueueMs'], [1])
+        self.assertEqual(groups['native/ticketBatches unique']['size'], [24])
+        self.assertEqual(groups['native/ticketBatches unique']['httpMs'], [112])
+        self.assertEqual(groups['js/catalogScreen']['visible90Ms'], [300])
+        self.assertEqual(excluded, {'catalogCover/error': 1, 'thumbnail/canceled': 1, 'catalogScreen/incomplete': 1})
+
     def test_percentiles(self):
         output = io.StringIO()
         perf.report((f'media status=ok cache=miss totalMs={n}' for n in range(1, 11)), output)

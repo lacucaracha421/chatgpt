@@ -32,23 +32,23 @@ it('bounds thumbnail work, displays a fast image independently, and cancels obso
     complete.set(payload.assetId, () => resolve({url:'https://example.invalid/thumb',expires_in:240}));
     signal.addEventListener('abort', () => reject(new DOMException('Cancelled','AbortError')), {once:true});
   }));
-  const controllers = Array.from({length:12}, () => new AbortController());
+  const controllers = Array.from({length:26}, () => new AbortController());
   const requests = controllers.map((controller,i) => loadThumbnail({id:String(i),kind:'image'}, controller.signal));
   // Attach rejection handlers before aborting, as the actual tiles do.
   const settled = Promise.allSettled(requests);
-  // Uncached thumbnails are latency-bound, so ten run at once and the rest wait.
-  expect(mocks.native).toHaveBeenCalledTimes(10);
-  controllers[10].abort();
+  // Uncached thumbnails are latency-bound, so 24 join native ticket preparation at once and the rest wait.
+  expect(mocks.native).toHaveBeenCalledTimes(24);
+  controllers[24].abort();
   complete.get('1')!();
   const fast = await requests[1];
   expect(fast.preview).toBe('https://example.invalid/thumb');
   expect(fast.ratio).toBeCloseTo(2/3);
-  await vi.waitFor(() => expect(complete.has('11')).toBe(true));
-  expect(complete.has('10')).toBe(false);
+  await vi.waitFor(() => expect(complete.has('25')).toBe(true));
+  expect(complete.has('24')).toBe(false);
   controllers.forEach(controller => controller.abort());
   const results = await settled;
   expect(results[0].status).toBe('rejected');
-  expect(results[10].status).toBe('rejected');
+  expect(results[24].status).toBe('rejected');
 });
 
 it('keeps background work to three slots and behind waiting visible tiles',async()=>{
@@ -56,8 +56,8 @@ it('keeps background work to three slots and behind waiting visible tiles',async
   vi.stubGlobal('Image',class {naturalWidth=600;naturalHeight=900;onload:(()=>void)|null=null;onerror:(()=>void)|null=null;set src(value:string){if(value){decoded(value);queueMicrotask(()=>this.onload?.());}}decode(){return Promise.resolve();}});
   const complete=new Map<string,()=>void>();
   mocks.native.mockImplementation((_op:string,payload:{assetId:string})=>new Promise(resolve=>complete.set(payload.assetId,()=>resolve({url:`https://example.invalid/${payload.assetId}`,expires_in:240}))));
-  // Twelve visible tiles: ten run, two wait.
-  const visible=Array.from({length:12},()=>new AbortController());
+  // Twenty-six visible tiles: 24 run, two wait.
+  const visible=Array.from({length:26},()=>new AbortController());
   visible.forEach((controller,i)=>void loadThumbnail({id:`v${i}`,kind:'image'},controller.signal).catch(()=>{}));
   const ahead=new AbortController();
   prefetchThumbnails(Array.from({length:5},(_,i)=>({id:`p${i}`,kind:'image'})),ahead.signal);
@@ -65,7 +65,7 @@ it('keeps background work to three slots and behind waiting visible tiles',async
   // Visible tiles are still waiting, so background work has not started.
   expect(started()).toEqual([]);
   complete.get('v0')!();complete.get('v1')!();
-  await vi.waitFor(()=>expect(complete.has('v11')).toBe(true));
+  await vi.waitFor(()=>expect(complete.has('v25')).toBe(true));
   // With no visible tile waiting, at most three background loads run beside the visible ones.
   await vi.waitFor(()=>expect(started()).toEqual(['p0','p1','p2']));
   // Scrolling on drops the queued rest but lets started downloads finish into the cache.
