@@ -889,7 +889,10 @@ export function App() {
         </div>
       </main>
   );
-  const homeAreaNode=<main className="library-main">
+  // Home's header belongs to the Home view, so it leaves with Home during a tab switch instead of
+  // vanishing first and shifting the retained Home content up.
+  const appHeader=<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{status.configured&&area==='assets'&&page.view.tab==='home'&&<FindButton/>}{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&vaultPresent&&<IconButton label="비밀 보관함 열기" icon={LockClosedIcon} onClick={()=>setVaultOpen(true)}/>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<span className="header-action-badge"><IconButton label={exchangeLabel} icon={ArrowsUpDownIcon} onClick={()=>setExchangeOpen(true)}/>{exchangeBadge&&<span className="header-badge" aria-hidden="true">{exchangeBadge}</span>}</span>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={()=>setSettings(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>;
+  const homeAreaNode=<>{!artistsOpen&&appHeader}<main className="library-main">
     <HeaderTools active={area==='assets'&&page.view.tab==='home'} target="context-location"><div className="gallery-heading"><h2>{page.view.title}</h2></div></HeaderTools>
     <Home items={visibleItems} hasMore={page.has_more} captures={captures} busy={busy} paused={paused} secondaryError={secondaryError} scope={status.endpoint} exchange={exchange.snapshot} characters={characterIndex}
           review={{enabled:false,refreshKey:0}} similarityKey={similarityClosed} onArtists={() => {closeArtists();fromHome(LIBRARY);setLibrarySegment('artists');openRoot();}}
@@ -899,7 +902,7 @@ export function App() {
           onReview={() => {}} onSimilarity={() => setSimilarity(true)} onExchange={() => setExchangeOpen(true)} onSettings={() => setSettings(true)}
           onDuplicates={() => {setHomeOrigin({area:'catalog'});setCatalogVisited(true);setArea('catalog');setDuplicateRequest(n => n+1);}}
           onReleases={() => openCalendar()} onWork={id => {setHomeOrigin({area:'collections'});openCollections({kind:'work',id});}}/>
-  </main>;
+  </main></>;
   const motionViews={
     library: assetAreaNode,
     home: homeAreaNode,
@@ -918,7 +921,7 @@ export function App() {
   };
   return <FindContext.Provider value={()=>setFindOpen(true)}><MotionScope key={status.endpoint}><div className="mobile-app" ref={appRef}>
     {/* Every configured area except Home draws its own title bar. */}
-    {!(status.configured&&(area!=='assets'||page.view.tab==='library')||artistsOpen)&&<header className="app-header"><div className="home-brand"><Mark/>{!status.configured&&<span>LAKOMICS</span>}</div><div id="context-location"/><div className="header-actions"><div id="context-tools"/>{status.configured&&area==='assets'&&page.view.tab==='home'&&<FindButton/>}{demo&&<span className="demo-label">디자인 미리보기</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&privacyMode&&<span className="privacy-pill" aria-label="비공개 모드 켜짐">비공개</span>}{status.configured&&area==='assets'&&page.view.tab==='home'&&vaultPresent&&<IconButton label="비밀 보관함 열기" icon={LockClosedIcon} onClick={()=>setVaultOpen(true)}/>}{status.configured&&area==='assets'&&page.view.tab==='home'&&<span className="header-action-badge"><IconButton label={exchangeLabel} icon={ArrowsUpDownIcon} onClick={()=>setExchangeOpen(true)}/>{exchangeBadge&&<span className="header-badge" aria-hidden="true">{exchangeBadge}</span>}</span>}{area==='assets'&&page.view.tab==='home'&&<IconButton label="연결 및 설정" icon={AdjustmentsHorizontalIcon} onClick={()=>setSettings(true)}/>}</div><BarProgress label={status.configured&&area==='assets'&&page.view.tab==='home'&&busy&&'목록 불러오는 중'}/></header>}
+    {!status.configured&&appHeader}
     {status.configured ? <div className="app-body" data-active-tab={area==='assets'?page.view.tab:area}>
       <AreaSwitch activeKey={motionTab} views={motionViews} retained={['library',...(page.view.tab==='home'?['home']:[]),'collections','notes','catalog']} ready={tabReady}/>
       {assetSearchOpen&&<div className="asset-search-layer"><AssetSearch items={searchItems} chips={searchChips.map(chipName)} endpoint={status.endpoint} paused={settings||!!viewer} onClose={()=>setAssetSearchOpen(false)} onChoose={chooseSearchScope}/></div>}

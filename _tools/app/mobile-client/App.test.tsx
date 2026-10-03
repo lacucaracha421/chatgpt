@@ -496,14 +496,14 @@ it('uses drill-down in both orientations and keeps settings only on Home',async(
   await screen.findByRole('button',{name:'연결 및 설정'});
   fireEvent.click(screen.getByRole('button',{name:'컬렉션',exact:true}));
   expect(screen.queryByRole('button',{name:'연결 및 설정'})).toBeNull();
-  // Collections draws its own title bar, so the shared bar and its sidebar button are absent.
-  expect(document.querySelector('.app-header')).toBeNull();
+  // Collections draws its own title bar; Home's bar leaves with the Home view once the switch commits.
+  await waitFor(()=>expect([...document.querySelectorAll('.app-header')].filter(header=>!header.closest('[style*="display: none"], [aria-hidden="true"]'))).toHaveLength(0),{timeout:2500});
   expect(screen.queryByRole('button',{name:'사이드바 열기'})).toBeNull();
   // Catalog and Notes also draw their own title bars; no area offers the old sidebar.
   for(const area of ['카탈로그','메모']){
     fireEvent.click(screen.getByRole('button',{name:area,exact:true}));
     expect(screen.queryByRole('button',{name:'연결 및 설정'})).toBeNull();
-    expect(document.querySelector('.app-header')).toBeNull();
+    await waitFor(()=>expect([...document.querySelectorAll('.app-header')].filter(header=>!header.closest('[style*="display: none"], [aria-hidden="true"]'))).toHaveLength(0),{timeout:2500});
     expect(screen.queryByRole('button',{name:'사이드바 열기'})).toBeNull();
   }
 });

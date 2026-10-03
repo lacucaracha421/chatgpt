@@ -49,6 +49,9 @@ h1,h2,h3,p { margin:0; }
 .app-body { min-height:0; flex:1; display:flex; }
 /* The artist screen replaces the tab views in the same row; the kept-mounted area stage must not take half the width. */
 .app-body:has(> .artist-screen) > .motion-stage { display:none; }
+/* Home carries its own header inside its area view; the Home content takes the rest. */
+.motion-stage__view > .app-header { flex:none; }
+.motion-stage__view > .app-header + .library-main { height:auto; flex:1; min-height:0; }
 /* Tab content and its backdrop are shown together without an entrance fade or transform. */
 .library-main { flex:1; min-width:0; display:flex; flex-direction:column; min-height:0; position:relative; }
 .home-context { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:30px var(--mobile-gutter) 22px; }
