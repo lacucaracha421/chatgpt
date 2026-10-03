@@ -269,6 +269,22 @@ Status: `PARTIAL` — clarify any remaining inventory/recorded-era metric defini
 
 Status: `HOLD` — no implementation until a concrete need exceeds the current date-grouped Library/Revisit.
 
+## LINUX-DESKTOP-001 — Deeper CachyOS / KDE Plasma integration
+
+Status: `TODO` — user 2026-10-04 asked for deeper integration with the Linux PC (CachyOS, KDE Plasma 6 on Wayland). Today the app runs only as the dev build: no installed package or launcher entry. Existing integration: close-to-tray, KDE Wallet via Secret Service, and the build-cache cleanup timer. All items are Linux-only additions; Windows behaviour must not change. Suggested order: 1 → 2 → 7 → 5, others as wanted.
+- **Tier 1 — basics:**
+  1. Arch package (PKGBUILD wrapping the release build): launcher/taskbar icon, `.desktop` entry, updates through `pacman`. Groundwork for the rest; release builds stay on request.
+  2. Start at login minimised to the tray (XDG autostart), so receiving for 전송 is ready without opening the app.
+  3. Native notifications in the Plasma notification centre (receive done, sync done, errors); overlaps the native-notification item in `PC-POLISH-20261002`.
+  4. Inhibit screen blanking/sleep while the viewer or a video is open (portal Inhibit).
+- **Tier 2 — KDE-native:**
+  5. KRunner search (D-Bus runner): Alt+Space, type a title, open that work in Lakomics.
+  6. Dolphin service menu: "Lakomics로 가져오기" on folders/archives; optional "Lakomics로 열기" for cbz/zip.
+  7. `lakomics://` deep links plus single-instance, so links, KRunner and Dolphin route to the running window instead of opening a second one. Needed by 5 and 6.
+  8. Global shortcut (portal GlobalShortcuts) to show/hide the window, rebindable in Plasma settings.
+- **Not recommended:** a Plasma "continue reading" widget (the user rarely resumes reading) and KDE Connect integration (overlaps 전송 / `TRANSFER-001`).
+- **Open questions before building:** design the D-Bus/deep-link surface once for 5–7; check portal support under the current Plasma version; keep runtime library resolution (no production path in the package or service files).
+
 ## ACCEPTANCE — native PC / tablet / Windows checks pending
 
 Status: `VERIFY` — source exists. Each line is a retained check, not new implementation, installation or claimed acceptance. Recorded prior confirmation applies only to its recorded revision/scope.
