@@ -17,6 +17,7 @@ use super::{
 };
 
 const DAILY_BACKUP_LIMIT: usize = 7;
+const PRE_MIGRATION_BACKUP_LIMIT: usize = 3;
 const BACKUP_TIMESTAMP_FORMAT: &str = "%Y%m%d-%H%M%S";
 const RESTORE_INTENT: &str = "library.sqlite.restore-intent";
 
@@ -90,6 +91,7 @@ impl Library {
             Some(source_version),
         );
         create_verified_snapshot_released(connection, &path)?;
+        prune_pre_migration_backups(&self.root, &path);
         backup_entry(&path)
             .map(|entry| entry.metadata)
             .ok_or(LibraryError::InvalidBackup)
@@ -348,7 +350,7 @@ fn backup_entries(
         .collect())
 }
 
-// Filename ownership and filesystem metadata are sufficient for daily scheduling/retention.
+// Filename ownership and filesystem metadata are sufficient for scheduling/retention.
 // Integrity verification belongs to creation, restore listings and the restore itself.
 fn backup_file_entries(root: &Path) -> Result<Vec<BackupEntry>, LibraryError> {
     let directory = root.join("backups");
@@ -449,6 +451,34 @@ fn rotate_daily_backups(root: &Path, created_path: &Path) -> Result<(), LibraryE
     // Empty/corrupt owned daily files count toward retention too. Never inspect or rotate
     // other backup kinds, unowned names, or unfinished files with a `.part` suffix.
     for entry in daily.into_iter().skip(DAILY_BACKUP_LIMIT) {
+        remove_file_if_exists(&entry.path)?;
+    }
+    Ok(())
+}
+
+// Call only after the new snapshot has been created and verified. Retention is best effort:
+// a pruning failure must not prevent migration or discard the new recovery point.
+pub(super) fn prune_pre_migration_backups(root: &Path, created_path: &Path) {
+    if let Err(error) = rotate_pre_migration_backups(root, created_path) {
+        eprintln!("[backup] Failed to prune pre-migration snapshots: {error}");
+    }
+}
+
+fn rotate_pre_migration_backups(root: &Path, created_path: &Path) -> Result<(), LibraryError> {
+    let mut snapshots = backup_file_entries(root)?
+        .into_iter()
+        .filter(|entry| entry.metadata.kind == BackupKind::PreMigration)
+        .collect::<Vec<_>>();
+    snapshots.sort_by(|left, right| {
+        // Keep the newly verified snapshot even if the system clock moved backwards.
+        (right.path == created_path)
+            .cmp(&(left.path == created_path))
+            .then_with(|| right.metadata.created_at.cmp(&left.metadata.created_at))
+            .then_with(|| right.path.file_name().cmp(&left.path.file_name()))
+    });
+    // Only module-owned snapshot files count, including empty/corrupt historical copies.
+    // Remove only the file itself; other backup kinds, partial files and sidecars are untouched.
+    for entry in snapshots.into_iter().skip(PRE_MIGRATION_BACKUP_LIMIT) {
         remove_file_if_exists(&entry.path)?;
     }
     Ok(())
@@ -1027,6 +1057,161 @@ mod tests {
             .unwrap()
             .iter()
             .any(|entry| entry.id == backup.id));
+    }
+
+    fn pre_migration_paths(library: &Library) -> Vec<PathBuf> {
+        super::backup_file_entries(library.root())
+            .unwrap()
+            .into_iter()
+            .filter(|entry| entry.metadata.kind == BackupKind::PreMigration)
+            .map(|entry| entry.path)
+            .collect()
+    }
+
+    fn seed_pre_migration_snapshots(library: &Library) -> Vec<PathBuf> {
+        (1..=4)
+            .map(|day| {
+                let date = Utc.with_ymd_and_hms(2000, 8, day, 12, 0, 0).unwrap();
+                let path = super::backup_path(
+                    library.root(), BackupKind::PreMigration, date, Some(1),
+                );
+                fs::write(&path, if day == 4 { &b""[..] } else { &b"corrupt"[..] }).unwrap();
+                path
+            })
+            .collect()
+    }
+
+    #[test]
+    fn pre_migration_backups_keep_the_newest_three_without_verifying_history() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let old = seed_pre_migration_snapshots(&library);
+        let before_verification = old.clone();
+        set_before_verify_hook(move || {
+            assert!(before_verification.iter().all(|path| path.exists()));
+        });
+        take_quick_checks();
+
+        let created = library.create_pre_migration_backup("legacy-lakomics").unwrap();
+
+        let paths = pre_migration_paths(&library);
+        assert_eq!(paths.len(), super::PRE_MIGRATION_BACKUP_LIMIT);
+        assert!(!old[0].exists());
+        assert!(!old[1].exists());
+        assert!(old[2].exists());
+        assert!(old[3].exists());
+        let new = paths.iter().find(|path| path.to_string_lossy().contains(&created.id)).unwrap();
+        assert!(super::verify_snapshot(new).is_ok());
+        assert!(take_quick_checks().iter().all(|path| path == new));
+    }
+
+    #[test]
+    fn pre_migration_rotation_ignores_other_kinds_unowned_names_and_sidecars() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let old = seed_pre_migration_snapshots(&library);
+        let directory = library.root().join("backups");
+        let date = Utc.with_ymd_and_hms(2000, 8, 1, 12, 0, 0).unwrap();
+        let id = "550e8400-e29b-41d4-a716-446655440000";
+        let mut preserved = vec![
+            super::backup_path(library.root(), BackupKind::Daily, date, None),
+            super::backup_path(library.root(), BackupKind::PreRestore, date, None),
+            directory.join(format!("pre-manga-cleanup-20000801-120000-{id}.sqlite")),
+            directory.join(format!("legacy-migration-20000801-120000-{id}.sqlite")),
+            directory.join(format!("manual-20000801-120000-{id}.sqlite")),
+            directory.join(format!("collection-source-internalize-20000801-120000-{id}.sqlite")),
+            directory.join(format!("pre-migration-20001301-120000-v1-{id}.sqlite")),
+            directory.join(format!("pre-migration-20000801-120000-vbad-{id}.sqlite")),
+            directory.join("pre-migration-20000801-120000-v1-not-a-uuid.sqlite"),
+            directory.join(format!("pre-migration-20000801-120000-{id}.sqlite")),
+            old[0].with_extension("sqlite.part"),
+            PathBuf::from(format!("{}-wal", old[3].display())),
+            PathBuf::from(format!("{}-shm", old[3].display())),
+            PathBuf::from(format!("{}-journal", old[3].display())),
+        ];
+        for path in &preserved {
+            fs::write(path, b"keep").unwrap();
+        }
+        let owned_directory = super::backup_path(
+            library.root(), BackupKind::PreMigration, date, Some(1),
+        );
+        fs::create_dir(&owned_directory).unwrap();
+        preserved.push(owned_directory);
+
+        library.create_pre_migration_backup("legacy-lakomics").unwrap();
+
+        assert_eq!(pre_migration_paths(&library).len(), super::PRE_MIGRATION_BACKUP_LIMIT);
+        assert!(preserved.iter().all(|path| path.exists()));
+        for path in preserved.iter().filter(|path| path.is_file()) {
+            assert_eq!(fs::read(path).unwrap(), b"keep");
+        }
+    }
+
+    #[test]
+    fn pre_migration_rotation_keeps_new_snapshot_after_clock_rollback_and_breaks_ties_by_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let directory = library.root().join("backups");
+        // UUID ordering disagrees with full filename ordering because the versions differ.
+        let names = [
+            "pre-migration-20260801-120000-v1-ffffffff-ffff-4fff-afff-ffffffffffff.sqlite",
+            "pre-migration-20260801-120000-v2-00000000-0000-4000-a000-000000000000.sqlite",
+            "pre-migration-20260801-120000-v3-00000000-0000-4000-a000-000000000000.sqlite",
+        ];
+        for name in names {
+            fs::write(directory.join(name), b"future").unwrap();
+        }
+        let created = super::backup_path(
+            library.root(), BackupKind::PreMigration,
+            Utc.with_ymd_and_hms(2000, 8, 1, 12, 0, 0).unwrap(), Some(db::SCHEMA_VERSION),
+        );
+        create_verified_snapshot(&library.connection().unwrap(), &created).unwrap();
+        super::prune_pre_migration_backups(library.root(), &created);
+
+        assert_eq!(pre_migration_paths(&library).len(), super::PRE_MIGRATION_BACKUP_LIMIT);
+        assert!(created.exists());
+        assert!(!directory.join(names[0]).exists());
+        assert!(directory.join(names[1]).exists());
+        assert!(directory.join(names[2]).exists());
+    }
+
+    #[test]
+    fn failed_pre_migration_snapshot_creation_or_verification_deletes_no_history() {
+        for fail_verification in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let library = Library::open(temp.path()).unwrap();
+            let old = seed_pre_migration_snapshots(&library);
+            set_after_reservation_hook(move |destination| {
+                if fail_verification {
+                    let destination = destination.to_path_buf();
+                    set_before_verify_hook(move || fs::write(destination, b"corrupt").unwrap());
+                    Ok(())
+                } else {
+                    Err(super::backup_error(destination, io::Error::other("injected failure")))
+                }
+            });
+
+            assert!(library.create_pre_migration_backup("legacy-lakomics").is_err());
+
+            assert_eq!(pre_migration_paths(&library).len(), old.len());
+            for (index, path) in old.iter().enumerate() {
+                assert_eq!(fs::read(path).unwrap(), if index == 3 { &b""[..] } else { &b"corrupt"[..] });
+            }
+        }
+    }
+
+    #[test]
+    fn pre_migration_prune_failure_preserves_the_verified_snapshot() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = temp.path().join("verified.sqlite");
+        let source = rusqlite::Connection::open_in_memory().unwrap();
+        source.pragma_update(None, "user_version", 1).unwrap();
+        create_verified_snapshot(&source, &destination).unwrap();
+        assert!(super::rotate_pre_migration_backups(temp.path(), &destination).is_err());
+
+        super::prune_pre_migration_backups(temp.path(), &destination);
+
+        assert!(super::verify_snapshot(&destination).is_ok());
     }
 
     #[test]

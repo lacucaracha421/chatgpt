@@ -225,6 +225,7 @@ pub(crate) fn initialize_database_with_dev_policy(
             if version > 0 {
                 let snapshot = backup::pre_migration_snapshot_path(root, version);
                 backup::create_verified_snapshot(&connection, &snapshot)?;
+                backup::prune_pre_migration_backups(root, &snapshot);
             }
             migrate_to_latest(&mut connection, version)?;
         }
@@ -4605,6 +4606,71 @@ mod dev_guard_enforcement_tests {
 
         initialize_database_with_dev_policy(&root.join("library.sqlite"), false, None).unwrap();
         assert_eq!(version_of(&root), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn migration_prunes_history_only_after_a_verified_snapshot() {
+        for fail_verification in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().join("library");
+            library_at_version(&root, SCHEMA_VERSION - 1);
+            let directory = root.join("backups");
+            let old = (1..=4)
+                .map(|day| {
+                    let path = directory.join(format!(
+                        "pre-migration-200008{day:02}-120000-v1-550e8400-e29b-41d4-a716-446655440000.sqlite"
+                    ));
+                    std::fs::write(&path, b"history").unwrap();
+                    path
+                })
+                .collect::<Vec<_>>();
+            let history = old.clone();
+            let snapshot_directory = directory.clone();
+            backup::set_before_verify_hook(move || {
+                assert!(history.iter().all(|path| path.exists()));
+                if fail_verification {
+                    let new = std::fs::read_dir(snapshot_directory)
+                        .unwrap()
+                        .map(|entry| entry.unwrap().path())
+                        .find(|path| !history.contains(path))
+                        .unwrap();
+                    std::fs::write(new, b"corrupt").unwrap();
+                }
+            });
+
+            let result = initialize_database_with_dev_policy(
+                &root.join("library.sqlite"), false, None,
+            );
+
+            let snapshots = std::fs::read_dir(directory)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect::<Vec<_>>();
+            if fail_verification {
+                assert!(result.is_err());
+                assert_eq!(version_of(&root), SCHEMA_VERSION - 1);
+                assert_eq!(snapshots.len(), old.len());
+                for path in old {
+                    assert_eq!(std::fs::read(path).unwrap(), b"history");
+                }
+            } else {
+                assert!(result.is_ok());
+                assert_eq!(version_of(&root), SCHEMA_VERSION);
+                assert_eq!(snapshots.len(), 3);
+                assert!(!old[0].exists());
+                assert!(!old[1].exists());
+                assert!(old[2].exists());
+                assert!(old[3].exists());
+                let new = snapshots.iter().find(|path| !old.contains(path)).unwrap();
+                let snapshot = open_database(new).unwrap();
+                assert_eq!(snapshot.pragma_query_value(None, "user_version", |row| {
+                    row.get::<_, i64>(0)
+                }).unwrap(), SCHEMA_VERSION - 1);
+                assert_eq!(snapshot.pragma_query_value(None, "quick_check", |row| {
+                    row.get::<_, String>(0)
+                }).unwrap(), "ok");
+            }
+        }
     }
 
     /// Marking the library is the durable opt-in, and it must actually unblock.
