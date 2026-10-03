@@ -107,11 +107,19 @@ impl Library {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let directory = self.root.join("backups");
+        let mut covered = false;
         for entry in fs::read_dir(&directory)
             .map_err(|source| backup_error(&directory, source))?
             .filter_map(Result::ok)
         {
             let name = entry.file_name();
+            if name.to_str().and_then(|name| name.strip_suffix(".tmp"))
+                .and_then(parse_backup_filename)
+                .is_some_and(|(kind, _, _)| kind == BackupKind::Daily)
+            {
+                remove_snapshot(&entry.path())?;
+                continue;
+            }
             let Some((kind, created_at, _)) = name.to_str().and_then(parse_backup_filename) else {
                 continue;
             };
@@ -120,13 +128,18 @@ impl Library {
             if kind == BackupKind::Daily && created_at.date_naive() == now.date_naive()
                 && entry.metadata().is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
             {
-                return Ok(None);
+                covered = true;
             }
         }
+        if covered { return Ok(None); }
 
         let path = backup_path(&self.root, BackupKind::Daily, now, None);
+        let temporary = path.with_extension("sqlite.tmp");
         let connection = self.connection()?;
-        create_verified_snapshot_released(connection, &path)?;
+        // Publish only a complete, verified snapshot. The UUID target does not exist yet,
+        // so this same-directory rename also works on Windows without replacing a file.
+        create_verified_snapshot_released(connection, &temporary)?;
+        fs::rename(&temporary, &path).map_err(|source| backup_error(&path, source))?;
         rotate_daily_backups(&self.root, &path)?;
         // Creation already verified this snapshot; returning metadata needs no second check.
         Ok(backup_file_entry(&path).map(|entry| entry.metadata))
@@ -970,7 +983,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_daily_allows_creation_and_nonempty_corrupt_daily_blocks_duplicate_creation() {
+    fn empty_daily_allows_creation_and_externally_corrupted_final_daily_blocks_duplicate_creation() {
         let temp = tempfile::tempdir().unwrap();
         let library = Library::open(temp.path()).unwrap();
         let today = Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap();
@@ -981,10 +994,37 @@ mod tests {
         assert_eq!(take_quick_checks().len(), 1);
         let path = daily_paths(&library).into_iter()
             .find(|path| path.to_string_lossy().contains(&created.id)).unwrap();
+        // External changes to a published file still do not trigger startup verification.
         fs::write(path, b"nonempty corrupt daily").unwrap();
         assert!(library.ensure_daily_backup(today).unwrap().is_none());
         assert!(take_quick_checks().is_empty());
         assert!(library.list_backups().unwrap().is_empty());
+    }
+
+    #[test]
+    fn daily_startup_removes_leftover_temps_without_counting_them_as_backups() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let today = Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap();
+        let stale = super::backup_path(library.root(), BackupKind::Daily, today, None)
+            .with_extension("sqlite.tmp");
+        assert!(parse_backup_filename(stale.file_name().unwrap().to_str().unwrap()).is_none());
+        fs::write(&stale, b"interrupted snapshot").unwrap();
+        take_quick_checks();
+        let created = library.ensure_daily_backup(today).unwrap().unwrap();
+        assert!(!stale.exists());
+        assert_eq!(daily_paths(&library).len(), 1);
+        let checks = take_quick_checks();
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].extension().unwrap(), "tmp");
+        assert!(checks[0].to_string_lossy().contains(&created.id));
+        assert!(!checks[0].exists());
+
+        // Cleanup still runs when today's published backup already covers the date.
+        fs::write(&stale, b"another interrupted snapshot").unwrap();
+        assert!(library.ensure_daily_backup(today).unwrap().is_none());
+        assert!(!stale.exists());
+        assert!(take_quick_checks().is_empty());
     }
 
     #[test]

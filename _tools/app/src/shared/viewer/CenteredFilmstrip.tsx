@@ -40,11 +40,15 @@ export function CenteredFilmstrip({items, index, height = 124, grown = false, cl
   const drag = useRef<{id: number; x: number; y: number; off: number; samples: [number, number][]} | null>(null);
   const wheelTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const dwell = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const dwellRequest = useRef(0);
+  const cancelDwell = useCallback(() => {
+    clearTimeout(dwell.current); dwell.current = undefined; dwellRequest.current++;
+  }, []);
   const report = useCallback((n: number) => {
-    clearTimeout(dwell.current); dwell.current = undefined;
+    cancelDwell();
     const s = state.current;
     if (n !== s.reported) { s.reported = n; latest.current.onIndex(n); }
-  }, []);
+  }, [cancelDwell]);
   const nearest = useCallback((off: number) => {
     const boxes = latest.current.layout;
     let lo = 0, hi = boxes.length - 1;
@@ -56,11 +60,14 @@ export function CenteredFilmstrip({items, index, height = 124, grown = false, cl
     if (rail.current) rail.current.style.transform = `translate3d(${s.off}px,0,0)`;
     const n = nearest(s.off), box = current.layout[n];
     if (slot.current && box) slot.current.style.setProperty('--slot-width', `${box.w}px`);
-    if (s.free && n !== s.selected) { s.selected = n; clearTimeout(dwell.current); dwell.current = setTimeout(() => report(n), FILMSTRIP_DWELL_MS); }
+    if (s.free && n !== s.selected) {
+      s.selected = n; cancelDwell(); const request = dwellRequest.current;
+      dwell.current = setTimeout(() => { if (request === dwellRequest.current && s.free && s.selected === n) report(n); }, FILMSTRIP_DWELL_MS);
+    }
     const half = current.width / (current.grown ? 2 : 1) + current.height;
     const start = Math.max(0, nearest(s.off + half) - 1), end = Math.min(current.layout.length, nearest(s.off - half) + 2);
     setWindowRange(range => range.start === start && range.end === end ? range : {start, end});
-  }, [nearest, report]);
+  }, [nearest, report, cancelDwell]);
   const tick = useCallback(function frame(now: number) {
     const s = state.current;
     const dt = Math.min(.032, Math.max(0, (now - s.last) / 1000)); s.last = now;
@@ -108,24 +115,30 @@ export function CenteredFilmstrip({items, index, height = 124, grown = false, cl
     const query = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
     const change = () => { if (query?.matches) kick(); };
     query?.addEventListener?.('change', change);
-    return () => { query?.removeEventListener?.('change', change); cancelAnimationFrame(state.current.raf); clearTimeout(wheelTimer.current); clearTimeout(dwell.current); if (drag.current) latest.current.onInteractionChange?.(false); };
-  }, [kick]);
+    return () => { query?.removeEventListener?.('change', change); cancelAnimationFrame(state.current.raf); clearTimeout(wheelTimer.current); cancelDwell(); if (drag.current) latest.current.onInteractionChange?.(false); };
+  }, [kick, cancelDwell]);
   if (items.length < 2) return null;
+  const select = (n: number) => {
+    cancelDwell(); clearTimeout(wheelTimer.current);
+    const s = state.current;
+    s.free = false; s.selected = n; s.reported = n; s.target = -(layout[n]?.c ?? 0);
+    onIndex(n); onInteract?.(); kick();
+  };
   const finish = (id: number, canceled = false) => {
     const d = drag.current; if (!d || d.id !== id) return;
     drag.current = null; latest.current.onInteractionChange?.(false); latest.current.onInteract?.();
     const s = state.current;
-    if (!s.dragged || canceled) { s.free = false; s.target = -(layout[latest.current.index]?.c ?? 0); kick(); return; }
+    if (!s.dragged || canceled) { cancelDwell(); s.free = false; s.target = -(layout[latest.current.index]?.c ?? 0); kick(); return; }
     const a = d.samples[0], b = d.samples[d.samples.length - 1]!;
     s.velocity = b[0] > a[0] ? clamp((b[1] - a[1]) / (b[0] - a[0]) * 1000, -7000, 7000) : 0;
     s.target = -(layout[nearest(s.off + s.velocity * .22)]?.c ?? 0); s.free = true; kick();
   };
   return <nav ref={bind} className={`centered-filmstrip ${grown ? 'is-grown' : ''} ${className}`} aria-label="주변 자산" style={{"--filmstrip-height": `${height}px`} as React.CSSProperties}
     onFocusCapture={() => onInteract?.()}
-    onKeyDown={event => { if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return; event.preventDefault(); event.stopPropagation(); onIndex(clamp(index + (event.key === 'ArrowLeft' ? -1 : 1), 0, items.length - 1)); onInteract?.(); }}
+    onKeyDown={event => { if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return; event.preventDefault(); event.stopPropagation(); select(clamp(index + (event.key === 'ArrowLeft' ? -1 : 1), 0, items.length - 1)); }}
     onPointerDown={event => {
       if (event.button > 0) return; event.stopPropagation();
-      clearTimeout(wheelTimer.current); cancelAnimationFrame(state.current.raf); state.current.raf = 0; state.current.velocity = 0; state.current.dragged = false;
+      cancelDwell(); clearTimeout(wheelTimer.current); cancelAnimationFrame(state.current.raf); state.current.raf = 0; state.current.velocity = 0; state.current.dragged = false;
       drag.current = {id: event.pointerId, x: event.clientX, y: event.clientY, off: state.current.off, samples: [[performance.now(), state.current.off]]};
       onInteractionChange?.(true); onInteract?.();
     }}
@@ -145,7 +158,7 @@ export function CenteredFilmstrip({items, index, height = 124, grown = false, cl
       event.stopPropagation();
       if (state.current.dragged) { state.current.dragged = false; event.preventDefault(); return; }
       const button = (event.target as Element).closest<HTMLElement>('[data-filmstrip-index]');
-      if (button) { state.current.free = false; onIndex(Number(button.dataset.filmstripIndex)); onInteract?.(); }
+      if (button) select(Number(button.dataset.filmstripIndex));
     }}>
     <div className="centered-filmstrip__extent" style={{width: width + (layout[layout.length - 1]?.c ?? 0) - (layout[0]?.c ?? 0)}} aria-hidden="true"/>
     <div className="centered-filmstrip__scale">

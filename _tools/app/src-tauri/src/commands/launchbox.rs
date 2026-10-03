@@ -95,13 +95,20 @@ pub async fn fetch_launchbox_spines(
         .join("launchbox");
     let job = Job::register(job_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        launchbox::refresh(&cache, &job.cancel)?;
+        // Spine batches need the index up front; information fill needs it only for
+        // works without an IGDB link.
+        if !information_only {
+            launchbox::refresh(&cache, &job.cancel)?;
+        }
         let (mut runner, _lease) = launchbox::reserve(&cache)?;
         let report = |progress| {
             let _ = on_progress.send(progress);
         };
         if information_only {
-            return runner.fill_information(&library, &cache, &job, limit, after, &report);
+            // Keep the shared lookup lease, but allow this explicit information request
+            // to download lazily. The shared runner remains lookup-only for automatic work.
+            return launchbox::FetchState::default()
+                .fill_information(&library, &cache, &job, limit, after, &report);
         }
         runner.fetch_batch(&library, &cache, &job, limit, after, &|progress| {
             let _ = on_progress.send(progress);

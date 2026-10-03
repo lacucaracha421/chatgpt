@@ -108,9 +108,11 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
   const revealTarget = useRef<string | null>(null);
   const opened = useRef<string | null>(null);
   const hold = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
+  // Untitled parts that had text while this memo is open stay as fields when emptied.
+  const keptTop = useRef(new Set<string>());
   // Replace directly with ready content; there is no empty loading frame between notes or saves.
   if (documentRef.current.id !== noteId) {
-    cancelHold(); clearTimeout(statusTimer.current); focusTarget.current = null;
+    cancelHold(); clearTimeout(statusTimer.current); focusTarget.current = null; keptTop.current = new Set();
     revealTarget.current = null; renamingComposition.current = false;
     documentRef.current = { id: noteId, doc: parseMemo(body) };
     setFilter(null); setDoneOpen(new Set()); setRename(null); setDeleteTarget(null); setMoveMenu(null); setSectionMenu(null); setStatus(null);
@@ -122,7 +124,8 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
   const named = sections.filter(section => section.heading);
   const tasks = (items: MemoItem[]) => mode === 'todo' ? items.filter(item => item.task) : items;
   const activeFilter = named.length >= 2 && named.some(section => section.id === filter) ? filter : null;
-  const shown = sections.filter(section => (!activeFilter || section.id === activeFilter) && (section.heading || (mode === 'todo' ? section.items.length : !named.length || sectionText(section).length > 0)));
+  for (const section of sections) if (!section.heading && sectionText(section).length > 0) keptTop.current.add(section.id);
+  const shown = sections.filter(section => (!activeFilter || section.id === activeFilter) && (section.heading || (mode === 'todo' ? section.items.length : !named.length || keptTop.current.has(section.id))));
   const visible = shown.flatMap(section => mode === 'todo' ? [...tasks(section.items).filter(item => !item.done), ...(doneOpen.has(section.id) ? tasks(section.items).filter(item => item.done) : [])] : section.items);
   const canDrag = !readOnly && !activeFilter && named.length > 1 && !rename;
   const sectionDrag = useMemoSectionDrag(root, canDrag, `${noteId}:${body}`, (id, index) => apply(moveMemoSectionTo(documentRef.current.doc, id, index)));

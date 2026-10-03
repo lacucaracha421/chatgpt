@@ -330,6 +330,17 @@ it('hides an empty top body with sections, adds unique names under a filter and 
   expect(screen.getByRole('button', { name: '새 섹션 2' })).toHaveAttribute('aria-pressed', 'true');
   expect(rows()).toHaveLength(1); expect(rows()[0]).toHaveFocus();
 });
+it('keeps the top text field and focus when its last text is cleared', () => {
+  surface('top\n## A\na\n## B\nb');
+  const top = rows()[0]!;
+  top.focus();
+  fireEvent.change(top, { target: { value: '' } });
+  expect(texts()).toEqual(['', 'a', 'b']);
+  expect(rows()[0]).toBe(top); expect(top).toHaveFocus();
+  fireEvent.change(top, { target: { value: 'new top' } });
+  expect(rows()[0]).toBe(top); expect(top).toHaveFocus();
+  expect(body()).toBe('new top\n## A\na\n## B\nb');
+});
 it('preserves whole pasted text, task markup and fences in one body', async () => {
   const changes = surface('original');
   const area = rows()[0]!; area.select();
