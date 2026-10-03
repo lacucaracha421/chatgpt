@@ -101,3 +101,18 @@ it('closes the open reader and aborts page work when privacy turns on',async()=>
  expect(document.querySelector('img[src]')).toBeNull();expect(screen.queryByRole('dialog')).toBeNull();
  expect(signal.aborted).toBe(true);expect(close).toHaveBeenCalledOnce();
 });
+it('turns pages with side taps (left = next, right = previous) and shows the bars from the middle',async()=>{
+  await open();
+  const stage=screen.getByLabelText('만화 페이지');
+  vi.spyOn(stage,'getBoundingClientRect').mockReturnValue({left:0,top:0,right:1000,bottom:1280,width:1000,height:1280,x:0,y:0,toJSON:()=>({})});
+  const tap=(x:number)=>{fireEvent.pointerDown(stage,{pointerId:7,clientX:x,clientY:600,button:0});fireEvent.pointerUp(stage,{pointerId:7,clientX:x,clientY:600});};
+  tap(100);
+  await screen.findByRole('img',{name:'2페이지'});
+  await waitFor(()=>expect(visiblePages()).toEqual([1]));
+  expect(document.querySelector('.catalog-reader')?.classList.contains('chrome-visible')).toBe(false);
+  tap(900);
+  await waitFor(()=>expect(visiblePages()).toEqual([0]));
+  tap(500);
+  expect(document.querySelector('.catalog-reader')?.classList.contains('chrome-visible')).toBe(true);
+  expect(visiblePages()).toEqual([0]);
+});

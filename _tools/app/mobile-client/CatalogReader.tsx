@@ -9,6 +9,8 @@ import './CatalogReader.css';
 import {usePrivacyMode} from './privacyMode';
 
 type Transform={scale:number;x:number;y:number};
+/** Share of the stage width on each side whose tap turns the page. */
+export const SIDE_TAP=0.3;
 function ReaderPage({workId,manifestRevision,page,transform,onRefresh,onFailure,onReady,onDispose,attempt}:{workId:string;manifestRevision:string;page:CatalogReaderPage;transform?:Transform;onRefresh():void;onFailure():void;onReady(index:number,ratio:number):void;onDispose(index:number):void;attempt:number}){
   const [src,setSrc]=useState(''),[failed,setFailed]=useState(false),[retry,setRetry]=useState(0);
   useEffect(()=>{
@@ -78,7 +80,7 @@ function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing}:{man
   return <Dialog open title="만화 읽기" variant="fullscreen" onClose={onClose} onKeyDown={event=>{
     if(event.target instanceof HTMLInputElement||transform.scale>1)return;if(event.key==='ArrowLeft'){event.preventDefault();change(next);}if(event.key==='ArrowRight'){event.preventDefault();change(previous);}
   }}>
-    <DialogDescription className="sr-only">세로는 한 페이지, 가로는 오른쪽에서 왼쪽으로 두 페이지를 붙여 표시합니다. 첫 표지는 오른쪽, 왼쪽은 빈 페이지입니다. 두 손가락으로 확대하고 확대하지 않은 상태에서 좌우로 넘깁니다. 화면을 짧게 탭하면 정보 표시가 나타납니다.</DialogDescription>
+    <DialogDescription className="sr-only">세로는 한 페이지, 가로는 오른쪽에서 왼쪽으로 두 페이지를 붙여 표시합니다. 첫 표지는 오른쪽, 왼쪽은 빈 페이지입니다. 두 손가락으로 확대하고 확대하지 않은 상태에서 좌우로 넘깁니다. 화면 왼쪽을 탭하면 다음 페이지, 오른쪽을 탭하면 이전 페이지로 넘어가고, 가운데를 탭하면 정보 표시가 나타납니다.</DialogDescription>
     <div className={`catalog-reader ${chrome?'chrome-visible':''}`}>
       <div ref={bindStage} className="catalog-reader-stage" aria-label="만화 페이지" onPointerDown={event=>{
         if(event.button>0)return;event.currentTarget.setPointerCapture?.(event.pointerId);const g=gesture.current;g.points.set(event.pointerId,{x:event.clientX,y:event.clientY});
@@ -95,7 +97,13 @@ function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing}:{man
         if(g.points.size===1){const remaining=[...g.points.values()][0];g.lastX=remaining.x;g.lastY=remaining.y;}
         const dx=event.clientX-g.startX,dy=event.clientY-g.startY;
         if(g.points.size===0&&!g.pinched&&transform.scale===1&&Math.abs(dx)>56&&Math.abs(dx)>Math.abs(dy)*1.2)change(dx>0?next:previous);
-        else if(g.points.size===0&&!g.moved&&!g.pinched)setChrome(v=>!v);
+        else if(g.points.size===0&&!g.moved&&!g.pinched){
+          // Side taps turn pages (right-to-left: the left edge is the next page); the middle shows the bars.
+          const rect=event.currentTarget.getBoundingClientRect(),at=rect.width>0?(event.clientX-rect.left)/rect.width:.5;
+          if(transform.scale===1&&at<SIDE_TAP)change(next);
+          else if(transform.scale===1&&at>1-SIDE_TAP)change(previous);
+          else setChrome(v=>!v);
+        }
       }} onPointerCancel={()=>gesture.current.points.clear()}>
         <div className="catalog-reader-spread" style={{width:spreadWidth||'100%',height:spreadWidth?spreadWidth/spreadRatio:'100%',transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}}>
           {pool.map(page=><div key={`${manifest.providerWorkId}:${page.index}`} className="catalog-reader-leaf" style={{display:shown.some(p=>p.index===page.index)?undefined:'none',flex:`0 0 ${pageRatio(page)/spreadRatio*100}%`,order:page.index}}><ReaderPage workId={manifest.providerWorkId} manifestRevision={manifest.publicationRevision} page={page} onRefresh={onRefresh} onReady={pageReady} onDispose={pageDisposed} attempt={attempt} onFailure={()=>{setFailedPages(old=>old.includes(page.index)?old:[...old,page.index]);if(targetPages.some(p=>p.index===page.index))refreshOnce();}}/></div>)}
