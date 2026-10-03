@@ -38,9 +38,13 @@ class AssetListQuery:
         where = self.where_clause
         params = self.params.copy()
         if after is not None:
-            where += (f" AND ({SORT_AT} {self.comparison} ?"
+            # Bound the leading index key so late pages seek past earlier dates.
+            # Keep equality here; the existing id predicate resolves date ties.
+            # Use order_at to preserve candidate-id lookup for sparse artist scopes.
+            where += (f" AND {self.order_at} {self.comparison}= ?"
+                      f" AND ({SORT_AT} {self.comparison} ?"
                       f" OR ({SORT_AT} = ? AND asset.id {self.comparison} ?))")
-            params.extend([after[0], after[0], after[1]])
+            params.extend([after[0], after[0], after[0], after[1]])
         sql = (f"SELECT {columns} FROM {self.from_clause} WHERE {where}"
                f" ORDER BY {self.order_at} {self.direction}, asset.id {self.direction}")
         if limit is not None:
