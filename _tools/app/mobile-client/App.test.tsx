@@ -614,6 +614,30 @@ describe('server list generation',()=>{
     await waitFor(()=>expect(screen.queryByText('viewer-a1')).toBeNull());
     vi.restoreAllMocks();
   });
+  it.each(['success','failure'])('holds the viewer through a delayed long-resume generation refresh: %s',async outcome=>{
+    const server=fixture();render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));
+    fireEvent.click(await screen.findByText('tile-a1'));const viewer=await screen.findByText('viewer-a1');
+    let resolve!:(value:unknown)=>void,reject!:(reason:Error)=>void;
+    const pending=new Promise((done,fail)=>{resolve=done;reject=fail;});
+    const original=mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path:string)=>path.startsWith('/v1/library/assets?')&&!path.includes('toc=1')?pending:original(path));
+    let visibility:DocumentVisibilityState='hidden';
+    const spy=vi.spyOn(document,'visibilityState','get').mockImplementation(()=>visibility);
+    const clock=vi.spyOn(Date,'now').mockReturnValue(Date.now()+10*60_000);
+    try {
+      act(()=>window.dispatchEvent(new Event('lakomics-pause')));
+      server.change([]);act(()=>window.dispatchEvent(new CustomEvent('lakomics-list-generation',{detail:{generation:server.generation()}})));
+      visibility='visible';await act(async()=>window.dispatchEvent(new Event('lakomics-resume')));
+      expect(screen.getByText('viewer-a1')).toBe(viewer);
+      if(outcome==='success'){
+        await act(async()=>resolve({items:[],has_more:false,next_cursor:null,list_generation:server.generation()}));
+        await waitFor(()=>expect(screen.queryByText('viewer-a1')).toBeNull());
+      }else{
+        await act(async()=>reject(new Error('offline')));
+        expect(screen.getByText('viewer-a1')).toBe(viewer);
+      }
+    } finally {spy.mockRestore();clock.mockRestore();}
+  });
   it('remote restore returns the same ID and new canonical Assets appear without restart',async()=>{
     const server=fixture();render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
     server.change([]);act(()=>window.dispatchEvent(new CustomEvent('lakomics-list-generation',{detail:{generation:server.generation()}})));

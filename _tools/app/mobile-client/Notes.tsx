@@ -121,6 +121,11 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
   // ---- Secret notes lock after 5 idle minutes, when the app goes to the background (native
   // locks in onStop and tells the page), when Notes is left, and when the note is closed.
   const revealed=state.notes.some(n=>isSecret(n)&&!n.redacted);
+  const snapshotSensitive=active&&(creatingSecret||!!note&&isSecret(note)||revealed);
+  useLayoutEffect(()=>{
+    window.LakomicsNative?.setResumeSnapshotSensitive?.(snapshotSensitive);
+    return()=>window.LakomicsNative?.setResumeSnapshotSensitive?.(false);
+  },[snapshotSensitive]);
   const lockSecrets=useCallback(()=>{void store.lockSecrets();},[store]);
   useEffect(()=>{
     if(!revealed)return;

@@ -1,4 +1,5 @@
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
+import {StableImage} from '../src/shared/ui/StableImage';
 import {warmOriginalTickets} from './originalTicketWarm';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,type PointerEvent,type ReactNode} from 'react';
@@ -79,7 +80,7 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, va
     if(!privacy) onOpen(index);
   }} onPointerDown={beginPress} onPointerMove={movePress} onPointerUp={endPress} onPointerCancel={cancelPointer} onContextMenu={event=>{if(onSelect)event.preventDefault();}} aria-label={privacy ? '비공개 모드로 이미지 숨김' : vault ? vault.label(asset) : `${asset.creator_name || asset.creator_handle || (asset.kind === 'video' ? '영상' : '이미지')}, ${dateLabel(asset)}`} aria-description={!privacy && asset.kind === "video" ? `영상 ${formatDuration(asset.duration_ms)}` : undefined} aria-selected={selectionMode&&selected?true:undefined} data-asset-id={asset.id} data-date-label={collectedDate(asset.collected_at ?? asset.created_at).label}>
     <span className="tile-picture" style={{height}}>
-      {privacy ? <span className="artist-private-tile" aria-hidden="true" /> : preview ? <img ref={image} src={preview} alt="" draggable={false} onError={() => {settle(); retry();}} onLoad={event => {
+      {privacy ? <span className="artist-private-tile" aria-hidden="true" /> : preview ? <StableImage ref={image} decodeFirst={false} src={preview} alt="" draggable={false} onError={() => {settle(); retry();}} onLoad={event => {
         const element = event.currentTarget;
         // A vault item without index dimensions takes its shape from the decoded thumbnail.
         if (vault && !asset.ratio && !(asset.width && asset.height) && element.naturalWidth > 0 && element.naturalHeight > 0) onReady({...asset, ratio: element.naturalWidth / element.naturalHeight});

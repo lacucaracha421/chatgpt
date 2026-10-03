@@ -17,6 +17,15 @@ it('has zero live intervals when hidden, re-arms once, and collapses the two res
  cleanup();expect(vi.getTimerCount()).toBe(0);
 });
 function Publications(){usePublicationCheck(true,'/v1/library/characters/status','one',()=>{});usePublicationCheck(true,'/v1/library/characters/status','one',()=>{});return null;}
+it('stops on native pause even before WebView reports hidden, and resumes after a long pause',()=>{
+ const tick=vi.fn();render(<Intervals tick={tick}/>);
+ act(()=>window.dispatchEvent(new Event('lakomics-pause')));
+ expect(vi.getTimerCount()).toBe(0);
+ act(()=>vi.advanceTimersByTime(10*60_000));expect(tick).not.toHaveBeenCalled();
+ act(()=>window.dispatchEvent(new Event('lakomics-resume')));
+ expect(tick).toHaveBeenCalledTimes(2);expect(vi.getTimerCount()).toBe(2);
+ cleanup();expect(vi.getTimerCount()).toBe(0);
+});
 it('shares one characters status request and timer between consumers',async()=>{
  render(<Publications/>);await act(async()=>{});expect(mocks.api).toHaveBeenCalledTimes(1);expect(vi.getTimerCount()).toBe(1);
  await act(()=>vi.advanceTimersByTimeAsync(60_000));expect(mocks.api).toHaveBeenCalledTimes(2);

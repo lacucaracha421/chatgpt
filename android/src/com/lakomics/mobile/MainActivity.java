@@ -14,6 +14,9 @@ public final class MainActivity extends Activity {
  private static final String ORIGIN="https://app.lakomics.local";
  private static final int PAGE_BACKGROUND=Color.rgb(22,23,24);
  private PrivateVault vault;
+ private android.widget.FrameLayout frame;
+ private WebViewResumeCover resumeCover;
+ private volatile boolean noteSnapshotSensitive;
  private WebView web; private SecureSettings settings; private CloudClient client; private MediaRepository media; private NotesRepository notes;
  private final ThreadPoolExecutor workers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(48));
  private final ThreadPoolExecutor mediaWorkers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(24));
@@ -88,14 +91,17 @@ public final class MainActivity extends Activity {
  @Override public void onCreate(Bundle b){super.onCreate(b);settings=new SecureSettings(this);client=new CloudClient(settings);notes=new NotesRepository(this,settings);vault=new PrivateVault(this,state->emit("lakomics-vault",state));
   try{media=MediaRepository.get(this);}catch(IllegalStateException ignored){}
   configureWindow();
-  web=new WebView(this);web.setBackgroundColor(PAGE_BACKGROUND);
-  android.widget.FrameLayout frame=new android.widget.FrameLayout(this);frame.setBackgroundColor(PAGE_BACKGROUND);frame.addView(web,new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT));setContentView(frame);
-  hideStatusBar();
-  // Edge-to-edge (targetSdk 35 on Android 15+) no longer resizes the window for the soft
-  // keyboard, and a WebView ignores its own padding, so the page never learned the keyboard
-  // covered it. The frame pads the keyboard's height below the WebView, shrinking the page
-  // above the keyboard as adjustResize did, and hands the WebView the insets without it.
+  frame=new android.widget.FrameLayout(this);frame.setBackgroundColor(PAGE_BACKGROUND);setContentView(frame);
+  // The host alone handles keyboard resize; system bars stay transient overlays.
   if(Build.VERSION.SDK_INT>=30)frame.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(0,0,0,insets.getInsets(WindowInsets.Type.ime()).bottom);return new WindowInsets.Builder(insets).setInsets(WindowInsets.Type.ime(),android.graphics.Insets.NONE).build();});
+  createWebView();
+  resumeCover=new WebViewResumeCover(frame,()->!noteSnapshotSensitive&&(getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_SECURE)==0);
+  ExchangeService.get(this).addListener(exchangeListener);
+  hideStatusBar();
+ }
+ private void createWebView(){
+  web=new WebView(this);web.setBackgroundColor(PAGE_BACKGROUND);
+  frame.addView(web,0,new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT));
   // Status bars are transient overlays: never turn their visibility into page padding.
   // Keep navigation/cutout insets for CSS env(safe-area-inset-*), and the frame's IME handling.
   web.setOnApplyWindowInsetsListener((v,insets)->{
@@ -104,12 +110,22 @@ public final class MainActivity extends Activity {
   });
   WebSettings s=web.getSettings();s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);s.setAllowFileAccess(false);s.setAllowContentAccess(false);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setMediaPlaybackRequiresUserGesture(false);s.setJavaScriptCanOpenWindowsAutomatically(false);s.setSupportMultipleWindows(false);s.setSaveFormData(false);s.setSafeBrowsingEnabled(true);
   CookieManager.getInstance().setAcceptCookie(false);WebView.setWebContentsDebuggingEnabled(false);
-  web.addJavascriptInterface(new Bridge(),"LakomicsNative");ExchangeService.get(this).addListener(exchangeListener);
+  web.addJavascriptInterface(new Bridge(),"LakomicsNative");
   web.setWebViewClient(new WebViewClient(){
    @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest r){return !bundled(r.getUrl());}
    @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest r){Uri u=r.getUrl();if(bundled(u)){if(u.getPath()!=null && u.getPath().startsWith("/vault/"))return vault.serve(r);if(u.getPath()!=null && u.getPath().startsWith(MediaStreamProxy.PREFIX))return mediaStream(r);return asset(u);}if(r.isForMainFrame() || !"https".equals(u.getScheme()))return denied();return null;}
    @Override public void onReceivedSslError(WebView v,android.webkit.SslErrorHandler h,android.net.http.SslError e){h.cancel();}
-   @Override public boolean onRenderProcessGone(WebView v,RenderProcessGoneDetail d){vault.lock("");finish();return true;}
+   @Override public boolean onRenderProcessGone(WebView v,RenderProcessGoneDetail d){
+    if(resumeCover!=null)resumeCover.clear();
+    // A dead renderer cannot be resumed or reused. Reload the bundled app; React state
+    // is gone, while durable drafts/settings remain in their existing repositories.
+    if(web==v)web=null;
+    frame.removeView(v);v.destroy();
+    // Lock events must not evaluate JavaScript on the dead instance.
+    vault.setVisible(false);notes.lockSecrets();stopRequests();noteSnapshotSensitive=false;
+    if(!destroyed&&foreground)createWebView();
+    return true;
+   }
   });web.loadUrl(ORIGIN+"/index.html");
  }
  // The bundled FAULT game (single self-contained file: inline scripts, data: font) runs only as a same-origin
@@ -245,6 +261,11 @@ public final class MainActivity extends Activity {
   secretClip=-1;
  };
  final class Bridge {
+  /** Set synchronously before React paints a secret screen; no snapshot of its contents. */
+  @JavascriptInterface public void setResumeSnapshotSensitive(boolean value){
+   noteSnapshotSensitive=value;
+   if(value)runOnUiThread(()->{if(resumeCover!=null)resumeCover.clear();});
+  }
   @JavascriptInterface public void cancel(String id){CancellationSignal s=active.remove(id);if(s!=null)s.cancel();}
   /** Local startup hint only: never exposes the saved token or performs a network check. */
   @JavascriptInterface public String localStatus(){try{return settings.status().toString();}catch(Exception ignored){return "{\"configured\":false,\"endpoint\":\"\"}";}}
@@ -368,7 +389,8 @@ public final class MainActivity extends Activity {
     if(!signal.isCanceled())reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.",null,mediaWork?mediaBusy():null);}
   }
  }
- @Override public void onTrimMemory(int level){if(vault!=null)vault.lock("메모리를 확보하기 위해 잠겼습니다");super.onTrimMemory(level);}
+ @Override public void onTrimMemory(int level){if(resumeCover!=null&&(level==TRIM_MEMORY_RUNNING_CRITICAL||level>=TRIM_MEMORY_MODERATE))resumeCover.clear();if(vault!=null)vault.lock("메모리를 확보하기 위해 잠겼습니다");super.onTrimMemory(level);}
+ @Override public void onLowMemory(){if(resumeCover!=null)resumeCover.clear();super.onLowMemory();}
  @Override protected void onActivityResult(int request,int result,Intent data){
   if(request==EXCHANGE_TREE){
    final String target=exchangeTarget;final Uri tree=result==RESULT_OK&&data!=null?data.getData():null;
@@ -407,7 +429,7 @@ public final class MainActivity extends Activity {
   }else if((getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_FULLSCREEN)==0)getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
  }
  @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(focused){hideStatusBar();clipboardHandler.post(clearSecretClip);}}
- @Override protected void onResume(){super.onResume();if(vault!=null)vault.resumed();synchronized(this){stopped=false;}foreground=true;hideStatusBar();if(web!=null){web.resumeTimers();web.onResume();emit("lakomics-resume",null);if(Build.VERSION.SDK_INT>=33)PickerLibrary.get(this).resume();}
+ @Override protected void onResume(){super.onResume();if(vault!=null)vault.resumed();synchronized(this){stopped=false;}foreground=true;hideStatusBar();if(web==null&&!destroyed)createWebView();if(web!=null){web.resumeTimers();web.onResume();emit("lakomics-resume",null);if(resumeCover!=null)resumeCover.resume(web);if(Build.VERSION.SDK_INT>=33)PickerLibrary.get(this).resume();}
   // Foreground-only Album replication: this resumes polling and reconciles now, and
   // onPause stops it. Nothing here keeps the device awake or runs in the background.
   AlbumReplicaService.get(this).setListGenerationListener(generation->{try{emit("lakomics-list-generation",new JSONObject().put("generation",generation));}catch(JSONException ignored){}});
@@ -418,9 +440,9 @@ public final class MainActivity extends Activity {
   // Before start(): the pass and the long-poll stay suspended while there is no network.
   deviceSignals.register();
   AlbumReplicaService.get(this).start();}
- @Override protected void onPause(){foreground=false;emit("lakomics-pause",null);if(web!=null){web.onPause();web.pauseTimers();}PickerLibrary.get(this).pause();deviceSignals.unregister();AlbumReplicaService.get(this).stop();ExchangeService.get(this).setForeground(false);super.onPause();}
+ @Override protected void onPause(){if(resumeCover!=null)resumeCover.pause(web);foreground=false;emit("lakomics-pause",null);if(web!=null){web.onPause();web.pauseTimers();}PickerLibrary.get(this).pause();deviceSignals.unregister();AlbumReplicaService.get(this).stop();ExchangeService.get(this).setForeground(false);super.onPause();}
  @Override protected void onStop(){if(vault!=null)vault.stopped();
   // Secret notes lock when the app goes to the background; the WebView drops their content.
   if(notes!=null){notes.lockSecrets();emit("lakomics-notes-locked",null);}stopNonEssential();super.onStop();}
- @Override protected void onDestroy(){destroyed=true;deviceSignals.unregister();if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);AlbumReplicaService.get(this).setSignalsListener(null);ExchangeService.get(this).removeListener(exchangeListener);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();catalogCoverWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
+ @Override protected void onDestroy(){destroyed=true;if(resumeCover!=null)resumeCover.clear();deviceSignals.unregister();if(vault!=null)vault.destroy();AlbumReplicaService.get(this).setListGenerationListener(null);AlbumReplicaService.get(this).setSignalsListener(null);ExchangeService.get(this).removeListener(exchangeListener);stopRequests();workers.shutdownNow();mediaWorkers.shutdownNow();catalogCoverWorkers.shutdownNow();if(web!=null){web.removeJavascriptInterface("LakomicsNative");web.stopLoading();web.destroy();web=null;}super.onDestroy();}
 }

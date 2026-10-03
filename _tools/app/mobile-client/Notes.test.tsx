@@ -512,3 +512,18 @@ it('adds a tablet section under a chip filter and has no bottom quick-add field'
  expect(rows()).toHaveLength(1);expect(document.activeElement).toBe(rows()[0]);
  await waitFor(()=>expect(saves().at(-1)?.body).toContain('## 새 이름'));
 });
+
+it('excludes secret gates and editors from the native resume snapshot, then releases on leave',async()=>{
+ const sensitive=vi.fn();window.LakomicsNative={request:vi.fn(),cancel:vi.fn(),setResumeSnapshotSensitive:sensitive};
+ const secret:MobileNote={...note,id:'s'.repeat(32),title:'스냅샷 제외 메모',type:'secret',redacted:true,fields:[],memo:''};
+ mock.native.mockImplementation(state([secret]));
+ const props={active:true,backRef:{current:null},request:null};
+ const view=render(<Notes {...props}/>);
+ try {
+   await openNote('스냅샷 제외 메모');expect(sensitive).toHaveBeenLastCalledWith(true);
+   act(()=>window.dispatchEvent(new Event('lakomics-notes-locked')));
+   expect(sensitive).toHaveBeenLastCalledWith(true);
+   view.rerender(<Notes {...props} active={false}/>);expect(sensitive).toHaveBeenLastCalledWith(false);
+   view.unmount();expect(sensitive).toHaveBeenLastCalledWith(false);
+ } finally {delete window.LakomicsNative;}
+});

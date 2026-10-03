@@ -25,16 +25,18 @@ export function onVisible(callback:()=>void) {
 
 /** Effect-level primitive, also used when a poll owns an AbortController or subscription. */
 export function visibleInterval(callback:()=>void,delay:number,immediate=false) {
-  let timer:ReturnType<typeof setInterval>|undefined;
+  let timer:ReturnType<typeof setInterval>|undefined,paused=false;
   const clear=()=>{clearInterval(timer);timer=undefined;};
   const arm=()=>{
-    if(document.visibilityState==='hidden'){clear();return;}
+    if(paused||document.visibilityState==='hidden'){clear();return;}
     if(timer===undefined)timer=setInterval(callback,delay);
   };
-  const removeResume=onVisible(()=>{arm();callback();});
+  const pause=()=>{paused=true;clear();};
+  const removeResume=onVisible(()=>{paused=false;arm();callback();});
+  window.addEventListener('lakomics-pause',pause);
   document.addEventListener('visibilitychange',arm);
   arm();if(immediate&&document.visibilityState!=='hidden')callback();
-  return()=>{clear();removeResume();document.removeEventListener('visibilitychange',arm);};
+  return()=>{clear();removeResume();window.removeEventListener('lakomics-pause',pause);document.removeEventListener('visibilitychange',arm);};
 }
 
 export function useVisibleInterval(callback:()=>void,delay:number|null,immediate=false) {

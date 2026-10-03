@@ -259,7 +259,7 @@ export function App() {
     return promise;
   }, []);
 
-  const load = useCallback(async (view: View, cursor: string | null = null, previous: (string | null)[] = [], restore = 0, fresh = false, nextFilters: AssetFiltersValue = EMPTY_FILTERS):Promise<void> => {
+  const load = useCallback(async (view: View, cursor: string | null = null, previous: (string | null)[] = [], restore = 0, fresh = false, nextFilters: AssetFiltersValue = EMPTY_FILTERS):Promise<boolean|void> => {
     const visible = latest.current.page;
     const placeChanged=visible.version>0&&viewKey(visible.view,visible.filters)!==viewKey(view,nextFilters);
     if(placeChanged){clearSelection();if(latest.current.albumBatchOpen)closeAlbumBatch();}
@@ -347,6 +347,7 @@ export function App() {
       scroll.current = restored;
       setFilters(nextFilters);setFiltersOpen(null);
       setPage({ ...response, items, view, cursor, previous, restoreScroll:restored, generation, version:request.id, filters:nextFilters, tocRequest, ...(cached?.assetRanges?{assetRanges:cached.assetRanges}:{}) });
+      return true;
     } catch (reason) { if (gate.current.current(request.id)) {
       const recovered=await recoverSearch(view,reason,request.signal);
       if(!gate.current.current(request.id))return;
@@ -397,8 +398,10 @@ export function App() {
           viewCache.current.clear(); cancelMore(); clearMediaCache();
           // This device's own trash/restore moves the generation too; the viewer already
           // shows the result, so it stays open instead of closing under the user.
-          if (!trash.recent() && Date.now() - viewerEditAt.current > VIEWER_EDIT_GRACE_MS) setViewer(null);
-          await load(state.page.view,state.page.cursor,state.page.previous,scroll.current,true,state.page.filters);
+          const closeViewer = !trash.recent() && Date.now() - viewerEditAt.current > VIEWER_EDIT_GRACE_MS;
+          const committed = await load(state.page.view,state.page.cursor,state.page.previous,scroll.current,true,state.page.filters);
+          // Keep the viewer while the replacement list waits or fails, then swap together.
+          if (active && committed && closeViewer) setViewer(current=>current===state.viewer?null:current);
           setIndexRevision(value=>value+1);
         }
       } catch { /* Retain last committed view on transport failure; cache reuse still validates. */ }

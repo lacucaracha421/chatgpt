@@ -1,4 +1,4 @@
-import {act, cleanup, render} from '@testing-library/react';
+import {act, cleanup, fireEvent, render} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
 const mocks = vi.hoisted(() => ({loadThumbnail:vi.fn()}));
@@ -47,4 +47,19 @@ it('never retries assets that have no thumbnail, and cancels a pending retry on 
   expect(mocks.loadThumbnail).toHaveBeenCalledTimes(2);
   view.unmount(); await advance(60_000);
   expect(mocks.loadThumbnail).toHaveBeenCalledTimes(2);
+});
+
+it('holds a loaded cover when a refreshed preview waits to decode',async()=>{
+  const view=render(<Cover asset={{...asset,preview:'https://example.invalid/old'}} paused={false}/>);
+  const old=image() as HTMLImageElement;
+  await act(async()=>fireEvent.load(old));
+  view.rerender(<Cover asset={{...asset,preview:'https://example.invalid/new'}} paused={false}/>);
+  const next=document.querySelector<HTMLImageElement>('[data-stable-image-loading]')!;
+  let decoded!:()=>void;
+  Object.defineProperty(next,'decode',{value:()=>new Promise<void>(resolve=>{decoded=resolve;})});
+  await act(async()=>fireEvent.load(next));
+  expect(old.src).toBe('https://example.invalid/old');expect(old.style.visibility).toBe('');
+  expect(next.style.visibility).toBe('hidden');
+  await act(async()=>decoded());
+  expect(next.style.visibility).toBe('');expect(old.style.visibility).toBe('hidden');
 });

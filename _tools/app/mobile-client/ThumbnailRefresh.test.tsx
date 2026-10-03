@@ -1,4 +1,4 @@
-import {act, cleanup, render, waitFor} from '@testing-library/react';
+import {act, cleanup, fireEvent, render, waitFor} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {Gallery} from './Gallery';
 import type {Asset} from './types';
@@ -33,4 +33,25 @@ it('loads a newly available thumbnail for the same mounted gallery asset', async
   // Unrelated metadata rerenders must not schedule an unbounded retry loop.
   view.rerender(component({...asset,thumbnail_available:true,creator_name:'Updated'}));
   expect(mocks.loadThumbnail).toHaveBeenCalledTimes(2);
+});
+
+it('keeps the painted thumbnail while a resume publication replaces its revision and decodes',async()=>{
+  const component=(revision:string)=><Gallery {...galleryProps} items={[{...asset,thumbnail_available:true,thumbnail_revision:revision}]}/>;
+  const view=render(component('one'));
+  await waitFor(()=>expect(view.container.querySelector('img')?.getAttribute('src')).toBe(preview));
+  const old=view.container.querySelector('img')!;
+  await act(async()=>fireEvent.load(old));
+  const nextUrl=preview+'-two';
+  mocks.loadThumbnail.mockImplementation(async(item:Asset)=>({...item,preview:nextUrl}));
+  view.rerender(component('two'));
+  await waitFor(()=>expect(view.container.querySelector('[data-stable-image-loading]')?.getAttribute('src')).toBe(nextUrl));
+  const next=view.container.querySelector<HTMLImageElement>('[data-stable-image-loading]')!;
+  let decoded!:()=>void;
+  const decoding=new Promise<void>(resolve=>{decoded=resolve;});
+  Object.defineProperty(next,'decode',{value:()=>decoding});
+  await act(async()=>fireEvent.load(next));
+  expect(old.getAttribute('src')).toBe(preview);expect(old.style.visibility).toBe('');
+  expect(next.style.visibility).toBe('hidden');
+  await act(async()=>decoded());
+  expect(next.style.visibility).toBe('');expect(old.style.visibility).toBe('hidden');
 });
