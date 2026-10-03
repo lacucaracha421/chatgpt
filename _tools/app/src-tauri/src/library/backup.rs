@@ -1,6 +1,8 @@
 use std::{
+    collections::HashMap,
     fs::{self, OpenOptions},
     path::{Path, PathBuf},
+    time::SystemTime,
 };
 
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -37,6 +39,38 @@ struct BackupEntry {
     path: PathBuf,
 }
 
+#[derive(Debug, Default)]
+pub(super) struct BackupVerificationCache {
+    results: HashMap<PathBuf, ((u64, SystemTime), bool)>,
+}
+
+impl BackupVerificationCache {
+    fn verify(&mut self, path: &Path) -> bool {
+        let Some(fingerprint) = snapshot_fingerprint(path) else {
+            self.results.remove(path);
+            return verify_snapshot(path).is_ok();
+        };
+        if let Some((cached_fingerprint, valid)) = self.results.get(path) {
+            if *cached_fingerprint == fingerprint {
+                return *valid;
+            }
+        }
+        let valid = verify_snapshot(path).is_ok();
+        // Do not cache or offer a snapshot that changed during verification.
+        if snapshot_fingerprint(path) != Some(fingerprint) {
+            self.results.remove(path);
+            return false;
+        }
+        self.results.insert(path.to_path_buf(), (fingerprint, valid));
+        valid
+    }
+}
+
+fn snapshot_fingerprint(path: &Path) -> Option<(u64, SystemTime)> {
+    let metadata = fs::metadata(path).ok()?;
+    Some((metadata.len(), metadata.modified().ok()?))
+}
+
 impl Library {
     pub fn create_pre_migration_backup(&self, label: &str) -> Result<MetadataBackup, LibraryError> {
         if label != "legacy-lakomics" {
@@ -70,27 +104,38 @@ impl Library {
             .backup_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let entries = backup_entries(&self.root)?;
-        if entries.iter().any(|entry| {
-            entry.metadata.kind == BackupKind::Daily
-                && entry.metadata.created_at[..10] == now.to_rfc3339()[..10]
-        }) {
-            return Ok(None);
+        let directory = self.root.join("backups");
+        for entry in fs::read_dir(&directory)
+            .map_err(|source| backup_error(&directory, source))?
+            .filter_map(Result::ok)
+        {
+            let name = entry.file_name();
+            let Some((kind, created_at, _)) = name.to_str().and_then(parse_backup_filename) else {
+                continue;
+            };
+            // Only today's candidates need a stat. Nonempty files cover the date;
+            // corruption is checked when listing/restoring, without reading history here.
+            if kind == BackupKind::Daily && created_at.date_naive() == now.date_naive()
+                && entry.metadata().is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
+            {
+                return Ok(None);
+            }
         }
 
         let path = backup_path(&self.root, BackupKind::Daily, now, None);
         let connection = self.connection()?;
         create_verified_snapshot_released(connection, &path)?;
-        rotate_daily_backups(&self.root)?;
-        Ok(backup_entry(&path).map(|entry| entry.metadata))
+        rotate_daily_backups(&self.root, &path)?;
+        // Creation already verified this snapshot; returning metadata needs no second check.
+        Ok(backup_file_entry(&path).map(|entry| entry.metadata))
     }
 
     pub fn list_backups(&self) -> Result<Vec<MetadataBackup>, LibraryError> {
-        let _backup_guard = self
+        let mut verification_cache = self
             .backup_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        Ok(backup_entries(&self.root)?
+        Ok(backup_entries(&self.root, &mut verification_cache)?
             .into_iter()
             .map(|entry| entry.metadata)
             .collect())
@@ -98,7 +143,7 @@ impl Library {
 
     pub fn restore_backup(&self, backup_id: &str) -> Result<(), LibraryError> {
         let _video_scan_guard = self.video_similarity_restore_guard()?;
-        let _backup_guard = self
+        let mut verification_cache = self
             .backup_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -110,7 +155,7 @@ impl Library {
             .database_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let selected = backup_entries(&self.root)?
+        let selected = backup_entries(&self.root, &mut verification_cache)?
             .into_iter()
             .find(|entry| entry.metadata.id == backup_id)
             .ok_or(LibraryError::InvalidBackup)?;
@@ -205,6 +250,8 @@ impl Library {
         // be rolled back to an older snapshot (ADR-0037 decision 6). This reads the
         // still-intact current database, so a refusal preserves it exactly.
         self.refuse_restore_with_adopted_authority()?;
+        // Listings may use cached integrity results. Always check the selected file afresh.
+        verify_snapshot(selected_path)?;
         let current = self.root.join("library.sqlite");
         let temporary = self.root.join("library.sqlite.restore.part");
         let recovery = self.root.join(format!(
@@ -289,22 +336,44 @@ fn restore_crash_point(_point: &str) {
     if std::env::var("LAKOMICS_TEST_RESTORE_CRASH").as_deref() == Ok(_point) { std::process::exit(88); }
 }
 
-fn backup_entries(root: &Path) -> Result<Vec<BackupEntry>, LibraryError> {
+fn backup_entries(
+    root: &Path,
+    verification_cache: &mut BackupVerificationCache,
+) -> Result<Vec<BackupEntry>, LibraryError> {
+    Ok(backup_file_entries(root)?
+        .into_iter()
+        .filter(|entry| {
+            entry.metadata.byte_size > 0 && verification_cache.verify(&entry.path)
+        })
+        .collect())
+}
+
+// Filename ownership and filesystem metadata are sufficient for daily scheduling/retention.
+// Integrity verification belongs to creation, restore listings and the restore itself.
+fn backup_file_entries(root: &Path) -> Result<Vec<BackupEntry>, LibraryError> {
     let directory = root.join("backups");
     let entries = fs::read_dir(&directory)
         .map_err(|source| backup_error(&directory, source))?
         .filter_map(Result::ok)
-        .filter_map(|entry| backup_entry(&entry.path()))
+        .filter_map(|entry| backup_file_entry(&entry.path()))
         .collect::<Vec<_>>();
     Ok(entries)
 }
 
 fn backup_entry(path: &Path) -> Option<BackupEntry> {
-    let metadata = fs::metadata(path).ok()?;
-    if !metadata.is_file() || metadata.len() == 0 || verify_snapshot(path).is_err() {
+    let entry = backup_file_entry(path)?;
+    if entry.metadata.byte_size == 0 || verify_snapshot(path).is_err() {
         return None;
     }
+    Some(entry)
+}
+
+fn backup_file_entry(path: &Path) -> Option<BackupEntry> {
     let (kind, created_at, id) = parse_backup_filename(path.file_name()?.to_str()?)?;
+    let metadata = fs::metadata(path).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
     Some(BackupEntry {
         metadata: MetadataBackup {
             id,
@@ -365,18 +434,20 @@ fn backup_path(
     root.join("backups").join(name)
 }
 
-fn rotate_daily_backups(root: &Path) -> Result<(), LibraryError> {
-    let mut daily = backup_entries(root)?
+fn rotate_daily_backups(root: &Path, created_path: &Path) -> Result<(), LibraryError> {
+    let mut daily = backup_file_entries(root)?
         .into_iter()
         .filter(|entry| entry.metadata.kind == BackupKind::Daily)
         .collect::<Vec<_>>();
     daily.sort_by(|left, right| {
-        right
-            .metadata
-            .created_at
-            .cmp(&left.metadata.created_at)
+        // Retain the newly verified snapshot even if the system clock moved backwards.
+        (right.path == created_path)
+            .cmp(&(left.path == created_path))
+            .then_with(|| right.metadata.created_at.cmp(&left.metadata.created_at))
             .then_with(|| right.metadata.id.cmp(&left.metadata.id))
     });
+    // Empty/corrupt owned daily files count toward retention too. Never inspect or rotate
+    // other backup kinds, unowned names, or unfinished files with a `.part` suffix.
     for entry in daily.into_iter().skip(DAILY_BACKUP_LIMIT) {
         remove_file_if_exists(&entry.path)?;
     }
@@ -520,6 +591,8 @@ fn verify_snapshot(destination: &Path) -> Result<(), LibraryError> {
         path: destination.to_path_buf(),
         source: std::io::Error::other(source),
     })?;
+    #[cfg(test)]
+    SNAPSHOT_QUICK_CHECKS.with(|checks| checks.borrow_mut().push(destination.to_path_buf()));
     let quick_check: String = snapshot
         .pragma_query_value(None, "quick_check", |row| row.get(0))
         .map_err(|source| LibraryError::Backup {
@@ -536,6 +609,11 @@ fn verify_snapshot(destination: &Path) -> Result<(), LibraryError> {
         return Err(LibraryError::InvalidBackup);
     }
     Ok(())
+}
+
+#[cfg(test)]
+thread_local! {
+    static SNAPSHOT_QUICK_CHECKS: std::cell::RefCell<Vec<PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 #[cfg(test)]
@@ -758,6 +836,180 @@ mod tests {
             "daily-20260801-120000-550e8400-e29b-41d4-a716-446655440000.sqlite"
         )
         .is_some());
+    }
+
+    fn take_quick_checks() -> Vec<PathBuf> {
+        super::SNAPSHOT_QUICK_CHECKS.with(|checks| std::mem::take(&mut *checks.borrow_mut()))
+    }
+
+    fn daily_paths(library: &Library) -> Vec<PathBuf> {
+        fs::read_dir(library.root().join("backups"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.is_file()
+                    && path.file_name().and_then(|name| name.to_str())
+                        .and_then(parse_backup_filename)
+                        .is_some_and(|(kind, _, _)| kind == BackupKind::Daily)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn daily_startup_only_verifies_the_new_snapshot() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        for day in 1..=8 {
+            let date = Utc.with_ymd_and_hms(2026, 8, day, 12, 0, 0).unwrap();
+            let daily = super::backup_path(library.root(), BackupKind::Daily, date, None);
+            fs::write(daily, b"unrelated daily snapshot").unwrap();
+            let migration = super::backup_path(
+                library.root(), BackupKind::PreMigration, date, Some(1),
+            );
+            fs::write(migration, b"unrelated migration snapshot").unwrap();
+        }
+        let today = Utc.with_ymd_and_hms(2026, 8, 10, 12, 0, 0).unwrap();
+        take_quick_checks();
+
+        let created = library.ensure_daily_backup(today).unwrap().unwrap();
+        let checks = take_quick_checks();
+        assert_eq!(checks.len(), 1, "startup must not verify historical snapshots");
+        assert!(checks[0].to_string_lossy().contains(&created.id));
+        assert!(library.ensure_daily_backup(today).unwrap().is_none());
+        assert!(take_quick_checks().is_empty());
+    }
+
+    #[test]
+    fn daily_rotation_uses_owned_filenames_even_for_corrupt_or_empty_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        for day in 1..=9 {
+            let date = Utc.with_ymd_and_hms(2026, 8, day, 12, 0, 0).unwrap();
+            let path = super::backup_path(library.root(), BackupKind::Daily, date, None);
+            fs::write(path, if day == 9 { &b""[..] } else { &b"corrupt"[..] }).unwrap();
+        }
+        let directory = library.root().join("backups");
+        let date = Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap();
+        let mut preserved = vec![
+            super::backup_path(library.root(), BackupKind::PreMigration, date, Some(1)),
+            super::backup_path(library.root(), BackupKind::PreRestore, date, None),
+            directory.join("legacy-migration-20260801T120000Z.json"),
+            directory.join("daily-manual.sqlite"),
+            super::backup_path(library.root(), BackupKind::Daily, date, None)
+                .with_extension("sqlite.part"),
+        ];
+        for path in &preserved {
+            fs::write(path, b"keep").unwrap();
+        }
+        let daily_directory = super::backup_path(library.root(), BackupKind::Daily, date, None);
+        fs::create_dir(&daily_directory).unwrap();
+        preserved.push(daily_directory);
+
+        library.ensure_daily_backup(Utc.with_ymd_and_hms(2026, 8, 10, 12, 0, 0).unwrap())
+            .unwrap().unwrap();
+        let mut dates = daily_paths(&library).into_iter().map(|path| {
+            parse_backup_filename(path.file_name().unwrap().to_str().unwrap())
+                .unwrap().1.format("%Y-%m-%d").to_string()
+        }).collect::<Vec<_>>();
+        dates.sort();
+        assert_eq!(dates, (4..=10).map(|day| format!("2026-08-{day:02}")).collect::<Vec<_>>());
+        assert!(preserved.iter().all(|path| path.exists()));
+    }
+
+    #[test]
+    fn daily_rotation_preserves_the_created_snapshot_when_the_clock_moves_backwards() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        for day in 2..=9 {
+            let date = Utc.with_ymd_and_hms(2026, 8, day, 12, 0, 0).unwrap();
+            let path = super::backup_path(library.root(), BackupKind::Daily, date, None);
+            fs::write(path, b"future snapshot").unwrap();
+        }
+        let created = library.ensure_daily_backup(
+            Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap(),
+        ).unwrap().unwrap();
+        let paths = daily_paths(&library);
+        assert_eq!(paths.len(), super::DAILY_BACKUP_LIMIT);
+        assert!(paths.iter().any(|path| path.to_string_lossy().contains(&created.id)));
+        let mut days = paths.iter().map(|path| {
+            parse_backup_filename(path.file_name().unwrap().to_str().unwrap()).unwrap().1
+                .format("%d").to_string()
+        }).collect::<Vec<_>>();
+        days.sort();
+        assert_eq!(days, ["01", "04", "05", "06", "07", "08", "09"]);
+    }
+
+    #[test]
+    fn empty_daily_allows_creation_and_nonempty_corrupt_daily_blocks_duplicate_creation() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let today = Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap();
+        let empty = super::backup_path(library.root(), BackupKind::Daily, today, None);
+        fs::write(empty, b"").unwrap();
+        take_quick_checks();
+        let created = library.ensure_daily_backup(today).unwrap().unwrap();
+        assert_eq!(take_quick_checks().len(), 1);
+        let path = daily_paths(&library).into_iter()
+            .find(|path| path.to_string_lossy().contains(&created.id)).unwrap();
+        fs::write(path, b"nonempty corrupt daily").unwrap();
+        assert!(library.ensure_daily_backup(today).unwrap().is_none());
+        assert!(take_quick_checks().is_empty());
+        assert!(library.list_backups().unwrap().is_empty());
+    }
+
+    #[test]
+    fn backup_list_cache_invalidates_on_size_or_mtime_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        for day in 1..=2 {
+            library.ensure_daily_backup(Utc.with_ymd_and_hms(2026, 8, day, 12, 0, 0).unwrap())
+                .unwrap().unwrap();
+        }
+        take_quick_checks();
+        assert_eq!(library.list_backups().unwrap().len(), 2);
+        assert_eq!(take_quick_checks().len(), 2);
+        assert_eq!(library.clone().list_backups().unwrap().len(), 2);
+        assert!(take_quick_checks().is_empty());
+
+        let paths = daily_paths(&library);
+        let first = &paths[0];
+        let metadata = fs::metadata(first).unwrap();
+        let file = fs::OpenOptions::new().write(true).open(first).unwrap();
+        file.set_len(metadata.len() / 2).unwrap();
+        file.set_times(fs::FileTimes::new().set_modified(metadata.modified().unwrap())).unwrap();
+        drop(file);
+        assert_eq!(library.list_backups().unwrap().len(), 1);
+        assert_eq!(take_quick_checks(), [first.clone()]);
+        assert_eq!(library.list_backups().unwrap().len(), 1);
+        assert!(take_quick_checks().is_empty(), "cache negative verification results too");
+
+        let second = &paths[1];
+        let modified = fs::metadata(second).unwrap().modified().unwrap() + Duration::from_secs(1);
+        fs::OpenOptions::new().write(true).open(second).unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified)).unwrap();
+        assert_eq!(library.list_backups().unwrap().len(), 1);
+        assert_eq!(take_quick_checks(), [second.clone()]);
+    }
+
+    #[test]
+    fn restore_reverifies_the_selected_snapshot_even_when_its_cache_key_is_unchanged() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let created = library.ensure_daily_backup(
+            Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap(),
+        ).unwrap().unwrap();
+        assert_eq!(library.list_backups().unwrap().len(), 1);
+        let path = daily_paths(&library).pop().unwrap();
+        let metadata = fs::metadata(&path).unwrap();
+        fs::write(&path, vec![0xff; metadata.len() as usize]).unwrap();
+        fs::OpenOptions::new().write(true).open(&path).unwrap()
+            .set_times(fs::FileTimes::new().set_modified(metadata.modified().unwrap())).unwrap();
+        take_quick_checks();
+        assert_eq!(library.list_backups().unwrap().len(), 1);
+        assert!(take_quick_checks().is_empty());
+        assert!(library.restore_backup(&created.id).is_err());
+        assert!(take_quick_checks().contains(&path));
+        assert!(library.list_classifications().is_ok());
     }
 
     #[test]
