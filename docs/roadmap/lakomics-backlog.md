@@ -994,8 +994,8 @@ library, PC render harness, tablet 0.8.98 on device online, server). Numbers bel
   CPU 21 % → 3.4 % average, idle Tctl 56.5 → 49 °C (app closed: 42.6 °C).
 - **TODO — PC idle residue:** after the fixes the idle app still uses ~3–6 % of a core, mostly the main (WebView/UI)
   thread rather than a tokio worker; attribute it (WebView timers/animations vs native ticks) on a quiet PC.
-- **Decision pending (user) — backup retention:** `backups/` holds 18 pre-migration snapshots (~15.4 GiB) that nothing
-  prunes. Proposed: keep the newest 3 pre-migration snapshots (dailies keep 7); deletion only with approval.
+- **Done 2026-10-03 — backup retention:** user approved; 15 old pre-migration snapshots deleted (24 → 11 GB) and the
+  app keeps the newest 3 pre-migration snapshots (af097687).
 - **TODO — PC Collections first open:** native marks show ~0.6 s to the list and ~1.7 s more until the first cover is
   visible (test library, debug build); cover loading is the remaining cost.
 - **Server audit 2026-10-02 (read-only, two Astra auditors) — S1–S3 done and deployed (61eb4850); remaining:**
@@ -1010,6 +1010,31 @@ library, PC render harness, tablet 0.8.98 on device online, server). Numbers bel
     hot-count churn; refresh/ledger history without retention; collections list does ~144 extra queries per 48-item
     page; suggestion caches rebuilt on every publication; startup re-aggregates all tag counts; move thumbnails to
     immutable `derived/` keys (removes most ticket HEADs).
+
+## AUDIT-20261003 — read-only audits of 2026-10-03 (left after the fix rounds)
+
+Status: `TODO` — from four read-only audits at `d318e534` (commit review, Android native, PC idle CPU, server round 2).
+Fixed findings are recorded in their commits; these were deliberately left for later. Claims are the auditors'
+unless marked verified; measure on the device/PC before optimising.
+
+- **Android native (measure first):** startup does Notes DB setup, the full thumbnail-cache scan/journal restore and
+  the first Picker JSON read (up to 96 MiB) on the UI thread (`MainActivity` onCreate/onResume, `ThumbnailCache`,
+  `PickerLibrary`) — ANR risk with big data; pause stops exchange/replica timers but not queued uploads/ZIPs, running
+  downloads or replica page walks (`ExchangeService`, `AlbumReplicaService`); `LibraryDocumentsProvider` holds the
+  global `CONNECTION_LOCK` during HTTP and page-cache writes, blocking the 4 media workers; exchange `outgoing` /
+  `announced` history and the single executor queue grow for the session; Notes status decrypts and returns every body
+  each sync; a full 3 GiB thumbnail cache re-sorts every file on each miss; `signal.cancel()` disconnects sockets on
+  the UI thread in onPause/onStop.
+- **PC idle residue (follow-up to PERF-20261002):** verified — `workload.rs` asks the window `is_focused`/`is_visible`
+  every second (each a main-loop round trip); `character_incremental_status` polls every 5 s idle,
+  `cloud_backfill_progress` and `similarity_review_inbound_status` every 10 s even unfocused. Unverified: video hover
+  preview keeps swapping frames every 720 ms after Alt-Tab if the pointer stays on a tile; `CollectionReleases` sets a
+  fresh status object every 5 s; 48 px blur layer on the work screen and a permanent `will-change` on the filmstrip.
+- **Server:** ticket executor threads are joined without a deadline at shutdown (a hung HEAD/DNS outlives the 6 s
+  bound); thumbnail temp objects/sessions and CAS-lost final objects are never collected (manual CLI only); search
+  suggestions normalise the whole vocabulary per keystroke and catalog fallback pages build the matching set twice;
+  personal-edit/noop history and refresh receipts have no retention; `library_thumbnails.py` scans all keys at every
+  start. The 14-day deletion of old `library/{id}/thumbnail` objects is not implemented yet (see PERF-20261002).
 
 ## EXTERNAL-REFS-20261002 — external projects worth borrowing from (reference list)
 
