@@ -40,7 +40,7 @@ it('keeps the exact old DOM inert while waiting, overlaps when ready, removes it
   view.rerender(tree(false)); await tick();
   expect(old.isConnected).toBe(true); expect(screen.getByRole('button', {name: 'new'})).toBeTruthy();
   expect(animate.mock.calls.map(call => call[1])).toEqual([{duration: 160, easing: 'cubic-bezier(0.2, 0, 0, 1)'}, {duration: 380, easing: EASE_SHEET}]);
-  expect(animate.mock.calls[1][0]).toEqual([{transform: 'translateY(12px)'}, {transform: 'none'}]);
+  expect(animate.mock.calls[1][0]).toEqual([{top: '12px', bottom: '-12px'}, {top: '0px', bottom: '0px'}]);
   await tick(160); expect(old.isConnected).toBe(false);
   expect(screen.getByRole('button', {name: 'new'})).toBeTruthy();
 });

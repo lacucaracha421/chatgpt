@@ -532,7 +532,7 @@ it.each([false,true])('switches ready bottom tabs with the approved motion and r
       if(reduced)expect(animate).not.toHaveBeenCalled();
       else expect(animate.mock.calls).toEqual(expect.arrayContaining([
         [[{opacity:0},{opacity:1}],{duration:160,easing:'cubic-bezier(0.2, 0, 0, 1)'}],
-        [[{transform:'translateY(12px)'},{transform:'none'}],{duration:380,easing:'cubic-bezier(.32,.72,0,1)'}],
+        [[{top:'12px',bottom:'-12px'},{top:'0px',bottom:'0px'}],{duration:380,easing:'cubic-bezier(.32,.72,0,1)'}],
       ]));
       await waitFor(()=>expect(body.querySelector('.motion-stage')?.getAttribute('data-motion-shown')).toBe(key));
       if(key!=='home'){

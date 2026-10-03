@@ -64,7 +64,9 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady}:
       if (reducedMotion() || typeof incoming.animate !== 'function') { commit(); return; }
       setArriving(activeKey);
       animations.push(incoming.animate([{opacity: 0}, {opacity: 1}], {duration: 160, easing: EASE_STANDARD}));
-      animations.push(incoming.animate([{transform: 'translateY(12px)'}, {transform: 'none'}], {duration: 380, easing: EASE_SHEET}));
+      // Move the box (top/bottom), not a transform: a transformed view would become the containing
+      // block of its fixed bars (the tablet scrubber), which then jump during the rise.
+      animations.push(incoming.animate([{top: '12px', bottom: '-12px'}, {top: '0px', bottom: '0px'}], {duration: 380, easing: EASE_SHEET}));
       animations[0].onfinish = commit;
       // Some native webviews do not dispatch finish after backgrounding.
       timer = window.setTimeout(() => { animations[0]?.finish?.(); commit(); }, 160);
