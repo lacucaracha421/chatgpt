@@ -37,8 +37,9 @@ describe('catalog cover retention',()=>{
   beforeEach(()=>{
     work={...item,thumbnailUrl:'https://example.invalid/cover.jpg'};revision='p1';observers=[];
     vi.stubGlobal('IntersectionObserver',class {
-      constructor(callback:(entries:{isIntersecting:boolean}[])=>void){observers.push(visible=>callback([{isIntersecting:visible}]));}
-      observe(){} disconnect(){}
+      constructor(private callback:IntersectionObserverCallback){}
+      observe(target:Element){observers.push(visible=>this.callback([{target,isIntersecting:visible} as IntersectionObserverEntry],this as unknown as IntersectionObserver));}
+      unobserve(){} disconnect(){}
     });
     mocks.native.mockResolvedValue({url:preview});
     mocks.api.mockImplementation(async(path:string)=>path.includes('/status')?{...capableStatus,publicationRevision:revision}:{...page,items:[work],publicationRevision:revision,countToken:null,countStatus:'ready',totalCount:1});
@@ -459,7 +460,7 @@ describe('mobile catalog reads',()=>{
     expect(screen.getByText('밤의 도서관')).toBeTruthy();
   });
   it('keeps the detail cover and back action without a decorative backdrop',async()=>{
-    vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{target,isIntersecting:true} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} disconnect(){}});
+    vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{target,isIntersecting:true} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} unobserve(){} disconnect(){}});
     mocks.api.mockImplementation(async(path:string)=>{
       if(path.includes('/status'))return capableStatus;
       if(path.includes('/works/'))return {publicationRevision:'p1',item:{...item,thumbnailUrl:'https://example.invalid/cover.jpg',tagGroups:[],uploader:null,category:1,updated:null,fileSize:null,rating:null}};
@@ -788,7 +789,7 @@ describe('appended card arrival',()=>{
   beforeEach(()=>{animate.mockReset();(HTMLElement.prototype as unknown as {animate:unknown}).animate=function(this:HTMLElement,...args:unknown[]){animate(this,...args);};});
   afterEach(()=>{delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
   it('never hides or fades the late cover after the appended card timeout',async()=>{
-    vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{target,isIntersecting:true} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} disconnect(){}});
+    vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{target,isIntersecting:true} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} unobserve(){} disconnect(){}});
     const second:CatalogItem={...item,providerWorkId:'43',groupId:'group-2',title:'계절의 기록',thumbnailUrl:'https://example.test/c.jpg',versionCount:1};
     vi.spyOn(catalogMedia,'catalogImageTicket').mockResolvedValue({url:'data:image/png;base64,AA'} as Awaited<ReturnType<typeof catalogMedia.catalogImageTicket>>);
     mocks.api.mockImplementation(async(path:string)=>{
@@ -806,7 +807,7 @@ describe('appended card arrival',()=>{
     expect(animate.mock.calls.filter(([element])=>element===cover)).toHaveLength(0);
   });
   it('holds a card appended by scrolling until its cover decodes, then rises the whole card in once',async()=>{
-    vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{target,isIntersecting:true} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} disconnect(){}});
+    vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{target,isIntersecting:true} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} unobserve(){} disconnect(){}});
     const second:CatalogItem={...item,providerWorkId:'43',groupId:'group-2',title:'계절의 기록',thumbnailUrl:'https://example.test/c.jpg',versionCount:1};
     vi.spyOn(catalogMedia,'catalogImageTicket').mockResolvedValue({url:'data:image/png;base64,AA'} as Awaited<ReturnType<typeof catalogMedia.catalogImageTicket>>);
     mocks.api.mockImplementation(async(path:string)=>{

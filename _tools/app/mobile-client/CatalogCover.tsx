@@ -4,14 +4,7 @@ import {catalogImageTicket} from './catalogMedia';
 import {catalogCoverDecoded} from './catalogPerf';
 import {usePrivacyMode} from './privacyMode';
 import type {CatalogItem} from './catalogModel';
-
-/** Two real card rows, including the grid gap, rather than a fixed device-specific distance. */
-export function catalogCoverMargin(host:HTMLElement){
-  const card=host.closest('.catalog-card')??host.parentElement??host;
-  const grid=card.parentElement;
-  const gap=grid?parseFloat(getComputedStyle(grid).rowGap)||0:0;
-  return Math.ceil(2*(card.getBoundingClientRect().height+gap));
-}
+import {observeCatalogCover} from './catalogCoverObservers';
 /** A nearby cover stays subscribed through quick viewport exits; a far cover is canceled. */
 export function CatalogCover({item,revision,active,onUrl,arrival}:{item:Pick<CatalogItem,'provider'|'providerWorkId'|'thumbnailUrl'>;revision:string;active:boolean;onUrl?(url:string|null):void;arrival?:CardArrival}){
   const [privacy] = usePrivacyMode();
@@ -20,31 +13,7 @@ export function CatalogCover({item,revision,active,onUrl,arrival}:{item:Pick<Cat
   const source=JSON.stringify([item.provider,item.providerWorkId,item.thumbnailUrl,revision]);
   useEffect(()=>{
     const element=host.current;if(!element)return;
-    const root=element.closest('.catalog-scroll, .catalog-detail, .catalog-edition-row');
-    if(!window.IntersectionObserver){
-      const measure=()=>{
-        const box=element.getBoundingClientRect(),bounds=root?.getBoundingClientRect()??{top:0,bottom:window.innerHeight,left:0,right:window.innerWidth};
-        const margin=catalogCoverMargin(element),horizontal=box.right>bounds.left&&box.left<bounds.right;
-        visible.current=box.height>0&&horizontal&&box.bottom>bounds.top&&box.top<bounds.bottom;
-        setNear(box.height>0&&horizontal&&box.bottom>bounds.top-margin&&box.top<bounds.bottom+margin);
-      };
-      measure();window.addEventListener('scroll',measure,true);window.addEventListener('resize',measure);
-      return()=>{window.removeEventListener('scroll',measure,true);window.removeEventListener('resize',measure);};
-    }
-    const onscreen=new IntersectionObserver(entries=>{visible.current=entries.some(e=>e.isIntersecting);},{root});
-    onscreen.observe(element);
-    let nearby:IntersectionObserver|null=null;
-    const resize=()=>{
-      nearby?.disconnect();
-      const margin=catalogCoverMargin(element);
-      nearby=new IntersectionObserver(entries=>setNear(entries.some(e=>e.isIntersecting)),{root,rootMargin:`${margin}px 0px`});
-      nearby.observe(element);
-    };
-    resize();
-    const sizing=window.ResizeObserver?new ResizeObserver(resize):null;
-    sizing?.observe(element.closest('.catalog-card')??element);
-    window.addEventListener('resize',resize);
-    return()=>{onscreen.disconnect();nearby?.disconnect();sizing?.disconnect();window.removeEventListener('resize',resize);};
+    return observeCatalogCover(element,value=>{visible.current=value;},setNear);
   },[]);
   useEffect(()=>{
     if(privacy||!active||!near||!item.thumbnailUrl||loaded.current===source)return;setFailed(null);

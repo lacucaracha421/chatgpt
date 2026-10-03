@@ -17,7 +17,7 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, 'animate', {configurable: true, value: animate});
 });
 afterEach(() => { cleanup(); delete (HTMLElement.prototype as Partial<HTMLElement>).animate; vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks(); change = undefined; });
-const tick = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+const tick = async (ms = 32) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 
 it('shares the exact prototype spring samples with CSS and falls back without linear()', () => {
   const css = readFileSync('src/styles/tokens.css', 'utf8');
@@ -103,8 +103,53 @@ it('commits explicit readiness changes even when the incoming DOM does not chang
   view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b>empty</b>}} ready={() => false}/>);
   expect(screen.getByText('old').isConnected).toBe(true); expect(animate).not.toHaveBeenCalled();
   view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b>empty</b>}} ready={() => true}/>);
+  expect(animate).not.toHaveBeenCalled();
+  await tick();
   expect(animate).toHaveBeenCalledTimes(2);
   await tick(160); expect(screen.queryByText('old')).toBeNull();
+});
+
+it('keeps the old view visible for a rendering frame after readiness before starting motion', async () => {
+  const view = render(<AreaSwitch activeKey="home" views={{home: <b>old</b>}} />);
+  const tree = (ready: boolean) => <AreaSwitch activeKey="catalog" views={{catalog: <button>catalog</button>}} ready={() => ready}/>;
+  view.rerender(tree(false)); await tick(0);
+  view.rerender(tree(true));
+  expect(animate).not.toHaveBeenCalled();
+  await tick(16); expect(animate).not.toHaveBeenCalled();
+  expect(screen.getByText('old').closest<HTMLElement>('[data-motion-view]')?.style.visibility).toBe('');
+  expect(screen.getByText('catalog').closest<HTMLElement>('[data-motion-view]')?.style.visibility).toBe('hidden');
+  await tick(16); expect(animate).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole('button', {name: 'catalog'})).toBeTruthy();
+});
+
+it('rechecks readiness during the frame wait and cancels a superseded ready view', async () => {
+  const view = render(<AreaSwitch activeKey="home" views={{home: <b>old</b>}} />);
+  const tree = (ready: boolean) => <AreaSwitch activeKey="catalog" views={{catalog: <b>catalog</b>}} ready={() => ready}/>;
+  view.rerender(tree(true)); await tick(16);
+  view.rerender(tree(false)); await tick(); expect(animate).not.toHaveBeenCalled();
+  view.rerender(tree(true)); await tick(16);
+  view.rerender(<AreaSwitch activeKey="notes" views={{notes: <b>notes</b>}}/>);
+  await tick(16); expect(animate).not.toHaveBeenCalled();
+  await tick(16); expect(animate).toHaveBeenCalledTimes(2);
+  expect(animate.mock.contexts.every(host => (host as HTMLElement).dataset.motionView === 'notes')).toBe(true);
+});
+
+it('keeps the 1s cap even when rendering frames are suspended', async () => {
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 99));
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  const view = render(<AreaSwitch activeKey="home" views={{home: <b>old</b>}}/>);
+  view.rerender(<AreaSwitch activeKey="catalog" views={{catalog: <b>catalog</b>}}/>);
+  await tick(999); expect(animate).not.toHaveBeenCalled();
+  await tick(1); expect(animate).toHaveBeenCalledTimes(2);
+  await tick(160); expect(screen.queryByText('old')).toBeNull();
+});
+
+it('skips pending frames when reduced motion is enabled during the readiness wait', async () => {
+  const view = render(<AreaSwitch activeKey="home" views={{home: <b>old</b>}}/>);
+  view.rerender(<AreaSwitch activeKey="catalog" views={{catalog: <b>catalog</b>}}/>);
+  reduce = true; act(() => change?.());
+  expect(screen.queryByText('old')).toBeNull(); expect(animate).not.toHaveBeenCalled();
+  await tick(); expect(animate).not.toHaveBeenCalled();
 });
 it('finishes an overlapping switch immediately when reduced motion is enabled', async () => {
   const view = render(<AreaSwitch activeKey="home" views={{home: <b>home</b>}} />);

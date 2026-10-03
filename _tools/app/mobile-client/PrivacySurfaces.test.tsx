@@ -37,7 +37,7 @@ it('masks every catalog cover use without a ticket and reports no cover URL',()=
  expect(mocks.ticket).not.toHaveBeenCalled();expect(onUrl).toHaveBeenLastCalledWith(null);
 });
 it('immediately removes a decoded catalog cover and clears its published URL',async()=>{
- vi.stubGlobal('IntersectionObserver',class{constructor(private callback:(entries:{isIntersecting:boolean}[])=>void){} observe(){this.callback([{isIntersecting:true}]);} disconnect(){}});
+ vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{target,isIntersecting:true} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} unobserve(){} disconnect(){}});
  mocks.ticket.mockResolvedValue({url:'https://app.lakomics.local/media-cache/cover'});const onUrl=vi.fn();
  const {container}=render(<><Preference/><CatalogCover item={item} revision="r" active onUrl={onUrl}/></>);
  await waitFor(()=>expect(container.querySelector('img')).toBeTruthy());

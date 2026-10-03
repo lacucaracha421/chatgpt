@@ -47,19 +47,21 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady}:
     if (activeKey === shownRef.current) { setArriving(null); return; }
     const incoming = hosts.current.get(activeKey);
     if (!incoming) return;
-    let finished = false, started = false, forced = false, timer = 0;
+    let finished = false, started = false, forced = false, timer = 0, frame = 0;
     const animations: Animation[] = [];
     const query = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     const commit = () => {
       if (finished) return;
       finished = true;
       window.clearTimeout(timer);
+      window.cancelAnimationFrame(frame);
       setShown(activeKey);
       setArriving(null);
       for (const key of nodes.current.keys()) if (key !== activeKey && !retained.includes(key)) nodes.current.delete(key);
     };
-    const check = () => {
-      if (started || (!forced && !readyRef.current(incoming, activeKey))) return;
+    const start = () => {
+      frame = 0;
+      if (finished || started || (!forced && !readyRef.current(incoming, activeKey))) return;
       started = true; observer.disconnect();
       if (reducedMotion() || typeof incoming.animate !== 'function') { commit(); return; }
       setArriving(activeKey);
@@ -71,16 +73,28 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady}:
       // Some native webviews do not dispatch finish after backgrounding.
       timer = window.setTimeout(() => { animations[0]?.finish?.(); commit(); }, 160);
     };
+    const check = () => {
+      if (finished || started) return;
+      if (!forced && !readyRef.current(incoming, activeKey)) { window.cancelAnimationFrame(frame); frame = 0; return; }
+      // Effects, shared observer setup and layout from the content commit get a rendering
+      // opportunity before the dissolve starts. Reduced motion and the readiness cap stay immediate.
+      if (forced || reducedMotion() || typeof incoming.animate !== 'function') { window.cancelAnimationFrame(frame); start(); return; }
+      if (!frame) frame = window.requestAnimationFrame(() => {
+        frame = window.requestAnimationFrame(start);
+      });
+    };
+    // A pending start survives further mutations (images settling, classes); start() re-checks readiness.
     const observer = new MutationObserver(check);
     observer.observe(incoming, {subtree: true, childList: true, attributes: true});
     checkRef.current = check;
     // Never leave an inert old view up: a view that stays busy switches after this cap.
     const cap = window.setTimeout(() => { forced = true; check(); }, READY_CAP_MS);
     check();
-    const reduce = () => { if (query?.matches && started) { animations.forEach(a => a.cancel()); commit(); } };
+    const reduce = () => { if (query?.matches) { if (started) { animations.forEach(a => a.cancel()); commit(); } else check(); } };
     query?.addEventListener?.('change', reduce);
     return () => {
       finished = true; checkRef.current = null; observer.disconnect(); window.clearTimeout(timer); window.clearTimeout(cap);
+      window.cancelAnimationFrame(frame);
       query?.removeEventListener?.('change', reduce);
       animations.forEach(a => a.cancel());
     };

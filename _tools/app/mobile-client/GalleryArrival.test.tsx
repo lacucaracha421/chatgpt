@@ -12,7 +12,7 @@ vi.mock('@tanstack/react-virtual',()=>({useVirtualizer:({count,estimateSize}:{co
 
 const animate=vi.fn();
 beforeEach(()=>{
- vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});
+ vi.stubGlobal('ResizeObserver',class{observe(){}unobserve(){}disconnect(){}});
  animate.mockReset().mockImplementation(()=>({cancel:vi.fn()}));
  (HTMLElement.prototype as unknown as {animate:unknown}).animate=function(this:HTMLElement,...args:unknown[]){return animate(this,...args);};
 });
@@ -93,7 +93,7 @@ it('keeps slow thumbnails and decoded images in place without fading',async()=>{
 });
 
 it('keeps a catalog cover in its sized box without a late fade when it decodes',async()=>{
- vi.stubGlobal('IntersectionObserver',class{constructor(private callback:(entries:{isIntersecting:boolean}[])=>void){} observe(){this.callback([{isIntersecting:true}]);} disconnect(){}});
+ vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{target,isIntersecting:true} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} unobserve(){} disconnect(){}});
  vi.spyOn(catalogMedia,'catalogImageTicket').mockResolvedValue({url:'data:image/png;base64,AA'} as Awaited<ReturnType<typeof catalogMedia.catalogImageTicket>>);
  render(<CatalogCover item={{provider:'p',providerWorkId:'w',thumbnailUrl:'https://example.test/c.jpg'}} revision="r" active/>);
  await act(async()=>{});
