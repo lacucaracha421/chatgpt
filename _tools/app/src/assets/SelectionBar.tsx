@@ -18,6 +18,8 @@ type SelectionBarProps = {
   characterOpen?: boolean;
   onCharacterToggle?: () => void;
   characterPicker?: ReactNode;
+  characterLabel?: string;
+  characterShortcut?: string | null;
   extraActions?: ReactNode;
   onTrash?: () => void;
   onClearSelection: () => void;
@@ -28,7 +30,7 @@ type SelectionBarProps = {
 // 자산 선택 시 갤러리 위에 떠오르는 고정 선택 바. 상단바는 선택과 무관하게
 // 제목·보기 설정·창 제어 위치를 유지하고, 선택 명령은 여기에만 나타난다.
 export function SelectionBar({
-  view, selectedCount, batchPending, onFavorite, onAddToAlbum, onRemoveFromCollection, onSetCover, onAssignArtist, characterOpen = false, onCharacterToggle, characterPicker, extraActions, onTrash, onClearSelection, compact = false,
+  view, selectedCount, batchPending, onFavorite, onAddToAlbum, onRemoveFromCollection, onSetCover, onAssignArtist, characterOpen = false, onCharacterToggle, characterPicker, characterLabel = "캐릭터", characterShortcut = "C", extraActions, onTrash, onClearSelection, compact = false,
 }: SelectionBarProps) {
   if (selectedCount === 0) return null;
   const inCollection = view?.kind === "collection";
@@ -38,7 +40,7 @@ export function SelectionBar({
       <span className="view-toolbar__divider" aria-hidden="true" />
       {onAddToAlbum && <Button size="sm" variant="primary" disabled={batchPending} onClick={onAddToAlbum}><FolderIcon aria-hidden="true" />앨범에 추가</Button>}
       {onCharacterToggle && <div className="asset-selection-bar__character">
-        <Button size="sm" variant={characterOpen ? "secondary" : "ghost"} aria-label="캐릭터 지정" aria-expanded={characterOpen} disabled={batchPending} onClick={onCharacterToggle}><UserIcon aria-hidden="true" />{!compact && <><span className="asset-selection-bar__label">캐릭터</span><kbd>C</kbd></>}</Button>
+        <Button size="sm" variant={characterOpen ? "secondary" : "ghost"} aria-label={`${characterLabel} 지정`} aria-expanded={characterOpen} disabled={batchPending} onClick={onCharacterToggle}><UserIcon aria-hidden="true" />{!compact && <><span className="asset-selection-bar__label">{characterLabel}</span>{characterShortcut && <kbd>{characterShortcut}</kbd>}</>}</Button>
         {characterOpen && characterPicker}
       </div>}
       {extraActions}

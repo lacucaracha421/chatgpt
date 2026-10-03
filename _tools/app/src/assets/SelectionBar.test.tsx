@@ -125,3 +125,17 @@ it("disables batch actions while a batch operation is pending", () => {
   expect(screen.getByRole("button", { name: "좋아요 켜기" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "선택 해제" })).not.toBeDisabled();
 });
+
+it.each([1, 3])("offers classification next to album assignment for %i selected assets through the shared picker slot", async (selectedCount) => {
+  const user = userEvent.setup();
+  const onCharacterToggle = vi.fn();
+  render(<SelectionBar selectedCount={selectedCount} batchPending={false} onAddToAlbum={vi.fn()} onClearSelection={vi.fn()} characterLabel="분류" characterShortcut={null} characterOpen onCharacterToggle={onCharacterToggle} characterPicker={<div>분류 변경 시트</div>} />);
+  expect(screen.getByRole("button", { name: "앨범에 추가" })).toBeVisible();
+  const classification = screen.getByRole("button", { name: "분류 지정" });
+  expect(classification).toHaveTextContent("분류");
+  expect(classification).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByText("분류 변경 시트")).toBeVisible();
+  expect(screen.queryByText("C")).not.toBeInTheDocument();
+  await user.click(classification);
+  expect(onCharacterToggle).toHaveBeenCalledOnce();
+});

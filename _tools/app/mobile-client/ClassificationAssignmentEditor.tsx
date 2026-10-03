@@ -128,6 +128,48 @@ export function collapsedForAssignment(rows:AssignmentClassification[],classific
   return collapsed;
 }
 
+/** The viewer and batch sheet share the same single-choice tree and local search. */
+export function ClassificationAssignmentChoices({classifications,selectedId,disabled,onSelect}:{classifications:AssignmentClassification[];selectedId:string|null|undefined;disabled:boolean;onSelect(id:string|null):void}) {
+  const [query,setQuery]=useState('');
+  const [collapsed,setCollapsed]=useState(()=>collapsedForAssignment(classifications,selectedId??null));
+  useEffect(()=>setCollapsed(collapsedForAssignment(classifications,selectedId??null)),[selectedId,classifications]);
+  const results=useMemo(()=>searchAssignmentTree(classifications,query),[classifications,query]);
+  const rows=useMemo(()=>flattenAssignmentTree(classifications,collapsed),[classifications,collapsed]);
+  const toggle=(id:string)=>setCollapsed(current=>{const next=new Set(current);next.has(id)?next.delete(id):next.add(id);return next;});
+  // The native layer validates the destination against the same replica this tree renders
+  // from, so a row can only ever name a live Classification.
+  const row=(classification:AssignmentClassification,depth:number,hasChildren:boolean,label?:string)=><div key={classification.id} className={`tree-row${selectedId===classification.id?' is-current':''}`} style={depth?{paddingLeft:depth*16}:undefined}>
+    {hasChildren?<button type="button" className="tree-expander" aria-label={`${classification.name} ${collapsed.has(classification.id)?'펼치기':'접기'}`} aria-expanded={!collapsed.has(classification.id)} onClick={()=>toggle(classification.id)}>{collapsed.has(classification.id)?<ChevronRightIcon/>:<ChevronDownIcon/>}</button>:<span className="tree-leaf"/>}
+    <button type="button" className="tree-select" role="radio" aria-checked={selectedId===classification.id} aria-label={classification.name} disabled={disabled} onClick={()=>onSelect(classification.id)}>
+      <span className="classification-assignment-mark" aria-hidden="true">{selectedId===classification.id?'●':'○'}</span>
+      <ClassificationIcon kind={classification.kind} iconKey={classification.iconKey} style={{color:classificationColor(classification.colorKey)}}/>
+      <span className="classification-assignment-name">{classification.name}</span>
+      {label?<span className="classification-assignment-breadcrumb">{label}</span>:null}
+    </button>
+  </div>;
+  return <>
+      <label className="classification-search"><MagnifyingGlassIcon/><input type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="분류 검색" aria-label="분류 검색"/></label>
+      <div className="classification-tree" role="radiogroup" aria-label="분류 선택">
+        {query.trim()
+          ? (results.length
+            ? <div className="classification-assignment-search-results">{results.map(({classification,breadcrumb})=>row(classification,0,false,breadcrumb))}</div>
+            : <p className="hint">일치하는 분류가 없습니다.</p>)
+          : <>
+            <div className={`tree-row${selectedId===null?' is-current':''}`}>
+              <span className="tree-leaf"/>
+              <button type="button" className="tree-select" role="radio" aria-checked={selectedId===null} aria-label="미분류" disabled={disabled} onClick={()=>onSelect(null)}>
+                <span className="classification-assignment-mark" aria-hidden="true">{selectedId===null?'●':'○'}</span>
+                <FolderIcon/>
+                <span className="classification-assignment-name">미분류</span>
+              </button>
+            </div>
+            {rows.map(({classification,depth,hasChildren})=>row(classification,depth,hasChildren))}
+            {!rows.length&&<p className="hint">아직 분류가 없습니다.</p>}
+          </>}
+      </div>
+  </>;
+}
+
 /**
  * Single-Asset Classification assignment picker.
  *
@@ -143,8 +185,6 @@ export function collapsedForAssignment(rows:AssignmentClassification[],classific
  */
 export function ClassificationAssignmentEditor({assetId,open,onClose}:{assetId:string;open:boolean;onClose():void}) {
   const [state,setState]=useState<ClassificationAssignmentState|null>(null);
-  const [collapsed,setCollapsed]=useState<Set<string>>(new Set());
-  const [query,setQuery]=useState('');
   const [error,setError]=useState('');
   const [saving,setSaving]=useState(false);
   const alive=useRef(0);
@@ -155,9 +195,6 @@ export function ClassificationAssignmentEditor({assetId,open,onClose}:{assetId:s
       if(generation!==alive.current||signal?.aborted)return;
       setState(next);
       setError('');
-      // Expansion is seeded from what the replica reports, so a reopened picker already shows
-      // the current branch without waiting for a second read.
-      setCollapsed(collapsedForAssignment(next.classifications,next.classificationId??null));
     }catch(reason){if(generation===alive.current&&!signal?.aborted)setError(errorText(reason));}
   },[assetId]);
   useEffect(()=>{
@@ -166,8 +203,6 @@ export function ClassificationAssignmentEditor({assetId,open,onClose}:{assetId:s
     // A reopened picker must not show the previous Asset's tree or selection while the new
     // read is in flight — including its expansion, which is derived from that Asset.
     setState(null);
-    setCollapsed(new Set());
-    setQuery('');
     const controller=new AbortController();
     void load(controller.signal);
     // The replica converges on its own cadence, so re-reading while open is what turns a
@@ -188,47 +223,14 @@ export function ClassificationAssignmentEditor({assetId,open,onClose}:{assetId:s
     }catch(reason){setError(errorText(reason));}
     finally{setSaving(false);}
   };
-  const results=useMemo(()=>searchAssignmentTree(state?.classifications??[],query),[state,query]);
-  const rows=useMemo(()=>flattenAssignmentTree(state?.classifications??[],collapsed),[state,collapsed]);
-  const toggle=(id:string)=>setCollapsed(current=>{const next=new Set(current);next.has(id)?next.delete(id):next.add(id);return next;});
-  const selectedId=state?.classificationId??null;
-  // The native layer validates the destination against the same replica this tree renders
-  // from, so a row can only ever name a live Classification.
-  const row=(classification:AssignmentClassification,depth:number,hasChildren:boolean,label?:string)=><div key={classification.id} className={`tree-row${selectedId===classification.id?' is-current':''}`} style={depth?{paddingLeft:depth*16}:undefined}>
-    {hasChildren?<button type="button" className="tree-expander" aria-label={`${classification.name} ${collapsed.has(classification.id)?'펼치기':'접기'}`} aria-expanded={!collapsed.has(classification.id)} onClick={()=>toggle(classification.id)}>{collapsed.has(classification.id)?<ChevronRightIcon/>:<ChevronDownIcon/>}</button>:<span className="tree-leaf"/>}
-    <button type="button" className="tree-select" role="radio" aria-checked={selectedId===classification.id} aria-label={classification.name} disabled={saving||state?.blocked===true} onClick={()=>void select(classification.id)}>
-      <span className="classification-assignment-mark" aria-hidden="true">{selectedId===classification.id?'●':'○'}</span>
-      <ClassificationIcon kind={classification.kind} iconKey={classification.iconKey} style={{color:classificationColor(classification.colorKey)}}/>
-      <span className="classification-assignment-name">{classification.name}</span>
-      {label?<span className="classification-assignment-breadcrumb">{label}</span>:null}
-    </button>
-  </div>;
   return <Dialog open={open} title="분류" onClose={onClose}>
     <DialogDescription className="sr-only">현재 자산의 분류를 하나 선택하거나 미분류로 둡니다. 선택하면 즉시 적용되고, 오프라인 변경은 저장 대기 상태로 유지됩니다.</DialogDescription>
     <div className="classification-index classification-assignment-editor">
       <div className="dialog-header"><span>분류 변경</span><IconButton label="분류 선택 닫기" icon={XMarkIcon} onClick={onClose}/></div>
-      <label className="classification-search"><MagnifyingGlassIcon/><input type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="분류 검색" aria-label="분류 검색"/></label>
       {!state&&!error&&<div className="loading-line" role="status" aria-label="분류 상태를 불러오는 중"/>}
       {error&&<p className="error-message" role="alert">{error}</p>}
       {state&&!state.adopted&&<p className="hint">분류 동기화가 준비된 뒤 편집할 수 있습니다.</p>}
-      {state?.adopted&&<div className="classification-tree" role="radiogroup" aria-label="분류 선택">
-        {query.trim()
-          ? (results.length
-            ? <div className="classification-assignment-search-results">{results.map(({classification,breadcrumb})=>row(classification,0,false,breadcrumb))}</div>
-            : <p className="hint">일치하는 분류가 없습니다.</p>)
-          : <>
-            <div className={`tree-row${selectedId===null?' is-current':''}`}>
-              <span className="tree-leaf"/>
-              <button type="button" className="tree-select" role="radio" aria-checked={selectedId===null} aria-label="미분류" disabled={saving||state.blocked} onClick={()=>void select(null)}>
-                <span className="classification-assignment-mark" aria-hidden="true">{selectedId===null?'●':'○'}</span>
-                <FolderIcon/>
-                <span className="classification-assignment-name">미분류</span>
-              </button>
-            </div>
-            {rows.map(({classification,depth,hasChildren})=>row(classification,depth,hasChildren))}
-            {!rows.length&&<p className="hint">아직 분류가 없습니다.</p>}
-          </>}
-      </div>}
+      {state?.adopted&&<ClassificationAssignmentChoices classifications={state.classifications} selectedId={state.classificationId??null} disabled={saving||state.blocked===true} onSelect={id=>void select(id)}/>}
       {state?.blocked&&<p className="classification-assignment-status is-blocked" role="status">{state.conflictMessage||'분류 변경을 적용할 수 없습니다.'}</p>}
       {state?.pending&&!state.blocked&&<p className="classification-assignment-status" role="status">저장 대기</p>}
     </div>
