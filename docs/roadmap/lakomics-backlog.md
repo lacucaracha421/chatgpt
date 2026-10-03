@@ -87,6 +87,13 @@ Status: `PARTIAL` — rename/hide/edit the Artist tab with PC-equivalent behavio
 - Add subtree folder listing, shelf thumbnail/count projection and true batch album/folder server operations; individual album commands and multi-selection classification already exist (`c60e57f9`, `f027836c`). Keep cursor/cache identity bound to subtree mode; do not repurpose direct `asset_count`. User 2026-09-29 approved server deployment for this scope.
 - Next IGDB refetch, one-off TMDB 400 and leftover diagnostics are (unverified 2026-10-03). Keep release-calendar ownership on PC. Deep character classification remains PC-only; viewer single-asset editors remain, multi-select character assignment stays dropped (user 2026-09-29).
 
+## TRANSFER-001 — LocalSend-style direct transfer first, server as fallback
+
+Status: `TODO` — user 2026-10-03: add a LocalSend-style transfer path to 전송 (PC ↔ tablet file exchange) as the primary route, with today's server path (R2 exchange via the Cloud API, `ExchangeService` / `ExchangeView`) as the fallback. Supersedes the 2026-10-02 `EXTERNAL-REFS` note that had LocalSend only as a fallback.
+- **Direct path:** discover the other device on the same network (LocalSend-style multicast announce + HTTP(S) registration; Tailscale address as a second candidate), pair once with the existing device identity, then send over an encrypted local HTTPS connection with resumable chunks. Keep the current hash/dedupe/trust checks, receive-folder rules and crash-safe receive on both ends.
+- **Fallback:** when no direct peer answers within a short timeout (or the user is away from home), use the existing server exchange unchanged; the user sees one 전송 screen, not two features.
+- **Open questions before building:** Android background/foreground limits for a listening socket (the app is foreground-only today), Windows/Linux firewall prompts on the PC, whether to reuse LocalSend's protocol (interop with the LocalSend app) or a private one, and battery cost of discovery. Design first; PC first, tablet in the same round.
+
 ## SERVER-INDEP-001 — Move server-solvable PC work to the server
 
 Status: `TODO` — user 2026-10-03: anything the server can own should stop waiting for the PC. Today the tablet sees PC-produced data only after the PC is on and publishes; tablet edits to PC-owned data wait as queued intents. The server is a 1-vCPU / 1.6 GB VPS, so model inference stays on the PC.
@@ -246,7 +253,7 @@ unless marked verified; measure on the device/PC before optimising.
 <a id="external-refs-20261002--external-projects-worth-borrowing-from-reference-list"></a>
 ## EXTERNAL-REFS-20261002 — Optional external references
 
-Status: `IDEA` — user-shared survey 2026-10-02, not adoption. Later candidates: Actual recurring-date/history semantics and remaining-spend display; Playnite per-field provider preview/preservation; FiftyOne failure analysis; LocalSend fallback transport with existing hash/dedupe/trust checks.
+Status: `IDEA` — user-shared survey 2026-10-02, not adoption. Later candidates: Actual recurring-date/history semantics and remaining-spend display; Playnite per-field provider preview/preservation; FiftyOne failure analysis; LocalSend transport is now its own item (`TRANSFER-001`, direct first, server fallback).
 Reader gesture/loading references: Mihon (no resume/following features); writing/search/revisit: usememos, fml, meguri; optional PySceneDetect, damaged-file checks, gallery-dl/Stash ideas-only, nowinandroid metadata flow, Tink AEAD review, restic backups, tus only for demonstrated retry pain. No installs implied.
 `fast_image_resize` is not adopted (resize 13.6%, below 25% measurement bar); static-WebP decode optimisation is done (`59c95ff0`). sqlite-vec, imgutils clustering and mismatched CSD weights are not new trials; TanStack Virtual already exists; larger taggers require same-sample comparisons.
 
