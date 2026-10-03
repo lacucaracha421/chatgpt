@@ -97,6 +97,13 @@ public final class VaultCryptoTest {
         }
     }
     public static void main(String[] args) throws Exception {
+        check(VaultCrypto.androidIndexLength(0)==0);
+        check(VaultCrypto.androidIndexLength(VaultCrypto.ANDROID_MAX_INDEX)==32*1024*1024);
+        rejects(()->VaultCrypto.androidIndexLength(-1));
+        try { VaultCrypto.androidIndexLength((long)VaultCrypto.ANDROID_MAX_INDEX+1);throw new AssertionError("oversized index accepted"); }
+        catch(VaultCrypto.IndexTooLarge expected){check(expected.getMessage().contains("PC"));}
+        rejects(()->VaultCrypto.androidIndexLength(VaultCrypto.MAX_INDEX));
+        rejects(()->VaultCrypto.androidIndexLength(Long.MAX_VALUE));
         Path root=Paths.get(System.getProperty("vault.fixtures","android/tests/fixtures/private-vault"));
         Path dir=root.resolve(".lakomics-vault");
         Map<String,Object> fixture=VaultCrypto.json(Files.readAllBytes(root.resolve("fixture.json")),4096);

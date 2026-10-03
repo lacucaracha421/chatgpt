@@ -17,6 +17,15 @@ public final class MainActivity extends Activity {
  private android.widget.FrameLayout frame;
  private WebViewResumeCover resumeCover;
  private volatile boolean noteSnapshotSensitive;
+ private boolean vaultSnapshotSensitive;
+ /** UI thread only: neither owner can release the other's screen protection. */
+ private void updateSecureWindow(){
+  boolean secure=noteSnapshotSensitive||vaultSnapshotSensitive;
+  if(secure){getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);if(resumeCover!=null)resumeCover.clear();}
+  else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+  if(Build.VERSION.SDK_INT>=33)setRecentsScreenshotEnabled(!secure);
+ }
+ private void setVaultSnapshotSensitive(boolean value){vaultSnapshotSensitive=value;updateSecureWindow();}
  private WebView web; private SecureSettings settings; private CloudClient client; private MediaRepository media; private NotesRepository notes;
  private final ThreadPoolExecutor workers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(48));
  private final ThreadPoolExecutor mediaWorkers=new ThreadPoolExecutor(4,4,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(24));
@@ -88,7 +97,7 @@ public final class MainActivity extends Activity {
   try{emit("lakomics-native",new JSONObject().put("id",id).put("ok",false).put("cancelled",true));}catch(JSONException ignored){}
  }
  private synchronized void stopNonEssential(){stopped=true;for(Map.Entry<String,CancellationSignal> entry:nonEssential.entrySet())cancelOptional(entry.getKey(),entry.getValue());}
- @Override public void onCreate(Bundle b){super.onCreate(b);settings=new SecureSettings(this);client=new CloudClient(settings);notes=new NotesRepository(this,settings);vault=new PrivateVault(this,state->emit("lakomics-vault",state));
+ @Override public void onCreate(Bundle b){super.onCreate(b);settings=new SecureSettings(this);client=new CloudClient(settings);notes=new NotesRepository(this,settings);vault=new PrivateVault(this,state->emit("lakomics-vault",state),this::setVaultSnapshotSensitive);
   try{media=MediaRepository.get(this);}catch(IllegalStateException ignored){}
   configureWindow();
   frame=new android.widget.FrameLayout(this);frame.setBackgroundColor(PAGE_BACKGROUND);setContentView(frame);
@@ -123,6 +132,7 @@ public final class MainActivity extends Activity {
     frame.removeView(v);v.destroy();
     // Lock events must not evaluate JavaScript on the dead instance.
     vault.setVisible(false);notes.lockSecrets();stopRequests();noteSnapshotSensitive=false;
+    updateSecureWindow();
     if(!destroyed&&foreground)createWebView();
     return true;
    }
@@ -264,7 +274,7 @@ public final class MainActivity extends Activity {
   /** Set synchronously before React paints a secret screen; no snapshot of its contents. */
   @JavascriptInterface public void setResumeSnapshotSensitive(boolean value){
    noteSnapshotSensitive=value;
-   if(value)runOnUiThread(()->{if(resumeCover!=null)resumeCover.clear();});
+   runOnUiThread(()->updateSecureWindow());
   }
   @JavascriptInterface public void cancel(String id){CancellationSignal s=active.remove(id);if(s!=null)s.cancel();}
   /** Local startup hint only: never exposes the saved token or performs a network check. */
@@ -307,7 +317,7 @@ public final class MainActivity extends Activity {
      // Secret notes (암호 메모): a per-device PIN or the fingerprint opens an in-process session.
      case "notesSecretStatus":data=notes.secretStatus().put("biometric",biometricAvailable());break;
      case "notesSecretSetPin":data=notes.secretSetPin(p.optString("pin"));break;
-     case "notesSecretUnlock":if(p.optBoolean("biometric")){authenticateBiometric(signal);data=notes.secretUnlockBiometric();}else data=notes.secretUnlock(p.optString("pin"));break;
+     case "notesSecretUnlock":if(p.optBoolean("biometric")){long generation=notes.secretUnlockGeneration();authenticateBiometric(signal);data=notes.secretUnlockBiometric(generation);}else data=notes.secretUnlock(p.optString("pin"));break;
      case "notesSecretResetPin":data=notes.secretResetPin(p.optString("recoveryKey"),p.optString("pin"));break;
      case "notesSecretLock":notes.lockSecrets();data=new JSONObject();break;
      case "notesSecretTouch":data=notes.touchSecrets();break;
@@ -389,7 +399,7 @@ public final class MainActivity extends Activity {
     if(!signal.isCanceled())reply(id,false,null,"요청이 많습니다. 잠시 후 다시 시도해 주세요.",null,mediaWork?mediaBusy():null);}
   }
  }
- @Override public void onTrimMemory(int level){if(resumeCover!=null&&(level==TRIM_MEMORY_RUNNING_CRITICAL||level>=TRIM_MEMORY_MODERATE))resumeCover.clear();if(vault!=null)vault.lock("메모리를 확보하기 위해 잠겼습니다");super.onTrimMemory(level);}
+ @Override public void onTrimMemory(int level){if(resumeCover!=null&&(level==TRIM_MEMORY_RUNNING_CRITICAL||level>=TRIM_MEMORY_BACKGROUND))resumeCover.clear();if(vault!=null)vault.lock("메모리를 확보하기 위해 잠겼습니다");super.onTrimMemory(level);}
  @Override public void onLowMemory(){if(resumeCover!=null)resumeCover.clear();super.onLowMemory();}
  @Override protected void onActivityResult(int request,int result,Intent data){
   if(request==EXCHANGE_TREE){

@@ -218,15 +218,19 @@ final class NotesRepository {
  // Secret notes: per-device PIN (never synced) and the in-process unlock session.
  private boolean pinSet()throws Exception{return !settings.notesPin(null).isEmpty();}
  JSONObject secretStatus()throws Exception{return new JSONObject().put("pinSet",pinSet()).put("unlocked",secrets.isOpen());}
- private void setPin(String pin)throws Exception{
+ long secretUnlockGeneration(){return secrets.generation();}
+ private void openSecrets(long generation)throws UserError{
+  if(!secrets.open(generation))throw new UserError("암호 메모가 잠겼습니다. 다시 시도해 주세요.");
+ }
+ private void setPin(String pin,long generation)throws Exception{
   if(!NotesPin.valid(pin))throw new UserError("PIN은 숫자 4~8자리로 입력해 주세요.");
-  settings.notesPin(NotesPin.makeVerifier(pin,NotesPin.ITERATIONS));secrets.open();
+  settings.notesPin(NotesPin.makeVerifier(pin,NotesPin.ITERATIONS));openSecrets(generation);
  }
  JSONObject secretSetPin(String pin)throws Exception{
-  unlocked();synchronized(attempts){if(pinSet())throw new UserError("이미 PIN이 설정돼 있습니다.");setPin(pin);}return state();
+  long generation=secretUnlockGeneration();unlocked();synchronized(attempts){if(pinSet())throw new UserError("이미 PIN이 설정돼 있습니다.");setPin(pin,generation);}return state();
  }
  JSONObject secretUnlock(String pin)throws Exception{
-  unlocked();
+  long generation=secretUnlockGeneration();unlocked();
   synchronized(attempts){
    // Check, verify and record under one lock; the counter survives restarts.
    long[] failures=settings.notesPinFailures();long now=System.currentTimeMillis()/1000;long wait=NotesPin.lockoutRemaining(failures[0],failures[1],now);
@@ -235,15 +239,15 @@ final class NotesRepository {
    if(!NotesPin.check(verifier,pin)){settings.notesPinFailures(failures[0]+1,now);throw new UserError("PIN이 맞지 않습니다.");}
    settings.notesPinFailures(0,0);
   }
-  secrets.open();return state();
+  openSecrets(generation);return state();
  }
  /** Called after a successful BiometricPrompt; a PIN must exist as the fallback. */
- JSONObject secretUnlockBiometric()throws Exception{unlocked();if(!pinSet())throw new UserError("먼저 PIN을 설정해 주세요.");secrets.open();return state();}
+ JSONObject secretUnlockBiometric(long generation)throws Exception{unlocked();if(!pinSet())throw new UserError("먼저 PIN을 설정해 주세요.");openSecrets(generation);return state();}
  /** A forgotten PIN is replaced by proving the recovery key. */
  JSONObject secretResetPin(String recoveryKey,String pin)throws Exception{
-  Vault v=unlocked();byte[] given;try{given=NotesCrypto.unhex(recoveryKey==null?"":recoveryKey.trim());}catch(IllegalArgumentException e){throw new UserError(RECOVERY_MISMATCH);}
+  long generation=secretUnlockGeneration();Vault v=unlocked();byte[] given;try{given=NotesCrypto.unhex(recoveryKey==null?"":recoveryKey.trim());}catch(IllegalArgumentException e){throw new UserError(RECOVERY_MISMATCH);}
   if(given.length!=32||!NotesCrypto.vault(given).equals(v.vault))throw new UserError(RECOVERY_MISMATCH);
-  synchronized(attempts){setPin(pin);}return state();
+  synchronized(attempts){setPin(pin,generation);}return state();
  }
  void lockSecrets(){secrets.lock();}
  JSONObject touchSecrets()throws Exception{return new JSONObject().put("unlocked",secrets.touch());}

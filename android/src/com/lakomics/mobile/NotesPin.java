@@ -80,9 +80,16 @@ final class NotesPin {
     static final class Session {
         private final Clock clock;
         private long last = -1;
+        private long generation;
         Session(Clock clock) { this.clock = clock; }
-        synchronized void open() { last = clock.now(); }
-        synchronized void lock() { last = -1; }
+        synchronized long generation() { return generation; }
+        /** Verification may finish after backgrounding; checking and opening are atomic. */
+        synchronized boolean open(long attempt) {
+            if (attempt != generation) return false;
+            last = clock.now();
+            return true;
+        }
+        synchronized void lock() { generation++; last = -1; }
         synchronized boolean isOpen() { return last >= 0 && clock.now() - last < IDLE_LOCK_MS; }
         /** True and refreshed while open and not idle-expired. */
         synchronized boolean touch() {

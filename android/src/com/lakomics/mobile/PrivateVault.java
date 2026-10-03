@@ -8,7 +8,6 @@ import android.net.Uri;
 import android.os.*;
 import android.provider.DocumentsContract;
 import android.util.Log;
-import android.view.WindowManager;
 import android.webkit.*;
 import org.json.*;
 import java.io.*;
@@ -26,6 +25,7 @@ final class PrivateVault {
     private final Activity activity;
     private final ContentResolver resolver;
     private final Events events;
+    private final java.util.function.Consumer<Boolean> secureWindow;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final java.util.concurrent.ExecutorService closes = java.util.concurrent.Executors.newSingleThreadExecutor();
     private final Set<VaultStream> streams = new HashSet<>();
@@ -45,8 +45,8 @@ final class PrivateVault {
             else unavailable("USB가 분리되어 잠겼습니다");
         }
     };
-    PrivateVault(Activity activity, Events events) {
-        this.activity=activity; this.resolver=activity.getContentResolver(); this.events=events;
+    PrivateVault(Activity activity, Events events, java.util.function.Consumer<Boolean> secureWindow) {
+        this.activity=activity; this.resolver=activity.getContentResolver(); this.events=events; this.secureWindow=secureWindow;
         String saved=activity.getSharedPreferences("private-vault-tree",Context.MODE_PRIVATE).getString("root",null);
         if(saved!=null) root=Uri.parse(saved);
         IntentFilter filter=new IntentFilter(Intent.ACTION_SCREEN_OFF); filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
@@ -61,9 +61,8 @@ final class PrivateVault {
     // Called on the UI thread in bridge arrival order, before sending an acknowledgement.
     void setVisible(boolean visible) {
         synchronized(this){shown=visible;}
-        if(visible) activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
-        else {lock("");activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);}
-        if(Build.VERSION.SDK_INT>=33) activity.setRecentsScreenshotEnabled(!visible);
+        if(!visible) lock("");
+        secureWindow.accept(visible);
     }
     JSONObject pick() throws Exception {
         ui(()->{
@@ -163,7 +162,7 @@ final class PrivateVault {
         try {
             List<VaultCrypto.Item> loaded;
             try {loaded=readIndex(dir,"index.bin",attempt);}
-            catch(VaultCrypto.Unsupported e){throw e;}
+            catch(VaultCrypto.Unsupported|VaultCrypto.IndexTooLarge e){throw e;}
             catch(VaultCrypto.Invalid|FileNotFoundException e){loaded=readIndex(dir,"index.prev.bin",attempt);}
             synchronized(this){
                 if(attempt!=epoch || cancellation.isCanceled() || master==null)throw new VaultCrypto.Invalid("보관함이 잠겼습니다");
@@ -176,13 +175,12 @@ final class PrivateVault {
                 byte[] random=new byte[16];new SecureRandom().nextBytes(random);nonce=NotesCrypto.hex(random);
                 unlocked=true;message="";return state();
             }
-        } catch(Exception e){lockIfCurrent(attempt,e instanceof IOException?"USB를 읽을 수 없어 잠겼습니다":"보관함을 열 수 없어 잠겼습니다");throw e;}
+        } catch(Exception e){lockIfCurrent(attempt,e instanceof VaultCrypto.IndexTooLarge?e.getMessage():e instanceof IOException?"USB를 읽을 수 없어 잠겼습니다":"보관함을 열 수 없어 잠겼습니다");throw e;}
     }
     private List<VaultCrypto.Item> readIndex(Uri dir,String name,long version) throws Exception {
         Uri document=required(dir,name);
         try(VaultStream stream=open(document,VaultCrypto.INDEX_ID,2,version)) {
-            if(stream.reader.length>VaultCrypto.MAX_INDEX)throw new VaultCrypto.Invalid();
-            byte[] plain=new byte[(int)stream.reader.length];
+            byte[] plain=new byte[VaultCrypto.androidIndexLength(stream.reader.length)];
             try {
                 int offset=0;
                 while(offset<plain.length){

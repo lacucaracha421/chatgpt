@@ -17,6 +17,7 @@ final class WebViewResumeCover {
     private final BooleanSupplier allowed;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private Bitmap snapshot;
+    private int viewportWidth, viewportHeight;
     private WebView drawing;
     private ViewTreeObserver.OnDrawListener nextDraw;
     private long epoch;
@@ -42,10 +43,14 @@ final class WebViewResumeCover {
         if (width <= 0 || height <= 0) return;
         Bitmap candidate = null;
         try {
-            candidate = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-            web.draw(new Canvas(candidate));
+            int captureWidth = Math.max(1, width / 2), captureHeight = Math.max(1, height / 2);
+            candidate = Bitmap.createBitmap(captureWidth, captureHeight, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(candidate);
+            canvas.scale((float) captureWidth / width, (float) captureHeight / height);
+            web.draw(canvas);
             if (!allowed.getAsBoolean()) { candidate.recycle(); return; }
             snapshot = candidate;
+            viewportWidth = width; viewportHeight = height;
             FrameLayout.LayoutParams bounds = new FrameLayout.LayoutParams(width, height);
             bounds.leftMargin = web.getLeft(); bounds.topMargin = web.getTop();
             overlay.setLayoutParams(bounds);
@@ -61,7 +66,7 @@ final class WebViewResumeCover {
     void resume(WebView web) {
         cancelWait();
         if (!allowed.getAsBoolean() || snapshot == null || web == null
-                || snapshot.getWidth() != web.getWidth() || snapshot.getHeight() != web.getHeight()) {
+                || viewportWidth != web.getWidth() || viewportHeight != web.getHeight()) {
             clear(); return;
         }
         final long request = epoch;
@@ -97,5 +102,6 @@ final class WebViewResumeCover {
         overlay.setImageDrawable(null);
         // Let the render thread release any bitmap it is still using; never persist it.
         snapshot = null;
+        viewportWidth = viewportHeight = 0;
     }
 }

@@ -155,10 +155,28 @@ public final class NotesModelTest {
   check(NotesPin.lockoutRemaining(6,100,100)==60&&NotesPin.lockoutRemaining(7,100,100)==300&&NotesPin.lockoutRemaining(50,100,100)==3600,"lockout escalates");
   long[] clock={0};NotesPin.Session session=new NotesPin.Session(()->clock[0]);
   check(!session.touch()&&!session.isOpen(),"session starts locked");
-  session.open();clock[0]=NotesPin.IDLE_LOCK_MS-1;check(session.touch(),"activity keeps the session");
+  check(session.open(session.generation()),"current verification opens");clock[0]=NotesPin.IDLE_LOCK_MS-1;check(session.touch(),"activity keeps the session");
   clock[0]+=NotesPin.IDLE_LOCK_MS-1;check(session.isOpen(),"refreshed by touch");
   clock[0]+=1;check(!session.isOpen()&&!session.touch(),"idle for 5 minutes locks");
-  session.open();session.lock();check(!session.isOpen(),"explicit lock");
+  session.open(session.generation());session.lock();check(!session.isOpen(),"explicit lock");
+  // Backgrounding while verification is pending invalidates PIN setup, PIN and biometric attempts.
+  long attempt=session.generation();session.lock();
+  check(!session.open(attempt)&&!session.isOpen(),"late verification cannot reopen after lock");
+  check(session.open(session.generation()),"a fresh foreground retry opens");
+  check(!session.open(attempt)&&session.isOpen(),"a stale reply cannot replace a newer session");
+  session.lock();
+  java.util.concurrent.CountDownLatch verifying=new java.util.concurrent.CountDownLatch(1),finish=new java.util.concurrent.CountDownLatch(1);
+  java.util.concurrent.atomic.AtomicBoolean opened=new java.util.concurrent.atomic.AtomicBoolean(true);
+  Thread slow=new Thread(()->{
+   long pending=session.generation();verifying.countDown();
+   try{if(finish.await(5,java.util.concurrent.TimeUnit.SECONDS))opened.set(session.open(pending));}
+   catch(InterruptedException interrupted){Thread.currentThread().interrupt();}
+  });
+  slow.start();
+  try{
+   check(verifying.await(5,java.util.concurrent.TimeUnit.SECONDS),"verification started");session.lock();
+  }finally{finish.countDown();slow.join(5000);}
+  check(!slow.isAlive()&&!opened.get()&&!session.isOpen(),"background lock wins against a delayed verifier thread");
  }
 
  /** Ledger (가계부) vectors shared with the PC and TypeScript (tests/fixtures/notes-v2/ledger-vectors.json). */

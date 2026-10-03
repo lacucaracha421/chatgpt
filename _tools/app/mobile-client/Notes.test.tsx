@@ -527,3 +527,27 @@ it('excludes secret gates and editors from the native resume snapshot, then rele
    view.unmount();expect(sensitive).toHaveBeenLastCalledWith(false);
  } finally {delete window.LakomicsNative;}
 });
+
+it('protects the recovery sheet before its key arrives and releases protection on close or leaving Notes',async()=>{
+ const sensitive=vi.fn();window.LakomicsNative={request:vi.fn(),cancel:vi.fn(),setResumeSnapshotSensitive:sensitive};
+ let deliver!: (value:{key:string})=>void;
+ const pendingKey=new Promise<{key:string}>(resolve=>{deliver=resolve;});
+ const base=state([note]);mock.native.mockImplementation((op:string,p:Record<string,unknown>)=>op==='notesRecoveryKey'?pendingKey:base(op,p));
+ const backRef={current:null as (()=>boolean)|null},props={active:true,backRef};
+ const view=render(<Notes {...props}/>);
+ try {
+  fireEvent.click(await screen.findByRole('button',{name:'메모 목록 더보기'}));
+  expect(sensitive).toHaveBeenLastCalledWith(false);
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'복구키 보기'}));
+  expect(sensitive).toHaveBeenLastCalledWith(true);
+  await act(async()=>deliver({key:'a'.repeat(64)}));
+  expect((await screen.findByRole('textbox',{name:'복구키'}) as HTMLTextAreaElement).value).toBe('a'.repeat(64));
+  expect(sensitive).toHaveBeenLastCalledWith(true);
+  act(()=>{backRef.current?.();});expect(sensitive).toHaveBeenLastCalledWith(false);
+  fireEvent.click(screen.getByRole('button',{name:'메모 목록 더보기'}));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'복구키 보기'}));
+  expect(sensitive).toHaveBeenLastCalledWith(true);
+  view.rerender(<Notes {...props} active={false}/>);expect(sensitive).toHaveBeenLastCalledWith(false);
+  view.unmount();expect(sensitive).toHaveBeenLastCalledWith(false);
+ } finally {delete window.LakomicsNative;}
+});

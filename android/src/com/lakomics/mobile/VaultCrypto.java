@@ -16,6 +16,8 @@ import javax.crypto.spec.SecretKeySpec;
 final class VaultCrypto {
     static final int CHUNK = 65536, HEADER = 38, TAG = 16;
     static final int MAX_INDEX = 256 * 1024 * 1024;
+    // The format limit stays unchanged. Android needs headroom for decoded JSON and items.
+    static final int ANDROID_MAX_INDEX = 32 * 1024 * 1024;
     static final String INDEX_ID = "00000000000000000000000000000000";
     static class Invalid extends Exception {
         Invalid() { super("비밀 보관함 데이터가 손상됐습니다"); }
@@ -23,6 +25,15 @@ final class VaultCrypto {
     }
     static final class Unsupported extends Invalid {
         Unsupported() { super("지원하지 않는 비밀 보관함 형식입니다"); }
+    }
+    static final class IndexTooLarge extends Invalid {
+        IndexTooLarge() { super("보관함 목록이 너무 커서 이 기기에서 열 수 없습니다. PC에서 목록을 줄여 주세요."); }
+    }
+    /** Check the authenticated plaintext length before allocating the index buffer. */
+    static int androidIndexLength(long length) throws Invalid {
+        if (length < 0) throw new Invalid();
+        if (length > ANDROID_MAX_INDEX) throw new IndexTooLarge();
+        return (int) length;
     }
     interface Source extends Closeable {
         long size() throws IOException;
