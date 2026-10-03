@@ -285,6 +285,17 @@ Status: `TODO` — user 2026-10-04 asked for deeper integration with the Linux P
 - **Not recommended:** a Plasma "continue reading" widget (the user rarely resumes reading) and KDE Connect integration (overlaps 전송 / `TRANSFER-001`).
 - **Open questions before building:** design the D-Bus/deep-link surface once for 5–7; check portal support under the current Plasma version; keep runtime library resolution (no production path in the package or service files).
 
+## GPU-BATCH-001 — Main-PC one-off heavy backfills
+
+Status: `TODO` — user 2026-10-04: use the new main PC (RTX 5070 Ti 16 GB, 12 threads, 23 GB) for heavy one-off work over the whole library (~9,073 images, 459 videos) that would be slow on the laptop; afterwards the laptop only keeps up with new items. Gate everything on the machine-local `performance.profile = "main"`; laptop behaviour unchanged. Library counts below are from the restored DB on 2026-10-04.
+- **Already done 2026-10-04:** full PixAI v1.0 / canary / Kaloscope re-run on GPU (0.2–0.4 s/image, pack-copy preprocessing, matches the prior DB to float16); exports placed in the auto-tag inbox; nightly tagger switched to the same pack copy.
+- **Suggested order: 1 → 2 → 3.**
+  1. **CCIP feature backfill (B36 + S36):** 6,826 of 9,073 images have B36 features (only `auto_classify` series were scanned). Fill the rest so history refresh and character tools cover the whole library. Run on CPU with more threads, not GPU, so vectors stay bit-identical to the cache and the equivalence receipts keep working (GPU output is not bit-identical).
+  2. **Video similarity fingerprints:** 0 of 459 videos fingerprinted (12 samples/video, FFmpeg 1 decoder thread, serialized). Run several in parallel on the main PC and try NVDEC decode; the fingerprint contract (frame size, samples) must stay identical so laptop-made fingerprints compare.
+  3. **Unknown-character grouping:** pairwise CCIP comparison over the whole library, grouping with Chinese Whispers (chosen in [OSS trial](../research/oss-trial-sqlitevec-ccip-20260926.md)); GPU for the N×N similarity. Needs 1.
+- **Optional larger features:** text-to-image library search from precomputed image embeddings (GPU backfill once; laptop embeds only new images and queries); upscaling for low-resolution manga pages.
+- **Also possible later:** NVENC for Linux video proxies (`libx264` today) and CUDA for live CCIP inference — both need equivalence/feature-identity decisions first.
+
 ## ACCEPTANCE — native PC / tablet / Windows checks pending
 
 Status: `VERIFY` — source exists. Each line is a retained check, not new implementation, installation or claimed acceptance. Recorded prior confirmation applies only to its recorded revision/scope.
