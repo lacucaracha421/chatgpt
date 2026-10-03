@@ -913,7 +913,7 @@ mod tests {
                 collection_type: CollectionType::Manga,
             })
             .unwrap();
-        let future = (chrono::Utc::now().date_naive() + chrono::Days::new(1)).to_string();
+        let future = (chrono::Local::now().date_naive() + chrono::Days::new(1)).to_string();
         library
             .connection()
             .unwrap()
