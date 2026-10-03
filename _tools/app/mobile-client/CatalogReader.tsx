@@ -116,7 +116,7 @@ function CatalogReaderContent({manifest,title,onClose,onRefresh,refreshing}:{man
       <footer className="catalog-reader-footer" onPointerDownCapture={()=>setControlsFocused(false)} onKeyDownCapture={()=>{setControlsFocused(true);setChrome(true);}} onFocusCapture={event=>{setControlsFocused(event.target.matches(':focus-visible'));setChrome(true);}} onBlurCapture={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setControlsFocused(false);}}>
         <IconButton label="다음 페이지" icon={ChevronLeftIcon} disabled={next>=manifest.pages.length} onClick={()=>change(next)}/>
         <label className="catalog-reader-jump"><span className="numeric">{scrubPage??pageLabel} / {manifest.pages.length}</span>
-          <input type="range" aria-label="페이지 이동" min={1} max={manifest.pages.length} step={1} value={scrubPage??target+1} aria-valuetext={`${scrubPage??target+1} / ${manifest.pages.length}페이지`} disabled={manifest.pages.length<=1}
+          <input type="range" dir="rtl" aria-label="페이지 이동" min={1} max={manifest.pages.length} step={1} value={scrubPage??target+1} aria-valuetext={`${scrubPage??target+1} / ${manifest.pages.length}페이지`} disabled={manifest.pages.length<=1}
             onPointerDown={event=>{scrubbing.current=true;setScrubPage(target+1);setChrome(true);event.currentTarget.setPointerCapture?.(event.pointerId);}}
             onChange={event=>{const page=Number(event.currentTarget.value);if(scrubbing.current)setScrubPage(page);else change(page-1);}}
             onPointerUp={event=>{if(scrubbing.current)change(Number(event.currentTarget.value)-1);scrubbing.current=false;setScrubPage(null);}}

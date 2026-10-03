@@ -285,10 +285,11 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
           </div>
           {edge("left")}
           {edge("right")}
-          {/* Page 1 always sits at the left of the scrubber, whatever the reading direction. */}
+          {/* The scrubber runs in the reading direction: right-to-left books start at the right (user, 2026-10-03). */}
           {pageCount > 1 && <div className="asset-viewer__filmstrip manga-reader__bottom" dir="ltr" {...chrome.hover}>
             <input
               type="range"
+              dir={direction === "rtl" ? "rtl" : "ltr"}
               className="manga-reader__scrubber"
               aria-label="페이지 위치"
               aria-valuetext={`${logicalSpread[0]}페이지`}

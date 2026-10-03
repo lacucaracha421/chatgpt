@@ -116,3 +116,7 @@ it('turns pages with side taps (left = next, right = previous) and shows the bar
   expect(document.querySelector('.catalog-reader')?.classList.contains('chrome-visible')).toBe(true);
   expect(visiblePages()).toEqual([0]);
 });
+it('runs the page scrubber right to left like the book',async()=>{
+  const slider=await open();
+  expect(slider.getAttribute('dir')).toBe('rtl');
+});
