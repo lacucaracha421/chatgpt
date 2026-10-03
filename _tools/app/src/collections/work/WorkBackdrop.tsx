@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 
 type CoverSlot = { src: string; version: number };
 /** Keep the painted cover until the actual next backdrop image has loaded and decoded. */
-export function WorkBackdrop({ src }: { src: string | null }) {
+export function WorkBackdrop({ src, onReady }: { src: string | null; onReady?(): void }) {
   const [slots, setSlots] = useState<[CoverSlot | null, CoverSlot | null]>([src ? { src, version: 0 } : null, null]);
   const [painted, setPainted] = useState<0 | 1 | null>(null);
+  const [settled, setSettled] = useState<number | null>(null);
   const request = useRef({ src, version: 0 });
   if (request.current.src !== src) request.current = { src, version: request.current.version + 1 };
   const version = request.current.version;
@@ -21,14 +22,15 @@ export function WorkBackdrop({ src }: { src: string | null }) {
       setSlots(current => next === 0 ? [incoming, current[1]] : [current[0], incoming]);
     }
   }, [src, slots, painted, version]);
+  useEffect(() => { if (!src || settled === version) onReady?.(); });
   if (!src) return null;
   return <div className="work-backdrop" aria-hidden="true">
     {slots.map((slot, index) => slot && <img key={`${index}:${slot.src}:${slot.version}`} src={slot.src} alt="" draggable={false}
       className={painted === index ? "is-painted" : undefined}
       onLoad={async event => {
         const image = event.currentTarget;
-        try { await image.decode?.(); } catch { return; }
-        if (image.isConnected && request.current.src === slot.src && request.current.version === slot.version) setPainted(index as 0 | 1);
-      }} />)}
+        try { await image.decode?.(); } catch { if (request.current.version === slot.version) setSettled(slot.version); return; }
+        if (image.isConnected && request.current.src === slot.src && request.current.version === slot.version) { setPainted(index as 0 | 1); setSettled(slot.version); }
+      }} onError={() => { if (request.current.version === slot.version) setSettled(slot.version); }} />)}
   </div>;
 }

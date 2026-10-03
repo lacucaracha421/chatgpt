@@ -13,6 +13,10 @@ const page:CollectionPage={ready:true,filterVersion:1,revision:'r1',publishedAt:
 const section=()=>screen.getByLabelText('컬렉션',{selector:'section'});
 const list=()=>section().querySelector('.collection-scroll') as HTMLElement;
 const detailPane=()=>section().querySelector('.collection-detail') as HTMLElement;
+async function finishIncomingWork() {
+  await waitFor(()=>expect(document.querySelector('[data-work-pending] img')).not.toBeNull());
+  await act(async()=>{document.querySelectorAll('[data-work-pending] img').forEach(image=>fireEvent.load(image));});
+}
 /** Finish the native rise before exercising the deferred Showcase body. */
 const pressShowcase=(button:HTMLElement)=>{
   fireEvent.click(button);
@@ -60,14 +64,14 @@ describe('tab return retention',()=>{
     const props={active:true,paused:false,backRef:{current:null}};
     const view=render(<Collections {...props}/>);fireEvent.click(await screen.findByText(item.name));
     fireEvent.click(await screen.findByRole('radio',{name:'판본 2'}));
-    await waitFor(()=>expect(document.querySelector('.work-hero-band img')).not.toBeNull());
-    const hero=document.querySelector('.work-hero-band img');
+    await finishIncomingWork();
+    const hero=document.querySelector('.tablet-work > div[aria-hidden="false"] .work-hero-band img');
     view.rerender(<Collections {...props} active={mode!=='inactive'} paused={mode==='paused'}/>);
     view.rerender(<Collections {...props}/>);await act(async()=>{});
     expect(listCalls()).toHaveLength(1);expect(detailCalls()).toHaveLength(1);
     expect(screen.getByRole('radio',{name:'판본 2'}).getAttribute('aria-checked')).toBe('true');
     expect(bookcaseLabels()).toHaveLength(101);
-    expect(document.querySelector('.work-hero-band img')).toBe(hero);
+    expect(document.querySelector('.tablet-work > div[aria-hidden="false"] .work-hero-band img')).toBe(hero);
     expect(artworkCalls('hero','original').length).toBeGreaterThan(0);expect(decode).toHaveBeenCalled();
   });
 
@@ -207,12 +211,15 @@ describe('tab return retention',()=>{
     mocks.native.mockImplementation(async(_op,payload)=>({url:`https://example.invalid/${payload.artworkId}-${payload.variant}-${payload.digest}`}));
     render(<Collections active paused={false} backRef={{current:null}}/>);
     fireEvent.click(await screen.findByText(item.name));
-    const band=()=>document.querySelector('.work-hero-band img')?.getAttribute('src');
+    const band=()=>document.querySelector('.tablet-work > div[aria-hidden="false"] .work-hero-band img')?.getAttribute('src');
     await waitFor(()=>expect(band()).toBe('https://example.invalid/hero-original-one'));
     work={...work,artworkVersions:{hero:{original:'two'}}};pull(detailPane());
+    await finishIncomingWork();
     await waitFor(()=>expect(band()).toContain('-two'));
     // A hero published without its original falls back to its thumbnail.
     work={...work,artworks:work.artworks.map(art=>({...art,originalAvailable:false}))};pull(detailPane());
+    await waitFor(()=>expect(document.querySelector('[data-work-pending] .work-hero-band img')?.getAttribute('src')).toContain('hero-thumbnail'));
+    await finishIncomingWork();
     await waitFor(()=>expect(band()).toContain('hero-thumbnail'));
   });
 });
@@ -619,6 +626,7 @@ describe('read-only collections',()=>{
     expect(within(await screen.findByRole('dialog')).getByText('2 / 3')).toBeTruthy();
     act(()=>{expect(backRef.current?.()).toBe(true);});expect(screen.queryByRole('dialog')).toBeNull();
     fireEvent.click(screen.getByRole('radio',{name:'판본 2'}));
+    await finishIncomingWork();
     await waitFor(()=>expect(bookcaseLabels()).toEqual(['특별판 1권 보기']));
     act(()=>{expect(backRef.current?.()).toBe(true);});expect(screen.queryAllByRole('article',{name:'만화 작품 화면'})).toHaveLength(0);expect(mocks.api.mock.calls.every(([, ,body])=>body===undefined)).toBe(true);
     expect(screen.queryAllByRole('button',{name:/편집|삭제|가져오기|게시/})).toHaveLength(0);
@@ -837,7 +845,9 @@ it('stands manga on the shared bookcase rows: a tap picks a volume, a second tap
     Object.defineProperties(event,{pointerId:{value:1},pointerType:{value:'touch'},isPrimary:{value:true}});
     fireEvent(workTrack,event);
   }
-  await waitFor(()=>expect(within(bookcase).getByRole('button',{name:'1권 보기'}).getAttribute('aria-pressed')).toBe('true'));
+  await finishIncomingWork();
+  const nextBookcase=screen.getByRole('group',{name:'권별 책장'});
+  expect(within(nextBookcase).getByRole('button',{name:'1권 보기'}).getAttribute('aria-pressed')).toBe('true');
 });
 
 it('marks a pre-registered volume on the bookcase from its future release date',async()=>{
@@ -1040,6 +1050,9 @@ describe('shelf view',()=>{
     expect(screen.queryByRole('heading',{level:1,name:second.name})).toBeNull();
     expect(document.querySelector('.tablet-work__identity')?.textContent).not.toMatch(/\d+\s*\/\s*\d+/);
     fireEvent.click(screen.getByRole('button',{name:'다음 작품'}));
+    await waitFor(()=>expect(document.querySelector('[data-work-pending] .k-front img')).not.toBeNull());
+    expect(screen.getByRole('heading',{level:1,name:item.name})).toBeTruthy();
+    await act(async()=>{document.querySelectorAll('[data-work-pending] img').forEach(image=>fireEvent.load(image));});
     expect(await screen.findByRole('heading',{level:1,name:second.name})).toBeTruthy();
     expect(document.querySelector('.tablet-work__identity')?.textContent).not.toMatch(/\d+\s*\/\s*\d+/);
   });

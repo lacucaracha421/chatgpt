@@ -25,7 +25,7 @@ export type WorkActions = {
 };
 function samePresentation(left: CollectionWorkData, right: CollectionWorkData) {
   // Game spine images keep their own painted slot, preserving the current case rotation.
-  return left.collection.id === right.collection.id && heroArtwork(left.collection) === heroArtwork(right.collection) && left.manga?.activeVolumeId === right.manga?.activeVolumeId && (["front", "spine", "back", "platform", "privacy"] as const).every(key => (key === "spine" && right.collection.type === "game") || left.case[key] === right.case[key]);
+  return left.collection.id === right.collection.id && heroArtwork(left.collection) === heroArtwork(right.collection) && left.manga?.activeVolumeId === right.manga?.activeVolumeId && JSON.stringify(left.artworks) === JSON.stringify(right.artworks) && JSON.stringify(left.manga?.volumes.map(volume => [volume.id, volume.coverArtworkId])) === JSON.stringify(right.manga?.volumes.map(volume => [volume.id, volume.coverArtworkId])) && (["front", "spine", "back", "platform", "privacy"] as const).every(key => (key === "spine" && right.collection.type === "game") || left.case[key] === right.case[key]);
 }
 export function CollectionWorkScreen({ data, pending, actions }: { data: CollectionWorkData; pending: boolean; actions: WorkActions }) {
   const root = useRef<HTMLElement>(null);
@@ -51,7 +51,6 @@ export function CollectionWorkScreen({ data, pending, actions }: { data: Collect
   const activeVolume = visible.manga?.volumes.find(volume => volume.id === visible.manga?.activeVolumeId);
   const title = visible.manga ? `${visible.collection.name}${activeVolume ? ` ${volumeLabel(activeVolume)}` : ""}` : visible.case.title;
   const privacy = data.case.privacy;
-  const coverSrc = privacy ? null : visible.collection.type === "av" ? visible.case.front : activeVolume?.coverArtworkId ? workArtworkUrl(activeVolume.coverArtworkId) : null;
   return <WorkZoomProvider workId={visible.collection.id} reset={reset}><article ref={root} tabIndex={-1} className={`collection-work asset-viewer${info ? " asset-viewer--docked" : ""}`} aria-label={visible.manga ? "만화 작품 화면" : visible.collection.type === "av" ? "AV 작품 화면" : visible.collection.type === "movie" ? "영화 작품 화면" : "게임 작품 화면"} aria-busy={waiting}
     onKeyDown={event => {
       if (event.defaultPrevented || (event.target instanceof HTMLElement && event.target.closest("input,textarea,select,[contenteditable],.ui-menu,.work-stars,.work-record-menu"))) return;
@@ -68,7 +67,6 @@ export function CollectionWorkScreen({ data, pending, actions }: { data: Collect
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="정보" aria-pressed={info} onClick={() => setInfo(value => !value)}><InformationCircleIcon /></Button>
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="닫기" onClick={actions.onClose}><XMarkIcon /></Button>
     </header>
-    {(visible.manga || visible.collection.type === "av") && !privacy && <div className={`work-cover-band${visible.collection.type === "av" ? " work-cover-band--av" : ""}${info ? " work-cover-band--info" : ""}`}><WorkBackdrop src={coverSrc} /></div>}
     {slots.map((slot, index) => slot && <div key={index} className={`work-surface${info ? " work-surface--info" : ""}`} style={index === active ? undefined : { visibility: "hidden", pointerEvents: "none" }} inert={index !== active || waiting} aria-hidden={index !== active}>
       <WorkSurface data={index === active ? visible : slot} privacy={privacy} info={info} reset={reset} actions={actions} onReady={() => { if (index !== active && slot === requested.current) { setActive(index as 0 | 1); root.current?.focus({ preventScroll: true }); } }} />
     </div>)}
@@ -91,13 +89,16 @@ function WorkSurface({ data, privacy, info, reset, actions, onReady }: { data: C
   const caseData = { ...data.case, privacy };
   const heroId = heroArtwork(data.collection);
   const heroSrc = !privacy && heroId ? workArtworkUrl(heroId) : null;
-  const presentation = JSON.stringify([data.collection.id, data.manga?.activeVolumeId, data.case.front, data.case.spine, data.case.back, heroSrc, privacy]);
-  const readiness = useRef({ presentation, object: false, hero: !heroSrc });
-  if (readiness.current.presentation !== presentation) readiness.current = { presentation, object: false, hero: !heroSrc };
-  function ready(part: "object" | "hero") {
-    if (readiness.current.presentation !== presentation) return;
+  const activeVolume = data.manga?.volumes.find(volume => volume.id === data.manga?.activeVolumeId);
+  const coverSrc = privacy ? null : data.collection.type === "av" ? data.case.front : activeVolume?.coverArtworkId ? workArtworkUrl(activeVolume.coverArtworkId) : null;
+  const presentation = JSON.stringify([data.collection.id, data.manga?.activeVolumeId, data.case.front, data.case.spine, data.case.back, heroSrc, coverSrc, data.artworks, privacy]);
+  const readiness = useRef({ presentation, object: false, hero: !heroSrc, backdrop: !coverSrc, strip: false });
+  if (readiness.current.presentation !== presentation) readiness.current = { presentation, object: false, hero: !heroSrc, backdrop: !coverSrc, strip: false };
+  const currentReadiness = readiness.current;
+  function ready(part: "object" | "hero" | "backdrop" | "strip") {
+    if (readiness.current !== currentReadiness) return;
     readiness.current[part] = true;
-    if (readiness.current.object && readiness.current.hero) onReady();
+    if (readiness.current.object && readiness.current.hero && readiness.current.backdrop && readiness.current.strip) onReady();
   }
   const [mode, setMode] = useState("case");
   const [picked, setPicked] = useState("case");
@@ -112,8 +113,9 @@ function WorkSurface({ data, privacy, info, reset, actions, onReady }: { data: C
   const isObject = mode === "case" || mode === "open";
   const record = data.record ?? defaultRecord(data.collection);
   return <>
+    {coverSrc && <div className={`work-cover-band${data.collection.type === "av" ? " work-cover-band--av" : ""}${info ? " work-cover-band--info" : ""}`}><WorkBackdrop key={coverSrc} src={coverSrc} onReady={() => ready("backdrop")} /></div>}
     {heroSrc && <HeroBand src={heroSrc} manga={Boolean(data.manga)} onReady={() => ready("hero")} />}
-    {data.manga ? <><MangaStage manga={data.manga} privacy={privacy} title={data.collection.name} author={data.collection.author} frontReset={reset} onPick={id => actions.onPickVolume?.(id)} onReady={() => ready("object")} /><MangaBookcase manga={data.manga} privacy={privacy} onPick={id => actions.onPickVolume?.(id)} onEnlarge={actions.onEnlargeManga} /></> : <>
+    {data.manga ? <><MangaStage manga={data.manga} privacy={privacy} title={data.collection.name} author={data.collection.author} frontReset={reset} onPick={id => actions.onPickVolume?.(id)} onReady={() => ready("object")} /><MangaBookcase key={`${data.collection.id}:${data.manga.activeVolumeId}`} onReady={() => ready("strip")} manga={data.manga} privacy={privacy} onPick={id => actions.onPickVolume?.(id)} onEnlarge={actions.onEnlargeManga} /></> : <>
     <WorkZoomStage stageRef={stage} className={`work-stage${data.collection.type !== "av" && !data.artworks.length ? " work-stage--no-strip" : ""}`} enabled={isObject || mode === "flat"} onEmptyClick={() => { if (mode !== "case" || picked !== "case") pick("case"); }}>
       <WorkZoomObject>
       <div style={isObject ? undefined : { position: "absolute", inset: 0, visibility: "hidden", pointerEvents: "none" }} className="work-case-slot" inert={!isObject} aria-hidden={!isObject}>
@@ -121,7 +123,7 @@ function WorkSurface({ data, privacy, info, reset, actions, onReady }: { data: C
           inside={<CaseInside record={insideRecord(data.collection, record)} facts={insideFacts(data.collection, data.av)} />}
           note={data.av?.people.length ? <><b>출연 · 감독</b><p className="work-names-note">{data.av.people.map(person => person.displayName).join(" · ")}</p></> : undefined} onReady={() => ready("object")} />
       </div>
-      {data.collection.type === "av" && <div className="work-flat-slot" style={mode === "flat" ? undefined : { visibility: "hidden", pointerEvents: "none" }} aria-hidden={mode !== "flat"} inert={mode !== "flat"}><FlatJacket data={caseData} stageBox={stageBox} onReady={() => { flatReady.current = true; if (desired.current === "flat") setMode("flat"); }} /></div>}
+      {data.collection.type === "av" && <div className="work-flat-slot" style={mode === "flat" ? undefined : { visibility: "hidden", pointerEvents: "none" }} aria-hidden={mode !== "flat"} inert={mode !== "flat"}><FlatJacket key={data.collection.id} data={caseData} stageBox={stageBox} onReady={() => { flatReady.current = true; if (desired.current === "flat") setMode("flat"); }} /></div>}
       </WorkZoomObject>
       {artwork && <div className="work-art" style={mode === "case" || mode === "open" || mode === "flat" ? { visibility: "hidden", pointerEvents: "none" } : undefined} aria-hidden={mode === "case" || mode === "open" || mode === "flat"}>{privacy ? <span className="privacy-mask" aria-label="비공개 모드" /> : <StableImage src={workArtworkUrl(artwork.id)} alt={`${data.case.title} 아트워크`} draggable={false} onLoad={async event => {
         const image = event.currentTarget; try { await image.decode?.(); } catch { /* Settled artwork remains navigable. */ }
@@ -131,7 +133,7 @@ function WorkSurface({ data, privacy, info, reset, actions, onReady }: { data: C
       <button className="asset-viewer__edge asset-viewer__edge--left" aria-label="이전 작품" disabled={data.position <= 1} onClick={() => actions.onStep(-1)}><ChevronLeftIcon /></button>
       <button className="asset-viewer__edge asset-viewer__edge--right" aria-label="다음 작품" disabled={data.position >= data.total} onClick={() => actions.onStep(1)}><ChevronRightIcon /></button>
     </WorkZoomStage>
-    <WorkStrip av={data.collection.type === "av"} mode={picked} frontThumbnailUrl={caseData.front} artworks={data.artworks} privacy={privacy} onPick={pick} />
+    <WorkStrip onReady={() => ready("strip")} av={data.collection.type === "av"} mode={picked} frontThumbnailUrl={caseData.front} artworks={data.artworks} privacy={privacy} onPick={pick} />
     </>}
     <aside className="asset-viewer__dock work-dock" aria-label="작품 정보" style={info ? undefined : { visibility: "hidden", pointerEvents: "none" }} aria-hidden={!info} inert={!info}><div className="asset-viewer__dock-body">{data.manga?.ownership}<WorkInfo collection={data.collection} av={data.av} related={data.related} tmdb={data.tmdb} record={record}
       onSave={edit => actions.onSave(data.collection, edit)} onOpenPerson={actions.onOpenPerson} onOpenCollection={actions.onOpenCollection} onCopyCode={() => actions.onCopyCode(data.av?.productCode ?? null)} />{data.manga?.management}</div></aside>

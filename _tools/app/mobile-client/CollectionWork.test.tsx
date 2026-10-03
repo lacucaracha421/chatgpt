@@ -1,3 +1,4 @@
+import '@testing-library/jest-dom/vitest';
 import {useMemo} from 'react';
 import {act, cleanup, fireEvent, render, screen} from '@testing-library/react';
 import {afterEach, expect, it, vi} from 'vitest';
@@ -79,7 +80,7 @@ it.each(['av', 'game', 'movie'] as const)('uses only the AV jacket front as a ba
   expect(view.container.querySelector('.work-backdrop')).toBeNull();
 });
 
-it('pinches the shared book without rotation or volume swipe, resumes one-finger turning, and resets both through 정면으로', () => {
+it('pinches the shared book without rotation or volume swipe, resumes one-finger turning, and resets both through 정면으로', async () => {
   artwork.urls = {c1: '/one', c2: '/two'};
   const view = render(<MangaWork {...props}/>);
   const book = screen.getByRole('group', {name: '책'});
@@ -102,23 +103,31 @@ it('pinches the shared book without rotation or volume swipe, resumes one-finger
   fireEvent.click(screen.getByRole('button', {name: '정면으로'}));
   expect(zoom()).toBe(1); expect(book.getAttribute('data-angle')).toBe('0');
   fireEvent.wheel(view.container.querySelector('.work-stage')!, {deltaY: -100});
-  view.rerender(<MangaWork {...props} item={{...manga, id: 'another'}}/>); expect(zoom()).toBe(1);
+  view.rerender(<MangaWork {...props} item={{...manga, id: 'another'}}/>);
+  expect(zoom()).toBeGreaterThan(1);
+  await act(async () => view.container.querySelectorAll('[data-work-pending] img').forEach(image => fireEvent.load(image)));
+  expect(zoom()).toBe(1);
 });
 
-it('uses the shown cover, keeps the painted backdrop through a pending decode and failure, and removes it in privacy mode', async () => {
+it('keeps the manga book, backdrop and shelf until every actual incoming image decodes, settling errors without blocking', async () => {
   artwork.urls = {c1: '/one', c2: '/two'};
   const view = render(<MangaWork {...props}/>);
-  const old = view.container.querySelector<HTMLImageElement>('.work-backdrop img')!;
-  await act(async () => fireEvent.load(old)); expect(old.className).toBe('is-painted');
+  await act(async () => view.container.querySelectorAll('img').forEach(image => fireEvent.load(image)));
+  const old = view.container.querySelector<HTMLImageElement>('.work-backdrop .is-painted')!;
+  const book = view.container.querySelector<HTMLImageElement>('.manga-bb-front img')!;
+  const shelf = view.container.querySelector('.manga-bookcase')!;
   fireEvent.click(screen.getByRole('button', {name: '다음 권'}));
-  const next = view.container.querySelector<HTMLImageElement>('.work-backdrop img:not(.is-painted)')!;
-  expect(next.getAttribute('src')).toBe(view.container.querySelector('.manga-bb-front img')!.getAttribute('src'));
-  expect(old.className).toBe('is-painted');
-  fireEvent.error(next); expect(old.className).toBe('is-painted');
+  const pending = view.container.querySelector('[data-work-pending]')!;
+  const next = pending.querySelector<HTMLImageElement>('.work-backdrop img')!;
   let decoded!: () => void;
   Object.defineProperty(next, 'decode', {value: () => new Promise<void>(resolve => {decoded = resolve;})});
-  fireEvent.load(next); expect(old.className).toBe('is-painted');
-  await act(async () => decoded()); expect(next.className).toBe('is-painted'); expect(old.className).toBe('');
+  await act(async () => pending.querySelectorAll('img').forEach(image => fireEvent.load(image)));
+  expect(old).toBeVisible(); expect(book).toBeVisible(); expect(shelf).toBeVisible();
+  expect(next).not.toBeVisible(); expect(screen.getByRole('article')).toHaveAttribute('inert');
+  await act(async () => decoded());
+  expect(next).toBeVisible(); expect(next).toHaveClass('is-painted');
+  expect(pending.querySelector('.manga-bb-front img')).toBeVisible();
+  expect(old).not.toBeVisible(); expect(book).not.toBeVisible();
   view.rerender(<MangaWork {...props} privacy/>); expect(view.container.querySelector('.work-backdrop')).toBeNull();
 });
 
@@ -159,8 +168,8 @@ it('keeps only thumbnails, returns to the case on a repeated artwork tap or empt
   fireEvent.click(view.container.querySelector('.work-art')!);
   expect(screen.getByRole('group', {name: '케이스'})).toBeTruthy();
   view.rerender(<CaseWork {...props} item={{...item, artworks: []}}/>);
-  expect(view.container.querySelector('.work-strip')).toBeNull();
-  expect((view.container.querySelector('.tablet-work__frame') as HTMLElement).style.getPropertyValue('--work-strip-height')).toBe('0px');
+  expect(view.container.querySelector('.tablet-work > div[aria-hidden="false"] .work-strip')).toBeNull();
+  expect((view.container.querySelector('.tablet-work > div[aria-hidden="false"] .tablet-work__frame') as HTMLElement).style.getPropertyValue('--work-strip-height')).toBe('0px');
 });
 
 it('keeps the AV front-thumbnail flat tile first and returns from it on a repeated tap', async () => {
@@ -197,4 +206,39 @@ it.each(['game', 'movie', 'av'] as const)('ignores horizontal stage swipes on %s
   fireEvent.click(screen.getByRole('button', {name: '이전 작품'}));
   fireEvent.click(screen.getByRole('button', {name: '다음 작품'}));
   expect(onStep.mock.calls).toEqual([[-1], [1]]);
+});
+
+
+it.each(['game', 'movie', 'av'] as const)('retains every painted %s surface until the actual incoming images decode together', async type => {
+  artwork.urls = {front1: '/front1', hero1: '/hero1', art1: '/art1', front2: '/front2', hero2: '/hero2', art2: '/art2', spine1: '/spine1', back1: '/back1', spine2: '/spine2', back2: '/back2'};
+  const item: CollectionDetail = {...manga, id: 'one', name: '작품 하나', type, selectedWorkArtworkId: 'front1', selectedHeroArtworkId: 'hero1', artworks: [{id: 'art1', kind: 'screenshot', selected: false}, {id: 'spine1', kind: 'spine', selected: true}, ...(type === 'av' ? [{id: 'back1', kind: 'back', selected: true}] : [])]};
+  const options = {item, revision: 'r1', active: true, privacy: false, position: 1, total: 2, score: () => null, onStep: vi.fn(), info: (work: CollectionDetail) => <p>{work.name} 정보</p>};
+  const {container, rerender} = render(<CaseWork {...options}/>);
+  await act(async () => container.querySelectorAll('img').forEach(image => fireEvent.load(image)));
+  const root = screen.getByRole('article');
+  const oldCase = screen.getByRole('group', {name: '케이스'});
+  fireEvent.keyDown(oldCase, {key: 'Enter'});
+  const oldAngle = oldCase.getAttribute('data-angle');
+  const oldImages = [...container.querySelectorAll<HTMLImageElement>('.work-case-slot img:not([aria-hidden="true"]), .work-hero-band img, .work-strip img, .work-backdrop .is-painted')];
+  const next = {...item, id: 'two', name: '작품 둘', selectedWorkArtworkId: 'front2', selectedHeroArtworkId: 'hero2', artworks: [{id: 'art2', kind: 'screenshot', selected: false}, {id: 'spine2', kind: 'spine', selected: true}, ...(type === 'av' ? [{id: 'back2', kind: 'back', selected: true}] : [])]};
+  rerender(<CaseWork {...options} item={next} position={2}/>);
+  expect(screen.getByRole('heading', {name: '작품 하나'})).toBeInTheDocument();
+  for (const image of oldImages) expect(image).toBeVisible();
+  expect(root).toHaveAttribute('inert');
+  expect(oldCase).toHaveAttribute('aria-expanded', 'true');
+  expect(oldCase.getAttribute('data-angle')).toBe(oldAngle);
+  const incoming = container.querySelector<HTMLElement>('[data-work-pending]')!;
+  const thumbnail = incoming.querySelector<HTMLImageElement>('.work-strip img[src="/art2"]')!;
+  let decoded!: () => void;
+  Object.defineProperty(thumbnail, 'decode', {value: () => new Promise<void>(resolve => {decoded = resolve;})});
+  await act(async () => incoming.querySelectorAll('img').forEach(image => fireEvent.load(image)));
+  for (const image of oldImages) expect(image).toBeVisible();
+  expect(screen.getByRole('heading', {name: '작품 하나'})).toBeInTheDocument();
+  await act(async () => decoded());
+  expect(screen.getByRole('article')).toBe(root);
+  expect(screen.getByRole('heading', {name: '작품 둘'})).toBeInTheDocument();
+  expect(thumbnail).toBeVisible();
+  for (const image of oldImages) expect(image).not.toBeVisible();
+  expect(root).not.toHaveAttribute('inert');
+  expect(screen.getByRole('group', {name: '케이스'})).toHaveAttribute('aria-expanded', 'false');
 });

@@ -5,6 +5,7 @@ import type { CollectionVolume, CollectionCoverFocus } from "../../library/types
 import { workArtworkThumbnailUrl, workArtworkUrl } from "../../assets/mediaUrl";
 import { StableImage } from "../../shared/ui/StableImage";
 import { ShelfScroller } from "../../shared/ui/ShelfScroller";
+import { useWorkImageReady } from "./useWorkImageReady";
 import { MangaBook } from "./MangaBook";
 import { stripPosition } from "./coverStrip";
 import { volumeLabel } from "../collectionFormat";
@@ -39,8 +40,13 @@ const SCROLL_MARGIN = 64;
  * `coverUrl` resolves a volume cover's thumbnail; each client passes its own (default: the PC's local artwork).
  * `list`: the Collections list row — the same books and plank, left-aligned under the row's label.
  */
-export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailUrl, list = false, touchTargets = false, label = "권별 책장", onPick, onEnlarge }: { manga: MangaWorkData; privacy: boolean; coverUrl?(artworkId: string): string | null; list?: boolean; touchTargets?: boolean; label?: string; onPick(id: string): void; onEnlarge?(volumeId: string): void }) {
+export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailUrl, list = false, touchTargets = false, label = "권별 책장", onPick, onEnlarge, onReady }: { manga: MangaWorkData; privacy: boolean; coverUrl?(artworkId: string): string | null; list?: boolean; touchTargets?: boolean; label?: string; onPick(id: string): void; onEnlarge?(volumeId: string): void; onReady?(): void }) {
   const viewport = useRef<HTMLDivElement>(null);
+  const sources = Object.fromEntries(manga.volumes.flatMap(volume => {
+    const src = !privacy && volume.coverArtworkId ? coverUrl(volume.coverArtworkId) : null;
+    return [[`${volume.id}:strip`, src], ...(volume.id === manga.activeVolumeId ? [[`${volume.id}:front`, src]] : [])];
+  }));
+  const images = useWorkImageReady(sources, onReady);
   // Tablet taps use the whole book area; native scrolling keeps ownership of swipes.
   const tap = useRef<{ id: number; x: number; y: number; left: number; track: HTMLElement; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
@@ -92,11 +98,11 @@ export function MangaBookcase({ manga, privacy, coverUrl = workArtworkThumbnailU
     onScrollCapture={touchTargets ? () => { if (tap.current) tap.current.moved = true; } : undefined}
     onPointerCancel={touchTargets ? () => { tap.current = null; } : undefined}
     onClickCapture={touchTargets ? event => { if (suppressClick.current && event.detail !== 0) { event.preventDefault(); event.stopPropagation(); } suppressClick.current = false; } : undefined} className={list ? "manga-bookcase manga-bookcase--list" : "work-strip manga-bookcase"} role="group" aria-label={label}><ShelfScroller previousLabel="책장 왼쪽 보기" nextLabel="책장 오른쪽 보기"><div className="manga-bookcase-board"><div className="manga-bookcase-spines">
-    {manga.volumes.map(volume => <Spine key={volume.id} volume={volume} latest={volume.volumeNumber === manga.latestKoreanVolume} picked={manga.activeVolumeId === volume.id} privacy={privacy} focus={manga.focuses.find(focus => focus.volumeId === volume.id && focus.coverArtworkId === volume.coverArtworkId)?.focusX ?? null} owned={manga.ownedNumbers === null ? null : manga.ownedNumbers.includes(volume.volumeNumber)} src={volume.coverArtworkId ? coverUrl(volume.coverArtworkId) : null} onPick={() => onPick(volume.id)} onEnlarge={onEnlarge && (() => onEnlarge(volume.id))} />)}
+    {manga.volumes.map(volume => <Spine key={volume.id} onImageLoad={(front, event) => void images.loaded(`${volume.id}:${front ? "front" : "strip"}`, event)} onImageError={(front, src) => images.failed(`${volume.id}:${front ? "front" : "strip"}`, src)} volume={volume} latest={volume.volumeNumber === manga.latestKoreanVolume} picked={manga.activeVolumeId === volume.id} privacy={privacy} focus={manga.focuses.find(focus => focus.volumeId === volume.id && focus.coverArtworkId === volume.coverArtworkId)?.focusX ?? null} owned={manga.ownedNumbers === null ? null : manga.ownedNumbers.includes(volume.volumeNumber)} src={volume.coverArtworkId ? coverUrl(volume.coverArtworkId) : null} onPick={() => onPick(volume.id)} onEnlarge={onEnlarge && (() => onEnlarge(volume.id))} />)}
     {!manga.volumes.length && <span className="manga-cover-empty">이 판본의 표지가 없습니다.</span>}
   </div></div></ShelfScroller></div>;
 }
-function Spine({ volume, latest, picked, privacy, focus, owned, src, onPick, onEnlarge }: { volume: CollectionVolume; latest: boolean; picked: boolean; privacy: boolean; focus: number | null; owned: boolean | null; src: string | null; onPick(): void; onEnlarge?(): void }) {
+function Spine({ volume, latest, picked, privacy, focus, owned, src, onPick, onEnlarge, onImageLoad, onImageError }: { volume: CollectionVolume; latest: boolean; picked: boolean; privacy: boolean; focus: number | null; owned: boolean | null; src: string | null; onPick(): void; onEnlarge?(): void; onImageLoad(front: boolean, event: import("react").SyntheticEvent<HTMLImageElement>): void; onImageError(front: boolean, src: string): void }) {
   const [ratio, setRatio] = useState(.71);
   // Admit a front only when picked, then retain it through put-down. The strip remains
   // visible until that front loads; StableImage retains decoded covers on refresh.
@@ -122,12 +128,13 @@ function Spine({ volume, latest, picked, privacy, focus, owned, src, onPick, onE
   const missing = owned === false;
   const image = (front: boolean) => !privacy && src ? <StableImage src={src} alt="" draggable={false} decodeFirst={!front} onLoad={async event => {
     const element = event.currentTarget;
+    onImageLoad(front, event);
     if (element.naturalHeight) setRatio(element.naturalWidth / element.naturalHeight);
     if (front) {
       try { await element.decode?.(); } catch { return; }
       if (element.isConnected && element.getAttribute("src") === src) setFrontReady(true);
     }
-  }} style={front ? undefined : { objectPosition: `${stripPosition(focus, full, MANGA_SPINE_WIDTH)}% 50%` }} /> : <span className="manga-spine-empty" aria-hidden="true" />;
+  }} onPreloadError={() => { onImageError(front, src); if (front) setFrontReady(true); }} onError={() => { onImageError(front, src); if (front) setFrontReady(true); }} style={front ? undefined : { objectPosition: `${stripPosition(focus, full, MANGA_SPINE_WIDTH)}% 50%` }} /> : <span className="manga-spine-empty" aria-hidden="true" />;
   return <button type="button" className={`manga-spine${fronted ? " is-fronted" : ""}${frontMounted && !picked ? " is-settling" : ""}${missing ? " manga-spine--missing" : ""}${volume.releaseStatus === "upcoming" ? " manga-spine--upcoming" : ""}`} aria-label={`${volumeLabel(volume)} 보기`} aria-description={volume.releaseStatus === "upcoming" ? `${volume.localReleaseDate ?? ""} 출간 예정` : missing ? "미보유" : undefined} aria-pressed={picked} data-volume-id={volume.id} onClick={onPick} onDoubleClick={onEnlarge} style={{ "--spine-width": `${MANGA_SPINE_WIDTH}px`, "--cover-width": `${full}px`, "--spine-angle": `${Math.acos(Math.min(1, MANGA_SPINE_WIDTH / full)) * 180 / Math.PI}deg` } as CSSProperties}>
     {/* The shelf is a physical object: real cover strip, light only, no invented printing. */}
     {latest && <span className="manga-latest-label">최신</span>}

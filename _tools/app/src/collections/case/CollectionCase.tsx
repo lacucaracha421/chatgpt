@@ -1,3 +1,4 @@
+import { useWorkImageReady } from "../work/useWorkImageReady";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useWorkTurnBlocked } from "../work/WorkZoom";
 import "./CollectionCase.css";
@@ -43,10 +44,7 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
   const lastReset = useRef(frontReset);
   const drag = useRef<{ pointer: number; x: number; angle: number; moved: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
-  const settled = useRef(new Set<string>());
-  const readyRef = useRef(onReady); readyRef.current = onReady;
-  const sources = data.privacy ? [] : [data.front, data.spine, data.back].filter((url): url is string => Boolean(url));
-  useEffect(() => { if (sources.every(source => settled.current.has(source))) readyRef.current?.(); });
+  const images = useWorkImageReady({ front: data.privacy ? null : data.front, back: data.privacy ? null : data.back ?? null, spine: data.privacy ? null : data.spine ?? null }, onReady);
   useEffect(() => { setAngle(0); if (lastReset.current !== frontReset) savedAngle.current = 0; lastReset.current = frontReset; drag.current = null; setDragging(false); }, [frontReset]);
   useEffect(() => {
     if (open) { savedAngle.current = angle; setAngle(-10); }
@@ -56,17 +54,15 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
   function face(url: string | null | undefined, label: string) {
     if (data.privacy) return <span className="case-mask" aria-label="비공개 모드" />;
     if (!url) return null;
-    return <img className="cv" src={url} alt={`${data.title} ${label}`} draggable={false} onLoad={async event => {
+    const key = label === "앞면" ? "front" : "back";
+    return <img key={url} className="cv" src={url} alt={`${data.title} ${label}`} draggable={false} onLoad={event => {
       const image = event.currentTarget;
       image.style.removeProperty("visibility");
       if (label === "앞면" && image.naturalWidth && image.naturalHeight) setRatio(image.naturalWidth / image.naturalHeight);
-      try { await image.decode?.(); } catch { /* A failed decode settles as an unavailable face. */ }
-      settled.current.add(url);
-      if (sources.every(source => settled.current.has(source))) readyRef.current?.();
+      void images.loaded(key, event);
     }} onError={event => {
       event.currentTarget.style.visibility = "hidden";
-      settled.current.add(url);
-      if (sources.every(source => settled.current.has(source))) readyRef.current?.();
+      images.failed(key, url);
     }} />;
   }
 
@@ -90,10 +86,7 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
       <span className="k-floor">{data.platform === "sw" || data.platform === "sw2" ? <span className="cart-slot"><span className="cart" /></span> : <span className="holder"><span className="disc" /></span>}{note && <div className="note">{note}</div>}</span>
       <span className="k-edge" /><span className="k-cap k-top" /><span className="k-cap k-bottom" />
       <span className="k-hinge"><span className="k-spine"><span className={spineInsertClass(data)}>
-        <CaseSpine data={data} onSettled={url => {
-          settled.current.add(url);
-          if (sources.every(source => settled.current.has(source))) readyRef.current?.();
-        }} />
+        <CaseSpine data={data} onSettled={url => images.failed("spine", url)} />
       </span></span><span className="k-spine-in" /><span className="k-lid"><span className="k-front"><span className="ins">{face(data.front, "앞면")}</span></span><span className="k-inner">{inside}</span></span></span>
     </div>
   </div>;
@@ -111,6 +104,9 @@ export function CaseSpine({ data, decorative = false, onSettled }: { data: CaseD
     setSlots(current => next === 0 ? [data.spine ?? null, current[1]] : [current[0], data.spine ?? null]);
   }, [data.spine, painted, slots]);
   const hasPaintedSpine = Boolean(data.spine && painted !== null);
+  useEffect(() => {
+    if (!data.privacy && data.spine && painted !== null && slots[painted] === data.spine) onSettled?.(data.spine);
+  });
 
   const template = ["sw2", "sw", "ps5"].includes(data.platform);
   const title = <span className="spine-title" data-title={decorative ? data.title : undefined}>{decorative ? null : data.title}</span>;

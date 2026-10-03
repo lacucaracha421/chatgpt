@@ -1,6 +1,6 @@
 import {WorkZoomObject, WorkZoomProvider, WorkZoomStage} from '../src/collections/work/WorkZoom';
 import {WorkBackdrop} from '../src/collections/work/WorkBackdrop';
-import {useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode} from 'react';
+import {useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode} from 'react';
 import {ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon} from '@heroicons/react/24/outline';
 import {CaseInside, CollectionCase} from '../src/collections/case/CollectionCase';
 import type {StageBox} from '../src/collections/case/fitCaseStage';
@@ -88,77 +88,113 @@ function StageEdges({previous, next, onStep}: {previous: boolean; next: boolean;
   </>;
 }
 
-type Shown = {item: CollectionDetail; revision: string; urls: Record<string, string>};
+type MangaShown = {item: CollectionDetail; manga: MangaWorkData; book: string | null; hero: string | null; spines: Record<string, string>; info: ReactNode};
+type Shown = {item: CollectionDetail; revision: string; urls: Record<string, string>; position: number; total: number};
+type CaseWorkProps = {
+  item: CollectionDetail; revision: string; active: boolean; privacy: boolean; position: number; total: number;
+  /** My rating as shown, including queued edits. */
+  score(item: CollectionDetail): number | null;
+  /** Status and device as shown, including queued edits; published values by default. */
+  record?(item: CollectionDetail): [string, string][];
+  onStep(offset: -1 | 1): void; info(item: CollectionDetail): ReactNode;
+};
 /**
  * The work screen for games, films and AV, in portrait: the hero band across the top of the
  * stage, the shared case (drag turns it, a tap opens it to the 내 기록 slip and 작품 정보 card),
  * the strip of views and artworks, then the information as a section below the stage (`info`).
- * Switching works keeps the shown work, inert, until the next one's faces are decoded.
+ * Switching works keeps the shown work, inert, until the next one's actual faces, hero, backdrop and strip are decoded.
  */
-export function CaseWork({item, revision, active, privacy, position, total, score, record = workRecordFacts, onStep, info}: {
-  item: CollectionDetail; revision: string; active: boolean; privacy: boolean; position: number; total: number;
-  /** My rating as shown (a queued edit included) for the slip inside the case. */score(item: CollectionDetail): number | null;
-  /** 상태 and 기기 as shown (a queued edit included); the published values by default. */record?(item: CollectionDetail): [string, string][];
-  onStep(offset: -1 | 1): void; info(item: CollectionDetail): ReactNode;
-}) {
+export function CaseWork(props: CaseWorkProps) {
+  const {item, revision, active, privacy, position, total} = props;
+  const strip = item.artworks.filter(art => !OBJECT_KINDS.includes(art.kind) && art.id !== heroArtwork(item));
   const faces = useArtworkSet(item, privacy ? {} : {
     front: {id: item.type === 'av' ? artworkOf(item, 'cover') ?? item.selectedWorkArtworkId : collectionCover(item), original: true, asset: true},
     spine: {id: selectedSpine(item.artworks)?.id, original: true},
     back: {id: item.type === 'av' ? artworkOf(item, 'back') : null, original: true},
     hero: heroRequest(item),
+    ...Object.fromEntries(strip.map(art => [`thumb:${art.id}`, {id: art.id, original: false}])),
   }, revision, active);
-  const [shown, setShown] = useState<Shown | null>(null);
+  const incoming = useMemo<Shown | null>(() => faces.ready ? {item, revision, urls: faces.urls, position, total} : null, [faces.ready, faces.urls, item, revision, position, total]);
+  const [slots, setSlots] = useState<[Shown | null, Shown | null]>([null, null]);
+  const [painted, setPainted] = useState<0 | 1>(0);
+  const shown = slots[painted];
+  const requested = useRef(incoming); requested.current = incoming;
+  const metadataOnly = shown?.item.id === item.id && incoming && shown.urls === incoming.urls;
+  const visible = metadataOnly ? incoming : shown;
+  const [reset, setReset] = useState(0);
   useEffect(() => {
-    if (faces.ready && (shown?.item !== item || shown.urls !== faces.urls)) setShown({item, revision, urls: faces.urls});
-  }, [faces.ready, faces.urls, item, revision, shown]);
-  const [stage, stageBox] = useStageBox(shown !== null);
-  const [mode, setMode] = useState('case'), [picked, setPicked] = useState('case'), [reset, setReset] = useState(0);
+    if (!incoming || shown === incoming) return;
+    const next = !shown || metadataOnly ? painted : painted === 0 ? 1 : 0;
+    if (slots[next] === incoming) return;
+    setSlots(current => next === 0 ? [incoming, current[1]] : [current[0], incoming]);
+  }, [incoming, shown, metadataOnly, painted, slots]);
+  if (!visible) return <div className="tablet-work__skeleton ui-skeleton" aria-label="작품을 불러오는 중" aria-busy="true"/>;
+  const waiting = !incoming || visible !== incoming;
+  const label = visible.item.type === 'av' ? 'AV 작품 화면' : visible.item.type === 'movie' ? '영화 작품 화면' : '게임 작품 화면';
+  return <WorkZoomProvider workId={visible.item.id} reset={reset}><article className="tablet-work" style={{position: 'relative'}} aria-label={label} aria-busy={waiting} inert={waiting || undefined}>
+    {slots.map((slot, index) => slot && <div key={index} data-work-pending={index !== painted && slot === incoming ? '' : undefined} aria-hidden={index !== painted} inert={index !== painted || waiting || undefined}
+      style={index === painted ? undefined : {position: 'absolute', inset: 0, visibility: 'hidden', pointerEvents: 'none'}}>
+      <CaseWorkSurface {...props} shown={index === painted ? visible : slot} reset={reset} onReset={() => setReset(value => value + 1)} onReady={() => {
+        if (index !== painted && slot === requested.current) setPainted(index as 0 | 1);
+      }}/>
+    </div>)}
+  </article></WorkZoomProvider>;
+}
+
+function CaseWorkSurface({shown, active, privacy, score, record = workRecordFacts, onStep, info, reset, onReset, onReady}: CaseWorkProps & {shown: Shown; reset: number; onReset(): void; onReady(): void}) {
+  const [stage, stageBox] = useStageBox(true);
+  const [mode, setMode] = useState('case'), [picked, setPicked] = useState('case');
   const flatReady = useRef(false);
   const shownId = shown?.item.id;
   useEffect(() => { setMode('case'); setPicked('case'); flatReady.current = false; }, [shownId]);
-  const work = shown?.item ?? item;
+  const work = shown.item;
   const strip = work.artworks.filter(art => !OBJECT_KINDS.includes(art.kind) && art.id !== heroArtwork(work));
-  const thumbs = useArtworkSet(work, Object.fromEntries(strip.map(art => [art.id, {id: art.id, original: false}])), shown?.revision ?? revision, active && !privacy, false);
-  const art = useArtworkSet(work, {art: {id: strip.some(entry => entry.id === picked) ? picked : null, original: true}}, shown?.revision ?? revision, active && !privacy);
+  const art = useArtworkSet(work, {art: {id: strip.some(entry => entry.id === picked) ? picked : null, original: true}}, shown.revision, active && !privacy);
+  const presentation = JSON.stringify([work.id, shown.urls, privacy]);
+  const readiness = useRef({presentation, object: false, hero: !shown.urls.hero || privacy, backdrop: work.type !== 'av' || privacy || !shown.urls.front, strip: false});
+  if (readiness.current.presentation !== presentation) readiness.current = {presentation, object: false, hero: !shown.urls.hero || privacy, backdrop: work.type !== 'av' || privacy || !shown.urls.front, strip: false};
+  const currentReadiness = readiness.current;
+  function ready(part: 'object' | 'hero' | 'backdrop' | 'strip') {
+    if (readiness.current !== currentReadiness) return;
+    readiness.current[part] = true;
+    if (readiness.current.object && readiness.current.hero && readiness.current.backdrop && readiness.current.strip) onReady();
+  }
   useEffect(() => { if (art.ready && art.urls.art && picked !== 'case' && picked !== 'open' && picked !== 'flat') setMode(picked); }, [art.ready, art.urls.art, picked]);
   function pick(next: string) {
     setPicked(next);
     if (next === 'case' || next === 'open' || privacy || (next === 'flat' && flatReady.current)) setMode(next);
   }
-  if (!shown) return <div className="tablet-work__skeleton ui-skeleton" aria-label="작품을 불러오는 중" aria-busy="true"/>;
   const data = {...workCaseData(work, shown.urls, privacy), title: work.av?.titleJa?.trim() || work.name};
-  const waiting = shown.item.id !== item.id;
   const isObject = mode === 'case' || mode === 'open';
   const hidden: CSSProperties = {visibility: 'hidden', pointerEvents: 'none'};
   const people = work.av?.people ?? [];
-  const label = work.type === 'av' ? 'AV 작품 화면' : work.type === 'movie' ? '영화 작품 화면' : '게임 작품 화면';
-  return <WorkZoomProvider workId={work.id} reset={reset}><article className="tablet-work" aria-label={label} aria-busy={waiting} inert={waiting || undefined}>
+  return <>
     <div className="tablet-work__frame" style={{"--work-strip-height": work.type === 'av' || strip.length ? '76px' : '0px'} as CSSProperties}>
-      {shown.urls.hero && <HeroBand src={shown.urls.hero} manga={false} onReady={() => undefined}/>}
+      {!privacy && shown.urls.hero && <HeroBand src={shown.urls.hero} manga={false} onReady={() => ready('hero')}/>}
       <WorkZoomStage stageRef={stage} className="work-stage tablet-work__stage" enabled={isObject || mode === 'flat'} onEmptyClick={() => { if (mode !== 'case' || picked !== 'case') pick('case'); }}>
-        {work.type === 'av' && !privacy && <WorkBackdrop src={data.front}/>}
+        {work.type === 'av' && !privacy && <WorkBackdrop key={data.front} src={data.front} onReady={() => ready('backdrop')}/>}
         <WorkZoomObject>
         <div className="work-case-slot" style={isObject ? undefined : {...hidden, position: 'absolute', inset: 0}} inert={!isObject || undefined} aria-hidden={!isObject}>
           <CollectionCase key={work.id} data={data} large stageBox={stageBox} open={mode === 'open'} onOpenChange={open => pick(open ? 'open' : 'case')} frontReset={reset}
             inside={<CaseInside record={caseRecord(record(work), <RecordStars score={score(work)}/>)} facts={insideFacts(work, work.av ?? null)}/>}
-            note={people.length ? <><b>출연 · 감독</b><p className="work-names-note">{people.map(person => person.name).join(' · ')}</p></> : undefined}/>
+            note={people.length ? <><b>출연 · 감독</b><p className="work-names-note">{people.map(person => person.name).join(' · ')}</p></> : undefined} onReady={() => ready('object')}/>
         </div>
         {work.type === 'av' && <div className="work-flat-slot" style={mode === 'flat' ? undefined : hidden} aria-hidden={mode !== 'flat'} inert={mode !== 'flat' || undefined}>
           <FlatJacket key={work.id} data={data} stageBox={stageBox} onReady={() => { flatReady.current = true; if (picked === 'flat') setMode('flat'); }}/>
         </div>}
         </WorkZoomObject>
         {!isObject && mode !== 'flat' && art.urls.art && <div className="work-art"><StableImage src={art.urls.art} alt={`${data.title} 아트워크`} draggable={false}/></div>}
-        <StageEdges previous={position > 1} next={position < total} onStep={onStep}/>
-        <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={() => setReset(value => value + 1)}><ArrowPathIcon aria-hidden="true"/></Button>
+        <StageEdges previous={shown.position > 1} next={shown.position < shown.total} onStep={onStep}/>
+        <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={onReset}><ArrowPathIcon aria-hidden="true"/></Button>
       </WorkZoomStage>
-      <WorkStrip av={work.type === 'av'} mode={picked} frontThumbnailUrl={data.front} artworks={strip} privacy={privacy} thumbnailUrl={id => thumbs.urls[id] ?? null} onPick={pick}/>
+      <WorkStrip av={work.type === 'av'} mode={picked} frontThumbnailUrl={data.front} artworks={strip} privacy={privacy} thumbnailUrl={id => shown.urls[`thumb:${id}`] ?? null} onReady={() => ready('strip')} onPick={pick}/>
     </div>
     <header className="tablet-work__identity">
       <h1>{data.title}</h1>
       <small className="numeric">{workMeta(work, data.platform, work.av ?? null)}</small>
     </header>
     <div className="tablet-work__info">{info(work)}</div>
-  </article></WorkZoomProvider>;
+  </>;
 }
 
 /** The published volume as the shared bookcase reads it; a future local date is a pre-registered volume. */
@@ -183,32 +219,65 @@ export function MangaWork({item, revision, active, privacy, volumes, owned, late
   const requested = volumes.find(volume => volume.id === wanted) ?? volumes[0] ?? null;
   // An edition without volumes still has the work's own cover; the book shows that.
   const book = useArtworkSet(item, privacy ? {} : {book: requested ? {id: requested.coverArtworkId, original: true} : {id: collectionCover(item), original: true, asset: true}}, revision, active);
-  const [shownVolume, setShownVolume] = useState<{id: string | null; url: string | null}>({id: null, url: null});
-  useEffect(() => { if (book.ready) setShownVolume({id: requested?.id ?? null, url: book.urls.book ?? null}); }, [book.ready, book.urls.book, requested?.id]);
-  const spines = useArtworkSet(item, privacy ? {} : Object.fromEntries(volumes.flatMap(volume => volume.coverArtworkId ? [[volume.coverArtworkId, {id: volume.coverArtworkId, original: false}]] : [])), revision, active, false);
+  const spines = useArtworkSet(item, privacy ? {} : Object.fromEntries(volumes.flatMap(volume => volume.coverArtworkId ? [[volume.coverArtworkId, {id: volume.coverArtworkId, original: false}]] : [])), revision, active);
   const hero = useArtworkSet(item, privacy ? {} : {hero: heroRequest(item)}, revision, active);
-  const index = volumes.findIndex(volume => volume.id === shownVolume.id);
-  const shown = volumes[index] ?? null;
-  const step = (offset: -1 | 1) => { const next = volumes[(index < 0 ? 0 : index) + offset]; if (next) setWanted(next.id); };
-  const swipe = useSwipe(step);
-  const manga: MangaWorkData = {
-    volumes, activeVolumeId: shown?.id ?? null, editionIndex: volumes[0]?.editionIndex ?? 0, latestKoreanVolume: latestKorean, focuses: coverFocuses(item.volumes),
-    ownedNumbers: owned === null ? null : volumes.filter(volume => volume.volumeNumber <= owned).map(volume => volume.volumeNumber),
-    scope: '', revision, ownership: null, management: null,
-  };
+  const incoming = useMemo<MangaShown | null>(() => book.ready && spines.ready && hero.ready ? {
+    item, book: book.urls.book ?? null, hero: hero.urls.hero ?? null, spines: spines.urls, info,
+    manga: {volumes, activeVolumeId: requested?.id ?? null, editionIndex: volumes[0]?.editionIndex ?? 0, latestKoreanVolume: latestKorean, focuses: coverFocuses(item.volumes),
+      ownedNumbers: owned === null ? null : volumes.filter(volume => volume.volumeNumber <= owned).map(volume => volume.volumeNumber),
+      scope: '', revision, ownership: null, management: null},
+  } : null, [book.ready, book.urls, spines.ready, spines.urls, hero.ready, hero.urls, item, info, volumes, requested?.id, latestKorean, owned, revision]);
+  const [slots, setSlots] = useState<[MangaShown | null, MangaShown | null]>([null, null]);
+  const [painted, setPainted] = useState<0 | 1>(0);
+  const shown = slots[painted];
+  const requestedSurface = useRef(incoming); requestedSurface.current = incoming;
+  const metadataOnly = shown && incoming && shown.item.id === incoming.item.id && shown.manga.activeVolumeId === incoming.manga.activeVolumeId && shown.book === incoming.book && shown.hero === incoming.hero && shown.spines === incoming.spines && JSON.stringify(shown.manga.volumes.map(volume => [volume.id, volume.coverArtworkId])) === JSON.stringify(incoming.manga.volumes.map(volume => [volume.id, volume.coverArtworkId]));
+  const visible = metadataOnly ? incoming : shown;
+  useEffect(() => {
+    if (!incoming || shown === incoming) return;
+    const next = !shown || metadataOnly ? painted : painted === 0 ? 1 : 0;
+    if (slots[next] === incoming) return;
+    setSlots(current => next === 0 ? [incoming, current[1]] : [current[0], incoming]);
+  }, [incoming, shown, metadataOnly, slots, painted]);
   const [reset, setReset] = useState(0);
-  return <WorkZoomProvider workId={item.id} reset={reset}><article className="tablet-work tablet-work--manga" aria-label="만화 작품 화면">
-    <div className="tablet-work__frame">
-      {hero.urls.hero && <HeroBand src={hero.urls.hero} manga onReady={() => undefined}/>}
-      <div className="tablet-work__manga-stage" {...swipe}>
-        {!privacy && <WorkBackdrop src={shownVolume.url}/>}
-        {volumes.length
-          ? <MangaStage manga={manga} privacy={privacy} title={item.name} author={item.author ?? null} frontReset={reset} coverUrl={id => id === shown?.coverArtworkId ? shownVolume.url : null} onPick={setWanted} onReady={() => undefined}/>
-          : <WorkZoomStage className="work-stage manga-work-stage"><WorkZoomObject><MangaBook src={shownVolume.url} title={item.name} author={item.author ?? null} volumeNumber={null} volumeTitle={item.name} focus={null} privacy={privacy} frontReset={reset} onReady={() => undefined}/></WorkZoomObject></WorkZoomStage>}
-        <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={() => setReset(value => value + 1)}><ArrowPathIcon aria-hidden="true"/></Button>
-      </div>
-      <MangaBookcase touchTargets manga={manga} privacy={privacy} coverUrl={id => spines.urls[id] ?? null} onPick={setWanted} onEnlarge={onEnlarge}/>
-    </div>
-    <div className="tablet-work__info">{info}</div>
+  if (!visible) return <div className="tablet-work__skeleton ui-skeleton" aria-label="작품을 불러오는 중" aria-busy="true"/>;
+  const waiting = !incoming || visible !== incoming;
+  return <WorkZoomProvider workId={visible.item.id} reset={reset}><article className="tablet-work tablet-work--manga" style={{position: 'relative'}} aria-label="만화 작품 화면" aria-busy={waiting} inert={waiting || undefined}>
+    {slots.map((slot, index) => slot && <div key={index} data-work-pending={index !== painted && slot === incoming ? '' : undefined} aria-hidden={index !== painted} inert={index !== painted || waiting || undefined}
+      style={index === painted ? undefined : {position: 'absolute', inset: 0, visibility: 'hidden', pointerEvents: 'none'}}>
+      <MangaWorkSurface shown={index === painted ? visible : slot} privacy={privacy} reset={reset} onReset={() => setReset(value => value + 1)} onPick={setWanted} onEnlarge={onEnlarge} onReady={() => {
+        if (index !== painted && slot === requestedSurface.current) setPainted(index as 0 | 1);
+      }}/>
+    </div>)}
   </article></WorkZoomProvider>;
+}
+
+function MangaWorkSurface({shown, privacy, reset, onReset, onPick, onEnlarge, onReady}: {shown: MangaShown; privacy: boolean; reset: number; onReset(): void; onPick(id: string): void; onEnlarge(id: string): void; onReady(): void}) {
+  const {item, manga} = shown;
+  const volume = manga.volumes.find(volume => volume.id === manga.activeVolumeId);
+  const index = manga.volumes.findIndex(volume => volume.id === manga.activeVolumeId);
+  const swipe = useSwipe(offset => { const next = manga.volumes[(index < 0 ? 0 : index) + offset]; if (next) onPick(next.id); });
+  const presentation = JSON.stringify([item.id, manga.activeVolumeId, shown.book, shown.hero, shown.spines, privacy]);
+  const readiness = useRef({presentation, object: false, hero: !shown.hero || privacy, backdrop: !shown.book || privacy, strip: false});
+  if (readiness.current.presentation !== presentation) readiness.current = {presentation, object: false, hero: !shown.hero || privacy, backdrop: !shown.book || privacy, strip: false};
+  const currentReadiness = readiness.current;
+  function ready(part: 'object' | 'hero' | 'backdrop' | 'strip') {
+    if (readiness.current !== currentReadiness) return;
+    readiness.current[part] = true;
+    if (readiness.current.object && readiness.current.hero && readiness.current.backdrop && readiness.current.strip) onReady();
+  }
+  return <>
+    <div className="tablet-work__frame">
+      {!privacy && shown.hero && <HeroBand src={shown.hero} manga onReady={() => ready('hero')}/>}
+      <div className="tablet-work__manga-stage" {...swipe}>
+        {!privacy && <WorkBackdrop key={shown.book} src={shown.book} onReady={() => ready('backdrop')}/>}
+        {manga.volumes.length
+          ? <MangaStage manga={manga} privacy={privacy} title={item.name} author={item.author ?? null} frontReset={reset} coverUrl={id => id === volume?.coverArtworkId ? shown.book : null} onPick={onPick} onReady={() => ready('object')}/>
+          : <WorkZoomStage className="work-stage manga-work-stage"><WorkZoomObject><MangaBook key={shown.book} src={shown.book} title={item.name} author={item.author ?? null} volumeNumber={null} volumeTitle={item.name} focus={null} privacy={privacy} frontReset={reset} onReady={() => ready('object')}/></WorkZoomObject></WorkZoomStage>}
+        <Button className="tablet-work__front" size="icon" variant="ghost" aria-label="정면으로" onClick={onReset}><ArrowPathIcon aria-hidden="true"/></Button>
+      </div>
+      <MangaBookcase key={`${item.id}:${manga.activeVolumeId}`} touchTargets manga={manga} privacy={privacy} coverUrl={id => shown.spines[id] ?? null} onPick={onPick} onEnlarge={onEnlarge} onReady={() => ready('strip')}/>
+    </div>
+    <div className="tablet-work__info">{shown.info}</div>
+  </>;
 }

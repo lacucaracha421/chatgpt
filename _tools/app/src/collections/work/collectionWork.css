@@ -12,11 +12,11 @@
 .work-stage--no-strip { bottom: 0; }
 .work-stage[data-zoom-enabled] { touch-action: none; }
 .work-zoom-object { position: absolute; inset: 0; transform: scale(var(--work-zoom, 1)); transform-origin: center; transition: transform 90ms linear; }
-.work-cover-band { position: absolute; inset: 56px 0 184px; overflow: hidden; pointer-events: none; }
+.work-cover-band { position: absolute; inset: 0 0 184px; overflow: hidden; pointer-events: none; }
 .work-cover-band--av { bottom: 76px; }
 .work-cover-band--info { right: 340px; }
 .work-backdrop { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-.work-backdrop img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scale(1.15); filter: blur(48px) saturate(.85); opacity: 0; transition: opacity 240ms linear; }
+.work-backdrop img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scale(1.15); filter: blur(48px) saturate(.85); opacity: 0; }
 .work-backdrop img.is-painted { opacity: .16; }
 @media (prefers-reduced-motion: reduce) { .work-zoom-object, .work-backdrop img { transition: none; } }
 .work-surface:has(> .work-stage--no-strip) .work-hero-band { bottom: 0; }

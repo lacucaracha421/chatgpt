@@ -198,8 +198,8 @@ function renderOverlay(
   return { gateway, onChanged, onExit, onOpenSettings, switchCollection: (item: CollectionSummary) => switchCollection(item) };
 }
 
-async function settleManga() {
-  await act(async () => { document.querySelectorAll<HTMLImageElement>(".manga-work-book img").forEach(image => fireEvent.load(image)); });
+async function settleWorkImages() {
+  await act(async () => { document.querySelectorAll<HTMLImageElement>(".work-surface img").forEach(image => fireEvent.load(image)); });
 }
 
 async function openProviderMenu(user: ReturnType<typeof userEvent.setup>) {
@@ -270,7 +270,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     renderOverlay({ listCollectionVolumes: vi.fn().mockResolvedValue(volumes) }, undefined, undefined, collection, undefined, true);
     const root = await screen.findByRole("article", { name: "만화 작품 화면" });
     await userEvent.click(screen.getByRole("button", { name: "대체판 1 선택" }));
-    await settleManga();
+    await settleWorkImages();
     expect(screen.getByRole("button", { name: "대체판 1 선택" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getAllByRole("group", { name: "판본 선택" })).toHaveLength(1);
     expect(root.querySelector(".asset-viewer__title small")).toHaveTextContent("대체판 1");
@@ -315,7 +315,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(within(connect).getByRole("button", { name: "카카오 연결" })).toHaveClass("is-primary");
     await user.click(screen.getByRole("button", { name: "2권 보기" }));
     expect(within(root).getByRole("heading", { name: "던전밥 1권" })).toBeInTheDocument();
-    await settleManga();
+    await settleWorkImages();
     expect(screen.getByRole("article")).toBe(root);
     expect(within(root).getByRole("heading", { name: "던전밥 2권" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -327,7 +327,7 @@ describe("CollectionOverlay MangaDex flow", () => {
     renderOverlay({ listCollectionVolumes: vi.fn().mockResolvedValue([1,2,3].map(n => ({ id: `v${n}`, volumeNumber: n, editionIndex: 0, displayLabel: String(n), coverArtworkId: `art-${n}` }))) });
     const root = await screen.findByRole("article", { name: "만화 작품 화면" });
     expect(screen.getByRole("button", { name: "2권 보기" })).toHaveAttribute("aria-pressed", "true");
-    await settleManga();
+    await settleWorkImages();
     expect(within(root).getByRole("heading", { name: "던전밥 2권" })).toBeInTheDocument();
     expect(requestedMangaVolume("collection-1")).toBeNull();
   });
@@ -455,8 +455,10 @@ describe("CollectionOverlay MangaDex flow", () => {
     expect(screen.getByRole("button", {name:"10권 보기"}).querySelector("img")).toBeNull();
     expect(screen.queryByRole("textbox", {name:"권 번호"})).toBeNull();
     await act(async () => finishSync({completed:1,skipped:2,failed:0}));
+    expect(screen.getByRole("button", {name:"10권 보기"}).querySelector("img")).toBeNull();
+    await settleWorkImages();
     expect(screen.getByRole("button", {name:"10권 보기"}).querySelector("img")).toHaveAttribute("src","http://lakomics.localhost/work-artwork-thumbnail/art-10");
-    await userEvent.click(screen.getByRole("button", {name:"대체판 1 선택"})); await settleManga();
+    await userEvent.click(screen.getByRole("button", {name:"대체판 1 선택"})); await settleWorkImages();
     expect(screen.getByRole("button", {name:"1.1권 보기"})).toBeInTheDocument();
   });
 
@@ -466,13 +468,14 @@ describe("CollectionOverlay MangaDex flow", () => {
     const {onExit} = renderOverlay({listCollectionVolumes:vi.fn().mockResolvedValue([1,2,3].map(n=>({id:`v${n}`,volumeNumber:n,editionIndex:0,displayLabel:String(n),coverArtworkId:n===3?null:`art-${n}`})))});
     const root=await screen.findByRole("article",{name:"만화 작품 화면"});
     const opener=screen.getByRole("button",{name:"2권 보기"});
-    await user.click(opener); await settleManga();
+    await user.click(opener); await settleWorkImages();
     await user.dblClick(screen.getByRole("button",{name:"2권 보기"}));
     expect(screen.getByRole("dialog",{name:"던전밥 2권 표지 감상"})).toBeInTheDocument();
     await user.keyboard("{Escape}");
     await waitFor(()=>expect(screen.getByRole("button",{name:"2권 보기"})).toHaveFocus());
     expect(onExit).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button",{name:"3권 보기"}));
+    await settleWorkImages();
     await waitFor(()=>expect(within(root).getByRole("heading", { name: "던전밥 3권" })).toBeInTheDocument());
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByText("표지가 없습니다.")).toBeInTheDocument();
@@ -864,6 +867,8 @@ describe("CollectionOverlay movie detail flow", () => {
       refreshTmdbMovie: vi.fn().mockRejectedValue(new Error("TMDB 새로고침 실패")),
     }, undefined, undefined, movieCollection);
 
+    await waitFor(() => expect(document.querySelector('.work-surface[aria-hidden="true"] .work-strip img')).not.toBeNull());
+    await settleWorkImages();
     await user.click(screen.getByRole("button", { name: "작품 관리" }));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "TMDB 새로고침" })).toBeEnabled());
     await user.click(screen.getByRole("menuitem", { name: "TMDB 새로고침" }));

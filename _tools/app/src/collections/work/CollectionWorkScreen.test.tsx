@@ -225,18 +225,21 @@ describe("merged work screen", () => {
     await act(async () => { container.querySelectorAll('.work-surface[aria-hidden="true"] .manga-bb-back img, .work-surface[aria-hidden="true"] .manga-jspine-illustration img').forEach(image => fireEvent.load(image)); });
     expect(screen.getByRole("heading", { name: "게임 하나 1권" })).toBeInTheDocument();
     await act(async()=>decode());
+    expect(screen.getByRole("heading", { name: "게임 하나 1권" })).toBeInTheDocument();
+    const pending = container.querySelector('.work-surface[aria-hidden="true"]')!;
+    const newBackdrop = pending.querySelector<HTMLImageElement>('.work-backdrop img')!;
+    let backdropDecode!: () => void;
+    Object.defineProperty(newBackdrop, 'decode', { value: () => new Promise<void>(resolve => { backdropDecode = resolve; }) });
+    await act(async () => pending.querySelectorAll('.manga-bookcase img').forEach(image => fireEvent.load(image)));
+    fireEvent.load(newBackdrop);
+    expect(oldBackdrop).toBeVisible(); expect(incoming).not.toBeVisible();
+    await act(async () => backdropDecode());
     expect(screen.getByRole("article")).toBe(root);
     expect(screen.getByRole("heading", { name: "게임 하나 2권" })).toBeInTheDocument();
     expect(root.querySelector(".asset-viewer__position")).toBeNull();
     expect(incoming).toBeVisible();
     expect([...container.querySelectorAll('.work-zoom-object')].every(node => node.getAttribute('data-zoom') === volumeZoom)).toBe(true);
-    expect(oldBackdrop).toHaveClass('is-painted');
-    const newBackdrop = container.querySelector<HTMLImageElement>('.work-backdrop img:not(.is-painted)')!;
-    let backdropDecode!: () => void;
-    Object.defineProperty(newBackdrop, 'decode', { value: () => new Promise<void>(resolve => { backdropDecode = resolve; }) });
-    fireEvent.load(newBackdrop); expect(oldBackdrop).toHaveClass('is-painted');
-    await act(async () => backdropDecode());
-    expect(newBackdrop).toHaveClass('is-painted'); expect(oldBackdrop).not.toHaveClass('is-painted');
+    expect(newBackdrop).toHaveClass('is-painted'); expect(newBackdrop).toBeVisible(); expect(oldBackdrop).not.toBeVisible();
     fireEvent.keyDown(screen.getByRole('group', { name: '책' }), { key: 'ArrowRight' });
     fireEvent.click(screen.getByRole('button', { name: '정면으로' }));
     expect(screen.getByRole('group', { name: '책' })).toHaveAttribute('data-angle', '0');
@@ -444,4 +447,44 @@ it("waits for a fresh hero decode when a pending surface changes away from and b
   Object.defineProperty(incomingHero, "decode", { value: () => Promise.resolve() });
   await act(async () => fireEvent.load(incomingHero));
   expect(screen.getByRole("heading", { name: "게임 셋" })).toBeInTheDocument(); expect(incomingHero).toBeVisible();
+});
+
+
+it.each(['game', 'movie', 'av'] as const)('waits for the %s strip and backdrop as well as faces and hero before a step', async type => {
+  const base = value(type === 'av');
+  const first = {...base, collection: {...base.collection, type, selectedHeroArtworkId: 'hero1'}, artworks: [{id: 'art1', kind: 'screenshot', selected: false}]};
+  const actions = callbacks(); const {container, rerender} = view(first, actions);
+  await act(async () => container.querySelectorAll('img').forEach(image => fireEvent.load(image)));
+  const oldImages = [...container.querySelectorAll<HTMLImageElement>('.work-surface:not([aria-hidden="true"]) .work-case-slot img:not([aria-hidden="true"]), .work-surface:not([aria-hidden="true"]) .work-hero-band img, .work-surface:not([aria-hidden="true"]) .work-strip img, .work-backdrop .is-painted')];
+  const second = {...first, collection: {...first.collection, id: 'two', selectedHeroArtworkId: 'hero2'}, case: {...first.case, title: '작품 둘', front: '/front2', spine: null, back: null}, artworks: [{id: 'art2', kind: 'screenshot', selected: false}]};
+  rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={second} pending={false} actions={actions}/></PrivacyProvider>);
+  const incoming = container.querySelector<HTMLElement>('.work-surface[aria-hidden="true"]')!;
+  const thumbnail = incoming.querySelector<HTMLImageElement>('.work-strip img[src*="art2"]')!;
+  let decoded!: () => void;
+  Object.defineProperty(thumbnail, 'decode', {value: () => new Promise<void>(resolve => {decoded = resolve;})});
+  await act(async () => incoming.querySelectorAll('img').forEach(image => fireEvent.load(image)));
+  expect(screen.getByRole('heading', {name: first.case.title})).toBeInTheDocument();
+  for (const image of oldImages) expect(image).toBeVisible();
+  await act(async () => decoded());
+  expect(screen.getByRole('heading', {name: '작품 둘'})).toBeInTheDocument();
+  expect(thumbnail).toBeVisible();
+  for (const image of oldImages) expect(image).not.toBeVisible();
+});
+
+it('retains the existing PC case turn state when reusing a painted surface, while new faces still decode first', async () => {
+  const base = value(); const actions = callbacks(); const {container, rerender} = view(base, actions);
+  const original = screen.getByRole('group', {name: '케이스'});
+  fireEvent.keyDown(original, {key: 'ArrowRight'});
+  const angle = original.getAttribute('data-angle');
+  const show = (id: string) => rerender(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><CollectionWorkScreen data={{...base, collection: {...base.collection, id}, case: {...base.case, title: id, front: `/${id}`}}} pending={false} actions={actions}/></PrivacyProvider>);
+  show('two');
+  await act(async () => fireEvent.load(container.querySelector('img[src="/two"]')!));
+  show('three');
+  const incoming = container.querySelector('img[src="/three"]')!;
+  expect(screen.getByRole('heading', {name: 'two'})).toBeInTheDocument();
+  expect(incoming).not.toBeVisible();
+  await act(async () => fireEvent.load(incoming));
+  expect(screen.getByRole('group', {name: '케이스'})).toBe(original);
+  expect(original).toHaveAttribute('data-angle', angle);
+  expect(incoming).toBeVisible();
 });
