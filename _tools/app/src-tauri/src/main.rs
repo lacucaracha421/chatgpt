@@ -10,5 +10,14 @@ fn main() {
     if std::env::var_os("IBUS_ENABLE_SYNC_MODE").is_none() {
         std::env::set_var("IBUS_ENABLE_SYNC_MODE", "1");
     }
+    // WebKitGTK's DMA-BUF renderer aborts on the NVIDIA proprietary driver under
+    // Wayland (Gdk "Error 71 dispatching to Wayland display"). Use the fallback
+    // renderer only there, and respect an explicitly configured value.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
+        && std::path::Path::new("/proc/driver/nvidia/version").exists()
+    {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
     app_lib::run()
 }
