@@ -72,6 +72,7 @@ impl Library {
             return Err(LibraryError::AssetNotFound);
         }
         transaction.commit()?;
+        self.publication_inputs.signal(&[10, 11]);
         drop(connection);
         self.get_asset(&request.asset_id)
     }

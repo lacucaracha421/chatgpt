@@ -160,6 +160,7 @@ impl Library {
                 params![id, name, description, type_str, now],
             )
             .map_err(map_duplicate_name)?;
+        self.publication_inputs.signal(&[9]);
         collection_by_id(&connection, &id)
     }
 
@@ -240,6 +241,7 @@ impl Library {
         if changed == 0 {
             return Err(LibraryError::CollectionNotFound);
         }
+        self.publication_inputs.signal(&[9]);
         collection_by_id(&connection, id)
     }
 
@@ -250,6 +252,7 @@ impl Library {
         if changed == 0 {
             return Err(LibraryError::CollectionNotFound);
         }
+        self.publication_inputs.signal(&[9]);
         self.cleanup_collection_thumbnail_cache(id)?;
         // The delete is committed; a file that cannot be removed now is retried on the
         // next library open instead of reporting a failed delete.

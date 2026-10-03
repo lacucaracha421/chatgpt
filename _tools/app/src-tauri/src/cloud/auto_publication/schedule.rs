@@ -20,6 +20,8 @@ struct DispatchHistory {
 pub(crate) struct Inputs {
     dispatch_history: Mutex<DispatchHistory>,
     generations: [AtomicU64; 12],
+    // Domain input observations survive dispatcher checks of polls and partial passes.
+    observed: [Mutex<Option<(String, u64)>>; 12],
     checked: [Mutex<Option<u64>>; 12],
     cached: [Mutex<Option<(u64, String, String)>>; 12],
     character_sources: Mutex<
@@ -74,6 +76,29 @@ impl Inputs {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             != Some(self.generation(lane))
+    }
+    pub(crate) fn observed_generation(&self, lane: usize, endpoint: &str) -> Option<u64> {
+        self.observed[lane]
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .filter(|(key, _)| key == endpoint)
+            .map(|(_, generation)| *generation)
+    }
+    pub(crate) fn inputs_changed(&self, lane: usize, endpoint: &str) -> bool {
+        self.observed_generation(lane, endpoint) != Some(self.generation(lane))
+    }
+    pub(crate) fn observe_inputs(&self, lane: usize, endpoint: &str, generation: u64) {
+        *self.observed[lane]
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((endpoint.to_owned(), generation));
+    }
+    pub(crate) fn signal(&self, lanes: &[usize]) {
+        for &lane in lanes {
+            self.generations[lane].fetch_add(1, Ordering::Release);
+        }
+        crate::cloud::status_watch::wake_publications();
     }
     pub(crate) fn changed_table(&self, table: &str) {
         // Scheduling tables are deliberately absent: a poll/build must not dirty its own input.
@@ -170,7 +195,7 @@ fn poll_pending(
 fn feed_due(db: &Connection, endpoint: &str, table: &str, now: i64) -> Result<bool, LibraryError> {
     Ok(db.query_row(&format!("SELECT retry_after<=?2 AND (published_input_digest IS NULL
         OR (input_digest IS NOT published_input_digest AND (last_dirty<=?2-30 OR first_dirty<=?2-300))
-        OR built_at<=?2-300) FROM {table} WHERE endpoint=?1"),
+        OR built_at<=?2-1800) FROM {table} WHERE endpoint=?1"),
         rusqlite::params![endpoint, now], |r| r.get(0)).optional()?.unwrap_or(true))
 }
 
@@ -293,9 +318,14 @@ impl Library {
         )?;
         for (slot, kind) in [(8, "upcoming"), (9, "avPick"), (10, "artists")] {
             // A damaged checkpoint belongs to this lane, never to all twelve workers.
-            due[slot] = Self::home_publication_due_on(&db, endpoint, kind, now).unwrap_or(true);
+            due[slot] = self
+                .home_publication_due_on(&db, endpoint, kind, now)
+                .unwrap_or(true);
         }
-        due[11] = !light && Self::auto_tag_publication_due_on(&db, endpoint, now).unwrap_or(true);
+        due[11] = !light
+            && self
+                .auto_tag_publication_due_on(&db, endpoint, now)
+                .unwrap_or(true);
         Ok(due)
     }
 }
@@ -410,7 +440,7 @@ mod tests {
                 rusqlite::params![
                     normalized_endpoint,
                     kind,
-                    json!({"next_build":now+300,"last_poll":now}).to_string()
+                    json!({"next_build":now+300,"last_poll":now,"last_day":chrono::Local::now().date_naive()}).to_string()
                 ],
             )
             .unwrap();
@@ -419,7 +449,7 @@ mod tests {
             "INSERT INTO auto_tag_publication_state(endpoint,state_json) VALUES(?1,?2)",
             rusqlite::params![
                 normalized_endpoint,
-                json!({"retry_after":now+300}).to_string()
+                json!({"retry_after":now+300,"next_verification":now+300}).to_string()
             ],
         )
         .unwrap();
@@ -428,6 +458,11 @@ mod tests {
             library
                 .publication_inputs
                 .checked(lane, library.publication_inputs.generation(lane));
+            library.publication_inputs.observe_inputs(
+                lane,
+                &normalized_endpoint,
+                library.publication_inputs.generation(lane),
+            );
         }
         // The idle fixture represents lanes that have already received their startup check.
         let started = Instant::now();
@@ -738,7 +773,7 @@ mod tests {
         let due = reopened
             .publication_lanes_due(&endpoint, now, false, false)
             .unwrap();
-        assert!(!due[8]); // next_build survives the process-local input cache.
+        assert!(due[8]); // Home checks its inputs once at app startup.
         assert!(!due[11]); // auto-tag retry_after also survives.
         assert!(due[2]); // Cold inputs are checked once rather than trusted across restart.
         assert!(due[5]);

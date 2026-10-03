@@ -307,6 +307,7 @@ impl Library {
         tx.execute("DELETE FROM av_link_candidates WHERE inbox_id=?1", [id])?;
         let covers = super::super::av_artwork::cover_set(&tx, &collection)?;
         tx.commit()?;
+        self.publication_inputs.signal(&[9]);
         for (_, artwork) in prepared {
             artwork.commit();
         }

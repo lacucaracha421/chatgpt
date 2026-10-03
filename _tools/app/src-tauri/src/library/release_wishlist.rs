@@ -353,17 +353,22 @@ impl Library {
         let transaction = connection.transaction()?;
         insert_watch(&transaction, &title, source, now, today)?;
         transaction.commit()?;
+        self.publication_inputs.signal(&[8]);
         drop(connection);
         self.release_watch_item(id)?
             .ok_or(LibraryError::IgdbNotFound)
     }
 
     pub fn remove_release_watch(&self, id: &str) -> Result<(), LibraryError> {
-        remove_watch(&*self.connection()?, id)
+        remove_watch(&*self.connection()?, id)?;
+        self.publication_inputs.signal(&[8]);
+        Ok(())
     }
 
     pub fn set_release_watch_muted(&self, id: &str, muted: bool) -> Result<(), LibraryError> {
-        mute_watch(&*self.connection()?, id, muted)
+        mute_watch(&*self.connection()?, id, muted)?;
+        self.publication_inputs.signal(&[8]);
+        Ok(())
     }
 
     /// Mark exactly these events read; later events stay unread.
@@ -375,6 +380,7 @@ impl Library {
         let transaction = connection.transaction()?;
         acknowledge_watch(&transaction, event_ids)?;
         transaction.commit()?;
+        self.publication_inputs.signal(&[8]);
         Ok(())
     }
 
@@ -647,6 +653,7 @@ impl Library {
             ],
         )?;
         transaction.commit()?;
+        self.publication_inputs.signal(&[8]);
         Ok(!events.is_empty())
     }
 }

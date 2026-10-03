@@ -668,7 +668,16 @@ fn adoption_probes_the_log_and_an_older_server_stays_off() {
             [],
         )
         .unwrap();
-    // Rebuilt after five minutes, but an unchanged body is not sent again.
+    // Skip the five-minute build with an unchanged fingerprint, but keep slow verification.
+    assert_eq!(publish(), FeedOutcome::NotDue);
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE mobile_similarity_review_feed_state SET built_at=unixepoch()-1801",
+            [],
+        )
+        .unwrap();
     assert_eq!(publish(), FeedOutcome::Unchanged);
     f.library
         .connection()
@@ -830,4 +839,54 @@ fn automatic_comparison_pairs_a_materialized_near_duplicate_but_not_a_distinct_i
         .query_row("SELECT COUNT(*) FROM similarity_reviews", [], |r| r.get(0))
         .unwrap();
     assert_eq!(count, 1);
+}
+
+#[test]
+fn unchanged_similarity_feed_skips_five_minute_build_and_verifies_after_thirty_without_io() {
+    let f = fixture();
+    let endpoint = "https://similarity-feed-idle.invalid";
+    f.library
+        .adopt_similarity_review_library(endpoint, &f.id)
+        .unwrap();
+    let input = f.library.similarity_review_feed_input(0).unwrap();
+    let digest = hex(serde_json::to_vec(&FeedBody {
+        version: 1,
+        library_id: f.id.clone(),
+        base_revision: None,
+        decision_cursor: 0,
+        generated_at: String::new(),
+        skipped: vec![],
+        items: vec![],
+    })
+    .unwrap());
+    f.library.connection().unwrap().execute(
+        "INSERT INTO mobile_similarity_review_feed_state(endpoint,library_id,input_digest,published_input_digest,adopted,body_digest,built_at)
+         VALUES(?1,?2,?3,?3,1,?4,unixepoch()-301)", params![endpoint, f.id, input, digest],
+    ).unwrap();
+    let client = CloudClient::new(endpoint).unwrap();
+    let publish = || {
+        f.library
+            .publish_due_similarity_review_feed_with(&client, "publisher", "shared", endpoint)
+            .unwrap()
+    };
+    assert_eq!(publish(), FeedOutcome::NotDue);
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE mobile_similarity_review_feed_state SET built_at=unixepoch()-1799",
+            [],
+        )
+        .unwrap();
+    assert_eq!(publish(), FeedOutcome::NotDue);
+    f.library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE mobile_similarity_review_feed_state SET built_at=unixepoch()-1801",
+            [],
+        )
+        .unwrap();
+    assert_eq!(publish(), FeedOutcome::Unchanged);
+    assert_eq!(publish(), FeedOutcome::NotDue);
 }

@@ -147,6 +147,7 @@ impl Library {
         tx.execute("INSERT INTO collection_person_portraits(person_id,kind,artwork_id,x,y,w,h,updated_at) VALUES(?1,'crop',?2,?3,?4,?5,?6,?7)",params![person,artwork,rect.x,rect.y,rect.w,rect.h,chrono::Utc::now().to_rfc3339()])?;
         let result = portrait(&tx, person)?.ok_or(AvError::Invalid)?;
         tx.commit()?;
+        self.publication_inputs.signal(&[9]);
         Ok(result)
     }
     pub fn clear_av_portrait(&self, person: &str) -> Result<(), AvError> {
@@ -156,6 +157,7 @@ impl Library {
             "DELETE FROM collection_person_portraits WHERE person_id=?1",
             [person],
         )?;
+        self.publication_inputs.signal(&[9]);
         Ok(())
     }
     pub(crate) fn preview_av_commons_portrait_with(
@@ -241,6 +243,7 @@ impl Library {
             preview: image.preview.clone(),
         };
         tx.commit()?;
+        self.publication_inputs.signal(&[9]);
         pending.remove(&key);
         Ok(result)
     }
@@ -387,6 +390,7 @@ impl Library {
             preview: image.preview.clone(),
         };
         tx.commit()?;
+        self.publication_inputs.signal(&[9]);
         pending.remove(&key);
         Ok(result)
     }

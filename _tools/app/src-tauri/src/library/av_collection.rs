@@ -244,6 +244,7 @@ impl Library {
         )?;
         let result = details(&transaction, id)?;
         transaction.commit()?;
+        self.publication_inputs.signal(&[9]);
         Ok(result)
     }
 }

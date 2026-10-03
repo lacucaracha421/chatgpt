@@ -61,6 +61,7 @@ impl Library {
             "trash",
             Some(chrono::Utc::now().to_rfc3339()),
         )
+        .inspect(|_| self.publication_inputs.signal(&[10, 11]))
     }
 
     pub fn restore_asset(&self, asset_id: &str) -> Result<(), LibraryError> {
@@ -73,6 +74,7 @@ impl Library {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.update_trash_status(asset_ids, "trash", "normal", None)
+            .inspect(|_| self.publication_inputs.signal(&[10, 11]))
     }
 
     pub fn list_trash(

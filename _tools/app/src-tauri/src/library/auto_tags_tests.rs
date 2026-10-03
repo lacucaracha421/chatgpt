@@ -185,7 +185,9 @@ fn import_replaces_machine_rows_keeps_edits_and_skips_unknown_assets() {
             ("gone", "1girl", 0.9),
         ],
     );
+    let generation = library.publication_inputs.generation(11);
     let summary = library.import_auto_tags(&first).unwrap();
+    assert!(library.publication_inputs.generation(11) > generation);
     assert_eq!(
         (
             summary.tagged_assets,

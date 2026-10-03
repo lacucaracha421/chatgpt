@@ -428,10 +428,15 @@ fn feed_publication_is_debounced_throttled_and_skips_an_unchanged_body() {
     );
     // Nothing changed: not due.
     assert_eq!(publish(), FeedOutcome::NotDue);
-    // Five minutes later the feed is rebuilt, but an identical body is not sent again.
+    // The unchanged fingerprint skips the five-minute build; safety still rebuilds.
     state(
         &f,
         "UPDATE mobile_character_review_feed_state SET built_at=unixepoch()-301",
+    );
+    assert_eq!(publish(), FeedOutcome::NotDue);
+    state(
+        &f,
+        "UPDATE mobile_character_review_feed_state SET built_at=unixepoch()-1801",
     );
     assert_eq!(publish(), FeedOutcome::Unchanged);
     // A decision changes the inputs: debounced for 30 seconds ...
@@ -603,4 +608,60 @@ fn an_older_server_or_a_stale_base_never_breaks_the_feed() {
             .unwrap(),
         FeedOutcome::NotReady
     );
+}
+
+#[test]
+fn unchanged_feed_skips_five_minute_build_and_verifies_after_thirty_without_io() {
+    let f = Fixture::new();
+    let endpoint = "https://character-feed-idle.invalid";
+    let id = bind(&f, endpoint);
+    let series = BTreeSet::new();
+    let input = f
+        .library
+        .character_review_feed_input(0, Some(&series))
+        .unwrap();
+    let content = f
+        .library
+        .character_review_feed_content(Some(&series))
+        .unwrap();
+    let digest = hex(serde_json::to_vec(&FeedBody {
+        version: 1,
+        library_id: &id,
+        base_revision: None,
+        decision_cursor: 0,
+        policy_version: &content.policy_version,
+        generated_at: "",
+        skipped: &[],
+        targets: &content.targets,
+        items: &content.items,
+    })
+    .unwrap());
+    f.library.connection().unwrap().execute(
+        "INSERT INTO mobile_character_review_feed_state(endpoint,library_id,input_digest,published_input_digest,adopted,body_digest,built_at)
+         VALUES(?1,?2,?3,?3,1,?4,unixepoch()-301)", params![endpoint, id, input, digest],
+    ).unwrap();
+    let client = CloudClient::new(endpoint).unwrap();
+    let publish = || {
+        f.library
+            .publish_due_character_review_feed_with(
+                &client,
+                "publisher",
+                "shared",
+                endpoint,
+                Some(&series),
+            )
+            .unwrap()
+    };
+    assert_eq!(publish(), FeedOutcome::NotDue);
+    state(
+        &f,
+        "UPDATE mobile_character_review_feed_state SET built_at=unixepoch()-1799",
+    );
+    assert_eq!(publish(), FeedOutcome::NotDue);
+    state(
+        &f,
+        "UPDATE mobile_character_review_feed_state SET built_at=unixepoch()-1801",
+    );
+    assert_eq!(publish(), FeedOutcome::Unchanged);
+    assert_eq!(publish(), FeedOutcome::NotDue);
 }

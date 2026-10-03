@@ -603,7 +603,9 @@ impl super::Library {
         tag: &str,
         edit: AutoTagEdit,
     ) -> Result<(), LibraryError> {
-        edit_tag(&*self.connection()?, asset_id, tag, edit, &now_utc())
+        edit_tag(&*self.connection()?, asset_id, tag, edit, &now_utc())?;
+        self.publication_inputs.signal(&[11]);
+        Ok(())
     }
 
     pub fn auto_tag_import_summary(&self) -> Result<Option<AutoTagImportSummary>, LibraryError> {
@@ -615,7 +617,9 @@ impl super::Library {
             .ingestion_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        import_file(&*self.connection()?, path, &now_utc())
+        let result = import_file(&*self.connection()?, path, &now_utc())?;
+        self.publication_inputs.signal(&[11]);
+        Ok(result)
     }
 }
 

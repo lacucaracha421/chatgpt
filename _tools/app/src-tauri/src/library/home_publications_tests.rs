@@ -302,7 +302,7 @@ fn av_absence_deletes_once_and_lightweight_mode_spaces_builds() {
         "avPick",
     )
     .unwrap();
-    assert_eq!(state.next_build, now().timestamp() + 300);
+    assert_eq!(state.next_build, now().timestamp() + BUILD_INTERVAL);
     run(&lib, &fake, "avPick", 301);
     assert_eq!(fake.requests.borrow().len(), 1);
 }
@@ -346,6 +346,7 @@ fn av_schema_front_cover_receipt_change_detection_and_delete() {
         .unwrap()
         .execute("DELETE FROM collection_person_relations", [])
         .unwrap();
+    lib.publication_inputs.signal(&[9]);
     run(&lib, &fake, "avPick", 122);
     assert!(fake.requests.borrow()[1].1.is_none());
 }
@@ -390,6 +391,7 @@ fn artists_publish_complete_hub_schema_assignments_and_unique_creator_fallback_k
         .unwrap()
         .execute("UPDATE artists SET hidden=1 WHERE id='a1'", [])
         .unwrap();
+    lib.publication_inputs.signal(&[10]);
     run(&lib, &fake, "artists", 122);
     assert_eq!(
         fake.requests.borrow()[1].1.as_ref().unwrap()["artists"][0]["hidden"],
@@ -484,6 +486,7 @@ fn fake_http_uses_publisher_auth_correct_routes_and_methods() {
         .unwrap()
         .execute("DELETE FROM collection_person_relations", [])
         .unwrap();
+    lib.publication_inputs.signal(&[9]);
     lib.run_home_with(
         &client,
         "publisher",
@@ -639,4 +642,120 @@ fn tablet_intent_adds_an_anime_season_to_the_wishlist() {
     );
     assert!(rejected.is_err());
     assert_eq!(lib.list_release_watch().unwrap().len(), 1);
+}
+
+#[test]
+fn home_idle_signal_and_safety_deadlines_bound_body_builds() {
+    let (_dir, lib) = setup();
+    asset(&lib, "asset-1", Some("alice"));
+    cache(&lib, &[game()]);
+    let fake = Fake::default();
+    let checkpoint =
+        |kind| State::load(&*lib.connection().unwrap(), "https://fake.invalid/", kind).unwrap();
+    for kind in ["artists", "avPick", "upcoming"] {
+        run(&lib, &fake, kind, 0);
+        for seconds in [1, 59, 60, 300, BUILD_INTERVAL - 1] {
+            run(&lib, &fake, kind, seconds);
+            assert_eq!(
+                checkpoint(kind).next_build,
+                now().timestamp() + BUILD_INTERVAL
+            );
+        }
+        run(&lib, &fake, kind, BUILD_INTERVAL);
+        assert_eq!(
+            checkpoint(kind).next_build,
+            now().timestamp() + 2 * BUILD_INTERVAL
+        );
+    }
+    let count = fake.requests.borrow().len();
+    lib.update_asset_metadata(super::super::models::AssetMetadataPatch {
+        asset_id: "asset-1".into(),
+        source_published_at: None,
+        creator_name: Some("New name".into()),
+        creator_handle: Some("new".into()),
+        creator_url: None,
+    })
+    .unwrap();
+    run(&lib, &fake, "artists", BUILD_INTERVAL + 1);
+    assert_eq!(fake.requests.borrow().len(), count + 1);
+    assert_eq!(
+        checkpoint("artists").next_build,
+        now().timestamp() + 2 * BUILD_INTERVAL + 1
+    );
+    // The artist facade also signals promptly, including pins and display-name edits.
+    lib.set_artist_flags("new", Some(true), None, None).unwrap();
+    run(&lib, &fake, "artists", BUILD_INTERVAL + 2);
+    assert_eq!(fake.requests.borrow().len(), count + 2);
+    lib.set_release_watch_muted("invalid", true).unwrap_err(); // A failed write sends no signal.
+}
+
+#[test]
+fn av_day_rollover_builds_before_the_ten_minute_deadline() {
+    let (_dir, lib) = setup();
+    av_fixture(&lib);
+    let fake = Fake::default();
+    run(&lib, &fake, "avPick", 0);
+    let tomorrow = now().date_naive().succ_opt().unwrap();
+    lib.run_home_with(
+        &fake,
+        "publisher",
+        "https://fake.invalid",
+        "avPick",
+        now() + chrono::Duration::seconds(1),
+        tomorrow,
+        false,
+    )
+    .unwrap();
+    assert_eq!(fake.requests.borrow().len(), 2);
+    assert_eq!(
+        fake.requests.borrow()[1].1.as_ref().unwrap()["pick"]["date"],
+        tomorrow.to_string()
+    );
+}
+
+#[test]
+fn upcoming_intent_poll_keeps_legacy_cadence_without_rebuilding_unchanged_body() {
+    let (_dir, lib) = setup();
+    cache(&lib, &[game()]);
+    let fake = Fake::default();
+    let endpoint = "https://intent-cadence.invalid";
+    let publish = |seconds| {
+        lib.run_home_with(
+            &fake,
+            "publisher",
+            endpoint,
+            "upcoming",
+            now() + chrono::Duration::seconds(seconds),
+            now().date_naive(),
+            false,
+        )
+        .unwrap()
+    };
+    let checkpoint = || {
+        State::load(
+            &*lib.connection().unwrap(),
+            &status_watch::endpoint_key(endpoint),
+            "upcoming",
+        )
+        .unwrap()
+    };
+    publish(0);
+    fake.pages
+        .borrow_mut()
+        .push_back(page(0, vec![intent(1, "add", "igdb:1942")]));
+    publish(59);
+    assert_eq!(fake.pages.borrow().len(), 1);
+    assert_eq!(checkpoint().last_poll, Some(now().timestamp()));
+    publish(60);
+    assert!(fake.pages.borrow().is_empty());
+    assert_eq!(checkpoint().cursor, 1);
+    assert_eq!(checkpoint().last_poll, Some(now().timestamp() + 60));
+    assert_eq!(fake.requests.borrow().len(), 2);
+    publish(120);
+    assert_eq!(checkpoint().last_poll, Some(now().timestamp() + 120));
+    assert_eq!(
+        checkpoint().next_build,
+        now().timestamp() + 60 + BUILD_INTERVAL
+    );
+    assert_eq!(fake.requests.borrow().len(), 2);
 }

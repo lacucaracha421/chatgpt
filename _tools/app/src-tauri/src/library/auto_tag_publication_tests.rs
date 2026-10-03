@@ -137,6 +137,7 @@ fn first_incremental_manual_edits_labels_and_trash() {
         db.execute("UPDATE assets SET status='trash' WHERE id='a0001'", [])
             .unwrap();
     }
+    library.publication_inputs.signal(&[11]);
     run(&library, &fake, 300).unwrap();
     let updated = assets(&fake);
     assert_eq!(updated.len(), 2);
@@ -189,6 +190,7 @@ fn removed_assets_publish_an_empty_replacement() {
         .execute("DELETE FROM assets WHERE id='a0000'", [])
         .unwrap();
     fake.bodies.borrow_mut().clear();
+    library.publication_inputs.signal(&[11]);
     run(&library, &fake, 200).unwrap();
     assert_eq!(
         assets(&fake),
@@ -384,6 +386,7 @@ fn excess_tags_are_capped_by_manual_score_and_id_without_stalling() {
         )
         .unwrap();
     }
+    library.publication_inputs.signal(&[11]);
     run(&library, &fake, 300).unwrap();
     run(&library, &fake, 301).unwrap();
     let published = assets(&fake);
@@ -416,6 +419,7 @@ fn malformed_asset_is_skipped_and_retried_on_the_next_scan() {
         )
         .unwrap();
     fake.bodies.borrow_mut().clear();
+    library.publication_inputs.signal(&[11]);
     run(&library, &fake, 200).unwrap();
     assert_eq!(assets(&fake)[0]["assetId"], "a0000");
 }
@@ -464,6 +468,7 @@ fn auto_tag_rating_is_published_but_never_a_search_tag_and_changes_identity() {
         )
         .unwrap();
     fake.bodies.borrow_mut().clear();
+    library.publication_inputs.signal(&[11]);
     run(&library, &fake, 200).unwrap();
     assert_eq!(assets(&fake)[0]["contentRating"], "e");
     fake.bodies.borrow_mut().clear();
@@ -490,4 +495,85 @@ fn auto_tag_video_rating_is_null_in_publication() {
     let fake = Fake::default();
     run(&library, &fake, 100).unwrap();
     assert!(assets(&fake)[0]["contentRating"].is_null());
+}
+
+#[test]
+fn completed_pass_is_idle_until_signal_or_six_hour_verification() {
+    let (_temp, library) = fixture(2);
+    let fake = Fake::default();
+    let endpoint = "https://example.invalid/";
+    run(&library, &fake, 100).unwrap();
+    let checkpoint = || State::load(&*library.connection().unwrap(), endpoint).unwrap();
+    assert_eq!(checkpoint().next_verification, 100 + VERIFICATION_INTERVAL);
+    fake.bodies.borrow_mut().clear();
+    for time in [101, 160, 700, 100 + VERIFICATION_INTERVAL - 1] {
+        assert!(!library
+            .auto_tag_publication_due_on(&*library.connection().unwrap(), endpoint, time)
+            .unwrap());
+        run(&library, &fake, time).unwrap();
+        assert_eq!(checkpoint().next_verification, 100 + VERIFICATION_INTERVAL);
+    }
+    assert!(fake.bodies.borrow().is_empty());
+    // An uninstrumented writer is eventually found by the safety pass.
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE assets SET creator_handle='new' WHERE id='a0001'",
+            [],
+        )
+        .unwrap();
+    run(&library, &fake, 100 + VERIFICATION_INTERVAL).unwrap();
+    assert_eq!(assets(&fake).len(), 1);
+    assert_eq!(assets(&fake)[0]["creatorKey"], "new");
+    fake.bodies.borrow_mut().clear();
+    // The real edit facade wakes the lane inside the safety interval.
+    library
+        .edit_asset_auto_tag("a0000", "long_hair", auto_tags::AutoTagEdit::Remove)
+        .unwrap();
+    assert!(library
+        .auto_tag_publication_due_on(
+            &*library.connection().unwrap(),
+            endpoint,
+            101 + VERIFICATION_INTERVAL
+        )
+        .unwrap());
+    run(&library, &fake, 101 + VERIFICATION_INTERVAL).unwrap();
+    assert_eq!(assets(&fake).len(), 1);
+    assert_eq!(assets(&fake)[0]["assetId"], "a0000");
+    assert!(!assets(&fake)[0]["tags"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("long_hair")));
+}
+
+#[test]
+fn signal_rechecks_edits_behind_an_incomplete_cursor_and_restart_verifies_again() {
+    let (temp, library) = fixture(240);
+    let fake = Fake::default();
+    run(&library, &fake, 100).unwrap();
+    fake.bodies.borrow_mut().clear();
+    library
+        .edit_asset_auto_tag("a0000", "low_(series)", auto_tags::AutoTagEdit::Add)
+        .unwrap();
+    run(&library, &fake, 101).unwrap();
+    assert_eq!(assets(&fake)[0]["assetId"], "a0000");
+    assert!(assets(&fake)[0]["tags"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("low_(series)")));
+    run(&library, &fake, 102).unwrap();
+    drop(library);
+    let library = Library::open(temp.path()).unwrap();
+    assert!(library
+        .auto_tag_publication_due_on(
+            &*library.connection().unwrap(),
+            "https://example.invalid",
+            103
+        )
+        .unwrap());
+    fake.bodies.borrow_mut().clear();
+    run(&library, &fake, 103).unwrap();
+    run(&library, &fake, 104).unwrap();
+    assert!(assets(&fake).is_empty()); // A startup verification retains publication receipts.
 }

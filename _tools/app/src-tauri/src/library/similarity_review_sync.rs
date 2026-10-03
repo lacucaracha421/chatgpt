@@ -702,7 +702,7 @@ impl Library {
                     published_input_digest IS NULL
                     OR (input_digest IS NOT published_input_digest
                         AND (last_dirty<=unixepoch()-30 OR first_dirty<=unixepoch()-300))
-                    OR built_at<=unixepoch()-300)
+                    OR built_at<=unixepoch()-1800)
                  FROM mobile_similarity_review_feed_state WHERE endpoint=?1 AND library_id=?2",
                 params![endpoint, library_id],
                 |row| row.get(0),

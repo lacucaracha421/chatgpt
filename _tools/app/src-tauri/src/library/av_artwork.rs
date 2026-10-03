@@ -75,6 +75,7 @@ impl Library {
         transaction.execute("UPDATE collections SET updated_at=?1 WHERE id=?2",params![chrono::Utc::now().to_rfc3339(),id])?;
         let result = cover_set(&transaction,id)?;
         transaction.commit()?;
+        self.publication_inputs.signal(&[9]);
         for (index,item) in prepared.into_iter().enumerate() { if let Some(item) = item { if committed[index] { item.commit(); } } }
         Ok(result)
     }

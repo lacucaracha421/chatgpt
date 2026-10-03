@@ -17,6 +17,15 @@ use std::io::Read;
 
 // home_upcoming.py accepts anime (`tmdb:tv:<show>:s<season>`) from the 2026-09-27 server deploy on.
 const PUBLISH_ANIME: bool = true;
+const BUILD_INTERVAL: i64 = 10 * 60;
+fn lane(kind: &str) -> Result<usize, LibraryError> {
+    match kind {
+        "upcoming" => Ok(8),
+        "avPick" => Ok(9),
+        "artists" => Ok(10),
+        _ => Err(LibraryError::InvalidCloudResponse),
+    }
+}
 fn supported(kind: ReleaseKind) -> bool {
     PUBLISH_ANIME || kind != ReleaseKind::Anime
 }
@@ -64,6 +73,7 @@ struct State {
     cursor: i64,
     last_poll: Option<i64>,
     next_build: i64,
+    last_day: Option<NaiveDate>,
     retry_after: i64,
     failures: u32,
 }
@@ -149,6 +159,7 @@ fn title(value: &ReleaseTitle) -> Value {
 
 impl Library {
     pub(crate) fn home_publication_due_on(
+        &self,
         db: &Connection,
         endpoint: &str,
         kind: &str,
@@ -157,7 +168,11 @@ impl Library {
         let endpoint = status_watch::endpoint_key(endpoint);
         let state = State::load(db, &endpoint, kind)?;
         Ok(state.retry_after <= clock
-            && (state.next_build <= clock
+            && (self
+                .publication_inputs
+                .inputs_changed(lane(kind)?, &endpoint)
+                || (kind == "avPick" && state.last_day != Some(chrono::Local::now().date_naive()))
+                || state.next_build <= clock
                 || (kind == "upcoming"
                     && status_watch::log_pending(
                         &endpoint,
@@ -175,6 +190,14 @@ impl Library {
     ) -> Result<(), LibraryError> {
         let config = self.cloud_sync_config()?;
         if !config.enabled || config.api_base_url.as_deref() != Some(endpoint) {
+            return Ok(());
+        }
+        if !self.home_publication_due_on(
+            &*self.connection()?,
+            endpoint,
+            kind,
+            Utc::now().timestamp(),
+        )? {
             return Ok(());
         }
         let token = match super::credential::read_cloud_publisher_token_os() {
@@ -208,7 +231,7 @@ impl Library {
         kind: &str,
         now: DateTime<Utc>,
         today: NaiveDate,
-        light: bool,
+        _light: bool,
     ) -> Result<(), LibraryError> {
         let endpoint = status_watch::endpoint_key(endpoint);
         let mut state = State::load(&*self.connection()?, &endpoint, kind)?;
@@ -216,6 +239,12 @@ impl Library {
         if state.retry_after > clock {
             return Ok(());
         }
+        let generation = self.publication_inputs.generation(lane(kind)?);
+        let build_due = state.next_build <= clock
+            || self
+                .publication_inputs
+                .inputs_changed(lane(kind)?, &endpoint)
+            || (kind == "avPick" && state.last_day != Some(today));
         let poll = kind == "upcoming"
             && status_watch::log_due(
                 &endpoint,
@@ -224,12 +253,13 @@ impl Library {
                 Some(state.last_poll.unwrap_or(0)),
                 clock,
             );
-        if !poll && state.next_build > clock {
+        if !poll && !build_due {
             return Ok(());
         }
         // Persist before I/O: a crash or a failing endpoint cannot create a tight retry loop.
         state.retry_after = clock + 60;
         state.save(&*self.connection()?, &endpoint, kind)?;
+        let mut built = false;
         let result = (|| {
             let previous_cursor = state.cursor;
             if poll {
@@ -247,7 +277,7 @@ impl Library {
                     }
                 }
             }
-            if state.next_build > clock && state.cursor == previous_cursor {
+            if !build_due && state.next_build > clock && state.cursor == previous_cursor {
                 return Ok(());
             }
             let (path, mut body, artwork) = match kind {
@@ -298,7 +328,11 @@ impl Library {
                 state.revision = reply["revision"].as_i64();
                 state.published_digest = digest;
             }
-            state.next_build = clock + if light { 300 } else { 60 };
+            state.next_build = clock + BUILD_INTERVAL;
+            if kind == "avPick" {
+                state.last_day = Some(today);
+            }
+            built = true;
             Ok(())
         })();
         if result.is_ok() {
@@ -310,6 +344,10 @@ impl Library {
                 clock + (60_i64 * (1_i64 << state.failures.saturating_sub(1).min(6))).min(3600);
         }
         state.save(&*self.connection()?, &endpoint, kind)?;
+        if result.is_ok() && built {
+            self.publication_inputs
+                .observe_inputs(lane(kind)?, &endpoint, generation);
+        }
         result
     }
 

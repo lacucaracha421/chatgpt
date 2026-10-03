@@ -2158,6 +2158,7 @@ impl super::Library {
 
     pub fn apply_artist_source_fill(&self) -> Result<SourceFillResult, LibraryError> {
         apply_source_fill(&*self.connection()?, &now_utc())
+        .inspect(|_| self.publication_inputs.signal(&[10]))
     }
 
     pub fn artist_caption_labels(&self) -> Result<ArtistCaptionLabels, LibraryError> {
@@ -2170,6 +2171,7 @@ impl super::Library {
         display_name: Option<&str>,
     ) -> Result<String, LibraryError> {
         set_display_name(&*self.connection()?, id, display_name, &now_utc())
+        .inspect(|_| self.publication_inputs.signal(&[10]))
     }
 
     pub fn set_artist_flags(
@@ -2187,6 +2189,7 @@ impl super::Library {
             reposter,
             &now_utc(),
         )
+        .inspect(|_| self.publication_inputs.signal(&[10]))
     }
 
     pub fn merge_artists(
@@ -2202,10 +2205,12 @@ impl super::Library {
             display_name,
             &now_utc(),
         )
+        .inspect(|_| self.publication_inputs.signal(&[10]))
     }
 
     pub fn detach_artist_member(&self, id: &str, key: &str) -> Result<String, LibraryError> {
         detach_member(&*self.connection()?, id, key, &now_utc())
+        .inspect(|_| self.publication_inputs.signal(&[10]))
     }
 
     pub fn detach_artist_assignments(
@@ -2214,10 +2219,12 @@ impl super::Library {
         source: &str,
     ) -> Result<String, LibraryError> {
         detach_assignments(&*self.connection()?, id, source, &now_utc())
+        .inspect(|_| self.publication_inputs.signal(&[10]))
     }
 
     pub fn dismiss_artist_merge(&self, key_a: &str, key_b: &str) -> Result<(), LibraryError> {
         dismiss_suggestion(&*self.connection()?, key_a, key_b, &now_utc())
+        .inspect(|_| self.publication_inputs.signal(&[10]))
     }
 
     pub fn assign_assets_to_artist(
@@ -2233,6 +2240,7 @@ impl super::Library {
             new_name,
             &now_utc(),
         )
+        .inspect(|_| self.publication_inputs.signal(&[10]))
     }
 
     pub fn set_artist_settings(
@@ -2240,6 +2248,7 @@ impl super::Library {
         settings: ArtistSettings,
     ) -> Result<ArtistSettings, LibraryError> {
         set_settings(&*self.connection()?, settings)
+        .inspect(|_| self.publication_inputs.signal(&[10]))
     }
 
     pub fn list_artist_excluded_folders(&self) -> Result<Vec<ArtistExcludedFolder>, LibraryError> {
@@ -2248,6 +2257,7 @@ impl super::Library {
 
     pub fn set_artist_excluded_folders(&self, ids: &[String]) -> Result<(), LibraryError> {
         set_excluded_folders(&*self.connection()?, ids)
+        .inspect(|_| self.publication_inputs.signal(&[10]))
     }
 }
 

@@ -1343,6 +1343,7 @@ impl Library {
                     )?;
                 }
             }
+            self.publication_inputs.signal(&[8]);
         }
         self.release_calendar_at(now, today)
     }

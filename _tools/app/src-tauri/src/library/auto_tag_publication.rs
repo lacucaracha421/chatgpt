@@ -13,6 +13,7 @@ const ASSET_BATCH: usize = 100;
 // Must match library_search.MAX_TAGS_PER_ASSET (the upload contract).
 const MAX_TAGS_PER_ASSET: usize = 1000;
 const VOCABULARY_BATCH: usize = 500;
+const VERIFICATION_INTERVAL: i64 = 6 * 60 * 60;
 
 // The inspector and the publisher read the same labels and hidden-tag source.
 #[derive(Deserialize)]
@@ -67,6 +68,7 @@ struct State {
     vocabulary_cursor: String,
     asset_cursor: String,
     vocabulary_done: bool,
+    next_verification: i64,
     retry_after: i64,
     failures: u32,
 }
@@ -191,12 +193,16 @@ fn validate_reply(reply: &Value, body: &Value) -> Result<(), LibraryError> {
 
 impl Library {
     pub(crate) fn auto_tag_publication_due_on(
+        &self,
         db: &Connection,
         endpoint: &str,
         now: i64,
     ) -> Result<bool, LibraryError> {
         let endpoint = crate::cloud::status_watch::endpoint_key(endpoint);
-        Ok(State::load(db, &endpoint)?.retry_after <= now)
+        let state = State::load(db, &endpoint)?;
+        Ok(state.retry_after <= now
+            && (state.next_verification <= now
+                || self.publication_inputs.inputs_changed(11, &endpoint)))
     }
 
     pub(crate) fn run_due_auto_tag_publication(&self, endpoint: &str) -> Result<(), LibraryError> {
@@ -206,6 +212,13 @@ impl Library {
         }
         let config = self.cloud_sync_config()?;
         if !config.enabled || config.api_base_url.as_deref() != Some(endpoint) {
+            return Ok(());
+        }
+        if !self.auto_tag_publication_due_on(
+            &*self.connection()?,
+            endpoint,
+            Utc::now().timestamp(),
+        )? {
             return Ok(());
         }
         let token = match super::credential::read_cloud_publisher_token_os() {
@@ -238,9 +251,27 @@ impl Library {
         if state.retry_after > now {
             return Ok(());
         }
+        let generation = self.publication_inputs.generation(11);
+        let previous = self.publication_inputs.observed_generation(11, &endpoint);
+        let inputs_changed = previous != Some(generation);
+        if !inputs_changed && state.next_verification > now {
+            return Ok(());
+        }
+        // Resume incomplete checkpoints at startup. A new signal restarts the bounded pass
+        // so edits behind the cursor are included; receipts keep acknowledged pages idempotent.
+        if previous.is_some_and(|seen| seen != generation)
+            || (inputs_changed && state.next_verification > 0)
+        {
+            state.asset_cursor.clear();
+            state.vocabulary_cursor.clear();
+            state.vocabulary_done = false;
+        }
+        state.next_verification = 0;
         // Persist before network I/O so a crash cannot spin on a failing endpoint.
         state.retry_after = now + 60;
         state.save(&*self.connection()?, &endpoint)?;
+        self.publication_inputs
+            .observe_inputs(11, &endpoint, generation);
         let result = (|| {
             // At most three scan pages per owner tick, plus any newly introduced vocabulary.
             // Cursors survive restart/failure.
@@ -401,14 +432,11 @@ impl Library {
                         state.asset_cursor.clear();
                         state.vocabulary_cursor.clear();
                         state.vocabulary_done = false;
+                        state.next_verification = now + VERIFICATION_INTERVAL;
                     }
                 }
                 state.failures = 0;
-                state.retry_after = if kind == "asset" && reached_end {
-                    now + 60
-                } else {
-                    0
-                };
+                state.retry_after = 0;
                 state.save(&tx, &endpoint)?;
                 tx.commit()?;
                 if kind == "asset" && reached_end {
