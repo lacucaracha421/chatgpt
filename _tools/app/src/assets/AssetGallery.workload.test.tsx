@@ -58,7 +58,8 @@ it.each(["pending", "processing"] as const)("updates a %s video caption on workl
   act(() => bridge.handlers.get("workload://changed")!({ payload: normal }));
   expect(screen.getByRole("status")).toHaveTextContent("준비 중");
   expect(screen.getByRole("option", { name: `${state}.mp4` })).toBe(tile);
-  expect(bridge.invoke.mock.calls).toEqual([["workload_profile"]]);
+  // Only the two one-time startup reads; workload events must not invoke preparation.
+  expect(bridge.invoke.mock.calls).toEqual([["performance_profile"], ["workload_profile"]]);
 
   rerender(<AssetGallery layout="masonry" items={items} onRetryVideo={retry} privacyMode />);
   expect(screen.queryByText("준비 중")).not.toBeInTheDocument();
