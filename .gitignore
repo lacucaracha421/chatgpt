@@ -9,3 +9,6 @@ lakomics-collector-list-*.zip
 *.lnk
 .tmp/
 .vite/
+
+# Local character-runtime experiment data and sample images; kept on disk, not published.
+/TEST_kisaki/
