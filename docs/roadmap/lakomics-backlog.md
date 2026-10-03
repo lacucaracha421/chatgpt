@@ -158,6 +158,13 @@ Status: `IDEA` — user 2026-09-26, not started. Candidate order: Collection pro
 Status: `TODO` — low priority. Scope catalog duplicate decisions by library identity as well as server address; resolve similarity-review withdrawal arriving after the PC log read but before feed PUT, leaving the asset in Trash (unverified 2026-10-03).
 Live R2 Content-Length enforcement and transfer recovery checks are in consolidated acceptance; implemented bounds/paging/reclaim are archived.
 
+<a id="transfer-lan-001--localsend-style-direct-transfer-between-pc-and-tablet"></a>
+## TRANSFER-LAN-001 — LocalSend-style direct transfer between PC and tablet
+
+Status: `HOLD` — user 2026-10-03 chose this as the next practical transfer improvement; do not implement until the user explicitly starts it (PC diagnosis in progress).
+Decided 2026-10-03: on the same Wi-Fi, PC ↔ tablet transfers go device-to-device without the cloud; otherwise they fall back automatically to the current cloud transfer. Already-registered own devices connect automatically without a PIN/code prompt; unregistered devices are not connected. The chat-style transfer screen stays as is.
+Keep the existing hash/dedupe/trust checks; the first use may show a PC firewall prompt (Windows and Linux). Chosen over text/link/clipboard sending, add-to-library from received files, send-from-Asset and pre-send conversion, which stay unrecorded ideas.
+
 <a id="server-review-20260924--remaining-judgment-calls-of-the-cloud-api-review"></a>
 ## SERVER-REVIEW-20260924 — Residual server judgment calls
 
@@ -246,7 +253,7 @@ unless marked verified; measure on the device/PC before optimising.
 <a id="external-refs-20261002--external-projects-worth-borrowing-from-reference-list"></a>
 ## EXTERNAL-REFS-20261002 — Optional external references
 
-Status: `IDEA` — user-shared survey 2026-10-02, not adoption. Later candidates: Actual recurring-date/history semantics and remaining-spend display; Playnite per-field provider preview/preservation; FiftyOne failure analysis; LocalSend fallback transport with existing hash/dedupe/trust checks.
+Status: `IDEA` — user-shared survey 2026-10-02, not adoption. Later candidates: Actual recurring-date/history semantics and remaining-spend display; Playnite per-field provider preview/preservation; FiftyOne failure analysis; LocalSend fallback transport (chosen; see [TRANSFER-LAN-001](#transfer-lan-001--localsend-style-direct-transfer-between-pc-and-tablet)).
 Reader gesture/loading references: Mihon (no resume/following features); writing/search/revisit: usememos, fml, meguri; optional PySceneDetect, damaged-file checks, gallery-dl/Stash ideas-only, nowinandroid metadata flow, Tink AEAD review, restic backups, tus only for demonstrated retry pain. No installs implied.
 `fast_image_resize` is not adopted (resize 13.6%, below 25% measurement bar); static-WebP decode optimisation is done (`59c95ff0`). sqlite-vec, imgutils clustering and mismatched CSD weights are not new trials; TanStack Virtual already exists; larger taggers require same-sample comparisons.
 
