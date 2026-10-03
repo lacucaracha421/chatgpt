@@ -1,3 +1,5 @@
+import { useAssetMask } from "../privacy/PrivacyContext";
+import { AssetImage } from "../privacy/AssetImage";
 import { workloadPollDelay, getWorkloadProfile } from "../app/workloadProfile";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
@@ -183,11 +185,13 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
   // Another character already judged on this same image in this window.
   const sameImage = current ? [...judged.current.values()].filter(j => j.item.assetId === current.assetId && j.item.targetId !== current.targetId) : [];
   const next = queue[1];
+  const nextMasked=useAssetMask(next?.assetId,privacyMode);
   useEffect(() => {
-    if (!next || privacyMode) return;
+    if (!next || nextMasked) return;
     const image = new Image();
     image.src = assetUrl(next.assetId);
-  }, [next, privacyMode]);
+    return () => {image.src = "";};
+  }, [next, nextMasked]);
 
   async function judge(decision: Judgment["decision"]) {
     if (!current || busy) return;
@@ -289,7 +293,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
               </div>
               <h3 className="shadow-review__character">{current.targetName}</h3>
               {current.referenceAssetIds.length > 0 && <ul className="shadow-review__references" aria-label={`${current.targetName} 레퍼런스`}>
-                {current.referenceAssetIds.map(id => <li key={id}><img src={thumbnailUrl(id)} alt="" className={privacyMode ? "character-private" : undefined} loading="lazy" /></li>)}
+                {current.referenceAssetIds.map(id => <li key={id}><AssetImage src={thumbnailUrl(id)} alt="" className={privacyMode ? "character-private" : undefined} loading="lazy" /></li>)}
               </ul>}
               {mode === "doubtful" && <p className="shadow-review__same-image" role="note">이미 {current.targetName}(으)로 자동 분류된 이미지인데, S36은 이 분류를 지지하지 않습니다. 틀렸으면 아님을 눌러 주세요.</p>}
               {mode !== "doubtful" && current.nativeOutcome === "accepted_automatic" && <p className="shadow-review__same-image" role="note">기존 분류기가 이미 {current.targetName}(으)로 자동 분류한 이미지입니다. 새 후보를 다 본 뒤에 나오며, 틀렸으면 아님을 눌러 주세요.</p>}
@@ -324,8 +328,8 @@ function ReviewImage({ item, privacyMode }: { item: ShadowReviewItem; privacyMod
   const [original, setOriginal] = useState<"loading" | "ready" | "failed">("loading");
   const alt = `${item.originalName} — ${item.targetName} 후보`;
   return <figure className="shadow-review__figure">
-    {original !== "ready" && <img className={`shadow-review__image${privacyMode ? " character-private" : ""}`} src={thumbnailUrl(item.assetId)} alt={alt} draggable={false} />}
-    {original !== "failed" && <img className={`shadow-review__image${original === "ready" ? "" : " shadow-review__image--pending"}${privacyMode ? " character-private" : ""}`}
+    {original !== "ready" && <AssetImage className={`shadow-review__image${privacyMode ? " character-private" : ""}`} src={thumbnailUrl(item.assetId)} alt={alt} draggable={false} />}
+    {original !== "failed" && <AssetImage className={`shadow-review__image${original === "ready" ? "" : " shadow-review__image--pending"}${privacyMode ? " character-private" : ""}`}
       src={assetUrl(item.assetId)} alt={original === "ready" ? alt : ""} draggable={false}
       onLoad={() => setOriginal("ready")} onError={() => setOriginal("failed")} />}
     {original === "failed" && <figcaption className="shadow-review__image-note" role="status">원본을 불러오지 못해 축소 이미지를 표시합니다.</figcaption>}

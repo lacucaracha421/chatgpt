@@ -12,14 +12,14 @@ import {artistName,searchValues,type LibraryArtist} from './artistsModel';
 
 export const TABLET_FIND_SCOPES=FIND_SCOPES.filter(scope=>scope!=='명령');
 export type FindDestination={kind:'work';id:string}|{kind:'artist';artist:LibraryArtist}|{kind:'note';id:string}|{kind:'place';view:View}|{kind:'screen';screen:'home'|'assets'|'collections'|'catalog'|'notes'|'settings'};
-export type TabletFindEntry=NavigationEntry&{destination:FindDestination;work?:{item:CollectionSummary;revision:string};assetId?:string};
+export type TabletFindEntry=NavigationEntry&{destination:FindDestination;work?:{item:CollectionSummary;revision:string};assetId?:string;contentRating?:import("../src/shared/privacy/contentMask").ContentRating|null};
 
 /** Project titles only, including concealed and locked secret notes' public titles. */
 export function tabletFindEntries({works,artists,notes,folders,albums,navigate}:{works:{item:CollectionSummary;revision:string}[];artists:LibraryArtist[];notes:Pick<Note,'id'|'title'|'type'|'deleted'>[];folders:Entry[];albums:AlbumTree|null;navigate(destination:FindDestination):void}):TabletFindEntry[] {
   const entry=(id:string,group:NavigationEntry['group'],label:string,destination:FindDestination,extra:Partial<TabletFindEntry>={}):TabletFindEntry=>({id,group,label,icon:null,...extra,destination,run:()=>navigate(destination)});
   return [
     ...works.map(work=>entry(`work-${work.item.id}`,'work',work.item.name,{kind:'work',id:work.item.id},{keywords:work.item.originalTitle?[work.item.originalTitle]:[],context:FIND_WORK_TYPE_LABEL[work.item.type],icon:<BookOpenIcon/>,work})),
-    ...artists.filter(artist=>!artist.hidden).map(artist=>entry(`artist-${artist.id}`,'artist',artistName(artist),{kind:'artist',artist},{keywords:searchValues(artist),icon:<UserIcon/>,avatar:true,assetId:artist.coverAssetIds[0]})),
+    ...artists.filter(artist=>!artist.hidden).map(artist=>entry(`artist-${artist.id}`,'artist',artistName(artist),{kind:'artist',artist},{keywords:searchValues(artist),icon:<UserIcon/>,avatar:true,assetId:artist.coverAssetIds[0],contentRating:artist.coverContentRatings?.[artist.coverAssetIds[0]]??null})),
     ...notes.filter(note=>!note.deleted&&note.type!=='ledger-month').map(note=>entry(`note-${note.id}`,'note',note.title.trim()||'제목 없는 메모',{kind:'note',id:note.id},{icon:<PencilSquareIcon/>})),
     ...folders.map(folder=>entry(`place-folder-${folder.id}`,'place',folder.name,{kind:'place',view:entryView(folder)},{context:ancestorsOf(folders,folder.id).map(parent=>parent.name).join(' › ')||'폴더',icon:<FolderIcon/>})),
     ...(albums?.adopted?albums.albums.map(album=>entry(`place-album-${album.id}`,'place',album.name,{kind:'place',view:albumView(albums,album)},{context:'앨범',icon:<RectangleStackIcon/>})):[]),

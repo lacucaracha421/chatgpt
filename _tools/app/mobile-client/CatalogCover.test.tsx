@@ -121,3 +121,23 @@ it('bounds the no-observer fallback instead of warming every card',()=>{
   </div></div>);
   expect(mocks.ticket).toHaveBeenCalledTimes(1);
 });
+
+it('masks nearby covers under only the NSFW filter without a ticket or source',()=>{
+  localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+  const view=render(cover());
+  intersect(observers[1],true);
+  expect(mocks.ticket).not.toHaveBeenCalled();
+  expect(view.container.querySelector('img')).toBeNull();
+  expect(view.container.querySelector('[src]')).toBeNull();
+  expect(view.container.querySelector('.privacy-mask')).toBeTruthy();
+});
+it('removes a loaded cover and aborts its work when the NSFW filter turns on',async()=>{
+  mocks.ticket.mockResolvedValue({url:'https://app.lakomics.local/media-cache/test'});
+  const view=render(cover());intersect(observers[1],true);
+  await waitFor(()=>expect(view.container.querySelector('img')).not.toBeNull());
+  const signal=mocks.ticket.mock.calls[0][1] as AbortSignal;
+  act(()=>{localStorage.setItem('lakomics.mobile.nsfwFilter','1');window.dispatchEvent(new Event('lakomics-privacy-mode'));});
+  expect(signal.aborted).toBe(true);
+  expect(view.container.querySelector('img')).toBeNull();
+  expect(mocks.ticket).toHaveBeenCalledTimes(1);
+});

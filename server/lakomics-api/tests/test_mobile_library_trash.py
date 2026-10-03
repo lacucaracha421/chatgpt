@@ -19,6 +19,7 @@ from tests.test_capture_api_stub import fake_s3
 
 import app as api_app
 import asset_authority
+import library_search
 
 A = "20000000-0000-4000-8000-0000000000a1"
 B = "20000000-0000-4000-8000-0000000000b2"
@@ -91,6 +92,16 @@ class MobileLibraryTrashTests(AssetAuthorityFixture):
         self.assertTrue(first["thumbnail_available"])
         self.assertEqual((body["libraryId"], body["epoch"], body["contractVersion"]),
                          ("e" * 32, 1, 1))
+
+    def test_trash_payload_includes_live_rating_and_unknown_null(self):
+        self.seeded()
+        with api_app.get_db() as db:
+            db.executescript(library_search.DDL)
+            db.execute("INSERT INTO library_asset_ratings(asset_id,content_rating) VALUES(?,?)", [A, "g"])
+            db.commit()
+        items = {item["id"]: item for item in self.trash().json()["items"]}
+        self.assertEqual(items[A]["contentRating"], "g")
+        self.assertIsNone(items[B]["contentRating"])
 
     def test_pages_with_a_keyset_cursor(self):
         self.seeded()

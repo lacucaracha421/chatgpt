@@ -218,6 +218,7 @@ impl Library {
         install_staged_asset(&staging_path, &asset_path, &mut pending)?;
 
         let asset = AssetSummary {
+            content_rating: None,
             id: identity.map(|value| value.asset_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             title: None,
             original_name: original_name(&request.source_path),
@@ -341,6 +342,7 @@ impl Library {
         install_staged_asset(&staging_path, &asset_path, &mut pending)?;
 
         let asset = AssetSummary {
+            content_rating: None,
             id: identity.map(|value| value.asset_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             title: None,
             original_name: original_name(&request.source_path),

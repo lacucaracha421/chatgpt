@@ -1,3 +1,5 @@
+import {nsfwFilter,privacyMode,PRIVACY_MODE_EVENT} from './privacyMode';
+import {mediaMasked} from './assetMask';
 import {onVisible} from './useVisibleInterval';
 import {native} from './transport';
 import {onPowerChange} from './deviceSignals';
@@ -19,7 +21,7 @@ let active:AbortController|undefined;
 let generation=0;
 let removeVisible:(()=>void)|undefined;
 const hide=()=>{if(document.visibilityState==='hidden')schedule();};
-const allowed=()=>document.visibilityState!=='hidden'&&!meteredConnection();
+const allowed=()=>!nsfwFilter()&&!privacyMode()&&document.visibilityState!=='hidden'&&!meteredConnection();
 function schedule(){
   if(timer!==undefined)clearTimeout(timer);timer=undefined;
   if(!allowed()){active?.abort();return;}
@@ -56,17 +58,17 @@ export function warmOriginalTickets(items:Asset[],signal:AbortSignal){
   if(signal.aborted)return;
   const token=Symbol(),ids:string[]=[];
   for(const item of items){
-    if(item.pending||!(item.kind==='image'||item.kind==='gif')||ids.includes(item.id))continue;
+    if(mediaMasked(item)||item.pending||!(item.kind==='image'||item.kind==='gif')||ids.includes(item.id))continue;
     // Bound subscriptions too, even for an unusually dense viewport.
     if(!visible.has(item.id)&&visible.size+ids.filter(id=>!visible.has(id)).length>=128)continue;
     ids.push(item.id);
   }
   const wasEmpty=!visible.size;
   for(const id of ids){let watchers=visible.get(id);if(!watchers){watchers=new Set();visible.set(id,watchers);}watchers.add(token);}
-  if(wasEmpty&&visible.size){document.addEventListener('visibilitychange',hide);connection()?.addEventListener?.('change',schedule);removeVisible=onVisible(schedule);removePower=onPowerChange(powerChanged);}
+  if(wasEmpty&&visible.size){window.addEventListener(PRIVACY_MODE_EVENT,schedule);document.addEventListener('visibilitychange',hide);connection()?.addEventListener?.('change',schedule);removeVisible=onVisible(schedule);removePower=onPowerChange(powerChanged);}
   const release=()=>{
     for(const id of ids){const watchers=visible.get(id);watchers?.delete(token);if(!watchers?.size)visible.delete(id);}
-    if(!visible.size){document.removeEventListener('visibilitychange',hide);connection()?.removeEventListener?.('change',schedule);removeVisible?.();removeVisible=undefined;removePower?.();removePower=undefined;}
+    if(!visible.size){window.removeEventListener(PRIVACY_MODE_EVENT,schedule);document.removeEventListener('visibilitychange',hide);connection()?.removeEventListener?.('change',schedule);removeVisible?.();removeVisible=undefined;removePower?.();removePower=undefined;}
     schedule();
   };
   signal.addEventListener('abort',release,{once:true});schedule();

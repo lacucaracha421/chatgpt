@@ -60,6 +60,7 @@ proceeds exactly as before, and startup only creates empty tables. There is no
 automatic activation: :func:`activate` runs solely from the publisher-only route,
 which this batch does not call in any environment.
 """
+import library_search
 import datetime
 import hashlib
 import json
@@ -672,6 +673,7 @@ def default_asset_item(row, classification_ids=None):
     """
     return {
         "id": row["id"],
+        "contentRating": library_search.content_rating(row),
         "kind": row["kind"],
         "content_type": row["content_type"],
         "size_bytes": row["size_bytes"],

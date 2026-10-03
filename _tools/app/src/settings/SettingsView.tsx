@@ -1,3 +1,4 @@
+import { usePrivacy } from "../privacy/PrivacyContext";
 import { displayDate, displayDateTime } from "../shared/displayDate";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -79,6 +80,7 @@ const SHORTCUTS = [
 ] as const;
 
 export function SettingsView({ restoring, onRestore, onExit, onImportFolder, metadataImportRunning = false, onCollectionsChanged, onCloudCaptureSynced = () => undefined, onRestoreCloudMetadata, onPrivateVaultChanged, initialSection, sectionRequest, privacyMode = false, onPrivacyModeChange = () => undefined, appZoom = 100, onAppZoomChange = () => undefined, appZoomError = null }: SettingsViewProps) {
+  const {nsfwFilter,setNsfwFilter} = usePrivacy();
   const workspace = useWorkspaceChrome();
   const { collections: collectionPublication, characters: characterPublication } = usePublicationJobs();
   const { error: libraryError, gateway, library, openLibrary } = useLibrary();
@@ -450,6 +452,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           <header className="settings-view__header"><h2>자주 쓰는 것</h2></header>
           <SettingsGroup title="모드">
             <SimpleRow name="비공개 모드" control={<Switch aria-label="비공개 모드" checked={privacyMode} onChange={event => onPrivacyModeChange(event.target.checked)} />} />
+            <SimpleRow name="NSFW 필터" status="전연령 이미지만 보여요" control={<Switch aria-label="NSFW 필터" checked={nsfwFilter} onChange={event => setNsfwFilter(event.target.checked)} />} />
             <LightweightModeRow />
           </SettingsGroup>
           <SettingsGroup title="동기화">
@@ -470,6 +473,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             <SimpleRow name="화면 배율" control={<span className="settings-view__control-pair"><Select label="화면 배율" value={appZoom} onChange={event => onAppZoomChange(Number(event.target.value))}>{APP_ZOOM_LEVELS.map(level => <option key={level} value={level}>{level}%</option>)}</Select><Button size="sm" variant="quiet" disabled={appZoom === 100} onClick={() => onAppZoomChange(100)}>100%</Button></span>} />
             {appZoomError && <p className="settings-view__row-message" role="alert">{appZoomError}</p>}
             <SimpleRow name="비공개 모드" control={<Switch aria-label="비공개 모드" checked={privacyMode} onChange={event => onPrivacyModeChange(event.target.checked)} />} />
+            <SimpleRow name="NSFW 필터" status="전연령 이미지만 보여요" control={<Switch aria-label="NSFW 필터" checked={nsfwFilter} onChange={event => setNsfwFilter(event.target.checked)} />} />
           </SettingsGroup>
           <SettingsGroup title="절약 모드">
             <WorkloadControls />

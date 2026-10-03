@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SERVER_DIR = Path(__file__).resolve().parents[1]
@@ -519,6 +519,19 @@ if __name__ == "__main__":
 
 
 class MobileRevisitTests(MobileLibraryApiTests):
+    def test_rating_is_returned_in_home_revisit_payloads(self):
+        import library_search
+        with api_app.get_db() as db:
+            library_search.startup_db(db)
+        self.commit_asset("safe-revisit", collected_at="2025-10-03T00:00:00Z")
+        with api_app.get_db() as db:
+            db.execute("INSERT INTO library_asset_ratings VALUES('safe-revisit','g')")
+            db.commit()
+        response = self.client.get("/v1/library/revisit/date", headers=self.auth)
+        self.assertEqual(response.status_code, 200, response.text)
+        items = response.json()["items"]
+        self.assertTrue(any(item["id"] == "safe-revisit" and item["contentRating"] == "g" for item in items))
+
     def test_revisit_date_excludes_recent_and_prefers_calendar_near_dates(self):
         # 30일 이내 자산은 date bundle에서 제외된다(최근 추가와 중복 방지).
         # 오래된 ±7일 캘린더 근처/같은 달/결정론적 오래된 자산만 후보다.
@@ -781,7 +794,9 @@ class MobileRevisitDetailTests(MobileLibraryApiTests):
 
     def test_date_detail_excludes_recent_and_paginates(self):
         recent = "62000000-0000-4000-8000-000000000001"
-        self.commit_asset(recent, collected_at="2026-09-02T00:00:00.000Z", creator="recent-only")
+        # Relative to now: a fixed date ages out of the recent window.
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        self.commit_asset(recent, collected_at=yesterday, creator="recent-only")
         old_ids = []
         for index in range(5):
             asset_id = f"62000000-0000-4000-8000-{index + 2:012d}"

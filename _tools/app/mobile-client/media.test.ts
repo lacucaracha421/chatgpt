@@ -181,3 +181,25 @@ it('waits for the native power event instead of retrying tickets native declined
     await vi.advanceTimersByTimeAsync(0);expect(mocks.native).toHaveBeenCalledTimes(2);
   }finally{controller.abort();vi.useRealTimers();}
 });
+
+it('does not request or decode masked thumbnails through foreground and prefetch queues',async()=>{
+ localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+ const image=vi.fn();vi.stubGlobal('Image',image);
+ const asset={id:'unknown',kind:'image',preview:'blob:old'};
+ try {
+  const result=await loadThumbnail(asset,new AbortController().signal);
+  expect(result.preview).toBeUndefined();prefetchThumbnails([asset],new AbortController().signal);
+  expect(mocks.native).not.toHaveBeenCalled();expect(mocks.api).not.toHaveBeenCalled();expect(image).not.toHaveBeenCalled();
+ }finally {localStorage.removeItem('lakomics.mobile.nsfwFilter');}
+});
+
+it('never requests or decodes safe-rated videos with the NSFW filter enabled',async()=>{
+ localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+ const image=vi.fn();vi.stubGlobal('Image',image);
+ try {
+  const video={id:'safe-video',kind:'video',contentRating:'g' as const};
+  expect((await loadThumbnail(video,new AbortController().signal)).preview).toBeUndefined();
+  prefetchThumbnails([video],new AbortController().signal);
+  expect(mocks.native).not.toHaveBeenCalled();expect(image).not.toHaveBeenCalled();
+ }finally {localStorage.removeItem('lakomics.mobile.nsfwFilter');}
+});

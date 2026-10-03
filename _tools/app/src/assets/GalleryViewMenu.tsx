@@ -1,3 +1,4 @@
+import { usePrivacy } from "../privacy/PrivacyContext";
 import type { ReactNode } from "react";
 import { ViewOptionsMenu } from "../shared/ui/ViewOptionsMenu";
 import { useGalleryCount } from "./galleryCount";
@@ -48,6 +49,7 @@ export function GalleryViewMenu({
   inspectorAvailable = true,
   onInspectorOpenChange,
 }: GalleryViewMenuProps) {
+  const {privacyMode,setPrivacyMode,nsfwFilter,setNsfwFilter} = usePrivacy();
   const [perRow, setPerRow] = useGalleryCount(thumbnailRowHeight);
   return <ViewOptionsMenu
     layout={galleryLayout} options={[{ value: "masonry", label: "폭포수" }, { value: "justified", label: "같은 높이" }]}
@@ -67,6 +69,8 @@ export function GalleryViewMenu({
           {ASPECT_OPTIONS.map((option) => <button key={option.value} type="button" role="radio" aria-checked={aspectFilter === option.value} className="asset-view-menu__aspect" onClick={() => onAspectFilterChange(option.value)}>{option.icon}<span>{option.label}</span></button>)}
         </div>
       </section>}
+      <Switch label="비공개 모드" checked={privacyMode} onChange={event => setPrivacyMode(event.target.checked)} />
+      <Switch label="NSFW 필터" title="전연령 이미지만 보여요" checked={nsfwFilter} onChange={event => setNsfwFilter(event.target.checked)} />
       {scopeControl}
       {onInspectorOpenChange && <Switch label="정보" checked={Boolean(inspectorOpen)} disabled={!inspectorAvailable} onChange={(event) => onInspectorOpenChange(event.target.checked)} />}
   </ViewOptionsMenu>;

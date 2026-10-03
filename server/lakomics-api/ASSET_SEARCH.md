@@ -72,9 +72,9 @@ Example: `/v1/library/assets?tag=long_hair&tag=glasses&artist=artist%3Aa1&classi
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "vocabulary": [{"id": "long_hair", "label": "긴 머리", "category": "general"}],
-  "assets": [{"assetId": "asset-1", "creatorKey": "alice", "tags": ["long_hair"]}]
+  "assets": [{"assetId": "asset-1", "creatorKey": "alice", "tags": ["long_hair"], "contentRating": "g"}]
 }
 ```
 
@@ -88,7 +88,7 @@ that Asset's tag set and creator key. Every referenced tag must already exist or
 be in the same request. An empty tag array clears previous tags. Other Assets
 are untouched. Duplicate ids/tags, unknown tags and invalid shape return
 `422 invalidAutoTagUpload`; an oversized body returns `413 autoTagUploadTooLarge`.
-Response: `{"version":1,"revision":1,"changed":true,"assets":1,"vocabulary":1}`.
+Response: `{"version":2,"revision":1,"changed":true,"assets":1,"vocabulary":1}`.
 Identical content is idempotent, including retry after a lost response; generated
 timestamps are deliberately absent from the content identity.
 
@@ -121,10 +121,10 @@ hidden tag names; character labels retain the PC's prettified names.
 
 1. The controller reviews the focused diff and checks below, then deploys the
    server first using the existing service deployment procedure and backup rules.
-   Startup creates eight additive tables: `library_tag_state`,
+   Startup creates nine additive tables: `library_tag_state`,
    `library_tag_vocabulary`, `library_tag_assets`, `library_asset_tags`,
    `library_artist_keys`, `library_artist_assignments`, `library_tag_counts`,
-   `library_tag_visibility`, with tag/creator/artist and committed/id indexes.
+   `library_tag_visibility`, and `library_asset_ratings`, with tag/creator/artist and committed/id indexes.
    The artist key and assignment tables are projections of the already published artist
    document, rebuilt from the stored document in the same `BEGIN IMMEDIATE` transaction at
    startup and atomically replaced by later artist uploads. Search startup runs
@@ -234,3 +234,47 @@ existing real-file/scale probes remained ignored. Task-scoped whitespace checks
 No commit, deployment, SSH, dependency installation or production-library writes
 were performed. Native application publication and live server acceptance remain
 unverified.
+
+
+## Device NSFW filter and rating publication (2026-10-03)
+
+Auto-tag publication version 2 adds nullable `contentRating` (`g`, `s`, `q`, `e`)
+per Asset. The PC derives it from model rows in `asset_auto_tags` joined to the
+`rating` vocabulary category, using the highest score. Equal scores select the
+more restrictive rating (`e`, `q`, `s`, `g`), with unknown tags taking precedence
+on a tie. The highest-scoring rating-category tag is selected before mapping its
+label; an unrecognized top tag produces null instead of falling back to a lower
+known rating. Videos always expose null. Manual display-tag edits do not affect
+this value. Rating tags remain excluded from the effective searchable tag set.
+The indexed local summary reads expose the same field; ID-only PC covers share
+bounded existing summary reads and stay masked until those reads establish `g`.
+
+Server startup creates `library_asset_ratings` additively. A tag batch atomically
+replaces rating, creator key and tags for each submitted Asset. Rating participates
+in the digest and existing tag revision/list generation. Version 1 uploads remain
+accepted; omitted ratings replace the previous rating with null. The response
+version matches the submitted version. Identical retries do not advance revision.
+A rating-free version 1 retry also accepts its pre-upgrade `[creatorKey,tags]`
+digest without rewriting relations. Version 2 identity always includes rating.
+No production migration or deployment was performed for this change.
+
+Ordinary Library, Album, Character, Revisit and Trash Asset payloads carry `contentRating`;
+missing values are null. Character index cover/hero IDs have a `contentRatings`
+map, and artist documents include `coverContentRatings` on each artist. These
+preview projections read current ratings without altering the PC-owned publication
+identity, and their response content/ETags change with the rating data.
+
+PC and tablet persist independent device switches for privacy and the NSFW filter.
+Privacy wins. The NSFW filter reveals only `g` images; videos, untagged, failed, not-yet-published
+and other unknown Assets stay masked in place. Masked viewers, mosaic cells,
+filmstrips and thumbnail queues do not request or decode their media. Local transfer
+previews have no authoritative rating and therefore stay masked. Collections,
+Catalog/Manga and Notes retain their existing behavior. The asset-based FAULT game
+is unavailable under this filter because its embedded view cannot mask individual
+images. Native drag uses a neutral preview for a masked representative Asset.
+
+Deploy the compatible server first, then release the PC and tablet. Normal bounded
+auto-tag publication will gradually send the new rating field; no media backfill
+or replacement catalog is required. Until publication arrives, tablet cells remain
+masked under the filter. Deployment, native acceptance and device checks are separate
+from the fixture checks and require their own execution.

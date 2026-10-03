@@ -56,3 +56,21 @@ it('keeps list and viewer info readable while masking its supplied preview',()=>
  const {container}=render(<ViewerInfo asset={{id:'info',kind:'image',preview:'blob:preview',width:600,height:800}}/>);
  expect(screen.getByText('600 × 800')).toBeTruthy();expect(container.querySelector('.privacy-mask')).toBeTruthy();expect(container.querySelector('img[src]')).toBeNull();
 });
+
+it('NSFW masks each folder/album/home mosaic cell, including cached unknowns, without requesting media',()=>{
+ localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+ const {container}=render(<CoverGroup paused={false} items={[
+  {id:'g',kind:'image',contentRating:'g',preview:'blob:safe'},
+  {id:'q',kind:'image',contentRating:'q',preview:'blob:unsafe'},
+  {id:'unknown',kind:'image',preview:'blob:unknown'},
+ ]}/>);
+ expect(container.querySelectorAll('img[src]')).toHaveLength(1);
+ expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:safe');
+ expect(container.querySelectorAll('.privacy-mask')).toHaveLength(2);
+ expect(mocks.thumbnail).not.toHaveBeenCalled();
+});
+it('privacy wins over a g rating while both device switches are on',()=>{
+ localStorage.setItem('lakomics.mobile.nsfwFilter','1');localStorage.setItem('lakomics.mobile.privacyMode','1');
+ const {container}=render(<CoverGroup paused={false} items={[{id:'g',kind:'image',contentRating:'g',preview:'blob:safe'}]}/>);
+ expect(container.querySelector('img[src]')).toBeNull();expect(mocks.thumbnail).not.toHaveBeenCalled();
+});

@@ -6,7 +6,7 @@ import {rememberRecent,readRecent} from '../src/shared/findModel';
 import type {CollectionSummary} from './collectionModel';
 const media=vi.hoisted(()=>({ticket:vi.fn()}));
 vi.mock('./collectionArtwork',()=>({artworkTicket:media.ticket,decoded:vi.fn(async()=>{})}));
-vi.mock('./media',()=>({mediaTicket:media.ticket}));
+vi.mock('./media',()=>({mediaTicket:media.ticket,decodeImage:vi.fn(async()=>{})}));
 const endpoint='test-device';const recentKey=`tablet:${endpoint}`;
 function entries(count=8,run=vi.fn()):TabletFindEntry[]{return tabletFindEntries({works:Array.from({length:count},(_,i)=>({item:{id:String(i),name:`별과 ${i}`,type:'manga',showcase:false,coverAssetId:`cover-${i}`} as CollectionSummary,revision:'r'})),artists:[],notes:[{id:'n',title:'별과 메모',type:'text',deleted:false}],folders:[],albums:null,navigate:run});}
 function show(props:Partial<Parameters<typeof FindSheet>[0]>={}){return render(<FindSheet open entries={entries()} endpoint={endpoint} privacy={false} onClose={vi.fn()} {...props}/>);}
@@ -61,4 +61,14 @@ it('resolves recent IDs against current accessible entries and keeps the chosen 
   show();expect(screen.getAllByRole('option')).toHaveLength(2);
   fireEvent.click(screen.getByRole('button',{name:'메모',exact:true}));
   expect(screen.getAllByRole('option')).toHaveLength(1);expect(screen.getByRole('option').textContent).toBe('별과 메모');
+});
+
+it('masks unsafe artist results without tickets while retaining work covers and safe results',async()=>{
+  localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+  const artist=(id:string,contentRating:'g'|'e'|null):TabletFindEntry=>({id,group:'artist',label:`별과 ${id}`,icon:null,assetId:id,contentRating,destination:{kind:'screen',screen:'assets'},run:vi.fn()});
+  show({entries:[artist('g','g'),artist('e','e'),artist('u',null),...entries(1)]});type('별과');
+  await screen.findAllByRole('option');
+  await waitFor(()=>expect(media.ticket).toHaveBeenCalledTimes(2));
+  expect(media.ticket.mock.calls.some(([asset])=>asset?.id==='e'||asset?.id==='u')).toBe(false);
+  expect(document.querySelectorAll('.privacy-mask')).toHaveLength(2);
 });

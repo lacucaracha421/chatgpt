@@ -12,7 +12,7 @@ import { CATALOG_BOOKMARKS_CHANGED_EVENT } from "../app/useCatalogBookmarkSync";
 import { catalogStreamStatus, latestCatalogUpdate } from "../library/catalogStreams";
 import { commandErrorMessage } from "../library/errorMessage";
 import { nativeMediaUrl } from "../assets/mediaUrl";
-import { usePrivacy } from "../privacy/PrivacyContext";
+import { useCatalogMasked } from "../privacy/catalogMask";
 import type {
   CatalogLanguage,
   CatalogGroupedPage,
@@ -80,7 +80,7 @@ type OnlineCatalogBrowserProps = {
 
 export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, onBookmarksChanged, onSwitchLocal, initialScope = "all", requestedSource, active = true, onSourceChange, onReady, localCount, bookmarkCount, onBookmarkCount }: OnlineCatalogBrowserProps) {
   const { gateway } = useLibrary();
-  const { privacyMode } = usePrivacy();
+  const privacyMode = useCatalogMasked();
   const workspace = useWorkspaceChrome();
   const [searchOpen, setSearchOpen] = useState(false);
   const [appliedQuery, setAppliedQuery] = useState("");

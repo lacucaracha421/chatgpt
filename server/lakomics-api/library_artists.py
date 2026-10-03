@@ -212,13 +212,15 @@ def register(app, get_db, require_client, require_publisher):
                     if_none_match: str | None = Header(default=None)):
         require_client(authorization)
         with get_db() as db:
+            db.execute("BEGIN")
             state = _state(db)
-        if state["document"] is None:
-            return conditional.json_response({
-                "version": 1, "revision": state["revision"], "publishedAt": None, "generatedAt": None,
-                "settings": None, "unknown": None, "artists": [], "assignments": []}, if_none_match)
-        body = state["document"].encode("utf-8")
-        return conditional.encoded_response(body, conditional.etag_for(body), if_none_match)
+            if state["document"] is None:
+                return conditional.json_response({
+                    "version": 1, "revision": state["revision"], "publishedAt": None, "generatedAt": None,
+                    "settings": None, "unknown": None, "artists": [], "assignments": []}, if_none_match)
+            document = json.loads(state["document"])
+            attach_cover_ratings(db, document.get("artists", []))
+        return conditional.json_response(document, if_none_match)
 
     @app.get(PREFIX + "/{artist_id:path}")
     def get_artist(artist_id: str, authorization: str | None = Header(default=None),
@@ -228,10 +230,12 @@ def register(app, get_db, require_client, require_publisher):
             db.execute("BEGIN")
             revision = _state(db)["revision"]
             row = db.execute("SELECT payload,assigned FROM library_artists WHERE artist_id=?", (artist_id,)).fetchone()
+            artist = json.loads(row["payload"]) if row else None
+            if artist: attach_cover_ratings(db, [artist])
             db.rollback()
         if row is None:
             fail(404, "artistNotFound", "작가를 찾을 수 없습니다.")
-        return conditional.json_response({"version": 1, "revision": revision, "artist": json.loads(row["payload"]),
+        return conditional.json_response({"version": 1, "revision": revision, "artist": artist,
                                           "assignedAssetCount": row["assigned"]}, if_none_match)
 
     def startup():
@@ -240,3 +244,17 @@ def register(app, get_db, require_client, require_publisher):
             db.commit()
 
     return startup
+
+
+def attach_cover_ratings(db, artists):
+    """Read current cover ratings in one indexed batch, outside publication identity."""
+    import asset_visibility
+    import library_search
+    asset_visibility.install(db)
+    ids = sorted({id for artist in artists for id in artist.get("coverAssetIds", [])})
+    ratings = {}
+    if db.execute("SELECT 1 FROM sqlite_temp_master WHERE name='visible_assets'").fetchone():
+        ratings = {row["id"]: library_search.content_rating(row) for row in db.execute(
+            "SELECT id,content_rating FROM visible_assets WHERE id IN (SELECT value FROM json_each(?))", [json.dumps(ids)])}
+    for artist in artists:
+        artist["coverContentRatings"] = {id: ratings.get(id) for id in artist.get("coverAssetIds", [])}

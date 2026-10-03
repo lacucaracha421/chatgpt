@@ -51,7 +51,7 @@ function Handles({artist}: {artist: LibraryArtist}) {
 }
 
 function ArtistTile({artist, privateMode, query, onOpen}: {artist: LibraryArtist; privateMode: boolean; query: string; onOpen(): void}) {
-  const assets = assetsFromIds(artist.coverAssetIds);
+  const assets = assetsFromIds(artist.coverAssetIds,artist.coverContentRatings);
   const plus = Math.max(0, artist.assetCount - Math.max(1, Math.min(4, assets.length)));
   const recent = `최근 30일 ${artist.recentCount.toLocaleString('ko-KR')}장 · `;
   return <button className="artist-tile" onClick={onOpen} aria-label={`${artistName(artist)}, ${artist.assetCount.toLocaleString('ko-KR')}장`}>
@@ -75,7 +75,7 @@ function ArtistStats({artist, detail = false}: {artist: LibraryArtist; detail?: 
 }
 
 function ArtistToday({artist, privateMode, onOpen}: {artist: LibraryArtist; privateMode: boolean; onOpen(): void}) {
-  const assets = assetsFromIds(artist.coverAssetIds);
+  const assets = assetsFromIds(artist.coverAssetIds,artist.coverContentRatings);
   const plus = Math.max(0, artist.assetCount - Math.max(1, Math.min(4, assets.length)));
   const notSeen = daysSince(artist.lastOpenedAt);
   return <button className="artist-today" onClick={onOpen} aria-label={`오늘의 작가 ${artistName(artist)}`}>
@@ -96,7 +96,7 @@ function ArtistHub({artists, assignments, query, privateMode, paused, onOpen}: {
   const scrubberSort=useMemo(()=>({kind:'fallback' as const}),[]);
   return <div ref={scroller} className="artist-scroll" aria-label="작가 목록">
     {query.trim() ? <div className="artist-search-hint"><strong>결과 {visible.length.toLocaleString('ko-KR')}명</strong><span>이름 · 핸들 · 초성으로 찾기</span></div> : <div className="artist-content">
-      {main && <section className="artist-section" aria-label="오늘"><SectionHeading title="오늘" meta={`${new Date().getMonth() + 1}월 ${new Date().getDate()}일 · ${picks.length}명`} /><ArtistToday artist={main} privateMode={privateMode} onOpen={() => onOpen(main)} /><div className="artist-other-picks">{others.map(artist => <button key={artist.id} className="artist-other-pick" onClick={() => onOpen(artist)} aria-label={`${artistName(artist)} 작가`}><Collage assets={assetsFromIds(artist.coverAssetIds)} privateMode={privateMode} /><span className="artist-pick-text"><strong>{artistName(artist)}</strong><small>{artist.lastOpenedAt ? `${daysSince(artist.lastOpenedAt) ?? 0}일 동안 안 봄` : artist.recentCount ? `최근 30일 ${artist.recentCount}장` : '주요 작가'}</small></span><ChevronRightIcon aria-hidden="true" /></button>)}</div></section>}
+      {main && <section className="artist-section" aria-label="오늘"><SectionHeading title="오늘" meta={`${new Date().getMonth() + 1}월 ${new Date().getDate()}일 · ${picks.length}명`} /><ArtistToday artist={main} privateMode={privateMode} onOpen={() => onOpen(main)} /><div className="artist-other-picks">{others.map(artist => <button key={artist.id} className="artist-other-pick" onClick={() => onOpen(artist)} aria-label={`${artistName(artist)} 작가`}><Collage assets={assetsFromIds(artist.coverAssetIds,artist.coverContentRatings)} privateMode={privateMode} /><span className="artist-pick-text"><strong>{artistName(artist)}</strong><small>{artist.lastOpenedAt ? `${daysSince(artist.lastOpenedAt) ?? 0}일 동안 안 봄` : artist.recentCount ? `최근 30일 ${artist.recentCount}장` : '주요 작가'}</small></span><ChevronRightIcon aria-hidden="true" /></button>)}</div></section>}
     </div>}
     <section className={`artist-section${query.trim() ? '' : ' artist-content'}`} aria-label="주요 작가"><div className="artist-sort-line"><SectionHeading title={query.trim() ? '검색 결과' : '최근 저장 순'} meta={query.trim() ? undefined : <>주요 작가 · {major.length}명</>} /><span>{assignments.length ? `${assignmentCount.size}명 게시` : ''}</span></div><div className="artist-grid">{visible.map(artist => <ArtistTile key={artist.id} artist={artist} privateMode={privateMode} query={query} onOpen={() => onOpen(artist)} />)}</div>{visible.length === 0 && <EmptyState icon={PhotoIcon} title="검색 결과가 없습니다" />}</section>
     <Scrubber scrollRef={scroller} total={visible.length} sort={scrubberSort} hidden={paused}/>
@@ -106,7 +106,7 @@ function ArtistHub({artists, assignments, query, privateMode, paused, onOpen}: {
 export function EmptyArtists() { return <EmptyState icon={PhotoIcon} title="PC 앱이 작가 목록을 아직 보내지 않았습니다" />; }
 
 function ArtistIntro({artist, privateMode, sort, filter, onSort, onFilter, assets}: {artist: LibraryArtist; privateMode: boolean; sort: 'newest' | 'oldest'; filter: 'all' | 'image' | 'video'; onSort(): void; onFilter(value: 'all' | 'image' | 'video'): void; assets: Asset[]}) {
-  const avatar = assetsFromIds(artist.coverAssetIds)[0];
+  const avatar = assetsFromIds(artist.coverAssetIds,artist.coverContentRatings)[0];
   const imageCount = assets.filter(asset => asset.kind !== 'video').length || Math.max(0, artist.assetCount - assets.filter(asset => asset.kind === 'video').length);
   const videoCount = assets.filter(asset => asset.kind === 'video').length;
   return <div className="artist-detail-intro">

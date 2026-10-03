@@ -1,8 +1,11 @@
+import {useAssetMask} from "../privacy/PrivacyContext";
+import {Skeleton} from "../shared/ui/Skeleton";
 import { ArrowsPointingOutIcon, ArrowsPointingInIcon, PauseIcon, PlayIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref, type VideoHTMLAttributes } from "react";
 import { Button } from "../shared/ui/Button";
 
 export type VideoPlayerAsset = {
+  contentRating?: import("../shared/privacy/contentMask").ContentRating | null;
   id: string;
   title?: string | null;
   originalName: string;
@@ -81,6 +84,10 @@ const resolveInternalVaultPlaybackUrl: PlaybackUrlResolver = itemId => desktopIn
  * `vault` plays an encrypted Private Vault item: no scrub frames, vault routes only.
  */
 export function VideoPlayer(props: VideoPlayerProps) {
+  const masked=useAssetMask({contentRating:props.asset.contentRating,kind:'video'});
+  return masked?<Skeleton className="privacy-mask" label="이미지 숨김"/>:<UnmaskedVideoPlayer {...props}/>;
+}
+function UnmaskedVideoPlayer(props: VideoPlayerProps) {
   const vault = props.source === "vault";
   const hasExternalSource = Object.prototype.hasOwnProperty.call(props, "sourceUrl");
   return <VideoPlayerSurface

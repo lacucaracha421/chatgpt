@@ -48,4 +48,8 @@ def install(db):
     if 'assets' not in tables:
         return
     predicate = f" WHERE {_predicate('asset')}" if len(tables) == 3 else ""
-    db.execute("CREATE TEMP VIEW visible_assets AS SELECT asset.* FROM assets AS asset" + predicate)
+    rating_table = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='library_asset_ratings'").fetchone()
+    rating = ("CASE WHEN asset.kind='video' THEN NULL ELSE "
+              "(SELECT content_rating FROM library_asset_ratings WHERE asset_id=asset.id) END"
+              if rating_table else "NULL")
+    db.execute(f"CREATE TEMP VIEW visible_assets AS SELECT asset.*, {rating} AS content_rating FROM assets AS asset" + predicate)

@@ -1,4 +1,7 @@
-.privacy-mask {
+.privacy-mask,
+.ui-skeleton.privacy-mask {
+  animation: none;
+  opacity: 1;
   min-height: 0;
 }
 

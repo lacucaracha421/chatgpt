@@ -455,3 +455,16 @@ it('grows the strip near the bottom and shrinks after the pointer leaves', () =>
     expect(screen.getByRole('navigation',{name:'주변 자산'})).not.toHaveClass('is-grown');
   } finally {vi.useRealTimers();}
 });
+
+it('NSFW viewer and filmstrip use each rating and never preload the masked neighbour',async()=>{
+  const {PrivacyProvider}=await import('../privacy/PrivacyContext');
+  const items=[{...asset('g','safe.png'),contentRating:'g' as const},{...asset('e','explicit.png'),contentRating:'e' as const},asset('u','unknown.png')];
+  const draw=(activeId:string,privacy=false)=><PrivacyProvider privacyMode={privacy} setPrivacyMode={vi.fn()} nsfwFilter><AssetViewer items={items} activeId={activeId} onActiveIdChange={vi.fn()} onClose={vi.fn()}/></PrivacyProvider>;
+  const {rerender}=render(draw('e'));
+  expect(document.querySelector('.asset-viewer__media-surface img')).toBeNull();
+  expect([...document.querySelectorAll('img[src]')].every(img=>img.getAttribute('src')?.includes('/thumbnail/g'))).toBe(true);
+  rerender(draw('g'));expect(document.querySelector('.asset-viewer__media-surface img')).toHaveAttribute('src','http://lakomics.localhost/asset/g');
+  fireEvent.load(document.querySelector('.asset-viewer__media-surface img')!);
+  expect(document.querySelector('img[src*="/asset/e"]')).toBeNull();
+  rerender(draw('g',true));expect(document.querySelector('img[src]')).toBeNull();
+});

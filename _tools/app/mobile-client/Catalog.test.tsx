@@ -833,3 +833,32 @@ describe('appended card arrival',()=>{
     expect(animate.mock.calls.filter(([element])=>element===first||element===cover)).toHaveLength(0);
   });
 });
+
+it('keeps catalog list prewarm from starting while only the NSFW filter is enabled',async()=>{
+  localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+  const view=render(<Catalog active={false} prefetch paused={false} backRef={{current:null}}/>);
+  await act(async()=>{});
+  expect(mocks.api.mock.calls.some(([path])=>path.includes('/search?'))).toBe(false);
+  expect(mocks.api.mock.calls.some(([path])=>path.includes('/reader?'))).toBe(false);
+  expect(mocks.native.mock.calls.some(([op])=>op==='catalogImage')).toBe(false);
+  expect(view.container.querySelector('img')).toBeNull();
+});
+
+it('masks active catalog covers and blocks reader prefetch under only the NSFW filter',async()=>{
+  localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+  const fallback=mocks.api.getMockImplementation()!;
+  mocks.api.mockImplementation(async(path:string,...args:unknown[])=>{
+    const reply=await fallback(path,...args);
+    if(path.includes('/search?'))return {...reply,items:[{...item,thumbnailUrl:'https://example.invalid/cover.jpg'}]};
+    if(path.includes('/works/'))return {...reply,item:{...reply.item,thumbnailUrl:'https://example.invalid/cover.jpg'}};
+    return reply;
+  });
+  const view=render(<Catalog active paused={false} backRef={{current:null}}/>);
+  fireEvent.click(await screen.findByText(item.title));
+  await screen.findByRole('button',{name:'읽기'});
+  expect((screen.getByRole('button',{name:'읽기'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(view.container.querySelector('.privacy-mask')).toBeTruthy();
+  expect(view.container.querySelector('img')).toBeNull();
+  expect(mocks.native.mock.calls.some(([op])=>op==='catalogImage')).toBe(false);
+  expect(mocks.api.mock.calls.some(([path])=>path.includes('/reader?'))).toBe(false);
+});

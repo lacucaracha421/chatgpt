@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useLayoutEffect, useRef, useState } fr
 import { useLibrary } from "../library/LibraryContext";
 import type { CatalogScope, MangaCatalogRecoveryPreview, MangaSeries, MangaIndexIdentity, MangaLocalIndex } from "../library/types";
 import { mangaCoverUrl } from "../assets/mediaUrl";
+import { useCatalogMasked } from "../privacy/catalogMask";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { Scrubber } from "../shared/ui/scrubber/Scrubber";
 import type { ScrubberSort } from "../shared/ui/scrubber/scrubberModel";
@@ -38,7 +39,8 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const [localFolder, setLocalFolder] = useState<string | null>(null);
   const [localIndex, setLocalIndex] = useState<MangaLocalIndex | null>(null);
   const receiveLocalIndex = useCallback((index: MangaLocalIndex) => setLocalIndex(index), []);
-  const { privacyMode, setPrivacyMode } = usePrivacy();
+  const { privacyMode, setPrivacyMode, nsfwFilter } = usePrivacy();
+  const catalogMasked = useCatalogMasked();
   const [root, setRoot] = useState<string | null | undefined>(undefined);
   const [series, setSeries] = useState<MangaSeries[] | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -216,7 +218,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
       ]} /> : undefined}
       chrome={{
         status: scanning ? <span role="status">폴더 스캔 중</span> : undefined,
-        summary: `${mangaSortLabel(sort)}${privacyMode ? " · 비공개" : ""}`,
+        summary: `${mangaSortLabel(sort)}${privacyMode ? " · 비공개" : ""}${nsfwFilter ? " · NSFW 필터" : ""}`,
         search: { scope: "로컬 망가", label: "망가 검색", placeholder: "제목 또는 작가 검색", query, onApply: setQuery },
         settings: <fieldset className="chrome-settings-group"><legend>표시</legend><Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => setPrivacyMode(event.target.checked)}>비공개 모드</Toggle></fieldset>,
       }} />}
@@ -229,7 +231,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
         <EmptyState title="망가가 없습니다">망가 폴더에 시리즈 폴더를 추가하세요.</EmptyState>
       ) : visibleSeries.length === 0 ? (
         <EmptyState title="검색 결과가 없습니다">다른 제목이나 작가 이름으로 검색하세요.</EmptyState>
-      ) : <div className="manga-grid">{visibleSeries.map(entry => <MangaCard key={entry.id} title={entry.title} artist={entry.author} pageCount={entry.pageCount} coverUrl={mangaCoverUrl(entry.id)} privacyMode={privacyMode} onOpen={() => onOpenSeries?.(entry)} />)}</div>}
+      ) : <div className="manga-grid">{visibleSeries.map(entry => <MangaCard key={entry.id} title={entry.title} artist={entry.author} pageCount={entry.pageCount} coverUrl={mangaCoverUrl(entry.id)} privacyMode={catalogMasked} onOpen={() => onOpenSeries?.(entry)} />)}</div>}
     </div>
     <Scrubber input="pointer" scrollRef={gridScroll} total={visibleSeries.length} sort={scrubberSort} hidden={source !== "local" || displayedSource !== "local"} />
   </section>}</>;

@@ -1,4 +1,5 @@
-import {usePrivacyMode} from './privacyMode';
+import {useTabletAssetMask} from './assetMask';
+import type {ContentRating} from '../src/shared/privacy/contentMask';
 import {useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {ArrowLeftIcon, ChevronRightIcon, PhotoIcon} from '@heroicons/react/24/outline';
 import {Button, IconButton} from './ui';
@@ -18,16 +19,16 @@ type State =
   | {phase: 'error'; message: string; offline: boolean};
 
 /** A character's portrait or a series cover, from the character index's thumbnail Asset. */
-function Portrait({id, paused}: {id?: string | null; paused: boolean}) {
-  const [privacy] = usePrivacyMode();
+function Portrait({id, paused, rating}: {id?: string | null; paused: boolean; rating?:ContentRating|null}) {
+  const privacy=useTabletAssetMask({contentRating:rating});
   const [loaded, setLoaded] = useState<{id: string; preview?: string}>();
   const preview = loaded && loaded.id === id ? loaded.preview : undefined;
   useEffect(() => {
     if (privacy || paused || !id || preview) return;
     const controller = new AbortController();
-    void loadThumbnail({id, kind: 'image'}, controller.signal).then(asset => { if (!controller.signal.aborted) setLoaded({id, preview: asset.preview}); }, () => {});
+    void loadThumbnail({id, kind: 'image',contentRating:rating}, controller.signal).then(asset => { if (!controller.signal.aborted) setLoaded({id, preview: asset.preview}); }, () => {});
     return () => controller.abort();
-  }, [id, paused, preview, privacy]);
+  }, [id, paused, preview, privacy,rating]);
   return privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : preview ? <img src={preview} alt=""/> : <PhotoIcon aria-hidden="true"/>;
 }
 
@@ -114,14 +115,14 @@ export function CharacterReviewOverview({libraryId, characters, refreshKey, paus
     {value && value.total > 0 && <div ref={scroller} className="overview-scroll">
       {value.groups.map(group => <section key={group.seriesId} className="overview-series" aria-label={`${group.seriesName} ${group.count}건`}>
         <button className="overview-series-head" onClick={() => onOpen({series: {id: group.seriesId, name: group.seriesName}, serverSeries})} aria-label={`${group.seriesName} 전체 검토 ${group.count}건`}>
-          <span className="overview-cover"><Portrait id={covers[group.seriesId]} paused={paused}/></span>
+          <span className="overview-cover"><Portrait id={covers[group.seriesId]} rating={characters?.contentRatings?.[covers[group.seriesId]]} paused={paused}/></span>
           <strong>{group.seriesName}</strong>
           <span className="overview-count numeric">{group.count}</span>
           <ChevronRightIcon aria-hidden="true"/>
         </button>
         <div className="overview-characters">
           {group.characters.map(entry => <button key={entry.id} className="overview-character" onClick={() => onOpen({target: {id: entry.id, name: entry.name}})} aria-label={`${entry.name} 검토 ${entry.count}건`}>
-            <span className="overview-portrait"><Portrait id={portraits[entry.id]} paused={paused}/></span>
+            <span className="overview-portrait"><Portrait id={portraits[entry.id]} rating={characters?.contentRatings?.[portraits[entry.id]]} paused={paused}/></span>
             <span className="overview-caption"><strong>{entry.name}</strong><span className="numeric">{entry.count}</span></span>
           </button>)}
         </div>

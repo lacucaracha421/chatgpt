@@ -1,3 +1,5 @@
+import { AssetSvgImage } from "../privacy/AssetImage";
+import { AssetImage } from "../privacy/AssetImage";
 import { useId, useState, type ReactNode } from "react";
 import { PhotoIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
@@ -39,10 +41,10 @@ export function updateCharacterReferences(draft: CharacterEditorDraft, reference
 /** A strip tile shows the crop the character actually uses, not the whole image. */
 function ReferenceThumb({ assetId, region, privacyMode }: { assetId: string; region: ReferenceInspection | undefined; privacyMode: boolean }) {
   const crop = region ? currentReferenceCrop(region) : null;
-  if (!region || !crop) return <img loading="lazy" src={thumbnailUrl(assetId)} className={privacyMode ? "character-private" : undefined} alt="" />;
+  if (!region || !crop) return <AssetImage loading="lazy" src={thumbnailUrl(assetId)} className={privacyMode ? "character-private" : undefined} alt="" />;
   const width = Math.max(crop[2] - crop[0], 1), height = Math.max(crop[3] - crop[1], 1);
   return <svg className={privacyMode ? "character-private" : undefined} viewBox={`${crop[0]} ${crop[1]} ${width} ${height}`} preserveAspectRatio="xMidYMin slice" aria-hidden="true">
-    <image href={thumbnailUrl(assetId)} width={region.width} height={region.height} preserveAspectRatio="none" />
+    <AssetSvgImage href={thumbnailUrl(assetId)} width={region.width} height={region.height} preserveAspectRatio="none" />
   </svg>;
 }
 
@@ -121,7 +123,7 @@ export function CharacterRegistry({ draft, target, seriesId, privacyMode, busy, 
         <label className="character-description">설명<textarea value={draft.description} onChange={e => onChange({ ...draft, description: e.target.value })} disabled={busy} rows={3} /></label>
         <div className="character-portrait-editor">
           <button type="button" className="character-portrait-editor__preview" disabled={busy} aria-label="대표 이미지 선택" onClick={() => onPick("thumbnail")}>
-            {draft.thumbnail ? <img className={privacyMode ? "character-private" : ""} src={thumbnailUrl(draft.thumbnail)} alt="대표 이미지" /> : <PhotoIcon aria-hidden="true" />}
+            {draft.thumbnail ? <AssetImage className={privacyMode ? "character-private" : ""} src={thumbnailUrl(draft.thumbnail)} alt="대표 이미지" /> : <PhotoIcon aria-hidden="true" />}
           </button>
           <div><Button size="sm" disabled={busy} onClick={() => onPick("thumbnail")}>대표 이미지</Button>{draft.thumbnail && <Button size="icon" variant="ghost" aria-label="대표 이미지 해제" disabled={busy} onClick={() => onChange({ ...draft, thumbnail: null })}><XMarkIcon aria-hidden="true" /></Button>}</div>
         </div>

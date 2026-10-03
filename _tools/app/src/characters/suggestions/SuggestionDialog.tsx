@@ -1,3 +1,4 @@
+import { AssetImage } from "../../privacy/AssetImage";
 import { useHorizontalWheel } from "../../shared/ui/useHorizontalWheel";
 import { useEffect, useRef, useState } from "react";
 import { assetUrl, thumbnailUrl } from "../../assets/mediaUrl";
@@ -152,7 +153,7 @@ function ImageChoice({ image, privacyMode, selected = false, index, disabled, on
 }) {
   const both = image.pixaiScore >= .85 && image.canaryScore >= .85;
   return <button type="button" className={`character-suggestion-image${selected ? " character-suggestion-image--selected" : ""}`} disabled={disabled} aria-pressed={selected} aria-label={`${image.assetId} 크게 보기`} onClick={onClick}>
-    {!privacyMode && <img draggable={false} src={thumbnailUrl(image.assetId)} alt="" loading="lazy" />}
+    {!privacyMode && <AssetImage draggable={false} src={thumbnailUrl(image.assetId)} alt="" loading="lazy" />}
     {index && <b>{index}</b>}{image.solo && <span className="character-suggestion-image__solo">단독</span>}{!image.insideSeries && <span className="character-suggestion-image__outside">밖</span>}
     <span className={`character-suggestion-image__score${both ? "" : " character-suggestion-warning"}`} aria-label={`PixAI ${image.pixaiScore.toFixed(3)} · canary ${image.canaryScore.toFixed(3)}`}>{Math.max(image.pixaiScore, image.canaryScore).toFixed(2)}</span>
   </button>;
@@ -186,7 +187,7 @@ function ImagePreview({ image, privacyMode, selected, canAdd, onMove, onToggle, 
       }
     }}>
     <div className="character-suggestion-preview__image">
-      {privacyMode ? <span>프라이버시 모드</span> : <img src={assetUrl(image.assetId)} alt="참조 미리보기" />}
+      {privacyMode ? <span>프라이버시 모드</span> : <AssetImage src={assetUrl(image.assetId)} alt="참조 미리보기" />}
     </div>
     <div className="character-suggestion-preview__controls">
       <Button aria-label="이전 이미지" onClick={() => onMove(-1)}>←</Button>

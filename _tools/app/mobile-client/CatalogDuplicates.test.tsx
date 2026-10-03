@@ -134,9 +134,9 @@ describe('catalog duplicate review',()=>{
 });
 
 
-it('already masks duplicate covers without requesting images in privacy mode',async()=>{
+it.each(['privacyMode','nsfwFilter'])('masks duplicate covers without requesting images under %s',async mode=>{
   const {catalogImageTicket}=await import('./catalogMedia');vi.mocked(catalogImageTicket).mockClear();
-  localStorage.setItem('lakomics.mobile.privacyMode','1');
+  localStorage.setItem(`lakomics.mobile.${mode}`,'1');
   lists.undecided=feed([candidate(C1,'w1','w2')]);mount();
   await screen.findByText('Title w1');
   await waitFor(()=>expect(document.querySelector('.privacy-mask')).toBeTruthy());

@@ -879,6 +879,7 @@ describe("App", () => {
         galleryLayout: "masonry",
         metadataVisible: false,
         privacyMode: false,
+        nsfwFilter: false,
         sidebarWidth: 272,
         expandedClassificationIds: [],
         pinnedClassificationIds: [],

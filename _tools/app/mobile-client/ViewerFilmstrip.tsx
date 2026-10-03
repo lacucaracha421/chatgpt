@@ -1,3 +1,4 @@
+import {useTabletAssetMask} from './assetMask';
 import {useEffect, useState} from 'react';
 import {CenteredFilmstrip} from '../src/shared/viewer/CenteredFilmstrip';
 import type {Asset} from './types';
@@ -8,7 +9,8 @@ type ViewerFilmstripProps = {
   onIndex(index: number): void; onSwipeUp?(): void; onInteract?(): void; onInteractionChange?(active: boolean): void;
 };
 const loadedThumbnails = new Map<string, string>();
-function Thumbnail({asset, privacy}: {asset: Asset; privacy: boolean}) {
+function Thumbnail({asset, privacy: requestedPrivacy}: {asset: Asset; privacy: boolean}) {
+  const privacy=useTabletAssetMask(asset,requestedPrivacy);
   const cacheKey = `${asset.id}:${asset.thumbnail_revision ?? ''}`;
   const [preview, setPreview] = useState(() => asset.preview ?? loadedThumbnails.get(cacheKey));
   useEffect(() => {

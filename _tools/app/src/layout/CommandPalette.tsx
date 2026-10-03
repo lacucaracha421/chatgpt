@@ -1,3 +1,4 @@
+import {AssetImage} from "../privacy/AssetImage";
 import {FindEntryContent} from "../shared/FindEntryContent";
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { useEffect, useId, useLayoutEffect, useRef, useState, useDeferredValue, useMemo, type KeyboardEvent } from "react";
@@ -148,7 +149,7 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fin
                   aria-current={entry.selected ? "page" : undefined}
                   className="command-palette__option" onPointerMove={() => { if (own !== current) setActive(own); }}
                   onMouseDown={(event) => event.preventDefault()} onClick={(event) => run(entry, event.shiftKey)}>
-                  <FindEntryContent entry={entry} query={filteredQuery} privacy={privacyMode}/>
+                  <FindEntryContent entry={entry} query={filteredQuery} privacy={privacyMode} media={entry.thumbnail && entry.group !== "work" ? <AssetImage src={entry.thumbnail} alt=""/> : undefined}/>
                 </div>;
               })}
             </div>;

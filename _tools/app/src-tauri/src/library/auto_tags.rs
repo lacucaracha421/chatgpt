@@ -618,3 +618,59 @@ impl super::Library {
         import_file(&*self.connection()?, path, &now_utc())
     }
 }
+
+/// Model rating only; manual display edits never grant permission to reveal media.
+/// Correlated with the owning query's `asset` alias. Unknown top tags fail closed.
+pub(crate) const CONTENT_RATING_SQL: &str = "CASE WHEN asset.media_kind='video' THEN NULL ELSE
+    (SELECT CASE tagged.tag WHEN 'rating:g' THEN 'g' WHEN 'rating:s' THEN 's'
+        WHEN 'rating:q' THEN 'q' WHEN 'rating:e' THEN 'e' ELSE NULL END
+     FROM asset_auto_tags AS tagged
+     JOIN auto_tag_vocabulary AS vocabulary ON vocabulary.tag=tagged.tag
+     WHERE tagged.asset_id=asset.id AND vocabulary.category='rating'
+     ORDER BY tagged.score DESC, CASE tagged.tag WHEN 'rating:e' THEN 3
+        WHEN 'rating:q' THEN 2 WHEN 'rating:s' THEN 1 WHEN 'rating:g' THEN 0 ELSE 4 END DESC
+     LIMIT 1) END";
+
+pub(crate) fn top_content_rating(
+    connection: &Connection,
+    asset_id: &str,
+) -> Result<Option<String>, LibraryError> {
+    Ok(connection
+        .query_row(
+            &format!("SELECT {CONTENT_RATING_SQL} FROM assets AS asset WHERE asset.id=?1"),
+            [asset_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+#[cfg(test)]
+mod content_rating_tests {
+    use super::*;
+    #[test]
+    fn auto_tag_rating_uses_score_and_conservative_ties() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE asset_auto_tags(asset_id TEXT,tag TEXT,score REAL,PRIMARY KEY(asset_id,tag));
+            CREATE TABLE auto_tag_vocabulary(tag TEXT PRIMARY KEY,category TEXT);
+            CREATE TABLE assets(id TEXT PRIMARY KEY,media_kind TEXT);
+            INSERT INTO assets VALUES('a','image'),('b','image'),('v','video');
+            INSERT INTO auto_tag_vocabulary VALUES('rating:g','rating'),('rating:s','rating'),('rating:q','rating'),('rating:e','rating'),('rating:x','rating');
+            INSERT INTO asset_auto_tags VALUES('a','rating:g',0.9),('a','rating:e',0.1),('b','rating:g',0.5),('b','rating:s',0.5),('b','rating:q',0.5),('b','rating:e',0.5),('a','rating:x',1.0);").unwrap();
+        assert_eq!(top_content_rating(&db, "a").unwrap(), None);
+        db.execute("DELETE FROM asset_auto_tags WHERE tag='rating:x'", [])
+            .unwrap();
+        assert_eq!(top_content_rating(&db, "a").unwrap().as_deref(), Some("g"));
+        db.execute("INSERT INTO asset_auto_tags VALUES('v','rating:g',1.0)", [])
+            .unwrap();
+        assert_eq!(top_content_rating(&db, "v").unwrap(), None);
+        assert_eq!(top_content_rating(&db, "b").unwrap().as_deref(), Some("e"));
+        assert_eq!(top_content_rating(&db, "missing").unwrap(), None);
+        db.execute(
+            "UPDATE auto_tag_vocabulary SET category='general' WHERE tag='rating:g'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(top_content_rating(&db, "a").unwrap().as_deref(), Some("e"));
+    }
+}

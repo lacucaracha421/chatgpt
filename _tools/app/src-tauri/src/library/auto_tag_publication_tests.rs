@@ -32,7 +32,7 @@ impl HomeTransport for Fake {
             return Err(LibraryError::InvalidCloudResponse);
         }
         Ok(
-            json!({"version":1,"revision":1,"changed":true,"assets":body["assets"].as_array().unwrap().len(),"vocabulary":body["vocabulary"].as_array().unwrap().len()}),
+            json!({"version":2,"revision":1,"changed":true,"assets":body["assets"].as_array().unwrap().len(),"vocabulary":body["vocabulary"].as_array().unwrap().len()}),
         )
     }
     fn intents(&self, _: i64, _: &str) -> Result<Value, LibraryError> {
@@ -192,18 +192,18 @@ fn removed_assets_publish_an_empty_replacement() {
     run(&library, &fake, 200).unwrap();
     assert_eq!(
         assets(&fake),
-        vec![json!({"assetId":"a0000","creatorKey":null,"tags":[]})]
+        vec![json!({"assetId":"a0000","creatorKey":null,"tags":[],"contentRating":null})]
     );
 }
 #[test]
 fn publisher_http_boundary_uses_separate_route_and_token() {
     let (client, requests) = crate::cloud::client::CloudClient::home_test_client(vec![
-        json!({"version":1,"revision":1,"changed":true,"assets":0,"vocabulary":0}),
+        json!({"version":2,"revision":1,"changed":true,"assets":0,"vocabulary":0}),
     ]);
     client
         .publish(
             PATH,
-            Some(&json!({"version":1,"assets":[],"vocabulary":[]})),
+            Some(&json!({"version":2,"assets":[],"vocabulary":[]})),
             "publisher",
         )
         .unwrap();
@@ -425,4 +425,69 @@ fn publication_tag_limit_matches_server_validation() {
     let server = include_str!("../../../../../server/lakomics-api/library_search.py");
     assert!(server.contains(&format!("MAX_TAGS_PER_ASSET = {}", MAX_TAGS_PER_ASSET)));
     assert!(server.contains("Field(max_length=MAX_TAGS_PER_ASSET)"));
+}
+
+#[test]
+fn auto_tag_rating_is_published_but_never_a_search_tag_and_changes_identity() {
+    let (_temp, library) = fixture(1);
+    {
+        let db = library.connection().unwrap();
+        db.execute_batch(
+            "DELETE FROM asset_auto_tags WHERE tag='rating';
+          INSERT INTO auto_tag_vocabulary VALUES('rating:g','rating'),('rating:e','rating');
+          INSERT INTO asset_auto_tags VALUES('a0000','rating:g',0.9),('a0000','rating:e',0.1);",
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        library
+            .get_asset("a0000")
+            .unwrap()
+            .content_rating
+            .as_deref(),
+        Some("g")
+    );
+    let fake = Fake::default();
+    run(&library, &fake, 100).unwrap();
+    assert_eq!(assets(&fake)[0]["contentRating"], "g");
+    assert!(!assets(&fake)[0]["tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tag| tag.as_str().unwrap().starts_with("rating:")));
+    library
+        .connection()
+        .unwrap()
+        .execute(
+            "UPDATE asset_auto_tags SET score=1.0 WHERE tag='rating:e'",
+            [],
+        )
+        .unwrap();
+    fake.bodies.borrow_mut().clear();
+    run(&library, &fake, 200).unwrap();
+    assert_eq!(assets(&fake)[0]["contentRating"], "e");
+    fake.bodies.borrow_mut().clear();
+    run(&library, &fake, 300).unwrap();
+    assert!(assets(&fake).is_empty());
+}
+
+#[test]
+fn auto_tag_video_rating_is_null_in_publication() {
+    let (_temp, library) = fixture(1);
+    library
+        .connection()
+        .unwrap()
+        .execute_batch(
+            "DELETE FROM asset_auto_tags WHERE tag='rating';
+         INSERT INTO auto_tag_vocabulary VALUES('rating:g','rating');
+         INSERT INTO asset_auto_tags VALUES('a0000','rating:g',1.0);
+         UPDATE assets SET media_kind='video' WHERE id='a0000';
+         INSERT INTO video_assets(asset_id,duration_ms,container,video_codec,preparation_state)
+         VALUES('a0000',1000,'mp4','h264','pending');",
+        )
+        .unwrap();
+    assert_eq!(library.get_asset("a0000").unwrap().content_rating, None);
+    let fake = Fake::default();
+    run(&library, &fake, 100).unwrap();
+    assert!(assets(&fake)[0]["contentRating"].is_null());
 }

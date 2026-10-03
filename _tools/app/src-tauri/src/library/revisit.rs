@@ -1,3 +1,4 @@
+use super::auto_tags::CONTENT_RATING_SQL;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use chrono::DateTime;
@@ -317,8 +318,7 @@ fn load_recommendation_assets(connection: &Connection, ids: Option<&[String]>) -
         "SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url, \
          asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, \
          asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, \
-         asset.import_source, asset.import_batch_id, asset.original_modified_at \
-         FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id \
+         asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id \
          WHERE asset.status = 'normal'{restriction}"
     ))?;
     let rows = statement.query_map(rusqlite::params_from_iter(ids.unwrap_or_default().iter()), asset_summary_from_row)?;

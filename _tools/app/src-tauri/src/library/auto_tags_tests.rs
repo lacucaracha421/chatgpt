@@ -735,3 +735,49 @@ fn weak_character_guesses_neither_match_nor_count() {
         .count;
     assert_eq!(count, 2);
 }
+
+#[test]
+fn auto_tag_content_rating_is_shared_by_list_refresh_and_get() {
+    let (_temp, library) = fixture(&["safe", "unsafe", "unknown", "unrecognized", "video"]);
+    library.connection().unwrap().execute_batch("INSERT INTO auto_tag_vocabulary VALUES('rating:g','rating'),('rating:q','rating'),('rating:x','rating');
+      INSERT INTO asset_auto_tags VALUES('safe','rating:g',0.8),('safe','rating:q',0.2),('unsafe','rating:g',0.5),('unsafe','rating:q',0.5),('unrecognized','rating:x',1.0),('unrecognized','rating:g',0.9),('video','rating:g',1.0);
+      UPDATE assets SET media_kind='video' WHERE id='video';
+      INSERT INTO video_assets(asset_id,duration_ms,container,video_codec,preparation_state) VALUES('video',1000,'mp4','h264','pending');").unwrap();
+    for sort in [
+        AssetSort::Newest,
+        AssetSort::Oldest,
+        AssetSort::Favorites,
+        AssetSort::Random,
+    ] {
+        let query = AssetQuery {
+            sort,
+            limit: 50,
+            ..Default::default()
+        };
+        let page = library.list_assets(query.clone()).unwrap();
+        for asset in page.items {
+            let expected = match asset.id.as_str() {
+                "safe" => Some("g"),
+                "unsafe" => Some("q"),
+                _ => None,
+            };
+            assert_eq!(asset.content_rating.as_deref(), expected);
+            assert_eq!(
+                library
+                    .get_asset(&asset.id)
+                    .unwrap()
+                    .content_rating
+                    .as_deref(),
+                expected
+            );
+            assert_eq!(
+                library
+                    .refresh_assets(query.clone(), vec![asset.id])
+                    .unwrap()[0]
+                    .content_rating
+                    .as_deref(),
+                expected
+            );
+        }
+    }
+}

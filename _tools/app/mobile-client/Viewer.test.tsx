@@ -676,3 +676,20 @@ it('keeps the actual painted slot until the next original loads and decodes',asy
   await act(async()=>finish());
   expect(screen.getByRole('img')).toBe(next);
 });
+
+it('NSFW opens a masked viewer, requests no original and keeps unsafe filmstrip cells masked',()=>{
+ localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+ const close=vi.fn(),onIndex=vi.fn();
+ const {container}=render(<Viewer items={[{id:'e',kind:'image',contentRating:'e',preview:'blob:unsafe'},{id:'u',kind:'image',preview:'blob:unknown'}]} index={0} onIndex={onIndex} onClose={close}/>);
+ expect(screen.getByRole('dialog')).toBeTruthy();expect(container.querySelector('img[src]')).toBeNull();
+ expect(mocks.ticket).not.toHaveBeenCalled();expect(mocks.decode).not.toHaveBeenCalled();expect(mocks.thumbnail).not.toHaveBeenCalled();
+ expect(close).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'다음 자산'}));expect(onIndex).toHaveBeenCalledWith(1);
+});
+it('NSFW does not preload the unsafe neighbour from a safe viewer',async()=>{
+ localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+ const items:Asset[]=[{id:'g',kind:'image',contentRating:'g',preview:'blob:safe'},{id:'e',kind:'image',contentRating:'e',preview:'blob:unsafe'}];
+ render(<Viewer items={items} index={0} onIndex={vi.fn()} onClose={vi.fn()}/>);
+ await waitFor(()=>expect(mocks.ticket).toHaveBeenCalled());
+ expect(mocks.ticket.mock.calls.every(call=>call[0].id==='g')).toBe(true);
+ expect(document.querySelector('img[src="blob:unsafe"]')).toBeNull();
+});

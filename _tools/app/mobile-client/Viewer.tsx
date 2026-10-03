@@ -1,3 +1,6 @@
+import {assetMasked} from '../src/shared/privacy/contentMask';
+import {mediaMasked} from './assetMask';
+import {useNsfwFilter} from './privacyMode';
 import {useCallback, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent} from 'react';
 import {ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, HeartIcon, InformationCircleIcon, ArrowPathIcon, FolderIcon, Square2StackIcon, TrashIcon, UserMinusIcon} from '@heroicons/react/24/outline';
 import type {ComponentType, CSSProperties, SVGProps} from 'react';
@@ -64,9 +67,11 @@ function ViewerAction({label, name, icon: Icon, active, danger, onClick}: {label
 }
 export function Viewer(props: Parameters<typeof ViewerContent>[0]) {
   const [privacy] = usePrivacyMode();
+  const [filter]=useNsfwFilter();
+  const masked=assetMasked(false,filter,props.items[props.index]);
   const hidden = !props.vault && (privacy || !!props.privacy);
   useEffect(() => { if (hidden) props.onClose(); }, [hidden, props.onClose]);
-  return hidden ? <span className="privacy-mask" aria-label="비공개 모드"/> : <ViewerContent {...props}/>;
+  return hidden ? <span className="privacy-mask" aria-label="비공개 모드"/> : masked ? <MaskedViewer {...props}/> : <ViewerContent key={String(filter)} {...props}/>;
 }
 
 function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoint,character,onCharacterExcluded,onTrash,trashNotice,totalCount,folderLabel,privacy,vault}: {items: Asset[]; index: number; onIndex(index: number): void; onClose(): void;onNearEnd?():void;backRef?: React.MutableRefObject<(() => boolean) | null>;endpoint?:string;character?:ViewerCharacterContext|null;onCharacterExcluded?(receipt:ExclusionReceipt):void;
@@ -209,7 +214,7 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   useEffect(() => {
     if(vault)return;
     // Skip prefetching neighbours whose decode alone would take hundreds of MB (e.g. very tall pages); they still open on demand.
-    const neighbours=imageNeighbours(items,index).reverse().filter(item=>(item.size_bytes==null||item.size_bytes<=8*1024*1024)&&(!item.width||!item.height||item.width*item.height<=MAX_PREFETCH_PIXELS)).slice(0,2);
+    const neighbours=imageNeighbours(items,index).reverse().filter(item=>!mediaMasked(item)&&(item.size_bytes==null||item.size_bytes<=8*1024*1024)&&(!item.width||!item.height||item.width*item.height<=MAX_PREFETCH_PIXELS)).slice(0,2);
     const retained=new Set([asset.id,...neighbours.map(item=>item.id)]);
     for(const [id,work] of prefetches.current)if(!retained.has(id)){work.controller.abort();prefetches.current.delete(id);}
     if(!original)return;
@@ -423,4 +428,23 @@ function mediaErrorCode(error: MediaError | null) {
   const name = /^[A-Z][A-Z0-9_]+/.exec(error.message ?? '')?.[0];
   console.warn(`vault video error ${error.code}${name ? ` ${name}` : ''}`);
   return ` (오류 ${error.code}${name ? ` · ${name}` : ''})`;
+}
+
+function MaskedViewer({items,index,onIndex,onClose,onNearEnd,totalCount,backRef}:Parameters<typeof ViewerContent>[0]) {
+  useEffect(()=>{if(!backRef)return;backRef.current=()=>{onClose();return true;};return()=>{backRef.current=null;};},[backRef,onClose]);
+  useEffect(()=>{if(index>=items.length-3)onNearEnd?.();},[index,items.length,onNearEnd]);
+  const gesture=useRef<{x:number;y:number}|null>(null);
+  return <Dialog open onClose={onClose} variant="fullscreen" title="자산 감상" onKeyDown={event=>{
+    if(event.key==='ArrowLeft'&&index>0)onIndex(index-1);
+    if(event.key==='ArrowRight'&&index+1<items.length)onIndex(index+1);
+  }}>
+    <div className="viewer chrome-visible" data-filmstrip-visible="true">
+      <div className="viewer-backdrop"/><div className="viewer-main">
+        <header className="viewer-bar"><IconButton label="뷰어 닫기" icon={ArrowLeftIcon} onClick={onClose}/><span className="numeric viewer-position">{index+1} / {totalCount??items.length}</span></header>
+        <div className="viewer-surface" onPointerDown={event=>{gesture.current={x:event.clientX,y:event.clientY};event.currentTarget.setPointerCapture?.(event.pointerId);}} onPointerUp={event=>{const start=gesture.current;gesture.current=null;if(!start)return;const dx=event.clientX-start.x,dy=event.clientY-start.y;if(Math.abs(dx)>60&&Math.abs(dx)>Math.abs(dy)*1.4){const next=index+(dx<0?1:-1);if(next>=0&&next<items.length)onIndex(next);}}}><span className="privacy-mask" aria-label="NSFW 필터로 이미지 숨김" style={{width:'100%',height:'100%'}}/></div>
+        <ViewerFilmstrip items={items} index={index} onIndex={onIndex}/>
+        <footer className="viewer-bar"><IconButton label="이전 자산" icon={ChevronLeftIcon} disabled={index===0} onClick={()=>onIndex(index-1)}/><span className="viewer-title">NSFW 필터</span><IconButton label="다음 자산" icon={ChevronRightIcon} disabled={index===items.length-1} onClick={()=>onIndex(index+1)}/></footer>
+      </div>
+    </div>
+  </Dialog>;
 }

@@ -280,3 +280,25 @@ it('retries a failed page as soon as native reports the network is back',async()
   await vi.waitFor(()=>expect(warmState().status).toBe('done'));
   expect(cursors()).toEqual(['first','c2','c2']);
 });
+
+it('skips masked misses and reaches later safe pages without incomplete retries',async()=>{
+ localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+ mocks.api.mockImplementation(async(path:string)=>new URL(path,'https://x.invalid').searchParams.has('cursor')
+  ? {items:[{id:'safe-later',kind:'image',contentRating:'g'}],has_more:false,next_cursor:null}
+  : {items:[{id:'explicit',kind:'image',contentRating:'e'},asset('unknown')],has_more:true,next_cursor:'safe-page'});
+ stop=startThumbnailWarm('filtered');await vi.advanceTimersByTimeAsync(START_DELAY+500);
+ await vi.waitFor(()=>expect(warmState().status).toBe('done'));
+ expect(mocks.api).toHaveBeenCalledTimes(2);
+ expect(mocks.native.mock.calls.filter(([op])=>op==='thumbnail').map(([,payload])=>payload.assetId)).toEqual(['safe-later']);
+});
+
+it('does not fail completion when a warm target becomes masked during the pass',async()=>{
+ const original=mocks.native.getMockImplementation()!;
+ mocks.native.mockImplementation(async(op:string,payload:{assetId:string})=>{
+  if(op==='thumbnail') {localStorage.setItem('lakomics.mobile.nsfwFilter','1');return {url:'https://example.invalid/uncached',expires_in:240};}
+  return original(op,payload);
+ });
+ stop=startThumbnailWarm('mask-during-warm');await vi.advanceTimersByTimeAsync(START_DELAY+500);
+ await vi.waitFor(()=>expect(warmState().status).toBe('done'));
+ expect(mocks.api).toHaveBeenCalledTimes(2);
+});

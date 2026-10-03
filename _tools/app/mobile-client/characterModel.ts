@@ -23,6 +23,7 @@ export type CharacterScope = {nodeId:string;filter:CharacterFilter;totalCount:nu
  */
 export type CharacterExclusion = {libraryId:string;revision:string;exclusionCursor:number};
 export type CharacterIndex = {
+  contentRatings?: Record<string, import("../src/shared/privacy/contentMask").ContentRating | null>;
   version:1;authority:'pc';authorityEpoch:0;capabilities:{read:boolean;write:boolean;manualExclusion?:boolean;characterReview?:boolean};
   libraryId?:string;exclusionCursor?:number;reviewDecisionCursor?:number;appliedReviewDecisionCursor?:number;
   navigationOrder?:string[];ready:boolean;revision:string|null;publishedAt:string|null;nodes:CharacterNode[];scopes:CharacterScope[];

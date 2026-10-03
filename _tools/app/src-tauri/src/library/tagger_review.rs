@@ -3,6 +3,7 @@
 //! Vetoes append an automatic `cleared` decision; the existing B36 and S36
 //! decision guards treat that as a durable stop, even after a later import.
 //! Recommendations block automatic publication while awaiting a manual judgment.
+use super::auto_tags::CONTENT_RATING_SQL;
 use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{params, Connection};
@@ -127,6 +128,7 @@ SELECT asset.id, asset.title, asset.original_name, asset.relative_path,
         WHERE e.asset_id=asset.id AND e.content_hash=asset.content_hash
           AND p.series_id=q.series_id AND j.state<>'superseded'
         ORDER BY e.generation DESC LIMIT 1)
+, {CONTENT_RATING_SQL} AS content_rating
 FROM character_tagger_pending q
 JOIN character_targets t ON t.id=q.target_id
 JOIN character_folder_order o ON o.target_id=t.id
@@ -376,7 +378,7 @@ impl Library {
     pub fn tagger_review_items(&self) -> Result<Vec<TaggerReviewItem>> {
         let connection = self.connection()?;
         let rows = connection
-            .prepare(TAGGER_REVIEW_ITEMS_SQL)?
+            .prepare(&TAGGER_REVIEW_ITEMS_SQL.replace("{CONTENT_RATING_SQL}", CONTENT_RATING_SQL))?
             .query_map([], |row| {
                 Ok(PendingReviewRow {
                     asset: super::query::asset_summary_from_row(row)?,

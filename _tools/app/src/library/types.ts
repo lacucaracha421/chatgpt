@@ -908,6 +908,7 @@ export type ImportSource =
   | "legacy_lakomics";
 
 export type AssetSummary = {
+  contentRating?: import("../shared/privacy/contentMask").ContentRating | null;
   id: string;
   title: string | null;
   originalName: string;

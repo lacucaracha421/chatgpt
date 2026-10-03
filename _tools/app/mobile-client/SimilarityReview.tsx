@@ -1,3 +1,4 @@
+import {useTabletAssetMask} from './assetMask';
 import {usePrivacyMode} from './privacyMode';
 import {displayDate} from '../src/shared/displayDate';
 import {visibleInterval} from './useVisibleInterval';
@@ -73,7 +74,7 @@ function useBox(ref: MutableRefObject<HTMLElement | null>) {
 
 /** The thumbnail at once; the original once `original` is set (on zoom) and it decodes. */
 function PairImage({side, original, style, label}: {side: SimilaritySide; original: boolean; style?: React.CSSProperties; label: string}) {
-  const [privacy] = usePrivacyMode();
+  const privacy = useTabletAssetMask(side.asset);
   const asset = side.asset;
   const [src, setSrc] = useState<{id: string; url?: string; full?: boolean}>({id: asset.id, url: asset.preview});
   const shown = src.id === asset.id ? src.url : asset.preview;

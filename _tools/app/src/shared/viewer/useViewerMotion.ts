@@ -1,4 +1,4 @@
-import {useCallback, useRef} from 'react';
+import { useLayoutEffect,useCallback, useRef} from 'react';
 
 export type TileRect = {left: number; top: number; width: number; height: number};
 export function viewerTile(id: string | null) {
@@ -16,10 +16,10 @@ const sheet = 'cubic-bezier(.32,.72,0,1)';
 const standard = 'cubic-bezier(.2,0,0,1)';
 
 /** Own only the viewer's entrance/exit; decoded content changes remain instant. */
-export function useViewerMotion(id: string | null, onClose: () => void, origin?: TileRect, aspect = 1, source?: string, sourceId = id) {
+export function useViewerMotion(id: string | null, onClose: () => void, origin?: TileRect, aspect = 1, source?: string, sourceId = id, masked = false) {
   const root = useRef<HTMLElement | null>(null);
   const first = useRef<{id: string | null; rect?: TileRect; tile?: HTMLElement}>({id: null});
-  const current = useRef({id, onClose, origin, aspect}); current.current = {id, onClose, origin, aspect};
+  const current = useRef({id, onClose, origin, aspect, masked}); current.current = {id, onClose, origin, aspect, masked};
   const sources = useRef(new Map<string, string>());
   if (source && sourceId) sources.current.set(source, sourceId);
   const closing = useRef(false);
@@ -32,7 +32,7 @@ export function useViewerMotion(id: string | null, onClose: () => void, origin?:
     const backdrop = node.querySelector<HTMLElement>('[data-viewer-backdrop]');
     const media = node.querySelector<HTMLElement>('[data-viewer-media]');
     delete node.dataset.viewerClosing;
-    if (reduced() || !media || typeof media.animate !== 'function') return;
+    if (current.current.masked || reduced() || !media || typeof media.animate !== 'function') return;
     const animations: Animation[] = [];
     const from = first.current.rect;
     const bounds = media.getBoundingClientRect();
@@ -78,6 +78,12 @@ export function useViewerMotion(id: string | null, onClose: () => void, origin?:
     query?.addEventListener?.('change', preferenceChanged);
     cleanup.current = () => { query?.removeEventListener?.('change', preferenceChanged); finishEntrance?.(); };
   }, []);
+  useLayoutEffect(() => {
+    if(!masked)return;
+    cleanup.current?.();cleanup.current=undefined;
+    root.current?.querySelectorAll('[data-viewer-zoom-preview]').forEach(node=>node.remove());
+    sources.current.clear();
+  },[masked]);
   const close = useCallback(() => {
     if (closing.current) return;
     const node = root.current, media = node?.querySelector<HTMLElement>('[data-viewer-media]');

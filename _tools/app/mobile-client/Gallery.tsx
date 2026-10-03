@@ -1,3 +1,4 @@
+import {useTabletAssetMask} from './assetMask';
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
 import {StableImage} from '../src/shared/ui/StableImage';
 import {warmOriginalTickets} from './originalTicketWarm';
@@ -23,8 +24,9 @@ import {buildJustifiedGalleryRows, GALLERY_DATE_HEADING_HEIGHT, type GalleryRowA
  */
 export type GalleryVaultSource = {label(asset: Asset): string};
 
-function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, vault, selectionMode, selected, onSelect, onToggle, onPressStart, onPressEnd}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
+function Tile({asset, index, width, height, onOpen, onReady, paused, privacy: requestedPrivacy, vault, selectionMode, selected, onSelect, onToggle, onPressStart, onPressEnd}: {asset: Asset; index: number; width: number; height: number; onOpen(index: number): void; onReady(asset:Asset):void; paused:boolean; privacy?:boolean; vault?:GalleryVaultSource;
   selectionMode:boolean; selected:boolean; favoritesView:boolean; onSelect?: (id:string)=>void; onToggle?: (id:string)=>void; onPressStart?: (cancel:()=>void)=>void; onPressEnd?: (cancel:()=>void)=>void}) {
+  const privacy=useTabletAssetMask(asset,requestedPrivacy);
   const timer=useRef<number|null>(null), pressStart=useRef<{x:number;y:number}|null>(null), suppressClick=useRef(false), pressCancel=useRef<()=>void>(()=>{});
   const host=useRef<HTMLButtonElement>(null), image=useRef<HTMLImageElement>(null);
   const clearTimer=()=>{if(timer.current!==null){window.clearTimeout(timer.current);timer.current=null;}};
@@ -77,7 +79,7 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy, va
   return <div className="media-tile-shell" style={{width,position:'relative',flexShrink:0}}><button ref={host} className="media-tile ui-selectable-media" style={{width}} onClick={() => {
     if(suppressClick.current){suppressClick.current=false;return;}
     if(selectionMode){onToggle?.(asset.id);return;}
-    if(!privacy) onOpen(index);
+    if(!requestedPrivacy) onOpen(index);
   }} onPointerDown={beginPress} onPointerMove={movePress} onPointerUp={endPress} onPointerCancel={cancelPointer} onContextMenu={event=>{if(onSelect)event.preventDefault();}} aria-label={privacy ? '비공개 모드로 이미지 숨김' : vault ? vault.label(asset) : `${asset.creator_name || asset.creator_handle || (asset.kind === 'video' ? '영상' : '이미지')}, ${dateLabel(asset)}`} aria-description={!privacy && asset.kind === "video" ? `영상 ${formatDuration(asset.duration_ms)}` : undefined} aria-selected={selectionMode&&selected?true:undefined} data-asset-id={asset.id} data-date-label={collectedDate(asset.collected_at ?? asset.created_at).label}>
     <span className="tile-picture" style={{height}}>
       {privacy ? <span className="artist-private-tile" aria-hidden="true" /> : preview ? <StableImage ref={image} decodeFirst={false} src={preview} alt="" draggable={false} onError={() => {settle(); retry();}} onLoad={event => {

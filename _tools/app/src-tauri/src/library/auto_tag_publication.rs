@@ -169,11 +169,16 @@ fn asset_value(db: &Connection, id: &str, creator: Option<&str>) -> Result<Value
     };
     // Content identity and payload ordering do not depend on score order.
     tags.sort();
-    Ok(json!({"assetId":id,"creatorKey":creator,"tags":tags}))
+    let rating = if normal {
+        auto_tags::top_content_rating(db, id)?
+    } else {
+        None
+    };
+    Ok(json!({"assetId":id,"creatorKey":creator,"tags":tags,"contentRating":rating}))
 }
 
 fn validate_reply(reply: &Value, body: &Value) -> Result<(), LibraryError> {
-    if reply["version"] != 1
+    if reply["version"] != body["version"]
         || reply["revision"].as_i64().is_none_or(|n| n < 0)
         || reply["changed"].as_bool().is_none()
         || reply["assets"].as_u64() != Some(body["assets"].as_array().unwrap().len() as u64)
@@ -236,7 +241,7 @@ impl Library {
                 } else {
                     "vocabulary"
                 };
-                let mut body = json!({"version":1,"vocabulary":[],"assets":[]});
+                let mut body = json!({"version":2,"vocabulary":[],"assets":[]});
                 let mut receipts = Vec::new();
                 let mut next = if state.vocabulary_done {
                     state.asset_cursor.clone()
@@ -351,7 +356,7 @@ impl Library {
                         }
                     }
                     for chunk in vocabulary.chunks(VOCABULARY_BATCH) {
-                        let body = json!({"version":1,"assets":[],"vocabulary":chunk.iter().map(|row|row.2.clone()).collect::<Vec<_>>()});
+                        let body = json!({"version":2,"assets":[],"vocabulary":chunk.iter().map(|row|row.2.clone()).collect::<Vec<_>>()});
                         let reply = client.publish(PATH, Some(&body), token)?;
                         validate_reply(&reply, &body)?;
                         let mut db = self.connection()?;

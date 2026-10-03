@@ -461,6 +461,8 @@ impl ImportSource {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetSummary {
+    #[serde(default)]
+    pub content_rating: Option<String>,
     pub id: String,
     pub title: Option<String>,
     pub original_name: String,
@@ -1743,6 +1745,7 @@ mod tests {
     #[test]
     fn asset_summary_serialization_omits_managed_paths() {
         let asset = AssetSummary {
+            content_rating: None,
             id: "asset-1".into(),
             title: None,
             original_name: "source.png".into(),
@@ -1783,6 +1786,7 @@ mod tests {
             thumbnail_revision("thumbnails/aa/other.webp")
         );
         let without = AssetSummary {
+            content_rating: None,
             thumbnail_relative_path: None,
             ..asset
         };
@@ -1808,6 +1812,7 @@ mod tests {
     #[test]
     fn video_asset_summary_serialization_hides_internal_media_details() {
         let asset = AssetSummary {
+            content_rating: None,
             id: "video-1".into(),
             title: None,
             original_name: "clip.webm".into(),
@@ -1854,6 +1859,7 @@ mod tests {
     #[test]
     fn similarity_review_serialization_omits_internal_hashes_and_paths() {
         let asset = AssetSummary {
+            content_rating: None,
             id: "asset-1".into(),
             title: None,
             original_name: "source.png".into(),

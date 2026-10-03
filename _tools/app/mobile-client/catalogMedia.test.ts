@@ -11,7 +11,7 @@ function load(id:string,visible=()=>true){
   void result.catch(()=>{});return result;
 }
 beforeEach(()=>{
-  controllers=[];replies=[];mocks.native.mockReset();
+  localStorage.clear();controllers=[];replies=[];mocks.native.mockReset();
   mocks.native.mockImplementation(()=>{const reply=Promise.withResolvers<{url:string}>();replies.push(reply);return reply.promise;});
   delete window.LakomicsNative;
 });
@@ -72,4 +72,18 @@ it('measures the six-slot queue with twelve cold visible covers at fixed fixture
     expect({peak,first,ninety,completed}).toEqual({peak:6,first:200,ninety:400,completed:12});
     console.info(`[perf] catalog queue fixture: visible=12 bridgeCalls=${mocks.native.mock.calls.length} peak=${peak} firstCoverMs=${first} visible90Ms=${ninety} (fixed 200ms native replies; not device latency)`);
   }finally{vi.useRealTimers();}
+});
+
+it.each(['cover','page'] as const)('blocks a %s request under only the NSFW filter',async kind=>{
+  localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+  await expect(catalogImageTicket({...request,kind},new AbortController().signal)).rejects.toHaveProperty('name','AbortError');
+  expect(mocks.native).not.toHaveBeenCalled();expect(shelfForegroundBusy()).toBe(false);
+});
+it('does not start queued preloads if the NSFW filter was enabled while waiting',async()=>{
+  const running=Array.from({length:6},(_,i)=>load(String(i+1)));
+  const queued=load('7',()=>false);
+  localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+  replies[0].resolve({url:'cached'});await running[0];
+  await expect(queued).rejects.toHaveProperty('name','AbortError');
+  expect(mocks.native).toHaveBeenCalledTimes(6);
 });

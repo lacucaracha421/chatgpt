@@ -1,3 +1,5 @@
+import {PRIVACY_MODE_EVENT} from './privacyMode';
+import {mediaMasked} from './assetMask';
 import {api, native} from './transport';
 import {mapBounded} from './model';
 import type {Asset, Ticket} from './types';
@@ -73,7 +75,7 @@ export function decodeImage(url: string, signal?: AbortSignal): Promise<HTMLImag
     const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', cancel); img.onload = img.onerror = null; };
     const cancel = () => { cleanup(); img.src = ''; reject(new DOMException('Cancelled', 'AbortError')); };
     const timer = setTimeout(() => { cleanup(); img.src = ''; reject(new Error('이미지를 불러오지 못했습니다.')); }, 18_000);
-    img.onload = () => { img.decode().then(() => { cleanup(); resolve(img); }, () => { cleanup(); reject(new Error('이미지를 표시하지 못했습니다.')); }); };
+    img.onload = () => { if (signal?.aborted) { cancel(); return; } img.decode().then(() => { cleanup(); resolve(img); }, () => { cleanup(); reject(new Error('이미지를 표시하지 못했습니다.')); }); };
     img.onerror = () => { cleanup(); reject(new Error('이미지를 불러오지 못했습니다.')); };
     signal?.addEventListener('abort', cancel, {once: true});
     if (signal?.aborted) cancel(); else img.src = url;
@@ -81,14 +83,22 @@ export function decodeImage(url: string, signal?: AbortSignal): Promise<HTMLImag
 }
 export async function prepareAssets(items: Asset[], signal?: AbortSignal): Promise<Asset[]> {
   return mapBounded(items, 6, async asset => {
-    if (asset.pending || asset.thumbnail_available === false) return {...asset, ratio: asset.ratio ?? 1};
+    if(mediaMasked(asset))return {...asset,preview:undefined};
+    if(asset.pending||asset.thumbnail_available===false)return {...asset,ratio:asset.ratio??1};
+    const controller=new AbortController();
+    const scoped=signal?AbortSignal.any([signal,controller.signal]):controller.signal;
+    const changed=()=>{if(mediaMasked(asset))controller.abort();};
+    window.addEventListener(PRIVACY_MODE_EVENT,changed);window.addEventListener('storage',changed);
     try {
-      const ticket = await mediaTicket(asset, 'thumbnail', signal);
-      if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
-      const image = await decodeImage(ticket.url, signal);
-      return {...asset, preview: ticket.url, ratio: Number(asset.width) > 0 && Number(asset.height) > 0 ? Number(asset.width) / Number(asset.height) : image.naturalWidth / image.naturalHeight};
-    } catch (error) { if (signal?.aborted) throw error; return {...asset, ratio: 1}; }
-  }, signal);
+      const ticket=await mediaTicket(asset,'thumbnail',scoped);
+      if(mediaMasked(asset))return {...asset,preview:undefined};
+      if(scoped.aborted)throw new DOMException('Cancelled','AbortError');
+      const image=await decodeImage(ticket.url,scoped);
+      if(mediaMasked(asset))return {...asset,preview:undefined};
+      return {...asset,preview:ticket.url,ratio:Number(asset.width)>0&&Number(asset.height)>0?Number(asset.width)/Number(asset.height):image.naturalWidth/image.naturalHeight};
+    }catch(error){if(signal?.aborted)throw error;return mediaMasked(asset)?{...asset,preview:undefined}:{...asset,ratio:1};}
+    finally {window.removeEventListener(PRIVACY_MODE_EVENT,changed);window.removeEventListener('storage',changed);}
+  },signal);
 }
 
 // Visible tiles share one queue. An uncached thumbnail costs a storage round trip of about
@@ -125,6 +135,7 @@ function enqueue(queue: (() => void)[], work: () => Promise<unknown>, signal: Ab
   queue.push(start); pump();
 }
 export function loadThumbnail(asset: Asset, signal: AbortSignal): Promise<Asset> {
+  if(mediaMasked(asset))return Promise.resolve({...asset,preview:undefined});
   const finish=beginShelfForeground();
   return new Promise<Asset>((resolve, reject) => {
     enqueue(thumbnailQueue, () => prepareAssets([asset], signal).then(items => resolve(items[0]), reject), signal, reject);
@@ -137,15 +148,16 @@ export function loadThumbnail(asset: Asset, signal: AbortSignal): Promise<Asset>
  */
 export function prefetchThumbnails(assets: Asset[], signal: AbortSignal) {
   for (const asset of assets) {
-    if (asset.pending || asset.preview || asset.thumbnail_available === false) continue;
+    if (mediaMasked(asset) || asset.pending || asset.preview || asset.thumbnail_available === false) continue;
     // The visibility owner also cancels an in-flight speculative transfer.
-    enqueue(prefetchQueue, () => mediaTicket(asset, 'thumbnail', signal).catch(() => undefined), signal, () => {});
+    enqueue(prefetchQueue, () => mediaMasked(asset)?Promise.resolve():mediaTicket(asset, 'thumbnail', signal).catch(() => undefined), signal, () => {});
   }
 }
 /** Library warm-up: one thumbnail through the prefetch queue, settled when native is done. */
 export function warmThumbnail(asset: Asset, signal: AbortSignal): Promise<void> {
+  if(mediaMasked(asset))return Promise.resolve();
   if (asset.pending || asset.thumbnail_available === false) return Promise.resolve();
   return new Promise(resolve => {
-    enqueue(prefetchQueue, () => mediaTicket(asset, 'thumbnail', signal).then(() => resolve(), () => resolve()), signal, () => resolve());
+    enqueue(prefetchQueue, () => mediaMasked(asset)?Promise.resolve().then(resolve):mediaTicket(asset, 'thumbnail', signal).then(() => resolve(), () => resolve()), signal, () => resolve());
   });
 }

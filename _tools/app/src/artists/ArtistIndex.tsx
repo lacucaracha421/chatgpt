@@ -1,3 +1,4 @@
+import { AssetImage } from "../privacy/AssetImage";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { useMemo, useState, type ReactNode } from "react";
 import { usePrivacy } from "../privacy/PrivacyContext";
@@ -86,7 +87,7 @@ function ArtistRow({ artist, current, onNavigate }: { artist: ArtistSummary; cur
   return <button type="button" className="workspace-index-link artist-index__link artist-index__artist-row"
     aria-current={current ? "page" : undefined} aria-label={`${artist.label} ${count(artist.assetCount)}장`}
     onClick={() => onNavigate({ kind: "creator", creatorKey: artist.id })}>
-    <span className="artist-index__thumb" aria-hidden="true">{privacyMode ? <span className="privacy-mask" aria-label="비공개 모드"/> : artist.coverAssetIds[0] && <img src={thumbnailUrl(artist.coverAssetIds[0])} alt="" loading="lazy" decoding="async" draggable={false} />}</span>
+    <span className="artist-index__thumb" aria-hidden="true">{privacyMode ? <span className="privacy-mask" aria-label="비공개 모드"/> : artist.coverAssetIds[0] && <AssetImage src={thumbnailUrl(artist.coverAssetIds[0])} alt="" loading="lazy" decoding="async" draggable={false} />}</span>
     <span className="more-panel__label artist-name">{artist.label}</span>
     <span className="more-panel__count">{count(artist.assetCount)}</span>
   </button>;

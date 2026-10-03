@@ -1,3 +1,5 @@
+import {useTabletAssetMask} from './assetMask';
+import {useNsfwFilter} from './privacyMode';
 import {collectionCover} from './collectionModel';
 import * as RadixDialog from '@radix-ui/react-dialog';
 import {useDeferredValue,useEffect,useId,useLayoutEffect,useMemo,useRef,useState} from 'react';
@@ -8,7 +10,7 @@ import {findGroups,GROUP_LIMIT,readRecent,rememberRecent,type FindScope} from '.
 import {NAVIGATION_GROUP_LABELS,type NavigationEntryGroup} from '../src/shared/findEntries';
 import {TABLET_FIND_SCOPES,type TabletFindEntry} from './findData';
 import {artworkTicket,decoded} from './collectionArtwork';
-import {mediaTicket} from './media';
+import {decodeImage,mediaTicket} from './media';
 import {useNoteEditor} from './noteCaret';
 import './find.css';
 
@@ -16,28 +18,31 @@ type CachedMedia={url:string;promise:Promise<string>};
 type MediaCache=Map<string,CachedMedia>;
 /** Only displayed rows request media; typing reuses the open session's decoded thumbnails. */
 function FindMedia({entry,cache,signal}:{entry:TabletFindEntry;cache:MediaCache;signal:AbortSignal}) {
+  const masked=useTabletAssetMask({contentRating:entry.contentRating}) && Boolean(entry.assetId) && !entry.work;
   const [url,setUrl]=useState(()=>cache.get(entry.id)?.url??'');
   useEffect(()=>{
+    if(masked)return;
     if((!entry.work&&!entry.assetId)||(entry.work&&!collectionCover(entry.work.item)&&!entry.work.item.coverAssetId))return;
     let active=true;
     if(!cache.has(entry.id)){
-      const request=entry.work?artworkTicket(entry.work.item,collectionCover(entry.work.item),entry.work.revision,false,signal):mediaTicket({id:entry.assetId!,kind:'image'},'thumbnail',signal);
-      const cached:CachedMedia={url:'',promise:request.then(async ticket=>{await decoded(ticket.url);cached.url=ticket.url;return ticket.url;}).catch(()=>'')};
+      const request=entry.work?artworkTicket(entry.work.item,collectionCover(entry.work.item),entry.work.revision,false,signal):mediaTicket({id:entry.assetId!,kind:'image',contentRating:entry.contentRating},'thumbnail',signal);
+      const cached:CachedMedia={url:'',promise:request.then(async ticket=>{if(signal.aborted)return '';if(entry.work)await decoded(ticket.url);else await decodeImage(ticket.url,signal);cached.url=ticket.url;return ticket.url;}).catch(()=>'')};
       cache.set(entry.id,cached);
     }
     void cache.get(entry.id)!.promise.then(value=>{if(active&&!signal.aborted)setUrl(value);});
     return()=>{active=false;};
-  },[entry.id,cache,signal]);
-  return url?<img src={url} alt="" className={entry.avatar?'find-entry__avatar':undefined}/>:entry.icon;
+  },[entry.id,cache,signal,masked]);
+  return masked?<span className="privacy-mask" aria-label="이미지 숨김"/>:url?<img src={url} alt="" className={entry.avatar?'find-entry__avatar':undefined}/>:entry.icon;
 }
 
 export function FindSheet({open,onClose,entries,endpoint,privacy,loading=false,error,onRetry}:{open:boolean;onClose():void;entries:TabletFindEntry[];endpoint:string;privacy:boolean;loading?:boolean;error?:string;onRetry?():void}) {
+  const [nsfwFilter]=useNsfwFilter();
   const [query,setQuery]=useState(''),[scope,setScope]=useState<FindScope>('전체');
   const [expanded,setExpanded]=useState<NavigationEntryGroup[]>([]),[recent,setRecent]=useState<string[]>([]),[activeId,setActiveId]=useState<string|null>(null);
   const field=useRef<HTMLInputElement|null>(null),editor=useNoteEditor();
   const picked=useRef(false),opener=useRef<HTMLElement|null>(null);
   const id=useId(),recentKey=`tablet:${endpoint}`;
-  const session=useMemo(()=>({cache:new Map() as MediaCache,controller:new AbortController()}),[open,endpoint,privacy]);
+  const session=useMemo(()=>({cache:new Map() as MediaCache,controller:new AbortController()}),[open,endpoint,privacy,nsfwFilter]);
   useEffect(()=>()=>session.controller.abort(),[session]);
   useLayoutEffect(()=>{
     if(!open)return;

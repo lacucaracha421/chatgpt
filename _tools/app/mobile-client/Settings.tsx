@@ -4,7 +4,7 @@ import {TopBar} from './TopBar';
 import {errorText, native} from './transport';
 import type {Status} from './types';
 import {onWarmState, setWarmEnabled, warmEnabled, warmState, type WarmState} from './thumbnailWarm';
-import {usePrivacyMode} from './privacyMode';
+import {useNsfwFilter,usePrivacyMode} from './privacyMode';
 import './Settings.css';
 
 type CacheStatus = {bytes:number; count:number; limit:number};
@@ -15,6 +15,7 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
   const [endpoint, setEndpoint] = useState(status.endpoint);
   const [token, setToken] = useState('');
   const [privateHttp, setPrivateHttp] = useState(status.allowPrivateHttp ?? false);
+  const [nsfwFilter,setNsfwFilter]=useNsfwFilter();
   const [privacyMode, setPrivacyMode] = usePrivacyMode();
   const [editing, setEditing] = useState(!status.configured);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
@@ -78,6 +79,7 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
 
         <SettingsGroup title="화면">
           <SettingsRow name="비공개 모드" control={<Switch aria-label="비공개 모드" checked={privacyMode} onChange={event => setPrivacyMode(event.target.checked)} />} />
+          <SettingsRow name="NSFW 필터" status="전연령 이미지만 보여요" control={<Switch aria-label="NSFW 필터" checked={nsfwFilter} onChange={event => setNsfwFilter(event.target.checked)} />} />
         </SettingsGroup>
 
         <SettingsGroup title="저장 공간">

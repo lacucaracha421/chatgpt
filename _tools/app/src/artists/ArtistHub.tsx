@@ -1,3 +1,4 @@
+import { AssetImage } from "../privacy/AssetImage";
 import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { thumbnailUrl } from "../assets/mediaUrl";
@@ -34,7 +35,7 @@ const formatCount = (value: number) => value.toLocaleString("ko-KR");
 
 export function ArtistThumb({ assetId, privacyMode, className = "artist-thumb" }: { assetId?: string; privacyMode: boolean; className?: string }) {
   return <span className={className} aria-hidden="true">
-    {assetId && !privacyMode && <img src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}
+    {assetId && !privacyMode && <AssetImage src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}
   </span>;
 }
 
@@ -43,9 +44,9 @@ export function ThumbStrip({ assetIds, privacyMode, label, onOpen }: { assetIds:
   return <div className="artist-strip" aria-label={label}>
     {assetIds.map((assetId) => onOpen
       ? <button key={assetId} type="button" className="artist-strip__item" aria-label={`${label} 이미지 열기`} onClick={() => onOpen(assetId)}>
-        {!privacyMode && <img src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}
+        {!privacyMode && <AssetImage src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}
       </button>
-      : <span key={assetId} className="artist-strip__item">{!privacyMode && <img src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}</span>)}
+      : <span key={assetId} className="artist-strip__item">{!privacyMode && <AssetImage src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}</span>)}
   </div>;
 }
 
@@ -277,7 +278,7 @@ function HeroMosaic({ assetIds, assetCount, privacyMode }: { assetIds: string[];
   const count = cells.length;
   return <span className={`artist-hero-mosaic artist-hero-mosaic--n${count}`} aria-hidden="true">
     {cells.map((assetId, index) => <span key={`${assetId ?? "empty"}-${index}`} className={`artist-hero-mosaic__cell${extra > 0 && index === cells.length - 1 ? " artist-hero-mosaic__cell--more" : ""}`}>
-      {assetId && !privacyMode && <img src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}
+      {assetId && !privacyMode && <AssetImage src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}
       {extra > 0 && index === cells.length - 1 && <span>+{formatCount(extra)}</span>}
     </span>)}
   </span>;
@@ -426,7 +427,7 @@ function SinglesMosaic({ onNavigate, privacyMode }: { onNavigate: Navigate; priv
     <p className="artist-muted artist-hub__lead">이름 대신 그림으로 훑어보기 · 마음에 들면 작가 페이지로</p>
     <div ref={grid} className="artist-mosaic">
       {page.artists.map((artist) => <button key={artist.id} type="button" className="artist-mosaic__tile" aria-label={`${artist.label} 작가 페이지`} onClick={() => onNavigate({ kind: "creator", creatorKey: artist.id })}>
-        {!privacyMode && artist.coverAssetIds[0] && <img src={thumbnailUrl(artist.coverAssetIds[0])} alt="" loading="lazy" decoding="async" draggable={false} />}
+        {!privacyMode && artist.coverAssetIds[0] && <AssetImage src={thumbnailUrl(artist.coverAssetIds[0])} alt="" loading="lazy" decoding="async" draggable={false} />}
         <span className="artist-name">{artist.label}</span>
       </button>)}
     </div>

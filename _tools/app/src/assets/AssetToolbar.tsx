@@ -1,3 +1,4 @@
+import { usePrivacy } from "../privacy/PrivacyContext";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
@@ -43,6 +44,7 @@ export function AssetToolbar({
   scopeControl, galleryLayout = "masonry", onGalleryLayoutChange, view: rawView, classifications, albums, collections = [], sort, mediaFilter, aspectFilter, metadataVisible, privacyMode, thumbnailRowHeight,
   onSortChange, onMediaFilterChange, onAspectFilterChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle, inspectorOpen = false, inspectorAvailable = false, onInspectorOpenChange, title, titleAccessory,
 }: AssetToolbarProps) {
+  const {nsfwFilter} = usePrivacy();
   void metadataVisible;
   void onMetadataVisibleChange;
   void onPrivacyModeChange;
@@ -62,8 +64,8 @@ export function AssetToolbar({
 
   return <>
     <ViewToolbar title={location} ariaLabel="자산 도구" titleAccessory={<>{registration}{titleAccessory}</>} trailingAction={<div className="asset-toolbar__controls">{workspace && <Button variant="quiet" aria-label="에셋 검색" aria-keyshortcuts="Control+K Control+F" onClick={workspace.openFind}><MagnifyingGlassIcon aria-hidden="true" /><span>검색</span></Button>}{viewControls}</div>} chrome={{
-      summary: [sortLabel, galleryLayout === "masonry" ? "폭포수" : "같은 높이", filterable && (mediaFilter !== "all" || aspectFilter !== "all") ? `필터 ${Number(mediaFilter !== "all") + Number(aspectFilter !== "all")}` : "", privacyMode ? "비공개" : ""].filter(Boolean).join(" · "),
-      status: privacyMode ? <span>비공개 모드</span> : undefined,
+      summary: [sortLabel, galleryLayout === "masonry" ? "폭포수" : "같은 높이", filterable && (mediaFilter !== "all" || aspectFilter !== "all") ? `필터 ${Number(mediaFilter !== "all") + Number(aspectFilter !== "all")}` : "", privacyMode ? "비공개" : "", nsfwFilter ? "NSFW 필터" : ""].filter(Boolean).join(" · "),
+      status: privacyMode || nsfwFilter ? <span>{[privacyMode ? "비공개 모드" : "", nsfwFilter ? "NSFW 필터" : ""].filter(Boolean).join(" · ")}</span> : undefined,
     }} />
   </>;
 }

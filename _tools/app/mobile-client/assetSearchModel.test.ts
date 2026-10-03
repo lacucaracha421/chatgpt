@@ -1,5 +1,8 @@
+import {assetMasked} from '../src/shared/privacy/contentMask';
+import {characterCovers} from './FolderCards';
+import type {CharacterIndex} from './characterModel';
 import {expect,it,vi} from 'vitest';
-import {addSearchChip,chipName,searchChip,searchView,invalidSearchChoices,removeViewSearch,type AssetSuggestion} from './assetSearchModel';
+import {assetSuggestions,addSearchChip,chipName,searchChip,searchView,invalidSearchChoices,removeViewSearch,type AssetSuggestion} from './assetSearchModel';
 import {assetSearchChoiceHint,assetSearchSelectionKey,type AssetSearchName} from '../src/assets/assetSearch';
 import {pagePath,viewKey} from './model';
 import {assetTocPath} from './assetToc';
@@ -61,4 +64,20 @@ it('isolates 422 chips without dropping valid choices or treating offline errors
  const controller=new AbortController();controller.abort();expect(await invalidSearchChoices(choices,read,controller.signal)).toEqual([]);
  expect(assetSearchSelectionKey(removeViewSearch(view,choices).search)).toBe('');
  expect(removeViewSearch(searchView([searchChip(album),searchChip(tag('a'))]),[album]).album).toBeUndefined();
+});
+
+it('keeps current artist and character cover ratings in search and folder projections',()=>{
+ const entries=[{id:'c',name:'Character',parent_id:null,asset_count:1,characterNode:'character:c'}];
+ const characters={nodes:[{id:'character:c',thumbnailAssetId:'character-cover'}],contentRatings:{'character-cover':'g'}} as CharacterIndex;
+ const safeArtist={id:'artist:a',label:'Artist',keys:[],assetCount:1,recentCount:0,pinned:false,hidden:false,main:false,coverAssetIds:[] as string[],coverContentRatings:{} as Record<string,'g'|'e'>};
+ safeArtist.coverAssetIds=['artist-cover'];safeArtist.coverContentRatings={'artist-cover':'g'};
+ const suggestions=assetSuggestions(entries,characters,null,[safeArtist]);
+ expect(suggestions.map(item=>item.cover?.contentRating)).toEqual(['g','g']);
+ for(const item of suggestions)expect(assetMasked(false,true,item.cover)).toBe(false);
+ expect(characterCovers(entries[0],characters)[0].contentRating).toBe('g');
+ characters.contentRatings={'character-cover':'e'};
+ safeArtist.coverContentRatings={'artist-cover':'e'};
+ for(const item of assetSuggestions(entries,characters,null,[safeArtist]))expect(assetMasked(false,true,item.cover)).toBe(true);
+ delete characters.contentRatings;safeArtist.coverContentRatings={};
+ for(const item of assetSuggestions(entries,characters,null,[safeArtist]))expect(assetMasked(false,true,item.cover)).toBe(true);
 });

@@ -1,3 +1,4 @@
+import { AssetImage } from "../privacy/AssetImage";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
 import { libraryContextItems } from "./libraryContextItems";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -31,7 +32,7 @@ import { AssetViewer } from "./AssetViewer";
 import { SelectionBar } from "./SelectionBar";
 import { thumbnailUrl } from "./mediaUrl";
 import { folderPreviewCache, rememberFolderPreview } from "./folderPreviewCache";
-import { StableImage } from "../shared/ui/StableImage";
+import { AssetStableImage as StableImage } from "../privacy/AssetImage";
 import { CharacterAssignPicker } from "../characters/CharacterAssignPicker";
 import { moveAssetsToCharacters, type CharacterTarget } from "../characters/api";
 import { characterHubApi, type CharacterGroup, type CharacterHubApi } from "../characters/hubApi";
@@ -655,7 +656,7 @@ function isMovableViewerFolder(entry: ClassificationEntry): boolean {
 function CharacterNoticeThumbnail({ target }: { target: CharacterTarget }) {
   const assetId = target.thumbnailAssetId ?? target.references.find(reference => reference.status === "ready")?.assetId;
   return assetId
-    ? <img className="character-assign-notice__thumbnail" src={thumbnailUrl(assetId)} alt="" />
+    ? <AssetImage className="character-assign-notice__thumbnail" src={thumbnailUrl(assetId)} alt="" />
     : <span className="character-assign-notice__thumbnail" aria-hidden="true" />;
 }
 

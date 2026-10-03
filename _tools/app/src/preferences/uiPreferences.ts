@@ -18,6 +18,7 @@ export type UiPreferences = {
   galleryLayout: "masonry" | "justified";
   metadataVisible: boolean;
   privacyMode: boolean;
+  nsfwFilter: boolean;
   sidebarWidth: number;
   expandedClassificationIds: string[];
   pinnedClassificationIds: string[];
@@ -40,6 +41,7 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   galleryLayout: "masonry",
   metadataVisible: true,
   privacyMode: false,
+  nsfwFilter: false,
   sidebarWidth: 208,
   expandedClassificationIds: [],
   pinnedClassificationIds: [],
@@ -80,6 +82,7 @@ export function loadUiPreferences(storage: Storage = localStorage): UiPreference
       typeof value.privacyMode === "boolean"
         ? value.privacyMode
         : DEFAULT_UI_PREFERENCES.privacyMode,
+    nsfwFilter: value.nsfwFilter === true,
     sidebarWidth:
       typeof value.sidebarWidth === "number" && Number.isFinite(value.sidebarWidth)
         ? clampSidebarWidth(value.sidebarWidth)

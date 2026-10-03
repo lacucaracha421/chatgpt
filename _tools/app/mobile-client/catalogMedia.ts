@@ -1,4 +1,5 @@
 import {native} from './transport';
+import {tabletCatalogMasked} from './catalogMask';
 import {beginShelfForeground} from './shelfWarmActivity';
 import {catalogPerfEnabled} from './catalogPerf';
 import type {Ticket} from './types';
@@ -24,7 +25,7 @@ function drain(){
 
 /** Only nearby covers enter this queue; an on-screen cover overtakes queued preloads. */
 export function catalogImageTicket(request:CatalogImageRequest,signal:AbortSignal,visible:()=>boolean=()=>true):Promise<Ticket>{
-  if(signal.aborted)return Promise.reject(new DOMException('Cancelled','AbortError'));
+  if(signal.aborted||tabletCatalogMasked())return Promise.reject(new DOMException('Cancelled','AbortError'));
   const submitted=performance.now(),perfId=`catalog-${Date.now().toString(36)}-${++sequence}`;
   const foregroundDone=request.kind==='cover'?beginShelfForeground():()=>{};
   return new Promise((resolve,reject)=>{
@@ -40,7 +41,7 @@ export function catalogImageTicket(request:CatalogImageRequest,signal:AbortSigna
       if(finish())reject(new DOMException('Cancelled','AbortError'));
     };
     const start=()=>{
-      if(signal.aborted){cancel();return;}started=true;active++;
+      if(signal.aborted||tabletCatalogMasked()){cancel();return;}started=true;active++;
       const timing=request.kind==='cover'&&catalogPerfEnabled()?{perfId,jsQueueMs:performance.now()-submitted}:{};
       void native<Ticket>('catalogImage',{...request,...timing},signal).then(value=>{if(finish())resolve(value);},error=>{if(finish())reject(error);});
     };

@@ -1,3 +1,4 @@
+import {listen} from "@tauri-apps/api/event";
 import { useWorkloadProfile } from "./workloadProfile";
 import {ASSET_LIFECYCLE_CHANGED_EVENT, useAssetAuthoritySync} from './useAssetAuthoritySync';
 import {useMobilePublications} from './useMobilePublications';
@@ -185,6 +186,11 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   useEffect(() => { void reattachVaultImport(gateway); }, [gateway]);
   const privateVaultVisible = Boolean(privateVaultStatus && privateVaultStatus.state !== "absent" && gateway.listEncryptedVaultItems);
   const [assetRefresh, setAssetRefresh] = useState(0);
+  useEffect(() => {
+    let live=true;let unlisten:(()=>void)|undefined;
+    void listen("library://auto-tag-inbox",()=>setAssetRefresh(value=>value+1)).then(stop=>{if(live)unlisten=stop;else stop();},()=>undefined);
+    return ()=>{live=false;unlisten?.();};
+  },[]);
   const characterHub = useCharacterHub(assetRefresh);
   const [clearAssetSelectionRequest, setClearAssetSelectionRequest] = useState(0);
   const [maintenance, setMaintenance] = useState<"restore" | null>(null);
@@ -485,7 +491,8 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
         : [...current, running];
     });
     try {
-      await startAssetDrag(assetIds);
+      if(preferences.privacyMode || preferences.nsfwFilter) await startAssetDrag(assetIds,{privacyMode:preferences.privacyMode,nsfwFilter:preferences.nsfwFilter});
+      else await startAssetDrag(assetIds);
       setNativeDragWorks((current) => current.map((work) => work.id === workId ? { ...work, completed: 1, status: "completed" } : work));
     } catch (error) {
       if (sameAssetIds(activeNativeDragAssetIdsRef.current, assetIds)) activeNativeDragAssetIdsRef.current = null;
@@ -636,7 +643,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   }
 
   return (
-    <PrivacyProvider privacyMode={preferences.privacyMode} setPrivacyMode={(privacyMode) => updatePreferences({ privacyMode })}>
+    <PrivacyProvider gateway={gateway} libraryKey={libraryRoot} ratingRevision={assetRefresh} nsfwFilter={preferences.nsfwFilter} setNsfwFilter={(nsfwFilter) => updatePreferences({nsfwFilter})} privacyMode={preferences.privacyMode} setPrivacyMode={(privacyMode) => updatePreferences({ privacyMode })}>
       <FaultGameProvider>
       <div className="library-workspace" data-privacy-mode={preferences.privacyMode ? "true" : undefined} inert={maintenance !== null ? true : undefined}>
         <WorkspaceChromeProvider scope={JSON.stringify(view)}>

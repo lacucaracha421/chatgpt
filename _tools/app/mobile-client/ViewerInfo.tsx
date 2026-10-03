@@ -1,3 +1,4 @@
+import {useTabletAssetMask} from './assetMask';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {ArrowTopRightOnSquareIcon, CheckIcon, ClipboardDocumentIcon} from '@heroicons/react/24/outline';
 import {IconButton} from './ui';
@@ -6,7 +7,6 @@ import {durationLabel} from './model';
 import {displayDateTime} from '../src/shared/displayDate';
 import {formatBytes} from '../src/shared/formatBytes';
 import {errorText, native} from './transport';
-import {usePrivacyMode} from './privacyMode';
 
 /**
  * Every row renders a field the mobile Asset actually carries; a value the device does
@@ -123,7 +123,7 @@ async function writeClipboard(text: string): Promise<void> {
  * `Viewer`, so those three overlays keep one owner.
  */
 export function ViewerInfo({asset, mediaError = ''}: {asset: Asset; mediaError?: string; onClose?(): void}) {
-  const [privacy] = usePrivacyMode();
+  const privacy = useTabletAssetMask(asset);
   const [status, setStatus] = useState<{kind: 'copied' | 'failed'; label: string} | null>(null);
   const [copied, setCopied] = useState('');
   const [busy, setBusy] = useState(false);

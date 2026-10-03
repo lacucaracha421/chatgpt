@@ -11,7 +11,7 @@ import {api,errorText} from './transport';
 import {CatalogCover} from './CatalogCover';
 import {catalogScreenTiming} from './catalogPerf';
 import {CatalogReader} from './CatalogReader';
-import {usePrivacyMode} from './privacyMode';
+import {useTabletCatalogMasked} from './catalogMask';
 import {CatalogRefreshBanner,CatalogRefreshControl,useCatalogRefresh,useNow} from './CatalogRefresh';
 import {BottomSheet} from './BottomSheet';
 import {usePullToRefresh} from './usePullToRefresh';
@@ -72,7 +72,7 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   const selectedKey=selected?`${selected.provider}:${selected.providerWorkId}`:null;
   const [detailError,setDetailError]=useState(''),[detailRefresh,setDetailRefresh]=useState(0);
   const [editions,setEditions]=useState<CatalogEditions|null>(null),[editionCursor,setEditionCursor]=useState<string|null>(null),[editionError,setEditionError]=useState('');
-  const [privacy] = usePrivacyMode();
+  const privacy = useTabletCatalogMasked();
   const listEnabled=!paused&&(active||(prefetch&&!privacy));
   const warmStatusAttempted=useRef(false),warmListAttempted=useRef(false);
   const listPending=useRef(false);

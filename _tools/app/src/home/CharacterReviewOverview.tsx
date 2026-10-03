@@ -1,3 +1,4 @@
+import { AssetImage } from "../privacy/AssetImage";
 import { CharacterSuggestionsOverview } from "../characters/suggestions/CharacterSuggestions";
 import { ChevronLeftIcon, ChevronRightIcon, UserIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useState } from "react";
@@ -149,7 +150,7 @@ function CharacterRow({ group, character, privacyMode, onOpen }: { group: Charac
   return <button type="button" className="crv-character" aria-label={`${group.seriesName} › ${character.name} 검토 ${character.count}건`}
     onClick={() => onOpen({ ...(group.seriesId ? { series: { id: group.seriesId, name: group.seriesName } } : {}), target: { id: character.targetId, name: character.name } })}>
     <span className="crv-portrait" aria-hidden="true">
-      {character.thumbnailAssetId && !privacyMode ? <img src={thumbnailUrl(character.thumbnailAssetId)} alt="" loading="lazy" decoding="async" /> : <UserIcon />}
+      {character.thumbnailAssetId && !privacyMode ? <AssetImage src={thumbnailUrl(character.thumbnailAssetId)} alt="" loading="lazy" decoding="async" /> : <UserIcon />}
     </span>
     <span className="crv-character__t"><b>{character.name}</b><Split automatic={character.automatic} recommended={character.recommended} /></span>
     <span className="crv-count numeric">{character.count.toLocaleString()}<small>건</small></span>

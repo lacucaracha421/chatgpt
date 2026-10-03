@@ -1,3 +1,4 @@
+import { AssetImage } from "../../privacy/AssetImage";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatBytes } from "../../assets/assetMetadata";
@@ -176,7 +177,7 @@ function seconds(ms: number) { return `${(ms / 1000).toFixed(1)}초`; }
 function VideoAssetPanel({ side, asset }: { side: string; asset: AssetSummary }) {
   const { privacyMode } = usePrivacy();
   return <section className="similarity-review__asset" aria-label={side}>
-    <div className="similarity-review__preview">{privacyMode ? <Skeleton className="privacy-mask similarity-review__preview-mask" label="비공개 모드" /> : asset.media.kind === "video" && asset.media.preparationState === "ready" ? <VideoPlayer key={asset.id} asset={{ ...asset, media: asset.media }} /> : <img src={thumbnailUrl(asset.id)} alt={side} />}</div>
+    <div className="similarity-review__preview">{privacyMode ? <Skeleton className="privacy-mask similarity-review__preview-mask" label="비공개 모드" /> : asset.media.kind === "video" && asset.media.preparationState === "ready" ? <VideoPlayer key={asset.id} asset={{ ...asset, media: asset.media }} /> : <AssetImage src={thumbnailUrl(asset.id)} alt={side} />}</div>
     <h3>{asset.title || asset.originalName}</h3>
     <dl><div><dt>파일 크기</dt><dd>{formatBytes(asset.byteSize)}</dd></div><div><dt>해상도</dt><dd>{asset.width} × {asset.height}</dd></div>{asset.media.kind === "video" && <div><dt>재생 시간</dt><dd>{asset.media.durationMs == null ? "알 수 없음" : seconds(asset.media.durationMs)}</dd></div>}</dl>
     {!privacyMode && asset.media.kind === "video" && asset.media.preparationState !== "ready" && <p>재생 준비가 끝나면 영상을 확인할 수 있습니다.</p>}

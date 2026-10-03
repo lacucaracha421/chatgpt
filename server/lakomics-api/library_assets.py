@@ -3,6 +3,7 @@
 The application module is supplied at registration so its shared services and
 compatibility hooks are resolved at call time, including test monkeypatches.
 """
+import library_search
 import base64
 import binascii
 import json
@@ -366,6 +367,7 @@ def list_mobile_classification_assets(
     items = [
         {
             "id": row["id"],
+            "contentRating": library_search.content_rating(row),
             "kind": row["kind"],
             "content_type": row["content_type"],
             "size_bytes": row["size_bytes"],
@@ -502,6 +504,7 @@ def _optional_duration_ms(row, column: str = "duration_ms") -> int | None:
 def mobile_asset_item(row, classification_ids: list[str] | None = None) -> dict:
     return {
         "id": row["id"],
+        "contentRating": library_search.content_rating(row),
         "kind": row["kind"],
         "content_type": row["content_type"],
         "size_bytes": row["size_bytes"],
@@ -579,6 +582,13 @@ def list_mobile_library_trash(
             rows, has_more, total_count, total_bytes = asset_authority.trash_page(
                 db, active["libraryId"], position, limit)
             memberships = api._mobile_memberships(db, rows)
+            ratings = {}
+            if rows and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='library_asset_ratings'").fetchone():
+                ids = [row["id"] for row in rows]
+                placeholders = ",".join("?" for _ in ids)
+                ratings = {row["asset_id"]: row["content_rating"] for row in db.execute(
+                    f"SELECT asset_id, content_rating FROM library_asset_ratings WHERE asset_id IN ({placeholders})", ids)}
+            rows = [{**dict(row), "content_rating": ratings.get(row["id"])} for row in rows]
         finally:
             db.rollback()
     items = []

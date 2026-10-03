@@ -54,6 +54,20 @@ describe('Library Trash browser',()=>{
     } finally {localStorage.clear();}
   });
 
+  it('requests only rated g trash thumbnails under the NSFW filter',async()=>{
+    localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+    mocks.api.mockImplementation((path:string)=>Promise.resolve(path.startsWith('/v1/library/trash')
+      ? {...page,items:[{...item('a'),contentRating:'g'},item('b')]}
+      : {items:[{asset_id:'a',ok:true,url:'https://thumb.example/a'}]}));
+    try {
+      const {container}=mount();
+      await waitFor(()=>expect(container.querySelector('img[src="https://thumb.example/a"]')).toBeTruthy());
+      const call=mocks.api.mock.calls.find(([path])=>path.includes('media-tickets'));
+      expect(call?.[2]).toEqual({items:[{asset_id:'a',variant:'thumbnail'}]});
+      expect(container.querySelectorAll('.privacy-mask')).toHaveLength(2);
+    } finally {localStorage.clear();}
+  });
+
   it('shows count, size, the PC-only emptying hint and no empty action',async()=>{
     mount();
     expect(await screen.findByText('2개 · 3.0 MB · 이동 대기 1')).toBeTruthy();

@@ -141,8 +141,8 @@ describe("PageViewer", () => {
     expect(position()).toBe("2 / 2");
   });
 
-  it("masks pages and skips preloading in privacy mode", () => {
-    render(<PrivacyProvider privacyMode setPrivacyMode={vi.fn()}>
+  it.each(["privacy", "nsfw"])("masks pages and skips preloading under %s", (mode) => {
+    render(<PrivacyProvider privacyMode={mode === "privacy"} nsfwFilter={mode === "nsfw"} setPrivacyMode={vi.fn()}>
       <PageViewer
         title="Remote"
         pageUrls={Array.from({ length: 10 }, (_, index) => `page-${index + 1}`)}
@@ -320,13 +320,13 @@ describe("PageViewer", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it("closes an open reader and removes all image sources when privacy turns on", () => {
+  it.each(["privacy", "nsfw"])("closes an open reader and removes all image sources when %s turns on", (mode) => {
     const close = vi.fn();
     const { container, rerender } = render(<PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}>
       <PageViewer {...viewerProps({onClose: close})} />
     </PrivacyProvider>);
     expect(container.querySelector("img") || screen.queryAllByRole("img").length).toBeTruthy();
-    rerender(<PrivacyProvider privacyMode setPrivacyMode={vi.fn()}>
+    rerender(<PrivacyProvider privacyMode={mode === "privacy"} nsfwFilter={mode === "nsfw"} setPrivacyMode={vi.fn()}>
       <PageViewer {...viewerProps({onClose: close})} />
     </PrivacyProvider>);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

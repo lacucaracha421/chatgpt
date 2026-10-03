@@ -1,3 +1,4 @@
+import {useTabletAssetMask} from './assetMask';
 import {usePrivacyMode} from './privacyMode';
 import {useCallback, useEffect, useRef, useState, type MutableRefObject} from 'react';
 import {ArrowLeftIcon, ArrowUturnLeftIcon, CheckIcon, ChevronDoubleUpIcon, ChevronRightIcon, PhotoIcon, UserIcon, XMarkIcon} from '@heroicons/react/24/outline';
@@ -36,7 +37,7 @@ type State =
 
 /** An image shown from its thumbnail at once, then from the original when that decodes. */
 function ReviewImage({asset, className, label}: {asset: Asset; className?: string; label: string}) {
-  const [privacy] = usePrivacyMode();
+  const privacy = useTabletAssetMask(asset);
   const [src, setSrc] = useState<{id: string; url?: string}>({id: asset.id, url: asset.preview});
   const shown = src.id === asset.id ? src.url : asset.preview;
   useEffect(() => {

@@ -21,7 +21,7 @@ function readSort(): ArtistSort {
 }
 
 function ArtistGridCard({artist,privateMode,paused,onOpen}:{artist:LibraryArtist;privateMode:boolean;paused:boolean;onOpen():void}) {
-  const assets = assetsFromIds(artist.coverAssetIds).slice(0,3);
+  const assets = assetsFromIds(artist.coverAssetIds,artist.coverContentRatings).slice(0,3);
   const name = artistName(artist);
   return <button type="button" className="artist-grid-card" onClick={onOpen} aria-label={`${name}, ${artist.assetCount.toLocaleString('ko-KR')}장${artist.pinned ? ', 고정됨' : ''}`}>
     <span className="artist-grid-mosaic">

@@ -1,3 +1,5 @@
+import { useAssetMasks } from "../privacy/PrivacyContext";
+import { AssetImage } from "../privacy/AssetImage";
 import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
 import { ArrowTopRightOnSquareIcon, CheckIcon, ChevronRightIcon, ClipboardDocumentIcon, PencilSquareIcon } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -43,7 +45,7 @@ export function AssetInfoPanel({
   onAssetUpdated = () => undefined,
   onAutoTagFilterApplied,
   onOpenArtist,
-  privacyMode = false,
+  privacyMode: requestedPrivacy = false,
 }: Props) {
   const { gateway } = useLibrary();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -64,6 +66,8 @@ export function AssetInfoPanel({
   useAutoDismiss(copyError, setCopyError);
   const assetIds = assets.map((item) => item.id).join(",");
   const asset = assets.length === 1 ? assets[0] : null;
+  const masked = useAssetMasks();
+  const privacyMode = masked(asset, requestedPrivacy);
   const autoTags = useAssetAutoTags(gateway.autoTags, asset?.id ?? null, onAutoTagFilterApplied);
 
   useEffect(() => {
@@ -191,7 +195,7 @@ export function AssetInfoPanel({
     </div>}
     {sourceGroup.length > 1 && <section className="asset-inspector__section asset-inspector__source-group" data-info-section="same-post" aria-label="같은 게시물">
       <SectionLabel as="h3" title="같은 게시물" count={sourceGroup.length} />
-      <div className="asset-inspector__source-group-strip">{sourceGroup.map((sibling) => <button key={sibling.id} type="button" className="asset-inspector__source-group-item" aria-label={`${sibling.title || sibling.originalName} 같은 게시물에서 열기`} aria-current={sibling.id === asset.id ? "true" : undefined} onClick={() => onOpenAsset?.(sibling)}>{!privacyMode && <img src={assetThumbnailUrl(sibling)} alt="" loading="lazy" decoding="async" draggable={false} />}</button>)}</div>
+      <div className="asset-inspector__source-group-strip">{sourceGroup.map((sibling) => <button key={sibling.id} type="button" className="asset-inspector__source-group-item" aria-label={`${sibling.title || sibling.originalName} 같은 게시물에서 열기`} aria-current={sibling.id === asset.id ? "true" : undefined} onClick={() => onOpenAsset?.(sibling)}>{!masked(sibling, requestedPrivacy) && <img src={assetThumbnailUrl(sibling)} alt="" loading="lazy" decoding="async" draggable={false} />}</button>)}</div>
     </section>}
     <section className="asset-inspector__section" data-info-section="tags"><AutoTagHighlights state={autoTags.state} /><AutoTagList state={autoTags.state} /></section>
     {currentCollection && <CollectionInfo collection={currentCollection} />}
@@ -211,7 +215,7 @@ function CollectionInfo({ collection }: { collection: CollectionSummary }) {
 
 function AssetStyleSuggestionBox({ suggestion, privacyMode, pending, error, onOpen, onAssign, onDismiss }: { suggestion: ArtistStyleSuggestion; privacyMode: boolean; pending: boolean; error: string | null; onOpen: (assetId: string) => void; onAssign: () => void; onDismiss: () => void }) {
   const stripWheel = useHorizontalWheel();
-  return <section className="asset-inspector__style-suggestion" data-info-section="similar-artist" aria-label="닮은 작가"><div className="asset-inspector__style-heading"><span className="asset-inspector__style-avatar">{!privacyMode && suggestion.artist.coverAssetIds[0] && <img src={thumbnailUrl(suggestion.artist.coverAssetIds[0])} alt="" loading="lazy" decoding="async" draggable={false} />}</span><span className="asset-inspector__style-copy"><span className="asset-inspector__style-kicker">닮은 작가 · 유사도 {suggestion.score.toFixed(2)}</span><strong className="artist-name">{suggestion.artist.label}</strong></span></div><p className="asset-inspector__style-reference-label">이 작가의 가장 비슷한 그림</p><div ref={stripWheel} className="asset-inspector__style-references">{suggestion.referenceAssetIds.slice(0, 3).map((id, index) => <button key={id} type="button" aria-label={`${suggestion.artist.label} 참고 이미지 ${index + 1} 열기`} onClick={() => onOpen(id)}>{!privacyMode && <img src={thumbnailUrl(id)} alt="" loading="lazy" decoding="async" draggable={false} />}</button>)}</div><div className="asset-inspector__style-actions"><Button size="sm" variant="primary" disabled={pending} onClick={onAssign}>{suggestion.artist.label}로 지정</Button><Button size="sm" disabled={pending} onClick={onDismiss}>아님</Button></div>{suggestion.runnerUp && <p className="asset-inspector__style-runner">다음 후보: {suggestion.runnerUp.artist.label} {suggestion.runnerUp.score.toFixed(2)}</p>}{error && <p className="asset-inspector__save-error" role="alert">{error}</p>}</section>;
+  return <section className="asset-inspector__style-suggestion" data-info-section="similar-artist" aria-label="닮은 작가"><div className="asset-inspector__style-heading"><span className="asset-inspector__style-avatar">{!privacyMode && suggestion.artist.coverAssetIds[0] && <AssetImage src={thumbnailUrl(suggestion.artist.coverAssetIds[0])} alt="" loading="lazy" decoding="async" draggable={false} />}</span><span className="asset-inspector__style-copy"><span className="asset-inspector__style-kicker">닮은 작가 · 유사도 {suggestion.score.toFixed(2)}</span><strong className="artist-name">{suggestion.artist.label}</strong></span></div><p className="asset-inspector__style-reference-label">이 작가의 가장 비슷한 그림</p><div ref={stripWheel} className="asset-inspector__style-references">{suggestion.referenceAssetIds.slice(0, 3).map((id, index) => <button key={id} type="button" aria-label={`${suggestion.artist.label} 참고 이미지 ${index + 1} 열기`} onClick={() => onOpen(id)}>{!privacyMode && <AssetImage src={thumbnailUrl(id)} alt="" loading="lazy" decoding="async" draggable={false} />}</button>)}</div><div className="asset-inspector__style-actions"><Button size="sm" variant="primary" disabled={pending} onClick={onAssign}>{suggestion.artist.label}로 지정</Button><Button size="sm" disabled={pending} onClick={onDismiss}>아님</Button></div>{suggestion.runnerUp && <p className="asset-inspector__style-runner">다음 후보: {suggestion.runnerUp.artist.label} {suggestion.runnerUp.score.toFixed(2)}</p>}{error && <p className="asset-inspector__save-error" role="alert">{error}</p>}</section>;
 }
 
 function nullable(value: string): string | null { return value.trim() || null; }

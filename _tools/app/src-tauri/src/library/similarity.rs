@@ -1,3 +1,4 @@
+use super::auto_tags::CONTENT_RATING_SQL;
 use std::{
     collections::HashMap,
     fs::File,
@@ -698,15 +699,14 @@ pub(super) fn load_asset_summaries(
     if asset_ids.is_empty() {
         return Ok(HashMap::new());
     }
-    let mut sql = String::from(
+    let mut sql = format!(
         "SELECT asset.id, asset.title, asset.original_name, asset.relative_path,
                 asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height,
                 asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url, asset.media_kind,
                 video.duration_ms, video.preparation_state, video.scrub_frame_count,
                 asset.source_published_at, asset.creator_name, asset.creator_handle,
                 asset.creator_url, asset.import_source, asset.import_batch_id,
-                asset.original_modified_at
-         FROM assets AS asset
+                asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset
          LEFT JOIN video_assets AS video ON video.asset_id = asset.id
          WHERE asset.id IN (",
     );
@@ -838,16 +838,15 @@ fn load_asset_summary(
 ) -> Result<AssetSummary, LibraryError> {
     connection
         .query_row(
-            "SELECT asset.id, asset.title, asset.original_name, asset.relative_path,
+            &format!("SELECT asset.id, asset.title, asset.original_name, asset.relative_path,
                     asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height,
                     asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url, asset.media_kind,
                     video.duration_ms, video.preparation_state, video.scrub_frame_count,
                     asset.source_published_at, asset.creator_name, asset.creator_handle,
                     asset.creator_url, asset.import_source, asset.import_batch_id,
-                    asset.original_modified_at
-             FROM assets AS asset
+                    asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset
              LEFT JOIN video_assets AS video ON video.asset_id = asset.id
-             WHERE asset.id = ?1 AND asset.status = ?2",
+             WHERE asset.id = ?1 AND asset.status = ?2"),
             params![asset_id, expected_status],
             asset_summary_from_row,
         )

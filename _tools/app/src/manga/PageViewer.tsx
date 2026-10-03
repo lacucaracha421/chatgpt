@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Reac
 import { BookmarkIcon, BookOpenIcon, ChevronLeftIcon, ChevronRightIcon, Cog6ToothIcon, Squares2X2Icon, XMarkIcon } from "@heroicons/react/24/outline";
 import { BookmarkIcon as BookmarkSolidIcon } from "@heroicons/react/24/solid";
 import { VIEWER_CHROME_IDLE_MS } from "../assets/AssetViewer";
-import { usePrivacy } from "../privacy/PrivacyContext";
+import { useCatalogMasked } from "../privacy/catalogMask";
 import { loadUiPreferences, saveUiPreferences } from "../preferences/uiPreferences";
 import type { MangaViewerGap, MangaViewerMargin } from "../preferences/uiPreferences";
 import { Button } from "../shared/ui/Button";
@@ -44,13 +44,13 @@ const GAP_LABEL: Record<MangaViewerGap, string> = { none: "없음", narrow: "좁
 
 /** The one immersive manga reader for local and online works. */
 export function PageViewer(props: PageViewerProps) {
-  const { privacyMode } = usePrivacy();
+  const privacyMode = useCatalogMasked();
   useEffect(() => { if (privacyMode) props.onClose(); }, [privacyMode, props.onClose]);
   return privacyMode ? <Skeleton className="privacy-mask manga-reader__mask" label="비공개 모드" /> : <PageViewerContent {...props}/>;
 }
 
 function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, bookmark, onPageChange, onClose, actions, onRetryPage }: PageViewerProps) {
-  const { privacyMode } = usePrivacy();
+  const privacyMode = useCatalogMasked();
   const pageCount = pageUrls.length;
   const [page, setPage] = useState(() => Math.max(1, Math.min(pageCount, initialPage)));
   const [retryingPages, setRetryingPages] = useState<Set<number>>(() => new Set());

@@ -106,7 +106,7 @@ fn small_folder_uses_membership_and_asset_id_indexes() {
         limit: 100,
         ..Default::default()
     };
-    let sql = scoped_asset_sql(&connection, CHRONO_DESC_HALF_SQL, &query, 1, 9).unwrap();
+    let sql = scoped_asset_sql(&connection, CHRONO_DESC_HALF_SQL.as_str(), &query, 1, 9).unwrap();
     let mut statement = connection
         .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
         .unwrap();
@@ -162,7 +162,7 @@ fn broad_folder_keeps_ordered_scan() {
         ..Default::default()
     };
     assert!(matches!(
-        scoped_asset_sql(&connection, CHRONO_DESC_HALF_SQL, &query, 1, 9).unwrap(),
+        scoped_asset_sql(&connection, CHRONO_DESC_HALF_SQL.as_str(), &query, 1, 9).unwrap(),
         std::borrow::Cow::Borrowed(_)
     ));
 }

@@ -6,7 +6,7 @@ import {catalogImageTicket} from './catalogMedia';
 import {fitTransform} from './model';
 import type {CatalogReaderManifest,CatalogReaderPage} from './catalogModel';
 import './CatalogReader.css';
-import {usePrivacyMode} from './privacyMode';
+import {useTabletCatalogMasked} from './catalogMask';
 
 type Transform={scale:number;x:number;y:number};
 /** Share of the stage width on each side whose tap turns the page. */
@@ -31,7 +31,7 @@ function ReaderPage({workId,manifestRevision,page,transform,onRefresh,onFailure,
 }
 
 export function CatalogReader(props: Parameters<typeof CatalogReaderContent>[0]) {
-  const [privacy] = usePrivacyMode();
+  const privacy = useTabletCatalogMasked();
   useEffect(() => { if (privacy) props.onClose(); }, [privacy, props.onClose]);
   return privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : <CatalogReaderContent {...props}/>;
 }

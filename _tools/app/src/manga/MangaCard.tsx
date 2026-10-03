@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useCatalogMasked } from "../privacy/catalogMask";
 import { BookmarkIcon } from "../shared/ui/ArchiveIcons";
 import { Badge } from "../shared/ui/Badge";
 import { Skeleton } from "../shared/ui/Skeleton";
@@ -42,7 +43,8 @@ export function MangaCard({ title, displayTitle = title, artist, pageCount, cove
 export function MangaCover({ src, title, privacyMode, className = "" }: { src: string | null; title: string; privacyMode?: boolean; className?: string }) {
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  if (privacyMode) return <Skeleton className={`${className} privacy-mask`} label="비공개 모드" />;
+  const masked = useCatalogMasked(privacyMode);
+  if (masked) return <Skeleton className={`${className} privacy-mask`} label="비공개 모드" />;
   return <span className={`${className} manga-cover`} aria-busy={Boolean(src && src !== loadedSrc && src !== failedSrc)}>
     {src && src !== failedSrc && <StableImage src={src} alt={`${title} 표지`} referrerPolicy="no-referrer" draggable={false}
       loading="lazy" className="manga-cover__image" style={loadedSrc ? undefined : { visibility: "hidden" }}

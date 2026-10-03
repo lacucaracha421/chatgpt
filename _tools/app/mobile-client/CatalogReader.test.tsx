@@ -120,3 +120,24 @@ it('runs the page scrubber right to left like the book',async()=>{
   const slider=await open();
   expect(slider.getAttribute('dir')).toBe('rtl');
 });
+
+it('blocks reader pages under only the NSFW filter without tickets or sources',()=>{
+  localStorage.setItem('lakomics.mobile.nsfwFilter','1');const close=vi.fn();
+  const view=render(<CatalogReader manifest={manifest} title="만화" onClose={close} onRefresh={()=>{}} refreshing={false}/>);
+  expect(mocks.ticket).not.toHaveBeenCalled();
+  expect(view.container.querySelector('img')).toBeNull();
+  expect(view.container.querySelector('[src]')).toBeNull();
+  expect(view.container.querySelector('.privacy-mask')).toBeTruthy();
+  expect(close).toHaveBeenCalledOnce();
+});
+it('closes the reader and cancels page work when only the NSFW filter turns on',async()=>{
+  const close=vi.fn();render(<CatalogReader manifest={manifest} title="만화" onClose={close} onRefresh={()=>{}} refreshing={false}/>);
+  await screen.findByRole('img',{name:'1페이지'});
+  const signals=mocks.ticket.mock.calls.map(([,signal])=>signal as AbortSignal);
+  const calls=mocks.ticket.mock.calls.length;
+  act(()=>{localStorage.setItem('lakomics.mobile.nsfwFilter','1');window.dispatchEvent(new Event('lakomics-privacy-mode'));});
+  expect(signals.every(signal=>signal.aborted)).toBe(true);
+  expect(document.querySelector('img')).toBeNull();
+  expect(mocks.ticket).toHaveBeenCalledTimes(calls);
+  expect(close).toHaveBeenCalledOnce();
+});

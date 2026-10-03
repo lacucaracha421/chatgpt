@@ -1,3 +1,4 @@
+import { AssetImage } from "../privacy/AssetImage";
 import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { assetThumbnailUrl } from "../assets/mediaUrl";
@@ -82,7 +83,7 @@ function AlbumCard({ album, subAlbumCount, covers, privacyMode, onVisible, onNav
     <button ref={cardRef} type="button" className="album-overview__card" aria-label={`${album.name} ${count.toLocaleString("ko-KR")}장`} onClick={() => onNavigate({ kind: "album", albumId: album.id })}>
       <span className={`album-overview__mosaic album-overview__mosaic--${mosaicKind}`} aria-hidden="true">
         {mosaicAssets.map((asset, index) => <span className="album-overview__mosaic-cell" key={asset?.id ?? `empty-${index}`}>
-          {asset && !privacyMode && <img src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" draggable={false} />}
+          {asset && !privacyMode && <AssetImage asset={asset} src={assetThumbnailUrl(asset)} alt="" loading="lazy" decoding="async" draggable={false} />}
         </span>)}
       </span>
       <span className="album-overview__caption">

@@ -1,3 +1,4 @@
+use super::auto_tags::CONTENT_RATING_SQL;
 use rusqlite::params;
 
 #[cfg(test)]
@@ -64,7 +65,7 @@ fn aspect_filter_value(filter: Option<AspectRatioFilter>) -> Option<&'static str
 /// and upward (before-cursor) pagination in a newest-first listing.
 /// `?1..?5` scope, `?6`/`?7` exclusive cursor tuple, `?8` inclusive date bound,
 /// `?9` collection scope, `?10` limit + 1.
-const CHRONO_ASC_HALF_SQL: &str = "WITH RECURSIVE descendants(id) AS (
+static CHRONO_ASC_HALF_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
 ) , album_descendants(id) AS (
@@ -73,8 +74,7 @@ const CHRONO_ASC_HALF_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 ) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url,
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
 asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
-asset.import_source, asset.import_batch_id, asset.original_modified_at
-FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
+asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
 AND (?13 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?13, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?13))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
@@ -96,11 +96,11 @@ AND (
   OR (?12 = 'landscape' AND asset.width * 4 > asset.height * 5)
   OR (?12 = 'portrait' AND asset.width * 5 < asset.height * 4)
 )
-ORDER BY asset.collected_at ASC, asset.id ASC LIMIT ?10";
+ORDER BY asset.collected_at ASC, asset.id ASC LIMIT ?10".replace("{CONTENT_RATING_SQL}", CONTENT_RATING_SQL));
 
 /// The descending mirror of CHRONO_ASC_HALF_SQL: newest-first pages,
 /// anchor tails/heads, and upward pagination in an oldest-first listing.
-const CHRONO_DESC_HALF_SQL: &str = "WITH RECURSIVE descendants(id) AS (
+static CHRONO_DESC_HALF_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
 ) , album_descendants(id) AS (
@@ -109,8 +109,7 @@ const CHRONO_DESC_HALF_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 ) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url,
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
 asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
-asset.import_source, asset.import_batch_id, asset.original_modified_at
-FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
+asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
 AND (?13 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?13, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?13))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
@@ -132,7 +131,7 @@ AND (
   OR (?12 = 'landscape' AND asset.width * 4 > asset.height * 5)
   OR (?12 = 'portrait' AND asset.width * 5 < asset.height * 4)
 )
-ORDER BY asset.collected_at DESC, asset.id DESC LIMIT ?10";
+ORDER BY asset.collected_at DESC, asset.id DESC LIMIT ?10".replace("{CONTENT_RATING_SQL}", CONTENT_RATING_SQL));
 
 /// Filter-only asset count shared by every `list_assets` path (all sorts,
 /// both paging directions, anchored windows). It mirrors the scope/filter
@@ -302,9 +301,9 @@ impl Library {
         if asset_ids.len() > 500 { return Err(LibraryError::InvalidAssetPageLimit); }
         let (start, end) = collected_range_bounds(&query)?;
         let connection = self.connection()?;
-        let select = "SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url, asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, asset.import_source, asset.import_batch_id, asset.original_modified_at FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id";
+        let select = "SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url, asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id";
         let sql = with_auto_tag_filter(ASSET_COUNT_SQL.into(), &query)?
-            .replace("SELECT COUNT(*) FROM assets AS asset", select)
+            .replace("SELECT COUNT(*) FROM assets AS asset", &select.replace("{CONTENT_RATING_SQL}", CONTENT_RATING_SQL))
             + " AND asset.id IN (SELECT value FROM json_each(?12))";
         let mut statement = connection.prepare(&sql)?;
         let rows = statement.query_map(params![query.classification_id, query.album_id,
@@ -386,10 +385,10 @@ impl Library {
         let aspect_ratio = aspect_filter_value(query.aspect_ratio);
         let random_pivot = query.random_pivot.as_deref().unwrap_or("");
         let sql = match query.sort {
-            AssetSort::Newest => CHRONO_DESC_HALF_SQL,
-            AssetSort::Oldest => CHRONO_ASC_HALF_SQL,
-            AssetSort::Favorites => FAVORITES_SQL,
-            AssetSort::Random => RANDOM_SQL,
+            AssetSort::Newest => CHRONO_DESC_HALF_SQL.as_str(),
+            AssetSort::Oldest => CHRONO_ASC_HALF_SQL.as_str(),
+            AssetSort::Favorites => FAVORITES_SQL.as_str(),
+            AssetSort::Random => RANDOM_SQL.as_str(),
         };
         let collection_parameter = match query.sort {
             AssetSort::Favorites => 10,
@@ -518,8 +517,8 @@ impl Library {
         // boundary, then reversed into display order). Tail half: the page
         // starting at the boundary in display order.
         let (head_sql, tail_sql) = match query.sort {
-            AssetSort::Oldest => (CHRONO_DESC_HALF_SQL, CHRONO_ASC_HALF_SQL),
-            _ => (CHRONO_ASC_HALF_SQL, CHRONO_DESC_HALF_SQL),
+            AssetSort::Oldest => (CHRONO_DESC_HALF_SQL.as_str(), CHRONO_ASC_HALF_SQL.as_str()),
+            _ => (CHRONO_ASC_HALF_SQL.as_str(), CHRONO_DESC_HALF_SQL.as_str()),
         };
         let mut head =
             run_chronological_page(connection, head_sql, query, None, Some(&bound), fetch)?;
@@ -566,8 +565,8 @@ impl Library {
         };
         let limit_plus = i64::from(query.limit) + 1;
         let sql = match query.sort {
-            AssetSort::Oldest => CHRONO_DESC_HALF_SQL,
-            _ => CHRONO_ASC_HALF_SQL,
+            AssetSort::Oldest => CHRONO_DESC_HALF_SQL.as_str(),
+            _ => CHRONO_ASC_HALF_SQL.as_str(),
         };
         let mut rows = run_chronological_page(
             connection,
@@ -849,6 +848,7 @@ pub(crate) fn asset_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Resul
         _ => return Err(rusqlite::Error::InvalidQuery),
     };
     Ok(AssetSummary {
+        content_rating: row.get("content_rating")?,
         id: row.get(0)?,
         title: row.get(1)?,
         original_name: row.get(2)?,
@@ -882,7 +882,7 @@ pub(crate) fn asset_summaries_by_ids(
         return Ok(Vec::new());
     }
     let placeholders = std::iter::repeat_n("?", asset_ids.len()).collect::<Vec<_>>().join(",");
-    let sql = format!("SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url, asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, asset.import_source, asset.import_batch_id, asset.original_modified_at FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id=asset.id WHERE asset.status='normal' AND asset.id IN ({placeholders})");
+    let sql = format!("SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url, asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count, asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url, asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id=asset.id WHERE asset.status='normal' AND asset.id IN ({placeholders})");
     let mut statement = connection.prepare(&sql)?;
     let rows = statement
         .query_map(rusqlite::params_from_iter(asset_ids.iter()), asset_summary_from_row)?
@@ -937,7 +937,7 @@ fn encode_cursor(sort: AssetSort, asset: &AssetRow, random_pivot: &str) -> Asset
     }
 }
 
-const FAVORITES_SQL: &str = "WITH RECURSIVE descendants(id) AS (
+static FAVORITES_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
 ) , album_descendants(id) AS (
@@ -946,8 +946,7 @@ const FAVORITES_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 ) SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id), asset.source_url,
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
 asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
-asset.import_source, asset.import_batch_id, asset.original_modified_at
-FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
+asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
 AND (?13 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?13, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?13))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
@@ -968,9 +967,9 @@ AND (
   OR (?12 = 'landscape' AND asset.width * 4 > asset.height * 5)
   OR (?12 = 'portrait' AND asset.width * 5 < asset.height * 4)
 )
-ORDER BY EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) DESC, asset.collected_at DESC, asset.id DESC LIMIT ?9";
+ORDER BY EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) DESC, asset.collected_at DESC, asset.id DESC LIMIT ?9".replace("{CONTENT_RATING_SQL}", CONTENT_RATING_SQL));
 
-const RANDOM_SQL: &str = "WITH RECURSIVE descendants(id) AS (
+static RANDOM_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL
     UNION ALL SELECT entry.id FROM classification_entries AS entry JOIN descendants ON entry.parent_id = descendants.id
 ) , album_descendants(id) AS (
@@ -980,8 +979,7 @@ const RANDOM_SQL: &str = "WITH RECURSIVE descendants(id) AS (
 asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
 asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
 asset.import_source, asset.import_batch_id, asset.original_modified_at,
-asset.content_hash, CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END
-FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
+asset.content_hash, CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
 WHERE asset.status = 'normal' AND (?3 = 0 OR EXISTS(SELECT 1 FROM asset_likes WHERE asset_id = asset.id) = 1)
 AND (?14 IS NULL OR EXISTS (SELECT 1 FROM asset_artist_scope AS artist_scope WHERE artist_scope.asset_id = asset.id AND artist_scope.scope_ref IN (?14, (SELECT 'artist:' || artist_member.artist_id FROM artist_members AS artist_member WHERE artist_member.creator_key = ?14))))
 AND (?1 IS NULL OR EXISTS (SELECT 1 FROM asset_classifications AS link WHERE link.asset_id = asset.id AND ((?2 AND link.classification_id = ?1) OR (NOT ?2 AND link.classification_id IN (SELECT id FROM descendants)))))
@@ -1002,7 +1000,7 @@ AND (
   OR (?13 = 'landscape' AND asset.width * 4 > asset.height * 5)
   OR (?13 = 'portrait' AND asset.width * 5 < asset.height * 4)
 )
-ORDER BY CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END ASC, asset.content_hash ASC, asset.id ASC LIMIT ?10";
+ORDER BY CASE WHEN asset.content_hash >= ?6 THEN 0 ELSE 1 END ASC, asset.content_hash ASC, asset.id ASC LIMIT ?10".replace("{CONTENT_RATING_SQL}", CONTENT_RATING_SQL));
 
 const CREATORS_SQL: &str = "WITH RECURSIVE descendants(id) AS (
     SELECT ?1 WHERE ?1 IS NOT NULL

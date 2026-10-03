@@ -1,13 +1,13 @@
+import {useTabletAssetMask} from './assetMask';
 import {useEffect,useRef,useState} from 'react';
 import {PhotoIcon,PlayIcon} from '@heroicons/react/24/outline';
 import {StableImage} from '../src/shared/ui/StableImage';
 import {loadThumbnail} from './media';
 import type {Asset} from './types';
-import {usePrivacyMode} from './privacyMode';
 /** A cover whose thumbnail did not load tries again after these delays, then waits for `paused` or the asset to change. */
 const COVER_RETRY_MS=[1000,3000,10_000];
 export function Cover({asset, paused}: {asset:Asset; paused:boolean}) {
-  const [privacy] = usePrivacyMode();
+  const privacy = useTabletAssetMask(asset);
   const source = JSON.stringify([asset.id,asset.kind,asset.preview,asset.thumbnail_available,asset.pending]);
   const [loaded,setLoaded] = useState<{source:string;preview?:string}|null>(null);
   const [attempt,setAttempt] = useState(0);

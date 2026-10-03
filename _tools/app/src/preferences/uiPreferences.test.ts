@@ -45,7 +45,7 @@ describe("UI preferences", () => {
     const value = {
       galleryLayout: "masonry" as const,
       metadataVisible: false,
-      privacyMode: false,
+      privacyMode: false, nsfwFilter: false,
       appZoom: 100,
       sidebarWidth: 240,
       expandedClassificationIds: ["a"],
@@ -91,7 +91,7 @@ describe("UI preferences", () => {
     expect(loadUiPreferences(localStorage)).toEqual({
       galleryLayout: "masonry" as const,
       metadataVisible: false,
-      privacyMode: false,
+      privacyMode: false, nsfwFilter: false,
       appZoom: 100,
       sidebarWidth: 240,
       expandedClassificationIds: ["a"],
@@ -126,7 +126,7 @@ describe("UI preferences", () => {
     expect(loadUiPreferences(localStorage)).toEqual({
       galleryLayout: "masonry" as const,
       metadataVisible: false,
-      privacyMode: false,
+      privacyMode: false, nsfwFilter: false,
       appZoom: 100,
       sidebarWidth: 320,
       expandedClassificationIds: ["a"],
@@ -222,4 +222,12 @@ describe("UI preferences", () => {
       mangaViewerGap: "narrow",
     });
   });
+});
+
+it('persists the independent NSFW preference and defaults missing legacy values to off',()=>{
+ localStorage.clear();expect(loadUiPreferences().nsfwFilter).toBe(false);
+ saveUiPreferences({...DEFAULT_UI_PREFERENCES,privacyMode:true,nsfwFilter:true});
+ expect(loadUiPreferences()).toMatchObject({privacyMode:true,nsfwFilter:true});
+ saveUiPreferences({...loadUiPreferences(),privacyMode:false});
+ expect(loadUiPreferences()).toMatchObject({privacyMode:false,nsfwFilter:true});
 });

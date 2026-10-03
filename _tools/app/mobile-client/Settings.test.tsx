@@ -98,3 +98,11 @@ it('opens the USB private vault even without a cloud connection',async()=>{
   expect(openVault).toHaveBeenCalledOnce();
   await screen.findByText('2.0 MB / 1 GB · 12개');
 });
+
+it('persists the independent tablet NSFW switch without changing privacy',()=>{
+ localStorage.clear();
+ render(<Settings status={{configured:false,endpoint:''}} onStatus={vi.fn()} onClose={vi.fn()} onCacheCleared={vi.fn()}/>);
+ fireEvent.click(screen.getByRole('switch',{name:'NSFW 필터'}));
+ expect(localStorage.getItem('lakomics.mobile.nsfwFilter')).toBe('1');
+ expect(localStorage.getItem('lakomics.mobile.privacyMode')).not.toBe('1');
+});

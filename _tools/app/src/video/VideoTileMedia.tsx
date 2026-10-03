@@ -1,3 +1,4 @@
+import {useAssetMask} from "../privacy/PrivacyContext";
 import { formatDuration } from "./formatDuration";
 import { useEffect, useRef, useState } from "react";
 import { ClockIcon } from "@heroicons/react/24/outline";
@@ -11,7 +12,8 @@ import { Skeleton } from "../shared/ui/Skeleton";
 type VideoAsset = AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> };
 type Props = { asset: VideoAsset; active: boolean; onRequestActive(): void; onReleaseActive(): void; onRetry(): void; privacyMode?: boolean; thumbnailSrc?: string; playbackSrc?: string; compactBadge?: boolean; durationVisible?: boolean };
 
-export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive, onRetry, privacyMode = false, thumbnailSrc, playbackSrc, compactBadge = false, durationVisible = true }: Props) {
+export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive, onRetry, privacyMode:requestedPrivacy = false, thumbnailSrc, playbackSrc, compactBadge = false, durationVisible = true }: Props) {
+  const privacyMode=useAssetMask(asset,requestedPrivacy);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hoverTimer = useRef<number | null>(null);
   const seekTimer = useRef<number | null>(null);

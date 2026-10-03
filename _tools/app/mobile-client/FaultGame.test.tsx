@@ -144,3 +144,9 @@ describe('FAULT entry',()=>{
     expect(screen.getByRole('dialog',{name:'보기 옵션'})).toBeTruthy();expect(screen.queryByRole('button',{name:'FAULT로 플레이'})).toBeNull();
   });
 });
+
+it('does not load FAULT asset originals under the NSFW filter',async()=>{
+  localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+  expect(await loadFaultPhotos([image('unknown')])).toEqual([]);
+  expect(mocks.mediaTicket).not.toHaveBeenCalled();
+});

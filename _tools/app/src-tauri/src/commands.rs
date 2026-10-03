@@ -1882,13 +1882,14 @@ pub fn retry_video_preparation(
 #[cfg(target_os = "linux")]
 #[tauri::command]
 pub async fn start_asset_drag(
-    asset_ids: Vec<String>, window: tauri::Window, state: State<'_, AppState>,
+    asset_ids: Vec<String>, privacy_mode: Option<bool>, nsfw_filter: Option<bool>, window: tauri::Window, state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     let library = current_required(state)?;
     let prepare_ids = asset_ids.clone();
+    let mask_preview = privacy_mode.unwrap_or(false) || (nsfw_filter.unwrap_or(false) && prepare_ids.first().is_none_or(|id|library.get_asset(id).ok().and_then(|asset|asset.content_rating).as_deref()!=Some("g")));
     #[cfg(debug_assertions)]
     eprintln!("asset drag: preparing {} images", prepare_ids.len());
-    let prepared = tauri::async_runtime::spawn_blocking(move || library.prepare_asset_drag(&prepare_ids))
+    let prepared = tauri::async_runtime::spawn_blocking(move || library.prepare_asset_drag_masked(&prepare_ids,mask_preview))
         .await.map_err(|_| background_task_error())?.map_err(CommandError::from)?;
     let (sender, mut receiver) = tauri::async_runtime::channel(1);
     let drag_window = window.clone();
@@ -1902,12 +1903,14 @@ pub async fn start_asset_drag(
 #[tauri::command]
 pub fn start_asset_drag(
     asset_ids: Vec<String>,
+    privacy_mode: Option<bool>,
+    nsfw_filter: Option<bool>,
     window: tauri::Window,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     #[cfg(not(any(windows, target_os = "linux")))]
     {
-        let _ = (asset_ids, window, state);
+        let _ = (asset_ids, privacy_mode, nsfw_filter, window, state);
         Err(CommandError {
             code: "unsupported_platform",
             message: "Desktop drag-out is not supported on this platform.".into(),
@@ -1915,8 +1918,10 @@ pub fn start_asset_drag(
     }
     #[cfg(windows)]
     {
-        let prepared = current_required(state)?
-            .prepare_asset_drag(&asset_ids)
+        let library=current_required(state)?;
+        let mask_preview=privacy_mode.unwrap_or(false)||(nsfw_filter.unwrap_or(false)&&asset_ids.first().is_none_or(|id|library.get_asset(id).ok().and_then(|asset|asset.content_rating).as_deref()!=Some("g")));
+        let prepared = library
+            .prepare_asset_drag_masked(&asset_ids,mask_preview)
             .map_err(CommandError::from)?;
         let files = prepared.files.clone();
         let preview = prepared.preview.clone();

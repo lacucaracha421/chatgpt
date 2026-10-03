@@ -774,3 +774,13 @@ it.each(["masonry", "justified"] as const)("keeps the top asset and its image mo
   expect(Number.parseFloat(anchor.style.top) - scroller.scrollTop).toBeCloseTo(offset);
   expect(anchor.querySelector("img")).toBe(image);
 });
+
+it.each([false,true])('NSFW filters each tile without media requests; privacy=%s',async privacy=>{
+  const {PrivacyProvider}=await import('../privacy/PrivacyContext');
+  const items=[{...asset(0),contentRating:'g' as const},{...asset(1),contentRating:'s' as const},{...asset(2),contentRating:'q' as const},{...asset(3),contentRating:'e' as const},asset(4),videoAsset(5)];
+  const {container}=render(<PrivacyProvider privacyMode={privacy} setPrivacyMode={vi.fn()} nsfwFilter><AssetGallery layout="masonry" items={items}/></PrivacyProvider>);
+  expect(container.querySelectorAll('[data-asset-id]')).toHaveLength(6);
+  expect(container.querySelectorAll('img[src]')).toHaveLength(privacy?0:1);
+  expect(container.querySelector('video[src]')).toBeNull();
+  expect(container.querySelectorAll('.privacy-mask')).toHaveLength(privacy?6:5);
+});

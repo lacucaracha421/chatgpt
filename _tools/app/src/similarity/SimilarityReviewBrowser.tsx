@@ -1,3 +1,4 @@
+import { AssetImage } from "../privacy/AssetImage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatBytes, localDate, sourceLabel } from "../assets/assetMetadata";
 import { assetUrl } from "../assets/mediaUrl";
@@ -214,7 +215,7 @@ function ReviewAssetPanel({ side, reviewAsset }: { side: string; reviewAsset: Si
   const { asset, format, classifications } = reviewAsset;
   return <section className="similarity-review__asset" aria-label={side}>
     <h3 className="similarity-review__side">{side}</h3>
-    <div className="similarity-review__preview">{privacyMode ? <Skeleton className="privacy-mask similarity-review__preview-mask" label="비공개 모드" /> : <img src={assetUrl(asset.id)} alt={side} />}</div>
+    <div className="similarity-review__preview">{privacyMode ? <Skeleton className="privacy-mask similarity-review__preview-mask" label="비공개 모드" /> : <AssetImage asset={asset} src={assetUrl(asset.id)} alt={side} />}</div>
     <p className="similarity-review__filename">{asset.title || asset.originalName}</p>
     <dl>
       <div><dt>해상도</dt><dd>{asset.width} × {asset.height}</dd></div>

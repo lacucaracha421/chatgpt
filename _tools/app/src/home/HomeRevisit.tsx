@@ -1,3 +1,4 @@
+import { AssetImage } from "../privacy/AssetImage";
 import { useEffect, useState } from "react";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { HomePresence, HomeSection } from "./HomeAttention";
@@ -35,7 +36,7 @@ function RevisitMosaic({ assetIds, privacyMode, onOpenAsset }: {
 function AssetCell({ assetId, label, privacyMode, onOpenAsset, more = 0 }: {
   assetId: string; label: string; privacyMode: boolean; onOpenAsset?: (assetId: string) => void; more?: number;
 }) {
-  const image = !privacyMode && <img src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />;
+  const image = !privacyMode && <AssetImage src={thumbnailUrl(assetId)} alt="" loading="lazy" decoding="async" draggable={false} />;
   const content = <>{image}{more > 0 && <span className="home-revisit__more numeric">+{more}</span>}</>;
   return onOpenAsset
     ? <button type="button" className="home-revisit__cell" aria-label={`${label} 이미지 열기`} onClick={() => onOpenAsset(assetId)}>{content}</button>

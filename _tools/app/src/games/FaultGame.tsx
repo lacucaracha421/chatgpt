@@ -65,7 +65,8 @@ export async function loadFaultPhotos(items: readonly AssetSummary[], signal?: A
  * so closing the game returns to exactly the same view. Nothing is offered while privacy mode is on.
  */
 export function FaultGameProvider({ children }: { children: ReactNode }) {
-  const { privacyMode } = usePrivacy();
+  const { privacyMode:privacy, nsfwFilter } = usePrivacy();
+  const privacyMode=privacy||nsfwFilter;
   const [session, setSession] = useState<{ id: number; scope: FaultScope } | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const play = useCallback<Play>((scope) => {

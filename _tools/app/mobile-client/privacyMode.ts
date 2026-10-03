@@ -1,7 +1,7 @@
 import {useCallback, useSyncExternalStore} from 'react';
 
 export const PRIVACY_MODE_KEY = 'lakomics.mobile.privacyMode';
-const PRIVACY_MODE_EVENT = 'lakomics-privacy-mode';
+export const PRIVACY_MODE_EVENT = 'lakomics-privacy-mode';
 
 function readPrivacyMode(): boolean {
   try { return localStorage.getItem(PRIVACY_MODE_KEY) === '1'; } catch { return false; }
@@ -26,3 +26,17 @@ export function usePrivacyMode(): [boolean, (value: boolean) => void] {
 }
 
 export function privacyMode(): boolean { return readPrivacyMode(); }
+
+export const NSFW_FILTER_KEY = 'lakomics.mobile.nsfwFilter';
+function readNsfwFilter(): boolean {
+  try { return localStorage.getItem(NSFW_FILTER_KEY) === '1'; } catch { return false; }
+}
+export function useNsfwFilter(): [boolean, (value: boolean) => void] {
+  const enabled = useSyncExternalStore(subscribe, readNsfwFilter, () => false);
+  const setEnabled = useCallback((value: boolean) => {
+    try {localStorage.setItem(NSFW_FILTER_KEY,value?'1':'0');} catch { /* optional device preference */ }
+    window.dispatchEvent(new CustomEvent(PRIVACY_MODE_EVENT));
+  },[]);
+  return [enabled,setEnabled];
+}
+export function nsfwFilter(): boolean {return readNsfwFilter();}

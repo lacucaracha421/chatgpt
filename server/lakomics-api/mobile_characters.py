@@ -1,4 +1,5 @@
 """PC character projection with a bounded manual-exclusion correction channel."""
+import library_search
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -162,6 +163,9 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
 
     def visible_index(db, current):
         index = json.loads(current["index_json"])
+        ids = {node.get(key) for node in index["nodes"] for key in ("thumbnailAssetId", "heroAssetId") if node.get(key)}
+        index["contentRatings"] = {row["id"]: library_search.content_rating(row) for row in db.execute(
+            "SELECT id,content_rating FROM visible_assets WHERE id IN (SELECT value FROM json_each(?))", [json.dumps(sorted(ids))])}
         retired = {r[0] for r in db.execute("SELECT a.id FROM assets a WHERE NOT EXISTS (SELECT 1 FROM visible_assets v WHERE v.id=a.id)")}
         hidden = {(r[0], r[1]) for r in db.execute("SELECT node_id,asset_id FROM mobile_character_hidden_members")}
         if not retired and not hidden:
@@ -393,7 +397,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                 else:
                     sql, params = query.select(
                         f"a.payload, asset.width, asset.height, asset.duration_ms, asset.created_at, "
-                        f"asset.thumbnail_key, asset.thumbnail_revision, "
+                        f"asset.thumbnail_key, asset.thumbnail_revision, asset.content_rating, "
                         f"asset.collected_at, asset.id, {asset_list_query.SORT_AT} AS mobile_sort_at",
                         after=after, limit=limit + 1)
                     rows = db.execute(sql, params).fetchall()
@@ -405,6 +409,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
                     for row in rows:
                         item = json.loads(row["payload"])
                         item.update(asset_filters.technical_fields(row))
+                        item["contentRating"] = library_search.content_rating(row)
                         item["thumbnail_available"] = bool(row["thumbnail_key"])
                         if "thumbnail_revision" in item:
                             item["thumbnail_revision"] = library_thumbnails.revision(row)
@@ -421,7 +426,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             # hiding from another, and metadata repair is visible to the filter itself.
             rows = db.execute(f"""SELECT m.position, a.payload,
                                         asset.width, asset.height, asset.duration_ms,
-                                        asset.thumbnail_key, asset.thumbnail_revision
+                                        asset.thumbnail_key, asset.thumbnail_revision, asset.content_rating
                                   FROM mobile_character_members AS m
                                   JOIN mobile_character_assets AS a ON a.id = m.asset_id
                                   JOIN visible_assets AS asset ON asset.id = m.asset_id
@@ -450,6 +455,7 @@ def register_characters(app, get_db, require_auth, asset_item, asset_memberships
             for row in rows:
                 item = json.loads(row["payload"])
                 item.update(asset_filters.technical_fields(row))
+                item["contentRating"] = library_search.content_rating(row)
                 item["thumbnail_available"] = bool(row["thumbnail_key"])
                 if "thumbnail_revision" in item:
                     item["thumbnail_revision"] = library_thumbnails.revision(row)

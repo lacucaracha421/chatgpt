@@ -18,6 +18,7 @@ export type LibraryArtist = {
   hidden: boolean;
   main: boolean;
   coverAssetIds: string[];
+  coverContentRatings?: Record<string, import("../src/shared/privacy/contentMask").ContentRating | null>;
 };
 
 export type ArtistSort = 'recent' | 'count' | 'name';
@@ -48,8 +49,8 @@ export function assetFromId(id: string): Asset {
   return {id, kind: 'image', thumbnail_available: true};
 }
 
-export function assetsFromIds(ids: string[]): Asset[] {
-  return [...new Set(ids.filter(id => typeof id === 'string' && id.length > 0))].map(assetFromId);
+export function assetsFromIds(ids: string[], ratings?: LibraryArtist["coverContentRatings"]): Asset[] {
+  return [...new Set(ids.filter(id => typeof id === 'string' && id.length > 0))].map(id => ({...assetFromId(id),contentRating:ratings?.[id]??null}));
 }
 
 export function normalizeArtist(value: unknown): LibraryArtist | null {
@@ -70,6 +71,7 @@ export function normalizeArtist(value: unknown): LibraryArtist | null {
     pinned: row.pinned === true,
     hidden: row.hidden === true,
     main: row.main === true,
+    ...(row.coverContentRatings && typeof row.coverContentRatings === "object" ? {coverContentRatings:row.coverContentRatings} : {}),
     coverAssetIds: Array.isArray(row.coverAssetIds) ? row.coverAssetIds.filter((id): id is string => typeof id === 'string') : [],
   };
 }

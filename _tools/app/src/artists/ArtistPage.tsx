@@ -1,3 +1,4 @@
+import { AssetImage } from "../privacy/AssetImage";
 import { useEffect, useState, type ReactNode } from "react";
 import { AssetViewer } from "../assets/AssetViewer";
 import { thumbnailUrl } from "../assets/mediaUrl";
@@ -203,7 +204,7 @@ function ArtistStyleSuggestionRow({ group, privacyMode, onNavigate, onOpen }: { 
       {group.candidates.map((candidate) => <div className="artist-style-candidate" key={candidate.assetId}>
         <input type="checkbox" checked={selectedIds.includes(candidate.assetId)} aria-label={`${group.artist.label} ${candidate.score.toFixed(2)} 이미지 지정`} onChange={(event) => setSelected(candidate.assetId, event.target.checked)} />
         <button type="button" className="artist-style-candidate__open" aria-label={`${group.artist.label} ${candidate.score.toFixed(2)} 이미지 열기`} onClick={() => onOpen(candidateIds)(candidate.assetId)}>
-          <span className="artist-style-candidate__media">{!privacyMode && <img src={thumbnailUrl(candidate.assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}</span>
+          <span className="artist-style-candidate__media">{!privacyMode && <AssetImage src={thumbnailUrl(candidate.assetId)} alt="" loading="lazy" decoding="async" draggable={false} />}</span>
           <span className="artist-style-candidate__score">{candidate.score.toFixed(2)}</span>
         </button>
       </div>)}

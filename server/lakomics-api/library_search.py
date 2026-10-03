@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS library_tag_vocabulary(
  tag_id TEXT PRIMARY KEY, label TEXT NOT NULL, category TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS library_tag_assets(
  asset_id TEXT PRIMARY KEY, digest TEXT NOT NULL, creator_key TEXT);
+CREATE TABLE IF NOT EXISTS library_asset_ratings(
+ asset_id TEXT PRIMARY KEY, content_rating TEXT CHECK(content_rating IN ('g','s','q','e')));
 CREATE TABLE IF NOT EXISTS library_asset_tags(
  asset_id TEXT NOT NULL, tag_id TEXT NOT NULL,
  PRIMARY KEY(asset_id,tag_id));
@@ -143,11 +145,12 @@ class Tag(Strict):
 class Asset(Strict):
     assetId: AssetId
     creatorKey: text(1024) | None = None
+    contentRating: Literal["g", "s", "q", "e"] | None = None
     tags: list[text(200)] = Field(max_length=MAX_TAGS_PER_ASSET)
 
 
 class Upload(Strict):
-    version: Literal[1]
+    version: Literal[1, 2]
     vocabulary: list[Tag] = Field(default_factory=list, max_length=MAX_VOCABULARY)
     assets: list[Asset] = Field(default_factory=list, max_length=MAX_ASSETS)
 
@@ -177,13 +180,17 @@ def register(app, get_db, require_client, require_publisher):
                                "DO UPDATE SET label=excluded.label,category=excluded.category", [row.id, row.label, row.category])
                     changed = True
             for row in upload.assets:
-                digest = hashlib.sha256(conditional.encode([row.creatorKey, sorted(row.tags)])).hexdigest()
+                digest = hashlib.sha256(conditional.encode([row.creatorKey, sorted(row.tags), row.contentRating])).hexdigest()
                 old = db.execute("SELECT digest FROM library_tag_assets WHERE asset_id=?", [row.assetId]).fetchone()
-                if old is not None and old[0] == digest:
+                legacy_digest = (hashlib.sha256(conditional.encode([row.creatorKey, sorted(row.tags)])).hexdigest()
+                                 if upload.version == 1 and row.contentRating is None else None)
+                if old is not None and (old[0] == digest or old[0] == legacy_digest):
                     continue
                 db.execute("INSERT INTO library_tag_assets VALUES(?,?,?) ON CONFLICT(asset_id) "
                            "DO UPDATE SET digest=excluded.digest,creator_key=excluded.creator_key",
                            [row.assetId, digest, row.creatorKey])
+                db.execute("INSERT INTO library_asset_ratings VALUES(?,?) ON CONFLICT(asset_id) "
+                           "DO UPDATE SET content_rating=excluded.content_rating", [row.assetId, row.contentRating])
                 db.execute("DELETE FROM library_asset_tags WHERE asset_id=?", [row.assetId])
                 db.executemany("INSERT INTO library_asset_tags VALUES(?,?)", [(row.assetId, tag) for tag in row.tags])
                 changed = True
@@ -191,7 +198,7 @@ def register(app, get_db, require_client, require_publisher):
                 db.execute("UPDATE library_tag_state SET revision=revision+1 WHERE singleton=1")
             revision = db.execute("SELECT revision FROM library_tag_state WHERE singleton=1").fetchone()[0]
             db.commit()
-        return {"version": 1, "revision": revision, "changed": changed,
+        return {"version": upload.version, "revision": revision, "changed": changed,
                 "assets": len(ids), "vocabulary": len(tag_ids)}
 
     @app.put(PREFIX)
@@ -258,3 +265,11 @@ def match_rank(needle, *names):
         if needle in lowered:
             ranks.append(0 if lowered == needle else 1 if lowered.startswith(needle) else 2)
     return min(ranks) if ranks else None
+
+
+def content_rating(row):
+    """Unknown/legacy projections fail closed in clients."""
+    value = row["content_rating"] if "content_rating" in row.keys() else None
+    if any(row[key] == "video" for key in ("kind", "media_kind") if key in row.keys()):
+        return None
+    return value if value in ("g", "s", "q", "e") else None

@@ -60,7 +60,7 @@ function ShelfFolderCard({entry,items,characters,paused,onSelect,onVisible}:{ent
 
 export function characterCovers(entry:Entry,index?:CharacterIndex):Asset[] {
   const node=index?.nodes.find(node=>node.id===entry.characterNode);
-  return node?.thumbnailAssetId?[{id:node.thumbnailAssetId,kind:'image'}]:[];
+  return node?.thumbnailAssetId?[{id:node.thumbnailAssetId,kind:'image',contentRating:index?.contentRatings?.[node.thumbnailAssetId]??null}]:[];
 }
 export function FolderCard({id,name,count,items,paused,childrenLabel,kind,onSelect,onVisible}:{id:string;name:string;count?:number;items:Asset[];paused:boolean;childrenLabel?:string;/** Marks a character folder (glyph and card tint); absent for an asset folder. */kind?:CharacterFolderKind;onSelect():void;onVisible(id:string,visible:boolean):void}) {
   const host=useRef<HTMLButtonElement>(null),[visible,setVisible]=useState(false);

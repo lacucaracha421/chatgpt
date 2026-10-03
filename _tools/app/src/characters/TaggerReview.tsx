@@ -1,3 +1,4 @@
+import { AssetImage } from "../privacy/AssetImage";
 import { ChevronLeftIcon, ChevronRightIcon, UserIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { assetUrl, assetThumbnailUrl } from "../assets/mediaUrl";
@@ -387,7 +388,7 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
                 aria-label={`${group.seriesName} › ${entry.targetName} 태거 검토 ${entry.items.length}건`}
                 onClick={() => { setSelectedSeries(group.seriesId); setSelectedTarget(entry.targetId); setBulkDecision(null); setChecked(new Set()); }}>
                 <span className="crv-portrait" aria-hidden="true">{entry.thumbnailAssetId && !privacyMode
-                  ? <img src={assetThumbnailUrl({ id: entry.thumbnailAssetId })} alt="" loading="lazy" decoding="async" /> : <UserIcon />}</span>
+                  ? <AssetImage src={assetThumbnailUrl({ id: entry.thumbnailAssetId })} alt="" loading="lazy" decoding="async" /> : <UserIcon />}</span>
                 <span className="crv-character__t"><b>{entry.targetName}</b><Split items={entry.items} /></span>
                 <span className="crv-count numeric">{entry.items.length.toLocaleString()}<small>건</small></span>
                 <ChevronRightIcon className="crv-chevron" aria-hidden="true" />
@@ -421,7 +422,7 @@ function ReviewImage({ item, privacyMode, large = false }: { item: TaggerReviewI
     {!privacyMode && <div className="tagger-review__frame" style={large
       ? { aspectRatio: ratio, width: `min(100%, ${65 * ratio}vh)` }
       : { width: `${Math.min(1, ratio) * 100}%`, height: `${Math.min(1, 1 / ratio) * 100}%` }}>
-      <img src={large ? assetUrl(item.asset.id) : assetThumbnailUrl(item.asset)} alt={`${item.asset.originalName} — ${item.targetName} 후보`} loading={large ? "eager" : "lazy"} decoding="async" />
+      <AssetImage asset={item.asset} src={large ? assetUrl(item.asset.id) : assetThumbnailUrl(item.asset)} alt={`${item.asset.originalName} — ${item.targetName} 후보`} loading={large ? "eager" : "lazy"} decoding="async" />
       {box && <span className="tagger-review__crop" aria-label={`${item.targetName} 감지 영역`} role="img" style={{
         left: `${box[0] * 100}%`, top: `${box[1] * 100}%`, width: `${(box[2] - box[0]) * 100}%`, height: `${(box[3] - box[1]) * 100}%`,
       }} />}

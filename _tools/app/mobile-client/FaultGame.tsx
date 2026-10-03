@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
+import {mediaMasked} from './assetMask';
 import {Button} from './ui';
 import {mediaTicket} from './media';
 import {mapBounded} from './model';
@@ -11,7 +12,7 @@ import './fault.css';
  * viewer. Unreadable images are skipped; an empty result means nothing could be read.
  */
 export async function loadFaultPhotos(items:readonly Asset[],signal?:AbortSignal,onProgress?:(done:number,total:number)=>void,random:()=>number=Math.random):Promise<FaultPhoto[]> {
-  const chosen=pickRandom(faultCandidates(items),undefined,random);
+  const chosen=pickRandom(faultCandidates(items).filter(asset=>!mediaMasked(asset)),undefined,random);
   let done=0;onProgress?.(0,chosen.length);
   const loaded=await mapBounded(chosen,3,async asset=>{
     try { return await loadOne(asset); } finally { if(!signal?.aborted)onProgress?.(++done,chosen.length); }
@@ -20,6 +21,7 @@ export async function loadFaultPhotos(items:readonly Asset[],signal?:AbortSignal
   async function loadOne(asset:Asset):Promise<FaultPhoto|null> {
     try {
       const ticket=await mediaTicket(asset,'original',signal);
+      if(mediaMasked(asset)||signal?.aborted)return null;
       const response=await fetch(ticket.url,{signal});
       if(!response.ok)return null;
       const data=await response.blob();

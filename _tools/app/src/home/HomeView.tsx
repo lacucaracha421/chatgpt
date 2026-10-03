@@ -18,7 +18,7 @@ import { shadowReviewApi, type ShadowReviewApi, type ShadowReviewPendingTarget }
 import { useLocalDayClock } from "../shared/useLocalDayClock";
 import { Dialog as UiDialog } from "../shared/ui/Dialog";
 import { displayDate } from "../shared/displayDate";
-import { StableImage } from "../shared/ui/StableImage";
+import { AssetStableImage as StableImage } from "../privacy/AssetImage";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Button } from "../shared/ui/Button";
 import { daysAfter, localBoundaries, newlyReleasedRows, weekdayLabel, upcomingRows, type ReleaseRow, type UpcomingRow } from "./homeModel";

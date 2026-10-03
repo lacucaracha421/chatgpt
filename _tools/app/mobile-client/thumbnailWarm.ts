@@ -1,3 +1,4 @@
+import {mediaMasked} from './assetMask';
 import {scheduleWarm} from './warmScheduler';
 import {SHELF_ACTIVITY,shelfForegroundBusy} from './shelfWarmActivity';
 export {START_DELAY} from './warmScheduler';
@@ -108,7 +109,7 @@ async function pass(scope:string, signal:AbortSignal) {
       throw error;
     }
     if (signal.aborted) return;
-    const eligible = page.items.filter(asset => !asset.pending && asset.thumbnail_available !== false);
+    const eligible = page.items.filter(asset => !mediaMasked(asset) && !asset.pending && asset.thumbnail_available !== false);
     const cache = await probe(eligible, signal);
     if (signal.aborted) return;
     if (cache.generation !== progress.generation) {
@@ -121,7 +122,7 @@ async function pass(scope:string, signal:AbortSignal) {
     const boundary = progress.highWater ? page.items.findIndex(asset => atOrBelow(asset, progress.highWater!)) : -1;
     const items = boundary < 0 ? page.items : page.items.slice(0, boundary);
     const hits = new Set(cache.cachedIds);
-    const misses = items.filter(asset => !asset.pending && asset.thumbnail_available !== false && !hits.has(asset.id));
+    const misses = items.filter(asset => !mediaMasked(asset) && !asset.pending && asset.thumbnail_available !== false && !hits.has(asset.id));
     // Native is authoritative; a JS ticket can outlive an eviction or cache clear.
     await Promise.all(misses.map(asset => { invalidateTicket(asset, 'thumbnail'); return warmThumbnail(asset, signal); }));
     if (signal.aborted) return;
@@ -135,7 +136,7 @@ async function pass(scope:string, signal:AbortSignal) {
         write(PROGRESS_KEY, progress); continue;
       }
       const ready = new Set(verified.cachedIds);
-      if (misses.some(asset => !ready.has(asset.id))) throw new Error('Thumbnail page incomplete');
+      if (misses.some(asset => !mediaMasked(asset) && !ready.has(asset.id))) throw new Error('Thumbnail page incomplete');
     }
     const newest = progress.newest ?? (items[0] ? mark(items[0]) : undefined);
     progress = {...progress, cursor:page.next_cursor, warmed:progress.warmed + items.length,

@@ -1,3 +1,4 @@
+import { AssetImage } from "../privacy/AssetImage";
 import { CheckIcon, MagnifyingGlassIcon } from "@heroicons/react/20/solid";
 import { ChevronRightIcon, PlusIcon, Squares2X2Icon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useState } from "react";
@@ -210,7 +211,7 @@ function PickerSection({ label, children }: { label?: string; children: React.Re
 function CharacterThumbnail({ target, privacyMode }: { target: CharacterTarget; privacyMode: boolean }) {
   const assetId = target.thumbnailAssetId ?? target.references.find(reference => reference.status === "ready")?.assetId;
   if (privacyMode || !assetId) return <span className={`character-assign-picker__thumbnail${privacyMode ? " character-assign-picker__thumbnail--private" : ""}`} aria-hidden="true" />;
-  return <img className="character-assign-picker__thumbnail" src={thumbnailUrl(assetId)} alt="" draggable={false} />;
+  return <AssetImage className="character-assign-picker__thumbnail" src={thumbnailUrl(assetId)} alt="" draggable={false} />;
 }
 
 function buildSeriesSections(targets: CharacterTarget[], groups: CharacterGroup[], classifications: ClassificationEntry[], counts: Record<string, number>) {

@@ -1,3 +1,4 @@
+import {useAssetMask} from "../privacy/PrivacyContext";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowsUpDownIcon, CheckIcon, ComputerDesktopIcon, DevicePhoneMobileIcon, DeviceTabletIcon, ExclamationTriangleIcon, FolderIcon, PaperClipIcon } from "@heroicons/react/24/outline";
 import { ViewToolbar } from "../layout/ViewToolbar";
@@ -110,7 +111,9 @@ function useThumbnail(store: ExchangeStore, transferId: string, enabled: boolean
 const hasLocalFile = (item: Item) => item.kind === "saved" ? item.row.exists : item.kind === "out" && item.row.state !== "zipping";
 
 function Glyph({ item, store }: { item: Item; store: ExchangeStore }) {
-  const url = useThumbnail(store, item.row.transferId, isImageName(item.row.fileName) && hasLocalFile(item));
+  const masked=useAssetMask();
+  const url = useThumbnail(store, item.row.transferId, !masked && isImageName(item.row.fileName) && hasLocalFile(item));
+  if(masked)return <span className="exchange-glyph is-image"><span className="privacy-mask" aria-label="이미지 숨김"/></span>;
   return url
     ? <span className="exchange-glyph is-image"><img src={url} alt="" /></span>
     : <span className={`exchange-glyph${/\.zip$/i.test(item.row.fileName) ? " is-zip" : ""}`} aria-hidden="true">{extensionLabel(item.row.fileName)}</span>;
@@ -177,12 +180,13 @@ function ThumbStrip({ entries, store }: { entries: Item[]; store: ExchangeStore 
 }
 
 function StripTile({ item, store, more }: { item: Item; store: ExchangeStore; more: number }) {
-  const url = useThumbnail(store, item.row.transferId, hasLocalFile(item));
+  const masked=useAssetMask();
+  const url = useThumbnail(store, item.row.transferId, !masked && hasLocalFile(item));
   const { finished } = part(item);
   const active = moving(item);
   const label = more ? `${item.row.fileName} 외 ${more}개` : item.row.fileName;
   const tile = <>
-    {url ? <img src={url} alt="" /> : <span className="exchange-strip-ext" aria-hidden="true">{extensionLabel(item.row.fileName)}</span>}
+    {masked ? <span className="privacy-mask" aria-label="이미지 숨김"/> : url ? <img src={url} alt="" /> : <span className="exchange-strip-ext" aria-hidden="true">{extensionLabel(item.row.fileName)}</span>}
     {finished && <span className="exchange-strip-done" aria-hidden="true"><CheckIcon /></span>}
     {active && item.kind === "out" && item.row.state === "uploading" && <span className="exchange-strip-bar"><Progress done={item.row.done} total={item.row.sizeBytes} label={`${item.row.fileName} 진행률`} /></span>}
     {more > 0 && <span className="exchange-strip-more" aria-hidden="true">+{more}</span>}

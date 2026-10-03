@@ -1,3 +1,4 @@
+use super::auto_tags::CONTENT_RATING_SQL;
 use rusqlite::{params, OptionalExtension};
 
 use super::{error::LibraryError, models::AssetSummary, query::asset_summary_from_row, Library};
@@ -30,13 +31,12 @@ impl Library {
         let SourceGroupKey::XStatus(post_id) = &group_key;
         let candidate_pattern = format!("%/status/{post_id}%");
         let mut statement = connection.prepare(
-            "SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
+            &format!("SELECT asset.id, asset.title, asset.original_name, asset.relative_path, asset.thumbnail_relative_path, asset.byte_size, asset.width, asset.height, asset.collected_at, asset.favorite, asset.source_url,
              asset.media_kind, video.duration_ms, video.preparation_state, video.scrub_frame_count,
              asset.source_published_at, asset.creator_name, asset.creator_handle, asset.creator_url,
-             asset.import_source, asset.import_batch_id, asset.original_modified_at
-             FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
+             asset.import_source, asset.import_batch_id, asset.original_modified_at, {CONTENT_RATING_SQL} AS content_rating FROM assets AS asset LEFT JOIN video_assets AS video ON video.asset_id = asset.id
              WHERE asset.status = 'normal' AND asset.source_url LIKE ?1
-             ORDER BY asset.collected_at ASC, asset.id ASC",
+             ORDER BY asset.collected_at ASC, asset.id ASC"),
         )?;
         let rows = statement.query_map(params![candidate_pattern], asset_summary_from_row)?;
         let mut assets = Vec::new();

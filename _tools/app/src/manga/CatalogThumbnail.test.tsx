@@ -44,3 +44,10 @@ it("requests no cover in privacy mode or for an absent source", () => {
   expect(container.querySelector("img")).toBeNull();
   expect(container.firstElementChild).toHaveClass("manga-cover");
 });
+
+it("masks a catalog thumbnail with only the NSFW filter enabled", () => {
+  const { container } = render(<PrivacyProvider privacyMode={false} nsfwFilter setPrivacyMode={vi.fn()}><CatalogThumbnail {...props} /></PrivacyProvider>);
+  expect(container.querySelector("img")).toBeNull();
+  expect(container.querySelector("[src]")).toBeNull();
+  expect(container.querySelector(".privacy-mask")).toBeVisible();
+});

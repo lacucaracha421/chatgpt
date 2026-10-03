@@ -2,12 +2,12 @@ import {useEffect,useRef,useState} from 'react';
 import {afterDecode,arrive,type CardArrival} from './motion';
 import {catalogImageTicket} from './catalogMedia';
 import {catalogCoverDecoded} from './catalogPerf';
-import {usePrivacyMode} from './privacyMode';
+import {useTabletCatalogMasked} from './catalogMask';
 import type {CatalogItem} from './catalogModel';
 import {observeCatalogCover} from './catalogCoverObservers';
 /** A nearby cover stays subscribed through quick viewport exits; a far cover is canceled. */
 export function CatalogCover({item,revision,active,onUrl,arrival}:{item:Pick<CatalogItem,'provider'|'providerWorkId'|'thumbnailUrl'>;revision:string;active:boolean;onUrl?(url:string|null):void;arrival?:CardArrival}){
-  const [privacy] = usePrivacyMode();
+  const privacy = useTabletCatalogMasked();
   const [image,setImage]=useState<{source:string;url:string}|null>(null),[failed,setFailed]=useState<string|null>(null),[near,setNear]=useState(false),[decoded,setDecoded]=useState<string|null>(null);
   const host=useRef<HTMLSpanElement>(null),picture=useRef<HTMLImageElement>(null),loaded=useRef<string|null>(null),visible=useRef(false);
   const source=JSON.stringify([item.provider,item.providerWorkId,item.thumbnailUrl,revision]);

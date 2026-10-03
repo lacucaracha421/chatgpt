@@ -35,6 +35,10 @@ impl Library {
         &self,
         asset_ids: &[String],
     ) -> Result<PreparedAssetDrag, LibraryError> {
+        self.prepare_asset_drag_masked(asset_ids,false)
+    }
+
+    pub fn prepare_asset_drag_masked(&self,asset_ids:&[String],mask_preview:bool)->Result<PreparedAssetDrag,LibraryError> {
         let ids = unique_ids(asset_ids)?;
         let canonical_root = fs::canonicalize(&self.root).map_err(drag_error)?;
         let connection = self.connection()?;
@@ -50,7 +54,7 @@ impl Library {
             sources.push((
                 safe_original_name(&original_name, id),
                 canonical_managed_path(&canonical_root, &asset_path)?,
-                canonical_managed_path(&canonical_root, &thumbnail_path)?,
+                if mask_preview {PathBuf::new()} else {canonical_managed_path(&canonical_root, &thumbnail_path)?},
             ));
         }
         drop(connection);
@@ -59,7 +63,7 @@ impl Library {
         fs::create_dir_all(&drag_root).map_err(drag_error)?;
         let staging = drag_root.join(uuid::Uuid::new_v4().to_string());
         fs::create_dir(&staging).map_err(drag_error)?;
-        let result = stage_sources(&staging, &sources);
+        let result = stage_sources(&staging, &sources, mask_preview);
         if result.is_err() {
             let _ = fs::remove_dir_all(&staging);
         }
@@ -132,6 +136,7 @@ fn safe_original_name(original_name: &str, asset_id: &str) -> String {
 fn stage_sources(
     staging: &Path,
     sources: &[(String, PathBuf, PathBuf)],
+    mask_preview: bool,
 ) -> Result<(Vec<PathBuf>, PathBuf), LibraryError> {
     let mut used_names = BTreeSet::new();
     let mut files = Vec::with_capacity(sources.len());
@@ -139,6 +144,11 @@ fn stage_sources(
         let destination = staging.join(unique_file_name(name, &mut used_names));
         link_or_copy(source, &destination)?;
         files.push(destination);
+    }
+    if mask_preview {
+        let preview=staging.join(".preview.png");
+        image::RgbaImage::from_pixel(96,96,image::Rgba([48,48,48,255])).save(&preview).map_err(|error|drag_error(std::io::Error::other(error)))?;
+        return Ok((files,preview));
     }
     let preview = staging
         .join(".preview")
@@ -322,4 +332,17 @@ fn linux_drag_retains_independent_copy_until_next_library_open() {
     let _reopened = Library::open(temp.path()).unwrap();
     assert!(!exported.exists());
     assert!(original.exists());
+}
+
+#[test]
+fn drag_out_mask_does_not_require_or_decode_a_thumbnail() {
+    let temp=tempfile::tempdir().unwrap();
+    let library=Library::open(temp.path()).unwrap();
+    insert_asset(&library,"masked","image.png","assets/a.png","thumbnails/missing.webp","normal");
+    std::fs::write(temp.path().join("assets/a.png"),b"original").unwrap();
+    let prepared=library.prepare_asset_drag_masked(&["masked".into()],true).unwrap();
+    let image=image::open(&prepared.preview).unwrap().to_rgba8();
+    assert_eq!(image.dimensions(),(96,96));
+    assert!(image.pixels().all(|pixel|pixel.0==[48,48,48,255]));
+    assert_eq!(std::fs::read(&prepared.files[0]).unwrap(),b"original");
 }

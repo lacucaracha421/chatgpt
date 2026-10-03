@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
+import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { MangaCard, MangaSkeletonGrid } from "./MangaCard";
 import { MangaSourceControl } from "./MangaToolbar";
 
@@ -58,4 +59,11 @@ it("uses the shared segmented switch with known counts and keyboard access", asy
   expect(onChange).toHaveBeenLastCalledWith("bookmarked");
   rerender(<MangaSourceControl value="bookmarked" onChange={onChange} bookmarkCount={280} />);
   expect(screen.getByRole("radio", { name: "북마크 280" })).toHaveAttribute("aria-checked", "true");
+});
+
+it("masks a local manga card with only the NSFW filter enabled", () => {
+  const { container } = render(<PrivacyProvider privacyMode={false} nsfwFilter setPrivacyMode={vi.fn()}><MangaCard {...props} coverUrl="https://example.com/cover.jpg" /></PrivacyProvider>);
+  expect(container.querySelector("img")).toBeNull();
+  expect(container.querySelector("[src]")).toBeNull();
+  expect(container.querySelector(".privacy-mask")).toBeVisible();
 });

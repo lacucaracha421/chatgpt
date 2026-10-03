@@ -1,3 +1,5 @@
+import { useAssetMask } from "../privacy/PrivacyContext";
+import { AssetSvgImage } from "../privacy/AssetImage";
 import { useEffect, useState } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
 import { Button } from "../shared/ui/Button";
@@ -63,6 +65,7 @@ function RegionImage({ assetId, box, width, height, label, selectionLabel, priva
   assetId: string; box: [number, number, number, number]; width: number; height: number; label: string;
   selectionLabel?: string; privacyMode: boolean; disabled: boolean; onSelect: () => void;
 }) {
+  const masked=useAssetMask(assetId,privacyMode);
   const cropWidth = Math.max(box[2] - box[0], 1);
   const cropHeight = Math.max(box[3] - box[1], 1);
   // A background position percentage is the frame's share of the overflow, so a
@@ -73,12 +76,12 @@ function RegionImage({ assetId, box, width, height, label, selectionLabel, priva
   };
   const style = {
     aspectRatio: `${cropWidth} / ${cropHeight}`,
-    backgroundImage: `url("${thumbnailUrl(assetId)}")`,
+    backgroundImage: masked ? undefined : `url("${thumbnailUrl(assetId)}")`,
     backgroundPositionX: `${position(box[0], width, cropWidth)}%`,
     backgroundPositionY: `${position(box[1], height, cropHeight)}%`,
     backgroundSize: `${(width / cropWidth) * 100}% ${(height / cropHeight) * 100}%`,
   };
-  return <button type="button" className={`character-region-frame${privacyMode ? " character-private" : ""}`} style={style}
+  return <button type="button" className={`character-region-frame${masked ? " character-private" : ""}`} style={style}
     disabled={disabled} aria-label={label} aria-pressed={Boolean(selectionLabel)} aria-description={selectionLabel} onClick={onSelect}>
     {selectionLabel && <span className="character-region-frame__selection">{selectionLabel}</span>}
   </button>;
@@ -225,7 +228,7 @@ export function ReferenceRegionChoices({ seriesId, targetId, assetIds, draftRegi
       return <div key={region.assetId} role="group" aria-label={`레퍼런스 ${number} · ${status}`}>
         <div className="character-region-summary__preview">
           <svg className={privacyMode ? "character-private" : undefined} viewBox={`0 0 ${region.width} ${region.height}`} role="img" aria-label={`레퍼런스 ${number}${bounds ? " 사용 중인 인물 영역" : " 인물 미지정"}`}>
-            <image href={thumbnailUrl(region.assetId)} width={region.width} height={region.height} />
+            <AssetSvgImage href={thumbnailUrl(region.assetId)} width={region.width} height={region.height} />
             {bounds && <rect x={bounds[0]} y={bounds[1]} width={bounds[2] - bounds[0]} height={bounds[3] - bounds[1]} vectorEffect="non-scaling-stroke" />}
           </svg>
         </div>

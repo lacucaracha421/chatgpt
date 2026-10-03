@@ -431,7 +431,7 @@ it('passes privacy to the gallery opened directly from Find',async()=>{
 });
 
 
-it('never replaces a known preview with a placeholder on A → B → A or tab remount',async()=>{
+it('replaces covers by asset identity and reuses cached previews on A → B → A or tab remount',async()=>{
   let current=structuredClone(index);
   current.nodes=current.nodes.map(item=>item.id==='series:s'?{...item,thumbnailAssetId:'f2-mobile-a'}:item);
   mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?current:page());
@@ -445,12 +445,12 @@ it('never replaces a known preview with a placeholder on A → B → A or tab re
   current={...current,revision:'b'.repeat(64),nodes:current.nodes.map(item=>item.id==='series:s'?{...item,thumbnailAssetId:'f2-mobile-b'}:item)};
   view.rerender(<CharacterBrowser {...props} refreshKey={2}/>);
   await waitFor(()=>expect(mocks.loadThumbnail.mock.calls.some(([a])=>a.id==='f2-mobile-b')).toBe(true));
-  expect(card().querySelector('img')).toBe(first);
-  expect(card().querySelector('.character-card-image > svg')).toBeNull();
+  expect(card().querySelector('img')).toBeNull();
+  expect(card().querySelector('.character-card-image > svg')).toBeTruthy();
   await act(async()=>finish({id:'f2-mobile-b',kind:'image',preview:'data:image/png;base64,f2-mobile-b'}));
-  const next=card().querySelector<HTMLImageElement>('[data-stable-image-loading="true"]')!;
+  const next=card().querySelector<HTMLImageElement>('img')!;
   expect(next?.getAttribute('src')).toBe('data:image/png;base64,f2-mobile-b');
-  expect(first.style.visibility).not.toBe('hidden');
+  expect(card().contains(first)).toBe(false);
   fireEvent.load(next);
   expect(next.style.visibility).not.toBe('hidden');
   current={...current,revision:'c'.repeat(64),nodes:current.nodes.map(item=>item.id==='series:s'?{...item,thumbnailAssetId:'f2-mobile-a'}:item)};
@@ -465,4 +465,27 @@ it('never replaces a known preview with a placeholder on A → B → A or tab re
   expect(card().querySelector('img')?.getAttribute('src')).toContain('f2-mobile-a');
   expect(card().querySelector('.character-card-image > svg')).toBeNull();
   expect(mocks.loadThumbnail.mock.calls.filter(([a])=>a.id==='f2-mobile-a')).toHaveLength(1);
+});
+
+it('drops an old explicit cover when the filter turns on and a new safe cover is still loading',async()=>{
+ const oldId='review-old-explicit',newId='review-new-safe';
+ let current={...structuredClone(index),contentRatings:{[oldId]:'e' as const,[newId]:'g' as const}};
+ current.nodes[0].thumbnailAssetId=oldId;
+ mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?structuredClone(current):page());
+ const safe=Promise.withResolvers<Asset>();
+ mocks.loadThumbnail.mockImplementation((asset:Asset)=>asset.id===newId?safe.promise:Promise.resolve({...asset,preview:`https://test.invalid/${oldId}`}));
+ try {
+  const {container,rerender}=render(<CharacterBrowser {...props}/>);
+  await waitFor(()=>expect(container.querySelector(`img[src$="/${oldId}"]`)).toBeTruthy());
+  const oldImage=container.querySelector('img');
+  current.nodes[0].thumbnailAssetId=newId;
+  localStorage.setItem('lakomics.mobile.nsfwFilter','1');
+  act(()=>window.dispatchEvent(new CustomEvent('lakomics-privacy-mode')));
+  rerender(<CharacterBrowser {...props} refreshKey={2}/>);
+  await waitFor(()=>expect(mocks.loadThumbnail.mock.calls.some(([asset])=>asset.id===newId)).toBe(true));
+  expect(container.querySelector(`img[src$="/${oldId}"]`)).toBeNull();
+  safe.resolve({id:newId,kind:'image',contentRating:'g',preview:`https://test.invalid/${newId}`});
+  await waitFor(()=>expect(container.querySelector(`img[src$="/${newId}"]`)).toBeTruthy());
+  expect(container.contains(oldImage)).toBe(false);
+ }finally {localStorage.removeItem('lakomics.mobile.nsfwFilter');}
 });

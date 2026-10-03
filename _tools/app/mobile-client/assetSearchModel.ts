@@ -1,7 +1,7 @@
 import {combineAssetSearchChoices,assetSearchKey,ASSET_SEARCH_GROUPS,type AssetSearchIdentity,type AssetSearchName} from '../src/assets/assetSearch';
 import {entryView,type Entry} from './libraryModel';
 import {albumView,type AlbumTree} from './albumModel';
-import {artistName,assetFromId,type LibraryArtist} from './artistsModel';
+import {artistName,assetsFromIds,type LibraryArtist} from './artistsModel';
 import {characterCovers} from './FolderCards';
 import type {CharacterIndex} from './characterModel';
 import type {Asset,View} from './types';
@@ -10,7 +10,7 @@ export type AssetSearchChip = {type:'scope';item:AssetSuggestion}|{type:'tag';id
 export function assetSuggestions(entries:Entry[],characters:CharacterIndex|undefined,tree:AlbumTree|null,artists:LibraryArtist[]):AssetSuggestion[] {
   const result:AssetSuggestion[]=entries.map(entry=>({kind:entry.characterKind?'character':'folder',id:entry.id,name:entry.name,count:entry.asset_count,view:entryView(entry),cover:characterCovers(entry,characters)[0]}));
   if(tree?.adopted&&tree.libraryId&&tree.epoch!==null)for(const album of tree.albums)result.push({kind:'album',id:album.id,name:album.name,count:album.assetCount,view:albumView(tree,album)});
-  for(const artist of artists)result.push({kind:'artist',id:artist.id,name:artistName(artist),count:artist.assetCount,artist,cover:artist.coverAssetIds[0]?assetFromId(artist.coverAssetIds[0]):undefined});
+  for(const artist of artists)result.push({kind:'artist',id:artist.id,name:artistName(artist),count:artist.assetCount,artist,cover:assetsFromIds(artist.coverAssetIds,artist.coverContentRatings)[0]});
   return result;
 }
 const RECENT_KEY='lakomics.mobile.assetSearch.recents';
