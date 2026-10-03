@@ -243,6 +243,40 @@ class CollectionAuthorityTests(unittest.TestCase):
         self.assertEqual(self.stage().status_code, 200)
 
     # --- activation, fence and projection ------------------------------------------
+    def assert_home_counts(self, expected):
+        reply = self.client.get('/v1/library/summary', headers=self.auth)
+        self.assertEqual(reply.status_code, 200, reply.text)
+        counts = reply.json()['collections']
+        self.assertEqual(counts, expected)
+        for type_, count in counts.items():
+            with self.subTest(type=type_):
+                self.assertEqual(count, self.listing(type=type_)['totalCount'])
+        self.assertEqual(sum(counts.values()), self.listing()['totalCount'])
+
+    def test_home_collection_counts_keep_the_inactive_replica(self):
+        api_app.startup_classification_authority()
+        self.assertEqual(self.publish_legacy([*self.items, work('av', type='av')]).status_code, 200)
+        # An unserved projection must not change the replica's counts.
+        with api_app.get_db() as db:
+            db.execute("INSERT INTO collection_authority_projection "
+                       "SELECT id,?,type,name,showcase,showcase_order,payload "
+                       "FROM mobile_collections WHERE id='m'", (LIBRARY,))
+            db.commit()
+        self.assert_home_counts({'game': 0, 'manga': 2, 'movie': 1, 'av': 1})
+
+    def test_home_collection_counts_follow_active_creation_trash_and_purge(self):
+        api_app.startup_classification_authority()
+        self.ready()
+        self.assert_home_counts({'game': 0, 'manga': 2, 'movie': 1, 'av': 0})
+        self.ok(self.create('new-movie', 'New movie'))
+        self.ok(self.create('new-game', 'New game', type_='game'))
+        self.assert_home_counts({'game': 1, 'manga': 2, 'movie': 2, 'av': 0})
+        self.ok(self.command('deleteWork', workId='a', expectedRevision=1))
+        self.ok(self.command('deleteWork', workId='m', expectedRevision=1))
+        self.assert_home_counts({'game': 1, 'manga': 1, 'movie': 1, 'av': 0})
+        self.ok(self.command('purgeWork', headers=self.publisher, workId='m', expectedRevision=2))
+        self.assert_home_counts({'game': 1, 'manga': 1, 'movie': 1, 'av': 0})
+
     def test_activation_projects_the_legacy_shape_and_fences_the_pc(self):
         self.publish_legacy()
         before_list = self.listing(type='manga')

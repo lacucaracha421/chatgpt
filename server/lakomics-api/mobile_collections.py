@@ -470,6 +470,11 @@ def status_signal(db):
             "appliedPersonalEditCursor": edits["applied_cursor"] if edits else None}
 
 
+def read_table(active):
+    """The list's live authority projection, or the PC replica while inactive."""
+    return "collection_authority_projection" if active is not None else "mobile_collections"
+
+
 def register_collections(app, get_db, require_auth, storage, bucket, presign_get, presign_put,
                          require_client=None, require_publisher=None):
     reader = require_client or require_auth
@@ -522,10 +527,6 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             return active["revision"], active["publishedAt"]
         return legacy_state(db)
 
-    def table(active):
-        # Same columns and payload shape, so one query path serves both sources.
-        return "collection_authority_projection" if active is not None else "mobile_collections"
-
     def finalize(db, active, payload):
         if active is not None:
             collection_authority.finalize_item(db, active["libraryId"], payload)
@@ -534,7 +535,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
     # Registered before `/v1/collections/{collection_id}`, which would otherwise match it.
     personal_edits.register(app, get_db, reader, publisher, lambda db: legacy_state(db)[0])
     collection_releases.register(app, get_db, reader, publisher,
-                                 collection_source=lambda db: table(served(db)))
+                                 collection_source=lambda db: read_table(served(db)))
     collection_bindings.register(app, get_db, reader, publisher)
     collection_authority.register(app, get_db, reader, publisher)
 
@@ -745,7 +746,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             # A consistent read transaction binds metadata rows to this revision.
             db.execute("BEGIN")
             active = served(db)
-            source = table(active)
+            source = read_table(active)
             revision, published = state(db, active)
             offset = 0
             # Showcase is a manual exhibition; library filters never alter it.
@@ -834,7 +835,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
             db.execute("BEGIN")
             active = served(db)
             revision, _ = state(db, active)
-            row = db.execute(f"SELECT payload FROM {table(active)} WHERE id=?", (collection_id,)).fetchone()
+            row = db.execute(f"SELECT payload FROM {read_table(active)} WHERE id=?", (collection_id,)).fetchone()
             payload = None if row is None else finalize(db, active, json.loads(row["payload"]))
         if payload is None:
             raise HTTPException(404, "Collection is not published")
@@ -846,7 +847,7 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
         require_auth(authorization)
         with get_db() as db:
             db.execute("BEGIN")
-            row = db.execute(f"SELECT payload FROM {table(served(db))} WHERE id=?", (collection_id,)).fetchone()
+            row = db.execute(f"SELECT payload FROM {read_table(served(db))} WHERE id=?", (collection_id,)).fetchone()
             if row is None:
                 raise HTTPException(404, "Collection is not published")
             art = next((art for art in json.loads(row["payload"])["artworks"] if art["id"] == artwork_id), None)

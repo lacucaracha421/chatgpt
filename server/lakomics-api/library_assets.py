@@ -20,7 +20,9 @@ import asset_list_query
 import authority
 import classification_authority
 import classification_snapshot
+import collection_authority
 import conditional
+import mobile_collections
 
 
 api: ModuleType
@@ -433,7 +435,8 @@ def mobile_library_summary(
     `COALESCE(collected_at, created_at)`. `unclassified` is a visible Asset with no
     Classification: after the classification authority is active, no assignment row with a
     non-null Classification; before it, no legacy `asset_classifications` row. Collection
-    counts read the four published `mobile_collections` types in the same transaction.
+    counts read the list route's served source for the four published types in the same
+    transaction, excluding trashed and tombstoned works after authority activation.
     """
     # Client role (shared token, a client token or the publisher), like the media tickets.
     api.client_guard(api.get_db, api.API_TOKEN)(authorization)
@@ -463,8 +466,9 @@ def mobile_library_summary(
             [today_start, week_start, *classified_params],
         ).fetchone()
         collections = {kind: 0 for kind in ("game", "manga", "movie", "av")}
+        source = mobile_collections.read_table(collection_authority.served_state(db))
         for collection_row in db.execute(
-                "SELECT type, COUNT(*) AS total FROM mobile_collections "
+                f"SELECT type, COUNT(*) AS total FROM {source} "
                 "WHERE type IN ('game','manga','movie','av') GROUP BY type"):
             collections[collection_row["type"]] = collection_row["total"]
     payload = {
