@@ -187,7 +187,7 @@ it("keeps 홈, 에셋, 컬렉션, 망가, 메모 and 전송 in the rail, 비밀 
   const rail = screen.getByRole("navigation", { name: "주요 영역" });
   expect(within(rail).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent))
     .toEqual(["홈", "에셋", "컬렉션", "망가", "메모", "전송", "비밀", "찾기", "더보기"]);
-  expect(within(rail).getByRole("button", { name: "찾기" })).toHaveAttribute("aria-keyshortcuts", "Control+K Control+F");
+  expect(within(rail).getByRole("button", { name: "찾기" })).toHaveAttribute("aria-keyshortcuts", "Control+Q");
   expect(screen.getByRole("button", { name: "전체" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "작가" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "앨범" })).toBeInTheDocument();
@@ -325,14 +325,14 @@ it("reaches every former rail and 관리 destination from 더보기 with focus r
   expect(trigger).toHaveFocus();
 });
 
-it("opens the 찾기 palette with Ctrl+K, filters by name and navigates with Enter", async () => {
+it("opens the 찾기 palette with Ctrl+Q, filters by name and navigates with Enter", async () => {
   const user = userEvent.setup();
   const onNavigate = vi.fn();
   render(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={onNavigate} reviewCount={5} trashCount={1} />);
   const focusBefore = screen.getByRole("button", { name: "에셋" });
   focusBefore.focus();
 
-  await user.keyboard("{Control>}k{/Control}");
+  await user.keyboard("{Control>}q{/Control}");
   const palette = screen.getByRole("dialog", { name: "찾기" });
   const field = within(palette).getByRole("combobox", { name: "작품, 작가, 메모 제목, 폴더, 화면 또는 명령 이름" });
   expect(field).toHaveFocus();
@@ -380,26 +380,34 @@ it("closes the palette with Escape and returns focus to the rail button", async 
   expect(onNavigate).not.toHaveBeenCalled();
 });
 
-it("ignores Ctrl+K while typing in a text field", async () => {
+it("no longer opens with the retired Ctrl+K / Ctrl+F, and Ctrl+Q works from a text field", async () => {
   const user = userEvent.setup();
   render(<><input aria-label="다른 입력" /><WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} /></>);
   await user.click(screen.getByRole("textbox", { name: "다른 입력" }));
   await user.keyboard("{Control>}k{/Control}");
+  await user.keyboard("{Control>}f{/Control}");
+  await user.keyboard("{Meta>}q{/Meta}");
   expect(screen.queryByRole("dialog", { name: "찾기" })).not.toBeInTheDocument();
-  await user.keyboard("{Meta>}k{/Meta}");
-  expect(screen.queryByRole("dialog", { name: "찾기" })).not.toBeInTheDocument();
+  await user.keyboard("{Control>}q{/Control}");
+  expect(screen.getByRole("dialog", { name: "찾기" })).toBeInTheDocument();
+});
+
+it("opens with Ctrl+Q while the Korean IME reports the Q key as ㅂ", () => {
+  render(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} />);
+  fireEvent.keyDown(window, { key: "ㅂ", code: "KeyQ", ctrlKey: true });
+  expect(screen.getByRole("dialog", { name: "찾기" })).toBeInTheDocument();
 });
 
 it("does not open the palette over a modal dialog but does over a non-modal panel", async () => {
   const user = userEvent.setup();
   const { rerender } = render(<><div role="dialog" aria-label="표지 감상" /><WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} /></>);
-  await user.keyboard("{Control>}k{/Control}");
+  await user.keyboard("{Control>}q{/Control}");
   expect(screen.queryByRole("dialog", { name: "찾기" })).not.toBeInTheDocument();
   rerender(<><div role="dialog" aria-modal="true" aria-label="FAULT" /><WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} /></>);
-  await user.keyboard("{Control>}k{/Control}");
+  await user.keyboard("{Control>}q{/Control}");
   expect(screen.queryByRole("dialog", { name: "찾기" })).not.toBeInTheDocument();
   rerender(<><div role="dialog" aria-modal="false" aria-label="상태" /><WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} /></>);
-  await user.keyboard("{Control>}k{/Control}");
+  await user.keyboard("{Control>}q{/Control}");
   expect(screen.getByRole("dialog", { name: "찾기" })).toBeInTheDocument();
 });
 
@@ -434,7 +442,7 @@ it("returns focus to the 찾기 button when the opener is gone", async () => {
   const tree = (temporary: boolean) => <>{temporary && <button type="button">임시</button>}<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} /></>;
   const { rerender } = render(tree(true));
   screen.getByRole("button", { name: "임시" }).focus();
-  await user.keyboard("{Control>}k{/Control}");
+  await user.keyboard("{Control>}q{/Control}");
   expect(screen.getByRole("dialog", { name: "찾기" })).toBeInTheDocument();
   rerender(tree(false));
   await user.keyboard("{Escape}");
@@ -442,13 +450,13 @@ it("returns focus to the 찾기 button when the opener is gone", async () => {
   expect(screen.getByRole("button", { name: "찾기" })).toHaveFocus();
 });
 
-it("does not reopen or stack the palette with Ctrl+F while it is open", async () => {
+it("does not reopen or stack the palette with Ctrl+Q while it is open", async () => {
   const user = userEvent.setup();
   render(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} />);
-  await user.keyboard("{Control>}k{/Control}");
+  await user.keyboard("{Control>}q{/Control}");
   const field = screen.getByRole("combobox");
   await user.type(field, "휴지");
-  await user.keyboard("{Control>}f{/Control}");
+  await user.keyboard("{Control>}q{/Control}");
   expect(screen.getAllByRole("dialog")).toHaveLength(1);
   expect(field).toHaveValue("휴지");
 });
@@ -487,12 +495,12 @@ it("puts the view's search first while typing and applies it with Enter", async 
   expect(screen.getByRole("button", { name: "검색 해제" })).toBeInTheDocument();
 });
 
-it("opens the palette with Ctrl+F, also from a text field, and offers 검색 해제 for an active query", async () => {
+it("opens the palette with Ctrl+Q, also from a text field, and offers 검색 해제 for an active query", async () => {
   const user = userEvent.setup();
   const onApply = vi.fn();
   renderWithView(<><input aria-label="다른 입력" /><SearchableView initial="nier" onApply={onApply} /></>);
   await user.click(screen.getByRole("textbox", { name: "다른 입력" }));
-  await user.keyboard("{Control>}f{/Control}");
+  await user.keyboard("{Control>}q{/Control}");
   const palette = screen.getByRole("dialog", { name: "찾기" });
   const first = within(palette).getAllByRole("option")[0];
   expect(first).toHaveTextContent("검색 해제");
@@ -521,7 +529,7 @@ it("opens a view's own search editor from the palette with the typed draft", asy
   </WorkspaceChromeProvider></BackNavigationProvider>);
   // The online catalog keeps its own trigger in the index head.
   expect(screen.getByRole("button", { name: "온라인 만화 검색" })).toBeInTheDocument();
-  await user.keyboard("{Control>}f{/Control}");
+  await user.keyboard("{Control>}q{/Control}");
   expect(screen.getAllByRole("option")[0]).toHaveTextContent("온라인 카탈로그 검색 열기");
   await user.type(screen.getByRole("combobox"), "태그");
   expect(screen.getAllByRole("option")[0]).toHaveTextContent("온라인 카탈로그에서 ‘태그’ 검색");

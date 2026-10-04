@@ -3,13 +3,14 @@ import type { NavigationEntry, NavigationEntryGroup } from "./findEntries";
 
 export const FIND_SCOPES = ["전체", "작품", "작가", "메모", "폴더", "화면", "명령"] as const;
 export type FindScope = typeof FIND_SCOPES[number];
-export const FIND_GROUP_ORDER: NavigationEntryGroup[] = ["search", "work", "artist", "note", "place", "queue", "recent", "go", "action"];
+export const FIND_GROUP_ORDER: NavigationEntryGroup[] = ["content", "search", "work", "artist", "note", "place", "queue", "recent", "go", "action"];
 export const GROUP_LIMIT = 5;
 export const RECENT_LIMIT = 5;
 const recentMemory = new Map<string, string[]>();
 const RECENT_STORAGE = "lakomics.find.recent.v1:";
 
 export function entryScope(entry: NavigationEntry): FindScope {
+  if (entry.group === "content") return "전체";
   if (entry.group === "work") return "작품";
   if (entry.group === "artist") return "작가";
   if (entry.group === "note") return "메모";
@@ -20,9 +21,10 @@ export function entryScope(entry: NavigationEntry): FindScope {
 
 export function findGroups(entries: NavigationEntry[], query: string, scope: FindScope, recentIds: string[]) {
   const typed = query.trim();
-  const accepts = (entry: NavigationEntry) => scope === "전체" || entry.group === "search" || entryScope(entry) === scope;
+  // 내용 검색 searches every image, so it belongs to 전체 only; the view's own search follows every scope.
+  const accepts = (entry: NavigationEntry) => entry.group === "content" ? scope === "전체" : scope === "전체" || entry.group === "search" || entryScope(entry) === scope;
   const visible = typed
-    ? entries.filter(entry => accepts(entry) && (entry.group === "search" || matchesKoreanSearch([entry.label, ...(entry.keywords ?? [])], typed)))
+    ? entries.filter(entry => accepts(entry) && (entry.group === "search" || entry.group === "content" || matchesKoreanSearch([entry.label, ...(entry.keywords ?? [])], typed)))
     : [...entries.filter(entry => accepts(entry) && (entry.group === "queue" || entry.group === "search")),
       ...recentIds.flatMap(id => {
         const entry = entries.find(candidate => candidate.id === id);

@@ -9,6 +9,7 @@ export function FindEntryContent({entry,query,privacy,media}:{entry:NavigationEn
     {!privacy&&<span className="find-entry__media" aria-hidden="true">{media??(entry.thumbnail?<img className={entry.avatar?'find-entry__avatar':undefined} src={entry.thumbnail} alt="" loading="lazy" decoding="async"/>:entry.icon)}</span>}
     <span className="find-entry__text"><span className="find-entry__label">{matchedSpans(entry.label,query).map((span,index)=>span.matched?<mark key={index}>{span.text}</mark>:span.text)}</span>
       {entry.context&&<span className="find-entry__meta">{entry.context}</span>}
+      {entry.detail}
     </span>
     {entry.activity&&<span className="find-entry__meta">{entry.activity}</span>}
     {entry.count!==undefined&&<span className="find-entry__meta">{entry.count.toLocaleString('ko-KR')}</span>}

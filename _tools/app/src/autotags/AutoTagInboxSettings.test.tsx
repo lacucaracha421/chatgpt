@@ -20,6 +20,7 @@ const initial = (): AutoTagInbox => ({
   last: {
     "auto-tags-latest.sqlite": { fileModified: "123", fileSize: 10, importedAt: "2026-09-28T03:40:00+09:00", imported: { taggedAssets: 42, tagRows: 100, skippedAssets: 0 }, tagger: { veto: 4, recommend: 8 }, error: null },
     "artist-style-latest.sqlite": { fileModified: "124", fileSize: 20, importedAt: "2026-09-28T03:40:00+09:00", imported: { imported: 8960, skipped: 0 }, tagger: null, error: null },
+    "nl-search-latest.sqlite": { fileModified: "125", fileSize: 30, importedAt: "2026-09-28T03:40:00+09:00", imported: { siglip: 9103, qwen8b: 9103, skipped: 0 }, tagger: null, error: null },
   },
 });
 beforeEach(() => {
@@ -39,7 +40,7 @@ afterEach(cleanup);
 it("renders the nightly result and chooses the folder, review toggle and manual trigger", async () => {
   const user = userEvent.setup();
   render(<AutoTagSettings disabled={false} />);
-  expect(await screen.findByText(/태거 판정 12건 반영.*그림체 8,960장/)).toBeTruthy();
+  expect(await screen.findByText(/태거 판정 12건 반영.*그림체 8,960장.*내용 검색 색인 9,103장/)).toBeTruthy();
   expect(screen.getByText("/tmp/inbox")).toBeTruthy();
   await user.click(screen.getByRole("switch", { name: "가져온 뒤 태거 판정 자동 반영" }));
   expect(invoke).toHaveBeenCalledWith("set_auto_tag_inbox", { folder: "/tmp/inbox", applyTaggerReview: false });

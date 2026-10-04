@@ -26,9 +26,11 @@ export function autoTagInboxResult(settings: AutoTagInbox): string {
     const date = new Date(last.importedAt);
     const pad = (n: number) => String(n).padStart(2, "0");
     const time = Number.isNaN(date.getTime()) ? last.importedAt : `${pad(date.getMonth() + 1)}.${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-    const label = name === "auto-tags-latest.sqlite" ? "자동 태그" : "그림체";
+    const label = name === "auto-tags-latest.sqlite" ? "자동 태그" : name === "artist-style-latest.sqlite" ? "그림체" : "내용 검색 색인";
     if (last.error) return `${time} ${label} 가져오기 실패 · ${last.error}`;
-    const result = label === "자동 태그" ? "자동 태그 가져옴" : `그림체 ${(last.imported.imported ?? 0).toLocaleString("ko-KR")}장`;
+    const result = label === "자동 태그" ? "자동 태그 가져옴"
+      : label === "그림체" ? `그림체 ${(last.imported.imported ?? 0).toLocaleString("ko-KR")}장`
+      : `내용 검색 색인 ${(last.imported.siglip ?? 0).toLocaleString("ko-KR")}장`;
     const tagger = last.tagger ? ` · 태거 판정 ${(last.tagger.veto + last.tagger.recommend).toLocaleString("ko-KR")}건 반영` : "";
     return `${time} ${result}${tagger}`;
   }).join(" · ");

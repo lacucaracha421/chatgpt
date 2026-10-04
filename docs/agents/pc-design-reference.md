@@ -35,7 +35,7 @@ Typography (user-approved 2026-09-28, replaces the 2026-09-06 SUIT + Barlow pair
 
 ### Area rail
 
-- Areas start with 홈, 에셋, 컬렉션, 망가, 메모, 전송 (plus 비밀 when the private vault is available). The tail holds `찾기` (the command/search palette, `Ctrl+K` / `Ctrl+F`) and `더보기`, a panel listing pending queues (유사 검토, 미분류, 전송 when they have items) and destinations (작가, 다시보기, 통계, 휴지통, 설정). The `더보기` badge counts only pending similarity review; 전송 shows its own received-file count. The area order and the `작가` entry follow `layout/WorkspaceNavigation.tsx` and `layout/navigationEntries.tsx`.
+- Areas start with 홈, 에셋, 컬렉션, 망가, 메모, 전송 (plus 비밀 when the private vault is available). The tail holds `찾기` (the command/search palette, `Ctrl+Q`; it replaced `Ctrl+K` / `Ctrl+F` on 2026-10-05) and `더보기`, a panel listing pending queues (유사 검토, 미분류, 전송 when they have items) and destinations (작가, 다시보기, 통계, 휴지통, 설정). The `더보기` badge counts only pending similarity review; 전송 shows its own received-file count. The area order and the `작가` entry follow `layout/WorkspaceNavigation.tsx` and `layout/navigationEntries.tsx`.
 - More opens beside its rail button, bottom-aligned, without a header or close button; outside click or Escape dismisses it.
 - Work, sync and error status live in the titlebar status center beside the window controls, not as rail buttons.
 - The rail is narrow and visually weaker than the contextual index; its current area uses the parent-context tint (§7).
@@ -79,7 +79,7 @@ The Asset toolbar holds the title, search and 보기. Sort and tile size are ins
 
 Search is not the dominant daily action, so it has no persistent input.
 
-- The rail 찾기 palette (`Ctrl+K`; `Ctrl+F` also works from a field) searches names across works, artists, note titles, folders, screens and commands using data already on the device. Scope chips narrow results. The current screen's own search is the first row where supported; an empty query shows 확인할 것 and five recent items. The tablet shares the cross-name Find contract (`628b6da3`).
+- The rail 찾기 palette (`Ctrl+Q`, also from a text field) searches names across works, artists, note titles, folders, screens and commands using data already on the device. Scope chips narrow results. The current screen's own search is the first row where supported; an empty query shows 확인할 것 and five recent items. The tablet shares the cross-name Find contract (`628b6da3`).
 - An applied query stays visible as a query badge in the view header with a direct `검색 해제` (the palette offers it too). Dismissing the palette never clears an applied query.
 - Online Catalog keeps its own search surface with suggestions/autocomplete and language/scope semantics.
 - Assets have no general text-search query contract. Do not fake one or add a new index/search engine for symmetry.

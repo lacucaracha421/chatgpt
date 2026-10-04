@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
-/** search: the current view's own search (palette only); tag: 자동 태그 filters for the 에셋 screen (palette only, while typing); place: folders, albums and characters by name (palette only, while typing); queue: non-empty review queues; go: destinations; action: commands; settings: settings sections (palette only). */
-export type NavigationEntryGroup = "search" | "work" | "artist" | "note" | "recent" | "tag" | "place" | "queue" | "go" | "action" | "settings";
+/** content: 내용 검색, images that match the typed description (PC palette only, while typing); search: the current view's own search (palette only); tag: 자동 태그 filters for the 에셋 screen (palette only, while typing); place: folders, albums and characters by name (palette only, while typing); queue: non-empty review queues; go: destinations; action: commands; settings: settings sections (palette only). */
+export type NavigationEntryGroup = "content" | "search" | "work" | "artist" | "note" | "recent" | "tag" | "place" | "queue" | "go" | "action" | "settings";
 
 export type NavigationEntry = {
   id: string;
@@ -18,12 +18,15 @@ export type NavigationEntry = {
   selected?: boolean;
   thumbnail?: string;
   avatar?: boolean;
+  /** Extra content under the label, e.g. the 내용 검색 thumbnail strip. */
+  detail?: ReactNode;
   run: () => void;
   /** Shift+Enter or Shift+click, e.g. exclude a tag instead of including it. */
   runAlternate?: () => void;
 };
 
 export const NAVIGATION_GROUP_LABELS: Record<NavigationEntryGroup, string> = {
+  content: "이미지 내용",
   search: "이 화면에서",
   work: "작품",
   artist: "작가",

@@ -1,7 +1,7 @@
 import { BookmarkIcon, BookOpenIcon, ExchangeIcon, FolderIcon, HomeIcon, MagnifyingGlassIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon } from "../shared/ui/ArchiveIcons";
 import { ViewColumnsIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { EASE_STANDARD, reducedMotion } from "../shared/motion/curves";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType, CollectionSummary } from "../library/types";
@@ -13,6 +13,7 @@ import { useArtistOverview } from "../artists/artistStore";
 import { useFindData } from "./findData";
 import { rememberRecent } from "./findModel";
 import { CommandPalette } from "./CommandPalette";
+import { descriptionSearchSource } from "../assets/descriptionSearch";
 import { useAutoTagPaletteSearch } from "../autotags/autoTagPalette";
 import { MoreEntryList, MorePanel } from "./MorePanel";
 import { placeEntries, useNavigationEntries, type PlaceSources } from "./navigationEntries";
@@ -72,11 +73,6 @@ type Props = {
   places?: PlaceSources;
   collections?: CollectionSummary[];
 };
-
-function isEditing(target: EventTarget | null) {
-  return target instanceof HTMLElement
-    && (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement);
-}
 
 export function WorkspaceNavigation({ view, requestedView = view, settling = false, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, unsortedCount = null, onQueuesRequested, privateVaultAvailable = false, onImportFiles, places, collections = [] }: Props) {
   const chrome = useWorkspaceChrome();
@@ -158,6 +154,9 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
     { id: "manga", group: "go" as const, label: "망가", icon: <PhotoIcon />, run: () => onNavigate({ kind: "manga" }) },
     ...entries];
   const findTags = useAutoTagPaletteSearch(paletteOpen, view, onNavigate);
+  const libraryGateway = useOptionalLibrary()?.gateway;
+  const descriptionSource = useMemo(() => descriptionSearchSource(libraryGateway), [libraryGateway]);
+  const descriptionSearch = descriptionSource ? { source: descriptionSource, open: (query: string) => onNavigate({ kind: "description_search", query }) } : null;
   const paletteButton = useRef<HTMLButtonElement>(null);
   const queuesRequested = useRef(onQueuesRequested);
   queuesRequested.current = onQueuesRequested;
@@ -166,10 +165,12 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
   useEffect(() => { setFindAction?.(openPalette); return () => setFindAction?.(null); }, [setFindAction, openPalette]);
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase();
-      if ((key !== "k" && key !== "f") || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
-      // Not over another dialog such as the asset viewer. Ctrl+K also waits while typing; Ctrl+F is the find key and works from a field.
-      if (event.defaultPrevented || modalDialogOpen() || (key === "k" && isEditing(event.target))) return;
+      // Ctrl+Q (user, 2026-10-05; replaced Ctrl+K / Ctrl+F). It has no text-editing meaning, so it also works from a field.
+      // Match the physical key too: with the Korean IME on, the Q key reports "ㅂ".
+      const isQ = event.code === "KeyQ" || event.key.toLowerCase() === "q";
+      if (!isQ || !event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      // Not over another dialog such as the asset viewer.
+      if (event.defaultPrevented || modalDialogOpen()) return;
       event.preventDefault();
       setPaletteOpen(true);
       queuesRequested.current?.();
@@ -221,9 +222,9 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
           <span>{label}</span>{activity && <span className="workspace-rail__activity" aria-hidden="true" />}</button>;
       })}
       <div className="workspace-rail__tail">
-        <button ref={paletteButton} type="button" className="workspace-rail__item" aria-label="찾기" aria-keyshortcuts="Control+K Control+F"
-          aria-description={searchInfo ? `${searchInfo.scope}에서 검색하거나 이름으로 이동 (Ctrl+K)` : "이름으로 이동하거나 명령 실행 (Ctrl+K)"} onClick={openPalette}>
-          <MagnifyingGlassIcon aria-hidden="true" /><span>찾기</span><kbd className="workspace-rail__hint" aria-hidden="true">Ctrl K</kbd>
+        <button ref={paletteButton} type="button" className="workspace-rail__item" aria-label="찾기" aria-keyshortcuts="Control+Q"
+          aria-description={searchInfo ? `${searchInfo.scope}에서 검색하거나 이름으로 이동 (Ctrl+Q)` : "이름으로 이동하거나 명령 실행 (Ctrl+Q)"} onClick={openPalette}>
+          <MagnifyingGlassIcon aria-hidden="true" /><span>찾기</span><kbd className="workspace-rail__hint" aria-hidden="true">Ctrl Q</kbd>
         </button>
         <MorePanel entries={moreEntries} current={requestedArea === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />
       </div>
@@ -231,7 +232,7 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
     <div className="workspace-index-slot" data-state={hideIndex || indexHiddenByUser ? "closed" : "open"} inert={hideIndex || indexHiddenByUser || chrome?.pending || undefined} aria-hidden={hideIndex || indexHiddenByUser || undefined} style={{ "--workspace-index-width": `${width}px` } as CSSProperties}>
       <div ref={indexClip} className="workspace-index-clip" hidden={indexClosed} style={{opacity: !indexClosed && settling && (previousClosed.current || indexEntrance.current) ? 0 : undefined}}>{indexContent.current}</div>
     </div>
-    <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={paletteEntries} recentKey={find.recentKey} loading={find.loading} error={find.error} search={paletteSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} findTags={findTags} fallbackFocus={() => paletteButton.current} />
+    <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={paletteEntries} recentKey={find.recentKey} loading={find.loading} error={find.error} search={paletteSearch} descriptionSearch={descriptionSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} findTags={findTags} fallbackFocus={() => paletteButton.current} />
   </div>;
 }
 

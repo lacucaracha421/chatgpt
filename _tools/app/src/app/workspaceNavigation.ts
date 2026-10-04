@@ -4,7 +4,7 @@ export function backNavigationTab(view: AssetView): string {
   switch (view.kind) {
     // The 작가 hub is an asset quick view: back from it returns to the folder it was opened from.
     case "classification": case "albums": case "album":
-    case "artists": case "creator": return "assets";
+    case "artists": case "creator": case "description_search": return "assets";
     case "collection": case "collections": return "collections";
     default: return view.kind;
   }

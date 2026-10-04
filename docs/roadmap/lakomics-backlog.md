@@ -123,7 +123,7 @@ Status: `PARTIAL` — implemented redesigns, manga cleanup UI, automatic edition
 - **Refresh motion:** new tiles arriving during refresh were requested to animate; the later accepted motion set only animates first load (`297891ea`, `97edc2c9`). Whether the earlier refresh-animation request was explicitly withdrawn is (unverified 2026-10-03); do not add it without reconciling the accepted rule.
 - **Catalog review:** server automatic-decision origin labels, decision-log restart replay and PC decision reporting completeness need recheck (unverified 2026-10-03); `includesServerWorks=false` deliberately preserves server-only candidates, not unfinished behaviour.
 - **Character panel (`HOLD`, user 2026-09-29):** after classification-flow cleanup, adjust regions on reference tiles with fixed panel order, one flagged-count line and stable controls (mockup F); [folder prototypes](../prototypes/pc-folders-20260929/).
-- **Find / natural-language search:** keep the rail Find button and later improve convenience (decided 2026-09-28). Natural-language search stays `HOLD` because auto tags work; [SigLIP2 trial](../research/oss-trial-clip-20260927.md), tag translation first and model fallback only after a decision.
+- **Find / natural-language search:** keep the rail Find button and later improve convenience (decided 2026-09-28). The natural-language search `HOLD` was lifted by the user on 2026-10-04; see `NL-SEARCH-001`.
 - **Light theme (`HOLD`, decided 2026-09-28):** Settings choice, dark default, token-only light palette; [foundation palettes](../prototypes/design-foundation-20260928/part4.html).
 - **Vanished manga folders:** UI is implemented (`4542a6b9`, `af2fd1a4`); production deletion still needs separate approval. Preserve user choice of selected records only with verified automatic backup (decided 2026-09-28).
 
@@ -326,8 +326,26 @@ Status: `TODO` — user 2026-10-04: use the new main PC (RTX 5070 Ti 16 GB, 12 t
   2. **Video similarity fingerprints:** 0 of 459 videos fingerprinted (12 samples/video, FFmpeg 1 decoder thread, serialized). Run several in parallel on the main PC and try NVDEC decode; the fingerprint contract (frame size, samples) must stay identical so laptop-made fingerprints compare.
   3. **Unknown-character grouping:** pairwise CCIP comparison over the whole library, grouping with Chinese Whispers (chosen in [OSS trial](../research/oss-trial-sqlitevec-ccip-20260926.md)); GPU for the N×N similarity. Needs 1.
 - **Design notes (read-only study 2026-10-04):** 1 = new extraction-only `warm_features` op in `scan_worker.py` driven by the incremental owner (32/page, one Python owner, manual priority, Saving Mode wins, cache entries are the checkpoint); first prove S36 4-thread vectors are byte-identical to 2-thread and to the cache (ORT does not guarantee equality across thread counts). 2 = purpose-specific fingerprint backfill (not the 2–100-ID review scan), CPU only with N=2 bounded gate, resumable 600 s windows, keep `-threads 1` and test `-filter_threads 1`; NVDEC not adopted (no identity proof); fingerprint cache is keyed by the FFmpeg binary hash, so laptop and main PC do not share fingerprints. UI: two main-profile-only actions beside the performance selector, no auto-run.
-- **Optional larger features:** text-to-image library search from precomputed image embeddings (GPU backfill once; laptop embeds only new images and queries); upscaling for low-resolution manga pages.
+- **Optional larger features:** text-to-image library search is now `NL-SEARCH-001` (vectors built 2026-10-04); upscaling for low-resolution manga pages.
 - **Also possible later:** NVENC for Linux video proxies (`libx264` today) and CUDA for live CCIP inference — both need equivalence/feature-identity decisions first.
+
+<a id="nl-search-001--korean-natural-language-image-search"></a>
+## NL-SEARCH-001 — Korean natural-language image search (main PC)
+
+Status: `IN_PROGRESS` — the user lifted the HOLD on 2026-10-04 after a GPU bake-off ([research](../research/nl-search-trial-20261004.md)).
+- **Decided (user, 2026-10-04):**
+  - **v1 search:** names from the library's character targets (with their series folder names) go to auto-tag scores. Every other query is translated with opus-mt-ko-en and embedded with SigLIP2 so400m on CPU, then ranked by cosine against precomputed image vectors (P@10 0.68 on 32 Korean queries).
+  - **Precise mode:** Qwen3-VL-Embedding-8B image vectors are built too. Precise search (GPU at query time, about 4.8 GiB) is an optional setting (P@10 0.72).
+  - **Platforms:** main PC only for now. Laptop, tablet and video come later.
+  - **UI:** option A from the mockup. The 찾기 palette gets an "이미지 내용" group with a strip of the top 7 results. The strip updates after a typing pause of about 0.4 s and after Hangul composition ends, never per keystroke, and keeps the old strip until the next one is ready. Enter opens a "내용 검색" result state in 에셋 with 검색 해제. Mockup: [prototype README](../prototypes/nl-search-20261004/README.md).
+- **Architecture:** same as artist style. A machine-local GPU job (`_tools/app/nl-search-runtime/nl_index.py`) writes `nl-search-latest.sqlite` into the auto-tag inbox. The app imports it into `<library>/.cache/nl-search/` (disposable, PC-only, never published). Rust ranks the results. A Python query worker (`nl_query_worker.py`, newline-delimited JSON) starts when the palette opens and stops after 30 idle minutes.
+- **Remaining:**
+  - phase 1 backend;
+  - phase 2 palette and result UI;
+  - native check on the production library (needs approval: inbox folder and cache write);
+  - a nightly Windows task for new images (registered by the user).
+  Korean captions for all 9,103 images exist in the trial output, unused in v1 (later: inspector description, image-type filter).
+- **Laptop later:** the query worker holds about 4.1 GB RAM because the SigLIP text tower is fp32. New images need the main PC to index them.
 
 ## ACCEPTANCE — native PC / tablet / Windows checks pending
 

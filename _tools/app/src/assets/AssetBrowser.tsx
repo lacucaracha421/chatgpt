@@ -6,7 +6,8 @@ import { FolderIcon } from "@heroicons/react/24/outline";
 import { ASSET_PAGE_SIZE } from "../library/constants";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
-import type { AlbumEntry, AssetAspectFilter, AssetCursor, AssetDateBucket, AssetMediaFilter, AssetQuery, AssetSort, AssetSummary, AssetView, ClassificationEntry, CollectionSummary } from "../library/types";
+import type { AlbumEntry, AssetAspectFilter, AssetCursor, AssetDateBucket, AssetMediaFilter, AssetQuery, AssetSort, AssetSummary, AssetView, ClassificationEntry, CollectionSummary, LibraryGateway } from "../library/types";
+import { Badge } from "../shared/ui/Badge";
 import { Button } from "../shared/ui/Button";
 import { ContextMenu, type ContextMenuItem } from "../shared/ui/ContextMenu";
 import { EmptyState } from "../shared/ui/EmptyState";
@@ -38,10 +39,12 @@ import { moveAssetsToCharacters, type CharacterTarget } from "../characters/api"
 import { characterHubApi, type CharacterGroup, type CharacterHubApi } from "../characters/hubApi";
 import { applySelectionGesture, emptySelection, focusAsset, moveSelectionFocus, reconcileSelection, selectAllLoaded, type SelectionGesture, type SelectionState } from "./selection";
 import { FolderFilterControl, FolderShelf } from "./FolderShelf";
+import { descriptionSearchError, searchDescription } from "./descriptionSearch";
 
 export type AssetBrowserStatus = { loadedCount: number; totalCount?: number; selectedAsset: AssetSummary | null; loading: boolean };
-type Props = { navigationMemory?: AssetNavigationMemory; onReviewVideos?: (assetIds: string[]) => void; galleryLayout?: "masonry" | "justified"; onGalleryLayoutChange?: (layout: "masonry" | "justified") => void; view: AssetView; onViewChange?: (view: AssetView) => void; classifications: ClassificationEntry[]; characterTargets?: CharacterTarget[]; characterGroups?: CharacterGroup[]; onCharactersChanged?: () => void; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; onMembershipChanged?: () => void; sort: AssetSort; metadataVisible: boolean; privacyMode: boolean; onPrivacyModeChange: (privacyMode: boolean) => void; thumbnailRowHeight?: number; refreshVersion: number; clearSelectionRequest?: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; folderShelfApi?: Pick<CharacterHubApi, "seriesFolders">; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void };
-type PageState = { sort: AssetSort; queryKey: string; items: AssetSummary[]; headCursor: AssetCursor | null; tailCursor: AssetCursor | null; totalCount: number | null };
+type Props = { navigationMemory?: AssetNavigationMemory; onReviewVideos?: (assetIds: string[]) => void; galleryLayout?: "masonry" | "justified"; onGalleryLayoutChange?: (layout: "masonry" | "justified") => void; view: AssetView; onViewChange?: (view: AssetView) => void; classifications: ClassificationEntry[]; characterTargets?: CharacterTarget[]; characterGroups?: CharacterGroup[]; onCharactersChanged?: () => void; albums?: AlbumEntry[]; collections?: CollectionSummary[]; onCollectionsChanged?: () => void; onMembershipChanged?: () => void; sort: AssetSort; metadataVisible: boolean; privacyMode: boolean; onPrivacyModeChange: (privacyMode: boolean) => void; thumbnailRowHeight?: number; refreshVersion: number; clearSelectionRequest?: number; requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void; onSortChange: (sort: AssetSort) => void; onMetadataVisibleChange: (visible: boolean) => void; onThumbnailRowHeightChange?: (height: number) => void; onStatusChange: (status: AssetBrowserStatus) => void; folderShelfApi?: Pick<CharacterHubApi, "seriesFolders">; onPointerDragStart?: (payload: InternalDragPayload, event: React.PointerEvent<HTMLElement>) => void; onPointerDragMove?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void; onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void; /** 내용 검색 검색 해제: back to the view the search was opened from. */ onExitDescriptionSearch?: () => void };
+/** `noMatchQuery`: a 내용 검색 page whose query the "no match" gate turned away (not forced). */
+type PageState = { sort: AssetSort; queryKey: string; items: AssetSummary[]; headCursor: AssetCursor | null; tailCursor: AssetCursor | null; totalCount: number | null; noMatchQuery?: string };
 export type AssetNavigationMemory = Map<string, PageState>;
 type QueryError = { queryKey: string; message: string };
 const EMPTY_ASSETS: AssetSummary[] = [];
@@ -88,7 +91,7 @@ function useStyleSuggestionAssetIds(enabled: boolean) {
 }
 
 
-export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout = "masonry", onGalleryLayoutChange, view, onViewChange, classifications, characterTargets = [], characterGroups = [], onCharactersChanged = () => undefined, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, clearSelectionRequest = 0, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, folderShelfApi = characterHubApi, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: Props) {
+export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout = "masonry", onGalleryLayoutChange, view, onViewChange, classifications, characterTargets = [], characterGroups = [], onCharactersChanged = () => undefined, albums = [], collections = [], onCollectionsChanged = () => undefined, onMembershipChanged = () => undefined, sort, metadataVisible, privacyMode, onPrivacyModeChange, thumbnailRowHeight = 180, refreshVersion, clearSelectionRequest = 0, requestedAsset = null, onRequestedAssetHandled = () => undefined, onSortChange, onMetadataVisibleChange, onThumbnailRowHeightChange = () => undefined, onStatusChange, folderShelfApi = characterHubApi, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel, onExitDescriptionSearch }: Props) {
   const { gateway, library } = useLibrary();
   const previewCache = folderPreviewCache(gateway, library?.root);
   const [assignOpen, setAssignOpen] = useState(false);
@@ -183,11 +186,16 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   const styleSuggestionsOnly = view.kind === "creator" && isUnknownArtist(view.creatorKey) && view.styleSuggestionsOnly === true;
   const styleSuggestionAssets = useStyleSuggestionAssetIds(styleSuggestionsOnly);
   const autoTagFilter = useAutoTagFilter();
-  const autoTagFiltered = hasAutoTagFilter(autoTagFilter);
-  const queryBase = useMemo<Omit<AssetQuery, "after">>(() => ({ classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, collectionId: view.kind === "collection" ? view.collectionId : null, creatorKey, directOnly: view.kind === "classification" && Boolean(view.classificationId) && !view.characterId && !view.characterGroupId ? directOnly : false, unclassifiedOnly: view.kind === "unsorted", mediaKind: filterable && mediaFilter !== "all" ? mediaFilter : null, aspectRatio: filterable && aspectFilter !== "all" ? aspectFilter : null, sort, randomPivot: sort === "random" ? randomPivotRef.current : null, collectedRange: null, ...(autoTagFiltered ? { autoTags: autoTagFilter } : {}), limit: ASSET_PAGE_SIZE }), [aspectFilter, autoTagFilter, autoTagFiltered, creatorKey, directOnly, sort, filterable, mediaFilter, randomVersion, view]);
-  const queryKey = JSON.stringify(queryBase);
+  // 내용 검색 ranks every image by the description; the rank order is the order, so sort and tag filters do not apply.
+  const descriptionQuery = view.kind === "description_search" ? view.query : null;
+  const descriptionForce = view.kind === "description_search" && view.force === true;
+  const autoTagFiltered = hasAutoTagFilter(autoTagFilter) && descriptionQuery === null;
+  const querySort: AssetSort = descriptionQuery === null ? sort : "newest";
+  const queryBase = useMemo<Omit<AssetQuery, "after">>(() => ({ classificationId: view.kind === "classification" ? view.classificationId : null, albumId: view.kind === "album" ? view.albumId : null, collectionId: view.kind === "collection" ? view.collectionId : null, creatorKey, directOnly: view.kind === "classification" && Boolean(view.classificationId) && !view.characterId && !view.characterGroupId ? directOnly : false, unclassifiedOnly: view.kind === "unsorted", mediaKind: filterable && mediaFilter !== "all" ? mediaFilter : null, aspectRatio: filterable && aspectFilter !== "all" ? aspectFilter : null, sort: querySort, randomPivot: querySort === "random" ? randomPivotRef.current : null, collectedRange: null, ...(autoTagFiltered ? { autoTags: autoTagFilter } : {}), limit: ASSET_PAGE_SIZE }), [aspectFilter, autoTagFilter, autoTagFiltered, creatorKey, directOnly, querySort, filterable, mediaFilter, randomVersion, view]);
+  // The summary read uses the all-assets query; the description only keys the page.
+  const queryKey = descriptionQuery === null ? JSON.stringify(queryBase) : JSON.stringify({ ...queryBase, descriptionQuery, ...(descriptionForce ? { descriptionForce } : {}) });
   useEffect(() => setNewAssetsAvailable(false), [queryKey]);
-  const viewKey = view.kind === "classification" ? `classification:${view.classificationId}` : view.kind === "album" ? `album:${view.albumId}` : view.kind === "collection" ? `collection:${view.collectionId}` : view.kind === "creator" ? `creator:${view.creatorKey}:${view.styleSuggestionsOnly ? "suggested" : "all"}` : view.kind;
+  const viewKey = view.kind === "classification" ? `classification:${view.classificationId}` : view.kind === "album" ? `album:${view.albumId}` : view.kind === "collection" ? `collection:${view.collectionId}` : view.kind === "creator" ? `creator:${view.creatorKey}:${view.styleSuggestionsOnly ? "suggested" : "all"}` : view.kind === "description_search" ? `description:${view.query}${view.force ? ":force" : ""}` : view.kind;
   const activePage = page?.queryKey === queryKey ? page : null;
   const rawItems = activePage?.items ?? EMPTY_ASSETS;
   const items = styleSuggestionsOnly
@@ -215,6 +223,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     const request = { ...queryBase, after: null, aroundDate: null };
     const retained = pageRef.current;
     const load = async () => {
+      if (descriptionQuery !== null) return loadDescriptionPage(gateway, descriptionQuery, descriptionForce, request);
       if (!retained?.items.length || !gateway.refreshAssets) return gateway.listAssets(request);
       const first = retained.headCursor === null ? await gateway.listAssets(request) : null;
       const refreshed = new Map<string, AssetSummary>();
@@ -248,10 +257,11 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       if (!result) return;
       if (generation !== generationRef.current) return;
       const items = shareAssetSummaries(retained?.items ?? EMPTY_ASSETS, result.items);
-      setPage({ sort: queryBase.sort, queryKey, items, headCursor: result.previousCursor ?? null, tailCursor: result.nextCursor, totalCount: result.totalCount ?? null });
+      const turnedAway = (result as { noMatchQuery?: string }).noMatchQuery;
+      setPage({ sort: queryBase.sort, queryKey, items, headCursor: result.previousCursor ?? null, tailCursor: result.nextCursor, totalCount: result.totalCount ?? null, ...(turnedAway !== undefined ? { noMatchQuery: turnedAway } : {}) });
       setSelectedAsset((selected) => reconcileAsset(selected, selectedViewKeyRef.current, viewKey, items));
       setViewerAssetId((assetId) => requestedAssetRef.current?.id === assetId ? assetId : reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, items));
-    }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: commandErrorMessage(error, "자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) setFirstLoading(false); });
+    }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: descriptionQuery !== null ? descriptionSearchError(error) : commandErrorMessage(error, "자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) setFirstLoading(false); });
     return () => { ++generationRef.current; };
   }, [gateway, queryKey, galleryRefreshVersion, retryVersion, view.kind, viewKey]);
   useEffect(() => {
@@ -568,6 +578,11 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     { id: "info", label: "정보 열기", onSelect: () => setInspectorOpen(true) },
     { id: "trash", label: "휴지통으로 이동", destructive: true, disabled: batchPending, onSelect: trashSelection },
   ];
+  const descriptionCount = visiblePage?.queryKey === queryKey ? visiblePage.totalCount : null;
+  const descriptionAccessory = <span className="auto-tag-filters">
+    {descriptionCount ? <span className="auto-tag-filters__note" role="status">관련도순 · 상위 {descriptionCount.toLocaleString("ko-KR")}장</span> : null}
+    <Button variant="quiet" size="sm" onClick={onExitDescriptionSearch}>검색 해제</Button>
+  </span>;
   const showNewest = () => { setPage(null); pageRef.current = null; setNewAssetsAvailable(false); refresh(); }; // no-flash-ok: 처음부터 보기 is an explicit restart
   const folderShelfIntro = plainFolderId && directOnly && folderChildren.length > 0 ? <>
     <FolderShelf
@@ -595,11 +610,15 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   // Same padding as the gallery scroll area (layout-dependent gap + scrollbar lane), so the shelf does
   // not shift when the view moves between a loading/empty state and the gallery.
   const folderHead = folderShelfIntro && <div className={`asset-browser__folder-head${galleryLayout === "masonry" ? " asset-gallery--masonry" : ""}`}>{folderShelfIntro}</div>;
+  // The gate turned the painted query away: offer the nearest images anyway (a forced view, so back returns here).
+  const noMatchQuery = visiblePage?.noMatchQuery;
   const directOnlyEmpty = plainFolderId !== null && folderChildren.length > 0 && directOnly;
   const assetResults = (firstLoading && visibleItems.length === 0 && !visiblePage) || (!visiblePage && !currentFirstError)
     ? <>{folderHead}<Skeleton className="asset-browser__skeleton" label="자산을 불러오는 중" /></>
     : currentFirstError && !activePage
-      ? <>{folderHead}<EmptyState title="자산을 불러오지 못했습니다"><Button onClick={refresh}>다시 시도</Button></EmptyState></>
+      ? <>{folderHead}<EmptyState title={descriptionQuery !== null ? currentFirstError : "자산을 불러오지 못했습니다"}><Button onClick={refresh}>다시 시도</Button></EmptyState></>
+      : visibleItems.length === 0 && descriptionQuery !== null
+        ? <EmptyState title="일치하는 이미지가 없습니다.">{noMatchQuery !== undefined && <Button onClick={() => onViewChange?.({ kind: "description_search", query: noMatchQuery, force: true })}>그래도 가장 비슷한 그림 보기</Button>}</EmptyState>
       : visibleItems.length === 0 && (hasActiveFilters || autoTagFiltered || styleSuggestionsOnly)
         ? <>{folderHead}<EmptyState title={styleSuggestionsOnly ? "추천이 있는 자산이 없습니다." : "조건에 맞는 자산이 없습니다."}><Button onClick={() => { resetFilters(); clearAutoTagFilter(); resetStyleSuggestionFilter(); }}>필터 초기화</Button></EmptyState></>
       : visibleItems.length === 0
@@ -611,12 +630,12 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
           const target = items.find((item) => item.id === id);
           if (!target || (batchPending && !selection.ids.has(target.id))) { event.preventDefault(); return; }
           if (!selection.ids.has(target.id)) selectWithGesture(target, { toggle: false, range: false });
-        }} className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery scrubberHidden={viewerAssetId !== null} layout={galleryLayout} intro={<>{artistScope?.intro}{folderShelfIntro}</>} infoOpen={inspectorOpen} favoritesView={sort === "favorites"} groupDates={!folderShelfIntro && (visiblePage?.sort === "newest" || visiblePage?.sort === "oldest")} items={visibleItems} scopeKey={visiblePage?.queryKey} folderPath={galleryFolderPath} totalCount={styleSuggestionsOnly ? styleSuggestionAssets?.totalImages ?? null : visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onFocusAsset={focusAssetOnly} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onAssignCharacter={openCharacterPicker} onToggleFavorite={toggleFavorite} onToggleFocusedFavorite={toggleFocusedFavorite} onToggleInfo={() => setInspectorOpen((open) => !open)} onEscape={() => { if (inspectorOpen) setInspectorOpen(false); else clearSelection(); }} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; viewerOriginRect.current = visibleTileRect(asset.id); setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
+        }} className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery scrubberHidden={viewerAssetId !== null} layout={galleryLayout} intro={<>{artistScope?.intro}{folderShelfIntro}</>} infoOpen={inspectorOpen} favoritesView={sort === "favorites" && descriptionQuery === null} groupDates={descriptionQuery === null && !folderShelfIntro && (visiblePage?.sort === "newest" || visiblePage?.sort === "oldest")} items={visibleItems} scopeKey={visiblePage?.queryKey} folderPath={galleryFolderPath} totalCount={styleSuggestionsOnly ? styleSuggestionAssets?.totalImages ?? null : visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onFocusAsset={focusAssetOnly} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onAssignCharacter={openCharacterPicker} onToggleFavorite={toggleFavorite} onToggleFocusedFavorite={toggleFocusedFavorite} onToggleInfo={() => setInspectorOpen((open) => !open)} onEscape={() => { if (inspectorOpen) setInspectorOpen(false); else clearSelection(); }} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; viewerOriginRect.current = visibleTileRect(asset.id); setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
   return <section className="asset-browser" aria-label="저장소" onKeyDown={event => {
     if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.key.toLowerCase() !== "i" || (event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
     event.preventDefault(); setInspectorOpen(open => !open);
   }}>
-    {<AssetToolbar title={artistScope?.title} scopeControl={folderFilterControl} titleAccessory={<>{artistScope?.accessory}<AutoTagFilterBadges resultCount={activePage?.totalCount ?? null} /></>} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} inspectorOpen={inspectorOpen} inspectorAvailable onInspectorOpenChange={setInspectorOpen} />}
+    {<AssetToolbar title={descriptionQuery ?? artistScope?.title} titleLeading={descriptionQuery !== null ? <Badge>이미지 내용</Badge> : undefined} scopeControl={folderFilterControl} titleAccessory={descriptionQuery !== null ? descriptionAccessory : <>{artistScope?.accessory}<AutoTagFilterBadges resultCount={activePage?.totalCount ?? null} /></>} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} inspectorOpen={inspectorOpen} inspectorAvailable onInspectorOpenChange={setInspectorOpen} />}
     {newAssetsAvailable && <div role="status">새 자료가 있습니다. <Button size="sm" onClick={showNewest}>처음부터 보기</Button></div>}
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
     {characterNotice && <Toast secondaryActionLabel="열기" onSecondaryAction={() => {
@@ -627,7 +646,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       {privacyMode ? <span className="character-assign-notice__thumbnail character-assign-notice__thumbnail--private" aria-hidden="true" /> : <CharacterNoticeThumbnail target={characterNotice.target} />}
       <span><strong>{characterNotice.count.toLocaleString("ko-KR")}장</strong> → {characterNotice.target.displayName}</span>
     </span></Toast>}
-    {currentFirstError && <Toast tone="error">{currentFirstError}</Toast>}
+    {currentFirstError && descriptionQuery === null && <Toast tone="error">{currentFirstError}</Toast>}
     <div className="asset-browser__workspace" data-info-open={inspectorOpen}>
       <div className="asset-browser__gallery">
         {assetResults}
@@ -661,6 +680,19 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       onNearEnd={activePage && tailCursor !== null ? loadNextPage : undefined}
     />
   </section>;
+}
+
+/** Resolve the ranked ids to summaries (the read does not keep order), restore the rank order and drop ids that no longer resolve. */
+async function loadDescriptionPage(gateway: LibraryGateway, query: string, force: boolean, request: AssetQuery) {
+  if (!gateway.searchByDescription || !gateway.refreshAssets) throw new Error("이 환경에서는 지원하지 않습니다.");
+  const { route, assetIds } = await searchDescription(gateway.searchByDescription, query, force);
+  if (route === "noMatch" && !force) return { items: [], previousCursor: null, nextCursor: null, totalCount: 0, noMatchQuery: query };
+  const found = new Map<string, AssetSummary>();
+  for (let offset = 0; offset < assetIds.length; offset += 500) {
+    for (const asset of await gateway.refreshAssets(request, assetIds.slice(offset, offset + 500))) found.set(asset.id, asset);
+  }
+  const items = assetIds.flatMap(id => found.get(id) ?? []);
+  return { items, previousCursor: null, nextCursor: null, totalCount: items.length };
 }
 
 function isMovableViewerFolder(entry: ClassificationEntry): boolean {

@@ -1,0 +1,10 @@
+# CUDA 13.0 wheels: https://download.pytorch.org/whl/cu130
+# Versions read from the research environment; installing dependencies is a manual operation.
+torch==2.14.1+cu130
+torchvision==0.29.1+cu130
+transformers==5.18.0
+accelerate==1.15.0
+bitsandbytes==0.50.2
+sentencepiece==0.2.2
+pillow==12.3.0
+numpy==2.5.2

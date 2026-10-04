@@ -14,7 +14,7 @@ export type ViewChromeSpec = {
   actions?: ReactNode;
   settings?: ReactNode;
   summary?: string;
-  /** Plain text search: applied from the 찾기 palette (Ctrl+K / Ctrl+F); there is no separate editor. */
+  /** Plain text search: applied from the 찾기 palette (Ctrl+Q); there is no separate editor. */
   search?: ChromeSearchSpec;
   searchSurface?: ChromeSearchSurfaceSpec;
   status?: ReactNode;
