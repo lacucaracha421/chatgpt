@@ -4,7 +4,8 @@
 .physical-cover--game > img { object-fit:fill; }
 .physical-cover[data-source="fallback"] > img { object-fit:contain; }
 /* Pending: a neutral object in the final silhouette; the finished image fades in over it (never a flat preview first). */
-.physical-cover > .physical-cover__image { position:relative; z-index:1; opacity:0; transition:opacity 140ms ease-out; }
+.physical-cover > .physical-cover__image { position:relative; z-index:2; opacity:0; transition:opacity 140ms ease-out; }
+.physical-cover > .physical-cover__previous { position:absolute; inset:0; z-index:1; }
 .physical-cover[data-ready="true"] > .physical-cover__image { opacity:1; }
 .physical-cover[data-instant="true"] > .physical-cover__image { transition:none; }
 .physical-cover > .physical-cover__shell { position:absolute; inset:0; }

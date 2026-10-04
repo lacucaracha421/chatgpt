@@ -155,3 +155,42 @@ describe("scroll-back harness", () => {
     expect(cache.stats().bytes).toBeLessThanOrEqual(1_000_000); expect(cache.stats().entries).toBeLessThanOrEqual(6);
   });
 });
+
+it("bounds decoded rasters even when their PNG blobs are tiny, without revoking readers", async () => {
+  const cache = new RenderCache({ entries: 256, bytes: 64*1024*1024, decodedBytes: 128*1024*1024, pending: 128 });
+  caches.push(cache);
+  const large = () => ({ ...result(64), width: 512, height: 724 });
+  const releases: Array<() => void> = [], notifications: ReturnType<typeof vi.fn>[] = [];
+  for (let i = 0; i < 100; i++) {
+    const notify = vi.fn(); notifications.push(notify);
+    releases.push(cache.acquire(`large-${i}`, async () => large(), notify));
+  }
+  await vi.runAllTimersAsync();
+  expect(cache.stats().entries).toBe(90);
+  expect(cache.stats().decodedBytes).toBeLessThanOrEqual(128*1024*1024);
+  expect(notifications[90]).toHaveBeenCalledWith(null);
+  expect(revoke).not.toHaveBeenCalled();
+  releases[0]();
+  cache.acquire("replacement", async () => large(), vi.fn());
+  await vi.runAllTimersAsync();
+  expect(revoke).toHaveBeenCalledOnce();
+  expect(cache.stats().entries).toBe(90);
+  cache.clear();
+  expect(cache.stats().decodedBytes).toBe(0);
+});
+
+it("retains 181 measured game covers across collection switches without another bake", async () => {
+  const cache = new RenderCache(THUMBNAIL_LIMIT); caches.push(cache);
+  const produce = vi.fn(async () => ({ ...result(100_000), width: 192, height: 272 }));
+  const visit = async () => {
+    // The real viewport requests batches; a collection need not fit the pending queue.
+    for (let start = 0; start < 181; start += 36) {
+      const stops = Array.from({ length: Math.min(36, 181-start) }, (_, offset) =>
+        cache.acquire(coverKey({ kind:"game", src:`/thumb/${start+offset}`, scope:"library", revision:"1", pixels:192 }), produce, vi.fn()));
+      await vi.runAllTimersAsync(); stops.forEach(stop => stop());
+    }
+  };
+  await visit(); expect(produce).toHaveBeenCalledTimes(181);
+  await visit(); expect(produce).toHaveBeenCalledTimes(181);
+  expect(cache.stats()).toMatchObject({ hits:181, evictions:0 });
+});

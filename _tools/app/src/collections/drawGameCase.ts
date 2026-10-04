@@ -79,7 +79,9 @@ export function drawGameCase(canvas: HTMLCanvasElement, image: HTMLImageElement 
   }
   const texture = document.createElement("canvas");
   texture.width = WIDTH * 3; texture.height = HEIGHT * 3;
-  const paint = texture.getContext("2d");
+  // This surface is read 70 times and then discarded, never presented. Keep
+  // transient textures in CPU memory so they cannot queue accelerated work.
+  const paint = texture.getContext("2d", { willReadFrequently: true });
   if (!paint) return false;
   paint.drawImage(image, 0, 0, texture.width, texture.height);
   ctx.save();

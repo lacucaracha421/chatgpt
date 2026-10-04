@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { acquireCover, coverKey, coverSourceUrl, type CoverRequest } from "./collectibleRuntime";
 import type { Snapshot } from "./RenderCache";
 import { observeCover, observeCoverSize } from "./coverVisibility";
@@ -18,15 +18,22 @@ export function PhysicalCover({src,alt,kind,scope="",revision="",large=false,onE
   const [result,setResult]=useState<{key:string;value:Snapshot;failed:boolean;instant:boolean}|null>(null);
   const [shell,setShell]=useState<Snapshot>(null);
   const [loadedUrl,setLoadedUrl]=useState<string|null>(null);
+  const [shown,setShown]=useState<{key:string;url:string}|null>(null);
+  const shownRef=useRef(shown); shownRef.current=shown;
+  const leases=useRef(new Map<string,()=>void>());
   const request:CoverRequest={kind,src:src??"",scope,revision,pixels},key=coverKey(request);
   const current=result?.key===key?result:null;
   useEffect(()=>root.current?observeCover(root.current,(isNear,isVisible)=>{onScreen.current=isVisible;setNear(isNear);}):undefined,[]);
-  useEffect(()=>{
+  useLayoutEffect(()=>{
     if(kind!=="game"||!root.current) {setPixels(large?320:256);return;}
     const update=(width:number)=>{
+      if(width<=0) return;
       const required=Math.max(1,width)*Math.min(window.devicePixelRatio||1,2);
       setPixels([192,256,320,384,512].find(size=>size>=required)??512);
     };
+    // IntersectionObserver can deliver before ResizeObserver on entry. Measure
+    // before subscribing so a remount never requests the default bucket first.
+    update(root.current.getBoundingClientRect().width);
     return observeCoverSize(root.current,update);
   },[kind,large]);
   // One shared neutral case per pixel bucket: the pending silhouette of every game, and the final image without artwork.
@@ -39,22 +46,40 @@ export function PhysicalCover({src,alt,kind,scope="",revision="",large=false,onE
   useEffect(()=>{
     if(!near||!src) return;
     let active=true,instant=true;
-    const stop=acquireCover({kind,src,scope,revision,pixels},value=>{if(active)setResult({key,value,failed:value===null,instant});},()=>onScreen.current?0:1);
+    let stop:()=>void=()=>undefined;
+    let released=false;
+    const release=()=>{if(released)return;released=true;stop();leases.current.delete(key);};
+    leases.current.get(key)?.();
+    leases.current.set(key,release);
+    stop=acquireCover({kind,src,scope,revision,pixels},value=>{if(active)setResult({key,value,failed:value===null,instant});},()=>onScreen.current?0:1);
     instant=false;
-    return ()=>{active=false;stop();setResult(null);};
+    // A displayed raster stays pinned until its replacement has decoded.
+    return ()=>{active=false;if(shownRef.current?.key!==key)release();};
   },[near,key,kind,src,scope,revision,pixels]);
+  useEffect(()=>{
+    if(near)return;
+    setShown(null);shownRef.current=null;
+    for(const release of [...leases.current.values()])release();
+  },[near]);
+  useEffect(()=>()=>{for(const release of [...leases.current.values()])release();},[]);
   const art=src?current?.value??null:shell;
   const fallback=Boolean(src&&current?.failed);
   const url=near?(art?.url??(fallback?coverSourceUrl(request):null)):null;
   const ready=url!==null&&loadedUrl===url;
+  const previous=near&&shown?.url!==url?shown:null;
   const showShell=near&&kind==="game"&&Boolean(src)&&!fallback&&Boolean(shell);
   return <span ref={root} className={`physical-cover physical-cover--${kind}`} data-ready={ready} data-source={art?"rendered":fallback?"fallback":"pending"}
     data-shell={showShell||undefined} data-instant={(src&&current?.instant)||undefined}>
     {showShell&&<img className="physical-cover__shell" src={shell!.url} alt="" aria-hidden="true" decoding="async" draggable={false} />}
+    {previous&&<img key={previous.url} className="physical-cover__previous" src={previous.url} crossOrigin="anonymous" decoding="async" alt="" aria-hidden="true" draggable={false} />}
     {/* No <img> until there is a source: WebKitGTK spent ~70 ms a frame for most of a second on a
         grid's worth of source-less images (the covers outside the near margin) after every mount. */}
-    {url!==null&&<img ref={collectionCoverSourceRef} className="physical-cover__image" src={url} crossOrigin="anonymous" alt={alt} decoding="async" draggable={false}
-      onLoad={()=>setLoadedUrl(url)}
+    {url!==null&&<img key={url} ref={collectionCoverSourceRef} className="physical-cover__image" src={url} crossOrigin="anonymous" alt={alt} decoding="async" draggable={false}
+      onLoad={()=>{
+        if(previous)setResult(value=>value?.key===key?{...value,instant:true}:value);
+        setLoadedUrl(url);setShown({key,url});shownRef.current={key,url};
+        for(const [held,release] of [...leases.current])if(held!==key)release();
+      }}
       onError={()=>{
         if(src&&art) setResult({key,value:null,failed:true,instant:true});
         else latestError.current?.();

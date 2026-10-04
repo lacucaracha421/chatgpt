@@ -7,7 +7,7 @@ import { loadCoverImage } from "./loadCoverImage";
 import { createSnapshotStore } from "./snapshotStore";
 export type CoverRequest = { kind:"book"|"game"; src:string; scope:string; revision:string; pixels:number };
 const cache=new RenderCache(THUMBNAIL_LIMIT,createSnapshotStore());
-let engine:PaperbackEngine|null=null, bookCanvas:HTMLCanvasElement|null=null, gameCanvas:HTMLCanvasElement|null=null;
+let engine:PaperbackEngine|null=null, bookCanvas:HTMLCanvasElement|null=null, gameCanvas:HTMLCanvasElement|null=null, gameOutput:HTMLCanvasElement|null=null;
 let contextLost=false, unavailable=false, liveOwner:symbol|null=null, wakeLive:(()=>void)|null=null;
 let visibilityInstalled=false;
 function ensureEngine() {
@@ -45,14 +45,17 @@ async function bake(request:CoverRequest, signal:AbortSignal):Promise<RenderResu
   }
   if(typeof CanvasRenderingContext2D==="undefined") throw new Error("Canvas unavailable");
   const image=request.src?await loadCoverImage(coverSourceUrl(request),signal):null;
-  const output=document.createElement("canvas");
+  const output=gameOutput??=document.createElement("canvas");
   try {
     if(signal.aborted) throw new DOMException("Cancelled","AbortError");
     gameCanvas??=document.createElement("canvas");
+    // These surfaces are read back to PNG, not displayed. WebKit otherwise
+    // retains accelerated drawing work beyond this serial JS producer's lifetime.
+    gameCanvas.getContext("2d",{willReadFrequently:true});
     // Preserve the approved projection and its 2x sampling; cache the final raster.
     if(!drawGameCase(gameCanvas,image,request.pixels/(window.devicePixelRatio||1))) throw new Error("Case renderer unavailable");
     output.width=request.pixels; output.height=Math.ceil(request.pixels*260/184);
-    const ctx=output.getContext("2d"); if(!ctx) throw new Error("Canvas unavailable");
+    const ctx=output.getContext("2d",{willReadFrequently:true}); if(!ctx) throw new Error("Canvas unavailable");
     ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality="high"; ctx.drawImage(gameCanvas,0,0,output.width,output.height);
     return await snapshot(output);
   } finally { if(image) image.src=""; output.width=output.height=0; if(gameCanvas) gameCanvas.width=gameCanvas.height=2; }

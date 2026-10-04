@@ -5,13 +5,13 @@ type Listener = (value: Snapshot) => void;
 /** Read when the next producer is picked: 0 = on screen, 1 = near the viewport. Lower runs first. */
 export type Rank = () => number;
 type Producer = (signal: AbortSignal) => Promise<RenderResult>;
-type Entry = { value: NonNullable<Snapshot>; bytes: number; users: Set<Listener> };
+type Entry = { value: NonNullable<Snapshot>; bytes: number; decodedBytes: number; users: Set<Listener> };
 /** `ready` is false while the persistent store is being asked; such a job never occupies the producer. */
 type Job = { produce: Producer; users: Map<Listener, Rank>; ready: boolean };
 const ON_SCREEN: Rank = () => 0;
 // Bytes are the encoded snapshot blobs behind the object URLs (a 256px PNG cover is roughly 0.1–0.2 MB):
 // enough for a full large-window screen, its scroll margin and several screens of scroll-back.
-export const THUMBNAIL_LIMIT = { entries:256, bytes:64*1024*1024, pending:128 } as const;
+export const THUMBNAIL_LIMIT = { entries:256, bytes:64*1024*1024, decodedBytes:128*1024*1024, pending:128 } as const;
 /** Ref-counted LRU: live images are not revoked underneath their readers. */
 export class RenderCache {
   private entries = new Map<string, Entry>();
@@ -20,8 +20,8 @@ export class RenderCache {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private paused = false;
   private unavailable = false;
-  bytes = 0; hits = 0; misses = 0; restored = 0; evictions = 0; cancelled = 0; completed = 0;
-  constructor(private limits: { entries:number; bytes:number; pending:number } = THUMBNAIL_LIMIT, private store: SnapshotStore | null = null) {}
+  bytes = 0; decodedBytes = 0; hits = 0; misses = 0; restored = 0; evictions = 0; cancelled = 0; completed = 0;
+  constructor(private limits: { entries:number; bytes:number; decodedBytes?:number; pending:number } = THUMBNAIL_LIMIT, private store: SnapshotStore | null = null) {}
   acquire(key: string, produce: Producer, listener: Listener, rank: Rank = ON_SCREEN): () => void {
     const cached=this.entries.get(key);
     if(cached) {
@@ -78,20 +78,21 @@ export class RenderCache {
     // Yield between producers without making every ready cover wait a frame.
     this.timer=setTimeout(() => { this.timer=null; this.pump(); },0);
   }
-  private makeRoom(bytes: number) {
-    if(bytes>this.limits.bytes) return false;
+  private makeRoom(bytes: number, decodedBytes: number) {
+    const decodedLimit=this.limits.decodedBytes??THUMBNAIL_LIMIT.decodedBytes;
+    if(bytes>this.limits.bytes||decodedBytes>decodedLimit) return false;
     for(const [key,entry] of this.entries) {
-      if(this.entries.size<this.limits.entries&&this.bytes+bytes<=this.limits.bytes) break;
+      if(this.entries.size<this.limits.entries&&this.bytes+bytes<=this.limits.bytes&&this.decodedBytes+decodedBytes<=decodedLimit) break;
       if(entry.users.size) continue;
-      URL.revokeObjectURL(entry.value.url); this.bytes-=entry.bytes; this.entries.delete(key); this.evictions++;
+      URL.revokeObjectURL(entry.value.url); this.bytes-=entry.bytes; this.decodedBytes-=entry.decodedBytes; this.entries.delete(key); this.evictions++;
     }
-    return this.entries.size<this.limits.entries&&this.bytes+bytes<=this.limits.bytes;
+    return this.entries.size<this.limits.entries&&this.bytes+bytes<=this.limits.bytes&&this.decodedBytes+decodedBytes<=decodedLimit;
   }
   private publish(key: string, job: Job, result: RenderResult) {
-    const users=[...job.users.keys()], bytes=result.blob.size;
-    if(!this.makeRoom(bytes)) { for(const user of users) user(null); return false; }
+    const users=[...job.users.keys()], bytes=result.blob.size, decodedBytes=result.width*result.height*4;
+    if(!this.makeRoom(bytes,decodedBytes)) { for(const user of users) user(null); return false; }
     const value={url:URL.createObjectURL(result.blob),width:result.width,height:result.height};
-    this.entries.set(key,{value,bytes,users:new Set(users)}); this.bytes+=bytes;
+    this.entries.set(key,{value,bytes,decodedBytes,users:new Set(users)}); this.bytes+=bytes; this.decodedBytes+=decodedBytes;
     for(const user of users) user(value);
     return true;
   }
@@ -133,7 +134,7 @@ export class RenderCache {
     if(this.timer!==null) clearTimeout(this.timer); this.timer=null;
     this.active?.job.users.clear(); this.active?.abort.abort(); this.jobs.clear();
     for(const entry of this.entries.values()) { for(const user of entry.users) user(null); URL.revokeObjectURL(entry.value.url); }
-    this.entries.clear(); this.bytes=0;
+    this.entries.clear(); this.bytes=0; this.decodedBytes=0;
   }
-  stats() { return { entries:this.entries.size, bytes:this.bytes, pending:this.jobs.size, active:this.active?1:0, hits:this.hits, restored:this.restored, misses:this.misses, evictions:this.evictions, cancelled:this.cancelled, completed:this.completed }; }
+  stats() { return { entries:this.entries.size, bytes:this.bytes, decodedBytes:this.decodedBytes, pending:this.jobs.size, active:this.active?1:0, hits:this.hits, restored:this.restored, misses:this.misses, evictions:this.evictions, cancelled:this.cancelled, completed:this.completed }; }
 }
