@@ -339,6 +339,12 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
     invoke<CloudCredentialStatus>("set_cloud_api_token", { token }),
   deleteCloudApiToken: () =>
     invoke<CloudCredentialStatus>("delete_cloud_api_token"),
+  cloudPublisherTokenStatus: () =>
+    invoke<CloudCredentialStatus>("cloud_publisher_token_status"),
+  setCloudPublisherToken: (token) =>
+    invoke<CloudCredentialStatus>("set_cloud_publisher_token", { token }),
+  deleteCloudPublisherToken: () =>
+    invoke<CloudCredentialStatus>("delete_cloud_publisher_token"),
   testCloudCaptureConnection: () =>
     invoke<CloudCaptureConnectionStatus>("test_cloud_capture_connection"),
   createExtensionPairing: () =>

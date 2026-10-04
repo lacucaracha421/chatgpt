@@ -105,6 +105,10 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [cloudToken, setCloudToken] = useState("");
   const [editingCloudToken, setEditingCloudToken] = useState(false);
   const [confirmingCloudTokenDelete, setConfirmingCloudTokenDelete] = useState(false);
+  const [cloudPublisherConfigured, setCloudPublisherConfigured] = useState<boolean | null>(null);
+  const [cloudPublisherToken, setCloudPublisherToken] = useState("");
+  const [editingCloudPublisherToken, setEditingCloudPublisherToken] = useState(false);
+  const [confirmingCloudPublisherTokenDelete, setConfirmingCloudPublisherTokenDelete] = useState(false);
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [cloudMessage, setCloudMessage] = useState<string | null>(null);
@@ -169,6 +173,13 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     }).catch(cause => { if (active) setCloudError(commandErrorMessage(cause, "서버 설정을 확인하지 못했습니다.")); });
     return () => { active = false; };
   }, [gateway, loadCloud, cloudSettings]);
+
+  useEffect(() => {
+    if (!loadCloud || !gateway.cloudPublisherTokenStatus) return;
+    let active = true;
+    void gateway.cloudPublisherTokenStatus().then(status => { if (active) setCloudPublisherConfigured(status.configured); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [gateway, loadCloud]);
 
   useEffect(() => {
     if (section !== "frequent" && section !== "connection") return;
@@ -324,6 +335,22 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
     setCloudBusy(true); setCloudError(null);
     try { const status = await gateway.deleteCloudApiToken(); setCloudSettings(current => current ? { ...current, tokenConfigured: status.configured } : current); setCloudToken(""); setEditingCloudToken(false); setConfirmingCloudTokenDelete(false); setCloudMessage("연결 키를 삭제했습니다"); }
     catch (cause) { setCloudError(commandErrorMessage(cause, "연결 키를 삭제하지 못했습니다.")); }
+    finally { setCloudBusy(false); }
+  }
+
+  async function saveCloudPublisherToken() {
+    if (!cloudPublisherToken.trim() || cloudBusy || !gateway.setCloudPublisherToken) return;
+    setCloudBusy(true); setCloudError(null);
+    try { const status = await gateway.setCloudPublisherToken(cloudPublisherToken.trim()); setCloudPublisherConfigured(status.configured); setCloudPublisherToken(""); setEditingCloudPublisherToken(false); setCloudMessage("송신 키를 저장했습니다"); }
+    catch (cause) { setCloudError(commandErrorMessage(cause, "송신 키를 저장하지 못했습니다.")); }
+    finally { setCloudBusy(false); }
+  }
+
+  async function deleteCloudPublisherToken() {
+    if (cloudBusy || !gateway.deleteCloudPublisherToken) return;
+    setCloudBusy(true); setCloudError(null);
+    try { const status = await gateway.deleteCloudPublisherToken(); setCloudPublisherConfigured(status.configured); setCloudPublisherToken(""); setEditingCloudPublisherToken(false); setConfirmingCloudPublisherTokenDelete(false); setCloudMessage("송신 키를 삭제했습니다"); }
+    catch (cause) { setCloudError(commandErrorMessage(cause, "송신 키를 삭제하지 못했습니다.")); }
     finally { setCloudBusy(false); }
   }
 
@@ -502,11 +529,16 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         {section === "connection" && <div className="settings-view__section">
           <header className="settings-view__header"><h2>연결</h2></header>
           {(extensionError || cloudError || kakaoError || igdbError || tmdbError || stashdbError) && <Toast tone="error" onDismiss={() => { setExtensionError(null); setCloudError(null); setKakaoError(null); setIgdbError(null); setTmdbError(null); setStashdbError(null); }}>연결 설정을 처리하지 못했습니다.</Toast>}
-          <SettingsGroup title="서버" help="서버 주소와 연결 키가 있어야 태블릿과 브라우저 확장이 이 PC의 자료를 받습니다.">
+          <SettingsGroup title="서버" help="서버 주소와 연결 키가 있어야 태블릿과 브라우저 확장이 이 PC의 자료를 받습니다. 송신 키는 이 PC가 서버에 게시할 때 씁니다.">
             <SimpleRow name="주소" control={<TextInput className="settings-view__server-address" aria-label="서버 주소" type="url" value={cloudApiBaseUrl} placeholder="http://100.x.x.x:32146" onChange={event => setCloudApiBaseUrl(event.target.value)} onBlur={() => void saveCloudSettings(undefined, undefined, true)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void saveCloudSettings(undefined, undefined, true); } }} />} />
             <SimpleRow name="연결 키" status={cloudSettings?.tokenConfigured ? "설정됨" : "없음"} control={<span className="settings-view__control-pair"><Badge>{cloudSettings?.tokenConfigured ? "설정됨" : "없음"}</Badge>{!editingCloudToken && <Button size="sm" variant="quiet" onClick={() => setEditingCloudToken(true)}>{cloudSettings?.tokenConfigured ? "바꾸기" : "입력"}</Button>}{cloudSettings?.tokenConfigured && !editingCloudToken && <Button size="sm" variant="quiet" className="settings-view__danger-action" onClick={() => setConfirmingCloudTokenDelete(true)}>삭제</Button>}</span>} />
             {editingCloudToken && <InlineEdit><TextInput aria-label="서버 연결 키" type="password" autoComplete="off" value={cloudToken} onChange={event => setCloudToken(event.target.value)} /><Button size="sm" variant="quiet" disabled={!cloudToken.trim() || cloudBusy} onClick={() => void saveCloudToken()}>저장</Button><Button size="sm" variant="quiet" onClick={() => { setEditingCloudToken(false); setCloudToken(""); }}>취소</Button></InlineEdit>}
             {confirmingCloudTokenDelete && <ConfirmLine text="저장된 연결 키를 삭제할까요?" onCancel={() => setConfirmingCloudTokenDelete(false)} onConfirm={() => void deleteCloudToken()} busy={cloudBusy} />}
+            {gateway.setCloudPublisherToken && <>
+              <SimpleRow name="송신 키" status={cloudPublisherConfigured === null ? "확인 중…" : cloudPublisherConfigured ? "설정됨" : "없음"} control={<span className="settings-view__control-pair"><Badge>{cloudPublisherConfigured === null ? "확인 중…" : cloudPublisherConfigured ? "설정됨" : "없음"}</Badge>{!editingCloudPublisherToken && <Button size="sm" variant="quiet" onClick={() => setEditingCloudPublisherToken(true)}>{cloudPublisherConfigured ? "바꾸기" : "입력"}</Button>}{cloudPublisherConfigured && !editingCloudPublisherToken && <Button size="sm" variant="quiet" className="settings-view__danger-action" onClick={() => setConfirmingCloudPublisherTokenDelete(true)}>삭제</Button>}</span>} />
+              {editingCloudPublisherToken && <InlineEdit><TextInput aria-label="서버 송신 키" type="password" autoComplete="off" value={cloudPublisherToken} onChange={event => setCloudPublisherToken(event.target.value)} /><Button size="sm" variant="quiet" disabled={!cloudPublisherToken.trim() || cloudBusy} onClick={() => void saveCloudPublisherToken()}>저장</Button><Button size="sm" variant="quiet" onClick={() => { setEditingCloudPublisherToken(false); setCloudPublisherToken(""); }}>취소</Button></InlineEdit>}
+              {confirmingCloudPublisherTokenDelete && <ConfirmLine text="저장된 송신 키를 삭제할까요?" onCancel={() => setConfirmingCloudPublisherTokenDelete(false)} onConfirm={() => void deleteCloudPublisherToken()} busy={cloudBusy} />}
+            </>}
             <SimpleRow name="연결 상태" status={serverRow ? joinStatus(serverRow.value, serverRow.time) : "확인 중…"} tone={serverRow?.tone} control={<Button size="sm" variant="secondary" disabled={cloudBusy || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured} onClick={() => void testCloudConnection()}>연결 확인</Button>} />
             {cloudSettings?.apiBaseUrl && gateway.getCloudSyncHold && gateway.setCloudSyncHold && <CloudSyncHold endpoint={cloudSettings.apiBaseUrl} read={gateway.getCloudSyncHold} save={gateway.setCloudSyncHold} />}
             <SimpleRow name="클라우드에서 받기" control={<Switch aria-label="클라우드에서 받기" checked={cloudSettings?.captureEnabled ?? cloudSettings?.enabled ?? false} disabled={cloudBusy || !cloudSettings?.apiBaseUrl} onChange={event => void saveCloudSettings(cloudSettings?.enabled, event.target.checked)} />} />

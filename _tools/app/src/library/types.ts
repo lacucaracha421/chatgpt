@@ -1371,6 +1371,9 @@ export interface LibraryGateway {
   setCloudCaptureSettings(enabled: boolean, apiBaseUrl: string | null, captureEnabled?: boolean): Promise<CloudCaptureSettings>;
   setCloudApiToken(token: string): Promise<CloudCredentialStatus>;
   deleteCloudApiToken(): Promise<CloudCredentialStatus>;
+  cloudPublisherTokenStatus?(): Promise<CloudCredentialStatus>;
+  setCloudPublisherToken?(token: string): Promise<CloudCredentialStatus>;
+  deleteCloudPublisherToken?(): Promise<CloudCredentialStatus>;
   testCloudCaptureConnection(): Promise<CloudCaptureConnectionStatus>;
   createExtensionPairing?(): Promise<ExtensionPairingLink>;
   pushCloudMetadataBackup?(): Promise<CloudMetadataBackupResult>;

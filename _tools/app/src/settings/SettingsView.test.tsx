@@ -18,6 +18,13 @@ function createGateway(overrides: Partial<LibraryGateway> = {}) {
     ...libraryGateway,
     getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: true, workCount: 12, updateEnabled: true, updateIntervalSeconds: 21600, lastAttemptAt: "2026-09-29T06:00:00Z", lastSuccessAt: "2026-09-29T06:00:00Z", lastAdded: 2, lastError: null, streams: [] }),
     getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: true, captureEnabled: true, apiBaseUrl: "https://cloud.test", tokenConfigured: true }),
+    cloudPublisherTokenStatus: vi.fn().mockResolvedValue({ configured: true }),
+    setCloudPublisherToken: vi.fn().mockResolvedValue({ configured: true }),
+    deleteCloudPublisherToken: vi.fn().mockResolvedValue({ configured: false }),
+    getKakaoCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
+    getIgdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
+    getTmdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
+    getStashdbCredentialStatus: vi.fn().mockResolvedValue({ configured: false }),
     cloudBackfillProgress: vi.fn().mockResolvedValue({ controlState: "idle", totalAssets: 10, queued: 0, preparing: 0, uploading: 0, committing: 0, completed: 10, failed: 0, activeWorkers: 0, lastError: null, activity: [] }),
     getExtensionConnection: vi.fn().mockResolvedValue({ baseUrl: "http://127.0.0.1:47631", token: "extension-token", status: "ready" }),
     releaseCalendar: { calendar: vi.fn().mockResolvedValue({ rangeStart: "", rangeEnd: "", entries: [], sources: [{ provider: "igdb", fetchedAt: "2026-09-29T03:00:00Z", attemptedAt: null, errorCode: null, due: false }, { provider: "tmdb", fetchedAt: "2026-09-29T03:00:00Z", attemptedAt: null, errorCode: null, due: false }, { provider: "tmdb_tv", fetchedAt: "2026-09-29T03:00:00Z", attemptedAt: null, errorCode: null, due: false }] }), refreshNow: vi.fn() },
@@ -71,6 +78,65 @@ it("saves and confirms deletion of connection credentials", async () => {
   expect(screen.getByText("카카오 책 검색 설정을 삭제할까요?")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "삭제 확인" }));
   await waitFor(() => expect(gateway.deleteKakaoApiKey).toHaveBeenCalledTimes(1));
+});
+
+it.each([true, false])("shows the publisher credential status when configured is %s", async configured => {
+  const gateway = createGateway({ cloudPublisherTokenStatus: vi.fn().mockResolvedValue({ configured }) });
+  renderSettings(gateway, { initialSection: "connection" });
+  const row = screen.getByText("송신 키").closest("dl")!;
+  await waitFor(() => expect(within(row).getAllByText(configured ? "설정됨" : "없음")).toHaveLength(2));
+  expect(within(row).getByRole("button", { name: configured ? "바꾸기" : "입력" })).toBeInTheDocument();
+  expect(gateway.cloudPublisherTokenStatus).toHaveBeenCalledTimes(1);
+});
+
+it("saves a trimmed publisher credential and clears its input", async () => {
+  const gateway = createGateway({ cloudPublisherTokenStatus: vi.fn().mockResolvedValue({ configured: false }) });
+  renderSettings(gateway, { initialSection: "connection" });
+  const row = screen.getByText("송신 키").closest("dl")!;
+  await userEvent.click(within(row).getByRole("button", { name: "입력" }));
+  const input = screen.getByLabelText("서버 송신 키");
+  expect(input).toHaveAttribute("type", "password");
+  expect(input).toHaveAttribute("autocomplete", "off");
+  await userEvent.type(input, "  test-publisher-key  ");
+  await userEvent.click(screen.getByRole("button", { name: "저장" }));
+  await waitFor(() => expect(gateway.setCloudPublisherToken).toHaveBeenCalledWith("test-publisher-key"));
+  expect(screen.queryByLabelText("서버 송신 키")).not.toBeInTheDocument();
+  expect(screen.getByText("송신 키를 저장했습니다")).toBeInTheDocument();
+  await userEvent.click(within(row).getByRole("button", { name: "바꾸기" }));
+  expect(screen.getByLabelText("서버 송신 키")).toHaveValue("");
+});
+
+it("confirms deletion of the publisher credential", async () => {
+  const gateway = createGateway();
+  renderSettings(gateway, { initialSection: "connection" });
+  const row = screen.getByText("송신 키").closest("dl")!;
+  await userEvent.click(await within(row).findByRole("button", { name: "삭제" }));
+  expect(screen.getByText("저장된 송신 키를 삭제할까요?")).toBeInTheDocument();
+  expect(gateway.deleteCloudPublisherToken).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "확인" }));
+  await waitFor(() => expect(gateway.deleteCloudPublisherToken).toHaveBeenCalledTimes(1));
+  expect(within(row).getAllByText("없음")).toHaveLength(2);
+  expect(screen.queryByText("저장된 송신 키를 삭제할까요?")).not.toBeInTheDocument();
+  expect(screen.getByText("송신 키를 삭제했습니다")).toBeInTheDocument();
+});
+
+it("keeps publisher status unknown on failure and clears cancelled input", async () => {
+  const gateway = createGateway({ cloudPublisherTokenStatus: vi.fn().mockRejectedValue(new Error("unavailable")) });
+  renderSettings(gateway, { initialSection: "connection" });
+  const row = screen.getByText("송신 키").closest("dl")!;
+  await userEvent.click(within(row).getByRole("button", { name: "입력" }));
+  expect(within(row).getAllByText("확인 중…")).toHaveLength(2);
+  expect(screen.queryByText("연결 설정을 처리하지 못했습니다.")).not.toBeInTheDocument();
+  await userEvent.type(screen.getByLabelText("서버 송신 키"), "cancelled-test-key");
+  await userEvent.click(screen.getByRole("button", { name: "취소" }));
+  await userEvent.click(within(row).getByRole("button", { name: "입력" }));
+  expect(screen.getByLabelText("서버 송신 키")).toHaveValue("");
+  expect(gateway.setCloudPublisherToken).not.toHaveBeenCalled();
+});
+
+it("hides the publisher credential when the gateway cannot set it", () => {
+  renderSettings(createGateway({ setCloudPublisherToken: undefined }), { initialSection: "connection" });
+  expect(screen.queryByText("송신 키")).not.toBeInTheDocument();
 });
 
 it("keeps the local backup restore confirmation flow", async () => {

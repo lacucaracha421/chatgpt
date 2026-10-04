@@ -344,6 +344,9 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "get_remote_reading_progress": return null;
     case "notes_request": return notesRequest(args);
     case "get_cloud_capture_settings": return { enabled: true, captureEnabled: true, apiBaseUrl: "https://preview.lakomics.local", tokenConfigured: true };
+    case "cloud_publisher_token_status": return { configured: true };
+    case "set_cloud_publisher_token": return { configured: true };
+    case "delete_cloud_publisher_token": return { configured: false };
     case "get_extension_connection": return { baseUrl: "http://127.0.0.1:24821", token: "preview-token", status: "ready" };
     case "test_cloud_capture_connection": return { pendingCount: 3 };
     case "av_link_pending_count": return 0;
