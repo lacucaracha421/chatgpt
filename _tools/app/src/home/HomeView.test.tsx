@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readHomeVisit, writeHomeVisit } from "./homeAttention";
+import { readHomeVisit, writeHomeVisit } from "./homeAttentionModel";
 import { resetReleaseDataForTests } from "../collections/releaseData";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import type { AuthoritySyncHealth, HomeOverview, ReleaseWishlistItem } from "../library/types";

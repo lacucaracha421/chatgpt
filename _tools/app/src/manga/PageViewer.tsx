@@ -11,7 +11,7 @@ import { Menu } from "../shared/ui/Menu";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { DEFAULT_PAGE_RATIO, ReaderPage, ReaderPageBox } from "./ReaderPage";
 import { ReaderSpread } from "./ReaderSpread";
-import { arrowAdvance, displayOrder, edgeAdvance, nextSpreadStart, prevSpreadStart, spreadForPage } from "./readerSpread";
+import { arrowAdvance, displayOrder, edgeAdvance, nextSpreadStart, prevSpreadStart, spreadForPage } from "./readerSpreadModel";
 import "./reader.css";
 
 type ReaderBookmark = {

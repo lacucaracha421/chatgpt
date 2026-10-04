@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { newHomeArrivals, readHomeVisit, writeHomeVisit, type HomeArrival } from './homeAttention';
+import { newHomeArrivals, readHomeVisit, writeHomeVisit, type HomeArrival } from './homeAttentionModel';
 
 export function useHomeVisit<T extends HomeArrival>(scope: string, items: T[], today: string, active = true, visitedAt?: string, readReady = true) {
   const [state, setState] = useState(() => ({ scope, visit: readHomeVisit(scope), session: 0 }));

@@ -6,7 +6,7 @@ import {
   nextSpreadStart,
   prevSpreadStart,
   spreadForPage,
-} from "./readerSpread";
+} from "./readerSpreadModel";
 
 describe("spreadForPage", () => {
   it("pairs predictably with cover-single enabled", () => {

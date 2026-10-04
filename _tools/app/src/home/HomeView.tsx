@@ -22,7 +22,7 @@ import { AssetStableImage as StableImage } from "../privacy/AssetImage";
 import { Skeleton } from "../shared/ui/Skeleton";
 import { Button } from "../shared/ui/Button";
 import { daysAfter, localBoundaries, newlyReleasedRows, weekdayLabel, upcomingRows, type ReleaseRow, type UpcomingRow } from "./homeModel";
-import { attentionRows } from "./homeAttention";
+import { attentionRows } from "./homeAttentionModel";
 import { HomeAttentionLayout, HomePresence, HomeReleaseList, HomeSection, HomeToday } from "./HomeAttention";
 import { useHomeVisit } from "./useHomeVisit";
 import { HomeRevisit } from "./HomeRevisit";

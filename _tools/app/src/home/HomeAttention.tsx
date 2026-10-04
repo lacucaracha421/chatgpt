@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 import { SectionLabel } from '../shared/ui/SectionLabel';
 import { Badge } from '../shared/ui/Badge';
 import { ddayLabel, displayDate } from '../shared/displayDate';
-import type { AttentionRow } from './homeAttention';
+import type { AttentionRow } from './homeAttentionModel';
 import { daysAfter } from './homeModel';
 import './homeAttention.css';
 

@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Note } from '../notes/store';
 import type { Recurring } from '../notes/ledger/model';
-import { attentionRows, HOME_VISIT_KEY, newHomeArrivals, readHomeVisit, writeHomeVisit } from './homeAttention';
+import { attentionRows, HOME_VISIT_KEY, newHomeArrivals, readHomeVisit, writeHomeVisit } from './homeAttentionModel';
 import { HomePresence, HomeToday } from './HomeAttention';
 import { useHomeVisit } from './useHomeVisit';
 const today = '2026-10-30';

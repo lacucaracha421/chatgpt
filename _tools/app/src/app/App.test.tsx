@@ -9,7 +9,7 @@ import type {
   MetadataBackup,
   ReleaseWatchRunResult,
 } from "../library/types";
-import { readHomeVisit, writeHomeVisit } from "../home/homeAttention";
+import { readHomeVisit, writeHomeVisit } from "../home/homeAttentionModel";
 import { UI_PREFERENCES_KEY } from "../preferences/uiPreferences";
 import * as characters from "../characters/api";
 import { fixtureTarget } from "../characters/characterFixtures";
