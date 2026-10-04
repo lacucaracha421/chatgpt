@@ -1,3 +1,4 @@
+import {LoadingLine} from './TopBar';
 import {useTabletAssetMask} from './assetMask';
 import type {ContentRating} from '../src/shared/privacy/contentMask';
 import {useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
@@ -98,7 +99,7 @@ export function CharacterReviewOverview({libraryId, characters, refreshKey, paus
       {stale && <span className="review-stale numeric">{clockLabel(value!.at)} 기준</span>}
       {value && value.total > 0 && <Button onClick={() => onOpen({target: null})}>전체 검토</Button>}
     </header>
-    {state.phase === 'loading' && <div className="loading-line" role="status" aria-label="검토 목록 불러오는 중"/>}
+    <LoadingLine label={(state.phase === 'loading')&&'검토 목록 불러오는 중'}/>
     {state.phase === 'unready' && <div className="empty-state review-empty">
       <h2>PC 업데이트가 필요합니다</h2>
       <p>PC 앱이 아직 캐릭터 검토 목록을 보내지 않았습니다.</p>

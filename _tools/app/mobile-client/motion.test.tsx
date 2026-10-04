@@ -75,7 +75,7 @@ it('moves the content under a still bar and staggers the first tiles only on a d
   expect(animate).toHaveBeenCalledTimes(1);
 });
 
-function Segment({segment,index}:{segment:string|null;index:number}){const host=useRef<HTMLDivElement>(null);useSegmentMotion(host,segment,index);return <div ref={host} data-testid="segment"/>;}
+function Segment({segment,index,scope}:{segment:string|null;index:number;scope?:string}){const host=useRef<HTMLDivElement>(null);useSegmentMotion(host,segment,index,undefined,scope);return <div ref={host} data-testid="segment"/>;}
 describe('segment swap',()=>{
   it('slides in from the side of the new tab, after its data commits, within 200 ms',()=>{
     const view=render(<Segment segment="game" index={0}/>);
@@ -95,6 +95,33 @@ describe('segment swap',()=>{
     expect(firstFrame(1).transform).toBe('translateX(-16px)');
     view.rerender(<Segment segment="game" index={0}/>);
     expect(animate).toHaveBeenCalledTimes(2);
+  });
+  it('swaps within one place but not when the place itself changes',()=>{
+    // The asset gallery's 종류 segment: a new folder is a navigation (level motion), not a swap.
+    const view=render(<Segment segment="all" index={0} scope="folder:a"/>);
+    view.rerender(<Segment segment="videos" index={2} scope="folder:b"/>);
+    expect(animate).not.toHaveBeenCalled();
+    view.rerender(<Segment segment="images" index={1} scope="folder:b"/>);
+    expect(animate).toHaveBeenCalledTimes(1);
+    expect(firstFrame(0).transform).toBe('translateX(-16px)');
+  });
+  it('holds the swap on its first frame until the new first-viewport images decode, at most 250 ms (the PC rule)',async()=>{
+    vi.useFakeTimers();
+    const played=vi.fn(),paused=vi.fn();
+    animate.mockImplementation(function(this:HTMLElement){return {cancel(){},pause:paused,play:played};});
+    const rect={left:0,top:0,right:200,bottom:200,width:200,height:200,x:0,y:0,toJSON:()=>({})} as DOMRect;
+    const bounds=vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockReturnValue(rect);
+    Object.defineProperty(HTMLImageElement.prototype,'decode',{configurable:true,value:()=>new Promise(()=>{})});
+    function Images({segment,index}:{segment:string;index:number}){const host=useRef<HTMLDivElement>(null);useSegmentMotion(host,segment,index);return <div ref={host}><img src={`/${segment}.png`} alt=""/></div>;}
+    try {
+      const view=render(<Images segment="game" index={0}/>);
+      view.rerender(<Images segment="manga" index={1}/>);
+      expect(animate).toHaveBeenCalledTimes(1);expect(paused).toHaveBeenCalledTimes(1);expect(played).not.toHaveBeenCalled();
+      await act(async()=>{await vi.advanceTimersByTimeAsync(249);});
+      expect(played).not.toHaveBeenCalled();
+      await act(async()=>{await vi.advanceTimersByTimeAsync(1);});
+      expect(played).toHaveBeenCalledTimes(1);
+    } finally {bounds.mockRestore();delete (HTMLImageElement.prototype as Partial<HTMLImageElement>).decode;vi.useRealTimers();}
   });
   it('does not move under reduced motion',()=>{
     reduced(true);
@@ -166,13 +193,11 @@ describe('delayed loading presence',()=>{
   it('announces the bar line only while it is shown',()=>{
     const view=render(<BarProgress label="목록 불러오는 중"/>);
     expect(view.queryByRole('status')).toBeNull();
-    act(()=>{vi.advanceTimersByTime(PROGRESS_DELAY_MS);});
+    act(()=>{vi.advanceTimersByTime(600);});
     expect(view.getByRole('status',{name:'목록 불러오는 중'}).classList.contains('top-bar__progress')).toBe(true);
     act(()=>{vi.advanceTimersByTime(PROGRESS_MIN_MS);});
     view.rerender(<BarProgress label={false}/>);
     expect(view.queryByRole('status')).toBeNull();
-    expect(document.querySelector('.loading-line.is-leaving')).not.toBeNull();
-    act(()=>{vi.advanceTimersByTime(PROGRESS_FADE_MS);});
     expect(document.querySelector('.loading-line')).toBeNull();
   });
 });

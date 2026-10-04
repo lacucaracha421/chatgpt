@@ -14,6 +14,7 @@ import {
   type BindFailure, type BindProvider, type BindRequest, type BindStatus, type Connection, type KakaoCandidate, type MangaDexCandidate,
   type RequestsReply, type SearchReply,
 } from './collectionBindingsModel';
+import {Fold} from './Fold';
 import './collectionBindings.css';
 
 const PROVIDERS: BindProvider[] = ['mangadex', 'kakao'];
@@ -100,14 +101,14 @@ export function CollectionBindings({item, active, refreshKey, sheet, onSheet, pa
         </span>)}
         <ChevronDownIcon className="collection-bindings-fold__chevron" aria-hidden="true"/>
       </button>
-      {open && <div className="collection-bindings-rows">{providers.map(({provider, name, state}) => {
+      <Fold open={open}><div className="collection-bindings-rows">{providers.map(({provider, name, state}) => {
         const verb = `${name} ${state.again ? '다시 연결' : '연결'}`;
         return <div key={provider} className={`collection-binding-row is-${state.tone}`} data-provider={provider}>
           <span className="collection-personal-label">{name}</span>
           <span className="collection-binding-value"><span className="collection-binding-state">{state.text}</span>{state.detail && <small>{state.detail}</small>}</span>
           {!legacy && <Button size="sm" aria-label={verb} onClick={() => onSheet(provider)}>{state.again ? '다시 연결' : '연결'}</Button>}
         </div>;
-      })}</div>}
+      })}</div></Fold>
       {notes}
       {searchSheet}
     </section>;

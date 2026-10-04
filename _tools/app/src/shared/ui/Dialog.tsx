@@ -9,17 +9,19 @@ type DialogProps = PropsWithChildren<{
   variant?: "default" | "medium" | "wide" | "workspace" | "fullscreen";
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
   onKeyUp?: KeyboardEventHandler<HTMLDivElement>;
+  /** A fullscreen dialog that is pushed in from the right and pops back, like a tablet layer. */
+  layer?: boolean;
   onClose: () => void;
 }>;
 
 const SWIPE_BACK_PX = 80;
 const SWIPE_BACK_COOLDOWN_MS = 800;
 
-export function Dialog({ children, open, title, variant = "default", onKeyDown, onKeyUp, onClose }: DialogProps) {
+export function Dialog({ children, open, title, variant = "default", onKeyDown, onKeyUp, layer = false, onClose }: DialogProps) {
   const backNavigation = useBackNavigationContext();
   const requestBack = useBackRequest();
-  const surfaceRef = useMotionSurface("dialog", variant !== "fullscreen", title);
-  const scrimRef = useMotionSurface("scrim", variant !== "fullscreen", title);
+  const surfaceRef = useMotionSurface(layer ? "layer" : "dialog", variant !== "fullscreen" || layer, title);
+  const scrimRef = useMotionSurface("scrim", variant !== "fullscreen" || layer, title);
   const openerRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
   const swipeRef = useRef({ accumulated: 0, cooldownUntil: 0 });

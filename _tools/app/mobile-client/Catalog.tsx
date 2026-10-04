@@ -3,7 +3,7 @@ import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {usePublicationCheck} from './usePublicationCheck';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
-import {useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from './motion';
+import {sectionListParts,useAppendArrivals,useCardArrival,useLevelMotion,useSegmentMotion,type CardArrival} from './motion';
 import {catalogDisplayTitle} from '../src/manga/catalogDisplayTitle';
 import {ArrowLeftIcon,BookmarkIcon,BookOpenIcon,ChevronDownIcon,MagnifyingGlassIcon,FunnelIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {BookmarkIcon as BookmarkSolidIcon} from '@heroicons/react/24/solid';
@@ -439,6 +439,8 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   const scrubberSort=useMemo(()=>query.sort==='latest' ? {kind:'date' as const,values:items.map(item=>item.posted)} : {kind:'fallback' as const},[items,query.sort]);
 
   useLevelMotion(section,active?(selected?'detail':'list'):null,selected?1:0);
+  // 카탈로그 ⇄ 북마크 swaps like the Collections type segment, once the new list has committed.
+  useSegmentMotion(list,page?.ready&&committed.current===key?query.scope:null,SOURCES.findIndex(source=>source.value===query.scope),sectionListParts);
   // Search lives in the shared bar: the magnifier opens it, and it stays open while a query is set.
   const searching=searchOpen||!!draft||!!query.text;
   const closeSearch=()=>{setSuggestOpen(false);setSearchOpen(false);setDraft('');if(query.text)search('');};

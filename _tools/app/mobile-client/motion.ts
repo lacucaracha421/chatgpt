@@ -1,5 +1,6 @@
 import {useCallback,useEffect,useLayoutEffect,useRef,useState,type RefObject} from 'react';
-import {EASE_STANDARD as EASE_OUT,prefersReducedMotion} from '../src/shared/motion/curves';
+import {EASE_STANDARD as EASE_OUT,motionDefaults,motionSpring,motionTime,prefersReducedMotion} from '../src/shared/motion/curves';
+import {waitForViewportImages} from '../src/shared/motion/viewportImages';
 export {EASE_OUT,prefersReducedMotion};
 
 /**
@@ -51,9 +52,23 @@ function staggerTiles(host:HTMLElement):Animation[]{
 }
 
 function useRunning(){
-  const running=useRef<Animation[]>([]);
-  useEffect(()=>()=>{for(const animation of running.current)animation.cancel();},[]);
-  return (next:Animation[])=>{for(const animation of running.current)animation.cancel();running.current=next;};
+  const running=useRef<{animations:Animation[];stop?:()=>void}>({animations:[]});
+  const cancel=()=>{running.current.stop?.();for(const animation of running.current.animations)animation.cancel();};
+  useEffect(()=>()=>cancel(),[]);// eslint-disable-line react-hooks/exhaustive-deps
+  return (next:Animation[],stop?:()=>void)=>{cancel();running.current={animations:next,stop};};
+}
+
+/**
+ * Like the PC (AreaSwitch, FolderMove), an entrance starts only once the incoming view's
+ * first-viewport images have decoded, capped at IMAGE_READY_CAP_MS: the animations are created
+ * at once and held on their first frame, then played. Images that come later fade in by
+ * themselves (StableImage).
+ */
+function afterViewportImages(host:HTMLElement,animations:Animation[],run:(next:Animation[],stop?:()=>void)=>void){
+  for(const animation of animations)animation.pause?.();
+  let stop:(()=>void)|undefined;
+  run(animations,()=>stop?.());
+  stop=waitForViewportImages(host,()=>{stop=undefined;for(const animation of animations)animation.play?.();});
 }
 
 /**
@@ -65,9 +80,10 @@ function useRunning(){
  * over stale content and nothing flashes twice. Enter-only by design: the previous level is
  * replaced at once, nothing is kept alive, and only transform and opacity move. A `null` key
  * means "no level is on screen" and cancels an unfinished entrance, so returning to a retained
- * tab shows its content and backdrop at their final opacity and position.
+ * tab shows its content and backdrop at their final opacity and position. `stagger` false leaves
+ * the tiles to their own gallery entrance (the PC's first batch).
  */
-export function useLevelMotion(host:RefObject<HTMLElement|null>,key:string|null,depth:number){
+export function useLevelMotion(host:RefObject<HTMLElement|null>,key:string|null,depth:number,stagger=true){
   const previous=useRef<{key:string|null;depth:number}|null>(null);
   const run=useRunning();
   useLayoutEffect(()=>{
@@ -77,9 +93,9 @@ export function useLevelMotion(host:RefObject<HTMLElement|null>,key:string|null,
     if(!before||before.key===null||before.key===key||!element||prefersReducedMotion())return;
     const step=Math.sign(depth-before.depth);
     const parts=motionParts(element);
-    run(step
-      ?[...animateAll(parts,[{transform:`translateX(${step*20}px)`,opacity:.5},{transform:'none',opacity:1}],{duration:LEVEL_MOTION_MS,easing:EASE_OUT}),...(step>0?staggerTiles(element):[])]
-      :animateAll(parts,[{opacity:.6},{opacity:1}],{duration:SWAP_MOTION_MS,easing:EASE_OUT}));
+    afterViewportImages(element,step
+      ?[...animateAll(parts,[{transform:`translateX(${step*20}px)`,opacity:.5},{transform:'none',opacity:1}],{duration:LEVEL_MOTION_MS,easing:EASE_OUT}),...(step>0&&stagger?staggerTiles(element):[])]
+      :animateAll(parts,[{opacity:.6},{opacity:1}],{duration:SWAP_MOTION_MS,easing:EASE_OUT}),run);
   },[host,key,depth]);// eslint-disable-line react-hooks/exhaustive-deps
 }
 
@@ -90,21 +106,26 @@ export function useLevelMotion(host:RefObject<HTMLElement|null>,key:string|null,
  *
  * Callers pass `null` while the new segment's data is still loading, so the swap plays once,
  * when the new content commits, and never over stale content. `null` keeps the last shown
- * segment; the first segment shown and a repeat of the same one do not move.
+ * segment; the first segment shown and a repeat of the same one do not move. `scope` names the
+ * place the segment belongs to (a folder, say): a segment first shown in another place does not
+ * move either, since that change is a navigation with its own motion.
  */
-export function useSegmentMotion(host:RefObject<HTMLElement|null>,key:string|null,index:number,parts?:(host:HTMLElement)=>HTMLElement[]){
-  const shown=useRef<{key:string;index:number}|null>(null);
+export function useSegmentMotion(host:RefObject<HTMLElement|null>,key:string|null,index:number,parts?:(host:HTMLElement)=>HTMLElement[],scope=''){
+  const shown=useRef<{key:string;index:number;scope:string}|null>(null);
   const pick=useRef(parts);pick.current=parts;
   const run=useRunning();
   useLayoutEffect(()=>{
     if(key===null)return;
-    const before=shown.current;shown.current={key,index};
+    const before=shown.current;shown.current={key,index,scope};
     const element=host.current;
-    if(!before||before.key===key||!element||prefersReducedMotion())return;
+    if(!before||before.key===key||before.scope!==scope||!element||prefersReducedMotion())return;
     const step=Math.sign(index-before.index);
-    run(animateAll(pick.current?.(element)??[element],[{transform:`translateX(${step*SEGMENT_SHIFT_PX}px)`,opacity:.5},{transform:'none',opacity:1}],{duration:SEGMENT_MOTION_MS,easing:EASE_OUT}));
-  },[host,key,index]);// eslint-disable-line react-hooks/exhaustive-deps
+    afterViewportImages(element,animateAll(pick.current?.(element)??[element],[{transform:`translateX(${step*SEGMENT_SHIFT_PX}px)`,opacity:.5},{transform:'none',opacity:1}],{duration:SEGMENT_MOTION_MS,easing:EASE_OUT}),run);
+  },[host,key,index,scope]);// eslint-disable-line react-hooks/exhaustive-deps
 }
+
+/** Under a list's section bar, what a segment swap moves: everything but the bar, pull and scrubber. */
+export const sectionListParts=(host:HTMLElement)=>[...host.children].filter((child):child is HTMLElement=>child instanceof HTMLElement&&!child.matches('.ui-section-bar,.section-shade-rows,.pull-refresh,.mobile-scrubber'));
 
 /**
  * Places one underline element under the selected tab of `list` (its `[role=tab]` children)
@@ -280,4 +301,24 @@ export function useScrollMemory(host:RefObject<HTMLElement|null>,key:string){
       if(target.scrollTop!==top)target.scrollTop=top;
     }
   },[key]);
+}
+
+/** How long a full-screen layer takes to push in: the gentle spring, or the reduced-motion fade. */
+export function layerEnterTime(){
+  return prefersReducedMotion()?motionTime('--motion-micro',motionDefaults.micro):motionSpring('gentle').duration;
+}
+
+/**
+ * Whether an open full-screen layer has finished pushing in over the page, so the page beneath
+ * may be hidden. It is false at once when the layer closes, so the page is already back in place
+ * under the layer's exit.
+ */
+export function useLayerCovered(open:boolean){
+  const [covered,setCovered]=useState(false);
+  useEffect(()=>{
+    if(!open){setCovered(false);return;}
+    const timer=window.setTimeout(()=>setCovered(true),layerEnterTime());
+    return()=>window.clearTimeout(timer);
+  },[open]);
+  return open&&covered;
 }

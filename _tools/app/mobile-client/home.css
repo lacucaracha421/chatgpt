@@ -9,14 +9,28 @@
 .home-attention-mobile .home-attention-row, .home-attention-mobile .home-arrival-row { min-height:44px; }
 .home-home-image { display:block; object-fit:cover; }
 .home-cover-placeholder, .home-private-cell { display:block; width:100%; height:100%; background:var(--color-private-fill); }
-.home-arrival-cover .collection-art { width:100%; height:100%; object-fit:cover; }
-.home-revisit { display:flex; flex-direction:column; width:100%; height:240px; padding:0; border:0; background:none; }
-.home-revisit:focus-visible { outline:2px solid var(--color-focus); outline-offset:-2px; }
-.home-revisit-pics { display:flex; flex:1; flex-direction:column; min-height:0; gap:2px; overflow:hidden; }
-.home-jrow { display:flex; flex:1; gap:2px; min-height:0; }
-.home-jcell { display:block; flex:1 1 0; min-width:0; min-height:0; overflow:hidden; background:var(--color-surface); }
-.home-jcell .home-cover { width:100%; height:100%; }
-.home-caption { display:none; }
+.home-tablet-layout { min-height:100%; display:grid; grid-template-columns:minmax(0,1.75fr) minmax(0,1fr); gap:var(--space-8); align-items:stretch; }
+.home-tablet-media-column, .home-tablet-day-column { min-width:0; display:flex; flex-direction:column; gap:var(--space-8); grid-row:1; }
+.home-tablet-media-column { grid-column:1; justify-content:space-between; }
+.home-tablet-day-column { grid-column:2; }
+.home-tablet-playing, .home-tablet-today, .home-tablet-releases { min-width:0; }
+.home-tablet-day { min-width:0; min-height:0; flex:1; display:flex; flex-direction:column; }
+.home-tablet-playing:empty { display:none; }
+.home-attention-mobile .home-playing { overscroll-behavior-x:contain; }
+.home-release-tile__art > .home-cover-placeholder, .home-release-tile__art > .collection-art, .home-release-tile__art > .home-home-image { width:100%; height:100%; object-fit:cover; }
+.home-attention-mobile .home-revisit { min-height:0; height:auto; }
+.home-attention-mobile .home-revisit__cell, .home-attention-mobile .home-attention-row, .home-attention-mobile .ui-section-label__open { min-height:44px; min-width:44px; }
+.home-attention-mobile .home-revisit__cell > .home-cover { width:100%; height:100%; }
+@media (orientation:portrait), (max-width:700px) {
+  .home-tablet-layout { display:flex; flex-direction:column; gap:var(--space-8); }
+  .home-tablet-media-column, .home-tablet-day-column { display:contents; }
+  .home-tablet-today { order:0; }
+  .home-tablet-playing { order:1; }
+  .home-tablet-releases { order:2; }
+  .home-tablet-day { order:3; }
+  .home-attention-mobile .home-release-grid { display:grid; grid-template-columns:none; grid-template-rows:auto; grid-auto-flow:column; grid-auto-columns:120px; overflow-x:auto; padding-bottom:var(--space-2); overscroll-behavior-x:contain; }
+  .home-tablet-day { min-height:420px; }
+}
 /* Release detail keeps the interest action available after a cover tap. */
 .home-detail-sheet { display:flex; flex-direction:column; gap:var(--space-2); }
 .home-detail-cover { width:92px; height:116px; overflow:hidden; border-radius:var(--radius-mark); background:var(--color-surface-elevated); }

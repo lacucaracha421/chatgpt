@@ -1,3 +1,4 @@
+import {LoadingLine} from './TopBar';
 import {useTabletAssetMask} from './assetMask';
 import {usePrivacyMode} from './privacyMode';
 import {displayDate} from '../src/shared/displayDate';
@@ -372,7 +373,7 @@ export function SimilarityReview({onClose, backRef}: {onClose(): void; backRef: 
       {ready && current && <IconButton label={compare ? '나란히 보기' : '한 화면에서 비교'} icon={Square2StackIcon} active={!!compare} onClick={() => { setCompare(value => value ? null : 'flicker'); setAuto(false); setHeld(false); }}/>}
     </header>
     {notice && <p className="error-message review-notice" role="alert">{notice}</p>}
-    {state.phase === 'loading' && <div className="loading-line" role="status" aria-label="검토 목록 불러오는 중"/>}
+    <LoadingLine label={(state.phase === 'loading')&&'검토 목록 불러오는 중'}/>
     {state.phase === 'error' && <div className="empty-state review-empty">
       <h2>{state.offline ? '오프라인입니다' : '검토 목록을 불러오지 못했습니다'}</h2>
       <p>{state.offline ? (queued ? `저장된 결정 ${queued}개는 연결되면 PC로 전송됩니다.` : '연결을 확인한 뒤 다시 시도해 주세요.') : state.message}</p>

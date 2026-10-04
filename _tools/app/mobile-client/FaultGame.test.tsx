@@ -98,7 +98,7 @@ describe('FAULT photo loading',()=>{
     vi.stubGlobal('fetch',vi.fn(async()=>new Response(new Uint8Array([1,2]),{headers:{'content-type':'image/jpeg'}})));
     const onClose=vi.fn();render(<FaultGame items={[image('a')]} onClose={onClose}/>);
     const frame=screen.getByTitle('FAULT — REVEAL') as HTMLIFrameElement;
-    expect(frame.getAttribute('src')).toMatch(/#host=lakomics$/);expect(screen.getByRole('status').textContent).toMatch(/사진 불러오는 중 \d \/ 1|사진을 준비하고 있습니다/);
+    expect(frame.getAttribute('src')).toMatch(/#host=lakomics$/);expect(screen.getByRole('status').textContent).not.toMatch(/불러오는 중|준비하고 있습니다/);
     const post=vi.spyOn(frame.contentWindow!,'postMessage').mockImplementation(()=>{});
     act(()=>{window.dispatchEvent(new MessageEvent('message',{data:{type:'lakomics-fault-ready'},origin,source:frame.contentWindow}));});
     await waitFor(()=>expect(post).toHaveBeenCalledTimes(1));

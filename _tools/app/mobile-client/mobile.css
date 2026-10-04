@@ -47,8 +47,13 @@ h1,h2,h3,p { margin:0; }
 .demo-label { color:var(--color-muted); font-size:11px; }
 .privacy-pill { padding:3px 7px; border:1px solid var(--color-border-strong); border-radius:999px; color:var(--color-muted); font-size:11px; white-space:nowrap; }
 .app-body { min-height:0; flex:1; display:flex; }
-/* The artist screen replaces the tab views in the same row; the kept-mounted area stage must not take half the width. */
-.app-body:has(> .artist-screen) > .motion-stage { display:none; }
+/* The artist screen is a layer over the tab views; once it has pushed in, the kept-mounted area stage is hidden beneath it. */
+.app-body:has(> .artists-layer) { position:relative; }
+.artists-layer { position:absolute; inset:0; z-index:35; display:flex; flex-direction:column; min-width:0; min-height:0; background:var(--color-bg); }
+.app-body[data-layer-covered] > .motion-stage { display:none; }
+/* Full-screen layers owned by a component (trash, similarity, transfer, FAULT) move through this wrapper. */
+.tablet-layer { position:fixed; inset:0; z-index:180; }
+.tablet-layer.is-fault { z-index:200; }
 /* Home carries its own header inside its area view; the Home content takes the rest. */
 .motion-stage__view > .app-header { flex:none; }
 .motion-stage__view > .app-header + .library-main { height:auto; flex:1; min-height:0; }
@@ -77,7 +82,7 @@ h1,h2,h3,p { margin:0; }
 .gallery-date-heading { position:absolute; left:0; right:0; height:var(--gallery-date-heading-height); display:flex; align-items:baseline; gap:var(--space-2); line-height:var(--gallery-date-heading-height); color:var(--color-muted); font-family:var(--font-numeric); font-size:var(--type-meta); font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; }
 .gallery-date-heading__day { min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--color-muted); font-weight:400; }
 .gallery-date-heading__weekday { color:var(--color-faint); font-family:var(--font-ui); font-weight:400; }
-.gallery-date-heading__count { flex:none; color:var(--color-muted); opacity:0; transition:opacity 90ms var(--ease-standard); }
+.gallery-date-heading__count { flex:none; color:var(--color-muted); }
 .gallery-date-heading[data-active="true"] .gallery-date-heading__count, .gallery-date-heading:focus-visible .gallery-date-heading__count { opacity:1; }
 .gallery-date-heading:focus-visible { outline:var(--focus-width) solid var(--color-focus); }
 .media-tile { position:relative; padding:0; background:none; border:0; text-align:left; flex-shrink:0; min-width:0; border-radius:var(--radius-tile); overflow:hidden; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; touch-action:pan-y; }
@@ -100,7 +105,11 @@ h1,h2,h3,p { margin:0; }
 .bottom-nav { margin-bottom:8px; flex-shrink:0; display:flex; justify-content:center; gap:4px; padding:7px 24px calc(7px + env(safe-area-inset-bottom)); min-height:var(--mobile-nav); border-top:1px solid var(--color-border); background:var(--color-sidebar); }
 .bottom-nav button { display:flex; align-items:center; justify-content:center; gap:12px; width:180px; min-height:48px; border:0; border-radius:var(--radius-selection); background:transparent; color:var(--color-muted); }
 .bottom-nav button.active { background:var(--color-accent); color:var(--color-on-accent); }
-.bottom-nav button.active::after { content:''; width:5px; height:5px; background:currentColor; align-self:flex-start; margin:6px -10px 0 0; }
+.bottom-nav button.active::after { content:''; width:5px; height:5px; background:currentColor; align-self:flex-start; margin:6px -10px 0 0; animation:bottom-nav-mark var(--motion-micro) var(--ease-out); }
+/* The active state changes colour (and its mark fades in) over a short time; the tab content itself switches at once. */
+.bottom-nav button { transition:background-color var(--motion-micro) var(--ease-out), color var(--motion-micro) var(--ease-out); }
+@keyframes bottom-nav-mark { from { opacity:0; } }
+@media (prefers-reduced-motion:reduce) { .bottom-nav.bottom-nav button { transition:background-color var(--motion-micro) var(--ease-out), color var(--motion-micro) var(--ease-out) !important; } }
 /* A thin progress line that never takes space: its negative margin cancels its own height, so
    appearing and disappearing cannot move the content below it. A quiet track carries a soft
    highlight that sweeps across (transform only). A plain line waits 350 ms before fading in, so a

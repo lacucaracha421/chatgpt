@@ -37,10 +37,12 @@
 .home-playing__meta > b, .home-playing__meta > span:not(.work-stars) { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .home-playing__meta > span { color:var(--color-muted); }
 .home-playing__meta .work-stars { display:flex; color:var(--color-accent); }
-.home-playing__meta .work-star { position:relative; display:inline-flex; width:var(--icon-sm); height:var(--icon-sm); }
-.home-playing__meta .work-star > span { position:absolute; inset:0; overflow:hidden; }
-.home-playing__meta .work-star svg { width:var(--icon-sm); height:var(--icon-sm); flex:none; }
-.home-playing__meta .work-star > span svg { fill:currentColor; }
+/* One outline row with its fill layered exactly on top. The work screen's .work-stars rules (taller
+   grid cell, centred) can load after this file on the tablet, so these outrank them instead of relying on order. */
+.home-playing__meta .work-stars .work-star { position:relative; display:inline-flex; align-items:flex-start; width:var(--icon-sm); height:var(--icon-sm); padding:0; }
+.home-playing__meta .work-stars .work-star > span { position:absolute; top:0; left:0; bottom:0; display:flex; overflow:hidden; color:inherit; }
+.home-playing__meta .work-stars .work-star svg { width:var(--icon-sm); height:var(--icon-sm); flex:none; }
+.home-playing__meta .work-stars .work-star > span svg { fill:currentColor; }
 .home-playing__plank { position:absolute; pointer-events:none; top:calc(var(--case-height) + var(--space-4) - var(--space-3)); left:0; right:0; height:36px; }
 .home-playing__plank::before { content:""; position:absolute; inset:0 0 auto; height:25px; clip-path:polygon(16px 0,calc(100% - 16px) 0,100% 100%,0 100%); background:linear-gradient(180deg,color-mix(in srgb,var(--color-text) 4%,var(--color-bg)),color-mix(in srgb,var(--color-text) 15%,var(--color-bg))); }
 .home-playing__plank::after { content:""; position:absolute; left:0; right:0; top:25px; height:10px; background:linear-gradient(180deg,color-mix(in srgb,var(--color-text) 38%,var(--color-bg)) 0 1px,color-mix(in srgb,var(--color-text) 19%,var(--color-bg)) 1px,color-mix(in srgb,var(--color-text) 9%,var(--color-bg))); box-shadow:0 16px 20px -8px var(--color-overlay); }

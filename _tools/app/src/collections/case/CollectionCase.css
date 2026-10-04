@@ -22,6 +22,11 @@
    size instead of growing and shrinking while the stage and cover proportions settle (user, 2026-10-03). */
 .collection-case--fitted .kase { --ch: 520px; --cw: calc(var(--ch) * var(--ratio)); --cd: 34px; position: absolute; left: calc(50% - var(--cw) / 2); top: calc(50% - var(--ch) / 2); scale: var(--case-scale); transform: rotateX(-5deg) rotateY(var(--ry)) translateX(calc(var(--open) * (var(--cw) + var(--cd)) * .5)); }
 .collection-case .k-hinge, .collection-case .k-lid { transition-duration: 560ms; }
+/* Opening refits the model (the open case is twice as wide). While it opens or closes, the fit scale and the
+   floor shadows move on the same 560 ms curve as the rotation and lid, so the model never snaps smaller first. */
+.collection-case--fitted[data-unfolding] .kase:not(.is-dragging) { transition: transform 560ms var(--ease-standard), scale 560ms var(--ease-standard); }
+.collection-case--fitted[data-unfolding]::before { transition: top 560ms var(--ease-standard), height 560ms var(--ease-standard), width 560ms var(--ease-standard); }
+.collection-case--fitted[data-unfolding] .floor-shadow { transition: width 560ms var(--ease-standard), top 560ms var(--ease-standard); }
 .collection-case .kase > span, .collection-case .k-hinge > span, .collection-case .k-lid > span { position: absolute; display: block; backface-visibility: hidden; }
 /* The case opens like a real one: the spine folds flat on the back-left edge and the lid folds on the spine, so lid, spine and tray end up side by side. */
 .collection-case .kase > .k-hinge { backface-visibility: visible; left: 0; top: 0; width: var(--cd); height: 100%; transform-style: preserve-3d; transform-origin: 0 50%; transform: translateZ(calc(var(--cd) / -2)) rotateY(calc(-90deg - var(--open) * 90deg)); }
@@ -111,7 +116,8 @@
 .case-spine-art .sw { background: rgb(218,24,32); }
 .case-spine-art .ps5 .t-head { aspect-ratio: 96 / 271; background: url("./marks/ps5-head.png") center / 100% 100% no-repeat, #fff; box-shadow: 0 2px 0 #2a4fb0; }
 .case-spine-art .ps5 .t-band, .case-spine-art .ps5 .t-foot { background: #050505; }
-@media (prefers-reduced-motion: reduce) { .collection-case .kase, .collection-case .k-hinge, .collection-case .k-lid, .collection-case .floor-shadow { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .collection-case .kase, .collection-case .k-hinge, .collection-case .k-lid, .collection-case .floor-shadow,
+  .collection-case--fitted[data-unfolding] .kase:not(.is-dragging), .collection-case--fitted[data-unfolding]::before, .collection-case--fitted[data-unfolding] .floor-shadow { transition: none; } }
 /* Platform marks are cut from real package spines (user decision, 2026-10-01). A Nintendo-published Switch 2 game carries the publisher oval at the foot. */
 .case-spine-art .sw2[data-nintendo] .t-foot { aspect-ratio: 96 / 198; padding: 0; background: url("./marks/switch2-nintendo.png") center / 100% 100% no-repeat; }
 .case-spine-art .sw2[data-nintendo] .t-pub { display: none; }

@@ -1,7 +1,7 @@
 import { useCallback, useRef } from "react";
 import { motionDefaults, motionSpring, motionTime, prefersReducedMotion } from "./motionCurves";
 
-export type MotionSurface = "menu" | "dialog" | "scrim" | "toast" | "selection";
+export type MotionSurface = "menu" | "dialog" | "scrim" | "toast" | "selection" | "layer";
 const properties = ["opacity", "translate", "scale"] as const;
 type LeavingSurface = { node: HTMLElement; remove(): void };
 // Conditional sheet owners remount on reopen; their title still identifies the same surface.
@@ -62,6 +62,12 @@ export function useMotionSurface(kind: MotionSurface, enabled = true, identity?:
       snapshot.setAttribute("aria-hidden", "true");
       for (const element of [snapshot, ...snapshot.querySelectorAll("[id], [role], [aria-live]")]) {
         element.removeAttribute("id"); element.removeAttribute("role"); element.removeAttribute("aria-live");
+      }
+      // A copied frame or media element would load (and play) again; its box stays, empty.
+      for (const element of snapshot.querySelectorAll("iframe, video, audio")) {
+        const box = document.createElement("div");
+        box.className = element.className;
+        element.replaceWith(box);
       }
       for (const property of properties) snapshot.style.setProperty(property, style.getPropertyValue(property));
       if (kind === "toast") snapshot.style.transform = style.transform;

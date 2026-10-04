@@ -788,6 +788,31 @@ describe('appended card arrival',()=>{
   const animate=vi.fn();
   beforeEach(()=>{animate.mockReset();(HTMLElement.prototype as unknown as {animate:unknown}).animate=function(this:HTMLElement,...args:unknown[]){animate(this,...args);};});
   afterEach(()=>{delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
+  it('swaps to 북마크 like the Collections segment, only once the bookmarked list has committed',async()=>{
+    let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});
+    const marked:CatalogItem={...item,providerWorkId:'77',groupId:'group-77',title:'북마크한 작품'};
+    (HTMLElement.prototype as unknown as {animate:unknown}).animate=function(this:HTMLElement,...args:unknown[]){animate(this,...args);return {cancel(){},finish(){}};};
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path.includes('/status'))return capableStatus;
+      if(path.includes('/count?'))return {publicationRevision:'p1',totalCount:1};
+      if(path.includes('scope=bookmarked')){await held;return {...page,items:[marked]};}
+      return page;
+    });
+    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+    const list=document.querySelector('.catalog-scroll') as HTMLElement;
+    const swaps=()=>animate.mock.calls.filter(([element,frames])=>(element as HTMLElement).parentElement===list&&String((frames as Keyframe[])[0]?.transform).startsWith('translateX'));
+    animate.mockClear();
+    fireEvent.click(within(screen.getByRole('radiogroup',{name:'카탈로그 출처'})).getByRole('radio',{name:'북마크'}));
+    await act(async()=>{});
+    // The old list stays and nothing slides over it while the bookmarked page loads.
+    expect(swaps()).toHaveLength(0);
+    await act(async()=>{release();});
+    await screen.findByText('북마크한 작품');
+    expect(swaps().length).toBeGreaterThan(0);
+    expect((swaps()[0][1] as Keyframe[])[0]).toMatchObject({transform:'translateX(16px)',opacity:.5});
+    // The section bar itself does not move.
+    expect(swaps().some(([element])=>(element as HTMLElement).matches('.section-shade-rows,.ui-section-bar'))).toBe(false);
+  });
   it('never hides or fades the late cover after the appended card timeout',async()=>{
     vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{target,isIntersecting:true} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} unobserve(){} disconnect(){}});
     const second:CatalogItem={...item,providerWorkId:'43',groupId:'group-2',title:'계절의 기록',thumbnailUrl:'https://example.test/c.jpg',versionCount:1};

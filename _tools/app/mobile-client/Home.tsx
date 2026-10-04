@@ -1,10 +1,10 @@
-import {useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
+import {useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {RectangleStackIcon} from '@heroicons/react/24/outline';
 import {collectionCover, type CollectionSummary} from './collectionModel';
 import {localToday} from './collectionReleasesModel';
 import {Cover} from './CoverGroup';
 import {currentShelf, subscribeReleases} from './releaseStore';
-import {daysAfter, shelfEntries, useHomeDashboard, useHomeMemos, useHomeRevisit, useHomeUpcoming, type HomeCover, type RevisitGroup, type UpcomingHomeEntry} from './homeDashboard';
+import {daysAfter, shelfEntries, useHomeDashboard, useHomeMemos, useHomeRevisit, useHomeUpcoming, type HomeCover, type UpcomingHomeEntry} from './homeDashboard';
 import type {CharacterIndex} from './characterModel';
 import type {ExchangeSnapshot} from './exchangeModel';
 import {api, native} from './transport';
@@ -16,12 +16,21 @@ import type {Asset, Ticket} from './types';
 import {KIND_LABEL} from '../src/collections/collectionFormat';
 import {ddayLabel, displayDate} from '../src/shared/displayDate';
 import {Badge, Skeleton} from './ui';
-import {HomeAttentionLayout, HomePresence, HomeReleaseList, HomeSection, HomeToday, type HomeReleaseCard} from '../src/home/HomeAttention';
+import {HomeSection, HomeToday, type HomeReleaseCard} from '../src/home/HomeAttention';
+import {HomeReleaseGrid} from '../src/home/HomeReleaseGrid';
+import {HomePlayingShelf} from '../src/home/HomePlayingShelf';
+import {HomeDay} from '../src/home/HomeRevisit';
+import {LightCase} from '../src/collections/case/LightCase';
+import {workCasePlatform} from '../src/collections/case/CollectionCase';
+import {BusyLabel} from '../src/shared/ui/BusyLabel';
+import {HomeAssetImage, useTabletHomeDaily} from './HomeMedia';
+import {contentCross, EASE_STANDARD, reducedMotion} from '../src/shared/motion/curves';
 import {attentionRows} from '../src/home/homeAttentionModel';
 import {useHomeVisit} from '../src/home/useHomeVisit';
 import {koreanReleases} from './collectionReleasesModel';
 import {useLocalDayClock} from '../src/shared/useLocalDayClock';
 import {StableImage} from '../src/shared/ui/StableImage';
+import '../src/home/home.css';
 import './home.css';
 
 export interface HomeProps {
@@ -70,16 +79,15 @@ async function decodeHomeArtwork(url: string) {
   try { await image.decode?.(); } catch { /* The img element reports the failed decode. */ }
 }
 
-function HomeMangaCover({item, revision, label, active}: {item: CollectionSummary; revision: string; label: string; active: boolean}) {
-  const artworkId = collectionCover(item);
+function useHomeArtwork(item: CollectionSummary, revision: string, active: boolean, artworkId = collectionCover(item), assetId = item.coverAssetId) {
   const digest = artworkId ? item.artworkVersions?.[artworkId]?.thumbnail ?? revision : item.coverAssetId ?? revision;
-  const source = JSON.stringify([item.id, artworkId ?? null, item.coverAssetId ?? null, digest]);
+  const source = JSON.stringify([item.id, artworkId ?? null, assetId ?? null, digest]);
   const [url, setUrl] = useState(() => {
     const hit = homeArtworkCache.get(source);
     return hit && hit.until > Date.now() ? hit.url : '';
   });
   useEffect(() => {
-    if (!active || (!artworkId && !item.coverAssetId)) return;
+    if (!active || (!artworkId && !assetId)) return;
     const hit = homeArtworkCache.get(source);
     if (hit && hit.until > Date.now()) { setUrl(hit.url); return; }
     homeArtworkCache.delete(source);
@@ -88,7 +96,7 @@ function HomeMangaCover({item, revision, label, active}: {item: CollectionSummar
       const controller = new AbortController();
       const request = artworkId
         ? native<Ticket>('collectionArtwork', {collectionId: item.id, artworkId, variant: 'thumbnail', revision, digest: item.artworkVersions?.[artworkId]?.thumbnail ?? ''}, controller.signal)
-        : mediaTicket({id: item.coverAssetId!, kind: 'image'}, 'thumbnail', controller.signal);
+        : mediaTicket({id: assetId!, kind: 'image'}, 'thumbnail', controller.signal);
       load = request.then(async ticket => {
         if (!ticket?.url || !homeArtworkUrl(ticket.url)) throw new Error('Invalid artwork');
         await decodeHomeArtwork(ticket.url);
@@ -100,18 +108,23 @@ function HomeMangaCover({item, revision, label, active}: {item: CollectionSummar
     let live = true;
     void load.then(next => { if (live) setUrl(next); }, () => {});
     return () => { live = false; };
-  }, [active, artworkId, item, revision, source]);
+  }, [active, artworkId, assetId, item, revision, source]);
+  return url;
+}
+
+function HomeMangaCover({item, revision, label, active}: {item: CollectionSummary; revision: string; label: string; active: boolean}) {
+  const url = useHomeArtwork(item, revision, active);
   return url ? <StableImage className="collection-art" src={url} alt={label} /> : <span className="home-cover-placeholder"><RectangleStackIcon aria-hidden="true" /></span>;
 }
 
-const upcomingKind: Record<UpcomingHomeEntry['kind'], string> = KIND_LABEL;
-
-function RevisitMosaic({group, paused, privacy, onOpen}: {group: RevisitGroup; paused: boolean; privacy: boolean; onOpen(): void}) {
-  const items = group.items.slice(0, 7);
-  const rows = items.length >= 5 ? [items.slice(0, 3), items.slice(3)] : [items];
-  const ratio = (asset: Asset) => Number(asset.width) > 0 && Number(asset.height) > 0 ? Math.max(.4, Math.min(2.6, Number(asset.width) / Number(asset.height))) : 1;
-  return <button className="home-revisit" onClick={onOpen} aria-label={`1년 전 오늘 ${group.count}장`}><span className="home-revisit-pics">{rows.map((row, index) => <span key={index} className="home-jrow">{row.map(asset => <span key={asset.id} className="home-jcell" style={{flexGrow: ratio(asset), aspectRatio: String(ratio(asset))}}>{privacy ? <span className="home-private-cell" aria-label="비공개 모드로 이미지 숨김" /> : <Cover asset={asset} paused={paused} />}</span>)}</span>)}</span><span className="home-caption"><span>1년 전 오늘</span><span className="numeric">{group.count}장</span></span></button>;
+function HomePlayingCase({item, revision, active, privacy, selected}: {item: CollectionSummary; revision: string; active: boolean; privacy: boolean; selected: boolean}) {
+  const front = useHomeArtwork(item, revision, active && !privacy);
+  const spine = useHomeArtwork(item, revision, active && !privacy, item.spineArtworkId ?? null, null);
+  return <LightCase selected={selected} frontPending={!privacy && !!(collectionCover(item) || item.coverAssetId) && !front} spinePending={!privacy && !!item.spineArtworkId && !spine}
+    data={{title: item.name, author: item.author, publisher: item.publisher, platform: workCasePlatform(item.type, item.platforms, item.ownedPlatform), front: privacy ? null : front || null, spine: privacy ? null : spine || null, privacy}} />;
 }
+
+const upcomingKind: Record<UpcomingHomeEntry['kind'], string> = KIND_LABEL;
 
 function UpcomingDetailSheet({entry, interested, privacy, onToggle, onClose}: {entry: UpcomingHomeEntry; interested: boolean; privacy: boolean; onToggle(): void; onClose(): void}) {
   const days = entry.date ? daysAfter(entry.date, localToday()) : null;
@@ -131,7 +144,10 @@ export function Home(props: HomeProps) {
   const refreshHome = () => { d.retry(); props.onRefresh?.(); };
   const pull = usePullToRefresh(homeScroll, refreshHome, props.busy, paused);
   const [detail, setDetail] = useState<UpcomingHomeEntry | null>(null);
-  const shelf = useSyncExternalStore(subscribeReleases, currentShelf);
+  const freshShelf = useSyncExternalStore(subscribeReleases, currentShelf);
+  const keptShelf = useRef({scope: props.scope, value: freshShelf});
+  if (keptShelf.current.scope !== props.scope || freshShelf) keptShelf.current = {scope: props.scope, value: freshShelf};
+  const shelf = freshShelf ?? keptShelf.current.value;
   const works = useMemo(() => new Map((shelf?.works ?? []).map(work => [work.id, work])), [shelf]);
   const cover = (id: string, name: string) => {
     const work = works.get(id);
@@ -163,7 +179,13 @@ export function Home(props: HomeProps) {
     if (entry.muted || !upcoming.wishlist.has(entry.id) || entry.precision !== 'exact' || !entry.date) continue;
     const days = daysAfter(entry.date, today);
     if (days < 0 || days > 14) continue;
-    future.push({ key: `title:${entry.id}`, name: entry.title, date: entry.date, cover: <HomeCoverImage cover={entry.cover} alt="" privacy={privacy} />, onOpen: () => setDetail(entry) });
+    future.push({ key: `title:${entry.id}`, name: entry.title, date: entry.date, detail: upcomingKind[entry.kind], cover: <HomeCoverImage cover={entry.cover} alt="" privacy={privacy} />, onOpen: () => setDetail(entry) });
+  }
+  for (const work of shelf?.works ?? []) {
+    if ((work.type !== 'game' && work.type !== 'movie') || !work.releaseDate || !/^\d{4}-\d{2}-\d{2}$/.test(work.releaseDate)) continue;
+    const days = daysAfter(work.releaseDate, today);
+    if (days < 0 || days > 14 || future.some(row => row.name === work.name && row.date === work.releaseDate)) continue;
+    future.push({key: `work:${work.id}`, name: work.name, date: work.releaseDate, detail: KIND_LABEL[work.type], cover: cover(work.id, work.name), onOpen: () => props.onWork(work.id)});
   }
   future.sort((a,b) => (a.date ?? '').localeCompare(b.date ?? '') || a.name.localeCompare(b.name, 'ko'));
   const reviewRows = [
@@ -179,15 +201,41 @@ export function Home(props: HomeProps) {
   ];
   const rows = attentionRows(memos?.notes ?? [], reviewRows, connections, today);
   const dateGroup = revisit?.find(group => group.key === 'date' && group.count > 0);
-  const right = [
-    ...(visit.arrivals.length ? [{ key: 'new', content: <HomeSection title="새로 나옴 · 지난번 이후" onOpen={props.onReleases}><HomeReleaseList today={today} rows={visit.arrivals.map(e => ({ key: e.key, name: e.name, date: e.date, detail: e.detail, fresh: true, cover: e.external ? <HomeCoverImage cover={e.external.cover} alt="" privacy={privacy} /> : cover(e.workId, e.name), onOpen: () => { visit.opened(e.token); if (e.external) setDetail(e.external); else props.onWork(e.workId); } }))} /></HomeSection> }] : []),
-    ...(future.length ? [{ key: 'upcoming', content: <HomeSection title="2주 안에 나오는 신간" onOpen={props.onReleases}><HomeReleaseList rows={future} today={today} /></HomeSection> }] : []),
+  const releaseCards: HomeReleaseCard[] = [
+    ...visit.arrivals.map(e => ({key: e.key, name: e.name, date: e.date, detail: e.external ? upcomingKind[e.external.kind] : e.detail === '발매됨' ? KIND_LABEL[works.get(e.workId)?.type ?? 'game'] : e.detail, fresh: true,
+      cover: e.external ? <HomeCoverImage cover={e.external.cover} alt="" privacy={privacy} /> : cover(e.workId, e.name),
+      onOpen: () => {visit.opened(e.token); if (e.external) setDetail(e.external); else props.onWork(e.workId);}})),
+    ...future.filter(row => !visit.arrivals.some(e => e.key === row.key && e.date === row.date)),
   ];
-  // Same order as the PC: 1년 전 오늘 follows 오늘 할 것, before 새로 나옴 and 신간.
-  const revisitSection = dateGroup ? <HomePresence items={[{ key: 'revisit', content: <HomeSection title={`1년 전 오늘 · ${dateGroup.count.toLocaleString()}장`}><RevisitMosaic group={dateGroup} paused={paused} privacy={privacy} onOpen={() => props.onRevisit?.('date', dateGroup.title)} /></HomeSection> }]} /> : revisit === null ? <HomeSection title="1년 전 오늘"><div className="home-revisit"><Skeleton label="1년 전 오늘" /></div></HomeSection> : null;
+  const playing = (shelf?.works ?? []).filter(work => work.type === 'game' && work.status === 'playing' || work.type === 'movie' && work.status === 'watching');
+  const attentionPending = !memos || reviewRows.some(row => row.count === null);
+  const quiet = rows.length === 0 && !attentionPending;
+  const daily = useTabletHomeDaily(!paused && revisit !== null && !dateGroup && quiet, props.scope, today, d.refreshKey);
+  const dayPending = revisit === null || quiet && !dateGroup && !daily.value && !daily.failed;
+  const layoutShown = useRef(false);
+  if ((d.releasesReady && upcoming.ready || d.offline || d.serverProblem) && (!attentionPending || d.offline || d.serverProblem) && !dayPending) layoutShown.current = true;
+  const firstLoad = !layoutShown.current;
+  useLayoutEffect(() => {
+    if (firstLoad || reducedMotion()) return;
+    const host = homeScroll.current?.querySelector<HTMLElement>('.home-tablet-layout');
+    const animation = host?.animate?.([{opacity: 0}, {opacity: 1}], {duration: contentCross.enter, easing: EASE_STANDARD});
+    return () => animation?.cancel();
+  }, [firstLoad]);
+  const nextDayData = revisit === null ? null : {playing: [], dailyAsset: daily.value?.asset ? {id: daily.value.asset.id, collectedAt: daily.value.asset.collected_at ?? '', favorite: true} : null,
+    anniversary: dateGroup ? {id: 'date', kind: 'date' as const, title: dateGroup.title, reason: '', revision: 0, assetIds: dateGroup.items.map(asset => asset.id)} : null};
+  const nextDay = {scope: props.scope, data: nextDayData, group: dateGroup, asset: daily.value?.asset, quiet: quiet && daily.value?.available === true};
+  const keptDay = useRef(nextDay);
+  if (keptDay.current.scope !== props.scope || !dayPending && (!daily.failed || daily.value || dateGroup || !quiet)) keptDay.current = nextDay;
+  const day = keptDay.current;
+  const image = (id: string, variant: 'thumbnail' | 'original', className?: string) => {
+    const asset = day.asset?.id === id ? day.asset : day.group?.items.find(item => item.id === id);
+    return asset ? className ? <HomeAssetImage key={id} asset={asset} variant={variant} className={className} paused={paused} /> : <Cover asset={asset} paused={paused} /> : null;
+  };
   return <div className={`home-scroll home-attention-mobile${privacy ? ' is-private' : ''}`} ref={homeScroll} aria-label="홈">
     {pull}
-    <HomeAttentionLayout tablet today={<HomeToday rows={rows} loading={!memos || reviewRows.some(r => r.count === null) ? <Skeleton label="오늘 할 것" /> : undefined} onOpen={row => {
+    {firstLoad ? <div className="home-media-waiting" aria-busy="true"><Skeleton label="홈 미디어" /><BusyLabel busy>홈 불러오는 중</BusyLabel></div> : <div className="home-tablet-layout">
+    <div className="home-tablet-day-column">
+    {rows.length > 0 && <div className="home-tablet-today"><HomeToday rows={rows} animate={false} onOpen={row => {
       if (row.noteId) props.onNotes(row.noteId);
       else if (row.key === 'unsorted') props.onUnclassified();
       else if (row.key === 'similar') props.onSimilarity();
@@ -195,7 +243,18 @@ export function Home(props: HomeProps) {
       else if (row.key === 'duplicates') props.onDuplicates();
       else if (row.key === 'connection:exchange') props.onExchange();
       else if (row.key.startsWith('connection:')) props.onSettings();
-    }} />} leftAfter={revisitSection} right={<HomePresence items={revisit === null ? [] : right} />} />
+    }} /></div>}
+    <div className="home-tablet-day"><HomeDay data={day.data} failed={daily.failed} quiet={day.quiet} privacyMode={privacy} image={image} emptyAnniversary anniversaryCount={day.group?.count}
+      onOpenAsset={day.group && props.onRevisit ? () => props.onRevisit?.('date', day.group!.title) : undefined} />
+      {daily.failed && <button className="home-interest-action" onClick={refreshHome}>다시 시도</button>}
+    </div></div>
+    <div className="home-tablet-media-column">
+    <div className="home-tablet-playing"><HomePlayingShelf onOpen={props.onWork} works={playing.map(work => ({id: work.id, name: work.name, platform: work.ownedPlatform || work.platforms || KIND_LABEL[work.type], score: work.myScore ?? null,
+      case: selected => <HomePlayingCase item={work} revision={shelf?.revision ?? ''} active={!paused} privacy={privacy} selected={selected} />}))} /></div>
+    <div className="home-tablet-releases"><HomeSection title={`2주 안에 발매 · ${releaseCards.length}`} onOpen={props.onReleases}>
+      {releaseCards.length ? <HomeReleaseGrid today={today} rows={releaseCards.slice(0, 14)} /> : <p className="home-attention-empty">2주 안에 예정된 발매가 없습니다</p>}
+    </HomeSection></div>
+    </div></div>}
     {secondaryError && <p className="hint" role="status">{secondaryError}</p>}
     {detail && <UpcomingDetailSheet entry={detail} interested={upcoming.wishlist.has(detail.id)} privacy={privacy} onToggle={() => upcoming.toggle(detail.id)} onClose={() => setDetail(null)} />}
   </div>;

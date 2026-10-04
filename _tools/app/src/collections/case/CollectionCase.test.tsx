@@ -11,6 +11,29 @@ function Case({ value = data }: { value?: CaseData }) {
   return <CollectionCase data={value} open={open} onOpenChange={setOpen} />;
 }
 describe("CollectionCase", () => {
+  it("refits the opening case on the unfolding's curve instead of snapping smaller first", () => {
+    vi.useFakeTimers();
+    const style = document.createElement("style"); style.textContent = caseStyles; document.head.append(style);
+    try {
+      const stageBox = { width: 900, height: 700 };
+      const view = render(<CollectionCase data={data} stageBox={stageBox} large open={false} onOpenChange={vi.fn()} />);
+      const root = view.container.querySelector<HTMLElement>(".collection-case")!, kase = root.querySelector<HTMLElement>(".kase")!;
+      const closedScale = root.style.getPropertyValue("--case-scale");
+      // A stage resize or settling cover applies at once: no scale transition at rest.
+      expect(root).not.toHaveAttribute("data-unfolding");
+      expect(getComputedStyle(kase).transition).not.toContain("scale");
+      view.rerender(<CollectionCase data={data} stageBox={stageBox} large open onOpenChange={vi.fn()} />);
+      // The open case is twice as wide, so its fit shrinks; that change moves with the rotation and lid.
+      expect(Number(root.style.getPropertyValue("--case-scale"))).toBeLessThan(Number(closedScale));
+      expect(root).toHaveAttribute("data-unfolding");
+      expect(getComputedStyle(kase).transition).toBe("transform 560ms var(--ease-standard), scale 560ms var(--ease-standard)");
+      act(() => vi.advanceTimersByTime(600));
+      expect(root).not.toHaveAttribute("data-unfolding");
+      view.rerender(<CollectionCase data={data} stageBox={stageBox} large open={false} onOpenChange={vi.fn()} />);
+      expect(root).toHaveAttribute("data-unfolding");
+      expect(root.style.getPropertyValue("--case-scale")).toBe(closedScale);
+    } finally { style.remove(); vi.useRealTimers(); }
+  });
   it("prints each AV rim on its own one-turn text path without waiting for portraits", () => {
     const ready = vi.fn();
     const av = { ...data, platform: "av" as const, front: null, discLabel: "ABC-123 · Maker · Label" };

@@ -1,3 +1,5 @@
+import './folderCounts.css';
+import {Fold} from './Fold';
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
 import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {CoverGroup} from './CoverGroup';
@@ -35,7 +37,7 @@ export function FolderShelf({label,cards,accessory,ariaLabel,className,cardsId,c
   useFirstAppearance(host,cards.length,!!appearanceKey&&appearanceEnabled&&!cardsHidden,appearanceKey,".folder-shelf__card");
   return <section ref={host} className={['folder-shelf',className].filter(Boolean).join(' ')} aria-label={ariaLabel??label}>
     <SectionLabel as="h3" className="folder-shelf__label" title={label} actions={accessory}/>
-    {cards.length>0&&<div id={cardsId} hidden={cardsHidden}><ShelfScroller previousLabel="이전 항목" nextLabel="다음 항목">{cards}</ShelfScroller></div>}
+    {cards.length>0&&<Fold keepMounted open={!cardsHidden} id={cardsId}><ShelfScroller previousLabel="이전 항목" nextLabel="다음 항목">{cards}</ShelfScroller></Fold>}
   </section>;
 }
 
@@ -51,9 +53,8 @@ function ShelfFolderCard({entry,items,characters,paused,onSelect,onVisible}:{ent
   const count=entry.asset_count;
   return <article className="folder-shelf__card" ref={host}>
     <button type="button" className="folder-shelf__card-open" onClick={onSelect} aria-label={`${entry.name}${count===undefined?'':`, ${count}장`}`}>
-      <CoverGroup items={kind?characterCovers(entry,characters):items} paused={paused||!visible}/>
+      <span className="folder-thumbnail"><CoverGroup items={kind?characterCovers(entry,characters):items} paused={paused||!visible}/>{count!==undefined&&<span className="folder-thumbnail__count">{count.toLocaleString('ko-KR')}장</span>}</span>
       <strong><span className="folder-shelf__icon">{kind?<CharacterGlyph kind={kind}/>:<FolderIcon aria-hidden="true"/>}</span><span className="folder-shelf__name">{entry.name}</span></strong>
-      {count!==undefined&&<small className="folder-shelf__meta">{count.toLocaleString('ko-KR')}장</small>}
     </button>
   </article>;
 }
@@ -70,7 +71,7 @@ export function FolderCard({id,name,count,items,paused,childrenLabel,kind,onSele
     const observer=new IntersectionObserver(records=>{const next=records.some(r=>r.isIntersecting);setVisible(next);onVisible(id,next);},{rootMargin:'120px'});
     observer.observe(host.current);return()=>observer.disconnect();
   },[id,onVisible]);
-  return <button ref={host} className={`library-folder${kind?' is-character':''}`} onClick={onSelect} aria-label={count===undefined?name:`${name}, ${count}개`} aria-description={kind?KIND_NAMES[kind]:undefined}><CoverGroup items={items} paused={paused||!visible}/><span className="folder-caption">{kind&&<CharacterGlyph kind={kind}/>}<strong>{name}</strong>{count!==undefined&&<span className="numeric muted">{count}</span>}</span>{childrenLabel&&<small>{childrenLabel}</small>}</button>;
+  return <button ref={host} className={`library-folder${kind?' is-character':''}`} onClick={onSelect} aria-label={count===undefined?name:`${name}, ${count}개`} aria-description={kind?KIND_NAMES[kind]:undefined}><span className="folder-thumbnail"><CoverGroup items={items} paused={paused||!visible}/>{count!==undefined&&<span className="folder-thumbnail__count">{count.toLocaleString('ko-KR')}</span>}</span><span className="folder-caption">{kind&&<CharacterGlyph kind={kind}/>}<strong>{name}</strong></span>{childrenLabel&&<small>{childrenLabel}</small>}</button>;
 }
 export function FolderCards({items,entries,characters,paused,revision,onSelect,strip=false}:{items:Entry[];entries:Entry[];characters?:CharacterIndex;paused:boolean;revision:number;onSelect(view:View):void;strip?:boolean}) {
   const host=useRef<HTMLDivElement>(null);

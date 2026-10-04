@@ -23,8 +23,11 @@ const tile=(id:string)=>document.querySelector(`[data-asset-id="${id}"]`) as HTM
 const gallery=(items:Asset[],identity='all',stale=false)=><Gallery items={items} density={1} identity={identity} restoreScroll={0} onScroll={()=>{}} onOpen={()=>{}} onReady={()=>{}} onNearEnd={()=>{}} paused={false} stale={stale} vault={{label:item=>`항목 ${item.id}`}}/>;
 const tileAnimations=(id:string)=>animate.mock.calls.filter(([element])=>element===tile(id));
 async function load(id:string){fireEvent.load(tile(id).querySelector('img')!);await act(async()=>{});}
+/** The PC rule (user 2026-10-05): a thumbnail that decodes after its tile is shown fades in over 150 ms, in place. */
+const imageFades=(id:string)=>animate.mock.calls.filter(([element])=>element===tile(id).querySelector('img'));
+const lateFade=[{opacity:0},{opacity:1}];
 
-it('shows appended tiles in place without a content entrance animation',async()=>{
+it('shows appended tiles in place without a tile entrance; a late thumbnail fades in',async()=>{
  const first=[asset('a'),asset('b')];
  const view=render(gallery(first));
  const original=tile('a');
@@ -34,8 +37,11 @@ it('shows appended tiles in place without a content entrance animation',async()=
  expect(tile('c').style.opacity).not.toBe('0');
  expect(tile('d').style.opacity).not.toBe('0');
  await load('c');
- expect(animate).not.toHaveBeenCalled();
  expect(tileAnimations('c')).toHaveLength(0);
+ expect(imageFades('c')).toHaveLength(1);
+ expect(imageFades('c')[0][1]).toEqual(lateFade);
+ expect(imageFades('c')[0][2]).toEqual(expect.objectContaining({duration:150}));
+ expect(animate).toHaveBeenCalledTimes(1);
 });
 
 it('animates only the true first load, not a new place or anything under reduced motion',async()=>{
@@ -54,7 +60,9 @@ it('animates only the true first load, not a new place or anything under reduced
  expect(tile('b').style.opacity).not.toBe('0');
  expect(tile('b').querySelector('img')!.style.opacity).not.toBe('0');
  await load('b');
- expect(animate).not.toHaveBeenCalled();
+ // Reduced motion keeps only the opacity fade of the late image; nothing moves.
+ expect(tileAnimations('b')).toHaveLength(0);
+ expect(animate.mock.calls.every(([,frames])=>JSON.stringify(frames)===JSON.stringify(lateFade))).toBe(true);
 });
 
 it('keeps a stale list mounted and does not arrive ready thumbnails on replacement',()=>{
@@ -81,7 +89,7 @@ it('keeps a stale list mounted and does not arrive ready thumbnails on replaceme
  }
 });
 
-it('keeps slow thumbnails and decoded images in place without fading',async()=>{
+it('keeps a slow thumbnail in place and fades it in once decoded, like the PC',async()=>{
  const view=render(gallery([asset('a')]));
  animate.mockClear();
  view.rerender(gallery([asset('a'),asset('b')]));
@@ -89,7 +97,9 @@ it('keeps slow thumbnails and decoded images in place without fading',async()=>{
  expect(tile('b').style.opacity).not.toBe('0');
  expect(image.style.opacity).not.toBe('0');
  await load('b');
- expect(animate).not.toHaveBeenCalled();
+ expect(tileAnimations('b')).toHaveLength(0);
+ expect(imageFades('b').map(([,frames])=>frames)).toEqual([lateFade]);
+ expect(image.style.opacity).toBe('');
 });
 
 it('keeps a catalog cover in its sized box without a late fade when it decodes',async()=>{

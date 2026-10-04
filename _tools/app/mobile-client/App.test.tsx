@@ -218,7 +218,11 @@ it('shows unseen transfers in the Home header and opens the exchange screen', as
   const transfer = await screen.findByRole('button', {name: '전송 · 받은 파일 3개'});
   expect(transfer.closest('.header-action-badge')?.querySelector('.header-badge')?.textContent).toBe('3');
   fireEvent.click(transfer);
-  expect(await screen.findByRole('dialog', {name: '전송'})).toBeTruthy();
+  const screenLayer = await screen.findByRole('dialog', {name: '전송'});
+  // It is pushed in as a full-screen layer, and Back takes it away the same way.
+  expect(screenLayer.closest('.tablet-layer')?.getAttribute('data-motion')).toBe('layer');
+  act(() => {window.dispatchEvent(new Event('lakomics-back'));});
+  await waitFor(() => expect(screen.queryByRole('dialog', {name: '전송'})).toBeNull());
 });
 it('shows the outgoing transfer percentage when there are no unseen files', async () => {
   const snapshot = exchangeSnapshot({outgoing: [{transferId: 'tx1', batchId: 'b1', fileName: '스케치.zip', sizeBytes: 100, bytes: 62, peer: 'pc', peerId: 'pc', state: 'uploading', code: '', createdAt: '2026-09-25T10:00:00Z'}]});
@@ -579,20 +583,11 @@ it.each([false,true])('swaps bottom tabs atomically after readiness and retains 
         await act(async()=>releaseNotes());
       }
       await waitFor(()=>expect(body.querySelector(`[data-motion-view=${key}]`)?.getAttribute('aria-hidden')).toBeNull());
-      // A short cross: the incoming stage enters while the inert outgoing stage fades out underneath.
-      await waitFor(()=>expect((animate.mock.contexts as HTMLElement[]).filter(element=>element.classList.contains('motion-stage__view'))).toHaveLength(2));
-      expect((animate.mock.contexts as HTMLElement[])[0]).toBe(stage.querySelector(`[data-motion-view=${key}]`));
-      const crosses=animate.mock.calls.filter((_,index)=>(animate.mock.contexts[index] as HTMLElement).classList.contains('motion-stage__view'));
-      expect(crosses.map(call=>call[0])).toEqual([[{opacity:0},{opacity:1}],[{opacity:1},{opacity:0}]]);
-      expect(crosses.map(call=>call[1].duration)).toEqual(reduced?[120,120]:[150,150]);
+      // Tablet bottom tabs swap instantly once ready (user 2026-10-04): no stage cross-fade.
+      expect((animate.mock.contexts as HTMLElement[]).filter(element=>element.classList.contains('motion-stage__view'))).toHaveLength(0);
       await waitFor(()=>expect(body.querySelector('.motion-stage')?.getAttribute('data-motion-shown')).toBe(key));
-      const incoming=stage.querySelector<HTMLElement>(`[data-motion-view=${key}]`)!;
-      for(const outgoing of [...stage.children].filter(view=>visibleViews().includes(view.getAttribute('data-motion-view'))&&view!==incoming)){
-        expect(outgoing.getAttribute('aria-hidden')).toBe('true');
-        expect(outgoing.hasAttribute('inert')).toBe(true);
-        expect(Number((outgoing as HTMLElement).style.zIndex)).toBeLessThan(Number(incoming.style.zIndex));
-      }
-      await waitFor(()=>expect(visibleViews()).toEqual([key]));
+      // Instant swap: the outgoing view is gone in the same commit that shows the incoming one.
+      expect(visibleViews()).toEqual([key]);
       if(key!=='home'){
         if(retained.has(key))expect(shown).toBe(retained.get(key));
         else retained.set(key,shown);
@@ -600,7 +595,7 @@ it.each([false,true])('swaps bottom tabs atomically after readiness and retains 
     }
     observer.disconnect();
     expect(visibilitySnapshots.length).toBeGreaterThan(0);
-    expect(visibilitySnapshots.every(views=>views.length>=1&&views.length<=2)).toBe(true);
+    expect(visibilitySnapshots.every(views=>views.length===1)).toBe(true);
   } finally {
     observer?.disconnect();
     if(descriptor)Object.defineProperty(HTMLElement.prototype,'animate',descriptor);

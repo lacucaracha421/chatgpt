@@ -1,3 +1,4 @@
+import {LoadingLine} from './TopBar';
 import {useEffect,useRef,useState} from 'react';
 import {FolderIcon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
@@ -51,7 +52,7 @@ export function AlbumBatchSheet({assetIds,open,onClose,onComplete}:{assetIds:str
   };
 
   return <BottomSheet title="앨범에 추가" onClose={()=>{if(!busy)onClose();}}>
-    {loading&&<div className="loading-line" role="status" aria-label="앨범 목록을 불러오는 중"/>}
+    <LoadingLine label={(loading)&&'앨범 목록을 불러오는 중'}/>
     {error&&<p className="error-message" role="alert">{error}</p>}
     {progress&&<p className="album-batch-progress" role="status">{progress.done}/{progress.total}</p>}
     {confirmation&&<p className="album-batch-confirmation" role="status">{confirmation}</p>}

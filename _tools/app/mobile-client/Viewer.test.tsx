@@ -123,6 +123,24 @@ describe('progressive viewer',()=>{
     await waitFor(()=>expect(document.querySelector('video')?.getAttribute('src')??'').toContain('original-v'));
     const player=document.querySelector('video')!;expect(player.autoplay).toBe(true);expect(player.loop).toBe(true);expect(player.preload).toBe('auto');
   });
+  it('hides the video controls as soon as the viewer zooms back into its tile',async()=>{
+    // The controls sit at the bottom of the full-screen media box, outside the letterboxed picture:
+    // left visible they would travel into the tile below it and trail behind the zoom-back.
+    const style=document.createElement('style');style.textContent=readFileSync('mobile-client/Viewer.css','utf8');document.head.append(style);
+    const animate=vi.fn(()=>({cancel:vi.fn(),finish:vi.fn(),onfinish:null}) as unknown as Animation);
+    Object.defineProperty(HTMLElement.prototype,'animate',{configurable:true,value:animate});
+    try {
+      const onClose=vi.fn();
+      render(<Viewer items={[{id:'v',kind:'video'}]} index={0} onIndex={()=>{}} onClose={onClose}/>);
+      await waitFor(()=>expect(document.querySelector('video')?.getAttribute('src')??'').toContain('original-v'));
+      const controls=document.querySelector<HTMLElement>('.video-player__controls')!;
+      expect(getComputedStyle(controls).visibility).not.toBe('hidden');
+      fireEvent.click(screen.getByRole('button',{name:'뷰어 닫기'}));
+      expect(document.querySelector('[data-viewer-closing]')).not.toBeNull();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(getComputedStyle(controls).visibility).toBe('hidden');
+    } finally {style.remove();delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;}
+  });
   it('renews a failed video and restores its playback position',async()=>{
     render(<Viewer items={[{id:'v',kind:'video'}]} index={0} onIndex={()=>{}} onClose={()=>{}}/>);
     await waitFor(()=>expect(document.querySelector('video')?.getAttribute('src')).toContain('original-v'));
@@ -537,6 +555,28 @@ describe('vault source',()=>{
     expect(mocks.ticket).not.toHaveBeenCalled();expect(mocks.decode).not.toHaveBeenCalled();
     expect(media.invalidateTicket).not.toHaveBeenCalled();
     expect(native).not.toHaveBeenCalled();
+  });
+});
+
+describe('vault image arrival',()=>{
+  const vaultItems:Asset[]=[{id:'v1',kind:'image',preview:'https://app.lakomics.local/vault/s/t1'}];
+  const vault={original:(asset:Asset)=>`https://app.lakomics.local/vault/s/${asset.id}`,label:(asset:Asset)=>`제목 ${asset.id}`};
+  it.each([false,true])('crossfades the full image over the low-resolution placeholder before removing it (reduced=%s)',reduced=>{
+    vi.stubGlobal('matchMedia',vi.fn(()=>({matches:reduced,addEventListener:vi.fn(),removeEventListener:vi.fn()})));
+    try{
+      render(<Viewer items={vaultItems} index={0} onIndex={()=>{}} onClose={()=>{}} vault={vault}/>);
+      const original=screen.getByAltText('제목 v1');
+      let finish:(()=>void)|undefined;
+      const animate=vi.fn(()=>({addEventListener:(type:string,listener:()=>void)=>{if(type==='finish')finish=listener;},cancel:vi.fn()}));
+      Object.assign(original,{animate});
+      fireEvent.load(original);
+      expect(animate).toHaveBeenCalledWith([{opacity:0},{opacity:1}],expect.objectContaining({duration:reduced?120:150}));
+      expect(original.style.opacity).toBe('1');
+      // The placeholder stays under the fading image until the fade has finished.
+      expect(document.querySelector('.viewer-placeholder')).not.toBeNull();
+      act(()=>finish!());
+      expect(document.querySelector('.viewer-placeholder')).toBeNull();
+    }finally{vi.unstubAllGlobals();}
   });
 });
 

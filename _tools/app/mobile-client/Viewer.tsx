@@ -1,3 +1,4 @@
+import {BusyLabel} from '../src/shared/ui/BusyLabel';
 import {assetMasked} from '../src/shared/privacy/contentMask';
 import {mediaMasked} from './assetMask';
 import {useNsfwFilter} from './privacyMode';
@@ -22,6 +23,7 @@ import {ViewerFilmstrip} from './ViewerFilmstrip';
 import {filmstripControlsOffset} from '../src/shared/viewer/CenteredFilmstrip';
 import {useLikesAlbum} from './useLikesAlbum';
 import {VideoPlayerSurface} from '../src/video/VideoPlayer';
+import {contentCross, EASE_STANDARD, motionDefaults, motionTime, prefersReducedMotion} from '../src/shared/motion/curves';
 
 import './Viewer.css';
 
@@ -101,6 +103,24 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
   const original = vault ? vault.original(asset) : decoded?.id === asset.id ? decoded.url : prepared.current.get(asset.id);
   const motion = useViewerMotion(asset.id, onClose, undefined, asset.width && asset.height ? asset.width / asset.height : 1, original || decoded?.url || asset.preview, original ? asset.id : decoded?.id || asset.id);
   const [loaded, setLoaded] = useState('');
+  // The low-resolution placeholder stays under the full image until the full image has faded in.
+  const [placeholderGone, setPlaceholderGone] = useState(false);
+  const shownId = useRef(asset?.id);shownId.current = asset?.id;
+  const fullLoaded = (event: SyntheticEvent<HTMLImageElement>) => {
+    const image = event.currentTarget, id = asset.id;
+    if (placeholderGone) { setLoaded(id); return; }
+    const show = () => {
+      if (shownId.current !== id) return;
+      setLoaded(id);
+      if (typeof image.animate !== 'function') { setPlaceholderGone(true); return; }
+      const fade = image.animate([{opacity: 0}, {opacity: 1}], {duration: prefersReducedMotion() ? motionTime('--motion-micro', motionDefaults.micro) : contentCross.image, easing: EASE_STANDARD});
+      fade.addEventListener?.('finish', () => setPlaceholderGone(true));
+      fade.addEventListener?.('cancel', () => setPlaceholderGone(true));
+    };
+    // Crossfade only once the full image is decoded, so the fade itself never waits on a decode.
+    if (typeof image.decode === 'function') void image.decode().catch(() => {}).then(show);
+    else show();
+  };
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [info, setInfo] = useState(false);
@@ -392,9 +412,9 @@ function ViewerContent({items, index, onIndex, onClose,onNearEnd,backRef,endpoin
           }}
         />
           : vault ? <>
-            {asset.preview && !loaded && <img className="viewer-image viewer-placeholder" src={asset.preview} alt="" aria-hidden="true" draggable={false}/>}
-            <StableImage decodeFirst={false} className="viewer-image" src={original!} alt={vault.label(asset)} draggable={false} onLoad={() => setLoaded(asset.id)} onError={() => setError('이미지를 표시하지 못했습니다. USB 연결과 지원 형식을 확인해 주세요.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, opacity: loaded ? 1 : 0}}/>
-          </> : imageSrc ? <StableImage decodeFirst={false} className="viewer-image" src={imageSrc} alt={artistLabel} draggable={false} onError={() => setError('이미지를 표시하지 못했습니다.')} onPreloadError={() => setError('이미지를 표시하지 못했습니다.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}}/> : <div className="empty-inline">{error ? '미리보기를 표시할 수 없습니다.' : '이미지 불러오는 중'}</div>}
+            {asset.preview && !placeholderGone && <img className="viewer-image viewer-placeholder" src={asset.preview} alt="" aria-hidden="true" draggable={false}/>}
+            <StableImage decodeFirst={false} className="viewer-image" src={original!} alt={vault.label(asset)} draggable={false} onLoad={fullLoaded} onError={() => setError('이미지를 표시하지 못했습니다. USB 연결과 지원 형식을 확인해 주세요.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, opacity: loaded ? 1 : 0}}/>
+          </> : imageSrc ? <StableImage className="viewer-image" src={imageSrc} alt={artistLabel} draggable={false} onError={() => setError('이미지를 표시하지 못했습니다.')} onPreloadError={() => setError('이미지를 표시하지 못했습니다.')} style={{transform:`translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`}}/> : <div className="empty-inline"><BusyLabel busy={!error} idle={error ? '미리보기를 표시할 수 없습니다.' : null}>이미지 불러오는 중</BusyLabel></div>}
       </div>
       {likes.error && <div className="viewer-error" role="alert"><span>{likes.error}</span></div>}
       {error && <div className="viewer-error" role="status"><span>{error}</span><Button onClick={() => {autoRetry.current={id:asset.id,used:false};renewVideo(video.current,!!video.current&&!video.current.paused);}}><ArrowPathIcon/>다시 시도</Button></div>}

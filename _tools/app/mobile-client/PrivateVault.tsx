@@ -82,7 +82,7 @@ export function PrivateVault({onClose,backRef,density=1}:{onClose():void;backRef
   const close=()=>{if(selected!==null)setSelected(null);else onClose();};
   const open=selected!==null&&selected<assets.length;
   const showChecking = useDelayedBusy(!ready && !error);
-  return <Dialog open title="비밀 보관함" variant="fullscreen" onClose={close}>
+  return <Dialog open layer title="비밀 보관함" variant="fullscreen" onClose={close}>
     <DialogDescription className="sr-only">USB에 있는 비밀 보관함을 열어 이미지와 영상을 감상합니다.</DialogDescription>
     <section className="private-vault" onContextMenu={event=>event.preventDefault()}>
       <header className="vault-header">

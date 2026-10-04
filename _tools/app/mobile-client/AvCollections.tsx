@@ -1,6 +1,6 @@
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useMemo, useRef, useState, type CSSProperties} from 'react';
-import {ChevronRightIcon} from '@heroicons/react/24/outline';
+import {ChevronDownIcon, ChevronRightIcon} from '@heroicons/react/24/outline';
 import {CollectionList} from '../src/collections/CollectionList';
 import {displayDate, displayDateTime} from '../src/shared/displayDate';
 import {StableImage} from '../src/shared/ui/StableImage';
@@ -11,6 +11,7 @@ import type {AvPerson, CollectionDetail, CollectionSummary} from './collectionMo
 import {api} from './transport';
 import {normalizeProductCode, readAvLookupRecent, writeAvLookupRecent, type AvLookupRecent} from './avLookup';
 import {Button, SectionLabel, Tabs} from './ui';
+import {Fold} from './Fold';
 import './avCollections.css';
 
 export type AvListView = 'works' | 'performers';
@@ -187,8 +188,9 @@ export function AvRelatedWorks({item,items,onOpen}:{item:CollectionDetail;items:
     ...(item.av?.series?[{name:'같은 시리즈',works:others.filter(work=>work.av?.series===item.av?.series)}]:[]),
     ...(item.av?.label?[{name:'같은 레이블',works:others.filter(work=>work.av?.label===item.av?.label)}]:[]),
   ].filter(group=>group.works.length>0);
+  const [open,setOpen]=useState(false);
   if(!groups.length)return null;
-  return <details className="tablet-work-related"><summary>관련 작품</summary>{groups.map(group=><section key={group.name} aria-label={group.name}><SectionLabel title={group.name}/>
+  return <div className="tablet-work-related"><button type="button" className="tablet-work-related__toggle" aria-expanded={open} onClick={()=>setOpen(value=>!value)}>관련 작품<ChevronDownIcon aria-hidden="true"/></button><Fold open={open}>{groups.map(group=><section key={group.name} aria-label={group.name}><SectionLabel title={group.name}/>
     {group.works.map(work=><Button key={work.id} variant="quiet" onClick={()=>onOpen(work.id)}>{[work.av?.productCode??work.name,displayDate(work.av?.releaseDate??work.releaseDate)].filter(Boolean).join(' · ')}</Button>)}
-  </section>)}</details>;
+  </section>)}</Fold></div>;
 }

@@ -60,6 +60,9 @@ function TrayMedia({ data, front }: { data: CaseData; front: string | null }) {
     </span><span className="disc-note">PUSH</span>
   </span>;
 }
+/** The case's open/close move (`.kase` transition in CollectionCase.css). */
+const UNFOLD_MS = 560;
+
 export function CollectionCase({ data, open, onOpenChange, frontReset = 0, inside, note, backContent, onReady, large = false, stageBox }: {
   data: CaseData; open: boolean; onOpenChange(open: boolean): void; frontReset?: number;
   inside?: ReactNode; note?: ReactNode; backContent?: CaseBackContent; onReady?(): void; large?: boolean; stageBox?: StageBox;
@@ -72,6 +75,16 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
   const lastReset = useRef(frontReset);
   const drag = useRef<{ pointer: number; x: number; angle: number; moved: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Opening refits the stage (the open case is twice as wide). The fit scale moves on the unfolding's
+  // curve only while it opens or closes; stage resizes and cover settling still apply at once.
+  const [unfolding, setUnfolding] = useState(false);
+  const [shownOpen, setShownOpen] = useState(open);
+  if (shownOpen !== open) { setShownOpen(open); setUnfolding(true); }
+  useEffect(() => {
+    if (!unfolding) return;
+    const timer = setTimeout(() => setUnfolding(false), UNFOLD_MS + 40);
+    return () => clearTimeout(timer);
+  }, [unfolding, open]);
   const sources = { front: data.privacy ? null : data.front, back: data.privacy ? null : data.back ?? null, spine: data.privacy ? null : data.spine ?? null };
   const signature = JSON.stringify(sources);
   const ready = useRef({ signature, notified: false });
@@ -104,7 +117,7 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
   }
 
   const fit = stageBox ? fitCollectionCase(stageBox, ratio, open) : null;
-  return <div className={`collection-case${data.platform === "film" ? " collection-case--film" : ""}${large ? " collection-case--large" : ""}${fit ? " collection-case--fitted" : ""}${open ? " is-open" : ""}`} style={{ "--ratio": ratio, "--plastic": CASE_PLASTIC[data.platform], ...(fit ? { "--ch": `${fit.height}px`, "--case-scale": fit.scale } : {}) } as CSSProperties}>
+  return <div className={`collection-case${data.platform === "film" ? " collection-case--film" : ""}${large ? " collection-case--large" : ""}${fit ? " collection-case--fitted" : ""}${open ? " is-open" : ""}`} data-unfolding={unfolding || undefined} style={{ "--ratio": ratio, "--plastic": CASE_PLASTIC[data.platform], ...(fit ? { "--ch": `${fit.height}px`, "--case-scale": fit.scale } : {}) } as CSSProperties}>
     <span className="floor-shadow" aria-hidden="true" />
     {/* This control is the physical media object, with rotation distinct from screen navigation. */}
     <div className={`kase${dragging ? " is-dragging" : ""}`} tabIndex={0} role="group" aria-label="케이스" aria-expanded={open} data-angle={angle} style={{ "--ry": `${angle}deg`, "--open": open ? 1 : 0, "--gloss": `${50 + angle}%` } as CSSProperties}

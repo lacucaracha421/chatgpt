@@ -1,3 +1,4 @@
+import {workImageLoads} from './workImageLoads.test-helper';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {setOutboxConnection} from './outboxConnection';
@@ -173,7 +174,8 @@ it('does not show an edit the device could not store as queued',async()=>{
 
 describe('artwork across a confirmed Showcase edit',()=>{
   // The list card's cover, then the work screen's book (its front face).
-  const artwork=()=>[...document.querySelectorAll<HTMLImageElement>('.collection-grid:not(.collection-showcase) .collection-art img, .collection-detail [aria-hidden="false"] .manga-bb-front img')];
+  const artwork=()=>['.collection-grid:not(.collection-showcase) .collection-art img', '.collection-detail .tablet-work > div[aria-hidden="false"] .manga-bb-front img:not([aria-hidden="true"])']
+    .flatMap(selector=>[...document.querySelectorAll<HTMLImageElement>(selector)]);
   const detailCalls=()=>mocks.api.mock.calls.filter(([path])=>path==='/v1/collections/w');
   const artworkCalls=()=>mocks.native.mock.calls.filter(([op])=>op==='collectionArtwork');
   /** The list card loads before the detail opens (a hidden list does not load artwork). */
@@ -218,7 +220,7 @@ describe('artwork across a confirmed Showcase edit',()=>{
     expect(artwork().map(image=>image.getAttribute('src'))).toEqual(['https://example.invalid/r1','https://example.invalid/r1']);
     await act(async()=>next.resolve({url:'https://example.invalid/r2'}));
     // Ticket readiness stages the next work; the actual book and backdrop must decode too.
-    await waitFor(()=>expect(document.querySelector('[data-work-pending] .manga-bb-front img')).toBeTruthy());
+    await waitFor(()=>expect(document.querySelector('[data-work-pending] .manga-bb-front img')?.getAttribute('src')).toBe('https://example.invalid/r2'));
     const pending=document.querySelector('[data-work-pending]')!;
     const replacement=pending.querySelector<HTMLImageElement>('.manga-bb-front img')!;
     const decode=Promise.withResolvers<void>();
@@ -385,3 +387,7 @@ describe('manga detail layout',()=>{
     expect(within(personal()).queryByRole('button',{name:/내 평점/})).toBeNull();
   });
 });
+
+let stopWorkImages: (() => void) | undefined;
+beforeEach(() => { stopWorkImages = workImageLoads(); });
+afterEach(() => { stopWorkImages?.(); });

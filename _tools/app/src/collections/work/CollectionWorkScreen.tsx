@@ -1,3 +1,4 @@
+import {useWorkSurfaceReady} from "./useWorkSurfaceReady";
 import { WorkZoomObject, WorkZoomProvider, WorkZoomStage } from "./WorkZoom";
 import { WorkBackdrop } from "./WorkBackdrop";
 import { ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisHorizontalIcon, InformationCircleIcon, PencilIcon, StarIcon, XMarkIcon } from "@heroicons/react/24/outline";
@@ -100,14 +101,8 @@ function WorkSurface({ data, privacy, info, reset, actions, onReady }: { data: C
   const activeVolume = data.manga?.volumes.find(volume => volume.id === data.manga?.activeVolumeId);
   const coverSrc = privacy ? null : data.collection.type === "av" ? data.case.front : activeVolume?.coverArtworkId ? workArtworkUrl(activeVolume.coverArtworkId) : null;
   const presentation = JSON.stringify([data.collection.id, data.manga?.activeVolumeId, data.case.front, data.case.spine, data.case.back, heroSrc, coverSrc, data.artworks, privacy]);
-  const readiness = useRef({ presentation, object: false, hero: !heroSrc, backdrop: !coverSrc, strip: false });
-  if (readiness.current.presentation !== presentation) readiness.current = { presentation, object: false, hero: !heroSrc, backdrop: !coverSrc, strip: false };
-  const currentReadiness = readiness.current;
-  function ready(part: "object" | "hero" | "backdrop" | "strip") {
-    if (readiness.current !== currentReadiness) return;
-    readiness.current[part] = true;
-    if (readiness.current.object && readiness.current.hero && readiness.current.backdrop && readiness.current.strip) onReady();
-  }
+  const ready = useWorkSurfaceReady(presentation, !heroSrc, !coverSrc, onReady,
+    JSON.stringify([data.collection.id, data.manga?.activeVolumeId, data.case.front, data.case.spine, data.case.back, data.case.platform, coverSrc, privacy]));
   const [mode, setMode] = useState("case");
   const [picked, setPicked] = useState("case");
   const flatReady = useRef(false);

@@ -255,7 +255,8 @@ it('bounds shelf cases after prefetch, picking and opening showcase',async()=>{
   fireEvent.click(view.container.querySelector('.collection-shortcuts button')!);
   await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
   const open=count(),openRenders=mocks.caseRenders-start;
-  await act(async()=>{await vi.advanceTimersByTimeAsync(250);});
+  // Past the sheet's spring rise (the deferred body's fallback when no transitionend arrives).
+  await act(async()=>{await vi.advanceTimersByTimeAsync(500);});
   const settled=count(),settledRenders=mocks.caseRenders-start;
   console.info(`[perf] S11 shelf 192: first=${first} prefetched=${prefetched} pickRenders=${pick} countRenders=${countRenders} overlayOpening=${open} overlayOpeningRenders=${openRenders} overlaySettled=${settled} overlaySettledRenders=${settledRenders}\n`);
   // These caps only tighten after an improvement; do not relax them to accommodate regressions.
@@ -268,7 +269,7 @@ it('bounds shelf cases after prefetch, picking and opening showcase',async()=>{
   expect(settled).toBeLessThanOrEqual(40);
   expect(settledRenders).toBeLessThanOrEqual(20);
   expect(settled).toBeGreaterThan(prefetched); // Deferred content really arrived.
-  const root=view.container.querySelector<HTMLElement>('.mobile-collections > .collection-scroll')!;
+  const root=view.container.querySelector<HTMLElement>('.mobile-collections .motion-stage__view > .collection-scroll')!;
   const tracks=()=>[...root.querySelectorAll<HTMLElement>('.collection-list__cell')].map(cell=>[cell.style.gridRow,cell.style.height]);
   const geometry=tracks();
   root.scrollTop=6000;fireEvent.scroll(root);

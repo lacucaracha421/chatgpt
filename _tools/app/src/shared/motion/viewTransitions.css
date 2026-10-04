@@ -1,0 +1,23 @@
+/* Only desktop area swaps opt in; each snapshot has one index and one content/header. */
+html[data-area-view-transition] * { view-transition-name: none !important; }
+html[data-area-view-transition] .library-workspace .workspace-index-slot[data-state="open"] { view-transition-name: index !important; }
+html[data-area-view-transition] .library-workspace .workspace-content { view-transition-name: main !important; }
+
+html[data-area-view-transition]::view-transition { pointer-events: none; }
+html[data-area-view-transition]::view-transition-group(root),
+html[data-area-view-transition]::view-transition-group(main),
+html[data-area-view-transition]::view-transition-group(index),
+html[data-area-view-transition]::view-transition-old(root),
+html[data-area-view-transition]::view-transition-new(root),
+html[data-area-view-transition]::view-transition-old(main),
+html[data-area-view-transition]::view-transition-new(main),
+html[data-area-view-transition]::view-transition-old(index),
+html[data-area-view-transition]::view-transition-new(index) {
+  animation-duration: 150ms;
+  animation-timing-function: cubic-bezier(.2,0,0,1);
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-area-view-transition]::view-transition-group(*),
+  html[data-area-view-transition]::view-transition-old(*),
+  html[data-area-view-transition]::view-transition-new(*) { animation-duration: 120ms; }
+}

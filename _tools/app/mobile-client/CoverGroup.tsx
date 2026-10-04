@@ -32,7 +32,7 @@ export function Cover({asset, paused}: {asset:Asset; paused:boolean}) {
     },() => {});
     return () => { controller.abort(); window.clearTimeout(timer); };
   },[source,preview,paused,privacy,attempt]);
-  return <span className="home-cover">{privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : preview ? <StableImage decodeFirst={false} src={preview} alt="" loading="lazy" draggable={false}/> : <PhotoIcon className="missing-media"/>}{!privacy && asset.kind === 'video' && <span className="video-mark"><PlayIcon/></span>}</span>;
+  return <span className="home-cover">{privacy ? <span className="privacy-mask" aria-label="비공개 모드"/> : preview ? <StableImage src={preview} alt="" loading="lazy" draggable={false}/> : <PhotoIcon className="missing-media"/>}{!privacy && asset.kind === 'video' && <span className="video-mark"><PlayIcon/></span>}</span>;
 }
 export function CoverGroup({items,paused}: {items:Asset[];paused:boolean}) {
   return <span className={`home-cover-group ${items.length < 2 ? 'single' : ''}`}>{items.slice(0,3).map(asset => <Cover key={asset.id} asset={asset} paused={paused}/>)}{!items.length && <span className="home-cover"><PhotoIcon className="missing-media"/></span>}</span>;

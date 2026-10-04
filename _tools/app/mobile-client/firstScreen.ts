@@ -1,13 +1,14 @@
 import type {Asset} from './types';
 import {decodeImage,prepareAssets} from './media';
 import {mediaMasked} from './assetMask';
+import {IMAGE_READY_CAP_MS} from '../src/shared/motion/viewportImages';
 
 /**
  * No flash on change: before a replaced list is shown, fetch and decode the thumbnails of its
  * first screen so the new tiles appear with their pictures instead of as blank cells. Bounded by
- * `budgetMs`; whatever is not ready by then loads as usual. Never throws.
+ * `budgetMs` (the PC's first-viewport image cap); whatever is not ready by then loads as usual. Never throws.
  */
-export async function readyFirstScreen(items: Asset[], signal: AbortSignal, limit = 24, budgetMs = 700): Promise<Asset[]> {
+export async function readyFirstScreen(items: Asset[], signal: AbortSignal, limit = 24, budgetMs = IMAGE_READY_CAP_MS): Promise<Asset[]> {
   const head = items.slice(0, limit).filter(asset => !mediaMasked(asset) && !asset.preview && !asset.pending && asset.thumbnail_available !== false);
   // Only on the device: without the native bridge (tests, browser demo) there is nothing to warm.
   if (!head.length || !window.LakomicsNative) return items;

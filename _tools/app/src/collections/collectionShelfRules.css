@@ -1,0 +1,11 @@
+/* Shared shelf paint order: the lifted selection stays above lowering neighbours. */
+.collection-list__cell { z-index: 1; }
+.collection-list__cell:has([data-settling]),
+.collection-list--shelf .collection-card:has([data-settling]) { z-index: 2; }
+.collection-list__cell:has(.collection-card[aria-selected="true"]),
+.collection-list--shelf .collection-card[aria-selected="true"] { z-index: 3; }
+/* Shelf height derives from width; scrollbars must not feed back into row geometry. */
+.collection-browser__list-scroll, .collection-scroll, .collection-detail { scrollbar-gutter: stable; }
+/* Preserve the case's animation raster while lifting and lowering. */
+.collection-light-case[data-front] .cs-box,
+.collection-light-case[data-settling] .cs-box { will-change: transform; }

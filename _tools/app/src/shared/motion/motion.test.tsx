@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 let reduce = false;
 let change: (() => void) | undefined;
 const animate = vi.fn();
+const transitionDescriptor = Object.getOwnPropertyDescriptor(document, 'startViewTransition');
 beforeEach(() => {
   vi.useFakeTimers(); reduce = false;
   vi.stubGlobal('CSS', {supports: () => false});
@@ -16,10 +17,175 @@ beforeEach(() => {
   animate.mockImplementation(() => ({cancel: vi.fn(), onfinish: null}));
   Object.defineProperty(HTMLElement.prototype, 'animate', {configurable: true, value: animate});
 });
-afterEach(() => { cleanup(); delete (HTMLElement.prototype as Partial<HTMLElement>).animate; vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks(); change = undefined; });
+afterEach(() => {
+  cleanup(); delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
+  if (transitionDescriptor) Object.defineProperty(document, 'startViewTransition', transitionDescriptor);
+  else Reflect.deleteProperty(document, 'startViewTransition');
+  vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks(); change = undefined;
+});
 const tick = async (ms = 64) => {
   for (let remaining = ms; remaining > 0; remaining -= 16) await act(async () => { await vi.advanceTimersByTimeAsync(Math.min(16, remaining)); });
 };
+
+function mockViewTransitions() {
+  const entries: {update: () => void; finish: () => void; skipTransition: ReturnType<typeof vi.fn>}[] = [];
+  const start = vi.fn((update: () => void) => {
+    let finish!: () => void;
+    const finished = new Promise<void>(resolve => {finish = resolve;});
+    const skipTransition = vi.fn();
+    entries.push({update, finish, skipTransition});
+    return {ready: Promise.resolve(), finished, skipTransition};
+  });
+  Object.defineProperty(document, 'startViewTransition', {configurable: true, value: start});
+  return {start, entries};
+}
+
+it.each([false, true])('commits the browser snapshot content and shell synchronously (reduced motion: %s)', async reduced => {
+  reduce = reduced;
+  const {start, entries} = mockViewTransitions();
+  function Shell({activeKey}: {activeKey: string}) {
+    const [shown, setShown] = useState('home');
+    return <div className="library-workspace">
+      <aside data-testid="index" data-state={shown === 'assets' ? 'open' : 'closed'}/>
+      <header data-testid="header">{shown}</header>
+      <AreaSwitch viewTransitions activeKey={activeKey} onShown={setShown} incomingWidthDelta={shown === 'home' ? -208 : 0}
+        views={{[activeKey]: activeKey === 'assets' ? <Tiles count={3}/> : <b>old</b>}}/>
+    </div>;
+  }
+  const view = render(<Shell activeKey="home"/>);
+  view.rerender(<Shell activeKey="assets"/>);
+  await tick(32);
+  expect(start).toHaveBeenCalledOnce();
+  expect(screen.getByText('old')).toBeVisible();
+  expect(screen.getByTestId('index')).toHaveAttribute('data-state', 'closed');
+  expect(screen.getByTestId('header')).toHaveTextContent('home');
+  expect(screen.getByText('old').closest<HTMLElement>('[data-motion-view]')?.style.position).toBe('');
+  act(() => {
+    entries[0].update();
+    // Assertions inside act catch a deferred React commit before the browser's new snapshot.
+    expect(view.container.querySelector('.motion-stage')).toHaveAttribute('data-motion-shown', 'assets');
+    expect(screen.getByTestId('index')).toHaveAttribute('data-state', 'open');
+    expect(screen.getByTestId('header')).toHaveTextContent('assets');
+    expect(screen.getByText('tile 0')).toBeVisible();
+    expect(screen.getByText('tile 0').closest<HTMLElement>('[data-motion-view]')?.style.width).toBe('');
+  });
+  expect(screen.queryByText('old')).toBeNull();
+  expect(animate).not.toHaveBeenCalled();
+  await act(async () => entries[0].finish());
+  expect(document.documentElement).not.toHaveAttribute('data-area-view-transition');
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('keeps browser names exclusive to the desktop swap and uses 150ms / 120ms CSS', () => {
+  const css = readFileSync('src/shared/motion/viewTransitions.css', 'utf8');
+  expect(css).toContain('html[data-area-view-transition] * { view-transition-name: none !important; }');
+  expect(css).toContain('.workspace-index-slot[data-state="open"] { view-transition-name: index !important; }');
+  expect(css).toContain('.workspace-content { view-transition-name: main !important; }');
+  for (const name of ['root', 'main', 'index']) {
+    expect(css).toContain(`::view-transition-old(${name})`);
+    expect(css).toContain(`::view-transition-new(${name})`);
+    expect(css).toContain(`::view-transition-group(${name})`);
+  }
+  expect(css).toContain('animation-duration: 150ms;');
+  expect(css).toContain('animation-timing-function: cubic-bezier(.2,0,0,1);');
+  expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*animation-duration: 120ms;/);
+  expect(css).toContain('::view-transition { pointer-events: none; }');
+});
+
+it.each([false, true])('skips a running browser transition without committing stale callbacks (already updated: %s)', async updated => {
+  const {entries} = mockViewTransitions();
+  const tree = (activeKey: string) => <AreaSwitch viewTransitions activeKey={activeKey} views={{[activeKey]: <b>{activeKey}</b>}}/>;
+  const view = render(tree('home'));
+  view.rerender(tree('assets')); await tick(32);
+  if (updated) act(() => entries[0].update());
+  view.rerender(tree('notes'));
+  expect(entries[0].skipTransition).toHaveBeenCalledOnce();
+  await tick(32);
+  expect(entries).toHaveLength(2);
+  act(() => entries[0].update());
+  expect(screen.getByText(updated ? 'assets' : 'home')).toBeVisible();
+  await act(async () => entries[0].finish());
+  expect(document.documentElement).toHaveAttribute('data-area-view-transition');
+  act(() => entries[1].update());
+  expect(screen.getByText('notes')).toBeVisible();
+  expect(animate).not.toHaveBeenCalled();
+  view.unmount();
+  expect(entries[1].skipTransition).toHaveBeenCalledOnce();
+  expect(document.documentElement).not.toHaveAttribute('data-area-view-transition');
+});
+
+it.each([false, true])('waits for viewport image decoding or its cap before taking browser snapshots (cap: %s)', async capped => {
+  const {start, entries} = mockViewTransitions();
+  const view = render(<AreaSwitch viewTransitions activeKey="home" views={{home: <b>old</b>}}/>);
+  const tree = (ready: boolean) => <AreaSwitch viewTransitions activeKey="assets" ready={() => ready}
+    views={{assets: <img src="/slow" loading="lazy" alt="incoming"/>}}/>;
+  view.rerender(tree(false)); await tick(896);
+  expect(start).not.toHaveBeenCalled();
+  const incoming = screen.getByAltText('incoming').closest<HTMLElement>('[data-motion-view]')!;
+  const image = incoming.querySelector('img')!;
+  const rect = () => ({top: 0, bottom: 100, left: 0, right: 100, width: 100, height: 100, x: 0, y: 0, toJSON() {}});
+  incoming.getBoundingClientRect = rect; image.getBoundingClientRect = rect;
+  let decode!: () => void; image.decode = () => new Promise<void>(resolve => {decode = resolve;});
+  view.rerender(tree(true)); await tick(32);
+  expect(image.loading).toBe('eager');
+  expect(start).not.toHaveBeenCalled();
+  expect(screen.getByText('old')).toBeVisible();
+  expect(incoming.style.opacity).toBe('0');
+  if (capped) { await tick(249); expect(start).not.toHaveBeenCalled(); await tick(1); }
+  else await act(async () => decode());
+  expect(start).toHaveBeenCalledOnce();
+  expect(screen.getByText('old')).toBeVisible();
+  act(() => entries[0].update());
+  expect(image).toBeVisible();
+  expect(animate).not.toHaveBeenCalled();
+});
+
+it('cancels browser image preparation when another request supersedes it', async () => {
+  const {start, entries} = mockViewTransitions();
+  const view = render(<AreaSwitch viewTransitions activeKey="home" views={{home: <b>old</b>}}/>);
+  view.rerender(<AreaSwitch viewTransitions activeKey="assets" views={{assets: <img src="/slow" alt="abandoned"/>}}/>);
+  const image = screen.getByAltText('abandoned') as HTMLImageElement;
+  const rect = () => ({top: 0, bottom: 100, left: 0, right: 100, width: 100, height: 100, x: 0, y: 0, toJSON() {}});
+  image.getBoundingClientRect = rect; image.closest<HTMLElement>('[data-motion-view]')!.getBoundingClientRect = rect;
+  let decode!: () => void; image.decode = () => new Promise<void>(resolve => {decode = resolve;});
+  await tick(32);
+  view.rerender(<AreaSwitch viewTransitions activeKey="notes" views={{notes: <b>notes</b>}}/>);
+  await act(async () => decode()); await tick(300);
+  expect(start).toHaveBeenCalledOnce();
+  expect(screen.queryByAltText('abandoned')).toBeNull();
+  expect(screen.getByText('old')).toBeVisible();
+  act(() => entries[0].update()); expect(screen.getByText('notes')).toBeVisible();
+});
+
+it.each([false, true])('preserves the readiness cap with browser transitions (Collections: %s)', async collections => {
+  const {start, entries} = mockViewTransitions();
+  const view = render(<AreaSwitch viewTransitions activeKey="home" views={{home: <b>old</b>}}/>);
+  view.rerender(<AreaSwitch viewTransitions activeKey="assets" waitForReady={collections} views={{assets: <b aria-busy="true">busy</b>}}/>);
+  await tick(READY_CAP_MS * (collections ? 5 : 1) - 1);
+  expect(start).not.toHaveBeenCalled(); expect(screen.getByText('old')).toBeVisible();
+  await tick(1); expect(start).toHaveBeenCalledOnce();
+  act(() => entries[0].update()); expect(screen.getByText('busy')).toBeVisible();
+  expect(animate).not.toHaveBeenCalled();
+});
+
+it('keeps the frozen 150ms fallback when View Transitions are requested but unavailable', async () => {
+  const view = render(<AreaSwitch viewTransitions activeKey="home" views={{home: <b>old</b>}}/>);
+  view.rerender(<AreaSwitch viewTransitions activeKey="assets" views={{assets: <b>new</b>}}/>);
+  await tick();
+  expect(screen.getByText('old').closest<HTMLElement>('[data-motion-view]')?.style.position).toBe('fixed');
+  expect(animate).toHaveBeenCalledTimes(2);
+  expect(animate.mock.calls[0][1].duration).toBe(150);
+  expect(document.documentElement).not.toHaveAttribute('data-area-view-transition');
+  await tick(150); expect(screen.queryByText('old')).toBeNull();
+});
+
+it('keeps instant tablet swaps even when the browser API is available', async () => {
+  const {start} = mockViewTransitions();
+  const view = render(<AreaSwitch viewTransitions crossFade={false} activeKey="home" views={{home: <b>old</b>}}/>);
+  view.rerender(<AreaSwitch viewTransitions crossFade={false} activeKey="assets" views={{assets: <b>new</b>}}/>);
+  await tick(); expect(screen.getByText('new')).toBeVisible();
+  expect(start).not.toHaveBeenCalled(); expect(animate).not.toHaveBeenCalled();
+});
 
 it('shares the snappy prototype samples with CSS and preserves both spring fallbacks', () => {
   const css = readFileSync('src/styles/tokens.css', 'utf8');

@@ -256,7 +256,9 @@
 .viewer[data-filmstrip-visible="false"] .viewer-filmstrip { visibility: hidden; }
 .viewer.is-playing .viewer-bar { opacity: 0; pointer-events: none; }
 .viewer-backdrop { position: absolute; inset: 0; background: var(--color-viewer-bg, #101112); pointer-events: none; }
-.viewer[data-viewer-closing] .viewer-bar, .viewer[data-viewer-closing] .viewer-filmstrip { visibility: hidden; }
+/* Closing zooms the whole media surface back into its tile. The video controls sit at the bottom of that
+   full-screen box, outside the letterboxed picture, so they would trail into the tile below it: hide them with the chrome. */
+.viewer[data-viewer-closing] .viewer-bar, .viewer[data-viewer-closing] .viewer-filmstrip, .viewer[data-viewer-closing] .video-player__controls { visibility: hidden; }
 
 .viewer-nav-a11y {
   position: absolute;

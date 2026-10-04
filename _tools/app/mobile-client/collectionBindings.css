@@ -24,7 +24,7 @@
 .collection-bindings-fold__wait,.collection-bindings-fold__failed{color:var(--color-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .collection-bindings-fold__wait i{display:inline-block;width:6px;height:6px;margin-right:4px;border-radius:50%;background:var(--color-accent);vertical-align:1px}
 .collection-bindings-fold__failed{color:var(--color-danger)}
-.collection-bindings-fold__chevron{margin-left:auto;transition:transform var(--motion-standard) var(--ease-standard)}
+.collection-bindings-fold__chevron{margin-left:auto;transition:transform var(--motion-medium) var(--ease-out)}
 .collection-bindings-fold[aria-expanded=true] .collection-bindings-fold__chevron{transform:rotate(180deg)}
 .collection-bindings-rows .collection-binding-row{padding-left:8px}
 @media(prefers-reduced-motion:reduce){.collection-bindings-fold__chevron{transition:none}}

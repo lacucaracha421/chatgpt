@@ -1,6 +1,7 @@
 import {useTabletAssetMask} from './assetMask';
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
 import {StableImage} from '../src/shared/ui/StableImage';
+import {FolderMove} from '../src/assets/FolderWave';
 import {warmOriginalTickets} from './originalTicketWarm';
 import {usePullToRefresh} from './usePullToRefresh';
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,type PointerEvent,type ReactNode} from 'react';
@@ -76,13 +77,13 @@ function Tile({asset, index, width, height, onOpen, onReady, paused, privacy: re
     setRetried(true); invalidateTicket(asset, 'thumbnail');
     void mediaTicket(asset, 'thumbnail').then(t => setPreview(t.url), () => {});
   };
-  return <div className="media-tile-shell" style={{width,position:'relative',flexShrink:0}}><button ref={host} className="media-tile ui-selectable-media" style={{width}} onClick={() => {
+  return <div className="media-tile-shell" data-gallery-cell="" style={{width,position:'relative',flexShrink:0}}><button ref={host} className="media-tile ui-selectable-media" style={{width}} onClick={() => {
     if(suppressClick.current){suppressClick.current=false;return;}
     if(selectionMode){onToggle?.(asset.id);return;}
     if(!requestedPrivacy) onOpen(index);
   }} onPointerDown={beginPress} onPointerMove={movePress} onPointerUp={endPress} onPointerCancel={cancelPointer} onContextMenu={event=>{if(onSelect)event.preventDefault();}} aria-label={privacy ? '비공개 모드로 이미지 숨김' : vault ? vault.label(asset) : `${asset.creator_name || asset.creator_handle || (asset.kind === 'video' ? '영상' : '이미지')}, ${dateLabel(asset)}`} aria-description={!privacy && asset.kind === "video" ? `영상 ${formatDuration(asset.duration_ms)}` : undefined} aria-selected={selectionMode&&selected?true:undefined} data-asset-id={asset.id} data-date-label={collectedDate(asset.collected_at ?? asset.created_at).label}>
     <span className="tile-picture" style={{height}}>
-      {privacy ? <span className="artist-private-tile" aria-hidden="true" /> : preview ? <StableImage ref={image} decodeFirst={false} src={preview} alt="" draggable={false} onError={() => {settle(); retry();}} onLoad={event => {
+      {privacy ? <span className="artist-private-tile" aria-hidden="true" /> : preview ? <StableImage ref={image} src={preview} alt="" draggable={false} onError={() => {settle(); retry();}} onLoad={event => {
         const element = event.currentTarget;
         // A vault item without index dimensions takes its shape from the decoded thumbnail.
         if (vault && !asset.ratio && !(asset.width && asset.height) && element.naturalWidth > 0 && element.naturalHeight > 0) onReady({...asset, ratio: element.naturalWidth / element.naturalHeight});
@@ -126,7 +127,9 @@ function rowSize(row: JustifiedGalleryRow<GalleryRowItem> & {spacer?:boolean}) {
   return row.height + (row.dateHeadings?.length ? GALLERY_DATE_HEADING_HEIGHT : 0) + GALLERY_ROW_GAP;
 }
 
-export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onClearSelection, sparse}: {sparse?:SparseGallerySource; items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
+export function Gallery({items, density, identity, restoreScroll, onScroll, onOpen, onReady, onNearEnd, paused, privacy=false, intro, onRefresh, busy=false, stale=false, vault, scrubberHidden=false, scrubberSort, selectedIds, favoritesView=false, onSelectAsset, onToggleSelection, onClearSelection, sparse, folderScope, folderPath}: {sparse?:SparseGallerySource;
+  /** The place these tiles belong to (a folder, album or character), without filters: a change moves folders like the PC. */folderScope?:string;
+  /** Ancestor ids then the place itself; a shorter prefix is a move back. */folderPath?:readonly string[]; items: Asset[]; density: number; identity: string; restoreScroll: number; onScroll(top: number): void; onOpen(index: number): void; onReady(asset:Asset):void; onNearEnd():void; paused:boolean;privacy?:boolean;intro?:ReactNode;onRefresh?():void;busy?:boolean;/** The items belong to the previous place and stay only until the new one commits. */stale?:boolean;
   /** Additional visibility guard for sheets owned by the parent screen. */scrubberHidden?:boolean;
   /** Optional sort metadata; the date fallback follows the existing gallery order. */scrubberSort?:ScrubberSort;
   /** Tablet Library selection; absent for Revisit, character and vault galleries. */selectedIds?:ReadonlySet<string>; favoritesView?:boolean; onSelectAsset?(id:string):void; onToggleSelection?(id:string):void;
@@ -294,10 +297,10 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
     if (last && now - last.at < 350 && Math.hypot(event.clientX - last.x, event.clientY - last.y) < 32) { lastBackgroundTap.current = null; onClearSelection(); return; }
     lastBackgroundTap.current = {at: now, x: event.clientX, y: event.clientY};
   };
-  return <div className={`gallery-scroll${stale?' is-stale':''}`} ref={parent} onPointerOver={event => { if (event.pointerType !== "touch") revealGalleryDateCount(parent.current, event.target); }} onPointerLeave={() => revealGalleryDateCount(parent.current, document.activeElement)} onFocusCapture={event => { if (event.target.matches(":focus-visible")) revealGalleryDateCount(parent.current, event.target); }} onBlurCapture={event => revealGalleryDateCount(parent.current, event.relatedTarget)} onPointerUp={backgroundTap} onScroll={event => {cancelActivePress();if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" aria-busy={stale||undefined} inert={stale||undefined} tabIndex={0}>
+  return <FolderMove scope={folderScope} queryKey={identity} visible={!paused} privacyKey={`${privacy}`} count={items.length} path={folderPath} host={parent} space=".gallery-canvas"><div className={`gallery-scroll${stale?' is-stale':''}`} ref={parent} onPointerOver={event => { if (event.pointerType !== "touch") revealGalleryDateCount(parent.current, event.target); }} onPointerLeave={() => revealGalleryDateCount(parent.current, document.activeElement)} onFocusCapture={event => { if (event.target.matches(":focus-visible")) revealGalleryDateCount(parent.current, event.target); }} onBlurCapture={event => revealGalleryDateCount(parent.current, event.relatedTarget)} onPointerUp={backgroundTap} onScroll={event => {cancelActivePress();if (!paused && event.currentTarget.clientHeight > 0) onScroll(event.currentTarget.scrollTop); checkEnd();}} aria-label="자산 목록" aria-busy={stale||undefined} inert={stale||undefined} tabIndex={0}>
     {/* The refresh pill is a zero-height sticky overlay, so it never changes the intro height. */}
     {pull}
-    {intro!=null&&<div ref={introduction}>{intro}</div>}
+    {intro!=null&&<div ref={introduction} className="gallery-intro">{intro}</div>}
     <div className="gallery-canvas" style={{height: virtualizer.getTotalSize()}}>
       {virtualizer.getVirtualItems().map(virtual => {
         const row = rows[virtual.index];
@@ -325,5 +328,5 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
       })}
     </div>
     <Scrubber scrollRef={parent} total={sparse?.toc.totalCount??items.length} sort={sort} onSeek={sparse?seek:undefined} indexAtScroll={sparse?indexAtScroll:undefined} hidden={paused || scrubberHidden} onEndReached={onNearEnd}/>
-  </div>;
+  </div></FolderMove>;
 }

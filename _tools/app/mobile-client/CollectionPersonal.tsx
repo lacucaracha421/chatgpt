@@ -7,6 +7,7 @@ import {MEMO_LIMIT, memoLength, type CollectionEditField, type CollectionEditVal
 import {platformOptions, recordStates, statusLabel} from '../src/collections/work/WorkRecord';
 import type {CollectionDetail, CollectionSummary} from './collectionModel';
 import {OwnedSheet, ReleaseWatchAction, trackedEditions, TrackingRows} from './CollectionTracking';
+import {useMotionSurface} from '../src/shared/ui/useMotionSurface';
 
 /** `owned-N` edits the owned-volume count of edition N; `status` / `platform` the PC work record. */
 export type PersonalSheet = 'rating' | 'memo' | 'conflict' | 'status' | 'platform' | `owned-${number}` | null;
@@ -98,6 +99,8 @@ export function PersonalActions({item, edits}: {item: CollectionDetail; edits: P
   const showcase = edits.visible(item.id, 'showcase', item.showcase);
   const [toast, setToast] = useState<{text: string; key: number} | null>(null);
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(null), 3000); return () => clearTimeout(timer); }, [toast]);
+  // Enters and leaves like the shared toast: a short rise in, a fade and small drop out.
+  const toastRef = useMotionSurface('toast');
   const ShowcaseIcon = showcase.value ? SparklesSolid : SparklesIcon;
   return <>
     <div className="collection-bar-actions" role="group" aria-label="작품 동작">
@@ -108,7 +111,7 @@ export function PersonalActions({item, edits}: {item: CollectionDetail; edits: P
         : (showcase.value || showcase.pending) && <span className={`collection-bar-action is-static${showcase.pending ? ' is-pending' : ''}`} role="img" aria-label={`쇼케이스에 추가됨${showcase.pending ? ', 전송 대기' : ''}`}><ShowcaseIcon aria-hidden="true"/><span className="collection-bar-pending" aria-hidden="true"/></span>}
       <ReleaseWatchAction item={item} edits={edits} onReason={text => setToast(current => ({text, key: (current?.key ?? 0) + 1}))}/>
     </div>
-    {toast && <p key={toast.key} className="collection-toast" role="status">{toast.text}</p>}
+    {toast && <p key={toast.key} ref={toastRef} data-state="open" className="collection-toast" role="status">{toast.text}</p>}
   </>;
 }
 

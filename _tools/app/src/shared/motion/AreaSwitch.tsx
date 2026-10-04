@@ -1,7 +1,9 @@
 import { createContext, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { contentCross, EASE_STANDARD, reducedMotion } from './curves';
 import { waitForViewportImages } from './viewportImages';
 import './areaMotion.css';
+import './viewTransitions.css';
 
 export const AreaVisible = createContext(true);
 /** Portals outside the stage must follow the same paint boundary as the content. */
@@ -36,10 +38,14 @@ type Props = {
   incomingWidthDelta?: number;
   /** Keep the index entrance on the same image-ready frame. */
   onSettlingChange?: (settling: boolean) => void;
+  /** The tablet's bottom tabs swap instantly (user 2026-10-04); readiness still holds the old view. */
+  crossFade?: boolean;
+  /** Desktop area swaps use browser snapshots when supported. */
+  viewTransitions?: boolean;
 };
 
 /** Preserve the actual old React/DOM tree until the incoming view commits its content. */
-export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, waitForReady = false, onShown, incomingWidthDelta = 0, onSettlingChange}: Props) {
+export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, waitForReady = false, onShown, incomingWidthDelta = 0, onSettlingChange, crossFade = true, viewTransitions = false}: Props) {
   const [shown, setShown] = useState(activeKey);
   const [outgoing, setOutgoing] = useState<string | null>(null);
   const [settling, setSettling] = useState(false);
@@ -53,6 +59,7 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
   const visited = useRef(new Set([activeKey]));
   const checkRef = useRef<(() => void) | null>(null);
   const entrance = useRef<string | null>(null);
+  const transition = useRef<{key: string; browser?: ViewTransition} | null>(null);
   /** The committed entrance; `started` turns true once its first frame may paint. */
   const running = useRef<{finish: (reveal?: boolean) => void; started: boolean; outgoing: string | null} | null>(null);
   // Freeze the outgoing props. It must keep its old content, active styling and scroll DOM.
@@ -63,6 +70,9 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
   for (const key of nodes.current.keys()) if (!keys.has(key)) nodes.current.delete(key);
 
   useLayoutEffect(() => {
+    transition.current?.browser?.skipTransition();
+    transition.current = null;
+    document.documentElement.removeAttribute('data-area-view-transition');
     const interrupted = running.current;
     interrupted?.finish(false);
     if (interrupted && !interrupted.started && interrupted.outgoing) {
@@ -74,7 +84,9 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
     if (activeKey === shownRef.current) return;
     const incoming = hosts.current.get(activeKey);
     if (!incoming) return;
-    let finished = false, forced = false, frame = 0;
+    let finished = false, forced = false, frame = 0, cancelled = false;
+    let stopImages: (() => void) | undefined;
+    const browserTransition = crossFade && viewTransitions && typeof document.startViewTransition === 'function';
     const query = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     const commit = () => {
       if (finished) return;
@@ -82,7 +94,30 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
       observer.disconnect();
       window.clearTimeout(cap);
       window.cancelAnimationFrame(frame);
-      const animate = !forced && typeof incoming.animate === 'function';
+      stopImages?.();
+      if (browserTransition) {
+        const entry: {key: string; browser?: ViewTransition} = {key: activeKey};
+        transition.current = entry;
+        document.documentElement.setAttribute('data-area-view-transition', '');
+        entry.browser = document.startViewTransition(() => {
+          // skipTransition still invokes its callback; abandoned requests must not commit.
+          if (cancelled) return;
+          flushSync(() => {
+            setShown(activeKey);
+            visited.current.add(activeKey);
+            onShownRef.current?.(activeKey);
+          });
+        });
+        const finish = () => {
+          if (transition.current !== entry) return;
+          transition.current = null;
+          document.documentElement.removeAttribute('data-area-view-transition');
+        };
+        void entry.browser.ready.catch(() => {}); // Skipping rejects ready, but still applies the update.
+        void entry.browser.finished.then(finish, finish);
+        return;
+      }
+      const animate = crossFade && !forced && typeof incoming.animate === 'function';
       const previous = animate ? hosts.current.get(shownRef.current) : undefined;
       const rect = previous?.getBoundingClientRect();
       // Capture before any shell update; viewport coordinates survive the index moving the stage.
@@ -99,14 +134,29 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
     const start = () => {
       frame = 0;
       if (finished || (!forced && !readyRef.current(incoming, activeKey))) return;
+      if (browserTransition && !forced) {
+        // Decode at the destination width while the old content and shell still paint.
+        if (!stopImages) {
+          window.clearTimeout(cap); // Image decoding has its own 250ms cap after readiness.
+          stopImages = waitForViewportImages(incoming, () => {
+            stopImages = undefined;
+            if (readyRef.current(incoming, activeKey)) commit();
+            else {
+              cap = window.setTimeout(() => { forced = true; check(); }, waitForReady ? READY_CAP_MS * 5 : READY_CAP_MS);
+              check();
+            }
+          });
+        }
+        return;
+      }
       commit();
     };
     const check = () => {
       if (finished) return;
       if (!forced && !readyRef.current(incoming, activeKey)) { window.cancelAnimationFrame(frame); frame = 0; return; }
       // Effects, shared observer setup and layout from the content commit get a rendering
-      // opportunity before the atomic swap. Reduced motion and the readiness cap stay immediate.
-      if (forced || (retained.includes(activeKey) && visited.current.has(activeKey)) || reducedMotion() || typeof incoming.animate !== 'function') { window.cancelAnimationFrame(frame); start(); return; }
+      // opportunity before the atomic swap. The fallback's reduced-motion shortcut stays immediate.
+      if (forced || (!browserTransition && ((retained.includes(activeKey) && visited.current.has(activeKey)) || reducedMotion() || typeof incoming.animate !== 'function'))) { window.cancelAnimationFrame(frame); start(); return; }
       if (!frame) frame = window.requestAnimationFrame(() => {
         frame = window.requestAnimationFrame(start);
       });
@@ -116,16 +166,23 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
     observer.observe(incoming, {subtree: true, childList: true, attributes: true});
     checkRef.current = check;
     // Never leave an inert old view up; Collections waits longer for committed artwork, but never forever.
-    const cap = window.setTimeout(() => { forced = true; check(); }, waitForReady ? READY_CAP_MS * 5 : READY_CAP_MS);
+    let cap = window.setTimeout(() => { forced = true; check(); }, waitForReady ? READY_CAP_MS * 5 : READY_CAP_MS);
     check();
     const reduce = () => { if (query?.matches) check(); };
     query?.addEventListener?.('change', reduce);
     return () => {
-      finished = true; checkRef.current = null; observer.disconnect(); window.clearTimeout(cap);
+      cancelled = true; finished = true; checkRef.current = null; observer.disconnect(); window.clearTimeout(cap);
+      stopImages?.();
       window.cancelAnimationFrame(frame);
       query?.removeEventListener?.('change', reduce);
     };
   }, [activeKey]); // The readiness observer follows asynchronous child commits, not parent renders.
+
+  useLayoutEffect(() => () => {
+    transition.current?.browser?.skipTransition();
+    transition.current = null;
+    document.documentElement.removeAttribute('data-area-view-transition');
+  }, []);
 
   // Explicit readiness may change without a DOM mutation (e.g. an empty first page).
   useLayoutEffect(() => { checkRef.current?.(); });
@@ -215,7 +272,7 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
           display: !painted && !incoming ? 'none' : undefined, visibility: painted ? undefined : 'hidden', opacity: !painted || (visible && settling) ? 0 : undefined,
           zIndex: outgoing ? visible ? 1 : 0 : undefined}}>
         <AreaPainted.Provider value={visible && !settling || key === outgoing && settling}><AreaRequested.Provider value={incoming}>
-          <AreaEntering.Provider value={visible && outgoing !== null}><AreaVisible.Provider value={visible && incoming}>{nodes.current.get(key)}</AreaVisible.Provider></AreaEntering.Provider>
+          <AreaEntering.Provider value={visible && (outgoing !== null || transition.current?.key === key)}><AreaVisible.Provider value={visible && incoming}>{nodes.current.get(key)}</AreaVisible.Provider></AreaEntering.Provider>
         </AreaRequested.Provider></AreaPainted.Provider>
       </div>;
     })}

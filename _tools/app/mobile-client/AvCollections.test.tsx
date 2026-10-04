@@ -1,3 +1,4 @@
+import {workImageLoads} from './workImageLoads.test-helper';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {CollectionDetail, CollectionPage, CollectionSummary} from './collectionModel';
@@ -415,3 +416,7 @@ it('formats recent sent timestamps with the shared helper and keeps invalid-time
     expect(list.textContent).toContain('보낸 시간 알 수 없음');
   } finally {vi.useRealTimers();}
 });
+
+let stopWorkImages: (() => void) | undefined;
+beforeEach(() => { stopWorkImages = workImageLoads(); });
+afterEach(() => { stopWorkImages?.(); });

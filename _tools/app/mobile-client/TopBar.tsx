@@ -2,23 +2,18 @@ import {FindButton} from './FindContext';
 import {ArrowLeftIcon,MagnifyingGlassIcon} from '@heroicons/react/24/outline';
 import {useEffect,useRef,type ReactNode,type Ref} from 'react';
 import {IconButton,Mark} from './ui';
-import {useDelayedPresence} from './motion';
+import {useDelayedBusy} from '../src/shared/useDelayedBusy';
 /**
  * The shared tab bar: the logo mark (or Back on a deeper level), the tab or place name, and the
  * actions that belong to that screen. Every tab uses the same 56px bar, so switching tabs never
  * moves the content.
  */
-/**
- * A thin progress line that shows only for a load that outlasts PROGRESS_DELAY_MS, stays at
- * least PROGRESS_MIN_MS and fades out, so quick loads show nothing and it never blinks. While
- * fading out it is no longer announced. `className` places it (e.g. `is-bottom`).
- */
+/** One shared busy rule: 600 ms delay, 400 ms minimum, with no layout movement. */
 export function LoadingLine({label,className=''}:{label:string|false|undefined;className?:string}) {
-  const presence=useDelayedPresence(!!label);
+  const visible=useDelayedBusy(!!label);
   const named=useRef('');if(label)named.current=label;
-  if(presence==='hidden')return null;
-  const classes=`loading-line is-timed${className?` ${className}`:''}${presence==='leaving'?' is-leaving':''}`;
-  return presence==='leaving'?<span className={classes} aria-hidden="true"/>:<span className={classes} role="status" aria-label={named.current}/>;
+  if(!visible)return null;
+  return <span className={`loading-line is-timed${className?` ${className}`:''}`} role="status" aria-label={named.current}/>;
 }
 /**
  * The one place a page or scope load shows: a thin line on the bar's bottom edge. It is laid

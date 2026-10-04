@@ -111,6 +111,7 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
     const clip = indexClip.current;
     if (!clip || !indexEntrance.current || settling) return;
     indexEntrance.current = false;
+    if (document.documentElement.hasAttribute("data-area-view-transition")) return;
     if (typeof clip.animate !== "function") return;
     clip.style.willChange = "opacity";
     const duration = reducedMotion() ? 120 : 150;

@@ -92,7 +92,10 @@ it("keeps the outgoing page scroll position until the next filter page arrives",
   expect(scroller.scrollTop).toBe(0);
 });
 
-it("switches the real series shelf only after folders, suggestions and character/group/collage images are ready", async () => {
+it.each([false, true])("switches the real series shelf only after folders, suggestions and character/group/collage images are ready (view transitions: %s)", async viewTransitions => {
+  const update = vi.fn<(callback: () => void) => void>();
+  const start = vi.fn((callback: () => void) => { update(callback); return { ready: Promise.resolve(), finished: new Promise<void>(() => {}), skipTransition: vi.fn() }; });
+  if (viewTransitions) Object.defineProperty(document, "startViewTransition", { configurable: true, value: start });
   const api = createCharacterFixture(), originalTargets = await api.targets();
   const targets = [...originalTargets, ...originalTargets.slice(0, 2).map((target, i) => ({
     ...target, id: `next-${i}`, displayName: `Next ${i}`, seriesClassificationId: "next", thumbnailAssetId: `next-cover-${i}`,
@@ -138,11 +141,29 @@ it("switches the real series shelf only after folders, suggestions and character
     for (const image of images.slice(0, -1)) fireEvent.load(image);
     expect(visibleShelf().textContent).toBe(oldText);
     await act(async () => { fireEvent.load(images[images.length - 1]); });
+    if (viewTransitions) {
+      expect(start).toHaveBeenCalledOnce();
+      expect(visibleShelf()).toBe(oldShelf);
+      expect(document.documentElement).toHaveAttribute("data-series-view-transition", "forward");
+      act(() => {
+        update.mock.calls[0][0]();
+        // The browser's new snapshot is taken right after the callback: everything must be committed inside it.
+        expect(visibleShelf()).toBe(prepared);
+        expect(visibleShelf()).toHaveTextContent("캐릭터 2 · 그룹 1 · 제안 1");
+        expect(visibleShelf().querySelector(".character-suggestion-tile__mosaic")).toHaveClass("character-suggestion-tile__mosaic--suggestion");
+        expect(screen.getByRole("button", { name: "제안 숨기기" })).toBeInTheDocument();
+        expect(view.container.querySelector("[data-shelf-exit]")).toBeNull();
+      });
+    }
     expect(visibleShelf()).toBe(prepared);
     expect(visibleShelf()).toHaveTextContent("캐릭터 2 · 그룹 1 · 제안 1");
     expect(screen.getByRole("button", { name: "제안 숨기기" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next 0 열기" }).querySelector("img")).toBe(characterImage);
     expect(screen.getByRole("button", { name: "Next group 그룹 열기" }).querySelector("img")).toBe(groupImage);
     expect(screen.queryByRole("button", { name: "히나 열기" })).toBeNull();
-  } finally { vi.useRealTimers(); }
+  } finally {
+    vi.useRealTimers();
+    Reflect.deleteProperty(document, "startViewTransition");
+    document.documentElement.removeAttribute("data-series-view-transition");
+  }
 });

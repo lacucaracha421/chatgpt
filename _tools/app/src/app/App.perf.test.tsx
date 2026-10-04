@@ -543,6 +543,58 @@ it("switches the index and header together with ready content and cancels pendin
   expect(header.querySelectorAll(".view-toolbar")).toHaveLength(1);
 });
 
+it("commits the content, index and header inside each browser tab snapshot update", async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(document, "startViewTransition");
+  const animationDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+  const animate = vi.fn(() => ({cancel: vi.fn(), onfinish: null}));
+  const entries: {update: () => void; skipTransition: ReturnType<typeof vi.fn>}[] = [];
+  const start = vi.fn((update: () => void) => {
+    const skipTransition = vi.fn();
+    entries.push({update, skipTransition});
+    return {ready: Promise.resolve(), finished: new Promise<void>(() => {}), skipTransition};
+  });
+  Object.defineProperty(document, "startViewTransition", {configurable: true, value: start});
+  Object.defineProperty(HTMLElement.prototype, "animate", {configurable: true, value: animate});
+  try {
+    renderApp(gw()); await advance(5_000);
+    const header = document.querySelector<HTMLElement>('[data-chrome-slot="header"]')!;
+    const slot = document.querySelector<HTMLElement>('.workspace-index-slot')!;
+    for (const [from, to, label, index] of [['home', 'assets', '에셋', 'open'], ['assets', 'collections', '컬렉션', 'closed'], ['collections', 'assets', '에셋', 'open']] as const) {
+      const oldHeader = header.textContent, oldIndex = slot.dataset.state;
+      const before = entries.length;
+      await act(async () => { fireEvent.click(within(screen.getByRole("navigation", {name: "주요 영역"})).getByRole("button", {name: label})); });
+      await advance(200, 16);
+      expect(entries).toHaveLength(before + 1);
+      if (before) expect(entries[before - 1].skipTransition).toHaveBeenCalledOnce();
+      expect(document.querySelector('.motion-stage')).toHaveAttribute('data-motion-shown', from);
+      expect(slot.dataset.state).toBe(oldIndex);
+      expect(header.textContent).toBe(oldHeader);
+      const incoming = document.querySelector<HTMLElement>(`[data-motion-view="${to}"]`)!;
+      expect(incoming).not.toBeVisible();
+      animate.mockClear();
+      act(() => {
+        entries[before].update();
+        expect(document.querySelector('.motion-stage')).toHaveAttribute('data-motion-shown', to);
+        expect(slot).toHaveAttribute('data-state', index);
+        expect(header.textContent).not.toBe(oldHeader);
+        expect(header.querySelectorAll('.view-toolbar')).toHaveLength(1);
+        expect(header).not.toHaveAttribute('inert');
+        expect(incoming).toBeVisible();
+        expect(incoming.style.width).toBe('');
+        expect(incoming.style.opacity).toBe('');
+      });
+      expect(document.querySelectorAll('.motion-stage__view[style*="position: fixed"]')).toHaveLength(0);
+      expect(animate.mock.contexts.filter(host => (host as HTMLElement).matches('.motion-stage__view, .workspace-index-clip'))).toHaveLength(0);
+    }
+  } finally {
+    cleanup();
+    if (descriptor) Object.defineProperty(document, 'startViewTransition', descriptor);
+    else Reflect.deleteProperty(document, 'startViewTransition');
+    if (animationDescriptor) Object.defineProperty(HTMLElement.prototype, 'animate', animationDescriptor);
+    else Reflect.deleteProperty(HTMLElement.prototype, 'animate');
+  }
+});
+
 it("keeps the outgoing gallery geometry through both index-width cross-fades", async () => {
   const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
   const animate = vi.fn(() => ({cancel: vi.fn(), onfinish: null}));

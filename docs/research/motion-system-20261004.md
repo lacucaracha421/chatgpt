@@ -52,6 +52,12 @@ Exit = the same curve at ~0.7× duration. JS reads the same values from one modu
 - Fix direction: compositor-only motion (transform/opacity; sidebar slides with transform and commits its width once), start the entrance after the incoming view's heavy work settles, promote animating layers (`will-change` only during the animation).
 - Folder move: the user dropped the top-down wave; use the direction-aware variant from §3.4 (forward from the right, back from the left), still covering the old content so there is no dip.
 
+## 4c. Decisions after the release builds (2026-10-04 night)
+
+- PC tab (area) switch: the browser View Transitions API (`document.startViewTransition`, `view-transition-name` `index` + `main`, 150 ms cross-fade) after the readiness/image gate; the user liked it best. Fallback without the API: frozen outgoing view + 150 ms cross-fade.
+- Tablet bottom-tab switch: instant (no motion), still gated on readiness.
+- In-tab motion stays custom: directional folder move over a snapshot, series shelf swaps once, overlays/toasts/sheets per §3. Shared-element morphs (folder cover → title) are possible with View Transitions later; not adopted yet.
+
 ## 5. Acceptance
 
 - One motion module and token set; components contain no raw durations/curves (extend the design-foundation CSS ratchet to durations and easings).

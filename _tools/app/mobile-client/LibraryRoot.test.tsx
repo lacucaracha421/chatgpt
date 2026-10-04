@@ -134,7 +134,7 @@ it('keeps the root grid and uses the PC style shelf for child folders',()=>{
  const folders=[{id:'a',name:'Parent',parent_id:null,asset_count:1},{id:'b',name:'Plain',parent_id:null,asset_count:0},{id:'c',name:'Child',parent_id:'a',asset_count:1}];
  const view=render(<FolderCards items={folders.slice(0,2)} entries={folders} paused revision={1} onSelect={()=>{}}/>);
  const gridCards=view.container.querySelectorAll('.library-folder');expect(gridCards).toHaveLength(2);
- gridCards.forEach(card=>expect(card.firstElementChild?.classList.contains('home-cover-group')).toBe(true));
+ gridCards.forEach(card=>expect(card.firstElementChild?.classList.contains('folder-thumbnail')).toBe(true));
  expect(gridCards[0].querySelector('small')).not.toBeNull();expect(gridCards[1].querySelector('small')).toBeNull();
  view.rerender(<FolderCards items={folders.slice(0,2)} entries={folders} paused revision={1} strip onSelect={()=>{}}/>);
  const shelf=view.container.querySelector('.folder-shelf') as HTMLElement;

@@ -29,3 +29,13 @@ it('uses the caller signal to cancel a first-screen decode already in progress',
  await vi.waitFor(()=>expect(mocks.decodeImage).toHaveBeenCalledOnce());
  controller.abort();expect(await work).toEqual([asset]);
 });
+it('stops waiting for the first screen at the PC first-viewport cap (250 ms)',async()=>{
+ vi.useFakeTimers();vi.stubGlobal('LakomicsNative',{});
+ try{
+  const asset:Asset={id:'slow',kind:'image',contentRating:'g'};
+  mocks.prepareAssets.mockReturnValue(new Promise(()=>{}));
+  let done=false;const work=readyFirstScreen([asset],new AbortController().signal).then(items=>{done=true;return items;});
+  await vi.advanceTimersByTimeAsync(249);expect(done).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);expect(await work).toEqual([asset]);
+ }finally{vi.useRealTimers();}
+});

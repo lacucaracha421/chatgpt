@@ -1,3 +1,4 @@
+import {AreaSwitch} from '../src/shared/motion/AreaSwitch';
 import { useDelayedBusy } from "../src/shared/useDelayedBusy";
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {TrackingRows} from './CollectionTracking';
@@ -24,7 +25,7 @@ import {FilmDetails} from './FilmDetails';
 import {CollectionBindings} from './CollectionBindings';
 import type {BindProvider} from './collectionBindingsModel';
 import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent} from 'react';
-import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,useSegmentMotion,type CardArrival} from './motion';
+import {afterDecode,arrive,sectionListParts,useAppendArrivals,useCardArrival,useLevelMotion,useSegmentMotion,type CardArrival} from './motion';
 import {BellIcon, CalendarIcon, StarIcon, ArrowsUpDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel} from './ui';
@@ -112,7 +113,7 @@ export function Artwork({item,id,revision,original=false,active=true,label,physi
   useEffect(()=>{if(privacy||absent||broken)arrival?.ready();},[privacy,absent,broken,arrival]);
   // While the card still waits, the card's arrival shows this cover; it does not fade on its own.
   if(ready&&arrival?.waiting())arriving.current=false;
-  return <span ref={host} className={`collection-art collection-art-${item.type}${solid?' is-physical':''}`}>{privacy?<span className="privacy-mask" aria-label="비공개 모드"/>:ready?(solid?<PhysicalCover kind={physical} src={image.url} alt={label??item.name} scope={item.id} revision={artworkVersion(item,id,revision,original)} large onError={()=>setFlat(source)}/>:<img src={image.url} alt={label??item.name} className={arriving.current?'collection-art-arrive':undefined} onLoad={arrival&&(event=>{const element=event.currentTarget;afterDecode(element,()=>{arrival.ready();arrive(element);});})} onError={()=>{arrival?.ready();loaded.current=null;arriving.current=true;kept?.forget(source);if(retryLater(null))setImage(null);else setFailed(source);}}/>):<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?'불러오는 중…':'표지'}</span></span>}</span>;
+  return <span ref={host} className={`collection-art collection-art-${item.type}${solid?' is-physical':''}`}>{privacy?<span className="privacy-mask" aria-label="비공개 모드"/>:ready?(solid?<PhysicalCover kind={physical} src={image.url} alt={label??item.name} scope={item.id} revision={artworkVersion(item,id,revision,original)} large onError={()=>setFlat(source)}/>:<img src={image.url} alt={label??item.name} className={arriving.current?'collection-art-arrive':undefined} onLoad={arrival&&(event=>{const element=event.currentTarget;afterDecode(element,()=>{arrival.ready();arrive(element);});})} onError={()=>{arrival?.ready();loaded.current=null;arriving.current=true;kept?.forget(source);if(retryLater(null))setImage(null);else setFailed(source);}}/>):<span className="collection-art-placeholder"><RectangleStackIcon/><span>{broken?'이미지를 불러오지 못했습니다':(!id&&!item.coverAssetId)?'표지 없음':original?<BusyLabel busy>불러오는 중…</BusyLabel>:'표지'}</span></span>}</span>;
 }
 type Pose={rx:number;ry:number};
 type View={pose:Pose;zoom:number;x:number;y:number};
@@ -192,7 +193,7 @@ function TurnableBook({url,label,onFail}:{url:string;label:string;onFail():void}
     return()=>{controller.abort();resize?.disconnect();element.removeEventListener('webglcontextlost',lost);if(frame.current)cancelAnimationFrame(frame.current);frame.current=0;texture.current=null;engine.current=null;book.dispose();};
   },[url,request]);
   return <div ref={host} className={`collection-turnable ${ready?'is-ready':''}`} role="img" aria-label={`${label} 입체 표지`} {...gesture.handlers}>
-    <canvas ref={canvas} aria-hidden="true"/>{!ready&&<span className="collection-turnable__status" role="status">입체 표지를 준비하는 중…</span>}
+    <canvas ref={canvas} aria-hidden="true"/><BusyLabel busy={!ready}><span className="collection-turnable__status" role="status">입체 표지를 준비하는 중…</span></BusyLabel>
   </div>;
 }
 /** The manga cover viewer's body: the flat artwork, or the paperback when switched on. */
@@ -207,7 +208,7 @@ function CoverStage({item,id,revision,label,mode,onFlat}:{item:CollectionDetail;
     return()=>controller.abort();
   },[physical,source]);
   if(!physical)return <Artwork item={item} id={id} revision={revision} label={label} original/>;
-  if(url?.source!==source)return <span className="collection-turnable" role="status">입체 표지를 준비하는 중…</span>;
+  if(url?.source!==source)return <span className="collection-turnable" role="status"><BusyLabel busy>입체 표지를 준비하는 중…</BusyLabel></span>;
   return <TurnableBook key={source} url={url.url} label={label} onFail={onFlat}/>;
 }
 function SeriesDetails({item,revision,active}:{item:CollectionDetail;revision:string;active:boolean}) {
@@ -341,8 +342,6 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
   const retryMore=useCallback(()=>{setState(value=>({...value,moreError:''}));},[]);
   return {...state,reload:restart,loadMore,retryMore,committed:state.key===committed.current&&!!state.page};
 }
-/** The list's own rows, which a type switch slides; the section bar, refresh pill and scrubber stay put. */
-const listParts=(host:HTMLElement)=>[...host.children].filter((child):child is HTMLElement=>child instanceof HTMLElement&&!child.matches('.ui-section-bar,.section-shade-rows,.pull-refresh,.mobile-scrubber'));
 const nearEnd=(element:HTMLElement)=>element.clientHeight>0&&element.scrollHeight-element.scrollTop-element.clientHeight<element.clientHeight;
 
 /** 내 별점 filter stops: 전체, then 0.5 … 5.0 (exact match, as the server applies it). */
@@ -539,7 +538,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const typeOptions=TABS.filter(value=>!privacyMode||value!=='av').map(value=>({value,label:labels[value]}));
   // Shortcuts and view controls share the section bar's right group on both surfaces.
   const shortcuts=<div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
-    <Button variant="quiet" size="sm" aria-label={showcaseCount==null?'쇼케이스':`쇼케이스 ${showcaseCount.toLocaleString()}`} aria-pressed={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}><StarIcon aria-hidden="true"/><span className="collection-shortcuts__label">쇼케이스</span>{showcaseCount!=null&&<span className="numeric collection-shortcuts__count">{showcaseCount.toLocaleString()}</span>}</Button>
+    <Button variant="quiet" size="sm" aria-label="쇼케이스" aria-pressed={showcaseAll} onClick={()=>setShowcaseAll(open=>!open)}><StarIcon aria-hidden="true"/><span className="collection-shortcuts__label">쇼케이스</span></Button>
     {(tab==='game'||tab==='movie')&&<Button variant="quiet" size="sm" aria-label={`발매 캘린더${calendarInterestCount>0?` ${calendarInterestCount.toLocaleString()}`:''}`} onClick={()=>setCalendarOpen(true)}><CalendarIcon aria-hidden="true"/><span className="collection-shortcuts__label">발매 캘린더</span>{calendarInterestCount>0&&<span className="numeric collection-shortcuts__count is-new">{calendarInterestCount.toLocaleString()}</span>}</Button>}
     {tab==='manga'&&<Button variant="quiet" size="sm" aria-label={`신간${releases.unread>0?` ${releases.unread.toLocaleString()}`:''}`} onClick={openInbox}><BellIcon aria-hidden="true"/><span className="collection-shortcuts__label">신간</span>{releases.unread>0&&<span className="numeric collection-shortcuts__count is-new">{releases.unread.toLocaleString()}</span>}</Button>}
   </div>;
@@ -563,9 +562,9 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const unpublishedNotice=<EmptyState icon={RectangleStackIcon} title="컬렉션이 아직 공유되지 않았습니다" />;
 
   // Works and performers remain navigation levels; shortcuts use the overlay motion.
-  useLevelMotion(sectionRef,active?`${selected??''}|${performer?.id??''}`:null,(selected?1:0)+(performer?1:0));
+  useLevelMotion(sectionRef,active?performer?.id??'':null,performer?1:0);
   // A type switch swaps the committed list sideways; the section bar stays still.
-  useSegmentMotion(listRef,tab==='av'||settledOn(main,mainKey)?tab:null,(privacyMode?TABS.filter(value=>value!=='av'):TABS).indexOf(tab),listParts);
+  useSegmentMotion(listRef,tab==='av'||settledOn(main,mainKey)?tab:null,(privacyMode?TABS.filter(value=>value!=='av'):TABS).indexOf(tab),sectionListParts);
   // The grid keeps the layout of the type it shows until the new type's page commits.
   const shownType=main.items[0]?.type??type;
   // Cards appended by scrolling rise in once each; a committed first page (a type switch, a
@@ -620,9 +619,10 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     <div ref={setBindHost} className="collection-bind-host"/>
   </>;
   return <ArtworkMemoryContext.Provider value={artworks}><section ref={sectionRef} className={`mobile-collections ${selected?'has-detail':''}`} style={{display:active?undefined:'none'}} aria-label="컬렉션">
+    <AreaSwitch activeKey={selected?'work':'shelf'} retained={['shelf','work']} waitForReady crossFade={false} views={{shelf: <>
     <div style={{display:'contents'}} inert={overlayOpen&&!selected&&!performer||undefined}>{header}</div>
     {!selected&&!overlayOpen&&!performer&&!searching&&sections.shade}
-    <div ref={listRef} className="collection-scroll" {...shelfPutDown} inert={overlayOpen||undefined} aria-hidden={overlayOpen||undefined} style={{display:selected||performer?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
+    <div ref={listRef} className="collection-scroll" {...shelfPutDown} inert={overlayOpen||undefined} aria-hidden={overlayOpen||undefined} style={{display:performer?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
       {listPull}
       {sections.inline}
       {tab==='av'?<>
@@ -646,7 +646,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       <Scrubber scrollRef={listRef} total={main.items.length} sort={mainScrubberSort} hidden={!active||paused||!!selected||overlayOpen||!!performer||sheet!==null} onEndReached={main.loadMore}/>
     </div>
     {/* Always mounted so its pull-to-refresh gesture is attached; hidden until opened. */}
-    <Overlay deferContent open={showcaseAll} covered={!live||!!selected||!!performer} title="쇼케이스" count={showcaseCount} onClose={()=>setShowcaseAll(false)}>
+    <Overlay deferContent open={showcaseAll} covered={!live||!!performer} title="쇼케이스" count={showcaseCount} onClose={()=>setShowcaseAll(false)}>
     {ready=><div ref={showcaseRef} className="collection-scroll" onScroll={event=>{if(nearEnd(event.currentTarget))showcase.loadMore();}}>{showcaseAll&&<>
       {showcasePull}
       <BusyLabel busy={!!(showcase.busy&&!showcaseItems.length)}><p className="hint" role="status">쇼케이스를 불러오는 중…</p></BusyLabel>
@@ -659,20 +659,22 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       <Scrubber scrollRef={showcaseRef} total={showcaseItems.length} sort={showcaseScrubberSort} hidden={!active||paused||!!selected||!showcaseAll} onEndReached={showcase.loadMore}/>
     </>}</div>}
     </Overlay>
-    <Overlay open={calendarOpen} covered={!live||!!selected||!!performer} title="발매 캘린더" count={calendarInterestCount} onClose={()=>setCalendarOpen(false)}>
+    <Overlay open={calendarOpen} covered={!live||!!performer} title="발매 캘린더" count={calendarInterestCount} onClose={()=>setCalendarOpen(false)}>
       {calendarOpen&&(tab==='game'||tab==='movie')&&<ReleaseCalendar embedded onSnapshot={setCalendarReply} initialKind={tab} onClose={()=>setCalendarOpen(false)}/>}
     </Overlay>
-    <Overlay open={inboxOpen} covered={!live||!!selected||!!performer} title="신간" count={releases.unread} onClose={closeInbox}>
+    <Overlay open={inboxOpen} covered={!live||!!performer} title="신간" count={releases.unread} onClose={closeInbox}>
     {inboxOpen&&<CollectionReleases active={active&&!paused&&!selected} counts={releases} refresh={refresh} revision={releaseListRevision} onCounts={setReleases} onRevision={setReleaseListRevision} onOpen={id=>openWork(id)} ownedOf={ownedOf} watching={watching}
       cover={(work,workRevision,name)=>work?<Artwork item={work} id={collectionCover(work)} revision={workRevision} active={active&&!paused&&!selected} label={name}/>:<span className="collection-art collection-art-manga"><span className="collection-art-placeholder"><RectangleStackIcon/></span></span>}/>}
     </Overlay>
-    <div ref={performerRef} className="collection-scroll collection-performer-pane" style={{display:performer&&!selected?undefined:'none'}}>{performer&&<AvPerformerScreen personId={performer.id} currentId={performer.from} active={active&&!paused&&!selected} privacy={privacyMode} perRow={viewOf('av').perRow} order={performerOrder}
+    <div ref={performerRef} className="collection-scroll collection-performer-pane" style={{display:performer?undefined:'none'}}>{performer&&<AvPerformerScreen personId={performer.id} currentId={performer.from} active={active&&!paused&&!selected} privacy={privacyMode} perRow={viewOf('av').perRow} order={performerOrder}
       onOpen={(id,ids)=>openWork(id,ids)} onPerformer={id=>setPerformer(current=>({id,from:current?.from??null}))} onSort={()=>setSheet('performerSort')} onView={()=>setSheet('view')}/>}</div>
-    <div ref={detailRef} className="collection-detail" style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item||showDetailLoading?(showDetailLoading&&!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>)
+    </>, work: <>{header}
+    <div ref={detailRef} className="collection-detail" aria-busy={!!selected&&!item&&!detailError} style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item||showDetailLoading?(showDetailLoading&&!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>)
       :item.type==='manga'
         ?<MangaWork key={item.id} item={item} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} volumes={editionVolumesShared} owned={ownedOf(item,edition)} initialVolumeId={openedVolume?.id===item.id?openedVolume.volumeId:null}
           latestKorean={latestKoreanRelease(releaseBoardEntry(item,ownedOf,watching),edition,today)} onEnlarge={id=>{if(!privacyMode)setCoverIndex(volumes.findIndex(volume=>volume.id===id)+1);}} info={mangaInfo}/>
         :<CaseWork item={item} portraitSources={main.items} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} position={Math.max(1,order.indexOf(item.id)+1)} total={Math.max(1,order.length)} score={visibleScore} record={visibleRecord} onStep={stepWork} info={workInfo}/>}</>}</div>
+    </>}}/>
     {sheet==='sort'&&<BottomSheet title="정렬" onClose={()=>setSheet(null)}>
       <p className="collection-sheet-label">기준</p><div role="radiogroup" aria-label="정렬 기준">{(Object.keys(SORT_LABELS) as Filters['sort'][]).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.sort===value} onClick={()=>changeFilters({...filters,sort:value})}>{SORT_LABELS[value]}<span className="radio-dot"/></button>)}</div>
       <p className="collection-sheet-label">순서</p><div role="radiogroup" aria-label="정렬 순서">{(['desc','asc'] as const).map(value=><button key={value} className="sheet-option" role="radio" aria-checked={filters.direction===value} onClick={()=>changeFilters({...filters,direction:value})}>{sortDirectionLabels(filters.sort)[value]}<span className="radio-dot"/></button>)}</div>

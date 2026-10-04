@@ -32,7 +32,10 @@ export function folderMoveExit(element: HTMLElement) {
     {duration: reducedMotion() ? contentCross.reduced : contentCross.exit, easing: EASE_STANDARD, fill: 'forwards'});
 }
 
-type Props = { scope?: string; queryKey?: string; visible: boolean; privacyKey: string; count: number; path?: readonly string[]; host: RefObject<HTMLDivElement | null>; children: ReactNode };
+type Props = { scope?: string; queryKey?: string; visible: boolean; privacyKey: string; count: number; path?: readonly string[]; host: RefObject<HTMLDivElement | null>; children: ReactNode;
+  /** The host's child that holds the tiles (the tablet gallery names its own). */
+  space?: string };
+const VIRTUAL_SPACE = '.asset-gallery__virtual-space';
 const interactionEvents = ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const;
 
 function visibleCells(host: HTMLElement) {
@@ -104,7 +107,7 @@ export class FolderMove extends Component<Props> {
         if (cells.some(({cell}) => !cell.isConnected)) { this.finish(); return; }
         this.frame = window.requestAnimationFrame(() => {
           this.frame = 0;
-          const space = host.querySelector<HTMLElement>('.asset-gallery__virtual-space');
+          const space = host.querySelector<HTMLElement>(this.props.space ?? VIRTUAL_SPACE);
           if (!space) { this.finish(); return; }
           const reduced = reducedMotion(), duration = reduced ? contentCross.reduced : contentCross.enter;
           const back = previous.path && this.props.path && this.props.path.length < previous.path.length
@@ -137,7 +140,7 @@ export class FolderMove extends Component<Props> {
     const host = this.props.host.current;
     if (host) {
       delete host.dataset.folderMove;
-      const space = host.querySelector<HTMLElement>('.asset-gallery__virtual-space');
+      const space = host.querySelector<HTMLElement>(this.props.space ?? VIRTUAL_SPACE);
       if (space) space.style.willChange = '';
       for (const event of interactionEvents) host.removeEventListener(event, this.finish, true);
       host.removeEventListener('scroll', this.onScroll);

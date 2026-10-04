@@ -1,0 +1,11 @@
+/* Fold contents: height follows a 0fr/1fr grid row and the contents fade with it. Closing takes
+   about 0.7x the opening and reverses from where it is on a quick toggle. */
+.tablet-fold { display:grid; grid-template-rows:1fr; opacity:1; transition:grid-template-rows var(--motion-medium) var(--ease-out), opacity var(--motion-small) var(--ease-out); }
+.tablet-fold[data-entering], .tablet-fold[data-open="false"] { grid-template-rows:0fr; opacity:0; }
+.tablet-fold[data-open="false"] { pointer-events:none; transition-duration:calc(var(--motion-medium) * var(--motion-exit-ratio)), calc(var(--motion-small) * var(--motion-exit-ratio)); }
+.tablet-fold[hidden] { display:none; }
+.tablet-fold > .tablet-fold__inner { min-width:0; min-height:0; overflow:hidden; }
+/* Settled open, the contents may draw outside (focus rings, shelf buttons). */
+.tablet-fold[data-settled] > .tablet-fold__inner { overflow:visible; }
+/* Reduced motion: the height changes at once and only the opacity eases. */
+@media (prefers-reduced-motion:reduce) { .tablet-fold.tablet-fold { transition:opacity var(--motion-micro) var(--ease-out) !important; } }

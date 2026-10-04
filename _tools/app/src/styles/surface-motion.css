@@ -21,6 +21,8 @@
 [data-motion="dialog"] { --surface-time: var(--spring-gentle-ms); --surface-ease: var(--spring-gentle); --surface-opacity-time: var(--motion-medium); --surface-y: 8px; --surface-scale: .97; }
 [data-motion="scrim"] { --surface-time: var(--motion-medium); --surface-exit-time: var(--motion-medium); --surface-opacity-time: var(--motion-medium); --surface-y: 0px; --surface-scale: 1; }
 [data-motion="toast"] { --surface-y: 10px; --surface-scale: .98; --surface-exit-time: var(--motion-toast-exit); }
+/* A full-screen tablet layer is pushed in from the right edge over the page and pops back. */
+[data-motion="layer"] { --surface-time: var(--spring-gentle-ms); --surface-ease: var(--spring-gentle); --surface-opacity-time: var(--motion-small); --surface-x: 100%; --surface-y: 0px; --surface-scale: 1; }
 [data-motion="selection"] { --surface-time: var(--motion-small); --surface-exit-time: var(--motion-small); --surface-ease: var(--ease-out); --surface-y: 8px; --surface-scale: 1; }
 [data-motion][data-motion-entering], [data-motion][data-state="closed"] { opacity: 0; translate: var(--surface-x) var(--surface-y); scale: var(--surface-scale); }
 [data-motion][data-state="closed"] {

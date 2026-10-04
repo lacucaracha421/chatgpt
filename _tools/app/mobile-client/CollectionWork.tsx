@@ -1,3 +1,4 @@
+import {useWorkSurfaceReady} from "../src/collections/work/useWorkSurfaceReady";
 import {WorkZoomObject, WorkZoomProvider, WorkZoomStage} from '../src/collections/work/WorkZoom';
 import {WorkBackdrop} from '../src/collections/work/WorkBackdrop';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode} from 'react';
@@ -125,6 +126,7 @@ export function CaseWork(props: CaseWorkProps) {
   const metadataOnly = shown?.item.id === item.id && incoming && shown.urls === incoming.urls;
   const visible = metadataOnly ? incoming : shown;
   const [reset, setReset] = useState(0);
+  const [entered, setEntered] = useState(false);
   useEffect(() => {
     if (!incoming || shown === incoming) return;
     const next = !shown || metadataOnly ? painted : painted === 0 ? 1 : 0;
@@ -134,10 +136,11 @@ export function CaseWork(props: CaseWorkProps) {
   if (!visible) return <div className="tablet-work__skeleton ui-skeleton" aria-label="작품을 불러오는 중" aria-busy="true"/>;
   const waiting = !incoming || visible !== incoming;
   const label = visible.item.type === 'av' ? 'AV 작품 화면' : visible.item.type === 'movie' ? '영화 작품 화면' : '게임 작품 화면';
-  return <WorkZoomProvider workId={visible.item.id} reset={reset}><article className="tablet-work" style={{position: 'relative'}} aria-label={label} aria-busy={waiting} inert={waiting || undefined}>
+  return <WorkZoomProvider workId={visible.item.id} reset={reset}><article className="tablet-work" style={{position: 'relative'}} aria-label={label} aria-busy={waiting || !entered} inert={waiting || undefined}>
     {slots.map((slot, index) => slot && <div key={index} data-work-pending={index !== painted && slot === incoming ? '' : undefined} aria-hidden={index !== painted} inert={index !== painted || waiting || undefined}
       style={index === painted ? undefined : {position: 'absolute', inset: 0, visibility: 'hidden', pointerEvents: 'none'}}>
       <CaseWorkSurface {...props} shown={index === painted ? visible : slot} reset={reset} onReset={() => setReset(value => value + 1)} onReady={() => {
+        if (index === painted) setEntered(true);
         if (index !== painted && slot === requested.current) setPainted(index as 0 | 1);
       }}/>
     </div>)}
@@ -154,14 +157,8 @@ function CaseWorkSurface({shown, active, privacy, score, record = workRecordFact
   const strip = work.artworks.filter(art => !OBJECT_KINDS.includes(art.kind) && art.id !== heroArtwork(work));
   const art = useArtworkSet(work, {art: {id: strip.some(entry => entry.id === picked) ? picked : null, original: true}}, shown.revision, active && !privacy);
   const presentation = JSON.stringify([work.id, shown.urls, privacy]);
-  const readiness = useRef({presentation, object: false, hero: !shown.urls.hero || privacy, backdrop: work.type !== 'av' || privacy || !shown.urls.front, strip: false});
-  if (readiness.current.presentation !== presentation) readiness.current = {presentation, object: false, hero: !shown.urls.hero || privacy, backdrop: work.type !== 'av' || privacy || !shown.urls.front, strip: false};
-  const currentReadiness = readiness.current;
-  function ready(part: 'object' | 'hero' | 'backdrop' | 'strip') {
-    if (readiness.current !== currentReadiness) return;
-    readiness.current[part] = true;
-    if (readiness.current.object && readiness.current.hero && readiness.current.backdrop && readiness.current.strip) onReady();
-  }
+  const ready = useWorkSurfaceReady(presentation, !shown.urls.hero || privacy, work.type !== 'av' || privacy || !shown.urls.front, onReady,
+    JSON.stringify([work.id, shown.urls.front, shown.urls.spine, shown.urls.back, work.ownedPlatform, work.platforms, privacy]));
   useEffect(() => { if (art.ready && art.urls.art && picked !== 'case' && picked !== 'open' && picked !== 'flat') setMode(picked); }, [art.ready, art.urls.art, picked]);
   function pick(next: string) {
     setPicked(next);
@@ -249,12 +246,14 @@ export function MangaWork({item, revision, active, privacy, volumes, owned, late
     setSlots(current => next === 0 ? [incoming, current[1]] : [current[0], incoming]);
   }, [incoming, shown, metadataOnly, slots, painted]);
   const [reset, setReset] = useState(0);
+  const [entered, setEntered] = useState(false);
   if (!visible) return <div className="tablet-work__skeleton ui-skeleton" aria-label="작품을 불러오는 중" aria-busy="true"/>;
   const waiting = !incoming || visible !== incoming;
-  return <WorkZoomProvider workId={visible.item.id} reset={reset}><article className="tablet-work tablet-work--manga" style={{position: 'relative'}} aria-label="만화 작품 화면" aria-busy={waiting} inert={waiting || undefined}>
+  return <WorkZoomProvider workId={visible.item.id} reset={reset}><article className="tablet-work tablet-work--manga" style={{position: 'relative'}} aria-label="만화 작품 화면" aria-busy={waiting || !entered} inert={waiting || undefined}>
     {slots.map((slot, index) => slot && <div key={index} data-work-pending={index !== painted && slot === incoming ? '' : undefined} aria-hidden={index !== painted} inert={index !== painted || waiting || undefined}
       style={index === painted ? undefined : {position: 'absolute', inset: 0, visibility: 'hidden', pointerEvents: 'none'}}>
       <MangaWorkSurface shown={index === painted ? visible : slot} privacy={privacy} reset={reset} onReset={() => setReset(value => value + 1)} onPick={setWanted} onEnlarge={onEnlarge} onReady={() => {
+        if (index === painted) setEntered(true);
         if (index !== painted && slot === requestedSurface.current) setPainted(index as 0 | 1);
       }}/>
     </div>)}
@@ -267,14 +266,7 @@ function MangaWorkSurface({shown, privacy, reset, onReset, onPick, onEnlarge, on
   const index = manga.volumes.findIndex(volume => volume.id === manga.activeVolumeId);
   const swipe = useSwipe(offset => { const next = manga.volumes[(index < 0 ? 0 : index) + offset]; if (next) onPick(next.id); });
   const presentation = JSON.stringify([item.id, manga.activeVolumeId, shown.book, shown.hero, shown.spines, privacy]);
-  const readiness = useRef({presentation, object: false, hero: !shown.hero || privacy, backdrop: !shown.book || privacy, strip: false});
-  if (readiness.current.presentation !== presentation) readiness.current = {presentation, object: false, hero: !shown.hero || privacy, backdrop: !shown.book || privacy, strip: false};
-  const currentReadiness = readiness.current;
-  function ready(part: 'object' | 'hero' | 'backdrop' | 'strip') {
-    if (readiness.current !== currentReadiness) return;
-    readiness.current[part] = true;
-    if (readiness.current.object && readiness.current.hero && readiness.current.backdrop && readiness.current.strip) onReady();
-  }
+  const ready = useWorkSurfaceReady(presentation, !shown.hero || privacy, !shown.book || privacy, onReady);
   return <>
     <div className="tablet-work__frame">
       {!privacy && shown.hero && <HeroBand src={shown.hero} manga onReady={() => ready('hero')}/>}

@@ -118,5 +118,5 @@ function ThumbnailWarmSetting() {
   const [enabled,setEnabled]=useState(warmEnabled),[state,setState]=useState(warmState);
   useEffect(()=>onWarmState(setState),[]);
   const status = enabled ? `${warmLabels[state.status]} · 확인한 썸네일 ${state.warmed.toLocaleString('ko-KR')}장` : warmLabels.off;
-  return <SettingsRow name="썸네일 미리 받기" status={status} control={<Switch aria-label="썸네일 미리 받기" checked={enabled} onChange={event=>{setEnabled(event.target.checked);setWarmEnabled(event.target.checked);}}/>}/>;
+  return <SettingsRow name="썸네일 미리 받기" status={<BusyLabel busy={enabled&&state.status==='running'} idle={enabled&&state.status==='running'?null:status}>{status}</BusyLabel>} control={<Switch aria-label="썸네일 미리 받기" checked={enabled} onChange={event=>{setEnabled(event.target.checked);setWarmEnabled(event.target.checked);}}/>}/>;
 }

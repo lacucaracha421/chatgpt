@@ -1,3 +1,4 @@
+import {LoadingLine} from './TopBar';
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useTabletAssetMask} from './assetMask';
 import {Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
@@ -103,6 +104,7 @@ export function Exchange({snapshot, onSnapshot, backRef, onClose}: {
   });
 
   const statusLabel = !usable ? '' : code === '' ? '연결됨' : code === 'network' || code === 'server' || code === 'storageUnavailable' ? '다시 연결하는 중' : '';
+  const reconnecting = usable && ['network', 'server', 'storageUnavailable'].includes(code);
   const peerName = target?.name ?? '';
   const receiveNote = '받은 파일은 앱이 열려 있을 때 다운로드/Lakomics 폴더에 저장됩니다.';
 
@@ -120,11 +122,11 @@ export function Exchange({snapshot, onSnapshot, backRef, onClose}: {
         <button type="button" aria-pressed={!receivedOnly} onClick={() => setReceivedOnly(false)}>전체</button>
         <button type="button" aria-pressed={receivedOnly} onClick={() => setReceivedOnly(true)}>받은 파일</button>
       </div>}
-      {statusLabel && <span className="exchange-status" role="status"><span className="exchange-dot" data-live={code === ''} aria-hidden="true"/>{statusLabel}</span>}
+      <BusyLabel busy={reconnecting} idle={!reconnecting&&statusLabel&&<span className="exchange-status" role="status"><span className="exchange-dot" data-live={code === ''} aria-hidden="true"/>{statusLabel}</span>}><span className="exchange-status" role="status"><span className="exchange-dot" data-live={false} aria-hidden="true"/>다시 연결하는 중</span></BusyLabel>
       {snapshot?.configured && snapshot.tokenConfigured && !needsToken && <IconButton label="기기 토큰 변경" icon={EllipsisHorizontalIcon} active={editingToken} onClick={() => setEditingToken(value => !value)}/>}
     </header>
     <div className="exchange-scroll" ref={scroller}>
-      {!snapshot && <div className="loading-line" role="status" aria-label="전송 불러오는 중"/>}
+      <LoadingLine label={(!snapshot)&&'전송 불러오는 중'}/>
       {(code && !needsToken || notice || showToken && snapshot?.configured || usable && !snapshot.receiveSupported) && <div className="exchange-notices">
         {code && !needsToken && <p className={code === 'network' || code === 'server' ? 'hint exchange-notice' : 'error-message exchange-notice'} role="status">{screenMessage(code)}</p>}
         {notice && <p className="error-message exchange-notice" role="alert">{notice}</p>}
@@ -226,7 +228,7 @@ function Block({block, peerName, actions}: {block: TimelineBlock<ExchangeRow>; p
             <ThumbStrip rows={rows} incoming={incoming} actions={actions}/>
             {rows.filter(row => rowView(row, incoming).tone === 'error').map(row => <FileRow key={row.transferId} row={row} incoming={incoming} actions={actions}/>)}
             {moving && <div className="exchange-batch-foot">
-              <span>{current ? `${rowView(current, incoming).label} · ${current.fileName}` : incoming ? '받기 대기 중' : '보내는 중'}</span>
+              <span><BusyLabel busy={!!moving}>{current ? `${rowView(current, incoming).label} · ${current.fileName}` : incoming ? '받기 대기 중' : '보내는 중'}</BusyLabel></span>
               {cancellable.length > 1 && <Button size="sm" variant="ghost" onClick={() => cancellable.forEach(row => actions.onCancel(row.transferId))}>{incoming ? '모두 받지 않기' : '모두 취소'}</Button>}
             </div>}
           </>
@@ -268,7 +270,7 @@ function FileRow({row, incoming, actions}: {row: ExchangeRow; incoming: boolean;
       <strong>{row.fileName}</strong>
       <span className="exchange-state" data-tone={view.tone}>
         {view.tone === 'error' && <ExclamationTriangleIcon aria-hidden="true"/>}
-        {meta.map((part, index) => <Fragment key={index}>{index > 0 && ' · '}<span className={index === 0 ? 'numeric' : undefined}>{part}</span></Fragment>)}
+        {meta.map((part, index) => <Fragment key={index}>{index > 0 && ' · '}<span className={index === 0 ? 'numeric' : undefined}><BusyLabel busy={part===label&&view.tone==='active'} idle={part===label&&view.tone==='active'?null:part}>{part}</BusyLabel></span></Fragment>)}
       </span>
       {view.progress !== null && <Bar percent={view.progress * 100} striped={row.state === 'zipping'}/>}
     </span>

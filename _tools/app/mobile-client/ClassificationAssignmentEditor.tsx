@@ -1,3 +1,4 @@
+import {LoadingLine} from './TopBar';
 import {visibleInterval} from './useVisibleInterval';
 import {viewerEditEvent} from './listGeneration';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
@@ -228,7 +229,7 @@ export function ClassificationAssignmentEditor({assetId,open,onClose}:{assetId:s
     <DialogDescription className="sr-only">현재 자산의 분류를 하나 선택하거나 미분류로 둡니다. 선택하면 즉시 적용되고, 오프라인 변경은 저장 대기 상태로 유지됩니다.</DialogDescription>
     <div className="classification-index classification-assignment-editor">
       <div className="dialog-header"><span>분류 변경</span><IconButton label="분류 선택 닫기" icon={XMarkIcon} onClick={onClose}/></div>
-      {!state&&!error&&<div className="loading-line" role="status" aria-label="분류 상태를 불러오는 중"/>}
+      <LoadingLine label={(!state&&!error)&&'분류 상태를 불러오는 중'}/>
       {error&&<p className="error-message" role="alert">{error}</p>}
       {state&&!state.adopted&&<p className="hint">분류 동기화가 준비된 뒤 편집할 수 있습니다.</p>}
       {state?.adopted&&<ClassificationAssignmentChoices classifications={state.classifications} selectedId={state.classificationId??null} disabled={saving||state.blocked===true} onSelect={id=>void select(id)}/>}

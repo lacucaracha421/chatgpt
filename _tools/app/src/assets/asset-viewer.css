@@ -163,7 +163,8 @@
   transition: opacity 100ms ease, transform 200ms var(--ease-sheet);
 }
 .asset-viewer--playing .asset-viewer__topbar, .asset-viewer--playing .asset-viewer__edge { opacity: 0; pointer-events: none; }
-.asset-viewer[data-viewer-closing] .asset-viewer__chrome { visibility: hidden; }
+/* The video controls live in the media surface that zooms back into the tile; they leave with the chrome. */
+.asset-viewer[data-viewer-closing] .asset-viewer__chrome, .asset-viewer[data-viewer-closing] .video-player__controls { visibility: hidden; }
 
 .asset-viewer__dock {
   display: flex;

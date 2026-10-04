@@ -99,7 +99,9 @@ it('shows every portrait child in one scroll strip and collapses it without repl
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
   expect(screen.getByRole('radiogroup',{name:'이미지 범위'})).toBeTruthy();
   fireEvent.click(toggle);
-  expect(controlled?.hidden).toBe(true);
+  // The strip folds away out of reach at once, and is hidden once the fold has finished.
+  expect(controlled?.getAttribute('data-open')).toBe('false');
+  await waitFor(()=>expect(controlled?.hidden).toBe(true));
   expect(screen.queryByRole('button',{name:'Extra 8'})).toBeNull();
   expect(screen.getByText('asset-1')).toBe(asset);
   expect(screen.getByLabelText('character gallery')).toBe(gallery);
@@ -370,6 +372,26 @@ it('uses the series unclassified empty state',async()=>{
   mocks.api.mockImplementation(async(path:string)=>path.endsWith('/characters')?structuredClone(index):page([]));
   render(<CharacterBrowser {...props} initialNode="series:s"/>);
   expect(await screen.findByText('미분류 이미지가 없습니다')).toBeTruthy();
+});
+it("enters another folder without showing the last visit's tiles while the new page loads",async()=>{
+  let finish!:(result:CharacterPage)=>void;
+  mocks.api.mockImplementation((path:string)=>{
+    if(path.endsWith('/characters'))return Promise.resolve(structuredClone(index));
+    if(path.includes('toc=1'))return Promise.resolve({});
+    if(path.includes('character%3Ac')||path.includes('character:c'))return new Promise(resolve=>{finish=resolve;});
+    return Promise.resolve(page(['old']));
+  });
+  const view=render(<CharacterBrowser {...props} initialNode="series:s" entryKey={1}/>);
+  await screen.findByText('old');
+  // Leave the character boundary (another Library place), then enter a different folder.
+  view.rerender(<CharacterBrowser {...props} active={false} initialNode="series:s" entryKey={1}/>);
+  view.rerender(<CharacterBrowser {...props} initialNode="character:c" entryKey={2}/>);
+  // The folder visited earlier is a different place: none of its tiles stand in for this one.
+  expect(screen.queryByText('old')).toBeNull();
+  await waitFor(()=>expect(finish).toBeDefined());
+  expect(screen.queryByText('old')).toBeNull();
+  await act(async()=>finish(page(['new'])));
+  expect(await screen.findByText('new')).toBeTruthy();
 });
 it('keeps the committed gallery page while a series filter replacement is pending',async()=>{
   let finish!:(result:CharacterPage)=>void;

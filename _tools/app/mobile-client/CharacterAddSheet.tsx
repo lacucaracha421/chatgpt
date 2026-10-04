@@ -1,3 +1,4 @@
+import {LoadingLine} from './TopBar';
 import {useEffect, useState} from 'react';
 import {BottomSheet} from './BottomSheet';
 import {api, errorText} from './transport';
@@ -33,7 +34,7 @@ export function CharacterAddSheet({assetId, libraryId, onClose, onAdded}: {asset
   return <BottomSheet title="캐릭터에 추가" onClose={onClose}>
     <p className="hint">이 자산이 속한 시리즈의 캐릭터만 표시합니다. PC가 반영하면 캐릭터 갤러리에 나타납니다.</p>
     {error && <p className="error-message" role="alert">{error}</p>}
-    {!targets && !error && <div className="loading-line" role="status" aria-label="캐릭터 불러오는 중"/>}
+    <LoadingLine label={(!targets && !error)&&'캐릭터 불러오는 중'}/>
     {targets && !targets.length && <p className="hint">추가할 수 있는 캐릭터가 없습니다.</p>}
     {targets?.map(target => <button key={target.targetId} className="sheet-option" onClick={() => add(target)}>
       <span>{target.name}{target.seriesName && <small className="muted"> · {target.seriesName}</small>}</span>

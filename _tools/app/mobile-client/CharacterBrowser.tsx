@@ -1,3 +1,4 @@
+import {LoadingLine} from './TopBar';
 import {useTabletAssetMask} from './assetMask';
 import type {ContentRating} from '../src/shared/privacy/contentMask';
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
@@ -7,7 +8,7 @@ import {invalidSearchChoices} from './assetSearchModel';
 import type {LibraryCrumb} from './LibraryHeader';
 import {FilterChips,type FilterGroup} from './FilterChips';
 import {usePublicationCheck} from './usePublicationCheck';
-import {useCallback,useEffect,useId,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
+import {useCallback,useEffect,useId,useLayoutEffect,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
 import {ArrowLeftIcon,ChevronUpIcon,InformationCircleIcon,PhotoIcon,Squares2X2Icon} from '@heroicons/react/24/outline';
 import {BottomSheet} from './BottomSheet';
 import {BarProgress,SearchButton} from './TopBar';
@@ -172,7 +173,8 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   // entry effect updates its ref eagerly while `where` commits later, so comparing the two
   // reported a drill-down for a folder that had just been opened and wrongly consumed Back.
   const drilled=useRef(false);
-  useEffect(()=>{if(active&&initialNode&&(appliedInitialNode.current!==initialNode||appliedEntryKey.current!==entryKey)){appliedEntryKey.current=entryKey;appliedInitialNode.current=initialNode;drilled.current=false;navigate({node:initialNode,filter:defaultCharacterFilter(initialNode,latest.current.index),filters:{...EMPTY_FILTERS},search});}},[initialNode,entryKey,active,navigate,search]);
+  // Before paint, so an entry never shows a frame of the previous folder's header or shelf.
+  useLayoutEffect(()=>{if(active&&initialNode&&(appliedInitialNode.current!==initialNode||appliedEntryKey.current!==entryKey)){appliedEntryKey.current=entryKey;appliedInitialNode.current=initialNode;drilled.current=false;navigate({node:initialNode,filter:defaultCharacterFilter(initialNode,latest.current.index),filters:{...EMPTY_FILTERS},search});}},[initialNode,entryKey,active,navigate,search]);
   useEffect(()=>{
     if(!active||assetSearchSelectionKey(search)===assetSearchSelectionKey(latest.current.where.search))return;
     pageGate.current.cancel();moreGate.current.cancel();morePending.current=false;setMore(false);
@@ -250,11 +252,12 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
     const promise=(usable?Promise.resolve(usable.page):withScopedToc(
       api<CharacterPage&{listGeneration?:string}>(characterPath(where.node,where.filter,index.revision,null,where.filters,where.search),request.signal).then(value=>({...value,list_generation:value.listGeneration,filter_version:filterVersionOf(value)??undefined})),
       readScopedToc(characterPath(where.node,where.filter,index.revision,null,where.filters,where.search,true),request.signal),'newest'))
-      // A switch inside a shown scope keeps the old page until the new first screen is decoded.
-      .then(result=>latest.current.page?readyFirstScreen(result.items,request.signal).then(items=>{
+      // A switch keeps the old page, and an entry its empty gallery, until the new first screen
+      // is decoded (capped like the PC's first viewport); later images load in place.
+      .then(result=>readyFirstScreen(result.items,request.signal).then(items=>{
         const prepared=new Map(items.map(asset=>[asset.id,asset]));
         return {...result,items,assetRanges:result.assetRanges?{...result.assetRanges,ranges:result.assetRanges.ranges.map(range=>({...range,items:range.items.map(asset=>prepared.get(asset.id)??asset)}))}:undefined};
-      }):result)
+      }))
       .then(result=>{
         if(!pageGate.current.current(request.id))return;
         // The reader's own envelope declares the contract under the wire name, so it is resolved
@@ -329,19 +332,31 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   const lastPage=useRef<CharacterPage|undefined>(undefined);
   const visibleGalleryIdentity=useRef('character:empty');
   if(shown&&index?.revision)visibleGalleryIdentity.current=key(index.revision,shown);
+  // The folder the visible tiles belong to; it changes only when a new folder's page commits, so the
+  // gallery's folder move (the PC's FolderMove) runs once, from the old tiles to the new ones.
+  const galleryFolder=useRef<{scope:string;path:string[]}|undefined>(undefined);
+  if(shown&&galleryFolder.current?.scope!==(shown.node??'root')){
+    const path:string[]=[],seen=new Set<string>();
+    for(let id=shown.node;id&&!seen.has(id);id=index?.nodes.find(item=>item.id===id)?.parentId??null){seen.add(id);path.unshift(id);}
+    galleryFolder.current={scope:shown.node??'root',path};
+  }
   const level=useRef<{key:string;depth:number}|null>(null);
+  // Entering from outside the browser is a new place: a page kept from an earlier visit is not
+  // this folder's content, so it never stands in while the entered folder loads.
+  const entering=active&&!!initialNode&&(appliedInitialNode.current!==initialNode||appliedEntryKey.current!==entryKey)&&!lastPage.current;
   if(!active){lastPage.current=undefined;level.current=null;}
-  else if(page)lastPage.current=page;
+  else if(page&&!entering)lastPage.current=page;
   if(active&&committed&&index){
     let depth=committed.node?1:0,up=index.nodes.find(n=>n.id===committed.node)?.parentId;const seen=new Set<string>();
     while(up&&!seen.has(up)){seen.add(up);depth++;up=index.nodes.find(n=>n.id===up)?.parentId;}
     // Character filters replace the page inside one level. Keep the level key stable so the
     // retained gallery does not replay the hierarchy fade when 미분류 and 전체 swap.
-    level.current={key:committed.node??'root',depth};
+    // Folder to folder is the gallery's folder move; this level only covers the index root.
+    level.current={key:committed.node?'folder':'root',depth};
   }
-  useLevelMotion(host,search?.length?'asset-search':level.current?.key??null,level.current?.depth??0);
+  useLevelMotion(host,search?.length?'asset-search':level.current?.key??null,level.current?.depth??0,false);
   const stale=!!shown&&filterPending||(!page&&busy&&!error&&!!where.node&&!!lastPage.current);
-  const galleryItems=page?.items??(stale?lastPage.current!.items:[]);
+  const galleryItems=entering?[]:page?.items??(stale?lastPage.current!.items:[]);
   useFirstAppearance(host,children.length,active&&!paused&&!stale&&!busy,"classification-characters",".character-card");
   const foldable=folderStrip&&children.length>0;
   const childCharacterCount=children.filter(child=>child.kind!=='folder').length;
@@ -383,9 +398,9 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   return <section className={`character-browser${landscape?' character-browser-landscape':''}`} style={{display:active?undefined:'none'}} aria-label="시리즈·캐릭터" ref={host}>
     {characterHeader}
     {where.node&&kindShade.shade}
-    <Gallery privacy={privacy} sparse={sparse} items={galleryItems} stale={stale} intro={<>{scopeChips}{where.node?<>{kindShade.inline}{overview}</>:overview}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null}/>
+    <Gallery privacy={privacy} sparse={sparse} folderScope={galleryFolder.current?.scope} folderPath={galleryFolder.current?.path} items={galleryItems} stale={stale} intro={<>{scopeChips}{where.node?<>{kindShade.inline}{overview}</>:overview}</>} onRefresh={()=>{cache.current.clear();setRetry(n=>n+1);}} busy={busy} density={density} identity={visibleGalleryIdentity.current} restoreScroll={restore} onScroll={top=>{scroll.current=top;}} onOpen={i=>{if(page)onOpen(page.items,i,viewerCharacterContext(node,index));}} onReady={ready} onNearEnd={nearEnd} paused={!active||paused} scrubberHidden={filtersOpen!==null}/>
     {where.node&&<FilterChips media={false} row={false} value={where.filters} applied={where.filters} onChange={applyFilters} open={filtersOpen} onOpen={setFiltersOpen}/>}
-    {more&&<div className="loading-line is-bottom" role="status" aria-label="다음 캐릭터 자산 불러오는 중"/>}
+    <LoadingLine label={(more)&&'다음 캐릭터 자산 불러오는 중'} className="is-bottom"/>
     {moreError&&<div className="inline-error" role="alert">{moreError}<Button onClick={()=>{if(sparse){cache.current.clear();setRetry(n=>n+1);}else void append();}}>다시 시도</Button><Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
     {filterHelpOpen&&<BottomSheet title="미분류와 전체" onClose={()=>setFilterHelpOpen(false)}><div className="folder-filter__explanation"><p><strong>미분류</strong>: 이 폴더에 바로 들어 있고 아직 캐릭터나 하위 폴더에 없는 이미지</p><p><strong>전체</strong>: 캐릭터와 하위 폴더까지 모두</p></div></BottomSheet>}
   </section>;

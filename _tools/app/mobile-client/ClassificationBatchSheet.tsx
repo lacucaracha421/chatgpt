@@ -1,3 +1,4 @@
+import {LoadingLine} from './TopBar';
 import {useEffect,useRef,useState} from 'react';
 import {BottomSheet} from './BottomSheet';
 import {Button} from './ui';
@@ -65,7 +66,7 @@ export function ClassificationBatchSheet({assetIds,onClose,onBusyChange,onComple
   };
   return <BottomSheet title={`분류 변경 (${assetIds.length}개)`} onClose={()=>{if(!saving.current)onClose();}}>
     <div className="classification-batch-sheet classification-assignment-editor">
-      {!states&&<div className="loading-line" role="status" aria-label="분류 상태를 불러오는 중"/>}
+      <LoadingLine label={(!states)&&'분류 상태를 불러오는 중'}/>
       {!!unavailable.length&&<p className="error-message" role="alert">{unavailable.length}개는 변경할 수 없습니다. {unavailable[0].error||unavailable[0].state?.conflictMessage||'분류 동기화가 준비된 뒤 편집할 수 있습니다.'}</p>}
       {!!pending&&!result&&<p className="hint">{pending}개 저장 대기 · 변경하면 대기 중인 분류도 바뀝니다.</p>}
       {tree&&!result&&<>

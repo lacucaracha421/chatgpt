@@ -32,7 +32,7 @@ it.each([false, true])("retains the same case on pick and put-down (reduced=%s)"
 it("paints the selected case above a later neighbour that is still settling", () => {
   vi.useFakeTimers(); motion(false);
   const style = document.createElement("style");
-  style.textContent = readFileSync("src/collections/CollectionBrowser.css", "utf8");
+  style.textContent = readFileSync("src/collections/collectionShelfRules.css", "utf8");
   document.head.append(style);
   try {
     const draw = (selected: number) => <div className="collection-list collection-list--shelf">{[0, 1].map(index =>
@@ -44,6 +44,25 @@ it("paints the selected case above a later neighbour that is still settling", ()
     const cells = container.querySelectorAll<HTMLElement>(".collection-list__cell");
     expect(cells[1].querySelector("[data-settling]")).not.toBeNull();
     expect(Number(getComputedStyle(cells[0]).zIndex)).toBeGreaterThan(Number(getComputedStyle(cells[1]).zIndex));
+  } finally { style.remove(); }
+});
+
+it("lifts the selected case toward the viewer and lowers it again", () => {
+  vi.useFakeTimers(); motion(false);
+  const style = document.createElement("style");
+  // LightCase.css is the case's own stylesheet on both clients; its @import is the shared paint order.
+  style.textContent = readFileSync("src/collections/case/LightCase.css", "utf8").replace(/^@import[^\n]*\n/, "");
+  document.head.append(style);
+  try {
+    const view = render(<LightCase data={data} selected={false} />);
+    const box = view.container.querySelector<HTMLElement>(".cs-box")!;
+    const resting = getComputedStyle(box).transform;
+    expect(resting).toContain("rotateY(34deg)");
+    view.rerender(<LightCase data={data} selected />);
+    expect(getComputedStyle(box).transform).toContain("translateZ(34px)");
+    expect(getComputedStyle(box).transform).not.toBe(resting);
+    view.rerender(<LightCase data={data} selected={false} />);
+    expect(getComputedStyle(box).transform).toBe(resting);
   } finally { style.remove(); }
 });
 

@@ -857,8 +857,8 @@ function WorkspaceAreaSwitch({view, shownView, collections, sidebarWidth, onShow
   const area = workspaceSwitchKey(view), scope = JSON.stringify(view);
   const indexWidth = (target: AssetView) => hasWorkspaceIndex(target, collections, chrome?.getMeta(JSON.stringify(target)) ?? null)
     && !(workspaceArea(target) === "manga" && chrome?.indexHidden.manga) ? sidebarWidth : 0;
-  // Prepare at the final width; the index swaps on the same frame as the opacity clock.
-  return <AreaSwitch activeKey={area} retained={["home", "manga"]} onShown={onShown} onSettlingChange={onSettlingChange} incomingWidthDelta={indexWidth(shownView) - indexWidth(view)} ready={ready} waitForReady={area === "collection-work" || area === "collections"} views={{[area]: <WorkspaceChromeScope chrome={chrome} scope={scope}>{children}</WorkspaceChromeScope>}}/>;
+  // Prepare at the final width; tab snapshots include the final index and header together.
+  return <AreaSwitch activeKey={area} viewTransitions={workspaceArea(view) !== workspaceArea(shownView)} retained={["home", "manga"]} onShown={onShown} onSettlingChange={onSettlingChange} incomingWidthDelta={indexWidth(shownView) - indexWidth(view)} ready={ready} waitForReady={area === "collection-work" || area === "collections"} views={{[area]: <WorkspaceChromeScope chrome={chrome} scope={scope}>{children}</WorkspaceChromeScope>}}/>;
 }
 
 const NO_CHROME_TARGETS = { navigation: null, actions: null, search: null, settings: null, header: null, details: null };

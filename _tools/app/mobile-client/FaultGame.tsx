@@ -1,3 +1,4 @@
+import {BusyLabel} from '../src/shared/ui/BusyLabel';
 import {useEffect,useRef,useState} from 'react';
 import {mediaMasked} from './assetMask';
 import {Button} from './ui';
@@ -55,7 +56,7 @@ export function FaultGame({items,onClose}:{items:readonly Asset[];onClose():void
   return <div className="fault-overlay" role="dialog" aria-modal="true" aria-label="FAULT">
     <iframe ref={frame} className="fault-frame" src={faultGameUrl()} title="FAULT — REVEAL" allow="fullscreen; screen-wake-lock; autoplay" onLoad={()=>frame.current?.contentWindow?.focus()}/>
     {state!=='playing'&&<div className="fault-status" role={state==='failed'?'alert':'status'}>
-      <p>{state==='failed'?'사진을 불러오지 못했습니다':state==='preparing'?'게임에 사진을 넣고 있습니다':progress?`사진 불러오는 중 ${progress.done} / ${progress.total}`:'사진을 준비하고 있습니다'}</p>
+      <p><BusyLabel busy={state!=='failed'} idle={state==='failed'?'사진을 불러오지 못했습니다':null}>{state==='preparing'?'게임에 사진을 넣고 있습니다':progress?`사진 불러오는 중 ${progress.done} / ${progress.total}`:'사진을 준비하고 있습니다'}</BusyLabel></p>
       {state!=='failed'&&<div className="loading-line" aria-hidden="true"/>}
       <Button variant="ghost" onClick={()=>close.current()}>닫기</Button>
     </div>}

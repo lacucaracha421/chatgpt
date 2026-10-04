@@ -1,6 +1,7 @@
+import {LoadingLine} from './TopBar';
 import {useTabletAssetMask} from './assetMask';
 import {usePrivacyMode} from './privacyMode';
-import {useCallback, useEffect, useRef, useState, type MutableRefObject} from 'react';
+import {useCallback, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject} from 'react';
 import {ArrowLeftIcon, ArrowUturnLeftIcon, CheckIcon, ChevronDoubleUpIcon, ChevronRightIcon, PhotoIcon, UserIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {Button, IconButton} from './ui';
 import {ApiError, api, errorText} from './transport';
@@ -9,6 +10,7 @@ import type {Asset} from './types';
 import {commitReviewDecision, queuedReviewPairs, readReviewIntents, reviewPairKey, undoReviewDecision, CHARACTER_REVIEW_EVENT} from './characterReviewOutbox';
 import {flushCharacterReview, isReviewInFlight, reviewPath, type ReviewCounts, type ReviewFeed, type ReviewItem, type ReviewSource, type ReviewTarget} from './characterReviewDelivery';
 import {useCharacterReviewCount} from './useCharacterReview';
+import {EASE_STANDARD, motionDefaults, motionTime, prefersReducedMotion} from '../src/shared/motion/curves';
 import './characterReview.css';
 
 const SKIPPED_KEY = 'lakomics.characters.review.skipped.v1';
@@ -29,6 +31,48 @@ const PAGE = 20;
 const SWIPE_SHARE = 0.3, FLING = 0.6, FLING_MIN = 40, UP_SHARE = 0.25;
 
 type Action = 'accepted' | 'rejected' | 'skipped';
+
+/**
+ * A decided card leaves as an inert copy flying off in the decision's direction (right for 맞음,
+ * left for 아님, up for 건너뛰기) from wherever the finger left it, fading as it goes; the real
+ * card shows the next candidate underneath at once. Under reduced motion the copy only fades.
+ */
+export function flyOff(card: HTMLElement | null, action: Action) {
+  const parent = card?.parentElement;
+  if (!card || !parent || typeof card.animate !== 'function') return;
+  const ghost = card.cloneNode(true) as HTMLElement;
+  for (const element of [ghost, ...ghost.querySelectorAll('[id], [role], [aria-label], [aria-live]')]) {
+    element.removeAttribute('id'); element.removeAttribute('role'); element.removeAttribute('aria-label'); element.removeAttribute('aria-live');
+  }
+  ghost.dataset.reviewGhost = '';
+  ghost.inert = true;
+  ghost.setAttribute('aria-hidden', 'true');
+  const painted = getComputedStyle(card).transform;
+  Object.assign(ghost.style, {left: `${card.offsetLeft}px`, top: `${card.offsetTop}px`, width: `${card.offsetWidth}px`, height: `${card.offsetHeight}px`, transition: 'none'});
+  parent.append(ghost);
+  const reduced = prefersReducedMotion();
+  const width = card.offsetWidth || window.innerWidth, height = card.offsetHeight || window.innerHeight;
+  const side = action === 'accepted' ? 1 : -1;
+  const to = action === 'skipped' ? `translate(0px, ${-height}px) rotate(0deg)` : `translate(${side * width * 1.25}px, 0px) rotate(${side * 18}deg)`;
+  const from = painted && painted !== 'none' ? painted : card.style.transform || 'none';
+  const animation = ghost.animate(reduced ? [{opacity: 1}, {opacity: 0}] : [{transform: from, opacity: 1}, {transform: to, opacity: 0}],
+    {duration: reduced ? motionTime('--motion-micro', motionDefaults.micro) : motionTime('--motion-small', motionDefaults.small), easing: EASE_STANDARD, fill: 'forwards'});
+  animation.addEventListener?.('finish', () => ghost.remove());
+  animation.addEventListener?.('cancel', () => ghost.remove());
+}
+
+/** The next card rises from behind the one that flew off: scale .96 to 1 while it fades in (opacity only under reduced motion). */
+export function riseIn(card: HTMLElement | null) {
+  if (!card) return;
+  // The thrown offset resets to rest without travelling back across the screen.
+  card.style.transition = 'none';
+  void card.offsetWidth;
+  card.style.transition = '';
+  if (typeof card.animate !== 'function') return;
+  const reduced = prefersReducedMotion();
+  card.animate(reduced ? [{opacity: 0}, {opacity: 1}] : [{opacity: 0, scale: .96}, {opacity: 1, scale: 1}],
+    {duration: reduced ? motionTime('--motion-micro', motionDefaults.micro) : motionTime('--motion-medium', motionDefaults.medium), easing: EASE_STANDARD});
+}
 type Undo = {action: Action; item: ReviewItem; operationId?: string};
 type State =
   | {phase: 'loading'}
@@ -187,6 +231,14 @@ export function CharacterReview({libraryId, target, series, serverSeries = false
   };
 
   const current = queue[0];
+  const currentKey = current ? reviewPairKey(current.targetId, current.assetId) : null;
+  // Set by a decision: the card now showing the next candidate rises in once it commits.
+  const rising = useRef(false);
+  useLayoutEffect(() => {
+    if (!rising.current) return;
+    rising.current = false;
+    riseIn(card.current);
+  }, [currentKey]);
   const act = useCallback((action: Action) => {
     const item = queue[0];
     if (!item) return;
@@ -206,6 +258,8 @@ export function CharacterReview({libraryId, target, series, serverSeries = false
       deferred.current = [...deferred.current.filter(row => reviewPairKey(row.targetId, row.assetId) !== key), item];
     }
     setNotice('');
+    flyOff(card.current, action);
+    rising.current = true;
     setOffset({x: 0, y: 0});
     setUndo(stack => [...stack, {action, item, operationId}].slice(-UNDO_DEPTH));
     setQueue(rest => rest.filter(row => reviewPairKey(row.targetId, row.assetId) !== key));
@@ -286,7 +340,7 @@ export function CharacterReview({libraryId, target, series, serverSeries = false
       {undo.length > 0 && !snackVisible && <IconButton label="마지막 판단 되돌리기" icon={ArrowUturnLeftIcon} onClick={revert}/>}
     </header>
     {notice && <p className="error-message review-notice" role="alert">{notice}</p>}
-    {state.phase === 'loading' && <div className="loading-line" role="status" aria-label="검토 목록 불러오는 중"/>}
+    <LoadingLine label={(state.phase === 'loading')&&'검토 목록 불러오는 중'}/>
     {state.phase === 'error' && <div className="empty-state review-empty">
       <h2>{state.offline ? '오프라인입니다' : '검토 목록을 불러오지 못했습니다'}</h2>
       <p>{state.offline ? (queued ? `저장된 결정 ${queued}개는 연결되면 PC로 전송됩니다.` : '연결을 확인한 뒤 다시 시도해 주세요.') : state.message}</p>
@@ -296,7 +350,7 @@ export function CharacterReview({libraryId, target, series, serverSeries = false
       <h2>PC 업데이트가 필요합니다</h2>
       <p>PC 앱이 아직 캐릭터 검토 목록을 보내지 않았습니다. PC 앱을 업데이트하고 실행해 두면 여기에서 검토할 수 있습니다.</p>
     </div>}
-    {state.phase === 'ready' && state.ready && !current && walking && !notice && <div className="loading-line" role="status" aria-label="검토 목록 불러오는 중"/>}
+    <LoadingLine label={(state.phase === 'ready' && state.ready && !current && walking && !notice)&&'검토 목록 불러오는 중'}/>
     {state.phase === 'ready' && state.ready && !current && (!walking || !!notice) && <div className="empty-state review-empty">
       <h2>모두 검토했습니다</h2>
       <p>{pending > 0 ? `PC 반영 대기 ${pending}개 · PC가 반영하면 캐릭터 갤러리에 나타납니다.` : 'PC가 새 후보를 보내면 여기에 나타납니다.'}</p>

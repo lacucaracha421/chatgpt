@@ -111,6 +111,29 @@ describe('character review screen',()=>{
     swipe(420);
     await waitFor(()=>expect(readReviewIntents()['d:a3'].decision).toBe('accepted'));
   });
+  it('flies the decided card off in the swipe direction and raises the next card in its place',async()=>{
+    const animations:{element:Element;frames:Keyframe[];finish?:()=>void}[]=[];
+    const animate=vi.fn(function(this:HTMLElement,frames:Keyframe[]){const entry:{element:Element;frames:Keyframe[];finish?:()=>void}={element:this,frames};animations.push(entry);
+      return {addEventListener:(type:string,listener:()=>void)=>{if(type==='finish')entry.finish=listener;},cancel:vi.fn()};});
+    Object.defineProperty(HTMLElement.prototype,'animate',{value:animate,configurable:true,writable:true});
+    try{
+      install(feed());mount();
+      await screen.findByText('S36 추천');
+      const card=candidate();
+      swipe(-420);
+      expect(readReviewIntents()['c:a1'].decision).toBe('rejected');
+      // The thrown card leaves as an inert copy to the left; the real card already shows the next candidate.
+      const ghost=document.querySelector<HTMLElement>('.review-card[data-review-ghost]')!;
+      expect(ghost.getAttribute('aria-hidden')).toBe('true');expect(ghost.textContent).toContain('S36 추천');
+      const flight=animations.find(entry=>entry.element===ghost)!;
+      expect(String(flight.frames.at(-1)!.transform)).toMatch(/^translate\(-/);
+      await screen.findByText('B36 추천');
+      expect(candidate()).toBe(card);
+      expect(animations.some(entry=>entry.element===card&&entry.frames[0]!.scale===.96)).toBe(true);
+      flight.finish!();
+      expect(ghost.isConnected).toBe(false);
+    }finally{delete (HTMLElement.prototype as {animate?:unknown}).animate;}
+  });
   it('undoes up to five actions, removing unsent intents and bringing candidates back',async()=>{
     install(feed());mount();
     await screen.findByText('루미');

@@ -1,3 +1,4 @@
+import {LoadingLine} from './TopBar';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {ArrowLeftIcon,ArrowUturnLeftIcon,BookOpenIcon,ChevronRightIcon,Square2StackIcon} from '@heroicons/react/24/outline';
 import {Button,IconButton} from './ui';
@@ -161,7 +162,7 @@ export function CatalogDuplicates({context,active=true,onClose}:{context:string|
       <button role="tab" aria-selected={tab==='decided'} onClick={()=>switchTab('decided')}>처리됨{counts?.decided?<span className="numeric"> {counts.decided}</span>:''}</button>
     </div>
     {notice&&<p className="error-message review-notice" role="alert">{notice}</p>}
-    {state.phase==='loading'&&<div className="loading-line" role="status" aria-label="검토 목록 불러오는 중"/>}
+    <LoadingLine label={(state.phase==='loading')&&'검토 목록 불러오는 중'}/>
     {state.phase==='error'&&<div className="empty-state review-empty">
       <h2>{state.offline?'오프라인이에요':'목록을 불러오지 못했어요'}</h2>
       <p>{state.offline?(pending?`저장된 결정 ${pending}개는 연결되면 전송돼요.`:'연결을 확인한 뒤 다시 시도해 주세요.'):state.message}</p>

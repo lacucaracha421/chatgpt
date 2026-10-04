@@ -7,7 +7,7 @@
   --page:#0e0f10; --bg:#161718; --sidebar:#1a1b1c; --surface:#222324; --hover:#2d2e2f;
   --text:#e7e9ec; --muted:#a0a3a5; --faint:#7d8184; --accent:#ddd8ca; --on-accent:#202628; --border:#363739; --border-strong:#55585a;
   --font:"Pretendard Variable","Pretendard","Segoe UI","Malgun Gothic",sans-serif;
-  --vt-ms:150ms; --vt-move-ms:420ms;
+  --vt-ms:150ms; --vt-move-ms:240ms; --vt-out-ms:90ms; --vt-hero-ms:420ms;
 }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--page); color:var(--text); font:15px/1.5 var(--font); padding-inline:16px; }
@@ -58,18 +58,16 @@ button { font:inherit; color:inherit; }
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration:var(--vt-ms); }
 ::view-transition-old(main), ::view-transition-new(main), ::view-transition-old(index), ::view-transition-new(index) { animation-duration:var(--vt-ms); animation-timing-function:cubic-bezier(.2,0,0,1); }
 ::view-transition-group(main), ::view-transition-group(index) { animation-duration:var(--vt-ms); }
-/* Folder move: old content leaves toward the side we came from, new arrives from the other side. */
-html.vt-forward::view-transition-old(main) { animation:vt-out-left var(--vt-move-ms) cubic-bezier(.2,0,0,1) both; }
-html.vt-forward::view-transition-new(main) { animation:vt-in-right var(--vt-move-ms) cubic-bezier(.2,0,0,1) both; }
-html.vt-back::view-transition-old(main) { animation:vt-out-right var(--vt-move-ms) cubic-bezier(.2,0,0,1) both; }
-html.vt-back::view-transition-new(main) { animation:vt-in-left var(--vt-move-ms) cubic-bezier(.2,0,0,1) both; }
-@keyframes vt-out-left { to { opacity:0; transform:translateX(-16px); } }
+/* Folder move, same as the app today: old content fades quickly in place; new content enters 16 px from the side of travel on the gentle spring. */
+html.vt-forward::view-transition-old(main), html.vt-back::view-transition-old(main) { animation:vt-fade-out var(--vt-out-ms) cubic-bezier(.2,0,0,1) both; }
+html.vt-forward::view-transition-new(main) { animation:vt-in-right var(--vt-move-ms) var(--spring-gentle, cubic-bezier(.25,1,.35,1)) both; }
+html.vt-back::view-transition-new(main) { animation:vt-in-left var(--vt-move-ms) var(--spring-gentle, cubic-bezier(.25,1,.35,1)) both; }
+@keyframes vt-fade-out { to { opacity:0; } }
 @keyframes vt-in-right { from { opacity:0; transform:translateX(16px); } }
-@keyframes vt-out-right { to { opacity:0; transform:translateX(16px); } }
 @keyframes vt-in-left { from { opacity:0; transform:translateX(-16px); } }
-/* Shared elements (folder cover → title chip, tile → viewer image) morph on a spring-ish curve. */
-::view-transition-group(hero) { animation-duration:var(--vt-move-ms); animation-timing-function:cubic-bezier(.25,1,.35,1); }
-::view-transition-old(hero), ::view-transition-new(hero) { animation-duration:calc(var(--vt-move-ms) * .5); }
+/* Shared elements (optional cover → title chip; tile → viewer like the app's viewer zoom). */
+::view-transition-group(hero) { animation-duration:var(--vt-hero-ms); animation-timing-function:cubic-bezier(.25,1,.35,1); }
+::view-transition-old(hero), ::view-transition-new(hero) { animation-duration:calc(var(--vt-hero-ms) * .5); }
 .chip { width:22px; height:28px; background:var(--c); display:inline-block; vertical-align:middle; }
 @media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation-duration:120ms !important; } }
 </style>
@@ -78,12 +76,12 @@ html.vt-back::view-transition-new(main) { animation:vt-in-left var(--vt-move-ms)
   <header>
     <h1>View Transitions 시연</h1>
     <p>브라우저가 바뀌기 직전 화면을 <b>그림으로 찍어 두고</b> 새 화면과 교차시키는 방식입니다. 이전 화면이 다시 배치되거나 흔들릴 수 없습니다. 왼쪽 레일의 탭, 폴더 카드, 썸네일을 눌러 보세요.</p>
-    <div class="opts"><span class="support" id="support"></span><label><input type="checkbox" id="slow"> 느리게 보기 (×4)</label></div>
+    <div class="opts"><span class="support" id="support"></span><label><input type="checkbox" id="slow"> 느리게 보기 (×4)</label><label><input type="checkbox" id="hero"> 폴더 표지 연결 (지금 앱에 없는 추가 기능)</label></div>
   </header>
   <div class="app" id="app"></div>
   <ul class="notes">
-    <li><b>탭 전환</b>: 사이드바가 있는 탭(에셋) ↔ 없는 탭(홈·컬렉션). 사이드바와 본문이 각자 그림으로 찍혀 0.15초 교차합니다. 이전 화면은 찍힌 그림이라 폭이 바뀌어도 흔들리지 않습니다.</li>
-    <li><b>폴더 들어가기</b>: 누른 폴더의 표지가 그대로 날아가 위쪽 제목 옆 작은 표지가 되고, 본문은 오른쪽에서 들어옵니다. 경로(에셋 ›)를 누르면 반대로 돌아갑니다.</li>
+    <li><b>탭 전환</b> (지금 앱과 같은 0.15초 교차): 사이드바가 있는 탭(에셋) ↔ 없는 탭(홈·컬렉션). 사이드바와 본문이 각자 그림으로 찍혀 교차합니다. 이전 화면은 찍힌 그림이라 폭이 바뀌어도 흔들리지 않습니다.</li>
+    <li><b>폴더 들어가기</b> (지금 앱과 같은 방식): 이전 내용은 0.09초 만에 흐려지고, 새 내용이 오른쪽에서 16px 밀려 들어옵니다(0.24초 스프링). 경로(에셋 ›)를 누르면 왼쪽에서 들어옵니다. 위의 「폴더 표지 연결」을 켜면 누른 폴더의 표지가 제목 옆으로 날아갑니다.</li>
     <li><b>썸네일 열기</b>: 썸네일이 그 자리에서 커지며 뷰어가 되고, 닫으면 원래 칸으로 돌아갑니다.</li>
   </ul>
 </main>
@@ -96,9 +94,16 @@ document.getElementById("support").textContent = supported ? "이 브라우저�
 let factor = 1;
 document.getElementById("slow").addEventListener("change", e => {
   factor = e.target.checked ? 4 : 1;
-  document.documentElement.style.setProperty("--vt-ms", `${150 * factor}ms`);
-  document.documentElement.style.setProperty("--vt-move-ms", `${420 * factor}ms`);
+  for (const [name, ms] of [["--vt-ms", 150], ["--vt-move-ms", 240], ["--vt-out-ms", 90], ["--vt-hero-ms", 420]]) document.documentElement.style.setProperty(name, `${ms * factor}ms`);
 });
+/* The app's gentle spring (response .46 s, damping .88) as CSS linear(). */
+(() => {
+  const w = 2 * Math.PI / .46, z = .88, wd = w * Math.sqrt(1 - z * z);
+  const x = t => 1 - Math.exp(-z * w * t) * (Math.cos(wd * t) + (z * w / wd) * Math.sin(wd * t));
+  let T = 0; while (T < 3 && Math.abs(1 - x(T)) > .002) T += .005;
+  if (CSS.supports("animation-timing-function", "linear(0, 1)")) document.documentElement.style.setProperty("--spring-gentle", `linear(${Array.from({ length: 41 }, (_, i) => +x(T * i / 40).toFixed(4)).join(", ")})`);
+})();
+const heroOn = () => document.getElementById("hero").checked;
 const tiles = (n, seed) => Array.from({ length: n }, (_, i) => `<button class="tile" data-tile="${seed}-${i}" style="--c:${COLORS[(i + seed) % COLORS.length]}" aria-label="에셋 ${i + 1}"></button>`).join("");
 function render() {
   const app = document.getElementById("app");
@@ -134,8 +139,8 @@ document.getElementById("app").addEventListener("click", e => {
   const tab = e.target.closest("[data-tab]");
   if (tab && tab.dataset.tab !== state.tab) return transition(() => { state.tab = tab.dataset.tab; state.folder = null; state.viewer = null; });
   const folder = e.target.closest("[data-folder]");
-  if (folder) { const f = folder.dataset.folder; return transition(() => { state.folder = f; }, { direction: 1, heroBefore: `[data-cover="${f}"]`, heroAfter: `.chip[data-cover="${f}"]` }); }
-  if (e.target.closest("[data-crumb]")) { const f = state.folder; return transition(() => { state.folder = null; }, { direction: -1, heroBefore: `.chip[data-cover="${f}"]`, heroAfter: `.cover[data-cover="${f}"]` }); }
+  if (folder) { const f = folder.dataset.folder; return transition(() => { state.folder = f; }, heroOn() ? { direction: 1, heroBefore: `[data-cover="${f}"]`, heroAfter: `.chip[data-cover="${f}"]` } : { direction: 1 }); }
+  if (e.target.closest("[data-crumb]")) { const f = state.folder; return transition(() => { state.folder = null; }, heroOn() ? { direction: -1, heroBefore: `.chip[data-cover="${f}"]`, heroAfter: `.cover[data-cover="${f}"]` } : { direction: -1 }); }
   const tile = e.target.closest("[data-tile]");
   if (tile) { const id = tile.dataset.tile; return transition(() => { state.viewer = { id, c: tile.style.getPropertyValue("--c"), label: tile.getAttribute("aria-label") }; }, { heroBefore: `[data-tile="${id}"]`, heroAfter: "[data-big]" }); }
   if (e.target.closest("[data-close]") && state.viewer) { const id = state.viewer.id; return transition(() => { state.viewer = null; }, { heroBefore: "[data-big]", heroAfter: `[data-tile="${id}"]` }); }

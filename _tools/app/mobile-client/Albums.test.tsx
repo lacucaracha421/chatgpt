@@ -45,7 +45,7 @@ describe('album Library scopes',()=>{
   render(<Albums tree={tree} paused={false} revision={1} onSelect={()=>{}}/>);
   expect(screen.queryByText('임시')).toBeNull();expect(screen.getByText('하위 앨범 1')).toBeTruthy();
   const cards=document.querySelectorAll('.library-folder-grid .library-folder');expect(cards).toHaveLength(2);
-  cards.forEach(card=>expect(card.firstElementChild?.classList.contains('home-cover-group')).toBe(true));
+  cards.forEach(card=>expect(card.firstElementChild?.classList.contains('folder-thumbnail')).toBe(true));
   await waitFor(()=>expect(cards[0].querySelector('img')).not.toBeNull());
   expect(mocks.api.mock.calls.every(([path])=>String(path).includes('limit=3'))).toBe(true);
  });

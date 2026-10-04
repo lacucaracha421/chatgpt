@@ -1,3 +1,4 @@
+import "./collectionShelfRules.css";
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import type { CollectionSummary, CollectionType } from "../library/types";

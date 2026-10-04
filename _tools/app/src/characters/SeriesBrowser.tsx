@@ -519,7 +519,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       </div>}
       <AssetGallery {...(!picking ? galleryDrag : {})} intro={<>
         {!picking && current && <div className="series-character-folder-head"><div className="folder-shelf__label character-group-heading"><span>이미지</span><span className="character-group-heading__count">{page.totalCount.toLocaleString("ko-KR")}</span></div></div>}
-        {!picking && !current && !excludedOnly && <SeriesShelf scope={`${library?.root ?? ""}:${series.classificationId}:${currentGroup?.id ?? ""}`} privacyKey={String(privacyMode)} ready={!shelfLoading && (Boolean(currentGroup) || (!staleFolders && !folderLoading) || Boolean(folderError))}>
+        {!picking && !current && !excludedOnly && <SeriesShelf scope={`${library?.root ?? ""}:${series.classificationId}:${currentGroup?.id ?? ""}`} path={[library?.root ?? "", series.classificationId, ...(currentGroup ? [currentGroup.id] : [])]} privacyKey={String(privacyMode)} ready={!shelfLoading && (Boolean(currentGroup) || (!staleFolders && !folderLoading) || Boolean(folderError))}>
           <CharacterGroups key={`${library?.root ?? ""}:${series.classificationId}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={currentGroup?.id} privacyMode={privacyMode} memberCounts={memberCounts}
             onOpenGroup={id => onNavigate({ kind: "classification", classificationId: series.classificationId, ...(id ? { characterGroupId: id } : {}) })}
             onGroupsChanged={onChanged} suggestionCount={currentGroup ? 0 : seriesSuggestions.length}

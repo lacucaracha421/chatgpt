@@ -4,6 +4,7 @@ import {workCasePlatform, type CaseData} from '../src/collections/case/Collectio
 import {PerRowControl} from '../src/shared/ui/PerRowControl';
 // The shared shelf geometry (rows, planks, the picked case's title) is the PC list's stylesheet.
 import '../src/collections/CollectionBrowser.css';
+import '../src/collections/collectionShelfRules.css';
 import {BottomSheet} from './BottomSheet';
 import {SegmentedControl} from './ui';
 import {useCoverUrl} from './collectionArtwork';

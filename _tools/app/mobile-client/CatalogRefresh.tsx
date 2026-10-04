@@ -105,9 +105,8 @@ export function CatalogRefreshControl({state, publishedAt, now, onReload, reload
 /** Progress or failure of a running refresh, shown above the list. */
 export function CatalogRefreshBanner({state}:{state:CatalogRefreshState}) {
   if(state.failure)return <p className="catalog-banner is-error" role="alert">{state.failure}</p>;
-  if(!state.running)return null;
-  const job=state.job!;
-  return <p className="catalog-banner"><ArrowPathIcon aria-hidden="true"/><span><strong>새 작품 가져오는 중</strong>{job.pages>0?` · ${job.pages}페이지 확인`:''}{job.added>0?` · ${job.added}개 추가`:''}</span></p>;
+  const job=state.job;
+  return <BusyLabel busy={state.running}><p className="catalog-banner"><ArrowPathIcon aria-hidden="true"/><span><strong>새 작품 가져오는 중</strong>{job&&job.pages>0?` · ${job.pages}페이지 확인`:''}{job&&job.added>0?` · ${job.added}개 추가`:''}</span></p></BusyLabel>;
 }
 
 export function CatalogRefresh(props:Options) {
