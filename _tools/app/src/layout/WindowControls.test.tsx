@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 
 const workload = vi.hoisted(() => ({
-  profile: { restricted: false, lightweight: false },
+  profile: { restricted: false, lightweight: false, ready: true },
   update: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("../app/workloadProfile", () => ({
@@ -19,7 +19,7 @@ const close = vi.fn();
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ minimize, toggleMaximize, close }),
 }));
-afterEach(() => { cleanup(); minimize.mockClear(); toggleMaximize.mockClear(); close.mockClear(); workload.profile.restricted = false; workload.profile.lightweight = false; workload.update.mockClear(); });
+afterEach(() => { cleanup(); minimize.mockClear(); toggleMaximize.mockClear(); close.mockClear(); workload.profile.restricted = false; workload.profile.lightweight = false; workload.profile.ready = true; workload.update.mockClear(); });
 
 it("hides the lightweight-mode indicator when the profile is unrestricted", () => {
   render(<LightweightModeIndicator />);
@@ -68,4 +68,10 @@ it("calls the window API on each button click", async () => {
   expect(minimize).toHaveBeenCalledOnce();
   expect(toggleMaximize).toHaveBeenCalledOnce();
   expect(close).toHaveBeenCalledOnce();
+});
+
+it.each([false, true])("hides mode wording before readiness (lightweight=%s)", lightweight => {
+  workload.profile = { restricted: true, lightweight, ready: false };
+  const { container } = render(<LightweightModeIndicator />);
+  expect(container).toBeEmptyDOMElement();
 });

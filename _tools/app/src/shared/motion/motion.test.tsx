@@ -28,21 +28,30 @@ it('shares the exact prototype spring samples with CSS and falls back without li
   vi.stubGlobal('CSS', {supports: () => true}); expect(springEasing()).toBe(EASE_SPRING);
 });
 
-it('keeps the exact old DOM inert while waiting, overlaps when ready, removes it after 160ms', async () => {
-  const tree = (loading: boolean) => <AreaSwitch activeKey="assets" views={{assets: loading ? <span className="asset-browser__skeleton">waiting</span> : <button>new</button>}} />;
+it('keeps the exact old DOM while pending and swaps atomically without overlap', async () => {
+  const tree = (loading: boolean) => <AreaSwitch activeKey="assets" views={{assets: loading ? <span className="asset-browser__skeleton" style={{visibility: 'visible'}}>waiting</span> : <button>new</button>}} />;
   const view = render(<AreaSwitch activeKey="home" views={{home: <button>old</button>}} />);
   const old = screen.getByText('old');
   view.rerender(tree(true)); await tick();
   expect(old.isConnected).toBe(true); expect(old.closest('[inert]')).not.toBeNull();
   expect(old.closest<HTMLElement>('[data-motion-view]')?.style.visibility).toBe('');
   expect(screen.getByText('waiting').closest<HTMLElement>('[data-motion-view]')?.style.visibility).toBe('hidden');
+  expect(screen.getByText('waiting').style.visibility).toBe('visible');
+  expect(screen.getByText('waiting').closest<HTMLElement>('[data-motion-view]')?.style.opacity).toBe('0');
+  expect(screen.getByText('waiting').closest<HTMLElement>('[data-motion-view]')?.style.display).toBe('');
+  expect(old).toBeVisible();
+  expect(screen.getByText('waiting')).not.toBeVisible();
   expect(animate).not.toHaveBeenCalled();
-  view.rerender(tree(false)); await tick();
-  expect(old.isConnected).toBe(true); expect(screen.getByRole('button', {name: 'new'})).toBeTruthy();
-  expect(animate.mock.calls.map(call => call[1])).toEqual([{duration: 160, easing: 'cubic-bezier(0.2, 0, 0, 1)'}, {duration: 380, easing: EASE_SHEET}]);
-  expect(animate.mock.calls[1][0]).toEqual([{top: '12px', bottom: '-12px'}, {top: '0px', bottom: '0px'}]);
-  await tick(160); expect(old.isConnected).toBe(false);
-  expect(screen.getByRole('button', {name: 'new'})).toBeTruthy();
+  view.rerender(tree(false)); await tick(16);
+  expect(old).toBeVisible();
+  expect(screen.getByText('new')).not.toBeVisible();
+  expect(screen.getByText('new').closest('[inert]')).not.toBeNull();
+  await tick(16);
+  expect(old.isConnected).toBe(false);
+  expect(screen.getByRole('button', {name: 'new'})).toBeVisible();
+  expect(screen.getByText('new').closest<HTMLElement>('[data-motion-view]')?.style.opacity).toBe('');
+  expect(view.container.querySelectorAll('[data-motion-view]')).toHaveLength(1);
+  expect(animate).not.toHaveBeenCalled();
 });
 
 it('switches instantly once ready under reduced motion, preserving old content during its load', async () => {
@@ -54,12 +63,24 @@ it('switches instantly once ready under reduced motion, preserving old content d
   expect(screen.queryByText('old')).toBeNull(); expect(animate).not.toHaveBeenCalled();
 });
 
+it('preserves the immediate ready swap when animation APIs are unavailable', () => {
+  delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
+  const view = render(<AreaSwitch activeKey="home" views={{home: <b>old</b>}} />);
+  view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b className="asset-browser__skeleton">waiting</b>}} />);
+  expect(screen.getByText('old')).toBeVisible();
+  expect(screen.getByText('waiting')).not.toBeVisible();
+  view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b>new</b>}} />);
+  expect(screen.queryByText('old')).toBeNull();
+  expect(screen.getByText('new')).toBeVisible();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it('cancels superseded transitions and never shows the abandoned pending view', async () => {
   const view = render(<AreaSwitch activeKey="home" views={{home: <b>old</b>}} />);
   view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b className="asset-browser__skeleton">pending</b>}} />); await tick();
   view.rerender(<AreaSwitch activeKey="notes" views={{notes: <b>notes</b>}} />); await tick();
-  expect(screen.queryByText('pending')).toBeNull(); expect(screen.getByText('old')).toBeTruthy();
-  await tick(160); expect(screen.queryByText('old')).toBeNull(); expect(screen.getByText('notes')).toBeTruthy();
+  expect(screen.queryByText('pending')).toBeNull(); expect(screen.queryByText('old')).toBeNull();
+  expect(screen.getByText('notes')).toBeVisible();
 });
 
 it('preserves retained surface DOM and mounts while hiding it on departure and showing it on revisit', async () => {
@@ -67,9 +88,10 @@ it('preserves retained surface DOM and mounts while hiding it on departure and s
   function Notes({active}: {active: boolean}) {useEffect(() => {mounts();}, []); return <button style={{display: active ? undefined : 'none'}}>notes</button>;}
   const tree = (activeKey: string) => <AreaSwitch activeKey={activeKey} retained={['notes']} views={{notes: <Notes active={activeKey === 'notes'}/>, home: <b>home</b>}} />;
   const view = render(tree('notes')); const notes = screen.getByText('notes');
-  view.rerender(tree('home')); await tick(); expect(notes.style.display).toBe('');
-  await tick(160); expect(notes.isConnected).toBe(true); expect(notes.style.display).toBe('none');
-  view.rerender(tree('notes')); await tick(); await tick(160);
+  view.rerender(tree('home')); expect(notes.style.display).toBe(''); await tick();
+  expect(notes.isConnected).toBe(true); expect(notes.style.display).toBe('none');
+  expect(notes.closest('[inert]')).not.toBeNull();
+  view.rerender(tree('notes')); await tick();
   expect(screen.getByRole('button', {name: 'notes'})).toBe(notes); expect(mounts).toHaveBeenCalledTimes(1);
 });
 
@@ -105,11 +127,11 @@ it('commits explicit readiness changes even when the incoming DOM does not chang
   view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b>empty</b>}} ready={() => true}/>);
   expect(animate).not.toHaveBeenCalled();
   await tick();
-  expect(animate).toHaveBeenCalledTimes(2);
-  await tick(160); expect(screen.queryByText('old')).toBeNull();
+  expect(animate).not.toHaveBeenCalled();
+  expect(screen.queryByText('old')).toBeNull();
 });
 
-it('keeps the old view visible for a rendering frame after readiness before starting motion', async () => {
+it('keeps the old view visible through incoming layout before replacing it in one frame', async () => {
   const view = render(<AreaSwitch activeKey="home" views={{home: <b>old</b>}} />);
   const tree = (ready: boolean) => <AreaSwitch activeKey="catalog" views={{catalog: <button>catalog</button>}} ready={() => ready}/>;
   view.rerender(tree(false)); await tick(0);
@@ -118,7 +140,8 @@ it('keeps the old view visible for a rendering frame after readiness before star
   await tick(16); expect(animate).not.toHaveBeenCalled();
   expect(screen.getByText('old').closest<HTMLElement>('[data-motion-view]')?.style.visibility).toBe('');
   expect(screen.getByText('catalog').closest<HTMLElement>('[data-motion-view]')?.style.visibility).toBe('hidden');
-  await tick(16); expect(animate).toHaveBeenCalledTimes(2);
+  await tick(16); expect(animate).not.toHaveBeenCalled();
+  expect(screen.queryByText('old')).toBeNull();
   expect(screen.getByRole('button', {name: 'catalog'})).toBeTruthy();
 });
 
@@ -130,8 +153,10 @@ it('rechecks readiness during the frame wait and cancels a superseded ready view
   view.rerender(tree(true)); await tick(16);
   view.rerender(<AreaSwitch activeKey="notes" views={{notes: <b>notes</b>}}/>);
   await tick(16); expect(animate).not.toHaveBeenCalled();
-  await tick(16); expect(animate).toHaveBeenCalledTimes(2);
-  expect(animate.mock.contexts.every(host => (host as HTMLElement).dataset.motionView === 'notes')).toBe(true);
+  await tick(16); expect(animate).not.toHaveBeenCalled();
+  expect(screen.queryByText('catalog')).toBeNull();
+  expect(screen.queryByText('old')).toBeNull();
+  expect(screen.getByText('notes').closest('[inert]')).toBeNull();
 });
 
 it('keeps the 1s cap even when rendering frames are suspended', async () => {
@@ -140,8 +165,8 @@ it('keeps the 1s cap even when rendering frames are suspended', async () => {
   const view = render(<AreaSwitch activeKey="home" views={{home: <b>old</b>}}/>);
   view.rerender(<AreaSwitch activeKey="catalog" views={{catalog: <b>catalog</b>}}/>);
   await tick(999); expect(animate).not.toHaveBeenCalled();
-  await tick(1); expect(animate).toHaveBeenCalledTimes(2);
-  await tick(160); expect(screen.queryByText('old')).toBeNull();
+  await tick(1); expect(animate).not.toHaveBeenCalled();
+  expect(screen.queryByText('old')).toBeNull();
 });
 
 it('skips pending frames when reduced motion is enabled during the readiness wait', async () => {
@@ -151,20 +176,30 @@ it('skips pending frames when reduced motion is enabled during the readiness wai
   expect(screen.queryByText('old')).toBeNull(); expect(animate).not.toHaveBeenCalled();
   await tick(); expect(animate).not.toHaveBeenCalled();
 });
-it('finishes an overlapping switch immediately when reduced motion is enabled', async () => {
+it('cleans up pending observers, frames and the cap on unmount', async () => {
+  const disconnect = vi.spyOn(MutationObserver.prototype, 'disconnect');
   const view = render(<AreaSwitch activeKey="home" views={{home: <b>home</b>}} />);
-  view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b>assets</b>}} />); await tick();
-  reduce = true; act(() => change?.());
-  expect(screen.queryByText('home')).toBeNull(); expect(animate.mock.results.every(result => result.value.cancel.mock.calls.length === 1)).toBe(true);
+  view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b>assets</b>}} />);
+  view.unmount();
+  expect(disconnect).toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+  await tick(1200);
+  expect(animate).not.toHaveBeenCalled();
+  disconnect.mockRestore();
 });
 
 it('switches after the readiness cap when the incoming view stays busy', async () => {
+  const disconnect = vi.spyOn(MutationObserver.prototype, 'disconnect');
   const view = render(<AreaSwitch activeKey="home" views={{home: <button>old</button>}} />);
   view.rerender(<AreaSwitch activeKey="assets" views={{assets: <span className="asset-browser__skeleton">busy</span>}} />); await tick(999);
   expect(screen.getByText('busy').closest<HTMLElement>('[data-motion-view]')?.style.visibility).toBe('hidden');
-  await tick(1); await tick(160);
+  await tick(1);
+  expect(vi.getTimerCount()).toBe(0);
   expect(screen.queryByText('old')).toBeNull();
   expect(screen.getByText('busy').closest('[inert]')).toBeNull();
+  expect(screen.getByText('busy')).toBeVisible();
+  expect(disconnect).toHaveBeenCalled();
+  disconnect.mockRestore();
 });
 
 function Cards({surface, count = 2, enabled = true}: {surface: string; count?: number; enabled?: boolean}) {
@@ -195,7 +230,6 @@ it('creates no stacking layer at rest, so fixed overlays inside a view stack aga
   const view = render(<AreaSwitch activeKey="home" views={{home: <b>home</b>}} />);
   expect(screen.getByText('home').closest<HTMLElement>('[data-motion-view]')?.style.zIndex).toBe('');
   view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b>assets</b>}} />); await tick();
-  expect(screen.getByText('assets').closest<HTMLElement>('[data-motion-view]')?.style.zIndex).toBe('1');
-  await tick(160);
+  expect(animate).not.toHaveBeenCalled();
   expect(screen.getByText('assets').closest<HTMLElement>('[data-motion-view]')?.style.zIndex).toBe('');
 });

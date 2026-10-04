@@ -23,7 +23,7 @@ export function LightweightModeToggle() {
       <span className="lightweight-toggle__label">{recovering && <ArrowPathIcon className="lightweight-mode-indicator__spin" aria-hidden="true" />}{mode}</span>
       <Switch checked={profile.lightweight} disabled={busy || !profile.ready} onChange={() => void toggle()} aria-label="절약 모드" />
     </div>
-    {!profile.lightweight && profile.restricted && <small className="chrome-settings-note">3분 안에 평소 속도로 돌아갑니다</small>}
+    {recovering && <small className="chrome-settings-note">3분 안에 평소 속도로 돌아갑니다</small>}
     {profile.error && <p role="alert" className="chrome-settings-note">{profile.error}</p>}
   </div>;
 }
@@ -47,7 +47,7 @@ export function WorkloadControls() {
     if (!Number.isInteger(value) || value < 1 || value > 1440 || busy) return;
     void updateWorkloadSettings({ autoEnterMinutes: value });
   };
-  const status = profile.lightweight ? "절약 모드" : profile.restricted ? "절약 모드 해제 중" : "일반 모드";
+  const status = !profile.ready ? "확인 중…" : profile.lightweight ? "절약 모드" : profile.restricted ? "절약 모드 해제 중" : "일반 모드";
   const selectPerformance = async (value: MachinePerformance) => {
     setSavingPerformance(true);
     try { await updatePerformanceProfile(value); }

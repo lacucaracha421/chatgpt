@@ -174,9 +174,9 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
 }
 
 function PendingVideoTile() {
-  const { restricted } = useWorkloadProfile();
+  const { restricted, ready } = useWorkloadProfile();
   return <div className="video-tile video-tile--pending">
     <ClockIcon className="video-tile__status-icon" aria-hidden="true" />
-    <span className="video-tile__status">{restricted ? "절약 모드로 대기 중" : "준비 중"}</span>
+    <span className="video-tile__status">{ready && restricted ? "절약 모드로 대기 중" : "준비 중"}</span>
   </div>;
 }

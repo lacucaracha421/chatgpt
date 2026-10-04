@@ -538,11 +538,14 @@ it('uses drill-down in both orientations and keeps settings only on Home',async(
     expect(screen.queryByRole('button',{name:'사이드바 열기'})).toBeNull();
   }
 });
-it.each([false,true])('switches ready bottom tabs with the approved motion and retains visited screens (reduced=%s)',async(reduced)=>{
+it.each([false,true])('swaps bottom tabs atomically after readiness and retains visited screens (reduced=%s)',async(reduced)=>{
   vi.stubGlobal('matchMedia',()=>({matches:reduced,addEventListener:vi.fn(),removeEventListener:vi.fn()}));
   const api=mocks.api.getMockImplementation()!;
   mocks.api.mockImplementation((path:string)=>path.startsWith('/v1/collections?')?Promise.resolve({ready:true,revision:'m1',items:[],nextCursor:null}):path.startsWith('/v1/mobile-catalog')?Promise.resolve({ready:true,publicationRevision:'p1',items:[],totalCount:0,countStatus:'ready',context:'c',nextCursor:null}):api(path));
-  mocks.native.mockImplementation(async(op:string)=>op.startsWith('notes')?{unlocked:true,notes:[]}:{configured:true,endpoint:'https://example.invalid'});
+  let releaseNotes!:()=>void;
+  const notes=new Promise(resolve=>{releaseNotes=()=>resolve({unlocked:true,notes:[]});});
+  mocks.native.mockImplementation(async(op:string)=>op.startsWith('notes')?notes:{configured:true,endpoint:'https://example.invalid'});
+  let observer:MutationObserver|undefined;
   const animate=vi.fn(function(this:HTMLElement){return {cancel(){}};});
   const descriptor=Object.getOwnPropertyDescriptor(HTMLElement.prototype,'animate');
   Object.defineProperty(HTMLElement.prototype,'animate',{configurable:true,value:animate});
@@ -551,6 +554,14 @@ it.each([false,true])('switches ready bottom tabs with the approved motion and r
     await screen.findByRole('heading',{name:'에셋'});
     const body=document.querySelector('.app-body')!;
     await waitFor(()=>expect(body.querySelector('.motion-stage')?.getAttribute('data-motion-shown')).toBe('library'));
+    const stage=body.querySelector<HTMLElement>('.motion-stage')!;
+    const visibleViews=()=>[...stage.children].filter((view)=>{
+      const style=(view as HTMLElement).style;
+      return style.display!=='none'&&style.visibility!=='hidden'&&style.opacity!=='0';
+    }).map(view=>view.getAttribute('data-motion-view'));
+    const visibilitySnapshots:ReturnType<typeof visibleViews>[]=[];
+    observer=new MutationObserver(()=>visibilitySnapshots.push(visibleViews()));
+    observer.observe(stage,{subtree:true,attributes:true,childList:true});
     const retained=new Map<string,Element>();
     const tabs=[['홈','home','[data-motion-view=home] .library-main'],['에셋','library','.library-root'],['컬렉션','collections','.mobile-collections'],['카탈로그','catalog','.mobile-catalog'],['메모','notes','.mobile-notes']] as const;
     for(const [label,key,selector] of [...tabs,...tabs]){
@@ -559,19 +570,27 @@ it.each([false,true])('switches ready bottom tabs with the approved motion and r
       expect(body.getAttribute('data-active-tab')).toBe(key);
       const shown=body.querySelector(selector)!;
       expect(shown).toBeTruthy();
+      if(key==='notes'&&!retained.has(key)){
+        expect(stage.getAttribute('data-motion-shown')).toBe('catalog');
+        expect(visibleViews()).toEqual(['catalog']);
+        expect(stage.querySelector('[data-motion-view=catalog]')?.hasAttribute('inert')).toBe(true);
+        expect(stage.querySelector('[data-motion-view=notes]')?.getAttribute('aria-hidden')).toBe('true');
+        await act(async()=>releaseNotes());
+      }
       await waitFor(()=>expect(body.querySelector(`[data-motion-view=${key}]`)?.getAttribute('aria-hidden')).toBeNull());
-      if(reduced)expect(animate).not.toHaveBeenCalled();
-      else expect(animate.mock.calls).toEqual(expect.arrayContaining([
-        [[{opacity:0},{opacity:1}],{duration:160,easing:'cubic-bezier(0.2, 0, 0, 1)'}],
-        [[{top:'12px',bottom:'-12px'},{top:'0px',bottom:'0px'}],{duration:380,easing:'cubic-bezier(.32,.72,0,1)'}],
-      ]));
+      expect((animate.mock.contexts as HTMLElement[]).filter(element=>element.classList.contains('motion-stage__view'))).toHaveLength(0);
       await waitFor(()=>expect(body.querySelector('.motion-stage')?.getAttribute('data-motion-shown')).toBe(key));
+      expect(visibleViews()).toEqual([key]);
       if(key!=='home'){
         if(retained.has(key))expect(shown).toBe(retained.get(key));
         else retained.set(key,shown);
       }
     }
+    observer.disconnect();
+    expect(visibilitySnapshots.length).toBeGreaterThan(0);
+    expect(visibilitySnapshots.every(views=>views.length===1)).toBe(true);
   } finally {
+    observer?.disconnect();
     if(descriptor)Object.defineProperty(HTMLElement.prototype,'animate',descriptor);
     else delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;
   }

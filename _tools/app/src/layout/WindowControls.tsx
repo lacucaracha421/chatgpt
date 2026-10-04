@@ -5,8 +5,8 @@ import { updateWorkloadSettings, useWorkloadProfile } from "../app/workloadProfi
 /** Title-bar mark while the PC runs slow: a button that turns 절약 모드 off, then a quiet
  * "해제 중" label for the short recovery window before normal work resumes. */
 export function LightweightModeIndicator() {
-  const { lightweight, restricted } = useWorkloadProfile();
-  if (!restricted) return null;
+  const { lightweight, restricted, ready } = useWorkloadProfile();
+  if (!ready || !restricted) return null;
   if (!lightweight) return <span className="lightweight-mode-indicator is-recovering" role="status">
     <ArrowPathIcon className="lightweight-mode-indicator__spin" aria-hidden="true" />
     <span>절약 모드 해제 중</span>

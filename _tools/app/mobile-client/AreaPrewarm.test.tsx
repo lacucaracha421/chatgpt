@@ -44,7 +44,8 @@ async function warm(){await frame();await frame();await time(AREA_PREWARM_IDLE_M
 const lists=(area:Area)=>mocks.api.mock.calls.filter(([path])=>area==='catalog'?path.startsWith('/v1/mobile-catalog/search?'):path.startsWith('/v1/collections?')&&!path.includes('showcase=true'));
 const first=(area:Area)=>lists(area).filter(([path])=>!new URL(path,'https://test').searchParams.has('cursor'));
 const mounted=(area:Area)=>document.querySelector(area==='catalog'?'.mobile-catalog':'.mobile-collections');
-const dissolves=()=>animate.mock.calls.filter(([keyframes,options])=>options.duration===160&&(keyframes as Keyframe[])[0].opacity===0);
+// Area switches swap atomically (user 2026-10-04): a switch has happened once the stage shows a non-Home area.
+const dissolves=()=>{const shown=document.querySelector('.motion-stage')?.getAttribute('data-motion-shown');return shown&&shown!=='home'?[shown]:[];};
 beforeEach(()=>{
   vi.useFakeTimers();localStorage.clear();localStorage.setItem('lakomics.mobile.collectionView.game.v1',JSON.stringify({layout:'grid',perRow:4}));sequence=0;frames=new Map();idles=new Map();
   vi.stubGlobal('requestAnimationFrame',(callback:FrameRequestCallback)=>{const id=++sequence;frames.set(id,callback);return id;});

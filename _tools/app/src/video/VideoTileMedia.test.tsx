@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
 import { VideoTileMedia } from "./VideoTileMedia";
 
-const workload = vi.hoisted(() => ({ restricted: false }));
+const workload = vi.hoisted(() => ({ restricted: false, ready: true }));
 vi.mock("../app/workloadProfile", () => ({ useWorkloadProfile: () => workload }));
 
 beforeEach(() => {
@@ -12,7 +12,7 @@ beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
   vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
 });
-afterEach(() => { cleanup(); workload.restricted = false; vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); workload.restricted = false; workload.ready = true; vi.useRealTimers(); vi.restoreAllMocks(); });
 
 it("uses prepared frames on hover and delays full playback until timeline interaction", () => {
   const request = vi.fn();
@@ -151,4 +151,12 @@ it("seeks the scrub slider by keyboard in five-second steps and clamps endpoints
   fireEvent.keyDown(slider, { key: "ArrowLeft" });
   expect(slider).toHaveAttribute("aria-valuenow", "0");
   expect(request).toHaveBeenCalled();
+});
+
+it("does not call startup video scheduling Saving Mode before readiness", () => {
+  workload.ready = false;
+  workload.restricted = true;
+  render(<VideoTileMedia asset={video("pending")} active={false} onRequestActive={vi.fn()} onReleaseActive={vi.fn()} onRetry={vi.fn()} />);
+  expect(screen.getByText("준비 중")).toBeInTheDocument();
+  expect(screen.queryByText("절약 모드로 대기 중")).not.toBeInTheDocument();
 });

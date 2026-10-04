@@ -1,5 +1,5 @@
 import { createContext, useContext, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { EASE_SHEET, EASE_STANDARD, reducedMotion } from './curves';
+import { reducedMotion } from './curves';
 import './areaMotion.css';
 
 export const AreaVisible = createContext(true);
@@ -31,7 +31,6 @@ type Props = {
 /** Preserve the actual old React/DOM tree until the incoming view commits its content. */
 export function AreaSwitch({activeKey, views, retained = [], ready = viewReady}: Props) {
   const [shown, setShown] = useState(activeKey);
-  const [arriving, setArriving] = useState<string | null>(null);
   const nodes = useRef(new Map<string, ReactNode>());
   const hosts = useRef(new Map<string, HTMLDivElement>());
   const shownRef = useRef(shown); shownRef.current = shown;
@@ -44,40 +43,30 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady}:
   const keys = new Set([shown, activeKey, ...retained.filter(key => nodes.current.has(key))]);
 
   useLayoutEffect(() => {
-    if (activeKey === shownRef.current) { setArriving(null); return; }
+    if (activeKey === shownRef.current) return;
     const incoming = hosts.current.get(activeKey);
     if (!incoming) return;
-    let finished = false, started = false, forced = false, timer = 0, frame = 0;
-    const animations: Animation[] = [];
+    let finished = false, forced = false, frame = 0;
     const query = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     const commit = () => {
       if (finished) return;
       finished = true;
-      window.clearTimeout(timer);
+      observer.disconnect();
+      window.clearTimeout(cap);
       window.cancelAnimationFrame(frame);
       setShown(activeKey);
-      setArriving(null);
       for (const key of nodes.current.keys()) if (key !== activeKey && !retained.includes(key)) nodes.current.delete(key);
     };
     const start = () => {
       frame = 0;
-      if (finished || started || (!forced && !readyRef.current(incoming, activeKey))) return;
-      started = true; observer.disconnect();
-      if (reducedMotion() || typeof incoming.animate !== 'function') { commit(); return; }
-      setArriving(activeKey);
-      animations.push(incoming.animate([{opacity: 0}, {opacity: 1}], {duration: 160, easing: EASE_STANDARD}));
-      // Move the box (top/bottom), not a transform: a transformed view would become the containing
-      // block of its fixed bars (the tablet scrubber), which then jump during the rise.
-      animations.push(incoming.animate([{top: '12px', bottom: '-12px'}, {top: '0px', bottom: '0px'}], {duration: 380, easing: EASE_SHEET}));
-      animations[0].onfinish = commit;
-      // Some native webviews do not dispatch finish after backgrounding.
-      timer = window.setTimeout(() => { animations[0]?.finish?.(); commit(); }, 160);
+      if (finished || (!forced && !readyRef.current(incoming, activeKey))) return;
+      commit();
     };
     const check = () => {
-      if (finished || started) return;
+      if (finished) return;
       if (!forced && !readyRef.current(incoming, activeKey)) { window.cancelAnimationFrame(frame); frame = 0; return; }
       // Effects, shared observer setup and layout from the content commit get a rendering
-      // opportunity before the dissolve starts. Reduced motion and the readiness cap stay immediate.
+      // opportunity before the atomic swap. Reduced motion and the readiness cap stay immediate.
       if (forced || reducedMotion() || typeof incoming.animate !== 'function') { window.cancelAnimationFrame(frame); start(); return; }
       if (!frame) frame = window.requestAnimationFrame(() => {
         frame = window.requestAnimationFrame(start);
@@ -90,13 +79,12 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady}:
     // Never leave an inert old view up: a view that stays busy switches after this cap.
     const cap = window.setTimeout(() => { forced = true; check(); }, READY_CAP_MS);
     check();
-    const reduce = () => { if (query?.matches) { if (started) { animations.forEach(a => a.cancel()); commit(); } else check(); } };
+    const reduce = () => { if (query?.matches) check(); };
     query?.addEventListener?.('change', reduce);
     return () => {
-      finished = true; checkRef.current = null; observer.disconnect(); window.clearTimeout(timer); window.clearTimeout(cap);
+      finished = true; checkRef.current = null; observer.disconnect(); window.clearTimeout(cap);
       window.cancelAnimationFrame(frame);
       query?.removeEventListener?.('change', reduce);
-      animations.forEach(a => a.cancel());
     };
   }, [activeKey]); // The readiness observer follows asynchronous child commits, not parent renders.
 
@@ -106,13 +94,13 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady}:
   return <div className="motion-stage" data-motion-active={activeKey} data-motion-shown={shown}>
     {[...keys].map(key => {
       const incoming = key === activeKey;
-      const visible = key === shown || (incoming && arriving === key);
-      const interactive = incoming && (activeKey === shown || arriving === key);
-      // A stacking layer only while two views overlap: at rest, fixed overlays inside a view
-      // (the collection work screen) must stack against the whole app, not inside this stage.
+      const visible = key === shown;
+      const interactive = incoming && visible;
+      // Opacity hides the whole pending subtree even if a descendant overrides visibility.
+      // Keep its layout measurable; remove opacity at rest so fixed overlays stack against the app.
       return <div key={key} ref={element => { if (element) hosts.current.set(key, element); else hosts.current.delete(key); }}
         className="motion-stage__view" data-motion-view={key} inert={!interactive || undefined} aria-hidden={!interactive || undefined}
-        style={{display: key !== shown && !incoming ? 'none' : undefined, visibility: visible ? undefined : 'hidden', zIndex: incoming && arriving === key ? 1 : undefined}}>
+        style={{display: key !== shown && !incoming ? 'none' : undefined, visibility: visible ? undefined : 'hidden', opacity: visible ? undefined : 0}}>
         <AreaVisible.Provider value={visible && incoming}>{nodes.current.get(key)}</AreaVisible.Provider>
       </div>;
     })}

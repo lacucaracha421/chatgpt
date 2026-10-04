@@ -10,7 +10,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("./workloadProfile", () => ({ nativeWorkload: () => true, useWorkloadProfile: () => mocks.profile, updateWorkloadSettings: mocks.update }));
 vi.mock("./performanceProfile", () => ({ usePerformanceProfile: () => mocks.performance, updatePerformanceProfile: mocks.setPerformance }));
 import { LightweightModeToggle, WorkloadControls } from "./WorkloadControls";
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); mocks.profile.ready = true; mocks.profile.lightweight = true; vi.clearAllMocks(); });
 it("toggles lightweight mode without exposing scan cancellation", () => {
   render(<LightweightModeToggle />);
   expect(mocks.invoke).not.toHaveBeenCalled();
@@ -53,4 +53,29 @@ it("keeps the performance selector unavailable until native settings load", () =
   render(<WorkloadControls />);
   expect(screen.getByRole("combobox", { name: "이 컴퓨터의 성능" })).toBeDisabled();
   mocks.performance.ready = true;
+});
+
+it("shows recovery wording only after the workload profile is ready", () => {
+  mocks.profile.ready = false;
+  mocks.profile.lightweight = false;
+  const view = render(<LightweightModeToggle />);
+  expect(screen.getByText("확인 중…")).toBeInTheDocument();
+  expect(screen.queryByText("절약 모드 해제 중")).not.toBeInTheDocument();
+  expect(screen.queryByText("3분 안에 평소 속도로 돌아갑니다")).not.toBeInTheDocument();
+  expect(screen.getByRole("switch")).toBeDisabled();
+  mocks.profile.ready = true;
+  view.rerender(<LightweightModeToggle />);
+  expect(screen.getByText("절약 모드 해제 중")).toBeInTheDocument();
+  expect(screen.getByText("3분 안에 평소 속도로 돌아갑니다")).toBeInTheDocument();
+  mocks.profile.lightweight = true;
+  view.rerender(<LightweightModeToggle />);
+  expect(screen.getByText("절약 모드")).toBeInTheDocument();
+  expect(screen.queryByText("3분 안에 평소 속도로 돌아갑니다")).not.toBeInTheDocument();
+});
+it("keeps the settings mode status neutral before readiness", () => {
+  mocks.profile.ready = false;
+  mocks.profile.lightweight = false;
+  render(<WorkloadControls />);
+  expect(screen.getByText("확인 중…")).toBeInTheDocument();
+  expect(screen.queryByText("절약 모드 해제 중")).not.toBeInTheDocument();
 });

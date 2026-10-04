@@ -9,23 +9,39 @@ export const nativeWorkload = () => typeof window !== "undefined" && "__TAURI_IN
 let profile: WorkloadProfile = { lightweight: false, autoEnterMinutes: null, closeToTray: true, restricted: nativeWorkload(), hidden: false, trayAvailable: false, ready: !nativeWorkload(), error: null };
 const subscribers = new Set<() => void>();
 let started = false;
+let retryTimer: ReturnType<typeof setTimeout> | undefined;
 function publish(next: WorkloadProfile) { profile = next; subscribers.forEach(fn => fn()); }
 function accept(next: Omit<WorkloadProfile, "ready" | "error">) { publish({ ...next, ready: true, error: null }); }
 async function start() {
   if (started || !nativeWorkload()) return;
+  clearTimeout(retryTimer);
   started = true;
   void loadPerformanceProfile();
+  const unlisteners: (() => void)[] = [];
   try {
     let received = false;
-    await listen<Omit<WorkloadProfile, "ready" | "error">>("workload://changed", ({ payload }) => { received = true; accept(payload); });
-    await listen<string>("workload://error", ({ payload }) => publish({ ...profile, error: payload }));
+    unlisteners.push(await listen<Omit<WorkloadProfile, "ready" | "error">>("workload://changed", ({ payload }) => { received = true; accept(payload); }));
+    unlisteners.push(await listen<string>("workload://error", ({ payload }) => publish({ ...profile, error: payload })));
     const initial = await invoke<Omit<WorkloadProfile, "ready" | "error">>("workload_profile");
     if (!received) accept(initial);
-  } catch { publish({ ...profile, error: "절약 모드 설정을 불러오지 못했습니다." }); }
+  } catch {
+    unlisteners.forEach(unlisten => unlisten());
+    started = false;
+    publish({ ...profile, error: "절약 모드 설정을 불러오지 못했습니다." });
+    // Retry a transient bridge failure even if the existing consumers stay mounted.
+    if (subscribers.size) retryTimer = setTimeout(() => { void start(); }, 5_000);
+  }
 }
 export function getWorkloadProfile() { return profile; }
+function subscribe(listener: () => void) {
+  subscribers.add(listener);
+  return () => {
+    subscribers.delete(listener);
+    if (!subscribers.size) clearTimeout(retryTimer);
+  };
+}
 export function useWorkloadProfile() {
-  const value = useSyncExternalStore(listener => { subscribers.add(listener); return () => { subscribers.delete(listener); }; }, getWorkloadProfile);
+  const value = useSyncExternalStore(subscribe, getWorkloadProfile);
   useEffect(() => { void start(); }, []);
   return value;
 }
