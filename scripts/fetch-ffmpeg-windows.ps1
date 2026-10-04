@@ -4,8 +4,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$archiveUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-08-13-06/ffmpeg-n7.1.5-12-g1fdbca85aa-win64-lgpl-shared-7.1.zip"
-$archiveSha256 = "4450e09c6740b39777a195569b61cf415a3e7ccaf0eb17f8ac9e16c84787dab3"
+# BtbN prunes daily autobuilds after ~2 weeks but keeps month-end builds; pin a month-end tag.
+$archiveUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-win64-lgpl-shared-8.1.zip"
+$archiveSha256 = "3e47bda1607740550141e37c0e49d1e5182b34699f15adfd137ee266d346811a"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $binaryRoot = Join-Path $repositoryRoot "_tools\app\src-tauri\binaries"
 $ffmpegPath = Join-Path $binaryRoot "ffmpeg-x86_64-pc-windows-msvc.exe"
