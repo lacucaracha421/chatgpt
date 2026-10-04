@@ -879,7 +879,7 @@ mod tests {
     #[test]
     fn source_root_recovers_legacy_windows_and_linux_paths_without_rewriting_settings() {
         let (_temp, library, _) = source_library();
-        let root = library.root().join("collection-sources/book");
+        let root = library.root().join("collection-sources").join("book");
         fs::create_dir_all(root.join("series")).unwrap();
         let bytes = write_png(&root.join("series/thumbnail.png"), 24, 32);
         for old in [r"Z:\old-library\collection-sources\book", "/missing/old-library/collection-sources/book"] {
@@ -895,7 +895,7 @@ mod tests {
     #[test]
     fn source_root_stores_internal_folders_portably_and_survives_library_move() {
         let (temp, library, _) = source_library();
-        let root = library.root().join("collection-sources/book");
+        let root = library.root().join("collection-sources").join("book");
         library.set_collection_source_root(Some(root.to_str().unwrap())).unwrap();
         let stored: String = library.connection().unwrap().query_row("SELECT collection_source_root FROM library_settings", [], |row| row.get(0)).unwrap();
         assert_eq!(stored, "./collection-sources/book");
@@ -904,7 +904,7 @@ mod tests {
         let moved = temp.path().join("renamed-library");
         fs::rename(old_root, &moved).unwrap();
         let library = Library::open(&moved).unwrap();
-        assert_eq!(library.collection_source_root().unwrap(), Some(moved.join("collection-sources/book").to_string_lossy().into_owned()));
+        assert_eq!(library.collection_source_root().unwrap(), Some(moved.join("collection-sources").join("book").to_string_lossy().into_owned()));
         library.set_collection_source_root(None).unwrap();
         assert_eq!(library.collection_source_root().unwrap(), None);
     }
@@ -918,7 +918,7 @@ mod tests {
         assert_eq!(resolve_source_root(library.root(), missing.to_str().unwrap()).unwrap(), missing.to_string_lossy());
         assert!(resolve_source_root(library.root(), "../source").is_err());
         assert!(resolve_source_root(library.root(), r"Z:\old\collection-sources\..\outside").is_err());
-        assert_eq!(resolve_source_root(library.root(), r".\collection-sources\book").unwrap(), library.root().join("collection-sources/book").to_string_lossy());
+        assert_eq!(resolve_source_root(library.root(), r".\collection-sources\book").unwrap(), library.root().join("collection-sources").join("book").to_string_lossy());
     }
 
     #[cfg(unix)]
