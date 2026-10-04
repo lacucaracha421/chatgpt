@@ -82,7 +82,6 @@
 .collection-card__object--game { padding: 0; background: transparent; }
 .collection-card__object--game::before, .collection-card__object--game::after { display: none; }
 .collection-card--game .collection-card__cover { background: transparent; outline: none; overflow: visible; }
-.collection-card--game .collection-card__object { filter: drop-shadow(var(--work-shadow-rest)); }
 .game-case { display: block; position: relative; width: 100%; height: 100%; aspect-ratio: 184 / 260; }
 .game-case > img { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .game-case > canvas { display: block; width: 100%; height: 100%; }
