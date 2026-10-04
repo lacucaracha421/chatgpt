@@ -1,8 +1,10 @@
 """Shared offline model settings; no dependency on the trial scripts."""
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import sys
 
@@ -23,6 +25,47 @@ MODELS = {'siglip': 'google/siglip2-so400m-patch14-384',
           'qwen8b': 'Qwen/Qwen3-VL-Embedding-8B'}
 OPUS = 'Helsinki-NLP/opus-mt-ko-en'
 QUERY_INSTRUCTION = 'Retrieve relevant images for the query.'
+
+
+# "No match" gate vocabulary. The Rust ranking (library/nl_search.rs) mirrors this tokeniser exactly.
+TOKEN = re.compile('[0-9a-z가-힣ㄱ-ㅎㅏ-ㅣ]+')
+HANGUL = re.compile('[가-힣ㄱ-ㅎㅏ-ㅣ]')
+LATIN_WORD = re.compile('[a-z]{3,}')
+TAG_SPLIT = re.compile(r'[_():\s]+')
+
+
+def text_units(text):
+    """Countable units of a text, in order and with repeats, as (kind, value) pairs.
+
+    Tokens are maximal runs of [0-9a-z가-힣ㄱ-ㅎㅏ-ㅣ] in the lower-cased text. A token with any
+    Hangul yields every 2-character substring (kind 'k'); a Latin-only token of 3+ letters yields
+    itself (kind 'w'); anything else yields nothing.
+    """
+    units = []
+    for token in TOKEN.findall(text.lower()):
+        if HANGUL.search(token):
+            units.extend(('k', token[i:i + 2]) for i in range(len(token) - 1))
+        elif LATIN_WORD.fullmatch(token):
+            units.append(('w', token))
+    return units
+
+
+def caption_vocabulary(path):
+    """Distinct units of every caption text in a captions.jsonl file, or None when it is absent."""
+    path = Path(path)
+    if not path.is_file():
+        return None
+    vocab = set()
+    with path.open(encoding='utf-8') as stream:
+        for line in stream:
+            if line.strip():
+                vocab.update(text_units(json.loads(line).get('text') or ''))
+    return vocab
+
+
+def tag_words(tags):
+    """Lower-case words of 3+ characters in auto-tag vocabulary tags, split on _ ( ) : and whitespace."""
+    return {word for tag in tags for word in TAG_SPLIT.split(tag.lower()) if len(word) >= 3}
 
 
 def read_only(path):

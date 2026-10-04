@@ -32,6 +32,7 @@ python nl_index.py --library <configured library root> --state <machine-local st
 - Vectors are stored in `<state>/vectors.sqlite`, keyed by `(content_hash, model_id, preprocess)`. A moved or re-imported file is not recomputed. A different model or preprocessing tag is recomputed.
 - Preprocessing `pack1024-q90` (EXIF transpose, RGB, GIF first frame, long side ≤ 1024, JPEG q90 round trip) matches the research trial.
 - Work is resumable per batch. Unreadable files are skipped and logged, and the job keeps GPU allocation under 12 GiB.
+- If `<state>/captions.jsonl` exists (one JSON object per line with `id` and `text`), every caption text feeds the "no match" gate vocabulary (see Ranking reference, rule 0). Without it, the export has no `vocab` table and the gate is off.
 - Full run on 2026-10-04: seeded from the trial, 9,103 assets, 0 computed, export 117.6 MB. Seed check cosine was ≥ 0.99999 for SigLIP and ≥ 0.999 for Qwen (NF4).
 
 ### Inbox file `nl-search-latest.sqlite`
@@ -45,7 +46,11 @@ meta(key TEXT PRIMARY KEY, value TEXT)
   asset_count  created_at (UTC ISO)  content_digest (sha256; excludes created_at)
 siglip(asset_id TEXT PRIMARY KEY, vector BLOB NOT NULL)   -- float16 little-endian, L2-normalised
 qwen8b(asset_id TEXT PRIMARY KEY, vector BLOB NOT NULL)   -- same; absent when not requested
+vocab(kind TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(kind,value)) WITHOUT ROWID
+                                                          -- caption units; absent without captions
 ```
+
+With a `vocab` table, meta also holds `vocab_count`, and `content_digest` covers the vocabulary.
 
 ## Query worker protocol
 
@@ -65,13 +70,16 @@ qwen8b(asset_id TEXT PRIMARY KEY, vector BLOB NOT NULL)   -- same; absent when n
 
 `Ranker.rank(query, response, top=200)`:
 
+0. **Gate** (cosine route only, i.e. no name hit): before any embedding, measure how much of the query the library's captions know. Lower-case the text; tokens are maximal runs of `[0-9a-z가-힣ㄱ-ㅎㅏ-ㅣ]`. A token containing Hangul (syllables or jamo) contributes all its 2-character substrings (kind `k`; a 1-character token contributes nothing). A Latin-only token of 3 or more letters contributes itself (kind `w`). Other tokens contribute nothing. A `k` unit is known when it is in the `vocab` `k` set; a `w` unit when it is in the `vocab` `w` set or among the auto-tag words (`auto_tag_vocabulary.tag` split on `_`, `(`, `)`, `:` and whitespace, lower-case, 3 or more characters). Repeated units count each time. Coverage below 0.6, or no units at all, answers **no match** (route `no_match`, no ids) without starting the worker. A force flag skips the gate. With no or an empty `vocab` table, the gate is off. On the trial captions (13,608 units), all 30 non-name trial queries pass, while inputs such as `ㅁㄴㅇㄹ`, `아무말 대잔치`, `asdfqwer` and `1234 5678` do not.
 1. **Names:** whitespace tokens equal to a character name are name hits. Names are `character_targets.display_name`, split on `/`. Each hit maps to its tagger tags (`character_target_tagger_tags`).
 2. **Series absorption:** a token equal to a hit character's series folder name (`classification_entries.name` via `series_classification_id`) is absorbed. So is every token between that series token and the name. For example, `젠레스 존 제로 엘렌` and `체인소맨 레제` stay name queries.
 3. **Names only:** rank by the max auto-tag score over the hit tags (score > 0). Ties break by asset id. Route `tags`.
 4. **Names plus other words:** keep assets whose max hit-tag score ≥ 0.35, then rank them by SigLIP cosine of the full query (route `mixed`). If that set is empty, fall back to rule 3 (route `mixed_fallback`). This route is not measured in the trial.
 5. **No names:** rank all assets by SigLIP cosine (route `siglip`). Image vectors are stored as float16 and normalised again in float32 before the dot product.
 
-The desktop exposes camelCase results: `mixed_fallback` becomes `mixedFallback`, and `siglip` becomes `cosine`. Its corpus includes only normal image/GIF assets with SigLIP vectors, for all routes. Limits default to 200 and clamp to 1–500. When precise mode and Qwen query/image vectors are available, cosine routes fuse the top 200 rankings from each model using reciprocal rank fusion with k=60; ties break by asset id. Otherwise results report `precise: false`.
+The desktop exposes camelCase results: `mixed_fallback` becomes `mixedFallback`, `no_match` becomes `noMatch`, and `siglip` becomes `cosine`. Its corpus includes only normal image/GIF assets with SigLIP vectors, for all routes. Limits default to 200 and clamp to 1–500. When precise mode and Qwen query/image vectors are available, cosine routes fuse the top 200 rankings from each model using reciprocal rank fusion with k=60; ties break by asset id. Otherwise results report `precise: false`.
+
+**Gate check:** `python nl_rank_reference.py --gate-queries <trial>/queries.json --captions <state>/captions.jsonl` prints coverage and pass/fail per query (caption vocabulary only).
 
 **Check:** `python nl_rank_reference.py --inbox … --db … --check-trial .. --responses worker-responses.json`. With live CPU query vectors, 30 of the 32 trial queries reproduce the trial top-10 exactly. q26 and q29 hold the same ten images with near-tied neighbours swapped (fp32 CPU vs fp16 GPU query vectors).
 
@@ -83,6 +91,7 @@ From this directory, `python -B -m unittest test_runtime` runs fixture tests wit
 - invalid vectors;
 - worker protocol;
 - routing rules including series absorption;
+- the gate tokeniser, export with and without captions, and the gate examples on a fixture vocabulary;
 - an optional real-snapshot equivalence check, skipped unless `LAKOMICS_NL_SEARCH_TRIAL` points at a trial root containing its runtime export/responses and library snapshot. No default test depends on a machine-specific trial or model-cache path.
 
 The measured figures above are historical trial observations, not native desktop acceptance of this repository integration.

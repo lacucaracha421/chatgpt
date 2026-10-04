@@ -18,7 +18,67 @@ const QWEN_DIM: usize = 4096;
 const SCHEMA: &str = "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
     CREATE TABLE siglip(asset_id TEXT PRIMARY KEY,vector BLOB NOT NULL);
     CREATE TABLE qwen8b(asset_id TEXT PRIMARY KEY,vector BLOB NOT NULL);";
+const VOCAB_SCHEMA: &str = "CREATE TABLE vocab(kind TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(kind,value)) WITHOUT ROWID;";
+/// Minimum share of known query units for the cosine route ("no match" gate).
+const GATE: f64 = 0.6;
 type Result<T> = std::result::Result<T, LibraryError>;
+
+fn is_hangul(c: char) -> bool {
+    matches!(c, '\u{ac00}'..='\u{d7a3}' | '\u{3131}'..='\u{3163}')
+}
+/// "No match" gate units of a text, in order and with repeats; mirrors `runtime_support.text_units`.
+/// Tokens are maximal runs of `[0-9a-z가-힣ㄱ-ㅎㅏ-ㅣ]` in the lower-cased text. A token with any
+/// Hangul yields every 2-character substring (`'k'`); a Latin-only token of 3+ letters yields
+/// itself (`'w'`); anything else yields nothing.
+fn text_units(text: &str) -> Vec<(char, String)> {
+    let lower = text.to_lowercase();
+    let mut units = Vec::new();
+    for token in lower
+        .split(|c: char| !(c.is_ascii_digit() || c.is_ascii_lowercase() || is_hangul(c)))
+        .filter(|token| !token.is_empty())
+    {
+        let chars: Vec<char> = token.chars().collect();
+        if chars.iter().any(|&c| is_hangul(c)) {
+            units.extend(chars.windows(2).map(|pair| ('k', pair.iter().collect())));
+        } else if chars.len() >= 3 && chars.iter().all(char::is_ascii_lowercase) {
+            units.push(('w', token.to_owned()));
+        }
+    }
+    units
+}
+/// Lower-case words of 3+ characters in auto-tag tags, split on `_`, `(`, `)`, `:` and whitespace.
+fn tag_words<'a>(tags: impl IntoIterator<Item = &'a str>) -> HashSet<String> {
+    tags.into_iter()
+        .flat_map(|tag| {
+            tag.to_lowercase()
+                .split(|c: char| matches!(c, '_' | '(' | ')' | ':') || c.is_whitespace())
+                .filter(|word| word.chars().count() >= 3)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+/// Caption vocabulary of the cached index plus the library's auto-tag words.
+#[derive(Debug, Default)]
+struct Vocabulary {
+    pairs: HashSet<String>,
+    words: HashSet<String>,
+    tag_words: HashSet<String>,
+}
+impl Vocabulary {
+    /// Coverage of the query's units is at least `GATE`; a query without units never passes.
+    fn passes(&self, query: &str) -> bool {
+        let units = text_units(query);
+        let known = units
+            .iter()
+            .filter(|(kind, value)| match kind {
+                'k' => self.pairs.contains(value),
+                _ => self.words.contains(value) || self.tag_words.contains(value),
+            })
+            .count();
+        !units.is_empty() && known as f64 / units.len() as f64 >= GATE
+    }
+}
 fn invalid(message: impl Into<String>) -> LibraryError {
     LibraryError::InvalidAutoTag(message.into())
 }
@@ -163,12 +223,26 @@ fn import_cache(
             }
         }
     }
+    let vocab = has_table(&source, "vocab")?;
+    if vocab {
+        let mut stmt = source.prepare("SELECT kind,value FROM vocab")?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let kind: String = row.get(0)?;
+            let value: String = row.get(1)?;
+            if !matches!(kind.as_str(), "k" | "w") || value.is_empty() {
+                return Err(invalid("검색 색인 vocab 형식이 올바르지 않습니다."));
+            }
+        }
+    }
     if destination.is_file() {
         let current = read_only(destination)?;
         if metadata(&current)
             .ok()
             .and_then(|m| m.get("content_digest").cloned())
             == meta.get("content_digest").cloned()
+            // A cache imported before vocab support lacks the table: import it again.
+            && has_table(&current, "vocab").unwrap_or(false) == vocab
         {
             return Ok(counts);
         }
@@ -181,6 +255,9 @@ fn import_cache(
     let temporary = tempfile::NamedTempFile::new_in(parent).map_err(|e| invalid(e.to_string()))?;
     let mut store = Connection::open(temporary.path())?;
     store.execute_batch(SCHEMA)?;
+    if vocab {
+        store.execute_batch(VOCAB_SCHEMA)?;
+    }
     let tx = store.transaction()?;
     meta.insert("imported_at".into(), chrono::Utc::now().to_rfc3339());
     // The cache always has both tables, even for a SigLIP-only export.
@@ -207,6 +284,14 @@ fn import_cache(
             }
         }
     }
+    if vocab {
+        let mut stmt = source.prepare("SELECT kind,value FROM vocab")?;
+        let mut rows = stmt.query([])?;
+        let mut insert = tx.prepare("INSERT INTO vocab VALUES (?1,?2)")?;
+        while let Some(row) = rows.next()? {
+            insert.execute(params![row.get::<_, String>(0)?, row.get::<_, String>(1)?])?;
+        }
+    }
     tx.commit()?;
     drop(store);
     temporary
@@ -229,6 +314,35 @@ struct Index {
     stamp: (Option<SystemTime>, u64),
     siglip: BTreeMap<String, Vec<f32>>,
     qwen: Option<BTreeMap<String, Vec<f32>>>,
+    /// None (gate off) for a cache without a vocab table, or with an empty one.
+    vocab: Option<Vocabulary>,
+}
+fn load_vocabulary(conn: &Connection) -> Result<Option<Vocabulary>> {
+    if !has_table(conn, "vocab")? {
+        return Ok(None);
+    }
+    let mut vocab = Vocabulary::default();
+    let mut stmt = conn.prepare("SELECT kind,value FROM vocab")?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let value: String = row.get(1)?;
+        match row.get::<_, String>(0)?.as_str() {
+            "k" => vocab.pairs.insert(value),
+            _ => vocab.words.insert(value),
+        };
+    }
+    Ok((!vocab.pairs.is_empty() || !vocab.words.is_empty()).then_some(vocab))
+}
+/// Auto-tag words, read once per index load and released like `known_assets`.
+fn auto_tag_words(library: &Connection) -> Result<HashSet<String>> {
+    if !has_table(library, "auto_tag_vocabulary")? {
+        return Ok(HashSet::new());
+    }
+    let tags = library
+        .prepare("SELECT tag FROM auto_tag_vocabulary")?
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(tag_words(tags.iter().map(String::as_str)))
 }
 fn load_vectors(conn: &Connection, table: &str, dim: usize) -> Result<BTreeMap<String, Vec<f32>>> {
     let mut vectors = BTreeMap::new();
@@ -476,8 +590,13 @@ impl Library {
         let conn = read_only(&path)?;
         let _snapshot = conn.unchecked_transaction()?;
         metadata(&conn)?;
+        let mut vocab = load_vocabulary(&conn)?;
+        if let Some(vocab) = vocab.as_mut() {
+            vocab.tag_words = auto_tag_words(&*self.connection()?)?;
+        }
         let index = Arc::new(Index {
             stamp,
+            vocab,
             siglip: load_vectors(&conn, "siglip", SIGLIP_DIM)?,
             qwen: if precise {
                 Some(if has_table(&conn, "qwen8b")? {
@@ -497,6 +616,7 @@ impl Library {
         query: &str,
         limit: Option<u32>,
         precise: bool,
+        force: bool,
         embed: impl FnOnce() -> std::result::Result<Embedding, String>,
     ) -> Result<SearchResult> {
         if query.trim().is_empty() {
@@ -510,6 +630,22 @@ impl Library {
                 route: routing.route,
                 translation: None,
                 asset_ids: routing.tag_ids,
+                precise: false,
+            });
+        }
+        // Words the library's captions do not know answer "no match" without embedding (cosine
+        // route only); `force` ranks them anyway.
+        if routing.route == "cosine"
+            && !force
+            && index
+                .vocab
+                .as_ref()
+                .is_some_and(|vocab| !vocab.passes(query))
+        {
+            return Ok(SearchResult {
+                route: "noMatch",
+                translation: None,
+                asset_ids: Vec::new(),
                 precise: false,
             });
         }

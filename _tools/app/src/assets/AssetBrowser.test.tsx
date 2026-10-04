@@ -1506,8 +1506,8 @@ describe("내용 검색 result state", () => {
     gateway.refreshAssets = vi.fn(async (_query, ids: string[]) => [asset(0), asset(1), asset(2)].filter(item => ids.includes(item.id)));
     return gateway;
   }
-  function renderRanked(gateway: LibraryGateway, onExit = vi.fn(), view: AssetView = rankedView) {
-    const element = (next: AssetView) => <LibraryProvider gateway={gateway}>{withWorkspaceChrome(<AssetBrowser galleryLayout="justified" view={next} classifications={classifications} sort="favorites" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} onExitDescriptionSearch={onExit} />)}</LibraryProvider>;
+  function renderRanked(gateway: LibraryGateway, onExit = vi.fn(), view: AssetView = rankedView, onViewChange = vi.fn()) {
+    const element = (next: AssetView) => <LibraryProvider gateway={gateway}>{withWorkspaceChrome(<AssetBrowser galleryLayout="justified" view={next} onViewChange={onViewChange} classifications={classifications} sort="favorites" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} onExitDescriptionSearch={onExit} />)}</LibraryProvider>;
     const result = render(element(view));
     return { ...result, rerenderView: (next: AssetView) => result.rerender(element(next)) };
   }
@@ -1570,6 +1570,42 @@ describe("내용 검색 result state", () => {
     renderRanked(describedGateway(vi.fn().mockResolvedValue({ route: "cosine", assetIds: [], precise: true })));
     expect(await screen.findByText("일치하는 이미지가 없습니다.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "필터 초기화" })).toBeNull();
+  });
+
+  it("answers no match from the gate with a button that opens the forced view, which ranks anyway", async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(async (_query: string, _limit?: number, force?: boolean) => force
+      ? { route: "cosine" as const, assetIds: ["asset-1", "asset-0"], precise: false }
+      : { route: "noMatch" as const, assetIds: [], precise: false });
+    const gateway = describedGateway(search);
+    const onViewChange = vi.fn();
+    const gated: AssetView = { kind: "description_search", query: "ㅁㄴㅇㄹ" };
+    const { rerenderView } = renderRanked(gateway, vi.fn(), gated, onViewChange);
+    expect(await screen.findByText("일치하는 이미지가 없습니다.")).toBeVisible();
+    expect(search).toHaveBeenCalledExactlyOnceWith("ㅁㄴㅇㄹ", 200);
+    expect(gateway.refreshAssets).not.toHaveBeenCalled();
+    expect(screen.queryByText(/관련도순/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "그래도 가장 비슷한 그림 보기" }));
+    expect(onViewChange).toHaveBeenCalledExactlyOnceWith({ kind: "description_search", query: "ㅁㄴㅇㄹ", force: true });
+    // The forced view is its own view (back returns to the gated one): it asks with force and shows normal results.
+    rerenderView({ kind: "description_search", query: "ㅁㄴㅇㄹ", force: true });
+    // The gated answer stays painted until the forced one arrives (no flash).
+    expect(screen.getByText("일치하는 이미지가 없습니다.")).toBeVisible();
+    await screen.findByRole("option", { name: "asset-1.png" });
+    expect(tileNames()).toEqual(["asset-1.png", "asset-0.png"]);
+    expect(search).toHaveBeenLastCalledWith("ㅁㄴㅇㄹ", 200, true);
+    expect(screen.getByText("관련도순 · 상위 2장")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "그래도 가장 비슷한 그림 보기" })).toBeNull();
+    // Back to the gated view: both answers are cached separately, so nothing is asked again.
+    rerenderView(gated);
+    expect(await screen.findByRole("button", { name: "그래도 가장 비슷한 그림 보기" })).toBeVisible();
+    expect(search).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers no forced view for an ordinary empty answer", async () => {
+    renderRanked(describedGateway(vi.fn().mockResolvedValue({ route: "cosine", assetIds: [], precise: false })));
+    expect(await screen.findByText("일치하는 이미지가 없습니다.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "그래도 가장 비슷한 그림 보기" })).toBeNull();
   });
 
   it("shows one error message with 다시 시도, and retrying asks again", async () => {

@@ -371,7 +371,7 @@ fn nl_search_lazy_index_invalidation_precise_fallback_limits_and_name_only() {
     assert!(precise_index.qwen.is_some());
     let name_result = fixture
         .library
-        .search_description(&target.display_name, None, true, || {
+        .search_description(&target.display_name, None, true, false, || {
             panic!("name query must not invoke worker")
         })
         .unwrap();
@@ -386,13 +386,13 @@ fn nl_search_lazy_index_invalidation_precise_fallback_limits_and_name_only() {
     };
     let result = fixture
         .library
-        .search_description("풍경", Some(0), true, embed)
+        .search_description("풍경", Some(0), true, false, embed)
         .unwrap();
     assert_eq!(result.asset_ids.len(), 1);
     assert!(!result.precise);
     let result = fixture
         .library
-        .search_description("풍경", Some(999), true, || {
+        .search_description("풍경", Some(999), true, false, || {
             Ok(Embedding {
                 translation: "landscape".into(),
                 siglip: decode(&blob(SIGLIP_DIM, 0x3c00), SIGLIP_DIM).unwrap(),
@@ -425,7 +425,7 @@ fn nl_search_lazy_index_invalidation_precise_fallback_limits_and_name_only() {
         .is_none());
     let result = fixture
         .library
-        .search_description("풍경", None, false, embed)
+        .search_description("풍경", None, false, false, embed)
         .unwrap();
     assert_eq!(result.asset_ids.last(), Some(&ids[0]));
     // External cache changes are detected without an import invalidation.
@@ -486,4 +486,275 @@ fn nl_search_inbox_dispatch_counts_and_unchanged_skip() {
         .unwrap()
         .processed
         .is_empty());
+}
+
+// Same fixture captions, auto-tags and examples as nl-search-runtime/test_runtime.py.
+const GATE_CAPTIONS: [&str; 3] = [
+    "은발에 안경을 쓴 여자가 파란 머리 포니테일 소녀와 서 있다. 셔츠에는 girl with 문구.",
+    "해가 지는 하늘 아래, 비가 오는 도시 거리.",
+    "아무도 없는 방에서 드라마를 보며 가나 초콜릿을 먹고, 신발을 신고 있다.",
+];
+const GATE_TAGS: [&str; 4] = ["maid_headdress", "glasses", "rating:g", "looking_at_viewer"];
+const GATE_PASS: [&str; 6] = [
+    "은발에 안경 쓴 여자",
+    "파란 머리 트윈테일",
+    "노을 지는 하늘",
+    "비 오는 밤 도시 거리",
+    "maid",
+    "girl with glasses",
+];
+const GATE_NO_MATCH: [&str; 8] = [
+    "ㅁㄴㅇㄹ",
+    "ㅋㅋㅋㅋㅋ",
+    "아무말 대잔치",
+    "가나다라마바사",
+    "세금 신고 마감일",
+    "asdfqwer",
+    "zxcv bnm",
+    "1234 5678",
+];
+/// The caption vocabulary as the index job builds it: distinct units of every caption.
+fn gate_vocab_rows() -> Vec<(char, String)> {
+    let mut rows: Vec<_> = GATE_CAPTIONS
+        .iter()
+        .flat_map(|text| text_units(text))
+        .collect();
+    rows.sort();
+    rows.dedup();
+    rows
+}
+fn gate_vocabulary() -> Vocabulary {
+    let mut vocab = Vocabulary {
+        tag_words: tag_words(GATE_TAGS),
+        ..Vocabulary::default()
+    };
+    for (kind, value) in gate_vocab_rows() {
+        if kind == 'k' {
+            vocab.pairs.insert(value);
+        } else {
+            vocab.words.insert(value);
+        }
+    }
+    vocab
+}
+fn units(text: &str) -> Vec<(char, String)> {
+    text_units(text)
+}
+fn expected(values: &[(char, &str)]) -> Vec<(char, String)> {
+    values
+        .iter()
+        .map(|(kind, value)| (*kind, value.to_string()))
+        .collect()
+}
+
+#[test]
+fn nl_search_gate_tokeniser_matches_reference() {
+    assert_eq!(
+        units("파란 머리 트윈테일"),
+        expected(&[
+            ('k', "파란"),
+            ('k', "머리"),
+            ('k', "트윈"),
+            ('k', "윈테"),
+            ('k', "테일")
+        ])
+    );
+    assert_eq!(units("비 오는 밤"), expected(&[('k', "오는")]));
+    assert_eq!(units("ㅋㅋㅋ"), expected(&[('k', "ㅋㅋ"), ('k', "ㅋㅋ")]));
+    assert_eq!(
+        units("Girl, WITH glasses!"),
+        expected(&[('w', "girl"), ('w', "with"), ('w', "glasses")])
+    );
+    assert!(units("1234 5678 ab x1y2 \u{e9}t\u{e9}").is_empty());
+    assert_eq!(
+        units("SD캐릭터 3월"),
+        expected(&[
+            ('k', "sd"),
+            ('k', "d캐"),
+            ('k', "캐릭"),
+            ('k', "릭터"),
+            ('k', "3월")
+        ])
+    );
+    assert_eq!(
+        units("메이드복(maid)"),
+        expected(&[('k', "메이"), ('k', "이드"), ('k', "드복"), ('w', "maid")])
+    );
+    assert_eq!(
+        tag_words([
+            "Maid_headdress",
+            "rating:g",
+            "looking_at_viewer",
+            "hat (object)",
+            "1girl"
+        ]),
+        HashSet::from(
+            [
+                "maid",
+                "headdress",
+                "rating",
+                "looking",
+                "viewer",
+                "hat",
+                "object",
+                "1girl"
+            ]
+            .map(String::from)
+        )
+    );
+}
+
+#[test]
+fn nl_search_gate_examples_with_fixture_vocabulary() {
+    let vocab = gate_vocabulary();
+    for query in GATE_PASS {
+        assert!(vocab.passes(query), "{query}");
+    }
+    for query in GATE_NO_MATCH {
+        assert!(!vocab.passes(query), "{query}");
+    }
+    // "maid" is known only as an auto-tag word.
+    let without_tags = Vocabulary {
+        tag_words: HashSet::new(),
+        ..gate_vocabulary()
+    };
+    assert!(!without_tags.passes("maid"));
+}
+
+fn add_gate_vocab(conn: &Connection) {
+    conn.execute_batch(VOCAB_SCHEMA).unwrap();
+    for (kind, value) in gate_vocab_rows() {
+        conn.execute(
+            "INSERT INTO vocab VALUES (?1,?2)",
+            params![kind.to_string(), value],
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn nl_search_import_copies_and_validates_vocab() {
+    let library = library();
+    let known = known_assets(&library).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("inbox.sqlite");
+    let output = temp.path().join("vectors.sqlite");
+    let conn = source(&input, false);
+    import_cache(&known, &input, &output).unwrap();
+    assert!(load_vocabulary(&read_only(&output).unwrap())
+        .unwrap()
+        .is_none());
+    // Same digest, but the cache has no vocab table (imported before vocab support): import again.
+    add_gate_vocab(&conn);
+    import_cache(&known, &input, &output).unwrap();
+    let vocab = load_vocabulary(&read_only(&output).unwrap())
+        .unwrap()
+        .unwrap();
+    assert!(vocab.pairs.contains("안경") && vocab.words.contains("girl"));
+    assert_eq!(
+        vocab.pairs.len() + vocab.words.len(),
+        gate_vocab_rows().len()
+    );
+    let old = std::fs::read(&output).unwrap();
+    for defect in ["kind", "empty"] {
+        // Keep the digest unchanged: validation must still reject a corrupted vocab table.
+        conn.execute_batch("DROP TABLE vocab; CREATE TABLE vocab(kind TEXT,value TEXT);")
+            .unwrap();
+        conn.execute(
+            "INSERT INTO vocab VALUES (?1,?2)",
+            if defect == "kind" {
+                ["x", "안경"]
+            } else {
+                ["k", ""]
+            },
+        )
+        .unwrap();
+        assert!(import_cache(&known, &input, &output).is_err(), "{defect}");
+        assert_eq!(old, std::fs::read(&output).unwrap(), "{defect}");
+    }
+}
+
+#[test]
+fn nl_search_gate_no_match_force_name_route_and_missing_vocab() {
+    use crate::library::characters::tests::Fixture;
+    let fixture = Fixture::new();
+    let target = fixture.ready("A");
+    fixture
+        .library
+        .connection()
+        .unwrap()
+        .execute(
+            "INSERT INTO auto_tag_vocabulary(tag,category) VALUES ('maid_headdress','general')",
+            [],
+        )
+        .unwrap();
+    let input = fixture.temp.path().join("inbox.sqlite");
+    let source = source(&input, false);
+    source.execute("DELETE FROM siglip", []).unwrap();
+    for i in 0..7 {
+        source
+            .execute(
+                "INSERT INTO siglip VALUES (?1,?2)",
+                params![format!("asset-{i}"), blob(SIGLIP_DIM, 0x3c00)],
+            )
+            .unwrap();
+    }
+    let search = |query: &str, force: bool| {
+        fixture
+            .library
+            .search_description(query, None, false, force, || {
+                Ok(Embedding {
+                    translation: "x".into(),
+                    siglip: decode(&blob(SIGLIP_DIM, 0x3c00), SIGLIP_DIM).unwrap(),
+                    qwen: None,
+                })
+            })
+            .unwrap()
+    };
+    let gated = |query: &str| {
+        fixture
+            .library
+            .search_description(query, None, false, false, || {
+                panic!("a gated query must not invoke the worker: {query}")
+            })
+            .unwrap()
+    };
+    // An older index without vocab: the gate is off.
+    fixture.library.import_nl_search(&input).unwrap();
+    assert!(fixture
+        .library
+        .nl_search_index(false)
+        .unwrap()
+        .vocab
+        .is_none());
+    assert_eq!(search("ㅁㄴㅇㄹ", false).route, "cosine");
+    add_gate_vocab(&source);
+    source
+        .execute(
+            "UPDATE meta SET value='vocab' WHERE key='content_digest'",
+            [],
+        )
+        .unwrap();
+    fixture.library.import_nl_search(&input).unwrap();
+    let index = fixture.library.nl_search_index(false).unwrap();
+    // Auto-tag words come from the library DB on index load.
+    assert!(index.vocab.as_ref().unwrap().tag_words.contains("maid"));
+    for query in GATE_NO_MATCH {
+        let result = gated(query);
+        assert_eq!(result.route, "noMatch", "{query}");
+        assert!(result.asset_ids.is_empty() && result.translation.is_none() && !result.precise);
+    }
+    assert_eq!(
+        serde_json::to_value(gated("1234 5678")).unwrap(),
+        serde_json::json!({"route":"noMatch","assetIds":[],"precise":false})
+    );
+    let forced = search("ㅁㄴㅇㄹ", true);
+    assert_eq!(forced.route, "cosine");
+    assert_eq!(forced.asset_ids.len(), 7);
+    assert_eq!(forced.translation.as_deref(), Some("x"));
+    for query in ["노을 지는 하늘", "maid"] {
+        assert_eq!(search(query, false).route, "cosine", "{query}");
+    }
+    // Name routes are never gated, even when the name has no countable units.
+    assert_eq!(gated(&target.display_name).route, "tags");
 }

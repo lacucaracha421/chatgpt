@@ -412,7 +412,7 @@ export type AssetView =
   | { kind: "collections"; typeFilter: CollectionType; showcase: boolean; releaseProvider?: CollectionUpdateProvider; releaseCalendar?: boolean }
   | { kind: "collection"; collectionId: string; tmdbSearch?: { query: string; mediaType: "movie" | "tv" } }
   /** 내용 검색 result state in the 에셋 area: images ranked by how well they match the typed description. */
-  | { kind: "description_search"; query: string };
+  | { kind: "description_search"; query: string; /** Rank even when the "no match" gate says the words are unknown. */ force?: true };
 
 export type ArtistHubSection = "main" | "others" | "singles" | "hidden" | "merge" | "source-fill" | "reposter";
 
@@ -1356,7 +1356,8 @@ export interface DescriptionSearchStatus {
 }
 
 export interface DescriptionSearchResult {
-  route: "tags" | "mixed" | "mixedFallback" | "cosine";
+  /** `noMatch`: the library's captions do not know the words; no ids, and no ranking ran. */
+  route: "tags" | "mixed" | "mixedFallback" | "cosine" | "noMatch";
   translation?: string;
   assetIds: string[];
   precise: boolean;
@@ -1365,7 +1366,8 @@ export interface DescriptionSearchResult {
 export interface LibraryGateway {
   descriptionSearchStatus?: () => Promise<DescriptionSearchStatus>;
   prewarmDescriptionSearch?: () => Promise<void>;
-  searchByDescription?: (query: string, limit?: number) => Promise<DescriptionSearchResult>;
+  /** `force` skips the "no match" gate and ranks the nearest images anyway. */
+  searchByDescription?: (query: string, limit?: number, force?: boolean) => Promise<DescriptionSearchResult>;
   /** Game/movie release calendar and wishlist (desktop only). */
   releaseCalendar?: ReleaseCalendarGateway;
   /** 작가 hub (desktop only; PC-authoritative). */

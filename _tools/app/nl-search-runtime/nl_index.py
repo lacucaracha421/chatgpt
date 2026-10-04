@@ -10,7 +10,7 @@ import sqlite3
 import time
 import uuid
 
-from runtime_support import (MODELS, PREPROCESS, QwenEncoder, SiglipImages,
+from runtime_support import (MODELS, PREPROCESS, QwenEncoder, SiglipImages, caption_vocabulary,
                              normalize, packed_image, read_only, source_path)
 import numpy as np
 
@@ -99,8 +99,11 @@ def seed_from_trial(store, rows, trial_out, models):
     return counts
 
 
-def export_inbox(store, rows, inbox, models):
-    """Digest includes actual published bytes and settings, excludes the timestamp."""
+def export_inbox(store, rows, inbox, models, vocab=None):
+    """Digest includes actual published bytes, settings and vocabulary, excludes the timestamp.
+
+    `vocab` is the caption vocabulary of (kind, value) units; None or empty exports no vocab table.
+    """
     models = sorted(set(models))
     inbox = Path(inbox)
     inbox.mkdir(parents=True, exist_ok=True)
@@ -123,6 +126,9 @@ def export_inbox(store, rows, inbox, models):
             'siglip_model': MODELS['siglip'] if 'siglip' in models else '', 'siglip_dim': '1152',
             'qwen_model': MODELS['qwen8b'] if 'qwen8b' in models else '',
             'qwen_dim': str(dims.get('qwen8b', 0)), 'asset_count': str(len(published))}
+    vocab = sorted(vocab) if vocab else []
+    if vocab:
+        meta['vocab_count'] = str(len(vocab))
     digest = hashlib.sha256(json.dumps(meta, sort_keys=True).encode())
     for model in models:
         digest.update(model.encode())
@@ -130,6 +136,10 @@ def export_inbox(store, rows, inbox, models):
             digest.update(json.dumps(asset_id).encode())
             digest.update(len(blob).to_bytes(4, 'little'))
             digest.update(blob)
+    if vocab:
+        digest.update(b'vocab')
+        for kind, value in vocab:
+            digest.update(json.dumps([kind, value]).encode())
     signature = digest.hexdigest()
     target = inbox / 'nl-search-latest.sqlite'
     if target.exists():
@@ -137,8 +147,8 @@ def export_inbox(store, rows, inbox, models):
         try:
             old = c.execute("SELECT value FROM meta WHERE key='content_digest'").fetchone()
             if old and old[0] == signature:
-                return {'changed': False, 'asset_count': len(published), 'bytes': target.stat().st_size,
-                        'digest': signature}
+                return {'changed': False, 'asset_count': len(published), 'vocab_count': len(vocab),
+                        'bytes': target.stat().st_size, 'digest': signature}
         finally:
             c.close()
     temp = inbox / (target.name + '.' + uuid.uuid4().hex + '.tmp')
@@ -152,6 +162,10 @@ def export_inbox(store, rows, inbox, models):
                 for model, values in tables.items():
                     c.execute(f'CREATE TABLE {model}(asset_id TEXT PRIMARY KEY, vector BLOB NOT NULL)')
                     c.executemany(f'INSERT INTO {model} VALUES (?,?)', values)
+                if vocab:
+                    c.execute('CREATE TABLE vocab(kind TEXT NOT NULL, value TEXT NOT NULL, '
+                              'PRIMARY KEY(kind,value)) WITHOUT ROWID')
+                    c.executemany('INSERT INTO vocab VALUES (?,?)', vocab)
         finally:
             c.close()
         with temp.open('r+b') as stream:
@@ -160,8 +174,8 @@ def export_inbox(store, rows, inbox, models):
     finally:
         if temp.exists():
             temp.unlink()
-    return {'changed': True, 'asset_count': len(published), 'bytes': target.stat().st_size,
-            'digest': signature}
+    return {'changed': True, 'asset_count': len(published), 'vocab_count': len(vocab),
+            'bytes': target.stat().st_size, 'digest': signature}
 
 
 def run_model(store, model, selected, library, verify_seed=False):
@@ -252,7 +266,11 @@ def main(argv=None):
         for model in models:
             report['models'][model] = run_model(store, model, selected, args.library,
                                                  verify_seed=bool(args.seed_from_trial))
-        report['export'] = export_inbox(store, rows, args.inbox, models)
+        # Optional captions (<state>/captions.jsonl) feed the "no match" gate vocabulary.
+        vocab = caption_vocabulary(args.state / 'captions.jsonl')
+        report['export'] = export_inbox(store, rows, args.inbox, models, vocab)
+        print(f'VOCAB {len(vocab) if vocab else 0} units'
+              + ('' if vocab is not None else ' (no captions.jsonl; gate off)'), flush=True)
         (args.state / 'last-run.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
         print(json.dumps(report, ensure_ascii=False), flush=True)
     finally:

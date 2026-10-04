@@ -117,6 +117,7 @@ pub(crate) fn prewarm_description_search(
 pub(crate) async fn search_by_description(
     query: String,
     limit: Option<u32>,
+    force: Option<bool>,
     app: AppHandle,
     state: State<'_, AppState>,
     worker: State<'_, Manager>,
@@ -126,9 +127,13 @@ pub(crate) async fn search_by_description(
     tauri::async_runtime::spawn_blocking(move || {
         let config = available_config(&library, config(&app), worker.status())?;
         library
-            .search_description(&query, limit, config.precise, || {
-                worker.embed(&config, &query)
-            })
+            .search_description(
+                &query,
+                limit,
+                config.precise,
+                force.unwrap_or(false),
+                || worker.embed(&config, &query),
+            )
             .map_err(CommandError::from)
     })
     .await

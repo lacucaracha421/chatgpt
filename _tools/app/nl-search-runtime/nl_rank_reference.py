@@ -9,11 +9,34 @@ for key in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'NUMEX
     os.environ[key] = '1'
 import numpy as np
 
+from runtime_support import caption_vocabulary, tag_words, text_units
+
+GATE = 0.6  # Minimum share of known query units for the cosine route ("no match" gate).
+
 
 def connect_ro(path):
     c = sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)
     c.execute('PRAGMA query_only=ON')
     return c
+
+
+def coverage(query, vocab, words):
+    """(known, total) query units. `vocab` holds (kind, value) units; `words` holds auto-tag words.
+
+    A 'k' unit is known when it is in the vocabulary; a 'w' unit when it is in the vocabulary or the
+    auto-tag words. Repeated units count each time.
+    """
+    units = text_units(query)
+    known = sum(1 for kind, value in units if (kind, value) in vocab or (kind == 'w' and value in words))
+    return known, len(units)
+
+
+def gate_passes(query, vocab, words):
+    """True when the cosine route may run: no vocabulary (gate off), or coverage >= GATE."""
+    if not vocab:
+        return True
+    known, total = coverage(query, vocab, words)
+    return total > 0 and known / total >= GATE
 
 
 class Ranker:
@@ -41,6 +64,10 @@ class Ranker:
             for asset, tag, score in c.execute('SELECT asset_id,tag,score FROM asset_auto_tags'):
                 if asset in self.corpus and tag in needed:
                     self.scores.setdefault(tag, {})[asset] = float(score)
+            has_vocabulary = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                                       "AND name='auto_tag_vocabulary'").fetchone()
+            self.tag_words = tag_words(r[0] for r in c.execute('SELECT tag FROM auto_tag_vocabulary')
+                                       ) if has_vocabulary else set()
         finally:
             c.close()
         c = connect_ro(inbox)
@@ -51,6 +78,9 @@ class Ranker:
             rows = [(asset, np.frombuffer(blob, dtype='<f2').astype(np.float32))
                     for asset, blob in c.execute('SELECT asset_id,vector FROM siglip ORDER BY asset_id')
                     if asset in self.corpus]
+            # Older exports have no vocab table: the gate is off.
+            self.vocab = {(kind, value) for kind, value in c.execute('SELECT kind,value FROM vocab')} if c.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vocab'").fetchone() else set()
         finally:
             c.close()
         self.ids = [asset for asset, _ in rows]
@@ -65,7 +95,7 @@ class Ranker:
             raise ValueError('Zero image vector')
         self.matrix /= np.maximum(norms, 1e-12)
 
-    def rank(self, query, response=None, top=200):
+    def rank(self, query, response=None, top=200, force=False):
         if top < 0:
             raise ValueError('top must be nonnegative')
         tokens = query.split()  # Exact whitespace tokens; no particles/substrings/fuzzy matches.
@@ -89,6 +119,10 @@ class Ranker:
                          key=lambda asset: (-scores[asset], asset))[:top]
         if hits and not other:
             return {'route':'tags', 'asset_ids':tag_ids}
+        if not hits and not force and not gate_passes(query, self.vocab, self.tag_words):
+            # RULE 0: a query whose words the library's captions do not know answers "no match"
+            # without embedding; `force` ranks it anyway.
+            return {'route':'no_match', 'asset_ids':[]}
         allowed = None
         if hits:
             # RULE 3: untested in the research trial. Keep this branch isolated:
@@ -131,14 +165,31 @@ def check_equivalence(inbox, library_db, trial, responses):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--inbox', type=Path, required=True, help='Exported SQLite file')
-    p.add_argument('--db', type=Path, required=True, help='Read-only library DB')
+    p.add_argument('--inbox', type=Path, help='Exported SQLite file')
+    p.add_argument('--db', type=Path, help='Read-only library DB')
     p.add_argument('--query')
     p.add_argument('--response', type=Path, help='Worker embed response JSON file')
     p.add_argument('--top', type=int, default=200)
     p.add_argument('--check-trial', type=Path, help='Trial root; requires --responses')
     p.add_argument('--responses', type=Path, help='Dictionary of live responses by query id')
+    p.add_argument('--force', action='store_true', help='Bypass the "no match" gate')
+    p.add_argument('--gate-queries', type=Path, help='queries.json: report gate coverage per query; '
+                   'requires --captions')
+    p.add_argument('--captions', type=Path, help='captions.jsonl that builds the gate vocabulary')
     args = p.parse_args()
+    if args.gate_queries:
+        if not args.captions:
+            p.error('--gate-queries requires --captions')
+        vocab = caption_vocabulary(args.captions) or set()
+        result = {'vocab_count': len(vocab), 'queries': []}
+        for query in json.loads(args.gate_queries.read_text(encoding='utf-8-sig')):
+            known, total = coverage(query['ko'], vocab, set())
+            result['queries'].append({'id': query['id'], 'ko': query['ko'], 'known': known, 'total': total,
+                                      'pass': gate_passes(query['ko'], vocab, set())})
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    if not args.inbox or not args.db:
+        p.error('--inbox and --db are required')
     if args.check_trial:
         if not args.responses:
             p.error('--check-trial requires --responses')
@@ -148,7 +199,7 @@ def main():
         if args.query is None:
             p.error('--query is required')
         response = json.loads(args.response.read_text(encoding='utf-8')) if args.response else None
-        result = Ranker(args.inbox, args.db).rank(args.query, response, args.top)
+        result = Ranker(args.inbox, args.db).rank(args.query, response, args.top, args.force)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return int(bool(result.get('mismatches')))
 

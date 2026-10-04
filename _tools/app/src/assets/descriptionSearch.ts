@@ -25,14 +25,23 @@ export function descriptionSearchKey(query: string) {
   return query.trim();
 }
 
-/** The finished answer for a query, if the palette (or an earlier result state) already has it. */
-export function cachedDescriptionSearch(search: Search, query: string): DescriptionSearchResult | undefined {
-  return caches.get(search)?.get(descriptionSearchKey(query))?.result;
+/** A forced answer (the "no match" gate skipped) is a different answer from the gated one for the same text. */
+function cacheKey(query: string, force: boolean) {
+  return `${force ? "force" : "gated"}:${descriptionSearchKey(query)}`;
 }
 
-/** Rank-ordered ids for a query. Reuses a finished or in-flight request for the same text; failures are not cached. */
-export function searchDescription(search: Search, query: string): Promise<DescriptionSearchResult> {
-  const key = descriptionSearchKey(query);
+/** The finished answer for a query, if the palette (or an earlier result state) already has it. */
+export function cachedDescriptionSearch(search: Search, query: string, force = false): DescriptionSearchResult | undefined {
+  return caches.get(search)?.get(cacheKey(query, force))?.result;
+}
+
+/**
+ * Rank-ordered ids for a query. Reuses a finished or in-flight request for the same text and force; failures are not cached.
+ * `force` skips the "no match" gate (route `noMatch`) and ranks the nearest images anyway; the palette never forces.
+ */
+export function searchDescription(search: Search, query: string, force = false): Promise<DescriptionSearchResult> {
+  const text = descriptionSearchKey(query);
+  const key = cacheKey(query, force);
   let cache = caches.get(search);
   if (!cache) caches.set(search, cache = new Map());
   const existing = cache.get(key);
@@ -41,7 +50,7 @@ export function searchDescription(search: Search, query: string): Promise<Descri
     cache.set(key, existing);
     return existing.promise;
   }
-  const entry: CacheEntry = { promise: search(key, DESCRIPTION_SEARCH_LIMIT) };
+  const entry: CacheEntry = { promise: force ? search(text, DESCRIPTION_SEARCH_LIMIT, true) : search(text, DESCRIPTION_SEARCH_LIMIT) };
   entry.promise.then(result => { entry.result = result; }, () => { if (cache.get(key) === entry) cache.delete(key); });
   cache.set(key, entry);
   while (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);

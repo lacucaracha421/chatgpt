@@ -825,7 +825,12 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onPointerDragMove={movePointerDrag}
                     onPointerDragEnd={finishPointerDrag}
                     onPointerDragCancel={cancelPointerDrag}
-                    onExitDescriptionSearch={() => { if (!navigateBack()) navigateView({ kind: "classification", classificationId: null }); }}
+                    onExitDescriptionSearch={() => {
+                      // 검색 해제 on forced results leaves the search instead of going back to its "no match" state.
+                      const history = viewHistoryRef.current, previous = history[history.length - 1];
+                      if (view.kind === "description_search" && view.force && previous?.kind === "description_search" && previous.query === view.query && !previous.force) history.pop();
+                      if (!navigateBack()) navigateView({ kind: "classification", classificationId: null });
+                    }}
                   />
                   </CharacterFolderContent>
                 )}

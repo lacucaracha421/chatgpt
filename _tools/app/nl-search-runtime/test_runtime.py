@@ -14,6 +14,18 @@ from unittest.mock import patch
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
+# Fixture captions and auto-tags for the "no match" gate. Built so the examples below behave as with
+# the 2026-10-05 trial captions; the Rust tests (library/nl_search_tests.rs) use the same texts.
+GATE_CAPTIONS = [
+    '은발에 안경을 쓴 여자가 파란 머리 포니테일 소녀와 서 있다. 셔츠에는 girl with 문구.',
+    '해가 지는 하늘 아래, 비가 오는 도시 거리.',
+    '아무도 없는 방에서 드라마를 보며 가나 초콜릿을 먹고, 신발을 신고 있다.',
+]
+GATE_TAGS = ['maid_headdress', 'glasses', 'rating:g', 'looking_at_viewer']
+GATE_PASS = ['은발에 안경 쓴 여자', '파란 머리 트윈테일', '노을 지는 하늘', '비 오는 밤 도시 거리', 'maid',
+             'girl with glasses']
+GATE_NO_MATCH = ['ㅁㄴㅇㄹ', 'ㅋㅋㅋㅋㅋ', '아무말 대잔치', '가나다라마바사', '세금 신고 마감일', 'asdfqwer',
+                 'zxcv bnm', '1234 5678']
 
 
 class RuntimeTests(unittest.TestCase):
@@ -135,6 +147,97 @@ class RuntimeTests(unittest.TestCase):
                           [('a','reze',0.35),('b','reze',0.349)])
         ranker = self.rank.Ranker(self.inbox / 'nl-search-latest.sqlite', self.db)
         self.assertEqual(ranker.rank('레제 웃는', response)['asset_ids'], ['a'])
+
+    def write_captions(self, texts=GATE_CAPTIONS):
+        path = self.root / 'state' / 'captions.jsonl'
+        path.write_text(''.join(json.dumps({'id': f'id-{i}', 'text': text, 'secs': 1.0}, ensure_ascii=False) + '\n'
+                                for i, text in enumerate(texts)) + '\n', encoding='utf-8')
+        return path
+
+    def test_tokeniser_units(self):
+        from runtime_support import tag_words, text_units
+        self.assertEqual(text_units('파란 머리 트윈테일'),
+                         [('k', '파란'), ('k', '머리'), ('k', '트윈'), ('k', '윈테'), ('k', '테일')])
+        self.assertEqual(text_units('노을 지는 하늘'), [('k', '노을'), ('k', '지는'), ('k', '하늘')])
+        self.assertEqual(text_units('비 오는 밤'), [('k', '오는')])  # one-character tokens count nothing
+        self.assertEqual(text_units('ㅋㅋㅋ'), [('k', 'ㅋㅋ'), ('k', 'ㅋㅋ')])  # jamo are Hangul; repeats count
+        self.assertEqual(text_units('Girl, WITH glasses!'), [('w', 'girl'), ('w', 'with'), ('w', 'glasses')])
+        self.assertEqual(text_units('1234 5678 ab x1y2 \u00e9t\u00e9'), [])  # digits, short or mixed words
+        self.assertEqual(text_units('SD캐릭터 3월'), [('k', 'sd'), ('k', 'd캐'), ('k', '캐릭'), ('k', '릭터'),
+                                                   ('k', '3월')])
+        self.assertEqual(text_units('메이드복(maid)'), [('k', '메이'), ('k', '이드'), ('k', '드복'), ('w', 'maid')])
+        self.assertEqual(tag_words(['Maid_headdress', 'rating:g', 'looking_at_viewer', 'hat (object)', '1girl']),
+                         {'maid', 'headdress', 'rating', 'looking', 'viewer', 'hat', 'object', '1girl'})
+
+    def test_gate_examples_with_fixture_vocabulary(self):
+        from runtime_support import caption_vocabulary, tag_words
+        vocab = caption_vocabulary(self.write_captions())
+        words = tag_words(GATE_TAGS)
+        for query in GATE_PASS:
+            self.assertTrue(self.rank.gate_passes(query, vocab, words), query)
+        for query in GATE_NO_MATCH:
+            self.assertFalse(self.rank.gate_passes(query, vocab, words), query)
+        self.assertEqual(self.rank.coverage('파란 머리 트윈테일', vocab, words), (3, 5))
+        self.assertEqual(self.rank.coverage('노을 지는 하늘', vocab, words), (2, 3))
+        self.assertEqual(self.rank.coverage('1234 5678', vocab, words), (0, 0))
+        self.assertEqual(self.rank.coverage('maid', vocab, set()), (0, 1))  # known only as a tag word
+        # No vocabulary: the gate is off.
+        self.assertTrue(self.rank.gate_passes('ㅁㄴㅇㄹ', set(), words))
+        self.assertIsNone(caption_vocabulary(self.root / 'state' / 'missing.jsonl'))
+
+    def test_export_with_and_without_captions_vocabulary(self):
+        from runtime_support import caption_vocabulary
+        first = self.export()
+        path = self.inbox / 'nl-search-latest.sqlite'
+        with closing(sqlite3.connect(path)) as c:
+            self.assertFalse(c.execute("SELECT name FROM sqlite_master WHERE name='vocab'").fetchall())
+            self.assertNotIn('vocab_count', dict(c.execute('SELECT key,value FROM meta')))
+        self.assertEqual(first['vocab_count'], 0)
+        vocab = caption_vocabulary(self.write_captions())
+        second = self.index.export_inbox(self.store, self.rows, self.inbox, ['siglip'], vocab)
+        self.assertTrue(second['changed'])
+        self.assertNotEqual(first['digest'], second['digest'])
+        self.assertEqual(second['vocab_count'], len(vocab))
+        with closing(sqlite3.connect(path)) as c:
+            meta = dict(c.execute('SELECT key,value FROM meta'))
+            self.assertEqual(meta['vocab_count'], str(len(vocab)))
+            self.assertEqual(set(c.execute('SELECT kind,value FROM vocab')), vocab)
+            self.assertEqual(c.execute("SELECT sql FROM sqlite_master WHERE name='vocab'").fetchone()[0],
+                             'CREATE TABLE vocab(kind TEXT NOT NULL, value TEXT NOT NULL, '
+                             'PRIMARY KEY(kind,value)) WITHOUT ROWID')
+        self.assertFalse(self.index.export_inbox(self.store, self.rows, self.inbox, ['siglip'], set(vocab))['changed'])
+        vocab.add(('k', '노을'))
+        self.assertTrue(self.index.export_inbox(self.store, self.rows, self.inbox, ['siglip'], vocab)['changed'])
+        # Captions gone (or empty): the table goes and the digest returns to the vocabulary-free one.
+        self.assertEqual(self.index.export_inbox(self.store, self.rows, self.inbox, ['siglip'], None)['digest'],
+                         first['digest'])
+        self.assertEqual(self.index.export_inbox(self.store, self.rows, self.inbox, ['siglip'], set())['digest'],
+                         first['digest'])
+
+    def test_rank_gate_no_match_force_name_route_and_missing_vocab(self):
+        from runtime_support import caption_vocabulary
+        self.export()
+        inbox = self.inbox / 'nl-search-latest.sqlite'
+        response = {'ok': True, 'siglip': self.vector([0, 1]).tolist()}
+        ranker = self.rank.Ranker(inbox, self.db)
+        # Older export without vocab: the gate is off.
+        self.assertEqual(ranker.rank('ㅁㄴㅇㄹ', response)['route'], 'siglip')
+        self.index.export_inbox(self.store, self.rows, self.inbox, ['siglip'],
+                                caption_vocabulary(self.write_captions()))
+        with closing(sqlite3.connect(self.db)) as c, c:
+            c.execute('CREATE TABLE auto_tag_vocabulary(tag TEXT PRIMARY KEY, category TEXT)')
+            c.executemany('INSERT INTO auto_tag_vocabulary VALUES (?,?)', [(tag, 'general') for tag in GATE_TAGS])
+        ranker = self.rank.Ranker(inbox, self.db)
+        for query in GATE_NO_MATCH:
+            # The worker response is not needed: no embedding happens.
+            self.assertEqual(ranker.rank(query), {'route': 'no_match', 'asset_ids': []}, query)
+        self.assertEqual(ranker.rank('ㅁㄴㅇㄹ', response, force=True), {'route': 'siglip', 'asset_ids': ['b', 'a', 'c']})
+        for query in GATE_PASS:
+            self.assertEqual(ranker.rank(query, response)['route'], 'siglip', query)
+        # Name routes are never gated.
+        self.assertEqual(ranker.rank('레제'), {'route': 'tags', 'asset_ids': ['a', 'b']})
+        self.assertEqual(ranker.rank('레제 ㅁㄴㅇㄹ', response)['route'], 'mixed')
+        self.assertEqual(ranker.rank('없는 ㅁㄴㅇㄹ')['route'], 'mixed_fallback')
 
     def test_invalid_vectors_rejected_without_partial_batch(self):
         with self.assertRaises(ValueError):

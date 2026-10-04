@@ -142,6 +142,19 @@ describe("이미지 내용 palette group", () => {
     expect(screen.getByRole("option", { name: /눈 내리는 폴더/ })).toBeInTheDocument();
   });
 
+  it("shows a no match answer as one muted line in the strip area and never forces the search", async () => {
+    vi.useFakeTimers();
+    const search = vi.fn(async (): Promise<DescriptionSearchResult> => ({ route: "noMatch", assetIds: [], precise: false }));
+    const { input } = setup({ search });
+    await flush();
+    type(input, "ㅁㄴㅇㄹ");
+    await pause(400);
+    const group = screen.getByRole("group", { name: "이미지 내용" });
+    expect(group.querySelector(".command-palette__strip-status")).toHaveTextContent("일치하는 이미지가 없습니다.");
+    expect(thumbs()).toEqual([]);
+    expect(search).toHaveBeenCalledExactlyOnceWith("ㅁㄴㅇㄹ", DESCRIPTION_SEARCH_LIMIT);
+  });
+
   it("opens the result state on Enter with the typed query and does not record it as recent", async () => {
     const { input, open, recentKey } = setup();
     await flush();
