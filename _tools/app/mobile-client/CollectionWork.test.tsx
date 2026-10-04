@@ -5,12 +5,85 @@ import {afterEach, expect, it, vi} from 'vitest';
 import {CaseWork, MangaWork, sharedVolume} from './CollectionWork';
 import type {CollectionDetail} from './collectionModel';
 
-const artwork = vi.hoisted(() => ({urls: {} as Record<string, string>}));
-vi.mock('./collectionArtwork', () => ({useArtworkSet: (_item: unknown, requests: Record<string, {id?: string | null}>) => useMemo(() => ({ready: true, urls: Object.fromEntries(Object.entries(requests).map(([key, request]) => [key, request.id ? artwork.urls[request.id] : null]))}), [JSON.stringify(requests), JSON.stringify(artwork.urls)])}));
+const artwork = vi.hoisted(() => ({urls: {} as Record<string, string>, sources: [] as string[]}));
+vi.mock('./collectionArtwork', () => ({usePortraitUrl: () => ({url: null, failed: false}), useArtworkSet: (item: {id: string}, requests: Record<string, {id?: string | null}>) => {
+  if (requests.front?.id === 'portrait') artwork.sources.push(item.id);
+  return useMemo(() => ({ready: true, urls: Object.fromEntries(Object.entries(requests).map(([key, request]) => [key, request.id ? artwork.urls[request.id] : null]))}), [JSON.stringify(requests), JSON.stringify(artwork.urls)]);
+}}));
 afterEach(() => {cleanup(); vi.restoreAllMocks();});
 const volumes = [1, 2].map(n => sharedVolume({id: `v${n}`, volumeNumber: n, editionIndex: 0, displayLabel: `${n}권`, coverArtworkId: `c${n}`}, '2026-10-02'));
 const manga: CollectionDetail = {id: 'manga', name: '만화', type: 'manga', showcase: false, volumes, artworks: []};
 const props = {item: manga, revision: 'r1', active: true, privacy: false, volumes, owned: 1, latestKorean: 2, onEnlarge: vi.fn(), info: null};
+
+it('prints published back fields and screenshot thumbnails, preserving real back art', () => {
+  artwork.urls = {front: '/front', hero: '/hero', shot: '/shot', extra: '/extra', back: '/back'};
+  const item: CollectionDetail = {...manga, type: 'game', selectedWorkArtworkId: 'front', selectedHeroArtworkId: 'hero', publisher: 'Publisher', developer: 'Developer', overview: 'Story',
+    artworks: [{id: 'hero', kind: 'screenshot', selected: true}, {id: 'shot', kind: 'screenshot', selected: false}, {id: 'extra', kind: 'artwork', selected: false}]};
+  const options = {item, revision: 'r1', active: true, privacy: false, position: 1, total: 1, score: () => null, onStep: vi.fn(), info: () => null};
+  const {container, unmount} = render(<CaseWork {...options}/>);
+  expect(container.querySelector('.case-back-copy')).toHaveTextContent('Story');
+  expect(container.querySelector<HTMLElement>('.case-back-hero')!.style.backgroundImage).toContain('/hero');
+  expect([...container.querySelectorAll('.case-back-shots img')].map(img => img.getAttribute('src'))).toEqual(['/hero', '/shot']);
+  expect(container.querySelector('.case-back-facts')).toHaveTextContent('개발Developer배급Publisher');
+  expect(container.querySelector('.case-back-facts')).not.toHaveTextContent('발매');
+  unmount();
+  const real = render(<CaseWork {...options} item={{...item, type: 'av', selectedHeroArtworkId: null, artworks: [{id: 'back', kind: 'back', selected: true}]}}/>);
+  expect(real.container.querySelector('.k-back .cv')).toHaveAttribute('src', '/back');
+  expect(real.container.querySelector('.case-back')).toBeNull();
+});
+
+it('omits unpublished back fields and uses the front when the tablet has no hero', () => {
+  artwork.urls = {front: '/front'};
+  const item: CollectionDetail = {...manga, type: 'movie', selectedWorkArtworkId: 'front'};
+  const {container} = render(<CaseWork item={item} revision="r1" active privacy={false} position={1} total={1} score={() => null} onStep={vi.fn()} info={() => null}/>);
+  expect(container.querySelector('.case-back-hero')).toHaveClass('is-fallback');
+  expect(container.querySelector<HTMLElement>('.case-back-hero')!.style.backgroundImage).toContain('/front');
+  expect(container.querySelector('.case-back-copy, .case-back-facts, .case-back-shots')).toBeNull();
+});
+
+it('prints the shared manual using queued tablet status, rating and platform', () => {
+  artwork.urls = {hero: '/hero'};
+  const item: CollectionDetail = {...manga, id: 'game', type: 'game', name: 'Game manual', selectedHeroArtworkId: 'hero', developer: 'Developer', publisher: 'Publisher', status: 'unplayed', ownedPlatform: 'PC'};
+  const {container, rerender} = render(<CaseWork item={item} revision="r1" active privacy={false} position={1} total={1} score={() => 3.5} record={() => [['상태', '하는 중'], ['기기', 'PS5']]} onStep={vi.fn()} info={() => null}/>);
+  const manual = container.querySelector('.case-manual')!;
+  expect(manual).toHaveTextContent('Game manual');
+  expect(manual).toHaveTextContent('PS5');
+  expect(manual.querySelector('.is-filled')).toHaveAttribute('data-status', 'playing');
+  expect(manual.querySelector('.case-score')).toHaveAttribute('aria-label', '별점 3.5');
+  expect(manual.querySelector<HTMLElement>('.case-manual-cover')!.style.backgroundImage).toContain('/hero');
+  rerender(<CaseWork item={item} revision="r1" active privacy={false} position={1} total={1} score={() => null} record={() => []} onStep={vi.fn()} info={() => null}/>);
+  expect(container.querySelector('.case-manual .case-writing-line')).toBeInTheDocument();
+  expect(container.querySelector('.case-manual .is-filled')).toBeNull();
+});
+
+it('renders AV rim, booklet and stored performer crops together, then masks them in privacy mode', () => {
+  artwork.urls = {portrait: '/portrait-crop'};
+  artwork.sources = [];
+  const item: CollectionDetail = {...manga, id: 'av', type: 'av', status: 'watched', runtimeMinutes: 120, av: {productCode: 'ABC-123', maker: 'Maker', label: 'Label', genres: [], people: [
+    ...Array.from({length: 5}, (_, index) => ({id: `p${index}`, name: `Performer ${index}`, role: 'performer' as const, order: index, portraitCrop: {artworkId: 'portrait', x: .25, y: .1, w: .5, h: .5}})),
+    {id: 'director', name: 'Director', role: 'director', order: 0},
+  ]}};
+  const source: CollectionDetail = {...item, id: 'portrait-owner', artworkVersions: {portrait: {thumbnail: 'portrait-digest'}}};
+  const options = {item, portraitSources: [source, item], revision: 'r1', active: true, privacy: false, position: 1, total: 1, score: () => 4, onStep: vi.fn(), info: () => null};
+  const {container, rerender} = render(<CaseWork {...options}/>);
+  expect(screen.getByRole('article', {name: 'AV 작품 화면'})).not.toHaveAttribute('inert');
+  expect(container.querySelector('textPath')).toHaveTextContent('ABC-123 · Maker · Label');
+  expect(container.querySelector('.case-av-book')).toHaveTextContent('수록120분');
+  expect(container.querySelector('.case-av-record .is-filled')).toHaveAttribute('data-status', 'watched');
+  expect(container.querySelectorAll('.case-pola')).toHaveLength(3);
+  expect(container.querySelector('.case-pola-more')).toHaveTextContent('+3');
+  expect(container.querySelector('.case-director')).toHaveTextContent('감독 · Director');
+  expect(container.querySelector('.k-floor .note')).toBeNull();
+  const portrait = container.querySelector<HTMLElement>('.case-pola .av-portrait')!;
+  expect(portrait.style.backgroundImage).toContain('/portrait-crop');
+  expect(portrait.style.backgroundSize).toBe('200% 200%');
+  expect(portrait.style.backgroundPosition).toBe('50% 20%');
+  expect(artwork.sources.length).toBeGreaterThan(0);
+  expect(artwork.sources.every(id => id === 'portrait-owner')).toBe(true);
+  rerender(<CaseWork {...options} privacy/>);
+  expect(container.querySelector('textPath, .case-av-book, .case-pola, .case-director')).toBeNull();
+  expect(container.querySelector('.k-inner .case-mask')).toBeInTheDocument();
+});
 
 it('enlarges the tapped spine while a different volume is displayed',()=>{
   artwork.urls={c1:'/one',c2:'/two'};

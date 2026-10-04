@@ -84,7 +84,9 @@ function LightCaseFrame({ data, selected, ratio, ready, revealed, children }: { 
     const timer = setTimeout(() => setSettling(false), 420);
     return () => clearTimeout(timer);
   }, [settling]);
-  return <span className={`collection-light-case${data.platform === "book" ? " collection-light-case--book" : ""}`} data-ready={ready} data-revealed={revealed} aria-busy={!revealed} data-front={selected || undefined} data-settling={settling || undefined} style={{ "--case-ratio": ratio, "--plastic": CASE_PLASTIC[data.platform], "--gloss": selected ? "50%" : "84%", ...(data.platform === "book" ? { "--spine-title-cells": Math.max(1, Array.from(data.title ?? "").length), "--spine-author-cells": Math.max(1, Array.from(data.author ?? "").length) } : {}) } as CSSProperties}>
+  // Face loading is local to this case; a neutral case is already usable page content.
+  // Do not mark it aria-busy: AreaSwitch uses that signal for unfinished page data.
+  return <span className={`collection-light-case${data.platform === "book" ? " collection-light-case--book" : ""}`} data-ready={ready} data-revealed={revealed} data-front={selected || undefined} data-settling={settling || undefined} style={{ "--case-ratio": ratio, "--plastic": CASE_PLASTIC[data.platform], "--gloss": selected ? "50%" : "84%", ...(data.platform === "book" ? { "--spine-title-cells": Math.max(1, Array.from(data.title ?? "").length), "--spine-author-cells": Math.max(1, Array.from(data.author ?? "").length) } : {}) } as CSSProperties}>
     <span className="cs-box" onTransitionEnd={event => { if (event.target === event.currentTarget && event.propertyName === "transform") setSettling(false); }}>{children}<span className="cs-top" /></span>
   </span>;
 }

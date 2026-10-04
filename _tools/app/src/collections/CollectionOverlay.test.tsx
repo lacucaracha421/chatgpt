@@ -659,7 +659,9 @@ describe("CollectionOverlay game detail flow", () => {
     renderOverlay({}, undefined, undefined, gameCollection);
     expect(await screen.findByRole("article", { name: "게임 작품 화면" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Astral Chain 앞면" })).toHaveAttribute("src", "http://lakomics.localhost/work-artwork/game-cover");
-    expect(screen.queryByText(gameCollection.overview!)).not.toBeInTheDocument();
+    // The overview is printed only on the generated case back, never as screen text.
+    const printed = screen.queryAllByText(gameCollection.overview!);
+    expect(printed.every(node => node.closest(".case-back"))).toBe(true);
   });
 
   it("renders the local game while its provider request is pending", async () => {

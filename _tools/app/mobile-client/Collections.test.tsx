@@ -653,8 +653,8 @@ it('shows personal and provider metadata, hides manga imported descriptions, and
  render(<Collections active paused={false} backRef={{current:null}}/>);fireEvent.click(await screen.findByText(item.name));await screen.findByText('첫 회');expect(screen.getAllByText('제작사 이름').length).toBeGreaterThan(0);expect(screen.getByText('2020-01-01 · 24분')).toBeTruthy();
  // One season needs no season picker, and its name is not repeated as a second heading.
  expect(screen.queryByRole('group',{name:'시즌'})).toBeNull();expect(screen.getByText('시즌 1개')).toBeTruthy();
- const toggle=screen.getByRole('button',{name:'더 보기'});expect(screen.getByText('한국어 줄거리').classList.contains('is-clamped')).toBe(true);
- fireEvent.click(toggle);expect(screen.getByText('한국어 줄거리').classList.contains('is-clamped')).toBe(false);
+ const toggle=screen.getByRole('button',{name:'더 보기'});expect(screen.getByText('한국어 줄거리', {selector: '.collection-overview'}).classList.contains('is-clamped')).toBe(true);
+ fireEvent.click(toggle);expect(screen.getByText('한국어 줄거리', {selector: '.collection-overview'}).classList.contains('is-clamped')).toBe(false);
 });
 
 describe('film details',()=>{
@@ -1076,8 +1076,11 @@ describe('shelf view',()=>{
     const record=await screen.findByRole('region',{name:'내 기록'});
     expect(within(record).getByText('상태').nextElementSibling?.textContent).toBe('하는 중');
     expect(within(record).getByText('기기').nextElementSibling?.textContent).toBe('Switch 2');
-    // The case's 내 기록 slip reads 상태, 별점, 기기 as on the PC.
-    expect([...document.querySelectorAll('.slip dt')].map(node=>node.textContent)).toEqual(['상태','별점','기기']);
+    // The booklet shares the PC's status, score and owned platform.
+    expect([...document.querySelectorAll('.case-manual-form dt')].map(node=>node.textContent)).toEqual(['상태','별점','기기']);
+    expect(document.querySelector('.case-manual .case-status-box.is-filled')?.getAttribute('data-status')).toBe('playing');
+    expect(document.querySelector('.case-manual-form')?.textContent).toContain('Switch 2');
+    expect(document.querySelector('.case-manual .case-score')).not.toBeNull();
   });
   it('leaves 상태 and 기기 out when the PC did not publish them',async()=>{
     render(<Collections active paused={false} backRef={{current:null}}/>);
@@ -1087,7 +1090,9 @@ describe('shelf view',()=>{
     fireEvent.click(tile);fireEvent.click(tile);
     const record=await screen.findByRole('region',{name:'내 기록'});
     expect(within(record).queryByText('상태')).toBeNull();expect(within(record).queryByText('기기')).toBeNull();
-    expect([...document.querySelectorAll('.slip dt')].map(node=>node.textContent)).toEqual(['별점']);
+    expect([...document.querySelectorAll('.case-manual-form dt')].map(node=>node.textContent)).toEqual(['상태','별점','기기']);
+    expect(document.querySelector('.case-manual .case-status-box.is-filled')).toBeNull();
+    expect(document.querySelector('.case-manual .case-writing-line')?.getAttribute('aria-label')).toBe('미입력');
   });
   it('changes 배치 and 한 줄에 N개 from the 보기 sheet and keeps them for the type',async()=>{
     render(<Collections active paused={false} backRef={{current:null}}/>);

@@ -4,12 +4,14 @@ import { ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisHorizontalIco
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CollectionSummary, WorkArtworkSummary, CollectionWorkRecord, CollectionRecordEdit, TmdbConnection } from "../../library/types";
 import type { AvCoverSet, AvDetails, AvRelated } from "../avTypes";
-import { workArtworkUrl } from "../../assets/mediaUrl";
+import { workArtworkThumbnailUrl, workArtworkUrl } from "../../assets/mediaUrl";
 import { Button } from "../../shared/ui/Button";
 import { Menu, type MenuItem } from "../../shared/ui/Menu";
 import { StableImage } from "../../shared/ui/StableImage";
 import { CaseInside, CollectionCase, type CaseData } from "../case/CollectionCase";
+import { AvPortrait } from "../av/AvPortrait";
 import { WorkInfo, insideFacts, insideRecord } from "./WorkInfo";
+import { backFacts } from "./workFacts";
 import { MangaStage, MangaBookcase, editionName, type MangaWorkData } from "./MangaBookcase";
 import { defaultRecord } from "./WorkRecord";
 import { volumeLabel } from "../collectionFormat";
@@ -86,7 +88,7 @@ function WorkSurface({ data, privacy, info, reset, actions, onReady }: { data: C
     observer?.observe(node);
     return () => observer?.disconnect();
   }, [info, data.collection.id]);
-  const caseData = { ...data.case, privacy };
+  const caseData = { ...data.case, privacy, discLabel: [data.av?.productCode, data.av?.maker, data.av?.label].filter(Boolean).join(" · ") };
   const heroId = heroArtwork(data.collection);
   const heroSrc = !privacy && heroId ? workArtworkUrl(heroId) : null;
   const activeVolume = data.manga?.volumes.find(volume => volume.id === data.manga?.activeVolumeId);
@@ -120,8 +122,14 @@ function WorkSurface({ data, privacy, info, reset, actions, onReady }: { data: C
       <WorkZoomObject>
       <div style={isObject ? undefined : { position: "absolute", inset: 0, visibility: "hidden", pointerEvents: "none" }} className="work-case-slot" inert={!isObject} aria-hidden={!isObject}>
         <CollectionCase data={caseData} large stageBox={stageBox} open={mode === "open"} onOpenChange={open => pick(open ? "open" : "case")} frontReset={reset}
-          inside={<CaseInside record={insideRecord(data.collection, record)} facts={insideFacts(data.collection, data.av)} />}
-          note={data.av?.people.length ? <><b>출연 · 감독</b><p className="work-names-note">{data.av.people.map(person => person.displayName).join(" · ")}</p></> : undefined} onReady={() => ready("object")} />
+          backContent={{ hero: heroSrc, overview: data.collection.overview,
+            screenshots: data.artworks.filter(art => art.kind === "screenshot").slice(0, 3).map(art => workArtworkThumbnailUrl(art.id)),
+            facts: backFacts(data.collection, data.av),
+            publisher: data.collection.type === "av" ? data.av?.maker : data.collection.type === "movie" ? data.collection.productionCompany : data.collection.publisher,
+            platformName: data.collection.type === "game" ? record.ownedPlatform || data.collection.platforms?.split("·")[0]?.trim() : null }}
+          inside={<CaseInside title={data.collection.name} type={data.collection.type} hero={heroSrc} front={caseData.front} privacy={privacy} record={insideRecord(data.collection, record)} facts={insideFacts(data.collection, data.av)}
+            people={data.av?.people.map(person => ({ ...person, name: person.displayName, portrait: person.portrait ? <AvPortrait portrait={person.portrait} name={person.displayName} size="performer" /> : null }))} />}
+          onReady={() => ready("object")} />
       </div>
       {data.collection.type === "av" && <div className="work-flat-slot" style={mode === "flat" ? undefined : { visibility: "hidden", pointerEvents: "none" }} aria-hidden={mode !== "flat"} inert={mode !== "flat"}><FlatJacket key={data.collection.id} data={caseData} stageBox={stageBox} onReady={() => { flatReady.current = true; if (desired.current === "flat") setMode("flat"); }} /></div>}
       </WorkZoomObject>

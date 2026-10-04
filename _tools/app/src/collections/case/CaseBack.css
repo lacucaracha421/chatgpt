@@ -1,0 +1,20 @@
+.collection-case .case-back { --back-band: #343c48; position: absolute; inset: 0; display: flex; flex-direction: column; background: #121a24; color: #e8eef5; font-family: var(--font-ui); }
+.collection-case .case-back--sw2 { --back-band: #e6482d; }
+.collection-case .case-back--sw { --back-band: #da1820; }
+.collection-case .case-back--ps5 { --back-band: #2a4fb0; }
+.collection-case .case-back--av { --back-band: #171719; }
+.collection-case .case-back-hero { position: relative; flex: none; height: 30%; background: #121a24 40% 50% / cover no-repeat; }
+.collection-case .case-back-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 55%, #121a24); }
+.collection-case .case-back-hero.is-fallback::after { background: linear-gradient(180deg, rgba(18,26,36,.4), #121a24); }
+.collection-case .case-back-hero b { position: absolute; left: 7%; right: 7%; bottom: 8%; z-index: 1; font-size: calc(12 * var(--u)); font-weight: 800; line-height: 1.25; letter-spacing: .03em; text-shadow: 0 calc(1 * var(--u)) calc(4 * var(--u)) rgba(0,0,0,.6); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
+.collection-case .case-back-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.collection-case .case-back-copy { flex: 0 1 auto; min-height: 0; margin: 4% 7% 0; font-size: calc(8 * var(--u)); line-height: 1.55; color: rgba(232,238,245,.82); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 7; overflow: hidden; overflow-wrap: anywhere; }
+.collection-case .case-back-shots { flex: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4%; margin: 5% 7% 0; }
+.collection-case .case-back-shots img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; box-shadow: 0 0 0 calc(1 * var(--u)) rgba(255,255,255,.12); }
+.collection-case .case-back-facts { flex: none; margin: 5% 7% 0; font-size: calc(7.5 * var(--u)); line-height: 1.4; color: rgba(232,238,245,.75); }
+.collection-case .case-back-facts > div { display: grid; grid-template-columns: calc(24 * var(--u)) minmax(0, 1fr); gap: calc(8 * var(--u)); margin-top: calc(2 * var(--u)); }
+.collection-case .case-back-facts dt { color: rgba(232,238,245,.5); white-space: nowrap; }
+.collection-case .case-back-foot { flex: none; height: 13%; display: flex; align-items: center; justify-content: space-between; gap: 6%; padding: 0 7%; background: var(--back-band); }
+.collection-case .case-back-pub, .collection-case .case-back-plat { min-width: 0; font-size: calc(8 * var(--u)); line-height: 1.2; color: #fff; overflow-wrap: anywhere; }
+.collection-case .case-back-pub { font-weight: 700; }
+.collection-case .case-back-plat { font-weight: 800; letter-spacing: .08em; text-align: right; }

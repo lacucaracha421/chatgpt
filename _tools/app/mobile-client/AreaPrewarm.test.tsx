@@ -90,13 +90,18 @@ it.each(areas)('starts the warmed %s dissolve after exactly two frames, with no 
   await frame();expect(dissolves()).toHaveLength(1);expect(first(area)).toHaveLength(1);
   expect(mocks.native.mock.calls.some(([op])=>op===(area==='catalog'?'catalogImage':'collectionArtwork'))).toBe(true);
 });
-it('prewarms the default Collection shelf without loading either cover face',async()=>{
+it.each(['pending ticket','pending decode'])('prewarms the default Collection shelf without loading either cover face, then opens with a %s',async pending=>{
   localStorage.removeItem('lakomics.mobile.collectionView.game.v1');
+  if(pending==='pending ticket')mocks.native.mockImplementation(()=>new Promise(()=>{}));
   const shell=render(<Shell/>);await warm();
   expect(document.querySelector('.collection-card')).not.toBeNull();expect(mocks.native).not.toHaveBeenCalled();
   expect(document.querySelector('img')).toBeNull();
   fireEvent.click(shell.getByText('collections'));await flush();await frame();await frame();
   expect(dissolves()).toHaveLength(1);expect(first('collections')).toHaveLength(1);
+  // No timers or image load events have run since the tap: the first page, not faces, admits the area.
+  expect(document.querySelector('.motion-stage')?.getAttribute('data-motion-shown')).toBe('collections');
+  expect(mocks.native.mock.calls.some(([op])=>op==='collectionArtwork')).toBe(true);
+  expect(document.querySelector('.collection-light-case')?.getAttribute('data-revealed')).toBe('false');
 });
 it.each(areas)('keeps Home until the in-flight %s first page is ready when tapped before warming finishes',async area=>{
   let resolve!:(page:unknown)=>void;

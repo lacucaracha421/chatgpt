@@ -7,15 +7,16 @@ import type {StageBox} from '../src/collections/case/fitCaseStage';
 import {FlatJacket, HeroBand, WorkStrip, heroArtwork, workMeta} from '../src/collections/work/WorkStage';
 import {MangaBookcase, MangaStage, type MangaWorkData} from '../src/collections/work/MangaBookcase';
 import {MangaBook} from '../src/collections/work/MangaBook';
-import {insideFacts} from '../src/collections/work/workFacts';
-import {RecordStars} from '../src/collections/work/WorkRecord';
+import {backFacts, insideFacts} from '../src/collections/work/workFacts';
+import {CaseScore} from '../src/collections/case/CaseInside';
+import {PersonPortrait} from './AvCollections';
 import type {Fact} from '../src/collections/case/CollectionCase';
 import {selectedSpine} from '../src/collections/launchBoxSpines';
 import {StableImage} from '../src/shared/ui/StableImage';
 import type {CollectionVolume as SharedVolume} from '../src/library/types';
 import {Button} from './ui';
 import {useArtworkSet, type ArtworkRequest} from './collectionArtwork';
-import {collectionCover, coverFocuses, type CollectionDetail, type CollectionVolume} from './collectionModel';
+import {collectionCover, coverFocuses, type CollectionDetail, type CollectionSummary, type CollectionVolume} from './collectionModel';
 import {workCaseData} from './CollectionShelf';
 import {workRecordFacts} from './CollectionPersonal';
 import './collectionShelf.css';
@@ -24,7 +25,7 @@ import './collectionShelf.css';
 const OBJECT_KINDS = ['cover', 'spine', 'back', 'volume_cover'];
 const SWIPE_PX = 64;
 
-/** The case's 내 기록 slip in the PC's order (상태, 별점, 기기); 상태 and 기기 only when recorded. */
+/** The booklet uses the visible record, including queued tablet edits. */
 function caseRecord(rows: [string, string][], stars: ReactNode): Fact[] {
   return [...rows.filter(([label]) => label === '상태'), ['별점', stars], ...rows.filter(([label]) => label === '기기')];
 }
@@ -92,6 +93,8 @@ type MangaShown = {item: CollectionDetail; manga: MangaWorkData; book: string | 
 type Shown = {item: CollectionDetail; revision: string; urls: Record<string, string>; position: number; total: number};
 type CaseWorkProps = {
   item: CollectionDetail; revision: string; active: boolean; privacy: boolean; position: number; total: number;
+  /** Published works resolve portrait crops owned by a different work, as in AvCast. */
+  portraitSources?: CollectionSummary[];
   /** My rating as shown, including queued edits. */
   score(item: CollectionDetail): number | null;
   /** Status and device as shown, including queued edits; published values by default. */
@@ -100,7 +103,7 @@ type CaseWorkProps = {
 };
 /**
  * The work screen for games, films and AV, in portrait: the hero band across the top of the
- * stage, the shared case (drag turns it, a tap opens it to the 내 기록 slip and 작품 정보 card),
+ * stage, the shared case (drag turns it, a tap opens it to the printed booklet),
  * the strip of views and artworks, then the information as a section below the stage (`info`).
  * Switching works keeps the shown work, inert, until the next one's actual faces, hero, backdrop and strip are decoded.
  */
@@ -110,7 +113,7 @@ export function CaseWork(props: CaseWorkProps) {
   const faces = useArtworkSet(item, privacy ? {} : {
     front: {id: item.type === 'av' ? artworkOf(item, 'cover') ?? item.selectedWorkArtworkId : collectionCover(item), original: true, asset: true},
     spine: {id: selectedSpine(item.artworks)?.id, original: true},
-    back: {id: item.type === 'av' ? artworkOf(item, 'back') : null, original: true},
+    back: {id: artworkOf(item, 'back'), original: true},
     hero: heroRequest(item),
     ...Object.fromEntries(strip.map(art => [`thumb:${art.id}`, {id: art.id, original: false}])),
   }, revision, active);
@@ -141,7 +144,7 @@ export function CaseWork(props: CaseWorkProps) {
   </article></WorkZoomProvider>;
 }
 
-function CaseWorkSurface({shown, active, privacy, score, record = workRecordFacts, onStep, info, reset, onReset, onReady}: CaseWorkProps & {shown: Shown; reset: number; onReset(): void; onReady(): void}) {
+function CaseWorkSurface({shown, active, privacy, score, record = workRecordFacts, portraitSources, onStep, info, reset, onReset, onReady}: CaseWorkProps & {shown: Shown; reset: number; onReset(): void; onReady(): void}) {
   const [stage, stageBox] = useStageBox(true);
   const [mode, setMode] = useState('case'), [picked, setPicked] = useState('case');
   const flatReady = useRef(false);
@@ -164,7 +167,7 @@ function CaseWorkSurface({shown, active, privacy, score, record = workRecordFact
     setPicked(next);
     if (next === 'case' || next === 'open' || privacy || (next === 'flat' && flatReady.current)) setMode(next);
   }
-  const data = {...workCaseData(work, shown.urls, privacy), title: work.av?.titleJa?.trim() || work.name};
+  const data = {...workCaseData(work, shown.urls, privacy), title: work.av?.titleJa?.trim() || work.name, discLabel: [work.av?.productCode, work.av?.maker, work.av?.label].filter(Boolean).join(' · ')};
   const isObject = mode === 'case' || mode === 'open';
   const hidden: CSSProperties = {visibility: 'hidden', pointerEvents: 'none'};
   const people = work.av?.people ?? [];
@@ -176,8 +179,14 @@ function CaseWorkSurface({shown, active, privacy, score, record = workRecordFact
         <WorkZoomObject>
         <div className="work-case-slot" style={isObject ? undefined : {...hidden, position: 'absolute', inset: 0}} inert={!isObject || undefined} aria-hidden={!isObject}>
           <CollectionCase key={work.id} data={data} large stageBox={stageBox} open={mode === 'open'} onOpenChange={open => pick(open ? 'open' : 'case')} frontReset={reset}
-            inside={<CaseInside record={caseRecord(record(work), <RecordStars score={score(work)}/>)} facts={insideFacts(work, work.av ?? null)}/>}
-            note={people.length ? <><b>출연 · 감독</b><p className="work-names-note">{people.map(person => person.name).join(' · ')}</p></> : undefined} onReady={() => ready('object')}/>
+            backContent={{hero: shown.urls.hero, overview: work.overview,
+              screenshots: work.artworks.filter(art => art.kind === 'screenshot').slice(0, 3).map(art => shown.urls[`thumb:${art.id}`] ?? (art.id === heroArtwork(work) ? shown.urls.hero : null)).filter((url): url is string => Boolean(url)),
+              facts: backFacts(work, work.av ?? null),
+              publisher: work.type === 'av' ? work.av?.maker : work.type === 'movie' ? work.productionCompany : work.publisher,
+              platformName: work.type === 'game' ? record(work).find(([label]) => label === '기기')?.[1] || work.platforms?.split('·')[0]?.trim() : null}}
+            inside={<CaseInside title={work.name} type={work.type} hero={shown.urls.hero} front={data.front} privacy={privacy} record={caseRecord(record(work), <CaseScore score={score(work)}/>)} facts={insideFacts(work, work.av ?? null)}
+              people={people.map(person => ({...person, portrait: person.portraitCrop || person.portraitImage ? <PersonPortrait person={person} current={work} items={portraitSources ?? [work]} revision={shown.revision} size="large"/> : null}))}/>}
+            onReady={() => ready('object')}/>
         </div>
         {work.type === 'av' && <div className="work-flat-slot" style={mode === 'flat' ? undefined : hidden} aria-hidden={mode !== 'flat'} inert={mode !== 'flat' || undefined}>
           <FlatJacket key={work.id} data={data} stageBox={stageBox} onReady={() => { flatReady.current = true; if (picked === 'flat') setMode('flat'); }}/>

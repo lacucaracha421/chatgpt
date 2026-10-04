@@ -1,7 +1,9 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { casePlatform, CollectionCase, type CaseData } from "./CollectionCase";
+import { CaseInside, casePlatform, CollectionCase, type CaseData } from "./CollectionCase";
 import { useState } from "react";
+import { readFileSync } from "node:fs";
+const caseStyles = readFileSync("src/collections/case/CollectionCase.css", "utf8");
 afterEach(cleanup);
 const data: CaseData = { title: "게임", front: "/front", platform: "sw2", publisher: "배급사", privacy: false };
 function Case({ value = data }: { value?: CaseData }) {
@@ -9,6 +11,119 @@ function Case({ value = data }: { value?: CaseData }) {
   return <CollectionCase data={value} open={open} onOpenChange={setOpen} />;
 }
 describe("CollectionCase", () => {
+  it("prints each AV rim on its own one-turn text path without waiting for portraits", () => {
+    const ready = vi.fn();
+    const av = { ...data, platform: "av" as const, front: null, discLabel: "ABC-123 · Maker · Label" };
+    const { container } = render(<>
+      <CollectionCase data={av} open onOpenChange={vi.fn()} onReady={ready} inside={<CaseInside title="AV" type="av" record={[]} facts={[]} people={[{ id: "person", name: "Performer", role: "performer", order: 0, portrait: <img src="/pending-portrait" alt="Performer portrait" /> }]} />}/>
+      <CollectionCase data={av} open onOpenChange={vi.fn()} />
+    </>);
+    const paths = [...container.querySelectorAll("textPath")];
+    expect(paths).toHaveLength(2);
+    expect(paths[0]).toHaveTextContent("ABC-123 · Maker · Label");
+    expect(Number(paths[0]!.getAttribute("textLength"))).toBeCloseTo(2 * Math.PI * 82);
+    expect(paths[0]!.getAttribute("href")).not.toBe(paths[1]!.getAttribute("href"));
+    expect(container.querySelector(".case-pola")).toBeInTheDocument();
+    expect(ready).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("img", { name: "Performer portrait" })).toBeNull();
+    fireEvent.error(screen.getByAltText("Performer portrait"));
+    expect(screen.getByAltText("Performer portrait")).not.toBeVisible();
+    expect(container.querySelector(".case-silhouette")).toBeVisible();
+    expect(ready).toHaveBeenCalledTimes(1);
+  });
+  it("removes AV rim text, booklet and portraits immediately in privacy mode", () => {
+    const av = { ...data, platform: "av" as const, front: null, discLabel: "SECRET-123 · Maker · Label" };
+    const inside = <CaseInside title="Secret" type="av" record={[]} facts={[["품번", "SECRET-123"]]} people={[{ id: "person", name: "Performer", role: "performer", order: 0, portrait: <img src="/portrait" alt="Performer portrait" /> }]} />;
+    const { container, rerender } = render(<CollectionCase data={av} open onOpenChange={vi.fn()} inside={inside} />);
+    expect(container.querySelector("textPath")).toBeInTheDocument();
+    rerender(<CollectionCase data={{ ...av, privacy: true }} open onOpenChange={vi.fn()} inside={inside} />);
+    expect(container.querySelector("textPath, .case-cast, .case-av-book, img")).toBeNull();
+    expect(container.querySelector(".k-inner .case-mask")).toBeInTheDocument();
+    expect(container).not.toHaveTextContent("SECRET-123");
+  });
+  it("builds both trays with outer walls, inner faces and rim lips", () => {
+    const { container } = render(<Case />);
+    for (const tray of ["base", "lid"]) {
+      for (const wall of ["top", "bottom", "outer"]) {
+        expect(container.querySelector(`.k-${tray}-wall.k-wall-${wall}`)).not.toBeNull();
+        expect(container.querySelector(`.k-${tray}-wall.k-wall-${wall}-in`)).not.toBeNull();
+        expect(container.querySelector(`.k-${tray}-lip.k-lip-${wall}`)).not.toBeNull();
+      }
+    }
+    expect(container.querySelector(".k-ridge")).not.toBeNull();
+    expect(container.querySelectorAll(".k-lid .k-lid-wall")).toHaveLength(6);
+  });
+  it("folds the lid a full 90 degrees relative to the spine", () => {
+    render(<Case />);
+    fireEvent.keyDown(screen.getByRole("group", { name: "케이스" }), { key: "Enter" });
+    expect(document.querySelector(".kase")).toHaveStyle({ "--open": "1" });
+    // jsdom cannot resolve CSS 3D matrices; keep the angle contract explicit.
+    expect(caseStyles).toMatch(/\.k-hinge > \.k-lid\s*\{[^}]*transform: rotateY\(calc\(90deg - var\(--open\) \* 90deg\)\)/);
+  });
+  it.each(["sw", "sw2", "ps5", "pc", "other", "film", "av"] as const)("uses the %s platform's media tray", platform => {
+    const { container } = render(<Case value={{ ...data, platform }} />);
+    const isCard = platform === "sw" || platform === "sw2";
+    expect(container.querySelectorAll(".cart-slot")).toHaveLength(isCard ? 1 : 0);
+    expect(container.querySelectorAll(".holder")).toHaveLength(isCard ? 0 : 1);
+    if (isCard) {
+      expect(container.querySelectorAll(".cart-slot .nub")).toHaveLength(2);
+      expect(container.querySelectorAll(".tray-rib")).toHaveLength(2);
+      expect(container.querySelector(".finger-notch")).not.toBeNull();
+      expect(screen.getByText("GAME CARD")).toBeInTheDocument();
+    } else {
+      expect(container.querySelectorAll(".holder .thumb")).toHaveLength(2);
+      expect(container.querySelector(".holder .hub")).not.toBeNull();
+      expect(screen.getByText("PUSH")).toBeInTheDocument();
+    }
+  });
+  it.each(["sw2", "av"] as const)("reuses the loaded front for the %s label without adding a readiness dependency", async platform => {
+    const ready = vi.fn();
+    const { container, rerender } = render(<CollectionCase data={{ ...data, platform }} open={false} onOpenChange={vi.fn()} onReady={ready} />);
+    const label = container.querySelector<HTMLElement>(".media-label")!;
+    expect(label.style.backgroundImage).toBe("");
+    await act(async () => fireEvent.load(screen.getByRole("img", { name: "게임 앞면" })));
+    expect(label.style.backgroundImage).toContain("/front");
+    expect(container.querySelectorAll("img")).toHaveLength(1);
+    expect(ready).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(screen.getByRole("group", { name: "케이스" }), { key: "ArrowRight" });
+    rerender(<CollectionCase data={{ ...data, platform }} open onOpenChange={vi.fn()} onReady={ready} />);
+    expect(ready).toHaveBeenCalledTimes(1);
+  });
+  it("keeps the supplied inside and note in the lid and base tray", () => {
+    const { container } = render(<CollectionCase data={data} open onOpenChange={vi.fn()} inside={<b>Record content</b>} note={<b>Note content</b>} />);
+    expect(container.querySelector(".k-lid .k-inner")).toHaveTextContent("Record content");
+    expect(container.querySelector(".k-floor .note")).toHaveTextContent("Note content");
+  });
+  it("settles a failed front once and leaves the interior label unprinted", () => {
+    const ready = vi.fn();
+    const { container } = render(<CollectionCase data={data} open onOpenChange={vi.fn()} onReady={ready} />);
+    fireEvent.error(screen.getByRole("img", { name: "게임 앞면" }));
+    expect(ready).toHaveBeenCalledTimes(1);
+    expect(container.querySelector<HTMLElement>(".media-label")!.style.backgroundImage).toBe("");
+    fireEvent.keyDown(screen.getByRole("group", { name: "케이스" }), { key: "ArrowLeft" });
+    expect(ready).toHaveBeenCalledTimes(1);
+  });
+  it("waits for a replacement front and announces each set of faces once", async () => {
+    const ready = vi.fn();
+    const { container, rerender } = render(<CollectionCase data={data} open onOpenChange={vi.fn()} onReady={ready} />);
+    await act(async () => fireEvent.load(screen.getByRole("img", { name: "게임 앞면" })));
+    expect(ready).toHaveBeenCalledTimes(1);
+    rerender(<CollectionCase data={{ ...data, front: "/next-front" }} open onOpenChange={vi.fn()} onReady={ready} />);
+    expect(container.querySelector<HTMLElement>(".media-label")!.style.backgroundImage).toBe("");
+    expect(ready).toHaveBeenCalledTimes(1);
+    await act(async () => fireEvent.load(screen.getByRole("img", { name: "게임 앞면" })));
+    expect(container.querySelector<HTMLElement>(".media-label")!.style.backgroundImage).toContain("/next-front");
+    expect(ready).toHaveBeenCalledTimes(2);
+    await act(async () => fireEvent.load(screen.getByRole("img", { name: "게임 앞면" })));
+    expect(ready).toHaveBeenCalledTimes(2);
+  });
+  it("settles privacy mode once without waiting for any artwork", () => {
+    const ready = vi.fn();
+    render(<CollectionCase data={{ ...data, privacy: true, back: "/back", spine: "/spine" }} open onOpenChange={vi.fn()} onReady={ready} />);
+    expect(ready).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(screen.getByRole("group", { name: "케이스" }), { key: "ArrowRight" });
+    expect(ready).toHaveBeenCalledTimes(1);
+  });
   it("uses an untouched real spine ahead of the platform template after decoding", async () => {
     const { container } = render(<Case value={{ ...data, spine: "/spine" }} />);
     await act(async () => fireEvent.load(container.querySelector<HTMLImageElement>('img[src="/spine"]')!));
@@ -18,8 +133,8 @@ describe("CollectionCase", () => {
   it.each(["sw2", "sw", "ps5"] as const)("draws the %s package blocks without invented logos", platform => {
     const { container } = render(<Case value={{ ...data, platform }} />);
     expect(container.querySelector(`[data-spine-template="${platform}"]`)).not.toBeNull();
-    expect(screen.getAllByText("게임")).toHaveLength(1);
-    expect(screen.getByText("배급사")).toBeInTheDocument();
+    expect(container.querySelector(".k-spine")).toHaveTextContent("게임");
+    expect(container.querySelector(".k-spine")).toHaveTextContent("배급사");
     expect(container.querySelector(".t-head img")).toBeNull();
   });
   it("derives the template from actual platform data", () => {
@@ -61,11 +176,17 @@ describe("CollectionCase", () => {
     fireEvent.load(front); fireEvent.load(document.querySelector<HTMLImageElement>('img[src="/spine"]')!); fireEvent.load(screen.getByRole("img", { name: "게임 뒷면" }));
     expect(ready).not.toHaveBeenCalled();
     await act(async () => resolve());
-    expect(ready).toHaveBeenCalled();
+    expect(ready).toHaveBeenCalledTimes(1);
     expect(front.closest(".collection-case")).toHaveStyle({ "--ratio": String(600 / 900) });
   });
-  it("masks all artwork in privacy mode", () => {
-    render(<Case value={{ ...data, privacy: true, spine: "/spine", back: "/back" }} />);
+  it.each(["sw2", "av"] as const)("masks all artwork including the %s media label in privacy mode", async platform => {
+    const { container, rerender } = render(<Case value={{ ...data, platform, spine: "/spine", back: "/back" }} />);
+    await act(async () => fireEvent.load(screen.getByRole("img", { name: "게임 앞면" })));
+    rerender(<Case value={{ ...data, platform, privacy: true, spine: "/spine", back: "/back" }} />);
     expect(screen.queryAllByRole("img")).toHaveLength(0);
+    for (const face of [".k-front", ".k-back", ".k-spine", ".media-label"]) {
+      expect(container.querySelector(`${face} .case-mask`)).not.toBeNull();
+    }
+    expect(container.querySelector<HTMLElement>(".media-label")!.style.backgroundImage).toBe("");
   });
 });

@@ -5,9 +5,14 @@
 .collection-case .floor-shadow { position: absolute; left: 50%; transform: translateX(-50%); border-radius: 50%; top: calc(50% + var(--ch) / 2 - 3px); height: 10px; width: calc(var(--cw) * 1.02); background: var(--case-contact); filter: blur(5px); box-shadow: 0 calc(var(--ch) * .03) calc(var(--ch) * .09) calc(var(--ch) * .035) var(--case-contact-spread); }
 .collection-case.is-open .floor-shadow { width: calc(var(--cw) * 2.05); }
 .collection-case .floor-shadow { transition: width 560ms var(--ease-standard); }
-.collection-case .kase { --ry: 32deg; --open: 0; --gloss: 50%; position: relative; width: var(--cw); height: var(--ch); transform-style: preserve-3d;
+.collection-case .kase { --u: calc(var(--ch) / 340); --ry: 32deg; --open: 0; --gloss: 50%; --d: calc(var(--cd) / 2); --t: 2px;
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+  position: relative; width: var(--cw); height: var(--ch); transform-style: preserve-3d;
   transform: rotateX(-5deg) rotateY(var(--ry)) translateX(calc(var(--open) * (var(--cw) + var(--cd)) * .5)); cursor: grab; touch-action: none; }
 .collection-case .kase:active { cursor: grabbing; }
+/* Turning the case by drag never selects its printed text or drags its images. */
+.collection-case .kase, .collection-light-case { -webkit-user-select: none; user-select: none; }
+.collection-case .kase img, .collection-light-case img { -webkit-user-drag: none; }
 .collection-case .k-hinge, .collection-case .k-lid { transition: transform 420ms var(--ease-standard); }
 /* Opening slides the case right as it unfolds; one eased move for the case, hinge and lid (user, 2026-10-01). A drag follows the pointer without easing. */
 .collection-case .kase { transition: transform 560ms var(--ease-standard); }
@@ -20,60 +25,75 @@
 .collection-case .kase > span, .collection-case .k-hinge > span, .collection-case .k-lid > span { position: absolute; display: block; backface-visibility: hidden; }
 /* The case opens like a real one: the spine folds flat on the back-left edge and the lid folds on the spine, so lid, spine and tray end up side by side. */
 .collection-case .kase > .k-hinge { backface-visibility: visible; left: 0; top: 0; width: var(--cd); height: 100%; transform-style: preserve-3d; transform-origin: 0 50%; transform: translateZ(calc(var(--cd) / -2)) rotateY(calc(-90deg - var(--open) * 90deg)); }
-.collection-case .k-hinge > .k-lid { backface-visibility: visible; left: 100%; top: 0; width: var(--cw); height: 100%; transform-style: preserve-3d; transform-origin: 0 50%; transform: rotateY(calc(90deg - var(--open) * 86deg)); }
+.collection-case .k-hinge > .k-lid { backface-visibility: visible; left: 100%; top: 0; width: var(--cw); height: 100%; transform-style: preserve-3d; transform-origin: 0 50%; transform: rotateY(calc(90deg - var(--open) * 90deg)); }
 /* plastic: a tint over a dark base so nothing shows through */
-.collection-case .k-front, .collection-case .k-back, .collection-case .k-spine, .collection-case .k-edge, .collection-case .k-cap { background: var(--case-material); }
+.collection-case .k-front, .collection-case .k-back, .collection-case .k-spine { background: var(--case-material); }
 .collection-case .k-front, .collection-case .k-inner { inset: 0; border-radius: var(--case-front-radius); }
 .collection-case .k-back { inset: 0; border-radius: 6px 3px 3px 6px; transform: rotateY(180deg) translateZ(calc(var(--cd) / 2)); }
-.collection-case .k-floor { inset: 3px; border-radius: 3px; transform: translateZ(calc(var(--cd) / -2 + 3px)); background: #111213; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05), inset 0 0 18px rgba(0, 0, 0, .8); }
-.collection-case .k-inner { transform: rotateY(180deg); background: #161719; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05); }
-.collection-case .k-edge { top: 0; bottom: 0; left: calc(50% - var(--cd) / 2); width: var(--cd); transform: rotateY(90deg) translateZ(calc(var(--cw) / 2)); }
+.collection-case .k-floor { inset: 0; border-radius: 3px; transform: translateZ(calc(var(--cd) / -2 + var(--t))); background-color: #111213; box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), inset 0 0 24px rgba(0,0,0,.85); }
+.collection-case .k-inner { border-radius: 3px; transform: translateZ(calc(var(--t) * -1)) rotateY(180deg); background-color: #161719; box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), inset 0 0 20px rgba(0,0,0,.6); }
 .collection-case .k-spine, .collection-case .k-spine-in { inset: 0; }
-.collection-case .k-spine-in { transform: rotateY(180deg); background: #161719; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05); }
-.collection-case .k-cap { left: 0; right: 0; top: calc(50% - var(--cd) / 2); height: var(--cd); }
-.collection-case .k-top { transform: rotateX(90deg) translateZ(calc(var(--ch) / 2)); }
-.collection-case .k-bottom { transform: rotateX(-90deg) translateZ(calc(var(--ch) / 2)); }
+.collection-case .k-spine-in { transform: rotateY(180deg); background-color: #161719; box-shadow: inset 2px 0 3px rgba(0,0,0,.6), inset -2px 0 3px rgba(0,0,0,.6); }
+.collection-case .k-floor, .collection-case .k-inner, .collection-case .k-spine-in { background-image: var(--grain), linear-gradient(160deg, rgba(255,255,255,.035), rgba(0,0,0,.18)), linear-gradient(var(--plastic), var(--plastic)); background-blend-mode: normal, normal, multiply; }
+.collection-case .k-spine-in::before, .collection-case .k-spine-in::after { content: ""; position: absolute; top: 2%; bottom: 2%; width: 2px; background: rgba(0,0,0,.55); box-shadow: 1px 0 0 rgba(255,255,255,.05); }
+.collection-case .k-spine-in::before { left: 22%; }
+.collection-case .k-spine-in::after { right: 22%; }
+/* Each tray has a half-depth wall with a separate inward face; the seam is z = 0.
+   Lid coordinates start at its front plate, so both sets of walls extend toward local -z. */
+.collection-case .k-wall, .collection-case .k-ridge { background: linear-gradient(var(--wall-shade), var(--wall-shade)), var(--case-material); background-blend-mode: multiply, normal; }
+.collection-case .k-wall-top, .collection-case .k-wall-top-in, .collection-case .k-wall-bottom, .collection-case .k-wall-bottom-in { left: 0; width: var(--cw); top: calc(50% - var(--d) / 2); height: var(--d); }
+.collection-case .k-wall-outer, .collection-case .k-wall-outer-in { top: 0; height: var(--ch); left: calc(50% - var(--d) / 2); width: var(--d); }
+.collection-case .k-wall-top { --wall-shade: #26282c; transform: translateZ(calc(var(--d) / -2)) rotateX(90deg) translateZ(calc(var(--ch) / 2)); }
+.collection-case .k-wall-top-in { --wall-shade: #0e0f11; transform: translateZ(calc(var(--d) / -2)) rotateX(-90deg) translateZ(calc(var(--ch) / -2 + var(--t))); }
+.collection-case .k-wall-bottom { --wall-shade: #141518; transform: translateZ(calc(var(--d) / -2)) rotateX(-90deg) translateZ(calc(var(--ch) / 2)); }
+.collection-case .k-wall-bottom-in { --wall-shade: #1a1c1f; transform: translateZ(calc(var(--d) / -2)) rotateX(90deg) translateZ(calc(var(--ch) / -2 + var(--t))); }
+.collection-case .k-wall-outer { --wall-shade: #1f2124; transform: translateZ(calc(var(--d) / -2)) rotateY(90deg) translateZ(calc(var(--cw) / 2)); }
+.collection-case .k-wall-outer-in { --wall-shade: #15171a; transform: translateZ(calc(var(--d) / -2)) rotateY(-90deg) translateZ(calc(var(--cw) / -2 + var(--t))); }
+.collection-case .k-lip { background: linear-gradient(rgba(255,255,255,.08), rgba(255,255,255,.08)), var(--case-material); }
+.collection-case .k-lip-top { left: 0; width: var(--cw); top: 0; height: var(--t); }
+.collection-case .k-lip-bottom { left: 0; width: var(--cw); bottom: 0; height: var(--t); }
+.collection-case .k-lip-outer { top: 0; height: var(--ch); right: 0; width: var(--t); }
+.collection-case .k-base-lip { transform: translateZ(0); }
+.collection-case .k-lid-lip { transform: translateZ(calc(var(--d) * -1)) rotateY(180deg); }
+.collection-case .k-ridge { --wall-shade: #1a1c1f; top: 0; height: var(--ch); width: calc(var(--d) / 2); left: calc(50% - var(--d) / 4); transform: translateZ(calc(var(--cd) / -2 + var(--d) / 4)) rotateY(90deg) translateZ(calc(var(--cw) / -2 + var(--t))); }
+.collection-case .tray-ledge { position: absolute; inset: 4px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.55), inset 0 0 0 2px rgba(255,255,255,.035); pointer-events: none; }
 /* the paper insert under the plastic */
 .collection-case .ins { position: absolute; inset: var(--case-rim) var(--case-rim) var(--case-rim) 0; overflow: hidden; border-radius: 0 2px 2px 0; display: block; background: var(--color-surface); }
 .collection-case .ins > .art, .ins > .cv, .ins > .scene { width: 100%; height: 100%; border-radius: 0; }
 .collection-case .k-spine .ins { inset: var(--case-rim) 0; border-radius: 0; }
 .collection-case .k-spine .ins > .art { position: absolute; left: 50%; top: 0; width: var(--cw); margin-left: calc(var(--cw) / -2); }
 .collection-case .k-back .ins { inset: var(--case-rim) 0 var(--case-rim) var(--case-rim); border-radius: 2px 0 0 2px; }
-/* gloss follows the turn; hinge and lip are moulded details */
-.collection-case .k-edge::after { content: ""; position: absolute; left: 25%; right: 25%; top: 42%; height: 16%; border-radius: 3px; background: rgba(255, 255, 255, .14); }
-/* inside: media in the tray, the personal record as a slip under the clips */
-.collection-case .holder { position: absolute; left: 50%; top: 50%; width: 84%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07); }
-.collection-case .disc { position: absolute; inset: 2%; border-radius: 50%;
-  background: radial-gradient(circle, #111213 0 7%, #d9dbdf 7% 9%, color-mix(in srgb, var(--color-accent) 55%, #9aa0a8) 9% 17%, rgba(255, 255, 255, 0) 17%),
-    conic-gradient(from 25deg, #c5c9cf, #f6f7f8 11%, #a3a9b1 24%, #eceef0 37%, #b4b9c1 50%, #f6f7f8 61%, #a3a9b1 74%, #e8eaec 87%, #c5c9cf);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, .6); }
-/* a Switch case keeps its game card at the bottom centre of the tray (user, 2026-09-30) */
-.collection-case .cart-slot { position: absolute; left: 39%; bottom: 7%; width: 22%; aspect-ratio: 21 / 31; border-radius: 3px; background: #0b0c0d; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07); }
-.collection-case .cart { position: absolute; inset: 5%; border-radius: 3px; background: linear-gradient(180deg, color-mix(in srgb, var(--color-accent) 70%, #333) 0 56%, #2b2c2f 56%); box-shadow: 0 1px 3px rgba(0, 0, 0, .6); }
-.collection-case .clip { position: absolute; left: 6%; width: 9%; height: 5%; border-radius: 2px; background: rgba(255, 255, 255, .1); z-index: 1; }
-.collection-case .slip { position: absolute; left: 11%; right: 9%; top: 12%; padding: var(--space-3); background: var(--color-accent); color: var(--color-on-accent); font-size: var(--type-meta); line-height: var(--line-meta); transform: rotate(-1.4deg); box-shadow: 0 2px 5px rgba(0, 0, 0, .5); border-radius: 1px; }
-.collection-case .slip b { display: block; font-size: var(--type-body); line-height: var(--line-ui); font-weight: 600; margin-bottom: var(--space-2); }
-.collection-case .slip dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-1) var(--space-3); }
-.collection-case .slip dt { opacity: .66; }
-.collection-case .slip .stars { color: var(--color-on-accent); }
-.collection-case .slip .stars svg.on { fill: var(--color-on-accent); stroke: var(--color-on-accent); }
-.collection-case .slip p { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid rgba(32, 38, 40, .25); }
+/* Media sits in the tray; the lid's printed booklet is styled in CaseInside.css. */
+.collection-case .tray-media { position: absolute; inset: 0; pointer-events: none; }
+.collection-case .tray-frame { position: absolute; inset: 9% 10%; border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 0 rgba(0,0,0,.5), 0 1px 0 rgba(255,255,255,.04), 0 -1px 0 rgba(0,0,0,.45); }
+.collection-case .tray-rib { position: absolute; left: 14%; right: 14%; height: 2px; border-radius: 1px; background: rgba(0,0,0,.35); box-shadow: 0 1px 0 rgba(255,255,255,.05); }
+.collection-case .tray-rib-one { top: 15%; }
+.collection-case .tray-rib-two { top: 17.5%; }
+.collection-case .tray-emboss { position: absolute; left: 0; right: 0; top: 40%; text-align: center; font: 800 calc(11 * var(--u))/1 var(--font-ui); letter-spacing: .32em; color: #121315; text-shadow: 0 1px 0 rgba(255,255,255,.07), 0 -1px 0 rgba(0,0,0,.6); }
+.collection-case .cart-slot { position: absolute; left: 36%; bottom: 8%; width: 28%; aspect-ratio: 21 / 31; border-radius: 4px; background: #08090a; box-shadow: inset 0 3px 4px rgba(0,0,0,.9), inset 0 -1px 0 rgba(255,255,255,.06), 0 1px 0 rgba(255,255,255,.05); }
+.collection-case .cart { position: absolute; left: 9%; right: 9%; top: 7%; bottom: 7%; border-radius: 3px; overflow: hidden; background: #e9e7e2; box-shadow: 0 1px 2px rgba(0,0,0,.7), inset 0 0 0 1px rgba(255,255,255,.4); }
+.collection-case .media-label { position: absolute; background-color: #2b2c2f; background-position: center 25%; background-size: cover; background-repeat: no-repeat; overflow: hidden; }
+.collection-case .cart .media-label { left: 8%; right: 8%; top: 8%; height: 52%; border-radius: 2px; }
+.collection-case .cart::after { content: ""; position: absolute; left: 12%; right: 12%; bottom: 7%; height: 9%; background: repeating-linear-gradient(90deg, #b9a66a 0 9%, transparent 9% 14%); opacity: .9; }
+.collection-case .nub { position: absolute; left: 50%; width: 22%; height: 5%; margin-left: -11%; border-radius: 2px; background: #2a2c30; box-shadow: 0 1px 1px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.12); }
+.collection-case .nub-top { top: -2%; }
+.collection-case .nub-bottom { bottom: -2%; }
+.collection-case .finger-notch { position: absolute; left: calc(64% - 2px); bottom: calc(8% + 18%); width: 7%; aspect-ratio: 1; border-radius: 50%; background: #08090a; box-shadow: inset 0 2px 3px rgba(0,0,0,.9), 0 1px 0 rgba(255,255,255,.05); }
+.collection-case .holder { position: absolute; left: 50%; top: 46%; width: 86%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; background: #0c0d0e; box-shadow: inset 0 3px 6px rgba(0,0,0,.9), inset 0 -1px 0 rgba(255,255,255,.06), 0 1px 0 rgba(255,255,255,.05); }
+.collection-case .thumb { position: absolute; top: 50%; width: 12%; height: 22%; margin-top: -11%; background: #08090a; box-shadow: inset 0 2px 3px rgba(0,0,0,.9); }
+.collection-case .thumb-left { left: -7%; border-radius: 40% 0 0 40%; }
+.collection-case .thumb-right { right: -7%; border-radius: 0 40% 40% 0; }
+.collection-case .disc { position: absolute; inset: 3%; border-radius: 50%; background: #c5c9cf; box-shadow: 0 2px 4px rgba(0,0,0,.7); }
+.collection-case .disc .media-label { inset: 0; border-radius: inherit; }
+.collection-case .disc::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: radial-gradient(circle, transparent 0 18%, #d9dbdf 18% 23%, transparent 23%); }
+.collection-case .hub { position: absolute; left: 50%; top: 50%; width: 27%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(circle, #2a2c30 0 34%, #111214 34% 38%, transparent 38%), repeating-conic-gradient(from 0deg, #26282c 0 20deg, #0f1012 20deg 24deg); box-shadow: 0 1px 2px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.1); }
+.collection-case .hub::after { content: ""; position: absolute; inset: 30%; border-radius: 50%; box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 1px 1px rgba(0,0,0,.7); }
+.collection-case .disc-note { position: absolute; left: 50%; bottom: 4%; transform: translateX(-50%); font: 800 calc(9 * var(--u))/1 var(--font-ui); letter-spacing: .3em; color: #121315; text-shadow: 0 1px 0 rgba(255,255,255,.07), 0 -1px 0 rgba(0,0,0,.6); white-space: nowrap; }
 .collection-case .cv { display: block; width: 100%; height: 100%; object-fit: fill; }
 .collection-case .case-mask { display: block; width: 100%; height: 100%; background: var(--color-surface); }
-.collection-case .clip-one { top: 20%; }
-.collection-case .clip-two { top: 60%; }
-.collection-case .slip { top: 7%; max-height: 36%; overflow: hidden; }
-.collection-case .slip dl, .collection-case .card2 dl { display: flex; flex-direction: column; gap: var(--space-1); }
-.collection-case .slip dl > div, .collection-case .card2 dl > div { display: grid; grid-template-columns: auto minmax(0,1fr); gap: var(--space-3); }
 .collection-case dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.collection-case .card2 { position: absolute; left: 9%; right: 11%; top: 47%; padding: var(--space-4); background: color-mix(in srgb, var(--color-accent) 85%, var(--color-on-accent)); color: var(--color-on-accent); font-size: var(--type-meta); line-height: var(--line-meta); transform: rotate(1.2deg); box-shadow: 0 2px 5px rgba(0,0,0,.5); border-radius: 1px; max-height: 48%; overflow: hidden; }
-.collection-case .card2 b { display: block; font-size: var(--type-body); line-height: var(--line-ui); font-weight: 600; margin-bottom: var(--space-2); }
-.collection-case .card2 dt { opacity: .66; }
 .collection-case .note { position: absolute; left: 7%; right: 7%; bottom: 4%; padding: var(--space-3); background: var(--color-accent); color: var(--color-on-accent); font-size: var(--type-meta); line-height: var(--line-meta); box-shadow: 0 2px 5px rgba(0,0,0,.5); border-radius: 1px; }
 .collection-case .note b { display: block; font-weight: 600; margin-bottom: var(--space-1); }
-.collection-case .holder { top: 42%; width: min(84%, calc(var(--ch) * .6)); }
-.collection-case--large .slip { font-size: var(--type-body); line-height: var(--line-ui); padding: var(--space-4); }
-.collection-case--large .slip b { font-size: var(--type-title); line-height: var(--line-title); }
 .collection-case .ins.bare { background: transparent; display: flex; align-items: center; justify-content: center; }
 .case-spine-art .spine-title { display: block; max-height: 92%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; writing-mode: vertical-rl; text-orientation: sideways; font-family: var(--font-spine); font-weight: 700; font-size: calc(var(--cd) * .5); line-height: 1; letter-spacing: .02em; color: rgba(255,255,255,.92); }
 .collection-case .ins.full { background: transparent; }
@@ -95,8 +115,6 @@
 .case-spine-art .sw2[data-nintendo] .t-foot { aspect-ratio: 96 / 198; padding: 0; background: url("./marks/switch2-nintendo.png") center / 100% 100% no-repeat; }
 .case-spine-art .sw2[data-nintendo] .t-pub { display: none; }
 
-/* Films have no printed back insert; the moulded plastic remains visible. */
-.collection-case--film .k-back .ins { background: transparent; }
 .collection-case .note { max-height: 20%; overflow: hidden; }
 .collection-case .work-names-note { margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 

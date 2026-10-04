@@ -378,10 +378,15 @@ describe('tablet AV collections',()=>{
     expect(screen.queryByLabelText('같은 배우의 다른 작품')).toBeNull();
     expect(screen.queryByLabelText('같은 시리즈')).toBeNull();
     expect(screen.queryByLabelText('같은 레이블')).toBeNull();
-    const cropped=await screen.findByLabelText('하야세 미오 사진');
+    // Label queries include aria-hidden descendants; inspect the interactive cast separately.
+    const cast=within(screen.getByRole('region',{name:'출연 · 감독'}));
+    const printedPortraits=document.querySelectorAll('.case-pola-photo');
+    expect(printedPortraits.length).toBeGreaterThan(0);
+    expect([...printedPortraits].every(node=>node.getAttribute('aria-hidden')==='true')).toBe(true);
+    const cropped=await cast.findByLabelText('하야세 미오 사진');
     expect(cropped.className).toContain('has-image');
     expect(cropped.getAttribute('style')).toContain('background-image');
-    const initials=screen.getByLabelText('아마노 린 사진');
+    const initials=cast.getByLabelText('아마노 린 사진');
     expect(initials.className).not.toContain('has-image');
     expect(initials.textContent).toContain('아');
   });

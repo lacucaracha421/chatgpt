@@ -102,7 +102,7 @@ it('keeps fields read-only without errors while the server lacks the capability'
 it('shows the memo for manga beside the overview and edits it with a counter',async()=>{
   item={...base,type:'movie',overview:'줄거리'};
   await openDetail();
-  expect(screen.getByText('줄거리')).toBeTruthy();
+  expect(screen.getByText('줄거리', {selector: '.collection-overview'})).toBeTruthy();
   expect(within(memoSection()).getByText('PC 메모')).toBeTruthy();
   fireEvent.click(within(memoSection()).getByRole('button',{name:'편집'}));
   const sheet=await screen.findByRole('dialog',{name:'내 메모'});
@@ -297,8 +297,8 @@ describe('work record (상태 · 기기)',()=>{
     observer.disconnect();
     expect(seen.every(label=>label.startsWith('상태 하는 중'))).toBe(true);
     expect(row(/^상태/)).toBe(button);
-    // The case's 내 기록 slip shows the same value.
-    expect([...document.querySelectorAll('.slip dd')].map(node=>node.textContent)).toContain('하는 중');
+    // The printed booklet fills the same status box.
+    expect(document.querySelector('.case-manual .case-status-box.is-filled')?.getAttribute('data-status')).toBe('playing');
     // 미입력 is a real choice and clears the record.
     fireEvent.click(button);
     fireEvent.click(within(await screen.findByRole('dialog',{name:'상태'})).getByRole('radio',{name:'미입력'}));

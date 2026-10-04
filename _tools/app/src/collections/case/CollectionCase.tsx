@@ -1,9 +1,11 @@
 import { useWorkImageReady } from "../work/useWorkImageReady";
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useWorkTurnBlocked } from "../work/WorkZoom";
 import "./CollectionCase.css";
 import "./CaseMaterials.css";
 import { fitCollectionCase, type StageBox } from "./fitCaseStage";
+import { CaseBack, type CaseBackContent } from "./CaseBack";
+export { CaseInside } from "./CaseInside";
 
 export type CasePlatform = "sw2" | "sw" | "ps5" | "pc" | "other" | "av" | "film" | "book";
 export function casePlatform(platforms: string | null, ownedPlatform?: string | null): CasePlatform {
@@ -22,7 +24,7 @@ export const CASE_PLASTIC: Record<CasePlatform, string> = {
   sw2: "rgba(206,44,54,.9)", sw: "rgba(214,222,230,.24)", ps5: "rgba(214,222,230,.24)",
   pc: "rgba(120,128,136,.38)", other: "rgba(120,128,136,.38)", av: "rgba(10,10,11,.94)", film: "rgba(28,30,34,.92)", book: "rgb(236,231,220)",
 };
-export type CaseData = { title: string; author?: string | null; coverFocus?: number | null; volumeNumber?: 1 | null; publisher?: string | null; platform: CasePlatform; front: string | null; spine?: string | null; back?: string | null; privacy: boolean };
+export type CaseData = { title: string; author?: string | null; coverFocus?: number | null; volumeNumber?: 1 | null; publisher?: string | null; platform: CasePlatform; front: string | null; spine?: string | null; back?: string | null; privacy: boolean; discLabel?: string };
 export function spineInsertClass(data: CaseData) {
   return `ins${data.spine || data.privacy ? "" : ["sw2", "sw", "ps5"].includes(data.platform) ? " full" : " bare"}`;
 }
@@ -30,21 +32,53 @@ export type Fact = [string, ReactNode];
 export function CaseFacts({ rows }: { rows: Fact[] }) {
   return <dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
 }
-export function CaseInside({ record, facts }: { record: Fact[]; facts: Fact[] }) {
-  return <><span className="clip clip-one" /><span className="clip clip-two" /><div className="slip"><b>내 기록</b><CaseFacts rows={record} /></div><div className="card2"><b>작품 정보</b><CaseFacts rows={facts} /></div></>;
+function caseTray(platform: CasePlatform) {
+  return platform === "sw" || platform === "sw2" ? "card" : "disc";
 }
-export function CollectionCase({ data, open, onOpenChange, frontReset = 0, inside, note, onReady, large = false, stageBox }: {
+function TrayWalls({ tray }: { tray: "base" | "lid" }) {
+  return <>{(["top", "bottom", "outer"] as const).map(wall => <Fragment key={wall}>
+    <span className={`k-wall k-${tray}-wall k-wall-${wall}`} aria-hidden="true" />
+    <span className={`k-wall k-${tray}-wall k-wall-${wall}-in`} aria-hidden="true" />
+    <span className={`k-lip k-${tray}-lip k-lip-${wall}`} aria-hidden="true" />
+  </Fragment>)}</>;
+}
+function TrayMedia({ data, front }: { data: CaseData; front: string | null }) {
+  const rimId = useId();
+  const label = <span className="media-label" style={!data.privacy && front ? { backgroundImage: `url(${JSON.stringify(front)})` } : undefined}>
+    {data.privacy && <span className="case-mask" />}
+  </span>;
+  return caseTray(data.platform) === "card" ? <span className="tray-media tray-media--card" aria-hidden="true">
+    <span className="tray-frame" /><span className="tray-rib tray-rib-one" /><span className="tray-rib tray-rib-two" />
+    <span className="tray-emboss">GAME CARD</span><span className="finger-notch" />
+    <span className="cart-slot"><span className="cart">{label}</span><span className="nub nub-top" /><span className="nub nub-bottom" /></span>
+  </span> : <span className="tray-media tray-media--disc" aria-hidden="true">
+    <span className="holder"><span className="thumb thumb-left" /><span className="thumb thumb-right" />
+      <span className="disc">{label}{data.platform === "av" && !data.privacy && data.discLabel && <svg className="av-disc-rim" viewBox="0 0 200 200">
+        <defs><path id={rimId} d="M 100,18 a 82,82 0 1,1 0,164 a 82,82 0 1,1 0,-164" /></defs>
+        <text><textPath href={`#${rimId}`} textLength={2 * Math.PI * 82} lengthAdjust="spacingAndGlyphs">{data.discLabel}</textPath></text>
+      </svg>}</span><span className="hub" />
+    </span><span className="disc-note">PUSH</span>
+  </span>;
+}
+export function CollectionCase({ data, open, onOpenChange, frontReset = 0, inside, note, backContent, onReady, large = false, stageBox }: {
   data: CaseData; open: boolean; onOpenChange(open: boolean): void; frontReset?: number;
-  inside?: ReactNode; note?: ReactNode; onReady?(): void; large?: boolean; stageBox?: StageBox;
+  inside?: ReactNode; note?: ReactNode; backContent?: CaseBackContent; onReady?(): void; large?: boolean; stageBox?: StageBox;
 }) {
   const blocked = useWorkTurnBlocked();
   const [angle, setAngle] = useState(open ? -10 : 28);
   const [ratio, setRatio] = useState(.71);
+  const [loadedFront, setLoadedFront] = useState<string | null>(null);
   const savedAngle = useRef(28);
   const lastReset = useRef(frontReset);
   const drag = useRef<{ pointer: number; x: number; angle: number; moved: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
-  const images = useWorkImageReady({ front: data.privacy ? null : data.front, back: data.privacy ? null : data.back ?? null, spine: data.privacy ? null : data.spine ?? null }, onReady);
+  const sources = { front: data.privacy ? null : data.front, back: data.privacy ? null : data.back ?? null, spine: data.privacy ? null : data.spine ?? null };
+  const signature = JSON.stringify(sources);
+  const ready = useRef({ signature, notified: false });
+  if (ready.current.signature !== signature) ready.current = { signature, notified: false };
+  const images = useWorkImageReady(sources, () => {
+    if (!ready.current.notified && onReady) { ready.current.notified = true; onReady(); }
+  });
   useEffect(() => { setAngle(0); if (lastReset.current !== frontReset) savedAngle.current = 0; lastReset.current = frontReset; drag.current = null; setDragging(false); }, [frontReset]);
   useEffect(() => {
     if (open) { savedAngle.current = angle; setAngle(-10); }
@@ -59,9 +93,12 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
       const image = event.currentTarget;
       image.style.removeProperty("visibility");
       if (label === "앞면" && image.naturalWidth && image.naturalHeight) setRatio(image.naturalWidth / image.naturalHeight);
+      // The interior print shares the loaded front URL and adds no image readiness key.
+      if (key === "front") setLoadedFront(url);
       void images.loaded(key, event);
     }} onError={event => {
       event.currentTarget.style.visibility = "hidden";
+      if (key === "front") setLoadedFront(null);
       images.failed(key, url);
     }} />;
   }
@@ -82,12 +119,12 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
         else return;
         event.preventDefault(); event.stopPropagation();
       }}>
-      <span className="k-back"><span className="ins">{face(data.back, "뒷면")}</span></span>
-      <span className="k-floor">{data.platform === "sw" || data.platform === "sw2" ? <span className="cart-slot"><span className="cart" /></span> : <span className="holder"><span className="disc" /></span>}{note && <div className="note">{note}</div>}</span>
-      <span className="k-edge" /><span className="k-cap k-top" /><span className="k-cap k-bottom" />
+      <span className="k-back"><span className="ins">{!data.back && !data.privacy && data.platform !== "book" ? <CaseBack data={data} content={backContent} /> : face(data.back, "뒷면")}</span></span>
+      <span className="k-floor"><TrayMedia data={data} front={loadedFront === data.front ? loadedFront : null} />{!data.privacy && note && <div className="note">{note}</div>}</span>
+      <TrayWalls tray="base" /><span className="k-ridge" aria-hidden="true" />
       <span className="k-hinge"><span className="k-spine"><span className={spineInsertClass(data)}>
         <CaseSpine data={data} onSettled={url => images.failed("spine", url)} />
-      </span></span><span className="k-spine-in" /><span className="k-lid"><span className="k-front"><span className="ins">{face(data.front, "앞면")}</span></span><span className="k-inner">{inside}</span></span></span>
+      </span></span><span className="k-spine-in" /><span className="k-lid"><span className="k-front"><span className="ins">{face(data.front, "앞면")}</span></span><span className="k-inner"><span className="tray-ledge" aria-hidden="true" />{data.privacy ? <span className="case-mask" aria-label="비공개 모드" /> : inside}</span><TrayWalls tray="lid" /></span></span>
     </div>
   </div>;
 }

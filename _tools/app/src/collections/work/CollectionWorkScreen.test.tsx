@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CollectionWorkScreen, type CollectionWorkData, type WorkActions } from "./CollectionWorkScreen";
 import type { CollectionSummary } from "../../library/types";
+import { displayDate } from "../../shared/displayDate";
 import { defaultRecord } from "./WorkRecord";
 import { PrivacyProvider } from "../../privacy/PrivacyContext";
 
@@ -120,6 +121,7 @@ describe("merged work screen", () => {
     const { container } = view(); const user = userEvent.setup();
     expect(container.querySelector(".asset-viewer__position")).toBeNull();
     expect(screen.getByRole("complementary", { name: "작품 정보" })).toBeInTheDocument();
+    expect(within(screen.getByRole("complementary")).queryByText(fixtureWork.overview!)).toBeNull();
     expect(container.querySelector(".work-surface")).toHaveClass("work-surface--info");
     await user.click(screen.getByRole("button", { name: "정보" }));
     expect(screen.queryByRole("complementary", { name: "작품 정보" })).toBeNull();
@@ -128,7 +130,7 @@ describe("merged work screen", () => {
     expect(container.querySelector(".cart-slot")).not.toBeNull();
     expect(container.querySelector(".work-strip")).toBeNull();
     expect(container.querySelector(".work-stage")).toHaveClass("work-stage--no-strip");
-    expect(screen.queryByText("개요는 표시하지 않음")).toBeNull();
+    expect(container.querySelector(".case-back-copy")).toHaveTextContent(fixtureWork.overview!);
     fireEvent.click(container.querySelector(".work-stage")!);
     expect(screen.getByRole("group", { name: "케이스" })).toHaveAttribute("aria-expanded", "false");
   });
@@ -260,28 +262,50 @@ function filmValue(): CollectionWorkData {
   const game = value();
   return { ...game, collection: { ...fixtureWork, type: "movie", name: "영화 하나", director: "감독 이름", productionCompany: "제작사 이름", runtimeMinutes: 81, genres: "애니메이션 · 스릴러", overview: "한국어 개요 전체 내용" }, case: { ...game.case, platform: "film", title: "영화 하나", spine: null, back: null } };
 }
-it.each(["game", "av", "movie"] as const)("keeps only short key rows inside a %s case while the full record stays in the dock", type => {
+it("passes the game's hero, screenshot artworks, localized facts and owned platform to the back", () => {
+  const original = value();
+  const data = { ...original, collection: { ...original.collection, selectedHeroArtworkId: "hero", genres: "Action & Adventure" },
+    record: { ...defaultRecord(original.collection), ownedPlatform: "Nintendo Switch 2" },
+    artworks: [{ id: "shot", kind: "screenshot", selected: false }, { id: "art", kind: "artwork", selected: false }] };
+  const { container } = view(data);
+  expect(container.querySelector<HTMLElement>(".case-back-hero")!.style.backgroundImage).toContain("hero");
+  expect(container.querySelectorAll(".case-back-shots img")).toHaveLength(1);
+  expect(container.querySelector(".case-back-shots img")?.getAttribute("src")).toContain("shot");
+  expect(container.querySelector(".case-back-facts")).toHaveTextContent("개발개발사배급배급사");
+  expect(container.querySelector(".case-back-facts")).toHaveTextContent("액션 & 모험");
+  expect(container.querySelector(".case-back-foot")).toHaveTextContent("배급사Nintendo Switch 2");
+});
+it.each(["game", "av", "movie"] as const)("prints the %s booklet record and facts while the full memo stays in the dock", type => {
   const original = type === "movie" ? filmValue() : value(type === "av");
   const data = { ...original, record: { status: null, ownedPlatform: "아주 긴 기기 이름".repeat(20), myScore: 3.5, memo: "긴 메모".repeat(100) } };
   const { container } = view(data);
-  const slip = container.querySelector(".slip")!;
-  const card = container.querySelector(".card2")!;
-  expect([...slip.querySelectorAll("dt")].map(node => node.textContent)).toEqual(type === "game" ? ["상태", "별점", "기기"] : ["상태", "별점"]);
-  expect([...card.querySelectorAll("dt")].map(node => node.textContent)).toEqual(type === "game" ? ["개발사", "발매"] : type === "av" ? ["품번", "메이커", "발매"] : ["감독", "개봉", "러닝타임"]);
-  expect(slip).not.toHaveTextContent(data.record.memo);
+  const booklet = container.querySelector<HTMLElement>(".case-booklet")!;
+  expect(booklet.querySelectorAll(".case-status-box").length).toBeGreaterThan(0);
+  expect(booklet.querySelector(".case-status-box.is-filled")).toBeNull();
+  expect(within(booklet).getByRole("img", { name: "별점 3.5" })).toBeInTheDocument();
+  if (type === "av") {
+    expect(booklet).toHaveTextContent("ABC-123메이커");
+    expect([...booklet.querySelectorAll("dt")].map(node => node.textContent)).toEqual(["레이블", "발매", "수록"]);
+  } else {
+    expect([...booklet.querySelectorAll("dt")].map(node => node.textContent)).toEqual(type === "game" ? ["상태", "별점", "기기"] : ["상태", "별점"]);
+    expect(booklet.querySelector(".case-manual-footer")).toHaveTextContent(type === "game" ? "개발사 · 배급사" : "감독 이름");
+    if (type === "game") expect(booklet).toHaveTextContent(data.record.ownedPlatform);
+  }
+  expect(booklet).not.toHaveTextContent(data.record.memo);
   expect(screen.getByRole("textbox", { name: "메모" })).toHaveValue(data.record.memo);
-  expect(container.querySelector(".kase")).not.toHaveTextContent("태그");
-  expect(container.querySelector(".kase")).not.toHaveTextContent("개요");
+  expect(booklet).not.toHaveTextContent("태그");
+  expect(booklet).not.toHaveTextContent("개요");
 });
-it("keeps the AV tray note to names only", () => {
+it("prints AV cast names on cards without the retired tray note", () => {
   const original = value(true);
   const people = [{ id: "p", displayName: "이름만", role: "performer" as const, order: 0, creditName: "긴 크레딧", nameJa: "일본 이름", workCount: 20, portrait: null }];
   const { container } = view({ ...original, av: { ...original.av!, people } });
-  expect(container.querySelector(".note")).toHaveTextContent("출연 · 감독이름만");
-  expect(container.querySelector(".note")).not.toHaveTextContent("긴 크레딧");
-  expect(container.querySelector(".note")).not.toHaveTextContent("일본 이름");
+  expect(container.querySelector(".note")).toBeNull();
+  expect(container.querySelector(".case-cast")).toHaveTextContent("이름만");
+  expect(container.querySelector(".case-cast")).not.toHaveTextContent("긴 크레딧");
+  expect(container.querySelector(".case-cast")).not.toHaveTextContent("일본 이름");
 });
-it("opens the film form with a plain disc case, concise facts and film record options", async () => {
+it("opens the film form with a disc case, booklet facts and film record options", async () => {
   const data = filmValue(); const { container, actions } = view(data); const user = userEvent.setup();
   expect(screen.getByRole("article", { name: "영화 작품 화면" })).toBeInTheDocument();
   expect(container.querySelector(".asset-viewer__title small")).toHaveTextContent("감독 이름 · 9.1");
@@ -294,8 +318,9 @@ it("opens the film form with a plain disc case, concise facts and film record op
   expect(container.querySelector(".k-spine .bare")).toHaveTextContent("영화 하나");
   expect(container.querySelector(".k-back img")).toBeNull();
   expect(container.querySelector(".note")).toBeNull();
-  expect(container.querySelector(".card2")).toHaveTextContent("감독감독 이름개봉");
-  expect(container.querySelector(".card2")).toHaveTextContent("러닝타임81분");
+  expect(container.querySelector(".case-manual-footer")).toHaveTextContent(`감독 이름${displayDate(data.collection.releaseDate)}81분`);
+  expect(container.querySelector(".case-back-facts")).toHaveTextContent(`감독감독 이름제작제작사 이름개봉${displayDate(data.collection.releaseDate)}장르애니메이션 · 스릴러`);
+  expect(container.querySelector(".case-back-copy")).toHaveTextContent(data.collection.overview!);
   const dock = within(screen.getByRole("complementary", { name: "작품 정보" }));
   expect(dock.getByRole("region", { name: "개요" })).toHaveTextContent(data.collection.overview!);
   expect(screen.queryByRole("button", { name: "소유 기기" })).toBeNull();
@@ -333,9 +358,11 @@ it("puts TV seasons and full overview in the dock, keeping seasons outside the c
   await userEvent.dblClick(screen.getByRole("button", { name: /시즌 1.*1개 에피소드/ }));
   expect(screen.getByRole("dialog", { name: "시즌 포스터 표지 감상" })).toBeInTheDocument();
 });
-it("omits missing film facts and an empty overview note", () => {
+it("omits missing film facts and empty back copy", () => {
   const data = filmValue(); view({ ...data, collection: { ...data.collection, director: null, productionCompany: null, runtimeMinutes: null, releaseDate: null, genres: null, overview: " " } });
-  expect(document.querySelector(".card2 dl")).toBeEmptyDOMElement();
+  expect(document.querySelector(".case-manual-footer")?.textContent).toBe("");
+  expect(document.querySelector(".case-back-facts")).toBeNull();
+  expect(document.querySelector(".case-back-copy")).toBeNull();
   expect(document.querySelector(".note")).toBeNull();
   expect(screen.queryByRole("region", { name: "개요" })).toBeNull();
 });

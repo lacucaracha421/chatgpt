@@ -155,6 +155,7 @@ it.each(["book", "pc"] as const)("reveals the first %s front and spine together 
   spine.decode = vi.fn(() => new Promise<void>(resolve => { spineDecoded = resolve; }));
   fireEvent.load(front); fireEvent.load(spine);
   expect(object).toHaveAttribute("data-revealed", "false");
+  expect(object).not.toHaveAttribute("aria-busy");
   await act(async () => frontDecoded());
   expect(front.style.visibility).toBe("hidden");
   expect(spine.style.visibility).toBe("hidden");
@@ -176,7 +177,7 @@ it("holds the plain DOM spine until the front decodes, then caps a stalled front
   act(() => vi.advanceTimersByTime(1));
   expect(container.querySelector(".spine-title")).toBeVisible();
   expect(front.style.visibility).toBe("hidden");
-  expect(container.querySelector(".collection-light-case")).toHaveAttribute("aria-busy", "false");
+  expect(container.querySelector(".collection-light-case")).toHaveAttribute("data-revealed", "true");
   fireEvent.load(front);
   expect(front.style.visibility).toBe("");
 });
@@ -268,7 +269,7 @@ it("keeps a completely failed item neutral and ends the initial wait at the cap"
   const { container } = render(<LightCase data={{ ...book, front: "/both-failed" }} selected={false} />);
   container.querySelectorAll("img").forEach(image => fireEvent.error(image));
   act(() => vi.advanceTimersByTime(READY_CAP_MS));
-  expect(container.querySelector(".collection-light-case")).toHaveAttribute("aria-busy", "false");
+  expect(container.querySelector(".collection-light-case")).toHaveAttribute("data-revealed", "true");
   expect([...container.querySelectorAll<HTMLImageElement>("img")].every(image => image.style.visibility === "hidden")).toBe(true);
   expect(container.querySelector(".manga-jspine-title")).not.toBeVisible();
 });
