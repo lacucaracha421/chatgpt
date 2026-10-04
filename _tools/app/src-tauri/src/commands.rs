@@ -57,6 +57,7 @@ use crate::library::models::{
 };
 
 pub(crate) mod characters;
+pub(crate) mod nl_search;
 pub(crate) mod av;
 pub(crate) mod av_link;
 pub(crate) mod video_similarity;

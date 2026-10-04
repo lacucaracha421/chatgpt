@@ -77,6 +77,8 @@ pub mod character_shadow_review;
 mod character_sources;
 mod character_training;
 pub(crate) mod character_worker;
+pub(crate) mod nl_search;
+pub(crate) mod nl_search_worker;
 pub mod character_workflow;
 pub mod characters;
 mod classification;
@@ -286,6 +288,7 @@ pub struct Library {
     revisit_color_cache: Arc<Mutex<revisit_color::ColorCache>>,
     revisit_color_lock: Arc<Mutex<()>>,
     artist_style_runtime: Arc<artist_style::Runtime>,
+    nl_search_runtime: Arc<nl_search::Runtime>,
     character_reference_files: Arc<Mutex<character_sources::ReferenceFiles>>,
     character_scan: Arc<Mutex<character_scan::ScanState>>,
     character_incremental: Arc<Mutex<character_incremental::Engine>>,
@@ -404,6 +407,7 @@ impl Library {
             revisit_color_cache: Arc::default(),
             revisit_color_lock: Arc::default(),
             artist_style_runtime: Arc::default(),
+            nl_search_runtime: Arc::default(),
             character_reference_files: Arc::default(),
             character_scan: Arc::default(),
             character_incremental: Arc::default(),

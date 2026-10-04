@@ -1343,7 +1343,27 @@ export interface ReleaseCalendarGateway {
   runDue(): Promise<ReleaseWishlistRunResult>;
 }
 
+export interface DescriptionSearchStatus {
+  available: boolean;
+  reason?: string;
+  indexed: number;
+  qwenIndexed: number;
+  precise: boolean;
+  worker: "stopped" | "starting" | "ready" | "error";
+  workerError?: string;
+}
+
+export interface DescriptionSearchResult {
+  route: "tags" | "mixed" | "mixedFallback" | "cosine";
+  translation?: string;
+  assetIds: string[];
+  precise: boolean;
+}
+
 export interface LibraryGateway {
+  descriptionSearchStatus?: () => Promise<DescriptionSearchStatus>;
+  prewarmDescriptionSearch?: () => Promise<void>;
+  searchByDescription?: (query: string, limit?: number) => Promise<DescriptionSearchResult>;
   /** Game/movie release calendar and wishlist (desktop only). */
   releaseCalendar?: ReleaseCalendarGateway;
   /** 작가 hub (desktop only; PC-authoritative). */

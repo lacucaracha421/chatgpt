@@ -113,10 +113,13 @@ pub(crate) fn run_inbox_and_report(
             let mut failed = false;
             for name in &result.processed {
                 let entry = &last[name];
-                let label = if name == crate::library::auto_tag_inbox::FILES[0] {
+                let files = crate::library::auto_tag_inbox::FILES;
+                let label = if name == files[0] {
                     "자동 태그"
-                } else {
+                } else if name == files[1] {
                     "그림체"
+                } else {
+                    "내용 검색 색인"
                 };
                 if let Some(error) = &entry.error {
                     failed = true;
@@ -129,10 +132,15 @@ pub(crate) fn run_inbox_and_report(
                             tagger.veto + tagger.recommend
                         ));
                     }
-                } else {
+                } else if label == "그림체" {
                     parts.push(format!(
                         "그림체 {}장",
                         entry.imported.get("imported").copied().unwrap_or(0)
+                    ));
+                } else {
+                    parts.push(format!(
+                        "내용 검색 색인 {}장",
+                        entry.imported.get("siglip").copied().unwrap_or(0)
                     ));
                 }
             }

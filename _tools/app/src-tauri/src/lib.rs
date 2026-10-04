@@ -33,6 +33,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(app_state.clone())
+        .manage(library::nl_search_worker::Manager::default())
         .manage(library::av_portrait::AvPortraitState::default())
         .manage(library::av_stashdb::AvProfileState::default())
         .manage(extension_runtime.clone())
@@ -279,6 +280,9 @@ pub fn run() {
             commands::artists::dismiss_artist_style_suggestion,
             commands::artists::import_artist_style_features,
             commands::artists::artist_style_status,
+            commands::nl_search::description_search_status,
+            commands::nl_search::prewarm_description_search,
+            commands::nl_search::search_by_description,
             commands::artists::get_artist_overview,
             commands::artists::list_artists,
             commands::artists::get_artist,
@@ -646,6 +650,11 @@ pub fn run() {
             commands::start_collection_cover_focus,
             commands::sync_mangadex_volume_covers,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                app.state::<library::nl_search_worker::Manager>().shutdown();
+            }
+        });
 }

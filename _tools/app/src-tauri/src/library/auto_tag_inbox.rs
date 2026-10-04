@@ -10,7 +10,11 @@ use serde::{Deserialize, Serialize};
 
 use super::{error::LibraryError, machine_settings, Library};
 
-pub(crate) const FILES: [&str; 2] = ["auto-tags-latest.sqlite", "artist-style-latest.sqlite"];
+pub(crate) const FILES: [&str; 3] = [
+    "auto-tags-latest.sqlite",
+    "artist-style-latest.sqlite",
+    "nl-search-latest.sqlite",
+];
 const RETRY_SECONDS: i64 = 3600;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -218,13 +222,22 @@ impl Library {
                             recommend: applied.recommend.count,
                         });
                     }
-                } else {
+                } else if name == FILES[1] {
                     let summary = self
                         .import_artist_style_features(&path)
                         .map_err(|e| e.to_string())?;
                     last.imported = BTreeMap::from([
                         ("imported".into(), summary.imported.into()),
                         ("skipped".into(), summary.skipped.into()),
+                    ]);
+                } else {
+                    let summary = self
+                        .import_nl_search(&path)
+                        .map_err(|e| e.to_string())?;
+                    last.imported = BTreeMap::from([
+                        ("siglip".into(), summary.siglip),
+                        ("qwen8b".into(), summary.qwen8b),
+                        ("skipped".into(), summary.skipped),
                     ]);
                 }
                 Ok(())
