@@ -347,6 +347,14 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "notes_request": return notesRequest(args);
     case "get_cloud_capture_settings": return { enabled: true, captureEnabled: true, apiBaseUrl: "https://preview.lakomics.local", tokenConfigured: true };
     case "cloud_publisher_token_status": return { configured: true };
+    case "verify_collection_authority_baseline": return { reportPath: "preview/collection-authority/verify-fixture.json", report: {
+      version: 1, verdict: "lossless", checkedAt: "2026-10-04T00:00:00Z", validation: null,
+      bindings: { legacyRevision: { staged: "fixture", server: "fixture", ok: true } }, counts: {},
+      works: { live: 0, staged: 0, matched: 0, missing: [], unknown: [], typeMismatch: [] },
+      diffs: { total: 0, byPath: {}, samples: [] }, people: { live: 0, staged: 0, diffs: 0, samples: [] },
+      artworks: { originalMissing: 0, unconfirmedBlobs: 0, samples: [] },
+    } };
+    case "open_collection_authority_report": return null;
     case "set_cloud_publisher_token": return { configured: true };
     case "delete_cloud_publisher_token": return { configured: false };
     case "get_extension_connection": return { baseUrl: "http://127.0.0.1:24821", token: "preview-token", status: "ready" };

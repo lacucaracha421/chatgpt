@@ -1,0 +1,633 @@
+{
+  "artworks": [
+    {
+      "artworkId": "cover",
+      "createdAt": "2026-10-04T00:00:00Z",
+      "height": 6,
+      "kind": "volume_cover",
+      "language": null,
+      "order": 0,
+      "original": {
+        "contentType": "image/png",
+        "objectKey": "work-artwork/mobile/bd54b02fae14b6b9ed73887ded339b8ef846fbcba0d4e5f9d95470ac23ade242",
+        "sha256": "bd54b02fae14b6b9ed73887ded339b8ef846fbcba0d4e5f9d95470ac23ade242",
+        "sizeBytes": 15
+      },
+      "provider": "local",
+      "providerImageId": "cover",
+      "selected": false,
+      "thumbnail": null,
+      "width": 4,
+      "workId": "m"
+    },
+    {
+      "artworkId": "source-0b677b7557130e94042c3703b5f971ad17d98923d8ceae70a7588a44fef97b33",
+      "createdAt": "2026-10-04T00:00:00Z",
+      "height": null,
+      "kind": "cover",
+      "language": null,
+      "order": 1,
+      "original": {
+        "contentType": "image/png",
+        "objectKey": "work-artwork/mobile/9da9263566b77ce7cf88ac4f9ad7f64b27fd1aa190d23008f573f3409e425f76",
+        "sha256": "9da9263566b77ce7cf88ac4f9ad7f64b27fd1aa190d23008f573f3409e425f76",
+        "sizeBytes": 194
+      },
+      "provider": null,
+      "providerImageId": null,
+      "selected": false,
+      "thumbnail": {
+        "contentType": "image/webp",
+        "objectKey": "work-artwork/mobile/5baf72de5f35d4d5e31bce743c039818838693d332a8e6a5203ac3032408bf1b",
+        "sha256": "5baf72de5f35d4d5e31bce743c039818838693d332a8e6a5203ac3032408bf1b",
+        "sizeBytes": 40778
+      },
+      "width": null,
+      "workId": "m"
+    },
+    {
+      "artworkId": "spine",
+      "createdAt": "2026-10-04T00:00:00Z",
+      "height": 6,
+      "kind": "spine",
+      "language": null,
+      "order": 0,
+      "original": {
+        "contentType": "image/png",
+        "objectKey": "work-artwork/mobile/bd54b02fae14b6b9ed73887ded339b8ef846fbcba0d4e5f9d95470ac23ade242",
+        "sha256": "bd54b02fae14b6b9ed73887ded339b8ef846fbcba0d4e5f9d95470ac23ade242",
+        "sizeBytes": 15
+      },
+      "provider": "local",
+      "providerImageId": "spine",
+      "selected": true,
+      "thumbnail": null,
+      "width": 4,
+      "workId": "g"
+    },
+    {
+      "artworkId": "missing",
+      "createdAt": "2026-10-04T00:00:00Z",
+      "height": 6,
+      "kind": "back",
+      "language": null,
+      "order": 1,
+      "original": {
+        "contentType": "image/png",
+        "objectKey": "work-artwork/mobile/bd54b02fae14b6b9ed73887ded339b8ef846fbcba0d4e5f9d95470ac23ade242",
+        "sha256": "bd54b02fae14b6b9ed73887ded339b8ef846fbcba0d4e5f9d95470ac23ade242",
+        "sizeBytes": 15
+      },
+      "provider": "local",
+      "providerImageId": "missing",
+      "selected": false,
+      "thumbnail": null,
+      "width": 4,
+      "workId": "g"
+    },
+    {
+      "artworkId": "front",
+      "createdAt": "2026-10-04T00:00:00Z",
+      "height": 6,
+      "kind": "cover",
+      "language": null,
+      "order": 0,
+      "original": {
+        "contentType": "image/png",
+        "objectKey": "work-artwork/mobile/bd54b02fae14b6b9ed73887ded339b8ef846fbcba0d4e5f9d95470ac23ade242",
+        "sha256": "bd54b02fae14b6b9ed73887ded339b8ef846fbcba0d4e5f9d95470ac23ade242",
+        "sizeBytes": 15
+      },
+      "provider": "local",
+      "providerImageId": "front",
+      "selected": true,
+      "thumbnail": null,
+      "width": 4,
+      "workId": "av"
+    },
+    {
+      "artworkId": "back",
+      "createdAt": "2026-10-04T00:00:00Z",
+      "height": 6,
+      "kind": "back",
+      "language": null,
+      "order": 1,
+      "original": {
+        "contentType": "image/png",
+        "objectKey": "work-artwork/mobile/bd54b02fae14b6b9ed73887ded339b8ef846fbcba0d4e5f9d95470ac23ade242",
+        "sha256": "bd54b02fae14b6b9ed73887ded339b8ef846fbcba0d4e5f9d95470ac23ade242",
+        "sizeBytes": 15
+      },
+      "provider": "local",
+      "providerImageId": "back",
+      "selected": true,
+      "thumbnail": null,
+      "width": 4,
+      "workId": "av"
+    }
+  ],
+  "bindingRequestSequence": 8,
+  "bindings": [
+    {
+      "config": null,
+      "externalId": "tv:2",
+      "lastSyncedAt": null,
+      "provider": "tmdb",
+      "snapshot": {
+        "series": {
+          "cast": [],
+          "seasons": [],
+          "status": "Ended"
+        }
+      },
+      "values": {
+        "director": null,
+        "externalScore": null,
+        "genres": null,
+        "originalTitle": null,
+        "overview": null,
+        "productionCompany": null,
+        "releaseDate": null,
+        "runtimeMinutes": null
+      },
+      "workId": "tv"
+    },
+    {
+      "config": null,
+      "externalId": "book",
+      "lastSyncedAt": "2026-10-01",
+      "provider": "kakao",
+      "snapshot": {},
+      "values": {},
+      "workId": "m"
+    },
+    {
+      "config": null,
+      "externalId": "123",
+      "lastSyncedAt": null,
+      "provider": "igdb",
+      "snapshot": {
+        "developer": "Maker",
+        "platforms": [
+          "PS5"
+        ]
+      },
+      "values": {
+        "developer": "Maker",
+        "genres": null,
+        "overview": null,
+        "platforms": "PS5",
+        "publisher": null,
+        "releaseDate": null
+      },
+      "workId": "g"
+    },
+    {
+      "config": null,
+      "externalId": "1",
+      "lastSyncedAt": null,
+      "provider": "tmdb",
+      "snapshot": {
+        "film": {
+          "cast": [
+            {
+              "name": "Actor"
+            }
+          ],
+          "tagline": "Tag"
+        }
+      },
+      "values": {
+        "director": null,
+        "externalScore": null,
+        "genres": null,
+        "originalTitle": null,
+        "overview": null,
+        "productionCompany": null,
+        "releaseDate": null,
+        "runtimeMinutes": null
+      },
+      "workId": "film"
+    }
+  ],
+  "legacyRevision": "revision",
+  "libraryId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "memberships": [
+    {
+      "addedAt": "2026-10-04T00:00:00Z",
+      "assetId": "asset",
+      "workId": "g"
+    }
+  ],
+  "ownership": [
+    {
+      "digital": true,
+      "editionIndex": 0,
+      "physical": true,
+      "volumeNumber": 1,
+      "workId": "m"
+    }
+  ],
+  "people": [
+    {
+      "favorite": true,
+      "memo": "Memo",
+      "personId": "crop",
+      "portrait": {
+        "author": null,
+        "license": null,
+        "licenseUrl": null,
+        "source": "cover",
+        "sourceUrl": null
+      },
+      "portraitImage": null,
+      "profile": null
+    },
+    {
+      "favorite": false,
+      "memo": null,
+      "personId": "portrait",
+      "portrait": {
+        "author": null,
+        "license": null,
+        "licenseUrl": null,
+        "source": "stashdb",
+        "sourceUrl": "https://fixture.test/portrait"
+      },
+      "portraitImage": {
+        "contentType": "image/png",
+        "height": 6,
+        "sha256": "bd54b02fae14b6b9ed73887ded339b8ef846fbcba0d4e5f9d95470ac23ade242",
+        "sizeBytes": 15,
+        "width": 4
+      },
+      "profile": null
+    }
+  ],
+  "personalEditCursor": 7,
+  "releaseGeneration": 10,
+  "releaseReadCursor": 9,
+  "stagingVersion": 2,
+  "volumeSources": [
+    {
+      "author": null,
+      "data": {},
+      "isbn13": "1234567890123",
+      "itemUrl": null,
+      "provider": "kakao",
+      "providerItemId": "book1",
+      "publicationDate": "2026-09-01",
+      "publisher": null,
+      "title": "Book",
+      "volumeNumber": 1,
+      "workId": "m"
+    }
+  ],
+  "volumes": [
+    {
+      "coverArtworkId": "cover",
+      "coverFocusX": 0.25,
+      "displayLabel": "1",
+      "editionIndex": 0,
+      "order": 0,
+      "published": {
+        "isbn13": "1234567890123",
+        "localReleaseDate": "2026-09-01",
+        "releaseStatus": "released"
+      },
+      "sortOrder": 9,
+      "sourceCoverId": null,
+      "sourceProvider": null,
+      "volumeId": "v",
+      "volumeNumber": 1,
+      "workId": "m"
+    },
+    {
+      "coverArtworkId": "source-0b677b7557130e94042c3703b5f971ad17d98923d8ceae70a7588a44fef97b33",
+      "coverFocusX": null,
+      "displayLabel": "2권",
+      "editionIndex": 0,
+      "order": 1,
+      "published": {
+        "isbn13": null,
+        "localReleaseDate": null,
+        "releaseStatus": null
+      },
+      "sortOrder": 1,
+      "sourceCoverId": null,
+      "sourceProvider": null,
+      "volumeId": "source-74139bee15de3858820f715c25e759c2c888a529dde17e3bda35eba2c53c7123",
+      "volumeNumber": 2,
+      "workId": "m"
+    }
+  ],
+  "works": [
+    {
+      "avCredits": [],
+      "createdAt": "2026-10-04T00:00:00Z",
+      "derived": {
+        "ownedVolumes": null,
+        "releaseSchedule": null,
+        "releaseWatch": null,
+        "unreadReleaseCount": 0
+      },
+      "details": {
+        "av": null,
+        "film": null,
+        "series": {
+          "cast": [],
+          "seasons": [],
+          "status": "Ended"
+        }
+      },
+      "fields": {
+        "author": null,
+        "coverAssetId": null,
+        "description": null,
+        "developer": null,
+        "director": null,
+        "externalScore": null,
+        "genres": null,
+        "myScore": null,
+        "originalTitle": null,
+        "overview": null,
+        "ownedPlatform": null,
+        "platforms": null,
+        "productionCompany": null,
+        "publisher": null,
+        "releaseDate": null,
+        "runtimeMinutes": null,
+        "status": null,
+        "year": null
+      },
+      "legacyKind": null,
+      "name": "TV",
+      "selection": {
+        "backdrop": null,
+        "hero": null,
+        "spine": null,
+        "work": null
+      },
+      "showcase": false,
+      "showcaseOrder": null,
+      "type": "movie",
+      "updatedAt": "2026-10-04T00:00:00Z",
+      "workId": "tv"
+    },
+    {
+      "avCredits": [],
+      "createdAt": "2026-10-04T00:00:00Z",
+      "derived": {
+        "ownedVolumes": [
+          {
+            "count": 1,
+            "editionIndex": 0
+          }
+        ],
+        "releaseSchedule": {
+          "kakao": {
+            "checkedAt": "2026-10-01",
+            "editionIndex": 0,
+            "volumes": [
+              {
+                "date": "2026-09-01",
+                "status": null,
+                "volumeNumber": 1
+              }
+            ]
+          },
+          "mangadex": null
+        },
+        "releaseWatch": {
+          "available": true,
+          "enabled": true
+        },
+        "unreadReleaseCount": 0
+      },
+      "details": {
+        "av": null,
+        "film": null,
+        "series": null
+      },
+      "fields": {
+        "author": null,
+        "coverAssetId": null,
+        "description": null,
+        "developer": null,
+        "director": null,
+        "externalScore": null,
+        "genres": null,
+        "myScore": 0.0,
+        "originalTitle": null,
+        "overview": null,
+        "ownedPlatform": null,
+        "platforms": null,
+        "productionCompany": null,
+        "publisher": null,
+        "releaseDate": null,
+        "runtimeMinutes": null,
+        "status": "collecting",
+        "year": null
+      },
+      "legacyKind": null,
+      "name": "Manga",
+      "selection": {
+        "backdrop": null,
+        "hero": null,
+        "spine": null,
+        "work": "cover"
+      },
+      "showcase": false,
+      "showcaseOrder": null,
+      "type": "manga",
+      "updatedAt": "2026-10-04T00:00:00Z",
+      "workId": "m"
+    },
+    {
+      "avCredits": [],
+      "createdAt": "2026-10-04T00:00:00Z",
+      "derived": {
+        "ownedVolumes": null,
+        "releaseSchedule": null,
+        "releaseWatch": null,
+        "unreadReleaseCount": 0
+      },
+      "details": {
+        "av": null,
+        "film": null,
+        "series": null
+      },
+      "fields": {
+        "author": null,
+        "coverAssetId": "asset",
+        "description": null,
+        "developer": null,
+        "director": null,
+        "externalScore": null,
+        "genres": null,
+        "myScore": 4.5,
+        "originalTitle": null,
+        "overview": null,
+        "ownedPlatform": "PS5",
+        "platforms": null,
+        "productionCompany": null,
+        "publisher": null,
+        "releaseDate": null,
+        "runtimeMinutes": null,
+        "status": "playing",
+        "year": null
+      },
+      "legacyKind": null,
+      "name": "Game",
+      "selection": {
+        "backdrop": null,
+        "hero": null,
+        "spine": "spine",
+        "work": null
+      },
+      "showcase": true,
+      "showcaseOrder": 3,
+      "type": "game",
+      "updatedAt": "2026-10-04T00:00:00Z",
+      "workId": "g"
+    },
+    {
+      "avCredits": [],
+      "createdAt": "2026-10-04T00:00:00Z",
+      "derived": {
+        "ownedVolumes": null,
+        "releaseSchedule": null,
+        "releaseWatch": null,
+        "unreadReleaseCount": 0
+      },
+      "details": {
+        "av": null,
+        "film": {
+          "cast": [
+            {
+              "character": "",
+              "name": "Actor"
+            }
+          ],
+          "related": null,
+          "releases": []
+        },
+        "series": null
+      },
+      "fields": {
+        "author": null,
+        "coverAssetId": null,
+        "description": null,
+        "developer": null,
+        "director": null,
+        "externalScore": null,
+        "genres": null,
+        "myScore": null,
+        "originalTitle": null,
+        "overview": null,
+        "ownedPlatform": null,
+        "platforms": null,
+        "productionCompany": null,
+        "publisher": null,
+        "releaseDate": null,
+        "runtimeMinutes": null,
+        "status": null,
+        "year": null
+      },
+      "legacyKind": null,
+      "name": "Film",
+      "selection": {
+        "backdrop": null,
+        "hero": null,
+        "spine": null,
+        "work": null
+      },
+      "showcase": false,
+      "showcaseOrder": null,
+      "type": "movie",
+      "updatedAt": "2026-10-04T00:00:00Z",
+      "workId": "film"
+    },
+    {
+      "avCredits": [
+        {
+          "name": "Crop",
+          "nameJa": "出演者",
+          "order": 0,
+          "personId": "crop",
+          "portraitCrop": {
+            "artworkId": "front",
+            "h": 0.4,
+            "w": 0.3,
+            "x": 0.1,
+            "y": 0.2
+          },
+          "role": "performer"
+        },
+        {
+          "name": "Portrait",
+          "nameJa": null,
+          "order": 1,
+          "personId": "portrait",
+          "portraitCrop": null,
+          "role": "director"
+        }
+      ],
+      "createdAt": "2026-10-04T00:00:00Z",
+      "derived": {
+        "ownedVolumes": null,
+        "releaseSchedule": null,
+        "releaseWatch": null,
+        "unreadReleaseCount": 0
+      },
+      "details": {
+        "av": {
+          "genres": [
+            "Genre"
+          ],
+          "label": "Label",
+          "maker": "Maker",
+          "productCode": "TEST-1",
+          "releaseDate": "2026-01-01",
+          "series": "Series",
+          "titleJa": "作品"
+        },
+        "film": null,
+        "series": null
+      },
+      "fields": {
+        "author": null,
+        "coverAssetId": null,
+        "description": null,
+        "developer": null,
+        "director": null,
+        "externalScore": null,
+        "genres": null,
+        "myScore": null,
+        "originalTitle": null,
+        "overview": null,
+        "ownedPlatform": null,
+        "platforms": null,
+        "productionCompany": null,
+        "publisher": null,
+        "releaseDate": null,
+        "runtimeMinutes": null,
+        "status": null,
+        "year": null
+      },
+      "legacyKind": null,
+      "name": "AV",
+      "selection": {
+        "backdrop": null,
+        "hero": null,
+        "spine": null,
+        "work": "front"
+      },
+      "showcase": false,
+      "showcaseOrder": null,
+      "type": "av",
+      "updatedAt": "2026-10-04T00:00:00Z",
+      "workId": "av"
+    }
+  ]
+}

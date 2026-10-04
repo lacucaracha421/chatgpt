@@ -357,6 +357,12 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
     return invoke<CloudCollectionsPublishResult>("push_cloud_collections", { onProgress: channel });
   },
   runDueMobilePublications: (orderIds) => invoke<void>("run_due_mobile_publications", {orderIds}),
+  verifyCollectionAuthorityBaseline: (onProgress) => {
+    const channel = new Channel<import("./publicationJobs").PublishProgress>();
+    channel.onmessage = value => onProgress?.(value);
+    return invoke<import("./types").CollectionAuthorityVerifyResult>("verify_collection_authority_baseline", { onProgress: channel });
+  },
+  openCollectionAuthorityReport: path => invoke<void>("open_collection_authority_report", { path }),
   subscribeCollectionsChanged: (handler) => {
     let stopped = false;
     let unlisten: (() => void) | undefined;

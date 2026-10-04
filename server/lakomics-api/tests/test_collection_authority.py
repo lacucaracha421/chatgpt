@@ -224,7 +224,7 @@ class CollectionAuthorityTests(unittest.TestCase):
 
         detail = rejected(lambda d: d['works'].pop())
         self.assertEqual((detail['reason'], detail['missing']), ('works', ['m']))
-        rejected(lambda d: d['works'][2].update(type='av'), 'collectionTypeUnsupported', 422)
+        rejected(lambda d: d['works'][2].update(type='av'))  # differs from the live movie type
         rejected(lambda d: d.update(personalEditCursor=3))
         self.assertEqual(rejected(lambda d: d['artworks'][0].update(
             original=blob(b'never uploaded')))['reason'], 'artworkBlob')
@@ -347,7 +347,7 @@ class CollectionAuthorityTests(unittest.TestCase):
         self.assertEqual(self.listing(type='movie')['totalCount'], 2)
         self.assertEqual(self.code(self.create('w2', 'film')), 'nameConflict')
         self.ok(self.create('g1', 'Film', type_='game'))
-        self.assertEqual(self.code(self.create('av', 'x', type_='av')), 'collectionTypeUnsupported')
+        self.ok(self.create('av', 'x', type_='av'))
         # Revision CAS.
         self.ok(self.update('w1', {'overview': 'Mine'}, revision=1))
         stale = self.update('w1', {'myScore': 4.5}, revision=1)

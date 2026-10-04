@@ -15,9 +15,9 @@ crop coordinates and an artworkId referencing a unique published ``kind: "cover"
 with image bytes on an AV row in the same complete snapshot (possibly another AV
 collection). Local/Commons portrait paths, URLs and bytes are not accepted.
 
-This capability describes the replica schema only. Collections authority still
-excludes AV and fences replica writes when active; its baseline completeness guard
-must reject activation that would drop published AV rows. Manga releases, bindings
+This capability describes the replica schema. Collections authority also preserves
+AV in staging v2 and fences replica writes when active; its baseline completeness guard
+rejects activation that would drop published AV rows. Manga releases, bindings
 and tracking edits do not apply to AV; ordinary personal edits remain available.
 
 Replica features (2026-10-01 publication contract): ``/v1/collections/status`` also
@@ -475,6 +475,16 @@ def read_table(active):
     return "collection_authority_projection" if active is not None else "mobile_collections"
 
 
+def public_person(db, person_id, library_id=None):
+    """The same person payload for live reads and staging comparisons."""
+    if library_id is None:
+        row = db.execute("SELECT payload FROM mobile_collection_people WHERE id=?", [person_id]).fetchone()
+    else:
+        row = db.execute("SELECT payload FROM collection_authority_people WHERE library_id=? AND person_id=?",
+                         [library_id, person_id]).fetchone()
+    return None if row is None else {"person": json.loads(row["payload"])}
+
+
 def register_collections(app, get_db, require_auth, storage, bucket, presign_get, presign_put,
                          require_client=None, require_publisher=None):
     reader = require_client or require_auth
@@ -821,12 +831,13 @@ def register_collections(app, get_db, require_auth, storage, bucket, presign_get
     @app.get("/v1/collections/people/{person_id}")
     def get_person(person_id: ID, authorization: str | None = Header(default=None)):
         require_auth(authorization)
-        # The last PC replica's people; Collections authority does not carry people.
         with get_db() as db:
-            row = db.execute("SELECT payload FROM mobile_collection_people WHERE id=?", (person_id,)).fetchone()
-        if row is None:
+            db.execute("BEGIN")
+            active = served(db)
+            payload = public_person(db, person_id, active["libraryId"] if active else None)
+        if payload is None:
             raise HTTPException(404, "Person is not published")
-        return {"person": json.loads(row["payload"])}
+        return payload
 
     @app.get("/v1/collections/{collection_id}")
     def get_collection(collection_id: ID, authorization: str | None = Header(default=None)):

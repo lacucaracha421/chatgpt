@@ -112,6 +112,27 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [cloudMessage, setCloudMessage] = useState<string | null>(null);
+  const [authorityCheck, setAuthorityCheck] = useState<import("../library/types").CollectionAuthorityVerifyResult | null>(null);
+  const [authorityBusy, setAuthorityBusy] = useState(false);
+  const [authorityMessage, setAuthorityMessage] = useState<string | null>(null);
+  async function verifyCollectionAuthority() {
+    if (!gateway.verifyCollectionAuthorityBaseline || authorityBusy) return;
+    setAuthorityBusy(true);
+    setAuthorityCheck(null);
+    setAuthorityMessage("점검 중…");
+    try {
+      const result = await gateway.verifyCollectionAuthorityBaseline(progress => setAuthorityMessage(publicationProgressText(progress)));
+      setAuthorityCheck(result);
+      setAuthorityMessage(authorityResultText(result.report));
+    } catch (cause) {
+      setAuthorityMessage(`확인 불가: ${commandErrorMessage(cause, "점검을 완료하지 못했습니다.")}`);
+    } finally { setAuthorityBusy(false); }
+  }
+  async function openAuthorityReport() {
+    if (!authorityCheck || !gateway.openCollectionAuthorityReport) return;
+    try { await gateway.openCollectionAuthorityReport(authorityCheck.reportPath); }
+    catch (cause) { setAuthorityMessage(`확인 불가: ${commandErrorMessage(cause, "보고서를 열지 못했습니다.")}`); }
+  }
   const [pairingMode, setPairingMode] = useState<"pc" | "qr">("pc");
   const [pairing, setPairing] = useState<ExtensionPairingLink | null>(null);
   const [kakaoConfigured, setKakaoConfigured] = useState<boolean | null>(null);
@@ -543,6 +564,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             {cloudSettings?.apiBaseUrl && gateway.getCloudSyncHold && gateway.setCloudSyncHold && <CloudSyncHold endpoint={cloudSettings.apiBaseUrl} read={gateway.getCloudSyncHold} save={gateway.setCloudSyncHold} />}
             <SimpleRow name="클라우드에서 받기" control={<Switch aria-label="클라우드에서 받기" checked={cloudSettings?.captureEnabled ?? cloudSettings?.enabled ?? false} disabled={cloudBusy || !cloudSettings?.apiBaseUrl} onChange={event => void saveCloudSettings(cloudSettings?.enabled, event.target.checked)} />} />
             <SimpleRow name="클라우드로 복제" control={<Switch aria-label="클라우드로 복제" checked={cloudSettings?.enabled ?? false} disabled={cloudBusy || !cloudSettings?.apiBaseUrl} onChange={event => void saveCloudSettings(event.target.checked, cloudSettings?.captureEnabled ?? cloudSettings?.enabled)} />} />
+            <SimpleRow name="컬렉션 서버 이전 점검" status={authorityMessage ?? "이전할 때 빠지는 자료가 있는지 확인합니다"} control={<span className="settings-view__control-pair"><Button size="sm" variant="quiet" disabled={authorityBusy || cloudBusy || collectionPublication?.running || !cloudSettings?.enabled || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured || !cloudPublisherConfigured || !gateway.verifyCollectionAuthorityBaseline} onClick={() => void verifyCollectionAuthority()}>{authorityBusy ? "점검 중…" : "점검하기"}</Button>{authorityCheck && gateway.openCollectionAuthorityReport && <Button size="sm" variant="quiet" onClick={() => void openAuthorityReport()}>보고서 열기</Button>}</span>} />
           </SettingsGroup>
           <SettingsGroup title="동기화 상태">
             <CloudBackfillSettings embedded connectionReady={cloudSettings ? Boolean(cloudSettings.apiBaseUrl && cloudSettings.tokenConfigured) : null}>
@@ -622,6 +644,20 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
 }
 
 const SimpleRow = SettingsRow;
+
+function authorityResultText(report: import("../library/types").CollectionAuthorityVerifyReport): string {
+  if (report.verdict === "lossless") return "잃는 항목 없음";
+  if (report.verdict === "blocked") {
+    const reasons: Record<string, string> = { legacyRevision: "게시된 자료가 변경됐습니다", personalEdits: "개인 편집을 아직 모두 받지 못했습니다", bindRequests: "연결 요청을 아직 모두 받지 못했습니다", releaseReads: "신간 읽음 상태를 아직 모두 받지 못했습니다", releaseGeneration: "신간 게시 상태가 변경됐습니다" };
+    const failed = Object.keys(report.bindings).find(key => report.bindings[key]?.ok === false);
+    return `확인 불가: ${report.validation?.message ?? (failed ? reasons[failed] : null) ?? "보고서를 확인해 주세요"}`;
+  }
+  const count = report.diffs.total + report.people.diffs + report.works.missing.length + report.works.unknown.length + report.works.typeMismatch.length + report.artworks.originalMissing + report.artworks.unconfirmedBlobs;
+  // Work-id lists are capped at 20 by the report contract. Do not present the
+  // sampled total as an exact count when any list may have been truncated.
+  const sampled = [report.works.missing, report.works.unknown, report.works.typeMismatch].some(ids => ids.length >= 20);
+  return `차이 ${count.toLocaleString()}건${sampled ? " 이상" : ""}`;
+}
 
 function InlineEdit({ children }: { children: ReactNode }) { return <div className="settings-view__inline-edit">{children}</div>; }
 

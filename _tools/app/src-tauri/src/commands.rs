@@ -2695,6 +2695,33 @@ pub async fn test_cloud_capture_connection(
 }
 
 #[tauri::command]
+pub async fn verify_collection_authority_baseline(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    on_progress: tauri::ipc::Channel<crate::cloud::publication::PublishProgress>,
+) -> Result<crate::cloud::collection_authority_verify::VerifyResult, CommandError> {
+    use tauri::Manager;
+    let library = current_required(state)?;
+    let directory = app.path().app_local_data_dir().map_err(|_| CommandError::from(crate::cloud::collection_authority_verify::VerifyError::Save))?;
+    tauri::async_runtime::spawn_blocking(move || library.verify_collection_authority_baseline(&directory, &|progress| { let _ = on_progress.send(progress); }))
+        .await.map_err(|_| background_task_error())?.map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn open_collection_authority_report(app: AppHandle, path: String) -> Result<(), CommandError> {
+    use tauri::Manager;
+    use tauri_plugin_opener::OpenerExt;
+    let error = || CommandError { code: "collection_authority_report_open_failed", message: "점검 보고서를 열지 못했습니다.".into() };
+    let directory = app.path().app_local_data_dir().map_err(|_| error())?.join("collection-authority").canonicalize().map_err(|_| error())?;
+    let path = std::path::PathBuf::from(path).canonicalize().map_err(|_| error())?;
+    if path.parent() != Some(directory.as_path()) || !path.is_file()
+        || !path.file_name().and_then(|s| s.to_str()).is_some_and(|s| s.starts_with("verify-") && s.ends_with(".json")) {
+        return Err(error());
+    }
+    app.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|_| error())
+}
+
+#[tauri::command]
 pub async fn push_cloud_collections(
     state: State<'_, AppState>,
     on_progress: tauri::ipc::Channel<crate::cloud::publication::PublishProgress>,

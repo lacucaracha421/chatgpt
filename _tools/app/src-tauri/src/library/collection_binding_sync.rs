@@ -474,6 +474,15 @@ impl Library {
         endpoint: &str,
         applier: &dyn BindingApplier,
     ) -> Result<(), LibraryError> {
+        self.sync_collection_bindings_now(client, publisher_token, endpoint, applier, false)
+    }
+
+    /// Explicit verification bypasses idle polling, while retaining failure backoff.
+    pub(crate) fn receive_collection_bindings_now(&self, client: &CloudClient, publisher_token: &str, endpoint: &str) -> Result<(), LibraryError> {
+        self.sync_collection_bindings_now(client, publisher_token, endpoint, &LiveApplier, true)
+    }
+
+    fn sync_collection_bindings_now(&self, client: &CloudClient, publisher_token: &str, endpoint: &str, applier: &dyn BindingApplier, force: bool) -> Result<(), LibraryError> {
         self.ensure_send_to(endpoint)?;
         client.ensure_send()?;
         use crate::cloud::status_watch::{log_due, LogKind, LogPosition};
@@ -493,7 +502,7 @@ impl Library {
         };
         // Left-over work clears `last_polled` to 0, which is always due: the next tick
         // continues it.
-        if !log_due(endpoint, LogKind::Bindings, position, Some(state.last_polled), now) {
+        if !force && !log_due(endpoint, LogKind::Bindings, position, Some(state.last_polled), now) {
             return Ok(());
         }
         self.update_binding_sync_state(endpoint, |s| s.last_polled = now)?;

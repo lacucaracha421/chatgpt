@@ -245,6 +245,22 @@ impl Library {
         received.and(uploaded)
     }
 
+    /// Explicit verification receives without the idle throttle, retaining backoff.
+    pub(crate) fn receive_collection_release_reads_now(&self, client: &CloudClient, publisher_token: &str, endpoint: &str) -> Result<(), LibraryError> {
+        let now = unix_now();
+        if self.collection_release_sync_state(endpoint)?.retry_after > now {
+            return Ok(());
+        }
+        self.update_release_sync_state(endpoint, |s| s.last_polled = now)?;
+        if !self.receive_collection_release_reads(client, publisher_token, endpoint)? {
+            self.update_release_sync_state(endpoint, |s| {
+                s.last_polled = now + 3600;
+                s.retry_after = s.retry_after.max(now + 3600);
+            })?;
+        }
+        Ok(())
+    }
+
     /// Apply up to [`MAX_PAGES`] read-log pages. `Ok(false)` when the route is absent.
     pub(crate) fn receive_collection_release_reads(
         &self,

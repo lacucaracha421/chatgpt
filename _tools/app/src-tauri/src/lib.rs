@@ -557,6 +557,8 @@ pub fn run() {
             commands::create_extension_pairing,
             commands::push_cloud_metadata_backup,
             commands::push_cloud_collections,
+            commands::verify_collection_authority_baseline,
+            commands::open_collection_authority_report,
             commands::push_cloud_catalog,
             commands::reconcile_catalog_bookmarks,
             commands::flush_catalog_bookmark_outbox,

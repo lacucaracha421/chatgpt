@@ -1,17 +1,17 @@
-"""Server-owned Collections authority (slice 0: substrate, inactive by default).
+"""Server-owned Collections authority (substrate and slice 1A verification).
 
-Design: ``docs/research/collection-authority-design-20260924.md`` with the §6 user
+Design: ``docs/research/collection-authority-design-20260924.md`` with the §7 user
 decisions, on top of ADR-0036/0037/0038. This module owns the canonical Collections
 model, its typed commands, the baseline/change feeds, digest-bound staging and the
 explicit activation handler. Nothing here runs automatically.
 
 # Domain boundary (one ``collections`` authority domain)
 
-* **Work** — client id, type (``game``/``manga``/``movie``), ``legacyKind``, name,
+* **Work** — client id, type (``game``/``manga``/``movie``/``av``), ``legacyKind``, name,
   editable metadata and personal fields (``fields``), Showcase flag and order, the
-  three selected-artwork slots (``selection``), provider-derived display detail
-  (``details``: TMDB ``series``/``film``), PC-derived display values the server cannot
-  compute (``derived``: ``unreadReleaseCount``) and the lifecycle
+  selected-artwork slots (``selection``, including the spine), display detail
+  (``details``: TMDB ``series``/``film`` and ``av``), AV credits and people,
+  PC-derived release tracking values (``derived``) and the lifecycle
   ``live`` -> ``trashed`` -> ``tombstoned``.
 * **Binding** — ``(work, provider)`` with ``externalId``, ``config``, the stored provider
   ``snapshot`` and its normalized ``values`` (the three-way merge baseline).
@@ -22,8 +22,7 @@ explicit activation handler. Nothing here runs automatically.
 * **Volume**, **VolumeSource**, **Ownership** and **Membership** (work <-> Asset desired
   state).
 
-AV is deliberately excluded (§6.1): every AV payload is rejected with
-``collectionTypeUnsupported``. Names are unique per type, case-insensitively with the
+Names are unique per type, case-insensitively with the
 same ASCII ``NOCASE`` rule the PC database uses (§6.4). Deleting a work moves it to a
 30-day Collections trash (§6.2); only a publisher purge — explicit, or the expiry sweep
 — tombstones it, frees its name and provider identity and drops its children.
@@ -39,8 +38,12 @@ client drops the intent), ``workTrashed`` and ``operationConflict``.
 
 # Inactive safety
 
-Startup only creates empty tables. While no ``authority_domains(domain='collections')``
-row exists every authority read/command route answers ``authorityInactive``, the legacy
+Startup creates or upgrades the inactive schema; the AV CHECK rebuild refuses a
+non-empty works table. The v2 verification route stages only typed authority rows
+in connection-local TEMP tables, with persistent writes denied and the read
+transaction rolled back. Memory is roughly the staging document + Collections rows,
+not the whole server database. While no ``authority_domains(domain='collections')``
+row exists authority feeds/commands answer ``authorityInactive``, the legacy
 replica PUT and the personal-edit POST behave exactly as before, and ``/v1/collections``
 keeps serving the PC-published replica. Only :func:`activate`, reachable solely from
 the publisher-only activation route, creates the epoch.
@@ -68,9 +71,8 @@ RECEIPT_RETENTION_DAYS = 180
 TRASH_RETENTION_DAYS = 30
 PURGE_BATCH = 100
 
-TYPES = ("game", "manga", "movie")
-UNSUPPORTED_TYPES = ("av",)
-LEGACY_KINDS = ("game", "manga", "movie", "gacha")
+TYPES = ("game", "manga", "movie", "av")
+LEGACY_KINDS = ("game", "manga", "movie", "gacha", "av")
 PROVIDERS = ("tmdb", "igdb", "mangadex", "aladin", "kakao")
 #: The PC only binds each provider to one Collection type.
 PROVIDER_TYPES = {"tmdb": "movie", "igdb": "game", "mangadex": "manga",
@@ -209,7 +211,7 @@ DDL = """
 CREATE TABLE IF NOT EXISTS collection_authority_works(
  library_id TEXT NOT NULL,
  work_id TEXT NOT NULL,
- type TEXT NOT NULL CHECK(type IN ('game','manga','movie')),
+ type TEXT NOT NULL CHECK(type IN ('game','manga','movie','av')),
  legacy_kind TEXT,
  name TEXT NOT NULL,
  fields TEXT NOT NULL,
@@ -218,6 +220,7 @@ CREATE TABLE IF NOT EXISTS collection_authority_works(
  selection TEXT NOT NULL,
  details TEXT NOT NULL,
  derived TEXT NOT NULL,
+ av_credits TEXT NOT NULL DEFAULT '[]',
  lifecycle TEXT NOT NULL CHECK(lifecycle IN ('live','trashed','tombstoned')),
  trashed_at TEXT,
  entity_revision INTEGER NOT NULL CHECK(entity_revision >= 1),
@@ -261,6 +264,8 @@ CREATE TABLE IF NOT EXISTS collection_authority_artworks(
  language TEXT,
  original TEXT NOT NULL,
  thumbnail TEXT,
+ published_order INTEGER,
+ selected INTEGER CHECK(selected IN (0,1)),
  entity_revision INTEGER NOT NULL DEFAULT 1,
  created_at TEXT NOT NULL,
  PRIMARY KEY(library_id,artwork_id));
@@ -277,6 +282,9 @@ CREATE TABLE IF NOT EXISTS collection_authority_volumes(
  cover_artwork_id TEXT,
  source_provider TEXT,
  source_cover_id TEXT,
+ cover_focus_x REAL,
+ published TEXT,
+ published_order INTEGER,
  deleted INTEGER NOT NULL CHECK(deleted IN (0,1)),
  entity_revision INTEGER NOT NULL CHECK(entity_revision >= 1),
  created_at TEXT NOT NULL,
@@ -382,17 +390,44 @@ CREATE TABLE IF NOT EXISTS collection_authority_projection(
  payload TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS collection_authority_projection_type_name
  ON collection_authority_projection(type, name COLLATE NOCASE, id);
+CREATE TABLE IF NOT EXISTS collection_authority_people(
+ library_id TEXT NOT NULL,
+ person_id TEXT NOT NULL,
+ payload TEXT NOT NULL,
+ portrait_image TEXT,
+ PRIMARY KEY(library_id,person_id));
 """
 
 TYPED_TABLES = ("collection_authority_works", "collection_authority_bindings",
                 "collection_authority_artworks", "collection_authority_volumes",
                 "collection_authority_volume_sources", "collection_authority_ownership",
                 "collection_authority_members", "collection_authority_receipts",
-                "collection_authority_changes", "collection_authority_projection")
+                "collection_authority_changes", "collection_authority_projection",
+                "collection_authority_people")
 
 
 def startup_db(db):
+    old = db.execute("SELECT sql FROM sqlite_master WHERE type='table'"
+                     " AND name='collection_authority_works'").fetchone()
+    if old is not None and "'av'" not in old[0]:
+        # Never rebuild populated authority state. Slice 1A may upgrade only the
+        # empty substrate; an active installation needs a separate migration.
+        if db.execute("SELECT 1 FROM collection_authority_works LIMIT 1").fetchone():
+            raise RuntimeError("Collections AV schema upgrade requires an empty works table")
+        db.execute("DROP TABLE collection_authority_works")
     db.executescript(DDL)
+    additions = {
+        "collection_authority_works": {"av_credits": "TEXT NOT NULL DEFAULT '[]'"},
+        "collection_authority_artworks": {"published_order": "INTEGER",
+                                           "selected": "INTEGER CHECK(selected IN (0,1))"},
+        "collection_authority_volumes": {"cover_focus_x": "REAL", "published": "TEXT",
+                                          "published_order": "INTEGER"},
+    }
+    for table, columns in additions.items():
+        present = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+        for column, declaration in columns.items():
+            if column not in present:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
 
 def startup(get_db):
@@ -593,6 +628,17 @@ def normalize_field(field, value, *, staged=False, code="invalidCollectionComman
     if field == "coverAssetId":
         return require_id(value, code, nullable=True)
     if field == "myScore":
+        if staged and value is not None:
+            # The replica accepts any finite stored f64. The editing command has
+            # a narrower 0..5 half-star rule, which must not reject old records.
+            if type(value) not in (int, float):
+                fail(422, code, "Invalid stored score.")
+            try:
+                if math.isfinite(float(value)):
+                    return float(value)
+            except OverflowError:
+                pass
+            fail(422, code, "Invalid stored score.")
         return normalize_score(value, code)
     if field in INT_FIELDS:
         return _int(value, code=code)
@@ -633,8 +679,6 @@ def normalize_name(value, *, limit=MAX_COMMAND_NAME, code="invalidCollectionComm
 
 
 def require_type(value, code="invalidCollectionCommand"):
-    if value in UNSUPPORTED_TYPES:
-        fail(422, "collectionTypeUnsupported", "AV 컬렉션은 서버에서 관리하지 않습니다.")
     if value not in TYPES:
         fail(422, code, "컬렉션 종류가 올바르지 않습니다.")
     return value
@@ -730,6 +774,7 @@ def work_state(row):
             "showcase": bool(row["showcase"]), "showcaseOrder": row["showcase_order"],
             "selection": json.loads(row["selection"]), "details": json.loads(row["details"]),
             "derived": json.loads(row["derived"]), "lifecycle": row["lifecycle"],
+            "avCredits": json.loads(row["av_credits"]),
             "trashedAt": row["trashed_at"], "entityRevision": row["entity_revision"],
             "createdAt": row["created_at"], "updatedAt": row["updated_at"]}
 
@@ -744,19 +789,19 @@ def write_work(db, library_id, state, *, insert=False):
               int(state["showcase"]), state["showcaseOrder"], encode(state["selection"]),
               encode(state["details"]), encode(state["derived"]), state["lifecycle"],
               state["trashedAt"], state["entityRevision"], state["createdAt"],
-              state["updatedAt"]]
+              state["updatedAt"], encode(state.get("avCredits", []))]
     try:
         if insert:
             db.execute(
                 "INSERT INTO collection_authority_works(type,legacy_kind,name,fields,showcase,"
                 "showcase_order,selection,details,derived,lifecycle,trashed_at,entity_revision,"
-                "created_at,updated_at,library_id,work_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "created_at,updated_at,av_credits,library_id,work_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 values + [library_id, state["workId"]])
         else:
             db.execute(
                 "UPDATE collection_authority_works SET type=?,legacy_kind=?,name=?,fields=?,"
                 "showcase=?,showcase_order=?,selection=?,details=?,derived=?,lifecycle=?,"
-                "trashed_at=?,entity_revision=?,created_at=?,updated_at=?"
+                "trashed_at=?,entity_revision=?,created_at=?,updated_at=?,av_credits=?"
                 " WHERE library_id=? AND work_id=?", values + [library_id, state["workId"]])
     except sqlite3.IntegrityError:
         holder = db.execute(
@@ -885,15 +930,18 @@ def build_payload(db, library_id, row):
     selection = state["selection"]
     artworks = db.execute(
         "SELECT * FROM collection_authority_artworks WHERE library_id=? AND work_id=?"
-        " ORDER BY CASE kind WHEN 'cover' THEN 0 WHEN 'hero' THEN 1 ELSE 2 END, created_at,"
+        " ORDER BY published_order IS NULL, published_order,"
+        " CASE kind WHEN 'cover' THEN 0 WHEN 'hero' THEN 1 ELSE 2 END, created_at,"
         " artwork_id", [library_id, work_id]).fetchall()
     selected_ids = {value for value in selection.values() if value}
     art_items = [{"id": art["artwork_id"], "kind": art["kind"],
-                  "selected": art["artwork_id"] in selected_ids,
+                  "selected": (art["artwork_id"] in selected_ids if art["selected"] is None
+                               else bool(art["selected"])),
                   "thumbnail": blob_payload(None if art["thumbnail"] is None else json.loads(art["thumbnail"])),
                   "original": blob_payload(json.loads(art["original"]))} for art in artworks]
-    art_items.sort(key=lambda art: 0 if art["selected"] else 1)
-    art_items.sort(key=lambda art: {"cover": 0, "hero": 1}.get(art["kind"], 2))
+    if all(art["published_order"] is None for art in artworks):
+        art_items.sort(key=lambda art: 0 if art["selected"] else 1)
+        art_items.sort(key=lambda art: {"cover": 0, "hero": 1}.get(art["kind"], 2))
     sources = {}
     for source in db.execute(
             "SELECT volume_number,provider,isbn13,publication_date FROM collection_authority_volume_sources"
@@ -905,15 +953,19 @@ def build_payload(db, library_id, row):
     volumes = []
     for volume in db.execute(
             "SELECT * FROM collection_authority_volumes WHERE library_id=? AND work_id=? AND deleted=0"
-            " ORDER BY edition_index, sort_order, volume_number, volume_id", [library_id, work_id]):
+            " ORDER BY published_order IS NULL, published_order, edition_index, sort_order,"
+            " volume_number, volume_id", [library_id, work_id]):
         source = sources.get(volume["volume_number"])
         volumes.append({"id": volume["volume_id"], "volumeNumber": volume["volume_number"],
                         "editionIndex": volume["edition_index"],
                         "displayLabel": volume["display_label"],
                         "coverArtworkId": volume["cover_artwork_id"],
+                        "coverFocusX": volume["cover_focus_x"],
                         "localReleaseDate": source["publication_date"] if source else None,
                         "isbn13": source["isbn13"] if source else None,
                         "releaseStatus": None})
+        if volume["published"] is not None:
+            volumes[-1].update(json.loads(volume["published"]))
     selected_work = selection.get("work")
     if selected_work is None:
         fallback = db.execute(
@@ -927,11 +979,21 @@ def build_payload(db, library_id, row):
     bindings = db.execute(
         "SELECT provider,external_id,bound,snapshot FROM collection_authority_bindings"
         " WHERE library_id=? AND work_id=?", [library_id, work_id]).fetchall()
-    # Not carried by authority yet (2026-10-01 publication contract): item `status` /
-    # `ownedPlatform` (and their personal-edit version-3 mobile edits, which the shim
-    # refuses), volume `coverFocusX` and replica `people` exist only in the PC replica, so
-    # activating authority silently drops them from the served projection.
-    # `spineArtworkId` is derived at read time from artwork kinds and survives.
+    av = state["details"].get("av")
+    if av is not None:
+        person_ids = sorted({credit["personId"] for credit in state["avCredits"]})
+        people = {person["person_id"]: person for person in db.execute(
+            "SELECT person_id,portrait_image FROM collection_authority_people WHERE library_id=?"
+            " AND person_id IN (" + ",".join("?" for _ in person_ids) + ")",
+            [library_id, *person_ids])} if person_ids else {}
+        credits = []
+        for credit in state["avCredits"]:
+            person = people.get(credit["personId"])
+            image = None if person is None or person["portrait_image"] is None else json.loads(person["portrait_image"])
+            credits.append({"id": credit["personId"],
+                            **{k: v for k, v in credit.items() if k != "personId"},
+                            "portraitImage": image})
+        av = {**av, "people": credits}
     payload = {
         "id": work_id, "name": state["name"], "type": state["type"],
         "description": fields.get("description"), "coverAssetId": fields.get("coverAssetId"),
@@ -942,11 +1004,13 @@ def build_payload(db, library_id, row):
         "unreadReleaseCount": int(state["derived"].get("unreadReleaseCount") or 0),
         **{field: fields.get(field) for field in WORK_FIELDS
            if field not in ("description", "coverAssetId")},
+        "status": fields.get("status"), "ownedPlatform": fields.get("ownedPlatform"),
+        **{field: state["derived"].get(field) for field in TRACKING_FIELDS},
         "showcase": state["showcase"], "showcaseOrder": state["showcaseOrder"],
         "seasonDateRange": season_date_range(state["details"], bindings),
         "createdAt": state["createdAt"], "updatedAt": state["updatedAt"],
         "series": state["details"].get("series"), "film": state["details"].get("film"),
-        "volumes": volumes, "artworks": art_items,
+        "av": av, "volumes": volumes, "artworks": art_items,
     }
     return mobile_collections.stored(mobile_collections.Collection.model_validate(payload))
 
@@ -1006,12 +1070,20 @@ def finalize_items(db, library_id, items, *, detail=False, today=None):
         stats = {row[0]: tuple(row[1:]) for row in rows}
     if detail:
         today = today or datetime.datetime.now(datetime.timezone.utc).date()
+        # Only authority-projected volumes carry ids; legacy volume dicts skip the lookup.
+        volume_ids = [volume["id"] for item in items for volume in item.get("volumes") or [] if volume.get("id")]
+        published_volumes = {row[0] for row in db.execute(
+            "SELECT volume_id FROM collection_authority_volumes WHERE library_id=? AND published IS NOT NULL"
+            " AND work_id IN (" + ",".join("?" for _ in items) + ")",
+            [library_id, *[item["id"] for item in items]])} if volume_ids else set()
     for item in items:
         count, first, cover = stats.get(item["id"], (0, None, None))
         item["assetCount"] = count
         item["coverAssetId"] = cover if cover is not None else first
         if detail:
             for volume in item.get("volumes") or []:
+                if volume.get("id") in published_volumes:
+                    continue
                 status = None
                 try:
                     date = datetime.datetime.strptime(volume.get("localReleaseDate") or "", "%Y-%m-%d").date()
@@ -1901,6 +1973,9 @@ def parse_command(body):
 
 STAGING_KEYS = {"libraryId", "personalEditCursor", "works", "bindings", "artworks", "volumes",
                 "volumeSources", "ownership", "memberships"}
+STAGING_V2_KEYS = STAGING_KEYS | {"stagingVersion", "legacyRevision", "bindingRequestSequence",
+                                  "releaseReadCursor", "releaseGeneration", "people"}
+TRACKING_FIELDS = ("releaseWatch", "ownedVolumes", "releaseSchedule")
 
 
 def _staged_list(body, key, limit=MAX_STAGED_ROWS):
@@ -1916,7 +1991,7 @@ def _exact(item, keys, section):
     return item
 
 
-def parse_staging(body):
+def _parse_staging_v1(body, *, allow_missing_original=False):
     """Normalize a PC-exported baseline. Rejections are coded and never echo payloads."""
     code = "invalidCollectionBaseline"
     if not isinstance(body, dict) or set(body) != STAGING_KEYS:
@@ -1986,7 +2061,8 @@ def parse_staging(body):
                          "width": _int(item["width"], low=1, high=1_000_000, code=code),
                          "height": _int(item["height"], low=1, high=1_000_000, code=code),
                          "language": _text(item["language"], 40, code=code),
-                         "original": blob_manifest(item["original"], code=code),
+                         "original": None if allow_missing_original and item["original"] is None
+                         else blob_manifest(item["original"], code=code),
                          "thumbnail": None if item["thumbnail"] is None
                          else blob_manifest(item["thumbnail"], thumbnail=True, code=code),
                          "createdAt": _text(item["createdAt"], 100, nullable=False, code=code)})
@@ -2053,15 +2129,154 @@ def parse_staging(body):
             "memberships": sorted(memberships, key=key)}
 
 
+def _replica_value(model, value, section):
+    """Validate without exposing Pydantic's errors (which contain input values)."""
+    try:
+        return model.model_validate(value, strict=True).model_dump()
+    except (ValueError, TypeError, OverflowError):
+        fail(422, "invalidCollectionBaseline", "Invalid replica value.", section=section)
+
+
+def parse_staging(body, *, verify=False):
+    """Accept the original exact v1 document, or the complete v2 publication contract.
+
+    V2 artwork rows require the exact v1 keys plus ``order`` (nonnegative integer)
+    and ``selected`` (boolean). The latter preserves the replica's selection for
+    every kind, including back covers outside the work/hero/backdrop/spine slots.
+    V1 rejects both keys; its stored NULL selection retains the slot fallback.
+    """
+    import mobile_collections as mobile
+
+    if not isinstance(body, dict) or "stagingVersion" not in body:
+        if verify:
+            fail(422, "invalidCollectionBaseline", "Verification requires staging version 2.")
+        return _parse_staging_v1(body)
+    code = "invalidCollectionBaseline"
+    _exact(body, STAGING_V2_KEYS, "staging")
+    if type(body["stagingVersion"]) is not int or body["stagingVersion"] != 2:
+        fail(422, code, "Unsupported staging version.")
+    extra = {"stagingVersion": 2,
+             "legacyRevision": _text(body["legacyRevision"], 2000, nullable=False, code=code)}
+    for key in ("bindingRequestSequence", "releaseReadCursor", "releaseGeneration"):
+        extra[key] = _int(body[key], low=0, nullable=False, code=code)
+    base = {key: body[key] for key in STAGING_KEYS}
+    base["works"], base["artworks"], base["volumes"] = [], [], []
+    work_extras, art_extras, volume_extras = {}, {}, {}
+    work_keys = {"workId", "type", "legacyKind", "name", "fields", "showcase", "showcaseOrder",
+                 "selection", "details", "derived", "createdAt", "updatedAt", "avCredits"}
+    for work in _staged_list(body, "works", MAX_WORKS):
+        _exact(work, work_keys, "works")
+        work_id = require_id(work["workId"], code)
+        fields = _exact(work["fields"], set(WORK_FIELDS) | {"status", "ownedPlatform"}, "fields")
+        selection = _exact(work["selection"], set(SLOTS) | {"spine"}, "selection")
+        details = _exact(work["details"], {"series", "film", "av"}, "details")
+        derived = _exact(work["derived"], {"unreadReleaseCount", *TRACKING_FIELDS}, "derived")
+        kind = require_type(work["type"], code)
+        status = _text(fields["status"], 40, code=code)
+        platform = _text(fields["ownedPlatform"], 200, code=code)
+        if status is not None and status not in mobile.ITEM_STATUSES[kind]:
+            fail(422, code, "Invalid work status.")
+        if platform is not None and kind != "game":
+            fail(422, code, "Owned platform requires a game.")
+        av = details["av"]
+        if av is not None:
+            _exact(av, {"productCode", "titleJa", "maker", "label", "series", "genres", "releaseDate"}, "av")
+            av = _replica_value(mobile.AvInfo, av, "av")
+            del av["people"]
+        credits = _staged_list(work, "avCredits", 64)
+        if kind != "av" and (av is not None or credits):
+            fail(422, code, "AV details and credits require an AV work.")
+        if credits and av is None:
+            fail(422, code, "AV credits require AV details.")
+        parsed_credits = []
+        for credit in credits:
+            _exact(credit, {"personId", "name", "nameJa", "role", "order", "portraitCrop"}, "avCredits")
+            person_id = require_id(credit["personId"], code)
+            value = _replica_value(mobile.AvPerson,
+                                   {"id": person_id, **{k: v for k, v in credit.items() if k != "personId"}},
+                                   "avCredits")
+            parsed_credits.append({"personId": person_id,
+                                   **{k: v for k, v in value.items() if k not in ("id", "portraitImage")}})
+        for key, model in (("releaseWatch", mobile.ReleaseWatch), ("releaseSchedule", mobile.ReleaseSchedule)):
+            if derived[key] is not None:
+                _replica_value(model, derived[key], key)
+        if derived["ownedVolumes"] is not None:
+            entries = _staged_list(derived, "ownedVolumes", 4)
+            editions = [_replica_value(mobile.OwnedVolumes, entry, "ownedVolumes")["editionIndex"]
+                        for entry in entries]
+            if len(set(editions)) != len(editions):
+                fail(422, code, "Duplicate owned-volume editions.")
+        work_extras[work_id] = {"status": status, "ownedPlatform": platform,
+                               "spine": require_id(selection["spine"], code, nullable=True),
+                               "av": av, "avCredits": parsed_credits,
+                               "tracking": {key: derived[key] for key in TRACKING_FIELDS}}
+        base["works"].append({**{k: v for k, v in work.items() if k != "avCredits"},
+                              "fields": {k: fields[k] for k in WORK_FIELDS},
+                              "selection": {k: selection[k] for k in SLOTS},
+                              "details": {k: details[k] for k in ("series", "film")},
+                              "derived": {"unreadReleaseCount": derived["unreadReleaseCount"]}})
+    for art in _staged_list(body, "artworks"):
+        if not isinstance(art, dict) or not {"order", "selected"} <= set(art):
+            fail(422, code, "Artwork order and selected are required.")
+        if type(art["selected"]) is not bool:
+            fail(422, code, "Artwork selected must be a boolean.")
+        art_extras[require_id(art.get("artworkId"), code)] = {
+            "order": _int(art["order"], low=0, nullable=False, code=code),
+            "selected": art["selected"]}
+        base["artworks"].append({k: v for k, v in art.items() if k not in ("order", "selected")})
+    for volume in _staged_list(body, "volumes"):
+        if not isinstance(volume, dict) or not {"coverFocusX", "published", "order"} <= set(volume):
+            fail(422, code, "Published volume fields are required.")
+        focus = volume["coverFocusX"]
+        if focus is not None and (type(focus) not in (int, float) or not 0 <= focus <= 1):
+            fail(422, code, "Invalid cover focus.")
+        published = volume["published"]
+        if published is not None:
+            _exact(published, {"releaseStatus", "localReleaseDate", "isbn13"}, "published")
+            for value in published.values():
+                _text(value, 100, code=code)
+        volume_extras[require_id(volume.get("volumeId"), code)] = {
+            "coverFocusX": focus, "published": published,
+            "order": _int(volume["order"], low=0, nullable=False, code=code)}
+        base["volumes"].append({k: v for k, v in volume.items()
+                                if k not in ("coverFocusX", "published", "order")})
+    people = []
+    for person in _staged_list(body, "people", mobile.MAX_PEOPLE):
+        _exact(person, {"personId", "memo", "favorite", "profile", "portrait", "portraitImage"}, "people")
+        person_id = require_id(person["personId"], code)
+        value = _replica_value(mobile.Person, {"id": person_id, **{
+            k: v for k, v in person.items() if k not in ("personId", "portraitImage")}}, "people")
+        if len(encode(value).encode()) > mobile.MAX_PERSON_BYTES:
+            fail(422, code, "Person is too large.")
+        portrait = person["portraitImage"]
+        if portrait is not None:
+            portrait = _replica_value(mobile.AvPortraitImage, portrait, "portraitImage")
+        people.append({"personId": person_id, **{k: v for k, v in value.items() if k != "id"},
+                       "portraitImage": portrait})
+    doc = _parse_staging_v1(base, allow_missing_original=verify)
+    for work in doc["works"]:
+        additions = work_extras[work["workId"]]
+        work["fields"].update({k: additions[k] for k in ("status", "ownedPlatform")})
+        work["selection"]["spine"] = additions["spine"]
+        work["details"]["av"] = additions["av"]
+        work["derived"].update(additions["tracking"])
+        work["avCredits"] = additions["avCredits"]
+    for art in doc["artworks"]:
+        art.update(art_extras[art["artworkId"]])
+    for volume in doc["volumes"]:
+        volume.update(volume_extras[volume["volumeId"]])
+    return {**doc, **extra, "people": sorted(people, key=lambda p: p["personId"])}
+
+
 def staging_counts(doc):
-    return {section: len(doc[section]) for section in SECTIONS}
+    return {section: len(doc[section]) for section in (*SECTIONS, "people") if section in doc}
 
 
 def _baseline_fail(message, **extra):
     fail(409, "collectionBaselineRejected", message, **extra)
 
 
-def validate_staging(db, doc):
+def validate_staging(db, doc, *, verify=False):
     """§5 step 2: the staged baseline must describe exactly the live legacy state."""
     library_id = doc["libraryId"]
     libraries = sorted({entry["libraryId"] for entry in authority.active_domains(db)})
@@ -2071,7 +2286,7 @@ def validate_staging(db, doc):
     # Every mobile personal edit must already be drained into the exported state.
     state = db.execute("SELECT last_sequence FROM mobile_collection_edit_state WHERE singleton=1").fetchone()
     last = state[0] if state else 0
-    if doc["personalEditCursor"] != last:
+    if not verify and doc["personalEditCursor"] != last:
         _baseline_fail("모바일 개인 편집을 모두 반영한 뒤 다시 준비해 주세요.",
                        reason="personalEditCursor", personalEditCursor=last)
     works = {work["workId"]: work for work in doc["works"]}
@@ -2080,7 +2295,7 @@ def validate_staging(db, doc):
     live = {row[0]: row[1] for row in db.execute("SELECT id,type FROM mobile_collections")}
     staged = {work_id: work["type"] for work_id, work in works.items()
               if work["legacyKind"] != "gacha"}
-    if staged != live:
+    if not verify and staged != live:
         _baseline_fail("게시된 컬렉션과 기준선의 작품 목록이 다릅니다.", reason="works",
                        missing=sorted(set(live) - set(staged))[:20],
                        unknown=sorted(set(staged) - set(live))[:20],
@@ -2106,7 +2321,7 @@ def validate_staging(db, doc):
         if art["workId"] not in works:
             _baseline_fail("작품에 속하지 않은 이미지가 있습니다.", artworkId=art["artworkId"])
         for blob in (art["original"], art["thumbnail"]):
-            if blob is not None and confirmed.get(blob["sha256"]) != (blob["sizeBytes"], blob["contentType"]):
+            if not verify and blob is not None and confirmed.get(blob["sha256"]) != (blob["sizeBytes"], blob["contentType"]):
                 _baseline_fail("업로드가 확인되지 않은 이미지가 있습니다.", reason="artworkBlob",
                                sha256=blob["sha256"])
         artworks[art["artworkId"]] = art["workId"]
@@ -2126,6 +2341,28 @@ def validate_staging(db, doc):
             owned(work["workId"], artwork_id)
         for artwork_id in detail_artwork_references(work["details"]):
             owned(work["workId"], artwork_id)
+    people = {person["personId"]: person for person in doc.get("people", [])}
+    if len(people) != len(doc.get("people", [])):
+        _baseline_fail("Duplicate person IDs.", reason="duplicatePerson")
+    for person in people.values():
+        portrait = person["portraitImage"]
+        if not verify and portrait is not None and confirmed.get(portrait["sha256"]) != (
+                portrait["sizeBytes"], portrait["contentType"]):
+            _baseline_fail("Unconfirmed portrait image.", reason="portraitBlob")
+    for work in doc["works"]:
+        for credit in work.get("avCredits", []):
+            if credit["personId"] not in people:
+                _baseline_fail("AV credit references a missing person.", reason="creditPerson")
+            crop = credit["portraitCrop"]
+            if crop is not None and works.get(artworks.get(crop["artworkId"]), {}).get("type") != "av":
+                _baseline_fail("Portrait crop must reference staged AV artwork.", reason="portraitCrop")
+    if doc.get("stagingVersion") == 2:
+        for section in ("artworks", "volumes"):
+            orders = [(item["workId"], item["order"]) for item in doc[section]]
+            if len(set(orders)) != len(orders):
+                _baseline_fail("Duplicate publication order.", reason="order", section=section)
+        if not verify and not all(binding["ok"] for binding in verification_bindings(db, doc).values()):
+            _baseline_fail("Publication bindings have changed.", reason="bindings")
     identities, pairs = set(), set()
     for binding in doc["bindings"]:
         if binding["workId"] not in works:
@@ -2246,6 +2483,251 @@ def staged_summary(db):
             "stagedAt": row[3]}
 
 
+def verification_bindings(db, body):
+    """Capture all drain barriers from the same SQLite read snapshot."""
+    def staged_int(key):
+        value = body.get(key)
+        return value if type(value) is int and 0 <= value <= MAX_SAFE_INTEGER else None
+
+    legacy = db.execute("SELECT revision FROM mobile_collection_replica WHERE singleton=1").fetchone()
+    revision = legacy[0] if legacy else None
+    staged_revision = body.get("legacyRevision")
+    if not isinstance(staged_revision, str) or len(staged_revision) > 2000:
+        staged_revision = None
+    edits = db.execute("SELECT last_sequence,applied_cursor FROM mobile_collection_edit_state"
+                       " WHERE singleton=1").fetchone()
+    last, applied = tuple(edits) if edits else (0, 0)
+    binding = db.execute("SELECT sequence FROM collection_binding_state WHERE singleton=1").fetchone()
+    sequence = binding[0] if binding else 0
+    pending = db.execute("SELECT COUNT(*) FROM collection_binding_requests WHERE state='pending'").fetchone()[0]
+    releases = db.execute("SELECT read_sequence,generation FROM collection_release_state WHERE singleton=1").fetchone()
+    read_cursor, generation = (releases[0], releases[1] or 0) if releases else (0, 0)
+    return {
+        "legacyRevision": {"staged": staged_revision, "server": revision,
+                           "ok": staged_revision is not None and staged_revision == revision},
+        "personalEdits": {"staged": staged_int("personalEditCursor"), "last": last, "applied": applied,
+                          "ok": staged_int("personalEditCursor") == last == applied},
+        "bindRequests": {"pending": pending, "staged": staged_int("bindingRequestSequence"),
+                         "server": sequence, "ok": pending == 0 and staged_int("bindingRequestSequence") == sequence},
+        "releaseReads": {"staged": staged_int("releaseReadCursor"), "server": read_cursor,
+                         "ok": staged_int("releaseReadCursor") == read_cursor},
+        "releaseGeneration": {"staged": staged_int("releaseGeneration"), "server": generation,
+                              "ok": staged_int("releaseGeneration") == generation},
+    }
+
+
+_ABSENT = object()
+
+
+def _value_diffs(live, projected, path=""):
+    """Leaf differences, preserving array order and missing-versus-null semantics."""
+    if isinstance(live, dict) and isinstance(projected, dict):
+        for key in sorted(set(live) | set(projected)):
+            yield from _value_diffs(live.get(key, _ABSENT), projected.get(key, _ABSENT),
+                                    f"{path}.{key}" if path else key)
+    elif isinstance(live, list) and isinstance(projected, list):
+        for index in range(max(len(live), len(projected))):
+            yield from _value_diffs(live[index] if index < len(live) else _ABSENT,
+                                    projected[index] if index < len(projected) else _ABSENT,
+                                    path + "[]")
+    elif live != projected or (isinstance(live, bool) != isinstance(projected, bool)):
+        yield path or "$", live, projected
+
+
+def _sample_digest(value):
+    # Tag absence rather than treating a missing key as an explicit JSON null.
+    return digest(["missing"] if value is _ABSENT else ["value", value])[:16]
+
+
+def _verification_artworks(db, doc):
+    confirmed = {row[0]: (row[1], row[2]) for row in db.execute(
+        "SELECT sha256,size_bytes,content_type FROM mobile_collection_artwork")}
+    missing, unconfirmed, samples = 0, set(), []
+    for art in doc["artworks"]:
+        issue = art["original"] is None
+        missing += int(issue)
+        for blob in (art["original"], art["thumbnail"]):
+            if blob is not None and confirmed.get(blob["sha256"]) != (blob["sizeBytes"], blob["contentType"]):
+                unconfirmed.add(blob["sha256"])
+                issue = True
+        if issue and len(samples) < 20:
+            samples.append(art["artworkId"])
+    for person in doc["people"]:
+        blob = person["portraitImage"]
+        if blob is not None and confirmed.get(blob["sha256"]) != (blob["sizeBytes"], blob["contentType"]):
+            unconfirmed.add(blob["sha256"])
+            # Portraits have no artwork ID; include only artwork IDs in this list.
+    return {"originalMissing": missing, "unconfirmedBlobs": len(unconfirmed), "samples": samples}
+
+
+def _create_verification_tables(db):
+    """Shadow typed authority tables with empty TEMP tables using the canonical DDL."""
+    # Execute statements individually: executescript() would commit the caller's
+    # read transaction and lose the snapshot shared by bindings and comparison.
+    for statement in re.sub(r"--[^\n]*", "", DDL).split(";"):
+        statement = statement.strip()
+        table = re.match(r"CREATE TABLE IF NOT EXISTS (\w+)", statement)
+        index = re.match(r"CREATE (?:UNIQUE )?INDEX IF NOT EXISTS (\w+)\s+ON (\w+)", statement)
+        if table and table[1] in TYPED_TABLES:
+            db.execute(statement.replace("CREATE TABLE", "CREATE TEMP TABLE", 1))
+        elif index and index[2] in TYPED_TABLES:
+            db.execute(statement.replace("IF NOT EXISTS ", "IF NOT EXISTS temp.", 1))
+
+
+def _verification_authorizer(action, arg1, arg2, database, source):
+    # query_only also blocks TEMP writes. Deny persistent DML instead, including
+    # writes to sqlite_master used by persistent schema changes.
+    if action in (sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE) and database != "temp":
+        return sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_OK
+
+
+def verify_staging(db, body, now):
+    """Project staging in TEMP tables inside the caller's read transaction.
+
+    Unqualified authority queries resolve to TEMP; legacy rows, asset visibility,
+    artwork receipts and drain barriers remain in main, all in the same read snapshot.
+    Rollback removes the TEMP schema even on validation or projection failure.
+    No activation handler, storage HEAD or publication receipt write is invoked.
+    """
+    import mobile_collections as mobile
+    from pydantic import ValidationError
+
+    db.set_authorizer(_verification_authorizer)
+    try:
+        report = {"version": 1, "verdict": "blocked", "checkedAt": now,
+                  "bindings": verification_bindings(db, body), "validation": None,
+                  "counts": {key: {"staged": len(body[key])} for key in (*SECTIONS, "people")
+                             if isinstance(body.get(key), list)},
+                  "works": {"live": 0, "staged": 0, "matched": 0, "missing": [], "unknown": [], "typeMismatch": []},
+                  "diffs": {"total": 0, "byPath": {}, "samples": []},
+                  "people": {"live": 0, "staged": 0, "diffs": 0, "samples": []},
+                  "artworks": {"originalMissing": 0, "unconfirmedBlobs": 0, "samples": []}}
+        live = {row["id"]: json.loads(row["payload"]) for row in db.execute("SELECT id,payload FROM mobile_collections")}
+        live_people = {row[0] for row in db.execute("SELECT id FROM mobile_collection_people")}
+        report["works"]["live"] = len(live)
+        report["people"]["live"] = len(live_people)
+        try:
+            doc = parse_staging(body, verify=True)
+            staged = {work["workId"]: work for work in doc["works"] if work["legacyKind"] != "gacha"}
+            common = set(live) & set(staged)
+            mismatched = sorted(key for key in common if live[key]["type"] != staged[key]["type"])
+            missing, unknown = sorted(set(live) - set(staged)), sorted(set(staged) - set(live))
+            report["works"].update(staged=len(staged), matched=len(common) - len(mismatched),
+                                   missing=missing[:20], unknown=unknown[:20], typeMismatch=mismatched[:20])
+            staged_people = {person["personId"] for person in doc["people"]}
+            report["people"]["staged"] = len(staged_people)
+            report["artworks"] = _verification_artworks(db, doc)
+            validate_staging(db, doc, verify=True)
+            _create_verification_tables(db)
+            insert_staging(db, doc, now)
+            library_id = doc["libraryId"]
+            diffs = report["diffs"]
+            # Use the exact public transforms used by /v1/collections. Derived
+            # asset counts/covers and release dates are intentionally not masked.
+            for work_id in sorted(common):
+                payload = build_payload(db, library_id, work_row(db, library_id, work_id))
+                for view in ("list", "detail"):
+                    projected = json.loads(encode(payload))
+                    finalize_items(db, library_id, [projected], detail=view == "detail")
+                    left = mobile.public_item(live[work_id], detail=view == "detail")
+                    right = mobile.public_item(projected, detail=view == "detail")
+                    for path, before, after in _value_diffs(left, right):
+                        diffs["total"] += 1
+                        diffs["byPath"][path] = diffs["byPath"].get(path, 0) + 1
+                        if len(diffs["samples"]) < 20:
+                            diffs["samples"].append({"workId": work_id, "view": view, "path": path,
+                                                     "liveDigest": _sample_digest(before),
+                                                     "projectedDigest": _sample_digest(after)})
+            for person_id in sorted(live_people | staged_people):
+                left = mobile.public_person(db, person_id)
+                right = mobile.public_person(db, person_id, library_id)
+                for path, before, after in _value_diffs(left, right):
+                    report["people"]["diffs"] += 1
+                    if len(report["people"]["samples"]) < 20:
+                        report["people"]["samples"].append({"personId": person_id, "path": path,
+                                                            "liveDigest": _sample_digest(before),
+                                                            "projectedDigest": _sample_digest(after)})
+        except HTTPException as error:
+            detail = error.detail if isinstance(error.detail, dict) else {}
+            report["validation"] = {"code": detail.get("code", "invalidCollectionBaseline"),
+                                    "message": detail.get("message", "Invalid staging document."),
+                                    "detail": {k: detail[k] for k in ("reason", "section") if k in detail}}
+        except (ValidationError, sqlite3.IntegrityError):
+            report["validation"] = {"code": "invalidCollectionBaseline",
+                                    "message": "The staged projection is invalid.", "detail": {}}
+        if report["validation"] is None and all(value["ok"] for value in report["bindings"].values()):
+            changed = (report["diffs"]["total"] or report["people"]["diffs"]
+                       or report["works"]["missing"] or report["works"]["unknown"]
+                       or report["works"]["typeMismatch"] or report["artworks"]["originalMissing"]
+                       or report["artworks"]["unconfirmedBlobs"])
+            report["verdict"] = "differences" if changed else "lossless"
+        return report
+    finally:
+        db.rollback()
+        db.set_authorizer(None)
+
+
+def insert_staging(db, doc, now):
+    """Insert validated rows for activation or connection-local verification tables."""
+    library_id = doc["libraryId"]
+    for work in doc["works"]:
+        write_work(db, library_id, {**work, "lifecycle": "live", "trashedAt": None,
+                                    "entityRevision": 1}, insert=True)
+    for binding in doc["bindings"]:
+        db.execute(
+            "INSERT INTO collection_authority_bindings(library_id,work_id,provider,external_id,config,"
+            "snapshot,snapshot_values,snapshot_digest,snapshot_external_id,last_synced_at,bound,"
+            "entity_revision,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,1,1,?,?)",
+            [library_id, binding["workId"], binding["provider"], binding["externalId"],
+             None if binding["config"] is None else encode(binding["config"]),
+             None if binding["snapshot"] is None else encode(binding["snapshot"]),
+             None if binding["values"] is None else encode(binding["values"]),
+             None if binding["snapshot"] is None else digest(binding["snapshot"]),
+             None if binding["snapshot"] is None else binding["externalId"],
+             binding["lastSyncedAt"], now, now])
+    db.executemany(
+        "INSERT INTO collection_authority_artworks(library_id,artwork_id,work_id,kind,provider,"
+        "provider_image_id,width,height,language,original,thumbnail,entity_revision,created_at,published_order,selected)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)",
+        [[library_id, art["artworkId"], art["workId"], art["kind"], art["provider"],
+          art["providerImageId"], art["width"], art["height"], art["language"],
+          encode(art["original"]), None if art["thumbnail"] is None else encode(art["thumbnail"]),
+          art["createdAt"], art.get("order"), art.get("selected")] for art in doc["artworks"]])
+    db.executemany(
+        "INSERT INTO collection_authority_volumes(library_id,volume_id,work_id,volume_number,"
+        "edition_index,sort_order,display_label,cover_artwork_id,source_provider,source_cover_id,"
+        "deleted,entity_revision,created_at,updated_at,cover_focus_x,published,published_order)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,0,1,?,?,?,?,?)",
+        [[library_id, v["volumeId"], v["workId"], v["volumeNumber"], v["editionIndex"],
+          v["sortOrder"], v["displayLabel"], v["coverArtworkId"], v["sourceProvider"],
+          v["sourceCoverId"], now, now, v.get("coverFocusX"),
+          None if v.get("published") is None else encode(v["published"]),
+          v.get("order")] for v in doc["volumes"]])
+    db.executemany(
+        "INSERT INTO collection_authority_volume_sources(library_id,work_id,volume_number,provider,"
+        "provider_item_id,title,author,publisher,isbn13,publication_date,item_url,data,deleted,"
+        "entity_revision,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,1,?,?)",
+        [[library_id, s["workId"], s["volumeNumber"], s["provider"], s["providerItemId"],
+          s["title"], s["author"], s["publisher"], s["isbn13"], s["publicationDate"],
+          s["itemUrl"], encode(s["data"]), now, now] for s in doc["volumeSources"]])
+    db.executemany(
+        "INSERT INTO collection_authority_ownership(library_id,work_id,volume_number,edition_index,"
+        "physical,digital,entity_revision,updated_at) VALUES(?,?,?,?,?,?,1,?)",
+        [[library_id, o["workId"], o["volumeNumber"], o["editionIndex"], int(o["physical"]),
+          int(o["digital"]), now] for o in doc["ownership"]])
+    db.executemany(
+        "INSERT INTO collection_authority_members(library_id,work_id,asset_id,desired_state,"
+        "entity_revision,added_at,updated_at) VALUES(?,?,?,1,1,?,?)",
+        [[library_id, m["workId"], m["assetId"], m["addedAt"], now] for m in doc["memberships"]])
+    db.executemany(
+        "INSERT INTO collection_authority_people(library_id,person_id,payload,portrait_image) VALUES(?,?,?,?)",
+        [[library_id, person["personId"], encode({"id": person["personId"], **{
+            k: v for k, v in person.items() if k not in ("personId", "portraitImage")}}),
+          None if person["portraitImage"] is None else encode(person["portraitImage"])]
+         for person in doc.get("people", [])])
+
+
 def activate(db, *, library_id, expected_digest, now):
     """Create epoch 1 from the staged baseline, fence the legacy writers, all at once.
 
@@ -2278,52 +2760,7 @@ def activate(db, *, library_id, expected_digest, now):
     if digest(doc) != expected_digest:
         fail(409, "collectionBaselineChanged", "컬렉션 기준선이 변경되었습니다. 다시 준비해 주세요.")
     validate_staging(db, doc)
-    for work in doc["works"]:
-        write_work(db, library_id, {**work, "lifecycle": "live", "trashedAt": None,
-                                    "entityRevision": 1}, insert=True)
-    for binding in doc["bindings"]:
-        db.execute(
-            "INSERT INTO collection_authority_bindings(library_id,work_id,provider,external_id,config,"
-            "snapshot,snapshot_values,snapshot_digest,snapshot_external_id,last_synced_at,bound,"
-            "entity_revision,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,1,1,?,?)",
-            [library_id, binding["workId"], binding["provider"], binding["externalId"],
-             None if binding["config"] is None else encode(binding["config"]),
-             None if binding["snapshot"] is None else encode(binding["snapshot"]),
-             None if binding["values"] is None else encode(binding["values"]),
-             None if binding["snapshot"] is None else digest(binding["snapshot"]),
-             None if binding["snapshot"] is None else binding["externalId"],
-             binding["lastSyncedAt"], now, now])
-    db.executemany(
-        "INSERT INTO collection_authority_artworks(library_id,artwork_id,work_id,kind,provider,"
-        "provider_image_id,width,height,language,original,thumbnail,entity_revision,created_at)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?)",
-        [[library_id, art["artworkId"], art["workId"], art["kind"], art["provider"],
-          art["providerImageId"], art["width"], art["height"], art["language"],
-          encode(art["original"]), None if art["thumbnail"] is None else encode(art["thumbnail"]),
-          art["createdAt"]] for art in doc["artworks"]])
-    db.executemany(
-        "INSERT INTO collection_authority_volumes(library_id,volume_id,work_id,volume_number,"
-        "edition_index,sort_order,display_label,cover_artwork_id,source_provider,source_cover_id,"
-        "deleted,entity_revision,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,0,1,?,?)",
-        [[library_id, v["volumeId"], v["workId"], v["volumeNumber"], v["editionIndex"],
-          v["sortOrder"], v["displayLabel"], v["coverArtworkId"], v["sourceProvider"],
-          v["sourceCoverId"], now, now] for v in doc["volumes"]])
-    db.executemany(
-        "INSERT INTO collection_authority_volume_sources(library_id,work_id,volume_number,provider,"
-        "provider_item_id,title,author,publisher,isbn13,publication_date,item_url,data,deleted,"
-        "entity_revision,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,1,?,?)",
-        [[library_id, s["workId"], s["volumeNumber"], s["provider"], s["providerItemId"],
-          s["title"], s["author"], s["publisher"], s["isbn13"], s["publicationDate"],
-          s["itemUrl"], encode(s["data"]), now, now] for s in doc["volumeSources"]])
-    db.executemany(
-        "INSERT INTO collection_authority_ownership(library_id,work_id,volume_number,edition_index,"
-        "physical,digital,entity_revision,updated_at) VALUES(?,?,?,?,?,?,1,?)",
-        [[library_id, o["workId"], o["volumeNumber"], o["editionIndex"], int(o["physical"]),
-          int(o["digital"]), now] for o in doc["ownership"]])
-    db.executemany(
-        "INSERT INTO collection_authority_members(library_id,work_id,asset_id,desired_state,"
-        "entity_revision,added_at,updated_at) VALUES(?,?,?,1,1,?,?)",
-        [[library_id, m["workId"], m["assetId"], m["addedAt"], now] for m in doc["memberships"]])
+    insert_staging(db, doc, now)
     legacy = db.execute("SELECT revision FROM mobile_collection_replica WHERE singleton=1").fetchone()
     db.execute(
         "INSERT INTO authority_domains(library_id,domain,epoch,contract_version,change_cursor,"
@@ -2643,6 +3080,18 @@ def register(app, get_db, require_client, require_publisher):
         doc = await run_in_threadpool(parse_staging, body)
         now = now_iso()
         return await transaction(lambda db: stage(db, doc, now))
+
+    @app.post(PREFIX + "/staging/verify")
+    async def collection_authority_verify(request: Request,
+                                          authorization: str | None = Header(default=None)):
+        require_publisher(authorization)
+        body = await _read_body(request, MAX_STAGING_BYTES, "invalidCollectionBaseline")
+        if not isinstance(body, dict):
+            fail(422, "invalidCollectionBaseline", "Expected a JSON object.")
+
+        def verify(db):
+            return verify_staging(db, body, now_iso())
+        return await transaction(verify, write=False)
 
     @app.get(PREFIX + "/staging")
     async def collection_authority_staged(authorization: str | None = Header(default=None)):

@@ -13,6 +13,7 @@ pub(crate) mod client;
 mod hold_tests;
 pub(crate) mod failure;
 pub(crate) mod collections;
+pub(crate) mod collection_authority_verify;
 pub(crate) mod catalog;
 pub(crate) mod catalog_duplicates;
 pub(crate) mod collection_bindings;

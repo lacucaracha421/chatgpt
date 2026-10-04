@@ -168,6 +168,19 @@ export type CloudCaptureConnectionStatus = { pendingCount: number };
 export type ExtensionPairingLink = { pairingUrl: string; expiresAt: string };
 export type CloudMetadataBackupResult = { byteSize: number };
 export type CloudCollectionsPublishResult = { collections: number; artworks: number; uploaded: number; revision: string };
+export type CollectionAuthorityVerifyReport = {
+  version: 1;
+  verdict: "lossless" | "differences" | "blocked";
+  checkedAt: string;
+  bindings: Record<string, { ok: boolean; [key: string]: number | string | boolean | null }>;
+  validation: { code: string; message: string; detail: Record<string, unknown> } | null;
+  counts: Record<string, { staged: number }>;
+  works: { live: number; staged: number; matched: number; missing: string[]; unknown: string[]; typeMismatch: string[] };
+  diffs: { total: number; byPath: Record<string, number>; samples: { workId: string; view: "list" | "detail"; path: string; liveDigest: string; projectedDigest: string }[] };
+  people: { live: number; staged: number; diffs: number; samples: unknown[] };
+  artworks: { originalMissing: number; unconfirmedBlobs: number; samples: string[] };
+};
+export type CollectionAuthorityVerifyResult = { report: CollectionAuthorityVerifyReport; reportPath: string };
 export type BookmarkReconciliationResult = {
   libraryId: string | null; epoch: number | null; contractVersion: number | null;
   serverCursor: number | null; localCursor: number | null; behindBy: number;
@@ -1379,6 +1392,8 @@ export interface LibraryGateway {
   createExtensionPairing?(): Promise<ExtensionPairingLink>;
   pushCloudMetadataBackup?(): Promise<CloudMetadataBackupResult>;
   pushCloudCollections?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<CloudCollectionsPublishResult>;
+  verifyCollectionAuthorityBaseline?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<CollectionAuthorityVerifyResult>;
+  openCollectionAuthorityReport?(path: string): Promise<void>;
   runDueMobilePublications?(orderIds:string[]): Promise<void>;
   /** Native signal that Collections changed in the background (mobile personal edits). */
   subscribeCollectionsChanged?(handler: () => void): () => void;

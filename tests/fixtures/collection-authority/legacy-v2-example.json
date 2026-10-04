@@ -1,0 +1,371 @@
+{
+  "version": 1,
+  "baseRevision": null,
+  "personalEditVersion": 3,
+  "libraryId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "personalEditCursor": 0,
+  "collections": [
+    {
+      "id": "av-work",
+      "name": "Evening performance",
+      "type": "av",
+      "description": "Personal screening note",
+      "coverAssetId": null,
+      "year": null,
+      "originalTitle": null,
+      "runtimeMinutes": null,
+      "author": null,
+      "director": null,
+      "developer": null,
+      "publisher": null,
+      "platforms": null,
+      "productionCompany": null,
+      "releaseDate": null,
+      "externalScore": null,
+      "myScore": 4.5,
+      "genres": null,
+      "overview": null,
+      "status": "watched",
+      "ownedPlatform": null,
+      "showcase": false,
+      "showcaseOrder": null,
+      "createdAt": "2026-10-04T00:00:00Z",
+      "updatedAt": "2026-10-04T00:00:00Z",
+      "selectedWorkArtworkId": "av-cover",
+      "selectedHeroArtworkId": null,
+      "selectedBackdropArtworkId": null,
+      "assetCount": 0,
+      "unreadReleaseCount": 0,
+      "releaseWatch": null,
+      "ownedVolumes": null,
+      "releaseSchedule": null,
+      "series": null,
+      "film": null,
+      "volumes": [],
+      "artworks": [
+        {
+          "id": "av-cover",
+          "kind": "cover",
+          "selected": true,
+          "original": {
+            "sha256": "01c0f8c19de9d5c485c5aecc3afcef7dc727cb7e1cd8f4a4aa77c6b65c68e9e1",
+            "sizeBytes": 22,
+            "contentType": "image/webp",
+            "objectKey": "work-artwork/mobile/01c0f8c19de9d5c485c5aecc3afcef7dc727cb7e1cd8f4a4aa77c6b65c68e9e1"
+          },
+          "thumbnail": {
+            "sha256": "01c0f8c19de9d5c485c5aecc3afcef7dc727cb7e1cd8f4a4aa77c6b65c68e9e1",
+            "sizeBytes": 22,
+            "contentType": "image/webp",
+            "objectKey": "work-artwork/mobile/01c0f8c19de9d5c485c5aecc3afcef7dc727cb7e1cd8f4a4aa77c6b65c68e9e1"
+          }
+        }
+      ],
+      "av": {
+        "productCode": "DEMO-001",
+        "titleJa": "Evening",
+        "maker": "Example Studio",
+        "label": "Archive",
+        "series": "Performances",
+        "genres": [
+          "Drama"
+        ],
+        "releaseDate": "2025-04-01",
+        "people": [
+          {
+            "id": "performer",
+            "name": "Alex Example",
+            "nameJa": null,
+            "role": "performer",
+            "order": 0,
+            "portraitCrop": {
+              "artworkId": "av-cover",
+              "x": 0.15,
+              "y": 0.1,
+              "w": 0.45,
+              "h": 0.65
+            },
+            "portraitImage": {
+              "sha256": "b1ce62af1a9cdb4116e088579d09fa58318fb379f1aefa7fc3ea513109349980",
+              "sizeBytes": 22,
+              "contentType": "image/webp",
+              "width": 480,
+              "height": 640
+            }
+          },
+          {
+            "id": "director",
+            "name": "Sam Example",
+            "nameJa": null,
+            "role": "director",
+            "order": 1,
+            "portraitCrop": null,
+            "portraitImage": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "manga-work",
+      "name": "Harbor journal",
+      "type": "manga",
+      "description": null,
+      "coverAssetId": "asset-2",
+      "year": null,
+      "originalTitle": null,
+      "runtimeMinutes": null,
+      "author": "Example Author",
+      "director": null,
+      "developer": null,
+      "publisher": null,
+      "platforms": null,
+      "productionCompany": null,
+      "releaseDate": null,
+      "externalScore": null,
+      "myScore": 4.25,
+      "genres": null,
+      "overview": null,
+      "status": "collecting",
+      "ownedPlatform": null,
+      "showcase": false,
+      "showcaseOrder": null,
+      "createdAt": "2026-10-04T00:00:00Z",
+      "updatedAt": "2026-10-04T00:00:00Z",
+      "selectedWorkArtworkId": "manga-cover-1",
+      "selectedHeroArtworkId": null,
+      "selectedBackdropArtworkId": null,
+      "assetCount": 1,
+      "unreadReleaseCount": 2,
+      "releaseWatch": {
+        "enabled": true,
+        "available": true
+      },
+      "ownedVolumes": [
+        {
+          "editionIndex": 0,
+          "count": 1
+        },
+        {
+          "editionIndex": 1,
+          "count": 0
+        }
+      ],
+      "releaseSchedule": {
+        "kakao": {
+          "editionIndex": 0,
+          "checkedAt": "2026-10-04T00:00:00Z",
+          "volumes": [
+            {
+              "volumeNumber": 1,
+              "date": "2025-05-01",
+              "status": "released"
+            },
+            {
+              "volumeNumber": 2,
+              "date": "2099-05-01",
+              "status": "upcoming"
+            }
+          ]
+        },
+        "mangadex": {
+          "checkedAt": "2026-10-04T00:00:00Z",
+          "latestVolume": 2,
+          "volumes": [
+            {
+              "volumeNumber": 1,
+              "editionIndex": 1
+            },
+            {
+              "volumeNumber": 2,
+              "editionIndex": 1
+            }
+          ]
+        }
+      },
+      "series": null,
+      "film": null,
+      "volumes": [
+        {
+          "id": "volume-2",
+          "volumeNumber": 2,
+          "editionIndex": 0,
+          "displayLabel": "2",
+          "coverArtworkId": "manga-cover-2",
+          "coverFocusX": 0.73,
+          "releaseStatus": "upcoming",
+          "localReleaseDate": "2099-05-01",
+          "isbn13": "9780000000002"
+        },
+        {
+          "id": "volume-1",
+          "volumeNumber": 1,
+          "editionIndex": 0,
+          "displayLabel": "1",
+          "coverArtworkId": "manga-cover-1",
+          "coverFocusX": 0.28,
+          "releaseStatus": "released",
+          "localReleaseDate": "2025-05-01",
+          "isbn13": "9780000000001"
+        }
+      ],
+      "artworks": [
+        {
+          "id": "manga-cover-2",
+          "kind": "volume_cover",
+          "selected": false,
+          "original": {
+            "sha256": "7563eda9863286e42348971ff170e7d0a001c2539c4d6a7ee9774089e8557667",
+            "sizeBytes": 27,
+            "contentType": "image/webp",
+            "objectKey": "work-artwork/mobile/7563eda9863286e42348971ff170e7d0a001c2539c4d6a7ee9774089e8557667"
+          },
+          "thumbnail": {
+            "sha256": "7563eda9863286e42348971ff170e7d0a001c2539c4d6a7ee9774089e8557667",
+            "sizeBytes": 27,
+            "contentType": "image/webp",
+            "objectKey": "work-artwork/mobile/7563eda9863286e42348971ff170e7d0a001c2539c4d6a7ee9774089e8557667"
+          }
+        },
+        {
+          "id": "manga-cover-1",
+          "kind": "volume_cover",
+          "selected": true,
+          "original": {
+            "sha256": "f777ce6b329b302b592af1a4b6ca4d12b3175df972f04a683a41e244da13449a",
+            "sizeBytes": 27,
+            "contentType": "image/webp",
+            "objectKey": "work-artwork/mobile/f777ce6b329b302b592af1a4b6ca4d12b3175df972f04a683a41e244da13449a"
+          },
+          "thumbnail": {
+            "sha256": "f777ce6b329b302b592af1a4b6ca4d12b3175df972f04a683a41e244da13449a",
+            "sizeBytes": 27,
+            "contentType": "image/webp",
+            "objectKey": "work-artwork/mobile/f777ce6b329b302b592af1a4b6ca4d12b3175df972f04a683a41e244da13449a"
+          }
+        }
+      ]
+    },
+    {
+      "id": "game-work",
+      "name": "Orbit traveler",
+      "type": "game",
+      "description": null,
+      "coverAssetId": "asset-1",
+      "year": null,
+      "originalTitle": null,
+      "runtimeMinutes": null,
+      "author": null,
+      "director": null,
+      "developer": "Example Games",
+      "publisher": null,
+      "platforms": "PC",
+      "productionCompany": null,
+      "releaseDate": null,
+      "externalScore": null,
+      "myScore": 3.5,
+      "genres": null,
+      "overview": null,
+      "status": "playing",
+      "ownedPlatform": "PC",
+      "showcase": true,
+      "showcaseOrder": 0,
+      "createdAt": "2026-10-04T00:00:00Z",
+      "updatedAt": "2026-10-04T00:00:00Z",
+      "selectedWorkArtworkId": "game-cover",
+      "selectedHeroArtworkId": null,
+      "selectedBackdropArtworkId": null,
+      "assetCount": 1,
+      "unreadReleaseCount": 0,
+      "releaseWatch": null,
+      "ownedVolumes": null,
+      "releaseSchedule": null,
+      "series": null,
+      "film": null,
+      "volumes": [],
+      "artworks": [
+        {
+          "id": "z-selected-spine",
+          "kind": "spine",
+          "selected": true,
+          "original": {
+            "sha256": "ad2169f605fd113e7999359cdf6a08687a2fc3adf4a256167fa61388752d697f",
+            "sizeBytes": 30,
+            "contentType": "image/webp",
+            "objectKey": "work-artwork/mobile/ad2169f605fd113e7999359cdf6a08687a2fc3adf4a256167fa61388752d697f"
+          },
+          "thumbnail": {
+            "sha256": "ad2169f605fd113e7999359cdf6a08687a2fc3adf4a256167fa61388752d697f",
+            "sizeBytes": 30,
+            "contentType": "image/webp",
+            "objectKey": "work-artwork/mobile/ad2169f605fd113e7999359cdf6a08687a2fc3adf4a256167fa61388752d697f"
+          }
+        },
+        {
+          "id": "game-cover",
+          "kind": "cover",
+          "selected": true,
+          "original": {
+            "sha256": "e7fae2ccddf4e3fe14dff453b04c55896b519e3878fd9684ea03c939f88e5af0",
+            "sizeBytes": 24,
+            "contentType": "image/webp",
+            "objectKey": "work-artwork/mobile/e7fae2ccddf4e3fe14dff453b04c55896b519e3878fd9684ea03c939f88e5af0"
+          },
+          "thumbnail": {
+            "sha256": "e7fae2ccddf4e3fe14dff453b04c55896b519e3878fd9684ea03c939f88e5af0",
+            "sizeBytes": 24,
+            "contentType": "image/webp",
+            "objectKey": "work-artwork/mobile/e7fae2ccddf4e3fe14dff453b04c55896b519e3878fd9684ea03c939f88e5af0"
+          }
+        },
+        {
+          "id": "a-unused-spine",
+          "kind": "spine",
+          "selected": false,
+          "original": {
+            "sha256": "669cf37d98f734faf193047a09e190902e9289e95e286450c174e9ed8f448279",
+            "sizeBytes": 28,
+            "contentType": "image/webp",
+            "objectKey": "work-artwork/mobile/669cf37d98f734faf193047a09e190902e9289e95e286450c174e9ed8f448279"
+          },
+          "thumbnail": {
+            "sha256": "669cf37d98f734faf193047a09e190902e9289e95e286450c174e9ed8f448279",
+            "sizeBytes": 28,
+            "contentType": "image/webp",
+            "objectKey": "work-artwork/mobile/669cf37d98f734faf193047a09e190902e9289e95e286450c174e9ed8f448279"
+          }
+        }
+      ]
+    }
+  ],
+  "people": [
+    {
+      "id": "performer",
+      "memo": "Follow future performances",
+      "favorite": true,
+      "profile": {
+        "source": "stashdb",
+        "name": "Alex Example",
+        "aliases": [
+          "A. Example"
+        ],
+        "birthDate": "1990-01-01",
+        "heightCm": 170,
+        "urls": []
+      },
+      "portrait": {
+        "source": "commons",
+        "author": "Example Photographer",
+        "license": "CC0",
+        "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "sourceUrl": "https://commons.wikimedia.org/wiki/File:Example.jpg"
+      }
+    },
+    {
+      "id": "director",
+      "memo": null,
+      "favorite": false,
+      "profile": null,
+      "portrait": null
+    }
+  ]
+}

@@ -38,6 +38,66 @@ function renderSettings(gateway: LibraryGateway, props: Partial<React.ComponentP
   return render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} {...props} /></LibraryProvider>);
 }
 
+function verificationResult(verdict: "lossless" | "differences" | "blocked" = "lossless") {
+  return { reportPath: "C:/app-data/collection-authority/verify-fixture.json", report: {
+    version: 1 as const, verdict, checkedAt: "2026-10-04T00:00:00Z", validation: null,
+    bindings: { personalEdits: { staged: 0, last: 0, applied: 0, ok: verdict !== "blocked" } }, counts: {},
+    works: { live: 2, staged: 2, matched: 2, missing: [] as string[], unknown: [] as string[], typeMismatch: [] as string[] },
+    diffs: { total: verdict === "differences" ? 3 : 0, byPath: {}, samples: [] },
+    people: { live: 0, staged: 0, diffs: 0, samples: [] }, artworks: { originalMissing: 0, unconfirmedBlobs: 0, samples: [] },
+  } };
+}
+
+it.each([
+  ["lossless", "잃는 항목 없음"], ["differences", "차이 3건"], ["blocked", "확인 불가: 개인 편집을 아직 모두 받지 못했습니다"],
+] as const)("checks Collection migration and opens the saved %s report", async (verdict, message) => {
+  const result = verificationResult(verdict);
+  const gateway = createGateway({ verifyCollectionAuthorityBaseline: vi.fn().mockResolvedValue(result), openCollectionAuthorityReport: vi.fn().mockResolvedValue(undefined) });
+  renderSettings(gateway, { initialSection: "connection" });
+  const row = screen.getByText("컬렉션 서버 이전 점검").closest("dl")!;
+  const button = within(row).getByRole("button", { name: "점검하기" });
+  await waitFor(() => expect(button).toBeEnabled());
+  await userEvent.click(button);
+  expect(await within(row).findByText(message)).toBeInTheDocument();
+  expect(gateway.verifyCollectionAuthorityBaseline).toHaveBeenCalledWith(expect.any(Function));
+  await userEvent.click(within(row).getByRole("button", { name: "보고서 열기" }));
+  expect(gateway.openCollectionAuthorityReport).toHaveBeenCalledWith(result.reportPath);
+});
+
+it("keeps a running check disabled and reports failure without a report link", async () => {
+  let reject!: (error: unknown) => void;
+  const gateway = createGateway({ verifyCollectionAuthorityBaseline: vi.fn().mockImplementation(() => new Promise((_, fail) => { reject = fail; })) });
+  renderSettings(gateway, { initialSection: "connection" });
+  const row = screen.getByText("컬렉션 서버 이전 점검").closest("dl")!;
+  const button = within(row).getByRole("button", { name: "점검하기" });
+  await waitFor(() => expect(button).toBeEnabled());
+  await userEvent.click(button);
+  expect(within(row).getByRole("button", { name: "점검 중…" })).toBeDisabled();
+  reject({ code: "collection_authority_verify_unsupported", message: "서버가 점검을 지원하지 않습니다." });
+  expect(await within(row).findByText("확인 불가: 서버가 점검을 지원하지 않습니다.")).toBeInTheDocument();
+  expect(within(row).queryByRole("button", { name: "보고서 열기" })).not.toBeInTheDocument();
+});
+
+it("requires the publisher credential before checking Collection migration", async () => {
+  const gateway = createGateway({ cloudPublisherTokenStatus: vi.fn().mockResolvedValue({ configured: false }) });
+  renderSettings(gateway, { initialSection: "connection" });
+  await waitFor(() => expect(gateway.cloudPublisherTokenStatus).toHaveBeenCalled());
+  expect(screen.getByRole("button", { name: "점검하기" })).toBeDisabled();
+});
+
+it("includes people and image differences and labels capped work samples as a minimum", async () => {
+  const result = verificationResult("differences");
+  result.report.people.diffs = 2;
+  result.report.artworks.originalMissing = 1;
+  result.report.works.missing = Array.from({ length: 20 }, (_, i) => `work-${i}`);
+  const gateway = createGateway({ verifyCollectionAuthorityBaseline: vi.fn().mockResolvedValue(result) });
+  renderSettings(gateway, { initialSection: "connection" });
+  const button = screen.getByRole("button", { name: "점검하기" });
+  await waitFor(() => expect(button).toBeEnabled());
+  await userEvent.click(button);
+  expect(await screen.findByText("차이 26건 이상")).toBeInTheDocument();
+});
+
 it("starts on frequent and uses the seven approved section ids without a search box", async () => {
   const gateway = createGateway();
   renderSettings(gateway);

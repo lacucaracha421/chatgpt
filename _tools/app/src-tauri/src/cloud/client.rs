@@ -1965,6 +1965,22 @@ impl CloudClient {
         Ok(read_json_bounded::<State>(&mut response, super::collections::MAX_METADATA_BYTES)?.revision)
     }
 
+    pub(crate) fn verify_collection_authority(&self, bytes: &[u8], publisher: &str) -> Result<serde_json::Value, super::collection_authority_verify::VerifyError> {
+        use super::collection_authority_verify::VerifyError;
+        let _send = self.send_permit()?;
+        let agent = self.agent_with_config(ureq::Agent::config_builder().max_redirects(0)
+            .http_status_as_error(false).timeout_global(Some(Duration::from_secs(120))).build());
+        let mut response = agent.post(self.endpoint("/v1/collections/authority/staging/verify")?)
+            .header("Authorization", bearer(publisher)?).content_type("application/json").send(bytes)
+            .map_err(|e| match e { ureq::Error::Timeout(_) => LibraryError::CloudRequestTimedOut, _ => LibraryError::CloudRequestUnavailable })?;
+        if response.status().as_u16() != 200 { return Err(VerifyError::Http(response.status().as_u16())); }
+        let report: serde_json::Value = read_json_bounded(&mut response, 4 * 1024 * 1024)?;
+        if report["version"] != 1 || !matches!(report["verdict"].as_str(), Some("lossless" | "differences" | "blocked")) {
+            return Err(LibraryError::InvalidCloudResponse.into());
+        }
+        Ok(report)
+    }
+
     pub(crate) fn upload_collection_artwork(&self, blob: &super::collections::ArtworkBlob, bytes: &[u8], token: &str) -> Result<bool, LibraryError> {
         let _send = self.send_permit()?;
         #[derive(serde::Deserialize)]

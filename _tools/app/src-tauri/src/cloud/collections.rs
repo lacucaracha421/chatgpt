@@ -2,6 +2,11 @@
 //! No provider calls, lazy imports or writes to the library. Source previews stage in TEMP.
 #[path = "collection_cache.rs"]
 mod cache;
+#[path = "collection_baseline.rs"]
+pub(crate) mod collection_baseline;
+#[cfg(test)]
+#[path = "collection_baseline_tests.rs"]
+mod collection_baseline_tests;
 #[path = "collections_av.rs"]
 mod av;
 #[cfg(test)]
@@ -216,7 +221,7 @@ pub struct CloudCollectionsPublishResult {
     collections: usize,
     artworks: usize,
     uploaded: usize,
-    revision: String,
+    pub(crate) revision: String,
 }
 struct LocalBlob {
     descriptor: ArtworkBlob,
@@ -580,8 +585,14 @@ fn snapshot_from_connection(root: &Path, connection: &mut rusqlite::Connection, 
 }
 
 fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite::Connection, base_revision: Option<String>, feature: Option<&PersonalEditFeature>, features: ReplicaFeatures, progress: Reporter<'_>) -> Result<Snapshot, LibraryError> {
-        let include_av = features.av;
         let transaction = connection.transaction()?;
+        let snapshot = snapshot_from_transaction(root, &transaction, base_revision, feature, features, progress)?;
+        transaction.commit()?;
+        Ok(snapshot)
+}
+
+fn snapshot_from_transaction(root: &Path, transaction: &rusqlite::Transaction<'_>, base_revision: Option<String>, feature: Option<&PersonalEditFeature>, features: ReplicaFeatures, progress: Reporter<'_>) -> Result<Snapshot, LibraryError> {
+        let include_av = features.av;
         // The received cursor is read in the same read transaction as the rows, so the
         // snapshot never advertises edits its rows do not reflect. An adopted feature with
         // no row is an inconsistency, not a reason to publish a legacy body.
@@ -751,7 +762,6 @@ fn snapshot_from_connection_with_feature(root: &Path, connection: &mut rusqlite:
             None
         };
         // Keep the single committed SQLite view during extraction, release it before HTTP.
-        transaction.commit()?;
         // The read transaction already fixes the committed metadata snapshot. An
         // unrelated PC write after it starts must not invalidate this publication.
         // Artwork bytes are independently hash-checked again immediately before upload.
