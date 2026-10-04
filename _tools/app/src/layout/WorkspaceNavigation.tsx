@@ -74,11 +74,6 @@ type Props = {
   collections?: CollectionSummary[];
 };
 
-function isEditing(target: EventTarget | null) {
-  return target instanceof HTMLElement
-    && (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement);
-}
-
 export function WorkspaceNavigation({ view, requestedView = view, settling = false, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, unsortedCount = null, onQueuesRequested, privateVaultAvailable = false, onImportFiles, places, collections = [] }: Props) {
   const chrome = useWorkspaceChrome();
   const vaultImport = useVaultImportJob().job;
@@ -170,9 +165,10 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
-      if ((key !== "k" && key !== "f") || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
-      // Not over another dialog such as the asset viewer. Ctrl+K also waits while typing; Ctrl+F is the find key and works from a field.
-      if (event.defaultPrevented || modalDialogOpen() || (key === "k" && isEditing(event.target))) return;
+      // Ctrl+Q (user, 2026-10-05; replaced Ctrl+K / Ctrl+F). It has no text-editing meaning, so it also works from a field.
+      if (key !== "q" || !event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      // Not over another dialog such as the asset viewer.
+      if (event.defaultPrevented || modalDialogOpen()) return;
       event.preventDefault();
       setPaletteOpen(true);
       queuesRequested.current?.();
@@ -224,8 +220,8 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
           <span>{label}</span>{activity && <span className="workspace-rail__activity" aria-hidden="true" />}</button>;
       })}
       <div className="workspace-rail__tail">
-        <button ref={paletteButton} type="button" className="workspace-rail__item" aria-label="찾기" aria-keyshortcuts="Control+K Control+F"
-          aria-description={searchInfo ? `${searchInfo.scope}에서 검색하거나 이름으로 이동 (Ctrl+K)` : "이름으로 이동하거나 명령 실행 (Ctrl+K)"} onClick={openPalette}>
+        <button ref={paletteButton} type="button" className="workspace-rail__item" aria-label="찾기" aria-keyshortcuts="Control+Q"
+          aria-description={searchInfo ? `${searchInfo.scope}에서 검색하거나 이름으로 이동 (Ctrl+Q)` : "이름으로 이동하거나 명령 실행 (Ctrl+Q)"} onClick={openPalette}>
           <MagnifyingGlassIcon aria-hidden="true" /><span>찾기</span><kbd className="workspace-rail__hint" aria-hidden="true">Ctrl K</kbd>
         </button>
         <MorePanel entries={moreEntries} current={requestedArea === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />

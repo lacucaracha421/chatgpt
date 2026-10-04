@@ -14,7 +14,7 @@ type Props = {
 
 /**
  * A view's specialized query editor (e.g. the online catalog with tag suggestions).
- * Ctrl+F belongs to the 찾기 palette, which opens this editor through the chrome search handle.
+ * Ctrl+Q belongs to the 찾기 palette, which opens this editor through the chrome search handle.
  */
 export function SearchSurface({ label, scope, active, open, onOpen, onClose, children }: Props) {
   return <>
