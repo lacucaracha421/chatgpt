@@ -358,7 +358,6 @@ button.brand{background:none;border:0;color:inherit;font:inherit;cursor:pointer;
 .viewer-actions__divider { width:1px; height:20px; margin:0 4px; background:#3a3b3d; flex:none; }
 @media (max-width:600px) { .viewer-action__label { display:none; } .viewer-actions .viewer-action { width:var(--touch); padding:0; } }
 /* Endless grids end in a short fade above the navigation instead of a hard cut. */
-.library-main:has(> .gallery-scroll)::after, .mobile-collections:not(.has-detail)::after, .catalog-content::after { content:''; position:absolute; left:0; right:0; bottom:0; height:32px; background:linear-gradient(transparent,var(--color-bg)); pointer-events:none; z-index:2; }
 .mobile-collections, .catalog-content { position:relative; }
 /* 보기 옵션 in the folder bar: quiet at the defaults; PC grey face and a count once changed. */
 .top-bar .top-bar__options.is-changed { width:auto; gap:6px; padding:0 10px; background:var(--color-filter-selected); border-color:var(--color-filter-border); color:var(--color-filter-text); }

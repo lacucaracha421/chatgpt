@@ -10,14 +10,12 @@ export {EASE_OUT,prefersReducedMotion};
  *   first tiles fade in with a short stagger that ends by the same 220 ms.
  * - Shallower level: the content comes back from 20px left, without a stagger (it was retained).
  * - Same depth: a quick fade from 0.6 in SWAP_MOTION_MS.
- * - Segment swap (a type or region tab inside a screen): the content slides SEGMENT_SHIFT_PX in
- *   the direction of the tab order (a tab further right brings it in from the right) and fades
- *   from 0.5 in SEGMENT_MOTION_MS; the tab underline glides to the new tab over the same time.
+ * - Segment swap (a type or region tab inside a screen) is the shared `swapSegment`
+ *   (src/shared/motion/viewSwap.ts); the tab underline glides to the new tab in SEGMENT_MOTION_MS.
  */
 export const LEVEL_MOTION_MS=220;
 export const SWAP_MOTION_MS=140;
 export const SEGMENT_MOTION_MS=200;
-export const SEGMENT_SHIFT_PX=16;
 const STAGGER_TILES=10,STAGGER_STEP_MS=12,STAGGER_TILE_MS=110;
 const TILE_SELECTOR='.media-tile,.library-folder,.character-card';
 
@@ -97,31 +95,6 @@ export function useLevelMotion(host:RefObject<HTMLElement|null>,key:string|null,
       ?[...animateAll(parts,[{transform:`translateX(${step*20}px)`,opacity:.5},{transform:'none',opacity:1}],{duration:LEVEL_MOTION_MS,easing:EASE_OUT}),...(step>0&&stagger?staggerTiles(element):[])]
       :animateAll(parts,[{opacity:.6},{opacity:1}],{duration:SWAP_MOTION_MS,easing:EASE_OUT}),run);
   },[host,key,depth]);// eslint-disable-line react-hooks/exhaustive-deps
-}
-
-/**
- * Plays a lateral swap when a segment (a type or region tab) inside a screen changes: the parts
- * slide in from the side the new tab lies on and fade in. `host` itself moves unless `parts`
- * picks what moves (for example everything under the segment control).
- *
- * Callers pass `null` while the new segment's data is still loading, so the swap plays once,
- * when the new content commits, and never over stale content. `null` keeps the last shown
- * segment; the first segment shown and a repeat of the same one do not move. `scope` names the
- * place the segment belongs to (a folder, say): a segment first shown in another place does not
- * move either, since that change is a navigation with its own motion.
- */
-export function useSegmentMotion(host:RefObject<HTMLElement|null>,key:string|null,index:number,parts?:(host:HTMLElement)=>HTMLElement[],scope=''){
-  const shown=useRef<{key:string;index:number;scope:string}|null>(null);
-  const pick=useRef(parts);pick.current=parts;
-  const run=useRunning();
-  useLayoutEffect(()=>{
-    if(key===null)return;
-    const before=shown.current;shown.current={key,index,scope};
-    const element=host.current;
-    if(!before||before.key===key||before.scope!==scope||!element||prefersReducedMotion())return;
-    const step=Math.sign(index-before.index);
-    afterViewportImages(element,animateAll(pick.current?.(element)??[element],[{transform:`translateX(${step*SEGMENT_SHIFT_PX}px)`,opacity:.5},{transform:'none',opacity:1}],{duration:SEGMENT_MOTION_MS,easing:EASE_OUT}),run);
-  },[host,key,index,scope]);// eslint-disable-line react-hooks/exhaustive-deps
 }
 
 /**

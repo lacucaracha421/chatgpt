@@ -1,5 +1,5 @@
 import { useDelayedBusy } from "../src/shared/useDelayedBusy";
-import {useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode} from 'react';
+import {useContext, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode} from 'react';
 import {ArrowUpRightIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronRightIcon, ComputerDesktopIcon, EllipsisHorizontalIcon, MagnifyingGlassIcon, PhotoIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {Button, EmptyState, Field, IconButton, SectionLabel, TextInput} from './ui';
 import {BottomSheet} from './BottomSheet';
@@ -18,6 +18,8 @@ import type {Asset, PageWire} from './types';
 import {usePrivacyMode} from './privacyMode';
 import {artistHandles, artistName, assetsFromIds, daysSince, matchedPositions, matchesArtist, orderedArtists, profileUrl, todayArtists, type ArtistAssignment, type LibraryArtist} from './artistsModel';
 import {displayDate} from '../src/shared/displayDate';
+import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
+import {ARTIST_LIST_ENTRANCE, PreparedCovers, usePreparedCovers} from './artistCovers';
 import './artists.css';
 
 type ArtistPage = ScopedAssetPage & {scope:string};
@@ -80,8 +82,9 @@ export function Placeholder({privateMode = false, label = '이미지 없음'}: {
 }
 
 export function ArtistImage({asset, privateMode, paused = false}: {asset?: Asset; privateMode: boolean; paused?: boolean}) {
+  const prepared = useContext(PreparedCovers);
   if (privateMode || !asset) return <Placeholder privateMode={privateMode} />;
-  return <span className="artist-image"><Cover asset={asset} paused={paused} /></span>;
+  return <span className="artist-image"><Cover asset={asset} paused={paused} ready={prepared.get(asset.id)} /></span>;
 }
 
 function Collage({assets, privateMode, plus}: {assets: Asset[]; privateMode: boolean; plus?: number}) {
@@ -150,13 +153,18 @@ function ArtistHub({artists, assignments, query, privateMode, paused, onOpen}: {
   const assignmentCount = new Map<string, number>();
   assignments.forEach(row => assignmentCount.set(row.artistId, (assignmentCount.get(row.artistId) ?? 0) + 1));
   const scrubberSort=useMemo(()=>({kind:'fallback' as const}),[]);
-  return <div ref={scroller} className="artist-scroll" aria-label="작가 목록">
+  const firstScreen=useMemo(()=>[main,...others,...visible.slice(0,6)].flatMap(artist=>artist?assetsFromIds(artist.coverAssetIds,artist.coverContentRatings).slice(0,5):[]),[main,others,visible]);
+  const covers=usePreparedCovers(firstScreen,!paused);
+  // Today's picks and the artist list rise together with their prepared covers.
+  useFirstAppearance(scroller,covers?visible.length+picks.length:0,!paused&&!query.trim(),'artist-hub','.artist-today, .artist-other-pick, .artist-tile',undefined,ARTIST_LIST_ENTRANCE);
+  if(!covers)return <div ref={scroller} className="artist-scroll" aria-label="작가 목록" aria-busy="true"/>;
+  return <PreparedCovers.Provider value={covers}><div ref={scroller} className="artist-scroll" aria-label="작가 목록">
     {query.trim() ? <div className="artist-search-hint"><strong>결과 {visible.length.toLocaleString('ko-KR')}명</strong><span>이름 · 핸들 · 초성으로 찾기</span></div> : <div className="artist-content">
       {main && <section className="artist-section" aria-label="오늘"><SectionHeading title="오늘" meta={`${new Date().getMonth() + 1}월 ${new Date().getDate()}일 · ${picks.length}명`} /><ArtistToday artist={main} privateMode={privateMode} onOpen={() => onOpen(main)} /><div className="artist-other-picks">{others.map(artist => <button key={artist.id} className="artist-other-pick" onClick={() => onOpen(artist)} aria-label={`${artistName(artist)} 작가`}><Collage assets={assetsFromIds(artist.coverAssetIds,artist.coverContentRatings)} privateMode={privateMode} /><span className="artist-pick-text"><strong>{artistName(artist)}</strong><small>{artist.lastOpenedAt ? `${daysSince(artist.lastOpenedAt) ?? 0}일 동안 안 봄` : artist.recentCount ? `최근 30일 ${artist.recentCount}장` : '주요 작가'}</small></span><ChevronRightIcon aria-hidden="true" /></button>)}</div></section>}
     </div>}
     <section className={`artist-section${query.trim() ? '' : ' artist-content'}`} aria-label="주요 작가"><div className="artist-sort-line"><SectionHeading title={query.trim() ? '검색 결과' : '최근 저장 순'} meta={query.trim() ? undefined : <>주요 작가 · {major.length}명</>} /><span>{assignments.length ? `${assignmentCount.size}명 게시` : ''}</span></div><div className="artist-grid">{visible.map(artist => <ArtistTile key={artist.id} artist={artist} privateMode={privateMode} query={query} onOpen={() => onOpen(artist)} />)}</div>{visible.length === 0 && <EmptyState icon={PhotoIcon} title="검색 결과가 없습니다" />}</section>
     <Scrubber scrollRef={scroller} total={visible.length} sort={scrubberSort} hidden={paused}/>
-  </div>;
+  </div></PreparedCovers.Provider>;
 }
 
 export function EmptyArtists() { return <EmptyState icon={PhotoIcon} title="PC 앱이 작가 목록을 아직 보내지 않았습니다" />; }

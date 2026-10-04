@@ -7,6 +7,12 @@ import {setOutboxConnection} from './outboxConnection';
 
 const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn()}));
 vi.mock('./transport', async () => { const actual = await vi.importActual<typeof import('./transport')>('./transport'); return {...actual, api: mocks.api, native: mocks.native}; });
+const swaps = vi.hoisted(() => ({calls: [] as {forward: boolean; target?: unknown}[]}));
+// The real shared swap (jsdom has no View Transitions, so it commits at once); calls are recorded.
+vi.mock('../src/shared/motion/viewSwap', async () => {
+  const actual = await vi.importActual<typeof import('../src/shared/motion/viewSwap')>('../src/shared/motion/viewSwap');
+  return {...actual, swapSegment: (owner: object, options: Parameters<typeof actual.swapSegment>[1]) => { swaps.calls.push({forward: options.forward, target: options.target}); return actual.swapSegment(owner, options); }};
+});
 
 const entry = (id: string, kind: ReleaseCalendarEntry['kind'], date: string | null, precision: ReleaseCalendarEntry['precision'], extra: Partial<ReleaseCalendarEntry> & {events?: unknown[]} = {}): ReleaseCalendarEntry => ({
   id, kind, title: id, originalTitle: null, date, precision, region: kind === 'movie' ? 'korea' : null, platforms: kind === 'game' ? ['PC'] : [], releaseType: null, cover: {url: `https://img.example/${id}.jpg`}, unread: [], ...extra,
@@ -122,13 +128,15 @@ describe('ReleaseCalendar', () => {
     expect(screen.getByText('발매일 변경 · 9.20 → 10.1')).toBeTruthy();
     expect(screen.getByText('NEW 1')).toBeTruthy();
     expect(screen.getAllByText('미정').length).toBe(2);
+    // A switch keeps the shown list until the chosen one's first covers are ready (capped).
     fireEvent.click(screen.getByRole('radio', {name: /^게임/}));
+    expect(screen.getByText('movie-one')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('movie-one')).toBeNull());
     expect(screen.getByText('game-one')).toBeTruthy();
-    expect(screen.queryByText('movie-one')).toBeNull();
     fireEvent.click(screen.getByRole('radio', {name: /^전체/}));
     fireEvent.click(screen.getByRole('button', {name: /^관심 목록/}));
+    await waitFor(() => expect(screen.queryByText('game-one')).toBeNull());
     expect(screen.getByText('movie-one')).toBeTruthy();
-    expect(screen.queryByText('game-one')).toBeNull();
     expect(screen.getByRole('button', {name: /^관심 목록/}).textContent).toContain('1');
   });
 
@@ -176,5 +184,35 @@ describe('ReleaseCalendar', () => {
     await screen.findByText('game-one');
     expect(document.querySelectorAll('img')).toHaveLength(0);
     expect(screen.getAllByLabelText('비공개 모드로 이미지 숨김').length).toBeGreaterThan(0);
+  });
+
+  it('moves kind and 관심 switches through the shared category swap once the list is ready', async () => {
+    render(<ReleaseCalendar onClose={vi.fn()} />);
+    await screen.findByText('movie-one');
+    swaps.calls.length = 0;
+    fireEvent.click(screen.getByRole('radio', {name: /^게임/}));
+    await waitFor(() => expect(screen.queryByText('movie-one')).toBeNull());
+    const list = document.querySelector('.release-calendar-scroll');
+    expect(swaps.calls).toEqual([{forward: true, target: list}]);
+    fireEvent.click(screen.getByRole('radio', {name: /^전체/}));
+    await screen.findByText('movie-one');
+    expect(swaps.calls.at(-1)).toEqual({forward: false, target: list});
+  });
+
+  it('gives the first covers the gallery first-batch entrance, and none under reduced motion', async () => {
+    const animate = vi.fn(() => ({cancel: vi.fn()}));
+    vi.stubGlobal('CSS', {supports: () => false});
+    Object.defineProperty(HTMLElement.prototype, 'animate', {configurable: true, value: animate});
+    const rises = () => animate.mock.calls.filter((call, i) => (animate.mock.contexts[i] as unknown as HTMLElement).matches('.release-calendar-card') && (call as unknown as Keyframe[][])[0][0].transform === 'translateY(8px) scale(.98)').length;
+    try {
+      const view = render(<ReleaseCalendar onClose={vi.fn()} />);
+      await screen.findByText('movie-one');
+      await waitFor(() => expect(rises()).toBe(5));
+      view.unmount(); animate.mockClear();
+      vi.stubGlobal('matchMedia', () => ({matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn()}));
+      render(<ReleaseCalendar onClose={vi.fn()} />);
+      await screen.findByText('movie-one');
+      expect(rises()).toBe(0);
+    } finally { delete (HTMLElement.prototype as Partial<HTMLElement>).animate; vi.unstubAllGlobals(); }
   });
 });

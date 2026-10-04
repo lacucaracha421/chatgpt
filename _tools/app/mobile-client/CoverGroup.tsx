@@ -6,10 +6,11 @@ import {loadThumbnail} from './media';
 import type {Asset} from './types';
 /** A cover whose thumbnail did not load tries again after these delays, then waits for `paused` or the asset to change. */
 const COVER_RETRY_MS=[1000,3000,10_000];
-export function Cover({asset, paused}: {asset:Asset; paused:boolean}) {
+export function Cover({asset, paused, ready}: {asset:Asset; paused:boolean;
+  /** A thumbnail its list already fetched and decoded: shown in the first frame (read at mount only). */ready?:string}) {
   const privacy = useTabletAssetMask(asset);
   const source = JSON.stringify([asset.id,asset.kind,asset.preview,asset.thumbnail_available,asset.pending]);
-  const [loaded,setLoaded] = useState<{source:string;preview?:string}|null>(null);
+  const [loaded,setLoaded] = useState<{source:string;preview?:string}|null>(() => ready ? {source,preview:ready} : null);
   const [attempt,setAttempt] = useState(0);
   const retries = useRef({source,count:0});
   const preview = asset.preview ?? (loaded?.source === source ? loaded.preview : undefined);

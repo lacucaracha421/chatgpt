@@ -23,7 +23,10 @@ import { faultSelectionItem, useFaultGame } from "../games/FaultGame";
 import { AutoTagFilterBadges } from "../autotags/AutoTagFilterBadges";
 import { clearAutoTagFilter, hasAutoTagFilter, useAutoTagFilter } from "../autotags/autoTagFilter";
 import { useInfoPanelPreference } from "./useInfoPanelPreference";
-import { AssetGallery } from "./AssetGallery";
+import { AssetGallery, tileThumbnailUrl } from "./AssetGallery";
+import { folderMoveScope } from "./FolderWave";
+import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
+import { preloadImages } from "../shared/motion/viewportImages";
 import { shareAssetSummaries } from "./shareAssetSummaries";
 import { AssetInfoPanel } from "./AssetInfoPanel";
 import { AssetInspector } from "./AssetInspector";
@@ -204,6 +207,13 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   const itemIds = useMemo(() => items.map((asset) => asset.id), [items]);
   const pageRef = useRef(activePage);
   pageRef.current = activePage;
+  // The committed page on screen (also while the next query loads), for the search/filter swap.
+  const shownPageRef = useRef(page);
+  shownPageRef.current = page;
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const searchSwapOwner = useRef({}).current;
+  const privacyModeRef = useRef(privacyMode); privacyModeRef.current = privacyMode;
+  useEffect(() => () => cancelSegmentSwap(searchSwapOwner), [searchSwapOwner]);
   const headCursor = activePage?.headCursor ?? null;
   const tailCursor = activePage?.tailCursor ?? null;
   const currentFirstError = firstError?.queryKey === queryKey ? firstError.message : null;
@@ -253,14 +263,24 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       });
       return { items, previousCursor: retained.headCursor, nextCursor: retained.tailCursor, totalCount: first?.totalCount ?? retained.totalCount };
     };
-    void load().then((result) => {
+    void load().then(async (result) => {
       if (!result) return;
       if (generation !== generationRef.current) return;
       const items = shareAssetSummaries(retained?.items ?? EMPTY_ASSETS, result.items);
       const turnedAway = (result as { noMatchQuery?: string }).noMatchQuery;
-      setPage({ sort: queryBase.sort, queryKey, items, headCursor: result.previousCursor ?? null, tailCursor: result.nextCursor, totalCount: result.totalCount ?? null, ...(turnedAway !== undefined ? { noMatchQuery: turnedAway } : {}) });
-      setSelectedAsset((selected) => reconcileAsset(selected, selectedViewKeyRef.current, viewKey, items));
-      setViewerAssetId((assetId) => requestedAssetRef.current?.id === assetId ? assetId : reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, items));
+      const commit = () => {
+        if (generation !== generationRef.current) return;
+        setPage({ sort: queryBase.sort, queryKey, items, headCursor: result.previousCursor ?? null, tailCursor: result.nextCursor, totalCount: result.totalCount ?? null, ...(turnedAway !== undefined ? { noMatchQuery: turnedAway } : {}) });
+        setSelectedAsset((selected) => reconcileAsset(selected, selectedViewKeyRef.current, viewKey, items));
+        setViewerAssetId((assetId) => requestedAssetRef.current?.id === assetId ? assetId : reconcileAssetId(assetId, viewerViewKeyRef.current, viewKey, items));
+      };
+      // A search or tag filter applied or cleared in the same place: the old results stay painted
+      // until the new first screen's thumbnails decode (capped), then one view swap shows them.
+      const shown = shownPageRef.current;
+      if (!shown?.items.length || !searchChanged(shown.queryKey, queryKey)) { commit(); return; }
+      if (!privacyModeRef.current) await preloadImages(items.slice(0, SEARCH_SWAP_THUMBNAILS).map(asset => tileThumbnailUrl(asset)));
+      if (generation !== generationRef.current) return;
+      swapSegment(searchSwapOwner, { target: resultsRef.current, commit });
     }).catch((error: unknown) => { if (generation === generationRef.current) setFirstError({ queryKey, message: descriptionQuery !== null ? descriptionSearchError(error) : commandErrorMessage(error, "자산을 불러오지 못했습니다.") }); }).finally(() => { if (generation === generationRef.current) setFirstLoading(false); });
     return () => { ++generationRef.current; };
   }, [gateway, queryKey, galleryRefreshVersion, retryVersion, view.kind, viewKey]);
@@ -533,7 +553,10 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
   const resetStyleSuggestionFilter = () => {
     if (view.kind === "creator") onViewChange?.({ kind: "creator", creatorKey: view.creatorKey });
   };
-  const visiblePage = activePage ?? (!currentFirstError ? navigationMemory?.get(queryKey) ?? page : null);
+  // A search/filter change keeps the shown results until its swap commits; a remembered snapshot of
+  // the target query is for returning to a place, not for a search swap.
+  const searchSwapping = !activePage && page !== null && searchChanged(page.queryKey, queryKey);
+  const visiblePage = activePage ?? (!currentFirstError ? (searchSwapping ? page : navigationMemory?.get(queryKey) ?? page) : null);
   // Follow the painted page, which can still belong to the outgoing folder while loading.
   const galleryFolderPath = useMemo(() => {
     if (!visiblePage?.queryKey) return undefined;
@@ -630,7 +653,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
           const target = items.find((item) => item.id === id);
           if (!target || (batchPending && !selection.ids.has(target.id))) { event.preventDefault(); return; }
           if (!selection.ids.has(target.id)) selectWithGesture(target, { toggle: false, range: false });
-        }} className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery scrubberHidden={viewerAssetId !== null} layout={galleryLayout} intro={<>{artistScope?.intro}{folderShelfIntro}</>} infoOpen={inspectorOpen} favoritesView={sort === "favorites" && descriptionQuery === null} groupDates={descriptionQuery === null && !folderShelfIntro && (visiblePage?.sort === "newest" || visiblePage?.sort === "oldest")} items={visibleItems} scopeKey={visiblePage?.queryKey} folderPath={galleryFolderPath} totalCount={styleSuggestionsOnly ? styleSuggestionAssets?.totalImages ?? null : visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onFocusAsset={focusAssetOnly} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onAssignCharacter={openCharacterPicker} onToggleFavorite={toggleFavorite} onToggleFocusedFavorite={toggleFocusedFavorite} onToggleInfo={() => setInspectorOpen((open) => !open)} onEscape={() => { if (inspectorOpen) setInspectorOpen(false); else clearSelection(); }} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; viewerOriginRect.current = visibleTileRect(asset.id); setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
+        }} ref={resultsRef} data-search-results="" className="asset-browser__results" aria-busy={firstLoading} inert={!activePage ? true : undefined}><AssetGallery scrubberHidden={viewerAssetId !== null} layout={galleryLayout} intro={<>{artistScope?.intro}{folderShelfIntro}</>} infoOpen={inspectorOpen} favoritesView={sort === "favorites" && descriptionQuery === null} groupDates={descriptionQuery === null && !folderShelfIntro && (visiblePage?.sort === "newest" || visiblePage?.sort === "oldest")} items={visibleItems} scopeKey={visiblePage?.queryKey} folderPath={galleryFolderPath} totalCount={styleSuggestionsOnly ? styleSuggestionAssets?.totalImages ?? null : visiblePage?.totalCount ?? null} selectedAssetIds={selection.ids} focusAssetId={selection.focusId} targetRowHeight={thumbnailRowHeight} metadataVisible={metadataVisible} privacyMode={privacyMode} hasNextPage={Boolean(activePage && tailCursor !== null)} onLoadNextPage={loadNextPage} hasPreviousPage={Boolean(activePage && headCursor !== null)} onLoadPrevPage={loadPrevPage} onSelectionGesture={selectWithGesture} onFocusAsset={focusAssetOnly} onSelectAll={selectAll} onDeleteSelection={trashSelection} onClearSelection={clearSelection} onAssignCharacter={openCharacterPicker} onToggleFavorite={toggleFavorite} onToggleFocusedFavorite={toggleFocusedFavorite} onToggleInfo={() => setInspectorOpen((open) => !open)} onEscape={() => { if (inspectorOpen) setInspectorOpen(false); else clearSelection(); }} onMoveFocus={moveFocus} onOpen={(asset) => { viewerViewKeyRef.current = viewKey; viewerOriginRect.current = visibleTileRect(asset.id); setViewerAssetId(asset.id); }} onRetryVideo={(asset) => void gateway.retryVideoPreparation(asset.id).then(() => gateway.preparePendingVideos(1)).then(refresh).catch((error) => setMessage(commandErrorMessage(error, "미리보기 준비를 다시 시작하지 못했습니다.")))} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} /></div></ContextMenu>;
   return <section className="asset-browser" aria-label="저장소" onKeyDown={event => {
     if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.key.toLowerCase() !== "i" || (event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
     event.preventDefault(); setInspectorOpen(open => !open);
@@ -731,4 +754,18 @@ function reconcileAssetId(current: string | null, currentViewKey: string | null,
 
 function createRandomPivot() {
   return (crypto.randomUUID() as unknown as { replaceAll(search: string, replacement: string): string }).replaceAll("-", "");
+}
+
+/** Thumbnails readied before a search/filter swap: about the first viewport. */
+const SEARCH_SWAP_THUMBNAILS = 24;
+/** The same place (no folder move) with a different 내용 검색 or 자동 태그 filter. */
+function searchChanged(previousKey: string, nextKey: string) {
+  if (previousKey === nextKey || folderMoveScope(previousKey) !== folderMoveScope(nextKey)) return false;
+  const part = (key: string) => {
+    try {
+      const query = JSON.parse(key) as { descriptionQuery?: string; descriptionForce?: boolean; autoTags?: unknown };
+      return JSON.stringify([query.descriptionQuery ?? null, query.descriptionForce ?? false, query.autoTags ?? null]);
+    } catch { return key; }
+  };
+  return part(previousKey) !== part(nextKey);
 }

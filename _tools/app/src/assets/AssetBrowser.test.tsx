@@ -1624,3 +1624,82 @@ describe("내용 검색 result state", () => {
     expect(await screen.findByText("내용 검색을 할 수 없습니다: 이 환경에서는 지원하지 않습니다.")).toBeVisible();
   });
 });
+
+describe("search and filter swap", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(document, "startViewTransition");
+  let transitions: { update: () => void; finish(): void }[];
+  beforeEach(() => {
+    transitions = [];
+    Object.defineProperty(document, "startViewTransition", { configurable: true, value: (update: () => void) => {
+      let finish!: () => void; const finished = new Promise<void>(resolve => { finish = resolve; });
+      transitions.push({ update, finish: () => finish() });
+      return { ready: Promise.resolve(), finished, updateCallbackDone: Promise.resolve(), skipTransition: vi.fn() };
+    } });
+  });
+  afterEach(async () => {
+    const { clearAutoTagFilter } = await import("../autotags/autoTagFilter");
+    clearAutoTagFilter();
+    if (descriptor) Object.defineProperty(document, "startViewTransition", descriptor); else Reflect.deleteProperty(document, "startViewTransition");
+  });
+  const names = () => screen.queryAllByRole("option").filter(option => option.hasAttribute("data-asset-id")).map(option => option.getAttribute("aria-label"));
+  /** Old results stay until the browser has its old snapshot; the new page commits once, in the callback. */
+  async function expectSwap(oldName: string, newNames: string[], results: () => HTMLElement) {
+    await waitFor(() => expect(transitions).toHaveLength(1));
+    expect(names()).toContain(oldName);
+    expect(document.documentElement).toHaveAttribute("data-view-swap", "rise");
+    expect(results()).toHaveAttribute("data-view-swap-target");
+    act(() => transitions[0].update());
+    expect(names()).toEqual(newNames);
+    await act(async () => transitions[0].finish());
+    expect(document.documentElement).not.toHaveAttribute("data-view-swap");
+    expect(results()).not.toHaveAttribute("data-view-swap-target");
+    expect(transitions).toHaveLength(1);
+  }
+
+  it("검색 해제 from 내용 검색 back to the same place swaps the results once", async () => {
+    const gateway = createGateway({ items: [asset(9)], nextCursor: null });
+    gateway.searchByDescription = vi.fn().mockResolvedValue({ route: "cosine", assetIds: ["asset-0"], precise: true });
+    gateway.refreshAssets = vi.fn(async (_query, ids: string[]) => [asset(0)].filter(item => ids.includes(item.id)));
+    const element = (view: AssetView) => <LibraryProvider gateway={gateway}>{withWorkspaceChrome(<AssetBrowser galleryLayout="justified" view={view} classifications={classifications} sort="newest" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />)}</LibraryProvider>;
+    const view = render(element({ kind: "description_search", query: "눈" }));
+    await screen.findByRole("option", { name: "asset-0.png" });
+    expect(transitions).toHaveLength(0);
+    view.rerender(element({ kind: "classification", classificationId: null }));
+    await expectSwap("asset-0.png", ["asset-9.png"], () => view.container.querySelector(".asset-browser__results")!);
+  });
+
+  it("adding and clearing a 자동 태그 filter swaps the results, keeping the shown ones until each commit", async () => {
+    const { applyAutoTagFilter, clearAutoTagFilter } = await import("../autotags/autoTagFilter");
+    const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+    gateway.listAssets = vi.fn(async query => ({ items: [query.autoTags ? asset(5) : asset(0)], nextCursor: null }));
+    const memory: AssetNavigationMemory = new Map();
+    const view = renderBrowser(gateway, { navigationMemory: memory });
+    await screen.findByRole("option", { name: "asset-0.png" });
+    const results = () => view.container.querySelector<HTMLElement>(".asset-browser__results")!;
+    act(() => applyAutoTagFilter("cat"));
+    await expectSwap("asset-0.png", ["asset-5.png"], results);
+    transitions.length = 0;
+    // Clearing returns to a query remembered in navigation memory: the filtered results still stay
+    // until the swap instead of cutting to the remembered snapshot.
+    act(() => clearAutoTagFilter());
+    expect(names()).toEqual(["asset-5.png"]);
+    await expectSwap("asset-5.png", ["asset-0.png"], results);
+  });
+
+  it("without the browser API commits at once and, under reduced motion, does not move", async () => {
+    Reflect.deleteProperty(document, "startViewTransition");
+    vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+    const animate = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
+    try {
+      const { applyAutoTagFilter } = await import("../autotags/autoTagFilter");
+      const gateway = createGateway({ items: [asset(0)], nextCursor: null });
+      gateway.listAssets = vi.fn(async query => ({ items: [query.autoTags ? asset(5) : asset(0)], nextCursor: null }));
+      renderBrowser(gateway);
+      await screen.findByRole("option", { name: "asset-0.png" });
+      act(() => applyAutoTagFilter("cat"));
+      await screen.findByRole("option", { name: "asset-5.png" });
+      expect(animate.mock.calls.some(([frames]) => JSON.stringify(frames).includes("translateY(8px)"))).toBe(false);
+    } finally { delete (HTMLElement.prototype as Partial<HTMLElement>).animate; vi.unstubAllGlobals(); }
+  });
+});

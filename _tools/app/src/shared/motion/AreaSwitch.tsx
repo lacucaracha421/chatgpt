@@ -44,10 +44,25 @@ type Props = {
   crossFade?: boolean;
   /** Desktop area swaps use browser snapshots when supported. */
   viewTransitions?: boolean;
+  /**
+   * A shared element of the outgoing and incoming view (a shelf item and its work-screen object):
+   * when both are on screen, the browser snapshot morphs that one object between them while the
+   * rest of the page swaps. Returns the element in `host` for view `key`, or null.
+   */
+  hero?: (key: string, host: HTMLElement) => HTMLElement | null;
 };
 
+/** Marks the one element captured as the shared object (`work-hero` in viewTransitions.css). */
+export const VIEW_HERO_ATTRIBUTE = 'data-view-hero';
+/** Only an element with a box inside the viewport is named; a hidden or scrolled-away one is not. */
+function onScreen(element: HTMLElement | null): element is HTMLElement {
+  const rect = element?.getBoundingClientRect();
+  return !!rect && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+}
+
 /** Preserve the actual old React/DOM tree until the incoming view commits its content. */
-export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, waitForReady = false, onShown, incomingWidthDelta = 0, onSettlingChange, crossFade = true, viewTransitions = false}: Props) {
+export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, waitForReady = false, onShown, incomingWidthDelta = 0, onSettlingChange, crossFade = true, viewTransitions = false, hero}: Props) {
+  const heroRef = useRef(hero); heroRef.current = hero;
   const [shown, setShown] = useState(activeKey);
   const [outgoing, setOutgoing] = useState<string | null>(null);
   const [settling, setSettling] = useState(false);
@@ -100,14 +115,28 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, 
       if (browserTransition) {
         const entry: {key: string; swap?: ViewSwap | null} = {key: activeKey};
         transition.current = entry;
-        entry.swap = startViewSwap({attribute: AREA_VIEW_TRANSITION, commit: () => {
+        // The shared object is named on the outgoing view for the old snapshot and on the incoming
+        // view for the new one, never both at once; only when both are on screen, never under
+        // reduced motion (then the page only cross-fades).
+        const from = shownRef.current, outgoingHost = hosts.current.get(from), findHero = heroRef.current;
+        let oldHero = findHero && outgoingHost && !reducedMotion() ? findHero(from, outgoingHost) : null;
+        let newHero = oldHero ? findHero!(activeKey, incoming) : null;
+        if (!onScreen(oldHero) || !onScreen(newHero) || oldHero === newHero) oldHero = newHero = null;
+        oldHero?.setAttribute(VIEW_HERO_ATTRIBUTE, '');
+        entry.swap = startViewSwap({attribute: AREA_VIEW_TRANSITION, value: oldHero ? 'hero' : '', commit: () => {
           // Abandoned requests must not commit (skipping still invokes the callback).
           if (cancelled) return;
+          oldHero?.removeAttribute(VIEW_HERO_ATTRIBUTE);
           setShown(activeKey);
           visited.current.add(activeKey);
           onShownRef.current?.(activeKey);
+          newHero?.setAttribute(VIEW_HERO_ATTRIBUTE, '');
         }});
-        void entry.swap?.finished.then(() => { if (transition.current === entry) transition.current = null; });
+        if (!entry.swap) oldHero?.removeAttribute(VIEW_HERO_ATTRIBUTE);
+        void entry.swap?.finished.then(() => {
+          oldHero?.removeAttribute(VIEW_HERO_ATTRIBUTE); newHero?.removeAttribute(VIEW_HERO_ATTRIBUTE);
+          if (transition.current === entry) transition.current = null;
+        });
         return;
       }
       const animate = crossFade && !forced && typeof incoming.animate === 'function';

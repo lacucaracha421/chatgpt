@@ -65,7 +65,7 @@ it('navigates series, groups and characters, opens shared assets and returns to 
   render(<CharacterBrowser {...props}/>);
   fireEvent.click(await screen.findByRole('button',{name:'Series · 2장'}));
   fireEvent.click(await screen.findByRole('button',{name:'Group · 2장'}));
-  fireEvent.click(screen.getByRole('button',{name:'Character · 2장'}));
+  fireEvent.click(await screen.findByRole('button',{name:'Character · 2장'}));
   fireEvent.click(await screen.findByText('asset-2'));
   // The third argument is the character origin this gallery hands its viewer. This node is a
   // character, whose published index here advertises no manual-exclusion capability, so the

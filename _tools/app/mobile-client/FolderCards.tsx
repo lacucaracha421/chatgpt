@@ -32,9 +32,10 @@ const KIND_NAMES:Record<CharacterFolderKind,string>={series:'캐릭터 시리즈
  * presentation-only, so it keeps the same wheel, drag and clipped-last-card behaviour on both
  * clients.
  */
-export function FolderShelf({label,cards,accessory,ariaLabel,className,cardsId,cardsHidden,appearanceKey,appearanceEnabled=true}:{label:string;cards:ReactNode[];accessory?:ReactNode;ariaLabel?:string;className?:string;cardsId?:string;cardsHidden?:boolean;appearanceKey?:string;appearanceEnabled?:boolean}) {
+export function FolderShelf({label,cards,accessory,ariaLabel,className,cardsId,cardsHidden,appearanceKey,appearanceEnabled=true,appearancePlace,appearanceSelector='.folder-shelf__card'}:{label:string;cards:ReactNode[];accessory?:ReactNode;ariaLabel?:string;className?:string;cardsId?:string;cardsHidden?:boolean;appearanceKey?:string;appearanceEnabled?:boolean;
+  /** The place whose cards are shown: a new place's first cards enter like the first visit's (the PC shelf's first batch). */appearancePlace?:string;appearanceSelector?:string}) {
   const host=useRef<HTMLElement>(null);
-  useFirstAppearance(host,cards.length,!!appearanceKey&&appearanceEnabled&&!cardsHidden,appearanceKey,".folder-shelf__card");
+  useFirstAppearance(host,cards.length,!!appearanceKey&&appearanceEnabled&&!cardsHidden,appearanceKey,appearanceSelector,appearancePlace);
   return <section ref={host} className={['folder-shelf',className].filter(Boolean).join(' ')} aria-label={ariaLabel??label}>
     <SectionLabel as="h3" className="folder-shelf__label" title={label} actions={accessory}/>
     {cards.length>0&&<Fold keepMounted open={!cardsHidden} id={cardsId}><ShelfScroller previousLabel="이전 항목" nextLabel="다음 항목">{cards}</ShelfScroller></Fold>}
@@ -73,11 +74,11 @@ export function FolderCard({id,name,count,items,paused,childrenLabel,kind,onSele
   },[id,onVisible]);
   return <button ref={host} className={`library-folder${kind?' is-character':''}`} onClick={onSelect} aria-label={count===undefined?name:`${name}, ${count}개`} aria-description={kind?KIND_NAMES[kind]:undefined}><span className="folder-thumbnail"><CoverGroup items={items} paused={paused||!visible}/>{count!==undefined&&<span className="folder-thumbnail__count">{count.toLocaleString('ko-KR')}</span>}</span><span className="folder-caption">{kind&&<CharacterGlyph kind={kind}/>}<strong>{name}</strong></span>{childrenLabel&&<small>{childrenLabel}</small>}</button>;
 }
-export function FolderCards({items,entries,characters,paused,revision,onSelect,strip=false}:{items:Entry[];entries:Entry[];characters?:CharacterIndex;paused:boolean;revision:number;onSelect(view:View):void;strip?:boolean}) {
+export function FolderCards({items,entries,characters,paused,revision,onSelect,strip=false,place}:{items:Entry[];entries:Entry[];characters?:CharacterIndex;paused:boolean;revision:number;onSelect(view:View):void;strip?:boolean;/** The folder these cards belong to; moving to another folder replays their first batch. */place?:string}) {
   const host=useRef<HTMLDivElement>(null);
-  useFirstAppearance(host,items.length,!paused,"classification-folders",".library-folder");
+  useFirstAppearance(host,items.length,!paused,"classification-folders",".library-folder",place);
   const {covers,onVisible}=useFolderCovers(items,paused,revision,entries);
-  if(strip)return <FolderShelf appearanceKey="classification-folder-shelf" appearanceEnabled={!paused} label={`폴더 ${items.length}`} cards={items.map(entry=><ShelfFolderCard key={entry.id} entry={entry} items={covers[entry.id]??[]} characters={characters} paused={paused} onSelect={()=>onSelect(entryView(entry))} onVisible={onVisible}/>)} />;
+  if(strip)return <FolderShelf appearanceKey="classification-folder-shelf" appearanceEnabled={!paused} appearancePlace={place} label={`폴더 ${items.length}`} cards={items.map(entry=><ShelfFolderCard key={entry.id} entry={entry} items={covers[entry.id]??[]} characters={characters} paused={paused} onSelect={()=>onSelect(entryView(entry))} onVisible={onVisible}/>)} />;
   return <div ref={host} className={strip?'library-children':'library-folder-grid'}>{items.map(entry=><FolderCard key={entry.id} id={entry.id} name={entry.name} kind={characterKindOf(entry)} count={entry.asset_count} items={entry.characterNode?characterCovers(entry,characters):covers[entry.id]??[]} paused={paused} childrenLabel={entries.some(item=>item.parent_id===entry.id)?`하위 폴더 ${entries.filter(item=>item.parent_id===entry.id).length}`:undefined} onSelect={()=>onSelect(entryView(entry))} onVisible={onVisible}/>)}</div>;
 }
 const coverDate=(asset:Asset)=>asset.collected_at??asset.created_at??'';

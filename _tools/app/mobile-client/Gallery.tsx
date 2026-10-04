@@ -137,7 +137,13 @@ export function Gallery({items, density, identity, restoreScroll, onScroll, onOp
   /** Private Vault mode: same layout and gestures, no library media client. */
   vault?:GalleryVaultSource}) {
   const parent = useRef<HTMLDivElement>(null);
-  useFirstAppearance(parent, items.length, !paused && !stale, vault ? 'vault-gallery' : 'asset-gallery');
+  // A place reached with nothing on screen to move from (an empty folder or series filter, or a
+  // gallery re-entered from outside) gets no folder move, so it is a new visit: its first batch
+  // enters like a first visit's. A place reached from shown tiles is the folder move's.
+  const visit = useRef({scope: folderScope, count: 0}), shownCount = useRef(0);
+  if (folderScope !== visit.current.scope) visit.current = {scope: folderScope, count: visit.current.count + (shownCount.current ? 0 : 1)};
+  useLayoutEffect(() => { shownCount.current = items.length; });
+  useFirstAppearance(parent, items.length, !paused && !stale, vault ? 'vault-gallery' : 'asset-gallery', undefined, visit.current.count);
   const activePress = useRef<(() => void)|null>(null);
   const registerPress=(cancel:()=>void)=>{activePress.current?.();activePress.current=cancel;};
   const releasePress=(cancel:()=>void)=>{if(activePress.current===cancel)activePress.current=null;};

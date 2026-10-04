@@ -51,3 +51,19 @@ it('does not move folders for a filter or paging change inside the same place',a
  expect(host().querySelector('.asset-gallery__folder-snapshot')).toBeNull();
  expect(host().dataset.folderMove).toBeUndefined();
 });
+
+it('gives a place reached with nothing on screen to move from the first-batch entrance instead',async()=>{
+ const rises=()=>animate.mock.calls.filter((call,i)=>(animate.mock.contexts[i] as unknown as HTMLElement).matches('[data-asset-id]')&&(call[0][0] as Keyframe).transform==='translateY(8px) scale(.98)').length;
+ const view=render(gallery('a',['first']));
+ await tick(1000);
+ view.rerender(gallery('b',[],['b']));
+ await tick(1000);animate.mockClear();
+ view.rerender(gallery('c',['new-1','new-2'],['c']));
+ expect(host().querySelector('.asset-gallery__folder-snapshot')).toBeNull();
+ expect(rises()).toBe(2);
+ // From shown tiles the folder move owns the arrival; the first batch is not replayed.
+ await tick(1000);animate.mockClear();
+ view.rerender(gallery('d',['next-1'],['d']));
+ expect(host().dataset.folderMove).toBe('pending');
+ expect(rises()).toBe(0);
+});

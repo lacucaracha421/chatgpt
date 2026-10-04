@@ -17,6 +17,7 @@ import { AssetBrowser, type AssetBrowserStatus, type AssetNavigationMemory } fro
 import { startAssetDrag as nativeStartAssetDrag, type StartAssetDrag } from "../drag-out/startAssetDrag";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
 import { createDefaultCollectionLibraryState, type CollectionLibraryState, type CollectionLibraryStateByType } from "../collections/collectionLibrary";
+import { collectionHero } from "../collections/collectionHero";
 import type { CollectionNavigationMemory } from "../collections/CollectionBrowser";
 import {
   type DropSubscriber,
@@ -867,7 +868,11 @@ function WorkspaceAreaSwitch({view, shownView, collections, sidebarWidth, onShow
   const indexWidth = (target: AssetView) => hasWorkspaceIndex(target, collections, chrome?.getMeta(JSON.stringify(target)) ?? null)
     && !(workspaceArea(target) === "manga" && chrome?.indexHidden.manga) ? sidebarWidth : 0;
   // Prepare at the final width; tab snapshots include the final index and header together.
-  return <AreaSwitch activeKey={area} viewTransitions={workspaceArea(view) !== workspaceArea(shownView)} retained={["home", "manga"]} onShown={onShown} onSettlingChange={onSettlingChange} incomingWidthDelta={indexWidth(shownView) - indexWidth(view)} ready={ready} waitForReady={area === "collection-work" || area === "collections"} views={{[area]: <WorkspaceChromeScope chrome={chrome} scope={scope}>{children}</WorkspaceChromeScope>}}/>;
+  // Shelf ⇄ work screen is one object moving between two layouts: a browser snapshot with that
+  // object shared (`hero`), not a cross-fade of the two whole screens.
+  const workSwap = new Set([area, workspaceSwitchKey(shownView)]).size === 2 && [area, workspaceSwitchKey(shownView)].every(key => key === "collections" || key === "collection-work");
+  const heroId = view.kind === "collection" ? view.collectionId : shownView.kind === "collection" ? shownView.collectionId : null;
+  return <AreaSwitch activeKey={area} viewTransitions={workspaceArea(view) !== workspaceArea(shownView) || workSwap} hero={workSwap && heroId ? (key, host) => collectionHero(key, host, heroId) : undefined} retained={["home", "manga"]} onShown={onShown} onSettlingChange={onSettlingChange} incomingWidthDelta={indexWidth(shownView) - indexWidth(view)} ready={ready} waitForReady={area === "collection-work" || area === "collections"} views={{[area]: <WorkspaceChromeScope chrome={chrome} scope={scope}>{children}</WorkspaceChromeScope>}}/>;
 }
 
 const NO_CHROME_TARGETS = { navigation: null, actions: null, search: null, settings: null, header: null, details: null };

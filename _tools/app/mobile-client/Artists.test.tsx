@@ -44,6 +44,26 @@ beforeEach(() => {
 afterEach(() => {cleanup(); vi.restoreAllMocks();});
 
 describe('artist model', () => {
+  it('starts the today picks and the artist list as one held entrance, and none under reduced motion', async () => {
+    const plays = vi.fn();
+    const animate = vi.fn(() => ({cancel: vi.fn(), pause: vi.fn(), play: plays}));
+    Object.defineProperty(HTMLElement.prototype, 'animate', {configurable: true, value: animate});
+    vi.stubGlobal('CSS', {supports: () => false});
+    try {
+      const view = renderArtists();
+      await screen.findByRole('button', {name: '오늘의 작가 하늘빛'});
+      const parts = () => animate.mock.calls.filter((_call, i) => (animate.mock.contexts[i] as unknown as HTMLElement).matches('.artist-today, .artist-other-pick, .artist-tile'));
+      await waitFor(() => expect(plays).toHaveBeenCalledTimes(parts().length));
+      expect(parts().length).toBeGreaterThan(1);
+      expect(parts().every(call => (call as unknown as Keyframe[][])[0][0].visibility === 'hidden')).toBe(true);
+      view.unmount(); animate.mockClear();
+      vi.stubGlobal('matchMedia', () => ({matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn()}));
+      renderArtists();
+      await screen.findByRole('button', {name: '오늘의 작가 하늘빛'});
+      expect(parts()).toHaveLength(0);
+    } finally {delete (HTMLElement.prototype as Partial<HTMLElement>).animate; vi.unstubAllGlobals();}
+  });
+
   it('matches Korean initials and underlines the matched syllables', () => {
     expect(matchesArtist(primary, 'ㅎㄴ')).toBe(true);
     expect(matchedPositions('하늘빛', 'ㅎㄴ')).toEqual(new Set([0, 1]));

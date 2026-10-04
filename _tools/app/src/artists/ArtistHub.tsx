@@ -1,6 +1,7 @@
 import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { AssetImage } from "../privacy/AssetImage";
 import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
+import { ARTIST_ENTRANCE } from "./ArtistIndex";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { ViewToolbar } from "../layout/ViewToolbar";
@@ -215,7 +216,7 @@ function MainSection({ onNavigate, privacyMode }: { onNavigate: Navigate; privac
   const addRows = () => setRowsState((value) => (mainRows = value + MAIN_ROWS_STEP));
   // Columns follow the grid's container queries (5 · 4 · 3), so read them from the rendered grid.
   const gridRef = useRef<HTMLDivElement | null>(null);
-  useFirstAppearance(gridRef, page?.artists.length ?? 0, true, "classification-artists", ".artist-card");
+  useFirstAppearance(gridRef, page?.artists.length ?? 0, true, "classification-artists", ".artist-card", undefined, ARTIST_ENTRANCE);
   const [columns, setColumns] = useState(5);
   useLayoutEffect(() => {
     const grid = gridRef.current;
@@ -424,7 +425,7 @@ function SinglesMosaic({ onNavigate, privacyMode }: { onNavigate: Navigate; priv
   const [limit, setLimit] = useState(PAGE);
   const page = useArtistRead((gateway) => gateway.list({ bucket: "single", sort: "recent", limit }), `singles:${limit}`).data;
   const grid = useRef<HTMLDivElement>(null);
-  useFirstAppearance(grid, page?.artists.length ?? 0, true, "classification-artists-singles", ".artist-mosaic__tile");
+  useFirstAppearance(grid, page?.artists.length ?? 0, true, "classification-artists-singles", ".artist-mosaic__tile", undefined, ARTIST_ENTRANCE);
   if (!page) return <Skeleton className="artist-hub__skeleton" label="작가를 불러오는 중" />;
   if (page.artists.length === 0) return <EmptyState title="한 장뿐인 작가가 없습니다" />;
   return <>

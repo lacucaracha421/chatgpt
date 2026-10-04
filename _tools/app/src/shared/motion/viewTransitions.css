@@ -21,3 +21,20 @@ html[data-area-view-transition]::view-transition-new(index) {
   html[data-area-view-transition]::view-transition-old(*),
   html[data-area-view-transition]::view-transition-new(*) { animation-duration: 120ms; }
 }
+
+/* Shelf item -> work screen (and back): one shared object morphs its box from the shelf spot to the
+   stage on the gentle spring while its two images cross-fade quickly, so it reads as one object.
+   The rest of the page does not blend two layouts: the old page leaves fast, the new one fades in. */
+html[data-area-view-transition="hero"] [data-view-hero] { view-transition-name: work-hero !important; }
+html[data-area-view-transition="hero"]::view-transition-group(work-hero) { animation-duration: 340ms; animation-timing-function: var(--spring-gentle, cubic-bezier(.2,0,0,1)); }
+html[data-area-view-transition="hero"]::view-transition-old(work-hero),
+html[data-area-view-transition="hero"]::view-transition-new(work-hero) { animation-duration: 120ms; animation-timing-function: cubic-bezier(.2,0,0,1); }
+html[data-area-view-transition="hero"]::view-transition-old(root),
+html[data-area-view-transition="hero"]::view-transition-old(main),
+html[data-area-view-transition="hero"]::view-transition-old(index) { animation-duration: 90ms; }
+html[data-area-view-transition="hero"]::view-transition-new(root),
+html[data-area-view-transition="hero"]::view-transition-new(main),
+html[data-area-view-transition="hero"]::view-transition-new(index),
+html[data-area-view-transition="hero"]::view-transition-group(root),
+html[data-area-view-transition="hero"]::view-transition-group(main),
+html[data-area-view-transition="hero"]::view-transition-group(index) { animation-duration: 180ms; }

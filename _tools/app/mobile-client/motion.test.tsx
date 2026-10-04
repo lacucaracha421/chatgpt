@@ -2,7 +2,7 @@ import {useRef,type CSSProperties} from 'react';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {cleanup,render} from '@testing-library/react';
 import {act} from 'react';
-import {EASE_OUT,PROGRESS_DELAY_MS,PROGRESS_FADE_MS,PROGRESS_MIN_MS,SEGMENT_MOTION_MS,useDelayedPresence,useLevelMotion,useScrollMemory,useSegmentMotion,useTabIndicator} from './motion';
+import {EASE_OUT,PROGRESS_DELAY_MS,PROGRESS_FADE_MS,PROGRESS_MIN_MS,SEGMENT_MOTION_MS,useDelayedPresence,useLevelMotion,useScrollMemory,useTabIndicator} from './motion';
 import {BarProgress} from './TopBar';
 
 function Level({levelKey,depth}:{levelKey:string|null;depth:number}){const host=useRef<HTMLDivElement>(null);useLevelMotion(host,levelKey,depth);return <div ref={host} data-testid="level"/>;}
@@ -73,62 +73,6 @@ it('moves the content under a still bar and staggers the first tiles only on a d
   animate.mockClear();
   view.rerender(<Screen levelKey="root" depth={0}/>);
   expect(animate).toHaveBeenCalledTimes(1);
-});
-
-function Segment({segment,index,scope}:{segment:string|null;index:number;scope?:string}){const host=useRef<HTMLDivElement>(null);useSegmentMotion(host,segment,index,undefined,scope);return <div ref={host} data-testid="segment"/>;}
-describe('segment swap',()=>{
-  it('slides in from the side of the new tab, after its data commits, within 200 ms',()=>{
-    const view=render(<Segment segment="game" index={0}/>);
-    expect(animate).not.toHaveBeenCalled();
-    // The new tab is still loading: nothing moves over the old content.
-    view.rerender(<Segment segment={null} index={1}/>);
-    expect(animate).not.toHaveBeenCalled();
-    view.rerender(<Segment segment="manga" index={1}/>);
-    expect(animate).toHaveBeenCalledTimes(1);
-    expect(animate.mock.contexts[0]).toBe(view.getByTestId('segment'));
-    expect(firstFrame(0)).toMatchObject({transform:'translateX(16px)',opacity:.5});
-    const options=animate.mock.calls[0][1] as KeyframeAnimationOptions;
-    // The shared curve keeps the same shape without depending on CSS whitespace.
-    expect(options.duration).toBeLessThanOrEqual(200);expect(options.easing).toBe(EASE_OUT);
-    // A tab to the left comes in from the left; the same tab again does not move.
-    view.rerender(<Segment segment="game" index={0}/>);
-    expect(firstFrame(1).transform).toBe('translateX(-16px)');
-    view.rerender(<Segment segment="game" index={0}/>);
-    expect(animate).toHaveBeenCalledTimes(2);
-  });
-  it('swaps within one place but not when the place itself changes',()=>{
-    // The asset gallery's 종류 segment: a new folder is a navigation (level motion), not a swap.
-    const view=render(<Segment segment="all" index={0} scope="folder:a"/>);
-    view.rerender(<Segment segment="videos" index={2} scope="folder:b"/>);
-    expect(animate).not.toHaveBeenCalled();
-    view.rerender(<Segment segment="images" index={1} scope="folder:b"/>);
-    expect(animate).toHaveBeenCalledTimes(1);
-    expect(firstFrame(0).transform).toBe('translateX(-16px)');
-  });
-  it('holds the swap on its first frame until the new first-viewport images decode, at most 250 ms (the PC rule)',async()=>{
-    vi.useFakeTimers();
-    const played=vi.fn(),paused=vi.fn();
-    animate.mockImplementation(function(this:HTMLElement){return {cancel(){},pause:paused,play:played};});
-    const rect={left:0,top:0,right:200,bottom:200,width:200,height:200,x:0,y:0,toJSON:()=>({})} as DOMRect;
-    const bounds=vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockReturnValue(rect);
-    Object.defineProperty(HTMLImageElement.prototype,'decode',{configurable:true,value:()=>new Promise(()=>{})});
-    function Images({segment,index}:{segment:string;index:number}){const host=useRef<HTMLDivElement>(null);useSegmentMotion(host,segment,index);return <div ref={host}><img src={`/${segment}.png`} alt=""/></div>;}
-    try {
-      const view=render(<Images segment="game" index={0}/>);
-      view.rerender(<Images segment="manga" index={1}/>);
-      expect(animate).toHaveBeenCalledTimes(1);expect(paused).toHaveBeenCalledTimes(1);expect(played).not.toHaveBeenCalled();
-      await act(async()=>{await vi.advanceTimersByTimeAsync(249);});
-      expect(played).not.toHaveBeenCalled();
-      await act(async()=>{await vi.advanceTimersByTimeAsync(1);});
-      expect(played).toHaveBeenCalledTimes(1);
-    } finally {bounds.mockRestore();delete (HTMLImageElement.prototype as Partial<HTMLImageElement>).decode;vi.useRealTimers();}
-  });
-  it('does not move under reduced motion',()=>{
-    reduced(true);
-    const view=render(<Segment segment="game" index={0}/>);
-    view.rerender(<Segment segment="movie" index={2}/>);
-    expect(animate).not.toHaveBeenCalled();
-  });
 });
 
 function Indicator({index}:{index:number}){const list=useRef<HTMLDivElement>(null),bar=useRef<HTMLSpanElement>(null);useTabIndicator(list,bar,index);return <div ref={list} style={{'--tab-inset':'4px'} as CSSProperties}>{[0,1,2].map(i=><button key={i} role="tab" ref={tab=>{if(tab){Object.defineProperty(tab,'offsetLeft',{configurable:true,value:i*60});Object.defineProperty(tab,'offsetWidth',{configurable:true,value:50});}}}/>)}<span ref={bar} data-testid="bar"/></div>;}

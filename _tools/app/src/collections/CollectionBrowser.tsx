@@ -398,6 +398,7 @@ export function CollectionBrowser({
         </div>}
         <div
           className="collection-browser__content-final"
+          data-search-results=""
           onContextMenu={(event) => {
             if (inbox || (event.target as HTMLElement).closest(".collection-card, .manga-shelf-row, .ui-section-bar")) return;
             event.preventDefault();

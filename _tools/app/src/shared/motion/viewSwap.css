@@ -13,7 +13,10 @@ html[data-view-swap]::view-transition-new(view-swap-still) { animation: none; }
 html[data-view-swap]::view-transition-old(view-swap) { animation: view-swap-out 90ms cubic-bezier(.2,0,0,1) both; }
 html[data-view-swap="forward"]::view-transition-new(view-swap) { animation: view-swap-in-forward 240ms var(--spring-gentle, cubic-bezier(.2,0,0,1)) both; }
 html[data-view-swap="back"]::view-transition-new(view-swap) { animation: view-swap-in-back 240ms var(--spring-gentle, cubic-bezier(.2,0,0,1)) both; }
+/* A search or filter change has no side: the new results rise a little into place. */
+html[data-view-swap="rise"]::view-transition-new(view-swap) { animation: view-swap-in-rise 200ms var(--spring-gentle, cubic-bezier(.2,0,0,1)) both; }
 @keyframes view-swap-out { to { opacity: 0; } }
+@keyframes view-swap-in-rise { from { opacity: 0; transform: translateY(8px); } }
 @keyframes view-swap-in-forward { from { opacity: 0; transform: translateX(16px); } }
 @keyframes view-swap-in-back { from { opacity: 0; transform: translateX(-16px); } }
 @keyframes view-swap-fade-in { from { opacity: 0; } }

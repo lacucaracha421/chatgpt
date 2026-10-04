@@ -12,28 +12,62 @@ import type {Ticket} from './types';
 import {filterReleaseEntries, groupReleaseEntries, normalizeReleaseCalendarReply, releaseDateLabel, releaseDaysUntil, releaseEventLine, visibleWishlistIds, wishlistIds, type KindFilter, type ReleaseCalendarEntry, type ReleaseCalendarEvent, type ReleaseCalendarReply} from './releaseCalendarModel';
 import {Scrubber} from './Scrubber';
 import {ddayLabel} from '../src/shared/displayDate';
-import {useSegmentMotion} from './motion';
+import {cancelSegmentSwap, swapSegment} from '../src/shared/motion/viewSwap';
+import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
+import {IMAGE_READY_CAP_MS} from '../src/shared/motion/viewportImages';
+import {decodeImage} from './media';
 import './releaseCalendar.css';
 
 type ScreenState = 'loading' | 'ready' | 'empty' | 'error';
 
-function HomeCoverImage({cover, alt, privacy}: {cover: ReleaseCalendarEntry['cover']; alt: string; privacy: boolean}) {
-  const [url, setUrl] = useState('');
+type Cover = ReleaseCalendarEntry['cover'];
+/** Cover tickets this screen resolved, kept briefly so a prepared list's covers paint in their first frame. */
+const coverTickets = new Map<string, {url: string; until: number}>();
+const COVER_KEEP_MS = 4 * 60_000;
+const FIRST_SCREEN_COVERS = 12;
+const httpsUrl = (url: string | undefined | null) => url && /^https:\/\//.test(url) ? url : '';
+function knownCover(cover: Cover) {
+  if (!cover) return '';
+  if (!cover.sha256) return httpsUrl(cover.url);
+  const hit = coverTickets.get(cover.sha256);
+  if (hit && hit.until > Date.now()) return hit.url;
+  coverTickets.delete(cover.sha256);
+  return '';
+}
+async function coverUrl(cover: Cover, signal: AbortSignal) {
+  const known = knownCover(cover);
+  if (known || !cover?.sha256) return known;
+  const sha256 = cover.sha256;
+  const reply = await (window.LakomicsNative
+    ? native<Ticket>('homeCover', {sha256}, signal)
+    : api<Ticket>(`/v1/home/covers/${encodeURIComponent(sha256)}/media-ticket`, signal, undefined, 'POST'));
+  const url = httpsUrl(reply?.url);
+  if (url && !signal.aborted) {
+    coverTickets.set(sha256, {url, until: Date.now() + (reply.expires_in ? reply.expires_in * 1000 : COVER_KEEP_MS)});
+    while (coverTickets.size > 200) coverTickets.delete(coverTickets.keys().next().value!);
+  }
+  return url;
+}
+/**
+ * No flash on change: a list's first screen of covers is resolved and decoded before it is shown,
+ * capped like the gallery's first viewport; whatever is not ready by then loads in place.
+ */
+function prepareCovers(entries: ReleaseCalendarEntry[], privacy: boolean, signal: AbortSignal) {
+  if (privacy) return Promise.resolve();
+  const work = Promise.all(entries.slice(0, FIRST_SCREEN_COVERS).map(entry => coverUrl(entry.cover, signal)
+    .then(url => url ? decodeImage(url, signal) : undefined).catch(() => undefined)));
+  return Promise.race([work, new Promise(resolve => window.setTimeout(resolve, IMAGE_READY_CAP_MS))]).then(() => undefined);
+}
+
+function HomeCoverImage({cover, alt, privacy}: {cover: Cover; alt: string; privacy: boolean}) {
+  const [url, setUrl] = useState(() => privacy ? '' : knownCover(cover));
   useEffect(() => {
     if (privacy || !cover) { setUrl(''); return; }
-    const sha256 = cover.sha256;
-    if (!sha256) {
-      if (cover.url && /^https:\/\//.test(cover.url)) { setUrl(cover.url); return; }
-      setUrl(''); return;
-    }
+    const known = knownCover(cover);
+    if (known || !cover.sha256) { setUrl(known); return; }
     const controller = new AbortController();
     setUrl('');
-    const request = window.LakomicsNative
-      ? native<Ticket>('homeCover', {sha256}, controller.signal)
-      : api<Ticket>(`/v1/home/covers/${encodeURIComponent(sha256)}/media-ticket`, controller.signal, undefined, 'POST');
-    void request.then(reply => {
-      if (!controller.signal.aborted && reply?.url && /^https:\/\//.test(reply.url)) setUrl(reply.url);
-    }, () => {});
+    void coverUrl(cover, controller.signal).then(next => { if (!controller.signal.aborted && next) setUrl(next); }, () => {});
     return () => controller.abort();
   }, [cover?.url, cover?.sha256, privacy]);
   if (privacy) return <span className="release-calendar-cover-placeholder is-private" aria-label="비공개 모드로 이미지 숨김" />;
@@ -128,8 +162,12 @@ export function ReleaseCalendar({onClose, backRef, initialKind, embedded=false, 
   const [reply, setReply] = useState<ReleaseCalendarReply | null>(null);
   const [state, setState] = useState<ScreenState>('loading');
   const [error, setError] = useState('');
+  // The chosen kind and 관심 answer the controls at once; the shown pair changes with the list.
   const [kind, setKind] = useState<KindFilter>(initialKind ?? 'all');
   const [wishlistOnly, setWishlistOnly] = useState(false);
+  const [shown, setShown] = useState<{kind: KindFilter; wishlistOnly: boolean}>(() => ({kind: initialKind ?? 'all', wishlistOnly: false}));
+  const latest = useRef({kind: shown.kind, wishlistOnly: shown.wishlistOnly, privacy: privateMode});
+  latest.current = {kind: shown.kind, wishlistOnly: shown.wishlistOnly, privacy: privateMode};
   const [tick, setTick] = useState(0);
   const [retry, setRetry] = useState(0);
   const [acknowledging, setAcknowledging] = useState<string | null>(null);
@@ -148,9 +186,12 @@ export function ReleaseCalendar({onClose, backRef, initialKind, embedded=false, 
     const controller = new AbortController();
     setState('loading');
     setError('');
-    void flushUpcomingWishlist(controller.signal).then(() => api<unknown>('/v1/home/upcoming', controller.signal)).then(value => {
+    void flushUpcomingWishlist(controller.signal).then(() => api<unknown>('/v1/home/upcoming', controller.signal)).then(async value => {
       if (controller.signal.aborted) return;
       const next = normalizeReleaseCalendarReply(value);
+      const view = latest.current;
+      await prepareCovers(filterReleaseEntries(view.wishlistOnly ? next.wishlist : next.entries, view.kind, view.wishlistOnly, visibleWishlistIds(wishlistIds(next), readUpcomingWishlistIntents())), view.privacy, controller.signal);
+      if (controller.signal.aborted) return;
       reconcileUpcomingWishlist(wishlistIds(next));
       setReply(next);
       setState(next.entries.length || next.wishlist.length || next.publishedAt ? 'ready' : 'empty');
@@ -172,7 +213,7 @@ export function ReleaseCalendar({onClose, backRef, initialKind, embedded=false, 
   const localIntents = readUpcomingWishlistIntents();
   const visibleIds = useMemo(() => visibleWishlistIds(authoritativeIds, localIntents), [authoritativeIds, tick]);
   const scroller = useRef<HTMLElement>(null);
-  const calendarEntries = useMemo(() => reply ? filterReleaseEntries(wishlistOnly ? reply.wishlist : reply.entries, kind, wishlistOnly, visibleIds) : [], [reply, kind, wishlistOnly, visibleIds]);
+  const calendarEntries = useMemo(() => reply ? filterReleaseEntries(shown.wishlistOnly ? reply.wishlist : reply.entries, shown.kind, shown.wishlistOnly, visibleIds) : [], [reply, shown, visibleIds]);
   // The scrubber walks the entries in the order the screen shows them (grouped by month).
   const scrubberSort=useMemo(()=>({kind:'date' as const,values:groupReleaseEntries(calendarEntries).flatMap(month=>month.days.flatMap(day=>day.items.map(entry=>entry.date)))}),[calendarEntries]);
   const count = visibleIds.size;
@@ -221,9 +262,25 @@ export function ReleaseCalendar({onClose, backRef, initialKind, embedded=false, 
     {value: 'movie', label: '영화', count: kindCounts.movie},
     {value: 'anime', label: '애니', count: kindCounts.anime},
   ] as const);
-  // A kind or 관심 switch slides the list like the other segmented screens (shared motion).
-  const kindIndex = kindOptions.findIndex(option => option.value === kind) + (wishlistOnly ? kindOptions.length : 0);
-  useSegmentMotion(scroller, state === 'ready' ? `${kind}:${wishlistOnly}` : null, kindIndex, host => Array.from(host.children).filter((child): child is HTMLElement => child instanceof HTMLElement && !child.matches('.mobile-scrubber')));
+  // A kind or 관심 switch is a category switch: the shown list stays until the chosen one's first
+  // covers are decoded (capped), then the shared view swap moves it in from the side of travel.
+  const order = (value: {kind: KindFilter; wishlistOnly: boolean}) => kindOptions.findIndex(option => option.value === value.kind) + (value.wishlistOnly ? kindOptions.length : 0);
+  const swapOwner = useRef({}).current;
+  useEffect(() => {
+    if (kind === shown.kind && wishlistOnly === shown.wishlistOnly) { cancelSegmentSwap(swapOwner); return; }
+    const next = {kind, wishlistOnly};
+    if (state !== 'ready' || !reply) { setShown(next); return; }
+    const controller = new AbortController();
+    void prepareCovers(filterReleaseEntries(wishlistOnly ? reply.wishlist : reply.entries, kind, wishlistOnly, visibleIds), privateMode, controller.signal).then(() => {
+      if (controller.signal.aborted) return;
+      const host = scroller.current;
+      swapSegment(swapOwner, {forward: order(next) >= order(shown), target: host, still: host?.querySelector<HTMLElement>(':scope > .mobile-scrubber'), commit: () => setShown(next)});
+    });
+    return () => controller.abort();
+  }, [kind, wishlistOnly, shown, state]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => cancelSegmentSwap(swapOwner), [swapOwner]);
+  // The first covers rise in like the gallery's first batch.
+  useFirstAppearance(scroller, calendarEntries.length, state === 'ready', 'release-calendar', '.release-calendar-card');
   const unreadTotal = reply?.wishlist.reduce((sum, entry) => sum + entry.unread.length, 0) ?? 0;
 
   const header = <TopBar back={{label: '홈으로', onClick: onClose}} crumbs={<span className="top-bar__crumbs">홈 ›</span>} title="발매 캘린더" count={reply && reply.entries.length ? reply.entries.length.toLocaleString('ko-KR') : undefined} />;
@@ -237,8 +294,8 @@ export function ReleaseCalendar({onClose, backRef, initialKind, embedded=false, 
     {error && <div className="release-calendar-error" role="alert"><span>{error}</span><button type="button" onClick={() => setRetry(value => value + 1)}>다시 시도</button></div>}
     <main ref={scroller} className="release-calendar-scroll" aria-label="발매 캘린더 목록">
       {state === 'loading' && <LoadingCalendar />}
-      {state === 'empty' && <EmptyCalendar wishlistOnly={wishlistOnly} />}
-      {state === 'ready' && reply && <CalendarBody reply={reply} kind={kind} wishlistOnly={wishlistOnly} visibleIds={visibleIds} privacy={privateMode} referenceYear={referenceYear} acknowledging={acknowledging} onToggle={toggle} onAcknowledge={acknowledge} />}
+      {state === 'empty' && <EmptyCalendar wishlistOnly={shown.wishlistOnly} />}
+      {state === 'ready' && reply && <CalendarBody reply={reply} kind={shown.kind} wishlistOnly={shown.wishlistOnly} visibleIds={visibleIds} privacy={privateMode} referenceYear={referenceYear} acknowledging={acknowledging} onToggle={toggle} onAcknowledge={acknowledge} />}
       <Scrubber scrollRef={scroller} total={calendarEntries.length} sort={scrubberSort} hidden={state!=='ready'} />
     </main>
   </div>;

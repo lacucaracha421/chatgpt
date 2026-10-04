@@ -103,14 +103,14 @@ const segmentSwaps = new WeakMap<object, ViewSwap>();
  * owns the document, or without the API, `commit` runs at once; without the API the target slides in by transform only
  * (never from a blank or dim frame).
  */
-export function swapSegment(owner: object, {forward, target, still, commit}: {forward: boolean; target?: HTMLElement | readonly (HTMLElement | null | undefined)[] | null; still?: Options['still']; commit(): void}) {
+export function swapSegment(owner: object, {forward, target, still, commit}: {/** Undefined: no direction (a search or filter change) — the new content rises in. */forward?: boolean; target?: HTMLElement | readonly (HTMLElement | null | undefined)[] | null; still?: Options['still']; commit(): void}) {
   const previous = segmentSwaps.get(owner);
   previous?.cancel();
   // Nothing on screen to move (a hidden or not yet mounted list): the switch is just a commit.
   if (!list(target).some(element => element.isConnected)) { commit(); return null; }
   if (viewTransitionsSupported()) {
     if (viewTransitionRunning()) { commit(); return null; }
-    const swap = startViewSwap({value: forward ? 'forward' : 'back', target, still, commit})!;
+    const swap = startViewSwap({value: forward === undefined ? 'rise' : forward ? 'forward' : 'back', target, still, commit})!;
     segmentSwaps.set(owner, swap);
     void swap.finished.then(() => { if (segmentSwaps.get(owner) === swap) segmentSwaps.delete(owner); });
     return swap;
@@ -119,8 +119,8 @@ export function swapSegment(owner: object, {forward, target, still, commit}: {fo
   if (reducedMotion()) return null;
   for (const element of list(target)) {
     if (typeof element.animate !== 'function' || !element.isConnected) continue;
-    element.animate([{transform: `translateX(${forward ? 16 : -16}px)`}, {transform: 'none'}],
-      {duration: 240, easing: getComputedStyle(element).getPropertyValue('--spring-gentle').trim() || 'cubic-bezier(.2,0,0,1)'});
+    element.animate([{transform: forward === undefined ? 'translateY(8px)' : `translateX(${forward ? 16 : -16}px)`}, {transform: 'none'}],
+      {duration: forward === undefined ? 200 : 240, easing: getComputedStyle(element).getPropertyValue('--spring-gentle').trim() || 'cubic-bezier(.2,0,0,1)'});
   }
   return null;
 }
@@ -129,4 +129,18 @@ export function swapSegment(owner: object, {forward, target, still, commit}: {fo
 export function cancelSegmentSwap(owner: object) {
   segmentSwaps.get(owner)?.cancel();
   segmentSwaps.delete(owner);
+}
+
+const searchSwap = {};
+/**
+ * A search or filter applied or cleared: the shown results (`[data-search-results]`, the visible
+ * ones) stay painted until `commit` has produced the new ones, then the old fade out in 90 ms and
+ * the new rise 8 px into place over 200 ms (reduced motion: a 120 ms fade). Without results on
+ * screen, or while another view transition runs, `commit` applies at once.
+ */
+export function swapSearchResults(commit: () => void) {
+  // Shown results only: not in a retained/hidden view, an inert pending view or a closed screen.
+  const target = Array.from(document.querySelectorAll<HTMLElement>('[data-search-results]')).filter(element =>
+    !element.closest('[inert], [aria-hidden="true"], [style*="display: none"], [style*="visibility: hidden"]') && getComputedStyle(element).display !== 'none');
+  return swapSegment(searchSwap, {target, commit});
 }

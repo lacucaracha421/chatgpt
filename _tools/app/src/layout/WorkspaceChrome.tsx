@@ -6,6 +6,7 @@ import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import type { ChromeSearchSpec } from "./ChromeSearch";
 import "../styles/chrome.css";
 import { ChromeContext, ChromePresenceContext, useWorkspaceChrome, type Slot, type Targets, type ChromeMeta, type ChromeSearchActions, type ChromeSearchInfo } from "./WorkspaceChromeContext";
+import { swapSearchResults } from "../shared/motion/viewSwap";
 
 /** A view-specific search editor; `content` renders in the index head, `open` lets the 찾기 palette open it. */
 export type ChromeSearchSurfaceSpec = ChromeSearchSpec & { open: (draft: string) => void; content: ReactNode };
@@ -56,7 +57,8 @@ export function WorkspaceChromeProvider({ scope, pending = false, children }: Pr
     if (actions) searchActions.current.set(owner, actions); else searchActions.current.delete(owner);
   }, []);
   const owner = meta?.search ? meta.owner : null;
-  const applySearch = useCallback((query: string) => { if (owner) searchActions.current.get(owner)?.apply?.(query); }, [owner]);
+  // The shown results change with the search swap (old stay painted until the new commit).
+  const applySearch = useCallback((query: string) => { const apply = owner ? searchActions.current.get(owner)?.apply : undefined; if (apply) swapSearchResults(() => apply(query)); }, [owner]);
   const openSearch = useCallback((draft: string) => { if (owner) searchActions.current.get(owner)?.open?.(draft); }, [owner]);
   const findAction = useRef<(() => void) | null>(null);
   const setFindAction = useCallback((action: (() => void) | null) => { findAction.current = action; }, []);

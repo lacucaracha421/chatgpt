@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cancelSegmentSwap, startViewSwap, swapSegment, viewTransitionRunning } from './viewSwap';
+import { readFileSync } from 'node:fs';
+import { cancelSegmentSwap, startViewSwap, swapSearchResults, swapSegment, viewTransitionRunning } from './viewSwap';
 
 type Pending = { update: () => void; skip: ReturnType<typeof vi.fn>; finish(): void };
 let pending: Pending[];
@@ -89,4 +90,21 @@ it('without the API commits at once and slides the target by transform only (no 
   expect(animate.mock.calls[0][0]).toEqual([{transform: 'translateX(16px)'}, {transform: 'none'}]);
   expect(JSON.stringify(animate.mock.calls[0][0])).not.toContain('opacity');
   target.remove();
+});
+
+it('swaps search results without a side: rise in, and reduced motion keeps only a 120 ms fade', () => {
+  mockApi();
+  const results = document.createElement('div'); results.setAttribute('data-search-results', ''); document.body.append(results);
+  Object.defineProperty(results, 'getClientRects', {value: () => [{}]});
+  const commit = vi.fn();
+  swapSearchResults(commit);
+  expect(document.documentElement.getAttribute('data-view-swap')).toBe('rise');
+  expect(results).toHaveAttribute('data-view-swap-target');
+  pending[0].update();
+  expect(commit).toHaveBeenCalledOnce();
+  const css = readFileSync('src/shared/motion/viewSwap.css', 'utf8');
+  expect(css).toContain('html[data-view-swap="rise"]::view-transition-new(view-swap) { animation: view-swap-in-rise 200ms');
+  expect(css).toContain('@keyframes view-swap-in-rise { from { opacity: 0; transform: translateY(8px); } }');
+  expect(css.indexOf('view-swap="rise"')).toBeLessThan(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+  expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*::view-transition-new\(view-swap\) \{ animation: view-swap-fade-in 120ms/);
 });

@@ -222,6 +222,32 @@ describe("style recommendation rows", () => {
 });
 
 describe("ArtistHub", () => {
+  it("enters together with the index list: both are held unseen, then start in the same task", async () => {
+    const played: { part: string; task: number }[] = [];
+    let task = 0;
+    const animate = vi.fn(function (this: HTMLElement) {
+      const part = this.matches(".artist-index__artist-row") ? "index" : this.matches(".artist-card") ? "grid" : "other";
+      return { cancel: vi.fn(), pause: vi.fn(), play: vi.fn(() => {
+        if (!played.length) queueMicrotask(() => { task += 1; });
+        played.push({ part, task });
+      }) };
+    });
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
+    vi.stubGlobal("CSS", { supports: () => false });
+    try {
+      render(<LibraryProvider gateway={libraryGateway(artistGateway())}><ArtistIndex view={{ kind: "artists" }} onNavigate={vi.fn()} />{chrome(<ArtistHub view={{ kind: "artists" }} onNavigate={vi.fn()} privacyMode={false} />)}</LibraryProvider>);
+      await waitFor(() => expect(played.map(entry => entry.part)).toEqual(expect.arrayContaining(["index", "grid"])));
+      const parts = played.filter(entry => entry.part !== "other");
+      expect(new Set(parts.map(entry => entry.task))).toEqual(new Set([0]));
+      const held = animate.mock.calls.filter((_call, index) => (animate.mock.contexts[index] as unknown as HTMLElement).matches(".artist-index__artist-row, .artist-card"));
+      expect(held.length).toBeGreaterThan(0);
+      expect(held.every(call => (call as unknown as Keyframe[][])[0][0].visibility === "hidden")).toBe(true);
+    } finally {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("refreshes background artist edits without blanking the current list and unsubscribes", async () => {
     const artists = artistGateway();
     const gateway = libraryGateway(artists);

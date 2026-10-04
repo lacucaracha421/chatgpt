@@ -10,6 +10,12 @@ vi.mock('./transport',async()=>{
   return {...actual,api:mocks.api,native:mocks.native};
 });
 vi.mock('./media',()=>({mediaTicket:vi.fn()}));
+const swaps=vi.hoisted(()=>({calls:[] as {forward:boolean;target?:unknown;still?:unknown}[]}));
+// The real shared swap (jsdom has no View Transitions, so it commits at once); calls are recorded.
+vi.mock('../src/shared/motion/viewSwap',async()=>{
+  const actual=await vi.importActual<typeof import('../src/shared/motion/viewSwap')>('../src/shared/motion/viewSwap');
+  return {...actual,swapSegment:(owner:object,options:Parameters<typeof actual.swapSegment>[1])=>{swaps.calls.push({forward:options.forward,target:options.target,still:options.still});return actual.swapSegment(owner,options);}};
+});
 import {ApiError} from './transport';
 import {Collections} from './Collections';
 import {SCHEDULE_ABSENT_NOTE} from './CollectionReleases';
@@ -382,4 +388,32 @@ it('keeps Collections Back inside the tab when the screen was not opened from Ho
   act(()=>{expect(backRef.current!()).toBe(true);});
   await waitForEntry('4');
   expect(backRef.current!()).toBe(false);
+});
+
+it('switches regions through the shared category swap after the first covers, the region bar still',async()=>{
+  await openReleases();
+  swaps.calls.length=0;
+  fireEvent.click(tab('일본'));
+  // The Korean ledger stays until the swap commits the Japanese one.
+  expect(screen.getByRole('table',{name:'한국 정발 신간'})).toBeTruthy();
+  await screen.findByRole('table',{name:'일본 신간'});
+  const releases=document.querySelector('.collection-releases');
+  expect(swaps.calls).toEqual([{forward:true,target:releases,still:releases!.querySelector('.release-ledger__bar')}]);
+  fireEvent.click(tab('한국 정발'));
+  await screen.findByRole('table',{name:'한국 정발 신간'});
+  expect(swaps.calls.at(-1)?.forward).toBe(false);
+});
+
+it('gives the ledger rows the first-batch entrance on each visit, not on a region switch',async()=>{
+  const animate=vi.fn(()=>({cancel:vi.fn()}));
+  vi.stubGlobal('CSS',{supports:()=>false});
+  Object.defineProperty(HTMLElement.prototype,'animate',{configurable:true,value:animate});
+  try{
+    await openReleases();
+    const rises=()=>animate.mock.calls.filter((call,i)=>(animate.mock.contexts[i] as unknown as HTMLElement).tagName==='TR'&&(call as unknown as Keyframe[][])[0][0].transform==='translateY(8px) scale(.98)').length;
+    await waitFor(()=>expect(rises()).toBe(2));
+    fireEvent.click(tab('일본'));
+    await screen.findByRole('table',{name:'일본 신간'});
+    expect(rises()).toBe(2);
+  }finally{delete (HTMLElement.prototype as Partial<HTMLElement>).animate;vi.unstubAllGlobals();}
 });

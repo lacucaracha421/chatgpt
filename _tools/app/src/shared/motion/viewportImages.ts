@@ -61,3 +61,19 @@ export function waitForViewportImages(host: HTMLElement, ready: () => void, capM
   check();
   return stop;
 }
+
+/**
+ * Loads and decodes `urls` before content that shows them commits (the old content stays painted
+ * meanwhile), resolving after all decode or after `capMs`, whichever is first. Never rejects.
+ */
+export function preloadImages(urls: readonly string[], capMs = IMAGE_READY_CAP_MS) {
+  if (!urls.length || typeof Image !== 'function') return Promise.resolve();
+  let timer = 0;
+  const decoded = Promise.all(urls.map(url => {
+    const image = new Image();
+    image.decoding = 'async';
+    image.src = url;
+    return (typeof image.decode === 'function' ? image.decode() : Promise.resolve()).catch(() => undefined);
+  }));
+  return Promise.race([decoded, new Promise<void>(resolve => { timer = window.setTimeout(resolve, capMs); })]).then(() => undefined).finally(() => window.clearTimeout(timer));
+}

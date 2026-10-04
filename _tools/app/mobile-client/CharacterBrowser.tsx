@@ -1,7 +1,6 @@
 import {LoadingLine} from './TopBar';
 import {useTabletAssetMask} from './assetMask';
 import type {ContentRating} from '../src/shared/privacy/contentMask';
-import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
 import {usePrivacyMode} from './privacyMode';
 import {assetSearchSelectionKey,type AssetSearchName} from '../src/assets/assetSearch';
 import {invalidSearchChoices} from './assetSearchModel';
@@ -78,6 +77,20 @@ function Preview({id,paused,label='',rating}:{id?:string|null;paused:boolean;lab
     return()=>controller.abort();
   },[id,paused,cached,loaded,masked,rating]);
   return masked?<span className="privacy-mask" aria-label="이미지 숨김"/>:preview?<StableImage key={id} src={preview} alt={label}/>:<PhotoIcon aria-hidden="true"/>;
+}
+/** The images a folder card shows: a group's mosaic of its members, otherwise its own thumbnail. */
+function cardPreviewIds(index:CharacterIndex|undefined,child:CharacterNode):string[] {
+  if(child.kind==='group')return [...new Set(index?.nodes.filter(n=>n.parentId===child.id&&n.thumbnailAssetId).map(n=>n.thumbnailAssetId!)??[])].slice(0,4);
+  return child.thumbnailAssetId?[child.thumbnailAssetId]:[];
+}
+/**
+ * No flash on change: the next place's first shelf covers are fetched and decoded with its first
+ * tiles (the same capped budget), so its cards commit with their pictures instead of placeholders.
+ */
+async function readyShelf(index:CharacterIndex,node:string|null,signal:AbortSignal,limit=8) {
+  const ids=[...new Set(characterChildren(index,node).slice(0,limit).flatMap(child=>cardPreviewIds(index,child)))].filter(id=>!resolvedPreviews.has(id));
+  const ready=await readyFirstScreen(ids.map(id=>({id,kind:'image',contentRating:index.contentRatings?.[id]??null})),signal,ids.length);
+  for(const asset of ready)if(asset.preview&&!signal.aborted)rememberPreview(asset.id,asset.preview);
 }
 function Card({node,count,paused,onSelect,previews=[],lazy=false,ratings}:{node:CharacterNode;count?:number;paused:boolean;onSelect():void;previews?:string[];lazy?:boolean;ratings?:CharacterIndex["contentRatings"]}) {
   const host=useRef<HTMLButtonElement>(null),[visible,setVisible]=useState(!lazy);
@@ -254,7 +267,7 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
       readScopedToc(characterPath(where.node,where.filter,index.revision,null,where.filters,where.search,true),request.signal),'newest'))
       // A switch keeps the old page, and an entry its empty gallery, until the new first screen
       // is decoded (capped like the PC's first viewport); later images load in place.
-      .then(result=>readyFirstScreen(result.items,request.signal).then(items=>{
+      .then(result=>Promise.all([readyFirstScreen(result.items,request.signal),readyShelf(index,where.node,request.signal)]).then(([items])=>{
         const prepared=new Map(items.map(asset=>[asset.id,asset]));
         return {...result,items,assetRanges:result.assetRanges?{...result.assetRanges,ranges:result.assetRanges.ranges.map(range=>({...range,items:range.items.map(asset=>prepared.get(asset.id)??asset)}))}:undefined};
       }))
@@ -320,16 +333,12 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
   // The committed page and its filters are one value, so an append cannot extend a page that
   // was fetched under a different scope than the one now displayed.
   const nearEnd=useCallback(()=>{if(!busy&&!moreError)void append();},[busy,moreError,append]);
-  const node=index?.nodes.find(n=>n.id===where.node);
-  const children=index?characterChildren(index,where.node):[];
-  const scope=index?.scopes.find(s=>s.nodeId===where.node&&s.filter===where.filter);
-  const ancestors:CharacterNode[]=[];
-  let parent=node?.parentId;
-  while(parent&&index&&!ancestors.some(n=>n.id===parent)){const found=index.nodes.find(n=>n.id===parent);if(!found)break;ancestors.unshift(found);parent=found.parentId;}
-  const folderStrip=!!node&&node.kind!=='character';
   // While the next folder loads, the previous one stays on screen, quieted, instead of blanking;
   // once it commits the new level slides in from the side it was entered from.
   const lastPage=useRef<CharacterPage|undefined>(undefined);
+  // The place the kept page belongs to: while the next place loads, its shelf, filters and header
+  // stay with its tiles, and all of them change together when the new page commits.
+  const lastPlace=useRef<Location|null>(null);
   const visibleGalleryIdentity=useRef('character:empty');
   if(shown&&index?.revision)visibleGalleryIdentity.current=key(index.revision,shown);
   // The folder the visible tiles belong to; it changes only when a new folder's page commits, so the
@@ -340,34 +349,39 @@ export function CharacterBrowser({search,onSearch,onInvalidSearch,scopeChips,hos
     for(let id=shown.node;id&&!seen.has(id);id=index?.nodes.find(item=>item.id===id)?.parentId??null){seen.add(id);path.unshift(id);}
     galleryFolder.current={scope:shown.node??'root',path};
   }
-  const level=useRef<{key:string;depth:number}|null>(null);
+  const level=useRef<string|null>(null);
   // Entering from outside the browser is a new place: a page kept from an earlier visit is not
   // this folder's content, so it never stands in while the entered folder loads.
   const entering=active&&!!initialNode&&(appliedInitialNode.current!==initialNode||appliedEntryKey.current!==entryKey)&&!lastPage.current;
-  if(!active){lastPage.current=undefined;level.current=null;}
-  else if(page&&!entering)lastPage.current=page;
-  if(active&&committed&&index){
-    let depth=committed.node?1:0,up=index.nodes.find(n=>n.id===committed.node)?.parentId;const seen=new Set<string>();
-    while(up&&!seen.has(up)){seen.add(up);depth++;up=index.nodes.find(n=>n.id===up)?.parentId;}
-    // Character filters replace the page inside one level. Keep the level key stable so the
-    // retained gallery does not replay the hierarchy fade when 미분류 and 전체 swap.
-    // Folder to folder is the gallery's folder move; this level only covers the index root.
-    level.current={key:committed.node?'folder':'root',depth};
-  }
-  useLevelMotion(host,search?.length?'asset-search':level.current?.key??null,level.current?.depth??0,false);
-  const stale=!!shown&&filterPending||(!page&&busy&&!error&&!!where.node&&!!lastPage.current);
+  if(!active){lastPage.current=undefined;lastPlace.current=null;level.current=null;}
+  else if(page&&!entering){lastPage.current=page;if(committed)lastPlace.current=committed;}
+  // Moving between places inside the browser is the shared folder move (tiles) and first-batch
+  // entrance (shelf cards); only a search toggle keeps the level swap.
+  if(active&&committed&&index)level.current='place';
+  useLevelMotion(host,search?.length?'asset-search':level.current,0,false);
+  // Not gated on `busy`: the frame between a navigation and its request starting must not show
+  // the next place half-built (its shelf without its tiles) or an empty gallery.
+  const navigating=!page&&!error&&!!where.node&&!!lastPage.current;
+  const stale=!!shown&&filterPending||navigating;
   const galleryItems=entering?[]:page?.items??(stale?lastPage.current!.items:[]);
-  useFirstAppearance(host,children.length,active&&!paused&&!stale&&!busy,"classification-characters",".character-card");
+  const place=navigating&&lastPlace.current?lastPlace.current:where;
+  const node=index?.nodes.find(n=>n.id===place.node);
+  const children=index?characterChildren(index,place.node):[];
+  const scope=index?.scopes.find(s=>s.nodeId===place.node&&s.filter===place.filter);
+  const ancestors:CharacterNode[]=[];
+  let parent=node?.parentId;
+  while(parent&&index&&!ancestors.some(n=>n.id===parent)){const found=index.nodes.find(n=>n.id===parent);if(!found)break;ancestors.unshift(found);parent=found.parentId;}
+  const folderStrip=!!node&&node.kind!=='character';
   const foldable=folderStrip&&children.length>0;
   const childCharacterCount=children.filter(child=>child.kind!=='folder').length;
   const childFolderCount=children.filter(child=>child.kind==='folder').length;
   const shelfLabel=childCharacterCount>0&&childFolderCount>0?`캐릭터 ${childCharacterCount} · 폴더 ${childFolderCount}`:childCharacterCount>0?`캐릭터 ${childCharacterCount}`:`폴더 ${childFolderCount}`;
   const scopeCount=(filter:CharacterFilter)=>node?.kind==='series'?index?.scopes.find(scope=>scope.nodeId===node.id&&scope.filter===filter)?.totalCount:undefined;
   const filterControls=node?.kind==='series'&&<div className="folder-filter character-filters">
-    <SegmentedControl<CharacterFilter> label="이미지 범위" options={SERIES_FILTERS.map(filter=>({value:filter,label:filter==='unclassified'?'미분류':'전체',count:scopeCount(filter)}))} value={where.filter} onChange={applyCharacterFilter}/>
+    <SegmentedControl<CharacterFilter> label="이미지 범위" options={SERIES_FILTERS.map(filter=>({value:filter,label:filter==='unclassified'?'미분류':'전체',count:scopeCount(filter)}))} value={place.filter} onChange={applyCharacterFilter}/>
     <IconButton label="미분류와 전체 설명" icon={InformationCircleIcon} onClick={()=>setFilterHelpOpen(true)}/>
   </div>;
-  const shelf=children.length>0&&<FolderShelf label={shelfLabel} cards={children.map(child=><Card key={child.id} node={child} ratings={index?.contentRatings} count={index?.scopes.find(scope=>scope.nodeId===child.id&&scope.filter==='all')?.totalCount} paused={!active||paused||(folderStrip&&foldersCollapsed)} lazy={folderStrip} previews={child.kind==='group'?[...new Set(index?.nodes.filter(n=>n.parentId===child.id&&n.thumbnailAssetId).map(n=>n.thumbnailAssetId!)??[])].slice(0,4):[]} onSelect={()=>enterInside({node:child.id,filter:defaultCharacterFilter(child.id,index)})}/>) } accessory={foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>} cardsId={folderStripId} cardsHidden={foldersCollapsed} />;
+  const shelf=children.length>0&&<FolderShelf label={shelfLabel} cards={children.map(child=><Card key={child.id} node={child} ratings={index?.contentRatings} count={index?.scopes.find(scope=>scope.nodeId===child.id&&scope.filter==='all')?.totalCount} paused={!active||paused||(folderStrip&&foldersCollapsed)} lazy={folderStrip} previews={child.kind==='group'?cardPreviewIds(index,child):[]} onSelect={()=>enterInside({node:child.id,filter:defaultCharacterFilter(child.id,index)})}/>) } accessory={foldable&&<Button size="icon" variant="ghost" className="character-fold-toggle" aria-label={foldersCollapsed?'캐릭터 폴더 펼치기':'캐릭터 폴더 접기'} aria-expanded={!foldersCollapsed} aria-controls={folderStripId} onClick={()=>setFoldersCollapsed(value=>!value)}><ChevronUpIcon aria-hidden="true"/></Button>} cardsId={folderStripId} cardsHidden={foldersCollapsed} appearanceKey="character-shelf" appearancePlace={place.node??'root'} appearanceEnabled={active&&!paused&&!navigating} appearanceSelector=".character-card"/>;
   const overview=<>
     {error&&<div className="inline-error" role="alert">{error}<Button onClick={()=>{cache.current.clear();setRetry(n=>n+1);}}>새로고침</Button></div>}
     {index&&!index.ready&&<div className="empty-state"><h3>캐릭터 보기가 아직 공유되지 않았습니다</h3><p>PC 설정에서 모바일 캐릭터 업데이트를 실행하면 여기에서 감상할 수 있습니다.</p></div>}

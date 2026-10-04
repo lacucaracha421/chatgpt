@@ -1,4 +1,5 @@
 import { MagnifyingGlassIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { swapSearchResults } from "../shared/motion/viewSwap";
 
 /** A view's plain text search; the 찾기 palette applies typed text through `onApply`. */
 export type ChromeSearchSpec = {
@@ -12,6 +13,6 @@ export type ChromeSearchSpec = {
 export function ChromeQueryBadge({ search }: { search?: ChromeSearchSpec }) {
   if (!search?.query.trim()) return null;
   return <span className="chrome-query" aria-description={search.query}><MagnifyingGlassIcon aria-hidden="true" /><span>{search.query}</span>
-    <button type="button" aria-label="검색 해제" onClick={() => search.onApply("")}><XMarkIcon aria-hidden="true" /></button>
+    <button type="button" aria-label="검색 해제" onClick={() => swapSearchResults(() => search.onApply(""))}><XMarkIcon aria-hidden="true" /></button>
   </span>;
 }

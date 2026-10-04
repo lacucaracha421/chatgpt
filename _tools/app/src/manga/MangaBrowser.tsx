@@ -237,7 +237,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
       }} />}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     {recovery && <MangaRecoveryPanel preview={recovery} busy={recoveryBusy} onRemoteLookup={gateway.refreshMangaCatalogRecoveryRemote ? () => void refreshRecoveryRemote() : undefined} onApply={() => void applyRecovery()} onApplySelection={(mangaId, workId) => void applyRecoverySelection(mangaId, workId)} onClose={() => setRecovery(null)} />}
-    <div ref={gridScroll} tabIndex={0} className="manga-browser__content" inert={source !== "local"}>
+    <div ref={gridScroll} tabIndex={0} data-search-results="" className="manga-browser__content" inert={source !== "local"}>
       {loadError && !series ? <EmptyState title="망가 목록을 불러오지 못했습니다" />
         : root === null ? <EmptyState title="망가 폴더가 설정되지 않았습니다">설정에서 망가 폴더를 선택하면 여기에 표시됩니다.</EmptyState>
         : !series ? <MangaSkeletonGrid /> : series.length === 0 ? (

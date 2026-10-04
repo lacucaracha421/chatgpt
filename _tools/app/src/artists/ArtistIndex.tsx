@@ -1,6 +1,7 @@
 import { AssetImage } from "../privacy/AssetImage";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { thumbnailUrl } from "../assets/mediaUrl";
 import { createKoreanMatcher } from "../shared/koreanSearch";
@@ -10,6 +11,9 @@ import { MergeIcon, QuestionIcon, SparklesIcon } from "./artistIcons";
 import { useArtistOverview, useArtistRead } from "./artistStore";
 import { UNKNOWN_NONE, isUnknownArtist, type ArtistSummary } from "./types";
 import "./artists.css";
+
+/** The artists index and hub grids start their first batches together. */
+export const ARTIST_ENTRANCE = "artists";
 
 export const isArtistView = (view: AssetView) => view.kind === "artists" || view.kind === "creator";
 
@@ -44,8 +48,12 @@ export function ArtistIndex({ view, onNavigate }: { view: AssetView; onNavigate:
   const creator = view.kind === "creator" ? view.creatorKey : null;
   const section = view.kind === "artists" ? view.section ?? "main" : null;
   const styleSuggestionCount = overview?.styleSuggestionCount ?? 0;
+  // The list enters with the hub's thumbnails as one entrance (same start, timing and stagger cap),
+  // once its pinned and main rows are both known and their first thumbnails are decoded.
+  const nav = useRef<HTMLElement>(null);
+  useFirstAppearance(nav, artists.length + (overview?.pinned.length ?? 0), !!overview && !!mainPage.data, "artist-index", ".artist-index__artist-row", undefined, ARTIST_ENTRANCE);
 
-  return <nav className="artist-index" aria-label="작가 목록">
+  return <nav ref={nav} className="artist-index" aria-label="작가 목록">
     <TextInput
       className="artist-index__search-input"
       icon={MagnifyingGlassIcon}

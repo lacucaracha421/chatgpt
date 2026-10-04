@@ -1,5 +1,5 @@
 import { BusyLabel } from "../src/shared/ui/BusyLabel";
-import {useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {BellIcon, RectangleStackIcon} from '@heroicons/react/24/outline';
 import {japanReleaseLedger, koreanReleaseLedger, releaseLedgerCounts, type ReleaseLedgerRow} from '../src/collections/releaseLedger';
 import {groupInbox, releaseLine} from '../src/collections/releaseCaption';
@@ -9,7 +9,10 @@ import type {CollectionSummary as SharedSummary} from '../src/library/types';
 import '../src/collections/collectionReleases.css';
 import {Badge, Button, Dialog, DialogDescription, EmptyState, SegmentedControl, Skeleton} from './ui';
 import {usePullToRefresh} from './usePullToRefresh';
-import {useSegmentMotion} from './motion';
+import {cancelSegmentSwap, swapSegment} from '../src/shared/motion/viewSwap';
+import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
+import {IMAGE_READY_CAP_MS} from '../src/shared/motion/viewportImages';
+import {ArtworkMemoryContext} from './collectionArtwork';
 import {Scrubber} from './Scrubber';
 import {errorText} from './transport';
 import type {CollectionSummary} from './collectionModel';
@@ -45,7 +48,10 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
   /** 신간 알림 is on (a queued edit included). */
   watching(work: CollectionSummary): boolean;
 }) {
+  // The chosen region answers the switch at once; the shown one changes with the list (see below).
   const [region, setRegion] = useState<Region>('kr');
+  const [shownRegion, setShownRegion] = useState<Region>('kr');
+  const artworks = useContext(ArtworkMemoryContext);
   const [data, setData] = useState<ReleaseStore>(() => releaseStore.current);
   const [status, setStatus] = useState({busy: false, error: ''});
   const [nonce, setNonce] = useState(0);
@@ -90,8 +96,6 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
     setNonce(n => n + 1);
   }, []);
   const pull = usePullToRefresh(scroller, reload, status.busy, !active);
-  // 한국 정발 → 일본 swaps what is under the region switch sideways; the switch itself stays still.
-  useSegmentMotion(scroller, region, region === 'kr' ? 0 : 1, host => Array.from(host.children).filter((child): child is HTMLElement => child instanceof HTMLElement && !child.matches('.collection-segments,.pull-refresh')));
 
   /**
    * Drop confirmed Collections' events here, in the kept copy and from the counts; the
@@ -140,17 +144,39 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
   const shared = works as unknown as SharedSummary[];
   const korean = koreanReleaseLedger(shared, board, inbox, today);
   const japan = japanReleaseLedger(shared, board, inbox, today);
-  const rows = region === 'kr' ? korean : japan;
+  const rows = shownRegion === 'kr' ? korean : japan;
   const volumeCounts = releaseLedgerCounts(rows);
   // A work either tab lists keeps its notifications there; the rest are listed plainly below.
   const shown = new Set([...korean, ...japan].map(row => row.work.id));
   const others = [...groupInbox(data.events.filter(event => !shown.has(event.collectionId)).map(releaseInboxItem)).entries()];
   const unread = Math.max(counts.unread, data.events.length);
-  const checkedAt = works.map(work => work.releaseSchedule?.[region === 'kr' ? 'kakao' : 'mangadex']?.checkedAt).filter((value): value is string => !!value).sort().reverse()[0];
+  const checkedAt = works.map(work => work.releaseSchedule?.[shownRegion === 'kr' ? 'kakao' : 'mangadex']?.checkedAt).filter((value): value is string => !!value).sort().reverse()[0];
   const scrubberSort=useMemo(()=>({kind:'date' as const,values:data.events.map(event=>event.detectedAt)}),[data.events]);
   const busy = working !== null;
   const revision = shelf?.revision ?? '';
   const workOf = (id: string) => works.find(work => work.id === id);
+  // 한국 정발 ⇄ 일본 is a category switch: the shown ledger stays until the other region's first
+  // covers are decoded (capped like the gallery's first viewport), then the shared view swap moves
+  // it in from the side of the chosen region while the region bar stays still.
+  const swapOwner = useRef({}).current;
+  const regionRows = useRef({kr: korean, jp: japan}); regionRows.current = {kr: korean, jp: japan};
+  useEffect(() => {
+    if (region === shownRegion) { cancelSegmentSwap(swapOwner); return; }
+    const controller = new AbortController();
+    const firstScreen = regionRows.current[region].slice(0, 12).map(entry => entry.work as unknown as CollectionSummary);
+    const covers = artworks && firstScreen.length ? artworks.preload(firstScreen, revision, controller.signal).catch(() => undefined) : Promise.resolve();
+    void Promise.race([covers, new Promise(resolve => window.setTimeout(resolve, IMAGE_READY_CAP_MS))]).then(() => {
+      if (controller.signal.aborted) return;
+      const host = scroller.current;
+      swapSegment(swapOwner, {forward: region === 'jp', target: host, still: host?.querySelector<HTMLElement>(':scope > .release-ledger__bar'), commit: () => setShownRegion(region)});
+    });
+    return () => controller.abort();
+  }, [region, shownRegion]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => cancelSegmentSwap(swapOwner), [swapOwner]);
+  // The ledger's first rows rise in like the gallery's first batch, once per visit to 신간.
+  const visit = useRef({active, count: 0});
+  if (active !== visit.current.active) visit.current = {active, count: visit.current.count + (active ? 1 : 0)};
+  useFirstAppearance(scroller, rows.length, active && data.loaded, 'collection-releases', '.collection-releases__ledger tbody tr', visit.current.count);
 
   const confirmButton = (id: string, name: string) => <Button variant="ghost" size="sm" className="collection-release-action" disabled={busy} aria-label={`${name} 확인`} onClick={event => { event.stopPropagation(); void acknowledgeWork(id); }}><BusyLabel busy={!!(working === id)} idle={'확인'}>확인 중…</BusyLabel></Button>;
   // The PC ledger's row (`src/collections/CollectionReleases.tsx`) with its stylesheet; the tablet sizes it.
@@ -163,7 +189,7 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
       <td><span className="collection-releases__cover">{cover(work, revision, work.name)}</span></td>
       <td className="collection-releases__name"><button type="button" onClick={event => { event.stopPropagation(); onOpen(work.id); }}><strong className="collection-releases__work-title">{work.name}</strong></button></td>
       <td className="collection-releases__owned">{entry.owned === null ? '기록 없음' : entry.owned === 0 ? '0권' : entry.owned === 1 ? '1권' : `1–${displayCount(entry.owned)} 권`}</td>
-      <td><div className="collection-releases__chips" aria-label={`${work.name} ${region === 'jp' ? '일본' : '정발'} 권`}>
+      <td><div className="collection-releases__chips" aria-label={`${work.name} ${shownRegion === 'jp' ? '일본' : '정발'} 권`}>
         {chips.map(chip => chip.kind === 'upcoming'
           ? <span key={chip.volumeNumber} className="collection-releases__upcoming" data-chip-kind={chip.kind}><span>{chip.label}</span></span>
           : <Badge key={chip.volumeNumber} variant={chip.kind === 'new' ? 'accent' : 'plain'} data-chip-kind={chip.kind}><span>{chip.label}</span></Badge>)}
@@ -202,8 +228,8 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
       <span><strong>{displayCount(volumeCounts.upcoming)}</strong>발매 예정</span>
     </div>}
     {data.loaded && shelf?.ready && !absent && !watched.length && !others.length && <EmptyState icon={BellIcon} title="신간 알림을 켠 만화가 없습니다" />}
-    {data.loaded && !absent && watched.length > 0 && !rows.length && <EmptyState icon={BellIcon} title={region === 'jp' ? '일본 발매 정보가 없습니다' : '소장하지 않은 정발 권이 없습니다'} />}
-    {rows.length > 0 && <table className="collection-releases__ledger" aria-label={`${region === 'jp' ? '일본' : '한국 정발'} 신간`}>
+    {data.loaded && !absent && watched.length > 0 && !rows.length && <EmptyState icon={BellIcon} title={shownRegion === 'jp' ? '일본 발매 정보가 없습니다' : '소장하지 않은 정발 권이 없습니다'} />}
+    {rows.length > 0 && <table className="collection-releases__ledger" aria-label={`${shownRegion === 'jp' ? '일본' : '한국 정발'} 신간`}>
       <colgroup><col className="collection-releases__cover-col"/><col className="collection-releases__title-col"/><col className="collection-releases__owned-col"/><col/><col className="collection-releases__date-col"/><col className="collection-releases__state-col"/></colgroup>
       <thead><tr><th aria-label="표지"/><th scope="col">작품</th><th scope="col">소장</th><th scope="col">안 가진 권</th><th scope="col">날짜</th><th scope="col">상태</th></tr></thead>
       <tbody>{rows.map(row)}</tbody>

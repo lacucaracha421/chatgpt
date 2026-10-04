@@ -482,7 +482,7 @@ const AssetTile = memo(function AssetTile({ asset: sourceAsset, width, favorites
 });
 
 
-function tileThumbnailUrl(asset: AssetSummary, cacheKey?: string | number, mediaSource: "library" | "vault" = "library") {
+export function tileThumbnailUrl(asset: AssetSummary, cacheKey?: string | number, mediaSource: "library" | "vault" = "library") {
   if (mediaSource === "vault") return vaultThumbnailUrl(asset.id, cacheKey);
   return asset.thumbnailRevision ? assetThumbnailUrl(asset) : thumbnailUrl(asset.id, cacheKey);
 }
