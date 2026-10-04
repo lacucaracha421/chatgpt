@@ -97,6 +97,7 @@ describe("merged work screen", () => {
   it("updates metadata in the painted surface without busy states or slot swaps", async () => {
     const first = { ...value(), record: { status: "playing", ownedPlatform: "PC", myScore: 3.5, memo: "메모" } };
     const actions = callbacks(); const { container, rerender } = view(first, actions);
+    await act(async () => fireEvent.load(container.querySelector(".k-front img")!));
     fireEvent.keyDown(screen.getByRole("group", { name: "케이스" }), { key: "Enter" });
     const object = screen.getByRole("group", { name: "케이스" });
     const label = screen.getByRole("button", { name: "상태" });

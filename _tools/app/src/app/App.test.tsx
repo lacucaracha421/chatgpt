@@ -684,7 +684,8 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "더보기" })).toHaveAttribute("aria-current", "page");
 
     await user.keyboard("{Control>}2{/Control}");
-    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ unclassifiedOnly: true })));
+    // The painted index reads its total after the incoming list is ready.
+    await waitFor(() => expect(libraryGateway.listAssets).toHaveBeenCalledWith(expect.objectContaining({ unclassifiedOnly: true, limit: 100 })));
     expect(screen.getByRole("button", { name: "에셋" })).toHaveAttribute("aria-current", "page");
 
     await user.keyboard("{Control>}k{/Control}");
@@ -1789,7 +1790,7 @@ describe("App", () => {
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
     await user.click(await screen.findByRole("button", { name: "컬렉션" }));
     expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "쇼케이스 1" }));
+    await user.click(await screen.findByRole("button", { name: "쇼케이스" }));
     expect(await screen.findByRole("heading", { name: "게임 쇼케이스" })).toBeInTheDocument();
     await user.dblClick(await screen.findByText("Showcase Game"));
     await user.click(await screen.findByRole("button", { name: "목록으로" }));

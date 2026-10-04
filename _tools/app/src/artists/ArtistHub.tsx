@@ -1,3 +1,4 @@
+import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { AssetImage } from "../privacy/AssetImage";
 import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -158,13 +159,15 @@ function ArtistExclusionSettings() {
     void update(excluded.filter((folder) => folder.id !== id).map((folder) => folder.id));
   };
 
+  const showExcluded = useDelayedBusy(excluded === null);
+  const showFolders = useDelayedBusy(addOpen && folders === null);
   return <section className="artist-exclusion" aria-labelledby="artist-exclusion-title">
     <div className="artist-exclusion__head">
       <h3 id="artist-exclusion-title">작가에서 제외할 폴더</h3>
       <Button size="sm" variant="ghost" disabled={pending} onClick={() => setAddOpen((open) => !open)}>{addOpen ? "닫기" : "폴더 추가"}</Button>
     </div>
     <p className="artist-muted">이 폴더의 이미지는 작가 목록·작가 미상·추천에서 빠집니다. 이미지와 폴더는 그대로입니다.</p>
-    {excluded === null ? <p className="artist-muted">선택한 폴더를 불러오는 중…</p> : excluded.length === 0 ? <p className="artist-muted">선택한 폴더가 없습니다.</p> : <ul className="artist-exclusion__list">
+    {excluded === null || showExcluded ? showExcluded && <p className="artist-muted">선택한 폴더를 불러오는 중…</p> : excluded.length === 0 ? <p className="artist-muted">선택한 폴더가 없습니다.</p> : <ul className="artist-exclusion__list">
       {excluded.map((folder: ArtistExcludedFolder) => <li key={folder.id} className="artist-exclusion__row">
         <span className="artist-exclusion__copy"><span>{folder.breadcrumb}</span><small>{formatCount(folder.imageCount)}장</small></span>
         <Button size="icon" variant="ghost" aria-label={`${folder.breadcrumb} 제외 해제`} disabled={pending} onClick={() => void remove(folder.id)}><XMarkIcon aria-hidden="true" /></Button>
@@ -172,7 +175,7 @@ function ArtistExclusionSettings() {
     </ul>}
     {addOpen && <div className="artist-exclusion__picker">
       <label className="artist-search artist-exclusion__search"><MagnifyingGlassIcon aria-hidden="true" /><span className="artist-sr-only">제외 폴더 검색</span><input type="search" value={search} placeholder="폴더 경로 검색" onChange={(event) => setSearch(event.target.value)} /></label>
-      {folders === null ? <p className="artist-muted">폴더를 불러오는 중…</p> : options.length === 0 ? <p className="artist-muted">추가할 폴더가 없습니다.</p> : <ul className="artist-exclusion__options" role="listbox" aria-label="제외할 폴더 선택">
+      {folders === null || showFolders ? showFolders && <p className="artist-muted">폴더를 불러오는 중…</p> : options.length === 0 ? <p className="artist-muted">추가할 폴더가 없습니다.</p> : <ul className="artist-exclusion__options" role="listbox" aria-label="제외할 폴더 선택">
         {options.map(({ entry, breadcrumb }) => <li key={entry.id}><button type="button" role="option" className="artist-exclusion__option" disabled={pending} onClick={() => add(entry.id)}><span>{breadcrumb}</span><small>{formatCount(entry.totalAssetCount ?? entry.assetCount ?? 0)}장</small></button></li>)}
       </ul>}
     </div>}

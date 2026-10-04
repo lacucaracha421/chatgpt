@@ -25,6 +25,8 @@
 .series-character--excluded .series-character__name { color: var(--color-muted); }
 .series-character__tag { position: absolute; top: var(--space-1); left: var(--space-1); padding: 0 var(--space-1); border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-bg); color: var(--color-muted); font-size: var(--text-xs); line-height: 18px; pointer-events: none; }
 .series-character__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Async counts must not add a line after the shelf has painted. */
+.series-character .folder-shelf__meta { min-height: var(--line-ui); }
 .series-empty { color: var(--color-muted); font-size: var(--text-sm); line-height: var(--line-ui); }
 /* The edit/overflow action sits in the image corner so the name keeps the full tile width. */
 .series-character__info.ui-button, .series-character__info.ui-menu__trigger { position: absolute; top: var(--space-1); right: var(--space-1); background: var(--color-bg); border-radius: var(--radius-sm); }

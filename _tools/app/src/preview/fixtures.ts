@@ -4,6 +4,8 @@ import type { ArtistSummary } from "../artists/types.ts";
 export const PREVIEW_FIXTURE_MARKER = "lakomics-preview-fixture-20260929";
 
 let mangaPins: MangaIndexIdentity[] = [];
+// Preview ISBNs carry a valid check digit so the generated manga back draws its barcode.
+const previewIsbn = (twelve: string) => twelve + (10 - [...twelve].reduce((sum, digit, index) => sum + Number(digit) * (index % 2 ? 3 : 1), 0) % 10) % 10;
 let vanishedPreview = [{ name: "옛 폴더", relativePath: "옛 폴더", seriesCount: 2, seriesIds: [] as string[] }];
 
 const isoDays = [
@@ -302,7 +304,7 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "list_ownership_tracking": return [1, 3, 5];
     case "list_volume_ownership": return [];
     case "list_collection_covers": return Array.from({ length: 10 }, (_, index) => ({ fileName: `volume-${index + 1}.jpg`, shelf: 0, volumeLabel: `${index + 1}권` }));
-    case "list_collection_volumes": return Array.from({ length: 12 }, (_, index) => ({ id: `volume-${index + 1}`, volumeNumber: index + 1, editionIndex: 0, displayLabel: `${index + 1}권`, coverArtworkId: `volume-art-${index + 1}`, localReleaseDate: `202${4 + Math.floor(index / 6)}-${String((index % 6) + 1).padStart(2, "0")}-12`, isbn13: `978890${String(index).padStart(7, "0")}`, releaseStatus: index > 9 ? "upcoming" : "released" }));
+    case "list_collection_volumes": return Array.from({ length: 12 }, (_, index) => ({ id: `volume-${index + 1}`, volumeNumber: index + 1, editionIndex: 0, displayLabel: `${index + 1}권`, coverArtworkId: `volume-art-${index + 1}`, localReleaseDate: `202${4 + Math.floor(index / 6)}-${String((index % 6) + 1).padStart(2, "0")}-12`, isbn13: previewIsbn(`978890${String(index).padStart(6, "0")}`), contents: index % 4 === 3 ? null : "도시의 끝에서 만난 두 사람이 서로의 비밀을 하나씩 꺼내 놓는다. 다가오는 여름, 둘은 처음으로 같은 방향을 바라보기 시작하는데…", price: index % 3 === 2 ? null : 6500 + index * 500, publisher: "달빛출판", releaseStatus: index > 9 ? "upcoming" : "released" }));
     case "list_collection_shelf_cases": return (args.collectionIds as string[]).map(collectionId => ({ collectionId, ownedPlatform: null, spineArtworkId: null }));
     case "list_collection_work_artworks": return [{ id: `artwork-${args.collectionId}-cover`, kind: "cover", selected: true }, { id: `artwork-${args.collectionId}-hero`, kind: "hero", selected: true }];
     case "get_igdb_connection": return { collectionId: args.collectionId, gameId: 101, gameName: "Preview Game", updatedAt: "2026-09-28T00:00:00.000Z" };

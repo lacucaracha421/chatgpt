@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import {useAssetMask} from "../privacy/PrivacyContext";
 import { AssetImage } from "../privacy/AssetImage";
 import { displayDate } from "../shared/displayDate";
@@ -169,7 +170,7 @@ export function TrashBrowser({ onCountChange }: { onCountChange?: (count: number
       }}
     />
     <details className="trash-browser__policy">
-      <summary>보존 설정 <span>{policy ? automaticDeletion ? `${policy.retentionDays}일 후 자동 삭제` : "자동 삭제 안 함" : "설정 확인 중…"}</span></summary>
+      <summary>보존 설정 <span><BusyLabel busy={!policy} idle={policy && (automaticDeletion ? `${policy.retentionDays}일 후 자동 삭제` : "자동 삭제 안 함")}>설정 확인 중…</BusyLabel></span></summary>
       <div className="trash-browser__policy-controls" role="group" aria-label="보존 기간 설정">
       <Toggle checked={automaticDeletion} disabled={!policy || mutationPending} onChange={(event) => void setAutomaticDeletion(event.target.checked)}>자동 삭제</Toggle>
       {automaticDeletion && <div className="trash-browser__retention"><TextField label="보존 기간" type="number" min={MIN_RETENTION_DAYS} max={MAX_RETENTION_DAYS} value={retentionDays} error={retentionError} disabled={mutationPending} onChange={(event) => setRetentionDays(event.target.value)} /><Button onClick={() => void saveRetention()} disabled={Boolean(retentionError) || mutationPending}>저장</Button></div>}

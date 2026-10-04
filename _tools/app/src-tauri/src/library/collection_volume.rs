@@ -263,10 +263,30 @@ impl Library {
 
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT volume.id, volume.volume_number, volume.edition_index,
-                    volume.cover_artwork_id, source.publication_date, source.isbn13
+            "WITH source_json AS (
+                 SELECT *, CASE WHEN json_valid(provider_data_json)
+                                THEN provider_data_json ELSE '{}' END AS data
+                 FROM collection_volume_sources WHERE collection_id = ?1
+             ), source_fields AS (
+                 SELECT *,
+                    CASE WHEN provider = 'kakao' AND json_type(data, '$.contents') = 'text'
+                         THEN NULLIF(TRIM(json_extract(data, '$.contents')), '') END AS contents,
+                    CASE WHEN provider = 'kakao' AND json_type(data, '$.price') IN ('text', 'integer', 'real')
+                         THEN TRIM(CAST(json_extract(data, '$.price') AS TEXT)) END AS list_price,
+                    COALESCE(NULLIF(TRIM(publisher), ''),
+                        CASE WHEN json_type(data, '$.publisher') = 'text'
+                             THEN NULLIF(TRIM(json_extract(data, '$.publisher')), '') END) AS publisher_name
+                 FROM source_json
+             )
+             SELECT volume.id, volume.volume_number, volume.edition_index,
+                    volume.cover_artwork_id, source.publication_date, source.isbn13,
+                    source.contents,
+                    CASE WHEN source.list_price NOT GLOB '*[^0-9]*'
+                                   AND CAST(source.list_price AS INTEGER) > 0
+                         THEN CAST(source.list_price AS INTEGER) END,
+                    source.publisher_name
              FROM collection_volumes AS volume
-             LEFT JOIN collection_volume_sources AS source
+             LEFT JOIN source_fields AS source
                ON source.collection_id = volume.collection_id
               AND source.volume_number = volume.volume_number
               AND source.provider = (
@@ -303,6 +323,9 @@ impl Library {
                         cover_artwork_id: row.get(3)?,
                         local_release_date,
                         isbn13: row.get(5)?,
+                        contents: row.get(6)?,
+                        price: row.get(7)?,
+                        publisher: row.get(8)?,
                         release_status,
                     })
                 },
@@ -573,6 +596,95 @@ mod tests {
     }
 
     const MANGA_ID: &str = "d1a9fdeb-f713-407f-960c-8326b586e6fd";
+
+    #[test]
+    fn projects_volume_back_fields_from_preferred_source_json() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Library::open(temp.path()).unwrap();
+        let work = library
+            .create_collection(CreateCollection {
+                name: "Back cover fixture".into(),
+                description: None,
+                collection_type: CollectionType::Manga,
+            })
+            .unwrap();
+        {
+            let connection = library.connection().unwrap();
+            connection.execute(
+                "INSERT INTO collection_volumes (id, collection_id, volume_number, edition_index, sort_order, created_at, updated_at)
+                 VALUES ('back-volume', ?1, 1, 0, 1, 't', 't')", [&work.id],
+            ).unwrap();
+            for (provider, json) in [
+                (
+                    "aladin",
+                    r#"{"publisher":"Legacy publisher","description":"Not projected","priceStandard":9000}"#,
+                ),
+                (
+                    "kakao",
+                    r#"{"contents":" Volume synopsis ","price":"12000","sale_price":"10800","publisher":" Publisher "}"#,
+                ),
+            ] {
+                connection.execute(
+                    "INSERT INTO collection_volume_sources (collection_id, volume_number, provider, provider_item_id, title, provider_data_json, created_at, updated_at)
+                     VALUES (?1, 1, ?2, 'item', 'Volume', ?3, 't', 't')",
+                    rusqlite::params![work.id, provider, json],
+                ).unwrap();
+            }
+        }
+        let volumes = library.list_collection_volumes(&work.id).unwrap();
+        assert_eq!(volumes[0].contents.as_deref(), Some("Volume synopsis"));
+        assert_eq!(volumes[0].price, Some(12000));
+        assert_eq!(volumes[0].publisher.as_deref(), Some("Publisher"));
+
+        for price in [
+            r#""""#,
+            r#""0""#,
+            "0",
+            "-1",
+            r#""12000won""#,
+            r#""unknown""#,
+            "null",
+            "{}",
+            "true",
+        ] {
+            let json = format!(r#"{{"contents":" ","publisher":"","price":{price}}}"#);
+            library.connection().unwrap().execute(
+                "UPDATE collection_volume_sources SET provider_data_json = ?1 WHERE provider = 'kakao'",
+                [json],
+            ).unwrap();
+            let volumes = library.list_collection_volumes(&work.id).unwrap();
+            assert_eq!(volumes[0].contents, None);
+            assert_eq!(volumes[0].publisher, None);
+            assert_eq!(volumes[0].price, None, "{price}");
+        }
+        library.connection().unwrap().execute(
+            "UPDATE collection_volume_sources SET provider_data_json = 'invalid JSON' WHERE provider = 'kakao'", [],
+        ).unwrap();
+        assert_eq!(
+            library.list_collection_volumes(&work.id).unwrap()[0].price,
+            None
+        );
+        library
+            .connection()
+            .unwrap()
+            .execute(
+                "DELETE FROM collection_volume_sources WHERE provider = 'kakao'",
+                [],
+            )
+            .unwrap();
+        let volumes = library.list_collection_volumes(&work.id).unwrap();
+        assert_eq!(volumes[0].publisher.as_deref(), Some("Legacy publisher"));
+        assert_eq!(volumes[0].contents, None);
+        assert_eq!(volumes[0].price, None);
+        library
+            .connection()
+            .unwrap()
+            .execute("DELETE FROM collection_volume_sources", [])
+            .unwrap();
+        let volumes = library.list_collection_volumes(&work.id).unwrap();
+        assert_eq!(volumes[0].publisher, None);
+        assert_eq!(volumes[0].price, None);
+    }
 
     fn candidate(
         cover_id: &str,

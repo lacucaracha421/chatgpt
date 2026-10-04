@@ -53,12 +53,12 @@ it("uses the shared segmented switch with known counts and keyboard access", asy
   expect(screen.getByRole("radiogroup", { name: "망가 출처" })).toHaveClass("ui-segmented");
   expect(screen.getByRole("radio", { name: "카탈로그" })).toHaveAttribute("aria-checked", "true");
   expect(screen.getByRole("radio", { name: "북마크" })).toBeInTheDocument();
-  expect(screen.getByRole("radio", { name: "로컬 30" })).toBeInTheDocument();
+  expect(screen.getByRole("radio", { name: "로컬" })).toBeInTheDocument();
   screen.getByRole("radio", { name: "카탈로그" }).focus();
   await userEvent.keyboard("{ArrowRight}");
   expect(onChange).toHaveBeenLastCalledWith("bookmarked");
   rerender(<MangaSourceControl value="bookmarked" onChange={onChange} bookmarkCount={280} />);
-  expect(screen.getByRole("radio", { name: "북마크 280" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByRole("radio", { name: "북마크" })).toHaveAttribute("aria-checked", "true");
 });
 
 it("masks a local manga card with only the NSFW filter enabled", () => {

@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { BookmarkIcon, BookOpenIcon, ChevronLeftIcon, ChevronRightIcon, Cog6ToothIcon, Squares2X2Icon, XMarkIcon } from "@heroicons/react/24/outline";
 import { BookmarkIcon as BookmarkSolidIcon } from "@heroicons/react/24/solid";
@@ -207,7 +208,7 @@ function PageViewerContent({ title, pageUrls, initialPage, sourceLabel, artist, 
     const ratio = ratioFor(value);
     if (failedPages.has(value)) {
       return <ReaderPageBox key={value} ratio={ratio}>
-        <span className="manga-reader__page-error">{value}페이지를 불러오지 못했습니다<Button disabled={retryingPages.has(value)} onClick={() => void retryPage(value)}>{retryingPages.has(value) ? "재시도 중…" : "다시 시도"}</Button></span>
+        <span className="manga-reader__page-error">{value}페이지를 불러오지 못했습니다<Button disabled={retryingPages.has(value)} onClick={() => void retryPage(value)}><BusyLabel busy={!!(retryingPages.has(value))} idle={"다시 시도"}>재시도 중…</BusyLabel></Button></span>
       </ReaderPageBox>;
     }
     if (privacyMode) {

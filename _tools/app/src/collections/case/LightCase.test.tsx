@@ -54,7 +54,7 @@ it("prints the shared vertical title, front cover strip and author on a shelf bo
   expect(object.style.getPropertyValue("--plastic")).toBe(CASE_PLASTIC.book);
   expect(object.querySelector(".cs-front img")).toHaveAttribute("src", book.front);
   expect(object.querySelector(".manga-jspine-title")).toHaveTextContent(book.title);
-  expect(object.querySelector(".manga-jspine-author")).toHaveTextContent(book.author!);
+  expect([...object.querySelectorAll(".manga-jspine-author .manga-jspine-column")].map(node => node.textContent)).toEqual(["작가", "이름"]);
   fireEvent.load(object.querySelector(".cs-front img")!);
   paintFrame(); paintFrame();
   expect(object.querySelector(".cs-spine img")).toHaveAttribute("src", object.querySelector(".cs-front img")!.getAttribute("src"));
@@ -73,7 +73,7 @@ it("masks both book faces in privacy mode and keeps the selection lift", () => {
 it("passes the PC summary author without fetching manga detail or guessing a volume number", () => {
   const collection = { id: "manga", name: book.title, type: "manga", author: book.author, publisher: null, platforms: null, updatedAt: "r1" } as CollectionSummary;
   const { container } = render(<CollectionShelfCase collection={collection} front={book.front} privacy={false} active selected={false} />);
-  expect(container.querySelector(".manga-jspine-author")).toHaveTextContent(book.author!);
+  expect(container.querySelector(".manga-jspine-author")).toHaveAttribute("aria-label", book.author!);
   expect(container.querySelector(".cs-spine img")).toHaveStyle({ visibility: "hidden" });
   fireEvent.load(container.querySelector(".cs-front img")!);
   paintFrame(); paintFrame();
@@ -107,7 +107,7 @@ it("uses the passed cover focus without measuring shelf text or creating observe
   const { container } = render(<LightCase data={{ ...book, coverFocus: .25, volumeNumber: 1 }} selected={false} />);
   fireEvent.load(container.querySelector(".cs-front img")!);
   paintFrame(); paintFrame();
-  expect(container.querySelector<HTMLImageElement>(".cs-spine img")!.style.objectPosition).toBe(`${stripPosition(.25, .71, .08)}% 30%`);
+  expect(container.querySelector<HTMLImageElement>(".cs-spine img")!.style.objectPosition).toBe(`${stripPosition(.25, .71 * .19, .08)}% 30%`);
   expect(container.querySelector(".manga-jspine-number")).toHaveTextContent("1");
   expect(container.querySelector(".manga-jspine-ruler")).toBeNull();
   expect(measure).not.toHaveBeenCalled();

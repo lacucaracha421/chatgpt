@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { displayDateTime } from "../shared/displayDate";
 import { CheckIcon, ChevronDownIcon, ChevronRightIcon, LinkIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
@@ -44,7 +45,7 @@ export function MangaConnections({ mangaDex, kakao, mangaDexBusy, kakaoBusy, onC
       <div className="manga-connections__row">
         <span className="manga-connections__name">MangaDex</span>
         <span className="manga-connections__state">{mangaDex ? <>연결됨<small>{synced(mangaDex.lastSyncedAt)}</small></> : "미연결"}</span>
-        {mangaDex ? <Button size="sm" variant="ghost" aria-label="MangaDex 새로고침" disabled={mangaDexBusy} onClick={onRefreshMangaDex}>{mangaDexBusy ? "새로고침 중…" : "새로고침"}</Button> : <Button size="sm" variant="ghost" aria-label="MangaDex 연결" disabled={mangaDexBusy} onClick={onConnectMangaDex}>연결</Button>}
+        {mangaDex ? <Button size="sm" variant="ghost" aria-label="MangaDex 새로고침" disabled={mangaDexBusy} onClick={onRefreshMangaDex}><BusyLabel busy={!!(mangaDexBusy)} idle={"새로고침"}>새로고침 중…</BusyLabel></Button> : <Button size="sm" variant="ghost" aria-label="MangaDex 연결" disabled={mangaDexBusy} onClick={onConnectMangaDex}>연결</Button>}
       </div>
       <div className="manga-connections__row">
         <span className="manga-connections__name">카카오</span>
@@ -66,12 +67,12 @@ export function MangaConnections({ mangaDex, kakao, mangaDexBusy, kakaoBusy, onC
       <div className="manga-connections__row">
         <span className="manga-connections__name">MangaDex</span>
         <span className="manga-connections__state">연결됨<small>{synced(mangaDex.lastSyncedAt)}</small></span>
-        <Button size="sm" variant="ghost" aria-label="MangaDex 새로고침" disabled={mangaDexBusy} onClick={onRefreshMangaDex}>{mangaDexBusy ? "새로고침 중…" : "새로고침"}</Button>
+        <Button size="sm" variant="ghost" aria-label="MangaDex 새로고침" disabled={mangaDexBusy} onClick={onRefreshMangaDex}><BusyLabel busy={!!(mangaDexBusy)} idle={"새로고침"}>새로고침 중…</BusyLabel></Button>
       </div>
       <div className="manga-connections__row">
         <span className="manga-connections__name">카카오</span>
         <span className="manga-connections__state">연결됨<small>{[kakao!.query, synced(kakao!.lastSyncedAt)].filter(Boolean).join(" · ")}</small></span>
-        <Button size="sm" variant="ghost" aria-label="카카오 새로고침" disabled={kakaoBusy} onClick={onRefreshKakao}>{kakaoBusy ? "새로고침 중…" : "새로고침"}</Button>
+        <Button size="sm" variant="ghost" aria-label="카카오 새로고침" disabled={kakaoBusy} onClick={onRefreshKakao}><BusyLabel busy={!!(kakaoBusy)} idle={"새로고침"}>새로고침 중…</BusyLabel></Button>
         <Button size="sm" variant="ghost" aria-label="카카오 다시 연결" disabled={kakaoBusy} onClick={onConnectKakao}>다시 연결</Button>
       </div>
     </div>}
@@ -84,7 +85,7 @@ export function MangaConnections({ mangaDex, kakao, mangaDexBusy, kakaoBusy, onC
     if (connected) return <div key={provider} className="manga-connections__choice is-done">
       <CheckIcon aria-hidden="true" />
       <span className="manga-connections__text"><strong>{name} 연결됨</strong><small>{GAINS[provider]}</small></span>
-      <Button size="sm" variant="ghost" aria-label={`${name} 새로고침`} disabled={busy} onClick={provider === "mangadex" ? onRefreshMangaDex : onRefreshKakao}>{busy ? "새로고침 중…" : "새로고침"}</Button>
+      <Button size="sm" variant="ghost" aria-label={`${name} 새로고침`} disabled={busy} onClick={provider === "mangadex" ? onRefreshMangaDex : onRefreshKakao}><BusyLabel busy={!!(busy)} idle={"새로고침"}>새로고침 중…</BusyLabel></Button>
     </div>;
     const primary = provider === "kakao";
     const label = provider === "kakao" && aladin ? "카카오로 재연결" : `${name} 연결`;

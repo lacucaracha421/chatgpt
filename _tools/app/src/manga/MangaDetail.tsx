@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
 import { formatBytes } from "../assets/assetMetadata";
 import { useLayoutEffect, useRef } from "react";
@@ -65,7 +66,7 @@ export function MangaDetail({ detail, privacyMode, bookmarkPending, reading, onB
         <p>{meta}</p>
         {datedMeta && <p>{datedMeta}</p>}
         <div className="manga-detail__actions">
-          <Button variant="primary" disabled={reading} aria-busy={reading} onClick={onRead}>{reading ? "불러오는 중…" : "읽기"}</Button>
+          <Button variant="primary" disabled={reading} aria-busy={reading} onClick={onRead}><BusyLabel busy={!!(reading)} idle={"읽기"}>불러오는 중…</BusyLabel></Button>
           <Button size="icon" variant="ghost" className="manga-detail__bookmark" aria-label={detail.bookmarked ? "북마크 해제" : "북마크"}
             aria-pressed={detail.bookmarked} aria-busy={bookmarkPending} disabled={bookmarkPending} onClick={() => onBookmark(!detail.bookmarked)}>
             <BookmarkIcon aria-hidden="true" />

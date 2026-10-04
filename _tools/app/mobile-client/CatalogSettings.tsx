@@ -1,3 +1,4 @@
+import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useEffect,useState,type ReactNode} from 'react';
 import {XMarkIcon,PlusIcon,TrashIcon} from '@heroicons/react/24/outline';
 import {Button,Dialog,DialogDescription,IconButton} from './ui';
@@ -65,7 +66,7 @@ export function CatalogSettings({open,preferences,revealBlocked,capability,onClo
     {index}
     <header className="catalog-settings-heading"><DialogDescription className="hint">이 기기에만 적용됩니다. PC 설정은 유지됩니다.</DialogDescription><IconButton label="필터 닫기" icon={XMarkIcon} onClick={onClose}/></header>
     {capability==='unsupported'&&<p className="catalog-settings-warning" role="alert">서버 업데이트 후 사용할 수 있습니다.</p>}
-    {capability==='checking'&&<p role="status">서버 지원 여부 확인 중…</p>}
+    <BusyLabel busy={!!(capability==='checking')}><p role="status">서버 지원 여부 확인 중…</p></BusyLabel>
     {capability==='failed'&&<p role="alert">서버 상태를 확인하지 못했습니다. 창을 닫고 다시 시도해 주세요.</p>}
     <section className="catalog-settings-section" aria-label="포함할 분류">
       <div className="catalog-settings-head"><h3>포함할 분류</h3><div className="catalog-settings-actions"><Button size="sm" variant="ghost" disabled={!supported||allChecked} onClick={()=>setCategories(null)}>모두 포함</Button><Button size="sm" variant="ghost" disabled={!supported||categories?.length===0} onClick={()=>setCategories([])}>모두 해제</Button></div></div>

@@ -26,7 +26,7 @@ it('draws title, the same front source and author without requesting a separate 
   const {container} = render(<ShelfTile item={{...item, spineArtworkId: 'unused'}} revision="r1" active privacy={false} picked={false} onTap={() => undefined}/>);
   await waitFor(() => expect(container.querySelector('.cs-front img')).not.toBeNull());
   expect(container.querySelector('.manga-jspine-title')?.textContent).toBe(item.name);
-  expect(container.querySelector('.manga-jspine-author')?.textContent).toBe(item.author);
+  expect([...container.querySelectorAll('.manga-jspine-author .manga-jspine-column')].map(node => node.textContent)).toEqual(['작가', '이름']);
   // The same shared gate holds the DOM spine and both actual image elements.
   expect(container.querySelector('.collection-light-case')?.getAttribute('data-revealed')).toBe('false');
   fireEvent.load(container.querySelector('.cs-front img')!);

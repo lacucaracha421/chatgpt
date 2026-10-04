@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { open } from "@tauri-apps/plugin-dialog";
 import QRCode from "qrcode";
 import { useEffect, useState, type FormEvent } from "react";
@@ -169,7 +170,7 @@ function SidecarCleanup({ gateway, vaultId, onChanged, onSaved }: {
         {preview!.examples.map((name) => <li key={name}>{name}</li>)}
       </ul>
       <div className="external-vault-actions">
-        <Button size="sm" variant="primary" disabled={busy || importing} onClick={() => void apply()}>{busy ? "정리하는 중…" : "정리하기"}</Button>
+        <Button size="sm" variant="primary" disabled={busy || importing} onClick={() => void apply()}><BusyLabel busy={!!(busy)} idle={"정리하기"}>정리하는 중…</BusyLabel></Button>
         <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirming(false)}>취소</Button>
       </div>
     </dd>}
@@ -209,7 +210,7 @@ function CreateForm({ busy, onCancel, onError, onCreate }: { busy: boolean; onCa
       <label className="ui-field"><span>비밀번호 확인</span><TextInput type="password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} /></label>
       <Checkbox checked={remember} onChange={(event) => setRemember(event.target.checked)}>이 PC에서 기억</Checkbox>
       <div className="external-vault-actions">
-        <Button type="submit" size="sm" variant="primary" disabled={busy}>{busy ? "만드는 중…" : "만들기"}</Button>
+        <Button type="submit" size="sm" variant="primary" disabled={busy}><BusyLabel busy={!!(busy)} idle={"만들기"}>만드는 중…</BusyLabel></Button>
         <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onCancel}>취소</Button>
       </div>
     </form>

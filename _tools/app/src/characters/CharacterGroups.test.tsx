@@ -32,10 +32,16 @@ it("puts the owner's quiet action on the count line and opens a group draft on r
 });
 
 it("keeps group tiles name-only with members in the accessible description", () => {
-  render(<CharacterGroups seriesId="series" members={members} groups={groups}>{children}</CharacterGroups>);
+  const { rerender } = render(<CharacterGroups seriesId="series" members={members} groups={groups}>{children}</CharacterGroups>);
   const tile = screen.getByRole("button", { name: "그룹 이름 그룹 열기" });
   expect(tile).toHaveAttribute("aria-description", "2명 · A · B");
-  expect(tile.querySelector("small")).toBeNull();
+  const count = tile.querySelector("small");
+  expect(count).toBeEmptyDOMElement();
+  expect(count).toHaveAttribute("aria-hidden", "true");
+  rerender(<CharacterGroups seriesId="series" members={members} groups={groups} memberCounts={{ a: 7, b: 2 }}>{children}</CharacterGroups>);
+  expect(tile.querySelector("small")).toBe(count);
+  expect(count).toHaveTextContent("9장");
+  expect(count).not.toHaveAttribute("aria-hidden");
 });
 
 it("omits a zero group count and counts ordinary folders separately", () => {

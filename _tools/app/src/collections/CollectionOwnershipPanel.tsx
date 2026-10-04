@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useEffect, useRef, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import type { CollectionVolume, VolumeOwnership } from "../library/types";
@@ -60,7 +61,7 @@ export function CollectionOwnershipPanel({ collectionId, volumes, editionIndex, 
           <input type="checkbox" checked={releaseWatch.enabled} disabled={releaseWatch.disabled} aria-description={releaseWatch.unavailableReason} onChange={event => releaseWatch.onChange(event.target.checked)} />신간 알림
         </label>}
       </div>
-      <Button type="submit" size="sm" disabled={busy || owned === null || input.trim() === "" || !Number.isInteger(count) || count < 0 || count > 2000 || (tracked && count === owned)}>{busy ? "저장 중…" : "저장"}</Button>
+      <Button type="submit" size="sm" disabled={busy || owned === null || input.trim() === "" || !Number.isInteger(count) || count < 0 || count > 2000 || (tracked && count === owned)}><BusyLabel busy={!!(busy)} idle={"저장"}>저장 중…</BusyLabel></Button>
     </form>
     {error && <p role="alert">{error}</p>}
     <p>최신 출간: {latest === null ? "정보 없음" : `${latest}권`}</p>

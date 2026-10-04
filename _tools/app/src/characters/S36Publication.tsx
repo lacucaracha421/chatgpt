@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "../shared/ui/Button";
@@ -132,7 +133,7 @@ export function S36SeriesControl({ seriesId, seriesName, disabled, onChanged, re
       <p>{seriesName}에서 S36이 자동으로 넣고 아직 아무도 확인하지 않은 분류를 모두 해제합니다. 직접 판단한 것과 기존 분류기가 넣은 것은 그대로 둡니다.</p>
       <div className="dialog-actions">
         <Button variant="ghost" disabled={clearing} onClick={() => setConfirming(false)}>취소</Button>
-        <Button variant="primary" disabled={clearing} onClick={() => void clear()}>{clearing ? "해제하는 중…" : "해제"}</Button>
+        <Button variant="primary" disabled={clearing} onClick={() => void clear()}><BusyLabel busy={!!(clearing)} idle={"해제"}>해제하는 중…</BusyLabel></Button>
       </div>
     </Dialog>}
   </div>;

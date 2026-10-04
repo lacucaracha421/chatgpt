@@ -51,8 +51,10 @@ it.each(["C:\\Media", "/home/user/Media"])("hides the chooser while reopening %s
     return library ? <p>작업 공간</p> : <LibrarySetup selectFolder={picker} />;
   }
   render(<StrictMode><LibraryProvider gateway={libraryGateway}><StartupScreen /></LibraryProvider></StrictMode>);
-  expect(screen.getByRole("status")).toHaveTextContent("저장소 여는 중");
+  // A quick reopen shows nothing; the label appears only once the delay passes.
+  expect(screen.queryByRole("status")).toBeNull();
   expect(screen.queryByRole("button", { name: "라이브러리 선택" })).toBeNull();
+  expect(await screen.findByRole("status", {}, { timeout: 1500 })).toHaveTextContent("저장소 여는 중");
   expect(libraryGateway.openLibrary).toHaveBeenCalledTimes(1);
   await act(async () => { resolve({ root: path }); });
   expect(screen.getByText("작업 공간")).toBeVisible();

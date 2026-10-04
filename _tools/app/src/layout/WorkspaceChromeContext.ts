@@ -11,11 +11,13 @@ export type ChromeMeta = { owner: string; scope: string; title: string; summary:
 export type ChromeSearchActions = { apply?: (query: string) => void; open?: (draft: string) => void };
 type ChromeContextValue = {
   scope: string;
+  pending: boolean;
   targets: Targets;
   setTarget: (slot: Slot, element: HTMLElement | null) => void;
   publish: (meta: ChromeMeta) => void;
   unpublish: (owner: string) => void;
   meta: ChromeMeta | null;
+  getMeta: (scope: string) => ChromeMeta | null;
   /** Latest search callbacks per contribution owner; kept out of `meta` so it stays serializable. */
   setSearchActions: (owner: string, actions: ChromeSearchActions | null) => void;
   applySearch: (query: string) => void;

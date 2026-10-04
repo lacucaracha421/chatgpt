@@ -28,26 +28,23 @@
 }
 .collection-light-case--book .cs-front::after, .collection-light-case--book .cs-spine::after { content: none; }
 .collection-light-case.collection-light-case--book .cs-top { background: color-mix(in srgb, var(--plastic) 90%, #000); }
-/* Shared Japanese spine print. Shelf type scales with the actual case depth. */
-.manga-jspine { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; background: var(--book-paper); color: var(--book-ink); font-family: var(--font-spine); font-weight: 700; }
-/* Upright vertical type (verticalText.ts): Latin sideways, short numbers as one upright cell, the font's vertical forms on. */
+/* Shared print bands keep every illustration at the same height on shelf and stage. */
+.manga-jspine { position: absolute; inset: 0; background: var(--book-paper); color: var(--book-ink); font-family: var(--font-spine); font-weight: 700; }
 .manga-jspine-title, .manga-jspine-author, .manga-jspine-ruler { writing-mode: vertical-rl; text-orientation: mixed; font-feature-settings: "vert"; white-space: nowrap; }
 .manga-jspine-tcy { text-combine-upright: all; -webkit-text-combine: horizontal; }
-/* A long title shrinks, then sets as two columns (right first); MangaBook measures the ruler to choose. */
-.manga-jspine-title { flex: none; max-height: calc(var(--title-share) * 100%); overflow: hidden; margin-top: 12%; font-size: calc(var(--bd) * var(--title-scale)); line-height: 1; letter-spacing: -.02em; }
+.manga-jspine-upright { text-orientation: upright; }
+.manga-jspine-title { position: absolute; top: 6%; left: 50%; transform: translateX(-50%); max-height: calc(var(--title-share) * 100%); overflow: hidden; font-size: calc(var(--bd) * var(--title-scale)); line-height: 1; letter-spacing: -.02em; }
 .manga-jspine-column { display: block; }
 .manga-jspine-column + .manga-jspine-column { margin-block-start: calc(var(--bd) * .06); }
 .manga-jspine-ruler { position: absolute; inset: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
 .manga-jspine-ruler > span { position: absolute; top: 0; right: 0; font-size: calc(var(--bd) * var(--title-base)); line-height: 1; letter-spacing: -.02em; }
-.manga-jspine-number { flex: none; margin-top: 6%; width: 78%; aspect-ratio: 1; display: grid; place-items: center; border-radius: 50%; background: var(--book-ink); color: var(--book-paper); font-family: var(--font-ui); font-weight: 800; font-size: calc(var(--bd) * .42); line-height: 1; }
-.manga-jspine-illustration { flex: 1; align-self: stretch; margin: 7% 0; min-height: 0; overflow: hidden; position: relative; }
+.manga-jspine-number { position: absolute; top: 48%; left: 11%; width: 78%; aspect-ratio: 1; display: grid; place-items: center; border-radius: 50%; background: var(--book-ink); color: var(--book-paper); font-family: var(--font-ui); font-weight: 800; font-size: calc(var(--bd) * .42); line-height: 1; }
+.manga-jspine-illustration { position: absolute; top: 58%; height: 19%; left: 0; right: 0; overflow: hidden; }
 .manga-jspine .manga-jspine-illustration img { position: absolute; inset: 0; object-fit: cover; }
-.manga-jspine-author { flex: none; max-height: 18%; overflow: hidden; font-family: var(--font-ui); font-weight: 600; font-size: calc(var(--bd) * .3); line-height: 1; letter-spacing: .02em; }
-.manga-jspine-bar { flex: none; width: 46%; height: calc(var(--bd) * .16); margin: 6% 0 5%; background: var(--book-ink); }
+.manga-jspine-author { position: absolute; top: 79%; left: 50%; transform-origin: top center; overflow: visible; font-family: var(--font-ui); font-weight: 600; line-height: 1; letter-spacing: .02em; }
+.manga-jspine-author-ruler > span { font-family: var(--font-ui); font-weight: 600; font-size: max(7px, calc(var(--bd) * .3)); letter-spacing: .02em; }
+.manga-jspine-bar { position: absolute; top: 95.5%; left: 27%; width: 46%; height: calc(var(--bd) * .16); background: var(--book-ink); }
 .collection-light-case--book { --bd: var(--cd); --book-paper: #f3f0e8; --book-ink: #15171a; }
-/* Only shelf books use CSS fitting: reserve whole glyphs within each print band.
-   Counts are conservative (combined digits count separately); no per-case layout effects. */
 .collection-light-case--book .manga-jspine { container-type: size; }
-.collection-light-case--book .manga-jspine-title { font-size: min(calc(var(--cd) * .66), calc(48cqh / (var(--spine-title-cells) * 1.2))); max-height: none; overflow: visible; }
-.collection-light-case--book .manga-jspine-author { font-size: min(calc(var(--cd) * .3), calc(16cqh / (var(--spine-author-cells) * 1.2))); max-height: none; overflow: visible; }
+.collection-light-case--book .manga-jspine-author { --author-size: max(7px, min(calc(var(--bd) * .3), calc(14.5cqh / (var(--author-cells) * 1.2)))); font-size: var(--author-size); transform: translateX(-50%) scaleY(min(1, calc(14.5cqh / (var(--author-size) * var(--author-cells) * 1.2)))) scaleX(min(1, calc(var(--bd) / ((var(--author-size) + var(--bd) * .06) * var(--author-columns))))); }
 .collection-light-case--book .manga-jspine-illustration img { display: block; width: 100%; height: 100%; }

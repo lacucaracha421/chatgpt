@@ -48,6 +48,9 @@
 .asset-gallery__justified-unit { position: absolute; inset: 0 0 auto; background: var(--color-bg); }
 .asset-gallery__justified-unit > .asset-gallery__date { position: static; width: 100%; }
 
+/* Date context stays visible when the pointer crosses empty gallery space. */
+.asset-gallery .asset-gallery__date-count { opacity: 1; transition: none; }
+
 .asset-gallery__asset {
   position: relative;
   flex: none;

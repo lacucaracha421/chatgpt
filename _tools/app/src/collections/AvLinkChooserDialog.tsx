@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { displayTime } from "../shared/displayDate";
 import { ArrowTopRightOnSquareIcon, ArrowUturnLeftIcon, ChevronRightIcon, ExclamationTriangleIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -186,7 +187,7 @@ export function AvLinkChooserDialog({ inboxId, collections, api = avLinkClient, 
         {candidate && <div className="av-link-chooser__source"><span>출처 <b>LibreDMM</b> · <span className="numeric">{clockTime(candidate.inbox.fetchedAt || candidate.inbox.receivedAt)}</span> 조회</span>{candidate.inbox.sourceUrl && <Button size="sm" variant="ghost" onClick={() => void openUrl(candidate.inbox.sourceUrl!)}>원본 페이지 열기<ArrowTopRightOnSquareIcon aria-hidden="true" /></Button>}</div>}
         <Button size="icon" variant="ghost" aria-label="후보 창 닫기" disabled={busy} onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
       </header>
-      {loading && <p className="av-link-chooser__loading" role="status">후보를 불러오는 중…</p>}
+      <BusyLabel busy={!!(loading)}><p className="av-link-chooser__loading" role="status">후보를 불러오는 중…</p></BusyLabel>
       {!loading && candidate && <div className="av-link-chooser__body">
         <section className="av-link-chooser__cover" aria-labelledby="av-link-cover-title">
           <SectionHeading id="av-link-cover-title" title="표지" note="펼친 재킷 · 선을 끌어 뒤 | 옆 | 앞 나누기" />

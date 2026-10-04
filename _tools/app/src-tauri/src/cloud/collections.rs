@@ -838,7 +838,7 @@ fn supplement_source_covers(root: &Path, configured: &str, source: &str,
             if volumes.len() >= MAX_VOLUMES { return Err(LibraryError::InvalidCloudResponse); }
             volumes.push(CollectionVolume { id: source_id(&format!("volume/{}/{number}/{edition}", summary.id)),
                 volume_number: number, edition_index: edition, display_label: if edition == 0 {format!("{number}권")} else {format!("{number}.{edition}권")},
-                cover_artwork_id: Some(artwork_id), local_release_date: None, isbn13: None, release_status: None });
+                cover_artwork_id: Some(artwork_id), local_release_date: None, isbn13: None, contents: None, price: None, publisher: None, release_status: None });
         }
     }
     Ok(())
@@ -904,6 +904,9 @@ fn committed_volumes(
                 cover_artwork_id: row.get(3)?,
                 local_release_date,
                 isbn13: row.get(5)?,
+                contents: None,
+                price: None,
+                publisher: None,
                 release_status,
             })
         })?

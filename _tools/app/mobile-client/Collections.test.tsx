@@ -464,7 +464,7 @@ describe('read-only collections',()=>{
     pressShowcase(screen.getByRole('button',{name:'쇼케이스'}));
     const overlay=screen.getByRole('dialog',{name:'쇼케이스'});
     expect(within(overlay).queryByRole('button',{name:'게임 쇼케이스'})).toBeNull();
-    expect(within(overlay).getByText('쇼케이스를 불러오는 중…').textContent).toContain('불러오는 중');
+    expect(within(overlay).queryByText('쇼케이스를 불러오는 중…')).toBeNull();
     await act(async()=>manga.resolve({...page,totalCount:2,items:[{...item,id:'manga-showcase',name:'만화 쇼케이스'}]}));
     expect(await within(overlay).findByRole('button',{name:/만화 쇼케이스/})).toBeTruthy();
     expect(overlay.querySelector('.mobile-overlay__title-row .numeric')?.textContent).toBe('2');

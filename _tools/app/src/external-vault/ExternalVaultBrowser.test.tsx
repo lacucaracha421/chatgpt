@@ -179,7 +179,8 @@ it("keeps import progress and the summary when the view is left and reopened", a
   report({ processed: 4, total: 10, imported: 4, skipped: 0, failed: 0 });
   render(<ExternalVaultBrowser gateway={gateway} status={unlocked} onStatusChange={vi.fn()} />);
   expect(await screen.findByText("가져오는 중 4 / 10")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "가져오는 중…" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "가져오기" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "가져오는 중…" })).not.toBeInTheDocument();
 
   finish({ total: 10, imported: 9, skipped: 1, failed: 0, withoutThumbnail: 0, legacyTitles: 0, legacyThumbnails: 0 });
   expect(await screen.findByRole("dialog", { name: "가져오기 완료" })).toHaveTextContent("가져옴9개");

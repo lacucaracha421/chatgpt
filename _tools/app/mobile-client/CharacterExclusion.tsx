@@ -1,3 +1,4 @@
+import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useEffect,useRef,useState} from 'react';
 import {XMarkIcon} from '@heroicons/react/24/outline';
 import {Button,Dialog,DialogDescription,IconButton} from './ui';
@@ -199,7 +200,7 @@ export function CharacterExclusionEditor({request,target,assetLabel,characterNam
     {error&&<p className="error-message" role="alert">{error}</p>}
     <div className="dialog-actions">
       <Button variant="ghost" disabled={busy} onClick={onClose}>취소</Button>
-      <Button variant="primary" disabled={busy||!request} onClick={()=>void confirm()}>{busy?'제외 적용 중':'제외'}</Button>
+      <Button variant="primary" disabled={busy||!request} onClick={()=>void confirm()}><BusyLabel busy={!!(busy)} idle={'제외'}>제외 적용 중</BusyLabel></Button>
     </div>
   </Dialog>;
 }

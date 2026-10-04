@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useLibrary } from "../library/LibraryContext";
@@ -99,7 +100,7 @@ export function FolderCharacterRegistration({ folderId, classifications, targets
       <label><input type="checkbox" checked={recursive} disabled={busy || loading} onChange={event => setRecursive(event.target.checked)} />하위 폴더 포함</label>
       <label><input type="checkbox" checked={cleanupFolder} disabled={busy} onChange={event => setCleanupFolder(event.target.checked)} />전환 후 기존 폴더 정리</label>
       <p>{cleanupFolder ? "이미지·GIF·영상을 연결하고, 직접 소속 자산은 시리즈로 옮깁니다. 하위 폴더와 남은 자산이 있으면 기존 폴더를 보존합니다." : "기존 분류 폴더를 유지합니다."}</p>
-      <p>{snapshot === null ? "대상 확인 중…" : `${snapshot.count}개 자산 연결 예정`} · 원본 파일과 다른 캐릭터 연결을 유지합니다.</p>
+      <p><BusyLabel busy={!!(snapshot === null)} idle={snapshot ? `${snapshot.count}개 자산 연결 예정` : null}>대상 확인 중…</BusyLabel> · 원본 파일과 다른 캐릭터 연결을 유지합니다.</p>
       {!targetId && <><div className="character-actions"><strong>대표 이미지</strong><span>{thumbnail ? "선택됨" : "선택 사항"}</span></div>
         <div className="character-picker__gallery"><AssetGallery layout="masonry" items={items} privacyMode={privacyMode} targetRowHeight={140} selectedAssetIds={new Set(thumbnail ? [thumbnail] : [])} onSelectionGesture={asset => {
           if (!busy) setThumbnail(old => old === asset.id ? null : asset.id);

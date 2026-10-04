@@ -1051,6 +1051,12 @@ pub struct CollectionVolume {
     pub cover_artwork_id: Option<String>,
     pub local_release_date: Option<String>,
     pub isbn13: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contents: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
     pub release_status: Option<String>,
 }
 

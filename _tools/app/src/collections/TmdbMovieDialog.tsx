@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
 import { useEffect, useRef, useState } from "react";
 import { tmdbImagePreviewUrl } from "../assets/mediaUrl";
@@ -181,7 +182,7 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
         {target.kind === "reconnect" && <p>정확한 작품을 검색해 선택한 뒤 저장하세요. 저장하기 전까지 기존 연결은 유지됩니다.</p>}
         {error && <div className="tmdb-movie-dialog__error" role="alert"><p>{error}</p>{credentialError && <Button type="button" onClick={onOpenSettings}>TMDB 설정 열기</Button>}</div>}
         {busy === "search" && <Skeleton className="tmdb-movie-dialog__loading" label={`${formatLabel} 검색 중`} />}
-        {busy === "apply" && step.kind === "preview" && step.preview.mediaType === "tv" && <p role="status">시즌별 에피소드와 포스터를 저장하고 있습니다. 시즌 수에 따라 시간이 걸릴 수 있습니다.</p>}
+        <BusyLabel busy={busy === "apply" && step.kind === "preview" && step.preview.mediaType === "tv"}><p role="status">시즌별 에피소드와 포스터를 저장하고 있습니다. 시즌 수에 따라 시간이 걸릴 수 있습니다.</p></BusyLabel>
         {busy === "artwork" && <Skeleton className="tmdb-movie-dialog__loading" label="아트워크 불러오는 중" />}
         {searchStep && target.kind !== "artwork" && <Select label="영상 형식" value={mediaType} disabled={busy !== null} onChange={(event) => {
           generation.current += 1;
@@ -200,8 +201,8 @@ export function TmdbMovieDialog({ open, target, onClose, onOpenSettings, onAppli
         <div className="ui-dialog__actions tmdb-movie-dialog__actions">
           <Button type="button" disabled={busy === "apply"} onClick={handleClose}>취소</Button>
           {previewStep && target.kind !== "artwork" && <Button type="button" disabled={busy !== null} onClick={back}>뒤로</Button>}
-          {searchStep && target.kind !== "artwork" && <Button type="button" variant="primary" disabled={searchStep.selectedMovieId === null || busy !== null} onClick={() => void previewSelected()}>{busy === "preview" ? "불러오는 중…" : "다음"}</Button>}
-          {previewStep && <Button type="button" variant="primary" disabled={busy !== null || !previewStep.posterDecided || !previewStep.backdropDecided} onClick={() => void apply()}>{busy === "apply" ? "저장 중…" : target.kind === "new" ? "가져오기" : "저장"}</Button>}
+          {searchStep && target.kind !== "artwork" && <Button type="button" variant="primary" disabled={searchStep.selectedMovieId === null || busy !== null} onClick={() => void previewSelected()}><BusyLabel busy={!!(busy === "preview")} idle={"다음"}>불러오는 중…</BusyLabel></Button>}
+          {previewStep && <Button type="button" variant="primary" disabled={busy !== null || !previewStep.posterDecided || !previewStep.backdropDecided} onClick={() => void apply()}><BusyLabel busy={!!(busy === "apply")} idle={target.kind === "new" ? "가져오기" : "저장"}>저장 중…</BusyLabel></Button>}
         </div>
       </div>
     </Dialog>

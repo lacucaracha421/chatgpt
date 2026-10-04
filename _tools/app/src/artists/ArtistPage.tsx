@@ -1,3 +1,4 @@
+import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { AssetImage } from "../privacy/AssetImage";
 import { useEffect, useState, type ReactNode } from "react";
 import { AssetViewer } from "../assets/AssetViewer";
@@ -144,7 +145,8 @@ export function UnknownStyleSuggestions({ privacyMode, onNavigate }: { privacyMo
   const { page, status, loading, moreLoading, error, loadMore } = useArtistStyleSuggestionPages();
   const [viewer, setViewer] = useState<{ items: AssetSummary[]; activeId: string } | null>(null);
   const groups = page?.groups ?? [];
-  if (!loading && !status?.computing && groups.length === 0 && !error) return null;
+  const showBusy = useDelayedBusy((loading && !page) || (!!status?.computing && groups.length === 0));
+  if (!showBusy && !loading && !status?.computing && groups.length === 0 && !error) return null;
   const open = (assetIds: string[]) => (assetId: string) => {
     const unique = [...new Set(assetIds)];
     void Promise.all(unique.map((id) => gateway.getAsset(id))).then((items) => setViewer({ items, activeId: assetId }), () => undefined);
@@ -156,7 +158,7 @@ export function UnknownStyleSuggestions({ privacyMode, onNavigate }: { privacyMo
       {page && <span className="artist-style-suggestions__count">{formatCount(page.totalImages)}장 · {formatCount(page.totalArtists)}명</span>}
     </summary>
     <div className="artist-style-suggestions__body">
-      {((loading && !page) || (status?.computing && groups.length === 0)) && <p className="artist-muted artist-style-suggestions__status" role="status">{status?.computing ? "라이브러리 변경 뒤 닮은 작가를 계산하는 중입니다…" : "닮은 작가 추천을 불러오는 중입니다…"}</p>}
+      {showBusy && <p className="artist-muted artist-style-suggestions__status" role="status">{status?.computing ? "라이브러리 변경 뒤 닮은 작가를 계산하는 중입니다…" : "닮은 작가 추천을 불러오는 중입니다…"}</p>}
       {Boolean(error) && <p className="artist-error artist-style-suggestions__status" role="alert">추천을 불러오지 못했습니다.</p>}
       {groups.map((group) => <ArtistStyleSuggestionRow key={group.artist.id} group={group} privacyMode={privacyMode} onNavigate={onNavigate} onOpen={open} />)}
       {remaining > 0 && <div className="artist-style-suggestions__more"><Button variant="ghost" disabled={moreLoading} onClick={() => void loadMore()}>작가 {STYLE_PAGE_SIZE}명 더 보기 · 남은 {formatCount(remaining)}명</Button></div>}

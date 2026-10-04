@@ -20,7 +20,7 @@ export function MangaStage({ manga, privacy, title, author, frontReset, coverUrl
   const focus = manga.focuses.find(item => item.volumeId === active?.id && item.coverArtworkId === active?.coverArtworkId)?.focusX ?? null;
   return <WorkZoomStage className="work-stage manga-work-stage">
     <WorkZoomObject>
-    <MangaBook src={src} title={title} author={author} volumeNumber={active?.volumeNumber ?? null} volumeTitle={active ? volumeLabel(active) : ""} focus={focus} privacy={privacy} frontReset={frontReset} onReady={onReady} />
+    <MangaBook src={src} title={title} author={author} volumeNumber={active?.volumeNumber ?? null} volumeTitle={active ? volumeLabel(active) : ""} isbn13={active?.isbn13} localReleaseDate={active?.localReleaseDate} contents={active?.contents} price={active?.price} publisher={active?.publisher} focus={focus} privacy={privacy} frontReset={frontReset} onReady={onReady} />
     </WorkZoomObject>
     {/* Wide edges belong to the immersive work viewer, separate from ownership controls. */}
     <button className="asset-viewer__edge asset-viewer__edge--left" aria-label="이전 권" disabled={index <= 0} onClick={() => onPick(manga.volumes[index - 1].id)}><ChevronLeftIcon /></button>

@@ -1,3 +1,5 @@
+import { useDelayedBusy } from "../src/shared/useDelayedBusy";
+import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {TrackingRows} from './CollectionTracking';
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {usePublicationCheck} from './usePublicationCheck';
@@ -555,6 +557,8 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
           {query&&<IconButton label="검색어 지우기" icon={XMarkIcon} onClick={()=>{setQuery('');setSearch('');}}/>}
         </form></TopBarSearch>
         :<TopBar find={tab==='av'} barRef={sections.barRef} title={sections.title('컬렉션')} loading={main.busy&&'컬렉션 불러오는 중'} actions={tab!=='av'?<SearchButton onClick={()=>setSearchOpen(true)}/>:undefined}/>;
+  const showAvLoading=useDelayedBusy(main.busy&&!main.committed);
+  const showDetailLoading=useDelayedBusy(!!selected&&!item&&!detailError);
   const unpublished=(state:{legacy:boolean;page:CollectionPage|null})=>state.legacy||state.page?.ready===false;
   const unpublishedNotice=<EmptyState icon={RectangleStackIcon} title="컬렉션이 아직 공유되지 않았습니다" />;
 
@@ -624,11 +628,11 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
       {tab==='av'?<>
       <AvLookupSender/>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
-      {unpublished(main)?unpublishedNotice:main.busy&&!main.committed?<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<EmptyState icon={RectangleStackIcon} title="PC 앱이 AV 작품을 아직 보내지 않았습니다" />:<>
+      {unpublished(main)?unpublishedNotice:(main.busy&&!main.committed)||showAvLoading?showAvLoading&&<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<EmptyState icon={RectangleStackIcon} title="PC 앱이 AV 작품을 아직 보내지 않았습니다" />:<>
         <AvViewTabs view={avView} onView={chooseAvView}/>
         {avView==='works'?<>{typeHeader}{worksView}</>:<AvPerformerShelves items={main.items} revision={revision} active={listActive} privacy={privacyMode} perRow={view.perRow} picked={picked} onTap={tapWork(main.items)} onPerformer={openPerformer}/>}
       </>}
-      {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
+      <BusyLabel busy={!!(main.more)}><p className="hint collection-more-status" role="status">더 불러오는 중…</p></BusyLabel>
       {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
       </>:<>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
@@ -636,7 +640,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
         {typeHeader}
         {main.committed&&!main.items.length&&<EmptyState icon={RectangleStackIcon} title={filtered?'조건에 맞는 작품이 없습니다':'아직 작품이 없습니다'} />}
         {worksView}
-        {main.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
+        <BusyLabel busy={!!(main.more)}><p className="hint collection-more-status" role="status">더 불러오는 중…</p></BusyLabel>
       {main.moreError&&<div className="inline-error" role="alert"><span>{main.moreError}</span><Button variant="ghost" onClick={()=>{main.retryMore();window.setTimeout(main.loadMore);}}>다시 시도</Button></div>}
       </>}</>}
       <Scrubber scrollRef={listRef} total={main.items.length} sort={mainScrubberSort} hidden={!active||paused||!!selected||overlayOpen||!!performer||sheet!==null} onEndReached={main.loadMore}/>
@@ -645,12 +649,12 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     <Overlay deferContent open={showcaseAll} covered={!live||!!selected||!!performer} title="쇼케이스" count={showcaseCount} onClose={()=>setShowcaseAll(false)}>
     {ready=><div ref={showcaseRef} className="collection-scroll" onScroll={event=>{if(nearEnd(event.currentTarget))showcase.loadMore();}}>{showcaseAll&&<>
       {showcasePull}
-      {showcase.busy&&!showcaseItems.length&&<p className="hint" role="status">쇼케이스를 불러오는 중…</p>}
+      <BusyLabel busy={!!(showcase.busy&&!showcaseItems.length)}><p className="hint" role="status">쇼케이스를 불러오는 중…</p></BusyLabel>
       <p className="hint collection-showcase-note">PC에서 정한 순서대로 보여 줍니다.</p>
       {showcase.error&&<div className="error-message" role="alert">{showcase.error}<Button variant="ghost" onClick={showcase.reload}>처음부터 새로고침</Button></div>}
       {showcase.committed&&!showcase.busy&&!showcaseItems.length&&<p className="hint">쇼케이스에 고른 작품이 없습니다.</p>}
-      {!ready?<p className="hint" role="status">쇼케이스를 준비하는 중…</p>:unpublished(showcase)?unpublishedNotice:workList(showcaseItems,type,`${labels[type]} 쇼케이스 작품 목록`,showcasePage?.revision??'',showcaseActive,showcaseArrivals)}
-      {showcase.more&&<p className="hint collection-more-status" role="status">더 불러오는 중…</p>}
+      <BusyLabel busy={!ready} idle={ready ? unpublished(showcase)?unpublishedNotice:workList(showcaseItems,type,`${labels[type]} 쇼케이스 작품 목록`,showcasePage?.revision??'',showcaseActive,showcaseArrivals) : null}><p className="hint" role="status">쇼케이스를 준비하는 중…</p></BusyLabel>
+      <BusyLabel busy={!!(showcase.more)}><p className="hint collection-more-status" role="status">더 불러오는 중…</p></BusyLabel>
       {showcase.moreError&&<div className="inline-error" role="alert"><span>{showcase.moreError}</span><Button variant="ghost" onClick={showcase.retryMore}>다시 시도</Button></div>}
       <Scrubber scrollRef={showcaseRef} total={showcaseItems.length} sort={showcaseScrubberSort} hidden={!active||paused||!!selected||!showcaseAll} onEndReached={showcase.loadMore}/>
     </>}</div>}
@@ -664,7 +668,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     </Overlay>
     <div ref={performerRef} className="collection-scroll collection-performer-pane" style={{display:performer&&!selected?undefined:'none'}}>{performer&&<AvPerformerScreen personId={performer.id} currentId={performer.from} active={active&&!paused&&!selected} privacy={privacyMode} perRow={viewOf('av').perRow} order={performerOrder}
       onOpen={(id,ids)=>openWork(id,ids)} onPerformer={id=>setPerformer(current=>({id,from:current?.from??null}))} onSort={()=>setSheet('performerSort')} onView={()=>setSheet('view')}/>}</div>
-    <div ref={detailRef} className="collection-detail" style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item?(!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>)
+    <div ref={detailRef} className="collection-detail" style={{display:selected?undefined:'none'}}>{selected&&<>{detailPull}{detailError&&<div className="inline-error" role="alert">{detailError}<Button onClick={()=>setDetailRefresh(value=>value+1)}>다시 시도</Button></div>}{!item||showDetailLoading?(showDetailLoading&&!detailError&&<p role="status" className="hint">작품을 불러오는 중…</p>)
       :item.type==='manga'
         ?<MangaWork key={item.id} item={item} revision={detail!.revision} active={active&&!paused} privacy={privacyMode} volumes={editionVolumesShared} owned={ownedOf(item,edition)} initialVolumeId={openedVolume?.id===item.id?openedVolume.volumeId:null}
           latestKorean={latestKoreanRelease(releaseBoardEntry(item,ownedOf,watching),edition,today)} onEnlarge={id=>{if(!privacyMode)setCoverIndex(volumes.findIndex(volume=>volume.id===id)+1);}} info={mangaInfo}/>

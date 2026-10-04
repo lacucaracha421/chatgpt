@@ -1,3 +1,5 @@
+import { useDelayedBusy } from "../src/shared/useDelayedBusy";
+import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {usePrivacyMode} from './privacyMode';
 import {useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {ArrowLeftIcon, LockClosedIcon} from '@heroicons/react/24/outline';
@@ -79,6 +81,7 @@ export function PrivateVault({onClose,backRef,density=1}:{onClose():void;backRef
   const shaped=useCallback((asset:Asset)=>{if(asset.ratio)setRatios(value=>({...value,[asset.id]:asset.ratio!}));},[]);
   const close=()=>{if(selected!==null)setSelected(null);else onClose();};
   const open=selected!==null&&selected<assets.length;
+  const showChecking = useDelayedBusy(!ready && !error);
   return <Dialog open title="비밀 보관함" variant="fullscreen" onClose={close}>
     <DialogDescription className="sr-only">USB에 있는 비밀 보관함을 열어 이미지와 영상을 감상합니다.</DialogDescription>
     <section className="private-vault" onContextMenu={event=>event.preventDefault()}>
@@ -88,7 +91,7 @@ export function PrivateVault({onClose,backRef,density=1}:{onClose():void;backRef
         {state.unlocked && <Button onClick={lock}><LockClosedIcon/>잠그기</Button>}
       </header>
       {error && <p className="error-message" role="alert">{error}</p>}
-      {!ready ? <div className="empty-state"><p>보관함 확인 중…</p>{error&&<Button onClick={refresh}>다시 확인</Button>}</div> : !state.unlocked ?
+      {!ready || showChecking ? <div className="empty-state">{showChecking && <p>보관함 확인 중…</p>}{error&&<Button onClick={refresh}>다시 확인</Button>}</div> : !state.unlocked ?
         <div className="vault-locked">
           <LockClosedIcon aria-hidden="true"/>
           <h3>{state.present?'비밀 보관함이 잠겨 있습니다':'USB를 연결해 주세요'}</h3>
@@ -99,7 +102,7 @@ export function PrivateVault({onClose,backRef,density=1}:{onClose():void;backRef
               <Button type="button" aria-pressed={recovery} disabled={busy} onClick={()=>{setRecovery(true);setSecret('');}}>복구 키</Button>
             </div>
             <label className="field">{recovery?'복구 키':'비밀번호'}<input type="password" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} required disabled={busy} value={secret} onChange={event=>setSecret(event.target.value)}/></label>
-            <Button variant="primary" type="submit" disabled={busy||!secret}>{busy?'여는 중…':'보관함 열기'}</Button>
+            <Button variant="primary" type="submit" disabled={busy||!secret}><BusyLabel busy={!!(busy)} idle={'보관함 열기'}>여는 중…</BusyLabel></Button>
           </form> : <>
             <p>USB-C로 연결한 USB의 최상위 폴더를 선택해 주세요.</p>
             {state.selected && <Button onClick={refresh}>USB 다시 확인</Button>}

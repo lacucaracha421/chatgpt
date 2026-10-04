@@ -1,3 +1,4 @@
+import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {usePrivacyMode} from './privacyMode';
 import {useEffect, useRef, useState, type FormEvent} from 'react';
 import {createPortal} from 'react-dom';
@@ -249,13 +250,13 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
       <form className="bind-search" role="search" onSubmit={submit}>
         <MagnifyingGlassIcon aria-hidden="true"/>
         <input ref={input} type="search" enterKeyHint="search" aria-label={`${name} 검색어`} value={query} maxLength={100} onChange={event => setQuery(event.target.value)}/>
-        <Button type="submit" variant="primary" disabled={searchDisabled}>{busy ? '검색 중…' : '검색'}</Button>
+        <Button type="submit" variant="primary" disabled={searchDisabled}><BusyLabel busy={!!(busy)} idle={'검색'}>검색 중…</BusyLabel></Button>
       </form>
       {status?.publisherSeenAt === null && <p className="collection-bindings-note">{PUBLISHER_UPDATE_NOTE}</p>}
       {unavailable && <p className="bind-message is-error" role="alert">{KAKAO_UNAVAILABLE}</p>}
       {failure && <div className="bind-message is-error" role="alert"><span>{failure.text}{failure.waitSeconds ? (wait > 0 ? ` ${wait}초 후에 다시 검색할 수 있어요.` : ' 이제 다시 검색할 수 있어요.') : ''}</span>
         {failure.retry && <Button size="sm" variant="ghost" disabled={searchDisabled} onClick={() => run(lastQuery.current)}>다시 시도</Button>}</div>}
-      {busy && <p className="hint" role="status">{name}에서 찾는 중…</p>}
+      <BusyLabel busy={!!(busy)}><p className="hint" role="status">{name}에서 찾는 중…</p></BusyLabel>
       {found && !busy && found.items.length === 0 && <p className="hint bind-empty">검색 결과가 없어요. 다른 제목으로 찾아 보세요.</p>}
       {found && found.items.length > 0 && <ul className="bind-results" aria-label={`${name} 검색 결과`} aria-busy={busy || undefined}>
         {found.provider === 'mangadex'
@@ -289,7 +290,7 @@ export function BindSearchSheet({item, provider, status, connection, onClose, on
         {picked.groups && <ul className="bind-groups" aria-label="고른 묶음">{picked.groups.map(group => <li key={group.key}><span>{group.title}</span><span className="numeric">{group.range}</span></li>)}</ul>}
         {picked.merge && <p className="bind-merge numeric">{picked.merge}</p>}
         {sendFailure && <p className="bind-message is-error" role="alert">{sendFailure.text}</p>}
-        <Button variant="primary" disabled={sending || (!!sendFailure && !sendFailure.retry)} onClick={confirm}>{sending ? '보내는 중…' : sendFailure?.retry ? '다시 보내기' : '연결 요청'}</Button>
+        <Button variant="primary" disabled={sending || (!!sendFailure && !sendFailure.retry)} onClick={confirm}><BusyLabel busy={!!(sending)} idle={sendFailure?.retry ? '다시 보내기' : '연결 요청'}>보내는 중…</BusyLabel></Button>
         <Button variant="ghost" onClick={() => { send.current?.abort(); setSending(false); setPicked(null); setSendFailure(null); }}>취소</Button>
       </div>
     </Dialog>}

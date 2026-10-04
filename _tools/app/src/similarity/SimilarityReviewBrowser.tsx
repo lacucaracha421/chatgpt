@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { AssetImage } from "../privacy/AssetImage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatBytes, localDate, sourceLabel } from "../assets/assetMetadata";
@@ -193,7 +194,7 @@ function HistoricalScanStatus({ scan, running, onRun }: {
   onRun(): void;
 }) {
   const detail = scan === undefined
-    ? "검사 상태 확인 중"
+    ? ""
     : scan === null
       ? "저장된 이미지끼리 비교해 기존 유사 항목을 찾습니다."
       : scan.completed
@@ -202,11 +203,11 @@ function HistoricalScanStatus({ scan, running, onRun }: {
   const action = scan && !scan.completed ? "검사 이어가기" : scan?.completed ? "다시 검사" : "기존 보관함 검사";
   return <section className="similarity-review__scan" aria-label="기존 보관함 유사 이미지 검사">
     <div>
-      <strong>{detail}</strong>
+      <strong><BusyLabel busy={scan === undefined} idle={detail}>검사 상태 확인 중</BusyLabel></strong>
       {scan && <span>{scan.totalAssets.toLocaleString()}개 대상 · 해시 미준비 {scan.skippedAssets.toLocaleString()}개</span>}
       {scan && scan.totalPairs > 0 && <progress value={scan.comparedPairs} max={scan.totalPairs} aria-label="기존 보관함 검사 진행률" />}
     </div>
-    <Button variant="secondary" disabled={running || scan === undefined} onClick={onRun}>{running ? "검사 중" : action}</Button>
+    <Button variant="secondary" disabled={running || scan === undefined} onClick={onRun}><BusyLabel busy={!!(running)} idle={action}>검사 중</BusyLabel></Button>
   </section>;
 }
 

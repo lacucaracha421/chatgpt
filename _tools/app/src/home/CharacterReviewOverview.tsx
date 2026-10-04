@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { AssetImage } from "../privacy/AssetImage";
 import { CharacterSuggestionsOverview } from "../characters/suggestions/CharacterSuggestions";
 import { ChevronLeftIcon, ChevronRightIcon, UserIcon } from "@heroicons/react/24/outline";
@@ -87,12 +88,11 @@ export function CharacterReviewOverview({ source, targets, seriesName, version, 
   } else if (error) {
     body = <div className="crv-notice" role="alert"><p>{error}</p><Button size="sm" onClick={() => setRetry((value) => value + 1)}>다시 시도</Button></div>;
   } else if (!tallies) {
-    body = <Reading progress={progress} />;
+    body = null;
   } else if (groups.length === 0) {
     body = <div className="crv-notice" role="status"><p>확인할 후보가 없습니다.</p></div>;
   } else {
     body = <>
-      {reading && <Reading progress={progress} again />}
       <div className="crv-groups" aria-busy={reading || undefined}>
         {shown.map((group) => <section key={seriesKey(group)} className="crv-group" aria-label={group.seriesName}>
           <header className="crv-group__head">
@@ -125,6 +125,7 @@ export function CharacterReviewOverview({ source, targets, seriesName, version, 
           <span className="crv-space" />
           <Button size="sm" onClick={() => onOpen({})}>전체 검토</Button>
         </div>}
+        <BusyLabel busy={!restricted && !error && (!tallies || reading)}><Reading progress={progress} again={!!tallies} /></BusyLabel>
         {body}
       </div>
     </div>

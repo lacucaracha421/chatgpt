@@ -9,7 +9,6 @@ import { artistHandle } from "../artists/format";
 import { assetDragIds, type InternalDragPayload } from "../shared/interaction/pointerDrag";
 import { Skeleton } from "../shared/ui/Skeleton";
 import type { SelectionGesture } from "./selection";
-import { revealGalleryDateCount } from "./galleryDateFeedback";
 import { anchorScrollTop, animateVisibleTiles, captureVisibleTileRects, type TileRects } from "./galleryMotion";
 import { galleryRowHeight, useGalleryCount } from "./galleryCount";
 import { buildJustifiedRows } from "./justifiedRows";
@@ -98,11 +97,12 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
   const scrollRef = useRef<HTMLDivElement>(null);
   const introRef = useRef<HTMLDivElement>(null);
   const [introHeight, setIntroHeight] = useState(0);
+  // A new shelf/count can change height while the intro element stays mounted.
+  useLayoutEffect(() => { setIntroHeight(introRef.current?.getBoundingClientRect().height ?? 0); }, [intro]);
   useLayoutEffect(() => {
     const element = introRef.current;
     if (!element) { setIntroHeight(0); return; }
     const measure = () => setIntroHeight(element.getBoundingClientRect().height);
-    measure();
     const observer = new ResizeObserver(measure); observer.observe(element);
     return () => observer.disconnect();
   }, [Boolean(intro)]);
@@ -202,7 +202,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
       if (element.scrollTop < pending.offset - 1) return;
     }
     pendingRestoreRef.current = null;
-  }, [layoutUnits, scopeKey, reservedTotal]);
+  }, [layoutUnits, scopeKey, reservedTotal, introHeight]);
   const cancelQuickPreview = useGalleryEvent(() => {
     quickPreviewRequestRef.current += 1;
     if (quickPreviewTimerRef.current !== null) window.clearTimeout(quickPreviewTimerRef.current);
@@ -339,7 +339,6 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
     query?.addEventListener?.("change", cancel);
     return () => { query?.removeEventListener?.("change", cancel); animationsRef.current.forEach(animation => animation.cancel()); };
   }, []);
-  const revealDateGroup = (target: EventTarget | null) => revealGalleryDateCount(scrollRef.current, target);
   const scrubberOrder = useMemo<ScrubberSort>(() => groupDates
     ? {kind: "date", values: items.map(asset => asset.collectedAt)} : {kind: "fallback"}, [groupDates, items]);
   const seekAsset = useCallback((index: number) => {
@@ -367,7 +366,6 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
     <div
       ref={scrollRef}
       className="asset-gallery__scroll"
-      onPointerOver={event => revealDateGroup(event.target)} onPointerLeave={() => revealDateGroup(document.activeElement)} onFocusCapture={event => revealDateGroup(event.target)} onBlurCapture={event => revealDateGroup(event.relatedTarget)}
       tabIndex={0}
       role={intro ? undefined : "listbox"}
       aria-label={intro ? undefined : "자산"}

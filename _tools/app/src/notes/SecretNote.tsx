@@ -1,3 +1,4 @@
+import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { ClipboardDocumentIcon, EyeIcon, LockClosedIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../shared/ui/Button";
@@ -49,7 +50,8 @@ export function SecretGate({ store, onOpened, onCancel }: { store: NotesStore; o
     setPin(""); setConfirm("");
     if (failure) setError(failure); else onOpened();
   }
-  if (!status) return <div className="notes-secret-gate" aria-busy={!error}>{error ? <p role="alert">{error}</p> : <p>확인하는 중…</p>}</div>;
+  const showChecking = useDelayedBusy(!status && !error);
+  if (!status || showChecking) return <div className="notes-secret-gate" aria-busy={!error}>{error ? <p role="alert">{error}</p> : showChecking ? <p>확인하는 중…</p> : null}</div>;
   const title = mode === "reset" ? "PIN 다시 설정" : status.pinSet ? "암호 메모 열기" : "암호 메모 PIN 만들기";
   return (
     <form className="notes-secret-gate" onSubmit={(event) => { event.preventDefault(); void submit(); }}>

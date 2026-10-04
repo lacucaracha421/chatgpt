@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useHorizontalWheel } from "../shared/ui/useHorizontalWheel";
 import { useEffect, useRef, useState } from "react";
 import { igdbImagePreviewUrl } from "../assets/mediaUrl";
@@ -213,7 +214,7 @@ export function IgdbImportDialog({ open, target, onClose, onApplied, onOpenSetti
           <Button type="button" onClick={handleClose} disabled={busy === "apply"}>취소</Button>
           {step.kind === "hero" && <Button type="button" onClick={back} disabled={busy !== null}>뒤로</Button>}
           {step.kind === "cover" && target.kind === "new" && <Button type="button" onClick={back} disabled={busy !== null}>뒤로</Button>}
-          {step.kind === "search" && <Button type="button" variant="primary" disabled={step.selectedGameId === null || busy !== null} onClick={() => void previewSelected()}>{busy === "preview" ? "불러오는 중" : "다음"}</Button>}
+          {step.kind === "search" && <Button type="button" variant="primary" disabled={step.selectedGameId === null || busy !== null} onClick={() => void previewSelected()}><BusyLabel busy={!!(busy === "preview")} idle={"다음"}>불러오는 중</BusyLabel></Button>}
           {step.kind === "cover" && <Button type="button" variant="primary" disabled={busy !== null || (target.kind === "new" && step.preview.covers.length > 0 && !step.coverDecisionMade)} onClick={nextFromCover}>다음</Button>}
           {step.kind === "hero" && <>
             <Button type="button" aria-pressed={step.heroDecisionMade && step.heroImageId === null} onClick={() => setStep({ ...step, heroImageId: null, heroDecisionMade: true })}>hero 없이 가져오기</Button>

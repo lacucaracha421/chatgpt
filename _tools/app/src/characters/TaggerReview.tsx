@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { AssetImage } from "../privacy/AssetImage";
 import { ChevronLeftIcon, ChevronRightIcon, UserIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
@@ -324,7 +325,7 @@ export function TaggerReview({ items, targets, classifications, privacyMode, onB
             <Button size="sm" disabled={busy} onClick={() => { setChecked(new Set()); selectionAnchor.current = null; }}>선택 해제</Button>
             <span><b className="numeric">{checked.size.toLocaleString()}</b>건 선택 · 이미지에서 제외할 항목을 체크 해제하세요.</span>
             <Button size="sm" variant="primary" disabled={busy || checked.size === 0 || acceptingUnresolved} onClick={() => void confirmBulk()}>
-              {busy ? "저장 중…" : `${checked.size.toLocaleString()}건 ${bulkDecision === "accepted" ? "맞음" : "아님"} 저장`}
+              <BusyLabel busy={!!(busy)} idle={`${checked.size.toLocaleString()}건 ${bulkDecision === "accepted" ? "맞음" : "아님"} 저장`}>저장 중…</BusyLabel>
             </Button>
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setBulkDecision(null); setChecked(new Set()); }}>취소</Button>
           </>}

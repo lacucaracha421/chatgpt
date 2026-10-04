@@ -1,3 +1,4 @@
+import { useDelayedBusy } from "../src/shared/useDelayedBusy";
 import {useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode} from 'react';
 import {ArrowUpRightIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronRightIcon, ComputerDesktopIcon, EllipsisHorizontalIcon, MagnifyingGlassIcon, PhotoIcon, XMarkIcon} from '@heroicons/react/24/outline';
 import {Button, EmptyState, Field, IconButton, SectionLabel, TextInput} from './ui';
@@ -266,10 +267,11 @@ export function Artists({scopeChips,endpoint, backRef, onOpenViewer, paused=fals
   const onEdit: EditArtist = (artist, action, displayName) => { commitArtistEdit(endpoint, artist, action, displayName); };
   const notice = <>{pending > 0 && <p className="artist-edit-status" role="status">작가 변경 전송 대기 중 · {pending}건</p>}{error && <div className="inline-error" role="alert">{error}<Button variant="quiet" onClick={retry}>다시 시도</Button></div>}</>;
   const resolved = detail ? resolveArtist(allArtists, detail) : undefined;
+  const showLoading=useDelayedBusy(!allArtists.length&&(state==='loading'||state==='idle'));
   if (detail) return <ArtistDetail scopeChips={scopeChips} summary={resolved ?? detail} listed={loaded ? !!resolved : undefined} assignments={assignments} privateMode={privateMode} paused={paused} notice={notice} onEdit={onEdit} onBack={() => { if (initialArtist && onClose) onClose(); else setDetail(null); }} onOpenViewer={onOpenViewer} />;
   const header = searchOpen ? <TopBarSearch title="작가" onClose={closeSearch}><label className="top-bar__search"><MagnifyingGlassIcon aria-hidden="true" /><input autoFocus type="search" aria-label="작가 검색" placeholder="이름, 핸들, 초성" value={query} onChange={event => setQuery(event.target.value)} />{query && <IconButton label="검색어 지우기" icon={XMarkIcon} onClick={() => setQuery('')} />}</label></TopBarSearch> : <TopBar back={{label:'홈으로', onClick:() => window.dispatchEvent(new Event('lakomics-back'))}} crumbs={<span className="top-bar__crumbs">홈 ›</span>} title="작가" count={artists.length ? artists.length.toLocaleString('ko-KR') : undefined} actions={state === 'ready' ? <IconButton label="작가 검색" icon={MagnifyingGlassIcon} onClick={() => setSearchOpen(true)} /> : undefined} />;
   return <div className="artist-screen">{header}{notice}
     <HiddenArtists endpoint={endpoint} artists={allArtists} onOpen={setDetail} pending={pending} syncError={error} onRetry={retry} />
-    {!allArtists.length && (state === 'loading' || state === 'idle') ? <div className="artist-empty" role="status"><span>작가 목록을 불러오는 중입니다</span></div> : !allArtists.length ? <EmptyArtists /> : <ArtistHub artists={artists} assignments={assignments} query={query} privateMode={privateMode} paused={paused} onOpen={setDetail} />}
+    {showLoading || (!allArtists.length && (state === 'loading' || state === 'idle')) ? <div className="artist-empty" role="status">{showLoading&&<span>작가 목록을 불러오는 중입니다</span>}</div> : !allArtists.length ? <EmptyArtists /> : <ArtistHub artists={artists} assignments={assignments} query={query} privateMode={privateMode} paused={paused} onOpen={setDetail} />}
   </div>;
 }

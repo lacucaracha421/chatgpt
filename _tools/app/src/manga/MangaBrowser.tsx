@@ -1,3 +1,4 @@
+import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { createPortal } from "react-dom";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { MangaIndex } from "./MangaIndex";
@@ -15,7 +16,6 @@ import { EmptyState } from "../shared/ui/EmptyState";
 import { Toast } from "../shared/ui/Toast";
 import { useAutoDismiss } from "../shared/ui/useAutoDismiss";
 import { Menu } from "../shared/ui/Menu";
-import { Toggle } from "../shared/ui/Toggle";
 import { OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
 import { MangaCard, MangaSkeletonGrid } from "./MangaCard";
 import { MangaToolbar, MangaChoiceMenu, type MangaSource } from "./MangaToolbar";
@@ -39,7 +39,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const [localFolder, setLocalFolder] = useState<string | null>(null);
   const [localIndex, setLocalIndex] = useState<MangaLocalIndex | null>(null);
   const receiveLocalIndex = useCallback((index: MangaLocalIndex) => setLocalIndex(index), []);
-  const { privacyMode, setPrivacyMode, nsfwFilter } = usePrivacy();
+  const { privacyMode, nsfwFilter } = usePrivacy();
   const catalogMasked = useCatalogMasked();
   const [root, setRoot] = useState<string | null | undefined>(undefined);
   const [series, setSeries] = useState<MangaSeries[] | null>(null);
@@ -53,6 +53,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
   const [recovery, setRecovery] = useState<MangaCatalogRecoveryPreview | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [source, setSource] = useState<"local" | "online">(initialMangaSource);
+  const scanStatusVisible = useDelayedBusy(scanning && source === "local");
   const [onlineScope, setOnlineScope] = useState<CatalogScope>("all");
   const [displayedSource, setDisplayedSource] = useState(source);
   const [localVisited, setLocalVisited] = useState(source === "local");
@@ -176,7 +177,7 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
         if (active) { setMessage("망가 목록을 불러오지 못했습니다"); setLoadError(true); }
       }
     })();
-    return () => { active = false; };
+    return () => { active = false; setScanning(false); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gateway, source]);
 
@@ -217,10 +218,9 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
         { id: "recovery", label: "카탈로그로 복구", disabled: recoveryBusy, onSelect: () => void previewRecovery() },
       ]} /> : undefined}
       chrome={{
-        status: scanning ? <span role="status">폴더 스캔 중</span> : undefined,
+        status: scanStatusVisible && source === "local" ? <span role="status">폴더 스캔 중</span> : undefined,
         summary: `${mangaSortLabel(sort)}${privacyMode ? " · 비공개" : ""}${nsfwFilter ? " · NSFW 필터" : ""}`,
         search: { scope: "로컬 망가", label: "망가 검색", placeholder: "제목 또는 작가 검색", query, onApply: setQuery },
-        settings: <fieldset className="chrome-settings-group"><legend>표시</legend><Toggle aria-label="비공개 모드" checked={privacyMode} onChange={(event) => setPrivacyMode(event.target.checked)}>비공개 모드</Toggle></fieldset>,
       }} />}
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     {recovery && <MangaRecoveryPanel preview={recovery} busy={recoveryBusy} onRemoteLookup={gateway.refreshMangaCatalogRecoveryRemote ? () => void refreshRecoveryRemote() : undefined} onApply={() => void applyRecovery()} onApplySelection={(mangaId, workId) => void applyRecoverySelection(mangaId, workId)} onClose={() => setRecovery(null)} />}

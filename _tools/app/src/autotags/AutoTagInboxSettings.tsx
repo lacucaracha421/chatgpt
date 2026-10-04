@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
@@ -48,7 +49,7 @@ export function AutoTagInboxSettings({ disabled }: { disabled: boolean }) {
   return <>
     <dl className="settings-view__property">
       <dt>매일 가져오기 폴더</dt>
-      <dd className="settings-view__status settings-view__path">{settings ? settings.folder ?? "설정 안 됨" : "확인 중…"}</dd>
+      <dd className="settings-view__status settings-view__path"><BusyLabel busy={!settings} idle={settings?.folder ?? (settings ? "설정 안 됨" : null)}>확인 중…</BusyLabel></dd>
       <dd className="settings-view__inline-controls">
         <Button size="sm" disabled={locked} onClick={() => void chooseFolder()}>폴더 선택</Button>
         <Button size="sm" variant="quiet" disabled={locked || !settings?.folder} onClick={() => void disable()}>사용 안 함</Button>
@@ -61,7 +62,7 @@ export function AutoTagInboxSettings({ disabled }: { disabled: boolean }) {
     <dl className="settings-view__property">
       <dt>최근 자동 가져오기</dt>
       {settings && <dd className="settings-view__status">{autoTagInboxResult(settings)}</dd>}
-      <dd className="settings-view__inline-controls"><Button size="sm" variant="quiet" disabled={locked || !settings?.folder} onClick={() => void runNow()}>{busy ? "처리 중…" : "지금 가져오기"}</Button></dd>
+      <dd className="settings-view__inline-controls"><Button size="sm" variant="quiet" disabled={locked || !settings?.folder} onClick={() => void runNow()}><BusyLabel busy={!!(busy)} idle={"지금 가져오기"}>처리 중…</BusyLabel></Button></dd>
     </dl>
     {message && <p className="settings-view__row-message" role={message.error ? "alert" : "status"}>{message.text}</p>}
   </>;

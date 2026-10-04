@@ -6,6 +6,7 @@ import { defaultRecord } from "./WorkRecord";
 export function useWorkRecord(collection: CollectionSummary | undefined) {
   const { gateway } = useLibrary();
   const [loaded, setLoaded] = useState<{ id: string; record: CollectionWorkRecord } | null>(null);
+  const [settledId, setSettledId] = useState<string | null>(null);
   const revision = useRef(0);
   const saves = useRef(Promise.resolve());
   const pending = useRef(0);
@@ -16,7 +17,8 @@ export function useWorkRecord(collection: CollectionSummary | undefined) {
     if (!collection || !gateway.getCollectionWorkRecord) return;
     let active = true;
     const token = ++revision.current;
-    void gateway.getCollectionWorkRecord(collection.id).then(record => { if (active && token === revision.current && pending.current === 0) setLoaded({ id: collection.id, record }); }, () => undefined);
+    void gateway.getCollectionWorkRecord(collection.id).then(record => { if (active && token === revision.current && pending.current === 0) setLoaded({ id: collection.id, record }); }, () => undefined)
+      .finally(() => { if (active) setSettledId(collection.id); });
     return () => { active = false; };
   }, [gateway, collection]);
   async function save(item: CollectionSummary, edit: CollectionRecordEdit) {
@@ -31,5 +33,5 @@ export function useWorkRecord(collection: CollectionSummary | undefined) {
       return record;
     } finally { pending.current -= 1; }
   }
-  return { record: collection ? loaded?.id === collection.id ? loaded.record : defaultRecord(collection) : undefined, save };
+  return { record: collection ? loaded?.id === collection.id ? loaded.record : defaultRecord(collection) : undefined, ready: !collection || !gateway.getCollectionWorkRecord || settledId === collection.id, save };
 }

@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -64,13 +65,13 @@ export function CharacterAutomationSettings({ disabled, onBusyChange }: {
 
   return <><dl className="settings-view__property" aria-busy={busy}>
     <dt>캐릭터 자동 분류</dt>
-    <dd className="settings-view__status">{busy ? "저장 중…" : enabled === null ? "확인 중…" : enabled ? "켜짐" : "꺼짐"}</dd>
+    <dd className="settings-view__status"><BusyLabel busy={busy || enabled === null} idle={enabled === null ? null : enabled ? "켜짐" : "꺼짐"}>{busy ? "저장 중…" : "확인 중…"}</BusyLabel></dd>
     <dd className="settings-view__inline-controls"><Switch aria-label="캐릭터 자동 분류" checked={enabled ?? false} disabled={disabled || busy || enabled === null} onChange={event => void change(event.target.checked)} /></dd>
     {error && <dd className="settings-view__row-message" role="alert">{error}{enabled === null && <Button size="sm" disabled={disabled} onClick={() => setRetry(value => value + 1)}>다시 확인</Button>}</dd>}
   </dl>
   <dl className="settings-view__property" aria-busy={busy}>
     <dt>넓은 폴더 인식</dt>
-    <dd className="settings-view__status">{busy ? "저장 중…" : broad === null ? "확인 중…" : broad ? "켜짐" : "꺼짐"}</dd>
+    <dd className="settings-view__status"><BusyLabel busy={busy || broad === null} idle={broad === null ? null : broad ? "켜짐" : "꺼짐"}>{busy ? "저장 중…" : "확인 중…"}</BusyLabel></dd>
     <dd className="settings-view__inline-controls"><Switch aria-label="넓은 폴더 인식" checked={broad ?? false} disabled={disabled || busy || broad === null} onChange={event => void changeBroad(event.target.checked)} /></dd>
   </dl></>;
 }

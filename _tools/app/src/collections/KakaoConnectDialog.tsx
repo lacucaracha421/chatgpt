@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -93,7 +94,7 @@ export function KakaoConnectDialog({
             onKeyDown={(event) => { if (event.key === "Enter") void search(); }}
           />
           <Button type="button" disabled={busy !== null} onClick={() => void search()}>
-            {busy === "search" ? "검색 중…" : "검색"}
+            <BusyLabel busy={!!(busy === "search")} idle={"검색"}>검색 중…</BusyLabel>
           </Button>
         </div>
 
@@ -164,7 +165,7 @@ export function KakaoConnectDialog({
           </span>
           <Button type="button" disabled={busy !== null} onClick={close}>취소</Button>
           <Button type="button" variant="primary" disabled={selected.length === 0 || busy !== null} onClick={() => void apply()}>
-            {busy === "apply" ? "연결 중…" : selected.length > 1 ? `${selected.length}개 연결` : "연결"}
+            <BusyLabel busy={!!(busy === "apply")} idle={selected.length > 1 ? `${selected.length}개 연결` : "연결"}>연결 중…</BusyLabel>
           </Button>
         </div>
       </div>

@@ -17,7 +17,7 @@ import { MoreEntryList, MorePanel } from "./MorePanel";
 import { placeEntries, useNavigationEntries, type PlaceSources } from "./navigationEntries";
 import { modalDialogOpen } from "./modalDialog";
 import { ChromeSettingsDock, ChromeTarget } from "./WorkspaceChrome";
-import { useWorkspaceChrome } from "./WorkspaceChromeContext";
+import { useWorkspaceChrome, type ChromeMeta } from "./WorkspaceChromeContext";
 import { clampSidebarWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from "./sidebarWidth";
 
 export function workspaceArea(view: AssetView): "home" | "assets" | "collections" | "manga" | "notes" | "exchange" | "private_vault" | "manage" {
@@ -29,6 +29,16 @@ export function workspaceArea(view: AssetView): "home" | "assets" | "collections
   if (view.kind === "manga") return "manga";
   if (view.kind === "settings" || view.kind === "trash" || view.kind === "similarity_review" || view.kind === "statistics") return "manage";
   return "assets";
+}
+
+/** Shared with the pending content layout so it measures at its destination width. */
+export function hasWorkspaceIndex(view: AssetView, collections: CollectionSummary[], meta: ChromeMeta | null) {
+  const area = workspaceArea(view);
+  const emptyIndex = (area === "home" || (area === "notes" && meta != null))
+    && !meta?.navigation && !meta?.actions && meta?.search?.kind !== "surface";
+  // Full-screen work viewers must not reserve an empty column while artwork prepares.
+  const workViewer = view.kind === "collection" && ["game", "movie", "av", "manga"].includes(collections.find(item => item.id === view.collectionId)?.type ?? "");
+  return view.kind !== "collections" && !workViewer && !emptyIndex;
 }
 type RailArea = "home" | "assets" | "collections" | "manga" | "notes" | "exchange" | "private_vault";
 const RAIL_AREAS: { key: RailArea; label: string; Icon: typeof NoteIcon }[] = [
@@ -42,6 +52,8 @@ const RAIL_AREAS: { key: RailArea; label: string; Icon: typeof NoteIcon }[] = [
 
 type Props = {
   view: AssetView;
+  /** The rail responds to requests while the index keeps the painted view until ready. */
+  requestedView?: AssetView;
   collectionType: CollectionType;
   width: number;
   onWidthChange: (width: number) => void;
@@ -64,40 +76,36 @@ function isEditing(target: EventTarget | null) {
     && (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement);
 }
 
-export function WorkspaceNavigation({ view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, unsortedCount = null, onQueuesRequested, privateVaultAvailable = false, onImportFiles, places, collections = [] }: Props) {
+export function WorkspaceNavigation({ view, requestedView = view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, unsortedCount = null, onQueuesRequested, privateVaultAvailable = false, onImportFiles, places, collections = [] }: Props) {
   const chrome = useWorkspaceChrome();
   const vaultImport = useVaultImportJob().job;
   const vaultExport = useVaultExportJob();
   const vaultImportText = vaultImport?.running ? vaultImportProgressText(vaultImport)
     : vaultExport?.running ? vaultExportProgressText(vaultExport) : undefined;
   const area = workspaceArea(view);
+  const requestedArea = workspaceArea(requestedView);
   const history = useRef<Partial<Record<ReturnType<typeof workspaceArea>, AssetView>>>({});
   const collectionList = useRef<Extract<AssetView, { kind: "collections" }> | null>(null);
-  if (view.kind === "collections") collectionList.current = view;
-  const quickAssetView = isArtistView(view) || view.kind === "unsorted";
+  if (requestedView.kind === "collections") collectionList.current = requestedView;
+  const quickAssetView = isArtistView(requestedView) || requestedView.kind === "unsorted";
   // A note opened from Home is not where the 메모 rail entry returns to.
-  if (!quickAssetView) history.current[area] = view.kind === "notes" && view.noteId ? { kind: "notes" } : view;
+  if (!quickAssetView) history.current[requestedArea] = requestedView.kind === "notes" && requestedView.noteId ? { kind: "notes" } : requestedView;
   const resize = useRef<{ id: number; x: number; width: number } | null>(null);
   const areaName = { home: "홈", assets: "에셋", collections: "컬렉션", manga: "망가", notes:"메모", exchange: "전송", private_vault: "비밀", manage: "더보기" }[area];
   const artistView = isArtistView(view);
   const areaTitle = view.kind === "settings" ? "설정" : area === "manage" ? "더보기" : areaName;
-  // Notes and Home (attention-first since 2026-10-02) drop the index column when nothing fills it.
-  const hideEmptyNotesIndex = (area === "home" || (area === "notes" && chrome?.meta != null))
-    && !chrome?.meta?.navigation
-    && !chrome?.meta?.actions
-    && chrome?.meta?.search?.kind !== "surface";
   const canToggleIndex = area === "manga" && chrome != null;
-  const hideIndex = view.kind === "collections" || hideEmptyNotesIndex;
+  const hideIndex = !hasWorkspaceIndex(view, collections, chrome?.meta ?? null);
   // Hidden by the user, the index stays mounted: its search dialog and content survive and come back without reloading.
   const indexHiddenByUser = canToggleIndex && chrome.indexHidden[area] === true;
   const assetTotalCount = useAssetTotalCount(area === "assets");
   const artistOverview = useArtistOverview();
   const enterArea = (next: RailArea) => {
-    if (next === "collections" && view.kind === "collection") {
+    if (next === "collections" && requestedView.kind === "collection") {
       onNavigate(collectionList.current ?? { kind: "collections", typeFilter: collectionType, showcase: false });
       return;
     }
-    if (next === area && !quickAssetView) return;
+    if (next === requestedArea && !quickAssetView) return;
     onNavigate(history.current[next] ?? (next === "collections" ? { kind: "collections", typeFilter: collectionType, showcase: false } : next === "manga" ? { kind: "manga" } : next === "home" ? { kind: "home" } : next === "notes" ? { kind: "notes" } : next === "exchange" ? { kind: "exchange" } : next === "private_vault" ? { kind: "private_vault" } : { kind: "classification", classificationId: null }));
   };
   const entries = useNavigationEntries({ view, onNavigate, reviewCount, unsortedCount, trashCount, privateVaultAvailable, privateVaultActivity: vaultImportText, onImportFiles });
@@ -150,7 +158,7 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
       {railAreas.map(({ key, label, Icon }) => {
         const count = key === "exchange" ? exchangeCount : 0;
         const activity = key === "private_vault" ? vaultImportText : undefined;
-        return <button key={key} type="button" className="workspace-rail__item" aria-current={area === key ? "page" : undefined}
+        return <button key={key} type="button" className="workspace-rail__item" aria-current={requestedArea === key ? "page" : undefined}
           aria-description={count > 0 ? `받은 파일 ${count}개` : activity} onClick={() => enterArea(key)}>
           <span className="workspace-rail__icon"><Icon aria-hidden="true" />{count > 0 && <span className="workspace-rail__count" aria-hidden="true">{count > 99 ? "99+" : count}</span>}</span>
           <span>{label}</span>{activity && <span className="workspace-rail__activity" aria-hidden="true" />}</button>;
@@ -160,10 +168,10 @@ export function WorkspaceNavigation({ view, collectionType, width, onWidthChange
           aria-description={searchInfo ? `${searchInfo.scope}에서 검색하거나 이름으로 이동 (Ctrl+K)` : "이름으로 이동하거나 명령 실행 (Ctrl+K)"} onClick={openPalette}>
           <MagnifyingGlassIcon aria-hidden="true" /><span>찾기</span><kbd className="workspace-rail__hint" aria-hidden="true">Ctrl K</kbd>
         </button>
-        <MorePanel entries={moreEntries} current={area === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />
+        <MorePanel entries={moreEntries} current={requestedArea === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />
       </div>
     </nav>
-    {!hideIndex && <aside className="workspace-index" hidden={indexHiddenByUser} style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
+    {!hideIndex && <aside className="workspace-index" hidden={indexHiddenByUser} inert={chrome?.pending || undefined} style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
       <header className="workspace-index__head" aria-label={areaName} data-tauri-drag-region="deep">
         <span className="workspace-index__title" aria-hidden="true">{areaTitle}</span>
         <div className="workspace-index__head-actions">

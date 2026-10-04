@@ -1,3 +1,5 @@
+import { useDelayedBusy } from "../shared/useDelayedBusy";
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { AssetGallery } from "../assets/AssetGallery";
@@ -74,7 +76,7 @@ function VaultUnlockPanel({ gateway, remembered, onStatusChange }: { gateway: Li
       </label>
       {error && <p className="external-vault-message external-vault-message--error" role="alert">{error}</p>}
       <div className="external-vault-actions">
-        <Button type="submit" variant="primary" disabled={busy || !value}>{busy ? "여는 중…" : "열기"}</Button>
+        <Button type="submit" variant="primary" disabled={busy || !value}><BusyLabel busy={!!(busy)} idle={"열기"}>여는 중…</BusyLabel></Button>
         <Button type="button" variant="ghost" disabled={busy} onClick={() => { setKind(recovery ? "password" : "recoveryKey"); setValue(""); setError(null); }}>
           {recovery ? "비밀번호로 열기" : "복구키로 열기"}
         </Button>
@@ -100,7 +102,9 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
   const { job: importJob, completions } = useVaultImportJob();
   const exportJob = useVaultExportJob();
   const importing = Boolean(importJob?.running);
+  const showImporting = useDelayedBusy(importing);
   const exporting = Boolean(exportJob?.running);
+  const showExporting = useDelayedBusy(exporting);
   const [locking, setLocking] = useState(false);
   const trashView = filter === "trash";
   const kind = filter === "image" || filter === "video" ? filter : null;
@@ -330,13 +334,13 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
           <ToolbarAction label="휴지통 비우기" Icon={TrashIcon} disabled={busy || readOnly || (totalCount === 0 && !trashedCount)} onClick={() => setConfirm({ kind: "empty" })} />
         </> : <>
           {selectedIds.length > 0 && <>
-            <ToolbarAction label={exporting ? "내보내는 중…" : `내보내기${selectedLabel}`} title="PC로 내보내기" count={exporting ? 0 : selectedIds.length} Icon={ArrowUpTrayIcon} disabled={exporting || !gateway.exportEncryptedVaultItems} onClick={() => void exportItems(selectedIds)} />
+            <ToolbarAction label={showExporting ? "내보내는 중…" : `내보내기${selectedLabel}`} title="PC로 내보내기" count={exporting ? 0 : selectedIds.length} Icon={ArrowUpTrayIcon} disabled={exporting || !gateway.exportEncryptedVaultItems} onClick={() => void exportItems(selectedIds)} />
             <ToolbarAction label="휴지통으로" Icon={TrashIcon} disabled={busy || readOnly || !gateway.trashEncryptedVaultItems} onClick={() => void trash(selectedIds)} />
           </>}
           <ToolbarAction label="제목 변경" Icon={PencilSquareIcon} disabled={!single || readOnly} onClick={() => setTitleEditorOpen(true)} />
           <span className="external-vault-browser__divider" aria-hidden="true" />
           <ToolbarAction label="파일 추가" Icon={DocumentPlusIcon} disabled={importing || readOnly || !gateway.importFilesIntoEncryptedVault} onClick={() => void addFiles()} />
-          <ToolbarAction label={importing ? "가져오는 중…" : "가져오기"} title="폴더 가져오기" Icon={FolderArrowDownIcon} disabled={importing || readOnly || !gateway.importIntoEncryptedVault} onClick={() => void importFolder()} />
+          <ToolbarAction label={showImporting ? "가져오는 중…" : "가져오기"} title="폴더 가져오기" Icon={FolderArrowDownIcon} disabled={importing || readOnly || !gateway.importIntoEncryptedVault} onClick={() => void importFolder()} />
         </>}
         <span className="external-vault-browser__divider" aria-hidden="true" />
         <ToolbarAction label="잠그기" Icon={LockClosedIcon} disabled={importing || locking} onClick={() => void lock()} />
@@ -395,7 +399,7 @@ function VaultGallery({ gateway, status, onStatusChange, onContentChanged, priva
       {error && <p className="external-vault-editor__error" role="alert">{error}</p>}
       <div className="ui-dialog__actions">
         <Button disabled={busy} onClick={() => setConfirm(null)}>취소</Button>
-        <Button variant="danger" disabled={busy} onClick={() => void confirmDeletion(confirm)}>{busy ? "삭제 중…" : "영구 삭제"}</Button>
+        <Button variant="danger" disabled={busy} onClick={() => void confirmDeletion(confirm)}><BusyLabel busy={!!(busy)} idle={"영구 삭제"}>삭제 중…</BusyLabel></Button>
       </div>
     </Dialog>}
     {message && <Toast actionLabel={message.undoIds ? "실행 취소" : undefined} onAction={message.undoIds ? () => void undoTrash(message.undoIds!) : undefined}

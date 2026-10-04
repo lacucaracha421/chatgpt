@@ -393,7 +393,8 @@ it("shows compact name-only tiles with a warning mark only when S36 found mistak
   const hina=await screen.findByRole("button",{name:"히나 열기"});
   await waitFor(()=>expect(hina.querySelector(".series-character__warning")).not.toBeNull());
   expect(hina).toHaveAttribute("aria-description", expect.stringContaining("S36 보류 · 확인 30 · 틀림 2"));
-  expect(hina.querySelector("small")).toBeNull();
+  expect(hina.querySelector("small")).toBeEmptyDOMElement();
+  expect(hina.querySelector("small")).toHaveAttribute("aria-hidden", "true");
   expect(screen.queryByText(/S36 보류/)).not.toBeInTheDocument();
   const kisaki=screen.getByRole("button",{name:"키사키 열기"});
   expect(kisaki.querySelector(".series-character__warning")).toBeNull();

@@ -133,6 +133,9 @@ fn without_features_the_payload_is_byte_identical_to_one_without_pc_data() {
         cover_artwork_id: Some("art".into()),
         local_release_date: None,
         isbn13: None,
+        contents: None,
+        price: None,
+        publisher: None,
         release_status: None,
     };
     assert_eq!(

@@ -286,10 +286,12 @@ describe("CollectionBrowser", () => {
     expect(document.querySelector(".ui-section-bar__extra")).toBeNull();
     expect(shortcuts.nextElementSibling).toHaveClass("collection-shortcuts__divider");
     expect(shortcuts.parentElement?.lastElementChild).toHaveTextContent("보기");
-    expect(within(shortcuts).getAllByRole("button").map(button => button.getAttribute("aria-label"))).toEqual(typeFilter === "av" ? ["쇼케이스 1"] : ["쇼케이스 1", typeFilter === "manga" ? "신간 보기" : "발매 캘린더 보기"]);
+    expect(within(shortcuts).getAllByRole("button").map(button => button.getAttribute("aria-label"))).toEqual(typeFilter === "av" ? ["쇼케이스"] : ["쇼케이스", typeFilter === "manga" ? "신간 보기" : "발매 캘린더 보기"]);
     expect(shortcuts.querySelector(".is-new, .ui-segmented__thumb, [aria-checked], [aria-current]")).toBeNull();
-    const showcase = within(shortcuts).getByRole("button", { name: "쇼케이스 1" });
+    const showcase = within(shortcuts).getByRole("button", { name: "쇼케이스" });
     expect(showcase).toHaveAttribute("aria-pressed", "false");
+    expect(showcase).toHaveTextContent(/^쇼케이스$/);
+    expect(showcase.querySelector(".collection-shortcuts__count")).toBeNull();
     showcase.focus();
     await userEvent.keyboard("{Enter}");
     expect(onViewChange).toHaveBeenCalledWith({ kind: "collections", typeFilter, showcase: true });
@@ -299,7 +301,7 @@ describe("CollectionBrowser", () => {
   it("marks Showcase pressed and toggles back to the library with the keyboard", async () => {
     const onViewChange = vi.fn();
     renderBrowser({ collections: [{ ...sample, showcase: true }], typeFilter: "game", showcase: true, onViewChange });
-    const button = screen.getByRole("button", { name: "쇼케이스 1" });
+    const button = screen.getByRole("button", { name: "쇼케이스" });
     expect(button).toHaveAttribute("aria-pressed", "true");
     button.focus();
     await userEvent.keyboard("{Enter}");
@@ -431,7 +433,7 @@ describe("CollectionBrowser", () => {
     const { container, rerender } = render(<LiveBrowser works={[game, manga]} />);
     const bar = container.querySelector(".ui-section-bar");
     const extra = bar?.querySelector(".ui-section-bar__extra");
-    expect(screen.getByRole("button", { name: "쇼케이스 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "쇼케이스" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("radio", { name: "만화" }));
     expect(container.querySelector(".ui-section-bar")).toBe(bar);
     expect(bar?.querySelector(".ui-section-bar__extra")).toBe(extra);
@@ -439,11 +441,11 @@ describe("CollectionBrowser", () => {
     expect(screen.queryByRole("button", { name: /발매 캘린더 보기/ })).not.toBeInTheDocument();
     expect(screen.getByRole("group", { name: "만화 작품 목록" })).toHaveTextContent("Astral Chain");
     rerender(<LiveBrowser works={[game, { ...manga, unreadReleaseCount: 0 }, { ...manga, id: "manga2", unreadReleaseCount: 0 }]} />);
-    expect(screen.getByRole("button", { name: "쇼케이스 2" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "쇼케이스" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "신간 보기" }).querySelector(".collection-shortcuts__count")).toBeNull();
     await userEvent.click(screen.getByRole("radio", { name: "AV" }));
     expect(container.querySelector(".ui-section-bar")).toBe(bar);
-    expect(screen.getByRole("button", { name: "쇼케이스 0" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "쇼케이스" })).toBeInTheDocument();
     expect(within(screen.getByRole("group", { name: "컬렉션 바로가기" })).getAllByRole("button")).toHaveLength(1);
   });
 
@@ -453,7 +455,7 @@ describe("CollectionBrowser", () => {
     renderBrowser({ collections: [{ ...sample, showcase: true }, { ...sample, id: "c2", name: "Celeste" }], typeFilter: "game", showcase: false, onViewChange, onLibraryStateChange, libraryState: { ...createDefaultCollectionLibraryState().game, showcaseOpen: true } });
     expect(screen.queryByRole("region", { name: "쇼케이스" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "전체 보기" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "쇼케이스 1" }));
+    await userEvent.click(screen.getByRole("button", { name: "쇼케이스" }));
     expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collections", typeFilter: "game", showcase: true });
     expect(onLibraryStateChange).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: /전체/ })).toHaveTextContent("전체2");
@@ -463,7 +465,7 @@ describe("CollectionBrowser", () => {
     renderBrowser({ collections: [{ ...sample, showcase: true }, { ...sample, id: "other", name: "다른 작품", showcase: true, myScore: 4.5 }], typeFilter: "game", showcase: false });
     await userEvent.click(screen.getByRole("button", { name: "내 별점" }));
     fireEvent.change(screen.getByRole("slider", { name: "내 별점" }), { target: { value: "10" } });
-    expect(screen.getByRole("button", { name: "쇼케이스 2" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "쇼케이스" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Astral Chain/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /다른 작품/ })).not.toBeInTheDocument();
   });
@@ -795,7 +797,7 @@ describe("CollectionBrowser manga shelf", () => {
     expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collection", collectionId: "m1" });
     fireEvent.keyDown(within(list).getByRole("button", { name: /빈 작품/ }), { key: "Enter" });
     expect(onViewChange).toHaveBeenLastCalledWith({ kind: "collection", collectionId: "m2" });
-    expect(screen.getByRole("button", { name: "쇼케이스 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "쇼케이스" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "쇼케이스" })).not.toBeInTheDocument();
   });
 

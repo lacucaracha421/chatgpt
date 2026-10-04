@@ -1,3 +1,4 @@
+import { BusyLabel } from "../../shared/ui/BusyLabel";
 import { useHorizontalWheel } from "../../shared/ui/useHorizontalWheel";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { workArtworkThumbnailUrl, workArtworkUrl } from "../../assets/mediaUrl";
@@ -166,10 +167,10 @@ export function AvPortraitPicker({ personId, personName, wikidataId = null, api,
             </button>)}
             {profile.images.length === 0 && <p>등록된 사진이 없어요.</p>}
           </div> : <p className="av-portrait-picker__empty">{stashdbConfigured === false ? "StashDB 키가 없어요. 설정에서 키를 등록해 주세요." : "StashDB 프로필이 연결되면 사진을 고를 수 있어요"}</p>}
-          {stashdbLoading && <p role="status">사진을 불러오는 중…</p>}
+          <BusyLabel busy={!!(stashdbLoading)}><p role="status">사진을 불러오는 중…</p></BusyLabel>
         </>}
         {sourceKind === "commons" && <div className="av-portrait-picker__commons">
-          {commonsLoading && <p role="status">위키미디어 공용 사진을 불러오는 중…</p>}
+          <BusyLabel busy={!!(commonsLoading)}><p role="status">위키미디어 공용 사진을 불러오는 중…</p></BusyLabel>
           {!commonsLoading && !commons && <p role="status">위키미디어 공용 사진이 없습니다</p>}
           {commons && <>
             {!privacyMode && <img src={commons.dataUrl} alt={`${personName} 공용 사진 미리보기`} />}

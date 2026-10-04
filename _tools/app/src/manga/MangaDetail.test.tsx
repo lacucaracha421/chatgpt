@@ -48,7 +48,8 @@ it("keeps busy read/bookmark buttons in place and masks every cover in privacy m
   const bookmark = screen.getByRole("button", { name: "북마크" });
   const edition = { ...detail, titleJpn: null, artists: [], series: [], posted: 1, language: "korean" };
   rerender(<MangaDetail {...props} detail={{ ...detail, bookmarked: true }} reading bookmarkPending privacyMode editionCount={2} editions={[edition]} />);
-  expect(screen.getByRole("button", { name: "불러오는 중…" })).toBe(read);
+  expect(screen.getByRole("button", { name: "읽기" })).toBe(read);
+  expect(screen.queryByText("불러오는 중…")).not.toBeInTheDocument();
   expect(read).toBeDisabled();
   expect(read).toHaveAttribute("aria-busy", "true");
   expect(screen.getByRole("button", { name: "북마크 해제" })).toBe(bookmark);

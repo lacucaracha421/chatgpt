@@ -12,7 +12,7 @@ import { useCharacterHub } from "../characters/useCharacterHub";
 import { CharacterFolderContent } from "../characters/CharacterFolderContent";
 import { applyInitialCountOrder, reorderFolders } from "../classification/folderOrder";
 import { useNotesCloseGuard } from "../notes/useNotesCloseGuard";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { AssetBrowser, type AssetBrowserStatus, type AssetNavigationMemory } from "../assets/AssetBrowser";
 import { startAssetDrag as nativeStartAssetDrag, type StartAssetDrag } from "../drag-out/startAssetDrag";
 import { ClassificationSidebar } from "../classification/ClassificationSidebar";
@@ -29,8 +29,8 @@ import {
 import { DropOverlay } from "../ingestion/DropOverlay";
 import { AppShell } from "../layout/AppShell";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
-import { WorkspaceNavigation, workspaceArea } from "../layout/WorkspaceNavigation";
-import { AreaSwitch, MotionScope, viewReady } from "../shared/motion/AreaSwitch";
+import { WorkspaceNavigation, hasWorkspaceIndex, workspaceArea } from "../layout/WorkspaceNavigation";
+import { AreaPainted, AreaSwitch, MotionScope, viewReady } from "../shared/motion/AreaSwitch";
 import { ChromeContext, useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { LightweightModeIndicator, WindowControls } from "../layout/WindowControls";
 import { libraryGateway } from "../library/client";
@@ -159,6 +159,10 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const assetNavigationMemory = useRef<AssetNavigationMemory>(new Map());
   // The app opens on Home (HOME-DASH-001); the rail's 에셋 opens the library.
   const [view, setView] = useState<AssetView>(initialWorkspaceView);
+  const area = workspaceSwitchKey(view);
+  const [shownArea, setShownArea] = useState(area);
+  const shownView = useRef(view);
+  if (area === shownArea) shownView.current = view;
   const viewHistoryRef = useRef<AssetView[]>([]);
   useCollectionOpen(gateway, libraryRoot, view.kind === "collection" ? view.collectionId : null);
   const collectionWorkOrderRef = useRef<string[]>([]);
@@ -646,10 +650,10 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     <PrivacyProvider gateway={gateway} libraryKey={libraryRoot} ratingRevision={assetRefresh} nsfwFilter={preferences.nsfwFilter} setNsfwFilter={(nsfwFilter) => updatePreferences({nsfwFilter})} privacyMode={preferences.privacyMode} setPrivacyMode={(privacyMode) => updatePreferences({ privacyMode })}>
       <FaultGameProvider>
       <div className="library-workspace" data-privacy-mode={preferences.privacyMode ? "true" : undefined} inert={maintenance !== null ? true : undefined}>
-        <WorkspaceChromeProvider scope={JSON.stringify(view)}>
+        <WorkspaceChromeProvider scope={JSON.stringify(shownView.current)} pending={area !== shownArea}>
         <AppShell
           sidebar={
-            <WorkspaceNavigation view={view} collectionType={preferences.collectionType}
+            <WorkspaceNavigation view={shownView.current} requestedView={view} collectionType={preferences.collectionType}
               width={sidebarWidth} onWidthChange={setSidebarWidth} onNavigate={navigateView}
               reviewCount={reviewCount} trashCount={trashCount} onImportFiles={dropEnabled ? () => void importFiles() : undefined}
               unsortedCount={unsortedCount} onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}
@@ -659,7 +663,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
               assetNavigation={<ClassificationSidebar embedded characters={characterHub.targets} characterGroups={characterHub.groups}
               entries={entries}
               albums={albums}
-              view={view}
+              view={shownView.current}
               collectionType={preferences.collectionType}
               expandedIds={preferences.expandedClassificationIds}
               pinnedIds={preferences.pinnedClassificationIds}
@@ -704,7 +708,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 <WindowControls /></div>
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
-                <MotionScope><WorkspaceAreaSwitch area={workspaceArea(view)} ready={(host, area) => (area !== "collections" || (collectionsRead?.gateway === gateway && collectionsRead.root === libraryRoot)) && viewReady(host)}><Suspense fallback={<DeferredViewFallback />}>
+                <MotionScope><WorkspaceAreaSwitch view={view} shownView={shownView.current} collections={collections} sidebarWidth={sidebarWidth} onShown={setShownArea} ready={(host, area) => (area !== "collections" || (collectionsRead?.gateway === gateway && collectionsRead.root === libraryRoot)) && viewReady(host)}><Suspense fallback={<DeferredViewFallback />}>
                 {view.kind === "private_vault" ? (
                   privateVaultVisible && privateVaultStatus
                     ? <ExternalVaultBrowser gateway={gateway} status={privateVaultStatus} onStatusChange={updatePrivateVaultStatus}
@@ -844,8 +848,20 @@ function DeferredViewFallback() {
   return <div className="library-content__deferred" role="status" aria-label="화면 불러오는 중" />;
 }
 
-/** Freeze the outgoing chrome scope too: it must not publish into the incoming area's slots. */
-function WorkspaceAreaSwitch({area, ready, children}: {area: string; ready(host: HTMLElement, area: string): boolean; children: ReactNode}) {
+function workspaceSwitchKey(view: AssetView) { return view.kind === "collection" ? "collection-work" : workspaceArea(view); }
+
+/** Prepare chrome for the requested scope while the shell still paints the outgoing scope. */
+function WorkspaceAreaSwitch({view, shownView, collections, sidebarWidth, onShown, ready, children}: {view: AssetView; shownView: AssetView; collections: CollectionSummary[]; sidebarWidth: number; onShown(area: string): void; ready(host: HTMLElement, area: string): boolean; children: ReactNode}) {
   const chrome = useWorkspaceChrome();
-  return <AreaSwitch activeKey={area} ready={ready} views={{[area]: <ChromeContext.Provider value={chrome}>{children}</ChromeContext.Provider>}}/>;
+  const area = workspaceSwitchKey(view), scope = JSON.stringify(view);
+  const indexWidth = (target: AssetView) => hasWorkspaceIndex(target, collections, chrome?.getMeta(JSON.stringify(target)) ?? null)
+    && !(workspaceArea(target) === "manga" && chrome?.indexHidden.manga) ? sidebarWidth : 0;
+  return <AreaSwitch activeKey={area} retained={["home"]} onShown={onShown} ready={ready} incomingWidthDelta={indexWidth(shownView) - indexWidth(view)} waitForReady={area === "collection-work" || area === "collections"} views={{[area]: <WorkspaceChromeScope chrome={chrome} scope={scope}>{children}</WorkspaceChromeScope>}}/>;
+}
+
+const NO_CHROME_TARGETS = { navigation: null, actions: null, search: null, settings: null, header: null, details: null };
+function WorkspaceChromeScope({chrome, scope, children}: {chrome: ReturnType<typeof useWorkspaceChrome>; scope: string; children: ReactNode}) {
+  const painted = useContext(AreaPainted);
+  // A portal escapes the stage's opacity. Only the painted tree may use the shell's slots.
+  return <ChromeContext.Provider value={chrome ? {...chrome, scope, targets: painted ? chrome.targets : NO_CHROME_TARGETS} : null}>{children}</ChromeContext.Provider>;
 }

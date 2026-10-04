@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useAssetMask } from "../privacy/PrivacyContext";
 import { AssetImage } from "../privacy/AssetImage";
 import { workloadPollDelay, getWorkloadProfile } from "../app/workloadProfile";
@@ -276,11 +277,12 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
         <Button size="icon" variant="ghost" aria-label="S36 확인 닫기" onClick={onClose}><XMarkIcon aria-hidden="true" /></Button>
       </header>
       {(starting || backfill?.running || (backfill?.total ?? 0) > 0 || backfill?.cancelled) && <div className="shadow-review__backfill" role="status">
-        {starting || backfill?.preparing ? "기존 이미지 확인 중…" : `기존 이미지 채점 ${backfill?.scored ?? 0} / ${backfill?.total ?? 0} · 건너뜀 ${backfill?.skipped ?? 0}`}
+        <BusyLabel busy={!!(starting || backfill?.preparing)} idle={`기존 이미지 채점 ${backfill?.scored ?? 0} / ${backfill?.total ?? 0} · 건너뜀 ${backfill?.skipped ?? 0}`}>기존 이미지 확인 중…</BusyLabel>
         {backfill?.cancelled && " · 취소됨"}
         {backfill?.running && <Button size="sm" variant="ghost" onClick={() => void cancelBackfill()}>채점 취소</Button>}
       </div>}
       {(backfillError || backfill?.error) && <p className="character-message shadow-review__notice" role="alert">{backfillError || backfill?.error}</p>}
+      <BusyLabel busy={loading && !current && !error}><p className="character-message shadow-review__notice" role="status">불러오는 중…</p></BusyLabel>
       {error
         ? <p className="character-message shadow-review__notice" role="alert">{error}<Button size="sm" onClick={() => setReload(value => value + 1)}>다시 시도</Button></p>
         : current
@@ -309,7 +311,7 @@ export function ShadowReview({ onClose, onChanged, privacyMode = false, api = sh
             </aside>
           </div>
           : loading
-            ? <p className="character-message shadow-review__notice" role="status">불러오는 중…</p>
+            ? null
             : skipped.current.size > 0
               ? <EmptyState title="건너뛴 항목만 남았습니다"><Button size="sm" onClick={restoreSkipped}>건너뛴 항목 다시 보기</Button></EmptyState>
               : <EmptyState title="확인할 항목이 없습니다">

@@ -8,6 +8,7 @@ import type { AuthoritySyncHealth, HomeOverview, ReleaseWishlistItem } from "../
 import { NotesStore, type Note } from "../notes/store";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
 import { HomeView, type HomeViewProps } from "./HomeView";
+import { AreaPainted, AreaRequested, AreaVisible } from "../shared/motion/AreaSwitch";
 
 const gateway = vi.hoisted(() => ({
   collectionTracking: { listInbox: vi.fn(), releaseBoard: vi.fn() },
@@ -193,6 +194,34 @@ describe('Home attention', () => {
 describe("Home visit read acknowledgement", () => {
   const previous = new Date(2026, 8, 24, 12).toISOString();
   const seedVisit = () => writeHomeVisit("fixture", { lastVisit: previous, pending: [], opened: [] });
+
+  it("retains arrivals on re-entry and acknowledges only the new visit's completed reads", async () => {
+    seedVisit();
+    gateway.releaseCalendar.wishlist.mockResolvedValue([title("cached", "Cached release", "game", "2026-09-25")]);
+    const notes = notesWith([]);
+    const avLinkApi = {pendingCount: vi.fn().mockResolvedValue(3)} as unknown as HomeViewProps["avLinkApi"];
+    const props = { collections: [], reviewCount: 0, unsortedCount: 0, trashCount: 0, notes, avLinkApi, onNavigate: vi.fn(), now: () => NOW };
+    const tree = (active: boolean) => <AreaRequested.Provider value={active}><AreaPainted.Provider value={active}><AreaVisible.Provider value={active}>
+      <PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}><HomeView {...props} /></PrivacyProvider>
+    </AreaVisible.Provider></AreaPainted.Provider></AreaRequested.Provider>;
+    const view = render(tree(true));
+    await screen.findByText("Cached release");
+    const avRow = await screen.findByRole("button", {name: /AV 품번3/});
+    await waitFor(() => expect(readHomeVisit("fixture").lastVisit).toBe(NOW.toISOString()));
+    view.rerender(tree(false));
+    const saved = readHomeVisit("fixture");
+    writeHomeVisit("fixture", {...saved, lastVisit: previous});
+    let finish!: (items: ReleaseWishlistItem[]) => void;
+    gateway.releaseCalendar.wishlist.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    view.rerender(tree(true));
+    expect(screen.getByRole("button", {name: /AV 품번3/})).toBe(avRow);
+    expect(screen.getByText("Cached release")).toBeVisible();
+    expect(readHomeVisit("fixture").lastVisit).toBe(previous);
+    await act(async () => { finish([title("cached", "Cached release", "game", "2026-09-25"), title("fresh", "Fresh release", "game", "2026-09-26")]); });
+    await within(screen.getByRole("region", {name: "새로 나옴 · 지난번 이후"})).findByText("Fresh release");
+    await waitFor(() => expect(readHomeVisit("fixture").lastVisit).toBe(NOW.toISOString()));
+    expect(readHomeVisit("fixture").pending).toContain("title:fresh:2026-09-26:");
+  });
 
   it("keeps the previous visit when leaving before release data arrives", async () => {
     seedVisit();

@@ -1,14 +1,24 @@
 import {useRef} from 'react';
-import {cleanup,fireEvent,render,screen} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
 import {afterEach,expect,it,vi} from 'vitest';
 import {usePullToRefresh} from './usePullToRefresh';
-afterEach(cleanup);
+afterEach(()=>{cleanup();vi.useRealTimers();});
 function Harness({refresh,busy=false,paused=false}:{refresh():void;busy?:boolean;paused?:boolean}){const host=useRef<HTMLDivElement>(null);const indicator=usePullToRefresh(host,refresh,busy,paused);return <div ref={host} data-testid="scroll">{indicator}</div>;}
 function pull(element:HTMLElement,x=0,y=140){fireEvent.touchStart(element,{touches:[{clientX:0,clientY:0}]});fireEvent.touchMove(element,{touches:[{clientX:x,clientY:y}]});}
 it('refreshes exactly once on release after a downward pull at the top',()=>{
+ vi.useFakeTimers();
  const refresh=vi.fn();const view=render(<Harness refresh={refresh}/>);const host=screen.getByTestId('scroll');
  pull(host);expect(screen.getByText('놓으면 새로고침')).toBeTruthy();expect(refresh).not.toHaveBeenCalled();fireEvent.touchEnd(host);expect(refresh).toHaveBeenCalledOnce();
- view.rerender(<Harness refresh={refresh} busy/>);expect(screen.getByText('새로고침 중')).toBeTruthy();pull(host);fireEvent.touchEnd(host);expect(refresh).toHaveBeenCalledOnce();
+ view.rerender(<Harness refresh={refresh} busy/>);act(()=>vi.advanceTimersByTime(599));expect(screen.queryByText('새로고침 중')).toBeNull();
+ act(()=>vi.advanceTimersByTime(1));expect(screen.getByText('새로고침 중')).toBeTruthy();pull(host);fireEvent.touchEnd(host);expect(refresh).toHaveBeenCalledOnce();
+ view.rerender(<Harness refresh={refresh}/>);act(()=>vi.advanceTimersByTime(399));expect(screen.getByText('새로고침 중')).toBeTruthy();
+ act(()=>vi.advanceTimersByTime(1));expect(screen.queryByText('새로고침 중')).toBeNull();
+});
+it('never announces a quick pull refresh',()=>{
+ vi.useFakeTimers();const refresh=vi.fn();const view=render(<Harness refresh={refresh}/>);const host=screen.getByTestId('scroll');
+ pull(host);fireEvent.touchEnd(host);view.rerender(<Harness refresh={refresh} busy/>);
+ act(()=>vi.advanceTimersByTime(500));view.rerender(<Harness refresh={refresh}/>);act(()=>vi.advanceTimersByTime(1000));
+ expect(screen.queryByText('새로고침 중')).toBeNull();expect(host.querySelector('.pull-refresh__pill')).toBeNull();
 });
 it('leaves scrolling, horizontal swipes, mouse input, short pulls and cancelled touches alone',()=>{
  const refresh=vi.fn();render(<Harness refresh={refresh}/>);const host=screen.getByTestId('scroll');

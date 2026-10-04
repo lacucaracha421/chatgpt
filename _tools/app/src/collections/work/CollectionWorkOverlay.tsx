@@ -34,13 +34,8 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
   const [tmdb, setTmdb] = useState<{ id: string; connection: TmdbConnection | null; loading: boolean }>({ id: collection.id, connection: null, loading: true });
   const tmdbRef = useRef(tmdb); tmdbRef.current = tmdb;
   const [tmdbRefreshing, setTmdbRefreshing] = useState(false);
-  const [loaded, setLoaded] = useState<CollectionWorkData | null>(() => collection.type === "game" || collection.type === "movie" ? {
-    collection, av: null, covers: null, related: null, artworks: [], providerConnected: false,
-    position: (listOrder?.includes(collection.id) ? listOrder : collections.filter(item => item.type === collection.type).map(item => item.id)).indexOf(collection.id) + 1,
-    total: (listOrder?.includes(collection.id) ? listOrder : collections.filter(item => item.type === collection.type).map(item => item.id)).length,
-    case: { title: collection.name, publisher: collection.publisher, platform: collection.type === "movie" ? "film" : casePlatform(collection.platforms), privacy: privacyMode, spine: null, back: null,
-      front: collection.selectedWorkArtworkId ? workArtworkUrl(collection.selectedWorkArtworkId) : collection.coverAssetId ? assetUrl(collection.coverAssetId) : collection.sourcePath ? collectionSourcePreviewUrl(collection.id) : null },
-  } : null);
+  // Artwork roles and the owned device determine the first case and its stage geometry.
+  const [loaded, setLoaded] = useState<CollectionWorkData | null>(null);
   const [panel, setPanel] = useState<{ kind: "edit" | "igdb" | "av" | "artwork" | "delete"; data: CollectionWorkData } | null>(null);
   const [tmdbPanel, setTmdbPanel] = useState<TmdbMovieTarget | null>(null);
   const [performer, setPerformer] = useState<string | null>(null);
@@ -50,6 +45,7 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
   const order = (listOrder?.includes(collection.id) ? listOrder : collections.filter(item => item.type === collection.type).map(item => item.id)).filter(id => collections.some(item => item.id === id));
   const orderKey = order.join("|");
   useEffect(() => {
+    if (!personal.ready) return;
     let active = true;
     let retry: ReturnType<typeof setTimeout> | undefined;
     setError(null);
@@ -84,7 +80,7 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
       } catch (reason) { if (active) setError(avError(reason)); }
     })();
     return () => { active = false; if (retry) clearTimeout(retry); };
-  }, [api, gateway, collection, reload, privacyMode, orderKey, spineRevision, library?.root]);
+  }, [api, gateway, collection, reload, privacyMode, orderKey, spineRevision, library?.root, personal.ready]);
   useEffect(() => {
     if (collection.type !== "movie") return;
     let active = true;
@@ -175,7 +171,7 @@ export function CollectionWorkOverlay({ collection, collections, listOrder, init
   };
   // Editors retain their exact target even if a route request changes behind them.
   return <>
-    {screenData ? <CollectionWorkScreen data={screenData} pending={screenData.collection.id !== collection.id} actions={actions} /> : <div className="work-loading"><Skeleton label="작품 화면" /><Button onClick={onExit}>닫기</Button></div>}
+    {screenData ? <CollectionWorkScreen data={screenData} pending={screenData.collection.id !== collection.id} actions={actions} /> : <div className="work-loading">{!error && <Skeleton label="작품 화면" />}<Button onClick={onExit}>닫기</Button></div>}
     {error && <div className="work-error" role="alert">{error} <Button size="sm" onClick={() => setReload(value => value + 1)}>다시 시도</Button></div>}
     {panel?.kind === "edit" && <CollectionEditDialog open mode={{ kind: "edit", collection: panel.data.collection }} onClose={() => setPanel(null)} onSubmit={async input => { await gateway.updateCollection(panel.data.collection.id, input as UpdateCollection); await onChanged(); setReload(value => value + 1); }} />}
     {tmdbPanel && <TmdbMovieDialog open target={tmdbPanel} onClose={() => setTmdbPanel(null)} onOpenSettings={() => { setTmdbPanel(null); onOpenSettings(); }} onApplied={async () => { setTmdbPanel(null); await mutate(async () => undefined); }} />}

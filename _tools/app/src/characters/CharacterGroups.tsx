@@ -147,7 +147,7 @@ function CharacterGroupCard({ group, members, memberCounts, privacyMode, onOpen,
         }) : <span className="character-group-card__slot"><PeopleIcon aria-hidden="true" /></span>}
       </span>
       <strong><PeopleIcon className="character-group-card__icon" aria-hidden="true" /><span className="series-character__name">{group.name}</span></strong>
-      {count !== undefined && <small className="folder-shelf__meta">{count.toLocaleString("ko-KR")}장</small>}
+      <small className="folder-shelf__meta" aria-hidden={count === undefined || undefined}>{count === undefined ? null : `${count.toLocaleString("ko-KR")}장`}</small>
     </button>
     <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${group.name} 그룹 편집`} aria-description="그룹 편집" onClick={onEdit}><PencilIcon aria-hidden="true" /></Button>
   </article>;

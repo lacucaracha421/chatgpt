@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LibraryProvider } from "../library/LibraryContext";
@@ -8,7 +8,7 @@ import { ChromeSettingsDock, ChromeTarget, WorkspaceChromeProvider } from "../la
 import { WindowControls } from "../layout/WindowControls";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 /** Stands in for the 찾기 palette: applies text through the view's registered search. */
 function SearchProbe() {
@@ -57,12 +57,12 @@ describe("MangaBrowser", () => {
     expect(screen.getByRole("radio", { name: "로컬" })).toHaveAttribute("aria-checked", "true");
     await act(async () => finishLocal(series));
     expect(await screen.findByText("T1")).toBeVisible();
-    expect(screen.getByRole("radio", { name: "로컬 2" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "로컬" })).toHaveAttribute("aria-checked", "true");
     await userEvent.click(screen.getByRole("radio", { name: "카탈로그" }));
     await waitFor(() => expect(screen.getByText("카탈로그 작품")).toBeVisible());
     expect(gateway.searchCatalogGroups).toHaveBeenCalledOnce();
     expect(screen.queryByLabelText("망가 불러오는 중")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("radio", { name: "로컬 2" }));
+    await userEvent.click(screen.getByRole("radio", { name: "로컬" }));
     await waitFor(() => expect(screen.getByText("T1")).toBeVisible());
     expect(screen.queryByLabelText("망가 불러오는 중")).not.toBeInTheDocument();
   });
@@ -112,6 +112,8 @@ describe("MangaBrowser", () => {
     expect(screen.getByText("T2")).toBeVisible();
     expect(container.querySelectorAll(".manga-card img").length).toBe(2);
     expect(container.querySelector(".manga-card img")).toHaveAttribute("alt", "T1 표지");
+    expect(screen.queryByRole("button", { name: "보기 설정" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "비공개 모드" })).not.toBeInTheDocument();
   });
 
   it("shows cached manga while a slow scan continues", async () => {
@@ -121,15 +123,44 @@ describe("MangaBrowser", () => {
     gateway.scanManga = vi.fn().mockReturnValue(scanning);
 
     renderBrowser(gateway);
-    await userEvent.click(await screen.findByRole("radio", { name: /^로컬/ }));
-
-    expect(await screen.findByText("T1")).toBeVisible();
+    const local = await screen.findByRole("radio", { name: "로컬" });
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(local); });
+    expect(screen.getByText("T1")).toBeVisible();
+    expect(screen.queryByText("폴더 스캔 중")).not.toBeInTheDocument();
+    await act(async () => { vi.advanceTimersByTime(599); });
+    expect(screen.queryByText("폴더 스캔 중")).not.toBeInTheDocument();
+    await act(async () => { vi.advanceTimersByTime(1); });
     expect(screen.getByRole("status")).toHaveTextContent("폴더 스캔 중");
     expect(screen.getByRole("button", { name: "새로고침" })).toBeDisabled();
     await act(async () => finishScan());
-    await waitFor(() => expect(screen.getByRole("button", { name: "새로고침" })).toBeEnabled());
+    expect(screen.getByRole("button", { name: "새로고침" })).toBeEnabled();
+    await act(async () => { vi.advanceTimersByTime(399); });
+    expect(screen.getByText("폴더 스캔 중")).toBeVisible();
+    await act(async () => { vi.advanceTimersByTime(1); });
+    expect(screen.queryByText("폴더 스캔 중")).not.toBeInTheDocument();
+    expect(screen.getByText("T1")).toBeVisible();
     expect(screen.queryByText("새로 변경된 망가가 없습니다")).not.toBeInTheDocument();
     expect(document.querySelector(".manga-toolbar__refresh time")).toHaveTextContent("갱신");
+  });
+
+  it("never shows scan status for a quick scan or a scan abandoned on a source switch", async () => {
+    let finishScan!: (count: number) => void;
+    const gateway = createGateway({ root: "C:\\manga", series });
+    gateway.scanManga = vi.fn().mockImplementation(() => new Promise<number>(resolve => { finishScan = resolve; }));
+    renderBrowser(gateway);
+    const local = await screen.findByRole("radio", { name: "로컬" });
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(local); });
+    await act(async () => { vi.advanceTimersByTime(200); finishScan(0); });
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(screen.queryByText("폴더 스캔 중")).not.toBeInTheDocument();
+    expect(screen.getByText("T1")).toBeVisible();
+    await act(async () => { fireEvent.click(screen.getByRole("radio", { name: "카탈로그" })); });
+    await act(async () => { fireEvent.click(screen.getByRole("radio", { name: "로컬" })); });
+    await act(async () => { vi.advanceTimersByTime(200); fireEvent.click(screen.getByRole("radio", { name: "카탈로그" })); });
+    await act(async () => { vi.advanceTimersByTime(400); finishScan(0); });
+    expect(screen.queryByText("폴더 스캔 중")).not.toBeInTheDocument();
   });
 
   it("shows the setup prompt when the root is not set", async () => {
@@ -182,7 +213,7 @@ describe("MangaBrowser", () => {
     const bar = screen.getByRole("radiogroup", { name: "망가 출처" }).closest(".ui-section-bar") as HTMLElement;
     expect(within(bar).getByRole("button", { name: "정렬" })).toBeVisible();
     expect(titlebar.queryByRole("button", { name: "정렬" })).not.toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "로컬 2" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "로컬" })).toHaveAttribute("aria-checked", "true");
   });
 
   it("opens the viewer when a cover is clicked", async () => {

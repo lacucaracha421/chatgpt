@@ -1,3 +1,4 @@
+import { BusyLabel } from "../../shared/ui/BusyLabel";
 import { AssetImage } from "../../privacy/AssetImage";
 import { useHorizontalWheel } from "../../shared/ui/useHorizontalWheel";
 import { useEffect, useRef, useState } from "react";
@@ -114,7 +115,7 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
         </div>
         {mode === "register" && <div className="character-suggestion-dialog__images">
           {!chosenSeries && <p>참조 이미지를 고를 시리즈 폴더를 선택해 주세요.</p>}
-          {chosenSeries && !detail && !error && <p role="status">이미지 불러오는 중…</p>}
+          <BusyLabel busy={!!(chosenSeries && !detail && !error)}><p role="status">이미지 불러오는 중…</p></BusyLabel>
           {detail && <>
             <h3>참조 이미지 {references.length}<small>단독 우선 · 최대 8장</small></h3>
             <div ref={stripWheel} className="character-suggestion-references" role="group" aria-label="참조 이미지">
@@ -139,7 +140,7 @@ export function SuggestionDialog({ suggestion, mode, privacyMode, api, onClose, 
       <div className="character-suggestion-dialog__footer">
         <p>{mode === "register" ? <>{name || "캐릭터"}를 만들고 참조 {references.length}장 · 검토 후보 {candidateCount}장</> : <>{target?.displayName ?? "캐릭터"}에 최대 {detail?.images.length ?? 0}장을 검토 후보로 넣어요. 기존 참조·판단은 유지해요.</>}</p>
         <Button variant="ghost" disabled={busy} onClick={onClose}>취소</Button>
-        <Button variant="primary" disabled={busy || !detail || !context || (mode === "register" ? !name.trim() || !seriesId : !target)} onClick={() => void save()}>{busy ? "저장 중…" : mode === "register" ? "캐릭터 만들기" : "선택한 캐릭터에 합치기"}</Button>
+        <Button variant="primary" disabled={busy || !detail || !context || (mode === "register" ? !name.trim() || !seriesId : !target)} onClick={() => void save()}><BusyLabel busy={!!(busy)} idle={mode === "register" ? "캐릭터 만들기" : "선택한 캐릭터에 합치기"}>저장 중…</BusyLabel></Button>
       </div>
       </div>
       {preview && <ImagePreview image={preview} privacyMode={privacyMode} selected={references.includes(preview.assetId)}

@@ -10,15 +10,15 @@ import { SectionDropMount, useSectionDrop } from "../shared/ui/useSectionDrop";
 import { displayDateTime } from "../shared/displayDate";
 
 export type MangaSource = "all" | "bookmarked" | "local";
-const sourceOptions = (localCount?: number, bookmarkCount?: number) => [
-  { value: "all" as const, label: "카탈로그" }, { value: "bookmarked" as const, label: "북마크", count: bookmarkCount }, { value: "local" as const, label: "로컬", count: localCount },
+const sourceOptions = [
+  { value: "all" as const, label: "카탈로그" }, { value: "bookmarked" as const, label: "북마크" }, { value: "local" as const, label: "로컬" },
 ];
 
 /** The source switch as the section bar under the top bar; sort and language menus sit at its right end. */
-export function MangaSourceControl({ value, onChange, localCount, bookmarkCount, trailing }: {
+export function MangaSourceControl({ value, onChange, trailing }: {
   value: MangaSource; onChange: (source: MangaSource) => void; localCount?: number; bookmarkCount?: number; trailing?: ReactNode;
 }) {
-  return <SectionBar label="망가 출처" className="manga-section-bar" value={value} onChange={onChange} trailing={trailing} options={sourceOptions(localCount, bookmarkCount)} />;
+  return <SectionBar label="망가 출처" className="manga-section-bar" value={value} onChange={onChange} trailing={trailing} options={sourceOptions} />;
 }
 
 export function MangaChoiceMenu<T extends string>({ label, value, options, onChange }: {
@@ -28,13 +28,13 @@ export function MangaChoiceMenu<T extends string>({ label, value, options, onCha
     items={options.map(option => ({ id: option.value, label: option.label, group: label, selected: value === option.value, onSelect: () => onChange(option.value) }))} />;
 }
 
-export function MangaToolbar({ source, onSourceChange, localCount, bookmarkCount, countLabel, filterToken, controls, refreshedAt, refreshing, onRefresh, actions, chrome, ariaLabel = "망가 도구" }: {
+export function MangaToolbar({ source, onSourceChange, countLabel, filterToken, controls, refreshedAt, refreshing, onRefresh, actions, chrome, ariaLabel = "망가 도구" }: {
   source: MangaSource; onSourceChange: (source: MangaSource) => void; localCount?: number; bookmarkCount?: number;
   countLabel?: string; filterToken?: ReactNode; controls?: ReactNode; refreshedAt?: string | null; refreshing?: boolean; onRefresh?: () => void;
   actions?: ReactNode; chrome?: ViewChromeSpec; ariaLabel?: string;
 }) {
   const workspace = useWorkspaceChrome();
-  const sectionDrop = useSectionDrop({ label: "망가 출처", className: "manga-section-bar", value: source, onChange: onSourceChange, trailing: controls, options: sourceOptions(localCount, bookmarkCount) });
+  const sectionDrop = useSectionDrop({ label: "망가 출처", className: "manga-section-bar", value: source, onChange: onSourceChange, trailing: controls, options: sourceOptions });
   return <>
     <ViewToolbar sectionDrop={sectionDrop} title="망가" ariaLabel={ariaLabel}
       leadingAction={workspace?.indexHidden.manga && <Button type="button" size="icon" variant="ghost" aria-label="사이드바 보이기" onClick={() => workspace.setIndexHidden("manga", false)}><ViewColumnsIcon aria-hidden="true" /></Button>}

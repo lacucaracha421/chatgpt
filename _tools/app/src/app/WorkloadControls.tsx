@@ -1,3 +1,4 @@
+import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { useEffect, useState } from "react";
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { Select } from "../shared/ui/Select";
@@ -10,6 +11,7 @@ import { useWorkloadProfile, updateWorkloadSettings, nativeWorkload } from "./wo
 export function LightweightModeToggle() {
   const profile = useWorkloadProfile();
   const [busy, setBusy] = useState(false);
+  const showChecking = useDelayedBusy(!profile.ready);
   if (!nativeWorkload()) return null;
   const toggle = async () => {
     setBusy(true);
@@ -17,7 +19,7 @@ export function LightweightModeToggle() {
     finally { setBusy(false); }
   };
   const recovering = profile.ready && !profile.lightweight && profile.restricted;
-  const mode = !profile.ready ? "확인 중…" : profile.lightweight ? "절약 모드" : recovering ? "절약 모드 해제 중" : "일반 모드";
+  const mode = showChecking ? "확인 중…" : !profile.ready ? "" : profile.lightweight ? "절약 모드" : recovering ? "절약 모드 해제 중" : "일반 모드";
   return <div className="lightweight-toggle">
     <div className="chrome-settings-controls">
       <span className="lightweight-toggle__label">{recovering && <ArrowPathIcon className="lightweight-mode-indicator__spin" aria-hidden="true" />}{mode}</span>
@@ -36,6 +38,7 @@ export function WorkloadControls() {
   const [busy, setBusy] = useState(false);
   const [minutes, setMinutes] = useState(String(profile.autoEnterMinutes ?? 30));
   useEffect(() => { setMinutes(String(profile.autoEnterMinutes ?? 30)); }, [profile.autoEnterMinutes]);
+  const showChecking = useDelayedBusy(!profile.ready);
   if (!nativeWorkload()) return null;
   const toggle = async () => {
     setBusy(true);
@@ -47,7 +50,7 @@ export function WorkloadControls() {
     if (!Number.isInteger(value) || value < 1 || value > 1440 || busy) return;
     void updateWorkloadSettings({ autoEnterMinutes: value });
   };
-  const status = !profile.ready ? "확인 중…" : profile.lightweight ? "절약 모드" : profile.restricted ? "절약 모드 해제 중" : "일반 모드";
+  const status = showChecking ? "확인 중…" : !profile.ready ? "" : profile.lightweight ? "절약 모드" : profile.restricted ? "절약 모드 해제 중" : "일반 모드";
   const selectPerformance = async (value: MachinePerformance) => {
     setSavingPerformance(true);
     try { await updatePerformanceProfile(value); }

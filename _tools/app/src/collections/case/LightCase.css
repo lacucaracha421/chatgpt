@@ -3,6 +3,8 @@
 .collection-light-case::after { content: ""; position: absolute; left: var(--lead); top: calc(var(--case-height) - 3px); width: calc(var(--W) * 1.02); height: 10px; background: var(--case-contact); filter: blur(5px); box-shadow: 0 calc(var(--face-height) * .03) calc(var(--face-height) * .09) calc(var(--face-height) * .035) var(--case-contact-spread); border-radius: 50%; transition: transform 360ms var(--ease-sheet), opacity 360ms var(--ease-sheet); }
 .collection-light-case[data-front]::after { opacity: .45; transform: translateX(calc(var(--lead) * -1)) scaleX(1.08); }
 .collection-light-case .cs-box { position: absolute; z-index: 1; left: var(--lead); top: calc(var(--case-height) - var(--face-height)); width: var(--W); height: var(--face-height); transform-style: preserve-3d; transform-origin: 0 100%; transform: rotateX(-6deg) rotateY(34deg); transition: transform 360ms var(--ease-sheet); }
+/* Keep a lifting/lowering box on its animation raster: a re-raster at the end snapped the cover 1px against the rim (WebView2 capture 2026-10-04). */
+.collection-light-case[data-front] .cs-box, .collection-light-case[data-settling] .cs-box { will-change: transform; }
 .collection-light-case[data-front] .cs-box { transform: translateX(calc(var(--lead) * -1)) translateY(-6px) translateZ(34px) rotateX(0deg) rotateY(0deg); }
 .collection-light-case .cs-front, .collection-light-case .cs-spine, .collection-light-case .cs-top { position: absolute; overflow: hidden; backface-visibility: hidden; background: var(--case-material); display: block; }
 .collection-light-case .cs-front { inset: 0; }

@@ -35,7 +35,8 @@ it('previews 25 / 40 throughout a long drag, then loads only the destination nei
   expect(requested()).toEqual([0,1,2]);expect(visiblePages()).toEqual([0]);
   fireEvent.pointerUp(slider,{pointerId:1});
   await waitFor(()=>expect(finish).toBeTypeOf('function'));
-  expect(screen.getByRole('status').textContent).toBe('25페이지 준비 중…');
+  expect(screen.queryByText('25페이지 준비 중…')).toBeNull();
+  expect((await screen.findByRole('status')).textContent).toBe('25페이지 준비 중…');
   // The requested page number shows at once and never flips back to the page still on screen.
   expect(screen.getAllByText('25 / 40')).toHaveLength(2);expect(screen.queryByText('1 / 40')).toBeNull();
   expect(requested()).toEqual([0,1,2,22,23,24,25,26]);expect(visiblePages()).toEqual([0]);

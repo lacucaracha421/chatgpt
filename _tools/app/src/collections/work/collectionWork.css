@@ -103,14 +103,25 @@
 .manga-bigbook.is-dragging { transition: none; cursor: grabbing; }
 .manga-bigbook > span { position: absolute; display: block; backface-visibility: hidden; overflow: hidden; }
 .manga-bb-front { inset: 0; transform: translateZ(calc(var(--bd) / 2)); border-radius: var(--radius-mark); background: var(--color-surface); }
-.manga-bb-front::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(0,0,0,.32), transparent 3%, rgba(0,0,0,.18) 4.6%, rgba(255,255,255,.1) 5.6%, transparent 8%), linear-gradient(115deg, rgba(255,255,255,.14), transparent 40%); }
+.manga-bb-front::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(270deg, rgba(0,0,0,.32), transparent 3%, rgba(0,0,0,.18) 4.6%, rgba(255,255,255,.1) 5.6%, transparent 8%), linear-gradient(115deg, rgba(255,255,255,.14), transparent 40%); }
 .manga-bb-back { inset: 0; transform: rotateY(180deg) translateZ(calc(var(--bd) / 2)); background: var(--color-surface); }
-.manga-bb-back img { filter: brightness(.55) saturate(.8); }
-.manga-bb-spine { top: 0; bottom: 0; left: calc(50% - var(--bd) / 2); width: var(--bd); transform: rotateY(-90deg) translateZ(calc(var(--bw) / 2)); }
+/* Printed cover material follows the approved paperback reference. */
+.manga-back-print { --u: calc(var(--bh) / 560); position: absolute; inset: 0; display: flex; flex-direction: column; color: #fff; font-family: var(--font-ui); }
+.manga-back-picture { position: relative; flex: none; align-self: center; width: 44%; aspect-ratio: 4 / 5; margin-top: 10%; overflow: hidden; box-shadow: 0 0 0 3px var(--book-paper), 0 4px 12px rgba(0,0,0,.4); }
+.manga-bigbook .manga-back-picture img { position: absolute; width: 190%; height: auto; max-width: none; left: 50%; top: 36%; transform: translate(-50%, -36%); }
+.manga-back-volume { flex: none; margin: 8% 9% 0; font-size: calc(11 * var(--u)); font-weight: 800; line-height: 1.2; letter-spacing: .04em; }
+.manga-back-synopsis { flex: none; margin: 3% 9% 0; font-size: calc(8.5 * var(--u)); line-height: 1.6; color: rgba(255,255,255,.88); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.manga-back-bottom { margin-top: auto; padding: 5% 7% 7%; display: flex; align-items: flex-end; justify-content: space-between; gap: 6%; }
+.manga-back-publisher { min-width: 0; font-size: calc(9 * var(--u)); font-weight: 800; line-height: 1.3; letter-spacing: .04em; overflow-wrap: anywhere; }
+.manga-back-publisher small { display: block; font-weight: 600; font-size: calc(7 * var(--u)); opacity: .75; }
+.manga-back-code { box-sizing: border-box; flex: none; width: 50%; background: #fff; color: #111; padding: calc(4 * var(--u)); border-radius: 1px; font-size: calc(6.5 * var(--u)); font-weight: 600; line-height: 1.3; text-align: center; }
+.manga-back-code svg { display: block; width: 100%; height: 28px; }
+.manga-back-price { display: block; text-align: right; font-weight: 800; font-size: calc(7 * var(--u)); margin-top: calc(1 * var(--u)); }
+.manga-bb-spine { top: 0; bottom: 0; left: calc(50% - var(--bd) / 2); width: var(--bd); transform: rotateY(90deg) translateZ(calc(var(--bw) / 2)); }
 /* Paper and ink are case-material colours, like the cases' plastic. Volume data has no colour, so ink is neutral. */
 .manga-work-book { --book-paper: #f3f0e8; --book-ink: #15171a; --book-page: #e9e3d3; --book-page-edge: #cfc8b6; }
-.manga-bb-pages { top: 3px; bottom: 3px; left: calc(50% - var(--bd) / 2 + 1px); width: calc(var(--bd) - 2px); transform: rotateY(90deg) translateZ(calc(var(--bw) / 2 - 3px)); background: repeating-linear-gradient(90deg, var(--book-page) 0 1px, var(--book-page-edge) 1px 2px); }
-.manga-bb-top { left: 0; right: 3px; top: calc(50% - var(--bd) / 2 + 1px); height: calc(var(--bd) - 2px); transform: rotateX(90deg) translateZ(calc(var(--bh) / 2 - 3px)); background: repeating-linear-gradient(180deg, var(--book-page) 0 1px, var(--book-page-edge) 1px 2px); }
+.manga-bb-pages { top: 3px; bottom: 3px; left: calc(50% - var(--bd) / 2 + 1px); width: calc(var(--bd) - 2px); transform: rotateY(-90deg) translateZ(calc(var(--bw) / 2 - 3px)); background: repeating-linear-gradient(90deg, var(--book-page) 0 1px, var(--book-page-edge) 1px 2px); }
+.manga-bb-top { left: 3px; right: 0; top: calc(50% - var(--bd) / 2 + 1px); height: calc(var(--bd) - 2px); transform: rotateX(90deg) translateZ(calc(var(--bh) / 2 - 3px)); background: repeating-linear-gradient(180deg, var(--book-page) 0 1px, var(--book-page-edge) 1px 2px); }
 .manga-bigbook img, .manga-bigbook .privacy-mask { display: block; width: 100%; height: 100%; object-fit: fill; }
 .manga-book-shadow { position: absolute; left: 50%; top: calc(50% + var(--bh) * var(--book-scale) / 2 - 6px); width: calc(var(--bw) * var(--book-scale) * 1.2); height: 26px; transform: translateX(-50%); background: rgba(0,0,0,.65); filter: blur(14px); border-radius: 50%; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .manga-bigbook { transition: none; } }
@@ -125,7 +136,7 @@
 .manga-bookcase-board::before { content: ""; position: absolute; left: 4%; right: 4%; top: calc(100% - 10px); height: 22px; background: radial-gradient(ellipse 50% 50% at 50% 50%, color-mix(in srgb, black 55%, transparent), transparent 72%); pointer-events: none; }
 .manga-bookcase-spines { position: relative; display: flex; justify-content: center; align-items: flex-end; gap: 2px; height: 100%; }
 .manga-spine { position: relative; flex: none; width: var(--spine-width); height: 120px; padding: 0; color: var(--color-text); }
-.manga-spine[aria-pressed="true"] { width: var(--cover-width); z-index: 1; }
+.manga-spine[aria-pressed="true"] { width: var(--cover-width); z-index: 2; }
 .manga-spine.is-settling { z-index: 1; }
 .manga-spine-strip, .manga-spine-front { position: absolute; inset: 0; display: block; overflow: hidden; background: var(--color-surface); }
 .manga-spine-strip { width: var(--spine-width); transition: opacity 360ms var(--ease-sheet); border-radius: var(--radius-mark); box-shadow: var(--shadow-floating); }

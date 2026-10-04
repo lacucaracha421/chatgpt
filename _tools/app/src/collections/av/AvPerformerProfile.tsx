@@ -1,3 +1,4 @@
+import { BusyLabel } from "../../shared/ui/BusyLabel";
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -117,7 +118,7 @@ export function AvPerformerProfile({ personId, api, onOpenSettings, displayName,
     </>}
     {profile?.status === "ambiguous" && <p className="av-profile__quiet">StashDB에서 여러 명이 찾아졌어요 · <button type="button" disabled={busy} onClick={() => setCandidates(profile.candidates)}>고르기</button></p>}
     {profile?.status === "none" && <p className="av-profile__quiet">StashDB에서 못 찾았어요 · <button type="button" disabled={busy} onClick={() => void refresh()}>다시 찾기</button></p>}
-    {!profile && busy && <p className="av-profile__quiet" role="status">StashDB 확인 중…</p>}
+    <BusyLabel busy={!!(!profile && busy)}><p className="av-profile__quiet" role="status">StashDB 확인 중…</p></BusyLabel>
     {error && <p className="av-profile__quiet" role="status">{error} <button type="button" disabled={busy} onClick={() => void refresh()}>다시 시도</button></p>}
     {candidates !== null && <Dialog open title="StashDB 배우 고르기" onClose={() => { if (!busy) setCandidates(null); }}>
       <div className="av-profile__candidates">{candidates.map(candidate => <div className="av-profile__candidate" key={candidate.stashdbId}>

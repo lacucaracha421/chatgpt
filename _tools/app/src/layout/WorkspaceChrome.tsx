@@ -29,7 +29,7 @@ function readIndexHidden(): Record<string, true> {
     return {};
   }
 }
-export function WorkspaceChromeProvider({ scope, children }: PropsWithChildren<{ scope: string }>) {
+export function WorkspaceChromeProvider({ scope, pending = false, children }: PropsWithChildren<{ scope: string; pending?: boolean }>) {
   const [indexHidden, updateIndexHidden] = useState(readIndexHidden);
   const setIndexHidden = useCallback((area: string, hidden: boolean) => {
     const next = { ...indexHidden };
@@ -38,17 +38,19 @@ export function WorkspaceChromeProvider({ scope, children }: PropsWithChildren<{
     try { localStorage.setItem(INDEX_HIDDEN_KEY, JSON.stringify(next)); } catch { /* Keep the toggle usable when storage is unavailable. */ }
   }, [indexHidden]);
   const [targets, setTargets] = useState<Targets>({ navigation: null, actions: null, search: null, settings: null, header: null, details: null });
-  const [registration, setRegistration] = useState<ChromeMeta | null>(null);
+  const [registrations, setRegistrations] = useState<ChromeMeta[]>([]);
   const setTarget = useCallback((slot: Slot, element: HTMLElement | null) => {
     setTargets((current) => current[slot] === element ? current : { ...current, [slot]: element });
   }, []);
   const publish = useCallback((next: ChromeMeta) => {
-    setRegistration((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+    setRegistrations((current) => JSON.stringify(current.find(item => item.scope === next.scope)) === JSON.stringify(next)
+      ? current : [...current.filter(item => item.scope !== next.scope && item.owner !== next.owner), next]);
   }, []);
   const unpublish = useCallback((owner: string) => {
-    setRegistration((current) => current?.owner === owner ? null : current);
+    setRegistrations((current) => current.some(item => item.owner === owner) ? current.filter(item => item.owner !== owner) : current);
   }, []);
-  const meta = registration?.scope === scope ? registration : null;
+  const getMeta = useCallback((targetScope: string) => registrations.find(item => item.scope === targetScope) ?? null, [registrations]);
+  const meta = getMeta(scope);
   const searchActions = useRef(new Map<string, ChromeSearchActions>());
   const setSearchActions = useCallback((owner: string, actions: ChromeSearchActions | null) => {
     if (actions) searchActions.current.set(owner, actions); else searchActions.current.delete(owner);
@@ -59,8 +61,8 @@ export function WorkspaceChromeProvider({ scope, children }: PropsWithChildren<{
   const findAction = useRef<(() => void) | null>(null);
   const setFindAction = useCallback((action: (() => void) | null) => { findAction.current = action; }, []);
   const openFind = useCallback(() => findAction.current?.(), []);
-  const value = useMemo(() => ({ openFind, setFindAction, scope, targets, setTarget, publish, unpublish, meta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden }),
-    [openFind, setFindAction, scope, targets, setTarget, publish, unpublish, meta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden]);
+  const value = useMemo(() => ({ openFind, setFindAction, scope, pending, targets, setTarget, publish, unpublish, meta, getMeta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden }),
+    [openFind, setFindAction, scope, pending, targets, setTarget, publish, unpublish, meta, getMeta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden]);
   return <ChromeContext.Provider value={value}><ChromePresenceContext.Provider value>{children}</ChromePresenceContext.Provider></ChromeContext.Provider>;
 }
 
@@ -69,7 +71,7 @@ export function ChromeTarget({ name, className = "" }: { name: Slot; className?:
   const chrome = useWorkspaceChrome();
   const setTarget = chrome?.setTarget;
   const attach = useCallback((element: HTMLDivElement | null) => setTarget?.(name, element), [name, setTarget]);
-  return <div ref={attach} className={className} data-chrome-slot={name} />;
+  return <div ref={attach} className={className} data-chrome-slot={name} inert={chrome?.pending || undefined} />;
 }
 
 export function ChromeContribution({ title, spec }: { title: string; spec: ViewChromeSpec }) {

@@ -827,7 +827,7 @@ describe("CollectionOverlay movie detail flow", () => {
     const searchTmdbMovies = vi.fn().mockResolvedValue([]);
     const applyTmdbMovie = vi.fn();
     renderOverlay({ searchTmdbMovies, applyTmdbMovie, getTmdbConnection: vi.fn().mockResolvedValue({ movieId: 42, mediaType: "tv", lastSyncedAt: "t" }) }, undefined, undefined, movieCollection);
-    await user.click(screen.getByRole("button", { name: "작품 관리" }));
+    await user.click(await screen.findByRole("button", { name: "작품 관리" }));
     await user.click(await screen.findByRole("menuitem", { name: "TMDB 연결 작품 변경" }));
     const dialog = await screen.findByRole("dialog", { name: "TMDB 시리즈 연결 작품 변경" });
     await waitFor(() => expect(searchTmdbMovies).toHaveBeenCalledWith(movieCollection.name, "tv"));
@@ -846,13 +846,13 @@ describe("CollectionOverlay movie detail flow", () => {
     expect(screen.getByRole("heading", { name: movieCollection.name, level: 1 })).toBeInTheDocument();
     expect(searchTmdbMovies).toHaveBeenCalledTimes(1);
   });
-  it("renders the local movie immediately and connects an unbound movie", async () => {
+  it("renders the prepared local movie without waiting for TMDB and connects an unbound movie", async () => {
     const user = userEvent.setup();
     let resolveConnection!: (connection: null) => void;
     const getTmdbConnection = vi.fn().mockReturnValue(new Promise((resolve) => { resolveConnection = resolve; }));
     renderOverlay({ getTmdbConnection }, undefined, undefined, movieCollection);
 
-    expect(screen.getByRole("heading", { name: "퍼펙트 블루", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "퍼펙트 블루", level: 1 })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "작품 관리" }));
     expect(screen.getByRole("menuitem", { name: "TMDB 새로고침" })).toBeDisabled();
     resolveConnection(null);
@@ -869,7 +869,7 @@ describe("CollectionOverlay movie detail flow", () => {
       refreshTmdbMovie: vi.fn().mockRejectedValue(new Error("TMDB 새로고침 실패")),
     }, undefined, undefined, movieCollection);
 
-    await waitFor(() => expect(document.querySelector('.work-surface[aria-hidden="true"] .work-strip img')).not.toBeNull());
+    await waitFor(() => expect(document.querySelector('.work-surface .work-strip img')).not.toBeNull());
     await settleWorkImages();
     await user.click(screen.getByRole("button", { name: "작품 관리" }));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "TMDB 새로고침" })).toBeEnabled());
@@ -908,7 +908,7 @@ it("keeps film editing, Showcase and confirmed delete reachable in the work scre
 it("keeps TMDB poster/backdrop picking and external-service settings reachable", async () => {
   const { gateway } = renderOverlay({ getTmdbConnection: vi.fn().mockResolvedValue({ movieId: 42, mediaType: "movie", lastSyncedAt: "t" }) }, undefined, undefined, movieCollection);
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "작품 관리" }));
+  await user.click(await screen.findByRole("button", { name: "작품 관리" }));
   await waitFor(() => expect(screen.getByRole("menuitem", { name: "포스터·배경 변경" })).toBeEnabled());
   await user.click(screen.getByRole("menuitem", { name: "포스터·배경 변경" }));
   expect(screen.getByRole("dialog", { name: "TMDB 영화 아트워크 변경" })).toBeInTheDocument();
@@ -920,7 +920,7 @@ it("keeps TMDB poster/backdrop picking and external-service settings reachable",
   cleanup();
   const settings = vi.fn();
   renderOverlay({ searchTmdbMovies: vi.fn().mockRejectedValue({ code: "tmdb_credential_not_configured" }) }, undefined, undefined, movieCollection, settings);
-  await user.click(screen.getByRole("button", { name: "작품 관리" }));
+  await user.click(await screen.findByRole("button", { name: "작품 관리" }));
   await waitFor(() => expect(screen.getByRole("menuitem", { name: "TMDB에 연결" })).toBeEnabled());
   await user.click(screen.getByRole("menuitem", { name: "TMDB에 연결" }));
   await user.type(screen.getByRole("searchbox", { name: "영화 검색" }), movieCollection.name);

@@ -1,3 +1,4 @@
+import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useMemo, useRef, useState, type CSSProperties} from 'react';
 import {ChevronRightIcon} from '@heroicons/react/24/outline';
 import {CollectionList} from '../src/collections/CollectionList';
@@ -118,7 +119,7 @@ export function AvLookupSender() {
           if (attempt.current?.code !== normalizeProductCode(next)) attempt.current = null;
           setFeedback(null);
         }}/>
-        <Button type="button" variant="primary" disabled={!normalized || sending} onClick={() => void send()}>{sending ? '보내는 중…' : feedback?.kind === 'offline' || feedback?.kind === 'rate' ? '다시 보내기' : '보내기'}</Button>
+        <Button type="button" variant="primary" disabled={!normalized || sending} onClick={() => void send()}><BusyLabel busy={!!(sending)} idle={feedback?.kind === 'offline' || feedback?.kind === 'rate' ? '다시 보내기' : '보내기'}>보내는 중…</BusyLabel></Button>
       </div>
       {normalized && <p className="av-lookup-preview" aria-live="polite">정규화된 품번: <strong className="numeric">{normalized}</strong></p>}
     </div>

@@ -777,6 +777,9 @@ export type CollectionVolume = {
   coverArtworkId: string | null;
   localReleaseDate: string | null;
   isbn13: string | null;
+  contents?: string | null;
+  price?: number | null;
+  publisher?: string | null;
   releaseStatus: "upcoming" | "released" | null;
 };
 

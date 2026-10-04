@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { CLOUD_PROGRESS_EVENT, notifyCloudBackfillSupervisor } from "../app/useCloudBackfillSupervisor";
 import { useLibrary } from "../library/LibraryContext";
@@ -76,7 +77,7 @@ export function CloudBackfillSettings({ connectionReady = null, children, embedd
   const verdict = conclusion(progress, error, connectionReady);
   return (
     <>
-      <p className="cloud-backfill__conclusion" role="status"><strong>{verdict}</strong></p>
+      <p className="cloud-backfill__conclusion" role="status"><strong><BusyLabel busy={!progress && !error && connectionReady !== false} idle={progress || error || connectionReady === false ? verdict : null}>동기화 상태 확인 중…</BusyLabel></strong></p>
       {children}
       <section className="cloud-backfill" aria-label={embedded ? "동기화 상태" : undefined} aria-labelledby={embedded ? undefined : "cloud-backfill-title"}>
         {!embedded && <h3 className="settings-view__group-title" id="cloud-backfill-title">동기화 상태</h3>}
@@ -85,7 +86,7 @@ export function CloudBackfillSettings({ connectionReady = null, children, embedd
 
         <div className="cloud-backfill__status">
           <div className="cloud-backfill__headline">
-            <strong>{stateLabel(progress, settled)}</strong>
+            <strong><BusyLabel busy={!progress && !error} idle={progress ? stateLabel(progress, settled) : null}>상태 확인 중…</BusyLabel></strong>
             {progress && <span>{progress.completed.toLocaleString()} / {total.toLocaleString()}개 ({percent}%)</span>}
           </div>
           <progress aria-label="모바일 라이브러리 동기화 진행률" aria-valuenow={percent} max={100} value={percent} />

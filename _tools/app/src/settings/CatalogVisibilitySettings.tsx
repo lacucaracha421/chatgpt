@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useEffect, useState, type FormEvent } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -87,7 +88,7 @@ export function CatalogVisibilitySettings() {
 
   return <section className="catalog-visibility-settings" aria-labelledby="catalog-visibility-title">
     <h4 id="catalog-visibility-title">검색 결과 숨김</h4>
-    {busy ? <p role="status">저장 중…</p> : saved && <p role="status">저장됨</p>}
+    <BusyLabel busy={busy} idle={saved && <p role="status">저장됨</p>}><p role="status">저장 중…</p></BusyLabel>
     {error && <Toast tone="error" onDismiss={() => setError(null)}>{error}</Toast>}
     {!policy ? loadFailed
       ? <Button size="sm" onClick={() => void retryLoad()}>다시 시도</Button>

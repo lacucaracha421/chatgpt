@@ -70,7 +70,8 @@ describe('catalog bookmark toggle',()=>{
     fireEvent.click(button);
     // Pending: the same elements, only their text changes; the status line was already there.
     await waitFor(()=>expect(line.textContent).toBe('저장 대기'));
-    expect(screen.getByRole('button',{name:'북마크 저장 중'})).toBe(button);
+    // The spoken busy name follows the shared delay; the visible pending state above is immediate.
+    expect(await screen.findByRole('button',{name:'북마크 저장 중'},{timeout:1500})).toBe(button);
     expect(row.nextElementSibling).toBe(line);expect(button.querySelector('.catalog-bookmark-label')?.textContent).toBe('북마크됨');
     await act(async()=>finish(accepted));
     await waitFor(()=>expect(screen.getByRole('button',{name:'북마크 해제'})).toBe(button));

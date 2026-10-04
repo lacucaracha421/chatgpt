@@ -98,10 +98,12 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const [shadowReview, setShadowReview] = useState<false | "series" | "all">(false);
   const [s36Setup, setS36Setup] = useState(false);
   const [candidateCount, setCandidateCount] = useState(0);
+  const [candidateLoading, setCandidateLoading] = useState(true);
   const [groupCreateRequest, setGroupCreateRequest] = useState(0);
   const [groupEditRequest, setGroupEditRequest] = useState(0);
   const [readinessVersion, setReadinessVersion] = useState(0);
   const [folderError, setFolderError] = useState<string | null>(null);
+  const [folderLoading, setFolderLoading] = useState(true);
   const [page, setPage] = useState<CharacterBrowsePage>(emptyPage);
   const [all, setAll] = useState(false), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
   const galleryRefreshVersion = useCoalescedRefreshVersion(refreshVersion, loading);
@@ -117,6 +119,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const [referenceSuggestionTarget, setReferenceSuggestionTarget] = useState<CharacterTarget | null>(null);
   const [seriesGalleryState, setSeriesGalleryState] = useState<{ seriesId: string; view: SeriesGalleryView }>(() => ({ seriesId: series.classificationId, view: "unclassified" }));
   const [legacyExcludedCount, setLegacyExcludedCount] = useState(0);
+  const [excludedLoading, setExcludedLoading] = useState(true);
   const [undo, setUndo] = useState<string[]>([]);
   const generation = useRef(0), pending = useRef(false), saving = useRef(false);
   const loadedScope = useRef<string | null>(null);
@@ -151,10 +154,13 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   // Per-character image counts come from the character index (character folders are hidden from the
   // folder tree, so their tree counts are missing); the folder tree is only a fallback.
   const [sidebarCounts, setSidebarCounts] = useState<Record<string, number> | null>(null);
+  const [sidebarLoading, setSidebarLoading] = useState(Boolean(gateway.characterSidebarCounts));
   useEffect(() => {
-    if (!gateway.characterSidebarCounts) return;
+    if (!gateway.characterSidebarCounts) { setSidebarLoading(false); return; }
     let active = true;
-    void gateway.characterSidebarCounts().then(result => { if (active) setSidebarCounts(result.targets); }, () => undefined);
+    setSidebarLoading(true);
+    void gateway.characterSidebarCounts().then(result => { if (active) setSidebarCounts(result.targets); }, () => undefined)
+      .finally(() => { if (active) setSidebarLoading(false); });
     return () => { active = false; };
   }, [gateway, refreshVersion, reload]);
   const characterCounts: Record<string, number> = Object.fromEntries(targets.flatMap(target => {
@@ -222,9 +228,11 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   useEffect(() => {
     if (targetId || currentGroup || picking) return;
     let active = true;
+    setExcludedLoading(true);
     void hubApi.excludedAssets(series.classificationId, null, 1)
       .then(result => { if (active) setLegacyExcludedCount(result.totalCount); })
-      .catch(() => { if (active) setLegacyExcludedCount(0); });
+      .catch(() => { if (active) setLegacyExcludedCount(0); })
+      .finally(() => { if (active) setExcludedLoading(false); });
     return () => { active = false; };
   }, [hubApi, series.classificationId, targetId, currentGroup?.id, picking, refreshVersion, reload]);
   useEffect(() => {
@@ -236,6 +244,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     setFolderError(null);
     if (targetId || currentGroup || picking) return;
     let active = true;
+    setFolderLoading(true);
     void hubApi.seriesFolders(series.classificationId).then(result => {
       if (!active) return;
       const next = result.map(item => {
@@ -245,7 +254,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       });
       rememberFolderPreview(previewCache.shelves, series.classificationId, next, 16);
       setFolderRead({ cache: previewCache, seriesId: series.classificationId, folders: next });
-    }).catch(error => { if (active) setFolderError(commandErrorMessage(error, "하위 폴더를 불러오지 못했습니다.")); });
+    }).catch(error => { if (active) setFolderError(commandErrorMessage(error, "하위 폴더를 불러오지 못했습니다.")); })
+      .finally(() => { if (active) setFolderLoading(false); });
     return () => { active = false; };
   }, [hubApi, previewCache, series.classificationId, targetId, currentGroup?.id, Boolean(picking), refreshVersion, reload]);
   useEffect(() => {
@@ -253,9 +263,11 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     // on the series count line. Without the runtime the action stays hidden.
     if (targetId || currentGroup || picking) return;
     let active = true;
+    setCandidateLoading(true);
     void shadowApi.page({ offset: 0, limit: 1, seriesId: series.classificationId })
       .then(result => { if (active) setCandidateCount(result.summary.automatic.pending + result.summary.recommended.pending); })
-      .catch(() => { if (active) setCandidateCount(0); });
+      .catch(() => { if (active) setCandidateCount(0); })
+      .finally(() => { if (active) setCandidateLoading(false); });
     return () => { active = false; };
   }, [shadowApi, series.classificationId, targetId, currentGroup?.id, Boolean(picking), readinessVersion]);
   useEffect(() => setSelection(emptySelection()), [clearSelectionRequest]);
@@ -459,7 +471,9 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       setSelection(emptySelection());
     })}>이 캐릭터에서 제외</Button>
     : undefined;
-  return <section className="series-browser" aria-label={focusedName ?? name}>
+  // The first page alone is not ready: the shelf and its count/header reads also change layout.
+  const shelfLoading = !picking && !current && (sidebarLoading || (!currentGroup && (folderLoading || suggestions.loading || candidateLoading || excludedLoading || (!s36Settings && !s36Error))));
+  return <section className="series-browser" aria-label={focusedName ?? name} aria-busy={loading || shelfLoading}>
     <ViewToolbar title={focusedName ? [name, current && currentCharacterGroup?.name, focusedName].filter(Boolean).join(" / ") : name} ariaLabel="시리즈 도구"
       titleContent={focusedName ? <span className="series-breadcrumb"><button onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId })}>{name}</button><ChevronRightIcon aria-hidden="true" />{current && currentCharacterGroup && <><button onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterGroupId: currentCharacterGroup.id })}>{currentCharacterGroup.name}</button><ChevronRightIcon aria-hidden="true" /></>}<span>{focusedName}</span>{!current && <small className="series-header-count">{page.totalCount.toLocaleString()}장</small>}</span> : name}
       titleAccessory={<div className="series-header-actions">
@@ -530,7 +544,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               <button className="series-character__open" aria-label={`${target.displayName} 열기`} aria-description={description || undefined} onClick={() => onNavigate({ kind: "classification", classificationId: series.classificationId, characterId: target.id })}>
                 {privacyMode ? <span className="series-character__placeholder privacy-mask" aria-label="비공개 모드"/> : (target.thumbnailAssetId ?? activeCharacterReferences(target)[0]?.assetId) ? <StableImage draggable={false} loading="lazy" src={thumbnailUrl((target.thumbnailAssetId ?? activeCharacterReferences(target)[0]!.assetId)!)} alt="" /> : <span className="series-character__placeholder"><UserIcon aria-hidden="true" />대표 이미지</span>}
                 <strong><UserIcon className="folder-shelf__icon" aria-hidden="true" />{status.warning && <span className="series-character__warning" aria-hidden="true">!</span>}<span className="series-character__name">{target.displayName}</span></strong>
-                {memberCounts[target.id] !== undefined && <small className="folder-shelf__meta">{memberCounts[target.id]!.toLocaleString("ko-KR")}장</small>}
+                <small className="folder-shelf__meta" aria-hidden={memberCounts[target.id] === undefined || undefined}>{memberCounts[target.id] === undefined ? null : `${memberCounts[target.id]!.toLocaleString("ko-KR")}장`}</small>
               </button>
               <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${target.displayName} 편집`} aria-description="캐릭터 편집" onClick={() => openEditor(target)}><PencilIcon aria-hidden="true" /></Button>
             </article></ContextMenu>;
@@ -553,7 +567,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         {error && <p className="character-message" role="alert">{error}<Button size="sm" onClick={() => { pickerPages.current.clear(); setReload(v => v + 1); }}>다시 시도</Button></p>}
         {!!undo.length && <div className="character-actions"><span>휴지통으로 이동했습니다.</span><Button size="sm" onClick={() => void action(async () => { await gateway.restoreAssets(undo); setUndo([]); })}>실행 취소</Button></div>}
         {!loading && !error && !page.items.length && <p className="series-gallery__empty">{picking ? "선택할 수 있는 이미지가 없습니다." : current ? "이 캐릭터의 이미지가 없습니다." : currentGroup ? "이 그룹에 연결된 이미지가 없습니다." : seriesGalleryView === "all" ? "이 시리즈에 이미지가 없습니다." : excludedOnly ? "자동 분류에서 제외한 이미지가 없습니다." : "미분류 이미지가 없습니다."}</p>}
-      </>} layout={galleryLayout} groupDates items={page.items} scopeKey={scope} totalCount={page.totalCount} metadataVisible={metadataVisible} privacyMode={privacyMode} targetRowHeight={thumbnailRowHeight}
+      </>} layout={galleryLayout} groupDates items={page.items} scopeKey={pageScope ?? undefined} totalCount={page.totalCount} metadataVisible={metadataVisible} privacyMode={privacyMode} targetRowHeight={thumbnailRowHeight}
         captionLabel={picking && picking.kind !== "hero" ? asset => page.unavailableReferenceIds?.includes(asset.id) ? "원본 없음 · 선택 불가" : null : undefined}
         selectedAssetIds={picking ? new Set(picking.ids) : selection.ids} focusAssetId={picking ? null : selection.focusId}
         hasNextPage={Boolean(page.nextCursor) && !loading && !error && pageScope === scope} onLoadNextPage={() => void load(page.nextCursor)}

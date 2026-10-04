@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fitSpineTitle, spineTitleSplits, verticalSpineRuns, verticalSpineText, SPINE_TITLE_SCALE } from "./verticalText";
+import { fitSpineAuthor, spineAuthorColumns, fitSpineTitle, spineTitleSplits, verticalSpineRuns, verticalSpineText, SPINE_TITLE_SCALE } from "./verticalText";
 
 describe("vertical spine text", () => {
   it("maps punctuation and brackets to vertical presentation forms", () => {
@@ -14,11 +14,28 @@ describe("vertical spine text", () => {
   it("leaves marks inside Latin runs to the sideways run", () => {
     expect(verticalSpineText("JoJo's X-Men 1.5 Re:Zero")).toBe("JoJo's X-Men 1.5 Re:Zero");
   });
-  it("stands one- or two-digit numbers upright but keeps longer numbers and Latin-attached digits sideways", () => {
+  it("combines short digit runs and makes longer runs upright, including Latin-attached digits", () => {
     expect(verticalSpineRuns("제12권 3부 2024년 WATCH2")).toEqual([
-      { text: "제", upright: false }, { text: "12", upright: true }, { text: "권 ", upright: false }, { text: "3", upright: true },
-      { text: "부 2024년 WATCH2", upright: false },
+      { text: "제", orientation: "mixed" }, { text: "12", orientation: "combined" }, { text: "권 ", orientation: "mixed" }, { text: "3", orientation: "combined" },
+      { text: "부 ", orientation: "mixed" }, { text: "2024", orientation: "upright" }, { text: "년 WATCH", orientation: "mixed" }, { text: "2", orientation: "combined" },
     ]);
+  });
+  it("splits names in reading order with at most two columns", () => {
+    expect(spineAuthorColumns(" Shinohara  Kenta ")).toEqual(["Shinohara", "Kenta"]);
+    expect(spineAuthorColumns("작가")).toEqual(["작가"]);
+    expect(spineAuthorColumns("One Two Three Four")).toEqual(["One", "Two Three Four"]);
+    expect(spineAuthorColumns("  ")).toEqual([]);
+  });
+  it("fits authors without dropping letters or going below 7px", () => {
+    const fit = (author: string, available: number, base = 10) => fitSpineAuthor(author, { available, base, length: text => text.length * base });
+    expect(fit("Kenta", 100)).toMatchObject({ fontSize: 10, inlineScale: 1 });
+    expect(fit("Shinohara Kenta", 72)).toMatchObject({ fontSize: 8, inlineScale: 1 });
+    const long = fit("First VeryLongAuthorName", 20);
+    expect(long.columns).toEqual(["First", "VeryLongAuthorName"]);
+    expect(long.fontSize).toBe(7);
+    expect(18 * long.fontSize * long.inlineScale).toBeCloseTo(20);
+    expect(fit("작가", 100, 4).fontSize).toBe(7);
+    expect(fit("", 0)).toMatchObject({ columns: [], inlineScale: 1 });
   });
   it("offers the subtitle split first, then spaces, else the middle", () => {
     const splits = spineTitleSplits("드래곤 퀘스트 다이의 대모험 : 용사 아방과 옥염의 마왕");

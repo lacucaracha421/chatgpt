@@ -199,7 +199,8 @@ it('keeps the connect screen while a device without a saved connection is checki
   window.LakomicsNative={localStatus:()=>JSON.stringify({configured:false,endpoint:''}),request:vi.fn(),cancel:vi.fn()};
   mocks.native.mockImplementation((op:string)=>op==='status' ? new Promise(()=>{}) : Promise.resolve({configured:false,endpoint:''}));
   render(<App/>);
-  expect(screen.getByRole('button',{name:'연결 확인 중'})).toBeTruthy();
+  expect(screen.getByRole('button',{name:'라이브러리 연결'}).hasAttribute('disabled')).toBe(true);
+  expect(screen.queryByText('연결 확인 중')).toBeNull();
   expect(screen.queryByRole('button',{name:'전체 보기'})).toBeNull();
 });
 it('points the durable outboxes at the configured connection as soon as the status arrives',async()=>{

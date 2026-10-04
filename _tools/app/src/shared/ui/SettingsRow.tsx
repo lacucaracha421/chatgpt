@@ -7,7 +7,7 @@ import { SectionLabel } from "./SectionLabel";
 export type SettingsRowProps = {
   name: string;
   value?: ReactNode;
-  status?: string;
+  status?: ReactNode;
   statusClassName?: string;
   tone?: string;
   control?: ReactNode;

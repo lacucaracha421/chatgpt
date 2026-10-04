@@ -32,20 +32,34 @@ export function verticalSpineText(text: string): string {
   return out;
 }
 
-export type VerticalRun = { text: string; upright: boolean };
-/** Split mapped text into runs; one- or two-digit numbers not touching Latin letters stand upright (tate-chu-yoko). */
+export type VerticalRun = { text: string; orientation: "mixed" | "combined" | "upright" };
+/** Short digit runs share a cell; longer runs keep each digit upright, even beside Latin text. */
 export function verticalSpineRuns(text: string): VerticalRun[] {
   const runs: VerticalRun[] = [];
   let from = 0;
   for (const match of text.matchAll(/\d+/g)) {
     const start = match.index ?? 0, end = start + match[0].length;
-    if (match[0].length > 2 || /[A-Za-z]/.test(text[start - 1] ?? "") || /[A-Za-z]/.test(text[end] ?? "")) continue;
-    if (start > from) runs.push({ text: text.slice(from, start), upright: false });
-    runs.push({ text: match[0], upright: true });
+    if (start > from) runs.push({ text: text.slice(from, start), orientation: "mixed" });
+    runs.push({ text: match[0], orientation: match[0].length <= 2 ? "combined" : "upright" });
     from = end;
   }
-  if (from < text.length) runs.push({ text: text.slice(from), upright: false });
+  if (from < text.length) runs.push({ text: text.slice(from), orientation: "mixed" });
   return runs;
+}
+
+/** DOM order is reading order; vertical-rl places the first name on the right. */
+export function spineAuthorColumns(author: string): string[] {
+  const parts = author.trim().split(/\s+/).filter(Boolean);
+  return parts.length > 2 ? [parts[0], parts.slice(1).join(" ")] : parts;
+}
+
+export function fitSpineAuthor(author: string, { available, base, length }: { available: number; base: number; length(text: string): number }) {
+  const columns = spineAuthorColumns(author);
+  const longest = Math.max(0, ...columns.map(length));
+  const fontSize = Math.max(7, longest > 0 && available > 0 ? Math.min(base, base * available / longest) : base);
+  // At the 7px floor, condense only the inline axis to retain every letter inside its band.
+  const inlineScale = longest > 0 && available > 0 ? Math.min(1, available / (longest * fontSize / base)) : 1;
+  return { columns, fontSize, inlineScale };
 }
 
 export type SpineTitleSplit = { parts: [string, string]; natural: boolean };

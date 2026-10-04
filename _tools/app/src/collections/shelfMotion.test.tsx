@@ -29,6 +29,35 @@ it.each([false, true])("retains the same case on pick and put-down (reduced=%s)"
   expect(box?.parentElement).not.toHaveAttribute("data-settling");
 });
 
+it("paints the selected case above a later neighbour that is still settling", () => {
+  vi.useFakeTimers(); motion(false);
+  const style = document.createElement("style");
+  style.textContent = readFileSync("src/collections/CollectionBrowser.css", "utf8");
+  document.head.append(style);
+  try {
+    const draw = (selected: number) => <div className="collection-list collection-list--shelf">{[0, 1].map(index =>
+      <div key={index} className="collection-list__cell"><button className="collection-card" aria-selected={selected === index}>
+        <LightCase data={{ ...data, platform: "book" }} selected={selected === index} />
+      </button></div>)}</div>;
+    const { container, rerender } = render(draw(1));
+    rerender(draw(0));
+    const cells = container.querySelectorAll<HTMLElement>(".collection-list__cell");
+    expect(cells[1].querySelector("[data-settling]")).not.toBeNull();
+    expect(Number(getComputedStyle(cells[0]).zIndex)).toBeGreaterThan(Number(getComputedStyle(cells[1]).zIndex));
+  } finally { style.remove(); }
+});
+
+it("paints a selected volume above a settling neighbour in the bookcase", () => {
+  const style = document.createElement("style");
+  style.textContent = readFileSync("src/collections/work/collectionWork.css", "utf8");
+  document.head.append(style);
+  try {
+    const { container } = render(<div><button className="manga-spine" aria-pressed="true" /><button className="manga-spine is-settling" aria-pressed="false" /></div>);
+    const buttons = container.querySelectorAll("button");
+    expect(Number(getComputedStyle(buttons[0]).zIndex)).toBeGreaterThan(Number(getComputedStyle(buttons[1]).zIndex));
+  } finally { style.remove(); }
+});
+
 it.each([false, true])("retains the book strip until its front loads and through put-down (reduced=%s)", async reduced => {
   vi.useFakeTimers(); motion(reduced);
   const props = { privacy: false, coverUrl: () => "/cover", onPick: vi.fn() };

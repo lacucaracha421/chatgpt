@@ -1,3 +1,5 @@
+import { useDelayedBusy } from "../src/shared/useDelayedBusy";
+import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {useVisibleInterval} from './useVisibleInterval';
 import {SIGNAL_FALLBACK_MS,useSyncSignal} from './syncSignals';
@@ -67,8 +69,9 @@ function RecoveryKey({store}:{store:NotesStore}) {
   async function reveal(){setError('');try{setKey((await store.request<{key:string}>('recoveryKey')).key);setNeedPin(false);}catch(e){if(e===PIN_REQUIRED_TEXT)setNeedPin(true);else setError(typeof e==='string'?e:'복구키를 불러오지 못했습니다.');}}
   async function unlockAndReveal(){setError('');const failure=await store.openSecrets('secretUnlock',{pin});setPin('');if(failure)setError(failure);else await reveal();}
   useEffect(()=>{void reveal();},[]);
+  const showLoading = useDelayedBusy(key === null && !needPin && !error);
   return <div className="notes-recovery">
-    {key!==null?<>
+    {key!==null&&!showLoading?<>
       <textarea className="notes-recovery__key" aria-label="복구키" value={key} readOnly spellCheck={false}/>
       <p className="hint">다른 사람이 보지 않는 곳에서 열고, 따로 보관해 주세요. 복사한 키는 30초 뒤 클립보드에서 지웁니다.</p>
       <Button onClick={()=>void copySecret(key).then(()=>setCopied(true),()=>setError('복사하지 못했습니다.'))}>{copied?'복사했습니다':'복구키 복사'}</Button>
@@ -76,7 +79,7 @@ function RecoveryKey({store}:{store:NotesStore}) {
       <label>암호 메모 PIN<input className="notes-secret-gate__pin" type="password" inputMode="numeric" autoComplete="off" maxLength={8} value={pin} onChange={event=>setPin(event.target.value.replace(/\D/g,''))}/></label>
       <p className="hint">복구키로 PIN을 바꿀 수 있어서, 보려면 이 태블릿의 PIN이 필요합니다.</p>
       <Button type="submit" variant="primary" disabled={pin.length<4}>확인 후 복구키 보기</Button>
-    </form>:!error&&<p className="hint">불러오는 중…</p>}
+    </form>:showLoading&&!error&&<p className="hint">불러오는 중…</p>}
     {error&&<p role="alert" className="notes-secret-gate__error">{error}</p>}
   </div>;
 }
@@ -232,7 +235,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
   const trashed=listed.filter(n=>n.deleted).length,archived=listed.filter(n=>!n.deleted&&n.archived).length;
   // Local saves remain immediate; an open editor only announces errors.
   const editorStatus=state.error?'확인 필요':'';
-  const status=state.error?'확인 필요':state.saving?'저장 중':state.syncing?'동기화 중':pending?'동기화 대기':'동기화됨';
+  const status=state.error?'확인 필요':pending?'동기화 대기':'동기화됨';
   const list=useRef<HTMLDivElement>(null);
   const scrubberSort=useMemo(()=>({kind:'date' as const,values:visible.map(note=>note.updatedAt)}),[visible]);
   const pull=usePullToRefresh(list,()=>void store.sync(),state.syncing,!active||!state.unlocked||editing);
@@ -288,7 +291,7 @@ export function Notes({active,backRef,request,onReturnHome,onHomeEntryGone,findS
     <div className="notes-list-view" style={{display:state.ready&&state.unlocked&&!editing?undefined:'none'}}>
       {scope!=='all'
         ?<header ref={kinds.barRef} className="notes-top is-sub"><IconButton label="메모 목록으로" icon={ArrowLeftIcon} onClick={()=>setScope('all')}/><h1>{kinds.title(trash?'휴지통':'보관함')}<span className="numeric muted">{trash?trashed:archived}</span></h1></header>
-        :<TopBar find barRef={kinds.barRef} title={kinds.title('메모')} actions={<><span className="notes-save-state" role="status">{status}</span>{syncButton}<IconButton label="메모 목록 더보기" icon={EllipsisHorizontalIcon} onClick={()=>setSheet('list')}/></>}/>}
+        :<TopBar find barRef={kinds.barRef} title={kinds.title('메모')} actions={<><span className="notes-save-state" role="status"><BusyLabel busy={!state.error&&(state.saving||state.syncing)} idle={status}>{state.saving?'저장 중':'동기화 중'}</BusyLabel></span>{syncButton}<IconButton label="메모 목록 더보기" icon={EllipsisHorizontalIcon} onClick={()=>setSheet('list')}/></>}/>}
       {kinds.shade}
       <div ref={list} className="notes-scroll">
         {pull}

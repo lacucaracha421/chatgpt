@@ -12,10 +12,11 @@ import { BackNavigationProvider } from "../../shared/navigation/BackNavigation";
 import { CollectionBrowser } from "../CollectionBrowser";
 import { createDefaultCollectionLibraryState, type CollectionLibraryState } from "../collectionLibrary";
 import { CollectionWorkOverlay } from "./CollectionWorkOverlay";
+import { AreaSwitch, READY_CAP_MS } from "../../shared/motion/AreaSwitch";
 
 afterEach(cleanup);
 const base: CollectionSummary = { id: "a", name: "가 작품", type: "game", description: "기록", coverAssetId: null, selectedWorkArtworkId: null, selectedHeroArtworkId: null, selectedBackdropArtworkId: null, assetCount: 0, unreadReleaseCount: 0, year: 2026, originalTitle: null, runtimeMinutes: null, author: null, developer: "개발", publisher: "배급", platforms: "Switch 2", productionCompany: null, releaseDate: "2026-09-01", director: null, externalScore: null, myScore: 3, genres: null, overview: null, showcase: false, showcaseOrder: null, createdAt: "2026-09-02T00:00:00Z", updatedAt: "r" };
-function fixtures(type: "game" | "av" | "movie" = "game") {
+function fixtures(type: "game" | "av" | "movie" = "game", buffered = false) {
   const items = [{ ...base, type }, { ...base, id: "b", name: "나 작품", type }];
   const records: Record<string, {status:string|null;ownedPlatform:string|null;myScore:number|null;memo:string|null}> = {};
   const gateway = { fetchLaunchBoxSpine: vi.fn().mockResolvedValue({ collectionId: "a", status: "no_match" }), getCollectionWorkRecord: vi.fn().mockImplementation(async (id: string) => records[id] ?? {status:null,ownedPlatform:null,myScore:3,memo:"기록"}), saveCollectionWorkRecord: vi.fn().mockImplementation(async (id: string, edit: {field:string;value:string|number|null}) => records[id] = {...(records[id] ?? {status:null,ownedPlatform:null,myScore:3,memo:"기록"}),[edit.field]:edit.value}), listCollectionWorkArtworks: vi.fn().mockResolvedValue([]), importCollectionArtworks: vi.fn().mockResolvedValue(0), getTmdbConnection: vi.fn().mockResolvedValue(null), getIgdbConnection: vi.fn().mockResolvedValue({ gameId: 1 }), updateCollection: vi.fn().mockResolvedValue(undefined), setCollectionShowcase: vi.fn().mockResolvedValue(undefined), deleteCollection: vi.fn().mockResolvedValue(undefined), refreshIgdbGame: vi.fn().mockResolvedValue(undefined) };
@@ -25,13 +26,58 @@ function fixtures(type: "game" | "av" | "movie" = "game") {
     const [id, setId] = useState<string | null>(null);
     const [order, setOrder] = useState<string[]>([]);
     const [state, setState] = useState<CollectionLibraryState>({ ...createDefaultCollectionLibraryState()[type], sort: "name", direction: "asc" });
+    const area = id ? "collection-work" : "collections";
+    const content = id ? <CollectionWorkOverlay collection={items.find(item => item.id === id)!} collections={items} listOrder={order} api={api as unknown as AvGateway} onOpenCollection={setId} onExit={() => { exit(); setId(null); }} onChanged={changed} onOpenSettings={vi.fn()} /> : <CollectionBrowser collections={items} typeFilter={type} showcase={false} libraryState={state} onLibraryStateChange={setState} onChanged={changed} onViewChange={view => { if (view.kind === "collection") setId(view.collectionId); }} onOpenWork={(nextId, nextOrder) => { setOrder(nextOrder); setId(nextId); }} />;
     return <BackNavigationProvider><LibraryProvider gateway={gateway as unknown as LibraryGateway}><PrivacyProvider privacyMode={false} setPrivacyMode={vi.fn()}>
-      {id ? <CollectionWorkOverlay collection={items.find(item => item.id === id)!} collections={items} listOrder={order} api={api as unknown as AvGateway} onOpenCollection={setId} onExit={() => { exit(); setId(null); }} onChanged={changed} onOpenSettings={vi.fn()} /> : <CollectionBrowser collections={items} typeFilter={type} showcase={false} libraryState={state} onLibraryStateChange={setState} onChanged={changed} onViewChange={view => { if (view.kind === "collection") setId(view.collectionId); }} onOpenWork={(nextId, nextOrder) => { setOrder(nextOrder); setId(nextId); }} />}
+      {buffered ? <AreaSwitch activeKey={area} views={{ [area]: content }} waitForReady /> : content}
     </PrivacyProvider></LibraryProvider></BackNavigationProvider>;
   }
   return { gateway, api, exit, changed, Harness };
 }
 describe("Collection work open path", () => {
+  it("keeps the shelf until the saved device, artwork list and decoded spine and strip are ready", async () => {
+    const { Harness, gateway } = fixtures("game", true);
+    const { container } = render(<Harness />);
+    await act(async () => undefined);
+    const shelf = container.querySelector(".collection-list")!;
+    let record!: (value: { status: null; ownedPlatform: string; myScore: null; memo: null }) => void;
+    let artworks!: (value: unknown[]) => void;
+    gateway.getCollectionWorkRecord.mockImplementation(() => new Promise(resolve => { record = resolve; }));
+    gateway.listCollectionWorkArtworks.mockImplementation(() => new Promise(resolve => { artworks = resolve; }));
+    vi.useFakeTimers();
+    try {
+      fireEvent.doubleClick(screen.getByRole("button", { name: /^가 작품/ }));
+      await act(async () => vi.advanceTimersByTimeAsync(READY_CAP_MS + 100));
+      expect(shelf).toBeVisible();
+      expect(container.querySelector(".collection-work")).toBeNull();
+      await act(async () => record({ status: null, ownedPlatform: "PS5", myScore: null, memo: null }));
+      await act(async () => artworks([{ id: "chosen-spine", kind: "spine", selected: true }, { id: "shot", kind: "screenshot", selected: false }]));
+      const work = container.querySelector(".collection-work")!;
+      expect(work).not.toBeVisible();
+      expect(work.querySelector("[data-spine-template]")).toBeNull();
+      expect(work.querySelector(".work-stage--no-strip")).toBeNull();
+      const spine = work.querySelector<HTMLImageElement>('.k-spine img')!;
+      let decode!: () => void;
+      spine.decode = () => new Promise<void>(resolve => { decode = resolve; });
+      const thumbnail = work.querySelector<HTMLImageElement>('.work-strip img')!;
+      let decodeStrip!: () => void;
+      thumbnail.decode = () => new Promise<void>(resolve => { decodeStrip = resolve; });
+      await act(async () => work.querySelectorAll("img").forEach(image => fireEvent.load(image)));
+      expect(shelf).toBeVisible();
+      await act(async () => decode());
+      expect(shelf).toBeVisible();
+      expect(work).not.toBeVisible();
+      await act(async () => decodeStrip());
+      expect(work).toBeVisible();
+      expect(spine).toBeVisible();
+      expect(shelf).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "소유 기기" })).toHaveTextContent("PS5");
+      fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+      await act(async () => undefined);
+      expect(container.querySelector(".collection-list")).toBeVisible();
+      expect(work).not.toBeInTheDocument();
+    } finally { vi.useRealTimers(); }
+  });
   it.each(["no_match", "ambiguous"])("asks once per session after %s, including reopening", async status => {
     const { Harness, gateway } = fixtures();
     gateway.fetchLaunchBoxSpine.mockResolvedValue({ collectionId: "a", status });

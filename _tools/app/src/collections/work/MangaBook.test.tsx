@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MangaBook } from "./MangaBook";
-import { MangaBookcase, type MangaWorkData } from "./MangaBookcase";
+import { MangaStage, MangaBookcase, type MangaWorkData } from "./MangaBookcase";
 import { stripPosition } from "./coverStrip";
 import { WorkZoomObject, WorkZoomProvider, WorkZoomStage } from "./WorkZoom";
 import { WorkBackdrop } from "./WorkBackdrop";
@@ -9,6 +9,25 @@ import { WorkBackdrop } from "./WorkBackdrop";
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const props = { src: "/cover", title: "위치 WATCH", author: "작가 이름", volumeNumber: 2, volumeTitle: "2권", focus: null, privacy: false, frontReset: 0, onReady: vi.fn() };
 describe("turnable manga book", () => {
+  it("forwards PC volume metadata through the shared stage, with tablet fields optional", () => {
+    const volume = { id: "v2", volumeNumber: 2, editionIndex: 0, displayLabel: "2", coverArtworkId: null, localReleaseDate: "2026-10-04", isbn13: "9780306406157", releaseStatus: null, contents: "Volume copy", price: 12000, publisher: "Publisher" };
+    const manga: MangaWorkData = { volumes: [volume], activeVolumeId: "v2", editionIndex: 0, focuses: [], ownedNumbers: null, scope: "", revision: "", ownership: null, management: null };
+    const view = render(<MangaStage manga={manga} privacy={false} title="Series" author="Shinohara Kenta" frontReset={0} onPick={vi.fn()} onReady={vi.fn()} />);
+    const back = () => view.container.querySelector(".manga-bb-back")!;
+    expect(back()).toHaveTextContent("Volume copy"); expect(back()).toHaveTextContent("값 12,000원"); expect(back()).toHaveTextContent("Publisher");
+    view.rerender(<MangaStage manga={{ ...manga, volumes: [{ ...volume, contents: undefined, price: undefined, publisher: undefined }] }} privacy={false} title="Series" author="Shinohara Kenta" frontReset={0} onPick={vi.fn()} onReady={vi.fn()} />);
+    expect(back()).toHaveTextContent("ISBN 9780306406157"); expect(back()).toHaveTextContent("2026-10-04");
+    expect(back().querySelector(".manga-back-synopsis")).toBeNull(); expect(back().querySelector(".manga-back-price")).toBeNull();
+  });
+  it("waits for the generated back picture decode too", async () => {
+    const ready = vi.fn(); const { container } = render(<MangaBook {...props} onReady={ready} />);
+    const back = container.querySelector<HTMLImageElement>(".manga-back-picture img")!;
+    let decode!: () => void;
+    Object.defineProperty(back, "decode", { value: () => new Promise<void>(resolve => { decode = resolve; }) });
+    await act(async () => container.querySelectorAll("img").forEach(image => fireEvent.load(image)));
+    expect(ready).not.toHaveBeenCalled();
+    await act(async () => decode()); expect(ready).toHaveBeenCalled();
+  });
   it("keeps the loaded backdrop through rapid cover changes and ignores stale decodes, even on returning to a pending cover", async () => {
     const view = render(<WorkBackdrop src="/one"/>);
     const old = view.container.querySelector<HTMLImageElement>('img')!;
@@ -82,7 +101,7 @@ describe("turnable manga book", () => {
   it("prints title, number and author only on the big book and cuts its own cover at the stored focus", () => {
     const { container, rerender } = render(<MangaBook {...props} />);
     const spine = container.querySelector('.manga-jspine')!;
-    expect([...spine.children].map(node => node.getAttribute("aria-hidden") === "true" ? null : node.textContent)).toEqual(["위치 WATCH", "2", "", "작가 이름", "", null]);
+    expect([...spine.children].map(node => node.getAttribute("aria-hidden") === "true" ? null : node.textContent)).toEqual(["위치 WATCH", "2", "", "작가이름", "", null, null]);
     const image = spine.querySelector<HTMLImageElement>('img')!;
     expect(image.style.objectPosition).toBe("50% 30%");
     rerender(<MangaBook {...props} focus={.25} />);
@@ -96,7 +115,7 @@ describe("turnable manga book", () => {
   });
   it("shrinks a long title, then sets two columns split at the subtitle, measured before paint", () => {
     const long = "드래곤 퀘스트 다이의 대모험 : 용사 아방과 옥염의 마왕";
-    // Each character measures one base em (22px); the spine is 34 × 560, so the title area is 291px.
+    // Each character measures one base em (22px); the fixed title band is 213px.
     vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) { return this.dataset.text ? Array.from(this.dataset.text).length * 22 : 0; });
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("manga-jspine") ? 34 : 0; });
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("manga-jspine") ? 560 : 0; });
@@ -107,7 +126,7 @@ describe("turnable manga book", () => {
     rerender(<MangaBook {...props} title={long} />);
     expect(title()).toHaveClass("manga-jspine-title--columns");
     expect([...title().querySelectorAll(".manga-jspine-column")].map(node => node.textContent)).toEqual(["드래곤 퀘스트 다이의 대모험", "용사 아방과 옥염의 마왕"]);
-    rerender(<MangaBook {...props} title="죠죠의 기묘한 모험 다이아" />);
+    rerender(<MangaBook {...props} title="죠죠의 기묘한 모험" />);
     expect(title()).not.toHaveClass("manga-jspine-title--columns");
     expect(Number(title().style.getPropertyValue("--title-scale"))).toBeLessThan(.66);
   });

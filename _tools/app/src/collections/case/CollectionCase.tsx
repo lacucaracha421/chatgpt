@@ -133,6 +133,9 @@ export function CollectionCase({ data, open, onOpenChange, frontReset = 0, insid
 export function CaseSpine({ data, decorative = false, onSettled }: { data: CaseData; decorative?: boolean; onSettled?(url: string): void }) {
   const [slots, setSlots] = useState<[string | null, string | null]>([data.spine ?? null, null]);
   const [painted, setPainted] = useState<0 | 1 | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const templatePainted = useRef(!data.spine);
+  if (!data.spine || failed === data.spine) templatePainted.current = true;
   const wanted = useRef(data.spine); wanted.current = data.spine;
   useEffect(() => {
     if (!data.spine || (painted !== null && slots[painted] === data.spine)) return;
@@ -142,7 +145,7 @@ export function CaseSpine({ data, decorative = false, onSettled }: { data: CaseD
   }, [data.spine, painted, slots]);
   const hasPaintedSpine = Boolean(data.spine && painted !== null);
   useEffect(() => {
-    if (!data.privacy && data.spine && painted !== null && slots[painted] === data.spine) onSettled?.(data.spine);
+    if (!data.privacy && data.spine && ((painted !== null && slots[painted] === data.spine) || failed === data.spine)) onSettled?.(data.spine);
   });
 
   const template = ["sw2", "sw", "ps5"].includes(data.platform);
@@ -153,11 +156,10 @@ export function CaseSpine({ data, decorative = false, onSettled }: { data: CaseD
       aria-hidden={painted !== index || undefined}
       onLoad={async event => {
         const image = event.currentTarget;
-        try { await image.decode?.(); } catch { onSettled?.(url); return; }
+        try { await image.decode?.(); } catch { if (wanted.current === url) setFailed(url); return; }
         if (image.isConnected && wanted.current === url) setPainted(index as 0 | 1);
-        onSettled?.(url);
-      }} onError={() => onSettled?.(url)} />)}
-    {!hasPaintedSpine && (template ?
+      }} onError={() => { if (wanted.current === url) setFailed(url); }} />)}
+    {!hasPaintedSpine && (templatePainted.current || failed === data.spine) && (template ?
     <span className={`tpl ${data.platform}`} data-spine-template={data.platform} data-nintendo={/nintendo|닌텐도/i.test(data.publisher ?? "") ? "" : undefined}>
       <span className="t-head" /><span className="t-band">{title}</span><span className="t-foot"><span className="t-pub">{data.publisher}</span></span>
     </span> : title)}

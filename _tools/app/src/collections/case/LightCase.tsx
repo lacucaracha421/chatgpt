@@ -101,7 +101,7 @@ function ShelfCaseFaces({ data, selected, ...pending }: { data: CaseData; select
       const props = images.imageProps(face, value);
       return <img key={index} {...props} ref={image => { props.ref(image); if (face === "front") collectionCoverSourceRef(image); }} src={value.src}
         alt={face === "front" ? data.title : ""} draggable={false}
-        style={{ ...props.style, ...(face === "spine" && book ? { objectPosition: `${stripPosition(data.coverFocus ?? null, images.ratio, .08)}% 30%` } : {}) }} />;
+        style={{ ...props.style, ...(face === "spine" && book ? { objectPosition: `${stripPosition(data.coverFocus ?? null, images.ratio * .19, .08)}% 30%` } : {}) }} />;
     });
   }
   const spineShown = Boolean(images.faces.spine.shown);
@@ -110,7 +110,7 @@ function ShelfCaseFaces({ data, selected, ...pending }: { data: CaseData; select
     <span className="cs-front"><span className="ins">{data.privacy ? <span className="case-mask" /> : cover("front")}</span></span>
     <span className="cs-spine"><span className={book || !spineShown ? "ins" : spineInsertClass(spineData)}>
       {data.privacy ? <span className="case-mask" /> : book ? <span style={{ visibility: spineShown ? undefined : "hidden" }}>
-        <MangaSpineFace title={data.title} author={data.author} volumeNumber={data.volumeNumber} illustration={cover("spine")} />
+        <MangaSpineFace shelf title={data.title} author={data.author} volumeNumber={data.volumeNumber} illustration={cover("spine")} />
       </span> : <>
         <span className="case-spine-art">{cover("spine")}</span>
         {spineShown && !spineData.spine && <CaseSpine decorative data={spineData} />}

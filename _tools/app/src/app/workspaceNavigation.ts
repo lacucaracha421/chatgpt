@@ -20,7 +20,7 @@ export function initialWorkspaceView(): AssetView {
     case "artist": return { kind: "creator", creatorKey: "artist-1" };
     case "albums": return { kind: "albums" };
     case "collections": return { kind: "collections", typeFilter: "game", showcase: false };
-    case "collection-detail": return { kind: "collection", collectionId: "game-1" };
+    case "collection-detail": return { kind: "collection", collectionId: new URLSearchParams(window.location.search).get("id") ?? "game-1" };
     case "calendar": return { kind: "collections", typeFilter: "game", showcase: false, releaseCalendar: true };
     case "manga":
     case "manga-catalog": return { kind: "manga" };

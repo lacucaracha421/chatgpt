@@ -1,3 +1,4 @@
+import { useDelayedBusy } from "../src/shared/useDelayedBusy";
 import {useFirstAppearance} from '../src/shared/motion/useFirstAppearance';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {ArrowsUpDownIcon} from '@heroicons/react/24/outline';
@@ -39,6 +40,7 @@ export function ArtistGrid({artists,state,paused,onOpenArtist,onVisibleNames}:{a
   const [sort,setSort] = useState<ArtistSort>(readSort);
   const [sortOpen,setSortOpen] = useState(false);
   const visible = useMemo(() => sortArtists(artists.some(artist=>artist.main)?artists.filter(artist=>artist.main):artists,sort),[artists,sort]);
+  const showLoading=useDelayedBusy(state==='idle'||state==='loading');
   const host=useRef<HTMLDivElement>(null);
   useFirstAppearance(host,visible.length,!paused&&state==='ready',"classification-artists",".artist-grid-card");
   useEffect(() => { onVisibleNames?.(visible.map(artistName)); }, [onVisibleNames,visible]);
@@ -53,7 +55,7 @@ export function ArtistGrid({artists,state,paused,onOpenArtist,onVisibleNames}:{a
     <div className="artist-grid-toolbar">
       <button type="button" className="artist-grid-sort" aria-label={`정렬: ${SORT_LABELS[sort]}`} onClick={() => setSortOpen(true)}><ArrowsUpDownIcon aria-hidden="true"/>{SORT_LABELS[sort]}</button>
     </div>
-    {state === 'idle' || state === 'loading' ? <div className="artist-empty" role="status"><span>{state === 'loading' ? '작가 목록을 불러오는 중입니다' : '작가 목록을 준비하는 중입니다'}</span></div> : state === 'empty' ? <EmptyArtists/> : visible.length ? <div className="artist-grid-list">{visible.map(artist => <ArtistGridCard key={artist.id} artist={artist} privateMode={privateMode} paused={paused} onOpen={() => onOpenArtist(artist)}/>)}</div> : <EmptyState title="검색 결과가 없습니다"/>}
+    {state === 'idle' || state === 'loading' || showLoading ? <div className="artist-empty" role="status"><span>{showLoading && "작가 목록을 불러오는 중입니다"}</span></div> : state === 'empty' ? <EmptyArtists/> : visible.length ? <div className="artist-grid-list">{visible.map(artist => <ArtistGridCard key={artist.id} artist={artist} privateMode={privateMode} paused={paused} onOpen={() => onOpenArtist(artist)}/>)}</div> : <EmptyState title="검색 결과가 없습니다"/>}
     {sortOpen && <BottomSheet title="정렬" onClose={() => setSortOpen(false)}><SegmentedControl fullWidth label="작가 정렬" options={SORT_OPTIONS} value={sort} onChange={chooseSort}/></BottomSheet>}
   </div>;
 }

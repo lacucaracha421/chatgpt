@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useEffect, useRef, useState } from "react";
 import { useLibrary } from "../library/LibraryContext";
 import type { CatalogGroupedWork, CatalogGroupEditionsPage, CatalogLanguage, CatalogWork } from "../library/types";
@@ -66,7 +67,7 @@ export function CatalogEditionsDialog({ work, language, revealBlocked, onOpen, o
   return <Dialog open title="작품 판본" variant="medium" onClose={onClose}>
     <div className="catalog-editions">
       <div className="catalog-editions__toolbar">
-        <span>{data ? `${data.totalCount}개 판본` : "판본을 불러오는 중…"}</span>
+        <span><BusyLabel busy={!data} idle={data && `${data.totalCount}개 판본`}>판본을 불러오는 중…</BusyLabel></span>
         <Button size="sm" disabled={saving || loading} aria-pressed={data?.selectedProviderWorkId === null} onClick={() => void select(null)}>자동 선택</Button>
       </div>
       {error && <p role="alert">{error}</p>}

@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useEffect, useMemo, useState } from "react";
 import { AssetGallery } from "../assets/AssetGallery";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -77,7 +78,7 @@ export function ReferenceCandidateDialog({ target, privacyMode, onClose, onSaved
     <div className="character-reference-dialog">
       <p>추천 이미지를 확인하고 잘못된 항목만 빼주세요. 과거 이미지는 자동으로 다시 분석하지 않습니다.</p>
       <p className="series-description">자동 확정은 같은 캐릭터를 지지하는 레퍼런스가 6장 이상일 때만 가능합니다.</p>
-      {!page && !error ? <p>추천 이미지를 고르는 중…</p> : null}
+      <BusyLabel busy={!page && !error}><p>추천 이미지를 고르는 중…</p></BusyLabel>
       {page && page.items.length === 0 ? <p>추천할 이미지가 없습니다. 캐릭터 폴더에서 직접 확인한 이미지를 더 모은 뒤 다시 시도해 주세요.</p> : null}
       {page && page.items.length > 0 ? <div className="character-reference-dialog__gallery">
         <AssetGallery

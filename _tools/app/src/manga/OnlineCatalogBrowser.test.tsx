@@ -202,7 +202,7 @@ describe("OnlineCatalogBrowser", () => {
     expect(container.querySelector(".online-catalog__frame")).toHaveAttribute("inert");
     expect(container.querySelector(".manga-card--skeleton")).toBeNull();
     await act(async () => next.resolve({ works: [{ ...work, bookmarked: true }], totalCount: 280, page: 0, pageSize: 48 }));
-    expect(await screen.findByRole("radio", { name: "북마크 280" })).toHaveAttribute("aria-checked", "true");
+    expect(await screen.findByRole("radio", { name: "북마크" })).toHaveAttribute("aria-checked", "true");
     expect(container.querySelector(".online-catalog__frame")).not.toHaveAttribute("inert");
     expect(gateway.searchOnlineCatalog).toHaveBeenCalledTimes(2);
   });
@@ -1056,7 +1056,7 @@ it("shows grouped cards before exact count and rejects stale counts and failures
   });
   renderBrowser(gateway);
   expect(await screen.findByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
-  expect(screen.getByText("결과 수 계산 중…")).toBeVisible();
+  expect(screen.queryByText("결과 수 계산 중…")).not.toBeInTheDocument();
   expect(document.querySelector(".online-catalog__list-end")).toHaveTextContent("1개");
   await chooseMenu("언어", "일본어");
   await act(async () => { events[1]({ type: "count", totalCount: 0 }); events[0]({ type: "count", totalCount: 999 }); old.reject(new Error("old failure")); });
@@ -1273,7 +1273,8 @@ it("keeps the resolving read action busy in the panel and opens page 1, includin
   const panel = await screen.findByRole("complementary", { name: "망가 상세" });
   const read = screen.getByRole("button", { name: "읽기" });
   await userEvent.click(read);
-  expect(screen.getByRole("button", { name: "불러오는 중…" })).toBe(read);
+  expect(screen.getByRole("button", { name: "읽기" })).toBe(read);
+  expect(screen.queryByText("불러오는 중…")).not.toBeInTheDocument();
   expect(read).toBeDisabled();
   vi.mocked(gateway.getOnlineCatalogWorkDetail).mockResolvedValue({ ...detail, bookmarked: true });
   act(() => window.dispatchEvent(new Event(CATALOG_BOOKMARKS_CHANGED_EVENT)));

@@ -1,3 +1,4 @@
+import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { Scrubber } from "../shared/ui/scrubber/Scrubber";
 import type { ScrubberSort } from "../shared/ui/scrubber/scrubberModel";
 import { EllipsisHorizontalIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
@@ -117,6 +118,8 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreFailed, setLoadMoreFailed] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const showUpdating = useDelayedBusy(updating);
+  const showCounting = useDelayedBusy(totalCount === null && !!status?.installed && !countError);
   const [openingWorkKey, setOpeningWorkKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<CatalogWorkDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -638,7 +641,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   // Rarely used catalog actions share one overflow menu in the top bar; the catalog also refreshes hourly on its own.
   const catalogMenu = status?.installed ? <Menu label="카탈로그 더보기" trigger={<EllipsisHorizontalIcon aria-hidden="true" />} items={[
     { id: "reveal", label: "숨긴 결과 표시", checked: revealBlocked, disabled: loading, onSelect: toggleRevealBlocked },
-    { id: "update", label: updating ? "갱신 중…" : "신규 작품 갱신", disabled: updating, onSelect: () => void updateCatalog() },
+    { id: "update", label: showUpdating ? "갱신 중…" : "신규 작품 갱신", disabled: updating, onSelect: () => void updateCatalog() },
     { id: "review", label: "중복 후보 검토", onSelect: () => setReviewOpen(true) },
   ]} /> : undefined;
   const searchForm = (status?.installed && <form className="manga-browser__search online-catalog__search" role="search" onSubmit={submit}>
@@ -702,7 +705,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   return <section className="manga-browser online-catalog" aria-label="온라인 망가">
     {active && <MangaToolbar source={requestedSource ?? scope} onSourceChange={selectSource} localCount={localCount} bookmarkCount={bookmarkCount ?? knownBookmarkCount}
       filterToken={<MangaIndexToken filter={indexFilter} onClear={() => onClearIndexFilter?.()} />}
-      countLabel={totalCount !== null ? `${totalCount.toLocaleString()}개 결과` : status?.installed ? countError ? "결과 수 확인 실패" : "결과 수 계산 중…" : undefined}
+      countLabel={showCounting ? "결과 수 계산 중…" : totalCount !== null ? `${totalCount.toLocaleString()}개 결과` : countError ? "결과 수 확인 실패" : undefined}
       controls={catalogControls} refreshedAt={refreshedAt ?? latestUpdate} refreshing={loading} onRefresh={status?.installed ? () => { void refreshSearch.current().then(success => { if (success) setRefreshedAt(new Date().toISOString()); }); } : undefined}
       ariaLabel="온라인 망가 도구" actions={catalogMenu} chrome={{
         summary: `${catalogSortLabel(sort)} · ${language === "korean" ? "한국어" : "일본어"}${revealBlocked ? " · 숨김 포함" : ""}`,

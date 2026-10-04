@@ -1,3 +1,4 @@
+import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useTabletAssetMask} from './assetMask';
 import {Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject} from 'react';
 import {
@@ -133,7 +134,7 @@ export function Exchange({snapshot, onSnapshot, backRef, onClose}: {
           {tokenError && <p className="error-message" role="alert">{tokenError}</p>}
           <div className="exchange-token-actions">
             {editingToken && !needsToken && <Button variant="ghost" type="button" onClick={() => setEditingToken(false)}>취소</Button>}
-            <Button variant="primary" type="submit" disabled={busy || !token.trim()}>{busy ? '확인 중' : '확인하고 저장'}</Button>
+            <Button variant="primary" type="submit" disabled={busy || !token.trim()}><BusyLabel busy={!!(busy)} idle={'확인하고 저장'}>확인 중</BusyLabel></Button>
           </div>
         </form>}
         {usable && !snapshot.receiveSupported && <p className="hint exchange-notice">이 Android 버전에서는 받기를 지원하지 않습니다 (Android 10 이상 필요). 보내기는 사용할 수 있습니다.</p>}

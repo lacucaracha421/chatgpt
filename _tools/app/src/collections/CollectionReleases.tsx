@@ -1,3 +1,5 @@
+import { useDelayedBusy } from "../shared/useDelayedBusy";
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { ArrowPathIcon, BookOpenIcon, ChevronLeftIcon } from "@heroicons/react/24/outline";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import type { ViewChromeSpec } from "../layout/WorkspaceChrome";
@@ -147,7 +149,8 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
     const url = work && !privacyMode ? coverUrl(work) : null;
     return <span className="collection-releases__cover">{url ? <StableImage src={url} alt="" loading="lazy" decoding="async" draggable={false} /> : <span aria-hidden="true" />}</span>;
   };
-  const confirm = (key: string, name: string, items: ReleaseInboxItem[]) => <Button size="sm" variant="quiet" disabled={busy || loading} aria-label={`${name} 확인`} onClick={event => { event.stopPropagation(); void acknowledge(key, items); }}>{working === key ? "확인 중…" : "확인"}</Button>;
+  const showChecking = useDelayedBusy(working === "check");
+  const confirm = (key: string, name: string, items: ReleaseInboxItem[]) => <Button size="sm" variant="quiet" disabled={busy || loading} aria-label={`${name} 확인`} onClick={event => { event.stopPropagation(); void acknowledge(key, items); }}><BusyLabel busy={!!(working === key)} idle={"확인"}>확인 중…</BusyLabel></Button>;
   const renderRow = (row: ReleaseLedgerRow) => {
     const chips = row.chips.slice(0, 2);
     const fresh = row.chips.find(chip => chip.kind === "new");
@@ -178,7 +181,7 @@ export function CollectionReleases({ provider, chrome, onBack, collections, data
       titleAccessory={<><span className="collection-toolbar__count">{displayCount(rows.length + others.length)}</span><div className="collection-releases__actions">
         <SegmentedControl label="신간 지역" options={[{ value: "kakao", label: "한국 정발", count: korean.length }, { value: "mangadex", label: "일본", count: japan.length }]} value={provider} onChange={onProviderChange} />
         {checkedAt && <span className="collection-releases__checked">{displayDateTime(checkedAt)} 확인</span>}
-        {api?.runUpdates && <Button size="sm" variant="quiet" aria-label={working === "check" ? "처리 중…" : waiting ? "재시도 대기" : "새로고침"} aria-description={checkedAt ? `${displayDateTime(checkedAt)} 확인` : undefined} disabled={busy || waiting || restricted || loading} onClick={() => void check()}><ArrowPathIcon aria-hidden="true" /></Button>}
+        {api?.runUpdates && <Button size="sm" variant="quiet" aria-label={showChecking ? "처리 중…" : waiting ? "재시도 대기" : "새로고침"} aria-description={checkedAt ? `${displayDateTime(checkedAt)} 확인` : undefined} disabled={busy || waiting || restricted || loading} onClick={() => void check()}><ArrowPathIcon aria-hidden="true" /></Button>}
         <Button size="sm" variant="quiet" disabled={busy || loading || inbox.length === 0} onClick={() => setConfirmAll(true)}>모두 확인</Button>
       </div></>}
     />

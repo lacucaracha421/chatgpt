@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { AreaPainted, AreaRequested, AreaVisible } from "../shared/motion/AreaSwitch";
 import { useAuthoritySyncHealth, useCloudSyncStatus } from "../app/useCloudProblems";
 import { useWorkloadProfile } from "../app/workloadProfile";
 import { igdbImagePreviewUrl, tmdbImagePreviewUrl } from "../assets/mediaUrl";
@@ -8,7 +9,7 @@ import { groupInbox, localDay } from "../collections/releaseCaption";
 import { useReleaseData } from "../collections/releaseData";
 import { ViewToolbar } from "../layout/ViewToolbar";
 import { useLibrary } from "../library/LibraryContext";
-import type { AssetView, ClassificationEntry, CollectionSummary, HomeOverview, ReleaseTitle, ReleaseWishlistItem } from "../library/types";
+import type { AssetView, ClassificationEntry, CollectionSummary, HomeOverview, ReleaseCalendar, ReleaseTitle, ReleaseWishlistItem } from "../library/types";
 import { characterApi, type CharacterTarget } from "../characters/api";
 import { TaggerReview } from "../characters/TaggerReview";
 import { taggerDecisionApi, taggerReviewSource, type TaggerDecisionApi, type TaggerReviewItem, type TaggerReviewSource } from "../characters/taggerReviewClient";
@@ -73,8 +74,18 @@ export type HomeViewProps = {
 export function HomeView({ collections, collectionsReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, notes, shadowApi, characterSource, taggerSource, taggerApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, onOpenAsset }: HomeViewProps) {
   const { gateway, library } = useLibrary();
   const root = library?.root ?? "";
+  const requested = useContext(AreaRequested);
+  const painted = useContext(AreaPainted);
+  const visible = useContext(AreaVisible);
+  const active = requested || painted;
+  const visitSession = useRef({active, number: 0});
+  if (visitSession.current.active !== active) visitSession.current = {active, number: visitSession.current.number + (active ? 1 : 0)};
+  const visitNumber = visitSession.current.number;
   const { privacyMode } = usePrivacy();
-  const avLinkCount = useAvLinkPendingCount({ enabled: !privacyMode, refreshVersion, api: avLinkApi });
+  const avLinkRead = useAvLinkPendingCount({ enabled: active && !privacyMode, refreshVersion, api: avLinkApi });
+  const lastAvLinkCount = useRef(avLinkRead);
+  if (active) lastAvLinkCount.current = avLinkRead;
+  const avLinkCount = active ? avLinkRead : lastAvLinkCount.current;
   const at = useLocalDayClock(now);
   const today = localDay(at);
 
@@ -90,27 +101,28 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   const [wishlistError, setWishlistError] = useState(false);
   const [releaseDetail, setReleaseDetail] = useState<ReleaseTitle | null>(null);
   const [shelfRetry, setShelfRetry] = useState(0);
-  const [calendarRead, setCalendarRead] = useState<{ api: typeof calendarApi; root: string; retry: number } | null>(null);
+  const [calendarRead, setCalendarRead] = useState<{ api: typeof calendarApi; root: string; retry: number; visit: number } | null>(null);
+  const [calendarSnapshot, setCalendarSnapshot] = useState<ReleaseCalendar | null>(null);
   useEffect(() => {
-    if (!calendarApi) return;
+    if (!calendarApi || !active) return;
     let live = true;
     const wishlistRead = calendarApi.wishlist().then((items) => {
       if (live) { setWishlist(items ?? []); setWishlistReady(true); setWishlistError(false); }
       return true;
     }, () => { if (live) setWishlistError(true); return false; });
-    const releaseRead = calendarApi.calendar().then(() => true, () => false);
+    const releaseRead = calendarApi.calendar().then(value => { if (live) setCalendarSnapshot(value); return true; }, () => false);
     void Promise.all([wishlistRead, releaseRead]).then(results => {
-      if (live && results.every(Boolean)) setCalendarRead({ api: calendarApi, root, retry: shelfRetry });
+      if (live && results.every(Boolean)) setCalendarRead({ api: calendarApi, root, retry: shelfRetry, visit: visitNumber });
     });
     return () => { live = false; };
-  }, [calendarApi, root, shelfRetry]);
+  }, [calendarApi, root, shelfRetry, active, visitNumber]);
 
   const [queueRead, setQueueRead] = useState(0);
   const [overview, setOverview] = useState<HomeOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(Boolean(gateway.getHomeOverview));
   const [overviewError, setOverviewError] = useState(false);
   useEffect(() => {
-    if (!gateway.getHomeOverview) return;
+    if (!gateway.getHomeOverview || !active) return;
     let live = true;
     setOverviewLoading(true);
     const { todayStart, weekStart } = localBoundaries(at);
@@ -127,7 +139,7 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
     return () => { live = false; };
     // `now` is a test seam; only the local day, gateway and relevant changes repeat this read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gateway, refreshVersion, trashCount, queueRead, today]);
+  }, [gateway, refreshVersion, trashCount, queueRead, today, active]);
 
   // 확인할 것 counts other screens own; read when Home opens and after their dialogs close.
   const [dialog, setDialog] = useState<Dialog | null>(null);
@@ -146,6 +158,7 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   // then the summary is read once.
   const { restricted } = useWorkloadProfile();
   useEffect(() => {
+    if (!active) return;
     if (!shadowQueueApi || restricted) { setCharacterQueue(null); return; }
     let live = true;
     const read = shadowQueueApi.summary
@@ -160,7 +173,7 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
       setCharacterError(false);
     }, () => { if (live) setCharacterError(true); });
     return () => { live = false; };
-  }, [shadowQueueApi, restricted, queueRead]);
+  }, [shadowQueueApi, restricted, queueRead, active]);
   // Refresh only when the series set changes or a review closes; keep the last result meanwhile.
   const taggerSeriesKey = characters.map((target) => `${target.id}:${target.seriesClassificationId ?? ""}`).join("|");
   const charactersRef = useRef(characters);
@@ -169,6 +182,7 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [taggerSource, taggerSeriesKey]);
   useEffect(() => {
+    if (!active) return;
     let live = true;
     onQueuesRequested?.();
     void Promise.resolve().then(() => gateway.listCatalogReview()).then((page) => {
@@ -176,14 +190,14 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
     }, () => { if (live) setDuplicateError(true); });
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gateway, queueRead]);
+  }, [gateway, queueRead, active]);
 
   const store = useMemo(() => notes ?? (root ? notesStore(root) : null), [notes, root]);
   const notesState = useSyncExternalStore(store?.subscribe ?? noopSubscribe, store?.snapshot ?? emptyNotes);
   useEffect(() => { void store?.load(); }, [store]);
   const cloud = useCloudSyncStatus(gateway, root);
   const { health } = useAuthoritySyncHealth(gateway, root);
-  const connectionRows = useConnectionRows({ gateway, cloud, authorityHealth: health });
+  const connectionRows = useConnectionRows({ gateway, cloud, authorityHealth: health, active, calendar: calendarSnapshot });
   const go = (view: AssetView) => () => onNavigate(view);
   const releaseView: AssetView = { kind: "collections", typeFilter: "manga", showcase: false, releaseProvider: "kakao" };
   const calendarView = (type: "game" | "movie" = "game"): AssetView => ({ kind: "collections", typeFilter: type, showcase: false, releaseCalendar: true });
@@ -226,8 +240,8 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   const releases = newlyReleasedRows(collections, board, inbox, wishlist, today);
   const arrivalItems = releases.map(row => ({ ...row, date: row.date ?? null, token: `${row.key}:${row.date ?? ''}:${row.volume ?? ''}`, fresh: row.caption.kind === 'new' }));
   const arrivalsReady = collectionsReady && (!tracking || Boolean(release.data && !release.loading && !release.error))
-    && (!calendarApi || (calendarRead?.api === calendarApi && calendarRead.root === root && calendarRead.retry === shelfRetry));
-  const visit = useHomeVisit(root, arrivalItems, today, true, at.toISOString(), arrivalsReady);
+    && (!calendarApi || (calendarRead?.api === calendarApi && calendarRead.root === root && calendarRead.retry === shelfRetry && calendarRead.visit === visitNumber));
+  const visit = useHomeVisit(root, arrivalItems, today, visible, at.toISOString(), arrivalsReady);
   const upcoming = upcomingRows(collections, board, inbox, wishlist, today).filter(row => daysAfter(row.date, today) <= 14);
   const openRelease = (row: ReleaseRow & { token: string }) => {
     visit.opened(row.token);
@@ -283,7 +297,7 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
         else todos.find(todo => todo.key === row.key)?.open();
       }} loading={reviewUnknown.length || (store && !notesState.ready) ? <>{reviewUnknown.some(r => r.failed) ? <p role="status">검토 수를 확인할 수 없습니다 <Button variant="quiet" onClick={retryOverview}>다시 시도</Button></p> : <Skeleton label="오늘 할 것" />}</> : undefined} />}
         // 1년 전 오늘 sits under 오늘 할 것 so a short to-do list does not leave the left column empty.
-        leftAfter={<HomeRevisit gateway={gateway} localDate={today} privacyMode={privacyMode} onOpenAsset={onOpenAsset} />}
+        leftAfter={<HomeRevisit gateway={gateway} localDate={today} privacyMode={privacyMode} onOpenAsset={onOpenAsset} active={active} />}
         right={<HomePresence items={rightSections} />} />
     </div></div>
     {dialogs}

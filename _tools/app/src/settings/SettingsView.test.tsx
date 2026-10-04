@@ -38,6 +38,20 @@ function renderSettings(gateway: LibraryGateway, props: Partial<React.ComponentP
   return render(<LibraryProvider gateway={gateway}><SettingsView restoring={false} onRestore={vi.fn()} onExit={vi.fn()} {...props} /></LibraryProvider>);
 }
 
+it("asks for the TMDB read access token and preserves it after a save failure", async () => {
+  const gateway = createGateway({ setTmdbToken: vi.fn().mockRejectedValue(null) });
+  renderSettings(gateway, { initialSection: "connection" });
+  await userEvent.click(await screen.findByRole("button", { name: "TMDB API 읽기 액세스 토큰 입력" }));
+  const input = screen.getByLabelText("TMDB API 읽기 액세스 토큰 입력");
+  expect(input).toHaveAttribute("placeholder", "API 읽기 액세스 토큰 (eyJ…)");
+  expect(screen.getByText("TMDB 설정의 API 읽기 액세스 토큰을 입력하세요. 32자리 API 키(v3)가 아닙니다.")).toBeVisible();
+  await userEvent.type(input, "eyJ.test-token");
+  await userEvent.click(screen.getByRole("button", { name: "저장" }));
+  expect(await screen.findByText("TMDB API 읽기 액세스 토큰을 저장하지 못했습니다.")).toBeVisible();
+  expect(gateway.setTmdbToken).toHaveBeenCalledWith("eyJ.test-token");
+  expect(input).toHaveValue("eyJ.test-token");
+});
+
 function verificationResult(verdict: "lossless" | "differences" | "blocked" = "lossless") {
   return { reportPath: "C:/app-data/collection-authority/verify-fixture.json", report: {
     version: 1 as const, verdict, checkedAt: "2026-10-04T00:00:00Z", validation: null,
@@ -72,7 +86,8 @@ it("keeps a running check disabled and reports failure without a report link", a
   const button = within(row).getByRole("button", { name: "점검하기" });
   await waitFor(() => expect(button).toBeEnabled());
   await userEvent.click(button);
-  expect(within(row).getByRole("button", { name: "점검 중…" })).toBeDisabled();
+  expect(within(row).getByRole("button", { name: "점검하기" })).toBeDisabled();
+  expect(within(row).queryByText("점검 중…")).not.toBeInTheDocument();
   reject({ code: "collection_authority_verify_unsupported", message: "서버가 점검을 지원하지 않습니다." });
   expect(await within(row).findByText("확인 불가: 서버가 점검을 지원하지 않습니다.")).toBeInTheDocument();
   expect(within(row).queryByRole("button", { name: "보고서 열기" })).not.toBeInTheDocument();
@@ -185,7 +200,8 @@ it("keeps publisher status unknown on failure and clears cancelled input", async
   renderSettings(gateway, { initialSection: "connection" });
   const row = screen.getByText("송신 키").closest("dl")!;
   await userEvent.click(within(row).getByRole("button", { name: "입력" }));
-  expect(within(row).getAllByText("확인 중…")).toHaveLength(2);
+  expect(within(row).queryAllByText("확인 중…")).toHaveLength(0);
+  expect(await within(row).findAllByText("확인 중…")).toHaveLength(2);
   expect(screen.queryByText("연결 설정을 처리하지 못했습니다.")).not.toBeInTheDocument();
   await userEvent.type(screen.getByLabelText("서버 송신 키"), "cancelled-test-key");
   await userEvent.click(screen.getByRole("button", { name: "취소" }));

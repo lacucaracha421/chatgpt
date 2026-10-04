@@ -5,6 +5,7 @@ import type { AssetSummary } from "../library/types";
 import { AssetGallery } from "./AssetGallery";
 import { GalleryViewMenu } from "./GalleryViewMenu";
 import { useState } from "react";
+import { readFileSync } from "node:fs";
 
 // Width 840 rounds to 848; six square items, 6px gaps, one date heading.
 const MEASURED_EIGHT = 2 * ((848 - 5 * 6) / 6) + 44 + 6;
@@ -23,6 +24,21 @@ afterEach(() => {
 });
 
 describe("AssetGallery", () => {
+  it("measures changed folder content before paint without waiting for ResizeObserver", () => {
+    const measured: string[] = [];
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (!this.classList.contains("asset-gallery__intro")) return original.call(this);
+      measured.push(this.textContent ?? "");
+      return { ...original.call(this), height: this.textContent === "new folder and counts" ? 260 : 40 };
+    });
+    const items = [asset(0)];
+    const { rerender } = render(<AssetGallery layout="masonry" items={items} intro={<div>old folder</div>} />);
+    measured.length = 0;
+    rerender(<AssetGallery layout="masonry" items={items} intro={<div>new folder and counts</div>} />);
+    expect(measured).toContain("new folder and counts");
+  });
+
   it("keeps the shared compact date heading even when a legacy caller requests full dates", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 8, 23));
@@ -736,18 +752,52 @@ it("keeps the heart reachable on hover/focus or selection and draws no select ci
   expect(heart).toHaveAttribute("data-visible", "true");
 });
 
-it.each(["masonry", "justified"] as const)("reveals date counts on the %s group's pointer or keyboard focus without a rule", layout => {
-  const { container } = render(<AssetGallery layout={layout} items={[asset(0), asset(1)]} />);
-  const heading = container.querySelector<HTMLElement>(".asset-gallery__date")!;
-  expect(heading.querySelector(".asset-gallery__date-rule")).toBeNull();
-  expect(heading.querySelector(".asset-gallery__date-count")).toHaveTextContent("2");
-  fireEvent.pointerOver(screen.getByRole("option", { name: "asset-0.png" }));
-  expect(heading).toHaveAttribute("data-active", "true");
-  fireEvent.pointerOver(container.querySelector(".asset-gallery__scroll")!);
-  expect(heading).toHaveAttribute("data-active", "false");
-  fireEvent.focus(screen.getByRole("option", { name: "asset-1.png" }));
-  expect(heading).toHaveAttribute("data-active", "true");
-  expect(heading).toHaveAttribute("tabindex", "0");
+it.each(["masonry", "justified"] as const)("keeps %s date headings and counts visible across tiles, gaps and focus changes", layout => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 9, 4, 12));
+  // Match global.css order: the legacy shared count rule loads after the gallery CSS.
+  const style = document.createElement("style");
+  style.textContent = ["src/assets/asset-gallery.css", "src/styles/shared-states.css"].map(path => readFileSync(path, "utf8")).join("\n");
+  document.head.append(style);
+  try {
+    const items = Array.from({ length: 4 }, (_, index) => ({ ...asset(index), collectedAt: new Date(2026, 9, index < 2 ? 4 : 3, 9).toISOString() }));
+    const { container, rerender } = render(<AssetGallery layout={layout} items={items} />);
+    const scroll = container.querySelector<HTMLElement>(".asset-gallery__scroll")!;
+    const space = container.querySelector<HTMLElement>(".asset-gallery__virtual-space")!;
+    const headings = [...container.querySelectorAll<HTMLElement>(".asset-gallery__date")];
+    expect(headings).toHaveLength(2);
+    expect(headings[0]).toHaveTextContent("10.4오늘2");
+    const positions = headings.map(heading => heading.getAttribute("style"));
+    const stable = () => {
+      expect([...container.querySelectorAll(".asset-gallery__date")]).toEqual(headings);
+      expect(headings.map(heading => heading.getAttribute("style"))).toEqual(positions);
+      expect(scroll.scrollTop).toBe(0);
+      for (const heading of headings) {
+        expect(heading).toBeVisible();
+        expect(heading).toHaveAttribute("tabindex", "0");
+        expect(heading.querySelector(".asset-gallery__date-rule")).toBeNull();
+        expect(heading.querySelector(".asset-gallery__date-day")).toBeVisible();
+        expect(heading.querySelector(".asset-gallery__date-weekday")).toBeVisible();
+        expect(heading.querySelector(".asset-gallery__date-count")).toHaveStyle({ opacity: "1", transition: "none" });
+        expect(heading.querySelector(".asset-gallery__date-count")).toHaveTextContent("2");
+      }
+    };
+    stable();
+    const tile = screen.getByRole("option", { name: "asset-0.png" });
+    act(() => tile.focus());
+    stable();
+    for (const target of [tile, space, headings[1], scroll, screen.getByRole("option", { name: "asset-2.png" }), space]) {
+      fireEvent.pointerOver(target);
+      fireEvent.pointerMove(target, { pointerType: "mouse", clientX: 400, clientY: 200 });
+      stable();
+    }
+    fireEvent.pointerLeave(scroll);
+    stable();
+    act(() => { headings[0].focus(); headings[0].blur(); });
+    stable();
+    rerender(<AssetGallery layout={layout} items={[...items]} />);
+    stable();
+  } finally { style.remove(); }
 });
 
 it.each(["masonry", "justified"] as const)("keeps the top asset and its image mounted during %s panel and size reflow", layout => {

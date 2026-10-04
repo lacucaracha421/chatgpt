@@ -60,6 +60,42 @@ describe("CollectionCase", () => {
     // jsdom cannot resolve CSS 3D matrices; keep the angle contract explicit.
     expect(caseStyles).toMatch(/\.k-hinge > \.k-lid\s*\{[^}]*transform: rotateY\(calc\(90deg - var\(--open\) \* 90deg\)\)/);
   });
+  it("puts the unfolded inner hinge on the same plane as the lid floor", () => {
+    const transform = (face: string) => caseStyles.match(new RegExp(`\\.collection-case \\.${face} \\{[^}]*?transform: ([^;]+);`))?.[1];
+    // Both are children of the flat hinge when open; a missing thickness leaves a visible step.
+    expect(transform("k-spine-in")).toBe(transform("k-inner"));
+    expect(transform("k-inner")).toBe("translateZ(calc(var(--t) * -1)) rotateY(180deg)");
+  });
+  it("never paints a generic spine while the chosen spine decodes", async () => {
+    const ready = vi.fn();
+    const { container } = render(<CollectionCase data={{ ...data, front: null, spine: "/slow-spine" }} open={false} onOpenChange={vi.fn()} onReady={ready} />);
+    const image = container.querySelector<HTMLImageElement>('img[src="/slow-spine"]')!;
+    let decode!: () => void;
+    image.decode = () => new Promise<void>(resolve => { decode = resolve; });
+    fireEvent.load(image);
+    expect(container.querySelector("[data-spine-template]")).toBeNull();
+    expect(ready).not.toHaveBeenCalled();
+    await act(async () => decode());
+    expect(image).toBeVisible();
+    expect(ready).toHaveBeenCalledTimes(1);
+  });
+  it("commits a failed spine fallback before announcing readiness", () => {
+    const ready = vi.fn(() => expect(document.querySelector('[data-spine-template="sw2"]')).toBeVisible());
+    const { container } = render(<CollectionCase data={{ ...data, front: null, spine: "/missing-spine" }} open={false} onOpenChange={vi.fn()} onReady={ready} />);
+    fireEvent.error(container.querySelector('img[src="/missing-spine"]')!);
+    expect(ready).toHaveBeenCalledTimes(1);
+  });
+  it("keeps an already painted failure fallback while a replacement spine loads", async () => {
+    const props = { open: false, onOpenChange: vi.fn() };
+    const { container, rerender } = render(<CollectionCase {...props} data={{ ...data, front: null, spine: "/failed" }} />);
+    fireEvent.error(container.querySelector('img[src="/failed"]')!);
+    const fallback = container.querySelector("[data-spine-template]");
+    rerender(<CollectionCase {...props} data={{ ...data, front: null, spine: "/replacement" }} />);
+    expect(fallback).toBeVisible();
+    await act(async () => fireEvent.load(container.querySelector('img[src="/replacement"]')!));
+    expect(fallback).not.toBeInTheDocument();
+    expect(container.querySelector('img[src="/replacement"]')).toBeVisible();
+  });
   it.each(["sw", "sw2", "ps5", "pc", "other", "film", "av"] as const)("uses the %s platform's media tray", platform => {
     const { container } = render(<Case value={{ ...data, platform }} />);
     const isCard = platform === "sw" || platform === "sw2";

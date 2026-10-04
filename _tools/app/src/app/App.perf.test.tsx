@@ -456,6 +456,86 @@ describe("desktop idle re-render gate (PERF-ALL-001)", () => {
   });
 });
 
+it("Home revisit shows retained content while its overview refresh is pending", async () => {
+  const gateway = gw();
+  const overview = { failed: [], assets: { total: 0, today: 0, week: 0, images: 0, videos: 0 }, collections: { game: 0, manga: 0, movie: 0, av: 0 }, tagger: { total: 0, recommendation: 0, veto: 0 }, avPerformer: null, server: { configured: false, live: false, confirmedAt: null, capturesPending: 0 } };
+  gateway.getHomeOverview = vi.fn().mockImplementation(() => new Promise(resolve => setTimeout(() => resolve(overview), 800)));
+  gateway.getRevisitSlate = vi.fn().mockResolvedValue({ localDate: "2026-10-02", bundles: [{ kind: "date", assetIds: ["old-a", "old-b"] }] });
+  gateway.releaseCalendar = { wishlist: vi.fn().mockResolvedValue([]), calendar: vi.fn().mockResolvedValue({ entries: [], sources: [] }) } as unknown as NonNullable<typeof gateway.releaseCalendar>;
+  renderApp(gateway);
+  await advance(5_000);
+  const home = document.querySelector<HTMLElement>(".home-view")!;
+  const thumbnail = home.querySelector("img");
+  expect(home).not.toBeNull();
+  console.log(`PERF home-first-entry ${JSON.stringify({ overviewReads: vi.mocked(gateway.getHomeOverview).mock.calls.length, wishlistReads: vi.mocked(gateway.releaseCalendar.wishlist).mock.calls.length, calendarReads: vi.mocked(gateway.releaseCalendar.calendar).mock.calls.length, revisitReads: vi.mocked(gateway.getRevisitSlate).mock.calls.length, thumbnails: home.querySelectorAll("img").length })}`);
+  const navigate = async (name: string) => act(async () => { fireEvent.click(within(screen.getByRole("navigation", { name: "주요 영역" })).getByRole("button", { name })); });
+  await navigate("에셋"); await advance(2_000);
+  vi.mocked(gateway.getHomeOverview).mockClear();
+  vi.mocked(gateway.getRevisitSlate).mockClear();
+  vi.mocked(gateway.releaseCalendar.wishlist).mockClear();
+  vi.mocked(gateway.releaseCalendar.calendar).mockClear();
+  vi.mocked(gateway.getHomeOverview).mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({...overview, tagger: {total: 7, recommendation: 7, veto: 0}}), 800)));
+  const started = Date.now();
+  await navigate("홈");
+  let shownAt: number | null = null;
+  for (let elapsed = 0; elapsed <= 1200; elapsed += 20) {
+    if (document.querySelector('[data-motion-shown="home"]')) { shownAt = Date.now() - started; break; }
+    await advance(20);
+  }
+  console.log(`PERF home-revisit ${JSON.stringify({ shownAtMs: shownAt, overviewReads: vi.mocked(gateway.getHomeOverview).mock.calls.length, wishlistReads: vi.mocked(gateway.releaseCalendar.wishlist).mock.calls.length, calendarReads: vi.mocked(gateway.releaseCalendar.calendar).mock.calls.length, revisitReads: vi.mocked(gateway.getRevisitSlate).mock.calls.length, sameHome: document.querySelector(".home-view") === home, sameThumbnail: document.querySelector(".home-view img") === thumbnail })}`);
+  expect(shownAt).toBe(0);
+  expect(document.querySelector(".home-view")).toBe(home);
+  expect(document.querySelector(".home-view img")).toBe(thumbnail);
+  expect(gateway.getHomeOverview).toHaveBeenCalledTimes(1);
+  expect(gateway.getRevisitSlate).toHaveBeenCalledTimes(1);
+  expect(gateway.releaseCalendar.calendar).toHaveBeenCalledTimes(1);
+  expect(gateway.releaseCalendar.wishlist).toHaveBeenCalledTimes(1);
+  await advance(1200);
+  expect(within(home).getByRole("button", {name: /태거7/})).toBeVisible();
+  expect(document.querySelector(".home-view")).toBe(home);
+  expect(document.querySelector(".home-view img")).toBe(thumbnail);
+});
+
+it("switches the index and header together with ready content and cancels pending navigation", async () => {
+  const gateway = gw();
+  renderApp(gateway);
+  await advance(5_000);
+  const home = document.querySelector<HTMLElement>(".home-view")!;
+  const header = document.querySelector<HTMLElement>('[data-chrome-slot="header"]')!;
+  const homeTitle = header.textContent;
+  const read = gateway.listAssets;
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  gateway.listAssets = vi.fn(async query => { await pending; return read(query); });
+  const navigate = async (name: string) => act(async () => { fireEvent.click(within(screen.getByRole("navigation", { name: "주요 영역" })).getByRole("button", { name })); });
+  await navigate("에셋");
+  await advance(100);
+  expect(home).toBeVisible();
+  expect(document.querySelector(".workspace-index")).toBeNull();
+  expect(header.textContent).toBe(homeTitle);
+  expect(header.querySelectorAll(".view-toolbar")).toHaveLength(1);
+  expect(header).toHaveAttribute("inert");
+  expect(document.querySelector<HTMLElement>('[data-motion-view="assets"]')?.style.width).toMatch(/^calc\(100% - \d+px\)$/);
+  await navigate("홈");
+  expect(home).toBeVisible();
+  expect(header).not.toHaveAttribute("inert");
+  expect(document.querySelector('[data-motion-view="assets"]')).toBeNull();
+  await navigate("에셋");
+  await act(async () => { release(); });
+  await advance(200);
+  expect(document.querySelector('[data-motion-shown="assets"]')).not.toBeNull();
+  expect(document.querySelector(".workspace-index")).toBeVisible();
+  expect(document.querySelector<HTMLElement>('[data-motion-view="assets"]')?.style.width).toBe("");
+  expect(home).not.toBeVisible();
+  expect(header.textContent).not.toBe(homeTitle);
+  expect(header.querySelectorAll(".view-toolbar")).toHaveLength(1);
+  await navigate("홈");
+  expect(document.querySelector(".workspace-index")).toBeNull();
+  expect(home).toBeVisible();
+  expect(header.textContent).toBe(homeTitle);
+  expect(header.querySelectorAll(".view-toolbar")).toHaveLength(1);
+});
+
 // Tighten-only gate (PERF-ALL-001 item 4): every Library tile thumbnail mounted while scrolling
 // down and back carries its content revision, so the backend serves it as immutable and a
 // re-mounted tile is answered from the WebView cache instead of the media protocol and its DB

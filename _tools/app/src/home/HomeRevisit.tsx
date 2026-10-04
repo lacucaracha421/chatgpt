@@ -4,16 +4,17 @@ import { thumbnailUrl } from "../assets/mediaUrl";
 import { HomePresence, HomeSection } from "./HomeAttention";
 import type { LibraryGateway, RevisitBundle } from "../library/types";
 
-export function HomeRevisit({ gateway, localDate, privacyMode, onOpenAsset }: {
-  gateway: LibraryGateway; localDate: string; privacyMode: boolean; onOpenAsset?: (assetId: string) => void;
+export function HomeRevisit({ gateway, localDate, privacyMode, onOpenAsset, active = true }: {
+  gateway: LibraryGateway; localDate: string; privacyMode: boolean; onOpenAsset?: (assetId: string) => void; active?: boolean;
 }) {
   const [bundle, setBundle] = useState<RevisitBundle | null | undefined>(undefined);
   useEffect(() => {
+    if (!active) return;
     let live = true;
     void Promise.resolve().then(() => gateway.getRevisitSlate(localDate, new Date().toISOString()))
       .then((slate) => { if (live) setBundle(slate?.bundles.find((item) => item.kind === "date") ?? null); }, () => undefined);
     return () => { live = false; };
-  }, [gateway, localDate]);
+  }, [gateway, localDate, active]);
 
   return <HomePresence items={bundle?.assetIds.length ? [{ key: "revisit", content: <HomeSection title={`1년 전 오늘 · ${bundle.assetIds.length.toLocaleString()}장`}><RevisitMosaic assetIds={bundle.assetIds} privacyMode={privacyMode} onOpenAsset={onOpenAsset} /></HomeSection> }] : []} />;
 }

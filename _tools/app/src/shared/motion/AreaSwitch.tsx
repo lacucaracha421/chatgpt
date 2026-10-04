@@ -3,6 +3,9 @@ import { reducedMotion } from './curves';
 import './areaMotion.css';
 
 export const AreaVisible = createContext(true);
+/** Portals outside the stage must follow the same paint boundary as the content. */
+export const AreaPainted = createContext(true);
+export const AreaRequested = createContext(true);
 export const READY_CAP_MS = 1000;
 const AppearanceMemory = createContext<Set<string> | null>(null);
 
@@ -26,15 +29,22 @@ type Props = {
   /** These surfaces already stay mounted in their owning app. */
   retained?: readonly string[];
   ready?: (host: HTMLElement, key: string) => boolean;
+  /** Collection entry keeps the old shelf longer while the actual artwork commits. */
+  waitForReady?: boolean;
+  onShown?: (key: string) => void;
+  /** Reserve the destination content width while the outgoing shell still owns its sidebar. */
+  incomingWidthDelta?: number;
 };
 
 /** Preserve the actual old React/DOM tree until the incoming view commits its content. */
-export function AreaSwitch({activeKey, views, retained = [], ready = viewReady}: Props) {
+export function AreaSwitch({activeKey, views, retained = [], ready = viewReady, waitForReady = false, onShown, incomingWidthDelta = 0}: Props) {
   const [shown, setShown] = useState(activeKey);
   const nodes = useRef(new Map<string, ReactNode>());
   const hosts = useRef(new Map<string, HTMLDivElement>());
   const shownRef = useRef(shown); shownRef.current = shown;
   const readyRef = useRef(ready); readyRef.current = ready;
+  const onShownRef = useRef(onShown); onShownRef.current = onShown;
+  const visited = useRef(new Set([activeKey]));
   const checkRef = useRef<(() => void) | null>(null);
   // Freeze the outgoing props. It must keep its old content, active styling and scroll DOM.
   for (const [key, node] of Object.entries(views)) {
@@ -55,6 +65,8 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady}:
       window.clearTimeout(cap);
       window.cancelAnimationFrame(frame);
       setShown(activeKey);
+      visited.current.add(activeKey);
+      onShownRef.current?.(activeKey);
       for (const key of nodes.current.keys()) if (key !== activeKey && !retained.includes(key)) nodes.current.delete(key);
     };
     const start = () => {
@@ -67,7 +79,7 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady}:
       if (!forced && !readyRef.current(incoming, activeKey)) { window.cancelAnimationFrame(frame); frame = 0; return; }
       // Effects, shared observer setup and layout from the content commit get a rendering
       // opportunity before the atomic swap. Reduced motion and the readiness cap stay immediate.
-      if (forced || reducedMotion() || typeof incoming.animate !== 'function') { window.cancelAnimationFrame(frame); start(); return; }
+      if (forced || (retained.includes(activeKey) && visited.current.has(activeKey)) || reducedMotion() || typeof incoming.animate !== 'function') { window.cancelAnimationFrame(frame); start(); return; }
       if (!frame) frame = window.requestAnimationFrame(() => {
         frame = window.requestAnimationFrame(start);
       });
@@ -76,8 +88,8 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady}:
     const observer = new MutationObserver(check);
     observer.observe(incoming, {subtree: true, childList: true, attributes: true});
     checkRef.current = check;
-    // Never leave an inert old view up: a view that stays busy switches after this cap.
-    const cap = window.setTimeout(() => { forced = true; check(); }, READY_CAP_MS);
+    // Never leave an inert old view up; Collections waits longer for committed artwork, but never forever.
+    const cap = window.setTimeout(() => { forced = true; check(); }, waitForReady ? READY_CAP_MS * 5 : READY_CAP_MS);
     check();
     const reduce = () => { if (query?.matches) check(); };
     query?.addEventListener?.('change', reduce);
@@ -100,8 +112,11 @@ export function AreaSwitch({activeKey, views, retained = [], ready = viewReady}:
       // Keep its layout measurable; remove opacity at rest so fixed overlays stack against the app.
       return <div key={key} ref={element => { if (element) hosts.current.set(key, element); else hosts.current.delete(key); }}
         className="motion-stage__view" data-motion-view={key} inert={!interactive || undefined} aria-hidden={!interactive || undefined}
-        style={{display: key !== shown && !incoming ? 'none' : undefined, visibility: visible ? undefined : 'hidden', opacity: visible ? undefined : 0}}>
-        <AreaVisible.Provider value={visible && incoming}>{nodes.current.get(key)}</AreaVisible.Provider>
+        style={{display: key !== shown && !incoming ? 'none' : undefined, visibility: visible ? undefined : 'hidden', opacity: visible ? undefined : 0,
+          width: incoming && !visible && incomingWidthDelta ? `calc(100% ${incomingWidthDelta < 0 ? '-' : '+'} ${Math.abs(incomingWidthDelta)}px)` : undefined}}>
+        <AreaPainted.Provider value={visible}><AreaRequested.Provider value={incoming}>
+          <AreaVisible.Provider value={visible && incoming}>{nodes.current.get(key)}</AreaVisible.Provider>
+        </AreaRequested.Provider></AreaPainted.Provider>
       </div>;
     })}
   </div>;

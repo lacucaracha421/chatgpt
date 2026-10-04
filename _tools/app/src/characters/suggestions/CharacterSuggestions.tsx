@@ -1,3 +1,4 @@
+import { BusyLabel } from "../../shared/ui/BusyLabel";
 import { AssetImage } from "../../privacy/AssetImage";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { thumbnailUrl } from "../../assets/mediaUrl";
@@ -75,7 +76,7 @@ export function CharacterSuggestionsOverview({ version, privacyMode, api = sugge
         {state.postponed.length > 0 && <Button size="sm" variant="ghost" onClick={state.clearPostponed}>나중에 {state.postponed.length} · 다시 보기</Button>}
         <Button size="sm" variant="ghost" onClick={() => setIgnoredOpen(true)}>무시 목록 {state.ignored.length}</Button>
       </div>
-      {state.loading && <p role="status">제안 불러오는 중…</p>}
+      <BusyLabel busy={!!(state.loading)}><p role="status">제안 불러오는 중…</p></BusyLabel>
       {state.error && <p role="alert">{state.error} <Button size="sm" onClick={state.refresh}>다시 시도</Button></p>}
       {!state.loading && !state.error && state.rows.length === 0 && <p>조건에 맞는 새 캐릭터 제안이 없습니다.</p>}
       {[...groups].map(([key, rows]) => <section key={key} aria-label={rows[0].seriesName ?? "시리즈 폴더 없음"}>

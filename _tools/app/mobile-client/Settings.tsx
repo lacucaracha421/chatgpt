@@ -1,3 +1,5 @@
+import { useDelayedBusy } from "../src/shared/useDelayedBusy";
+import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useEffect, useState} from 'react';
 import {Button, Field, SettingsGroup, SettingsRow, Switch, TextInput} from './ui';
 import {TopBar} from './TopBar';
@@ -40,7 +42,8 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
     }).catch(reason => setError(errorText(reason))).finally(() => setBusy(false));
   };
 
-  const cacheValue = cache ? `${(cache.bytes/1024/1024).toFixed(1)} MB / ${(cache.limit/1024/1024/1024).toFixed(0)} GB · ${(cache.count ?? 0).toLocaleString('ko-KR')}개` : '사용량 확인 중…';
+  const showCacheCheck = useDelayedBusy(!cache);
+  const cacheValue = showCacheCheck ? '사용량 확인 중…' : cache ? `${(cache.bytes/1024/1024).toFixed(1)} MB / ${(cache.limit/1024/1024/1024).toFixed(0)} GB · ${(cache.count ?? 0).toLocaleString('ko-KR')}개` : '';
 
   return <div className="settings-screen">
     <TopBar find back={{label:'홈으로', onClick:onClose}} title="설정" />
@@ -72,7 +75,7 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
             <Switch label="개인 네트워크 HTTP 허용" checked={privateHttp} onChange={event => setPrivateHttp(event.target.checked)} />
             {privateHttp && <p className="settings-screen__safety-line">숫자 IP(Tailscale·내부망)에만 사용</p>}
             {error && <p className="settings-screen__error" role="alert">{error}</p>}
-            <div className="settings-screen__form-actions"><Button variant="primary" type="submit" disabled={busy}>{busy ? '연결 확인 중' : '연결 확인하고 저장'}</Button></div>
+            <div className="settings-screen__form-actions"><Button variant="primary" type="submit" disabled={busy}><BusyLabel busy={!!(busy)} idle={'연결 확인하고 저장'}>연결 확인 중</BusyLabel></Button></div>
           </form>}
           {!editing && error && <p className="settings-screen__error" role="alert">{error}</p>}
         </SettingsGroup>
@@ -91,7 +94,7 @@ export function Settings({status, onStatus, onClose, onCacheCleared, onOpenVault
             control={<Button variant="quiet" type="button" disabled={busy || cacheBusy || !cache} onClick={() => {
               setCacheBusy(true); setCacheMessage(''); setCacheMessageTone(undefined);
               void native<CacheStatus>('clearCache').then(result => {setCache(result);onCacheCleared();setCacheMessage('미디어 캐시를 지웠습니다.');setCacheMessageTone('ok');}).catch(reason => {setCacheMessage(errorText(reason));setCacheMessageTone('off');}).finally(() => setCacheBusy(false));
-            }}>{cacheBusy ? '지우는 중…' : '캐시 지우기'}</Button>}
+            }}><BusyLabel busy={!!(cacheBusy)} idle={'캐시 지우기'}>지우는 중…</BusyLabel></Button>}
           />
           <ThumbnailWarmSetting/>
         </SettingsGroup>

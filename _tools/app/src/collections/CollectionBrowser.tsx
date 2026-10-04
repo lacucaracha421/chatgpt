@@ -295,8 +295,8 @@ export function CollectionBrowser({
   const inbox = Boolean(releaseProvider) || releaseCalendar;
   const libraryView = !inbox && !showcase;
   const shortcuts = <div className="collection-shortcuts" role="group" aria-label="컬렉션 바로가기">
-    <Button variant="quiet" size="sm" aria-pressed={showcase} aria-label={`쇼케이스 ${showcaseItems.length.toLocaleString()}`} onClick={() => setShowcase(!showcase)}>
-      <StarIcon aria-hidden="true" /><span className="collection-shortcuts__label">쇼케이스</span><span className="collection-shortcuts__count">{showcaseItems.length.toLocaleString()}</span>
+    <Button variant="quiet" size="sm" aria-pressed={showcase} aria-label="쇼케이스" onClick={() => setShowcase(!showcase)}>
+      <StarIcon aria-hidden="true" /><span className="collection-shortcuts__label">쇼케이스</span>
     </Button>
     {(typeFilter === "game" || typeFilter === "movie") && <Button variant="quiet" size="sm"
       aria-label={wishlistUnread > 0 ? `발매 캘린더 보기, 관심 목록 새 알림 ${wishlistUnread.toLocaleString()}개` : "발매 캘린더 보기"} onClick={openCalendar}>

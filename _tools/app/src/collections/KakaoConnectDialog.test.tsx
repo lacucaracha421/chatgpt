@@ -145,7 +145,8 @@ describe("KakaoConnectDialog", () => {
     const { gateway, onClose } = renderDialog({ searchKakao: vi.fn().mockReturnValue(pending) });
 
     await user.click(screen.getByRole("button", { name: "검색" }));
-    expect(screen.getByRole("button", { name: "검색 중…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "검색" })).toBeDisabled();
+    expect(screen.queryByText("검색 중…")).not.toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(onClose).not.toHaveBeenCalled();
     resolveSearch([]);

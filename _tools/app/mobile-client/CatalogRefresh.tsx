@@ -1,3 +1,4 @@
+import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useVisibleInterval} from './useVisibleInterval';
 import {useEffect, useRef, useState} from 'react';
 import {ArrowPathIcon, CloudArrowDownIcon} from '@heroicons/react/24/outline';
@@ -89,9 +90,9 @@ export function useNow(active:boolean, interval=30_000) {
 /** Title-bar status text and the "fetch new works" action. */
 export function CatalogRefreshControl({state, publishedAt, now, onReload, reloadBusy}:{state:CatalogRefreshState; publishedAt?:string|null; now:number; onReload?():void; reloadBusy?:boolean}) {
   const [choose,setChoose]=useState(false);
-  const status=state.sending?'요청 중':state.running?'갱신 중':syncedLabel(publishedAt,now);
+  const status=syncedLabel(publishedAt,now);
   return <>
-    {status&&<span className="catalog-synced" role="status">{status}</span>}
+    <span className="catalog-synced" role="status"><BusyLabel busy={state.sending||state.running} idle={status}>{state.sending?'요청 중':'갱신 중'}</BusyLabel></span>
     {state.supported
       ?<IconButton label="새 작품 가져오기" icon={CloudArrowDownIcon} disabled={state.sending||state.running} onClick={()=>{if(state.language==='all')setChoose(true);else void state.request(state.language);}}/>
       :onReload&&<IconButton label="카탈로그 새로고침" icon={ArrowPathIcon} disabled={reloadBusy} onClick={onReload}/>}

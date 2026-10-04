@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useEffect, useRef, useState } from "react";
 import { FolderIcon } from "@heroicons/react/24/outline";
 import { useLibrary } from "../library/LibraryContext";
@@ -147,7 +148,7 @@ export function MangaIndex({ source, filter, onFilter, folder, onFolder, localCo
       <p>고른 폴더를 라이브러리를 백업한 뒤 망가 목록에서 지웁니다. 디스크의 파일은 건드리지 않습니다.</p>
       {local.vanished.map(entry => <label key={entry.relativePath} className="manga-index__vanished"><input type="checkbox" checked={selected.has(entry.relativePath)} disabled={busy} onChange={event => setSelected(current => { const next = new Set(current); if (event.target.checked) next.add(entry.relativePath); else next.delete(entry.relativePath); return next; })} /><span>{entry.name}<small>{entry.relativePath}</small></span><span className="manga-index__count">{entry.seriesCount}개 작품</span></label>)}
       {message && <p role="alert">{message}</p>}
-      <div className="ui-dialog__actions"><Button disabled={busy} variant="ghost" onClick={() => setReview(false)}>취소</Button><Button disabled={busy || selected.size === 0} variant="primary" onClick={() => void purge()}>{busy ? "백업하고 정리 중…" : `백업하고 ${selected.size}개 지우기`}</Button></div>
+      <div className="ui-dialog__actions"><Button disabled={busy} variant="ghost" onClick={() => setReview(false)}>취소</Button><Button disabled={busy || selected.size === 0} variant="primary" onClick={() => void purge()}><BusyLabel busy={!!(busy)} idle={`백업하고 ${selected.size}개 지우기`}>백업하고 정리 중…</BusyLabel></Button></div>
     </Dialog>}
   </nav>;
 }

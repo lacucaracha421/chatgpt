@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { StrictMode, useEffect, useRef } from 'react';
-import { AreaSwitch, MotionScope } from './AreaSwitch';
+import { AreaSwitch, MotionScope, READY_CAP_MS } from './AreaSwitch';
 import { useFirstAppearance } from './useFirstAppearance';
 import { EASE_SHEET, EASE_SPRING, SPRING_FALLBACK, springEasing } from './curves';
 import { readFileSync } from 'node:fs';
@@ -54,6 +54,18 @@ it('keeps the exact old DOM while pending and swaps atomically without overlap',
   expect(animate).not.toHaveBeenCalled();
 });
 
+it.each([-208, 208])('prepares a pending view at its destination width (%i) without resizing the outgoing tree', async delta => {
+  const view = render(<AreaSwitch activeKey="old" views={{old: <b>old</b>}} />);
+  const tree = (ready: boolean) => <AreaSwitch activeKey="next" incomingWidthDelta={delta} ready={() => ready} views={{next: <b>next</b>}} />;
+  view.rerender(tree(false));
+  expect(screen.getByText('old').closest<HTMLElement>('[data-motion-view]')?.style.width).toBe('');
+  expect(screen.getByText('next').closest<HTMLElement>('[data-motion-view]')?.style.width).toBe(`calc(100% ${delta < 0 ? '-' : '+'} 208px)`);
+  expect(screen.getByText('next')).not.toBeVisible();
+  view.rerender(tree(true)); await tick();
+  expect(screen.getByText('next').closest<HTMLElement>('[data-motion-view]')?.style.width).toBe('');
+  expect(screen.getByText('next')).toBeVisible();
+});
+
 it('switches instantly once ready under reduced motion, preserving old content during its load', async () => {
   reduce = true;
   const view = render(<AreaSwitch activeKey="home" views={{home: <b>old</b>}} />);
@@ -93,6 +105,19 @@ it('preserves retained surface DOM and mounts while hiding it on departure and s
   expect(notes.closest('[inert]')).not.toBeNull();
   view.rerender(tree('notes')); await tick();
   expect(screen.getByRole('button', {name: 'notes'})).toBe(notes); expect(mounts).toHaveBeenCalledTimes(1);
+});
+
+it('revisits a ready retained view immediately even with animation APIs available', async () => {
+  const tree = (activeKey: string) => <AreaSwitch activeKey={activeKey} retained={['home']} views={{home: <b>home</b>, assets: <b>assets</b>}} />;
+  const view = render(tree('home'));
+  const home = screen.getByText('home');
+  view.rerender(tree('assets')); await tick();
+  expect(home).not.toBeVisible();
+  view.rerender(tree('home'));
+  expect(home).toBeVisible();
+  expect(screen.queryByText('assets')).toBeNull();
+  expect(vi.getTimerCount()).toBe(0);
+  expect(animate).not.toHaveBeenCalled();
 });
 
 function Tiles({count}: {count: number}) {
@@ -200,6 +225,20 @@ it('switches after the readiness cap when the incoming view stays busy', async (
   expect(screen.getByText('busy')).toBeVisible();
   expect(disconnect).toHaveBeenCalled();
   disconnect.mockRestore();
+});
+
+it('keeps the Collections five-times readiness cap and commits shell state only with the view', async () => {
+  const shown = vi.fn();
+  const view = render(<AreaSwitch activeKey="assets" onShown={shown} views={{assets: <b>old</b>}} />);
+  view.rerender(<AreaSwitch activeKey="collections" waitForReady onShown={shown} views={{collections: <b aria-busy="true">shelf</b>}} />);
+  await tick(READY_CAP_MS * 5 - 1);
+  expect(screen.getByText('old')).toBeVisible();
+  expect(screen.getByText('shelf')).not.toBeVisible();
+  expect(shown).not.toHaveBeenCalled();
+  await tick(1);
+  expect(screen.queryByText('old')).toBeNull();
+  expect(screen.getByText('shelf')).toBeVisible();
+  expect(shown).toHaveBeenCalledExactlyOnceWith('collections');
 });
 
 function Cards({surface, count = 2, enabled = true}: {surface: string; count?: number; enabled?: boolean}) {

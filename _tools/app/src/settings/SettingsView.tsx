@@ -1,3 +1,5 @@
+import { useDelayedBusy } from "../shared/useDelayedBusy";
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { CloudSyncHold } from "./CloudSyncHold";
 import { usePrivacy } from "../privacy/PrivacyContext";
 import { displayDate, displayDateTime } from "../shared/displayDate";
@@ -114,12 +116,13 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
   const [cloudMessage, setCloudMessage] = useState<string | null>(null);
   const [authorityCheck, setAuthorityCheck] = useState<import("../library/types").CollectionAuthorityVerifyResult | null>(null);
   const [authorityBusy, setAuthorityBusy] = useState(false);
+  const showAuthorityBusy = useDelayedBusy(authorityBusy);
   const [authorityMessage, setAuthorityMessage] = useState<string | null>(null);
   async function verifyCollectionAuthority() {
     if (!gateway.verifyCollectionAuthorityBaseline || authorityBusy) return;
     setAuthorityBusy(true);
     setAuthorityCheck(null);
-    setAuthorityMessage("점검 중…");
+
     try {
       const result = await gateway.verifyCollectionAuthorityBaseline(progress => setAuthorityMessage(publicationProgressText(progress)));
       setAuthorityCheck(result);
@@ -420,7 +423,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
       try { const next = await gateway.setIgdbCredentials({ clientId: igdbClientId.trim(), clientSecret: igdbClientSecret.trim() }); setIgdbConfigured(next.configured); setIgdbClientId(""); setIgdbClientSecret(""); setEditingIgdb(false); setNotice("IGDB 설정을 저장했습니다"); } catch (cause) { setIgdbError(commandErrorMessage(cause, "IGDB 키를 저장하지 못했습니다.")); } finally { setIgdbBusy(false); }
     } else if (kind === "tmdb") {
       if (!tmdbToken.trim() || tmdbBusy) return; setTmdbBusy(true); setTmdbError(null);
-      try { const next = await gateway.setTmdbToken(tmdbToken.trim()); setTmdbConfigured(next.configured); setTmdbToken(""); setEditingTmdb(false); setNotice("TMDB 설정을 저장했습니다"); } catch (cause) { setTmdbError(commandErrorMessage(cause, "TMDB 키를 저장하지 못했습니다.")); } finally { setTmdbBusy(false); }
+      try { const next = await gateway.setTmdbToken(tmdbToken.trim()); setTmdbConfigured(next.configured); setTmdbToken(""); setEditingTmdb(false); setNotice("TMDB 설정을 저장했습니다"); } catch (cause) { setTmdbError(commandErrorMessage(cause, "TMDB API 읽기 액세스 토큰을 저장하지 못했습니다.")); } finally { setTmdbBusy(false); }
     } else {
       if (!stashdbKey.trim() || stashdbBusy) return; setStashdbBusy(true); setStashdbError(null);
       try { const next = await gateway.setStashdbCredentials(stashdbKey.trim()); setStashdbConfigured(next.configured); setStashdbKey(""); setEditingStashdb(false); setNotice("StashDB 설정을 저장했습니다"); } catch (cause) { setStashdbError(commandErrorMessage(cause, "StashDB 키를 저장하지 못했습니다.")); } finally { setStashdbBusy(false); }
@@ -505,14 +508,14 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             <LightweightModeRow />
           </SettingsGroup>
           <SettingsGroup title="동기화">
-            <SimpleRow name="서버" status={serverRow ? joinStatus(serverRow.value, serverRow.time) : "확인 중…"} tone={serverRow?.tone} control={<Button size="sm" variant="quiet" disabled={cloudBusy || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured} onClick={() => void syncCloudNow()}>지금 받기</Button>} />
+            <SimpleRow name="서버" status={<BusyLabel busy={!serverRow} idle={serverRow && joinStatus(serverRow.value, serverRow.time)}>확인 중…</BusyLabel>} tone={serverRow?.tone} control={<Button size="sm" variant="quiet" disabled={cloudBusy || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured} onClick={() => void syncCloudNow()}>지금 받기</Button>} />
             <SimpleRow name="태블릿" status={tabletRow?.value ?? "연결된 기기 없음"} control={<Button size="sm" variant="quiet" disabled={cloudBusy} onClick={() => void createPairing("qr")}>QR 연결</Button>} />
-            <SimpleRow name="브라우저 확장" status={extensionConnection ? extensionConnection.status === "ready" ? "PC 연결 준비됨" : "사용 불가" : "확인 중…"} tone={extensionConnection?.status === "ready" ? "ok" : extensionConnection ? "off" : undefined} control={<Button size="sm" variant="quiet" disabled={cloudBusy} onClick={() => void createPairing("pc")}>PC 연결</Button>} />
+            <SimpleRow name="브라우저 확장" status={<BusyLabel busy={!extensionConnection} idle={extensionConnection && (extensionConnection.status === "ready" ? "PC 연결 준비됨" : "사용 불가")}>확인 중…</BusyLabel>} tone={extensionConnection?.status === "ready" ? "ok" : extensionConnection ? "off" : undefined} control={<Button size="sm" variant="quiet" disabled={cloudBusy} onClick={() => void createPairing("pc")}>PC 연결</Button>} />
             {pairing && <ExtensionPairingQr value={pairing} mode={pairingMode} onCopy={copyPairing} onRefresh={() => void createPairing(pairingMode)} onClose={() => setPairing(null)} />}
           </SettingsGroup>
           <SettingsGroup title="갱신">
             <SimpleRow name="온라인 카탈로그" status={catalogStatus?.installed ? `${catalogDbUpdatedAt ? localDateTime(catalogDbUpdatedAt) : "갱신 기록 없음"} · ${intervalLabel(catalogStatus.updateIntervalSeconds)}` : "설치 안 됨"} control={catalogStatus?.installed ? <Button size="sm" variant="quiet" disabled={catalogBusy} onClick={() => void refreshCatalog()}>지금 갱신</Button> : undefined} />
-            <SimpleRow name="발매 캘린더" status={calendar ? calendarStatus(calendar) : "확인 중…"} tone={calendar && calendar.sources.some(source => source.errorCode) ? "off" : "ok"} control={<Button size="sm" variant="quiet" disabled={calendarBusy} onClick={() => void refreshCalendar()}>새로 받기</Button>} />
+            <SimpleRow name="발매 캘린더" status={<BusyLabel busy={!calendar} idle={calendar && calendarStatus(calendar)}>확인 중…</BusyLabel>} tone={calendar && calendar.sources.some(source => source.errorCode) ? "off" : "ok"} control={<Button size="sm" variant="quiet" disabled={calendarBusy} onClick={() => void refreshCalendar()}>새로 받기</Button>} />
             {inbox.settings?.folder && <SimpleRow name="자동 태그" status={autoTagInboxResult(inbox.settings)} control={<Button size="sm" variant="quiet" disabled={inbox.locked} onClick={() => void inbox.runNow()}>지금 가져오기</Button>} />}
           </SettingsGroup>
         </div>}
@@ -531,7 +534,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         {section === "library" && <div className="settings-view__section">
           <header className="settings-view__header"><h2>라이브러리</h2></header>
           <SettingsGroup title="폴더">
-            <SimpleRow name="라이브러리 폴더" status={library?.root ?? "알 수 없음"} statusClassName="settings-view__path settings-view__path--left-ellipsis" control={<Button size="sm" variant="secondary" disabled={switchingLibrary || pending || metadataImportRunning} onClick={() => void chooseLibraryFolder()}>{switchingLibrary ? "여는 중…" : "다른 저장소 열기"}</Button>} />
+            <SimpleRow name="라이브러리 폴더" status={library?.root ?? "알 수 없음"} statusClassName="settings-view__path settings-view__path--left-ellipsis" control={<Button size="sm" variant="secondary" disabled={switchingLibrary || pending || metadataImportRunning} onClick={() => void chooseLibraryFolder()}><BusyLabel busy={!!(switchingLibrary)} idle={"다른 저장소 열기"}>여는 중…</BusyLabel></Button>} />
             <SimpleRow name="망가 폴더" status={mangaRoot ?? "설정 안 됨"} control={<Button size="sm" variant="secondary" onClick={() => void chooseMangaFolder()}>변경</Button>} />
             {otherMachineMangaRoot && <p className="settings-view__status">다른 PC 경로: {otherMachineMangaRoot}</p>}
             {mangaRootError && <p className="settings-view__row-message" role="alert">{mangaRootError}</p>}
@@ -549,22 +552,22 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
         </div>}
         {section === "connection" && <div className="settings-view__section">
           <header className="settings-view__header"><h2>연결</h2></header>
-          {(extensionError || cloudError || kakaoError || igdbError || tmdbError || stashdbError) && <Toast tone="error" onDismiss={() => { setExtensionError(null); setCloudError(null); setKakaoError(null); setIgdbError(null); setTmdbError(null); setStashdbError(null); }}>연결 설정을 처리하지 못했습니다.</Toast>}
+          {(extensionError || cloudError || kakaoError || igdbError || tmdbError || stashdbError) && <Toast tone="error" onDismiss={() => { setExtensionError(null); setCloudError(null); setKakaoError(null); setIgdbError(null); setTmdbError(null); setStashdbError(null); }}>{tmdbError ?? "연결 설정을 처리하지 못했습니다."}</Toast>}
           <SettingsGroup title="서버" help="서버 주소와 연결 키가 있어야 태블릿과 브라우저 확장이 이 PC의 자료를 받습니다. 송신 키는 이 PC가 서버에 게시할 때 씁니다.">
             <SimpleRow name="주소" control={<TextInput className="settings-view__server-address" aria-label="서버 주소" type="url" value={cloudApiBaseUrl} placeholder="http://100.x.x.x:32146" onChange={event => setCloudApiBaseUrl(event.target.value)} onBlur={() => void saveCloudSettings(undefined, undefined, true)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void saveCloudSettings(undefined, undefined, true); } }} />} />
             <SimpleRow name="연결 키" status={cloudSettings?.tokenConfigured ? "설정됨" : "없음"} control={<span className="settings-view__control-pair"><Badge>{cloudSettings?.tokenConfigured ? "설정됨" : "없음"}</Badge>{!editingCloudToken && <Button size="sm" variant="quiet" onClick={() => setEditingCloudToken(true)}>{cloudSettings?.tokenConfigured ? "바꾸기" : "입력"}</Button>}{cloudSettings?.tokenConfigured && !editingCloudToken && <Button size="sm" variant="quiet" className="settings-view__danger-action" onClick={() => setConfirmingCloudTokenDelete(true)}>삭제</Button>}</span>} />
             {editingCloudToken && <InlineEdit><TextInput aria-label="서버 연결 키" type="password" autoComplete="off" value={cloudToken} onChange={event => setCloudToken(event.target.value)} /><Button size="sm" variant="quiet" disabled={!cloudToken.trim() || cloudBusy} onClick={() => void saveCloudToken()}>저장</Button><Button size="sm" variant="quiet" onClick={() => { setEditingCloudToken(false); setCloudToken(""); }}>취소</Button></InlineEdit>}
             {confirmingCloudTokenDelete && <ConfirmLine text="저장된 연결 키를 삭제할까요?" onCancel={() => setConfirmingCloudTokenDelete(false)} onConfirm={() => void deleteCloudToken()} busy={cloudBusy} />}
             {gateway.setCloudPublisherToken && <>
-              <SimpleRow name="송신 키" status={cloudPublisherConfigured === null ? "확인 중…" : cloudPublisherConfigured ? "설정됨" : "없음"} control={<span className="settings-view__control-pair"><Badge>{cloudPublisherConfigured === null ? "확인 중…" : cloudPublisherConfigured ? "설정됨" : "없음"}</Badge>{!editingCloudPublisherToken && <Button size="sm" variant="quiet" onClick={() => setEditingCloudPublisherToken(true)}>{cloudPublisherConfigured ? "바꾸기" : "입력"}</Button>}{cloudPublisherConfigured && !editingCloudPublisherToken && <Button size="sm" variant="quiet" className="settings-view__danger-action" onClick={() => setConfirmingCloudPublisherTokenDelete(true)}>삭제</Button>}</span>} />
+              <SimpleRow name="송신 키" status={<BusyLabel busy={cloudPublisherConfigured === null} idle={cloudPublisherConfigured === null ? null : cloudPublisherConfigured ? "설정됨" : "없음"}>확인 중…</BusyLabel>} control={<span className="settings-view__control-pair"><Badge><BusyLabel busy={!!(cloudPublisherConfigured === null)} idle={cloudPublisherConfigured === null ? null : cloudPublisherConfigured ? "설정됨" : "없음"}>확인 중…</BusyLabel></Badge>{!editingCloudPublisherToken && <Button size="sm" variant="quiet" onClick={() => setEditingCloudPublisherToken(true)}>{cloudPublisherConfigured ? "바꾸기" : "입력"}</Button>}{cloudPublisherConfigured && !editingCloudPublisherToken && <Button size="sm" variant="quiet" className="settings-view__danger-action" onClick={() => setConfirmingCloudPublisherTokenDelete(true)}>삭제</Button>}</span>} />
               {editingCloudPublisherToken && <InlineEdit><TextInput aria-label="서버 송신 키" type="password" autoComplete="off" value={cloudPublisherToken} onChange={event => setCloudPublisherToken(event.target.value)} /><Button size="sm" variant="quiet" disabled={!cloudPublisherToken.trim() || cloudBusy} onClick={() => void saveCloudPublisherToken()}>저장</Button><Button size="sm" variant="quiet" onClick={() => { setEditingCloudPublisherToken(false); setCloudPublisherToken(""); }}>취소</Button></InlineEdit>}
               {confirmingCloudPublisherTokenDelete && <ConfirmLine text="저장된 송신 키를 삭제할까요?" onCancel={() => setConfirmingCloudPublisherTokenDelete(false)} onConfirm={() => void deleteCloudPublisherToken()} busy={cloudBusy} />}
             </>}
-            <SimpleRow name="연결 상태" status={serverRow ? joinStatus(serverRow.value, serverRow.time) : "확인 중…"} tone={serverRow?.tone} control={<Button size="sm" variant="secondary" disabled={cloudBusy || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured} onClick={() => void testCloudConnection()}>연결 확인</Button>} />
+            <SimpleRow name="연결 상태" status={<BusyLabel busy={!serverRow} idle={serverRow && joinStatus(serverRow.value, serverRow.time)}>확인 중…</BusyLabel>} tone={serverRow?.tone} control={<Button size="sm" variant="secondary" disabled={cloudBusy || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured} onClick={() => void testCloudConnection()}>연결 확인</Button>} />
             {cloudSettings?.apiBaseUrl && gateway.getCloudSyncHold && gateway.setCloudSyncHold && <CloudSyncHold endpoint={cloudSettings.apiBaseUrl} read={gateway.getCloudSyncHold} save={gateway.setCloudSyncHold} />}
             <SimpleRow name="클라우드에서 받기" control={<Switch aria-label="클라우드에서 받기" checked={cloudSettings?.captureEnabled ?? cloudSettings?.enabled ?? false} disabled={cloudBusy || !cloudSettings?.apiBaseUrl} onChange={event => void saveCloudSettings(cloudSettings?.enabled, event.target.checked)} />} />
             <SimpleRow name="클라우드로 복제" control={<Switch aria-label="클라우드로 복제" checked={cloudSettings?.enabled ?? false} disabled={cloudBusy || !cloudSettings?.apiBaseUrl} onChange={event => void saveCloudSettings(event.target.checked, cloudSettings?.captureEnabled ?? cloudSettings?.enabled)} />} />
-            <SimpleRow name="컬렉션 서버 이전 점검" status={authorityMessage ?? "이전할 때 빠지는 자료가 있는지 확인합니다"} control={<span className="settings-view__control-pair"><Button size="sm" variant="quiet" disabled={authorityBusy || cloudBusy || collectionPublication?.running || !cloudSettings?.enabled || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured || !cloudPublisherConfigured || !gateway.verifyCollectionAuthorityBaseline} onClick={() => void verifyCollectionAuthority()}>{authorityBusy ? "점검 중…" : "점검하기"}</Button>{authorityCheck && gateway.openCollectionAuthorityReport && <Button size="sm" variant="quiet" onClick={() => void openAuthorityReport()}>보고서 열기</Button>}</span>} />
+            <SimpleRow name="컬렉션 서버 이전 점검" status={showAuthorityBusy ? "점검 중…" : authorityMessage ?? "이전할 때 빠지는 자료가 있는지 확인합니다"} control={<span className="settings-view__control-pair"><Button size="sm" variant="quiet" disabled={authorityBusy || cloudBusy || collectionPublication?.running || !cloudSettings?.enabled || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured || !cloudPublisherConfigured || !gateway.verifyCollectionAuthorityBaseline} onClick={() => void verifyCollectionAuthority()}><BusyLabel busy={!!(authorityBusy)} idle={"점검하기"}>점검 중…</BusyLabel></Button>{authorityCheck && gateway.openCollectionAuthorityReport && <Button size="sm" variant="quiet" onClick={() => void openAuthorityReport()}>보고서 열기</Button>}</span>} />
           </SettingsGroup>
           <SettingsGroup title="동기화 상태">
             <CloudBackfillSettings embedded connectionReady={cloudSettings ? Boolean(cloudSettings.apiBaseUrl && cloudSettings.tokenConfigured) : null}>
@@ -573,13 +576,13 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           </SettingsGroup>
           <SettingsGroup title="기기">
             <SimpleRow name="태블릿" status={tabletRow?.value ?? "연결된 기기 없음"} control={<Button size="sm" variant="secondary" onClick={() => void createPairing("qr")}>QR 연결</Button>} />
-            <SimpleRow name="브라우저 확장" status={extensionConnection?.baseUrl ?? "확인 중…"} control={<span className="settings-view__control-pair"><Button size="sm" variant="quiet" disabled={!extensionConnection?.token} onClick={() => void copyExtensionToken()}>키 복사</Button><Button size="sm" variant="secondary" onClick={() => void createPairing("pc")}>PC 연결</Button></span>} />
+            <SimpleRow name="브라우저 확장" status={<BusyLabel busy={!extensionConnection} idle={extensionConnection?.baseUrl}>확인 중…</BusyLabel>} control={<span className="settings-view__control-pair"><Button size="sm" variant="quiet" disabled={!extensionConnection?.token} onClick={() => void copyExtensionToken()}>키 복사</Button><Button size="sm" variant="secondary" onClick={() => void createPairing("pc")}>PC 연결</Button></span>} />
             {pairing && <ExtensionPairingQr value={pairing} mode={pairingMode} onCopy={copyPairing} onRefresh={() => void createPairing(pairingMode)} onClose={() => setPairing(null)} />}
           </SettingsGroup>
           <SettingsGroup title="작품 정보 서비스">
             <CredentialRow name="카카오 책 검색" configured={kakaoConfigured} editing={editingKakao} value={kakaoKey} busy={kakaoBusy} onEdit={() => setEditingKakao(true)} onChange={setKakaoKey} onSave={() => void saveCredential("kakao")} onCancel={() => { setEditingKakao(false); setKakaoKey(""); }} confirmDelete={confirmingKakaoDelete} onDelete={() => setConfirmingKakaoDelete(true)} onCancelDelete={() => setConfirmingKakaoDelete(false)} onConfirmDelete={() => void deleteCredential("kakao")} />
             <CredentialRow name="IGDB" configured={igdbConfigured} editing={editingIgdb} value={igdbClientId} secondValue={igdbClientSecret} busy={igdbBusy} onEdit={() => setEditingIgdb(true)} onChange={setIgdbClientId} onSecondChange={setIgdbClientSecret} onSave={() => void saveCredential("igdb")} onCancel={() => { setEditingIgdb(false); setIgdbClientId(""); setIgdbClientSecret(""); }} confirmDelete={confirmingIgdbDelete} onDelete={() => setConfirmingIgdbDelete(true)} onCancelDelete={() => setConfirmingIgdbDelete(false)} onConfirmDelete={() => void deleteCredential("igdb")} />
-            <CredentialRow name="TMDB" configured={tmdbConfigured} editing={editingTmdb} value={tmdbToken} busy={tmdbBusy} onEdit={() => setEditingTmdb(true)} onChange={setTmdbToken} onSave={() => void saveCredential("tmdb")} onCancel={() => { setEditingTmdb(false); setTmdbToken(""); }} confirmDelete={confirmingTmdbDelete} onDelete={() => setConfirmingTmdbDelete(true)} onCancelDelete={() => setConfirmingTmdbDelete(false)} onConfirmDelete={() => void deleteCredential("tmdb")} />
+            <CredentialRow name="TMDB API 읽기 액세스 토큰" placeholder="API 읽기 액세스 토큰 (eyJ…)" help="TMDB 설정의 API 읽기 액세스 토큰을 입력하세요. 32자리 API 키(v3)가 아닙니다." configured={tmdbConfigured} editing={editingTmdb} value={tmdbToken} busy={tmdbBusy} onEdit={() => setEditingTmdb(true)} onChange={setTmdbToken} onSave={() => void saveCredential("tmdb")} onCancel={() => { setEditingTmdb(false); setTmdbToken(""); }} confirmDelete={confirmingTmdbDelete} onDelete={() => setConfirmingTmdbDelete(true)} onCancelDelete={() => setConfirmingTmdbDelete(false)} onConfirmDelete={() => void deleteCredential("tmdb")} />
             <CredentialRow name="StashDB" configured={stashdbConfigured} editing={editingStashdb} value={stashdbKey} busy={stashdbBusy} onEdit={() => setEditingStashdb(true)} onChange={setStashdbKey} onSave={() => void saveCredential("stashdb")} onCancel={() => { setEditingStashdb(false); setStashdbKey(""); }} confirmDelete={confirmingStashdbDelete} onDelete={() => setConfirmingStashdbDelete(true)} onCancelDelete={() => setConfirmingStashdbDelete(false)} onConfirmDelete={() => void deleteCredential("stashdb")} />
           </SettingsGroup>
           <SettingsGroup title="발매 캘린더">
@@ -592,7 +595,7 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
           <header className="settings-view__header"><h2>카탈로그</h2></header>
           {catalogError && <Toast tone="error" onDismiss={() => setCatalogError(null)}>{catalogError}</Toast>}
           <SettingsGroup title="온라인 카탈로그">
-            <SimpleRow name="상태" value={catalogStatus ? catalogStatus.installed ? `설치됨 · ${catalogStatus.workCount.toLocaleString()}개 작품` : "설치 안 됨" : "확인 중…"} status={catalogStatus?.lastSuccessAt ? `최근 갱신 ${localDateTime(catalogStatus.lastSuccessAt)}` : "최근 갱신 기록 없음"} />
+            <SimpleRow name="상태" value={<BusyLabel busy={!catalogStatus} idle={catalogStatus && (catalogStatus.installed ? `설치됨 · ${catalogStatus.workCount.toLocaleString()}개 작품` : "설치 안 됨")}>확인 중…</BusyLabel>} status={catalogStatus?.lastSuccessAt ? `최근 갱신 ${localDateTime(catalogStatus.lastSuccessAt)}` : "최근 갱신 기록 없음"} />
             <SimpleRow name="자동 갱신" control={<Switch aria-label="자동 갱신" checked={catalogStatus?.updateEnabled ?? false} disabled={catalogBusy || !catalogStatus?.installed} onChange={event => void saveCatalogSettings(event.target.checked, catalogStatus?.updateIntervalSeconds ?? 3600)} />} />
             <SimpleRow name="갱신 간격" control={<SegmentedControl label="갱신 간격" value={String(catalogStatus?.updateIntervalSeconds ?? 3600)} options={[{ value: "3600", label: "1시간" }, { value: "21600", label: "6시간" }, { value: "86400", label: "24시간" }]} onChange={value => { if (catalogStatus?.updateEnabled) void saveCatalogSettings(true, Number(value)); }} className={!catalogStatus?.updateEnabled ? "settings-view__control-disabled" : undefined} />} />
           </SettingsGroup>
@@ -621,17 +624,17 @@ export function SettingsView({ restoring, onRestore, onExit, onImportFolder, met
             {confirmingBackup ? <ConfirmLine text="현재 상태를 보존한 뒤 선택한 시점으로 복구합니다." onCancel={() => setConfirmingBackup(null)} onConfirm={() => void restoreBackup()} busy={pending} confirmLabel="복구 시작" /> : error ? <div className="settings-view__control-pair"><Toast tone="error" onDismiss={() => setError(null)}>{error}</Toast><Button size="sm" onClick={() => { setBackups(null); setBackupRetry(value => value + 1); }}>다시 시도</Button></div> : !backups ? <Skeleton className="settings-view__skeleton" label="백업 목록을 불러오는 중" /> : backups.length === 0 ? <p className="settings-view__status">사용할 수 있는 백업이 없습니다.</p> : <ul className="settings-view__safety-list">{backups.map(backup => <li key={backup.id} className="settings-view__safety-item"><span><strong>{localDate(backup.createdAt)}</strong><small>{kindLabel(backup.kind)} · {backup.byteSize.toLocaleString("ko-KR")} B</small></span><Button size="sm" variant="secondary" disabled={pending} onClick={() => setConfirmingBackup(backup.id)}>이 시점으로 복구</Button></li>)}</ul>}
           </SettingsGroup>
           <SettingsGroup title="모바일 게시">
-            <MobilePublishRow name="모바일 컬렉션" job={collectionPublication} action={collectionPublication?.running ? "업데이트 중…" : "모바일 컬렉션 업데이트"} disabled={cloudBusy || collectionPublication?.running || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured || !gateway.pushCloudCollections} onClick={() => void startPublication("collections", progress => gateway.pushCloudCollections!(progress), result => `${result.collections.toLocaleString()}개 완료 · 이미지 업로드 ${result.uploaded.toLocaleString()}개`)} />
-            <MobilePublishRow name="모바일 캐릭터" job={characterPublication} action={characterPublication?.running ? "업데이트 중…" : "모바일 캐릭터 업데이트"} disabled={cloudBusy || characterPublication?.running || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured || !gateway.pushCloudCharacters} onClick={() => void startPublication("characters", progress => gateway.pushCloudCharacters!(progress), result => `${result.nodes.toLocaleString()}개 보기 게시 완료`)} />
+            <MobilePublishRow name="모바일 컬렉션" job={collectionPublication} action="모바일 컬렉션 업데이트" disabled={cloudBusy || collectionPublication?.running || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured || !gateway.pushCloudCollections} onClick={() => void startPublication("collections", progress => gateway.pushCloudCollections!(progress), result => `${result.collections.toLocaleString()}개 완료 · 이미지 업로드 ${result.uploaded.toLocaleString()}개`)} />
+            <MobilePublishRow name="모바일 캐릭터" job={characterPublication} action="모바일 캐릭터 업데이트" disabled={cloudBusy || characterPublication?.running || !cloudSettings?.apiBaseUrl || !cloudSettings?.tokenConfigured || !gateway.pushCloudCharacters} onClick={() => void startPublication("characters", progress => gateway.pushCloudCharacters!(progress), result => `${result.nodes.toLocaleString()}개 보기 게시 완료`)} />
             <MobileCatalogPublishSettings />
           </SettingsGroup>
           <SettingsGroup title="가져오기">
-            <SimpleRow name="컬렉션 가져오기 · book 폴더" status={bookImportMessage ?? undefined} control={<Button size="sm" variant="secondary" disabled={bookImportRunning} onClick={() => void chooseBookImportFolder()}>{bookImportRunning ? "가져오는 중…" : "폴더 선택"}</Button>} />
+            <SimpleRow name="컬렉션 가져오기 · book 폴더" status={bookImportMessage ?? undefined} control={<Button size="sm" variant="secondary" disabled={bookImportRunning} onClick={() => void chooseBookImportFolder()}><BusyLabel busy={!!(bookImportRunning)} idle={"폴더 선택"}>가져오는 중…</BusyLabel></Button>} />
             <SimpleRow name="메타데이터 가져오기" status={lastImportFolder ?? "설정 안 됨"} control={<span className="settings-view__control-pair">{lastImportFolder && <Button size="sm" variant="quiet" disabled={metadataImportRunning || !onImportFolder} onClick={() => void onImportFolder?.(lastImportFolder)}>최근 폴더 다시 가져오기</Button>}<Button size="sm" variant="secondary" disabled={metadataImportRunning || !onImportFolder} onClick={() => void chooseImportFolder()}>다른 폴더 선택</Button></span>} />
           </SettingsGroup>
           <SettingsGroup title="카탈로그 복구">
             <SimpleRow name="일본어 체크포인트" control={!catalogCheckpointConfirming ? <Button size="sm" variant="secondary" disabled={catalogBusy || !catalogStatus?.installed} onClick={() => setCatalogCheckpointConfirming(true)}>재설정</Button> : <span className="settings-view__control-pair"><Button size="sm" variant="quiet" onClick={() => setCatalogCheckpointConfirming(false)}>취소</Button><Button size="sm" variant="danger" disabled={catalogBusy} onClick={() => void resetJapaneseCheckpoint()}>재설정 확인</Button></span>} />
-            <SimpleRow name="VCK 폴더" status={catalogRestoreMessage ?? undefined} control={<Button size="sm" variant="secondary" disabled={catalogRestoreBusy} onClick={() => void restoreCatalogFromVck()}>{catalogRestoreBusy ? "교체 중…" : "다시 선택"}</Button>} />
+            <SimpleRow name="VCK 폴더" status={catalogRestoreMessage ?? undefined} control={<Button size="sm" variant="secondary" disabled={catalogRestoreBusy} onClick={() => void restoreCatalogFromVck()}><BusyLabel busy={!!(catalogRestoreBusy)} idle={"다시 선택"}>교체 중…</BusyLabel></Button>} />
           </SettingsGroup>
           <SettingsGroup title="정보">
             <SimpleRow name="앱 버전" status={appVersion ?? "알 수 없음"} />
@@ -665,16 +668,17 @@ function ConfirmLine({ text, onCancel, onConfirm, busy, confirmLabel = "확인" 
   return <div className="settings-view__confirm-line"><span>{text}</span><span className="settings-view__control-pair"><Button size="sm" variant="quiet" disabled={busy} onClick={onCancel}>취소</Button><Button size="sm" variant="danger" disabled={busy} onClick={onConfirm}>{confirmLabel}</Button></span></div>;
 }
 
-function CredentialRow({ name, configured, editing, value, secondValue, busy, onEdit, onChange, onSecondChange, onSave, onCancel, confirmDelete, onDelete, onCancelDelete, onConfirmDelete }: { name: string; configured: boolean | null; editing: boolean; value: string; secondValue?: string; busy: boolean; onEdit: () => void; onChange: (value: string) => void; onSecondChange?: (value: string) => void; onSave: () => void; onCancel: () => void; confirmDelete: boolean; onDelete: () => void; onCancelDelete: () => void; onConfirmDelete: () => void }) {
+function CredentialRow({ name, placeholder, help, configured, editing, value, secondValue, busy, onEdit, onChange, onSecondChange, onSave, onCancel, confirmDelete, onDelete, onCancelDelete, onConfirmDelete }: { name: string; placeholder?: string; help?: string; configured: boolean | null; editing: boolean; value: string; secondValue?: string; busy: boolean; onEdit: () => void; onChange: (value: string) => void; onSecondChange?: (value: string) => void; onSave: () => void; onCancel: () => void; confirmDelete: boolean; onDelete: () => void; onCancelDelete: () => void; onConfirmDelete: () => void }) {
   return <>
     <SimpleRow name={name} control={!editing ? <span className="settings-view__control-pair"><Badge>{configured ? "설정됨" : "없음"}</Badge><Button size="sm" variant="quiet" aria-label={`${name} ${configured ? "바꾸기" : "입력"}`} onClick={onEdit}>{configured ? "바꾸기" : "입력"}</Button>{configured && <Button size="sm" variant="quiet" aria-label={`${name} 삭제`} className="settings-view__danger-action" onClick={onDelete}>삭제</Button>}</span> : undefined} />
-    {editing && <InlineEdit><TextInput aria-label={`${name} 입력`} type="password" autoComplete="off" value={value} onChange={event => onChange(event.target.value)} />{secondValue !== undefined && onSecondChange && <TextInput aria-label={`${name} Secret`} type="password" autoComplete="off" value={secondValue} onChange={event => onSecondChange(event.target.value)} />}<Button size="sm" variant="quiet" disabled={busy || !value.trim() || (secondValue !== undefined && !secondValue.trim())} onClick={onSave}>저장</Button><Button size="sm" variant="quiet" onClick={onCancel}>취소</Button></InlineEdit>}
+    {help && <p className="settings-view__status">{help}</p>}
+    {editing && <InlineEdit><TextInput aria-label={`${name} 입력`} placeholder={placeholder} type="password" autoComplete="off" value={value} onChange={event => onChange(event.target.value)} />{secondValue !== undefined && onSecondChange && <TextInput aria-label={`${name} Secret`} type="password" autoComplete="off" value={secondValue} onChange={event => onSecondChange(event.target.value)} />}<Button size="sm" variant="quiet" disabled={busy || !value.trim() || (secondValue !== undefined && !secondValue.trim())} onClick={onSave}>저장</Button><Button size="sm" variant="quiet" onClick={onCancel}>취소</Button></InlineEdit>}
     {confirmDelete && <ConfirmLine text={`${name} 설정을 삭제할까요?`} onCancel={onCancelDelete} onConfirm={onConfirmDelete} busy={busy} confirmLabel="삭제 확인" />}
   </>;
 }
 
 function MobilePublishRow({ name, job, action, disabled, onClick }: { name: string; job: PublicationJob | null | undefined; action: string; disabled: boolean; onClick: () => void }) {
-  return <SimpleRow name={name} status={job ? job.running ? publicationProgressText(job.progress) : job.message ?? undefined : undefined} tone={job?.error ? "off" : undefined} control={<Button size="sm" variant="secondary" disabled={disabled} onClick={onClick}>{action}</Button>} />;
+  return <SimpleRow name={name} status={job ? job.running ? publicationProgressText(job.progress) : job.message ?? undefined : undefined} tone={job?.error ? "off" : undefined} control={<Button size="sm" variant="secondary" disabled={disabled} onClick={onClick}><BusyLabel busy={!!job?.running} idle={action}>업데이트 중…</BusyLabel></Button>} />;
 }
 
 function LightweightModeRow() {
@@ -684,7 +688,8 @@ function LightweightModeRow() {
     setBusy(true);
     void updateWorkloadSettings({ lightweight: !profile.lightweight }).finally(() => setBusy(false));
   }} />;
-  const status = profile.ready ? `${profile.lightweight ? "절약 모드" : profile.restricted ? "절약 모드 해제 중" : "일반 모드"}${profile.autoEnterMinutes === null ? " · 자동 전환 꺼짐" : ` · ${profile.autoEnterMinutes}분 쉬면 자동으로 켜짐`}` : "확인 중…";
+  const showChecking = useDelayedBusy(!profile.ready);
+  const status = showChecking ? "확인 중…" : profile.ready ? `${profile.lightweight ? "절약 모드" : profile.restricted ? "절약 모드 해제 중" : "일반 모드"}${profile.autoEnterMinutes === null ? " · 자동 전환 꺼짐" : ` · ${profile.autoEnterMinutes}분 쉬면 자동으로 켜짐`}` : "";
   return <SimpleRow name="절약 모드" status={status} control={control} />;
 }
 

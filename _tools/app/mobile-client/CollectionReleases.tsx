@@ -1,3 +1,4 @@
+import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {BellIcon, RectangleStackIcon} from '@heroicons/react/24/outline';
 import {japanReleaseLedger, koreanReleaseLedger, releaseLedgerCounts, type ReleaseLedgerRow} from '../src/collections/releaseLedger';
@@ -151,7 +152,7 @@ export function CollectionReleases({active, counts, refresh, revision: listRevis
   const revision = shelf?.revision ?? '';
   const workOf = (id: string) => works.find(work => work.id === id);
 
-  const confirmButton = (id: string, name: string) => <Button variant="ghost" size="sm" className="collection-release-action" disabled={busy} aria-label={`${name} 확인`} onClick={event => { event.stopPropagation(); void acknowledgeWork(id); }}>{working === id ? '확인 중…' : '확인'}</Button>;
+  const confirmButton = (id: string, name: string) => <Button variant="ghost" size="sm" className="collection-release-action" disabled={busy} aria-label={`${name} 확인`} onClick={event => { event.stopPropagation(); void acknowledgeWork(id); }}><BusyLabel busy={!!(working === id)} idle={'확인'}>확인 중…</BusyLabel></Button>;
   // The PC ledger's row (`src/collections/CollectionReleases.tsx`) with its stylesheet; the tablet sizes it.
   const row = (entry: ReleaseLedgerRow) => {
     const work = entry.work as unknown as CollectionSummary;

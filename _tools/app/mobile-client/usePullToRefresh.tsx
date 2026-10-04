@@ -1,3 +1,4 @@
+import { useDelayedBusy } from "../src/shared/useDelayedBusy";
 import {useEffect,useRef,useState,type RefObject} from 'react';
 import {ArrowPathIcon} from '@heroicons/react/24/outline';
 /**
@@ -38,7 +39,7 @@ export function usePullToRefresh(host:RefObject<HTMLElement|null>,refresh:(()=>v
     element.addEventListener('touchstart',begin,{passive:true});element.addEventListener('touchmove',move,{passive:false});element.addEventListener('touchend',end);element.addEventListener('touchcancel',reset);
     return()=>{element.removeEventListener('touchstart',begin);element.removeEventListener('touchmove',move);element.removeEventListener('touchend',end);element.removeEventListener('touchcancel',reset);};
   },[host]);
-  const refreshing=pulled&&!!refresh;
+  const refreshing=useDelayedBusy(pulled&&busy&&!!refresh);
   const shown=!!refresh&&(refreshing||distance>0);
   // The pill follows the finger while pulling and rests just below the top edge while refreshing.
   const offset=refreshing&&!distance?56:Math.max(0,distance);

@@ -13,18 +13,21 @@ export type ConnectionRow = { key: string; label: string; value: string; time?: 
  * 연결 in the 상태 panel (moved from the Home index, 2026-09-28): server, tablet, cloud,
  * catalog and 발매 캘린더, one line each. Read when the panel opens.
  */
-export function useConnectionRows({ gateway, cloud, authorityHealth }: {
-  gateway: LibraryGateway; cloud?: CloudSyncStatus; authorityHealth: AuthoritySyncHealth | null;
+export function useConnectionRows({ gateway, cloud, authorityHealth, active = true, calendar: sharedCalendar }: {
+  gateway: LibraryGateway; cloud?: CloudSyncStatus; authorityHealth: AuthoritySyncHealth | null; active?: boolean; calendar?: ReleaseCalendar | null;
 }): ConnectionRow[] {
   const transfer = useExchangeSnapshot(exchangeStore);
   const [catalog, setCatalog] = useState<CatalogStatus | null>(null);
-  const [calendar, setCalendar] = useState<ReleaseCalendar | null>(null);
+  const [ownCalendar, setCalendar] = useState<ReleaseCalendar | null>(null);
+  const readCalendar = sharedCalendar === undefined;
+  const calendar = readCalendar ? ownCalendar : sharedCalendar;
   useEffect(() => {
+    if (!active) return;
     let live = true;
     void Promise.resolve().then(() => gateway.getOnlineCatalogStatus()).then((value) => { if (live) setCatalog(value ?? null); }, () => undefined);
-    void gateway.releaseCalendar?.calendar().then((value) => { if (live) setCalendar(value ?? null); }, () => undefined);
+    if (readCalendar) void gateway.releaseCalendar?.calendar().then((value) => { if (live) setCalendar(value ?? null); }, () => undefined);
     return () => { live = false; };
-  }, [gateway]);
+  }, [gateway, active, readCalendar]);
 
   const at = new Date();
   const outage = serverOutage(authorityHealth, cloud?.progress ?? null);

@@ -1,3 +1,4 @@
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { AutoTagInboxSettings } from "./AutoTagInboxSettings";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
@@ -53,8 +54,8 @@ export function AutoTagSettings({ disabled }: { disabled: boolean }) {
 
   return <><AutoTagInboxSettings disabled={disabled || busy} /><dl className="settings-view__property">
     <dt>파일 가져오기</dt>
-    <dd className="settings-view__status">{summary === undefined ? "확인 중…" : summary ? summaryText(summary) : "아직 가져오지 않음"}</dd>
-    <dd className="settings-view__inline-controls"><Button size="sm" disabled={busy || disabled} onClick={() => void importFile()}>{busy ? "가져오는 중…" : "파일 가져오기"}</Button></dd>
+    <dd className="settings-view__status"><BusyLabel busy={!!(summary === undefined)} idle={summary === undefined ? null : summary ? summaryText(summary) : "아직 가져오지 않음"}>확인 중…</BusyLabel></dd>
+    <dd className="settings-view__inline-controls"><Button size="sm" disabled={busy || disabled} onClick={() => void importFile()}><BusyLabel busy={!!(busy)} idle={"파일 가져오기"}>가져오는 중…</BusyLabel></Button></dd>
     {message && <dd className="settings-view__row-message" role={message.error ? "alert" : "status"}>{message.text}</dd>}
   </dl></>;
 }

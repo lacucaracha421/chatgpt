@@ -1,7 +1,8 @@
 import { WorkZoomObject, WorkZoomProvider, WorkZoomStage } from "./WorkZoom";
 import { WorkBackdrop } from "./WorkBackdrop";
 import { ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisHorizontalIcon, InformationCircleIcon, PencilIcon, StarIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { AreaVisible } from "../../shared/motion/AreaSwitch";
 import type { CollectionSummary, WorkArtworkSummary, CollectionWorkRecord, CollectionRecordEdit, TmdbConnection } from "../../library/types";
 import type { AvCoverSet, AvDetails, AvRelated } from "../avTypes";
 import { workArtworkThumbnailUrl, workArtworkUrl } from "../../assets/mediaUrl";
@@ -31,7 +32,9 @@ function samePresentation(left: CollectionWorkData, right: CollectionWorkData) {
 }
 export function CollectionWorkScreen({ data, pending, actions }: { data: CollectionWorkData; pending: boolean; actions: WorkActions }) {
   const root = useRef<HTMLElement>(null);
-  useEffect(() => { root.current?.focus(); }, []);
+  const areaVisible = useContext(AreaVisible);
+  const [entered, setEntered] = useState(false);
+  useEffect(() => { if (areaVisible && entered) root.current?.focus({ preventScroll: true }); }, [areaVisible, entered]);
   const [slots, setSlots] = useState<[CollectionWorkData | null, CollectionWorkData | null]>([data, null]);
   const [active, setActive] = useState<0 | 1>(0);
   const [info, setInfo] = useState(true);
@@ -53,7 +56,7 @@ export function CollectionWorkScreen({ data, pending, actions }: { data: Collect
   const activeVolume = visible.manga?.volumes.find(volume => volume.id === visible.manga?.activeVolumeId);
   const title = visible.manga ? `${visible.collection.name}${activeVolume ? ` ${volumeLabel(activeVolume)}` : ""}` : visible.case.title;
   const privacy = data.case.privacy;
-  return <WorkZoomProvider workId={visible.collection.id} reset={reset}><article ref={root} tabIndex={-1} className={`collection-work asset-viewer${info ? " asset-viewer--docked" : ""}`} aria-label={visible.manga ? "만화 작품 화면" : visible.collection.type === "av" ? "AV 작품 화면" : visible.collection.type === "movie" ? "영화 작품 화면" : "게임 작품 화면"} aria-busy={waiting}
+  return <WorkZoomProvider workId={visible.collection.id} reset={reset}><article ref={root} tabIndex={-1} className={`collection-work asset-viewer${info ? " asset-viewer--docked" : ""}`} aria-label={visible.manga ? "만화 작품 화면" : visible.collection.type === "av" ? "AV 작품 화면" : visible.collection.type === "movie" ? "영화 작품 화면" : "게임 작품 화면"} aria-busy={waiting || !entered}
     onKeyDown={event => {
       if (event.defaultPrevented || (event.target instanceof HTMLElement && event.target.closest("input,textarea,select,[contenteditable],.ui-menu,.work-stars,.work-record-menu"))) return;
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); if (!waiting) actions.onStep(event.key === "ArrowLeft" ? -1 : 1); }
@@ -70,7 +73,10 @@ export function CollectionWorkScreen({ data, pending, actions }: { data: Collect
       <Button className="asset-viewer__vbtn" size="icon" variant="ghost" aria-label="닫기" onClick={actions.onClose}><XMarkIcon /></Button>
     </header>
     {slots.map((slot, index) => slot && <div key={index} className={`work-surface${info ? " work-surface--info" : ""}`} style={index === active ? undefined : { visibility: "hidden", pointerEvents: "none" }} inert={index !== active || waiting} aria-hidden={index !== active}>
-      <WorkSurface data={index === active ? visible : slot} privacy={privacy} info={info} reset={reset} actions={actions} onReady={() => { if (index !== active && slot === requested.current) { setActive(index as 0 | 1); root.current?.focus({ preventScroll: true }); } }} />
+      <WorkSurface data={index === active ? visible : slot} privacy={privacy} info={info} reset={reset} actions={actions} onReady={() => {
+        if (index === active) setEntered(true);
+        else if (slot === requested.current) { setEntered(true); setActive(index as 0 | 1); root.current?.focus({ preventScroll: true }); }
+      }} />
     </div>)}
   </article></WorkZoomProvider>;
 }
