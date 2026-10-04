@@ -19,6 +19,7 @@ import {AssetSearch} from './AssetSearch';
 import {assetSuggestions,type AssetSuggestion} from './assetSearchModel';
 import {useLibraryArtists} from './useLibraryArtists';
 import {ArtistGrid} from './ArtistGrid';
+import {HiddenArtists} from './Artists';
 import type {LibraryArtist} from './artistsModel';
 
 export type LibrarySegment = 'folders'|'albums'|'artists';
@@ -80,7 +81,7 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
   const showFolders=segment==='folders'&&!searchOpen;
   const fit=useFolderFit(active&&showFolders,host,folders,`${topFolders.length}:${!!waiting}`);
   const [listsRequested,setListsRequested]=useState(false);
-  const artistList=useLibraryArtists(active&&!paused&&(listsRequested||segment==='artists'),revision);
+  const artistList=useLibraryArtists(active&&!paused&&(listsRequested||segment==='artists'),revision,endpoint);
   const suggestions=useMemo(()=>assetSuggestions(entries,characters,albumTree,artistList.artists),[entries,characters,albumTree,artistList.artists]);
   const closeSearch=()=>setSearchOpen(false);
   const openSearch=()=>{setSearchOpen(true);setListsRequested(true);onSearchFocus?.();};
@@ -112,7 +113,7 @@ export function LibraryRoot({active=true,entries,characters,items,total,paused,b
       {albumError&&<p className="error-message">{albumError}</p>}
       {albumTree&&<Albums key={`${albumTree.libraryId}:${albumTree.epoch}`} tree={albumTree} revision={revision} paused={paused||!active||segment!=='albums'||searchOpen} onSelect={onSelect}/>}
     </div>
-    <div style={{display:segment==='artists'?undefined:'none'}}><ArtistGrid artists={artistList.artists} state={artistList.state} paused={paused||!active||segment!=='artists'||searchOpen} onOpenArtist={onOpenArtist} onVisibleNames={onVisibleArtistNames}/></div>
+    <div style={{display:segment==='artists'?undefined:'none'}}><HiddenArtists endpoint={endpoint} artists={artistList.allArtists} onOpen={onOpenArtist} pending={artistList.pending} syncError={artistList.error} onRetry={artistList.retry}/><ArtistGrid artists={artistList.artists} state={artistList.state} paused={paused||!active||segment!=='artists'||searchOpen} onOpenArtist={onOpenArtist} onVisibleNames={onVisibleArtistNames}/></div>
     <Scrubber scrollRef={host} total={scrubberValues.length} sort={scrubberSort} hidden={!active||paused||queueOpen||searchOpen}/>
   </div>
   </div>

@@ -9,6 +9,7 @@ struct Fake {
     pages: RefCell<VecDeque<Value>>,
     uploads: RefCell<Vec<ArtworkBlob>>,
     fail: std::cell::Cell<bool>,
+    artist_pulls: RefCell<Vec<i64>>,
 }
 impl HomeTransport for Fake {
     fn publish(
@@ -42,6 +43,10 @@ impl HomeTransport for Fake {
             .borrow_mut()
             .pop_front()
             .unwrap_or_else(|| page(after, vec![])))
+    }
+    fn artist_intents(&self, after: i64, token: &str) -> Result<Value, LibraryError> {
+        self.artist_pulls.borrow_mut().push(after);
+        self.intents(after, token)
     }
     fn artwork(&self, blob: &ArtworkBlob, bytes: &[u8], token: &str) -> Result<(), LibraryError> {
         assert_eq!(token, "publisher");
@@ -466,6 +471,7 @@ fn fake_http_uses_publisher_auth_correct_routes_and_methods() {
     let (client, requests) = CloudClient::home_test_client(vec![
         page(0, vec![]),
         reply(true),
+        page(0, vec![]),
         reply(true),
         reply(true),
         reply(false),
@@ -504,6 +510,7 @@ fn fake_http_uses_publisher_auth_correct_routes_and_methods() {
             "/v1/home/upcoming/wishlist/intents?after=0&limit=200",
         ),
         ("PUT", "/v1/home/upcoming"),
+        ("GET", "/v1/library/artists/intents?after=0&limit=200"),
         ("PUT", "/v1/library/artists"),
         ("PUT", "/v1/home/av-pick"),
         ("DELETE", "/v1/home/av-pick"),
@@ -522,13 +529,14 @@ fn fake_http_uses_publisher_auth_correct_routes_and_methods() {
             }
             if path.ends_with("artists") {
                 assert_eq!(body["artists"], json!([]));
+                assert_eq!(body["intentCursor"], 0);
             }
             if path.ends_with("av-pick") {
                 assert_eq!(body["pick"]["personId"], "person-1");
             }
         }
     }
-    assert_eq!(requests.len(), 5);
+    assert_eq!(requests.len(), 6);
 }
 
 #[test]
@@ -798,4 +806,322 @@ fn held_upcoming_receives_intents_without_publishing_or_marking_inputs_observed(
     assert!(lib
         .publication_inputs
         .inputs_changed(8, "https://fake.invalid/"));
+}
+
+fn artist_intent(sequence: i64, action: &str, id: &str, name: Option<&str>) -> Value {
+    json!({"sequence":sequence,"operationId":uuid::Uuid::new_v4().to_string(),
+        "action":action,"artistId":id,"displayName":name,"createdAt":now().to_rfc3339()})
+}
+
+fn artist_checkpoint(lib: &Library) -> State {
+    State::load(
+        &*lib.connection().unwrap(),
+        "https://fake.invalid/",
+        "artists",
+    )
+    .unwrap()
+}
+
+#[test]
+fn artist_intents_apply_in_order_materialize_and_clear_name_preserving_other_flags() {
+    let (_dir, lib) = setup();
+    asset(&lib, "artist-asset", Some("alice"));
+    let fake = Fake::default();
+    fake.pages.borrow_mut().push_back(page(
+        0,
+        vec![
+            artist_intent(1, "rename", "alice", Some("First name")),
+            artist_intent(2, "rename", "alice", Some("Last name")),
+            artist_intent(3, "hide", "alice", None),
+            artist_intent(4, "pin", "alice", None),
+        ],
+    ));
+    run(&lib, &fake, "artists", 0);
+    let body = fake.requests.borrow()[0].1.clone().unwrap();
+    let artist = &body["artists"][0];
+    let id = artist["id"].as_str().unwrap().to_owned();
+    assert!(uuid::Uuid::parse_str(id.strip_prefix("artist:").unwrap()).is_ok());
+    assert_eq!(artist["displayName"], "Last name");
+    assert_eq!(artist["hidden"], true);
+    assert_eq!(artist["pinned"], true);
+    assert_eq!(body["intentCursor"], 4);
+    assert_eq!(artist_checkpoint(&lib).cursor, 4);
+
+    lib.set_artist_flags(&id, None, None, Some(true)).unwrap();
+    fake.pages.borrow_mut().push_back(page(
+        4,
+        vec![
+            artist_intent(5, "unhide", &id, None),
+            artist_intent(6, "unpin", "alice", None),
+            artist_intent(7, "rename", &id, None),
+        ],
+    ));
+    run(&lib, &fake, "artists", 61);
+    let body = fake.requests.borrow()[1].1.clone().unwrap();
+    assert_eq!(body["intentCursor"], 7);
+    assert_eq!(body["artists"][0]["id"], id);
+    assert!(body["artists"][0]["displayName"].is_null());
+    assert_eq!(body["artists"][0]["hidden"], false);
+    assert_eq!(body["artists"][0]["pinned"], false);
+    assert!(lib
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT reposter FROM artists WHERE id=?1",
+            [id.strip_prefix("artist:").unwrap()],
+            |r| r.get::<_, bool>(0)
+        )
+        .unwrap());
+}
+
+#[test]
+fn artist_intents_unknown_targets_are_acknowledged_and_pages_are_drained() {
+    let (_dir, lib) = setup();
+    let fake = Fake::default();
+    let mut first = page(
+        0,
+        vec![artist_intent(1, "rename", "missing-key", Some("Gone"))],
+    );
+    first["hasMore"] = json!(true);
+    first["lastSequence"] = json!(2);
+    fake.pages.borrow_mut().extend([
+        first,
+        page(1, vec![artist_intent(2, "pin", "artist:deleted", None)]),
+    ]);
+    run(&lib, &fake, "artists", 0);
+    assert_eq!(*fake.artist_pulls.borrow(), vec![0, 1]);
+    assert_eq!(artist_checkpoint(&lib).cursor, 2);
+    let body = fake.requests.borrow()[0].1.clone().unwrap();
+    assert_eq!(body["intentCursor"], 2);
+    assert_eq!(body["artists"], json!([]));
+}
+
+#[test]
+fn artist_intent_page_and_cursor_roll_back_together_on_checkpoint_failure() {
+    let (_dir, lib) = setup();
+    asset(&lib, "artist-asset", Some("alice"));
+    let endpoint = "https://fake.invalid/";
+    State::default()
+        .save(&*lib.connection().unwrap(), endpoint, "artists")
+        .unwrap();
+    lib.connection()
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER fail_artist_cursor BEFORE UPDATE ON home_publication_state
+         WHEN NEW.kind='artists' AND json_extract(NEW.state_json,'$.cursor')>0
+         BEGIN SELECT RAISE(ABORT,'injected checkpoint failure'); END;",
+        )
+        .unwrap();
+    let page: ArtistIntentPage = serde_json::from_value(page(
+        0,
+        vec![
+            artist_intent(1, "rename", "alice", Some("New")),
+            artist_intent(2, "pin", "alice", None),
+        ],
+    ))
+    .unwrap();
+    assert!(lib.apply_artist_intents(endpoint, &page, now()).is_err());
+    assert_eq!(artist_checkpoint(&lib).cursor, 0);
+    let db = lib.connection().unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM artists", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM artist_members", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    db.execute_batch("DROP TRIGGER fail_artist_cursor").unwrap();
+    drop(db);
+    lib.apply_artist_intents(endpoint, &page, now()).unwrap();
+    assert_eq!(artist_checkpoint(&lib).cursor, 2);
+    lib.set_artist_display_name("alice", Some("PC later edit"))
+        .unwrap();
+    lib.apply_artist_intents(endpoint, &page, now()).unwrap();
+    assert_eq!(artist_checkpoint(&lib).cursor, 2);
+    assert_eq!(
+        lib.connection()
+            .unwrap()
+            .query_row("SELECT display_name FROM artists", [], |r| r
+                .get::<_, String>(0))
+            .unwrap(),
+        "PC later edit"
+    );
+}
+
+#[test]
+fn artist_intent_mid_page_write_failure_rolls_back_earlier_edits() {
+    let (_dir, lib) = setup();
+    asset(&lib, "artist-asset", Some("alice"));
+    lib.connection()
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER fail_artist_pin BEFORE UPDATE OF pinned ON artists
+         BEGIN SELECT RAISE(ABORT,'injected artist failure'); END;",
+        )
+        .unwrap();
+    let page = serde_json::from_value(page(
+        0,
+        vec![
+            artist_intent(1, "rename", "alice", Some("New")),
+            artist_intent(2, "pin", "alice", None),
+        ],
+    ))
+    .unwrap();
+    assert!(lib
+        .apply_artist_intents("https://fake.invalid/", &page, now())
+        .is_err());
+    assert_eq!(artist_checkpoint(&lib).cursor, 0);
+    assert_eq!(
+        lib.connection()
+            .unwrap()
+            .query_row("SELECT count(*) FROM artists", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn artist_intent_cursor_survives_failed_publish_and_restart_without_reapplying() {
+    let (dir, lib) = setup();
+    asset(&lib, "artist-asset", Some("alice"));
+    let fake = Fake::default();
+    fake.pages.borrow_mut().push_back(page(
+        0,
+        vec![artist_intent(1, "rename", "alice", Some("Tablet"))],
+    ));
+    fake.fail.set(true);
+    assert!(lib
+        .run_home_with(
+            &fake,
+            "publisher",
+            "https://fake.invalid",
+            "artists",
+            now(),
+            now().date_naive(),
+            false
+        )
+        .is_err());
+    assert_eq!(artist_checkpoint(&lib).cursor, 1);
+    drop(lib);
+    let lib = Library::open(dir.path()).unwrap();
+    lib.set_artist_display_name("alice", Some("PC later edit"))
+        .unwrap();
+    fake.fail.set(false);
+    run(&lib, &fake, "artists", 61);
+    assert_eq!(*fake.artist_pulls.borrow(), vec![0, 1]);
+    let body = fake.requests.borrow()[1].1.clone().unwrap();
+    assert_eq!(body["intentCursor"], 1);
+    assert_eq!(body["artists"][0]["displayName"], "PC later edit");
+    assert_eq!(artist_checkpoint(&lib).cursor, 1);
+}
+
+#[test]
+fn artist_intents_reject_pruned_ahead_gapped_and_invalid_pages_without_acknowledging() {
+    let (_dir, lib) = setup();
+    asset(&lib, "artist-asset", Some("alice"));
+    let valid = page(0, vec![artist_intent(1, "rename", "alice", Some("New"))]);
+    for (key, value) in [
+        ("prunedThrough", json!(1)),
+        ("lastSequence", json!(-1)),
+        ("nextCursor", json!(2)),
+        ("acknowledgedThrough", json!(2)),
+    ] {
+        let mut bad = valid.clone();
+        bad[key] = value;
+        let page: ArtistIntentPage = serde_json::from_value(bad).unwrap();
+        assert!(page.validate(0).is_err());
+        assert!(lib
+            .apply_artist_intents("https://fake.invalid/", &page, now())
+            .is_err());
+        assert_eq!(artist_checkpoint(&lib).cursor, 0);
+    }
+    for (key, value) in [
+        ("sequence", json!(2)),
+        ("action", json!("merge")),
+        ("operationId", json!("bad")),
+        ("createdAt", json!("bad")),
+        ("displayName", json!("x".repeat(121))),
+    ] {
+        let mut bad = valid.clone();
+        bad["items"][0][key] = value;
+        let page: ArtistIntentPage = serde_json::from_value(bad).unwrap();
+        assert!(page.validate(0).is_err());
+    }
+    let (client, requests) = CloudClient::home_test_client(vec![json!({
+        "detail":{"code":"artistIntentsExpired","lastSequence":20}
+    })]);
+    assert!(lib
+        .run_home_with(
+            &client,
+            "publisher",
+            "https://fake.invalid",
+            "artists",
+            now(),
+            now().date_naive(),
+            false
+        )
+        .is_err());
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    assert_eq!(artist_checkpoint(&lib).cursor, 0);
+    assert_eq!(
+        lib.connection()
+            .unwrap()
+            .query_row("SELECT count(*) FROM artists", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn held_artists_receive_intents_without_publishing_and_publish_after_release() {
+    let (dir, mut lib) = setup();
+    lib.use_machine_settings(dir.path().join("machine.json"));
+    lib.set_cloud_sync_hold("https://fake.invalid", true)
+        .unwrap();
+    asset(&lib, "artist-asset", Some("alice"));
+    let fake = Fake::default();
+    fake.pages
+        .borrow_mut()
+        .push_back(page(0, vec![artist_intent(1, "hide", "alice", None)]));
+    run(&lib, &fake, "artists", 0);
+    assert_eq!(artist_checkpoint(&lib).cursor, 1);
+    assert!(fake.requests.borrow().is_empty());
+    assert!(lib
+        .publication_inputs
+        .inputs_changed(10, "https://fake.invalid/"));
+    lib.set_cloud_sync_hold("https://fake.invalid", false)
+        .unwrap();
+    // Releasing a receive-only hold intentionally takes effect after restart.
+    lib.simulate_sync_hold_restart();
+    run(&lib, &fake, "artists", 61);
+    let body = fake.requests.borrow()[0].1.clone().unwrap();
+    assert_eq!(body["intentCursor"], 1);
+    assert_eq!(body["artists"][0]["hidden"], true);
+}
+
+#[test]
+fn artists_do_not_pull_again_between_publication_passes_and_cursors_are_scoped() {
+    let (_dir, lib) = setup();
+    let fake = Fake::default();
+    run(&lib, &fake, "artists", 0);
+    for seconds in [1, 60, BUILD_INTERVAL - 1] {
+        run(&lib, &fake, "artists", seconds);
+    }
+    assert_eq!(*fake.artist_pulls.borrow(), vec![0]);
+    assert_eq!(
+        State::load(
+            &*lib.connection().unwrap(),
+            "https://other.invalid/",
+            "artists"
+        )
+        .unwrap()
+        .cursor,
+        0
+    );
+    run(&lib, &fake, "artists", BUILD_INTERVAL);
+    assert_eq!(*fake.artist_pulls.borrow(), vec![0, 0]);
 }

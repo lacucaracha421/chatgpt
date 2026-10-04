@@ -59,6 +59,17 @@ impl HomeTransport for CloudClient {
         self.upload_collection_artwork(blob, bytes, token)
             .map(|_| ())
     }
+
+    fn artist_intents(&self, after: i64, token: &str) -> Result<Value, LibraryError> {
+        let path = format!("/v1/library/artists/intents?after={after}&limit=200");
+        let mut response = self
+            .agent
+            .get(self.endpoint(&path)?)
+            .header("Authorization", bearer(token)?)
+            .call()
+            .map_err(map_registration_error)?;
+        read_json_bounded(&mut response, 4 * 1024 * 1024)
+    }
 }
 
 #[cfg(test)]

@@ -1,6 +1,9 @@
 import {useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode} from 'react';
-import {ArrowUpRightIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronRightIcon, ComputerDesktopIcon, MagnifyingGlassIcon, PhotoIcon, XMarkIcon} from '@heroicons/react/24/outline';
-import {EmptyState,IconButton,SectionLabel} from './ui';
+import {ArrowUpRightIcon, ArrowsUpDownIcon, ChevronDownIcon, ChevronRightIcon, ComputerDesktopIcon, EllipsisHorizontalIcon, MagnifyingGlassIcon, PhotoIcon, XMarkIcon} from '@heroicons/react/24/outline';
+import {Button, EmptyState, Field, IconButton, SectionLabel, TextInput} from './ui';
+import {BottomSheet} from './BottomSheet';
+import {useLibraryArtists} from './useLibraryArtists';
+import {commitArtistEdit, resolveArtist, type ArtistEditAction} from './artistEditOutbox';
 import {TopBar, TopBarSearch} from './TopBar';
 import {api, errorText, native} from './transport';
 import {Cover} from './CoverGroup';
@@ -12,12 +15,64 @@ import {readyFirstScreen} from './firstScreen';
 import {readScopedToc, readyScopedAsset, useScopedAssetToc, withScopedToc, type ScopedAssetPage} from './scopedAssetToc';
 import type {Asset, PageWire} from './types';
 import {usePrivacyMode} from './privacyMode';
-import {artistHandles, artistName, assetsFromIds, daysSince, matchedPositions, matchesArtist, normalizeArtist, normalizeArtists, normalizeAssignments, orderedArtists, profileUrl, todayArtists, type ArtistAssignment, type LibraryArtist} from './artistsModel';
+import {artistHandles, artistName, assetsFromIds, daysSince, matchedPositions, matchesArtist, orderedArtists, profileUrl, todayArtists, type ArtistAssignment, type LibraryArtist} from './artistsModel';
 import {displayDate} from '../src/shared/displayDate';
 import './artists.css';
 
-type ArtistState = 'loading' | 'ready' | 'empty';
 type ArtistPage = ScopedAssetPage & {scope:string};
+type EditArtist = (artist: LibraryArtist, action: ArtistEditAction, displayName?: string | null) => void;
+
+/** Used by both the retained Library root and the standalone artist hub. */
+export function HiddenArtists({endpoint, artists, onOpen, pending = 0, syncError = '', onRetry}: {endpoint: string; artists: LibraryArtist[]; onOpen(artist: LibraryArtist): void; pending?: number; syncError?: string; onRetry?(): void}) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState('');
+  const hidden = artists.filter(artist => artist.hidden);
+  return <>
+    <div className="artist-hidden-entry"><Button variant="quiet" onClick={() => { setError(''); setOpen(true); }}>숨긴 작가 · {hidden.length}명</Button></div>
+    {open && <BottomSheet title="숨긴 작가" onClose={() => setOpen(false)}>
+      {pending > 0 && <p className="hint" role="status">작가 변경 전송 대기 중 · {pending}건</p>}
+      {!hidden.length && <p className="hint">숨긴 작가가 없습니다.</p>}
+      {hidden.map(artist => <div className="artist-hidden-row" key={artist.id}>
+        <Button variant="quiet" onClick={() => { setOpen(false); onOpen(artist); }}>{artistName(artist)}</Button>
+        <Button variant="quiet" aria-label={`${artistName(artist)} 숨김 해제`} onClick={() => {
+          try { commitArtistEdit(endpoint, artist, 'unhide'); setError(''); }
+          catch (reason) { setError(errorText(reason)); }
+        }}>숨김 해제</Button>
+      </div>)}
+      {error && <p className="error-message" role="alert">{error}</p>}
+      {syncError && <div className="inline-error" role="alert">{syncError}{onRetry && <Button variant="quiet" onClick={onRetry}>다시 시도</Button>}</div>}
+    </BottomSheet>}
+  </>;
+}
+
+function ArtistEditMenu({artist, onEdit}: {artist: LibraryArtist; onEdit: EditArtist}) {
+  const [sheet, setSheet] = useState<'menu' | 'rename' | null>(null);
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const save = (action: ArtistEditAction, displayName?: string | null) => {
+    try { onEdit(artist, action, displayName); setSheet(null); setError(''); }
+    catch (reason) { setError(errorText(reason)); }
+  };
+  return <>
+    <IconButton label="작가 더보기" icon={EllipsisHorizontalIcon} onClick={() => { setError(''); setSheet('menu'); }} />
+    {sheet && <BottomSheet title={sheet === 'rename' ? '이름 바꾸기' : artistName(artist)} onClose={() => setSheet(null)}>
+      {sheet === 'menu' ? <>
+        <Button variant="quiet" onClick={() => { setName(artist.displayName ?? ''); setSheet('rename'); }}>이름 바꾸기</Button>
+        <Button variant="quiet" onClick={() => save(artist.hidden ? 'unhide' : 'hide')}>{artist.hidden ? '숨김 해제' : '숨기기'}</Button>
+        <Button variant="quiet" onClick={() => save(artist.pinned ? 'unpin' : 'pin')}>{artist.pinned ? '고정 해제' : '고정'}</Button>
+        <p className="hint">합치기는 PC 앱에서</p>
+      </> : <form className="artist-rename" onSubmit={event => { event.preventDefault(); save('rename', name); }}>
+        <Field label="작가 이름"><TextInput autoFocus value={name} placeholder={artist.sourceName ?? artist.label}
+          onChange={event => setName(event.target.value)} onKeyDown={event => {
+            if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault();
+          }} /></Field>
+        <p className="hint">비워 두면 원래 이름을 사용합니다. 최대 120자</p>
+        <Button type="submit">저장</Button>
+      </form>}
+      {error && <p className="error-message" role="alert">{error}</p>}
+    </BottomSheet>}
+  </>;
+}
 
 export function Placeholder({privateMode = false, label = '이미지 없음'}: {privateMode?: boolean; label?: string}) {
   return <span className={`artist-placeholder${privateMode ? ' is-private' : ''}`} aria-label={privateMode ? '비공개 모드로 이미지 숨김' : label}><PhotoIcon aria-hidden="true" /></span>;
@@ -86,7 +141,7 @@ function ArtistToday({artist, privateMode, onOpen}: {artist: LibraryArtist; priv
 
 function ArtistHub({artists, assignments, query, privateMode, paused, onOpen}: {artists: LibraryArtist[]; assignments: ArtistAssignment[]; query: string; privateMode: boolean; paused:boolean; onOpen(artist: LibraryArtist): void}) {
   const scroller=useRef<HTMLDivElement>(null);
-  const major = useMemo(() => artists.some(artist => artist.main) ? artists.filter(artist => artist.main) : artists, [artists]);
+  const major = useMemo(() => artists.some(artist => artist.main || artist.pinned) ? artists.filter(artist => artist.main || artist.pinned) : artists, [artists]);
   const visible = useMemo(() => query.trim() ? artists.filter(artist => matchesArtist(artist, query)) : orderedArtists(major), [artists, major, query]);
   const picks = todayArtists(artists);
   const main = picks[0];
@@ -112,13 +167,13 @@ function ArtistIntro({artist, privateMode, sort, filter, onSort, onFilter, asset
   return <div className="artist-detail-intro">
     <div className="artist-detail-identity"><span className="artist-avatar"><ArtistImage asset={avatar} privateMode={privateMode} /></span><span className="artist-detail-identity-text"><h2>{artistName(artist)}</h2><Handles artist={artist} /></span></div>
     <ArtistStats artist={artist} detail />
-    <div className="artist-pc-note"><ComputerDesktopIcon aria-hidden="true" />이름 바꾸기 · 다른 작가와 합치기 · 숨기기는 PC 앱에서</div>
+    <div className="artist-pc-note"><ComputerDesktopIcon aria-hidden="true" />합치기는 PC 앱에서</div>
     <div className="artist-filter-row"><button className="artist-filter" aria-pressed={sort === 'newest'} onClick={onSort}><ArrowsUpDownIcon aria-hidden="true" />{sort === 'newest' ? '최근 저장 순' : '처음 저장 순'}<ChevronDownIcon aria-hidden="true" /></button><button className="artist-filter" aria-pressed={filter === 'image'} onClick={() => onFilter(filter === 'image' ? 'all' : 'image')}>이미지 {imageCount.toLocaleString('ko-KR')}</button><button className="artist-filter" aria-pressed={filter === 'video'} onClick={() => onFilter(filter === 'video' ? 'all' : 'video')}>영상 {videoCount.toLocaleString('ko-KR')}</button></div>
   </div>;
 }
 
-function ArtistDetail({scopeChips,summary, assignments, privateMode, paused, onBack, onOpenViewer}: {scopeChips?:ReactNode;summary: LibraryArtist; assignments: ArtistAssignment[]; privateMode: boolean; paused:boolean; onBack(): void; onOpenViewer(items: Asset[], index: number): void}) {
-  const [artist, setArtist] = useState(summary);
+function ArtistDetail({scopeChips,summary, assignments, privateMode, paused, onBack, onOpenViewer, onEdit, notice, listed}: {scopeChips?:ReactNode;summary: LibraryArtist; assignments: ArtistAssignment[]; privateMode: boolean; paused:boolean; onBack(): void; onOpenViewer(items: Asset[], index: number): void; onEdit: EditArtist; notice: ReactNode; listed: boolean | undefined}) {
+  const artist = summary;
   const [missing, setMissing] = useState(false);
   const [page, setPage] = useState<ArtistPage>();
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
@@ -146,9 +201,11 @@ function ArtistDetail({scopeChips,summary, assignments, privateMode, paused, onB
   };
   useEffect(() => {
     const controller = new AbortController();
+    setMissing(false);
     void api<{artist?: LibraryArtist}>(`/v1/library/artists/${encodeURIComponent(summary.id)}`, controller.signal).then(reply => {
-      const next = normalizeArtist(reply.artist);
-      if (!controller.signal.aborted && next) setArtist(next);
+      // The list owns editable fields, including queued changes. A late detail read
+      // must never overwrite them with the previous server state.
+      if (!controller.signal.aborted && reply.artist) setMissing(false);
     }, reason => { if (!controller.signal.aborted && (reason as {status?: number})?.status === 404) setMissing(true); });
     return () => controller.abort();
   }, [summary.id]);
@@ -180,33 +237,23 @@ function ArtistDetail({scopeChips,summary, assignments, privateMode, paused, onB
     },reason=>{if(!controller.signal.aborted&&generation.current===version)setError(errorText(reason));})
       .finally(()=>{if(moreRequest.current===controller){moreRequest.current=null;setLoadingMore(false);}});
   };
-  if (missing) return <div className="artist-screen"><TopBar back={{label:'작가 목록으로', onClick:onBack}} crumbs={<span className="top-bar__crumbs">홈 › 작가 ›</span>} title={artistName(summary)} />{scopeChips}<EmptyArtists /></div>;
+  if (missing && listed === false) return <div className="artist-screen"><TopBar back={{label:'작가 목록으로', onClick:onBack}} crumbs={<span className="top-bar__crumbs">홈 › 작가 ›</span>} title={artistName(summary)} />{scopeChips}{notice}<EmptyArtists /></div>;
   const local = filter==='all'?fallback:fallback.filter(asset=>filter==='video'?asset.kind==='video':asset.kind!=='video');
   const shown = page?.items ?? (sort==='oldest'?[...local].reverse():local);
   const stale = !!page && page.scope!==scope;
-  return <div className="artist-screen"><TopBar back={{label:'작가 목록으로', onClick:onBack}} crumbs={<span className="top-bar__crumbs">홈 › 작가 ›</span>} title={artistName(artist)} actions={profile ? <IconButton label="작가 프로필 열기" icon={ArrowUpRightIcon} onClick={() => { void native('openExternal', {url: profile}).catch(() => {}); }} /> : undefined} />
+  return <div className="artist-screen"><TopBar back={{label:'작가 목록으로', onClick:onBack}} crumbs={<span className="top-bar__crumbs">홈 › 작가 ›</span>} title={artistName(artist)} actions={<>{profile && <IconButton label="작가 프로필 열기" icon={ArrowUpRightIcon} onClick={() => { void native('openExternal', {url: profile}).catch(() => {}); }} />}<ArtistEditMenu artist={artist} onEdit={onEdit} /></>} />{notice}
     <div className="artist-detail-scroll"><Gallery sparse={privateMode?undefined:sparse} items={shown} privacy={privateMode} stale={stale} busy={busy||loadingMore} onRefresh={()=>setRetry(value=>value+1)} density={DEFAULT_DENSITY} identity={`artist:${page?.scope??scope}`} restoreScroll={0} onScroll={() => {}} onReady={ready => setPage(current=>current?readyScopedAsset(current,ready):current)} onNearEnd={loadMore} paused={privateMode||paused} intro={<>{scopeChips}<ArtistIntro artist={artist} privateMode={privateMode} sort={sort} filter={filter} onSort={changeSort} onFilter={changeFilter} assets={shown} /></>} onOpen={index => { if (!privateMode&&!stale) onOpenViewer(shown, index); }} />{!shown.length&&!busy && <div className="artist-detail-empty">조건에 맞는 자산이 없습니다.</div>}{error&&<div className="inline-error" role="alert">{error}<button onClick={()=>setRetry(value=>value+1)}>다시 시도</button></div>}</div>
   </div>;
 }
 
 export function Artists({scopeChips,endpoint, backRef, onOpenViewer, paused=false, initialArtist, onClose}: {scopeChips?:ReactNode;endpoint: string; backRef: MutableRefObject<(() => boolean) | null>; onOpenViewer(items: Asset[], index: number): void; paused?:boolean; initialArtist?: LibraryArtist; onClose?(): void}) {
   const [privateMode] = usePrivacyMode();
-  const [state, setState] = useState<ArtistState>('loading');
-  const [artists, setArtists] = useState<LibraryArtist[]>([]);
-  const [assignments, setAssignments] = useState<ArtistAssignment[]>([]);
+  const {state, artists, allArtists, assignments, pending, error, retry, loaded} = useLibraryArtists(!paused, 0, endpoint);
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
-  const [detail, setDetail] = useState<LibraryArtist | null>(() => initialArtist ?? null);
-  useEffect(() => {
-    const controller = new AbortController();
-    setState('loading');
-    void api<unknown>('/v1/library/artists', controller.signal).then(value => {
-      if (controller.signal.aborted) return;
-      const next = normalizeArtists(value);
-      setArtists(next); setAssignments(normalizeAssignments(value)); setState(next.length ? 'ready' : 'empty');
-    }, () => { if (!controller.signal.aborted) setState('empty'); });
-    return () => controller.abort();
-  }, [endpoint]);
+  const [selection, setSelection] = useState<{endpoint: string; artist: LibraryArtist | null}>(() => ({endpoint, artist: initialArtist ?? null}));
+  const detail = selection.endpoint === endpoint ? selection.artist : null;
+  const setDetail = (artist: LibraryArtist | null) => setSelection({endpoint, artist});
   useEffect(() => {
     backRef.current = () => {
       if (detail) { if (initialArtist && onClose) onClose(); else setDetail(null); return true; }
@@ -216,7 +263,13 @@ export function Artists({scopeChips,endpoint, backRef, onOpenViewer, paused=fals
     return () => { backRef.current = null; };
   }, [backRef, detail, initialArtist, onClose, searchOpen]);
   const closeSearch = () => { setSearchOpen(false); setQuery(''); };
-  if (detail) return <ArtistDetail scopeChips={scopeChips} summary={detail} assignments={assignments} privateMode={privateMode} paused={paused} onBack={() => { if (initialArtist && onClose) onClose(); else setDetail(null); }} onOpenViewer={onOpenViewer} />;
+  const onEdit: EditArtist = (artist, action, displayName) => { commitArtistEdit(endpoint, artist, action, displayName); };
+  const notice = <>{pending > 0 && <p className="artist-edit-status" role="status">작가 변경 전송 대기 중 · {pending}건</p>}{error && <div className="inline-error" role="alert">{error}<Button variant="quiet" onClick={retry}>다시 시도</Button></div>}</>;
+  const resolved = detail ? resolveArtist(allArtists, detail) : undefined;
+  if (detail) return <ArtistDetail scopeChips={scopeChips} summary={resolved ?? detail} listed={loaded ? !!resolved : undefined} assignments={assignments} privateMode={privateMode} paused={paused} notice={notice} onEdit={onEdit} onBack={() => { if (initialArtist && onClose) onClose(); else setDetail(null); }} onOpenViewer={onOpenViewer} />;
   const header = searchOpen ? <TopBarSearch title="작가" onClose={closeSearch}><label className="top-bar__search"><MagnifyingGlassIcon aria-hidden="true" /><input autoFocus type="search" aria-label="작가 검색" placeholder="이름, 핸들, 초성" value={query} onChange={event => setQuery(event.target.value)} />{query && <IconButton label="검색어 지우기" icon={XMarkIcon} onClick={() => setQuery('')} />}</label></TopBarSearch> : <TopBar back={{label:'홈으로', onClick:() => window.dispatchEvent(new Event('lakomics-back'))}} crumbs={<span className="top-bar__crumbs">홈 ›</span>} title="작가" count={artists.length ? artists.length.toLocaleString('ko-KR') : undefined} actions={state === 'ready' ? <IconButton label="작가 검색" icon={MagnifyingGlassIcon} onClick={() => setSearchOpen(true)} /> : undefined} />;
-  return <div className="artist-screen">{header}{state === 'loading' ? <div className="artist-empty" role="status"><span>작가 목록을 불러오는 중입니다</span></div> : state === 'empty' ? <EmptyArtists /> : <ArtistHub artists={artists} assignments={assignments} query={query} privateMode={privateMode} paused={paused} onOpen={setDetail} />}</div>;
+  return <div className="artist-screen">{header}{notice}
+    <HiddenArtists endpoint={endpoint} artists={allArtists} onOpen={setDetail} pending={pending} syncError={error} onRetry={retry} />
+    {!allArtists.length && (state === 'loading' || state === 'idle') ? <div className="artist-empty" role="status"><span>작가 목록을 불러오는 중입니다</span></div> : !allArtists.length ? <EmptyArtists /> : <ArtistHub artists={artists} assignments={assignments} query={query} privateMode={privateMode} paused={paused} onOpen={setDetail} />}
+  </div>;
 }

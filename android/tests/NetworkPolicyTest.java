@@ -229,7 +229,11 @@ public final class NetworkPolicyTest {
  reject(()->NetworkPolicy.api("/v1/home/upcoming","PUT"));
  reject(()->NetworkPolicy.api("/v1/home/av-pick","PUT"));
  reject(()->NetworkPolicy.api("/v1/home/av-pick","DELETE"));
- // ARTIST-001: the artist list and one artist by its encoded id, read-only.
+ // Artist reads and the one client intent write; publisher log reads stay refused.
+ pass(()->NetworkPolicy.api("/v1/library/artists/intents","POST"));
+ for(String method:new String[]{"GET","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api("/v1/library/artists/intents",method));
+ for(String path:new String[]{"/v1/library/artists/intents?after=0&limit=100","/v1/library/artists/%69ntents","/v1/library/artists/int%65nts"})reject(()->NetworkPolicy.api(path,"GET"));
+ for(String path:new String[]{"/v1/library/artists/intents/","/v1/library/artists/intents/extra","/v1/library/artists/%69ntents","/v1/library/artists/../intents"})reject(()->NetworkPolicy.api(path,"POST"));
  for(String path:new String[]{"/v1/library/artists","/v1/library/artists/artist:a1","/v1/library/artists/https%3A%2F%2Fx.com%2Fbob","/v1/library/artists/alice_1.x~y"}){pass(()->NetworkPolicy.api(path,"GET"));for(String method:new String[]{"POST","PUT","DELETE","PATCH"})reject(()->NetworkPolicy.api(path,method));}
  for(String path:new String[]{"/v1/library/artists/","/v1/library/artists/..","/v1/library/artists/.","/v1/library/artists/a/b","/v1/library/artists/../summary","/v1/library/artistsx","/v1/library/artists/a b"})reject(()->NetworkPolicy.api(path,"GET"));
  reject(()->NetworkPolicy.api("/v1/library/artists/"+"a".repeat(3073),"GET"));

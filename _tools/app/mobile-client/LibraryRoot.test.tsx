@@ -10,7 +10,7 @@ import {mergeLibraryEntries} from './libraryModel';
 import type {CharacterIndex} from './characterModel';
 import {resetHomeSourceCache} from './homeCache';
 import type {LibraryArtist} from './artistsModel';
-const mocks=vi.hoisted(()=>({api:vi.fn(async()=>({items:[{id:'cover',kind:'image',preview:'data:image/png;base64,AA'}],has_more:false,next_cursor:null})),native:vi.fn(),thumbnail:vi.fn(async(asset)=>asset)}));
+const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn(),thumbnail:vi.fn(async(asset)=>asset)}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:String}));
 vi.mock('./media',()=>({loadThumbnail:mocks.thumbnail}));
 const characters:CharacterIndex={version:1,authority:'pc',authorityEpoch:0,capabilities:{read:true,write:false},ready:true,revision:'a'.repeat(64),publishedAt:null,nodes:[
@@ -20,7 +20,10 @@ const characters:CharacterIndex={version:1,authority:'pc',authorityEpoch:0,capab
 ],scopes:[]};
 const entries=mergeLibraryEntries([{id:'game',name:'게임',parent_id:null,asset_count:20},{id:'s',name:'블루 아카이브',parent_id:'game',asset_count:10}],characters);
 const props={entries,characters,recentFolders:['s'],items:[{id:'all-cover',kind:'image',preview:'data:image/png;base64,AA'}],total:20,paused:false,busy:false,revision:1,onSelect:vi.fn(),onOpenArtist:vi.fn(),onRefresh:vi.fn(),albumTree:null,albumError:'',segment:'folders' as const,onSegment:vi.fn(),restoreScroll:0,onScroll:vi.fn()};
-beforeEach(()=>{localStorage.clear();resetHomeSourceCache();vi.stubGlobal('ResizeObserver',class{observe(){}unobserve(){}disconnect(){}});});
+beforeEach(()=>{
+ localStorage.clear();resetHomeSourceCache();vi.stubGlobal('ResizeObserver',class{observe(){}unobserve(){}disconnect(){}});
+ mocks.api.mockReset().mockImplementation(async(path:string)=>path==='/v1/library/artists'?{artists:[]}:{items:[{id:'cover',kind:'image',preview:'data:image/png;base64,AA'}],has_more:false,next_cursor:null});
+});
 afterEach(()=>{cleanup();vi.clearAllMocks();vi.unstubAllGlobals();});
 it('does not read the similarity queue while the retained root is hidden',async()=>{
  const scope='https://library-root.example';
@@ -80,7 +83,7 @@ it('shows the three asset segments and lazily browses pinned artists with search
  expect(screen.getByRole('radiogroup',{name:'에셋 보기'}).closest('.library-root-scroll > .ui-section-bar--inline')).toBeTruthy();
  expect(screen.getAllByRole('radio')).toHaveLength(3);
  fireEvent.click(screen.getByRole('radio',{name:'작가'}));
- await waitFor(()=>expect(mocks.api).toHaveBeenCalledWith('/v1/library/artists',expect.anything()));
+ await waitFor(()=>expect(mocks.api).toHaveBeenCalledWith('/v1/library/artists',expect.any(AbortSignal),undefined,undefined,false,undefined));
  await screen.findByRole('button',{name:/지우, 2장/});
  const cards=[...document.querySelectorAll<HTMLButtonElement>('.artist-grid-card')];
  expect(cards[0].getAttribute('aria-label')).toBe('지우, 2장, 고정됨');
@@ -97,6 +100,35 @@ it('shows the three asset segments and lazily browses pinned artists with search
  expect(localStorage.getItem('lakomics.mobile.artistSort')).toBe('count');
  const reordered=[...document.querySelectorAll('.artist-grid-card .artist-grid-name')].map(node=>node.textContent);
  expect(reordered).toEqual(['지우','다람','가나']);
+});
+it.each([false,true])('loads artists without intents and retains them through a cancelled refresh (pending field=%s)',async(includePending)=>{
+ const endpoint='https://library-root.example';
+ const original=mocks.api.getMockImplementation()!;
+ const requests:{signal:AbortSignal;resolve(reply:unknown):void}[]=[];
+ mocks.api.mockImplementation((path:string,signal:AbortSignal)=>path==='/v1/library/artists'?new Promise((resolve,reject)=>{
+  requests.push({signal,resolve});
+  signal.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true});
+ }):original(path,signal));
+ const reply=(name:string)=>({revision:1,artists:[libraryArtist('legacy',name)],...(includePending?{pending:[]}: {})});
+ const view=render(<LibraryRoot {...props} endpoint={endpoint} segment="artists"/>);
+ await waitFor(()=>expect(requests).toHaveLength(1));
+ expect(mocks.api).toHaveBeenCalledWith('/v1/library/artists',requests[0].signal,undefined,undefined,false,endpoint);
+ expect(requests[0].signal.aborted).toBe(false);
+ await act(async()=>requests[0].resolve(reply('기존 작가')));
+ const card=await screen.findByRole('button',{name:'기존 작가, 10장'});
+ view.rerender(<LibraryRoot {...props} endpoint={endpoint} segment="artists" revision={2}/>);
+ await waitFor(()=>expect(requests).toHaveLength(2));
+ expect(screen.getByRole('button',{name:'기존 작가, 10장'})).toBe(card);
+ await act(async()=>view.rerender(<LibraryRoot {...props} endpoint={endpoint} segment="artists" revision={2} active={false}/>));
+ expect(requests[1].signal.aborted).toBe(true);
+ view.rerender(<LibraryRoot {...props} endpoint={endpoint} segment="artists" revision={2}/>);
+ await waitFor(()=>expect(requests).toHaveLength(3));
+ expect(screen.getByRole('button',{name:'기존 작가, 10장'})).toBe(card);
+ await act(async()=>requests[2].resolve(reply('갱신된 작가')));
+ await screen.findByRole('button',{name:'갱신된 작가, 10장'});
+ expect(screen.queryByRole('button',{name:'기존 작가, 10장'})).toBeNull();
+ expect(screen.queryByText(/작가 목록을 확인할 수 없습니다/)).toBeNull();
+ expect(mocks.api.mock.calls.filter(([path])=>path.includes('/intents'))).toHaveLength(0);
 });
 it('keeps the root grid and uses the PC style shelf for child folders',()=>{
  const folders=[{id:'a',name:'Parent',parent_id:null,asset_count:1},{id:'b',name:'Plain',parent_id:null,asset_count:0},{id:'c',name:'Child',parent_id:'a',asset_count:1}];

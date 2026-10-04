@@ -961,7 +961,8 @@ def publisher_log_heads(db):
             "bindings": collection_bindings.status_head(db),
             "personalEdits": collection_personal_edits.status_head(db),
             "captures": captures_status_head(db),
-            "upcomingIntents": home_upcoming.status_head(db)}
+            "upcomingIntents": home_upcoming.status_head(db),
+            "artistIntents": library_artists.status_head(db)}
 
 
 def status_signals(db):

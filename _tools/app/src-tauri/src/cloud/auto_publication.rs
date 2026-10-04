@@ -169,7 +169,13 @@ impl Library {
         .into_iter()
         .enumerate()
         {
-            if !due[slot] || (self.sync_held(&endpoint) && matches!(kind, "visibility" | "bindings" | "metadata" | "avPick" | "artists" | "autoTags")) {
+            if !due[slot]
+                || (self.sync_held(&endpoint)
+                    && matches!(
+                        kind,
+                        "visibility" | "bindings" | "metadata" | "avPick" | "autoTags"
+                    ))
+            {
                 continue;
             }
             let library = self.clone();
@@ -705,13 +711,14 @@ mod workload_tests {
                             | "catalogDuplicates"
                             | "releases"
                             | "upcoming"
+                            | "artists"
                     ));
                     Ok(())
                 },
             )
             .unwrap();
-        assert_eq!(count, 6);
-        assert_eq!(slots, [0, 1, 3, 4, 5, 8]);
+        assert_eq!(count, 7);
+        assert_eq!(slots, [0, 1, 3, 4, 5, 8, 10]);
         for slot in 0..12 {
             assert_eq!(library.publication_inputs.checked_generation(slot), None);
         }

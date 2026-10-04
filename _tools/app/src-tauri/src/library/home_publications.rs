@@ -46,6 +46,9 @@ impl HomeTransport for ApiArtwork<'_> {
     fn intents(&self, after: i64, token: &str) -> Result<Value, LibraryError> {
         self.client.intents(after, token)
     }
+    fn artist_intents(&self, after: i64, token: &str) -> Result<Value, LibraryError> {
+        self.client.artist_intents(after, token)
+    }
     fn artwork(
         &self,
         blob: &ArtworkBlob,
@@ -60,6 +63,9 @@ pub(crate) trait HomeTransport {
     fn publish(&self, path: &str, body: Option<&Value>, token: &str)
         -> Result<Value, LibraryError>;
     fn intents(&self, after: i64, token: &str) -> Result<Value, LibraryError>;
+    fn artist_intents(&self, _after: i64, _token: &str) -> Result<Value, LibraryError> {
+        Err(LibraryError::InvalidCloudResponse)
+    }
     fn artwork(&self, blob: &ArtworkBlob, bytes: &[u8], token: &str) -> Result<(), LibraryError>;
 }
 
@@ -277,7 +283,26 @@ impl Library {
                     }
                 }
             }
-            if self.sync_held(&endpoint) { return Ok(()); }
+            // Until the shared status watcher exposes artistIntents, receive on every
+            // artists publication pass (including the periodic safety build).
+            if kind == "artists" {
+                state.last_poll = Some(clock);
+                state.save(&*self.connection()?, &endpoint, kind)?;
+                for _ in 0..3 {
+                    let page: ArtistIntentPage =
+                        serde_json::from_value(client.artist_intents(state.cursor, token)?)
+                            .map_err(|_| LibraryError::InvalidCloudResponse)?;
+                    page.validate(state.cursor)?;
+                    self.apply_artist_intents(&endpoint, &page, now)?;
+                    state = State::load(&*self.connection()?, &endpoint, kind)?;
+                    if !page.has_more {
+                        break;
+                    }
+                }
+            }
+            if self.sync_held(&endpoint) {
+                return Ok(());
+            }
             if !build_due && state.next_build > clock && state.cursor == previous_cursor {
                 return Ok(());
             }
@@ -290,7 +315,8 @@ impl Library {
                 "artists" => {
                     let mut db = self.connection()?;
                     let tx = db.transaction()?;
-                    let body = super::artists::home_publication(&tx, now)?;
+                    let mut body = super::artists::home_publication(&tx, now)?;
+                    body["intentCursor"] = json!(state.cursor);
                     tx.commit()?;
                     ("/v1/library/artists", body, None)
                 }
@@ -318,7 +344,7 @@ impl Library {
                 if reply["version"] != 1
                     || reply["changed"].as_bool().is_none()
                     || reply["revision"].as_i64().is_none_or(|n| n < 0)
-                    || (kind == "upcoming"
+                    || (matches!(kind, "upcoming" | "artists")
                         && reply["acknowledgedThrough"]
                             .as_i64()
                             .is_none_or(|n| n < state.cursor))
@@ -488,6 +514,130 @@ impl Library {
         state.next_build = 0;
         state.save(&tx, endpoint, "upcoming")?;
         tx.commit()?;
+        Ok(())
+    }
+
+    fn apply_artist_intents(
+        &self,
+        endpoint: &str,
+        page: &ArtistIntentPage,
+        now: DateTime<Utc>,
+    ) -> Result<(), LibraryError> {
+        let mut db = self.connection()?;
+        let tx = db.transaction()?;
+        let mut state = State::load(&tx, endpoint, "artists")?;
+        if page.next_cursor <= state.cursor {
+            return Ok(());
+        }
+        page.validate(state.cursor)?;
+        let timestamp = now.to_rfc3339();
+        for item in &page.items {
+            let result = match item.action.as_str() {
+                "rename" => super::artists::set_display_name(
+                    &tx,
+                    &item.artist_id,
+                    item.display_name.as_deref(),
+                    &timestamp,
+                ),
+                "hide" | "unhide" => super::artists::set_flags(
+                    &tx,
+                    &item.artist_id,
+                    None,
+                    Some(item.action == "hide"),
+                    None,
+                    &timestamp,
+                ),
+                "pin" | "unpin" => super::artists::set_flags(
+                    &tx,
+                    &item.artist_id,
+                    Some(item.action == "pin"),
+                    None,
+                    None,
+                    &timestamp,
+                ),
+                _ => return Err(LibraryError::InvalidCloudResponse),
+            };
+            match result {
+                Ok(_) | Err(LibraryError::ArtistNotFound) => {}
+                Err(error) => return Err(error),
+            }
+            state.cursor = item.sequence;
+        }
+        state.next_build = 0;
+        state.save(&tx, endpoint, "artists")?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtistIntentPage {
+    version: u8,
+    after: i64,
+    last_sequence: i64,
+    acknowledged_through: i64,
+    pruned_through: i64,
+    next_cursor: i64,
+    has_more: bool,
+    items: Vec<ArtistIntent>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtistIntent {
+    sequence: i64,
+    operation_id: String,
+    artist_id: String,
+    action: String,
+    display_name: Option<String>,
+    created_at: String,
+}
+
+impl ArtistIntentPage {
+    fn validate(&self, after: i64) -> Result<(), LibraryError> {
+        if self.version != 1
+            || self.after != after
+            || !(0..=9_007_199_254_740_991).contains(&after)
+            || self.pruned_through < 0
+            || self.pruned_through > after
+            || self.acknowledged_through < self.pruned_through
+            || self.acknowledged_through > self.last_sequence
+            || self.items.len() > 200
+            || self.last_sequence > 9_007_199_254_740_991
+        {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
+        let mut cursor = after;
+        let mut operations = std::collections::HashSet::new();
+        for item in &self.items {
+            if item.sequence != cursor + 1
+                || item.artist_id.trim().is_empty()
+                || item.artist_id.chars().count() > 1024
+                || item.artist_id.contains(['\r', '\n', '\0'])
+                || uuid::Uuid::parse_str(&item.operation_id).is_err()
+                || !operations.insert(&item.operation_id)
+                || DateTime::parse_from_rfc3339(&item.created_at).is_err()
+                || !matches!(
+                    item.action.as_str(),
+                    "rename" | "hide" | "unhide" | "pin" | "unpin"
+                )
+                || (item.action != "rename" && item.display_name.is_some())
+                || item.display_name.as_deref().is_some_and(|name| {
+                    name.chars().count() > 120 || name.contains(['\r', '\n', '\0'])
+                })
+            {
+                return Err(LibraryError::InvalidCloudResponse);
+            }
+            cursor = item.sequence;
+        }
+        if self.next_cursor != cursor
+            || cursor > self.last_sequence
+            || self.has_more != (cursor < self.last_sequence)
+            || (self.has_more && self.items.is_empty())
+        {
+            return Err(LibraryError::InvalidCloudResponse);
+        }
         Ok(())
     }
 }

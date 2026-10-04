@@ -1704,16 +1704,22 @@ pub(crate) fn set_display_name(
     {
         return Ok(id.to_owned());
     }
-    let transaction = connection.unchecked_transaction()?;
-    let artist_id = materialize(&transaction, id, now_utc)?;
-    transaction.execute(
+    // An intent page owns the outer transaction; standalone PC writes still own theirs.
+    let transaction = connection
+        .is_autocommit()
+        .then(|| connection.unchecked_transaction())
+        .transpose()?;
+    let artist_id = materialize(connection, id, now_utc)?;
+    connection.execute(
         "UPDATE artists SET display_name = ?2, updated_at = ?3 WHERE id = ?1",
         params![artist_id, name, now_utc],
     )?;
-    let keys = member_keys(&transaction, &artist_id)?;
-    collect_empty_artists(&transaction)?;
-    let result = resulting_id(&transaction, &artist_id, keys.first().map(String::as_str))?;
-    transaction.commit()?;
+    let keys = member_keys(connection, &artist_id)?;
+    collect_empty_artists(connection)?;
+    let result = resulting_id(connection, &artist_id, keys.first().map(String::as_str))?;
+    if let Some(transaction) = transaction {
+        transaction.commit()?;
+    }
     Ok(result)
 }
 
@@ -1726,16 +1732,22 @@ pub(crate) fn set_flags(
     now_utc: &str,
 ) -> Result<String, LibraryError> {
     parse_utc_timestamp(now_utc)?;
-    let transaction = connection.unchecked_transaction()?;
-    let artist_id = materialize(&transaction, id, now_utc)?;
-    transaction.execute(
+    // An intent page owns the outer transaction; standalone PC writes still own theirs.
+    let transaction = connection
+        .is_autocommit()
+        .then(|| connection.unchecked_transaction())
+        .transpose()?;
+    let artist_id = materialize(connection, id, now_utc)?;
+    connection.execute(
         "UPDATE artists SET pinned = COALESCE(?2, pinned), hidden = COALESCE(?3, hidden), reposter = COALESCE(?4, reposter), updated_at = ?5 WHERE id = ?1",
         params![artist_id, pinned, hidden, reposter, now_utc],
     )?;
-    let keys = member_keys(&transaction, &artist_id)?;
-    collect_empty_artists(&transaction)?;
-    let result = resulting_id(&transaction, &artist_id, keys.first().map(String::as_str))?;
-    transaction.commit()?;
+    let keys = member_keys(connection, &artist_id)?;
+    collect_empty_artists(connection)?;
+    let result = resulting_id(connection, &artist_id, keys.first().map(String::as_str))?;
+    if let Some(transaction) = transaction {
+        transaction.commit()?;
+    }
     Ok(result)
 }
 

@@ -11,7 +11,10 @@ vi.mock('./Home',()=>({Home:()=> <div aria-label="home-content"/>}));
 vi.mock('./Gallery',()=>({Gallery:({items}:{items:Asset[]})=><div aria-label="gallery-content">{items.map(item=><span key={item.id}>{item.id}</span>)}</div>}));
 vi.mock('./Collections',()=>({Collections:({active,request,backRef}:{active:boolean;request:CollectionsRequest|null;backRef:MutableRefObject<(()=>boolean)|null>})=>{backRef.current=()=>false;return active?<section aria-label="collections-screen">{request?.kind==='work'?request.id:'root'}</section>:null;}}));
 vi.mock('./Notes',()=>({Notes:({active,request,backRef}:{active:boolean;request:{id:string}|null;backRef:MutableRefObject<(()=>boolean)|null>})=>{backRef.current=()=>false;return active?<section aria-label="notes-screen">{request?.id??'root'}</section>:null;}}));
-vi.mock('./Artists',()=>({Artists:({initialArtist}:{initialArtist?:LibraryArtist})=><section aria-label="artist-screen">{initialArtist?.id}</section>}));
+vi.mock('./Artists',()=>({
+  Artists:({initialArtist}:{initialArtist?:LibraryArtist})=><section aria-label="artist-screen">{initialArtist?.id}</section>,
+  HiddenArtists:()=>null,ArtistImage:()=>null,EmptyArtists:()=>null,
+}));
 vi.mock('./Settings',()=>({Settings:()=> <section aria-label="settings-screen"/>}));
 vi.mock('./Catalog',()=>({Catalog:({active}:{active:boolean})=>active?<section aria-label="catalog-screen"/>:null}));
 import {App} from './App';

@@ -2,9 +2,11 @@ import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {MutableRefObject} from 'react';
 import {Artists} from './Artists';
+import {LibraryRoot} from './LibraryRoot';
 import {AssetScopeChips} from './AssetScopeChips';
 import {matchesArtist, matchedPositions, type LibraryArtist} from './artistsModel';
 import type {SparseGallerySource} from './assetToc';
+import {commitArtistEdit, readArtistEdits} from './artistEditOutbox';
 
 const mocks = vi.hoisted(() => ({api: vi.fn(), native: vi.fn(), loadThumbnail: vi.fn()}));
 vi.mock('./transport', () => ({api: mocks.api, native: mocks.native, errorText:(e:Error)=>e.message}));
@@ -49,6 +51,134 @@ describe('artist model', () => {
 });
 
 describe('Artists', () => {
+  it('opens the shared hidden artist sheet from the actual Library root list', async () => {
+    const original = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path: string, ...args: unknown[]) => {
+      if (path === '/v1/library/artists') return Promise.resolve({...reply, artists: [{...primary, hidden: true}, other]});
+      if (path.endsWith('/intents')) return Promise.reject(new Error('offline'));
+      return original(path, ...args);
+    });
+    render(<LibraryRoot endpoint="https://example.invalid" entries={[]} items={[]} paused={false} busy={false} revision={0}
+      onSelect={vi.fn()} onOpenArtist={vi.fn()} onRefresh={vi.fn()} albumTree={null} albumError=""
+      segment="artists" onSegment={vi.fn()} restoreScroll={0} onScroll={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', {name: '숨긴 작가 · 1명'}));
+    fireEvent.click(screen.getByRole('button', {name: '하늘빛 숨김 해제'}));
+    expect(await screen.findByText('숨긴 작가가 없습니다.')).toBeTruthy();
+    expect(readArtistEdits('https://example.invalid')[0].action).toBe('unhide');
+  });
+  it('renames offline through the shared sheet and retains the edit on remount', async () => {
+    const original = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path: string, ...args: unknown[]) => path.endsWith('/intents')
+      ? Promise.reject(new Error('offline')) : original(path, ...args));
+    const view = renderArtists();
+    await screen.findByRole('button', {name: /하늘빛, 74장/});
+    fireEvent.click(screen.getByRole('button', {name: /하늘빛, 74장/}));
+    fireEvent.click(screen.getByRole('button', {name: '작가 더보기'}));
+    fireEvent.click(screen.getByRole('button', {name: '이름 바꾸기'}));
+    fireEvent.change(screen.getByRole('textbox', {name: '작가 이름'}), {target: {value: '새 이름'}});
+    fireEvent.click(screen.getByRole('button', {name: '저장'}));
+    await screen.findByRole('heading', {level: 2, name: '새 이름'});
+    await waitFor(() => expect(mocks.api.mock.calls.some(call => call[0].endsWith('/intents'))).toBe(true));
+    expect(readArtistEdits('https://example.invalid')[0]).toMatchObject({artistId: 'haneul', action: 'rename', displayName: '새 이름'});
+    view.unmount();
+    renderArtists();
+    expect(await screen.findByRole('button', {name: /새 이름, 74장/})).toBeTruthy();
+  });
+
+  it('hides an artist from the hub and restores it through the hidden artist sheet', async () => {
+    const original = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path: string, ...args: unknown[]) => path.endsWith('/intents')
+      ? Promise.reject(new Error('offline')) : original(path, ...args));
+    renderArtists();
+    fireEvent.click(await screen.findByRole('button', {name: /하늘빛, 74장/}));
+    fireEvent.click(screen.getByRole('button', {name: '작가 더보기'}));
+    fireEvent.click(screen.getByRole('button', {name: '숨기기'}));
+    act(() => backRef.current?.());
+    expect(screen.queryByRole('button', {name: /하늘빛, 74장/})).toBeNull();
+    fireEvent.click(screen.getByRole('button', {name: '숨긴 작가 · 1명'}));
+    fireEvent.click(screen.getByRole('button', {name: '하늘빛 숨김 해제'}));
+    expect(await screen.findByText('숨긴 작가가 없습니다.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', {name: '닫기'}));
+    expect(screen.getByRole('button', {name: /하늘빛, 74장/})).toBeTruthy();
+    expect(readArtistEdits('https://example.invalid').map(row => row.action)).toEqual(['hide', 'unhide']);
+  });
+
+  it('toggles pinned state and keeps merge as a PC-only note', async () => {
+    const original = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path: string, ...args: unknown[]) => path.endsWith('/intents')
+      ? Promise.reject(new Error('offline')) : original(path, ...args));
+    renderArtists();
+    fireEvent.click(await screen.findByRole('button', {name: /하늘빛, 74장/}));
+    fireEvent.click(screen.getByRole('button', {name: '작가 더보기'}));
+    fireEvent.click(screen.getByRole('button', {name: '고정'}));
+    fireEvent.click(screen.getByRole('button', {name: '작가 더보기'}));
+    expect(screen.getByRole('button', {name: '고정 해제'})).toBeTruthy();
+    expect(screen.queryByRole('button', {name: /합치기/})).toBeNull();
+    fireEvent.click(screen.getByRole('button', {name: '고정 해제'}));
+    expect(readArtistEdits('https://example.invalid').map(row => row.action)).toEqual(['pin', 'unpin']);
+  });
+
+  it('keeps content during refresh and resolves the open bare key to the new artist id', async () => {
+    let refresh!: (value: unknown) => void;
+    let refreshing = false;
+    const original = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path: string, ...args: unknown[]) => refreshing && path === '/v1/library/artists'
+      ? new Promise(resolve => { refresh = resolve; }) : original(path, ...args));
+    renderArtists();
+    fireEvent.click(await screen.findByRole('button', {name: /하늘빛, 74장/}));
+    await screen.findByText('asset-haneul-1');
+    refreshing = true;
+    act(() => window.dispatchEvent(new Event('online')));
+    await waitFor(() => expect(refresh).toBeDefined());
+    expect(screen.getByRole('heading', {level: 2, name: '하늘빛'})).toBeTruthy();
+    expect(screen.getByText('asset-haneul-1')).toBeTruthy();
+    await act(async () => refresh({...reply, revision: 5, artists: [{...primary, id: 'artist:uuid', label: '새 이름', displayName: '새 이름'}, other, cat]}));
+    await screen.findByRole('heading', {level: 2, name: '새 이름'});
+    expect(mocks.api.mock.calls.some(([path]) => path.includes('artist=artist%3Auuid'))).toBe(true);
+  });
+
+  it('does not flash the old name between POST acceptance and the next GET', async () => {
+    let refresh!: (value: unknown) => void;
+    let posted = false;
+    let operationId = '';
+    const original = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path: string, signal: AbortSignal, body?: {operationId: string}) => {
+      if (path.endsWith('/intents')) {
+        posted = true; operationId = body!.operationId;
+        return Promise.resolve({version: 1, operationId, sequence: 1, revision: 5});
+      }
+      if (path === '/v1/library/artists' && posted) return new Promise(resolve => { refresh = resolve; });
+      return original(path, signal);
+    });
+    renderArtists();
+    fireEvent.click(await screen.findByRole('button', {name: /하늘빛, 74장/}));
+    act(() => { commitArtistEdit('https://example.invalid', primary, 'rename', '새 이름'); });
+    await waitFor(() => expect(refresh).toBeDefined());
+    expect(screen.getByRole('heading', {level: 2, name: '새 이름'})).toBeTruthy();
+    expect(readArtistEdits('https://example.invalid')).toHaveLength(1);
+    await act(async () => refresh({...reply, revision: 5, artists: [{...primary, label: '새 이름', displayName: '새 이름'}],
+      pending: [{operationId, sequence: 1, artistId: primary.id, action: 'rename', displayName: '새 이름'}]}));
+    expect(screen.getByRole('heading', {level: 2, name: '새 이름'})).toBeTruthy();
+    expect(readArtistEdits('https://example.invalid')).toHaveLength(0);
+  });
+
+  it('holds the open detail when the bare id returns 404 before the refreshed list resolves it', async () => {
+    let finishList!: (value: unknown) => void;
+    const original = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path: string, ...args: unknown[]) => {
+      if (path === '/v1/library/artists') return new Promise(resolve => { finishList = resolve; });
+      if (path === `/v1/library/artists/${primary.id}`) return Promise.reject({status: 404});
+      return original(path, ...args);
+    });
+    render(<Artists endpoint="test" backRef={{current: null}} initialArtist={primary} onOpenViewer={vi.fn()} />);
+    await screen.findByText('asset-haneul-1');
+    expect(screen.queryByText('PC 앱이 작가 목록을 아직 보내지 않았습니다')).toBeNull();
+    await act(async () => finishList({...reply, artists: [{...primary, id: 'artist:uuid'}]}));
+    expect(screen.getByRole('heading', {level: 2, name: '하늘빛'})).toBeTruthy();
+    expect(screen.queryByText('PC 앱이 작가 목록을 아직 보내지 않았습니다')).toBeNull();
+    expect(mocks.api.mock.calls.some(([path]) => path.includes('artist=artist%3Auuid'))).toBe(true);
+  });
+
   it('uses the published artist id and TOC seek, including artists without creator keys', async () => {
     const original=mocks.api.getMockImplementation()!;
     mocks.api.mockImplementation((path:string)=>{
@@ -172,7 +302,7 @@ describe('Artists', () => {
 
   it('retains the removable search scope when the chosen artist has disappeared', async () => {
     const original=mocks.api.getMockImplementation()!;
-    mocks.api.mockImplementation((path:string)=>path===`/v1/library/artists/${primary.id}`?Promise.reject({status:404}):original(path));
+    mocks.api.mockImplementation((path:string)=>path===`/v1/library/artists/${primary.id}`?Promise.reject({status:404}):path==='/v1/library/artists'?Promise.resolve({...reply,artists:[other,cat]}):original(path));
     const remove=vi.fn();
     render(<Artists endpoint="https://example.invalid" backRef={{current:null}} initialArtist={primary} onOpenViewer={vi.fn()} scopeChips={<AssetScopeChips chips={[{kind:'artist',id:primary.id,name:'하늘빛'}]} onRemove={remove}/>}/>);
     await screen.findByText('PC 앱이 작가 목록을 아직 보내지 않았습니다');
@@ -220,4 +350,3 @@ describe('Artists', () => {
     expect(screen.getAllByLabelText('비공개 모드로 이미지 숨김').length).toBeGreaterThan(0);
   });
 });
-

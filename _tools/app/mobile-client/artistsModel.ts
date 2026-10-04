@@ -25,6 +25,8 @@ export type ArtistSort = 'recent' | 'count' | 'name';
 
 export type ArtistAssignment = {assetId: string; artistId: string; source?: 'manual' | 'source_url'};
 export type LibraryArtistsReply = {
+  pending?: import('./artistEditOutbox').PendingArtistEdit[];
+  acknowledgedThrough?: number;
   version?: number;
   revision?: number | string;
   publishedAt?: string | null;
@@ -76,11 +78,11 @@ export function normalizeArtist(value: unknown): LibraryArtist | null {
   };
 }
 
-export function normalizeArtists(value: unknown): LibraryArtist[] {
+export function normalizeArtists(value: unknown, includeHidden = false): LibraryArtist[] {
   if (!value || typeof value !== 'object') return [];
   const rows = (value as {artists?: unknown}).artists;
   if (!Array.isArray(rows)) return [];
-  return rows.map(normalizeArtist).filter((artist): artist is LibraryArtist => !!artist && !artist.hidden);
+  return rows.map(normalizeArtist).filter((artist): artist is LibraryArtist => !!artist && (includeHidden || !artist.hidden));
 }
 
 export function normalizeAssignments(value: unknown): ArtistAssignment[] {
@@ -124,6 +126,7 @@ export function matchedPositions(label: string, query: string): Set<number> {
 
 export function orderedArtists(artists: LibraryArtist[]): LibraryArtist[] {
   return [...artists].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
     const saved = (b.lastSavedAt ? Date.parse(b.lastSavedAt) : 0) - (a.lastSavedAt ? Date.parse(a.lastSavedAt) : 0);
     return (Number.isFinite(saved) ? saved : 0) || b.assetCount - a.assetCount || artistName(a).localeCompare(artistName(b), 'ko');
   });
