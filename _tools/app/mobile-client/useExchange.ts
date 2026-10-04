@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
 import {native} from './transport';
-import {arrivalText, EXCHANGE_ARRIVED_EVENT, EXCHANGE_EVENT, type ExchangeArrival, type ExchangeSnapshot} from './exchange';
+import {arrivalText, EXCHANGE_ARRIVED_EVENT, EXCHANGE_EVENT, type ExchangeArrival, type ExchangeSnapshot} from './exchangeModel';
 
 /**
  * App-level exchange state: the latest native snapshot (for the badge) and the arrival toast.

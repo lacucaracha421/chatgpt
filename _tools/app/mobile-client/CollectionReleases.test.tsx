@@ -2,7 +2,7 @@ import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {setOutboxConnection} from './outboxConnection';
 import type {CollectionDetail, CollectionPage, CollectionSummary, ReleaseSchedule} from './collectionModel';
-import type {ReleaseEvent} from './collectionReleases';
+import type {ReleaseEvent} from './collectionReleasesModel';
 
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport',async()=>{
@@ -14,7 +14,7 @@ import {ApiError} from './transport';
 import {Collections} from './Collections';
 import {SCHEDULE_ABSENT_NOTE} from './CollectionReleases';
 import {loadShelf, resetReleaseStore} from './releaseStore';
-import {koreanReleases, releaseBoardEntry, releaseCaption, releaseCounts, releaseInboxItem} from './collectionReleases';
+import {koreanReleases, releaseBoardEntry, releaseCaption, releaseCounts, releaseInboxItem} from './collectionReleasesModel';
 import {groupInbox, koreanVolumeLine, releaseLine} from '../src/collections/releaseCaption';
 import {japanReleaseLedger, koreanReleaseLedger} from '../src/collections/releaseLedger';
 import type {CollectionSummary as SharedSummary} from '../src/library/types';

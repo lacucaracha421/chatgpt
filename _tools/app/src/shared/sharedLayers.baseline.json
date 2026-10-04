@@ -14,9 +14,9 @@
     "mobile-client/Notes.tsx#SECRET_IDLE_MS",
     "mobile-client/PinIcon.tsx#PinIcon",
     "mobile-client/ViewerInfo.tsx#sourceLabel",
-    "mobile-client/collectionReleases.ts#koreanReleases",
-    "mobile-client/collectionReleases.ts#releaseCaption",
-    "mobile-client/exchange.ts#timelineEntries",
+    "mobile-client/collectionReleasesModel.ts#koreanReleases",
+    "mobile-client/collectionReleasesModel.ts#releaseCaption",
+    "mobile-client/exchangeModel.ts#timelineEntries",
     "mobile-client/homeDashboard.ts#releaseRows",
     "mobile-client/noteCaret.ts#caretOffset",
     "mobile-client/noteCaret.ts#caretOffsetAtPoint"

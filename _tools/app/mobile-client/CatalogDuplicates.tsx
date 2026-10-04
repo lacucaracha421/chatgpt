@@ -9,7 +9,7 @@ import {useDueFlush} from './useSimilarityReview';
 import {useCachedHomeSource} from './homeCache';
 import {Scrubber} from './Scrubber';
 import {DUPLICATE_REVIEW_EVENT,DUPLICATE_SETTLED_EVENT,commitDuplicateDecision,duplicatesPath,flushDuplicateDecisions,nextDuplicateDue,readDuplicateIntents,undoDuplicateDecision,
-  type DuplicateCandidate,type DuplicateChoice,type DuplicateFeed,type DuplicateIntent,type DuplicateOutcome,type DuplicateState,type DuplicateWork} from './catalogDuplicates';
+  type DuplicateCandidate,type DuplicateChoice,type DuplicateFeed,type DuplicateIntent,type DuplicateOutcome,type DuplicateState,type DuplicateWork} from './catalogDuplicatesModel';
 import './characterReview.css';
 import './catalogDuplicates.css';
 

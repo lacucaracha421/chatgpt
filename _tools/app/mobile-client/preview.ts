@@ -40,7 +40,7 @@ let refreshDemo:{job:RefreshJob;started:number}|null=null;
 import type {Asset} from './types';
 import type {CollectionDetail} from './collectionModel';
 import {ApiError} from './transport';
-import type {BindRequest, KakaoCandidate, MangaDexCandidate} from './collectionBindings';
+import type {BindRequest, KakaoCandidate, MangaDexCandidate} from './collectionBindingsModel';
 const palettes = [['#b8b1a0','#474d48','#7a8176','#d8cbb2'],['#afc0bb','#31464a','#607d7a','#d3d3bf'],['#c5ab98','#483d46','#826a73','#e2c9a8'],['#b6b7c4','#363d57','#737c93','#d4cbc3']];
 function art(index: number, w: number, h: number) {
   const p = palettes[index % palettes.length];

@@ -10,7 +10,7 @@ vi.mock('./transport', async () => {
 });
 import {ApiError} from './transport';
 import {CollectionBindings} from './CollectionBindings';
-import type {BindProvider, BindRequest} from './collectionBindings';
+import type {BindProvider, BindRequest} from './collectionBindingsModel';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const base: CollectionDetail = {id: 'w1', name: '밤의 도서관', type: 'manga', showcase: false, volumes: [], artworks: [],

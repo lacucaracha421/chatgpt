@@ -1,7 +1,7 @@
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {CollectionSummary} from './collectionModel';
-import type {ExchangeSnapshot} from './exchange';
+import type {ExchangeSnapshot} from './exchangeModel';
 import type {Asset} from './types';
 import type {Note} from '../src/notes/store';
 import {ApiError} from './transport';

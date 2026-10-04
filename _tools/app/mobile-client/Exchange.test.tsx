@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({native: vi.fn()}));
 vi.mock('./transport', () => ({native: mocks.native, errorText: (reason: unknown) => reason instanceof Error ? reason.message : '오류'}));
 import {Exchange} from './Exchange';
 import {useExchange} from './useExchange';
-import {arrivalText, errorCode, rowView, screenMessage, EXCHANGE_ARRIVED_EVENT, EXCHANGE_EVENT, type ExchangeRow, type ExchangeSnapshot} from './exchange';
+import {arrivalText, errorCode, rowView, screenMessage, EXCHANGE_ARRIVED_EVENT, EXCHANGE_EVENT, type ExchangeRow, type ExchangeSnapshot} from './exchangeModel';
 
 const PC = {deviceId: '11111111-1111-4111-8111-111111111111', name: 'DESKTOP', kind: 'pc', lastSeenAt: ''};
 function row(values: Partial<ExchangeRow>): ExchangeRow {

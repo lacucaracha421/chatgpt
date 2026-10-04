@@ -2,7 +2,7 @@ import { displayDate } from "../shared/displayDate";
 import type { CollectionSummary, ReleaseBoardEntry, ReleaseInboxItem } from "../library/types";
 
 /**
- * 신간 on the PC, as the tablet shows it (`mobile-client/collectionReleases.ts`): the grid tile's
+ * 신간 on the PC, as the tablet shows it (`mobile-client/collectionReleasesModel.ts`): the grid tile's
  * marker after the year and stars, and the 신간 view's 한국 정발 / 일본 rows. The data is the
  * library's own — the release board (`list_release_board`: 신간 알림, owned counts, Kakao and
  * MangaDex volumes) and the unread inbox — so both surfaces agree with what the tablet reads.

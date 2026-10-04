@@ -9,7 +9,7 @@ import {displayDate} from '../src/shared/displayDate';
 import {Badge, Button, EmptyState, SectionLabel, SegmentedControl, Skeleton} from './ui';
 import {PersonPortrait, performersOf} from './AvCollections';
 import {ShelfTile} from './CollectionShelf';
-import {allWorks} from './collectionReleases';
+import {allWorks} from './collectionReleasesModel';
 import {api, errorText, native} from './transport';
 import {personPath, personReply, type AvPerson, type CollectionPerson, type CollectionPersonProfile, type CollectionSummary} from './collectionModel';
 

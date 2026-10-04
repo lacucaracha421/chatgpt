@@ -2,7 +2,7 @@ import {onVisible, visibleInterval} from './useVisibleInterval';
 import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
 import {errorText} from './transport';
 import type {Asset} from './types';
-import {ASSET_LIFECYCLE_EVENT, pendingTrashIds, readLifecycle, setLifecycle, type LifecycleState} from './libraryTrash';
+import {ASSET_LIFECYCLE_EVENT, pendingTrashIds, readLifecycle, setLifecycle, type LifecycleState} from './libraryTrashModel';
 import {TrashSnackbar} from './LibraryTrash';
 
 const UNDO_MS = 6000;

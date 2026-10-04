@@ -6,7 +6,7 @@ vi.mock('./transport',()=>({native:mocks.native,api:mocks.api,errorText:(e:unkno
 vi.mock('./media',()=>({mediaTicket:vi.fn(()=>Promise.resolve({url:'https://thumb.example/pending'}))}));
 import {LibraryTrash} from './LibraryTrash';
 import {useLibraryTrash} from './useLibraryTrash';
-import {conflictNotice,formatBytes,pendingTrashIds,trashTiles,type LifecycleState,type TrashItem} from './libraryTrash';
+import {conflictNotice,formatBytes,pendingTrashIds,trashTiles,type LifecycleState,type TrashItem} from './libraryTrashModel';
 import type {Asset} from './types';
 
 const LIB='e'.repeat(32);

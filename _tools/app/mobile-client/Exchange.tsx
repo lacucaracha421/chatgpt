@@ -6,13 +6,13 @@ import {
 } from '@heroicons/react/24/outline';
 import {Button, IconButton} from './ui';
 import {errorText, native} from './transport';
-import {formatBytes} from './libraryTrash';
+import {formatBytes} from './libraryTrashModel';
 import {useExchangeThumbnail} from './useExchange';
 import {Scrubber} from './Scrubber';
 import {
   ACTIVE_STATES, batchPart, defaultTarget, errorCode, EXCHANGE_NOTICE_EVENT, rowView, screenMessage, timelineEntries, TOKEN_CODES, withDevice,
   type ExchangeDevice, type ExchangeRow, type ExchangeSnapshot,
-} from './exchange';
+} from './exchangeModel';
 import {batchProgress, buildTimeline, clockLabel, dayKey, dayLabel, extensionLabel, isImageName, withParticle, type TimelineBlock} from '../src/exchange/timeline';
 import './exchange.css';
 

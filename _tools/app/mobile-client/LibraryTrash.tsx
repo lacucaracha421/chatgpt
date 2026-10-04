@@ -11,7 +11,7 @@ import type {Asset} from './types';
 import {
   ASSET_LIFECYCLE_EVENT, TILE_LABEL, conflictNotice, dismissLifecycle, formatBytes, readLifecycle, readTrash, setLifecycle,
   trashDate, trashThumbnails, trashTiles, type LifecycleState, type TrashItem, type TrashTile,
-} from './libraryTrash';
+} from './libraryTrashModel';
 import './libraryTrash.css';
 
 const POLL = 5000;

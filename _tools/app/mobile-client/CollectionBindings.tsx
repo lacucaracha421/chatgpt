@@ -12,7 +12,7 @@ import {
   mangaDexCommand, mangaDexStatus, mergeSummary, orderGroups, requestFailure, requestsPath, safeImageUrl, searchFailure, searchPath,
   type BindFailure, type BindProvider, type BindRequest, type BindStatus, type Connection, type KakaoCandidate, type MangaDexCandidate,
   type RequestsReply, type SearchReply,
-} from './collectionBindings';
+} from './collectionBindingsModel';
 import './collectionBindings.css';
 
 const PROVIDERS: BindProvider[] = ['mangadex', 'kakao'];

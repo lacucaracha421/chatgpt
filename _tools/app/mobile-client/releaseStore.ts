@@ -1,4 +1,4 @@
-import {allWorks, type MangaShelf, type ReleaseEvent} from './collectionReleases';
+import {allWorks, type MangaShelf, type ReleaseEvent} from './collectionReleasesModel';
 
 /**
  * The manga, game and movie shelf and unread release events last read for the 신간 screen, shared with Home.

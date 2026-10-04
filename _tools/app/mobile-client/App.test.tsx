@@ -4,7 +4,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {Asset} from './types';
 import type {SparseGallerySource} from './assetToc';
 import type {HomeProps} from './Home';
-import type {ExchangeSnapshot} from './exchange';
+import type {ExchangeSnapshot} from './exchangeModel';
 const mocks=vi.hoisted(()=>({api:vi.fn(),native:vi.fn()}));
 vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:()=> 'connection failed',
   ApiError:class ApiError extends Error{status:number|null;details:unknown;constructor(message:string,status:number|null,details:unknown){super(message);this.status=status;this.details=details;}}}));

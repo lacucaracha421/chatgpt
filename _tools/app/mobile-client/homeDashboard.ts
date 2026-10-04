@@ -1,6 +1,6 @@
 import {useEffect, useState, useSyncExternalStore} from 'react';
-import {rowView, type ExchangeSnapshot} from './exchange';
-import {koreanReleases, localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCounts, type MangaShelf, type ReleaseCaption, type ReleaseCounts} from './collectionReleases';
+import {rowView, type ExchangeSnapshot} from './exchangeModel';
+import {koreanReleases, localToday, NO_RELEASES, RELEASE_COUNTS_PATH, releaseCaption, releaseCounts, type MangaShelf, type ReleaseCaption, type ReleaseCounts} from './collectionReleasesModel';
 import type {CollectionSummary} from './collectionModel';
 import {currentShelf, invalidateReleases, loadShelf, observePublication, releaseEpoch, subscribeReleases} from './releaseStore';
 import {useSimilarityReviewCount} from './useSimilarityReview';

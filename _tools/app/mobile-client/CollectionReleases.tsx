@@ -13,7 +13,7 @@ import {Scrubber} from './Scrubber';
 import {errorText} from './transport';
 import type {CollectionSummary} from './collectionModel';
 import {commitReleases, invalidateReleases, loadShelf, releaseEpoch, releaseStore, type ReleaseStore} from './releaseStore';
-import {acknowledgeReleases, allUnreadReleases, localToday, releaseBoardEntry, releaseInboxItem, type ReleaseCounts} from './collectionReleases';
+import {acknowledgeReleases, allUnreadReleases, localToday, releaseBoardEntry, releaseInboxItem, type ReleaseCounts} from './collectionReleasesModel';
 
 type Region = 'kr' | 'jp';
 export const SCHEDULE_ABSENT_NOTE = 'PC 앱을 업데이트하면 권별 발매 정보가 보여요';

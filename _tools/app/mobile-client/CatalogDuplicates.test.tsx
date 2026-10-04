@@ -10,7 +10,7 @@ vi.mock('./transport',()=>({api:mocks.api,native:vi.fn(),
 vi.mock('./catalogMedia',()=>({catalogImageTicket:vi.fn(async(request:{workId:string})=>({url:`data:image/png;base64,${request.workId}`}))}));
 import {ApiError} from './transport';
 import {CatalogDuplicates,DuplicateReviewEntry} from './CatalogDuplicates';
-import {DUPLICATE_DECISIONS_PATH,DUPLICATE_SEND_DELAY_MS,flushDuplicateDecisions,readDuplicateIntents} from './catalogDuplicates';
+import {DUPLICATE_DECISIONS_PATH,DUPLICATE_SEND_DELAY_MS,flushDuplicateDecisions,readDuplicateIntents} from './catalogDuplicatesModel';
 
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
 const C1='a'.repeat(32),C2='b'.repeat(32);
