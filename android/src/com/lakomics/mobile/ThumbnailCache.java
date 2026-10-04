@@ -92,7 +92,9 @@ final class ThumbnailCache {
    output.flush();file.getFD().sync();
   }
   // Same-directory replacement: a crash leaves either the old journal or the snapshot.
-  if(!temporary.renameTo(journal()))throw new IOException("Usage index replace failed");
+  // Files.move replaces the old journal on every host; File.renameTo refuses an existing target on Windows.
+  try{java.nio.file.Files.move(temporary.toPath(),journal().toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING,java.nio.file.StandardCopyOption.ATOMIC_MOVE);}
+  catch(IOException failed){throw new IOException("Usage index replace failed",failed);}
   journalRecords=usage.size();journalReady=true;
  }
  private void saveUsage(String key,Usage value){
