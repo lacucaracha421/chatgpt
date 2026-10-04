@@ -116,8 +116,16 @@ pub(crate) struct ImportCounts {
     pub skipped: u64,
 }
 
+/// Ids of library assets. Read once and released, so the long vector validation below never holds
+/// the shared library connection (holding it froze the UI on a 9k-image import in a debug build).
+fn known_assets(library: &Connection) -> Result<HashSet<String>> {
+    Ok(library
+        .prepare("SELECT id FROM assets")?
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<_, _>>()?)
+}
 fn import_cache(
-    library: &Connection,
+    known: &HashSet<String>,
     source_path: &Path,
     destination: &Path,
 ) -> Result<ImportCounts> {
@@ -131,7 +139,6 @@ fn import_cache(
     let mut meta = metadata(&source)?;
     let tables = [("siglip", SIGLIP_DIM), ("qwen8b", QWEN_DIM)];
     let mut counts = ImportCounts::default();
-    let mut exists = library.prepare("SELECT 1 FROM assets WHERE id=?1")?;
     // Validate every row, including unknown ids, before digest skip or publication.
     for (table, dim) in tables {
         if table == "qwen8b" && !has_table(&source, table)? {
@@ -147,7 +154,7 @@ fn import_cache(
                 return Err(invalid("검색 색인 asset_id가 비었거나 중복되었습니다."));
             }
             decode(&blob, dim)?;
-            if !exists.exists([&id])? {
+            if !known.contains(&id) {
                 counts.skipped += 1;
             } else if table == "siglip" {
                 counts.siglip += 1;
@@ -195,7 +202,7 @@ fn import_cache(
         let mut insert = tx.prepare(&format!("INSERT INTO {table} VALUES (?1,?2)"))?;
         while let Some(row) = rows.next()? {
             let id: String = row.get(0)?;
-            if exists.exists([&id])? {
+            if known.contains(&id) {
                 insert.execute(params![id, row.get::<_, Vec<u8>>(1)?])?;
             }
         }
@@ -316,8 +323,13 @@ fn routing(
     }
     let mut scores: HashMap<String, f64> = HashMap::new();
     if !hit_tags.is_empty() {
-        let mut stmt = conn.prepare("SELECT asset_id,tag,score FROM asset_auto_tags")?;
-        let mut rows = stmt.query([])?;
+        // Filter in SQL: only the hit tags' rows cross into Rust (the table has ~350k rows).
+        let wanted = serde_json::to_string(&hit_tags.iter().collect::<Vec<_>>())
+            .map_err(|e| invalid(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT asset_id,tag,score FROM asset_auto_tags WHERE tag IN (SELECT value FROM json_each(?1))",
+        )?;
+        let mut rows = stmt.query([wanted])?;
         while let Some(row) = rows.next()? {
             let id: String = row.get(0)?;
             let tag: String = row.get(1)?;
@@ -423,7 +435,8 @@ impl Library {
             .index
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let counts = import_cache(&*self.connection()?, path, &self.nl_search_path())
+        let known = known_assets(&*self.connection()?)?;
+        let counts = import_cache(&known, path, &self.nl_search_path())
             .map_err(|e| invalid(format!("검색 색인을 가져오지 못했습니다: {e}")))?;
         *index = None;
         Ok(counts)

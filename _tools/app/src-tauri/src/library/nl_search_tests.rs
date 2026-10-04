@@ -53,7 +53,7 @@ fn nl_search_import_filters_unknown_preserves_meta_and_skips_digest() {
     let _source = source(&input, true);
     let library = library();
     assert_eq!(
-        import_cache(&library, &input, &output).unwrap(),
+        import_cache(&known_assets(&library).unwrap(), &input, &output).unwrap(),
         ImportCounts {
             siglip: 3,
             qwen8b: 1,
@@ -68,13 +68,13 @@ fn nl_search_import_filters_unknown_preserves_meta_and_skips_digest() {
     assert_eq!(meta["qwen_model"], "qwen");
     assert!(meta.contains_key("imported_at"));
     drop(store);
-    import_cache(&library, &input, &output).unwrap();
+    import_cache(&known_assets(&library).unwrap(), &input, &output).unwrap();
     assert_eq!(old, std::fs::read(&output).unwrap());
     assert_eq!(
         modified,
         std::fs::metadata(&output).unwrap().modified().unwrap()
     );
-    assert!(import_cache(&library, &output, &output).is_err());
+    assert!(import_cache(&known_assets(&library).unwrap(), &output, &output).is_err());
 }
 
 #[test]
@@ -98,7 +98,7 @@ fn nl_search_invalid_import_never_replaces_existing_cache() {
         let output = temp.path().join("vectors.sqlite");
         let conn = source(&input, true);
         let library = library();
-        import_cache(&library, &input, &output).unwrap();
+        import_cache(&known_assets(&library).unwrap(), &input, &output).unwrap();
         let old = std::fs::read(&output).unwrap();
         // Keep the digest unchanged: validation must still reject corrupted exports.
         match defect {
@@ -143,7 +143,10 @@ fn nl_search_invalid_import_never_replaces_existing_cache() {
             }
             _ => unreachable!(),
         }
-        assert!(import_cache(&library, &input, &output).is_err(), "{defect}");
+        assert!(
+            import_cache(&known_assets(&library).unwrap(), &input, &output).is_err(),
+            "{defect}"
+        );
         assert_eq!(old, std::fs::read(&output).unwrap(), "{defect}");
         assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 2);
     }
@@ -156,7 +159,7 @@ fn nl_search_atomic_replace_and_optional_qwen() {
     let output = temp.path().join("vectors.sqlite");
     let conn = source(&input, false);
     let library = library();
-    import_cache(&library, &input, &output).unwrap();
+    import_cache(&known_assets(&library).unwrap(), &input, &output).unwrap();
     let old = std::fs::read(&output).unwrap();
     conn.execute(
         "UPDATE meta SET value='second' WHERE key='content_digest'",
@@ -168,7 +171,7 @@ fn nl_search_atomic_replace_and_optional_qwen() {
         [blob(SIGLIP_DIM, 0xbc00)],
     )
     .unwrap();
-    import_cache(&library, &input, &output).unwrap();
+    import_cache(&known_assets(&library).unwrap(), &input, &output).unwrap();
     assert_ne!(old, std::fs::read(&output).unwrap());
     let cache = read_only(&output).unwrap();
     assert_eq!(metadata(&cache).unwrap()["content_digest"], "second");
@@ -193,7 +196,7 @@ fn nl_search_failed_atomic_publish_preserves_old_cache() {
     let output = temp.path().join("vectors.sqlite");
     let conn = source(&input, false);
     let library = library();
-    import_cache(&library, &input, &output).unwrap();
+    import_cache(&known_assets(&library).unwrap(), &input, &output).unwrap();
     let old = std::fs::read(&output).unwrap();
     conn.execute(
         "UPDATE meta SET value='second' WHERE key='content_digest'",
@@ -206,11 +209,11 @@ fn nl_search_failed_atomic_publish_preserves_old_cache() {
         .share_mode(3)
         .open(&output)
         .unwrap();
-    assert!(import_cache(&library, &input, &output).is_err());
+    assert!(import_cache(&known_assets(&library).unwrap(), &input, &output).is_err());
     assert_eq!(old, std::fs::read(&output).unwrap());
     drop(held);
     assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 2);
-    import_cache(&library, &input, &output).unwrap();
+    import_cache(&known_assets(&library).unwrap(), &input, &output).unwrap();
     assert_eq!(
         metadata(&read_only(&output).unwrap()).unwrap()["content_digest"],
         "second"
