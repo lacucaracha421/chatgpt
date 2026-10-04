@@ -79,7 +79,10 @@ export function perfGateway(options: PerfGatewayOptions = {}): LibraryGateway {
     openLibrary: vi.fn().mockResolvedValue(summary),
     importVckCatalog: vi.fn(),
     getOnlineCatalogStatus: vi.fn().mockResolvedValue({ installed: false, workCount: 0, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null }),
-    searchCatalogGroups: vi.fn(), getCatalogGroupEditions: vi.fn(), setCatalogGroupRepresentative: vi.fn(), listCatalogReview: vi.fn(),
+    cancelCatalogSearch: vi.fn().mockResolvedValue(undefined),
+    searchCatalogGroups: vi.fn<LibraryGateway["searchCatalogGroups"]>(async (_query, emit, _searchId) => {
+      emit({ type: "end", cancelled: false });
+    }), getCatalogGroupEditions: vi.fn(), setCatalogGroupRepresentative: vi.fn(), listCatalogReview: vi.fn(),
     generateCatalogReview: vi.fn(), decideCatalogReview: vi.fn(), searchOnlineCatalog: vi.fn(), suggestOnlineCatalog: vi.fn(),
     updateOnlineCatalog: vi.fn(), setOnlineCatalogUpdateSettings: vi.fn(), runDueOnlineCatalogUpdate: vi.fn(),
     getCloudCaptureSettings: vi.fn().mockResolvedValue({ enabled: true, apiBaseUrl: "https://example.invalid", tokenConfigured: true }),

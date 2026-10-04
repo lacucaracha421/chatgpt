@@ -1976,6 +1976,7 @@ pub enum CatalogGroupedSearchEvent {
     Page { page: CatalogGroupedPage },
     Count { total_count: u64 },
     CountError { message: String },
+    End { cancelled: bool },
 }
 
 fn default_editions_page_size() -> u32 {

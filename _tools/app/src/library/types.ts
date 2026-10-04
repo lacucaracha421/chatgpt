@@ -330,7 +330,8 @@ export type CatalogGroupedPage = { works: CatalogGroupedWork[]; page: number; pa
 export type CatalogGroupedSearchEvent =
   | { type: "page"; page: CatalogGroupedPage }
   | { type: "count"; totalCount: number }
-  | { type: "countError"; message: string };
+  | { type: "countError"; message: string }
+  | { type: "end"; cancelled: boolean };
 export type CatalogGroupEditionsQuery = {
   provider: CatalogProvider; groupId: string; language?: CatalogLanguage;
   revealBlocked: boolean; page: number; pageSize: number;
@@ -1343,8 +1344,8 @@ export interface LibraryGateway {
   getCatalogVisibilityPolicy(): Promise<CatalogVisibilityPolicy>;
   setCatalogCategoryHidden(category: number, hidden: boolean): Promise<CatalogVisibilityPolicy>;
   setCatalogTagBlocked(tag: CatalogBlockedTag, blocked: boolean): Promise<CatalogVisibilityPolicy>;
-  cancelCatalogSearch?(): Promise<void>;
-  searchCatalogGroups(query: CatalogSearchQuery, onEvent: (event: CatalogGroupedSearchEvent) => void): Promise<void>;
+  cancelCatalogSearch?(searchId: string): Promise<void>;
+  searchCatalogGroups(query: CatalogSearchQuery, onEvent: (event: CatalogGroupedSearchEvent) => void, searchId: string): Promise<void>;
   getCatalogGroupEditions(query: CatalogGroupEditionsQuery): Promise<CatalogGroupEditionsPage>;
   setCatalogGroupRepresentative(query: CatalogGroupRepresentativeQuery): Promise<void>;
   searchOnlineCatalog(query: CatalogSearchQuery): Promise<CatalogSearchPage>;

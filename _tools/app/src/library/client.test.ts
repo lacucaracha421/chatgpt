@@ -482,11 +482,15 @@ describe("libraryGateway encrypted vault contract", () => {
 it("streams grouped count through Channel and sends edition requests", async () => {
   const query = { provider: "kHentai" as const, text: "love", sort: "latest" as const, scope: "all" as const, page: 0, pageSize: 48 };
   const onEvent = vi.fn();
-  await libraryGateway.searchCatalogGroups(query, onEvent);
+  await libraryGateway.searchCatalogGroups(query, onEvent, "search-1");
   const payload = invoke.mock.calls[invoke.mock.calls.length - 1][1];
-  expect(invoke).toHaveBeenLastCalledWith("search_catalog_groups", { query, onEvent: expect.any(Object) });
+  expect(invoke).toHaveBeenLastCalledWith("search_catalog_groups", { query, searchId: "search-1", onEvent: expect.any(Object) });
   payload.onEvent.onmessage({ type: "count", totalCount: 0 });
   expect(onEvent).toHaveBeenCalledWith({ type: "count", totalCount: 0 });
+  payload.onEvent.onmessage({ type: "end", cancelled: true });
+  expect(onEvent).toHaveBeenCalledWith({ type: "end", cancelled: true });
+  await libraryGateway.cancelCatalogSearch!("search-1");
+  expect(invoke).toHaveBeenLastCalledWith("cancel_catalog_search", { searchId: "search-1" });
   const editions = { provider: "kHentai" as const, groupId: "uuid", language: "korean" as const, revealBlocked: false, page: 0, pageSize: 40 };
   await libraryGateway.getCatalogGroupEditions(editions);
   expect(invoke).toHaveBeenLastCalledWith("get_catalog_group_editions", { query: editions });

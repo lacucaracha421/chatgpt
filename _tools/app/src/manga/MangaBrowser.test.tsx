@@ -78,17 +78,17 @@ describe("MangaBrowser", () => {
     const { container } = renderBrowser(gateway);
     await screen.findByText("원래 작품");
     await userEvent.click(screen.getByRole("button", { name: "팔레트 검색 b" }));
-    await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ text: "b" }), expect.any(Function)));
+    await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ text: "b" }), expect.any(Function), expect.any(String)));
     let finish!: () => void;
     vi.mocked(gateway.searchCatalogGroups).mockImplementationOnce(async (_query, onEvent) => { await new Promise<void>(resolve => { finish = resolve; }); onEvent({ type: "page", page: { works: [{ ...work, title: "새 작품" }], page: 0, pageSize: 48 } }); });
     await userEvent.click(await screen.findByRole("button", { name: "태그 1" }));
-    expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ text: '(b) AND female:"tag"' }), expect.any(Function));
+    expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ text: '(b) AND female:"tag"' }), expect.any(Function), expect.any(String));
     expect(screen.getByText("원래 작품")).toBeVisible();
     expect(container.querySelector(".online-catalog__frame")).toHaveAttribute("inert");
     await act(async () => finish());
     expect(await screen.findByText("새 작품")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "태그 필터 해제" }));
-    expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ text: "b" }), expect.any(Function));
+    expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ text: "b" }), expect.any(Function), expect.any(String));
   });
 
   it("filters the local grid by folder series identities", async () => {

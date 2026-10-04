@@ -324,6 +324,7 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
     case "list_manga_series": return Array.from({ length: 18 }, (_, index) => ({ id: `manga-${index + 1}`, title: ["해질녘의 기록", "유리별", "작은 정원", "비 오는 오후", "그 여름의 지도", "달빛 우체국"][index % 6] + (index > 5 ? ` ${Math.floor(index / 6) + 1}` : ""), author: creatorNames[index % creatorNames.length]!, galleryId: String(9000 + index), pageCount: 80 + index * 7 }));
     case "get_online_catalog_status": return { installed: true, workCount: 24863, updateEnabled: true, updateIntervalSeconds: 86400, lastAttemptAt: "2026-09-29T03:00:00.000Z", lastSuccessAt: "2026-09-29T03:00:00.000Z", lastAdded: 28, lastError: null, streams: [{ provider: "kHentai", language: "korean", hasState: true, initialComplete: true, watermark: 24863, cursor: 1, pendingMax: 0, lastAttemptAt: "2026-09-29T03:00:00.000Z", lastProgressAt: "2026-09-29T03:00:00.000Z", lastCompletedAt: "2026-09-29T03:00:00.000Z", lastAdded: 28, lastError: null }, { provider: "kHentai", language: "japanese", hasState: true, initialComplete: true, watermark: 12000, cursor: 1, pendingMax: 0, lastAttemptAt: "2026-09-28T03:00:00.000Z", lastProgressAt: "2026-09-28T03:00:00.000Z", lastCompletedAt: "2026-09-28T03:00:00.000Z", lastAdded: 12, lastError: null }] };
     case "run_due_online_catalog_update": return null;
+    case "cancel_catalog_search": return null;
     case "search_catalog_groups": {
       const query = (args.query ?? {}) as { page?: number; pageSize?: number };
       const works = catalogWorks();
@@ -332,6 +333,7 @@ export function dispatchPreviewCommand(command: string, args: Record<string, unk
       const channel = args.onEvent as { onmessage?: (value: unknown) => void } | undefined;
       channel?.onmessage?.({ type: "page", page: { works: works.slice(page * size, (page + 1) * size), page, pageSize: size } });
       channel?.onmessage?.({ type: "count", totalCount: works.length });
+      channel?.onmessage?.({ type: "end", cancelled: false });
       return null;
     }
     case "suggest_online_catalog": return [{ value: "artist:모래빛", label: "작가: 모래빛", count: 18 }, { value: "series:오리지널", label: "시리즈: 오리지널", count: 42 }];

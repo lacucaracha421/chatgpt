@@ -2246,41 +2246,89 @@ pub async fn search_online_catalog(
 }
 
 // Superseded searches release SQLite through its progress callback, including COUNT.
-static CATALOG_SEARCH_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static CATALOG_SEARCH_WORKERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-struct CatalogSearchPermit;
-impl CatalogSearchPermit {
-    fn acquire(generation: u64) -> Option<Self> {
+struct CatalogSearchState {
+    generation: std::sync::atomic::AtomicU64,
+    current_id: std::sync::Mutex<Option<String>>,
+    workers: std::sync::atomic::AtomicUsize,
+}
+impl CatalogSearchState {
+    const fn new() -> Self {
+        Self {
+            generation: std::sync::atomic::AtomicU64::new(0),
+            current_id: std::sync::Mutex::new(None),
+            workers: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+    fn begin(&self, search_id: String) -> u64 {
+        let mut current_id = self.current_id.lock().unwrap_or_else(|e| e.into_inner());
+        let generation = self.generation.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
+        *current_id = Some(search_id);
+        generation
+    }
+    fn cancel(&self, search_id: &str) {
+        // Serialize the identity check with begin, so a stale cancel cannot
+        // invalidate a search that starts between the check and the increment.
+        let mut current_id = self.current_id.lock().unwrap_or_else(|e| e.into_inner());
+        if current_id.as_deref() == Some(search_id) {
+            self.generation.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            *current_id = None;
+        }
+    }
+    fn cancelled(&self, generation: u64) -> bool {
+        self.generation.load(std::sync::atomic::Ordering::Acquire) != generation
+    }
+}
+static CATALOG_SEARCH: CatalogSearchState = CatalogSearchState::new();
+struct CatalogSearchPermit<'a>(&'a CatalogSearchState);
+impl<'a> CatalogSearchPermit<'a> {
+    fn acquire(state: &'a CatalogSearchState, generation: u64) -> Option<Self> {
         use std::sync::atomic::Ordering;
         loop {
-            if CATALOG_SEARCH_GENERATION.load(Ordering::Acquire) != generation { return None; }
-            if CATALOG_SEARCH_WORKERS.fetch_update(Ordering::AcqRel, Ordering::Acquire,
-                |n| (n < 4).then_some(n + 1)).is_ok() { return Some(Self); }
+            if state.cancelled(generation) { return None; }
+            if state.workers.fetch_update(Ordering::AcqRel, Ordering::Acquire,
+                |n| (n < 4).then_some(n + 1)).is_ok() { return Some(Self(state)); }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
 }
-impl Drop for CatalogSearchPermit {
-    fn drop(&mut self) { CATALOG_SEARCH_WORKERS.fetch_sub(1, std::sync::atomic::Ordering::AcqRel); }
+impl Drop for CatalogSearchPermit<'_> {
+    fn drop(&mut self) { self.0.workers.fetch_sub(1, std::sync::atomic::Ordering::AcqRel); }
+}
+fn finish_catalog_search(
+    result: Result<(), CommandError>,
+    cancelled: bool,
+    emit: impl FnOnce(crate::library::models::CatalogGroupedSearchEvent) -> Result<(), CommandError>,
+) -> Result<(), CommandError> {
+    // Attempt terminal delivery on errors as well, while retaining the original
+    // command error. The channel preserves page/count/end order.
+    let end = emit(crate::library::models::CatalogGroupedSearchEvent::End { cancelled });
+    result.and(end)
 }
 #[tauri::command]
-pub fn cancel_catalog_search() {
-    CATALOG_SEARCH_GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+pub fn cancel_catalog_search(search_id: String) {
+    CATALOG_SEARCH.cancel(&search_id);
 }
 #[tauri::command]
 pub async fn search_catalog_groups(
     query: CatalogSearchQuery,
+    search_id: String,
     on_event: tauri::ipc::Channel<crate::library::models::CatalogGroupedSearchEvent>,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    let library = current_required(state)?;
-    let generation = CATALOG_SEARCH_GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
-    tauri::async_runtime::spawn_blocking(move || {
-        let Some(_permit) = CatalogSearchPermit::acquire(generation) else { return Ok(()); };
-        library.search_catalog_groups_cancellable(query, move || {
-            CATALOG_SEARCH_GENERATION.load(std::sync::atomic::Ordering::Acquire) != generation
-        }, |event| on_event.send(event).map_err(|_| LibraryError::InvalidOnlineCatalog))
-    }).await.map_err(|_| background_task_error())?.map_err(CommandError::from)
+    let generation = CATALOG_SEARCH.begin(search_id);
+    let events = on_event.clone();
+    let result = async {
+        let library = current_required(state)?;
+        tauri::async_runtime::spawn_blocking(move || {
+            let Some(_permit) = CatalogSearchPermit::acquire(&CATALOG_SEARCH, generation) else { return Ok(()); };
+            library.search_catalog_groups_cancellable(query, move || {
+                CATALOG_SEARCH.cancelled(generation)
+            }, |event| events.send(event).map_err(|_| LibraryError::InvalidOnlineCatalog))
+        }).await.map_err(|_| background_task_error())?.map_err(CommandError::from)
+    }.await;
+    finish_catalog_search(result, CATALOG_SEARCH.cancelled(generation), |event| {
+        on_event.send(event).map_err(|_| CommandError::from(LibraryError::InvalidOnlineCatalog))
+    })
 }
 
 #[tauri::command]
@@ -3915,19 +3963,91 @@ mod tests {
 
 #[cfg(test)]
 mod catalog_admission_tests {
+    use super::{finish_catalog_search, CatalogSearchPermit, CatalogSearchState, CommandError};
+    use crate::library::models::{CatalogGroupedPage, CatalogGroupedSearchEvent};
+
+    #[test]
+    fn stale_cancel_does_not_cancel_a_newer_generation() {
+        let state = CatalogSearchState::new();
+        let old = state.begin("old".into());
+        let fresh = state.begin("fresh".into());
+        assert!(state.cancelled(old));
+        state.cancel("old");
+        assert!(!state.cancelled(fresh));
+        state.cancel("fresh");
+        assert!(state.cancelled(fresh));
+        let newest = state.begin("newest".into());
+        state.cancel("fresh");
+        assert!(!state.cancelled(newest));
+    }
+
+    #[test]
+    fn superseded_search_without_a_permit_still_emits_end() {
+        let state = CatalogSearchState::new();
+        let old = state.begin("old".into());
+        state.begin("fresh".into());
+        assert!(CatalogSearchPermit::acquire(&state, old).is_none());
+        let mut events = Vec::new();
+        finish_catalog_search(Ok(()), state.cancelled(old), |event| {
+            events.push(event);
+            Ok(())
+        }).unwrap();
+        assert_eq!(events, vec![CatalogGroupedSearchEvent::End { cancelled: true }]);
+    }
+
+    #[test]
+    fn terminal_event_follows_page_and_count() {
+        let mut events = vec![
+            CatalogGroupedSearchEvent::Page {
+                page: CatalogGroupedPage { works: vec![], page: 0, page_size: 48 },
+            },
+            CatalogGroupedSearchEvent::Count { total_count: 0 },
+        ];
+        finish_catalog_search(Ok(()), false, |event| {
+            events.push(event);
+            Ok(())
+        }).unwrap();
+        assert!(matches!(events.as_slice(), [
+            CatalogGroupedSearchEvent::Page { .. },
+            CatalogGroupedSearchEvent::Count { .. },
+            CatalogGroupedSearchEvent::End { cancelled: false },
+        ]));
+        assert_eq!(serde_json::to_value(events.last().unwrap()).unwrap(),
+            serde_json::json!({ "type": "end", "cancelled": false }));
+    }
+
+    #[test]
+    fn terminal_event_preserves_command_errors_even_if_delivery_fails() {
+        let mut events = Vec::new();
+        let result = finish_catalog_search(
+            Err(CommandError { code: "search_failed", message: "original".into() }),
+            false,
+            |event| {
+                events.push(event);
+                Err(CommandError { code: "delivery_failed", message: "channel".into() })
+            },
+        );
+        assert_eq!(events, vec![CatalogGroupedSearchEvent::End { cancelled: false }]);
+        assert_eq!(result.unwrap_err().code, "search_failed");
+    }
+
     #[test]
     fn latest_search_waits_for_a_slot_and_superseded_waiters_exit() {
-        use super::{CatalogSearchPermit,CATALOG_SEARCH_GENERATION};
-        use std::sync::atomic::Ordering;
-        CATALOG_SEARCH_GENERATION.store(1,Ordering::Release);
-        let permits=(0..4).map(|_|CatalogSearchPermit::acquire(1).unwrap()).collect::<Vec<_>>();
-        CATALOG_SEARCH_GENERATION.store(2,Ordering::Release);
-        assert!(CatalogSearchPermit::acquire(1).is_none());
-        let (send,receive)=std::sync::mpsc::channel();
-        let worker=std::thread::spawn(move || {let _permit=CatalogSearchPermit::acquire(2).unwrap();send.send(()).unwrap();});
+        let state = std::sync::Arc::new(CatalogSearchState::new());
+        let old = state.begin("old".into());
+        let permits = (0..4).map(|_| CatalogSearchPermit::acquire(&state, old).unwrap()).collect::<Vec<_>>();
+        let fresh = state.begin("fresh".into());
+        assert!(CatalogSearchPermit::acquire(&state, old).is_none());
+        let (send, receive) = std::sync::mpsc::channel();
+        let worker_state = state.clone();
+        let worker = std::thread::spawn(move || {
+            let _permit = CatalogSearchPermit::acquire(&worker_state, fresh).unwrap();
+            send.send(()).unwrap();
+        });
         assert!(receive.recv_timeout(std::time::Duration::from_millis(50)).is_err());
         drop(permits);
-        receive.recv_timeout(std::time::Duration::from_secs(2)).unwrap();worker.join().unwrap();
+        receive.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        worker.join().unwrap();
     }
 }
 

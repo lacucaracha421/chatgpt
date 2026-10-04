@@ -8,7 +8,7 @@ import { CatalogVisibilitySettings } from "../settings/CatalogVisibilitySettings
 import { OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { displayDateTime } from "../shared/displayDate";
-import { lazy, Suspense } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import { WindowControls } from "../layout/WindowControls";
 import { CATALOG_BOOKMARKS_CHANGED_EVENT } from "../app/useCatalogBookmarkSync";
 import { existsSync, readFileSync } from "node:fs";
@@ -50,6 +50,122 @@ const detail: CatalogWorkDetail = {
 };
 
 describe("OnlineCatalogBrowser", () => {
+  it.each([false, true])("settles initial loading when the stream ends without a page (cancelled=%s)", async (cancelled) => {
+    const gateway = createGateway(true);
+    let emit!: (event: CatalogGroupedSearchEvent) => void;
+    gateway.searchCatalogGroups = vi.fn().mockImplementation(async (_query, onEvent) => { emit = onEvent; });
+    renderBrowser(gateway);
+    await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenCalledOnce());
+    expect(screen.getByLabelText("망가 불러오는 중")).toBeVisible();
+    act(() => emit({ type: "end", cancelled }));
+    await waitFor(() => expect(screen.queryByLabelText("망가 불러오는 중")).not.toBeInTheDocument());
+  });
+
+  it("keeps shown cards when a replacement search ends without a page", async () => {
+    const gateway = createGateway(true);
+    const { container } = renderBrowser(gateway);
+    await screen.findByRole("button", { name: `${work.title} 상세 보기` });
+    let emit!: (event: CatalogGroupedSearchEvent) => void;
+    gateway.searchCatalogGroups = vi.fn().mockImplementation(async (_query, onEvent) => { emit = onEvent; });
+    await chooseMenu("언어", "일본어");
+    expect(container.querySelector(".online-catalog__frame")).toHaveAttribute("inert");
+    expect(screen.getByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
+    act(() => emit({ type: "end", cancelled: true }));
+    await waitFor(() => expect(container.querySelector(".online-catalog__frame")).not.toHaveAttribute("inert"));
+    expect(screen.getByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
+    expect(container.querySelector(".manga-card--skeleton")).toBeNull();
+  });
+
+  it("targets unmount cancellation at the old search after a fresh mount starts", async () => {
+    const gateway = createGateway(true);
+    const streams: Array<{ id: string; emit: (event: CatalogGroupedSearchEvent) => void }> = [];
+    let activeId: string | null = null;
+    let deliverCancel!: () => void;
+    gateway.searchCatalogGroups = vi.fn().mockImplementation(async (_query, emit, id) => {
+      activeId = id;
+      streams.push({ id, emit });
+    });
+    gateway.cancelCatalogSearch = vi.fn().mockImplementation((id) => new Promise<void>((resolve) => {
+      deliverCancel = () => {
+        if (id === activeId) {
+          activeId = null;
+          streams.find(stream => stream.id === id)?.emit({ type: "end", cancelled: true });
+        }
+        resolve();
+      };
+    }));
+    const old = renderBrowser(gateway);
+    await waitFor(() => expect(streams).toHaveLength(1));
+    old.unmount();
+    renderBrowser(gateway);
+    await waitFor(() => expect(streams).toHaveLength(2));
+    expect(streams[0].id).toEqual(expect.any(String));
+    expect(streams[1].id).not.toBe(streams[0].id);
+    expect(gateway.cancelCatalogSearch).toHaveBeenCalledExactlyOnceWith(streams[0].id);
+    await act(async () => deliverCancel());
+    expect(activeId).toBe(streams[1].id);
+    act(() => {
+      streams[1].emit({ type: "page", page: { works: [{ ...work, groupId: "3", versionCount: 1, hasBookmarkedVersion: false }], page: 0, pageSize: 48 } });
+      streams[1].emit({ type: "count", totalCount: 1 });
+      streams[1].emit({ type: "end", cancelled: false });
+    });
+    expect(await screen.findByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
+    expect(screen.queryByLabelText("망가 불러오는 중")).not.toBeInTheDocument();
+  });
+
+  it("shows the initial catalog when the command finishes before its page is delivered", async () => {
+    const gateway = createGateway(true);
+    const command = deferred<void>();
+    let emit!: (event: CatalogGroupedSearchEvent) => void;
+    gateway.searchCatalogGroups = vi.fn().mockImplementation((_query, onEvent) => {
+      emit = onEvent;
+      return command.promise;
+    });
+    const onReady = vi.fn();
+    render(<StrictMode><LibraryProvider gateway={gateway}><OnlineCatalogBrowser onSwitchLocal={vi.fn()} onReady={onReady} /></LibraryProvider></StrictMode>);
+    await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenCalledOnce());
+    // Large Tauri channel payloads can arrive after the invocation has resolved.
+    await act(async () => command.resolve());
+    expect(screen.getByLabelText("망가 불러오는 중")).toBeVisible();
+    expect(onReady).not.toHaveBeenCalled();
+    act(() => {
+      emit({ type: "page", page: { works: [{ ...work, groupId: "3", versionCount: 1, hasBookmarkedVersion: false }], page: 0, pageSize: 48 } });
+      emit({ type: "count", totalCount: 1 });
+    });
+    expect(await screen.findByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
+    expect(screen.getByText("1개 결과")).toBeVisible();
+    expect(onReady).toHaveBeenCalledWith("all");
+    expect(gateway.searchCatalogGroups).toHaveBeenCalledOnce();
+  });
+
+  it("keeps old cards and rejects superseded pages when commands finish before delivery", async () => {
+    const gateway = createGateway(true);
+    const { container } = renderBrowser(gateway);
+    await screen.findByRole("button", { name: `${work.title} 상세 보기` });
+    const events: Array<(event: CatalogGroupedSearchEvent) => void> = [];
+    gateway.searchCatalogGroups = vi.fn().mockImplementation(async (_query, emit) => { events.push(emit); });
+    await chooseMenu("언어", "일본어");
+    expect(screen.getByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
+    expect(container.querySelector(".online-catalog__frame")).toHaveAttribute("inert");
+    expect(container.querySelector(".manga-card--skeleton")).toBeNull();
+    await chooseMenu("언어", "한국어");
+    act(() => {
+      events[0]({ type: "page", page: { works: [{ ...work, title: "이전 요청 작품", groupId: "old", versionCount: 1, hasBookmarkedVersion: false }], page: 0, pageSize: 48 } });
+      events[0]({ type: "count", totalCount: 999 });
+      events[0]({ type: "end", cancelled: true });
+    });
+    expect(screen.queryByText("이전 요청 작품")).not.toBeInTheDocument();
+    expect(screen.queryByText("999개 결과")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `${work.title} 상세 보기` })).toBeVisible();
+    act(() => {
+      events[1]({ type: "page", page: { works: [{ ...work, title: "최신 요청 작품", groupId: "new", versionCount: 1, hasBookmarkedVersion: false }], page: 0, pageSize: 48 } });
+      events[1]({ type: "count", totalCount: 1 });
+      events[1]({ type: "end", cancelled: false });
+    });
+    expect(await screen.findByRole("button", { name: "최신 요청 작품 상세 보기" })).toBeVisible();
+    expect(container.querySelector(".online-catalog__frame")).not.toHaveAttribute("inert");
+  });
+
   it("shows skeleton cards only on first load and holds the old grid on language/scope/refresh changes", async () => {
     const gateway = createGateway(true);
     const first = deferred<Awaited<ReturnType<LibraryGateway["searchOnlineCatalog"]>>>();
@@ -855,6 +971,7 @@ function createGateway(installed: boolean): LibraryGateway {
     const result = await gateway.searchOnlineCatalog(query);
     emit({ type: "page", page: { ...result, works: result.works.map((work) => ({ ...work, groupId: work.providerWorkId, versionCount: 1, hasBookmarkedVersion: work.bookmarked })) } });
     emit({ type: "count", totalCount: result.totalCount });
+    emit({ type: "end", cancelled: false });
   });
   return gateway;
 }
@@ -1142,7 +1259,7 @@ it("searches a tag and closes the panel, without resolving page addresses", asyn
   const panel = await screen.findByRole("complementary", { name: "망가 상세" });
   await userEvent.click(screen.getByRole("button", { name: "character:teitoku 검색" }));
   expect(panel).toHaveAttribute("data-state", "closed");
-  await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ text: "character:teitoku", page: 0 }), expect.any(Function)));
+  await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ text: "character:teitoku", page: 0 }), expect.any(Function), expect.any(String)));
   expect(gateway.resolveOnlineCatalogWork).not.toHaveBeenCalled();
   await waitFor(() => expect(panel).not.toBeInTheDocument());
 });
@@ -1333,7 +1450,7 @@ describe("load more", () => {
     expect(document.querySelector(".manga-grid--more")).toBeNull();
 
     await io.reveal();
-    expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "all", sort: "hotDay", language: "korean", text: "", page: 1, pageSize: 48 }), expect.any(Function));
+    expect(gateway.searchCatalogGroups).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "all", sort: "hotDay", language: "korean", text: "", page: 1, pageSize: 48 }), expect.any(Function), expect.any(String));
     expect(screen.getByLabelText("다음 망가 불러오는 중")).toHaveClass("manga-grid", "manga-grid--more");
     expect(screen.getAllByRole("button", { name: /^작품 0-\d+ 상세 보기$/ })).toHaveLength(48);
     expect(document.querySelector(".online-catalog__frame")).not.toHaveAttribute("inert");

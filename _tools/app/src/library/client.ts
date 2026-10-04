@@ -275,11 +275,11 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
     invoke<CatalogVisibilityPolicy>("set_catalog_category_hidden", { category, hidden }),
   setCatalogTagBlocked: (tag: CatalogBlockedTag, blocked) =>
     invoke<CatalogVisibilityPolicy>("set_catalog_tag_blocked", { tag, blocked }),
-  cancelCatalogSearch: () => invoke<void>("cancel_catalog_search"),
-  searchCatalogGroups: (query, onEvent) => {
+  cancelCatalogSearch: (searchId) => invoke<void>("cancel_catalog_search", { searchId }),
+  searchCatalogGroups: (query, onEvent, searchId) => {
     const channel = new Channel<CatalogGroupedSearchEvent>();
     channel.onmessage = onEvent;
-    return invoke<void>("search_catalog_groups", { query, onEvent: channel });
+    return invoke<void>("search_catalog_groups", { query, searchId, onEvent: channel });
   },
   getCatalogGroupEditions: (query) => invoke<CatalogGroupEditionsPage>("get_catalog_group_editions", { query }),
   setCatalogGroupRepresentative: (query) => invoke<void>("set_catalog_group_representative", { query }),

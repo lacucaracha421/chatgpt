@@ -140,6 +140,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     artist: string | null;
   } | null>(null);
   const searchRequest = useRef(0);
+  const activeSearchId = useRef<string | null>(null);
   const suggestionRequest = useRef(0);
   const detailRequest = useRef(0);
   const readRequest = useRef(0);
@@ -166,23 +167,27 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
     return () => {
       mounted.current = false;
       searchRequest.current += 1;
-      void gateway.cancelCatalogSearch?.();
+      if (activeSearchId.current) void gateway.cancelCatalogSearch?.(activeSearchId.current);
+      activeSearchId.current = null;
       detailRequest.current += 1;
       editionRequest.current += 1;
       readRequest.current += 1;
     };
   }, [gateway]);
 
-  function applyCount(event: Exclude<CatalogGroupedSearchEvent, { type: "page" }>, view: CatalogView) {
+  function applyCount(event: Extract<CatalogGroupedSearchEvent, { type: "count" | "countError" }>, view: CatalogView) {
     if (event.type === "countError") { setTotalCount(null); setCountError(event.message); return; }
     setTotalCount(event.totalCount); setCountError(null);
     if (view.scope === "bookmarked" && !view.text && !view.revealBlocked) { setKnownBookmarkCount(event.totalCount); onBookmarkCount?.(event.totalCount); }
   }
 
-  /** `first` settles with the page as soon as it streams in; `done` settles after its count. */
+  /** `first` follows page delivery; `done` follows command completion, which can precede delivery. */
   function streamPage(view: CatalogView, page: number, request: number): PageStream {
-    let deliver: (page: CatalogGroupedPage) => void = () => undefined;
-    const delivered = new Promise<CatalogGroupedPage>((resolve) => { deliver = resolve; });
+    let deliver: (page: CatalogGroupedPage | null) => void = () => undefined;
+    let reject: (error: unknown) => void = () => undefined;
+    const delivered = new Promise<CatalogGroupedPage | null>((resolve, rejectPage) => { deliver = resolve; reject = rejectPage; });
+    const searchId = crypto.randomUUID();
+    activeSearchId.current = searchId;
     const done = gateway.searchCatalogGroups({
       provider: "kHentai",
       language: view.language,
@@ -193,11 +198,19 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
       page,
       pageSize: CATALOG_PAGE_SIZE,
     }, (event) => {
+      if (event.type === "end") {
+        deliver(null);
+        if (activeSearchId.current === searchId) activeSearchId.current = null;
+        return;
+      }
       if (request !== searchRequest.current) return;
       if (event.type === "page") deliver(event.page);
       else applyCount(event, view);
-    });
-    return { first: Promise.race([delivered, done.then(() => null)]), done };
+    }, searchId);
+    // Tauri fetches large channel payloads asynchronously. A successful invocation
+    // does not mean its page has arrived; end settles a stream with no page.
+    void done.catch(reject);
+    return { first: delivered, done };
   }
 
   /** Load a view from its first page. A refresh passes the number of pages shown, so appended cards keep their place. */
