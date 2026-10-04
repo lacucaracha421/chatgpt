@@ -332,7 +332,7 @@ Status: `TODO` — user 2026-10-04: use the new main PC (RTX 5070 Ti 16 GB, 12 t
 <a id="nl-search-001--korean-natural-language-image-search"></a>
 ## NL-SEARCH-001 — Korean natural-language image search (main PC)
 
-Status: `IN_PROGRESS` — the user lifted the HOLD on 2026-10-04 after a GPU bake-off ([research](../research/nl-search-trial-20261004.md)).
+Status: `PARTIAL` — PC shipped to main 2026-10-05; tablet option A is next. The user lifted the HOLD on 2026-10-04 after a GPU bake-off ([research](../research/nl-search-trial-20261004.md)).
 - **Decided (user, 2026-10-04):**
   - **v1 search:** names from the library's character targets (with their series folder names) go to auto-tag scores. Every other query is translated with opus-mt-ko-en and embedded with SigLIP2 so400m on CPU, then ranked by cosine against precomputed image vectors (P@10 0.68 on 32 Korean queries).
   - **Precise mode:** Qwen3-VL-Embedding-8B image vectors are built too. Precise search (GPU at query time, about 4.8 GiB) is an optional setting (P@10 0.72).
@@ -340,12 +340,22 @@ Status: `IN_PROGRESS` — the user lifted the HOLD on 2026-10-04 after a GPU bak
   - **Tablet (decided 2026-10-05, option A):** server-side text search with no model at query time. Names go through the same character-name dictionary to the already published auto tags. Everything else runs over the Korean captions published to the server (Hangul-pair BM25), so the PC can be off. Measured P@10 0.55 against 0.68 on the PC; weak on mood and expression queries. The PC publishes captions (about 3 MB for 9k images). New images need captions from the main-PC nightly job. The tablet UI follows the PC option A, with a preview strip in the find sheet and a result state. Later options, not chosen: an int8 SigLIP text model on the VPS (1.6 GB RAM; needs measurement), or relaying to the main PC while it is on.
   - **UI:** option A from the mockup. The 찾기 palette gets an "이미지 내용" group with a strip of the top 7 results. The strip updates after a typing pause of about 0.4 s and after Hangul composition ends, never per keystroke, and keeps the old strip until the next one is ready. Enter opens a "내용 검색" result state in 에셋 with 검색 해제. Mockup: [prototype README](../prototypes/nl-search-20261004/README.md).
 - **Architecture:** same as artist style. A machine-local GPU job (`_tools/app/nl-search-runtime/nl_index.py`) writes `nl-search-latest.sqlite` into the auto-tag inbox. The app imports it into `<library>/.cache/nl-search/` (disposable, PC-only, never published). Rust ranks the results. A Python query worker (`nl_query_worker.py`, newline-delimited JSON) starts when the palette opens and stops after 30 idle minutes.
-- **Remaining:**
-  - phase 1 backend;
-  - phase 2 palette and result UI;
-  - native check on the production library (needs approval: inbox folder and cache write);
-  - a nightly Windows task for new images (registered by the user).
-  Korean captions for all 9,103 images exist in the trial output, unused in v1 (later: inspector description, image-type filter).
+- **PC done (2026-10-05, merged 7c7170d6 / 9e44fb2d):**
+  - **Backend, palette and result UI:** done.
+  - **Search behaviour:** a "no match" gate refuses nonsense queries; it needs 60 % of the query's units to appear in the caption vocabulary or the auto-tag words, and "그래도 가장 비슷한 그림 보기" overrides it. Searches replace each other instead of stacking. The 찾기 shortcut is now Ctrl+Q.
+  - **Production check:** the dev app on the production library imported 9,139 SigLIP and Qwen vectors plus a 13,608-unit vocabulary without freezing the UI, and the user confirmed results.
+  - **Machine setup:** inbox `C:\laku\lakomics-inbox`. The task scheduler entry "Lakomics NL index" runs daily at 03:30 (`C:\laku\scripts\nl-index-nightly.ps1`, state `C:\laku\nlsearch-state`) and embeds new images only.
+- **Next: tablet option A** (decided above; PC first, the tablet follows the PC design):
+  1. **Captions on the main PC:** add Korean captioning (Qwen3-VL-8B NF4, batch 16, about 1.4 s/image) to the nightly job for images without captions. Seed it with the 9,103 trial captions (`C:\laku\nlsearch-state\captions.jsonl`). Export captions in the inbox file, so the vocabulary also stays current.
+  2. **PC publication:** import the captions into a PC-only table or cache and publish them to the server through a publication lane like the auto-tag lane (digest-based, about 3 MB).
+  3. **Server:** store the captions and add a search route, for example `GET /v1/library/search/description?q=`. Name tokens use the character-name dictionary and the published auto tags; other tokens use Hangul-pair BM25 over the captions; apply the same 60 % vocabulary gate, with a force flag. Add tests.
+  4. **Tablet:** a NetworkPolicy allowlist entry for the new route. The find sheet gets an "이미지 내용" row with a preview strip (0.4 s pause, IME guard, no flash), and Enter opens a result state with 검색 해제 and "그래도 가장 비슷한 그림 보기".
+  5. **Checks:** server tests, the tablet suite and a device check on the tablet.
+- **Later:**
+  - inspector description and image-type filter from the captions;
+  - precise-mode setting in Settings;
+  - laptop query side, needing a smaller text model;
+  - video.
 - **Laptop later:** the query worker holds about 4.1 GB RAM because the SigLIP text tower is fp32. New images need the main PC to index them.
 
 ## ACCEPTANCE — native PC / tablet / Windows checks pending
