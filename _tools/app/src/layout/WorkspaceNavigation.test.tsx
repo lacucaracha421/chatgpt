@@ -392,6 +392,12 @@ it("no longer opens with the retired Ctrl+K / Ctrl+F, and Ctrl+Q works from a te
   expect(screen.getByRole("dialog", { name: "찾기" })).toBeInTheDocument();
 });
 
+it("opens with Ctrl+Q while the Korean IME reports the Q key as ㅂ", () => {
+  render(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} />);
+  fireEvent.keyDown(window, { key: "ㅂ", code: "KeyQ", ctrlKey: true });
+  expect(screen.getByRole("dialog", { name: "찾기" })).toBeInTheDocument();
+});
+
 it("does not open the palette over a modal dialog but does over a non-modal panel", async () => {
   const user = userEvent.setup();
   const { rerender } = render(<><div role="dialog" aria-label="표지 감상" /><WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} /></>);
