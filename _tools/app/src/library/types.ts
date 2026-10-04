@@ -1397,6 +1397,8 @@ export interface LibraryGateway {
   runDueMobilePublications?(orderIds:string[]): Promise<void>;
   /** Native signal that Collections changed in the background (mobile personal edits). */
   subscribeCollectionsChanged?(handler: () => void): () => void;
+  /** Native signal that tablet artist edits were applied in the background. */
+  subscribeArtistsChanged?(handler: () => void): () => void;
   pushCloudCharacters?(onProgress?: (progress: import("./publicationJobs").PublishProgress) => void): Promise<{revision: string; nodes: number}>;
   restoreCloudMetadataBackup?(): Promise<CloudLibraryRestoreReport>;
   runDueCloudCaptureSync(onProgress?: (outcome: IngestOutcome) => void): Promise<CloudCaptureSyncResult>;

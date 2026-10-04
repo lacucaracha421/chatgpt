@@ -20,6 +20,7 @@ pub(crate) fn status_with(logs: Option<PublisherLogs>) -> SyncStatus {
 pub(crate) fn logs(bindings_last: i64, captures_pending: i64) -> PublisherLogs {
     PublisherLogs {
         upcoming_intents: None,
+        artist_intents: None,
         character_exclusions: Some(3),
         character_review_decisions: Some(4),
         similarity_decisions: Some(5),
@@ -43,6 +44,65 @@ pub(crate) fn logs(bindings_last: i64, captures_pending: i64) -> PublisherLogs {
 
 fn seq(value: i64) -> Head {
     Head::Sequence(value)
+}
+
+#[test]
+fn artist_heads_parse_independently_and_wake_publications() {
+    let logs = |value| {
+        PublisherLogs::parse(&json!({
+            "artistIntents": value,
+            "upcomingIntents": {"last": 7, "prunedThrough": 0}
+        }))
+        .unwrap()
+    };
+    let previous = status_with(Some(logs(json!({
+        "last": 4, "acknowledgedThrough": 2, "prunedThrough": 1
+    }))));
+    let next = status_with(Some(logs(json!({
+        "last": 5, "acknowledgedThrough": 3, "prunedThrough": 2
+    }))));
+    let head = next
+        .publisher_logs
+        .as_ref()
+        .unwrap()
+        .artist_intents
+        .unwrap();
+    assert_eq!(
+        (head.last, head.acknowledged_through, head.pruned_through),
+        (5, 3, 2)
+    );
+    assert_eq!(
+        diff(Some(&previous), &next),
+        Changes {
+            logs: true,
+            domains: false,
+            captures: false
+        }
+    );
+    assert_eq!(
+        Head::of(
+            LogKind::ArtistIntents,
+            next.publisher_logs.as_ref().unwrap()
+        ),
+        Some(Head::Reads {
+            last: 5,
+            pruned_through: 2
+        })
+    );
+    for value in [
+        Value::Null,
+        json!({"last": 5}),
+        json!({"last": -1, "acknowledgedThrough": 0, "prunedThrough": 0}),
+        json!({"last": 5, "acknowledgedThrough": "bad", "prunedThrough": 0}),
+    ] {
+        let parsed = logs(value);
+        assert!(parsed.artist_intents.is_none());
+        assert_eq!(parsed.upcoming_intents.unwrap().last, 7);
+    }
+    assert!(PublisherLogs::parse(&json!({}))
+        .unwrap()
+        .artist_intents
+        .is_none());
 }
 
 #[test]

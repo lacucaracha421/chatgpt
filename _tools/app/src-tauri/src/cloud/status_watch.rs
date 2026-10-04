@@ -80,6 +80,7 @@ pub(crate) enum LogKind {
     CatalogDuplicateDecisions,
     ReleaseReads,
     UpcomingIntents,
+    ArtistIntents,
     Bindings,
     PersonalEdits,
 }
@@ -121,6 +122,13 @@ impl Head {
             LogKind::UpcomingIntents => {
                 let head = logs.upcoming_intents?;
                 Self::Reads { last: head.last, pruned_through: head.pruned_through }
+            }
+            LogKind::ArtistIntents => {
+                let head = logs.artist_intents?;
+                Self::Reads {
+                    last: head.last,
+                    pruned_through: head.pruned_through,
+                }
             }
             LogKind::ReleaseReads => {
                 let head = logs.release_reads?;
@@ -406,6 +414,17 @@ pub(crate) fn log_due(
     now: i64,
 ) -> bool {
     log_ready(endpoint, kind, position, last_checked, now, true)
+}
+
+/// A missing or stale artist head keeps the pre-head per-publication receive fallback.
+pub(crate) fn artist_intents_head(
+    endpoint: &str,
+    now: i64,
+) -> Option<super::client::ArtistIntentsHead> {
+    hub()
+        .get(&endpoint_key(endpoint))?
+        .trusted_logs(now)?
+        .artist_intents
 }
 
 /// Readiness only: the dispatcher must not consume a head before the lane receives it.

@@ -20,7 +20,7 @@ import { EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
 import { ArtistCollage } from "./ArtistCollage";
 import { artistHandle } from "./format";
 import { ArrowPathIcon, CheckIcon, ChevronRightIcon, Cog6ToothIcon, MagnifyingGlassIcon, MergeIcon, PinIcon, XMarkIcon } from "./artistIcons";
-import { invalidateArtists, localDateAndOffset, useArtistGateway, useArtistOverview, useArtistRead } from "./artistStore";
+import { invalidateArtists, localDateAndOffset, useArtistGateway, useArtistOverview, useArtistRead, useArtistsChanged } from "./artistStore";
 import { UNKNOWN_SOURCE, type ArtistBucket, type ArtistExcludedFolder, type ArtistMergeSuggestion, type ArtistSettings, type ArtistSort, type ArtistSummary } from "./types";
 import "./artists.css";
 
@@ -58,6 +58,7 @@ function metaLine(artist: ArtistSummary, rule?: ArtistSettings) {
 }
 
 export function ArtistHub({ view, onNavigate, privacyMode }: { view: Extract<AssetView, { kind: "artists" }>; onNavigate: Navigate; privacyMode: boolean }) {
+  useArtistsChanged();
   const section: ArtistHubSection = view.section ?? "main";
   const overview = useArtistOverview();
   const [ruleOpen, setRuleOpen] = useState(false);

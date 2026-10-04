@@ -363,6 +363,14 @@ export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
     return invoke<import("./types").CollectionAuthorityVerifyResult>("verify_collection_authority_baseline", { onProgress: channel });
   },
   openCollectionAuthorityReport: path => invoke<void>("open_collection_authority_report", { path }),
+  subscribeArtistsChanged: (handler) => {
+    let stopped = false;
+    let unlisten: (() => void) | undefined;
+    void listen("library://artists-changed", () => handler())
+      .then((stop) => { if (stopped) stop(); else unlisten = stop; })
+      .catch(() => {});
+    return () => { stopped = true; unlisten?.(); };
+  },
   subscribeCollectionsChanged: (handler) => {
     let stopped = false;
     let unlisten: (() => void) | undefined;

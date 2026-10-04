@@ -95,6 +95,15 @@ pub fn run() {
                     }
                 })?;
             }
+            // Tablet artist edits applied in the background refresh the UI.
+            let artists_handle = app.handle().clone();
+            library::artists::set_artists_changed_listener(move || {
+                let _ = tauri::Emitter::emit(
+                    &artists_handle,
+                    library::artists::ARTISTS_CHANGED_EVENT,
+                    (),
+                );
+            });
             // Mobile personal Collection edits applied in the background refresh the UI.
             let collections_handle = app.handle().clone();
             library::collection_personal_edits::set_collections_changed_listener(move || {

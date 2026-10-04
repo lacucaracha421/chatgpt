@@ -823,6 +823,36 @@ fn artist_checkpoint(lib: &Library) -> State {
 }
 
 #[test]
+fn artist_intents_notify_once_per_changed_committed_page_only() {
+    let (_dir, lib) = setup();
+    asset(&lib, "artist-asset", Some("alice"));
+    let events = std::cell::Cell::new(0);
+    let notify = || {
+        // A listener can read the committed data without a held connection lock.
+        assert!(lib.connection().is_ok());
+        events.set(events.get() + 1);
+    };
+    let apply = |after, items| {
+        let page = serde_json::from_value(page(after, items)).unwrap();
+        lib.apply_artist_intents_with_notify("https://events.invalid/", &page, now(), &notify)
+    };
+    apply(0, vec![artist_intent(1, "rename", "alice", Some("Tablet")), artist_intent(2, "pin", "alice", None)]).unwrap();
+    assert_eq!(events.get(), 1);
+    // Replayed, unchanged, missing and empty pages do not notify.
+    apply(0, vec![artist_intent(1, "rename", "alice", Some("Tablet")), artist_intent(2, "pin", "alice", None)]).unwrap();
+    apply(2, vec![artist_intent(3, "pin", "alice", None), artist_intent(4, "rename", "alice", Some("Tablet"))]).unwrap();
+    apply(4, vec![artist_intent(5, "hide", "missing", None)]).unwrap();
+    apply(5, vec![]).unwrap();
+    assert_eq!(events.get(), 1);
+    lib.connection().unwrap().execute_batch("CREATE TRIGGER fail_artist_cursor BEFORE UPDATE ON home_publication_state WHEN NEW.kind='artists' AND json_extract(NEW.state_json,'$.cursor')>5 BEGIN SELECT RAISE(ABORT,'injected checkpoint failure'); END;").unwrap();
+    assert!(apply(5, vec![artist_intent(6, "hide", "alice", None)]).is_err());
+    assert_eq!(events.get(), 1);
+    lib.connection().unwrap().execute_batch("DROP TRIGGER fail_artist_cursor").unwrap();
+    apply(5, vec![artist_intent(6, "hide", "alice", None)]).unwrap();
+    assert_eq!(events.get(), 2);
+}
+
+#[test]
 fn artist_intents_apply_in_order_materialize_and_clear_name_preserving_other_flags() {
     let (_dir, lib) = setup();
     asset(&lib, "artist-asset", Some("alice"));
@@ -1124,4 +1154,107 @@ fn artists_do_not_pull_again_between_publication_passes_and_cursors_are_scoped()
     );
     run(&lib, &fake, "artists", BUILD_INTERVAL);
     assert_eq!(*fake.artist_pulls.borrow(), vec![0, 0]);
+}
+
+#[test]
+fn artist_status_head_gates_prompt_pulls_even_during_receive_only_hold() {
+    use crate::cloud::client::{PublisherLogs, SyncStatus};
+    for held in [false, true] {
+        let (dir, lib) = setup();
+        let endpoint = format!("https://artist-head-{held}.invalid/");
+        lib.use_machine_settings(dir.path().join("machine.json"));
+        if held {
+            lib.set_cloud_sync_hold(&endpoint, true).unwrap();
+        }
+        let fake = Fake::default();
+        let clock = now().timestamp();
+        State {
+            cursor: 2,
+            last_poll: Some(clock),
+            next_build: clock + BUILD_INTERVAL,
+            ..State::default()
+        }
+        .save(&*lib.connection().unwrap(), &endpoint, "artists")
+        .unwrap();
+        lib.publication_inputs
+            .observe_inputs(10, &endpoint, lib.publication_inputs.generation(10));
+        for last in [1, 2, 3] {
+            let status = SyncStatus {
+                protocol_version: 1,
+                active: false,
+                library_id: None,
+                domains: vec![],
+                publisher_logs: PublisherLogs::parse(&json!({"artistIntents": {
+                    "last": last, "acknowledgedThrough": 2, "prunedThrough": 0
+                }})),
+            };
+            status_watch::observe(&endpoint, &status, clock + 1, status_watch::Source::Watcher);
+            assert_eq!(
+                lib.home_publication_due_on(
+                    &*lib.connection().unwrap(),
+                    &endpoint,
+                    "artists",
+                    clock + 1
+                )
+                .unwrap(),
+                last > 2
+            );
+            if last > 2 {
+                fake.pages
+                    .borrow_mut()
+                    .push_back(page(2, vec![artist_intent(3, "hide", "missing", None)]));
+            }
+            lib.run_home_with(
+                &fake,
+                "publisher",
+                &endpoint,
+                "artists",
+                now() + chrono::Duration::seconds(1),
+                now().date_naive(),
+                false,
+            )
+            .unwrap();
+            assert_eq!(fake.artist_pulls.borrow().len(), usize::from(last > 2));
+        }
+        assert_eq!(
+            State::load(&*lib.connection().unwrap(), &endpoint, "artists")
+                .unwrap()
+                .cursor,
+            3
+        );
+        assert_eq!(fake.requests.borrow().len(), usize::from(!held));
+        assert!(fake.uploads.borrow().is_empty());
+        // Even a periodic build must not pull a trusted head at or behind the cursor.
+        for last in [2, 3] {
+            let mut state = State::load(&*lib.connection().unwrap(), &endpoint, "artists").unwrap();
+            state.next_build = 0;
+            state
+                .save(&*lib.connection().unwrap(), &endpoint, "artists")
+                .unwrap();
+            let status = SyncStatus {
+                protocol_version: 1,
+                active: false,
+                library_id: None,
+                domains: vec![],
+                publisher_logs: PublisherLogs::parse(&json!({"artistIntents": {
+                    "last": last, "acknowledgedThrough": 2, "prunedThrough": 0
+                }})),
+            };
+            status_watch::observe(&endpoint, &status, clock + 2, status_watch::Source::Watcher);
+            lib.run_home_with(
+                &fake,
+                "publisher",
+                &endpoint,
+                "artists",
+                now() + chrono::Duration::seconds(2),
+                now().date_naive(),
+                false,
+            )
+            .unwrap();
+            assert_eq!(fake.artist_pulls.borrow().len(), 1);
+        }
+        if held {
+            assert!(fake.requests.borrow().is_empty());
+        }
+    }
 }

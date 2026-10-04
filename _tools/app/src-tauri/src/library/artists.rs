@@ -19,6 +19,33 @@ use super::error::LibraryError;
 use super::revisit::{parse_local_date, parse_utc_timestamp};
 
 pub(crate) const ARTIST_PREFIX: &str = "artist:";
+pub(crate) const ARTISTS_CHANGED_EVENT: &str = "library://artists-changed";
+static ARTISTS_CHANGED: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
+
+pub(crate) fn set_artists_changed_listener(listener: impl Fn() + Send + Sync + 'static) {
+    let _ = ARTISTS_CHANGED.set(Box::new(listener));
+}
+
+pub(crate) fn notify_artists_changed() {
+    if let Some(listener) = ARTISTS_CHANGED.get() {
+        listener();
+    }
+}
+
+/// The fields tablet intents can change, resolving a bare creator key without materializing it.
+pub(super) fn intent_fields(
+    connection: &Connection,
+    id: &str,
+) -> Result<Option<(String, Option<String>, bool, bool)>, LibraryError> {
+    let artist_id = id.strip_prefix(ARTIST_PREFIX);
+    Ok(connection.query_row(
+        "SELECT id, display_name, pinned, hidden FROM artists WHERE id = COALESCE(?1,
+         (SELECT artist_id FROM artist_members WHERE creator_key = ?2))",
+        params![artist_id, id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    ).optional()?)
+}
+
 pub(crate) const UNKNOWN_NONE: &str = "unknown:none";
 pub(crate) const UNKNOWN_SOURCE: &str = "unknown:source";
 const COVER_LIMIT: usize = 12;

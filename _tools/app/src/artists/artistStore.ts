@@ -28,6 +28,12 @@ export function useArtistGateway(): ArtistGateway | null {
   return useOptionalLibrary()?.gateway.artists ?? null;
 }
 
+/** Refresh all mounted artist reads while preserving their last successful results. */
+export function useArtistsChanged(enabled = true) {
+  const gateway = useOptionalLibrary()?.gateway;
+  useEffect(() => enabled ? gateway?.subscribeArtistsChanged?.(invalidateArtists) : undefined, [enabled, gateway]);
+}
+
 /**
  * Last result per read key, per gateway, so a view opened again (back from an artist page)
  * shows what it showed at once and refreshes behind it. Bounded; oldest keys drop first.

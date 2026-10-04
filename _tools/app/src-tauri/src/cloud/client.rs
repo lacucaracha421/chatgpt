@@ -217,9 +217,17 @@ pub(crate) struct PublisherLogs {
     pub catalog_duplicate_decisions: Option<i64>,
     pub release_reads: Option<ReleaseReadsHead>,
     pub upcoming_intents: Option<ReleaseReadsHead>,
+    pub artist_intents: Option<ArtistIntentsHead>,
     pub bindings: Option<BindingsHead>,
     pub personal_edits: Option<i64>,
     pub captures: Option<CapturesHead>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ArtistIntentsHead {
+    pub last: i64,
+    pub acknowledged_through: i64,
+    pub pruned_through: i64,
 }
 
 impl PublisherLogs {
@@ -274,6 +282,13 @@ impl PublisherLogs {
                 })
             }),
             release_reads,
+            artist_intents: block.get("artistIntents").and_then(|value| {
+                Some(ArtistIntentsHead {
+                    last: sequence(value.get("last"))?,
+                    acknowledged_through: sequence(value.get("acknowledgedThrough"))?,
+                    pruned_through: sequence(value.get("prunedThrough"))?,
+                })
+            }),
             bindings,
             personal_edits: head("personalEdits"),
             captures,

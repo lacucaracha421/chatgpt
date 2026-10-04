@@ -104,6 +104,7 @@ function libraryGateway(artists: ArtistGateway, items: AssetSummary[] = []): Lib
     artists,
     // No auto-tag service in these views; a proxy function here would look like a broken gateway.
     autoTags: undefined,
+    subscribeArtistsChanged: undefined,
     listAssets: vi.fn().mockResolvedValue({ items, nextCursor: null, totalCount: items.length }),
     listAssetDateBuckets: vi.fn().mockResolvedValue([]),
     getAsset: vi.fn().mockImplementation(async (id: string) => asset(Number(id.replace(/\D/g, "")) || 0)),
@@ -221,6 +222,27 @@ describe("style recommendation rows", () => {
 });
 
 describe("ArtistHub", () => {
+  it("refreshes background artist edits without blanking the current list and unsubscribes", async () => {
+    const artists = artistGateway();
+    const gateway = libraryGateway(artists);
+    let changed: (() => void) | undefined;
+    const stop = vi.fn();
+    gateway.subscribeArtistsChanged = vi.fn((handler) => { changed = handler; return stop; });
+    const view = render(<LibraryProvider gateway={gateway}>{chrome(<ArtistHub view={{ kind: "artists" }} onNavigate={vi.fn()} privacyMode={false} />)}</LibraryProvider>);
+    const old = await screen.findByRole("button", { name: /^Rin Kagura 12장/ });
+    let resolve!: (value: Awaited<ReturnType<ArtistGateway["list"]>>) => void;
+    vi.mocked(artists.list).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    act(() => changed?.());
+    await waitFor(() => expect(artists.list).toHaveBeenCalledTimes(2));
+    expect(old).toBeInTheDocument();
+    expect(screen.queryByLabelText("작가를 불러오는 중")).not.toBeInTheDocument();
+    await act(async () => resolve({ total: 1, artists: [artist("rin", "Tablet name")] }));
+    expect(await screen.findByRole("button", { name: /^Tablet name 12장/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Rin Kagura 12장/ })).not.toBeInTheDocument();
+    view.unmount();
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
   const renderHub = (view: Extract<AssetView, { kind: "artists" }>, gateway = artistGateway()) => {
     const onNavigate = vi.fn();
     render(<LibraryProvider gateway={libraryGateway(gateway)}>{chrome(<ArtistHub view={view} onNavigate={onNavigate} privacyMode={false} />)}</LibraryProvider>);
@@ -367,6 +389,23 @@ describe("artist pages in the gallery", () => {
       metadataVisible privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} />)}</LibraryProvider>);
     return onViewChange;
   };
+
+  it("refreshes an open artist page on a background event while keeping its summary", async () => {
+    const artists = artistGateway();
+    const gateway = libraryGateway(artists);
+    let changed: (() => void) | undefined;
+    gateway.subscribeArtistsChanged = vi.fn((handler) => { changed = handler; return vi.fn(); });
+    renderPage({ kind: "creator", creatorKey: "artist:moon" }, gateway);
+    const title = await screen.findByRole("heading", { name: "달그림자" });
+    let resolve!: (value: ArtistDetail) => void;
+    vi.mocked(artists.detail).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    act(() => changed?.());
+    await waitFor(() => expect(artists.detail).toHaveBeenCalledTimes(2));
+    expect(title).toBeInTheDocument();
+    await act(async () => resolve({ ...detail, summary: { ...detail.summary, label: "Tablet name", displayName: "Tablet name" } }));
+    expect(await screen.findByRole("heading", { name: "Tablet name" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "달그림자" })).not.toBeInTheDocument();
+  });
 
   it("scopes the gallery to the artist, shows its summary and 다시보기, and saves 작가 편집", async () => {
     const user = userEvent.setup();

@@ -11,7 +11,7 @@ import { Toggle } from "../shared/ui/Toggle";
 import { ArtistThumb, ThumbStrip } from "./ArtistHub";
 import { artistHandle } from "./format";
 import { CheckIcon, MagnifyingGlassIcon, MergeIcon, PencilIcon, PinIcon, PlayIcon, SparklesIcon, XMarkIcon } from "./artistIcons";
-import { invalidateArtists, localDateAndOffset, useArtistGateway, useArtistOverview, useArtistRead, useArtistRevision } from "./artistStore";
+import { invalidateArtists, localDateAndOffset, useArtistGateway, useArtistOverview, useArtistRead, useArtistRevision, useArtistsChanged } from "./artistStore";
 import { UNKNOWN_NONE, UNKNOWN_SOURCE, isUnknownArtist, type ArtistDetail, type ArtistStyleGroup, type ArtistStylePage, type ArtistStyleStatus } from "./types";
 import "./artists.css";
 
@@ -29,6 +29,7 @@ export type ArtistScopeChrome = { title: string; accessory: ReactNode; intro: Re
  * filter chips instead. Returns null for other views.
  */
 export function useArtistScopeChrome(view: AssetView, { onNavigate, onPlay, privacyMode }: { onNavigate?: Navigate; onPlay: () => void; privacyMode: boolean }): ArtistScopeChrome | null {
+  useArtistsChanged(view.kind === "creator");
   const id = view.kind === "creator" ? view.creatorKey : null;
   const artistId = id && !isUnknownArtist(id) ? id : null;
   const { localDate, offsetMinutes } = localDateAndOffset();

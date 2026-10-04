@@ -186,6 +186,16 @@ impl Library {
                         LogPosition::cursor(Some(state.cursor)),
                         Some(state.last_poll.unwrap_or(0)),
                         clock,
+                    ))
+                || (kind == "artists"
+                    && status_watch::artist_intents_head(&endpoint, clock)
+                        .is_some_and(|head| head.last > state.cursor)
+                    && status_watch::log_pending(
+                        &endpoint,
+                        LogKind::ArtistIntents,
+                        LogPosition::cursor(Some(state.cursor)),
+                        Some(state.last_poll.unwrap_or(0)),
+                        clock,
                     ))))
     }
 
@@ -259,7 +269,21 @@ impl Library {
                 Some(state.last_poll.unwrap_or(0)),
                 clock,
             );
-        if !poll && !build_due {
+        let artist_poll = kind == "artists"
+            && match status_watch::artist_intents_head(&endpoint, clock) {
+                Some(head) => {
+                    head.last > state.cursor
+                        && status_watch::log_due(
+                            &endpoint,
+                            LogKind::ArtistIntents,
+                            LogPosition::cursor(Some(state.cursor)),
+                            Some(state.last_poll.unwrap_or(0)),
+                            clock,
+                        )
+                }
+                None => build_due,
+            };
+        if !poll && !artist_poll && !build_due {
             return Ok(());
         }
         // Persist before I/O: a crash or a failing endpoint cannot create a tight retry loop.
@@ -283,9 +307,7 @@ impl Library {
                     }
                 }
             }
-            // Until the shared status watcher exposes artistIntents, receive on every
-            // artists publication pass (including the periodic safety build).
-            if kind == "artists" {
+            if artist_poll {
                 state.last_poll = Some(clock);
                 state.save(&*self.connection()?, &endpoint, kind)?;
                 for _ in 0..3 {
@@ -523,6 +545,18 @@ impl Library {
         page: &ArtistIntentPage,
         now: DateTime<Utc>,
     ) -> Result<(), LibraryError> {
+        self.apply_artist_intents_with_notify(
+            endpoint, page, now, super::artists::notify_artists_changed,
+        )
+    }
+
+    fn apply_artist_intents_with_notify(
+        &self,
+        endpoint: &str,
+        page: &ArtistIntentPage,
+        now: DateTime<Utc>,
+        notify: impl FnOnce(),
+    ) -> Result<(), LibraryError> {
         let mut db = self.connection()?;
         let tx = db.transaction()?;
         let mut state = State::load(&tx, endpoint, "artists")?;
@@ -531,7 +565,9 @@ impl Library {
         }
         page.validate(state.cursor)?;
         let timestamp = now.to_rfc3339();
+        let mut changed = false;
         for item in &page.items {
+            let before = super::artists::intent_fields(&tx, &item.artist_id)?;
             let result = match item.action.as_str() {
                 "rename" => super::artists::set_display_name(
                     &tx,
@@ -558,7 +594,12 @@ impl Library {
                 _ => return Err(LibraryError::InvalidCloudResponse),
             };
             match result {
-                Ok(_) | Err(LibraryError::ArtistNotFound) => {}
+                Ok(id) => {
+                    changed |= before != super::artists::intent_fields(&tx, &id)?;
+                }
+                Err(LibraryError::ArtistNotFound) => {
+                    changed |= before != super::artists::intent_fields(&tx, &item.artist_id)?;
+                }
                 Err(error) => return Err(error),
             }
             state.cursor = item.sequence;
@@ -566,6 +607,10 @@ impl Library {
         state.next_build = 0;
         state.save(&tx, endpoint, "artists")?;
         tx.commit()?;
+        drop(db);
+        if changed {
+            notify();
+        }
         Ok(())
     }
 }
