@@ -2,6 +2,13 @@
 
 This is the archive for completed, superseded, and historical Lakomics work. It is **not** a second backlog. New executable work belongs only in [lakomics-backlog.md](lakomics-backlog.md).
 
+## Closure checkpoint — 2026-10-04 — NSFW running round
+
+- **RUNNING-ROUND-20261003 — NSFW filtering and rollout:** closed by the user on 2026-10-04 (PC/server/tablet NSFW filtering, catalog masking under privacy mode or the filter, AUDIT-20261003 fixes, server deployment of 2026-10-03). Former record:
+
+  > Status: `IN_PROGRESS` — user priority 2026-10-03. Finish shared PC/server/tablet NSFW filtering and mask catalog covers/pages under either privacy mode or the NSFW filter; integrate today's audit fixes, then deploy the server under the running round's authorization.
+  > Committed HEAD does not establish completion of the concurrent changes or deployment. Retain the PC-before-server upload compatibility order from `001b7bd8`.
+
 ## Closure checkpoint — 2026-10-03 backlog reconciliation
 
 Reconciled committed `main` at `adb00569` (full SHA `adb0056910169856969c83cc2bc922e9e79aa29b`). No concurrent worktree code, build/install, deployment, production-data write or Git write is included. These one-line records replace historical narration and obsolete source TODOs; an implementation record can close a slice while its parent ID retains a feature, authorization gate or acceptance check in the [active backlog](lakomics-backlog.md).

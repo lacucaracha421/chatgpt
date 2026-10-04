@@ -146,3 +146,10 @@ A read-only comparison against `HEAD 2f027a63` found the design still sound, but
 - **3 — retire** the personal-edit bridge, publication triggers 0074/0117 and manual publication controls after the retention window.
 
 A partial cutover where the PC keeps overwriting other fields of the same work with full snapshots is not safe; existing data must be preserved completely and every related PC write goes through the outbox or a fence. Rollback after activation stays: pause writes, restore the server authority backup, rebuild replicas; never republish a PC snapshot (the cloud PC backup strips portraits/profiles and is not an authority backup).
+
+## 8. User decisions 2026-10-04 (before slice 1B)
+
+Inventory: [collection-authority-1b-survey-20261004.md](collection-authority-1b-survey-20261004.md).
+1. Provider and import operations that do not yet have authority commands may be temporarily unavailable after activation (fenced with a clear message) instead of blocking 1C on full command coverage.
+2. Changing a work's type is rarely needed: it is not supported under authority (the PC hides or fences it after activation; recreate the work instead). No `changeType` command.
+3. Tablet covers change only by choosing a provider candidate (TMDB/IGDB/Kakao/MangaDex) through the server lookup of slice 2 (the server fetches the chosen image into R2, then `addArtwork` + `selectArtwork`). No uploads of tablet files and no picking from library assets; 1B's tablet editing therefore covers create, rename, basic info and record, and cover editing arrives with slice 2. (User, 2026-10-04, replacing an earlier same-day note about tablet uploads.)

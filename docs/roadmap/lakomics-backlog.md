@@ -6,13 +6,12 @@ Reconciled 2026-10-03 against committed `main` at `adb00569`. Concurrent code ed
 
 ## Current priority
 
-Updated 2026-10-03 at HEAD `adb00569`; order set by the user today. PC remains canonical; tablet follows in the same round.
+Updated 2026-10-04: the NSFW running round is closed (user, 2026-10-04); order otherwise as set by the user on 2026-10-03. Collections authority 1A and tablet artist slice 1 shipped 2026-10-04 (see their sections). PC remains canonical; tablet follows in the same round.
 
-1. **Finish the running round:** NSFW filtering on PC/server/tablet; catalog masking under both privacy mode and the NSFW filter; today's `AUDIT-20261003` fixes; server deployment. Concurrent implementation is outside this committed checkpoint.
-2. **PERF-ALL-001:** measurements first — PC idle residue, PC Collections first open, tablet cold thumbnails/startup, and `PC-POLISH-20261002` item 5. `PERF-20261002`, `MOBILE-PERF-002` and Home measurements are consolidated here.
-3. **USER-REQ-20260924 / USER-REQ-20260926B:** Collections authority slice 1, then tablet Collection creation. Only slice 0 exists (`c38a2bc`); design: [Collection authority](../research/collection-authority-design-20260924.md).
-4. **TABLET-PARITY-001:** tablet Artist-tab rename/hide/edit with PC-equivalent behaviour.
-5. **Remaining work, preserving the previous priority order:** Collections/manga acceptance → Home/artist/AV/calendar acceptance (`USER-REQ-20260927`, `HOME-DASH-001`) → release picker checks (`PC-RELEASE-FEEDBACK-20260929`) → remaining tablet parity → `ARTIST-SUGGEST-001` acceptance → `AUTO-TAG-001` approval → Windows gates (`PC-DECLUTTER-001`, `WIN-SYNC-001`, `VAULT-ENC-001`) → `PC-REVIEW-001` → `CLOUD-POST-001` → `PC-UI-001` / `ARTIST-001` acceptance → `HOME-OPT-001` test debt → `CHAR-AUTO-007`. Other low-priority and held requests retain their order below.
+1. **PERF-ALL-001:** measurements first — PC idle residue, PC Collections first open, tablet cold thumbnails/startup, and `PC-POLISH-20261002` item 5. `PERF-20261002`, `MOBILE-PERF-002` and Home measurements are consolidated here.
+2. **USER-REQ-20260924 / USER-REQ-20260926B:** Collections authority slices 1B (PC write paths + first tablet editing UI) and 1C (separately authorized activation), then tablet Collection creation. 1A (verify-only baseline) shipped and deployed 2026-10-04; design: [Collection authority](../research/collection-authority-design-20260924.md).
+3. **TABLET-PARITY-001:** artist slice 1 (rename/hide/pin, 숨긴 작가) shipped 2026-10-04 in tablet 0.9.15; merge/detach stay PC-only unless the user asks; remaining tablet parity items below.
+4. **Remaining work, preserving the previous priority order:** Collections/manga acceptance → Home/artist/AV/calendar acceptance (`USER-REQ-20260927`, `HOME-DASH-001`) → release picker checks (`PC-RELEASE-FEEDBACK-20260929`) → remaining tablet parity → `ARTIST-SUGGEST-001` acceptance → `AUTO-TAG-001` approval → Windows gates (`PC-DECLUTTER-001`, `WIN-SYNC-001`, `VAULT-ENC-001`) → `PC-REVIEW-001` → `CLOUD-POST-001` → `PC-UI-001` / `ARTIST-001` acceptance → `HOME-OPT-001` test debt → `CHAR-AUTO-007`. Other low-priority and held requests retain their order below.
 
 ## Status legend
 
@@ -37,11 +36,6 @@ Updated 2026-10-03 at HEAD `adb00569`; order set by the user today. PC remains c
 - Production data writes, deployments, device installation, and Git writes still require their own explicit authorization.
 
 # Current implementation and performance
-
-## RUNNING-ROUND-20261003 — NSFW filtering and rollout
-
-Status: `IN_PROGRESS` — user priority 2026-10-03. Finish shared PC/server/tablet NSFW filtering and mask catalog covers/pages under either privacy mode or the NSFW filter; integrate today's audit fixes, then deploy the server under the running round's authorization.
-Committed HEAD does not establish completion of the concurrent changes or deployment. Retain the PC-before-server upload compatibility order from `001b7bd8`.
 
 <a id="perf-all-001--whole-app-benchmark-and-optimization-pass"></a>
 <a id="mobile-perf-002--first-view-thumbnail-latency"></a>
@@ -75,7 +69,7 @@ Status: `HOLD` — after change contracts stabilize, persist browse metadata, cu
 ## USER-REQ-20260924 — Collections authority slice 1
 
 Status: `TODO` — only inactive server slice 0 (`c38a2bc`) exists. Implement slice 1 using [Collection authority design](../research/collection-authority-design-20260924.md); performance requests from this batch are consolidated in `PERF-ALL-001`.
-- **1A (2026-10-04, uncommitted at writing):** verify-only route `POST /v1/collections/authority/staging/verify` (staging v2, TEMP-table projection, digest-only report) and the PC Settings row "컬렉션 서버 이전 점검" with a PC-generated interop fixture. Open for 1B: `selectArtwork` updates selection slots but not the new per-artwork `selected` flag; a production dry run needs a server deploy (separate approval).
+- **1A (2026-10-04, uncommitted at writing):** verify-only route `POST /v1/collections/authority/staging/verify` (staging v2, TEMP-table projection, digest-only report) and the PC Settings row "컬렉션 서버 이전 점검" with a PC-generated interop fixture. 1B inventory and user decisions (fence unsupported provider/import operations after activation, no type change under authority, tablet covers only from provider candidates via slice 2) are in the design doc §8. Open for 1B: `selectArtwork` updates selection slots but not the new per-artwork `selected` flag; a production dry run needs a server deploy (separate approval).
 
 <a id="user-req-20260926b--user-requests-2026-09-26-second-batch"></a>
 ## USER-REQ-20260926B — Tablet Collection creation
@@ -228,6 +222,7 @@ Status: `TODO` — low priority. VCK/kHentai stays default; isolate optional pro
 Status: `TODO` — reported by the user 2026-10-04 on the first Windows release build (`e8b3d774`, WebView2).
 - **Starts in Saving Mode:** the app appears to start in 절약 모드 on first launch although `library-machine.json` has `workload.lightweight = false` and `performance.profile = "main"`. Find what enters the restricted state at startup (`src-tauri/src/workload.rs` recovery window, initial window activity, auto-enter timer) and whether it is Windows-specific.
 - **Tab ghosting:** switching top tabs (에셋, 컬렉션, …) leaves an afterimage of the previous tab. Determine whether it is a WebView2 compositing artefact or the frontend keeping the old view mounted (no-flash rule: keep old content until the new one is ready, but never show both).
+- **Shelf pop-in (user 2026-10-04):** on the Collections shelf the spine appears first and the cover/3D model (game case bake, paperback bake) later. Each shelf item should appear with spine and cover together (no-flash rule), revisits from cache without a second step.
 - **Windows test debt (found 2026-10-04):** `cargo test --lib` on Windows fails 3 `library::collection_source::tests::source_root_*` tests: the stored source root joins `collection-sources/book` with a forward slash, so the path string differs from the native `\` form (functionally tolerated by Windows, but not portable as written). Server `tests.test_media_thumbnail_encode` `test_no_kind_leaves_a_partial_file_behind_on_an_unsupported_source` returns exit 7 instead of 4 under the WSL test venv (Pillow/codec environment; untouched code).
 - **Wrong Collection overview (found 2026-10-04, read-only):** 가치아쿠타 (`8a143d39…`) carries the MangaDex overview of 극락가 (Gokurakugai, same author Sano Yuto) while its Kakao volume data is correct; check the MangaDex binding and whether other works by the same author were matched to the wrong series.
 - **Collections cache should survive (on hold — user 2026-10-04: seems fine after more use):** the user wanted the PC Collections screen to keep its cache instead of rebuilding it (the tablet likely already keeps a durable cache — compare `mobile-client` collection caching with the PC `collection_cache.rs` / frontend Collections loading and game-case bake cache).
