@@ -25,7 +25,8 @@ import {FilmDetails} from './FilmDetails';
 import {CollectionBindings} from './CollectionBindings';
 import type {BindProvider} from './collectionBindingsModel';
 import {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent} from 'react';
-import {afterDecode,arrive,sectionListParts,useAppendArrivals,useCardArrival,useLevelMotion,useSegmentMotion,type CardArrival} from './motion';
+import {afterDecode,arrive,useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from './motion';
+import {cancelSegmentSwap,swapSegment} from '../src/shared/motion/viewSwap';
 import {BellIcon, CalendarIcon, StarIcon, ArrowsUpDownIcon, ChevronLeftIcon, ChevronRightIcon, MagnifyingGlassIcon, RectangleStackIcon, Squares2X2Icon, XMarkIcon} from '@heroicons/react/24/outline';
 import {StarIcon as StarSolid} from '@heroicons/react/24/solid';
 import {Button, Dialog, DialogDescription, EmptyState, IconButton, SectionLabel} from './ui';
@@ -56,7 +57,6 @@ type CollectionTab = CollectionKind | 'av';
 const labels:Record<CollectionTab,string> = KIND_LABEL;
 const TABS:CollectionTab[] = ['game','manga','movie','av'];
 /** A list query has settled on `key`: its first page (or its failure) is on screen. */
-const settledOn=(list:{key:string;busy:boolean},key:string)=>list.key===key&&!list.busy;
 // The detail pane names the work's own maker role rather than a generic "제작자".
 const makerLabels:Record<CollectionKind,string> = {game:'개발사',manga:'작가',movie:'제작사',av:'메이커'};
 
@@ -237,8 +237,9 @@ function WorkCard({work,revision,active,meta=true,caption,onOpen,arriving=false,
   return <button ref={host} className="collection-tile" onClick={()=>onOpen(work.id)}><Artwork item={work} id={collectionCover(work)} revision={revision} active={active} arrival={arrival}/><span className="collection-title">{work.name}</span>{credit&&<span className="collection-credit">{credit}</span>}{(date||tail)&&<span className="collection-card-meta">{tail}{date&&<span className="collection-date numeric">{date}</span>}</span>}</button>;
 }
 
-type ListState={key:string;items:CollectionSummary[];page:CollectionPage|null;next:string|null;busy:boolean;more:boolean;error:string;moreError:string;legacy:boolean};
-const EMPTY_LIST:ListState={key:'',items:[],page:null,next:null,busy:false,more:false,error:'',moreError:'',legacy:false};
+/** `slot` is the slot (type) of the committed list on screen. */
+type ListState={key:string;slot:string;items:CollectionSummary[];page:CollectionPage|null;next:string|null;busy:boolean;more:boolean;error:string;moreError:string;legacy:boolean};
+const EMPTY_LIST:ListState={key:'',slot:'',items:[],page:null,next:null,busy:false,more:false,error:'',moreError:'',legacy:false};
 /** Covers readied before a swap: the S11 portrait first screen (4 columns x 3 rows). */
 const FIRST_SCREEN_COVERS=12;
 /** A swap waits at most this long for the new first screen's covers before it commits. */
@@ -260,7 +261,8 @@ function settleWithin(work:Promise<unknown>,ms:number){
  * publication revision has been read since. A refresh (`key` changes), a new search or filter
  * within the slot, or a revision change while fetching reads the server as before.
  */
-function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:boolean,{slot='',validate,prepare,allowMore=true,warm=false}:{slot?:string;validate?:(page:CollectionPage)=>void;prepare?:(page:CollectionPage,signal:AbortSignal)=>Promise<unknown>;allowMore?:boolean;warm?:boolean}={}) {
+function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:boolean,{slot='',validate,prepare,present,allowMore=true,warm=false}:{slot?:string;validate?:(page:CollectionPage)=>void;prepare?:(page:CollectionPage,signal:AbortSignal)=>Promise<unknown>;
+  /** Shows a slot switch (another type's list replacing the shown one): `apply` commits it. */present?:(apply:()=>void,slot:string)=>void;allowMore?:boolean;warm?:boolean}={}) {
   const [state,setState]=useState<ListState>(EMPTY_LIST);
   const latest=useRef(state);latest.current=state;
   const committed=useRef('');
@@ -271,6 +273,7 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
   const pathRef=useRef(path);pathRef.current=path;
   const validateRef=useRef(validate);validateRef.current=validate;
   const prepareRef=useRef(prepare);prepareRef.current=prepare;
+  const presentRef=useRef(present);presentRef.current=present;
   // Each slot remembers its committed query as it grows.
   useEffect(()=>{
     if(!state.page||state.busy||state.error||state.key!==committed.current||state.key!==key)return;
@@ -284,10 +287,14 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
     const controller=new AbortController();
     firstPending.current=true;
     const firstPage=()=>api<CollectionPage>(pathRef.current(null),controller.signal).then(result=>{validateRef.current?.(result);newest.current=result.revision;return result;});
-    const commit=(result:CollectionPage)=>{committed.current=key;setState({key,items:result.items,page:result,next:result.nextCursor,busy:false,more:false,error:'',moreError:'',legacy:false});};
+    const commit=(result:CollectionPage)=>{committed.current=key;setState({key,slot,items:result.items,page:result,next:result.nextCursor,busy:false,more:false,error:'',moreError:'',legacy:false});};
+    // A slot switch over a shown list goes through `present` (the shared view swap); its commit is
+    // dropped once this request is superseded.
+    const switching=slot!==shownSlot.current&&!!latest.current.page&&!!presentRef.current;
+    const show=(apply:()=>void)=>{const guarded=()=>{if(!controller.signal.aborted)apply();};if(switching)presentRef.current!(guarded,slot);else guarded();};
     const kept=slot!==shownSlot.current?memory.current.get(slot):undefined;
     if(kept?.key===key){
-      committed.current=key;setState(kept);
+      show(()=>{committed.current=key;setState(kept);});
       // Shown at once; re-read quietly only if a newer publication was read since.
       if(kept.page?.revision!==newest.current){
         // A remembered partial list must not fetch its old cursor alongside this first page.
@@ -303,7 +310,7 @@ function useCollectionList(path:(cursor:string|null)=>string,key:string,enabled:
       // The previous list stays until the new first screen is ready (or the cap passes).
       if(swapping&&prepareRef.current)await settleWithin(prepareRef.current(result,controller.signal),SWAP_PREPARE_MS);
       if(controller.signal.aborted)return;
-      commit(result);
+      show(()=>commit(result));
     }).catch(reason=>{if(controller.signal.aborted)return;const legacy=(reason as {status?:number}).status===404;setState(current=>({...current,busy:false,legacy,error:legacy?'':errorText(reason)}));}).finally(()=>{if(!controller.signal.aborted)firstPending.current=false;});
     return()=>{controller.abort();firstPending.current=false;};
   },[key,enabled,nonce]);
@@ -425,8 +432,17 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const [artworks]=useState(()=>new ArtworkMemory());
   const prepareCovers=useCallback((page:CollectionPage,signal:AbortSignal)=>artworks.preload(page.items.slice(0,FIRST_SCREEN_COVERS),page.revision??'',signal),[artworks]);
   const mainKey=JSON.stringify([collectionPath(type,search,false,null,filters),refresh]);
+  // A type switch is a segment switch: the shared view swap moves the new list in from the side of
+  // the chosen type once it commits (covers prepared first); the section bar stays still.
+  const typeOrder=(value:string)=>TABS.indexOf(value as CollectionTab);
+  const shownTab=useRef<string>(type),swapOwner=useRef({}).current;
+  const presentType=useCallback((apply:()=>void,slot:string)=>{
+    const list=listRef.current,from=shownTab.current;
+    swapSegment(swapOwner,{forward:typeOrder(slot)>=typeOrder(from),target:list,still:list?.querySelector<HTMLElement>(':scope > .section-shade-rows, :scope > .ui-section-bar'),commit:()=>{shownTab.current=slot;apply();}});
+  },[swapOwner]);// eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>()=>cancelSegmentSwap(swapOwner),[swapOwner]);
   const main=useCollectionList(cursor=>collectionPath(type,search,false,cursor,filters),mainKey,live||warming,
-    {slot:type,allowMore:live,warm:!live,prepare:live?prepareCovers:undefined,validate:result=>{if(result.ready&&result.filterVersion!==1)throw new Error('별점 필터와 정렬을 사용하려면 서버 업데이트가 필요합니다.');}});
+    {slot:type,allowMore:live,warm:!live,prepare:live?prepareCovers:undefined,present:live?presentType:undefined,validate:result=>{if(result.ready&&result.filterVersion!==1)throw new Error('별점 필터와 정렬을 사용하려면 서버 업데이트가 필요합니다.');}});
   const wantShowcase=live;
   const showcaseKey=JSON.stringify([collectionPath(type,'',true,null),refresh]);
   const showcase=useCollectionList(cursor=>collectionPath(type,'',true,cursor),showcaseKey,wantShowcase,{slot:type,prepare:prepareCovers});
@@ -563,8 +579,9 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
 
   // Works and performers remain navigation levels; shortcuts use the overlay motion.
   useLevelMotion(sectionRef,active?performer?.id??'':null,performer?1:0);
-  // A type switch swaps the committed list sideways; the section bar stays still.
-  useSegmentMotion(listRef,tab==='av'||settledOn(main,mainKey)?tab:null,(privacyMode?TABS.filter(value=>value!=='av'):TABS).indexOf(tab),sectionListParts);
+  // The list body follows the committed list's type, so a switch to or from AV keeps the old list
+  // painted until the new one swaps in.
+  const listTab=(main.slot||tab) as CollectionTab;
   // The grid keeps the layout of the type it shows until the new type's page commits.
   const shownType=main.items[0]?.type??type;
   // Cards appended by scrolling rise in once each; a committed first page (a type switch, a
@@ -594,7 +611,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
   const collectionTypeLabel=<SectionLabel as="h2" className="collection-type-label" title={filtered?'검색 결과':labels[type]} count={!filtered&&main.page?.totalCount!=null ? main.page.totalCount : undefined} />;
   const typeHeader=<div className="collection-section collection-all"><div className="collection-type-header">{collectionTypeLabel}</div></div>;
   const mainOrder=main.items.map(work=>work.id);
-  const worksView=workList(main.items,shownType,`${labels[type]} 작품 목록`,revision,listActive,mainArrivals);
+  const worksView=workList(main.items,shownType,`${labels[listTab]} 작품 목록`,revision,listActive,mainArrivals);
   // The opened work as the shared work screen, its information as the section below the stage.
   const visibleScore=(work:CollectionDetail)=>edits.visible(work.id,'myScore',work.myScore??null).value;
   const visibleRecord=(work:CollectionDetail)=>workRecordFacts(work,edits);
@@ -625,7 +642,7 @@ export function Collections({active,prefetch=false,paused,backRef,request,onRetu
     <div ref={listRef} className="collection-scroll" {...shelfPutDown} inert={overlayOpen||undefined} aria-hidden={overlayOpen||undefined} style={{display:performer?'none':undefined}} onScroll={event=>{listScroll.current=event.currentTarget.scrollTop;if(nearEnd(event.currentTarget))main.loadMore();}}>
       {listPull}
       {sections.inline}
-      {tab==='av'?<>
+      {listTab==='av'?<>
       <AvLookupSender/>
       {main.error&&<div className="error-message" role="alert">{main.error}<Button variant="ghost" onClick={main.reload}>처음부터 새로고침</Button></div>}
       {unpublished(main)?unpublishedNotice:(main.busy&&!main.committed)||showAvLoading?showAvLoading&&<p className="hint" role="status">AV 컬렉션을 불러오는 중…</p>:main.committed&&!main.items.length?<EmptyState icon={RectangleStackIcon} title="PC 앱이 AV 작품을 아직 보내지 않았습니다" />:<>

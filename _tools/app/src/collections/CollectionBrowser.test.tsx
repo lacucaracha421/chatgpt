@@ -5,7 +5,7 @@ vi.mock("./physical/collectibleRuntime", async (importOriginal) => ({
   attachLiveBook: (_host: unknown, _request: unknown, onReady: (value: boolean) => void) => { onReady(false); return { tilt: () => undefined, refresh: () => undefined, dispose: () => undefined }; },
 }));
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -136,6 +136,32 @@ describe("CollectionBrowser", () => {
     expect(status.querySelector(".collection-toolbar__spine-spinner")).toHaveAttribute("aria-hidden", "true");
     expect(within(status.closest(".collection-toolbar__spine-progress") as HTMLElement).getByRole("button", { name: "취소" })).toBeInTheDocument();
   });
+  it("switches types through the shared view swap: the old list stays until the new type commits in the snapshot", async () => {
+    const transitions: { update: () => void; finish(): void }[] = [];
+    Object.defineProperty(document, "startViewTransition", { configurable: true, value: (update: () => void) => {
+      let finish!: () => void; const finished = new Promise<void>(resolve => { finish = resolve; });
+      transitions.push({ update, finish: () => finish() });
+      return { ready: Promise.resolve(), finished, updateCallbackDone: Promise.resolve(), skipTransition() {} };
+    } });
+    try {
+      const onViewChange = vi.fn();
+      renderBrowser({ collections: [sample], typeFilter: "manga", showcase: false, onViewChange });
+      const stage = document.querySelector(".collection-browser__list-scroll") as HTMLElement;
+      fireEvent.click(within(screen.getByRole("radiogroup", { name: "컬렉션 유형" })).getByRole("radio", { name: "게임" }));
+      // Nothing commits before the browser holds the old frame; the list moves, its section bar stays.
+      expect(onViewChange).not.toHaveBeenCalled();
+      expect(document.documentElement).toHaveAttribute("data-view-swap", "back");
+      expect(stage).toHaveAttribute("data-view-swap-target");
+      expect(stage.querySelector(":scope > .ui-section-bar")).toHaveAttribute("data-view-swap-still");
+      act(() => transitions[0].update());
+      expect(onViewChange).toHaveBeenCalledOnce();
+      expect(onViewChange).toHaveBeenCalledWith({ kind: "collections", typeFilter: "game", showcase: false });
+      await act(async () => transitions[0].finish());
+      expect(document.documentElement).not.toHaveAttribute("data-view-swap");
+      expect(stage).not.toHaveAttribute("data-view-swap-target");
+    } finally { Reflect.deleteProperty(document, "startViewTransition"); }
+  });
+
   it("puts the types in the section bar with sort, rating and view at its right end", async () => {
     const defaults = createDefaultCollectionLibraryState();
     renderBrowser({ collections: [sample], typeFilter: "game", showcase: false, libraryState: defaults.game });

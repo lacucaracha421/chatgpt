@@ -555,32 +555,44 @@ describe('read-only collections',()=>{
     await waitFor(()=>expect(listPaths().at(-1)).toContain('type=manga'));
     expect(within(list()).getByRole('radio',{name:'만화'}).getAttribute('aria-checked')).toBe('true');
   });
-  it('swaps the list sideways toward the chosen type only once its page commits',async()=>{
-    const animate=vi.fn(()=>({cancel(){}}));(HTMLElement.prototype as unknown as {animate:unknown}).animate=animate;
+  it('swaps the list through the shared view swap toward the chosen type, only once its page commits',async()=>{
+    const transitions:{update:()=>void;finish():void}[]=[];
+    Object.defineProperty(document,'startViewTransition',{configurable:true,value:(update:()=>void)=>{
+      let finish!:()=>void;const finished=new Promise<void>(resolve=>{finish=resolve;});
+      transitions.push({update,finish:()=>finish()});
+      return {ready:Promise.resolve(),finished,updateCallbackDone:Promise.resolve(),skipTransition(){}};
+    }});
+    const step=async()=>{await waitFor(()=>expect(transitions.at(-1)).toBeDefined());const last=transitions.at(-1)!;act(()=>last.update());await act(async()=>last.finish());};
     try{
       render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-      expect(animate).not.toHaveBeenCalled();
+      expect(transitions).toHaveLength(0);
       const switcher=screen.getByRole('radiogroup',{name:'컬렉션 유형'});
       expect(switcher.classList.contains('ui-segmented')).toBe(true);
       let resolveManga!:(value:CollectionPage)=>void;
       mocks.api.mockImplementation((path:string)=>path.includes('type=manga')&&!path.includes('showcase=true')?new Promise(resolve=>{resolveManga=resolve;}):path.includes('type=av')?Promise.resolve({...page,items:[]}):Promise.resolve(page));
       pressTab('만화');await act(async()=>{});
-      // Still loading: the game list stays put rather than sliding in stale.
-      expect(animate).not.toHaveBeenCalled();
+      // Still loading: the game list stays put and no transition starts.
+      expect(transitions).toHaveLength(0);expect(screen.getByText('밤의 도서관')).toBeTruthy();
       await act(async()=>resolveManga({...page,items:[{...item,id:'manga-2',type:'manga',name:'새 만화'}]}));
-      await screen.findByText('새 만화');
-      const moves=animate.mock.calls as unknown as [Keyframe[],KeyframeAnimationOptions][];
-      // The list's rows slide; its first row, the section bar, stays still.
-      const moved=animate.mock.contexts as unknown as HTMLElement[];
-      expect(moved.length).toBeGreaterThan(0);
-      expect(moved.every(element=>element.parentElement===list()&&!element.matches('.ui-section-bar,.section-shade-rows,.pull-refresh,.mobile-scrubber'))).toBe(true);
-      expect(moves.every(move=>move[0][0].transform==='translateX(16px)')).toBe(true);
-      // AV lies to the right as well; back to 게임 comes in from the left.
-      pressTab('AV');await screen.findByText('PC 앱이 AV 작품을 아직 보내지 않았습니다');
-      expect(moves.at(-1)![0][0].transform).toBe('translateX(16px)');
-      pressTab('게임');await screen.findByText('밤의 도서관');
-      await waitFor(()=>expect(moves.at(-1)![0][0].transform).toBe('translateX(-16px)'));
-    }finally{delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;}
+      await waitFor(()=>expect(transitions).toHaveLength(1));
+      // The browser holds the old frame: the old list is still there, the list is the named part
+      // and its section bar stays still.
+      expect(screen.getByText('밤의 도서관')).toBeTruthy();expect(screen.queryByText('새 만화')).toBeNull();
+      expect(document.documentElement.getAttribute('data-view-swap')).toBe('forward');
+      expect(list().hasAttribute('data-view-swap-target')).toBe(true);
+      expect(list().querySelector(':scope > .section-shade-rows, :scope > .ui-section-bar')?.hasAttribute('data-view-swap-still')).toBe(true);
+      await step();
+      expect(screen.getByText('새 만화')).toBeTruthy();expect(document.documentElement.hasAttribute('data-view-swap')).toBe(false);
+      // AV lies to the right as well: the manga list stays until the AV list commits.
+      pressTab('AV');await waitFor(()=>expect(transitions).toHaveLength(2));
+      expect(document.documentElement.getAttribute('data-view-swap')).toBe('forward');
+      expect(screen.getByText('새 만화')).toBeTruthy();
+      await step();await screen.findByText('PC 앱이 AV 작품을 아직 보내지 않았습니다');
+      // Back to the games comes in from the left.
+      pressTab('게임');await waitFor(()=>expect(transitions).toHaveLength(3));
+      expect(document.documentElement.getAttribute('data-view-swap')).toBe('back');
+      await step();await screen.findByText('밤의 도서관');
+    }finally{Reflect.deleteProperty(document,'startViewTransition');}
   });
   it('shows the AV tab and requests the deployed AV collection type',async()=>{
     render(<Collections active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');

@@ -2,6 +2,7 @@ import {afterEach,beforeEach,describe,it,expect,vi} from 'vitest';
 import {act,cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {Catalog} from './Catalog';
+import {forgetCatalogCovers} from './CatalogCover';
 import {suggestionQuery,type CatalogItem,type CatalogPage} from './catalogModel';
 import * as catalogMedia from './catalogMedia';
 /** Search lives behind the top bar's magnifier; open it once, then use the field. */
@@ -27,7 +28,7 @@ beforeEach(()=>{Object.defineProperty(window,'innerWidth',{configurable:true,val
 const CHOICES:Record<string,string>={korean:'한국어',japanese:'일본어',all:'전체 언어',latest:'최신순',views:'조회순',hotDay:'오늘 인기',hotWeek:'이번 주 인기',hotMonth:'이번 달 인기'};
 /** Open a chip's sheet and pick one option, as a user does. */
 function choose(group:'카탈로그 언어'|'카탈로그 정렬',value:string){fireEvent.click(screen.getByRole('button',{name:new RegExp(`^${group}`)}));fireEvent.click(screen.getByRole('radio',{name:CHOICES[value]}));}
-afterEach(()=>{cleanup();vi.unstubAllGlobals();});
+afterEach(()=>{cleanup();forgetCatalogCovers();vi.unstubAllGlobals();});
 describe('catalog cover retention',()=>{
   const preview='https://app.lakomics.local/media-cache/cover';
   const props={active:true,paused:false,backRef:{current:null}};
@@ -92,8 +93,13 @@ describe('catalog cover retention',()=>{
     choose('카탈로그 언어','japanese');
     await waitFor(()=>expect(requests()).toHaveLength(2));expect(document.querySelector('.catalog-card')).toBe(card);
     expect(requests()[1][1]).toMatchObject({workId:work.providerWorkId,url:work.thumbnailUrl,revision});
+    // The replaced list waits for its first covers at most 250 ms (the PC's first-viewport cap);
+    // once it commits with this cover still on its way, the card never shows its old source.
+    await act(()=>new Promise(resolve=>setTimeout(resolve,300)));
     expect(image()).toBeNull();
     await act(async()=>next.resolve({url:`${preview}-new`}));expect(image()?.src).toBe(`${preview}-new`);
+    // The card joined the preparation's request instead of asking again.
+    expect(requests()).toHaveLength(2);
   });
 
   it('ignores an old source reply after the same mounted card changes source',async()=>{
@@ -788,7 +794,7 @@ describe('appended card arrival',()=>{
   const animate=vi.fn();
   beforeEach(()=>{animate.mockReset();(HTMLElement.prototype as unknown as {animate:unknown}).animate=function(this:HTMLElement,...args:unknown[]){animate(this,...args);};});
   afterEach(()=>{delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
-  it('swaps to 북마크 like the Collections segment, only once the bookmarked list has committed',async()=>{
+  it('swaps to 북마크 through the shared view swap, only once the bookmarked list has committed',async()=>{
     let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});
     const marked:CatalogItem={...item,providerWorkId:'77',groupId:'group-77',title:'북마크한 작품'};
     (HTMLElement.prototype as unknown as {animate:unknown}).animate=function(this:HTMLElement,...args:unknown[]){animate(this,...args);return {cancel(){},finish(){}};};
@@ -798,20 +804,78 @@ describe('appended card arrival',()=>{
       if(path.includes('scope=bookmarked')){await held;return {...page,items:[marked]};}
       return page;
     });
-    render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
-    const list=document.querySelector('.catalog-scroll') as HTMLElement;
-    const swaps=()=>animate.mock.calls.filter(([element,frames])=>(element as HTMLElement).parentElement===list&&String((frames as Keyframe[])[0]?.transform).startsWith('translateX'));
-    animate.mockClear();
-    fireEvent.click(within(screen.getByRole('radiogroup',{name:'카탈로그 출처'})).getByRole('radio',{name:'북마크'}));
-    await act(async()=>{});
-    // The old list stays and nothing slides over it while the bookmarked page loads.
-    expect(swaps()).toHaveLength(0);
-    await act(async()=>{release();});
-    await screen.findByText('북마크한 작품');
-    expect(swaps().length).toBeGreaterThan(0);
-    expect((swaps()[0][1] as Keyframe[])[0]).toMatchObject({transform:'translateX(16px)',opacity:.5});
-    // The section bar itself does not move.
-    expect(swaps().some(([element])=>(element as HTMLElement).matches('.section-shade-rows,.ui-section-bar'))).toBe(false);
+    // The shared view swap (src/shared/motion/viewSwap.ts) with a held browser transition.
+    const transitions:{update:()=>void;finish():void}[]=[];
+    Object.defineProperty(document,'startViewTransition',{configurable:true,value:(update:()=>void)=>{
+      let finish!:()=>void;const finished=new Promise<void>(resolve=>{finish=resolve;});
+      transitions.push({update,finish:()=>finish()});
+      return {ready:Promise.resolve(),finished,updateCallbackDone:Promise.resolve(),skipTransition(){}};
+    }});
+    try {
+      render(<Catalog active paused={false} backRef={{current:null}}/>);await screen.findByText('밤의 도서관');
+      const list=document.querySelector('.catalog-scroll') as HTMLElement;
+      fireEvent.click(within(screen.getByRole('radiogroup',{name:'카탈로그 출처'})).getByRole('radio',{name:'북마크'}));
+      await act(async()=>{});
+      // The old list stays, untouched, while the bookmarked page loads.
+      expect(transitions).toHaveLength(0);expect(screen.getByText('밤의 도서관')).toBeTruthy();
+      await act(async()=>{release();});
+      await waitFor(()=>expect(transitions).toHaveLength(1));
+      // The browser holds the old frame: nothing has committed yet, the list and only it is named.
+      expect(screen.getByText('밤의 도서관')).toBeTruthy();expect(screen.queryByText('북마크한 작품')).toBeNull();
+      expect(document.documentElement.getAttribute('data-view-swap')).toBe('forward');
+      expect(list.hasAttribute('data-view-swap-target')).toBe(true);
+      expect(list.querySelector(':scope > .section-shade-rows')?.hasAttribute('data-view-swap-still')).toBe(true);
+      // The new list commits once, inside the snapshot callback.
+      act(()=>transitions[0].update());
+      expect(screen.getByText('북마크한 작품')).toBeTruthy();expect(screen.queryByText('밤의 도서관')).toBeNull();
+      await act(async()=>transitions[0].finish());
+      expect(document.documentElement.hasAttribute('data-view-swap')).toBe(false);
+      expect(list.hasAttribute('data-view-swap-target')).toBe(false);
+      // Back to 카탈로그: the cached list swaps in from the other side.
+      fireEvent.click(within(screen.getByRole('radiogroup',{name:'카탈로그 출처'})).getByRole('radio',{name:'카탈로그'}));
+      await waitFor(()=>expect(transitions).toHaveLength(2));
+      expect(document.documentElement.getAttribute('data-view-swap')).toBe('back');
+      act(()=>transitions[1].update());await act(async()=>transitions[1].finish());
+      expect(screen.getByText('밤의 도서관')).toBeTruthy();
+    } finally {Reflect.deleteProperty(document,'startViewTransition');}
+  });
+  it('switches 카탈로그 ⇄ 북마크 with covers already painted, and does not reload covers it just showed',async()=>{
+    vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{target,isIntersecting:true} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} unobserve(){} disconnect(){}});
+    (HTMLElement.prototype as unknown as {animate:unknown}).animate=function(this:HTMLElement,...args:unknown[]){animate(this,...args);return {cancel(){},finish(){},pause(){},play(){}};};
+    const library:CatalogItem={...item,providerWorkId:'40',groupId:'group-40',title:'서고의 밤',thumbnailUrl:'https://example.test/40.jpg'};
+    const marked:CatalogItem={...item,providerWorkId:'77',groupId:'group-77',title:'북마크한 작품',thumbnailUrl:'https://example.test/77.jpg'};
+    const tickets=new Map<string,number>();
+    vi.spyOn(catalogMedia,'catalogImageTicket').mockImplementation(async request=>{
+      const seen=tickets.get(request.workId)??0;tickets.set(request.workId,seen+1);
+      // A cover asked for a second time never answers: a shown cover must come back from memory.
+      if(seen)return new Promise<never>(()=>{});
+      return {url:`data:image/png;base64,${request.workId}`} as Awaited<ReturnType<typeof catalogMedia.catalogImageTicket>>;
+    });
+    mocks.api.mockImplementation(async(path:string)=>{
+      if(path.includes('/status'))return capableStatus;
+      if(path.includes('/count?'))return {publicationRevision:'p1',totalCount:1};
+      return path.includes('scope=bookmarked')?{...page,items:[marked]}:{...page,items:[library]};
+    });
+    // Every time a card is on screen, its cover must already be there: no empty box, no pop-in.
+    const blank:string[]=[];
+    const watch=new MutationObserver(()=>{for(const card of document.querySelectorAll<HTMLElement>('.catalog-card'))if(!card.querySelector('.catalog-cover-image img'))blank.push(card.textContent??'');});
+    watch.observe(document.body,{subtree:true,childList:true});
+    try {
+      render(<Catalog active paused={false} backRef={{current:null}}/>);
+      const first=(await screen.findByText('서고의 밤')).closest('.catalog-card') as HTMLElement;
+      await waitFor(()=>expect(first.querySelector('img')).not.toBeNull());
+      blank.length=0;
+      const sources=()=>within(screen.getByRole('radiogroup',{name:'카탈로그 출처'}));
+      fireEvent.click(sources().getByRole('radio',{name:'북마크'}));
+      await screen.findByText('북마크한 작품');
+      await act(async()=>{});
+      expect(blank).toEqual([]);
+      fireEvent.click(sources().getByRole('radio',{name:'카탈로그'}));
+      await screen.findByText('서고의 밤');
+      await act(async()=>{});
+      expect(blank).toEqual([]);
+      expect((screen.getByText('서고의 밤').closest('.catalog-card') as HTMLElement).querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,40');
+    } finally {watch.disconnect();}
   });
   it('never hides or fades the late cover after the appended card timeout',async()=>{
     vi.stubGlobal('IntersectionObserver',class{constructor(private callback:IntersectionObserverCallback){} observe(target:Element){this.callback([{target,isIntersecting:true} as IntersectionObserverEntry],this as unknown as IntersectionObserver);} unobserve(){} disconnect(){}});

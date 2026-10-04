@@ -3,6 +3,7 @@ import {act,cleanup,fireEvent,render} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {AreaSwitch,MotionScope,READY_CAP_MS,viewReady} from '../src/shared/motion/AreaSwitch';
 import {Catalog} from './Catalog';
+import {forgetCatalogCovers} from './CatalogCover';
 import {Collections} from './Collections';
 import {AREA_PREWARM_IDLE_MS,useAreaPrewarm} from './useAreaPrewarm';
 import {usePrivacyMode} from './privacyMode';
@@ -68,7 +69,7 @@ beforeEach(()=>{
     return {items:[],revision:'r1'};
   });
 });
-afterEach(()=>{cleanup();vi.unstubAllGlobals();vi.useRealTimers();delete (HTMLElement.prototype as {animate?:unknown}).animate;});
+afterEach(()=>{cleanup();forgetCatalogCovers();vi.unstubAllGlobals();vi.useRealTimers();delete (HTMLElement.prototype as {animate?:unknown}).animate;});
 
 it('does no mounting or requests before paint and idle, then fetches only one first page per hidden area',async()=>{
   render(<Shell/>);

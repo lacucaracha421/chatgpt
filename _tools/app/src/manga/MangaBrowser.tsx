@@ -20,6 +20,7 @@ import { OnlineCatalogBrowser } from "./OnlineCatalogBrowser";
 import { MangaCard, MangaSkeletonGrid } from "./MangaCard";
 import { MangaToolbar, MangaChoiceMenu, type MangaSource } from "./MangaToolbar";
 import { createKoreanMatcher } from "../shared/koreanSearch";
+import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
 
 type MangaSort = "recent" | "title_asc" | "author_asc" | "pages_desc";
 
@@ -65,10 +66,22 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
     if (next === "local") { setLocalVisited(true); setSource("local"); }
     else { setOnlineScope(next); setOnlineVisited(true); setSource("online"); }
   }
+  // Local and online are one segment switch: the shown screen stays until the other is ready, then the
+  // shared view swap moves it in from the side of the chosen source, with the source bar still.
+  const onlineScreen = useRef<HTMLDivElement>(null), localScreen = useRef<HTMLElement>(null);
+  const displayedRef = useRef(displayedSource); displayedRef.current = displayedSource;
+  const sourceSwap = useRef({}).current;
+  useEffect(() => () => cancelSegmentSwap(sourceSwap), [sourceSwap]);
   useEffect(() => {
-    if (source === "local" && (root === null || series !== null || loadError)) setDisplayedSource("local");
-    if (source === "online" && onlineReadyScope === onlineScope) setDisplayedSource("online");
-  }, [source, root, series, loadError, onlineReadyScope, onlineScope]);
+    const next = source === "local" && (root === null || series !== null || loadError) ? "local"
+      : source === "online" && onlineReadyScope === onlineScope ? "online" : null;
+    if (!next) return;
+    if (next === displayedRef.current) { cancelSegmentSwap(sourceSwap); setDisplayedSource(next); return; }
+    const screens = [onlineScreen.current, localScreen.current];
+    swapSegment(sourceSwap, { forward: next === "online", target: screens,
+      still: screens.flatMap(screen => screen ? [...screen.querySelectorAll<HTMLElement>(".manga-section-bar.ui-section-bar--inline")] : []),
+      commit: () => setDisplayedSource(next) });
+  }, [source, root, series, loadError, onlineReadyScope, onlineScope, sourceSwap]);
   const previousSource = useRef(displayedSource);
   useLayoutEffect(() => {
     if (previousSource.current !== displayedSource) {
@@ -201,13 +214,13 @@ export function MangaBrowser({ onOpenSeries }: MangaBrowserProps) {
     }} />;
   return <>
     {workspace?.targets.navigation && createPortal(index, workspace.targets.navigation)}
-    {onlineVisited && <div className="manga-browser__screen" style={{ display: displayedSource === "online" ? undefined : "none" }}>
+    {onlineVisited && <div ref={onlineScreen} className="manga-browser__screen" style={{ display: displayedSource === "online" ? undefined : "none" }}>
       <OnlineCatalogBrowser initialScope={onlineScope} requestedSource={source === "local" ? "local" : onlineScope}
         onBookmarksChanged={() => setBookmarkRevision(n => n + 1)} indexFilter={indexFilter} onClearIndexFilter={() => setIndexFilter(null)}
         active={displayedSource === "online"} onSourceChange={selectSource} onSwitchLocal={() => selectSource("local")}
         onReady={onlineReady} localCount={series?.length} bookmarkCount={bookmarkCount} onBookmarkCount={setBookmarkCount} />
     </div>}
-    {localVisited && <section className="manga-browser manga-browser__screen" aria-label="망가" style={{ display: localActive ? undefined : "none" }}>
+    {localVisited && <section ref={localScreen} className="manga-browser manga-browser__screen" aria-label="망가" style={{ display: localActive ? undefined : "none" }}>
     {localActive && <MangaToolbar source={source === "local" ? "local" : onlineScope} onSourceChange={selectSource}
       localCount={series?.length} bookmarkCount={bookmarkCount} countLabel={series ? countLabel : undefined}
       refreshedAt={refreshedAt} refreshing={scanning} onRefresh={root ? () => void refreshSeries() : undefined}

@@ -71,7 +71,10 @@ import type {LibraryArtist} from './artistsModel';
 import {CharacterBrowser} from './CharacterBrowser';
 import {FaultGame} from './FaultGame';
 import {faultCandidates} from '../src/games/fault/host';
-import {useLayerCovered,useLevelMotion,useScrollMemory,useSegmentMotion} from './motion';
+import {useLayerCovered,useLevelMotion,useScrollMemory} from './motion';
+import {swapSegment} from '../src/shared/motion/viewSwap';
+import {IMAGE_READY_CAP_MS} from '../src/shared/motion/viewportImages';
+import {readyFirstScreen} from './firstScreen';
 import {useMotionSurface} from '../src/shared/ui/useMotionSurface';
 import {setOutboxConnection} from './outboxConnection';
 import {useNsfwFilter,usePrivacyMode} from './privacyMode';
@@ -102,8 +105,8 @@ async function readPage(view:View,cursor:string|null,filters:AssetFiltersValue,s
 function store(key: string, value: unknown) { try {localStorage.setItem(key, JSON.stringify(value));} catch { /* Optional device preference. */ } }
 type HomeOrigin = {area:'collections'|'notes'|'catalog'} | {area:'library';entry:string;scroll:number};
 type Committed = Page & AssetTocPage & {generation:string|null; view: View; cursor: string | null; previous: (string | null)[]; version: number; restoreScroll: number; filters: AssetFiltersValue};
-/** The asset gallery's tiles (not its intro rows), which a 종류 switch slides. */
-const galleryTiles=(host:HTMLElement)=>Array.from(host.querySelectorAll<HTMLElement>(':scope > .gallery-scroll > .gallery-canvas'));
+/** Owner of the gallery's kind switch in the shared view swap. */
+const KIND_SWAP={};
 
 export function App() {
   const [area,setArea] = useState<'assets'|'collections'|'catalog'|'notes'>('assets');
@@ -348,12 +351,26 @@ export function App() {
       if (filtered && !synthetic && response.filter_version !== ASSET_FILTER_VERSION)
         throw new Error('자산 필터 응답을 확인할 수 없습니다. 서버를 업데이트해 주세요.');
       observedGeneration.current=generation;
-      const items = response.items;
+      if (!gate.current.current(request.id)) return;
+      // A kind switch (all / images / videos) in the shown place is a segment switch: the old tiles stay
+      // until the new first screen's thumbnails are decoded (capped), then the shared view swap moves
+      // the new page in from the side of the chosen kind, with the kind row still.
+      const shownPage = latest.current.page;
+      const kindSwitch = view.tab === 'library' && cursor === null && shownPage.version > 0 && viewKey(shownPage.view) === viewKey(view) && shownPage.filters.media !== nextFilters.media;
+      const items = kindSwitch ? await readyFirstScreen(response.items, request.signal, 24, IMAGE_READY_CAP_MS) : response.items;
       if (!gate.current.current(request.id)) return;
       const restored = cached && restore === 0 ? cached.restoreScroll : restore;
-      scroll.current = restored;
-      setFilters(nextFilters);setFiltersOpen(null);
-      setPage({ ...response, items, view, cursor, previous, restoreScroll:restored, generation, version:request.id, filters:nextFilters, tocRequest, ...(cached?.assetRanges?{assetRanges:cached.assetRanges}:{}) });
+      const apply = () => {
+        if (!gate.current.current(request.id)) return;
+        scroll.current = restored;
+        setFilters(nextFilters);setFiltersOpen(null);
+        setPage({ ...response, items, view, cursor, previous, restoreScroll:restored, generation, version:request.id, filters:nextFilters, tocRequest, ...(cached?.assetRanges?{assetRanges:cached.assetRanges}:{}) });
+      };
+      if (kindSwitch) {
+        const order = (media: AssetFiltersValue['media']) => MEDIA_SECTIONS.findIndex(section => section.value === media);
+        const scroller = mainRef.current?.querySelector<HTMLElement>(':scope > .gallery-scroll');
+        swapSegment(KIND_SWAP, {forward: order(nextFilters.media) >= order(shownPage.filters.media), target: scroller, still: scroller?.querySelector<HTMLElement>(':scope > .gallery-intro'), commit: apply});
+      } else apply();
       return true;
     } catch (reason) { if (gate.current.current(request.id)) {
       const recovered=await recoverSearch(view,reason,request.signal);
@@ -811,9 +828,6 @@ export function App() {
   useLevelMotion(mainRef,libraryLevel?libraryLevelKey:null,libraryLevel?levelDepth(page.view):0,false);
   const folderPath=page.view.album&&albumTree?[...albumAncestors(albumTree.albums,page.view.album.id).map(album=>`album:${album.id}`),`album:${page.view.album.id}`]
     :currentEntry?[...ancestorsOf(entries,currentEntry.id).map(entry=>entry.id),currentEntry.id]:[viewKey(page.view)];
-  // 전체 · 이미지 · 영상 swaps the tiles like the Collections type segment, once the filtered page has
-  // committed (the old page stays until then); the 종류 row stays put, and a new place does not swap.
-  useSegmentMotion(mainRef,libraryLevel&&filterable?page.filters.media:null,MEDIA_SECTIONS.findIndex(section=>section.value===page.filters.media),galleryTiles,viewKey(page.view));
   // AreaSwitch retains the outgoing tab until the incoming content is ready.
   // Back from a Library entry opened from Home puts Home's scroll offset back once it is shown.
   // Home's cards render from their kept snapshot first, so a second try covers late growth.

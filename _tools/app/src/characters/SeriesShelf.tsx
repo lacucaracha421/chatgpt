@@ -1,13 +1,13 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { flushSync } from "react-dom";
 import { folderMoveEntrance } from "../assets/FolderWave";
 import { waitForViewportImages } from "../shared/motion/viewportImages";
+import { startViewSwap, viewTransitionRunning, viewTransitionsSupported, type ViewSwap } from "../shared/motion/viewSwap";
 
 export const SERIES_SHELF_CAP_MS = 300;
 /** Set on <html> while the shelf owns the document's view transition: "forward" | "back". */
 export const SERIES_VIEW_TRANSITION_ATTRIBUTE = "data-series-view-transition";
 const SHELF_ATTRIBUTE = "data-series-shelf-transition";
-type BrowserSwap = { scope: string; cancelled: boolean; browser?: ViewTransition };
+type BrowserSwap = { scope: string; swap?: ViewSwap | null };
 
 /** Back = the new path is a strict prefix of the old one (group → its series); siblings move forward. */
 const movesBack = (from: readonly string[] | undefined, to: readonly string[] | undefined) =>
@@ -28,9 +28,8 @@ export function SeriesShelf({ scope, path, privacyKey, ready, children }: { scop
   if (!switching) retained.current = { scope, path, privacyKey, children };
   const publish = () => {
     const element = host.current;
-    const root = document.documentElement;
-    if (element && typeof document.startViewTransition === "function" && !clipped(element)) {
-      if (root.hasAttribute("data-area-view-transition")) {
+    if (element && viewTransitionsSupported() && !clipped(element)) {
+      if (viewTransitionRunning(swap.current?.swap)) {
         // One view transition per document: the area entrance already moves this content.
         instant.current = true;
         setShown(scope);
@@ -38,35 +37,22 @@ export function SeriesShelf({ scope, path, privacyKey, ready, children }: { scop
       }
       if (swap.current?.scope === scope) return; // Already requested; its callback commits.
       endSwap();
-      const entry: BrowserSwap = { scope, cancelled: false };
+      const entry: BrowserSwap = { scope };
       swap.current = entry;
-      element.setAttribute(SHELF_ATTRIBUTE, "");
-      root.setAttribute(SERIES_VIEW_TRANSITION_ATTRIBUTE, movesBack(retained.current.path, path) ? "back" : "forward");
-      entry.browser = document.startViewTransition(() => {
-        // skipTransition still invokes the callback; a superseded request must not commit.
-        if (entry.cancelled) return;
-        instant.current = true;
-        flushSync(() => setShown(entry.scope));
-      });
-      const finish = () => { if (swap.current === entry) clearSwap(); };
-      void entry.browser.ready.catch(() => {}); // Skipping rejects ready but still applies the update.
-      void entry.browser.finished.then(finish, finish);
+      // A superseded request is cancelled through the swap, which then never commits.
+      entry.swap = startViewSwap({ attribute: SERIES_VIEW_TRANSITION_ATTRIBUTE, value: movesBack(retained.current.path, path) ? "back" : "forward",
+        target: element, targetAttribute: SHELF_ATTRIBUTE, commit: () => { instant.current = true; setShown(entry.scope); } });
+      void entry.swap?.finished.then(() => { if (swap.current === entry) swap.current = null; });
       return;
     }
     if (switching && typeof next.current?.animate === "function") setExiting(retained.current);
     setShown(scope);
   };
-  const clearSwap = () => {
-    swap.current = null;
-    host.current?.removeAttribute(SHELF_ATTRIBUTE);
-    document.documentElement.removeAttribute(SERIES_VIEW_TRANSITION_ATTRIBUTE);
-  };
   const endSwap = () => {
     const entry = swap.current;
     if (!entry) return;
-    entry.cancelled = true;
-    entry.browser?.skipTransition();
-    clearSwap();
+    swap.current = null;
+    entry.swap?.cancel();
   };
 
   useLayoutEffect(() => {

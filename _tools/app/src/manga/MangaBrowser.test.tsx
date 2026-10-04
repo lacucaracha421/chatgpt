@@ -67,6 +67,36 @@ describe("MangaBrowser", () => {
     expect(screen.queryByLabelText("망가 불러오는 중")).not.toBeInTheDocument();
   });
 
+  it("swaps local and online through the shared view swap, keeping the shown screen until the other commits", async () => {
+    const gateway = createGateway({ root: "C:\\manga", series });
+    gateway.getOnlineCatalogStatus = vi.fn().mockResolvedValue({ installed: true, workCount: 1, updateEnabled: true, updateIntervalSeconds: 3600, lastAttemptAt: null, lastSuccessAt: null, lastAdded: 0, lastError: null });
+    gateway.searchCatalogGroups = vi.fn(async (_query, onEvent) => {
+      onEvent({ type: "page", page: { works: [{ provider: "kHentai", providerWorkId: "1", groupId: 1, versionCount: 1, hasBookmarkedVersion: false, title: "카탈로그 작품", titleJpn: null, artists: [], series: [], thumbnailUrl: null, bookmarked: false, fileCount: 20, views: 0, posted: 1 }], page: 0, pageSize: 48 } });
+      onEvent({ type: "count", totalCount: 1 });
+    });
+    const transitions: { update: () => void; finish(): void }[] = [];
+    try {
+      const { container } = renderBrowser(gateway);
+      expect(await screen.findByText("카탈로그 작품")).toBeVisible();
+      Object.defineProperty(document, "startViewTransition", { configurable: true, value: (update: () => void) => {
+        let finish!: () => void; const finished = new Promise<void>(resolve => { finish = resolve; });
+        transitions.push({ update, finish: () => finish() });
+        return { ready: Promise.resolve(), finished, updateCallbackDone: Promise.resolve(), skipTransition() {} };
+      } });
+      await userEvent.click(screen.getByRole("radio", { name: "로컬" }));
+      await waitFor(() => expect(transitions).toHaveLength(1));
+      // The online screen is still the painted one; local enters from its side (to the left).
+      expect(screen.getByText("카탈로그 작품")).toBeVisible();
+      expect(document.documentElement).toHaveAttribute("data-view-swap", "back");
+      const screens = [...container.querySelectorAll<HTMLElement>(".manga-browser__screen")];
+      expect(screens.every(element => element.hasAttribute("data-view-swap-target"))).toBe(true);
+      act(() => transitions[0].update());
+      expect(await screen.findByText("T1")).toBeVisible();
+      await act(async () => transitions[0].finish());
+      expect(document.documentElement).not.toHaveAttribute("data-view-swap");
+    } finally { Reflect.deleteProperty(document, "startViewTransition"); }
+  });
+
   it("combines an index pick with typed search, holds the old grid, and clears only the index token", async () => {
     const gateway = createGateway({ root: "C:\\manga", series });
     gateway.suggestOnlineCatalog = vi.fn().mockResolvedValue([]);

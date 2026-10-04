@@ -1,6 +1,6 @@
 import {act,cleanup,fireEvent,render,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {CatalogCover} from './CatalogCover';
+import {CatalogCover,forgetCatalogCovers} from './CatalogCover';
 const mocks=vi.hoisted(()=>({ticket:vi.fn()}));
 vi.mock('./catalogMedia',()=>({catalogImageTicket:mocks.ticket}));
 const item={provider:'kHentai' as const,providerWorkId:'42',thumbnailUrl:'https://ehgt.org/42.jpg'};
@@ -27,7 +27,7 @@ beforeEach(()=>{
     disconnect(){this.record.disconnect();}
   });
 });
-afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
+afterEach(()=>{cleanup();forgetCatalogCovers();vi.restoreAllMocks();vi.unstubAllGlobals();delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;});
 it('shares observers and one row measurement for 40 covers, unobserving only removed covers',()=>{
   mocks.ticket.mockReturnValue(new Promise(()=>{}));
   const style=vi.spyOn(window,'getComputedStyle');

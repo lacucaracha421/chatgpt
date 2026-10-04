@@ -8,7 +8,7 @@ vi.mock('./transport',()=>({api:mocks.api,native:mocks.native,errorText:()=> 'co
   ApiError:class ApiError extends Error{status:number|null;details:unknown;constructor(message:string,status:number|null,details:unknown){super(message);this.status=status;this.details=details;}}}));
 vi.mock('./media',()=>({clearMediaCache:vi.fn(),loadThumbnail:vi.fn(async(a)=>a),prepareAssets:()=>new Promise(()=>{})}));
 vi.mock('./Home',()=>({Home:({items,onOpen}:HomeProps)=><div>{items.slice(0,12).map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}</div>}));
-vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,onScroll,restoreScroll,identity}:{intro?:ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;onScroll?(top:number):void;restoreScroll:number;identity:string})=><div className="gallery-scroll" aria-label="자산 목록" data-identity={identity} data-restore={restoreScroll} onScroll={()=>onScroll?.(420)}>{intro}<div className="gallery-canvas">{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}</div><button data-testid="near-end" onClick={onNearEnd}>near end</button></div>}));
+vi.mock('./Gallery',()=>({Gallery:({intro,items,onOpen,onNearEnd,onScroll,restoreScroll,identity}:{intro?:ReactNode;items:Asset[];onOpen(i:number):void;onNearEnd():void;onScroll?(top:number):void;restoreScroll:number;identity:string})=><div className="gallery-scroll" aria-label="자산 목록" data-identity={identity} data-restore={restoreScroll} onScroll={()=>onScroll?.(420)}><div className="gallery-intro">{intro}</div><div className="gallery-canvas">{items.map((a,i)=><button key={a.id} onClick={()=>onOpen(i)}>{`tile-${a.id}`}</button>)}</div><button data-testid="near-end" onClick={onNearEnd}>near end</button></div>}));
 vi.mock('./Viewer',()=>({Viewer:({items,index,onClose}:{items:Asset[];index:number;onClose():void})=><div><span>{`viewer-${items[index].id}`}</span><button onClick={onClose}>viewer close</button></div>}));
 import {App} from './App';
 
@@ -103,26 +103,35 @@ describe('asset filters',()=>{
     expect(lastPagePath()).toContain('duration_ms_max=300000');
   });
 
-  it('swaps the tiles like the Collections segment once the 이미지 page commits, leaving the 종류 row still',async()=>{
-    const animate=vi.fn(()=>({cancel(){},finish(){}}));
-    Object.defineProperty(HTMLElement.prototype,'animate',{configurable:true,value:animate});
+  it('swaps the tiles through the shared view swap once the images page commits, leaving the kind row still',async()=>{
+    const transitions:{update:()=>void;finish():void}[]=[];
+    Object.defineProperty(document,'startViewTransition',{configurable:true,value:(update:()=>void)=>{
+      let finish!:()=>void;const finished=new Promise<void>(resolve=>{finish=resolve;});
+      transitions.push({update,finish:()=>finish()});
+      return {ready:Promise.resolve(),finished,updateCallbackDone:Promise.resolve(),skipTransition(){}};
+    }});
     try {
       let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});
       const server=supporting();
       mocks.api.mockImplementation(async(path:string)=>{if(path.includes('media_kind=images')){await held;return page(['i1']);}return server(path);});
       render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');
-      const swaps=()=>(animate.mock.contexts as HTMLElement[]).filter((element,index)=>element.classList.contains('gallery-canvas')&&String((animate.mock.calls[index] as unknown[] as [Keyframe[]])[0][0]?.transform).startsWith('translateX'));
-      animate.mockClear();
+      const scroller=document.querySelector('.library-main > .gallery-scroll') as HTMLElement;
       chooseIn('미디어','이미지');
       await waitFor(()=>expect(lastPagePath()).toContain('media_kind=images'));
-      // The old tiles stay, unmoved, while the 이미지 page loads.
-      expect(swaps()).toHaveLength(0);expect(screen.getByText('tile-a1')).toBeTruthy();
+      // The old tiles stay while the images page loads.
+      expect(transitions).toHaveLength(0);expect(screen.getByText('tile-a1')).toBeTruthy();
       await act(async()=>{release();});
-      await screen.findByText('tile-i1');
-      expect(swaps()).toHaveLength(1);
-      expect((animate.mock.calls[(animate.mock.contexts as HTMLElement[]).indexOf(swaps()[0])] as unknown[] as [Keyframe[]])[0][0]).toMatchObject({transform:'translateX(16px)',opacity:.5});
-      expect((animate.mock.contexts as HTMLElement[]).some(element=>element.querySelector?.('[role=radiogroup]'))).toBe(false);
-    } finally {delete (HTMLElement.prototype as unknown as {animate?:unknown}).animate;}
+      await waitFor(()=>expect(transitions).toHaveLength(1));
+      // Held old frame: nothing committed yet; the gallery is the moving part, its intro (kind row) stays.
+      expect(screen.getByText('tile-a1')).toBeTruthy();expect(screen.queryByText('tile-i1')).toBeNull();
+      expect(document.documentElement.getAttribute('data-view-swap')).toBe('forward');
+      expect(scroller.hasAttribute('data-view-swap-target')).toBe(true);
+      expect(scroller.querySelector(':scope > .gallery-intro')?.hasAttribute('data-view-swap-still')).toBe(true);
+      act(()=>transitions[0].update());
+      expect(screen.getByText('tile-i1')).toBeTruthy();expect(screen.queryByText('tile-a1')).toBeNull();
+      await act(async()=>transitions[0].finish());
+      expect(document.documentElement.hasAttribute('data-view-swap')).toBe(false);
+    } finally {Reflect.deleteProperty(document,'startViewTransition');}
   });
   it('sends nothing extra until a filter is chosen and summarizes the applied set in the heading',async()=>{
     render(<App/>);fireEvent.click(await screen.findByRole('button',{name:/모든 자산/}));await screen.findByText('tile-a1');

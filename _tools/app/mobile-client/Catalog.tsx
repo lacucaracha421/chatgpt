@@ -3,14 +3,16 @@ import { BusyLabel } from "../src/shared/ui/BusyLabel";
 import {useHorizontalWheel} from '../src/shared/ui/useHorizontalWheel';
 import {usePublicationCheck} from './usePublicationCheck';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,type MutableRefObject,type ReactNode} from 'react';
-import {sectionListParts,useAppendArrivals,useCardArrival,useLevelMotion,useSegmentMotion,type CardArrival} from './motion';
+import {useAppendArrivals,useCardArrival,useLevelMotion,type CardArrival} from './motion';
+import {swapSegment,type ViewSwap} from '../src/shared/motion/viewSwap';
 import {catalogDisplayTitle} from '../src/manga/catalogDisplayTitle';
 import {ArrowLeftIcon,BookmarkIcon,BookOpenIcon,ChevronDownIcon,MagnifyingGlassIcon,FunnelIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {BookmarkIcon as BookmarkSolidIcon} from '@heroicons/react/24/solid';
 import {SearchButton,TopBar,TopBarSearch} from './TopBar';
 import {Button,IconButton} from './ui';
 import {api,errorText} from './transport';
-import {CatalogCover} from './CatalogCover';
+import {CatalogCover,catalogCoversKnown,prepareCatalogCovers} from './CatalogCover';
+import {IMAGE_READY_CAP_MS} from '../src/shared/motion/viewportImages';
 import {catalogScreenTiming} from './catalogPerf';
 import {CatalogReader} from './CatalogReader';
 import {useTabletCatalogMasked} from './catalogMask';
@@ -45,6 +47,10 @@ function ArrivingCard({arriving,onArrived,disabled,onClick,children}:{arriving:b
 type ReaderPrefetch={cacheKey:string;owner:string;controller:AbortController;promise:Promise<CatalogReaderManifest>};
 function readerCacheKey(item:Pick<CatalogItem,'provider'|'providerWorkId'>,revision:string,filterKey:string){return `${revision}:${filterKey}:${item.provider}:${item.providerWorkId}`;}
 
+/** Covers readied before a replacing list commits: the portrait first screen. */
+const FIRST_SCREEN_COVERS=12;
+/** The cover revision a page without a publication revision is shown under (see `revision` below). */
+const NO_REVISION='0'.repeat(64);
 const SOURCES:readonly {value:CatalogQuery['scope'];label:string}[]=[{value:'all',label:'카탈로그'},{value:'bookmarked',label:'북마크'}];
 export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDuplicates=0,onReturnHome}:{active:boolean;prefetch?:boolean;paused:boolean;backRef:MutableRefObject<(()=>boolean)|null>;endpoint?:string;
   /** Bumped by Home's 중복 판본 tile: opens the duplicate-edition review. */
@@ -79,6 +85,7 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   const warmStatusAttempted=useRef(false),warmListAttempted=useRef(false);
   const listPending=useRef(false);
   const [reader,setReader]=useState<CatalogReaderManifest|null>(null),[readerBusy,setReaderBusy]=useState(false),[readerError,setReaderError]=useState('');
+  const shownScope=useRef<CatalogQuery['scope']|null>(null),swapOwner=useRef({}).current;
   const section=useRef<HTMLElement>(null),committed=useRef(''),list=useRef<HTMLDivElement>(null),scroll=useRef(0),publication=useRef<string|null>(null);
   const authorityCursor=useRef<number|null|undefined>(undefined);
   const published=page?.publicationRevision;
@@ -191,13 +198,35 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
     if(!listEnabled||!listReady||committed.current===key)return;
     if(!active){if(warmListAttempted.current)return;warmListAttempted.current=true;}
     const cached=lruGet(pageCache.current,path);
-    if(cached){resetPublicationCaches(cached.publicationRevision);committed.current=key;resetMore();setPage(cached);setBusy(false);setError('');return;}
-    const controller=new AbortController();listPending.current=true;setBusy(true);setError('');setCountError('');
-    void api<CatalogPage>(path,controller.signal).then(result=>{
-      if(controller.signal.aborted)return;resetPublicationCaches(result.publicationRevision);lruSet(pageCache.current,path,result,12);
-      committed.current=key;resetMore();setPage(result);setBusy(false);if(list.current)list.current.scrollTop=0;
+    // A list replacing a shown one (카탈로그 ⇄ 북마크, a new sort) keeps the old cards until the new
+    // first screen's covers are decoded, capped like the PC's first viewport, so the new cards never
+    // appear as empty boxes that fill in one by one.
+    const replacing=!!page&&active;
+    const firstScreen=(value:CatalogPage)=>value.items.slice(0,FIRST_SCREEN_COVERS);
+    const controller=new AbortController(),scope=query.scope;
+    // 카탈로그 ⇄ 북마크 is a segment switch: the shared view swap moves the prepared list in from the
+    // side of the chosen source once it commits; other replacements (sort, language) commit in place.
+    let swap:ViewSwap|null=null;
+    const present=(apply:()=>void)=>{
+      const commit=()=>{if(controller.signal.aborted)return;shownScope.current=scope;apply();};
+      const from=shownScope.current;
+      if(!replacing||from===null||from===scope){commit();return;}
+      const forward=SOURCES.findIndex(source=>source.value===scope)>=SOURCES.findIndex(source=>source.value===from);
+      swap=swapSegment(swapOwner,{forward,target:list.current,still:list.current?.querySelector<HTMLElement>(':scope > .section-shade-rows, :scope > .ui-section-bar'),commit});
+    };
+    if(cached&&(!replacing||catalogCoversKnown(firstScreen(cached),cached.publicationRevision??NO_REVISION))){
+      present(()=>{resetPublicationCaches(cached.publicationRevision);committed.current=key;resetMore();setPage(cached);setBusy(false);setError('');});
+      return()=>{controller.abort();swap?.cancel();};
+    }
+    listPending.current=true;setBusy(true);setError('');setCountError('');
+    void (cached?Promise.resolve(cached):api<CatalogPage>(path,controller.signal)).then(async result=>{
+      if(controller.signal.aborted)return;
+      if(replacing)await prepareCatalogCovers(firstScreen(result),result.publicationRevision??NO_REVISION,controller.signal,IMAGE_READY_CAP_MS);
+      if(controller.signal.aborted)return;
+      resetPublicationCaches(result.publicationRevision);lruSet(pageCache.current,path,result,12);
+      present(()=>{committed.current=key;resetMore();setPage(result);setBusy(false);if(list.current)list.current.scrollTop=0;});
     }).catch(reason=>{if(!controller.signal.aborted){setError(catalogError(reason)||errorText(reason));setBusy(false);}}).finally(()=>{if(!controller.signal.aborted)listPending.current=false;});
-    return()=>{controller.abort();listPending.current=false;};
+    return()=>{controller.abort();swap?.cancel();listPending.current=false;};
   },[listEnabled,key,path,query,listReady]);
   useEffect(()=>{
     // A canceled/failed warm-up gets the ordinary user-initiated retry. A live
@@ -430,7 +459,7 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   </div>;
   // 카탈로그 · 북마크 is the list's first row; scrolled away, the top bar pulls it down. 북마크 lists newest first.
   const sources=useSectionShade<CatalogQuery['scope']>({label:'카탈로그 출처',options:SOURCES,value:query.scope,onChange:scope=>{if(scope!==query.scope)change(scope==='bookmarked'?{scope,sort:'latest'}:{scope});},extra:viewControls},{active:active&&!paused&&!selected&&!reader&&!settings&&!duplicates});
-  const revision=page?.publicationRevision??'0'.repeat(64);
+  const revision=page?.publicationRevision??NO_REVISION;
   const shownList=active&&!paused&&!selected&&!reader&&!privacy&&page?.ready&&committed.current===key;
   const shownListKey=shownList?committed.current:null;
   useLayoutEffect(()=>{
@@ -439,8 +468,6 @@ export function Catalog({active,prefetch=false,paused,backRef,endpoint='',openDu
   const scrubberSort=useMemo(()=>query.sort==='latest' ? {kind:'date' as const,values:items.map(item=>item.posted)} : {kind:'fallback' as const},[items,query.sort]);
 
   useLevelMotion(section,active?(selected?'detail':'list'):null,selected?1:0);
-  // 카탈로그 ⇄ 북마크 swaps like the Collections type segment, once the new list has committed.
-  useSegmentMotion(list,page?.ready&&committed.current===key?query.scope:null,SOURCES.findIndex(source=>source.value===query.scope),sectionListParts);
   // Search lives in the shared bar: the magnifier opens it, and it stays open while a query is set.
   const searching=searchOpen||!!draft||!!query.text;
   const closeSearch=()=>{setSuggestOpen(false);setSearchOpen(false);setDraft('');if(query.text)search('');};

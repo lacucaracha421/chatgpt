@@ -41,6 +41,7 @@ import { useReleaseData } from "./releaseData";
 import { deriveCollectionLibrary, type CollectionLibrarySort, type CollectionLibraryState } from "./collectionLibrary";
 import { AvLinkInbox, useAvLinkInbox, type AvLinkApi } from "./AvLinkInbox";
 import { KIND_LABEL } from "./collectionFormat";
+import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
 import "./CollectionBrowser.css";
 import "../styles/collectionSpines.css";
 
@@ -133,6 +134,8 @@ export function CollectionBrowser({
   libraryStateRef.current = libraryState;
   useAutoDismiss(message, setMessage);
   const stageRef = useRef<HTMLDivElement>(null);
+  const typeSwap = useRef({}).current;
+  useEffect(() => () => cancelSegmentSwap(typeSwap), [typeSwap]);
   const [pageMemory, setPageMemory] = useState<{ scope: string; page: number } | null>(null);
   const scope = JSON.stringify([library?.root ?? "", typeFilter, showcase, libraryState.query, libraryState.sort, libraryState.direction, libraryState.rating, releaseProvider, releaseCalendar]);
   useCollectionCoverPerf(stageRef, scope, collections);
@@ -171,7 +174,14 @@ export function CollectionBrowser({
 
   function setTypeFilter(next: CollectionType) {
     if (next === typeFilter && !releaseProvider && !releaseCalendar && !showcase) return;
-    onViewChange({ kind: "collections", typeFilter: next, showcase: false });
+    const commit = () => onViewChange({ kind: "collections", typeFilter: next, showcase: false });
+    // Leaving the showcase or releases is not a type switch; those views keep their own motion.
+    if (releaseProvider || releaseCalendar || showcase) { commit(); return; }
+    // A type switch moves the list in from the side of the chosen type (the shared view swap);
+    // the section bar stays still. The old list stays painted until the new one commits.
+    const stage = stageRef.current;
+    swapSegment(typeSwap, { forward: TYPES.indexOf(next) >= TYPES.indexOf(typeFilter), target: stage,
+      still: stage?.querySelector<HTMLElement>(":scope > .ui-section-bar"), commit });
   }
 
   function setShowcase(next: boolean) {

@@ -124,9 +124,6 @@ export function useSegmentMotion(host:RefObject<HTMLElement|null>,key:string|nul
   },[host,key,index,scope]);// eslint-disable-line react-hooks/exhaustive-deps
 }
 
-/** Under a list's section bar, what a segment swap moves: everything but the bar, pull and scrubber. */
-export const sectionListParts=(host:HTMLElement)=>[...host.children].filter((child):child is HTMLElement=>child instanceof HTMLElement&&!child.matches('.ui-section-bar,.section-shade-rows,.pull-refresh,.mobile-scrubber'));
-
 /**
  * Places one underline element under the selected tab of `list` (its `[role=tab]` children)
  * with a transform only: it glides to a newly selected tab, and is placed without motion on
