@@ -75,6 +75,7 @@ Status: `HOLD` — after change contracts stabilize, persist browse metadata, cu
 ## USER-REQ-20260924 — Collections authority slice 1
 
 Status: `TODO` — only inactive server slice 0 (`c38a2bc`) exists. Implement slice 1 using [Collection authority design](../research/collection-authority-design-20260924.md); performance requests from this batch are consolidated in `PERF-ALL-001`.
+- **1A (2026-10-04, uncommitted at writing):** verify-only route `POST /v1/collections/authority/staging/verify` (staging v2, TEMP-table projection, digest-only report) and the PC Settings row "컬렉션 서버 이전 점검" with a PC-generated interop fixture. Open for 1B: `selectArtwork` updates selection slots but not the new per-artwork `selected` flag; a production dry run needs a server deploy (separate approval).
 
 <a id="user-req-20260926b--user-requests-2026-09-26-second-batch"></a>
 ## USER-REQ-20260926B — Tablet Collection creation
@@ -85,6 +86,7 @@ Status: `TODO` — implement tablet Collection creation after authority slice 1.
 ## TABLET-PARITY-001 — Remaining tablet parity
 
 Status: `PARTIAL` — rename/hide/edit the Artist tab with PC-equivalent behaviour (priority 4, user 2026-10-03); committed `Artists.tsx` still directs these edits to PC.
+- **Slice 1 (2026-10-04, uncommitted at writing):** tablet rename / hide / pin + 숨긴 작가 list via the artist intent log (server overlay; PC applies on its artists publication pass). Known limits: the PC applies on its publication pass (up to ~10 min when idle, no status-head gating yet), and an open PC artist screen does not refresh until revisited (no artist change event exists). Merge/detach stay PC-only.
 - Add subtree folder listing, shelf thumbnail/count projection and true batch album/folder server operations; individual album commands and multi-selection classification already exist (`c60e57f9`, `f027836c`). Keep cursor/cache identity bound to subtree mode; do not repurpose direct `asset_count`. User 2026-09-29 approved server deployment for this scope.
 - Next IGDB refetch, one-off TMDB 400 and leftover diagnostics are (unverified 2026-10-03). Keep release-calendar ownership on PC. Deep character classification remains PC-only; viewer single-asset editors remain, multi-select character assignment stays dropped (user 2026-09-29).
 
@@ -220,6 +222,15 @@ User 2026-09-27 chose LibreDMM; DMM/FANZA affiliate API dropped (Korean geo/addr
 Status: `TODO` — low priority. VCK/kHentai stays default; isolate optional provider cache and verify page resolution separately from metadata. Disable/cache-clear preserves bookmarks/progress.
 
 # Desktop UI follow-ups
+
+## WIN-FEEDBACK-20261004 — First Windows release-run findings
+
+Status: `TODO` — reported by the user 2026-10-04 on the first Windows release build (`e8b3d774`, WebView2).
+- **Starts in Saving Mode:** the app appears to start in 절약 모드 on first launch although `library-machine.json` has `workload.lightweight = false` and `performance.profile = "main"`. Find what enters the restricted state at startup (`src-tauri/src/workload.rs` recovery window, initial window activity, auto-enter timer) and whether it is Windows-specific.
+- **Tab ghosting:** switching top tabs (에셋, 컬렉션, …) leaves an afterimage of the previous tab. Determine whether it is a WebView2 compositing artefact or the frontend keeping the old view mounted (no-flash rule: keep old content until the new one is ready, but never show both).
+- **Windows test debt (found 2026-10-04):** `cargo test --lib` on Windows fails 3 `library::collection_source::tests::source_root_*` tests: the stored source root joins `collection-sources/book` with a forward slash, so the path string differs from the native `\` form (functionally tolerated by Windows, but not portable as written). Server `tests.test_media_thumbnail_encode` `test_no_kind_leaves_a_partial_file_behind_on_an_unsupported_source` returns exit 7 instead of 4 under the WSL test venv (Pillow/codec environment; untouched code).
+- **Wrong Collection overview (found 2026-10-04, read-only):** 가치아쿠타 (`8a143d39…`) carries the MangaDex overview of 극락가 (Gokurakugai, same author Sano Yuto) while its Kakao volume data is correct; check the MangaDex binding and whether other works by the same author were matched to the wrong series.
+- **Collections cache should survive (on hold — user 2026-10-04: seems fine after more use):** the user wanted the PC Collections screen to keep its cache instead of rebuilding it (the tablet likely already keeps a durable cache — compare `mobile-client` collection caching with the PC `collection_cache.rs` / frontend Collections loading and game-case bake cache).
 
 <a id="pc-polish-20261002--remaining-polish-and-acceptance"></a>
 ## PC-POLISH-20261002 — Remaining notification feature

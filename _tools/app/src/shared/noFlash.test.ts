@@ -52,7 +52,7 @@ function measure(): Record<string, Counts> {
     if (!existsSync(root)) continue;
     for (const file of sourceFiles(root)) {
       const counts = countFile(readFileSync(file, "utf8"));
-      if (categories.some((category) => counts[category] > 0)) result[relative(packageDirectory, file)] = counts;
+      if (categories.some((category) => counts[category] > 0)) result[relative(packageDirectory, file).replaceAll("\\", "/")] = counts;
     }
   }
   return result;
