@@ -1496,3 +1496,95 @@ it("keeps every displayed cover when a large active shelf exceeds the revisit ca
   await waitFor(() => expect(screen.getByRole("button", { name: "Child 256 폴더 열기" }).querySelector("img")).toHaveAttribute("src", expect.stringContaining("cover-large-256")));
   expect(screen.getByRole("button", { name: "Child 0 폴더 열기" }).querySelector("img")).toHaveAttribute("src", expect.stringContaining("cover-large-0"));
 });
+
+describe("내용 검색 result state", () => {
+  const rankedView: AssetView = { kind: "description_search", query: "눈 내리는 겨울" };
+  function describedGateway(search: LibraryGateway["searchByDescription"]) {
+    const gateway = createGateway({ items: [asset(9)], nextCursor: null });
+    gateway.searchByDescription = search;
+    // The summary read does not keep the requested order.
+    gateway.refreshAssets = vi.fn(async (_query, ids: string[]) => [asset(0), asset(1), asset(2)].filter(item => ids.includes(item.id)));
+    return gateway;
+  }
+  function renderRanked(gateway: LibraryGateway, onExit = vi.fn(), view: AssetView = rankedView) {
+    const element = (next: AssetView) => <LibraryProvider gateway={gateway}>{withWorkspaceChrome(<AssetBrowser galleryLayout="justified" view={next} classifications={classifications} sort="favorites" metadataVisible={false} privacyMode={false} onPrivacyModeChange={vi.fn()} refreshVersion={0} onSortChange={vi.fn()} onMetadataVisibleChange={vi.fn()} onStatusChange={vi.fn()} onExitDescriptionSearch={onExit} />)}</LibraryProvider>;
+    const result = render(element(view));
+    return { ...result, rerenderView: (next: AssetView) => result.rerender(element(next)) };
+  }
+  const tileNames = () => screen.getAllByRole("option").filter(option => option.hasAttribute("data-asset-id")).map(option => option.getAttribute("aria-label") ?? option.textContent);
+
+  it("shows the ranked images in rank order with the badge, query and count, without paging or sort", async () => {
+    const user = userEvent.setup();
+    const search = vi.fn().mockResolvedValue({ route: "cosine", assetIds: ["asset-2", "asset-0", "gone", "asset-1"], precise: true });
+    const gateway = describedGateway(search);
+    renderRanked(gateway);
+    await screen.findByRole("option", { name: "asset-2.png" });
+    expect(tileNames()).toEqual(["asset-2.png", "asset-0.png", "asset-1.png"]);
+    expect(search).toHaveBeenCalledExactlyOnceWith("눈 내리는 겨울", 200);
+    expect(gateway.refreshAssets).toHaveBeenCalledWith(expect.objectContaining({ classificationId: null, albumId: null, collectionId: null, unclassifiedOnly: false, mediaKind: null }), ["asset-2", "asset-0", "gone", "asset-1"]);
+    expect(gateway.listAssets).not.toHaveBeenCalledWith(expect.objectContaining({ limit: expect.any(Number), after: null }));
+    const header = screen.getByRole("toolbar", { name: "자산 도구" });
+    expect(within(header).getByText("이미지 내용")).toHaveClass("ui-badge");
+    expect(within(header).getByRole("heading", { name: "눈 내리는 겨울" })).toBeVisible();
+    expect(within(header).getByText("관련도순 · 상위 3장")).toBeVisible();
+    // Rank order, not date groups.
+    expect(document.querySelector(".asset-gallery__date")).toBeNull();
+    await user.click(within(header).getByRole("button", { name: "보기" }));
+    expect(screen.getByRole("radiogroup", { name: "배치" })).toBeVisible();
+    expect(screen.queryByRole("radiogroup", { name: "정렬" })).not.toBeInTheDocument();
+  });
+
+  it("reuses the palette's answer for the same query", async () => {
+    const search = vi.fn().mockResolvedValue({ route: "tags", assetIds: ["asset-1"], precise: true });
+    const gateway = describedGateway(search);
+    const { searchDescription } = await import("./descriptionSearch");
+    await searchDescription(search, "눈 내리는 겨울 ");
+    renderRanked(gateway);
+    await screen.findByRole("option", { name: "asset-1.png" });
+    expect(search).toHaveBeenCalledOnce();
+  });
+
+  it("검색 해제 leaves the result state through the caller", async () => {
+    const user = userEvent.setup();
+    const onExit = vi.fn();
+    renderRanked(describedGateway(vi.fn().mockResolvedValue({ route: "cosine", assetIds: ["asset-0"], precise: true })), onExit);
+    await screen.findByRole("option", { name: "asset-0.png" });
+    await user.click(screen.getByRole("button", { name: "검색 해제" }));
+    expect(onExit).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the previous results painted and inert while the next query loads", async () => {
+    let finish!: (value: { route: "cosine"; assetIds: string[]; precise: boolean }) => void;
+    const search = vi.fn().mockResolvedValueOnce({ route: "cosine", assetIds: ["asset-0"], precise: true })
+      .mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const { container, rerenderView } = renderRanked(describedGateway(search));
+    await screen.findByRole("option", { name: "asset-0.png" });
+    rerenderView({ kind: "description_search", query: "비 오는 거리" });
+    expect(screen.getByRole("option", { name: "asset-0.png" })).toBeInTheDocument();
+    expect(container.querySelector(".asset-browser__results")).toHaveAttribute("inert");
+    await act(async () => finish({ route: "cosine", assetIds: ["asset-2"], precise: true }));
+    expect(tileNames()).toEqual(["asset-2.png"]);
+  });
+
+  it("shows the empty line without a filter reset", async () => {
+    renderRanked(describedGateway(vi.fn().mockResolvedValue({ route: "cosine", assetIds: [], precise: true })));
+    expect(await screen.findByText("일치하는 이미지가 없습니다.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "필터 초기화" })).toBeNull();
+  });
+
+  it("shows one error message with 다시 시도, and retrying asks again", async () => {
+    const user = userEvent.setup();
+    const search = vi.fn().mockRejectedValueOnce(new Error("모델이 없습니다")).mockResolvedValueOnce({ route: "cosine", assetIds: ["asset-1"], precise: true });
+    renderRanked(describedGateway(search));
+    expect(await screen.findByText("내용 검색을 할 수 없습니다: 모델이 없습니다")).toBeVisible();
+    expect(screen.getAllByText(/내용 검색을 할 수 없습니다/)).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(await screen.findByRole("option", { name: "asset-1.png" })).toBeInTheDocument();
+    expect(search).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports an unavailable search without a gateway method", async () => {
+    renderRanked(describedGateway(undefined));
+    expect(await screen.findByText("내용 검색을 할 수 없습니다: 이 환경에서는 지원하지 않습니다.")).toBeVisible();
+  });
+});

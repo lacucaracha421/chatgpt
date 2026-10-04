@@ -273,6 +273,13 @@ body .ui-menu { border-color: var(--chrome-border); border-radius: var(--chrome-
 .command-palette__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .command-palette__option[aria-current=page] .command-palette__label::after { content: " · 현재"; color: var(--color-muted); }
 .command-palette__meta, .command-palette__count { color: var(--color-muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 내용 검색 row: the top matches as 64px squares under the label, or one quiet line (no match, error). */
+.command-palette__option--detail { align-items: flex-start; }
+.command-palette__strip-area { display: flex; min-width: 0; margin-top: var(--space-1); }
+.command-palette__strip { display: flex; gap: var(--space-1); min-width: 0; overflow: hidden; }
+.command-palette__thumb { position: relative; display: block; flex: none; width: 64px; height: 64px; overflow: hidden; border-radius: var(--radius-tile); }
+.command-palette__thumb img, .command-palette__thumb .privacy-mask { display: block; width: 100%; height: 100%; object-fit: cover; }
+.command-palette__strip-status { color: var(--color-muted); font-size: var(--type-meta); }
 .command-palette__empty { margin: 0; padding: var(--space-4) var(--space-2); color: var(--color-muted); font-size: var(--text-sm); }
 .command-palette__foot { flex: none; display: flex; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-4); border-top: 1px solid var(--color-border); color: var(--color-muted); font-size: var(--text-xs); }
 .command-palette__foot kbd { font: inherit; padding: 1px 4px; margin: 0 2px 0 6px; border: 1px solid var(--color-border); border-radius: var(--radius-tile); }

@@ -410,7 +410,9 @@ export type AssetView =
   | { kind: "settings"; section?: "frequent" | "display" | "library" | "connection" | "catalog" | "vault" | "advanced" }
   | { kind: "manga" }
   | { kind: "collections"; typeFilter: CollectionType; showcase: boolean; releaseProvider?: CollectionUpdateProvider; releaseCalendar?: boolean }
-  | { kind: "collection"; collectionId: string; tmdbSearch?: { query: string; mediaType: "movie" | "tv" } };
+  | { kind: "collection"; collectionId: string; tmdbSearch?: { query: string; mediaType: "movie" | "tv" } }
+  /** 내용 검색 result state in the 에셋 area: images ranked by how well they match the typed description. */
+  | { kind: "description_search"; query: string };
 
 export type ArtistHubSection = "main" | "others" | "singles" | "hidden" | "merge" | "source-fill" | "reposter";
 

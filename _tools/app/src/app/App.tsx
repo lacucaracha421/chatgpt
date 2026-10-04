@@ -825,6 +825,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onPointerDragMove={movePointerDrag}
                     onPointerDragEnd={finishPointerDrag}
                     onPointerDragCancel={cancelPointerDrag}
+                    onExitDescriptionSearch={() => { if (!navigateBack()) navigateView({ kind: "classification", classificationId: null }); }}
                   />
                   </CharacterFolderContent>
                 )}

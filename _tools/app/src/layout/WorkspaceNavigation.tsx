@@ -1,7 +1,7 @@
 import { BookmarkIcon, BookOpenIcon, ExchangeIcon, FolderIcon, HomeIcon, MagnifyingGlassIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon } from "../shared/ui/ArchiveIcons";
 import { ViewColumnsIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { EASE_STANDARD, reducedMotion } from "../shared/motion/curves";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType, CollectionSummary } from "../library/types";
@@ -13,6 +13,7 @@ import { useArtistOverview } from "../artists/artistStore";
 import { useFindData } from "./findData";
 import { rememberRecent } from "./findModel";
 import { CommandPalette } from "./CommandPalette";
+import { descriptionSearchSource } from "../assets/descriptionSearch";
 import { useAutoTagPaletteSearch } from "../autotags/autoTagPalette";
 import { MoreEntryList, MorePanel } from "./MorePanel";
 import { placeEntries, useNavigationEntries, type PlaceSources } from "./navigationEntries";
@@ -157,6 +158,9 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
     { id: "manga", group: "go" as const, label: "망가", icon: <PhotoIcon />, run: () => onNavigate({ kind: "manga" }) },
     ...entries];
   const findTags = useAutoTagPaletteSearch(paletteOpen, view, onNavigate);
+  const libraryGateway = useOptionalLibrary()?.gateway;
+  const descriptionSource = useMemo(() => descriptionSearchSource(libraryGateway), [libraryGateway]);
+  const descriptionSearch = descriptionSource ? { source: descriptionSource, open: (query: string) => onNavigate({ kind: "description_search", query }) } : null;
   const paletteButton = useRef<HTMLButtonElement>(null);
   const queuesRequested = useRef(onQueuesRequested);
   queuesRequested.current = onQueuesRequested;
@@ -230,7 +234,7 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
     <div className="workspace-index-slot" data-state={hideIndex || indexHiddenByUser ? "closed" : "open"} inert={hideIndex || indexHiddenByUser || chrome?.pending || undefined} aria-hidden={hideIndex || indexHiddenByUser || undefined} style={{ "--workspace-index-width": `${width}px` } as CSSProperties}>
       <div ref={indexClip} className="workspace-index-clip" hidden={indexClosed} style={{opacity: !indexClosed && settling && (previousClosed.current || indexEntrance.current) ? 0 : undefined}}>{indexContent.current}</div>
     </div>
-    <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={paletteEntries} recentKey={find.recentKey} loading={find.loading} error={find.error} search={paletteSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} findTags={findTags} fallbackFocus={() => paletteButton.current} />
+    <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={paletteEntries} recentKey={find.recentKey} loading={find.loading} error={find.error} search={paletteSearch} descriptionSearch={descriptionSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} findTags={findTags} fallbackFocus={() => paletteButton.current} />
   </div>;
 }
 
