@@ -1,2 +1,9 @@
+# Normalize line endings to LF on every platform (Linux, WSL, Windows).
+* text=auto eol=lf
+
+# Windows-only scripts that cmd.exe requires to be CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
 docs/agents/lakomics-works-handoff-v2.md text eol=lf
 docs/prototypes/lakomics-works-v6-reference.html text eol=lf
