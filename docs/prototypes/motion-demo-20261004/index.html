@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>라쿠믹스 움직임 시연</title>
+<style>
+/* Layout: a column of demos; each demo shows the current behaviour (left) and the proposal (right) driven by one control. Single dark look, like the app. */
+@font-face { font-family:"Pretendard Variable"; src:url("../../../_tools/app/src/styles/fonts/PretendardVariable.woff2") format("woff2-variations"); font-weight:45 920; font-display:block; }
+:root {
+  color-scheme:dark;
+  --page:#0e0f10; --bg:#161718; --sidebar:#1a1b1c; --surface:#222324; --surface-2:#292a2b; --hover:#2d2e2f;
+  --text:#e7e9ec; --muted:#a0a3a5; --faint:#7d8184; --accent:#ddd8ca; --on-accent:#202628; --border:#363739; --border-strong:#55585a;
+  --scrim:rgba(0,0,0,.55);
+  --font:"Pretendard Variable","Pretendard","Segoe UI","Malgun Gothic",sans-serif;
+  /* Proposal tokens (spring curves are generated at load into these properties). */
+  --motion-micro:120ms; --motion-small:180ms; --motion-medium:240ms; --motion-large:340ms;
+  --ease-out:cubic-bezier(.2,0,0,1);
+  --spring-snappy:cubic-bezier(.2,0,0,1); --spring-snappy-ms:320ms;
+  --spring-gentle:cubic-bezier(.2,0,0,1); --spring-gentle-ms:480ms;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--page); color:var(--text); font:15px/1.5 var(--font); padding-inline:16px; }
+h1,h2,h3,p { margin:0; }
+button { font:inherit; color:inherit; }
+.doc { max-width:1180px; margin:0 auto; padding-block:32px 96px; display:grid; gap:40px; }
+.doc > header { display:grid; gap:10px; max-width:70ch; }
+.doc > header h1 { font-size:24px; font-weight:650; text-wrap:balance; }
+.doc > header p { color:var(--muted); line-height:1.7; }
+.opts { display:flex; gap:16px; flex-wrap:wrap; align-items:center; font-size:13px; color:var(--muted); }
+.opts label { display:flex; gap:6px; align-items:center; cursor:pointer; }
+.demo { display:grid; gap:12px; }
+.demo-head { display:flex; justify-content:space-between; align-items:end; gap:16px; flex-wrap:wrap; }
+.demo-head h2 { font-size:17px; font-weight:600; }
+.demo-head p { font-size:13px; color:var(--muted); max-width:62ch; }
+.ctrl { display:flex; gap:8px; flex-wrap:wrap; }
+.btn { border:1px solid var(--border-strong); background:var(--surface); padding:6px 14px; font-size:13px; font-weight:600; cursor:pointer; }
+.btn:hover { background:var(--hover); }
+.btn.primary { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
+.btn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.pair { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:16px; }
+@media (max-width:760px) { .pair { grid-template-columns:1fr; } }
+.pane { display:grid; gap:6px; min-width:0; }
+.pane > b { font-size:12px; font-weight:600; color:var(--muted); letter-spacing:.04em; }
+.pane > b span { color:var(--accent); }
+.stage { position:relative; height:260px; background:var(--bg); border:1px solid var(--border); overflow:hidden; }
+.bar { height:36px; display:flex; align-items:center; gap:8px; padding:0 12px; border-bottom:1px solid var(--border); font-size:13px; font-weight:600; }
+.bar .sp { flex:1; }
+.dots { width:28px; height:24px; display:grid; place-items:center; color:var(--muted); background:transparent; border:0; cursor:pointer; }
+.tiles { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; padding:12px; }
+.tile { aspect-ratio:3/4; background:var(--c, #333); }
+
+/* ===== shared surfaces ===== */
+.menu { position:absolute; top:34px; right:10px; width:170px; background:var(--surface-2); border:1px solid var(--border-strong); box-shadow:0 8px 24px rgba(0,0,0,.45); padding:4px; z-index:5; font-size:13px; }
+.menu div { padding:6px 10px; }
+.menu div:hover { background:var(--hover); }
+.scrim { position:absolute; inset:0; background:var(--scrim); z-index:6; }
+.dialog { position:absolute; left:50%; top:50%; width:240px; translate:-50% -50%; background:var(--surface-2); border:1px solid var(--border-strong); padding:16px; z-index:7; display:grid; gap:10px; box-shadow:0 16px 40px rgba(0,0,0,.5); }
+.dialog h3 { font-size:15px; font-weight:600; }
+.dialog p { font-size:13px; color:var(--muted); }
+.toasts { position:absolute; right:12px; bottom:12px; display:flex; flex-direction:column; gap:6px; align-items:flex-end; z-index:8; }
+.toast { background:var(--surface-2); border:1px solid var(--border-strong); padding:7px 12px; font-size:13px; box-shadow:0 6px 16px rgba(0,0,0,.4); white-space:nowrap; }
+.sheet { position:absolute; left:0; right:0; bottom:0; height:62%; background:var(--surface-2); border-top:1px solid var(--border-strong); z-index:7; padding:10px 16px; display:grid; align-content:start; gap:8px; }
+.sheet .grab { width:36px; height:4px; background:var(--border-strong); justify-self:center; }
+.sheet .row { padding:8px 0; border-bottom:1px solid var(--border); font-size:13px; }
+.crumbs { font-size:13px; font-weight:600; display:flex; gap:6px; align-items:center; }
+.crumbs i { font-style:normal; color:var(--faint); }
+.view { position:absolute; inset:36px 0 0 0; }
+.tree { padding:10px 12px; font-size:13px; display:grid; }
+.node { display:flex; align-items:center; gap:6px; padding:5px 4px; cursor:pointer; background:none; border:0; text-align:left; }
+.node .tri { width:10px; display:inline-block; color:var(--muted); }
+.kids { display:grid; padding-left:18px; }
+.kids > div { min-height:0; overflow:hidden; display:grid; }
+.split { position:absolute; inset:36px 0 0 0; display:grid; grid-template-columns:1fr 0px; }
+.split .dock { background:var(--sidebar); border-left:1px solid var(--border); overflow:hidden; padding:12px; font-size:13px; color:var(--muted); white-space:nowrap; }
+.split .tiles { align-content:start; }
+
+/* ===== CURRENT behaviour (approximates the app today) ===== */
+.cur .menu { display:none; }
+.cur .menu.open { display:block; animation:cur-rise 140ms var(--ease-out); }
+.cur .scrim, .cur .dialog { display:none; }
+.cur.dlg .scrim { display:block; }
+.cur.dlg .dialog { display:grid; animation:cur-rise 140ms var(--ease-out); }
+@keyframes cur-rise { from { opacity:0; transform:translateY(4px); } }
+.cur .sheet, .cur .sheet-scrim { display:none; }
+.cur.sht .sheet { display:grid; animation:cur-sheet 140ms var(--ease-out); }
+.cur.sht .sheet-scrim { display:block; animation:cur-fade 160ms var(--ease-out); }
+@keyframes cur-sheet { from { opacity:.4; transform:translateY(24px); } }
+@keyframes cur-fade { from { opacity:0; } }
+.cur .kids > div { display:none; }
+.cur .open > .kids > div { display:grid; }
+.cur .split.docked { grid-template-columns:1fr 150px; }
+
+/* ===== PROPOSAL ===== */
+/* Menus grow from their trigger; exit is the same path, shorter, and ignores the pointer immediately. */
+.new .menu { transform-origin:top right; opacity:0; scale:.96; translate:0 -4px; pointer-events:none; visibility:hidden;
+  transition:opacity calc(var(--motion-small) * .7) var(--ease-out), scale calc(var(--spring-snappy-ms) * .6) var(--ease-out), translate calc(var(--spring-snappy-ms) * .6) var(--ease-out), visibility 0s linear calc(var(--motion-small) * .7); }
+.new .menu.open { opacity:1; scale:1; translate:0 0; pointer-events:auto; visibility:visible;
+  transition:opacity var(--motion-small) var(--ease-out), scale var(--spring-snappy-ms) var(--spring-snappy), translate var(--spring-snappy-ms) var(--spring-snappy), visibility 0s; }
+/* Dialog: the scrim fades both ways; the card settles from slightly below and smaller. */
+.new .scrim { opacity:0; visibility:hidden; transition:opacity calc(var(--motion-medium) * .7) var(--ease-out), visibility 0s linear calc(var(--motion-medium) * .7); }
+.new.dlg .scrim { opacity:1; visibility:visible; transition:opacity var(--motion-medium) var(--ease-out), visibility 0s; }
+.new .dialog { opacity:0; scale:.97; translate:-50% calc(-50% + 8px); visibility:hidden; pointer-events:none;
+  transition:opacity calc(var(--motion-medium) * .7) var(--ease-out), scale calc(var(--motion-medium) * .7) var(--ease-out), translate calc(var(--motion-medium) * .7) var(--ease-out), visibility 0s linear calc(var(--motion-medium) * .7); }
+.new.dlg .dialog { opacity:1; scale:1; translate:-50% -50%; visibility:visible; pointer-events:auto;
+  transition:opacity var(--motion-medium) var(--ease-out), scale var(--spring-gentle-ms) var(--spring-gentle), translate var(--spring-gentle-ms) var(--spring-gentle), visibility 0s; }
+/* Sheet travels its own height on the gentle spring. */
+.new .sheet { translate:0 100%; visibility:hidden; transition:translate calc(var(--motion-large) * .7) var(--ease-out), visibility 0s linear calc(var(--motion-large) * .7); }
+.new.sht .sheet { translate:0 0; visibility:visible; transition:translate var(--spring-gentle-ms) var(--spring-gentle), visibility 0s; }
+/* Tree: rows unfold to their height, chevron turns with them. */
+.new .kids { grid-template-rows:0fr; opacity:0; transition:grid-template-rows calc(var(--motion-medium) * .7) var(--ease-out), opacity calc(var(--motion-micro)) var(--ease-out); }
+.new .open > .kids { grid-template-rows:1fr; opacity:1; transition:grid-template-rows var(--spring-gentle-ms) var(--spring-gentle), opacity var(--motion-medium) var(--ease-out) 40ms; }
+.new .tri { transition:rotate var(--motion-medium) var(--spring-snappy); }
+.new .open > .node .tri { rotate:90deg; }
+.cur .open > .node .tri { rotate:90deg; }
+/* Dock: the column itself animates, so tiles reflow continuously. */
+.new .split { transition:grid-template-columns var(--spring-gentle-ms) var(--spring-gentle); }
+.new .split.docked { grid-template-columns:1fr 150px; }
+
+
+/* Sidebar demo */
+.shell { position:absolute; inset:0; display:grid; grid-template-columns:40px 150px minmax(0,1fr); }
+.shell[data-tab="collections"] { grid-template-columns:40px 0px minmax(0,1fr); }
+.rail2 { background:var(--sidebar); border-right:1px solid var(--border); display:grid; align-content:start; gap:10px; padding:12px 0; justify-items:center; position:relative; z-index:2; }
+.rail2 i { width:16px; height:16px; border:1.5px solid var(--muted); }
+.side { background:var(--sidebar); border-right:1px solid var(--border); overflow:hidden; position:relative; z-index:1; }
+.side-in { width:150px; padding:12px; display:grid; gap:8px; font-size:13px; color:var(--muted); }
+.side-in b { color:var(--text); font-weight:600; }
+.body2 { min-width:0; position:relative; }
+.body-view { position:absolute; inset:36px 0 0 0; }
+.body-view .tiles { grid-template-columns:repeat(4,1fr); }
+.new .shell { transition:grid-template-columns var(--spring-gentle-ms) var(--spring-gentle); }
+.new .side-in { transition:opacity var(--motion-medium) var(--ease-out) 60ms, translate var(--spring-gentle-ms) var(--spring-gentle); }
+.new .shell[data-tab="collections"] .side-in { opacity:0; translate:-24px 0; transition:opacity var(--motion-micro) var(--ease-out), translate var(--spring-gentle-ms) var(--spring-gentle); }
+.cur .shell[data-tab="collections"] .side { display:none; }
+.cur .shell[data-tab="collections"] { grid-template-columns:40px minmax(0,1fr); }
+.view .tile, .body-view .tile { cursor:pointer; }
+@media (prefers-reduced-motion: reduce) { .new * { transition-duration:120ms !important; } }
+.reduced .new *, .reduced .new { transition-property:opacity, visibility !important; transition-duration:120ms !important; }
+.reduced .new .menu, .reduced .new .menu.open { scale:1; translate:0 0; }
+.reduced .new .dialog { scale:1; translate:-50% -50%; }
+</style>
+</head>
+<body>
+<main class="doc" id="doc">
+  <header>
+    <h1>움직임 시연</h1>
+    <p>항목마다 왼쪽은 <b>지금 앱</b>, 오른쪽은 <b>제안</b>입니다. 버튼 하나가 양쪽을 동시에 움직입니다. 빠르게 여러 번 눌러 보면 제안 쪽은 중간에서 자연스럽게 방향을 바꾸는 것도 볼 수 있습니다.</p>
+    <div class="opts"><label><input type="checkbox" id="slow"> 느리게 보기 (×4)</label><label><input type="checkbox" id="reduced"> 움직임 줄이기 설정 흉내</label></div>
+  </header>
+  <section class="demo" id="d-menu"></section>
+  <section class="demo" id="d-dialog"></section>
+  <section class="demo" id="d-toast"></section>
+  <section class="demo" id="d-folder"></section>
+  <section class="demo" id="d-sidebar"></section>
+  <section class="demo" id="d-tree"></section>
+  <section class="demo" id="d-dock"></section>
+  <section class="demo" id="d-sheet"></section>
+</main>
+<script>
+/* Spring easing as CSS linear(): sample a damped spring (response = period in s, damping ratio). */
+function springLinear(response, damping, points = 40) {
+  const w = 2 * Math.PI / response, z = damping, wd = w * Math.sqrt(Math.max(0, 1 - z * z));
+  const x = t => z >= 1 ? 1 - (1 + w * t) * Math.exp(-w * t) : 1 - Math.exp(-z * w * t) * (Math.cos(wd * t) + (z * w / wd) * Math.sin(wd * t));
+  let T = 0; while (T < 3 && Math.abs(1 - x(T)) > .002) T += .005; // settle time
+  const stops = Array.from({ length: points + 1 }, (_, i) => +x(T * i / points).toFixed(4));
+  return { css: `linear(${stops.join(", ")})`, ms: Math.round(T * 1000) };
+}
+const root = document.documentElement;
+const snappy = springLinear(.32, 1), gentle = springLinear(.46, .88);
+if (CSS.supports("transition-timing-function", "linear(0, 1)")) {
+  root.style.setProperty("--spring-snappy", snappy.css); root.style.setProperty("--spring-gentle", gentle.css);
+}
+const base = { "--motion-micro":120, "--motion-small":180, "--motion-medium":240, "--motion-large":340, "--spring-snappy-ms":snappy.ms, "--spring-gentle-ms":gentle.ms };
+const applySpeed = f => Object.entries(base).forEach(([k, v]) => root.style.setProperty(k, `${v * f}ms`));
+applySpeed(1);
+let factor = 1;
+document.getElementById("slow").addEventListener("change", e => { factor = e.target.checked ? 4 : 1; applySpeed(factor); });
+document.getElementById("reduced").addEventListener("change", e => document.body.classList.toggle("reduced", e.target.checked));
+const reduced = () => document.body.classList.contains("reduced") || matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const COLORS = ["#6b4f8a","#2f6f73","#8a5a3c","#3c5a8a","#7a3c4f","#4f7a3c","#8a7a3c","#3c7a6b","#5a3c8a","#8a3c6b","#3c4f7a","#6b8a3c","#7a6b3c","#3c8a7a","#8a4f3c"];
+const tiles = (n, seed = 0) => `<div class="tiles">${Array.from({ length: n }, (_, i) => `<div class="tile" style="--c:${COLORS[(i + seed) % COLORS.length]}"></div>`).join("")}</div>`;
+function demo(id, title, note, controls, stage) {
+  const el = document.getElementById(id);
+  el.innerHTML = `<div class="demo-head"><div><h2>${title}</h2><p>${note}</p></div><div class="ctrl">${controls}</div></div>
+    <div class="pair"><div class="pane"><b>지금</b><div class="stage cur">${stage}</div></div><div class="pane"><b><span>제안</span></b><div class="stage new">${stage}</div></div></div>`;
+  return [el.querySelector(".cur"), el.querySelector(".new"), el];
+}
+
+/* 1. Menu */
+{
+  const [c, n, el] = demo("d-menu", "메뉴 (… · 오른쪽 클릭 메뉴)", "제안: 누른 버튼에서 펼쳐지고, 닫을 때 같은 길로 더 짧게 접힙니다. 지금은 닫힐 때 그냥 사라집니다.",
+    `<button class="btn primary" data-a="toggle">메뉴 열기/닫기</button>`,
+    `<div class="bar">게임<span class="sp"></span><button class="dots" aria-label="메뉴">⋯</button></div>${tiles(10)}<div class="menu"><div>이름 바꾸기</div><div>새 폴더</div><div>정렬</div><div>휴지통으로</div></div>`);
+  const toggle = () => [c, n].forEach(s => s.querySelector(".menu").classList.toggle("open"));
+  el.querySelector('[data-a="toggle"]').onclick = toggle;
+  el.querySelectorAll(".dots").forEach(d => d.onclick = toggle);
+}
+/* 2. Dialog */
+{
+  const [c, n, el] = demo("d-dialog", "대화상자", "제안: 배경이 함께 서서히 어두워지고, 창은 살짝 아래·작은 데서 자리 잡습니다. 닫을 때도 거꾸로 움직입니다.",
+    `<button class="btn primary" data-a="toggle">대화상자 열기/닫기</button>`,
+    `<div class="bar">컬렉션</div>${tiles(10, 3)}<div class="scrim"></div><div class="dialog"><h3>컬렉션 삭제</h3><p>이 작품을 휴지통으로 옮길까요?</p><div class="ctrl"><button class="btn" data-close>취소</button><button class="btn primary" data-close>삭제</button></div></div>`);
+  const toggle = () => [c, n].forEach(s => s.classList.toggle("dlg"));
+  el.querySelector('[data-a="toggle"]').onclick = toggle;
+  el.querySelectorAll("[data-close], .scrim").forEach(b => b.onclick = () => [c, n].forEach(s => s.classList.remove("dlg")));
+}
+/* 3. Toast (FLIP for the stack on the proposal side) */
+{
+  const [c, n, el] = demo("d-toast", "알림 (토스트)", "제안: 아래에서 살짝 떠오르고, 사라질 때는 가라앉으며 흐려집니다. 남은 알림은 빈자리로 미끄러져 내려옵니다. 지금은 나타나고 사라질 때 모두 순간입니다.",
+    `<button class="btn primary" data-a="add">알림 띄우기</button>`,
+    `<div class="bar">에셋</div>${tiles(10, 6)}<div class="toasts"></div>`);
+  const texts = ["태그를 저장했습니다", "3장을 휴지통으로 옮겼습니다", "작가 정보를 새로 고쳤습니다", "폴더를 만들었습니다"];
+  let k = 0;
+  const flip = (box, change) => {
+    const first = new Map([...box.children].map(t => [t, t.getBoundingClientRect().top]));
+    change();
+    if (reduced()) return;
+    for (const [t, top] of first) if (t.isConnected && !t.dataset.leaving) {
+      const dy = top - t.getBoundingClientRect().top;
+      if (dy) t.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: 240 * factor, easing: getComputedStyle(root).getPropertyValue("--spring-gentle") });
+    }
+  };
+  el.querySelector('[data-a="add"]').onclick = () => {
+    const text = texts[k++ % texts.length];
+    const tc = document.createElement("div"); tc.className = "toast"; tc.textContent = text; c.querySelector(".toasts").append(tc);
+    setTimeout(() => tc.remove(), 2600 * factor);
+    const box = n.querySelector(".toasts"); const tn = document.createElement("div"); tn.className = "toast"; tn.textContent = text;
+    flip(box, () => box.append(tn));
+    if (!reduced()) tn.animate([{ opacity: 0, transform: "translateY(10px) scale(.98)" }, { opacity: 1, transform: "none" }], { duration: snappy.ms * factor, easing: getComputedStyle(root).getPropertyValue("--spring-snappy") });
+    else tn.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120 * factor });
+    setTimeout(() => {
+      tn.dataset.leaving = "1";
+      const out = tn.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: reduced() ? "none" : "translateY(4px)" }], { duration: 130 * factor, easing: "cubic-bezier(.2,0,0,1)", fill: "forwards" });
+      out.onfinish = () => flip(box, () => tn.remove());
+    }, 2600 * factor);
+  };
+}
+/* 4. Folder navigation inside a tab — a wave sweeping down from the top */
+{
+  const [c, n, el] = demo("d-folder", "같은 탭 안에서 폴더 이동 — 위에서부터 스슥", "제안: 새 폴더의 썸네일이 맨 윗줄부터 아랫줄로 차례차례 스슥 나타납니다. 이전 썸네일은 새 썸네일이 덮을 때까지 그 자리에 있어서 화면이 비거나 번쩍이지 않습니다. 아무 썸네일이나 눌러 보세요.",
+    `<button class="btn" data-a="back">‹ 상위 폴더</button><button class="btn primary" data-a="fwd">하위 폴더 ›</button>`,
+    `<div class="bar"><span class="crumbs"></span></div><div class="view"></div>`);
+  const levels = [["에셋"], ["에셋", "게임"], ["에셋", "게임", "니케"], ["에셋", "게임", "니케", "라피"], ["에셋", "게임", "니케", "라피", "코스튬"]];
+  let level = 1;
+  const crumbs = stage => stage.querySelector(".crumbs").innerHTML = levels[level].map((s, i) => i ? `<i>›</i>${s}` : s).join(" ");
+  const wave = stage => {
+    const host = stage.querySelector(".view").parentElement, old = [...host.querySelectorAll(".view")];
+    const view = document.createElement("div"); view.className = "view"; view.innerHTML = tiles(10, level * 4); host.append(view);
+    const done = () => old.forEach(v => v.remove());
+    if (!stage.classList.contains("new")) { done(); return; }
+    // The new layer is transparent; each new tile lands on top of the old one beneath it, row by row.
+    const list = [...view.querySelectorAll(".tile")], rows = [...new Set(list.map(t => t.offsetTop))].sort((a, b) => a - b);
+    const ease = getComputedStyle(root).getPropertyValue("--spring-snappy");
+    let last;
+    list.forEach(t => {
+      const row = rows.indexOf(t.offsetTop);
+      last = t.animate(reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: "translateY(-10px)" }, { opacity: 1, transform: "none" }],
+        { duration: (reduced() ? 120 : snappy.ms) * factor, delay: (reduced() ? 0 : row * 70 + (list.indexOf(t) % 5) * 12) * factor, easing: reduced() ? "linear" : ease, fill: "backwards" });
+    });
+    if (last) last.onfinish = done; else done();
+  };
+  const go = dir => {
+    if ((dir > 0 && level >= levels.length - 1) || (dir < 0 && level <= 0)) return;
+    level += dir; [c, n].forEach(stage => { crumbs(stage); wave(stage); });
+  };
+  [c, n].forEach(stage => { crumbs(stage); stage.querySelector(".view").innerHTML = tiles(10, level * 4); });
+  el.querySelector('[data-a="fwd"]').onclick = () => go(1);
+  el.querySelector('[data-a="back"]').onclick = () => go(-1);
+  [c, n].forEach(stage => stage.addEventListener("click", e => { if (e.target.closest(".tile")) go(1); }));
+}
+/* 4b. Sidebar appearing and disappearing between tabs */
+{
+  const [c, n, el] = demo("d-sidebar", "사이드바 있는 탭 ↔ 없는 탭", "제안: 사이드바가 레일 뒤로 미끄러져 들어가며 접히고, 본문이 그 폭만큼 부드럽게 넓어집니다. 사이드바 안의 글자는 먼저 흐려져서 찌그러져 보이지 않습니다. 돌아올 때는 레일에서 다시 펼쳐집니다.",
+    `<button class="btn" data-a="assets">에셋 (사이드바 있음)</button><button class="btn primary" data-a="collections">컬렉션 (사이드바 없음)</button>`,
+    `<div class="shell"><div class="rail2"><i></i><i></i><i></i><i></i></div><div class="side"><div class="side-in"><b>폴더</b><span>게임</span><span>만화</span><span>사진</span><span>배경화면</span></div></div><div class="body2"><div class="bar body-title">에셋</div><div class="body-view">${tiles(8, 2)}</div></div></div>`);
+  const show = (tab) => [c, n].forEach(stage => {
+    const shell = stage.querySelector(".shell"); if (shell.dataset.tab === tab) return;
+    shell.dataset.tab = tab;
+    stage.querySelector(".body-title").textContent = tab === "assets" ? "에셋" : "컬렉션";
+    const old = [...stage.querySelectorAll(".body-view")], view = document.createElement("div");
+    view.className = "body-view"; view.innerHTML = tiles(8, tab === "assets" ? 2 : 7); old[0].parentElement.append(view);
+    const done = () => old.forEach(v => v.remove());
+    if (!stage.classList.contains("new")) { done(); return; }
+    // An opaque new layer fades over the old one: brightness never dips, so nothing flashes.
+    view.style.background = "var(--bg)";
+    view.animate(reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }],
+      { duration: (reduced() ? 120 : 220) * factor, easing: "cubic-bezier(.2,0,0,1)" }).onfinish = done;
+  });
+  [c, n].forEach(stage => stage.querySelector(".shell").dataset.tab = "assets");
+  el.querySelector('[data-a="assets"]').onclick = () => show("assets");
+  el.querySelector('[data-a="collections"]').onclick = () => show("collections");
+}
+/* 5. Tree expand */
+{
+  const [c, n, el] = demo("d-tree", "사이드바 폴더 펼치기", "제안: 하위 폴더 줄이 제 높이만큼 펼쳐지고 화살표가 같이 돕니다. 지금은 줄이 순간 끼워져 아래가 툭 밀립니다.",
+    `<button class="btn primary" data-a="toggle">게임 폴더 펼치기/접기</button>`,
+    `<div class="tree"><div class="grp"><button class="node"><span class="tri">▸</span>게임</button><div class="kids"><div><span class="node">격투게임</span><span class="node">니케</span><span class="node">닌텐도</span><span class="node">리버스</span></div></div></div><span class="node"><span class="tri">▸</span>만화</span><span class="node"><span class="tri">▸</span>사진</span><span class="node"><span class="tri">▸</span>배경화면</span></div>`);
+  const toggle = () => [c, n].forEach(s => s.querySelector(".grp").classList.toggle("open"));
+  el.querySelector('[data-a="toggle"]').onclick = toggle;
+  el.querySelectorAll(".grp > .node").forEach(b => b.onclick = toggle);
+}
+/* 6. Info dock */
+{
+  const [c, n, el] = demo("d-dock", "정보 패널 열기", "제안: 패널 칸 자체가 부드럽게 넓어지고 썸네일이 함께 자리를 옮깁니다. 지금은 칸이 순간 바뀝니다.",
+    `<button class="btn primary" data-a="toggle">정보 패널 열기/닫기</button>`,
+    `<div class="bar">에셋 · 니케</div><div class="split">${tiles(10, 9)}<div class="dock">파일 정보<br>2026.10.4 저장<br>1920×1080</div></div>`);
+  el.querySelector('[data-a="toggle"]').onclick = () => [c, n].forEach(s => s.querySelector(".split").classList.toggle("docked"));
+}
+/* 7. Tablet sheet */
+{
+  const [c, n, el] = demo("d-sheet", "태블릿 아래 시트", "제안: 시트가 화면 아래에서 제 높이만큼 올라오고, 닫을 때 같은 길로 내려갑니다. 지금은 열릴 때만 조금 떠오르고 닫힐 때 사라집니다.",
+    `<button class="btn primary" data-a="toggle">시트 열기/닫기</button>`,
+    `<div class="bar">망가 카탈로그</div>${tiles(10, 12)}<div class="scrim sheet-scrim"></div><div class="sheet"><span class="grab"></span><div class="row">최근 저장 순</div><div class="row">제목 순</div><div class="row">평점 순</div></div>`);
+  const toggle = () => [c, n].forEach(s => { s.classList.toggle("sht"); s.classList.toggle("dlg", s.classList.contains("sht")); });
+  el.querySelector('[data-a="toggle"]').onclick = toggle;
+  el.querySelectorAll(".sheet-scrim").forEach(sc => sc.onclick = () => [c, n].forEach(s => s.classList.remove("sht", "dlg")));
+}
+</script>
+</body>
+</html>
