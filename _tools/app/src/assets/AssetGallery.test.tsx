@@ -470,7 +470,7 @@ describe("AssetGallery", () => {
 
   it("gives re-mounted tiles the same cacheable thumbnail URL until the content revision changes", () => {
     const items = [{ ...asset(0), thumbnailRevision: "11" }, { ...asset(1), thumbnailRevision: null }];
-    const sources = () => [...document.querySelectorAll(".asset-gallery__image img")].map((image) => image.getAttribute("src"));
+    const sources = () => [...document.querySelectorAll('.asset-gallery__image img:not([aria-hidden="true"])')].map((image) => image.getAttribute("src"));
     const first = render(<AssetGallery layout="masonry" items={items} />);
     const mounted = sources();
     expect(mounted).toEqual(["http://lakomics.localhost/thumbnail/asset-0/v11", "http://lakomics.localhost/thumbnail/asset-1"]);
@@ -479,8 +479,11 @@ describe("AssetGallery", () => {
     const second = render(<AssetGallery layout="masonry" items={items} />);
     expect(sources()).toEqual(mounted);
     second.rerender(<AssetGallery layout="masonry" items={[{ ...items[0], thumbnailRevision: "12" }, items[1]]} />);
+    expect(sources()).toEqual(mounted);
+    fireEvent.load(document.querySelector('img[src$="/v12"]')!);
     expect(sources()[0]).toBe("http://lakomics.localhost/thumbnail/asset-0/v12");
     second.rerender(<AssetGallery layout="masonry" mediaSource="vault" items={items} />);
+    fireEvent.load(document.querySelector('img[src$="/vault-thumbnail/asset-0"]')!);
     expect(sources()[0]).toBe("http://lakomics.localhost/vault-thumbnail/asset-0");
   });
 

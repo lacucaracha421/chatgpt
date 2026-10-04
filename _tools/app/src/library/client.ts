@@ -206,6 +206,7 @@ type DesktopHomeDataGateway = Required<Pick<LibraryGateway,
 export const libraryGateway: LibraryGateway & DesktopHomeDataGateway = {
   getLibraryStatistics: () => invoke("get_library_statistics"),
   getHomeOverview: (todayStart, weekStart, localDate) => invoke("get_home_overview", { todayStart, weekStart, localDate }),
+  getHomeMedia: (localDate) => invoke("get_home_media", { localDate }),
   measureLibraryDerivativeStorage: () => invoke("measure_library_derivative_storage"),
   recordCollectionOpened: (collectionId, openedAt) => invoke("record_collection_opened", { collectionId, openedAt }),
   artists: {

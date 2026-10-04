@@ -1,13 +1,16 @@
 import { useAssetMasks, usePrivacy } from "../privacy/PrivacyContext";
 import { useFirstAppearance } from "../shared/motion/useFirstAppearance";
+import { AreaVisible } from "../shared/motion/AreaSwitch";
+import { FolderMove, folderMoveScope } from "./FolderWave";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { MagnifyingGlassPlusIcon } from "@heroicons/react/24/outline";
 import { HeartIcon } from "@heroicons/react/24/solid";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AssetSummary } from "../library/types";
 import { artistHandle } from "../artists/format";
 import { assetDragIds, type InternalDragPayload } from "../shared/interaction/pointerDrag";
 import { Skeleton } from "../shared/ui/Skeleton";
+import { StableImage } from "../shared/ui/StableImage";
 import type { SelectionGesture } from "./selection";
 import { anchorScrollTop, animateVisibleTiles, captureVisibleTileRects, type TileRects } from "./galleryMotion";
 import { galleryRowHeight, useGalleryCount } from "./galleryCount";
@@ -39,6 +42,7 @@ type AssetGalleryProps = {
   groupDates?: boolean;
   fullDateHeadings?: boolean;
   scopeKey?: string;
+  folderPath?: readonly string[];
   infoOpen?: boolean;
   favoritesView?: boolean;
   totalCount?: number | null;
@@ -77,7 +81,7 @@ type AssetGalleryProps = {
   onPointerDragEnd?: (event: React.PointerEvent<HTMLElement>) => void;
   onPointerDragCancel?: (event: React.PointerEvent<HTMLElement>) => void;
 };
-export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, infoOpen = false, favoritesView = false, totalCount = null, scrubberHidden = false, selectedAssetIds = EMPTY_SELECTION, focusAssetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onToggleFocusedFavorite = onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
+export function AssetGallery({ intro, items, layout = "justified", groupDates = true, fullDateHeadings = false, scopeKey, folderPath, infoOpen = false, favoritesView = false, totalCount = null, scrubberHidden = false, selectedAssetIds = EMPTY_SELECTION, focusAssetId = null, targetRowHeight: legacyRowHeight = 180, metadataVisible: _metadataVisible = false, captionLabel, privacyMode = false, thumbnailCacheKey, mediaSource = "library", hasNextPage = false, onLoadNextPage, hasPreviousPage = false, onLoadPrevPage, onSelectionGesture, onFocusAsset, onSelectAll, onDeleteSelection, onClearSelection, onAssignCharacter, onToggleFavorite, onToggleFocusedFavorite = onToggleFavorite, onToggleInfo, onEscape, onMoveFocus, onOpen, onRetryVideo, onPointerDragStart, onPointerDragMove, onPointerDragEnd, onPointerDragCancel }: AssetGalleryProps) {
   const masked = useAssetMasks();
   void _metadataVisible;
   const sourceAssets = useMemo(() => new Map(items.map(asset => [asset.id, asset])), [items]);
@@ -234,7 +238,7 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
       else reveal();
     }, QUICK_PREVIEW_DELAY_MS);
   });
-  const {nsfwFilter}=usePrivacy();
+  const {nsfwFilter, privacyMode: contextPrivacy}=usePrivacy();
   useLayoutEffect(() => {cancelQuickPreview();},[privacyMode,nsfwFilter]);
   const requestPreview = useCallback((id: string) => setActivePreviewId(id), []);
   const releasePreview = useCallback((id: string) => setActivePreviewId(current => current === id ? null : current), []);
@@ -361,8 +365,12 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
   const inRangeIds = new Set(inRange.map(tile => tile.asset.id));
   const mountedTiles = positionedTiles.filter(tile => retainedIds.has(tile.asset.id) || inRangeIds.has(tile.asset.id));
   useLayoutEffect(() => { paintedRef.current = { scopeKey, scrollTop, ids: new Set(mountedTiles.map(tile => tile.asset.id)) }; });
-  useFirstAppearance(scrollRef, items.length, true, `asset-gallery:${mediaSource}`);
-  return <div className={`asset-gallery asset-gallery--${layout}`} data-per-row={perRow}>
+  const areaVisible = useContext(AreaVisible);
+  const folderScope = folderMoveScope(scopeKey);
+  const visitScope = useRef(folderScope);
+  if (!areaVisible || visitScope.current === undefined) visitScope.current = folderScope;
+  useFirstAppearance(scrollRef, items.length, visitScope.current === folderScope, `asset-gallery:${mediaSource}`);
+  return <FolderMove path={folderPath} scope={folderScope} queryKey={scopeKey} visible={areaVisible} privacyKey={`${privacyMode || contextPrivacy}:${nsfwFilter}:${mediaSource}`} count={items.length} host={scrollRef}><div className={`asset-gallery asset-gallery--${layout}`} data-per-row={perRow}>
     <div
       ref={scrollRef}
       className="asset-gallery__scroll"
@@ -446,8 +454,8 @@ export function AssetGallery({ intro, items, layout = "justified", groupDates = 
       </div>
     </div>
     {quickPreview && !masked(quickPreview.asset, privacyMode) && <div className="asset-gallery__quick-preview" style={quickPreviewLayout(quickPreview)}><img src={mediaSource === "vault" ? vaultAssetUrl(quickPreview.asset.id) : assetUrl(quickPreview.asset.id)} alt={`${quickPreview.asset.title || quickPreview.asset.originalName} 빠른 미리보기`} draggable={false} onError={cancelQuickPreview} /></div>}
-    <Scrubber input="pointer" hidden={scrubberHidden} scrollRef={scrollRef} total={items.length} sort={scrubberOrder} onSeek={seekAsset} indexAtScroll={indexAtScroll} />
-  </div>;
+    <Scrubber input="pointer" hidden={scrubberHidden} scrollRef={scrollRef} total={items.length} displayTotal={totalCount} sort={scrubberOrder} onSeek={seekAsset} indexAtScroll={indexAtScroll} />
+  </div></FolderMove>;
 }
 
 function isTextEditingTarget(target: EventTarget | null) {
@@ -465,7 +473,7 @@ const AssetTile = memo(function AssetTile({ asset: sourceAsset, width, favorites
   const metadataLabel = (captionLabel ?? (creatorKey ? artistHandle({ keys: [creatorKey] }) : asset.creatorName?.trim())) ?? "";
   return <div role="option" data-asset-id={asset.id} data-focused={focusVisible ? "true" : undefined} className="asset-gallery__asset ui-selectable-media" style={{ width: asset.width, height }} aria-label={alt} aria-description={[metadataLabel, collectedDate(asset.collectedAt).full].filter(Boolean).join(" · ")} aria-selected={selected} tabIndex={focused ? 0 : -1} onFocus={event => { if (event.target === event.currentTarget) onFocusAsset?.(asset, true); }} onClick={(event) => { const gesture = { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey }; if (onFocusAsset && !gesture.toggle && !gesture.range) onFocusAsset(asset); else onSelectionGesture?.(asset, gesture); }} onDoubleClick={() => onOpen?.(asset)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onOpen?.(asset); } else if (event.key === " ") { event.preventDefault(); onSelectionGesture?.(asset, { toggle: true, range: event.shiftKey }); } }} onPointerDown={(event) => { if (event.button === 0) onPointerDragStart?.(asset.id, event); }} onPointerMove={onPointerDragMove} onPointerUp={onPointerDragEnd} onPointerCancel={onPointerDragCancel}>
     <div className="asset-gallery__image" style={{ height }}>
-    {privacyMode ? <Skeleton className="privacy-mask asset-gallery__media-mask" label="비공개 모드" /> : asset.media.kind === "video" ? <AssetVideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} thumbnailSrc={tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource)} playbackSrc={mediaSource === "vault" ? vaultPlaybackUrl(asset.id) : undefined} active={activePreview} onRequestActive={() => onRequestPreview(asset.id)} onReleaseActive={() => onReleasePreview(asset.id)} onRetry={() => onRetryVideo?.(asset)} /> : <img src={tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource)} alt={alt} width={asset.width} height={asset.height} loading="lazy" decoding="async" draggable={false} />}
+    {privacyMode ? <Skeleton className="privacy-mask asset-gallery__media-mask" label="비공개 모드" /> : asset.media.kind === "video" ? <AssetVideoTileMedia asset={asset as AssetSummary & { media: Extract<AssetSummary["media"], { kind: "video" }> }} thumbnailSrc={tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource)} playbackSrc={mediaSource === "vault" ? vaultPlaybackUrl(asset.id) : undefined} active={activePreview} onRequestActive={() => onRequestPreview(asset.id)} onReleaseActive={() => onReleasePreview(asset.id)} onRetry={() => onRetryVideo?.(asset)} /> : <StableImage src={tileThumbnailUrl(asset, thumbnailCacheKey, mediaSource)} alt={alt} width={asset.width} height={asset.height} loading="lazy" decoding="async" draggable={false} />}
     {asset.media.kind === "image" && !privacyMode && <button type="button" className="asset-gallery__quick-preview-trigger" aria-label={`${alt} 빠른 확대 미리보기`} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerEnter={(event) => onRequestQuickPreview(asset, event.currentTarget)} onPointerLeave={onCancelQuickPreview} onFocus={(event) => onRequestQuickPreview(asset, event.currentTarget)} onBlur={onCancelQuickPreview} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onCancelQuickPreview(); } }}><MagnifyingGlassPlusIcon aria-hidden="true" /></button>}
     </div>
     {selected && <span className="ui-selection-check" aria-hidden="true" />}

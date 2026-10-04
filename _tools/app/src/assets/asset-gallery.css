@@ -16,6 +16,7 @@
 }
 
 .asset-gallery__scroll {
+  position: relative;
   box-sizing: border-box;
   flex: 1;
   min-height: 0;
@@ -27,6 +28,14 @@
      (The native scrollbar is hidden below, so no stable gutter is needed.) */
   padding-right: var(--gallery-scrollbar-width);
 }
+
+.asset-gallery__folder-snapshot { position: absolute; z-index: 0; overflow: hidden; pointer-events: none; }
+.asset-gallery__folder-snapshot * { animation: none !important; transition: none !important; }
+.asset-gallery__scroll[data-folder-move] > .asset-gallery__virtual-space { z-index: 1; background: var(--color-bg); }
+.asset-gallery__scroll[data-folder-move] > .asset-gallery__intro { position: relative; z-index: 2; background: var(--color-bg); }
+.asset-gallery__scroll[data-folder-move] .asset-gallery__justified-unit,
+.asset-gallery__scroll[data-folder-move] .asset-gallery__row { background: transparent !important; }
+.asset-gallery__scroll[data-folder-move="pending"] > .asset-gallery__virtual-space { visibility: hidden; }
 
 /* An inline section bar already supplies the same 4px inset as its dropped copy.
    Gallery tile gutters must not add another band above it (20px in masonry). */
@@ -266,4 +275,3 @@
   height: 100%;
   object-fit: contain;
 }
-

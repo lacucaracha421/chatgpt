@@ -21,19 +21,21 @@ export function useCharacterSuggestions(version: number, api: SuggestionApi = su
   const currentFilters = useSyncExternalStore(subscribe, snapshot);
   const [rows, setRows] = useState<Suggestion[]>([]);
   const [ignored, setIgnored] = useState<IgnoredTag[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [settledRequest, setSettledRequest] = useState<{ api: SuggestionApi; minimum: number; version: number; revision: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const loading = !settledRequest || settledRequest.api !== api || settledRequest.minimum !== currentFilters.minimum || settledRequest.version !== version || settledRequest.revision !== revision;
   const [message, setMessage] = useState<string | null>(null);
   const [postponed, setPostponed] = useState<string[]>([]);
   const refresh = useCallback(() => setRevision(value => value + 1), []);
   useEffect(() => {
     let live = true;
-    setLoading(true); setError(null);
+    setError(null);
+    const request = { api, minimum: currentFilters.minimum, version, revision };
     void Promise.all([api.list(currentFilters.minimum), api.ignored()]).then(([next, hidden]) => {
-      if (live) { setRows(next); setIgnored(hidden); setLoading(false); }
-    }, reason => { if (live) { setLoading(false); setError(commandErrorMessage(reason, "새 캐릭터 제안을 불러오지 못했습니다.")); } });
+      if (live) { setRows(next); setIgnored(hidden); setSettledRequest(request); }
+    }, reason => { if (live) { setSettledRequest(request); setError(commandErrorMessage(reason, "새 캐릭터 제안을 불러오지 못했습니다.")); } });
     return () => { live = false; };
   }, [api, currentFilters.minimum, version, revision]);
   const ignore = async (tag: string, value: boolean) => {
@@ -110,7 +112,7 @@ export function CharacterSuggestionTile({ suggestion, state, privacyMode, onChan
   return <>
     <AnchoredPanel open={open} onOpenChange={setOpen} title={suggestionName(suggestion.tag)} description={suggestion.tag}
       trigger={<button type="button" className="character-suggestion-tile" aria-label={`${suggestionName(suggestion.tag)} 제안 ${suggestion.imageCount}장`}>
-        <span className="character-suggestion-tile__mosaic">{!privacyMode && suggestion.sampleAssetIds.map(id => <AssetImage key={id} draggable={false} loading="lazy" src={thumbnailUrl(id)} alt="" />)}</span>
+        <span className="character-suggestion-tile__mosaic character-suggestion-tile__mosaic--suggestion">{!privacyMode && suggestion.sampleAssetIds.map(id => <AssetImage key={id} draggable={false} loading="lazy" src={thumbnailUrl(id)} alt="" />)}</span>
         <span className="character-suggestion-tile__flag">제안</span><b>{suggestionName(suggestion.tag)}</b><small>{suggestion.imageCount}장 · {suggestion.bothCount ? "● 일치" : "○ 한 태거만"}</small>
       </button>}
       footer={<SuggestionActions disabled={state.busy} onRegister={() => edit("register")} onMerge={() => edit("merge")} onIgnore={() => { setOpen(false); void state.ignore(suggestion.tag, true); }} onPostpone={() => state.postpone(suggestion.tag)} />}>

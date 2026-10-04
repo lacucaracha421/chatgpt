@@ -91,3 +91,58 @@ it("keeps the outgoing page scroll position until the next filter page arrives",
   await act(async () => { page.resolve({ items: fixtureAssets, nextCursor: null, totalCount: fixtureAssets.length }); });
   expect(scroller.scrollTop).toBe(0);
 });
+
+it("switches the real series shelf only after folders, suggestions and character/group/collage images are ready", async () => {
+  const api = createCharacterFixture(), originalTargets = await api.targets();
+  const targets = [...originalTargets, ...originalTargets.slice(0, 2).map((target, i) => ({
+    ...target, id: `next-${i}`, displayName: `Next ${i}`, seriesClassificationId: "next", thumbnailAssetId: `next-cover-${i}`,
+  }))];
+  const pendingSuggestions = deferred<Awaited<ReturnType<typeof suggestionApi.list>>>(), pendingFolders = deferred<SeriesFolder[]>();
+  vi.spyOn(suggestionApi, "list").mockResolvedValueOnce([]).mockReturnValue(pendingSuggestions.promise);
+  const hubApi = { browse: async () => ({ items: [], nextCursor: null, totalCount: 0 }),
+    seriesFolders: (id: string) => id === "next" ? pendingFolders.promise : Promise.resolve([]),
+    excludedAssets: async () => ({ items: [], nextCursor: null, totalCount: 0 }) } as unknown as CharacterHubApi;
+  const shadowApi = { page: async () => ({ summary: emptyShadowSummary() }) } as unknown as ShadowReviewApi;
+  const gateway = {} as LibraryGateway;
+  const element = (id: string) => <LibraryProvider gateway={gateway}><SeriesBrowser
+    series={{ classificationId: id, heroAssetId: null, autoClassify: true }} targets={targets}
+    groups={[{ id: "next-group", seriesId: "next", name: "Next group", revision: 1, targetIds: ["next-1"] }]}
+    classifications={fixtureClassifications} galleryLayout="masonry" privacyMode={false} metadataVisible thumbnailRowHeight={180} refreshVersion={id === "next" ? 1 : 0}
+    onGalleryLayoutChange={() => undefined} onPrivacyModeChange={() => undefined} onMetadataVisibleChange={() => undefined}
+    onThumbnailRowHeightChange={() => undefined} onNavigate={() => undefined} onChanged={() => undefined} api={api} hubApi={hubApi} shadowApi={shadowApi}
+  /></LibraryProvider>;
+  const view = render(element("series"));
+  await waitFor(() => expect(viewReady(view.container)).toBe(true));
+  vi.useFakeTimers();
+  try {
+    const rect = { top: 0, bottom: 100, left: 0, right: 100, width: 100, height: 100, x: 0, y: 0, toJSON() {} };
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect);
+    const visibleShelf = () => Array.from(view.container.querySelector(".series-shelf")!.children).find(node => !(node as HTMLElement).style.opacity)!;
+    const oldShelf = visibleShelf(), oldText = oldShelf.textContent;
+    view.rerender(element("next"));
+    expect(visibleShelf()).toBe(oldShelf);
+    expect(visibleShelf().textContent).toBe(oldText);
+    await act(async () => { pendingFolders.resolve([]); });
+    expect(visibleShelf().textContent).toBe(oldText);
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(visibleShelf()).toBe(oldShelf);
+    await act(async () => { pendingSuggestions.resolve([{ tag: "new_suggestion", seriesId: "next", seriesName: "Next", imageCount: 7,
+      bothCount: 7, canaryCount: 7, pixaiCount: 7, insideCount: 7, sampleAssetIds: ["sample-a", "sample-b"] }]); });
+    expect(visibleShelf().textContent).toBe(oldText);
+    const prepared = view.container.querySelector<HTMLElement>('[data-motion-view="series-shelf"][aria-hidden="true"]')!;
+    expect(prepared.querySelector(".character-suggestion-tile__mosaic")).toHaveClass("character-suggestion-tile__mosaic--suggestion");
+    const images = Array.from(prepared.querySelectorAll("img"));
+    expect(images).toHaveLength(4);
+    const characterImage = images.find(image => image.src.includes("next-cover-0"))!;
+    const groupImage = images.find(image => image.src.includes("next-cover-1"))!;
+    for (const image of images.slice(0, -1)) fireEvent.load(image);
+    expect(visibleShelf().textContent).toBe(oldText);
+    await act(async () => { fireEvent.load(images[images.length - 1]); });
+    expect(visibleShelf()).toBe(prepared);
+    expect(visibleShelf()).toHaveTextContent("캐릭터 2 · 그룹 1 · 제안 1");
+    expect(screen.getByRole("button", { name: "제안 숨기기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next 0 열기" }).querySelector("img")).toBe(characterImage);
+    expect(screen.getByRole("button", { name: "Next group 그룹 열기" }).querySelector("img")).toBe(groupImage);
+    expect(screen.queryByRole("button", { name: "히나 열기" })).toBeNull();
+  } finally { vi.useRealTimers(); }
+});

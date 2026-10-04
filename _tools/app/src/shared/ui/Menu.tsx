@@ -1,4 +1,5 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { useMotionSurface } from "./useMotionSurface";
 import { CheckIcon } from "@heroicons/react/20/solid";
 import { useRef, useState, type ReactNode } from "react";
 
@@ -37,6 +38,7 @@ type MenuProps = {
 
 export function Menu({ open, onOpenChange, items = [], content, label, trigger, disabled = false, triggerClassName, contentClassName, align = "start" }: MenuProps): ReactNode {
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const surfaceRef = useMotionSurface("menu");
   const [panelOwner, setPanelOwner] = useState<string | undefined>();
   return (
     <DropdownMenu.Root open={open} modal={false} onOpenChange={(next) => { setPanelOwner(next ? triggerRef.current?.closest("[data-workspace-popover]")?.getAttribute("data-workspace-popover") ?? undefined : undefined); onOpenChange?.(next); }}>
@@ -46,7 +48,7 @@ export function Menu({ open, onOpenChange, items = [], content, label, trigger, 
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content className={`ui-menu${contentClassName ? ` ${contentClassName}` : ""}`} data-panel-owner={panelOwner} align={align} sideOffset={4}>
+        <DropdownMenu.Content ref={surfaceRef} className={`ui-menu${contentClassName ? ` ${contentClassName}` : ""}`} data-panel-owner={panelOwner} align={align} sideOffset={4}>
           {content ?? renderMenuItems(items)}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

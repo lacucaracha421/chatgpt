@@ -1,4 +1,6 @@
 import {useCallback,useEffect,useLayoutEffect,useRef,useState,type RefObject} from 'react';
+import {EASE_STANDARD as EASE_OUT,prefersReducedMotion} from '../src/shared/motion/curves';
+export {EASE_OUT,prefersReducedMotion};
 
 /**
  * Motion spec (transform and opacity only, all ≤ 220 ms, nothing under reduced motion):
@@ -15,14 +17,8 @@ export const LEVEL_MOTION_MS=220;
 export const SWAP_MOTION_MS=140;
 export const SEGMENT_MOTION_MS=200;
 export const SEGMENT_SHIFT_PX=16;
-/** A fast start that settles softly, like the system's own screen transitions. */
-export const EASE_OUT='cubic-bezier(0.2,0,0,1)';
 const STAGGER_TILES=10,STAGGER_STEP_MS=12,STAGGER_TILE_MS=110;
 const TILE_SELECTOR='.media-tile,.library-folder,.character-card';
-
-export function prefersReducedMotion(){
-  try{return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches??false;}catch{return false;}
-}
 
 const hidden=(element:HTMLElement)=>element.hidden||element.style.display==='none';
 /**

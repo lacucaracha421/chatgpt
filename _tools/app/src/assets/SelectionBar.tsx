@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
 import type { AssetView } from "../library/types";
 import { Button } from "../shared/ui/Button";
+import { MotionPresence } from "../shared/ui/MotionPresence";
 import "./SelectionBar.css";
 
 type SelectionBarProps = {
@@ -32,9 +33,9 @@ type SelectionBarProps = {
 export function SelectionBar({
   view, selectedCount, batchPending, onFavorite, onAddToAlbum, onRemoveFromCollection, onSetCover, onAssignArtist, characterOpen = false, onCharacterToggle, characterPicker, characterLabel = "캐릭터", characterShortcut = "C", extraActions, onTrash, onClearSelection, compact = false,
 }: SelectionBarProps) {
-  if (selectedCount === 0) return null;
   const inCollection = view?.kind === "collection";
   return (
+    <MotionPresence open={selectedCount > 0}>
     <div className={`asset-selection-bar${compact ? " asset-selection-bar--compact" : ""}`} role="toolbar" aria-label="선택 작업">
       <strong>{selectedCount}개 선택</strong>
       <span className="view-toolbar__divider" aria-hidden="true" />
@@ -54,5 +55,6 @@ export function SelectionBar({
       {onTrash && <Button aria-label="휴지통으로 이동" size="icon" variant="danger" disabled={batchPending} onClick={onTrash}><TrashIcon aria-hidden="true" /></Button>}
       <Button aria-label="선택 해제" size="icon" variant="ghost" onClick={onClearSelection}><XMarkIcon aria-hidden="true" /></Button>
     </div>
+    </MotionPresence>
   );
 }

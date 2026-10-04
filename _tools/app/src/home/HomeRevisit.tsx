@@ -1,22 +1,36 @@
-import { AssetImage } from "../privacy/AssetImage";
-import { useEffect, useState } from "react";
-import { thumbnailUrl } from "../assets/mediaUrl";
-import { HomePresence, HomeSection } from "./HomeAttention";
-import type { LibraryGateway, RevisitBundle } from "../library/types";
+import { AssetStableImage as AssetImage } from "../privacy/AssetImage";
+import { assetUrl, thumbnailUrl } from "../assets/mediaUrl";
+import { HomeSection } from "./HomeAttention";
+import type { LibraryGateway } from "../library/types";
+import { Button } from "../shared/ui/Button";
+import { BusyLabel } from "../shared/ui/BusyLabel";
+import { useHomeMedia, type HomeMediaSnapshot } from "./useHomeMedia";
 
 export function HomeRevisit({ gateway, localDate, privacyMode, onOpenAsset, active = true }: {
   gateway: LibraryGateway; localDate: string; privacyMode: boolean; onOpenAsset?: (assetId: string) => void; active?: boolean;
 }) {
-  const [bundle, setBundle] = useState<RevisitBundle | null | undefined>(undefined);
-  useEffect(() => {
-    if (!active) return;
-    let live = true;
-    void Promise.resolve().then(() => gateway.getRevisitSlate(localDate, new Date().toISOString()))
-      .then((slate) => { if (live) setBundle(slate?.bundles.find((item) => item.kind === "date") ?? null); }, () => undefined);
-    return () => { live = false; };
-  }, [gateway, localDate, active]);
+  const read = useHomeMedia(gateway, localDate, active, 0);
+  return <HomeDay data={read.data} failed={read.failed} quiet={false} privacyMode={privacyMode} onOpenAsset={onOpenAsset} />;
+}
 
-  return <HomePresence items={bundle?.assetIds.length ? [{ key: "revisit", content: <HomeSection title={`1년 전 오늘 · ${bundle.assetIds.length.toLocaleString()}장`}><RevisitMosaic assetIds={bundle.assetIds} privacyMode={privacyMode} onOpenAsset={onOpenAsset} /></HomeSection> }] : []} />;
+export function HomeDay({ data, failed, quiet, privacyMode, onOpenAsset }: {
+  data: HomeMediaSnapshot | null; failed: boolean; quiet: boolean; privacyMode: boolean; onOpenAsset?: (assetId: string) => void;
+}) {
+  const bundle = data?.anniversary;
+  const asset = data?.dailyAsset;
+  const saved = asset ? new Date(asset.collectedAt) : null;
+  return <div className="home-day">
+    {failed && <p role="status" className="home-attention-empty">오늘의 이미지를 확인할 수 없습니다</p>}
+    {!data && !failed && <div className="home-day__waiting" aria-busy="true"><BusyLabel busy>오늘의 이미지 불러오는 중</BusyLabel></div>}
+    {bundle ? <HomeSection title={`1년 전 오늘 · ${bundle.assetIds.length.toLocaleString()}장`}><RevisitMosaic assetIds={bundle.assetIds} privacyMode={privacyMode} onOpenAsset={onOpenAsset} /></HomeSection>
+      : quiet && data && <HomeSection title="오늘의 한 장">{asset ? <div className="home-daily">
+        {privacyMode ? <span className="home-daily__mask privacy-mask" aria-label="이미지 숨김" /> : <AssetImage className="home-daily__backdrop" src={thumbnailUrl(asset.id)} alt="" draggable={false} />}
+        <div className="home-daily__picture">{!privacyMode && <AssetImage className="home-daily__image" src={assetUrl(asset.id)} alt="오늘의 한 장" draggable={false} />}</div>
+        <div className="home-daily__caption"><span><b>{saved && `${saved.getFullYear()}.${saved.getMonth() + 1}.${saved.getDate()}에 저장`}</b><span className="home-daily__favorite">★ 즐겨찾기</span></span>
+          {onOpenAsset && <Button onClick={() => onOpenAsset(asset.id)}>열기</Button>}
+        </div>
+      </div> : <p className="home-attention-empty">즐겨찾는 이미지가 생기면 여기에 보여 드립니다</p>}</HomeSection>}
+  </div>;
 }
 
 function RevisitMosaic({ assetIds, privacyMode, onOpenAsset }: {

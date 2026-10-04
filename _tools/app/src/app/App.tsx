@@ -29,7 +29,7 @@ import {
 import { DropOverlay } from "../ingestion/DropOverlay";
 import { AppShell } from "../layout/AppShell";
 import { ChromeTarget, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
-import { WorkspaceNavigation, hasWorkspaceIndex, workspaceArea } from "../layout/WorkspaceNavigation";
+import { hasWorkspaceIndex, WorkspaceNavigation, workspaceArea } from "../layout/WorkspaceNavigation";
 import { AreaPainted, AreaSwitch, MotionScope, viewReady } from "../shared/motion/AreaSwitch";
 import { ChromeContext, useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { LightweightModeIndicator, WindowControls } from "../layout/WindowControls";
@@ -161,6 +161,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
   const [view, setView] = useState<AssetView>(initialWorkspaceView);
   const area = workspaceSwitchKey(view);
   const [shownArea, setShownArea] = useState(area);
+  const [areaSettling, setAreaSettling] = useState(false);
   const shownView = useRef(view);
   if (area === shownArea) shownView.current = view;
   const viewHistoryRef = useRef<AssetView[]>([]);
@@ -653,7 +654,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
         <WorkspaceChromeProvider scope={JSON.stringify(shownView.current)} pending={area !== shownArea}>
         <AppShell
           sidebar={
-            <WorkspaceNavigation view={shownView.current} requestedView={view} collectionType={preferences.collectionType}
+            <WorkspaceNavigation view={shownView.current} requestedView={view} settling={areaSettling} collectionType={preferences.collectionType}
               width={sidebarWidth} onWidthChange={setSidebarWidth} onNavigate={navigateView}
               reviewCount={reviewCount} trashCount={trashCount} onImportFiles={dropEnabled ? () => void importFiles() : undefined}
               unsortedCount={unsortedCount} onQueuesRequested={() => void refreshUnsortedCount().catch(() => undefined)}
@@ -708,7 +709,7 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                 <WindowControls /></div>
             <div className="library-content">
               <section className="library-content__browser" aria-label="자산 내용">
-                <MotionScope><WorkspaceAreaSwitch view={view} shownView={shownView.current} collections={collections} sidebarWidth={sidebarWidth} onShown={setShownArea} ready={(host, area) => (area !== "collections" || (collectionsRead?.gateway === gateway && collectionsRead.root === libraryRoot)) && viewReady(host)}><Suspense fallback={<DeferredViewFallback />}>
+                <MotionScope><WorkspaceAreaSwitch view={view} shownView={shownView.current} collections={collections} sidebarWidth={sidebarWidth} onShown={setShownArea} onSettlingChange={setAreaSettling} ready={(host, area) => (area !== "collections" || (collectionsRead?.gateway === gateway && collectionsRead.root === libraryRoot)) && viewReady(host)}><Suspense fallback={<DeferredViewFallback />}>
                 {view.kind === "private_vault" ? (
                   privateVaultVisible && privateVaultStatus
                     ? <ExternalVaultBrowser gateway={gateway} status={privateVaultStatus} onStatusChange={updatePrivateVaultStatus}
@@ -851,12 +852,13 @@ function DeferredViewFallback() {
 function workspaceSwitchKey(view: AssetView) { return view.kind === "collection" ? "collection-work" : workspaceArea(view); }
 
 /** Prepare chrome for the requested scope while the shell still paints the outgoing scope. */
-function WorkspaceAreaSwitch({view, shownView, collections, sidebarWidth, onShown, ready, children}: {view: AssetView; shownView: AssetView; collections: CollectionSummary[]; sidebarWidth: number; onShown(area: string): void; ready(host: HTMLElement, area: string): boolean; children: ReactNode}) {
+function WorkspaceAreaSwitch({view, shownView, collections, sidebarWidth, onShown, onSettlingChange, ready, children}: {view: AssetView; shownView: AssetView; collections: CollectionSummary[]; sidebarWidth: number; onShown(area: string): void; onSettlingChange(settling: boolean): void; ready(host: HTMLElement, area: string): boolean; children: ReactNode}) {
   const chrome = useWorkspaceChrome();
   const area = workspaceSwitchKey(view), scope = JSON.stringify(view);
   const indexWidth = (target: AssetView) => hasWorkspaceIndex(target, collections, chrome?.getMeta(JSON.stringify(target)) ?? null)
     && !(workspaceArea(target) === "manga" && chrome?.indexHidden.manga) ? sidebarWidth : 0;
-  return <AreaSwitch activeKey={area} retained={["home"]} onShown={onShown} ready={ready} incomingWidthDelta={indexWidth(shownView) - indexWidth(view)} waitForReady={area === "collection-work" || area === "collections"} views={{[area]: <WorkspaceChromeScope chrome={chrome} scope={scope}>{children}</WorkspaceChromeScope>}}/>;
+  // Prepare at the final width; the index swaps on the same frame as the opacity clock.
+  return <AreaSwitch activeKey={area} retained={["home", "manga"]} onShown={onShown} onSettlingChange={onSettlingChange} incomingWidthDelta={indexWidth(shownView) - indexWidth(view)} ready={ready} waitForReady={area === "collection-work" || area === "collections"} views={{[area]: <WorkspaceChromeScope chrome={chrome} scope={scope}>{children}</WorkspaceChromeScope>}}/>;
 }
 
 const NO_CHROME_TARGETS = { navigation: null, actions: null, search: null, settings: null, header: null, details: null };

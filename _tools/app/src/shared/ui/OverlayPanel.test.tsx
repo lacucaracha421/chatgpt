@@ -31,7 +31,9 @@ it("closes only the panel on Escape and returns focus to its opener", async () =
 
   fireEvent.keyDown(document.activeElement!, { key: "Escape" });
   expect(parentEscape).not.toHaveBeenCalled();
-  act(() => vi.advanceTimersByTime(220));
+  act(() => vi.advanceTimersByTime(239));
+  expect(screen.getByRole("complementary", { name: "자산 정보" })).toBeInTheDocument();
+  act(() => vi.advanceTimersByTime(1));
 
   expect(screen.queryByRole("complementary", { name: "자산 정보" })).not.toBeInTheDocument();
   expect(opener).toHaveFocus();

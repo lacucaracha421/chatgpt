@@ -547,7 +547,7 @@ it.each([false,true])('swaps bottom tabs atomically after readiness and retains 
   const notes=new Promise(resolve=>{releaseNotes=()=>resolve({unlocked:true,notes:[]});});
   mocks.native.mockImplementation(async(op:string)=>op.startsWith('notes')?notes:{configured:true,endpoint:'https://example.invalid'});
   let observer:MutationObserver|undefined;
-  const animate=vi.fn(function(this:HTMLElement){return {cancel(){}};});
+  const animate=vi.fn(function(this:HTMLElement,_frames:Keyframe[],_options:KeyframeAnimationOptions){return {cancel(){}};});
   const descriptor=Object.getOwnPropertyDescriptor(HTMLElement.prototype,'animate');
   Object.defineProperty(HTMLElement.prototype,'animate',{configurable:true,value:animate});
   try {
@@ -579,9 +579,20 @@ it.each([false,true])('swaps bottom tabs atomically after readiness and retains 
         await act(async()=>releaseNotes());
       }
       await waitFor(()=>expect(body.querySelector(`[data-motion-view=${key}]`)?.getAttribute('aria-hidden')).toBeNull());
-      expect((animate.mock.contexts as HTMLElement[]).filter(element=>element.classList.contains('motion-stage__view'))).toHaveLength(0);
+      // A short cross: the incoming stage enters while the inert outgoing stage fades out underneath.
+      await waitFor(()=>expect((animate.mock.contexts as HTMLElement[]).filter(element=>element.classList.contains('motion-stage__view'))).toHaveLength(2));
+      expect((animate.mock.contexts as HTMLElement[])[0]).toBe(stage.querySelector(`[data-motion-view=${key}]`));
+      const crosses=animate.mock.calls.filter((_,index)=>(animate.mock.contexts[index] as HTMLElement).classList.contains('motion-stage__view'));
+      expect(crosses.map(call=>call[0])).toEqual([[{opacity:0},{opacity:1}],[{opacity:1},{opacity:0}]]);
+      expect(crosses.map(call=>call[1].duration)).toEqual(reduced?[120,120]:[150,150]);
       await waitFor(()=>expect(body.querySelector('.motion-stage')?.getAttribute('data-motion-shown')).toBe(key));
-      expect(visibleViews()).toEqual([key]);
+      const incoming=stage.querySelector<HTMLElement>(`[data-motion-view=${key}]`)!;
+      for(const outgoing of [...stage.children].filter(view=>visibleViews().includes(view.getAttribute('data-motion-view'))&&view!==incoming)){
+        expect(outgoing.getAttribute('aria-hidden')).toBe('true');
+        expect(outgoing.hasAttribute('inert')).toBe(true);
+        expect(Number((outgoing as HTMLElement).style.zIndex)).toBeLessThan(Number(incoming.style.zIndex));
+      }
+      await waitFor(()=>expect(visibleViews()).toEqual([key]));
       if(key!=='home'){
         if(retained.has(key))expect(shown).toBe(retained.get(key));
         else retained.set(key,shown);
@@ -589,7 +600,7 @@ it.each([false,true])('swaps bottom tabs atomically after readiness and retains 
     }
     observer.disconnect();
     expect(visibilitySnapshots.length).toBeGreaterThan(0);
-    expect(visibilitySnapshots.every(views=>views.length===1)).toBe(true);
+    expect(visibilitySnapshots.every(views=>views.length>=1&&views.length<=2)).toBe(true);
   } finally {
     observer?.disconnect();
     if(descriptor)Object.defineProperty(HTMLElement.prototype,'animate',descriptor);
@@ -1003,5 +1014,5 @@ it('opens the shared info from a single list selection and consumes Back before 
  fireEvent.contextMenu(screen.getByText('tile-a2'));
  expect(screen.queryByRole('button',{name:'정보',exact:true})).toBeNull();
  act(()=>window.dispatchEvent(new Event('lakomics-back')));
- expect(screen.queryByText('2개 선택')).toBeNull();
+ await waitFor(()=>expect(screen.queryByText('2개 선택')).toBeNull());
 });

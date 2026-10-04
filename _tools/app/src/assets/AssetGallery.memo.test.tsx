@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssetSummary } from "../library/types";
 import { AssetGallery } from "./AssetGallery";
@@ -25,7 +25,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe.each(["masonry", "justified"] as const)("%s tile memoization", layout => {
-  it("skips equal responses and updates only the changed tile without replacing image nodes", () => {
+  it("skips equal responses and keeps the old bitmap until the changed thumbnail decodes", async () => {
     const thumbnail = vi.spyOn(mediaUrl, "assetThumbnailUrl");
     const items = Array.from({ length: 8 }, (_, index) => asset(index));
     const { rerender } = render(<AssetGallery layout={layout} items={items} onOpen={() => undefined} />);
@@ -44,8 +44,15 @@ describe.each(["masonry", "justified"] as const)("%s tile memoization", layout =
     expect(thumbnail).toHaveBeenCalledOnce();
     expect(thumbnail.mock.calls[0][0].id).toBe("asset-2");
     expect(screen.getByRole("option", { name: "Updated" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Updated" })).toHaveAttribute("src", expect.stringContaining("/vr2"));
     screen.getAllByRole("img").forEach((image, index) => expect(image).toBe(images[index]));
+    const next = document.querySelector<HTMLImageElement>('img[src$="/vr2"]')!;
+    let finish!: () => void;
+    next.decode = () => new Promise<void>(resolve => { finish = resolve; });
+    fireEvent.load(next);
+    expect(screen.getByRole("img", {name: "asset-2.png"})).toBe(images[2]);
+    await act(async () => finish());
+    expect(screen.getByRole("img", {name: "Updated"})).toBe(next);
+    screen.getAllByRole("img").forEach((image, index) => { if (index !== 2) expect(image).toBe(images[index]); });
   });
 
   it("uses current callbacks and drag selection when an unchanged tile skips rendering", () => {

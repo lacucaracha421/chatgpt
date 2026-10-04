@@ -1,6 +1,6 @@
 import {visibleInterval} from './useVisibleInterval';
 import {viewerEditEvent} from './listGeneration';
-import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
+import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {ChevronDownIcon,ChevronRightIcon,FolderIcon,MagnifyingGlassIcon,XMarkIcon} from '@heroicons/react/24/outline';
 import {Dialog,DialogDescription,IconButton} from './ui';
 import {errorText,native} from './transport';
@@ -132,7 +132,8 @@ export function collapsedForAssignment(rows:AssignmentClassification[],classific
 export function ClassificationAssignmentChoices({classifications,selectedId,disabled,onSelect}:{classifications:AssignmentClassification[];selectedId:string|null|undefined;disabled:boolean;onSelect(id:string|null):void}) {
   const [query,setQuery]=useState('');
   const [collapsed,setCollapsed]=useState(()=>collapsedForAssignment(classifications,selectedId??null));
-  useEffect(()=>setCollapsed(collapsedForAssignment(classifications,selectedId??null)),[selectedId,classifications]);
+  // Apply the replica's expansion before paint so its reset cannot undo the first tap.
+  useLayoutEffect(()=>setCollapsed(collapsedForAssignment(classifications,selectedId??null)),[selectedId,classifications]);
   const results=useMemo(()=>searchAssignmentTree(classifications,query),[classifications,query]);
   const rows=useMemo(()=>flattenAssignmentTree(classifications,collapsed),[classifications,collapsed]);
   const toggle=(id:string)=>setCollapsed(current=>{const next=new Set(current);next.has(id)?next.delete(id):next.add(id);return next;});

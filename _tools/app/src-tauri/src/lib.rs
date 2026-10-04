@@ -245,6 +245,7 @@ pub fn run() {
             exchange::exchange_set_token,
             exchange::exchange_thumbnail,
             commands::home::get_home_overview,
+            commands::home_media::get_home_media,
             commands::home::set_av_favorite,
             commands::home::list_av_favorites,
             commands::release_calendar::get_release_calendar,

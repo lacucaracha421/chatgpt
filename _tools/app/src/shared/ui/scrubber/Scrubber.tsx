@@ -12,7 +12,7 @@ const FADE_MS = 220;
 
 type Metrics = {long: boolean; progress: number; top: number; bottom: number; right: number; height: number};
 
-export function Scrubber({scrollRef, total, sort, hidden = false, onEndReached, onSeek, indexAtScroll, input = 'touch'}: {scrollRef: RefObject<HTMLElement | null>; total: number; sort: ScrubberSort; hidden?: boolean; onEndReached?(): void; onSeek?(index:number):void; indexAtScroll?():number; input?: 'touch' | 'pointer'}) {
+export function Scrubber({scrollRef, total, displayTotal, sort, hidden = false, onEndReached, onSeek, indexAtScroll, input = 'touch'}: {scrollRef: RefObject<HTMLElement | null>; total: number; /** The whole list's size when only part of it is loaded; only the label uses it. */ displayTotal?: number | null; sort: ScrubberSort; hidden?: boolean; onEndReached?(): void; onSeek?(index:number):void; indexAtScroll?():number; input?: 'touch' | 'pointer'}) {
   const desktop = input === 'pointer';
   const [hovered, setHovered] = useState(false);
   const hoveredRef = useRef(false);
@@ -262,7 +262,7 @@ export function Scrubber({scrollRef, total, sort, hidden = false, onEndReached, 
         <div className="pc-scrubber-thumb" />
       </div>
       {shown && <div className="pc-scrubber-bubble" style={{top: clampScrubberTag(thumbY, height, 48)}} aria-hidden="true">
-        {label && <b>{label}</b>}<small>{(position.index + 1).toLocaleString()} / {total.toLocaleString()}</small>
+        {label && <b>{label}</b>}<small>{(position.index + 1).toLocaleString()} / {Math.max(total, displayTotal ?? 0).toLocaleString()}</small>
       </div>}
     </div>, document.body);
   }
@@ -280,7 +280,7 @@ export function Scrubber({scrollRef, total, sort, hidden = false, onEndReached, 
       {phase !== 'idle' && sort.kind==='toc' && model.ticks.filter(tick=>!tick.major).map(tick=><i className="mobile-scrubber-month" key={tick.index} style={{left:`${tick.position*100}%`}}/>)}
       {phase !== 'idle' && <div className="mobile-scrubber-bubble" ref={bubbleRef}>
         {label && <b>{label}</b>}
-        <small>{(position.index + 1).toLocaleString()} / {total.toLocaleString()}</small>
+        <small>{(position.index + 1).toLocaleString()} / {Math.max(total, displayTotal ?? 0).toLocaleString()}</small>
       </div>}
     </div>}
   </div>;

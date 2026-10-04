@@ -2,7 +2,7 @@ import {useRef,type CSSProperties} from 'react';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {cleanup,render} from '@testing-library/react';
 import {act} from 'react';
-import {PROGRESS_DELAY_MS,PROGRESS_FADE_MS,PROGRESS_MIN_MS,SEGMENT_MOTION_MS,useDelayedPresence,useLevelMotion,useScrollMemory,useSegmentMotion,useTabIndicator} from './motion';
+import {EASE_OUT,PROGRESS_DELAY_MS,PROGRESS_FADE_MS,PROGRESS_MIN_MS,SEGMENT_MOTION_MS,useDelayedPresence,useLevelMotion,useScrollMemory,useSegmentMotion,useTabIndicator} from './motion';
 import {BarProgress} from './TopBar';
 
 function Level({levelKey,depth}:{levelKey:string|null;depth:number}){const host=useRef<HTMLDivElement>(null);useLevelMotion(host,levelKey,depth);return <div ref={host} data-testid="level"/>;}
@@ -88,7 +88,8 @@ describe('segment swap',()=>{
     expect(animate.mock.contexts[0]).toBe(view.getByTestId('segment'));
     expect(firstFrame(0)).toMatchObject({transform:'translateX(16px)',opacity:.5});
     const options=animate.mock.calls[0][1] as KeyframeAnimationOptions;
-    expect(options.duration).toBeLessThanOrEqual(200);expect(options.easing).toBe('cubic-bezier(0.2,0,0,1)');
+    // The shared curve keeps the same shape without depending on CSS whitespace.
+    expect(options.duration).toBeLessThanOrEqual(200);expect(options.easing).toBe(EASE_OUT);
     // A tab to the left comes in from the left; the same tab again does not move.
     view.rerender(<Segment segment="game" index={0}/>);
     expect(firstFrame(1).transform).toBe('translateX(-16px)');
@@ -111,7 +112,7 @@ describe('tab underline',()=>{
     expect(bar.style.transition).toBe('none');
     view.rerender(<Indicator index={2}/>);
     expect(bar.style.transform).toBe('translateX(124px) scaleX(42)');
-    expect(bar.style.transition).toBe(`transform ${SEGMENT_MOTION_MS}ms cubic-bezier(0.2,0,0,1)`);
+    expect(bar.style.transition).toBe(`transform ${SEGMENT_MOTION_MS}ms ${EASE_OUT}`);
   });
   it('jumps without a transition under reduced motion',()=>{
     reduced(true);

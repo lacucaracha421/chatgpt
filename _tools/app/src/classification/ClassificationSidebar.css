@@ -1,0 +1,11 @@
+.classification-sidebar__reveal { display: grid; min-height: 0; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows calc(var(--motion-medium) * .7) var(--spring-gentle), opacity var(--motion-micro) var(--ease-out); }
+.classification-sidebar__reveal > ul { min-height: 0; overflow: hidden; }
+.classification-sidebar__reveal[data-open="true"] { grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows var(--motion-medium) var(--spring-gentle), opacity var(--motion-small) var(--ease-out) calc(var(--motion-micro) / 3); }
+.classification-sidebar__tree-toggle-mark, .classification-sidebar__tree-heading > svg { transition: transform calc(var(--motion-medium) * .7) var(--spring-gentle); }
+.classification-sidebar__tree-toggle-mark[data-state="expanded"], .classification-sidebar__tree-heading[aria-expanded="true"] > svg { transform: rotate(90deg); transition-duration: var(--motion-medium); }
+@media (prefers-reduced-motion: reduce) {
+  /* Commit height in one step: closing paint remains visible for its opacity fade. */
+  .classification-sidebar__reveal { transition: grid-template-rows var(--motion-micro) step-end, opacity var(--motion-micro) var(--ease-out); }
+  .classification-sidebar__reveal[data-open="true"] { transition: grid-template-rows var(--motion-micro) step-start, opacity var(--motion-micro) var(--ease-out); }
+  .classification-sidebar__tree-toggle-mark, .classification-sidebar__tree-heading > svg { transition: none; }
+}

@@ -1,4 +1,5 @@
 import * as RadixDialog from "@radix-ui/react-dialog";
+import { useMotionSurface } from "./useMotionSurface";
 import { useEffect, useRef, type KeyboardEventHandler, type PropsWithChildren, type WheelEventHandler } from "react";
 import { useBackHandler, useBackNavigationContext, useBackRequest } from "../navigation/BackNavigation";
 
@@ -17,6 +18,8 @@ const SWIPE_BACK_COOLDOWN_MS = 800;
 export function Dialog({ children, open, title, variant = "default", onKeyDown, onKeyUp, onClose }: DialogProps) {
   const backNavigation = useBackNavigationContext();
   const requestBack = useBackRequest();
+  const surfaceRef = useMotionSurface("dialog", variant !== "fullscreen", title);
+  const scrimRef = useMotionSurface("scrim", variant !== "fullscreen", title);
   const openerRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
   const swipeRef = useRef({ accumulated: 0, cooldownUntil: 0 });
@@ -71,8 +74,9 @@ export function Dialog({ children, open, title, variant = "default", onKeyDown, 
   return (
     <RadixDialog.Root open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
       <RadixDialog.Portal>
-        <RadixDialog.Overlay className="ui-dialog__overlay" />
+        <RadixDialog.Overlay ref={scrimRef} className="ui-dialog__overlay" />
         <RadixDialog.Content
+          ref={surfaceRef}
           className={`ui-dialog${variant === "default" ? "" : ` ui-dialog--${variant}`}`}
           onCloseAutoFocus={(event) => {
             event.preventDefault();

@@ -24,9 +24,13 @@ import { Skeleton } from "../shared/ui/Skeleton";
 import { Button } from "../shared/ui/Button";
 import { daysAfter, localBoundaries, newlyReleasedRows, weekdayLabel, upcomingRows, type ReleaseRow, type UpcomingRow } from "./homeModel";
 import { attentionRows } from "./homeAttentionModel";
-import { HomeAttentionLayout, HomePresence, HomeReleaseList, HomeSection, HomeToday } from "./HomeAttention";
+import { HomeSection, HomeToday, type HomeReleaseCard } from "./HomeAttention";
 import { useHomeVisit } from "./useHomeVisit";
-import { HomeRevisit } from "./HomeRevisit";
+import { HomeDay } from "./HomeRevisit";
+import { HomePlaying } from "./HomePlaying";
+import { HomeReleaseGrid } from "./HomeReleaseGrid";
+import { useHomeMedia } from "./useHomeMedia";
+import { BusyLabel } from "../shared/ui/BusyLabel";
 import { useConnectionRows } from "../layout/ConnectionStatusBlock";
 import { CharacterReviewOverview, type CharacterReviewScope } from "./CharacterReviewOverview";
 import { shadowPageSource, type CharacterReviewSource } from "./characterReviewSource";
@@ -69,7 +73,7 @@ export type HomeViewProps = {
   avLinkApi?: AvLinkApi;
 };
 
-/** Attention-only Home: existing note, review, connection and cached release sources. */
+/** PC Home: media on the left, today's attention and memories on the right. */
 
 export function HomeView({ collections, collectionsReady = true, reviewCount, unsortedCount, trashCount, refreshVersion = 0, onNavigate, onQueuesRequested, notes, shadowApi, characterSource, taggerSource, taggerApi = taggerDecisionApi, characters = [], classifications = [], now = () => new Date(), avLinkApi, onOpenAsset }: HomeViewProps) {
   const { gateway, library } = useLibrary();
@@ -101,6 +105,8 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   const [wishlistError, setWishlistError] = useState(false);
   const [releaseDetail, setReleaseDetail] = useState<ReleaseTitle | null>(null);
   const [shelfRetry, setShelfRetry] = useState(0);
+  const mediaVersion = `${refreshVersion}:${shelfRetry}:${collections.map(work => `${work.id}:${work.updatedAt}`).join('|')}`;
+  const media = useHomeMedia(gateway, today, active, mediaVersion);
   const [calendarRead, setCalendarRead] = useState<{ api: typeof calendarApi; root: string; retry: number; visit: number } | null>(null);
   const [calendarSnapshot, setCalendarSnapshot] = useState<ReleaseCalendar | null>(null);
   useEffect(() => {
@@ -199,7 +205,6 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   const { health } = useAuthoritySyncHealth(gateway, root);
   const connectionRows = useConnectionRows({ gateway, cloud, authorityHealth: health, active, calendar: calendarSnapshot });
   const go = (view: AssetView) => () => onNavigate(view);
-  const releaseView: AssetView = { kind: "collections", typeFilter: "manga", showcase: false, releaseProvider: "kakao" };
   const calendarView = (type: "game" | "movie" = "game"): AssetView => ({ kind: "collections", typeFilter: type, showcase: false, releaseCalendar: true });
 
   /* 확인할 것; 캐릭터 검토 names its busiest series (from the first page) and opens the overview */
@@ -272,6 +277,12 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   const shelfLoading = (Boolean(tracking) && !release.data && !release.error) || (!wishlistReady && !wishlistError);
   const shelfFailed = Boolean(release.error) || wishlistError;
   const retryShelf = () => { release.reload(); setShelfRetry(value => value + 1); };
+  const attentionPending = (Boolean(gateway.getHomeOverview) && !overview && !overviewError) || duplicateCount === null && !duplicateError
+    || Boolean(shadowQueueApi) && !restricted && characterQueue === null && !characterError || Boolean(store && !notesState.ready);
+  // Resolve the initial block arrangement together; subsequent reads leave it mounted.
+  const layoutShown = useRef(false);
+  if (collectionsReady && (media.data || media.failed) && !shelfLoading && !attentionPending) layoutShown.current = true;
+  const firstLoad = !layoutShown.current;
 
   if (reviewOverview && source) return <>
     <CharacterReviewOverview source={source} targets={characters} seriesName={seriesName} version={reviewRead} restricted={restricted} privacyMode={privacyMode}
@@ -282,23 +293,36 @@ export function HomeView({ collections, collectionsReady = true, reviewCount, un
   if (taggerOverview && taggerItems) return <TaggerReview items={taggerItems} targets={characters} classifications={classifications} privacyMode={privacyMode}
     api={taggerApi} onItemsChange={setTaggerItems} onBack={() => { setTaggerOverview(false); setQueueRead((value) => value + 1); }} />;
 
-  const rightSections = [
-    ...(visit.arrivals.length ? [{ key: 'new', content: <HomeSection title="새로 나옴 · 지난번 이후" onOpen={() => onNavigate(releaseView)}><HomeReleaseList today={today} rows={visit.arrivals.map(row => ({ key: row.key, name: row.name, date: row.date ?? null, detail: row.volume ? `${row.volume}권` : row.caption.text, fresh: true, cover: cover(row) ? <StableImage src={cover(row)!} alt="" loading="lazy" decoding="async" /> : undefined, onOpen: () => openRelease(row) }))} /></HomeSection> }] : []),
-    ...(upcoming.length ? [{ key: 'upcoming', content: <HomeSection title="2주 안에 나오는 신간" onOpen={() => onNavigate(calendarApi ? calendarView() : releaseView)}><HomeReleaseList today={today} rows={upcoming.map(row => ({ key: row.key, name: row.name, date: row.date, detail: row.detail, cover: cover(row) ? <StableImage src={cover(row)!} alt="" loading="lazy" decoding="async" /> : undefined, onOpen: () => openUpcoming(row) }))} /></HomeSection> }] : []),
-    ...((shelfLoading && !visit.arrivals.length && !upcoming.length) ? [{ key: 'loading', content: <Skeleton label="신간 정보" /> }] : []),
-    ...(shelfFailed ? [{ key: 'release-error', content: <p role="status">신간을 확인할 수 없습니다 <Button variant="quiet" onClick={retryShelf}>다시 시도</Button></p> }] : []),
+  const releaseKind = (kind: ReleaseRow['kind'], volume?: number | null) => volume ? `${volume}권` : ({ game: '게임', movie: '영화', anime: '애니', manga: '만화' })[kind];
+  const releaseCover = (row: ReleaseRow | UpcomingRow) => { const src = cover(row); return src ? <StableImage src={src} alt="" loading="lazy" decoding="async" /> : undefined; };
+  const releaseCards: HomeReleaseCard[] = [
+    ...visit.arrivals.map(row => ({ key: row.key, name: row.name, date: row.date ?? null, detail: releaseKind(row.kind, row.volume), fresh: true, cover: releaseCover(row), onOpen: () => openRelease(row) })),
+    ...upcoming.filter(row => !visit.arrivals.some(arrival => arrival.date === row.date && (arrival.volume ?? null) === (row.volume ?? null) && (arrival.key === row.key || arrival.collection?.id === row.collectionId && !!row.collectionId)))
+      .map(row => ({ key: row.key, name: row.name, date: row.date, detail: releaseKind(row.kind, row.volume), cover: releaseCover(row), onOpen: () => openUpcoming(row) })),
   ];
   return <div className="home-view">
     <ViewToolbar title="홈" titleContent={<span className="home-title-date"><span className="numeric">{`${at.getMonth() + 1}.${at.getDate()}`}</span> {weekdayLabel(at)}</span>} />
-    <div className="home-scroll"><div className="home-content">
-      <HomeAttentionLayout today={<HomeToday rows={todayRows} onOpen={row => {
+    <div className="home-scroll"><div className="home-content home-pc-layout" aria-busy={firstLoad}>
+      <div className="home-media-column">
+        {firstLoad ? <div className="home-media-waiting"><Skeleton label="홈 미디어" /><BusyLabel busy>홈 불러오는 중</BusyLabel></div> : <>
+          <HomePlaying collections={collections} records={media.data?.playing ?? []} privacyMode={privacyMode} active={active}
+            onOpen={id => onNavigate({ kind: 'collection', collectionId: id })} onAll={() => onNavigate({ kind: 'collections', typeFilter: 'game', showcase: false })} />
+          <HomeSection title={`2주 안에 발매 · ${releaseCards.length}`} onOpen={() => onNavigate(calendarView())}>
+            {releaseCards.length ? <HomeReleaseGrid today={today} rows={releaseCards.slice(0, 14)} /> : shelfLoading ? <Skeleton label="신간 정보" /> : <p className="home-attention-empty">2주 안에 예정된 발매가 없습니다</p>}
+            {shelfFailed && <p role="status">신간을 확인할 수 없습니다 <Button variant="quiet" onClick={retryShelf}>다시 시도</Button></p>}
+          </HomeSection>
+        </>}
+        {media.failed && <Button variant="quiet" onClick={retryShelf}>홈 미디어 다시 시도</Button>}
+      </div>
+      <div className="home-day-column">
+      {!firstLoad && todayRows.length > 0 && <HomeToday rows={todayRows} animate={false} onOpen={row => {
         if (row.noteId) onNavigate({ kind: 'notes', noteId: row.noteId });
         else if (row.key.startsWith('connection:')) { const problem = problems.find(p => `connection:${p.key}` === row.key); if (problem) onNavigate(problem.view); }
         else todos.find(todo => todo.key === row.key)?.open();
-      }} loading={reviewUnknown.length || (store && !notesState.ready) ? <>{reviewUnknown.some(r => r.failed) ? <p role="status">검토 수를 확인할 수 없습니다 <Button variant="quiet" onClick={retryOverview}>다시 시도</Button></p> : <Skeleton label="오늘 할 것" />}</> : undefined} />}
-        // 1년 전 오늘 sits under 오늘 할 것 so a short to-do list does not leave the left column empty.
-        leftAfter={<HomeRevisit gateway={gateway} localDate={today} privacyMode={privacyMode} onOpenAsset={onOpenAsset} active={active} />}
-        right={<HomePresence items={rightSections} />} />
+      }} />}
+      {reviewUnknown.some(row => row.failed) && <p role="status">검토 수를 확인할 수 없습니다 <Button variant="quiet" onClick={retryOverview}>다시 시도</Button></p>}
+      <HomeDay data={firstLoad ? null : media.data} failed={media.failed} quiet={!todayRows.length && !attentionPending && !reviewUnknown.length} privacyMode={privacyMode} onOpenAsset={onOpenAsset} />
+      </div>
     </div></div>
     {dialogs}
     {releaseDetail && <UiDialog open title={releaseDetail.title} onClose={() => setReleaseDetail(null)}><div className="home-release-detail">

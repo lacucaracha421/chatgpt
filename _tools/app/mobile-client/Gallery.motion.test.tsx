@@ -2,7 +2,7 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Gallery } from './Gallery';
 import type { Asset } from './types';
-import { MotionScope } from '../src/shared/motion/AreaSwitch';
+import { AreaVisible, MotionScope } from '../src/shared/motion/AreaSwitch';
 
 const animate = vi.fn(() => ({cancel: vi.fn()}));
 beforeEach(() => {
@@ -17,16 +17,21 @@ beforeEach(() => {
 afterEach(() => {cleanup(); delete (HTMLElement.prototype as Partial<HTMLElement>).animate; vi.unstubAllGlobals(); animate.mockClear();});
 const assets: Asset[] = Array.from({length: 6}, (_, i) => ({id: `motion-${i}`, kind: 'image', preview: `blob:motion-${i}`, width: 200, height: 200}));
 const props = {density: 1, restoreScroll: 0, onScroll: vi.fn(), onOpen: vi.fn(), onReady: vi.fn(), onNearEnd: vi.fn(), paused: false};
-it('animates the first tablet batch once, skipping refresh, sort/filter, paging and remount revisits', () => {
-  const tree = (items: Asset[], identity: string, mounted = true) => <MotionScope>{mounted && <Gallery {...props} items={items} identity={identity}/>}</MotionScope>;
+it('animates the first tablet batch on every visit, skipping refresh, sort/filter and paging', () => {
+  const tree = (items: Asset[], identity: string, mounted = true, visible = true) => <MotionScope><AreaVisible.Provider value={visible}>{mounted && <Gallery {...props} items={items} identity={identity}/>}</AreaVisible.Provider></MotionScope>;
   const view = render(tree([], 'first')); expect(animate).not.toHaveBeenCalled();
   view.rerender(tree(assets, 'first')); const first = animate.mock.calls.length; expect(first).toBeGreaterThan(0);
   expect(animate.mock.calls[0][1]).toEqual(expect.objectContaining({duration: 560, delay: 0}));
   view.rerender(tree([...assets, {...assets[0], id: 'next'}], 'page'));
   view.rerender(tree([...assets].reverse(), 'sort'));
   view.rerender(tree(assets.slice(0, 2), 'filter')); view.rerender(tree([...assets], 'refresh'));
-  view.rerender(tree([], 'away', false)); view.rerender(tree(assets, 'revisit'));
   expect(animate).toHaveBeenCalledTimes(first);
+  view.rerender(tree([], 'away', false)); view.rerender(tree(assets, 'revisit'));
+  expect(animate).toHaveBeenCalledTimes(first * 2);
+  view.rerender(tree(assets, 'revisit', true, false));
+  expect(animate).toHaveBeenCalledTimes(first * 2);
+  view.rerender(tree(assets, 'revisit'));
+  expect(animate).toHaveBeenCalledTimes(first * 3);
 });
 it('does not consume first appearance while stale or paused, and skips it under reduced motion', () => {
   const tree = (paused: boolean, stale: boolean) => <MotionScope><Gallery {...props} paused={paused} stale={stale} items={assets} identity="first"/></MotionScope>;

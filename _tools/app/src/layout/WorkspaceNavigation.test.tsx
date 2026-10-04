@@ -11,6 +11,7 @@ import { useWorkspaceChrome } from "./WorkspaceChromeContext";
 import { WorkspaceNavigation } from "./WorkspaceNavigation";
 import { MangaToolbar } from "../manga/MangaToolbar";
 import type { AssetView } from "../library/types";
+import { readFileSync } from "node:fs";
 
 const indexHiddenKey = "lakomics.workspace.indexHidden.v1";
 afterEach(() => {
@@ -39,6 +40,57 @@ it("offers a collection list when detail was opened without a remembered list", 
 
 const baseProps = { collectionType: "game" as const, width: 208, onWidthChange: vi.fn(), assetNavigation: null, reviewCount: 0, trashCount: 0 };
 const assetsView = { kind: "classification" as const, classificationId: null };
+
+it("changes index presence without width or transform transitions", () => {
+  const css = readFileSync('src/styles/chrome.css', 'utf8');
+  const indexRules = css.match(/[^{}]*workspace-index-(?:slot|clip)[^{}]*\{[^}]*\}/g)!;
+  expect(indexRules.length).toBeGreaterThan(0);
+  expect(indexRules.join('\n')).not.toMatch(/transform|transition/);
+  expect(indexRules.join('\n')).toContain('display: none');
+});
+
+it("fades an appearing index only when the content cross-fade starts", () => {
+  vi.useFakeTimers();
+  const animate = vi.fn(() => ({cancel: vi.fn(), onfinish: null}));
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'animate');
+  Object.defineProperty(HTMLElement.prototype, 'animate', {configurable: true, value: animate});
+  try {
+    const view = render(<WorkspaceNavigation {...baseProps} view={{kind: 'home'}} onNavigate={vi.fn()} />);
+    const clip = view.container.querySelector<HTMLElement>('.workspace-index-clip')!;
+    view.rerender(<WorkspaceNavigation {...baseProps} view={assetsView} settling onNavigate={vi.fn()} />);
+    expect(clip.style.opacity).toBe('0');
+    expect(animate).not.toHaveBeenCalled();
+    view.rerender(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} />);
+    expect(clip.style.opacity).toBe('');
+    expect(animate).toHaveBeenCalledExactlyOnceWith([{opacity: 0}, {opacity: 1}], {duration: 150, easing: 'cubic-bezier(0.2, 0, 0, 1)'});
+    expect(clip.style.willChange).toBe('opacity');
+    vi.advanceTimersByTime(150);
+    expect(clip.style.willChange).toBe('');
+    view.rerender(<WorkspaceNavigation {...baseProps} view={{kind: 'home'}} onNavigate={vi.fn()} />);
+    expect(animate).toHaveBeenCalledTimes(1);
+    view.unmount();
+  } finally {
+    vi.useRealTimers();
+    if (descriptor) Object.defineProperty(HTMLElement.prototype, 'animate', descriptor);
+    else delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
+  }
+});
+
+it("keeps the painted index while a destination loads and reuses the column on return", () => {
+  const { rerender } = render(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} />);
+  const index = screen.getByRole("complementary", { name: "탐색 인덱스" });
+  const slot = index.closest(".workspace-index-slot")!;
+  rerender(<WorkspaceNavigation {...baseProps} view={assetsView} requestedView={{ kind: "home" }} onNavigate={vi.fn()} />);
+  expect(slot).toHaveAttribute("data-state", "open");
+  rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "home" }} onNavigate={vi.fn()} />);
+  expect(index.isConnected).toBe(true);
+  expect(slot).toHaveAttribute("data-state", "closed");
+  expect(slot).toHaveAttribute("inert");
+  expect(slot).toHaveAttribute("aria-hidden", "true");
+  rerender(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} />);
+  expect(screen.getByRole("complementary", { name: "탐색 인덱스" })).toBe(index);
+  expect(slot).toHaveAttribute("data-state", "open");
+});
 
 function IndexToggleWorkspace({ view = { kind: "manga" } }: { view?: AssetView }) {
   return <WorkspaceChromeProvider scope={view.kind}>
@@ -177,8 +229,9 @@ it("opens Home from the first rail entry, marks it current there and names the i
   rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "home" }} onNavigate={onNavigate} />);
   expect(within(rail).getByRole("button", { name: "홈" })).toHaveAttribute("aria-current", "page");
   expect(within(rail).getByRole("button", { name: "에셋" })).not.toHaveAttribute("aria-current");
-  // Home is attention-first and has no index column of its own (2026-10-02).
-  expect(document.querySelector(".workspace-index")).toBeNull();
+  // Home closes the column immediately while keeping its contents mounted.
+  expect(document.querySelector(".workspace-index-slot")).toHaveAttribute("data-state", "closed");
+  expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
   // A note opened from Home is not where the 메모 rail entry returns to.
   rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "notes", noteId: "n1" }} onNavigate={onNavigate} />);
   rerender(<WorkspaceNavigation {...baseProps} view={{ kind: "home" }} onNavigate={onNavigate} />);
@@ -557,7 +610,8 @@ it.each([
   expect(screen.getByRole("navigation", { name: "주요 영역" })).toBeInTheDocument();
   expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).not.toBeInTheDocument();
   expect(document.querySelector(".workspace-index")).toBeNull();
-  expect(document.querySelector(".workspace-navigation")?.children).toHaveLength(1);
+  expect(document.querySelector(".workspace-index-slot")).toHaveAttribute("data-state", "closed");
+  expect(document.querySelector(".workspace-index-slot")).toHaveAttribute("inert");
   expect(screen.queryByRole("separator", { name: "사이드바 너비 조절" })).not.toBeInTheDocument();
   rerender(<WorkspaceNavigation {...baseProps} view={assetsView} onNavigate={vi.fn()} />);
   expect(screen.getByRole("complementary", { name: "탐색 인덱스" })).toBeInTheDocument();

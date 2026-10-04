@@ -1,4 +1,5 @@
 import { BusyLabel } from "../shared/ui/BusyLabel";
+import { useMotionSurface } from "../shared/ui/useMotionSurface";
 import {AssetImage} from "../privacy/AssetImage";
 import {FindEntryContent} from "../shared/FindEntryContent";
 import * as RadixDialog from "@radix-ui/react-dialog";
@@ -39,6 +40,8 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fin
   fallbackFocus?: () => HTMLElement | null; recentKey?: string; loading?: boolean; error?: string | null;
 }) {
   const { privacyMode } = usePrivacy();
+  const surfaceRef = useMotionSurface("dialog");
+  const scrimRef = useMotionSurface("scrim");
   const [scope, setScope] = useState<FindScope>("전체");
   const [expanded, setExpanded] = useState<NavigationEntryGroup[]>([]);
   const [recentIds, setRecentIds] = useState<string[]>([]);
@@ -116,8 +119,8 @@ export function CommandPalette({ open, onClose, entries, search, findPlaces, fin
   let index = -1;
   return <RadixDialog.Root open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
     <RadixDialog.Portal>
-      <RadixDialog.Overlay className="ui-dialog__overlay command-palette__overlay" />
-      <RadixDialog.Content className="command-palette" aria-describedby={`${id}-hint`}
+      <RadixDialog.Overlay ref={scrimRef} className="ui-dialog__overlay command-palette__overlay" />
+      <RadixDialog.Content ref={surfaceRef} className="command-palette" aria-describedby={`${id}-hint`}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           // A row may have opened another dialog (the view's search editor); leave focus there.

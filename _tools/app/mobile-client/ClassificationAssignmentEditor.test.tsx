@@ -1,4 +1,4 @@
-import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 const mocks=vi.hoisted(()=>({native:vi.fn()}));
 vi.mock('./transport',()=>({native:mocks.native,errorText:(e:unknown)=>e instanceof Error?e.message:String(e)}));
@@ -137,10 +137,16 @@ describe('Classification assignment picker',()=>{
   it('expands and collapses a branch without changing the selection',async()=>{
     render(<ClassificationAssignmentEditor assetId="asset_1" open onClose={()=>{}}/>);
     await screen.findByRole('radio',{name:'미분류'});
-    fireEvent.click(screen.getByRole('button',{name:'게임 펼치기'}));
-    expect(names()).toContain('게임');
+    // The first tap after the replica arrives must survive the initial expansion reset.
+    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'게임 펼치기'}));});
+    expect(names()).toContain('원신');
     expect(screen.getByRole('button',{name:'게임 접기'})).toBeTruthy();
     expect(checked()).toEqual(['백합']);
+    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'게임 접기'}));});
+    expect(names()).not.toContain('원신');
+    expect(screen.getByRole('button',{name:'게임 펼치기'})).toBeTruthy();
+    expect(checked()).toEqual(['백합']);
+    expect(mocks.native).not.toHaveBeenCalledWith('classificationAssignmentSet',expect.anything());
   });
 
   it('filters to flat results with a breadcrumb when searching',async()=>{

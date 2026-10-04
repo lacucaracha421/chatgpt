@@ -26,7 +26,7 @@ export function MangaCard({ title, displayTitle = title, artist, pageCount, cove
   return <article className="manga-card">
     <button type="button" className="manga-card__body" aria-label={`${title} 상세 보기`} aria-pressed={selected} disabled={opening} onClick={(event) => onOpen(event.currentTarget)}>
       <span className="manga-card__frame ui-selectable-media" aria-selected={selected ?? false}>
-        <MangaCover src={coverUrl} title={title} privacyMode={privacyMode} className="manga-card__cover" />
+        <MangaCover src={coverUrl} title={title} privacyMode={privacyMode} className="manga-card__cover" reportBusy={false} />
         <Badge variant="scrim" className="manga-card__pages">{pageCount}p</Badge>
         {selected && <span className="ui-selection-check" aria-hidden="true" />}
       </span>
@@ -40,12 +40,13 @@ export function MangaCard({ title, displayTitle = title, artist, pageCount, cove
   </article>;
 }
 
-export function MangaCover({ src, title, privacyMode, className = "" }: { src: string | null; title: string; privacyMode?: boolean; className?: string }) {
+export function MangaCover({ src, title, privacyMode, className = "", reportBusy = true }: { src: string | null; title: string; privacyMode?: boolean; className?: string; reportBusy?: boolean }) {
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const masked = useCatalogMasked(privacyMode);
   if (masked) return <Skeleton className={`${className} privacy-mask`} label="비공개 모드" />;
-  return <span className={`${className} manga-cover`} aria-busy={Boolean(src && src !== loadedSrc && src !== failedSrc)}>
+  // Lazy grid covers must not hold area readiness; the area prepares its viewport images.
+  return <span className={`${className} manga-cover`} aria-busy={reportBusy ? Boolean(src && src !== loadedSrc && src !== failedSrc) : undefined}>
     {src && src !== failedSrc && <StableImage src={src} alt={`${title} 표지`} referrerPolicy="no-referrer" draggable={false}
       loading="lazy" className="manga-cover__image" style={loadedSrc ? undefined : { visibility: "hidden" }}
       onLoad={(event) => setLoadedSrc(event.currentTarget.getAttribute("src"))}

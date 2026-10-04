@@ -13,6 +13,7 @@ import { WindowControls } from "../layout/WindowControls";
 import { CATALOG_BOOKMARKS_CHANGED_EVENT } from "../app/useCatalogBookmarkSync";
 import { existsSync, readFileSync } from "node:fs";
 import { PrivacyProvider } from "../privacy/PrivacyContext";
+import { AreaVisible, viewReady } from "../shared/motion/AreaSwitch";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 afterEach(() => { cleanup(); vi.useRealTimers(); });
@@ -50,6 +51,58 @@ const detail: CatalogWorkDetail = {
 };
 
 describe("OnlineCatalogBrowser", () => {
+  it("is area-ready on first page without waiting for 48 lazy covers, count or command completion", async () => {
+    const gateway = createGateway(true);
+    const command = deferred<void>();
+    let emit!: (event: CatalogGroupedSearchEvent) => void;
+    gateway.searchCatalogGroups = vi.fn().mockImplementation((_query, onEvent) => { emit = onEvent; return command.promise; });
+    const { container } = renderBrowser(gateway);
+    await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenCalledOnce());
+    expect(viewReady(container)).toBe(false);
+    await act(async () => emit({ type: "page", page: { works: Array.from({ length: 48 }, (_, index) => ({ ...work,
+      providerWorkId: String(index), groupId: String(index), versionCount: 1, hasBookmarkedVersion: false })), page: 0, pageSize: 48 } }));
+    expect(container.querySelectorAll(".manga-card img")).toHaveLength(48);
+    expect(container.querySelectorAll('[aria-busy="true"]:not(button)')).toHaveLength(0);
+    expect(viewReady(container)).toBe(true);
+    expect(gateway.getOnlineCatalogStatus).toHaveBeenCalledOnce();
+    expect(gateway.searchCatalogGroups).toHaveBeenCalledOnce();
+    act(() => window.dispatchEvent(new Event(CATALOG_BOOKMARKS_CHANGED_EVENT)));
+    await waitFor(() => expect(gateway.searchCatalogGroups).toHaveBeenCalledTimes(2));
+    expect(viewReady(container)).toBe(true);
+    await act(async () => command.resolve());
+  });
+
+  it("does not prefetch more pages while the incoming area is preparing", async () => {
+    const io = stubIntersectionObserver();
+    const gateway = createGateway(true);
+    vi.mocked(gateway.searchOnlineCatalog).mockImplementation(async query => fullPage(query, 100));
+    const browser = (visible: boolean) => <LibraryProvider gateway={gateway}><AreaVisible.Provider value={visible}>
+      <OnlineCatalogBrowser onSwitchLocal={vi.fn()} />
+    </AreaVisible.Provider></LibraryProvider>;
+    const { container, rerender } = render(browser(false));
+    await screen.findByRole("button", { name: "작품 0-0 상세 보기" });
+    await io.reveal();
+    expect(gateway.searchCatalogGroups).toHaveBeenCalledOnce();
+    expect(viewReady(container)).toBe(true);
+    rerender(browser(true));
+    await io.reveal();
+    await screen.findByRole("button", { name: "작품 1-0 상세 보기" });
+    expect(gateway.searchCatalogGroups).toHaveBeenCalledTimes(2);
+  });
+
+  it("repeats status and first-page requests after an unretained area remount", async () => {
+    const gateway = createGateway(true);
+    const first = renderBrowser(gateway);
+    await screen.findByRole("button", { name: `${work.title} 상세 보기` });
+    expect(gateway.getOnlineCatalogStatus).toHaveBeenCalledOnce();
+    expect(gateway.searchCatalogGroups).toHaveBeenCalledOnce();
+    first.unmount();
+    renderBrowser(gateway);
+    await screen.findByRole("button", { name: `${work.title} 상세 보기` });
+    expect(gateway.getOnlineCatalogStatus).toHaveBeenCalledTimes(2);
+    expect(gateway.searchCatalogGroups).toHaveBeenCalledTimes(2);
+  });
+
   it.each([false, true])("settles initial loading when the stream ends without a page (cancelled=%s)", async (cancelled) => {
     const gateway = createGateway(true);
     let emit!: (event: CatalogGroupedSearchEvent) => void;

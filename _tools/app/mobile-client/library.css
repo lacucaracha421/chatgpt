@@ -69,7 +69,7 @@
 .pull-refresh__pill svg { width:16px; height:16px; color:var(--color-muted); }
 .pull-refresh__pill.is-ready svg { color:var(--color-accent); }
 .pull-refresh__pill.is-refreshing { transition:transform var(--motion-standard) var(--ease-standard); }
-.pull-refresh__pill.is-refreshing svg { color:var(--color-accent); animation:pull-spin .9s linear infinite; }
+.pull-refresh__pill.is-refreshing svg { color:var(--color-accent); animation:pull-spin var(--motion-refresh-cycle) linear infinite; }
 @keyframes pull-spin { to { transform:rotate(360deg); } }
 .library-main button:focus-visible,.library-search input:focus-visible,.sheet-option:focus-visible { outline:2px solid var(--color-focus); outline-offset:2px; }
 /* Character, group and folder cards share one row, so they share one cover shape. */
@@ -97,15 +97,11 @@
 .gallery-scroll.is-stale { pointer-events:none; }
 .gallery-scroll[aria-busy="true"] { cursor:progress; }
 @media (prefers-reduced-motion:no-preference) {
-  .floating-notices>* { animation:notice-enter 160ms var(--ease-standard); }
-  .ui-dialog__overlay { animation:overlay-enter 160ms ease-out; }
-  .ui-dialog:has(>.library-sheet) { animation:sheet-enter 140ms var(--ease-standard); }
-  .ui-dialog:has(.classification-index) { animation:drawer-enter 200ms var(--ease-standard); }
+  .floating-notices>* { animation:notice-enter var(--motion-small) var(--ease-standard); }
+  .ui-dialog__overlay:not([data-motion]) { animation:overlay-enter var(--motion-small) var(--ease-out); }
 }
 @keyframes notice-enter { from { opacity:0; transform:translateY(6px); } }
 @keyframes overlay-enter { from { opacity:0; } }
-@keyframes sheet-enter { from { transform:translate(-50%,24px); opacity:.4; } }
-@keyframes drawer-enter { from { transform:translateX(-24px); opacity:.4; } }
 /* Pressed feedback, so a tap that starts a network load is acknowledged at once. */
 .library-folder:active .home-cover-group, .library-result:active, .library-all:active, .home-folder:active .home-cover-group { opacity:.8; }
 .bottom-nav button:not(.active):active { color:var(--color-text); }
@@ -132,3 +128,7 @@
 .library-folder.is-character .home-cover-group { position:relative; }
 .result-name strong .character-glyph { width:14px; height:14px; margin-right:6px; vertical-align:-2px; }
 .top-bar h1 .character-glyph { width:17px; height:17px; margin-right:2px; align-self:center; }
+
+/* Shared dialog presence, with edge travel measured in the sheet own height. */
+.ui-dialog[data-motion]:has(>.library-sheet) { --surface-y: 100%; --surface-scale: 1; }
+.ui-dialog[data-motion]:has(.classification-index) { --surface-x: -100%; --surface-y: 0px; --surface-scale: 1; }

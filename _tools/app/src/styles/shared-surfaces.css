@@ -166,6 +166,10 @@
   pointer-events: auto;
 }
 
+/* Exiting snapshots reserve their slot until the stack can close the gap. */
+.ui-toast-region .ui-toast[data-state="closed"],
+.ui-toast-region .ui-toast[data-motion-ghost] { pointer-events: none; }
+
 .ui-toast--error {
   border-color: color-mix(in srgb, var(--color-danger) 50%, var(--color-border));
 }
@@ -604,4 +608,3 @@
   width: var(--space-1);
   cursor: col-resize;
 }
-

@@ -515,7 +515,9 @@ it("switches the index and header together with ready content and cancels pendin
   expect(header.textContent).toBe(homeTitle);
   expect(header.querySelectorAll(".view-toolbar")).toHaveLength(1);
   expect(header).toHaveAttribute("inert");
-  expect(document.querySelector<HTMLElement>('[data-motion-view="assets"]')?.style.width).toMatch(/^calc\(100% - \d+px\)$/);
+  // The pending view prepares at the final width without moving the painted shell.
+  expect(document.querySelector<HTMLElement>('[data-motion-view="assets"]')?.style.width).toBe("calc(100% - 208px)");
+  expect(document.querySelector(".workspace-index-slot")).toHaveAttribute("data-state", "closed");
   await navigate("홈");
   expect(home).toBeVisible();
   expect(header).not.toHaveAttribute("inert");
@@ -525,15 +527,72 @@ it("switches the index and header together with ready content and cancels pendin
   await advance(200);
   expect(document.querySelector('[data-motion-shown="assets"]')).not.toBeNull();
   expect(document.querySelector(".workspace-index")).toBeVisible();
+  expect(document.querySelector(".workspace-index-slot")).toHaveAttribute("data-state", "open");
   expect(document.querySelector<HTMLElement>('[data-motion-view="assets"]')?.style.width).toBe("");
   expect(home).not.toBeVisible();
   expect(header.textContent).not.toBe(homeTitle);
   expect(header.querySelectorAll(".view-toolbar")).toHaveLength(1);
   await navigate("홈");
-  expect(document.querySelector(".workspace-index")).toBeNull();
+  // The index disappears at the swap and keeps its DOM for a later visit.
+  expect(document.querySelector(".workspace-index-slot")).toHaveAttribute("data-state", "closed");
+  expect(document.querySelector(".workspace-index-slot")).toHaveAttribute("inert");
+  expect(document.querySelector(".workspace-index-clip")).not.toBeVisible();
+  expect(screen.queryByRole("complementary", { name: "탐색 인덱스" })).toBeNull();
   expect(home).toBeVisible();
   expect(header.textContent).toBe(homeTitle);
   expect(header.querySelectorAll(".view-toolbar")).toHaveLength(1);
+});
+
+it("keeps the outgoing gallery geometry through both index-width cross-fades", async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+  const animate = vi.fn(() => ({cancel: vi.fn(), onfinish: null}));
+  Object.defineProperty(HTMLElement.prototype, "animate", {configurable: true, value: animate});
+  const originalRect = HTMLElement.prototype.getBoundingClientRect;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (!this.matches('.motion-stage, .motion-stage__view')) return originalRect.call(this);
+    const slot = document.querySelector<HTMLElement>('.workspace-index-slot');
+    const indexWidth = slot?.dataset.state === 'open' ? Number.parseFloat(slot.style.getPropertyValue('--workspace-index-width')) : 0;
+    const fixed = this.style.position === 'fixed';
+    const delta = /calc\(100% ([+-]) (\d+)px\)/.exec(this.style.width);
+    const left = fixed ? Number.parseFloat(this.style.left) : 64 + indexWidth + (Number.parseFloat(this.style.left) || 0);
+    const width = fixed ? Number.parseFloat(this.style.width) : 1200 - indexWidth + (delta ? Number(delta[2]) * (delta[1] === '+' ? 1 : -1) : 0);
+    return {left, top: 44, width, height: 856, right: left + width, bottom: 900, x: left, y: 44, toJSON() {}};
+  });
+  try {
+    await startWorkspace(gw());
+    const navigate = async (name: string) => act(async () => { fireEvent.click(within(screen.getByRole("navigation", {name: "주요 영역"})).getByRole("button", {name})); });
+    for (const [from, to, label, indexWidth] of [['assets', 'collections', '컬렉션', 0], ['collections', 'assets', '에셋', 208]] as const) {
+      const outgoing = document.querySelector<HTMLElement>(`[data-motion-view="${from}"]`)!;
+      const {left, width} = outgoing.getBoundingClientRect();
+      animate.mockClear();
+      await navigate(label);
+      let started = false;
+      for (let elapsed = 0; elapsed < 500; elapsed += 16) {
+        await advance(16, 16);
+        const incoming = document.querySelector<HTMLElement>(`[data-motion-view="${to}"]`)!;
+        started = animate.mock.contexts.includes(incoming);
+        const slot = document.querySelector('.workspace-index-slot')!;
+        expect(slot).toHaveAttribute('data-state', (started ? indexWidth : from === 'assets' ? 208 : 0) ? 'open' : 'closed');
+        expect(outgoing.getBoundingClientRect()).toMatchObject({left, width});
+        if (!started) { expect(incoming.style.opacity).toBe('0'); continue; }
+        expect(outgoing.style.position).toBe('fixed');
+        expect(outgoing.style.width).toBe(`${width}px`);
+        expect(outgoing.style.contain).toBe('layout paint size');
+        expect(incoming.style.width).toBe('');
+        expect(incoming.getBoundingClientRect()).toMatchObject({left: 64 + indexWidth, width: 1200 - indexWidth});
+        break;
+      }
+      expect(started).toBe(true);
+      await advance(100, 16);
+      expect(outgoing.isConnected).toBe(true);
+      expect(outgoing.getBoundingClientRect()).toMatchObject({left, width});
+      await advance(100, 16);
+      expect(outgoing.isConnected).toBe(false);
+    }
+  } finally {
+    if (descriptor) Object.defineProperty(HTMLElement.prototype, 'animate', descriptor);
+    else delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
+  }
 });
 
 // Tighten-only gate (PERF-ALL-001 item 4): every Library tile thumbnail mounted while scrolling

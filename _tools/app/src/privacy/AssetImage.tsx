@@ -12,7 +12,7 @@ function assetId(src: unknown): string | undefined {
 export function AssetImage({asset,...props}:ImgHTMLAttributes<HTMLImageElement>&{asset?:RatedAsset}) {
   const id=assetId(props.src);
   const masked=useAssetMask(asset??id) && Boolean(asset||id);
-  return masked?<span className={`${props.className??''} privacy-mask`} aria-label="이미지 숨김" style={{display:'block',width:props.width??'100%',height:props.height??'100%',...props.style}}/>:<img {...props}/>;
+  return masked?<span className={`${props.className??''} privacy-mask`} aria-label="이미지 숨김" style={{display:'block',width:props.width??'100%',height:props.height??'100%',...props.style}}/>:props.src?<StableImage {...props} src={props.src} alt={props.alt??''}/>:<img {...props}/>;
 }
 export function AssetStableImage({asset,...props}:ComponentProps<typeof StableImage>&{asset?:RatedAsset}) {
   const id=assetId(props.src);

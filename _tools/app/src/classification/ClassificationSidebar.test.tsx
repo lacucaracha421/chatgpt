@@ -123,6 +123,7 @@ function renderSidebar(
   function Fixture() {
     const [view, setView] = useState<AssetView>(props.view ?? { kind: "classification", classificationId: null });
     const [expandedIds, setExpandedIds] = useState(props.expandedIds ?? ["root", "work"]);
+    const [expandedAlbumIds, setExpandedAlbumIds] = useState(props.expandedAlbumIds ?? []);
     const [pinnedIds, setPinnedIds] = useState(props.pinnedIds ?? []);
     const [sidebarWidth, setSidebarWidth] = useState(props.sidebarWidth ?? 232);
     return (
@@ -135,6 +136,8 @@ function renderSidebar(
           collectionType={props.collectionType ?? "manga"}
           view={view}
           expandedIds={expandedIds}
+          expandedAlbumIds={expandedAlbumIds}
+          onExpandedAlbumIdsChange={setExpandedAlbumIds}
           pinnedIds={pinnedIds}
           onPinnedIdsChange={setPinnedIds}
           sidebarWidth={sidebarWidth}
@@ -527,10 +530,10 @@ describe("ClassificationSidebar", () => {
     const games = screen.getByRole("treeitem", { name: "Games" });
     expect(games.querySelector("[data-icon-key='photo']")).toHaveStyle({ color: "#df6fa7" });
     expect(games.querySelector(".classification-sidebar__tree-label")).not.toHaveAttribute("style");
-    const group = games.closest("li")?.querySelector(":scope > [role='group']") as HTMLElement;
+    const group = games.closest("li")?.querySelector(":scope > .classification-sidebar__reveal > [role='group']") as HTMLElement;
     expect(group.style.getPropertyValue("--classification-branch-color")).toBe("#df6fa7");
     expect(screen.getByRole("treeitem", { name: "Blue Archive" }).querySelector("[data-icon-key='book']")).toBeInTheDocument();
-    const defaultGroup = screen.getByRole("treeitem", { name: "Blue Archive" }).closest("li")?.querySelector(":scope > [role='group']") as HTMLElement;
+    const defaultGroup = screen.getByRole("treeitem", { name: "Blue Archive" }).closest("li")?.querySelector(":scope > .classification-sidebar__reveal > [role='group']") as HTMLElement;
     expect(defaultGroup.style.getPropertyValue("--classification-branch-color")).toBe("var(--color-sidebar-connector)");
   });
 
@@ -1015,6 +1018,40 @@ describe("ClassificationSidebar", () => {
     await user.click(screen.getByRole("button", { name: "컬렉션" }));
 
     expect(onViewChange).toHaveBeenCalledWith({ kind: "collections", typeFilter: "movie", showcase: false });
+  });
+});
+
+describe("tree motion", () => {
+  afterEach(cleanup);
+
+  it.each(["folders", "albums"])("retains disclosed %s rows through collapse and rapid reopen without exposing closed rows", kind => {
+    renderSidebar(gateway(), { expandedIds: [], ...(kind === "albums" ? { view: { kind: "albums" }, albums: entries.map(({ id, name, parentId, iconKey, colorKey }) => ({ id, name, parentId, iconKey, colorKey })) } : {}) });
+    expect(screen.queryByRole("treeitem", { name: "Blue Archive", hidden: true })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Games 펼치기" }));
+    const child = screen.getByRole("treeitem", { name: "Blue Archive" });
+    const reveal = child.closest(".classification-sidebar__reveal")!;
+    expect(reveal).toHaveAttribute("data-open", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Games 접기" }));
+    expect(screen.queryByRole("treeitem", { name: "Blue Archive" })).toBeNull();
+    expect(child).toBeInTheDocument();
+    expect(reveal).toHaveAttribute("inert");
+    fireEvent.click(screen.getByRole("button", { name: "Games 펼치기" }));
+    expect(screen.getByRole("treeitem", { name: "Blue Archive" })).toBe(child);
+    expect(reveal).not.toHaveAttribute("inert");
+  });
+
+  it.each(["folders", "albums"])("retains the %s section during fold and restores the same tree", kind => {
+    const albums = kind === "albums";
+    renderSidebar(gateway(), { view: albums ? { kind: "albums" } : { kind: "classification", classificationId: null } });
+    const label = albums ? "앨범" : "폴더";
+    const tree = screen.getByRole("tree", { name: label });
+    fireEvent.click(screen.getByRole("button", { name: `${label} 접기` }));
+    expect(screen.queryByRole("tree", { name: label })).toBeNull();
+    expect(tree).toBeInTheDocument();
+    expect(tree.parentElement).toHaveAttribute("data-open", "false");
+    expect(tree.parentElement).toHaveAttribute("inert");
+    fireEvent.click(screen.getByRole("button", { name: `${label} 펼치기` }));
+    expect(screen.getByRole("tree", { name: label })).toBe(tree);
   });
 });
 

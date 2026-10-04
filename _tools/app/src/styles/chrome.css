@@ -2,6 +2,12 @@
 .workspace-navigation, .workspace-navigation *, .workspace-titlebar, .workspace-titlebar *, .view-toolbar--context, .ui-anchored-panel, .ui-anchored-panel *, .chrome-query, .chrome-search-editor, .chrome-search-editor * { box-sizing: border-box; }
 :root { --chrome-rail-width: 64px; --chrome-titlebar-height: 44px; --chrome-context-height: 44px; --chrome-panel-width: 320px; --chrome-border: var(--color-border-strong); --chrome-radius: var(--radius-sm); --chrome-z-panel: 1080; }
 .workspace-navigation { display: flex; height: 100%; min-height: 0; }
+.workspace-index-slot { position: relative; width: var(--workspace-index-width); min-width: 0; flex: none; }
+.workspace-index-slot[data-state="closed"] { width: 0; pointer-events: none; }
+.workspace-index-clip { height: 100%; width: var(--workspace-index-width); }
+.workspace-index-slot[data-state="closed"] .workspace-index-clip { display: none; }
+.workspace-index-slot .workspace-index { height: 100%; }
+.workspace-index-slot .workspace-index__resize { right: 0; }
 .workspace-navigation svg { flex: none; width: 18px; height: 18px; }
 .workspace-rail { width: var(--chrome-rail-width); flex: none; display: flex; flex-direction: column; align-items: stretch; padding: var(--space-2) var(--space-compact); gap: var(--space-2); background: var(--color-sidebar); border-right: 1px solid var(--color-border); }
 .workspace-mark { height: 48px; display: flex; justify-content: center; align-items: center; gap: 3px; }
@@ -273,7 +279,7 @@ body .ui-menu { border-color: var(--chrome-border); border-radius: var(--chrome-
 .command-palette__foot kbd:first-child { margin-left: 0; }
 @media (max-width: 640px) { .command-palette__foot { flex-wrap: wrap; } }
 /* A rail item with background work in progress (e.g. the Private Vault import). */
-.workspace-rail__activity { position: absolute; top: 6px; left: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); animation: workspace-rail-activity 1.2s var(--ease-standard) infinite alternate; }
+.workspace-rail__activity { position: absolute; top: 6px; left: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); animation: workspace-rail-activity var(--motion-activity-cycle) var(--ease-standard) infinite alternate; }
 @keyframes workspace-rail-activity { from { opacity: 1; } to { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .workspace-rail__activity { animation: none; } }
 /* Folder header count ("N장 · 이 폴더만 M장") and palette place paths. */
@@ -288,7 +294,7 @@ body .ui-menu { border-color: var(--chrome-border); border-radius: var(--chrome-
 .lightweight-toggle__label svg { width: 16px; height: 16px; color: var(--color-muted); }
 .lightweight-mode-indicator.is-recovering { cursor: default; color: var(--color-faint); }
 .lightweight-mode-indicator.is-recovering:hover { background: transparent; color: var(--color-faint); }
-.lightweight-mode-indicator__spin { animation: lightweight-spin 1.2s linear infinite; }
+.lightweight-mode-indicator__spin { animation: lightweight-spin var(--motion-activity-cycle) linear infinite; }
 @keyframes lightweight-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .lightweight-mode-indicator__spin { animation: none; } }
 

@@ -1,5 +1,5 @@
 import { StarIcon } from "@heroicons/react/20/solid";
-import { ChevronDownIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
+import { ChevronRightIcon } from "@heroicons/react/24/outline";
 import { BookOpenIcon, EllipsisHorizontalIcon, FolderIcon, PhotoIcon, InboxIcon, PersonIcon, PlusIcon, RectangleStackIcon, Cog6ToothIcon, TrashIcon } from "../shared/ui/ArchiveIcons";
 import { useLayoutEffect, useEffect, useRef, useState, type CSSProperties } from "react";
 import { commandErrorMessage } from "../library/errorMessage";
@@ -19,6 +19,7 @@ import { ClassificationAppearanceDialog } from "./ClassificationAppearanceDialog
 import { ClassificationIcon, classificationColor } from "./classificationAppearance";
 import type { CharacterTarget } from "../characters/api";
 import type { CharacterGroup } from "../characters/hubApi";
+import "./ClassificationSidebar.css";
 
 type ClassificationSidebarProps = {
   characters?: CharacterTarget[];
@@ -182,7 +183,7 @@ export function ClassificationSidebar({
     const update = () => {
       const top = scroller.getBoundingClientRect().top + 28;
       const rows = [...sidebar.querySelectorAll<HTMLElement>("[data-classification-id]")];
-      const row = rows.find((item) => { const rect = item.getBoundingClientRect(); return rect.height > 0 && rect.bottom > top; });
+      const row = rows.find((item) => { if (item.closest("[inert]")) return false; const rect = item.getBoundingClientRect(); return rect.height > 0 && rect.bottom > top; });
       const id = row?.dataset.classificationId;
       const entry = entries.find((item) => item.id === id);
       setScrollFolderId(scroller.scrollTop > 0 ? entry?.parentId ?? null : null);
@@ -499,7 +500,7 @@ export function ClassificationSidebar({
       <section className="classification-sidebar__folder-section" aria-label="폴더 탐색">
       <div className="chrome-tree-heading">
       <button type="button" className="classification-sidebar__tree-heading" aria-expanded={foldersOpen} aria-label={`폴더 ${foldersOpen ? "접기" : "펼치기"}`} onClick={() => setFoldersOpen((open) => !open)}>
-        {foldersOpen ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
+        <ChevronRightIcon aria-hidden="true" />
         <span>폴더</span>
       </button>
       {embedded && <Button type="button" size="icon" variant="ghost" aria-label="새 폴더" onClick={() => openTopLevelCreate("classification")}><PlusIcon aria-hidden="true" /></Button>}
@@ -507,7 +508,8 @@ export function ClassificationSidebar({
       </div>
       {foldersOpen && scrollFolderId && <nav className="classification-sidebar__scroll-path" aria-label="스크롤 위치 경로">{folderPath(scrollFolderId).map((entry) => <button key={entry.id} type="button" aria-description={entry.name} onClick={() => openPinned(entry.id)}>{entry.name}</button>)}</nav>}
       <ContextMenu items={[{ id: "create-root", label: "새 폴더", onSelect: () => openTopLevelCreate("classification") }, ...treeViewActions]}>
-        <ul className="classification-sidebar__tree" role="tree" aria-label="폴더" hidden={!foldersOpen}>
+        <div className="classification-sidebar__reveal" data-open={foldersOpen} aria-hidden={!foldersOpen} inert={!foldersOpen || undefined}>
+        <ul className="classification-sidebar__tree" role="tree" aria-label="폴더">
           {tree.map((node, index) => (
             <TreeItem
               key={node.entry.id}
@@ -545,6 +547,7 @@ export function ClassificationSidebar({
             <InlineFolderEditor name={name} error={editError} onNameChange={(nextName) => { setName(nextName); setEditError(null); }} onSave={() => void saveInlineEdit()} onCancel={cancelInlineEdit} />
           )}
         </ul>
+        </div>
       </ContextMenu>
       </section>
       </>}
@@ -554,12 +557,13 @@ export function ClassificationSidebar({
         <div>
           <div className="chrome-tree-heading">
           <button type="button" className="classification-sidebar__tree-heading" aria-expanded={albumsOpen} aria-label={`앨범 ${albumsOpen ? "접기" : "펼치기"}`} onClick={() => setAlbumsOpen((open) => !open)}>
-            {albumsOpen ? <ChevronDownIcon aria-hidden="true" /> : <ChevronRightIcon aria-hidden="true" />}
+            <ChevronRightIcon aria-hidden="true" />
             <span>앨범</span>
           </button>
           {embedded && <Button type="button" size="icon" variant="ghost" aria-label="새 앨범" onClick={() => openTopLevelCreate("album")}><PlusIcon aria-hidden="true" /></Button>}
           </div>
-          <ul className="classification-sidebar__tree" role="tree" aria-label="앨범" hidden={!albumsOpen}>
+          <div className="classification-sidebar__reveal" data-open={albumsOpen} aria-hidden={!albumsOpen} inert={!albumsOpen || undefined}>
+          <ul className="classification-sidebar__tree" role="tree" aria-label="앨범">
             {albumTree.map((node, index) => (
               <TreeItem
                 key={node.entry.id}
@@ -595,6 +599,7 @@ export function ClassificationSidebar({
               <InlineFolderEditor name={name} error={editError} onNameChange={(nextName) => { setName(nextName); setEditError(null); }} onSave={() => void saveInlineEdit()} onCancel={cancelInlineEdit} />
             )}
           </ul>
+          </div>
         </div>
       </ContextMenu>
       </>}
@@ -697,6 +702,9 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
   const rowRef = useRef<HTMLDivElement>(null);
   const hasChildren = node.children.length > 0;
   const expanded = expandedIds.includes(node.entry.id);
+  // Mount on first disclosure, then retain rows so a close can reverse mid-flight.
+  const revealed = useRef(expanded);
+  if (expanded) revealed.current = true;
   const selected = node.entry.treeKind === "album"
     ? view.kind === "album" && view.albumId === node.entry.id
     : view.kind === "classification" && view.classificationId === node.entry.id;
@@ -771,7 +779,7 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
           </span>
         </div>
       </ContextMenu>
-      {expanded && (hasChildren || creatingChild) && (
+      {(hasChildren || creatingChild) && <div className="classification-sidebar__reveal" data-open={expanded} aria-hidden={!expanded} inert={!expanded || undefined}>
         <ul
           role="group"
           style={{
@@ -780,10 +788,10 @@ function TreeItem({ pinnedIds = [], onTogglePin, activeRowId, editError, editNam
               : "var(--color-sidebar-connector)",
           } as CSSProperties}
         >
-          {node.children.map((child, index) => <TreeItem pinnedIds={pinnedIds} onTogglePin={onTogglePin} key={child.entry.id} node={child} hasNextSibling={index < node.children.length - 1} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onAppearance={onAppearance} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
+          {revealed.current && node.children.map((child, index) => <TreeItem pinnedIds={pinnedIds} onTogglePin={onTogglePin} key={child.entry.id} node={child} hasNextSibling={index < node.children.length - 1} view={view} expandedIds={expandedIds} activeRowId={activeRowId} inlineEdit={inlineEdit} editName={editName} editError={editError} onViewChange={onViewChange} onToggleExpanded={onToggleExpanded} onRowFocus={onRowFocus} onRowKeyDown={onRowKeyDown} registerTreeRow={registerTreeRow} onAppearance={onAppearance} onCreateChild={onCreateChild} onRename={onRename} onEditNameChange={onEditNameChange} onEditSave={onEditSave} onEditCancel={onEditCancel} onMove={onMove} onDelete={onDelete} dragTarget={dragTarget} onPointerDragStart={onPointerDragStart} onPointerDragMove={onPointerDragMove} onPointerDragEnd={onPointerDragEnd} onPointerDragCancel={onPointerDragCancel} />)}
           {creatingChild && <InlineFolderEditor name={editName} error={editError} onNameChange={onEditNameChange} onSave={onEditSave} onCancel={onEditCancel} />}
         </ul>
-      )}
+      </div>}
     </li>
   );
 }

@@ -1,8 +1,7 @@
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { Button } from "./Button";
-
-const EXIT_MS = 220;
+import { motionDefaults, motionTime } from "./motionCurves";
 
 type OverlayPanelProps = {
   open: boolean;
@@ -47,7 +46,7 @@ export function OverlayPanel({ open, onOpenChange, title, ariaLabel, closeLabel,
       restoreFocusRef.current = null;
     };
     if (reduced) { finish(); return; }
-    const timer = window.setTimeout(finish, EXIT_MS);
+    const timer = window.setTimeout(finish, motionTime("--motion-medium", motionDefaults.medium, panelRef.current ?? undefined));
     return () => window.clearTimeout(timer);
   }, [mounted, open, returnFocusRef]);
 

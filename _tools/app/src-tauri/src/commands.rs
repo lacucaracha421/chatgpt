@@ -66,6 +66,7 @@ pub(crate) mod auto_tags;
 pub(crate) mod tagger_review;
 pub(crate) mod character_suggestions;
 pub(crate) mod home;
+pub(crate) mod home_media;
 pub(crate) mod launchbox;
 
 #[tauri::command]

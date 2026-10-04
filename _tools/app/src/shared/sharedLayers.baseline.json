@@ -25,7 +25,6 @@
     "mobile-client/AssetInfoSheet.css#.ui-dialog:has(> .asset-info-sheet)",
     "mobile-client/collectionBindings.css#.ui-dialog:has(>.bind-sheet)",
     "mobile-client/ledger.css#.ui-dialog:has(>.ledger-sheet)",
-    "mobile-client/library.css#.ui-dialog:has(.classification-index)",
     "mobile-client/library.css#.ui-dialog:has(>.library-sheet)"
   ]
 }

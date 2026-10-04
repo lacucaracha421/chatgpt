@@ -9,6 +9,30 @@ import { MangaSourceControl } from "./MangaToolbar";
 afterEach(cleanup);
 const props = { title: "한 줄 제목", artist: "", coverUrl: null, pageCount: 76, onOpen: vi.fn() };
 
+it("keeps the painted cover and its opacity through opening, selection and deselection", () => {
+  const base = readFileSync("src/styles/shared-base.css", "utf8");
+  const css = readFileSync("src/manga/manga.css", "utf8");
+  const style = document.createElement("style");
+  style.textContent = `${base.match(/button:disabled,[\s\S]*?\}/)![0]}\n${css.match(/\.manga-card__body:disabled\s*\{[^}]*\}/)![0]}`;
+  document.head.append(style);
+  try {
+    const cardProps = { ...props, coverUrl: "https://example.com/cover.jpg" };
+    const { container, rerender } = render(<MangaCard {...cardProps} selected={false} />);
+    const card = container.querySelector("article");
+    const button = screen.getByRole("button");
+    const image = screen.getByAltText(`${props.title} 표지`);
+    fireEvent.load(image);
+    for (const state of [{ opening: true, selected: false }, { opening: false, selected: true }, { opening: false, selected: false }]) {
+      rerender(<MangaCard {...cardProps} {...state} />);
+      expect(container.querySelector("article")).toBe(card);
+      expect(screen.getByAltText(`${props.title} 표지`)).toBe(image);
+      expect(image).toHaveAttribute("src", cardProps.coverUrl);
+      expect(image).toBeVisible();
+      expect(getComputedStyle(button).opacity || "1").toBe("1");
+    }
+  } finally { style.remove(); }
+});
+
 it("reserves two title lines and uses a separate artist line and page badge", () => {
   const { container, rerender } = render(<MangaCard {...props} />);
   expect(screen.getByText("한 줄 제목")).toHaveClass("manga-card__title");

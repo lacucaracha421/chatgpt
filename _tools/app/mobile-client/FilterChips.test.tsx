@@ -22,6 +22,7 @@ it('marks selected chips and uses a transient pressed face without a focus resid
   expect(css).toContain('.filter-chip:active:not(:disabled) { background:var(--color-surface-pressed); }');
   expect(css).toContain('font-weight:600');
   expect(css).toContain('.filter-chip:focus:not(:focus-visible) { outline:none; }');
-  expect(css).toContain('.ui-dialog:has(>.library-sheet) { animation:sheet-enter 140ms var(--ease-standard); }');
+  // Shared dialog presence now owns enter/exit timing; the sheet only sets edge travel.
+  expect(css).toContain('.ui-dialog[data-motion]:has(>.library-sheet) { --surface-y: 100%; --surface-scale: 1; }');
   expect(css).toContain('.filter-chips--toolbar .filter-chip--toolbar.selected');
 });

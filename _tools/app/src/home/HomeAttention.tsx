@@ -36,10 +36,10 @@ export function HomePresence({ items }: { items: Item[] }) {
 export function HomeSection({ title, onOpen, children }: { title: string; onOpen?: () => void; children: ReactNode }) {
   return <section className="home-attention-section" aria-label={title}><SectionLabel title={title} onOpen={onOpen} /><div>{children}</div></section>;
 }
-export function HomeToday({ rows, onOpen, loading }: { rows: AttentionRow[]; onOpen(row: AttentionRow): void; loading?: ReactNode }) {
+export function HomeToday({ rows, onOpen, loading, animate = true }: { rows: AttentionRow[]; onOpen(row: AttentionRow): void; loading?: ReactNode; animate?: boolean }) {
   const items: Item[] = rows.map(row => ({ key: row.key, content: <button type="button" className="home-attention-row" data-problem={row.problem || undefined} disabled={row.disabled} onClick={() => onOpen(row)}><span className="home-attention-mark" aria-hidden="true">{row.problem ? '!' : row.days !== undefined || row.noteId ? '○' : '□'}</span><span className="home-attention-copy"><span>{row.label}</span>{row.secondary && <small>{row.secondary}</small>}</span>{row.days !== undefined ? <Badge>{ddayLabel(row.days)}</Badge> : row.value && <span className="home-attention-value numeric">{row.value}</span>}</button> }));
   if (!rows.length) items.push({ key: 'empty', content: loading ?? <p className="home-attention-empty">오늘 할 것이 없습니다</p> });
-  return <HomeSection title={`오늘 할 것 · ${rows.length}`}><HomePresence items={items} /></HomeSection>;
+  return <HomeSection title={`오늘 할 것 · ${rows.length}`}>{animate ? <HomePresence items={items} /> : items.map(item => <div key={item.key}>{item.content}</div>)}</HomeSection>;
 }
 export type HomeReleaseCard = { key: string; name: string; date: string | null; detail?: string; fresh?: boolean; cover?: ReactNode; onOpen(): void };
 export function HomeReleaseList({ rows, today }: { rows: HomeReleaseCard[]; today: string }) {

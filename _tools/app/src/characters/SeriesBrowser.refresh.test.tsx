@@ -62,11 +62,12 @@ it("restores cached series folder covers on A → B → A and remount, retaining
   await waitFor(() => expect(card().querySelector("img")).toHaveAttribute("src", expect.stringContaining("f2-series-cover")));
   view.rerender(element("other-series"));
   expect(card().querySelector("img")).toHaveAttribute("src", expect.stringContaining("f2-series-cover"));
-  expect(card()).toBeDisabled();
+  expect(card().closest("[inert]")).not.toBeNull();
   await waitFor(() => expect(screen.queryByRole("button", { name: "Folder 폴더 열기" })).not.toBeInTheDocument());
   let fail!: (error: Error) => void;
   seriesFolders.mockReturnValueOnce(new Promise((_, reject) => { fail = reject; }));
   view.rerender(element("series"));
+  await waitFor(() => expect(card()).toBeInTheDocument());
   expect(card().querySelector("img")).toHaveAttribute("src", expect.stringContaining("f2-series-cover"));
   expect(card().querySelector(".series-character__placeholder")).toBeNull();
   await act(async () => fail(new Error("offline")));

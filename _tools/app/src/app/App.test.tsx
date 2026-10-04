@@ -385,7 +385,8 @@ describe("App", () => {
     const pending = new Promise<Awaited<ReturnType<LibraryGateway["listCollections"]>>>(resolve => { complete = resolve; });
     vi.mocked(libraryGateway.listCollections).mockReturnValue(pending);
     render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
-    await screen.findByRole("region", { name: /^오늘 할 것/ });
+    // Home shows 오늘 할 것 only when there is something to do; wait for Home itself instead.
+    expect(await screen.findByRole("button", { name: "홈" }, { timeout: 5000 })).toHaveAttribute("aria-current", "page");
     await waitFor(() => expect(libraryGateway.listCollections).toHaveBeenCalled());
     expect(readHomeVisit(summary.root).lastVisit).toBe(previous);
     await act(async () => complete([]));

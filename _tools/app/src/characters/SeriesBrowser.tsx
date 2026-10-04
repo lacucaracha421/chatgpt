@@ -1,10 +1,12 @@
+import { SeriesShelf } from "./SeriesShelf";
 import { AssetImage } from "../privacy/AssetImage";
 import { folderPreviewCache, rememberFolderPreview } from "../assets/folderPreviewCache";
 import { AssetStableImage as StableImage } from "../privacy/AssetImage";
 import { CharacterSuggestionTile, useCharacterSuggestions } from "./suggestions/CharacterSuggestions";
 import { invoke } from "@tauri-apps/api/core";
 import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion";
-import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
+import { motionDefaults, motionTime, reducedMotion } from "../shared/motion/curves";
 import { ChevronRightIcon, FolderIcon, UserIcon } from "@heroicons/react/24/outline";
 import { EllipsisHorizontalIcon, PencilIcon, PeopleIcon } from "../shared/ui/ArchiveIcons";
 import type { AlbumEntry, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
@@ -128,6 +130,12 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const [pageScope, setPageScope] = useState<string | null>(null);
   const pickerPages = useRef(new Map<string, CharacterBrowsePage>());
   const returnGallery = useRef<{ scope: string; page: CharacterBrowsePage } | null>(null);
+  useLayoutEffect(() => {
+    setEditor(null); setPicking(null); setConverting(false); setViewer(null); setExternalAsset(null);
+    setSelection(emptySelection()); setCharacterOpen(false); setShadowReview(false); setS36Setup(false);
+    setReferenceSuggestionTarget(null); setAll(false); setUndo([]); setMessage(null); setEditorError(null);
+    pickerPages.current.clear(); returnGallery.current = null;
+  }, [series.classificationId]);
   const current = targets.find(t => t.id === targetId);
   const inspectionTarget = editor ? editor.target : current;
   const inspectionDraft = editor?.draft ?? characterDraft(current ?? null);
@@ -495,6 +503,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       <div className="series-picking__chosen">{picking.ids.map((id,i) => <button key={id} aria-label={`선택 이미지 ${i + 1} 해제`} onClick={() => setPicking({ ...picking, ids: picking.ids.filter(v => v !== id) })}>{privacyMode ? <span className="privacy-mask" aria-label="비공개 모드"/> : <AssetImage src={thumbnailUrl(id)} alt="" />}<span>×</span></button>)}</div>
       <Button size="sm" disabled={busy || !picking.ids.length} onClick={() => finishPick(true)}>완료</Button><Button size="sm" variant="ghost" onClick={() => finishPick(false)}>취소</Button>
     </div>}
+    <div className="series-browser__body">
     <ContextMenu items={contextItems}><div className="series-gallery" aria-busy={loading} inert={pageScope !== scope && page.items.length > 0 ? true : undefined} onContextMenu={event => {
       if (picking) return;
       const id = (event.target as HTMLElement).closest<HTMLElement>("[data-asset-id]")?.dataset.assetId;
@@ -510,13 +519,13 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
       </div>}
       <AssetGallery {...(!picking ? galleryDrag : {})} intro={<>
         {!picking && current && <div className="series-character-folder-head"><div className="folder-shelf__label character-group-heading"><span>이미지</span><span className="character-group-heading__count">{page.totalCount.toLocaleString("ko-KR")}</span></div></div>}
-        {!picking && !current && !excludedOnly && <div className="series-browser__overview">
-          <CharacterGroups key={`${library?.root ?? ""}:${folderSeriesId}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={currentGroup?.id} privacyMode={privacyMode} memberCounts={memberCounts}
+        {!picking && !current && !excludedOnly && <SeriesShelf scope={`${library?.root ?? ""}:${series.classificationId}:${currentGroup?.id ?? ""}`} privacyKey={String(privacyMode)} ready={!shelfLoading && (Boolean(currentGroup) || (!staleFolders && !folderLoading) || Boolean(folderError))}>
+          <CharacterGroups key={`${library?.root ?? ""}:${series.classificationId}`} seriesId={series.classificationId} members={members} groups={groups.filter(group => group.seriesId === series.classificationId)} activeGroupId={currentGroup?.id} privacyMode={privacyMode} memberCounts={memberCounts}
             onOpenGroup={id => onNavigate({ kind: "classification", classificationId: series.classificationId, ...(id ? { characterGroupId: id } : {}) })}
             onGroupsChanged={onChanged} suggestionCount={currentGroup ? 0 : seriesSuggestions.length}
             suggestionCards={!currentGroup && !suggestionsHidden ? seriesSuggestions.map(suggestion => <CharacterSuggestionTile key={suggestion.tag} suggestion={suggestion} state={suggestions} privacyMode={privacyMode} onChanged={onChanged} />) : undefined}
             headerAccessory={!currentGroup ? <>{candidateReview}{seriesSuggestions.length > 0 && <Button size="sm" variant="ghost" onClick={() => setHiddenSuggestions(ids => suggestionsHidden ? ids.filter(id => id !== series.classificationId) : [...ids, series.classificationId])}>{suggestionsHidden ? "제안 보기" : "제안 숨기기"}</Button>}</> : undefined} groupCreateRequest={groupCreateRequest} groupEditRequest={groupEditRequest}
-            folderCards={folders.length > 0 ? folders.map(item => {
+            folderCards={!staleFolders && folders.length > 0 ? folders.map(item => {
               const folder = classifications.find(folder => folder.id === item.classificationId);
               if (!folder) return null;
               const exclusion = folderExclusionItem(folder.id, classifications, folderExclusions, excluded => void action(() => hubApi.setFolderExcluded(folder.id, excluded)));
@@ -549,7 +558,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
               <Button className="series-character__info" size="icon" variant="ghost" aria-label={`${target.displayName} 편집`} aria-description="캐릭터 편집" onClick={() => openEditor(target)}><PencilIcon aria-hidden="true" /></Button>
             </article></ContextMenu>;
             })}</>}</CharacterGroups>
-        </div>}
+        </SeriesShelf>}
         {!current && suggestions.error && <p role="alert">{suggestions.error}<Button size="sm" onClick={suggestions.refresh}>제안 다시 불러오기</Button></p>}
         {!current && suggestions.message && <p role="status">{suggestions.message}</p>}
         {folderError && <p className="character-message" role="alert">{folderError}<Button size="sm" onClick={() => setReload(v => v + 1)}>다시 시도</Button></p>}
@@ -589,6 +598,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         onClearSelection={() => setSelection(emptySelection())}
       />}
     </div></ContextMenu>
+    <SeriesInlineInspector assets={page.items.filter(a => selection.ids.has(a.id))} classifications={classifications} privacyMode={privacyMode} open={inspector} onOpenChange={setInspector} onOpenAsset={a => setViewer(a.id)} onOpenArtist={creatorKey => onNavigate({ kind: "creator", creatorKey })} onAssetUpdated={refresh} onAutoTagFilterApplied={() => onNavigate({ kind: "classification", classificationId: null })} />
+    </div>
     {message && <Toast onDismiss={() => setMessage(null)}>{message}</Toast>}
     {referenceSuggestionTarget && <ReferenceCandidateDialog
       target={referenceSuggestionTarget}
@@ -602,7 +613,31 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     {s36Setup && <Dialog open title="S36 자동 분류" onClose={() => setS36Setup(false)}>
       <S36SeriesControl seriesId={series.classificationId} seriesName={name} disabled={busy} onChanged={refresh} readiness={readiness} />
     </Dialog>}
-    <AssetInspector assets={page.items.filter(a => selection.ids.has(a.id))} classifications={classifications} open={inspector} onOpenChange={setInspector} onOpenAsset={a => setViewer(a.id)} onOpenArtist={creatorKey => onNavigate({ kind: "creator", creatorKey })} onAssetUpdated={refresh} onAutoTagFilterApplied={() => onNavigate({ kind: "classification", classificationId: null })} />
     <AssetViewer items={externalAsset && !page.items.some(a => a.id === externalAsset.id) ? [externalAsset, ...page.items] : page.items} activeId={viewer} onActiveIdChange={setViewer} onClose={() => setViewer(null)} privacyMode={privacyMode} onAssetOpened={a => gateway.recordAssetOpened(a.id, new Date().toISOString())} onToggleFavorite={a => void action(() => gateway.setAssetFavorite(a.id, !a.favorite))} onTrash={a => void action(() => gateway.trashAssets([a.id]))} />
   </section>;
+}
+
+export function SeriesInlineInspector({ open, ...props }: ComponentProps<typeof AssetInspector>) {
+  const [present, setPresent] = useState(open), [visible, setVisible] = useState(false);
+  const panel = useRef<HTMLDivElement>(null), opener = useRef<HTMLElement | null>(null);
+  const lastAssets = useRef(props.assets);
+  if (open) lastAssets.current = props.assets;
+  useLayoutEffect(() => {
+    if (open) {
+      opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setPresent(true);
+      // Establish the closed pose once; subsequent toggles reverse the same transition.
+      if (panel.current) void getComputedStyle(panel.current).opacity;
+      const frame = requestAnimationFrame(() => setVisible(true));
+      return () => cancelAnimationFrame(frame);
+    }
+    setVisible(false);
+    if (panel.current?.contains(document.activeElement) && opener.current?.isConnected) opener.current.focus({ preventScroll: true });
+    const duration = reducedMotion() ? motionTime("--motion-micro", motionDefaults.micro) : motionTime("--motion-medium", motionDefaults.medium) * .7;
+    const timer = window.setTimeout(() => setPresent(false), duration);
+    return () => window.clearTimeout(timer);
+  }, [open]);
+  return <div ref={panel} className="series-inspector-presence" data-open={open} data-visible={visible && open} aria-hidden={!open} inert={!open || undefined}>
+    {(open || present) && <AssetInspector {...props} assets={open ? props.assets : lastAssets.current} open presentation="inline" />}
+  </div>;
 }

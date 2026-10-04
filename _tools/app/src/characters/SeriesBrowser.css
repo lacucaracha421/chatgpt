@@ -1,4 +1,17 @@
 .series-browser { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.series-browser__body { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+/* Commit the gallery width once; only the inspector's paint moves each frame. */
+.series-inspector-presence { position: relative; flex: none; width: 0; opacity: 0; transform: translateX(12px); transition: transform calc(var(--motion-medium) * .7) var(--spring-gentle), opacity var(--motion-micro) var(--ease-out); }
+.series-inspector-presence[data-open="true"] { width: var(--inspector-width); }
+.series-inspector-presence[data-visible="true"] { opacity: 1; transform: translateX(0); transition-duration: var(--motion-medium), var(--motion-small); }
+.series-inspector-presence > .asset-inspector--inline { position: absolute; inset: 0 0 0 auto; box-sizing: border-box; width: var(--inspector-width); height: 100%; }
+@media (max-width: 1100px) {
+  .series-inspector-presence, .series-inspector-presence[data-open="true"] { position: absolute; inset: 0 0 0 auto; z-index: 2; width: min(var(--inspector-width), calc(100% - var(--space-6))); }
+  .series-inspector-presence > .asset-inspector--inline { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .series-inspector-presence, .series-inspector-presence[data-visible="true"] { transform: none; transition: opacity var(--motion-micro) var(--ease-out); }
+}
 .series-browser__overview { padding: var(--space-5) 0 var(--space-4); }
 .series-header-actions, .series-breadcrumb { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
 .series-header-actions { flex-shrink: 0; }
@@ -25,8 +38,6 @@
 .series-character--excluded .series-character__name { color: var(--color-muted); }
 .series-character__tag { position: absolute; top: var(--space-1); left: var(--space-1); padding: 0 var(--space-1); border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-bg); color: var(--color-muted); font-size: var(--text-xs); line-height: 18px; pointer-events: none; }
 .series-character__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Async counts must not add a line after the shelf has painted. */
-.series-character .folder-shelf__meta { min-height: var(--line-ui); }
 .series-empty { color: var(--color-muted); font-size: var(--text-sm); line-height: var(--line-ui); }
 /* The edit/overflow action sits in the image corner so the name keeps the full tile width. */
 .series-character__info.ui-button, .series-character__info.ui-menu__trigger { position: absolute; top: var(--space-1); right: var(--space-1); background: var(--color-bg); border-radius: var(--radius-sm); }
@@ -44,7 +55,7 @@
 .series-gallery-heading h3 { margin: 0; font-size: var(--text-md); font-weight: 500; }
 .series-gallery-heading small { margin-left: var(--space-2); color: var(--color-muted); font-size: var(--text-sm); }
 /* The series switch and total count form the gallery's own first line, not a separate band. */
-.series-gallery { position: relative; isolation: isolate; flex: 1; min-height: 0; }
+.series-gallery { position: relative; isolation: isolate; flex: 1; min-width: 0; min-height: 0; }
 .series-gallery > .asset-gallery { height: 100%; }
 .series-gallery__empty { padding: var(--space-4); color: var(--color-muted); pointer-events: none; }
 .series-character-folder-head { padding: var(--space-4) var(--space-4) 0; }
@@ -202,3 +213,8 @@
 .s36-exclusion{display:flex;align-items:flex-start;gap:8px;font-size:13px;padding:4px 0}
 .s36-exclusion small{display:block;font-size:12px;color:var(--color-muted)}
 .s36-series__ready{font-size:12px;color:var(--color-accent)}
+
+.series-shelf { position: relative; display: grid; }
+.series-shelf > div { grid-area: 1 / 1; min-width: 0; }
+/* Opaque incoming paint covers the retained shelf, including its taller empty space. */
+.series-shelf > [data-motion-view] { position: relative; background: var(--color-bg); }

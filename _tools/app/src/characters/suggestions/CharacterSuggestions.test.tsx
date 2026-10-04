@@ -1,12 +1,29 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CharacterSuggestionsOverview } from "./CharacterSuggestions";
+import { useLayoutEffect } from "react";
+import { CharacterSuggestionsOverview, CharacterSuggestionTile, useCharacterSuggestions, type SuggestionState } from "./CharacterSuggestions";
+import { readFileSync } from "node:fs";
 import { SuggestionDialog } from "./SuggestionDialog";
 import { suggestionName, type Suggestion, type SuggestionApi, type SuggestionDetail } from "./client";
 import type { CharacterTarget } from "../api";
 import type { ClassificationEntry } from "../../library/types";
 
 const suggestion: Suggestion = { tag: "isolde_(reverse:1999)", imageCount: 8, bothCount: 6, pixaiCount: 8, canaryCount: 6, sampleAssetIds: ["a0", "a1", "a2", "a3"], seriesId: "series", seriesName: "리버스", insideCount: 7 };
+
+it("dims the suggestion collage on its first render and throughout late image fades", () => {
+  const style = document.createElement("style"); style.textContent = readFileSync("src/characters/suggestions/CharacterSuggestions.css", "utf8"); document.head.append(style);
+  try {
+    const view = render(<CharacterSuggestionTile suggestion={suggestion} state={{ busy: false, api: api() } as SuggestionState} privacyMode={false} onChanged={() => undefined} />);
+    const mosaic = view.container.querySelector<HTMLElement>(".character-suggestion-tile__mosaic")!;
+    expect(mosaic).toHaveClass("character-suggestion-tile__mosaic--suggestion");
+    expect(getComputedStyle(mosaic).opacity).toBe("0.55");
+    expect(getComputedStyle(mosaic).filter).toBe("saturate(.55)");
+    for (const image of mosaic.querySelectorAll("img")) {
+      image.animate = vi.fn(); fireEvent.load(image);
+      expect(getComputedStyle(mosaic).opacity).toBe("0.55");
+    }
+  } finally { style.remove(); }
+});
 const target: CharacterTarget = { id: "existing", displayName: "기존 캐릭터", seriesClassificationId: "series", linkedClassificationId: null, enabled: true, manualOnly: false, ready: false, references: [], revision: 2, fingerprint: "fingerprint" };
 const detail: SuggestionDetail = { previewToken: "snapshot", referenceIds: ["a4", "a0", "a1", "a2", "a3"], images: Array.from({ length: 8 }, (_, i) => ({ assetId: `a${i}`, assetHash: `h${i}`, pixaiScore: .99 - i * .01, canaryScore: i < 6 ? .9 : .2, insideSeries: i < 7, solo: i === 4 || i === 6 })) };
 const folders = [{ id: "series", parentId: null, name: "리버스", kind: "root", assetCount: 8, iconKey: null, colorKey: null }] as ClassificationEntry[];
@@ -14,6 +31,22 @@ const api = (): SuggestionApi => ({ list: vi.fn().mockResolvedValue([suggestion]
 const dialog = (client: SuggestionApi, mode: "register" | "merge" = "register", row = suggestion, onSaved = vi.fn()) => render(<SuggestionDialog suggestion={row} mode={mode} privacyMode={false} api={client} onClose={vi.fn()} onSaved={onSaved} />);
 
 afterEach(cleanup);
+
+it("marks changed suggestion requests loading on the first committed render", async () => {
+  const client = api(), reads: boolean[] = [];
+  function Probe({ version }: { version: number }) {
+    const state = useCharacterSuggestions(version, client);
+    useLayoutEffect(() => { reads.push(state.loading); });
+    return <span>{state.loading ? "loading" : "ready"}</span>;
+  }
+  const view = render(<Probe version={0} />);
+  await screen.findByText("ready");
+  vi.mocked(client.list).mockReturnValue(new Promise(() => undefined));
+  reads.length = 0;
+  view.rerender(<Probe version={1} />);
+  expect(reads[0]).toBe(true);
+  expect(screen.getByText("loading")).toBeInTheDocument();
+});
 
 describe("character suggestions", () => {
   it("ships reviewed Korean names and humanises unknown qualifiers", () => {
@@ -109,11 +142,16 @@ describe("character suggestions", () => {
     fireEvent.keyDown(preview, { key: "Tab" });
     expect(within(preview).getByRole("button", { name: "이전 이미지" })).toHaveFocus();
     expect(within(preview).getByRole("img")).toHaveAttribute("src", expect.stringContaining("/asset/a4"));
+    // The previous reference stays painted until the next one has loaded (no blank frame).
+    const loadReplacement = (id: string) => fireEvent.load(preview.querySelector(`img[src$="/asset/${id}"]`)!);
     fireEvent.keyDown(preview, { key: "ArrowRight" });
-    expect(within(preview).getByRole("img")).toHaveAttribute("src", expect.stringContaining("/asset/a6"));
+    expect(within(preview).getByRole("img")).toHaveAttribute("src", expect.stringContaining("/asset/a4"));
+    loadReplacement("a6");
+    await waitFor(() => expect(within(preview).getByRole("img")).toHaveAttribute("src", expect.stringContaining("/asset/a6")));
     fireEvent.click(within(preview).getByRole("button", { name: "이전 이미지" }));
     fireEvent.keyDown(preview, { key: "ArrowLeft" });
-    expect(within(preview).getByRole("img")).toHaveAttribute("src", expect.stringContaining("/asset/a5"));
+    loadReplacement("a5");
+    await waitFor(() => expect(within(preview).getByRole("img")).toHaveAttribute("src", expect.stringContaining("/asset/a5")));
     fireEvent.click(within(preview).getByRole("button", { name: "다음 이미지" }));
     fireEvent.keyDown(preview, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "참조 이미지 크게 보기" })).not.toBeInTheDocument());

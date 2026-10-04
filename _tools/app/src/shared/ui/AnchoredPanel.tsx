@@ -1,4 +1,5 @@
 import * as RadixDialog from "@radix-ui/react-dialog";
+import { useMotionSurface } from "./useMotionSurface";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import { useCallback, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { useBackHandler } from "../navigation/BackNavigation";
@@ -23,7 +24,8 @@ export function AnchoredPanel({ open, onOpenChange, trigger, title, description,
   const triggerRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentNode, setContentNode] = useState<HTMLDivElement | null>(null);
-  const attachContent = useCallback((node: HTMLDivElement | null) => { contentRef.current = node; setContentNode(node); }, []);
+  const surfaceRef = useMotionSurface("menu");
+  const attachContent = useCallback((node: HTMLDivElement | null) => { contentRef.current = node; setContentNode(node); surfaceRef(node); }, [surfaceRef]);
   const [position, setPosition] = useState<CSSProperties>({ visibility: "hidden" });
   const closeRef = useRef(onOpenChange);
   closeRef.current = onOpenChange;
@@ -42,14 +44,16 @@ export function AnchoredPanel({ open, onOpenChange, trigger, title, description,
       const triggerRect = triggerNode.getBoundingClientRect();
       const side = index.getBoundingClientRect();
       const rect = content.getBoundingClientRect();
+      // Entrance scale must not change the settled viewport bounds.
+      const panelWidth = content.offsetWidth || rect.width, panelHeight = content.offsetHeight || rect.height;
       const viewport = window.visualViewport;
       const width = viewport?.width ?? window.innerWidth;
       const height = viewport?.height ?? window.innerHeight;
       const offsetX = viewport?.offsetLeft ?? 0;
       const offsetY = viewport?.offsetTop ?? 0;
-      const left = Math.max(offsetX + EDGE, Math.min(side.right + GAP, offsetX + width - rect.width - EDGE));
-      const top = Math.max(offsetY + EDGE, Math.min(triggerRect.bottom - rect.height, offsetY + height - rect.height - EDGE));
-      setPosition({ left, top, visibility: "visible" });
+      const left = Math.max(offsetX + EDGE, Math.min(side.right + GAP, offsetX + width - panelWidth - EDGE));
+      const top = Math.max(offsetY + EDGE, Math.min(triggerRect.bottom - panelHeight, offsetY + height - panelHeight - EDGE));
+      setPosition({ left, top, visibility: "visible", transformOrigin: `${Math.max(0, Math.min(panelWidth, triggerRect.right - left))}px ${Math.max(0, Math.min(panelHeight, triggerRect.top + triggerRect.height / 2 - top))}px` });
     };
     positionPanel();
     const observer = new ResizeObserver(positionPanel);

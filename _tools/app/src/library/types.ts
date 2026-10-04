@@ -763,6 +763,11 @@ export type KakaoApplyRequest = {
 
 // PC-only data: kept separate from CollectionSummary/CollectionVolume replica shapes.
 export type CollectionWorkRecord = { status: string | null; ownedPlatform: string | null; myScore: number | null; memo: string | null };
+/** PC Home: read-only personal media, selected deterministically for the local date. */
+export type HomeMedia = {
+  playing: { collectionId: string; ownedPlatform: string | null; myScore: number | null }[];
+  dailyAsset: { id: string; collectedAt: string; favorite: boolean } | null;
+};
 /** A shelf case's printing: the owned device and the chosen spine artwork. */
 export type CollectionShelfCase = { collectionId: string; ownedPlatform: string | null; spineArtworkId: string | null };
 export type CollectionRecordEdit = { field: "status" | "ownedPlatform" | "memo"; value: string | null } | { field: "myScore"; value: number | null };
@@ -1348,6 +1353,7 @@ export interface LibraryGateway {
   getLibraryStatistics?(): Promise<import("../statistics/types").LibraryStatistics>;
   /** PC Home: asset totals since local midnight / this Monday and the server's last known state (desktop only). */
   getHomeOverview?(todayStart: string, weekStart: string, localDate: string): Promise<HomeOverview>;
+  getHomeMedia?(localDate: string): Promise<HomeMedia>;
   measureLibraryDerivativeStorage?(): Promise<import("../statistics/types").DerivativeStorage>;
   recordCollectionOpened?(collectionId: string, openedAt: string): Promise<void>;
   collectionTracking?: CollectionTrackingGateway;

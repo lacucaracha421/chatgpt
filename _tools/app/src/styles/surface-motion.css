@@ -1,0 +1,37 @@
+/* A no-op animation gives Radix Presence a lifetime. Visual properties use transitions,
+   so toggling closed/open reverses at the current painted position. */
+@keyframes ui-surface-exit { from { --ui-presence: 0; } to { --ui-presence: 1; } }
+[data-motion] {
+  --surface-time: var(--spring-snappy-ms);
+  --surface-ease: var(--spring-snappy);
+  --surface-opacity-time: var(--motion-small);
+  --surface-exit-time: calc(var(--surface-time) * var(--motion-exit-ratio));
+  --surface-x: 0px;
+  --surface-y: -4px;
+  --surface-scale: .96;
+  opacity: 1;
+  translate: none;
+  scale: none;
+  transition: opacity var(--surface-opacity-time) var(--ease-out), translate var(--surface-time) var(--surface-ease), scale var(--surface-time) var(--surface-ease);
+}
+[data-motion="menu"] { transform-origin: var(--radix-dropdown-menu-content-transform-origin, var(--radix-context-menu-content-transform-origin, var(--radix-popover-content-transform-origin, left bottom))); }
+[data-motion="menu"][data-side="top"] { --surface-y: 4px; }
+[data-motion="menu"][data-side="left"] { --surface-x: 4px; --surface-y: 0px; }
+[data-motion="menu"][data-side="right"] { --surface-x: -4px; --surface-y: 0px; }
+[data-motion="dialog"] { --surface-time: var(--spring-gentle-ms); --surface-ease: var(--spring-gentle); --surface-opacity-time: var(--motion-medium); --surface-y: 8px; --surface-scale: .97; }
+[data-motion="scrim"] { --surface-time: var(--motion-medium); --surface-exit-time: var(--motion-medium); --surface-opacity-time: var(--motion-medium); --surface-y: 0px; --surface-scale: 1; }
+[data-motion="toast"] { --surface-y: 10px; --surface-scale: .98; --surface-exit-time: var(--motion-toast-exit); }
+[data-motion="selection"] { --surface-time: var(--motion-small); --surface-exit-time: var(--motion-small); --surface-ease: var(--ease-out); --surface-y: 8px; --surface-scale: 1; }
+[data-motion][data-motion-entering], [data-motion][data-state="closed"] { opacity: 0; translate: var(--surface-x) var(--surface-y); scale: var(--surface-scale); }
+[data-motion][data-state="closed"] {
+  transition-duration: min(var(--surface-opacity-time), var(--surface-exit-time)), var(--surface-exit-time), var(--surface-exit-time);
+  animation: ui-surface-exit var(--surface-exit-time) linear;
+}
+[data-motion="toast"][data-state="closed"] { --surface-y: 4px; --surface-scale: 1; }
+[data-motion][data-state="closed"], [data-motion-ghost], [data-motion-ghost] * { pointer-events: none !important; }
+.ui-selection-presence { display: contents; }
+/* The tablet's blanket reduced-motion reset is overridden only for these surfaces. */
+@media (prefers-reduced-motion: reduce) {
+  [data-motion][data-motion] { --surface-time: var(--motion-micro); --surface-opacity-time: var(--motion-micro); --surface-exit-time: var(--motion-micro); translate: none !important; scale: none !important; transition: opacity var(--motion-micro) var(--ease-out) !important; }
+  [data-motion][data-motion][data-state="closed"] { animation: ui-surface-exit var(--motion-micro) linear !important; }
+}

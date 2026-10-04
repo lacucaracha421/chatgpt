@@ -1,9 +1,9 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { StrictMode, useEffect, useRef } from 'react';
-import { AreaSwitch, MotionScope, READY_CAP_MS } from './AreaSwitch';
+import { StrictMode, useEffect, useRef, useState } from 'react';
+import { AreaSwitch, AreaVisible, MotionScope, READY_CAP_MS } from './AreaSwitch';
 import { useFirstAppearance } from './useFirstAppearance';
-import { EASE_SHEET, EASE_SPRING, SPRING_FALLBACK, springEasing } from './curves';
+import { EASE_SNAPPY, EASE_SPRING, EASE_STANDARD, SNAPPY_MS, SPRING_FALLBACK, snappySpringEasing, springEasing } from './curves';
 import { readFileSync } from 'node:fs';
 
 let reduce = false;
@@ -17,18 +17,22 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, 'animate', {configurable: true, value: animate});
 });
 afterEach(() => { cleanup(); delete (HTMLElement.prototype as Partial<HTMLElement>).animate; vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks(); change = undefined; });
-const tick = async (ms = 32) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+const tick = async (ms = 64) => {
+  for (let remaining = ms; remaining > 0; remaining -= 16) await act(async () => { await vi.advanceTimersByTimeAsync(Math.min(16, remaining)); });
+};
 
-it('shares the exact prototype spring samples with CSS and falls back without linear()', () => {
+it('shares the snappy prototype samples with CSS and preserves both spring fallbacks', () => {
   const css = readFileSync('src/styles/tokens.css', 'utf8');
-  expect(css).toContain(`--ease-spring: ${EASE_SPRING}`);
-  expect(css).toContain(`--ease-sheet: ${EASE_SHEET}`);
+  expect(css).toContain(`--spring-snappy: ${EASE_SNAPPY}`);
+  expect(css).toContain(`--spring-snappy-ms: ${SNAPPY_MS}ms`);
   expect(css).toContain('@supports (transition-timing-function: linear(0, 1))');
   vi.stubGlobal('CSS', {supports: () => false}); expect(springEasing()).toBe(SPRING_FALLBACK);
+  expect(snappySpringEasing()).toBe(EASE_STANDARD);
   vi.stubGlobal('CSS', {supports: () => true}); expect(springEasing()).toBe(EASE_SPRING);
+  expect(snappySpringEasing()).toBe(EASE_SNAPPY);
 });
 
-it('keeps the exact old DOM while pending and swaps atomically without overlap', async () => {
+it('keeps the exact old DOM until both opacity fades finish together', async () => {
   const tree = (loading: boolean) => <AreaSwitch activeKey="assets" views={{assets: loading ? <span className="asset-browser__skeleton" style={{visibility: 'visible'}}>waiting</span> : <button>new</button>}} />;
   const view = render(<AreaSwitch activeKey="home" views={{home: <button>old</button>}} />);
   const old = screen.getByText('old');
@@ -46,33 +50,101 @@ it('keeps the exact old DOM while pending and swaps atomically without overlap',
   expect(old).toBeVisible();
   expect(screen.getByText('new')).not.toBeVisible();
   expect(screen.getByText('new').closest('[inert]')).not.toBeNull();
-  await tick(16);
-  expect(old.isConnected).toBe(false);
+  await tick(48);
+  expect(old).toBeVisible();
+  expect(old.closest('[inert][aria-hidden="true"]')).not.toBeNull();
+  expect(old.closest<HTMLElement>('[data-motion-view]')?.style.zIndex).toBe('0');
   expect(screen.getByRole('button', {name: 'new'})).toBeVisible();
   expect(screen.getByText('new').closest<HTMLElement>('[data-motion-view]')?.style.opacity).toBe('');
+  expect(view.container.querySelectorAll('[data-motion-view]')).toHaveLength(2);
+  expect(screen.getByText('new').closest<HTMLElement>('[data-motion-view]')?.style.zIndex).toBe('1');
+  expect(animate).toHaveBeenCalledTimes(2);
+  expect(animate.mock.contexts[0]).toBe(screen.getByText('new').closest('[data-motion-view]'));
+  expect(animate.mock.calls[0]).toEqual([
+    [{opacity: 0}, {opacity: 1}],
+    {duration: 150, easing: EASE_STANDARD},
+  ]);
+  expect(animate.mock.contexts[1]).toBe(old.closest('[data-motion-view]'));
+  expect(animate.mock.calls[1]).toEqual([
+    [{opacity: 1}, {opacity: 0}], {duration: 150, easing: EASE_STANDARD, fill: 'forwards'},
+  ]);
+  view.rerender(tree(false)); await tick(149);
+  expect(old).toBeVisible();
+  await tick(1);
+  expect(old.isConnected).toBe(false);
   expect(view.container.querySelectorAll('[data-motion-view]')).toHaveLength(1);
-  expect(animate).not.toHaveBeenCalled();
+  expect(animate).toHaveBeenCalledTimes(2);
 });
 
-it.each([-208, 208])('prepares a pending view at its destination width (%i) without resizing the outgoing tree', async delta => {
-  const view = render(<AreaSwitch activeKey="old" views={{old: <b>old</b>}} />);
-  const tree = (ready: boolean) => <AreaSwitch activeKey="next" incomingWidthDelta={delta} ready={() => ready} views={{next: <b>next</b>}} />;
-  view.rerender(tree(false));
-  expect(screen.getByText('old').closest<HTMLElement>('[data-motion-view]')?.style.width).toBe('');
-  expect(screen.getByText('next').closest<HTMLElement>('[data-motion-view]')?.style.width).toBe(`calc(100% ${delta < 0 ? '-' : '+'} 208px)`);
-  expect(screen.getByText('next')).not.toBeVisible();
-  view.rerender(tree(true)); await tick();
-  expect(screen.getByText('next').closest<HTMLElement>('[data-motion-view]')?.style.width).toBe('');
-  expect(screen.getByText('next')).toBeVisible();
-});
-
-it('switches instantly once ready under reduced motion, preserving old content during its load', async () => {
+it('uses a 120ms opacity cross under reduced motion', async () => {
   reduce = true;
   const view = render(<AreaSwitch activeKey="home" views={{home: <b>old</b>}} />);
   view.rerender(<AreaSwitch activeKey="assets" views={{assets: <span className="library-content__deferred"/>}} />); await tick();
   expect(screen.getByText('old')).toBeTruthy();
-  view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b>new</b>}} />); await tick();
-  expect(screen.queryByText('old')).toBeNull(); expect(animate).not.toHaveBeenCalled();
+  view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b>new</b>}} />);
+  expect(screen.getByText('old')).toBeVisible();
+  await tick(32);
+  expect(animate).toHaveBeenNthCalledWith(1, [{opacity: 0}, {opacity: 1}], {duration: 120, easing: EASE_STANDARD});
+  expect(animate).toHaveBeenNthCalledWith(2, [{opacity: 1}, {opacity: 0}], {duration: 120, easing: EASE_STANDARD, fill: 'forwards'});
+  await tick(119); expect(screen.getByText('old')).toBeVisible();
+  await tick(1); expect(screen.queryByText('old')).toBeNull();
+});
+
+it.each([['assets', 'collections'], ['collections', 'assets']])('freezes %s geometry while %s enters at its final index width', async (from, to) => {
+  const indexFor = (key: string) => key === 'assets' ? 208 : 0;
+  const shown = vi.fn();
+  function Shell({activeKey}: {activeKey: string}) {
+    const [indexWidth, setIndexWidth] = useState(indexFor(from));
+    return <div data-test-index-width={indexWidth}><AreaSwitch activeKey={activeKey}
+      incomingWidthDelta={indexWidth - indexFor(activeKey)} onShown={key => {
+        // The shell must change with the opacity clock, never while the destination prepares.
+        expect(animate).toHaveBeenCalledTimes(2);
+        shown(key); setIndexWidth(indexFor(key));
+      }} views={{[activeKey]: <b>{activeKey}</b>}}/></div>;
+  }
+  // jsdom has no layout: model only the shell's column width and the actual host styles.
+  const rects = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const indexWidth = Number(this.closest('[data-test-index-width]')?.getAttribute('data-test-index-width'));
+    const fixed = this.style.position === 'fixed';
+    const delta = /calc\(100% ([+-]) (\d+)px\)/.exec(this.style.width);
+    const left = fixed ? Number.parseFloat(this.style.left) : 64 + indexWidth + (Number.parseFloat(this.style.left) || 0);
+    const top = fixed ? Number.parseFloat(this.style.top) : 88;
+    const width = fixed ? Number.parseFloat(this.style.width) : 1200 - indexWidth + (delta ? Number(delta[2]) * (delta[1] === '+' ? 1 : -1) : 0);
+    return {left, top, width, height: 720, right: left + width, bottom: top + 720, x: left, y: top, toJSON() {}};
+  });
+  try {
+    const view = render(<Shell activeKey={from}/>);
+    const outgoing = view.container.querySelector<HTMLElement>(`[data-motion-view="${from}"]`)!;
+    const {left, top, width, height} = outgoing.getBoundingClientRect();
+    const lastFrame = {left, top, width, height};
+    view.rerender(<Shell activeKey={to}/>);
+    const incoming = view.container.querySelector<HTMLElement>(`[data-motion-view="${to}"]`)!;
+    expect(incoming.getBoundingClientRect().width).toBe(1200 - indexFor(to));
+    expect(incoming.getBoundingClientRect().left).toBe(64 + indexFor(to));
+    await tick(32);
+    expect(shown).not.toHaveBeenCalled();
+    expect(outgoing.style.position).toBe('fixed');
+    expect(outgoing.style.inset).toBe('auto');
+    expect(outgoing.style.contain).toBe('layout paint size');
+    expect(outgoing.style.width).toBe(`${lastFrame.width}px`);
+    expect(outgoing.style.height).toBe(`${lastFrame.height}px`);
+    expect(outgoing.getBoundingClientRect()).toMatchObject(lastFrame);
+    expect(incoming.style.opacity).toBe('0');
+    await tick(16); expect(shown).not.toHaveBeenCalled();
+    await tick(16);
+    expect(shown).toHaveBeenCalledExactlyOnceWith(to);
+    expect(view.container.firstElementChild).toHaveAttribute('data-test-index-width', String(indexFor(to)));
+    expect(incoming.style.width).toBe('');
+    expect(incoming.style.opacity).toBe('');
+    expect(incoming.getBoundingClientRect().width).toBe(1200 - indexFor(to));
+    expect(incoming.getBoundingClientRect().left).toBe(64 + indexFor(to));
+    expect(outgoing.getBoundingClientRect()).toMatchObject(lastFrame);
+    await tick(149);
+    expect(outgoing.isConnected).toBe(true);
+    expect(outgoing.style.width).toBe(`${lastFrame.width}px`);
+    await tick(1);
+    expect(outgoing.isConnected).toBe(false);
+  } finally { rects.mockRestore(); }
 });
 
 it('preserves the immediate ready swap when animation APIs are unavailable', () => {
@@ -91,7 +163,8 @@ it('cancels superseded transitions and never shows the abandoned pending view', 
   const view = render(<AreaSwitch activeKey="home" views={{home: <b>old</b>}} />);
   view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b className="asset-browser__skeleton">pending</b>}} />); await tick();
   view.rerender(<AreaSwitch activeKey="notes" views={{notes: <b>notes</b>}} />); await tick();
-  expect(screen.queryByText('pending')).toBeNull(); expect(screen.queryByText('old')).toBeNull();
+  expect(screen.queryByText('pending')).toBeNull(); expect(screen.getByText('old')).toBeVisible();
+  await tick(180); expect(screen.queryByText('old')).toBeNull();
   expect(screen.getByText('notes')).toBeVisible();
 });
 
@@ -101,37 +174,76 @@ it('preserves retained surface DOM and mounts while hiding it on departure and s
   const tree = (activeKey: string) => <AreaSwitch activeKey={activeKey} retained={['notes']} views={{notes: <Notes active={activeKey === 'notes'}/>, home: <b>home</b>}} />;
   const view = render(tree('notes')); const notes = screen.getByText('notes');
   view.rerender(tree('home')); expect(notes.style.display).toBe(''); await tick();
-  expect(notes.isConnected).toBe(true); expect(notes.style.display).toBe('none');
+  expect(notes.isConnected).toBe(true); expect(notes.style.display).toBe('');
   expect(notes.closest('[inert]')).not.toBeNull();
+  await tick(180); expect(notes.style.display).toBe('none');
+  expect(notes.closest<HTMLElement>('[data-motion-view]')?.style.position).toBe('');
+  expect(notes.closest<HTMLElement>('[data-motion-view]')?.style.contain).toBe('');
   view.rerender(tree('notes')); await tick();
   expect(screen.getByRole('button', {name: 'notes'})).toBe(notes); expect(mounts).toHaveBeenCalledTimes(1);
 });
 
-it('revisits a ready retained view immediately even with animation APIs available', async () => {
+it('settles a ready retained Home before its entrance and plays its entrance on every revisit', async () => {
   const tree = (activeKey: string) => <AreaSwitch activeKey={activeKey} retained={['home']} views={{home: <b>home</b>, assets: <b>assets</b>}} />;
   const view = render(tree('home'));
   const home = screen.getByText('home');
   view.rerender(tree('assets')); await tick();
-  expect(home).not.toBeVisible();
-  view.rerender(tree('home'));
   expect(home).toBeVisible();
+  expect(animate).toHaveBeenCalledTimes(2);
+  view.rerender(tree('home')); await tick(32);
+  expect(home).toBeVisible();
+  expect(screen.getByText('assets')).toBeVisible();
+  expect(screen.getByText('assets').closest('[inert]')).not.toBeNull();
+  expect(animate).toHaveBeenCalledTimes(4);
+  expect(animate.mock.contexts[2]).toBe(home.closest('[data-motion-view]'));
+  view.rerender(tree('assets')); await tick();
+  view.rerender(tree('home')); await tick(32);
+  expect(animate).toHaveBeenCalledTimes(8);
+  expect(animate.mock.contexts[6]).toBe(home.closest('[data-motion-view]'));
+  await tick(180);
   expect(screen.queryByText('assets')).toBeNull();
   expect(vi.getTimerCount()).toBe(0);
-  expect(animate).not.toHaveBeenCalled();
 });
 
 function Tiles({count}: {count: number}) {
   const host = useRef<HTMLDivElement>(null); useFirstAppearance(host, count);
   return <div ref={host}>{Array.from({length: count}, (_, i) => <b data-asset-id={i} key={i}>tile {i}</b>)}</div>;
 }
-it('waits for the first loaded tiles, caps stagger at 18, and skips rerenders, paging and remount revisits', () => {
+it('animates the first loaded tiles on every mount, caps stagger at 18, and skips later batches', () => {
   const tree = (count: number, mount = true) => <MotionScope>{mount && <Tiles count={count}/>}</MotionScope>;
   const view = render(tree(0)); expect(animate).not.toHaveBeenCalled();
   view.rerender(tree(22)); expect(animate).toHaveBeenCalledTimes(22);
   expect(animate.mock.calls[0][0]).toEqual([{opacity: 0, transform: 'translateY(8px) scale(.98)'}, {opacity: 1, transform: 'none'}]);
   expect(animate.mock.calls[21][1]).toEqual({duration: 560, delay: 432, easing: SPRING_FALLBACK, fill: 'backwards'});
-  view.rerender(tree(24)); view.rerender(tree(4)); view.rerender(tree(0, false)); view.rerender(tree(22));
+  view.rerender(tree(24)); view.rerender(tree(4)); view.rerender(tree(0)); view.rerender(tree(22));
   expect(animate).toHaveBeenCalledTimes(22);
+  view.rerender(tree(0, false)); view.rerender(tree(22));
+  expect(animate).toHaveBeenCalledTimes(44);
+});
+it('rearms retained tiles while hidden and waits for their first enabled painted batch on revisit', () => {
+  const tree = (visible: boolean, count: number, enabled = true) => <AreaVisible.Provider value={visible}><Cards surface="retained" count={count} enabled={enabled}/></AreaVisible.Provider>;
+  const view = render(tree(true, 2)); expect(animate).toHaveBeenCalledTimes(2);
+  const first = animate.mock.results.map(result => result.value);
+  view.rerender(tree(false, 3));
+  first.forEach(animation => expect(animation.cancel).toHaveBeenCalledOnce());
+  view.rerender(tree(false, 4)); expect(animate).toHaveBeenCalledTimes(2);
+  view.rerender(tree(true, 4, false)); expect(animate).toHaveBeenCalledTimes(2);
+  view.rerender(tree(true, 4)); expect(animate).toHaveBeenCalledTimes(6);
+  view.rerender(tree(true, 8)); expect(animate).toHaveBeenCalledTimes(6);
+});
+it('merges the first tile batch into the area entrance, including a retained revisit', async () => {
+  const tree = (activeKey: string, count = 2) => <AreaSwitch activeKey={activeKey} retained={['assets']} views={{assets: <Tiles count={count}/>, home: <b>home</b>}}/>;
+  const view = render(tree('home'));
+  expect(animate).not.toHaveBeenCalled();
+  view.rerender(tree('assets')); expect(animate).not.toHaveBeenCalled();
+  await tick();
+  const tiles = () => animate.mock.contexts.filter(host => (host as HTMLElement).matches('[data-asset-id]'));
+  expect(tiles()).toHaveLength(0);
+  view.rerender(tree('assets', 3)); expect(tiles()).toHaveLength(0);
+  view.rerender(tree('home', 3)); await tick();
+  view.rerender(tree('home', 4)); expect(tiles()).toHaveLength(0);
+  view.rerender(tree('assets', 4));
+  expect(tiles()).toHaveLength(0);
 });
 it('consumes the first appearance without animations under reduced motion', () => {
   reduce = true; const view = render(<MotionScope><Tiles count={2}/></MotionScope>);
@@ -152,7 +264,9 @@ it('commits explicit readiness changes even when the incoming DOM does not chang
   view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b>empty</b>}} ready={() => true}/>);
   expect(animate).not.toHaveBeenCalled();
   await tick();
-  expect(animate).not.toHaveBeenCalled();
+  expect(animate).toHaveBeenCalledTimes(2);
+  expect(screen.getByText('old')).toBeVisible();
+  await tick(180);
   expect(screen.queryByText('old')).toBeNull();
 });
 
@@ -166,6 +280,9 @@ it('keeps the old view visible through incoming layout before replacing it in on
   expect(screen.getByText('old').closest<HTMLElement>('[data-motion-view]')?.style.visibility).toBe('');
   expect(screen.getByText('catalog').closest<HTMLElement>('[data-motion-view]')?.style.visibility).toBe('hidden');
   await tick(16); expect(animate).not.toHaveBeenCalled();
+  await tick(32); expect(animate).toHaveBeenCalledTimes(2);
+  expect(screen.getByText('old')).toBeVisible();
+  await tick(180);
   expect(screen.queryByText('old')).toBeNull();
   expect(screen.getByRole('button', {name: 'catalog'})).toBeTruthy();
 });
@@ -179,7 +296,10 @@ it('rechecks readiness during the frame wait and cancels a superseded ready view
   view.rerender(<AreaSwitch activeKey="notes" views={{notes: <b>notes</b>}}/>);
   await tick(16); expect(animate).not.toHaveBeenCalled();
   await tick(16); expect(animate).not.toHaveBeenCalled();
+  await tick(32); expect(animate).toHaveBeenCalledTimes(2);
   expect(screen.queryByText('catalog')).toBeNull();
+  expect(screen.getByText('old')).toBeVisible();
+  await tick(180);
   expect(screen.queryByText('old')).toBeNull();
   expect(screen.getByText('notes').closest('[inert]')).toBeNull();
 });
@@ -194,12 +314,76 @@ it('keeps the 1s cap even when rendering frames are suspended', async () => {
   expect(screen.queryByText('old')).toBeNull();
 });
 
-it('skips pending frames when reduced motion is enabled during the readiness wait', async () => {
+it('waits two frames after the shown commit, merging its tiles and releasing promotion on finish', async () => {
+  const shown = vi.fn();
+  const view = render(<AreaSwitch activeKey="home" views={{home: <b>old</b>}}/>);
+  view.rerender(<AreaSwitch activeKey="assets" onShown={shown} views={{assets: <Tiles count={18}/>}}/>);
+  await tick(32);
+  expect(shown).not.toHaveBeenCalled();
+  const incoming = view.container.querySelector<HTMLElement>('[data-motion-view="assets"]')!;
+  expect(incoming.style.opacity).toBe('0');
+  expect(incoming).toHaveAttribute('inert');
+  expect(screen.getByText('old')).toBeVisible();
+  expect(animate).not.toHaveBeenCalled();
+  await tick(16); expect(animate).not.toHaveBeenCalled();
+  await tick(16); expect(animate).toHaveBeenCalledTimes(2);
+  expect(shown).toHaveBeenCalledExactlyOnceWith('assets');
+  expect(animate.mock.contexts[0]).toBe(incoming);
+  expect(incoming).not.toHaveAttribute('inert');
+  expect(incoming.style.willChange).toBe('opacity');
+  await tick(180);
+  expect(incoming.style.willChange).toBe('');
+  expect(animate).toHaveBeenCalledTimes(2);
+});
+
+it('keeps the old view painted while first-viewport lazy images decode after the shell commit', async () => {
+  const settling = vi.fn();
+  const view = render(<AreaSwitch activeKey="home" views={{home: <b>old</b>}}/>);
+  view.rerender(<AreaSwitch activeKey="assets" onSettlingChange={settling} views={{assets: <img src="/thumb" loading="lazy" alt="new"/>}}/>);
+  const incoming = view.container.querySelector<HTMLElement>('[data-motion-view="assets"]')!;
+  const image = incoming.querySelector('img')!;
+  const rect = () => ({top: 0, bottom: 100, left: 0, right: 100, width: 100, height: 100, x: 0, y: 0, toJSON() {}});
+  incoming.getBoundingClientRect = rect; image.getBoundingClientRect = rect;
+  let finish!: () => void; image.decode = () => new Promise<void>(resolve => {finish = resolve;});
+  await tick();
+  expect(image.loading).toBe('eager'); expect(incoming.style.opacity).toBe('0');
+  expect(settling).toHaveBeenLastCalledWith(true);
+  expect(screen.getByText('old')).toBeVisible(); expect(animate).not.toHaveBeenCalled();
+  await act(async () => finish());
+  expect(animate).toHaveBeenCalledTimes(2); expect(incoming.style.opacity).toBe('');
+  expect(settling).toHaveBeenLastCalledWith(false);
+  await tick(180); expect(screen.queryByText('old')).toBeNull();
+});
+
+it('does not reveal an abandoned tab when a switch interrupts its image preparation', async () => {
+  const shown = vi.fn();
+  const view = render(<AreaSwitch activeKey="home" onShown={shown} views={{home: <b>old</b>}}/>);
+  view.rerender(<AreaSwitch activeKey="assets" onShown={shown} views={{assets: <img src="/slow" alt="abandoned"/>}}/>);
+  const incoming = view.container.querySelector<HTMLElement>('[data-motion-view="assets"]')!;
+  const image = incoming.querySelector('img')!;
+  const rect = () => ({top: 0, bottom: 100, left: 0, right: 100, width: 100, height: 100, x: 0, y: 0, toJSON() {}});
+  incoming.getBoundingClientRect = rect; image.getBoundingClientRect = rect;
+  let finish!: () => void; image.decode = () => new Promise<void>(resolve => {finish = resolve;});
+  await tick();
+  expect(shown).not.toHaveBeenCalled();
+  view.rerender(<AreaSwitch activeKey="notes" onShown={shown} views={{notes: <b aria-busy="true">pending</b>}}/>);
+  expect(screen.getByText('old')).toBeVisible();
+  expect(screen.getByText('old').closest<HTMLElement>('[data-motion-view]')?.style.opacity).toBe('');
+  expect(screen.queryByAltText('abandoned')).toBeNull();
+  // The abandoned destination never changed the painted shell.
+  expect(shown).not.toHaveBeenCalled();
+  await act(async () => finish()); await tick(300);
+  expect(animate).not.toHaveBeenCalled(); expect(screen.getByText('old')).toBeVisible();
+});
+
+it('settles the shown commit before a reduced-motion entrance', async () => {
   const view = render(<AreaSwitch activeKey="home" views={{home: <b>old</b>}}/>);
   view.rerender(<AreaSwitch activeKey="catalog" views={{catalog: <b>catalog</b>}}/>);
   reduce = true; act(() => change?.());
-  expect(screen.queryByText('old')).toBeNull(); expect(animate).not.toHaveBeenCalled();
-  await tick(); expect(animate).not.toHaveBeenCalled();
+  expect(screen.getByText('old')).toBeVisible(); expect(animate).not.toHaveBeenCalled();
+  await tick(32); expect(animate).toHaveBeenCalledTimes(2);
+  expect(animate.mock.calls[0][1].duration).toBe(120);
+  await tick(120); expect(screen.queryByText('old')).toBeNull();
 });
 it('cleans up pending observers, frames and the cap on unmount', async () => {
   const disconnect = vi.spyOn(MutationObserver.prototype, 'disconnect');
@@ -223,6 +407,7 @@ it('switches after the readiness cap when the incoming view stays busy', async (
   expect(screen.queryByText('old')).toBeNull();
   expect(screen.getByText('busy').closest('[inert]')).toBeNull();
   expect(screen.getByText('busy')).toBeVisible();
+  expect(animate).not.toHaveBeenCalled();
   expect(disconnect).toHaveBeenCalled();
   disconnect.mockRestore();
 });
@@ -239,6 +424,7 @@ it('keeps the Collections five-times readiness cap and commits shell state only 
   expect(screen.queryByText('old')).toBeNull();
   expect(screen.getByText('shelf')).toBeVisible();
   expect(shown).toHaveBeenCalledExactlyOnceWith('collections');
+  expect(animate).not.toHaveBeenCalled();
 });
 
 function Cards({surface, count = 2, enabled = true}: {surface: string; count?: number; enabled?: boolean}) {
@@ -246,7 +432,7 @@ function Cards({surface, count = 2, enabled = true}: {surface: string; count?: n
   useFirstAppearance(host, count, enabled, surface, '.classification-card');
   return <div ref={host}>{Array.from({length: count}, (_, i) => <button className="classification-card" key={i}><img alt=""/>card {i}</button>)}</div>;
 }
-it('moves custom card containers without fading their thumbnails and remembers each segment separately', () => {
+it('moves custom card containers without fading their thumbnails on every segment visit', () => {
   const tree = (surface: string, count = 2, enabled = true, mounted = true) => <MotionScope>{mounted && <Cards key={surface} surface={surface} count={count} enabled={enabled}/>}</MotionScope>;
   const view = render(tree('folders', 0));
   view.rerender(tree('folders', 2, false)); expect(animate).not.toHaveBeenCalled();
@@ -257,7 +443,7 @@ it('moves custom card containers without fading their thumbnails and remembers e
   expect(animate).toHaveBeenCalledTimes(8);
   view.rerender(tree('folders', 8)); view.rerender(tree('albums', 3));
   view.rerender(tree('artists', 0, true, false)); view.rerender(tree('artists'));
-  expect(animate).toHaveBeenCalledTimes(8);
+  expect(animate).toHaveBeenCalledTimes(21);
 });
 it('consumes custom card appearances without motion when reduced motion is enabled', () => {
   reduce = true; const view = render(<MotionScope><Cards surface="folders"/></MotionScope>);
@@ -269,6 +455,23 @@ it('creates no stacking layer at rest, so fixed overlays inside a view stack aga
   const view = render(<AreaSwitch activeKey="home" views={{home: <b>home</b>}} />);
   expect(screen.getByText('home').closest<HTMLElement>('[data-motion-view]')?.style.zIndex).toBe('');
   view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b>assets</b>}} />); await tick();
-  expect(animate).not.toHaveBeenCalled();
+  expect(animate).toHaveBeenCalledTimes(2);
+  expect(animate.mock.calls[0][1].fill).toBeUndefined();
+  await tick(180);
+  expect(screen.getByText('assets').closest<HTMLElement>('[data-motion-view]')?.style.transform).toBe('');
+  expect(screen.getByText('assets').closest<HTMLElement>('[data-motion-view]')?.style.opacity).toBe('');
   expect(screen.getByText('assets').closest<HTMLElement>('[data-motion-view]')?.style.zIndex).toBe('');
+});
+
+it('cancels an area entrance when reduced motion turns on or the stage unmounts', async () => {
+  const view = render(<AreaSwitch activeKey="home" views={{home: <b>home</b>}}/>);
+  view.rerender(<AreaSwitch activeKey="assets" views={{assets: <b>assets</b>}}/>); await tick();
+  expect(animate).toHaveBeenCalledTimes(2);
+  const entrance = animate.mock.results[0].value;
+  reduce = true; act(() => change?.());
+  expect(entrance.cancel).toHaveBeenCalledOnce();
+  expect(screen.getByText('assets')).toBeVisible();
+  expect(screen.queryByText('home')).toBeNull();
+  view.unmount();
+  expect(entrance.cancel).toHaveBeenCalledTimes(2);
 });

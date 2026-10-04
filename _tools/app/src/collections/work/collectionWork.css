@@ -12,13 +12,22 @@
 .work-stage--no-strip { bottom: 0; }
 .work-stage[data-zoom-enabled] { touch-action: none; }
 .work-zoom-object { position: absolute; inset: 0; transform: scale(var(--work-zoom, 1)); transform-origin: center; transition: transform 90ms linear; }
-.work-cover-band { position: absolute; inset: 0 0 184px; overflow: hidden; pointer-events: none; }
+.work-cover-band { position: absolute; inset: 0 0 184px; overflow: hidden; pointer-events: none; visibility: visible; opacity: 1; transition: opacity var(--motion-medium) var(--ease-out); }
+/* Work surfaces swap after their ready gate; their keyed backdrops fade at this boundary. */
+.work-surface[aria-hidden="true"] > .work-cover-band { opacity: 0; }
+.work-cover-band .work-backdrop img { transition: none; }
 .work-cover-band--av { bottom: 76px; }
 .work-cover-band--info { right: 340px; }
-.work-backdrop { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-.work-backdrop img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scale(1.15); filter: blur(48px) saturate(.85); opacity: 0; }
-.work-backdrop img.is-painted { opacity: .16; }
-@media (prefers-reduced-motion: reduce) { .work-zoom-object, .work-backdrop img { transition: none; } }
+.work-backdrop { position: absolute; inset: 0; overflow: hidden; pointer-events: none; opacity: .16; }
+.work-backdrop img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scale(1.15); filter: blur(48px) saturate(.85); opacity: 0; transition: opacity var(--motion-medium) var(--ease-out); }
+/* Keep the old paint underneath until the decoded replacement fully covers it. */
+.work-backdrop img.is-painted, .work-backdrop img.is-underlay { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .work-zoom-object { transition: none; }
+  .work-backdrop img { transition: opacity var(--motion-micro) var(--ease-out); }
+  .work-cover-band { transition: opacity var(--motion-micro) var(--ease-out); }
+  .work-cover-band .work-backdrop img { transition: none; }
+}
 .work-surface:has(> .work-stage--no-strip) .work-hero-band { bottom: 0; }
 .work-hero-band { position: absolute; inset: 0 0 76px; overflow: hidden; pointer-events: none; }
 .work-surface--info .work-hero-band { right: 340px; }

@@ -1,7 +1,8 @@
 import { BookmarkIcon, BookOpenIcon, ExchangeIcon, FolderIcon, HomeIcon, MagnifyingGlassIcon, NoteIcon, PersonIcon, PhotoIcon, PlusIcon, RectangleStackIcon } from "../shared/ui/ArchiveIcons";
 import { ViewColumnsIcon } from "@heroicons/react/24/outline";
 import { Button } from "../shared/ui/Button";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { EASE_STANDARD, reducedMotion } from "../shared/motion/curves";
 import lakomicsMark from "../brand/lakomics-mark.svg?no-inline";
 import type { AssetView, CollectionType, CollectionSummary } from "../library/types";
 import { useOptionalLibrary } from "../library/LibraryContext";
@@ -31,7 +32,7 @@ export function workspaceArea(view: AssetView): "home" | "assets" | "collections
   return "assets";
 }
 
-/** Shared with the pending content layout so it measures at its destination width. */
+/** Whether the painted area reserves an index beside the rail. */
 export function hasWorkspaceIndex(view: AssetView, collections: CollectionSummary[], meta: ChromeMeta | null) {
   const area = workspaceArea(view);
   const emptyIndex = (area === "home" || (area === "notes" && meta != null))
@@ -54,6 +55,7 @@ type Props = {
   view: AssetView;
   /** The rail responds to requests while the index keeps the painted view until ready. */
   requestedView?: AssetView;
+  settling?: boolean;
   collectionType: CollectionType;
   width: number;
   onWidthChange: (width: number) => void;
@@ -76,7 +78,7 @@ function isEditing(target: EventTarget | null) {
     && (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement);
 }
 
-export function WorkspaceNavigation({ view, requestedView = view, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, unsortedCount = null, onQueuesRequested, privateVaultAvailable = false, onImportFiles, places, collections = [] }: Props) {
+export function WorkspaceNavigation({ view, requestedView = view, settling = false, collectionType, width, onWidthChange, onNavigate, assetNavigation, reviewCount, trashCount, unsortedCount = null, onQueuesRequested, privateVaultAvailable = false, onImportFiles, places, collections = [] }: Props) {
   const chrome = useWorkspaceChrome();
   const vaultImport = useVaultImportJob().job;
   const vaultExport = useVaultExportJob();
@@ -98,6 +100,28 @@ export function WorkspaceNavigation({ view, requestedView = view, collectionType
   const hideIndex = !hasWorkspaceIndex(view, collections, chrome?.meta ?? null);
   // Hidden by the user, the index stays mounted: its search dialog and content survive and come back without reloading.
   const indexHiddenByUser = canToggleIndex && chrome.indexHidden[area] === true;
+  const indexClosed = hideIndex || indexHiddenByUser;
+  const indexClip = useRef<HTMLDivElement>(null);
+  const previousClosed = useRef(indexClosed);
+  const indexEntrance = useRef(false);
+  useLayoutEffect(() => {
+    if (previousClosed.current && !indexClosed) indexEntrance.current = true;
+    previousClosed.current = indexClosed;
+    if (indexClosed) indexEntrance.current = false;
+    const clip = indexClip.current;
+    if (!clip || !indexEntrance.current || settling) return;
+    indexEntrance.current = false;
+    if (typeof clip.animate !== "function") return;
+    clip.style.willChange = "opacity";
+    const duration = reducedMotion() ? 120 : 150;
+    const easing = getComputedStyle(clip).getPropertyValue("--ease-out").trim() || EASE_STANDARD;
+    const animation = clip.animate([{opacity: 0}, {opacity: 1}], {duration, easing});
+    const finish = () => { clip.style.willChange = ""; };
+    animation.onfinish = finish;
+    const timer = window.setTimeout(finish, duration);
+    return () => { window.clearTimeout(timer); animation.onfinish = null; animation.cancel(); finish(); };
+  }, [indexClosed, settling]);
+  const indexContent = useRef<ReactNode>(null);
   const assetTotalCount = useAssetTotalCount(area === "assets");
   const artistOverview = useArtistOverview();
   const enterArea = (next: RailArea) => {
@@ -152,26 +176,7 @@ export function WorkspaceNavigation({ view, requestedView = view, collectionType
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
   }, []);
-  return <div className="workspace-navigation">
-    <nav className="workspace-rail" aria-label="주요 영역">
-      <span className="workspace-mark"><img src={lakomicsMark} alt="Lakomics" width="32" height="32" /></span>
-      {railAreas.map(({ key, label, Icon }) => {
-        const count = key === "exchange" ? exchangeCount : 0;
-        const activity = key === "private_vault" ? vaultImportText : undefined;
-        return <button key={key} type="button" className="workspace-rail__item" aria-current={requestedArea === key ? "page" : undefined}
-          aria-description={count > 0 ? `받은 파일 ${count}개` : activity} onClick={() => enterArea(key)}>
-          <span className="workspace-rail__icon"><Icon aria-hidden="true" />{count > 0 && <span className="workspace-rail__count" aria-hidden="true">{count > 99 ? "99+" : count}</span>}</span>
-          <span>{label}</span>{activity && <span className="workspace-rail__activity" aria-hidden="true" />}</button>;
-      })}
-      <div className="workspace-rail__tail">
-        <button ref={paletteButton} type="button" className="workspace-rail__item" aria-label="찾기" aria-keyshortcuts="Control+K Control+F"
-          aria-description={searchInfo ? `${searchInfo.scope}에서 검색하거나 이름으로 이동 (Ctrl+K)` : "이름으로 이동하거나 명령 실행 (Ctrl+K)"} onClick={openPalette}>
-          <MagnifyingGlassIcon aria-hidden="true" /><span>찾기</span><kbd className="workspace-rail__hint" aria-hidden="true">Ctrl K</kbd>
-        </button>
-        <MorePanel entries={moreEntries} current={requestedArea === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />
-      </div>
-    </nav>
-    {!hideIndex && <aside className="workspace-index" hidden={indexHiddenByUser} inert={chrome?.pending || undefined} style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
+  if (!hideIndex) indexContent.current = <aside className="workspace-index" inert={chrome?.pending || indexHiddenByUser || undefined} style={{ "--workspace-index-width": `${width}px` } as CSSProperties} aria-label="탐색 인덱스">
       <header className="workspace-index__head" aria-label={areaName} data-tauri-drag-region="deep">
         <span className="workspace-index__title" aria-hidden="true">{areaTitle}</span>
         <div className="workspace-index__head-actions">
@@ -202,7 +207,29 @@ export function WorkspaceNavigation({ view, requestedView = view, collectionType
           onWidthChange(event.key === "Home" ? MIN_SIDEBAR_WIDTH : event.key === "End" ? MAX_SIDEBAR_WIDTH : clampSidebarWidth(width + (event.key === "ArrowRight" ? 8 : -8)));
         }}
       />
-    </aside>}
+    </aside>;
+  return <div className="workspace-navigation">
+    <nav className="workspace-rail" aria-label="주요 영역">
+      <span className="workspace-mark"><img src={lakomicsMark} alt="Lakomics" width="32" height="32" /></span>
+      {railAreas.map(({ key, label, Icon }) => {
+        const count = key === "exchange" ? exchangeCount : 0;
+        const activity = key === "private_vault" ? vaultImportText : undefined;
+        return <button key={key} type="button" className="workspace-rail__item" aria-current={requestedArea === key ? "page" : undefined}
+          aria-description={count > 0 ? `받은 파일 ${count}개` : activity} onClick={() => enterArea(key)}>
+          <span className="workspace-rail__icon"><Icon aria-hidden="true" />{count > 0 && <span className="workspace-rail__count" aria-hidden="true">{count > 99 ? "99+" : count}</span>}</span>
+          <span>{label}</span>{activity && <span className="workspace-rail__activity" aria-hidden="true" />}</button>;
+      })}
+      <div className="workspace-rail__tail">
+        <button ref={paletteButton} type="button" className="workspace-rail__item" aria-label="찾기" aria-keyshortcuts="Control+K Control+F"
+          aria-description={searchInfo ? `${searchInfo.scope}에서 검색하거나 이름으로 이동 (Ctrl+K)` : "이름으로 이동하거나 명령 실행 (Ctrl+K)"} onClick={openPalette}>
+          <MagnifyingGlassIcon aria-hidden="true" /><span>찾기</span><kbd className="workspace-rail__hint" aria-hidden="true">Ctrl K</kbd>
+        </button>
+        <MorePanel entries={moreEntries} current={requestedArea === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />
+      </div>
+    </nav>
+    <div className="workspace-index-slot" data-state={hideIndex || indexHiddenByUser ? "closed" : "open"} inert={hideIndex || indexHiddenByUser || chrome?.pending || undefined} aria-hidden={hideIndex || indexHiddenByUser || undefined} style={{ "--workspace-index-width": `${width}px` } as CSSProperties}>
+      <div ref={indexClip} className="workspace-index-clip" hidden={indexClosed} style={{opacity: !indexClosed && settling && (previousClosed.current || indexEntrance.current) ? 0 : undefined}}>{indexContent.current}</div>
+    </div>
     <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={paletteEntries} recentKey={find.recentKey} loading={find.loading} error={find.error} search={paletteSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} findTags={findTags} fallbackFocus={() => paletteButton.current} />
   </div>;
 }

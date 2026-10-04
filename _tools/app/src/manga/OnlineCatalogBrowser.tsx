@@ -3,7 +3,8 @@ import { Scrubber } from "../shared/ui/scrubber/Scrubber";
 import type { ScrubberSort } from "../shared/ui/scrubber/scrubberModel";
 import { EllipsisHorizontalIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { AreaVisible } from "../shared/motion/AreaSwitch";
 import { useWorkspaceChrome } from "../layout/WorkspaceChromeContext";
 import { SearchSurface } from "../layout/SearchSurface";
 import { ChromeQueryBadge } from "../layout/ChromeSearch";
@@ -81,6 +82,7 @@ type OnlineCatalogBrowserProps = {
 
 export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, onBookmarksChanged, onSwitchLocal, initialScope = "all", requestedSource, active = true, onSourceChange, onReady, localCount, bookmarkCount, onBookmarkCount }: OnlineCatalogBrowserProps) {
   const { gateway } = useLibrary();
+  const areaVisible = useContext(AreaVisible);
   const privacyMode = useCatalogMasked();
   const workspace = useWorkspaceChrome();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -685,7 +687,7 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
   const searchScope = scope === "bookmarked" ? "망가 북마크" : "온라인 카탈로그";
   const moreAvailable = Boolean(results && !results.complete && (totalCount === null || results.pages * CATALOG_PAGE_SIZE < totalCount));
   const autoLoadSupported = typeof IntersectionObserver !== "undefined";
-  const canAutoLoad = moreAvailable && autoLoadSupported && active && requestedSource !== "local" && !loading && !searchPending && !loadingMore && !loadMoreFailed;
+  const canAutoLoad = moreAvailable && autoLoadSupported && areaVisible && active && requestedSource !== "local" && !loading && !searchPending && !loadingMore && !loadMoreFailed;
   const loadMoreRef = useRef(loadMore);
   loadMoreRef.current = loadMore;
   useEffect(() => {
@@ -754,7 +756,8 @@ export function OnlineCatalogBrowser({ indexFilter = null, onClearIndexFilter, o
           </div>
           {loadingMore && <MangaSkeletonGrid more />}
           <div ref={moreSentinel} className="online-catalog__more-sentinel" aria-hidden="true" />
-          <footer className="online-catalog__list-end" aria-busy={loadingMore || totalCount === null}>
+          {/* Counts and appended pages are background work, not initial area readiness. */}
+          <footer className="online-catalog__list-end">
             <span>{totalCount === null ? `${results.works.length.toLocaleString()}개` : `${results.works.length.toLocaleString()} / ${totalCount.toLocaleString()}`}</span>
             {moreAvailable && !loadingMore && (loadMoreFailed || !autoLoadSupported) && <Button size="sm" variant="quiet" disabled={searchPending} onClick={() => void loadMore()}>더 불러오기</Button>}
           </footer>

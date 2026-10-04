@@ -1,3 +1,4 @@
+@import "./surface-motion.css";
 .ui-badge {
   display: inline-flex;
   align-items: center;
@@ -442,7 +443,7 @@ select.ui-text-input {
   white-space: nowrap;
   cursor: pointer;
   touch-action: pan-y;
-  transition: color 140ms var(--ease-standard);
+  transition: color var(--motion-small) var(--ease-standard);
 }
 
 .ui-segmented--full-width .ui-segmented__cell {
@@ -459,7 +460,7 @@ select.ui-text-input {
   background: var(--color-accent);
   box-shadow: 3px 3px 0 -1px var(--color-surface), 3px 3px 0 0 var(--color-selection-echo);
   pointer-events: none;
-  transition: left 200ms var(--ease-standard), width 200ms var(--ease-standard), transform 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard);
+  transition: left var(--motion-medium) var(--ease-standard), width var(--motion-medium) var(--ease-standard), transform var(--motion-micro) var(--ease-standard), box-shadow var(--motion-micro) var(--ease-standard);
 }
 
 .ui-segmented__thumb--initial {
@@ -468,7 +469,7 @@ select.ui-text-input {
 
 .ui-segmented__thumb--settling {
   /* No overshoot: a bouncing width read as the buttons changing size (user, 2026-10-03). */
-  transition: left 200ms var(--ease-sheet), width 200ms var(--ease-sheet), transform 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard);
+  transition: left var(--motion-medium) var(--ease-sheet), width var(--motion-medium) var(--ease-sheet), transform var(--motion-micro) var(--ease-standard), box-shadow var(--motion-micro) var(--ease-standard);
 }
 
 .ui-segmented__thumb--pressed {
@@ -477,7 +478,7 @@ select.ui-text-input {
 }
 
 .ui-segmented__thumb--dragging {
-  transition: transform 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard);
+  transition: transform var(--motion-micro) var(--ease-standard), box-shadow var(--motion-micro) var(--ease-standard);
 }
 
 .ui-segmented__cell[data-segmented-active="true"] {
@@ -515,7 +516,7 @@ select.ui-text-input {
 .ui-segmented__count {
   color: var(--color-faint);
   font: 500 var(--type-meta) / 1 var(--font-numeric);
-  transition: color 140ms var(--ease-standard), opacity 140ms var(--ease-standard);
+  transition: color var(--motion-small) var(--ease-standard), opacity var(--motion-small) var(--ease-standard);
 }
 
 .ui-segmented__cell[data-segmented-active="true"] .ui-segmented__count {
@@ -669,7 +670,6 @@ select.ui-text-input {
   background-size: 8px 2px, 2px 8px, 8px 2px, 2px 8px;
   background-position: left top, left top, right bottom, right bottom;
   background-origin: padding-box;
-  animation: ui-floating-surface-open var(--motion-standard) var(--ease-standard) both;
 }
 
 .ui-overlay-panel {
@@ -688,10 +688,10 @@ select.ui-text-input {
   box-shadow: var(--shadow-floating);
   opacity: 1;
   transform: translateX(0);
-  transition: transform 220ms var(--ease-standard), opacity 220ms var(--ease-standard);
+  transition: transform var(--motion-medium) var(--ease-standard), opacity var(--motion-medium) var(--ease-standard);
 }
 
-/* The shared floating-surface animation (fill "both") would pin opacity at 1 and hold the panel visible until unmount; the overlay moves by transition only. */
+/* The dock keeps its own width/presence contract. */
 .ui-overlay-panel.ui-overlay-panel {
   animation: none;
 }
@@ -744,27 +744,15 @@ select.ui-text-input {
 .home-shelf__arrow--prev svg { transform: rotate(180deg); }
 .home-shelf__arrow--next { right: var(--space-1); }
 
-/* Bottom sheets retain their edge-attached shape and existing sheet animation. */
+/* Bottom sheets retain their edge-attached shape. */
 .ui-dialog.ui-dialog:has(>.library-sheet) {
   border-radius: var(--radius-md) var(--radius-md) 0 0;
 }
-
-@keyframes ui-floating-surface-open {
-  from {
-    opacity: 0;
-    translate: 0 4px;
-  }
-  to {
-    opacity: 1;
-    translate: 0 0;
-  }
-}
-
 .ui-skeleton {
   display: block;
   background: color-mix(in srgb, var(--color-surface) 70%, var(--color-bg));
   border-radius: var(--radius-mark);
-  animation: ui-skeleton-in 400ms ease-out 300ms both, ui-skeleton-breathe 2.4s ease-in-out 700ms infinite;
+  animation: ui-skeleton-in var(--motion-skeleton-in) var(--ease-out) var(--motion-skeleton-delay) both, ui-skeleton-breathe var(--motion-skeleton-cycle) var(--ease-in-out) var(--motion-skeleton-breathe-delay) infinite;
 }
 
 @keyframes ui-skeleton-in {
@@ -778,10 +766,6 @@ select.ui-text-input {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ui-menu.ui-menu,
-  .ui-anchored-panel.ui-anchored-panel,
-  .ui-overlay-panel.ui-overlay-panel,
-  .ui-dialog.ui-dialog.ui-dialog:not(.ui-dialog--fullscreen):not(:has(.classification-index)):not(:has(>.library-sheet)),
   .ui-skeleton {
     animation: none;
     opacity: 1;
@@ -825,9 +809,9 @@ select.ui-text-input {
   box-shadow: var(--shadow-floating);
   transform: translateY(-100%);
   visibility: hidden;
-  transition: transform 160ms var(--ease-standard), visibility 0s linear 160ms;
+  transition: transform var(--motion-small) var(--ease-standard), visibility var(--motion-instant) linear var(--motion-small);
 }
-.ui-section-drop.is-open { transform: none; visibility: visible; transition: transform 160ms var(--ease-standard), visibility 0s; }
+.ui-section-drop.is-open { transform: none; visibility: visible; transition: transform var(--motion-small) var(--ease-standard), visibility var(--motion-instant); }
 .ui-section-drop-title {
   display: inline-flex;
   align-items: center;
@@ -844,7 +828,7 @@ select.ui-text-input {
   cursor: pointer;
 }
 .ui-section-drop-title__now { color: var(--color-muted); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ui-section-drop-title > svg { flex: none; width: var(--icon-sm); height: var(--icon-sm); color: var(--color-faint); transition: transform 160ms var(--ease-standard); }
+.ui-section-drop-title > svg { flex: none; width: var(--icon-sm); height: var(--icon-sm); color: var(--color-faint); transition: transform var(--motion-small) var(--ease-standard); }
 .ui-section-drop-title[aria-expanded="true"] > svg { transform: rotate(180deg); }
 .ui-section-drop-title:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {

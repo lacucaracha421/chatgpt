@@ -124,7 +124,8 @@
 .manga-browser__content > .ui-section-drop-slot + .online-catalog__frame > .manga-grid { padding-top: var(--space-2); }
 .manga-card { position: relative; min-width: 0; }
 .manga-card__body { display: flex; flex-direction: column; width: 100%; min-width: 0; padding: 0; text-align: left; font: inherit; color: var(--color-text); background: transparent; border: 0; cursor: pointer; }
-.manga-card__body:disabled { cursor: wait; }
+/* Opening disables another click, but must not dim and then restore the cover. */
+.manga-card__body:disabled { cursor: wait; opacity: 1; }
 .manga-card__body:focus-visible { outline: none; }
 .manga-card__body:focus-visible .manga-card__frame { outline: var(--focus-width) solid var(--color-focus); outline-offset: 2px; }
 .manga-card__frame { position: relative; display: block; width: 100%; aspect-ratio: 148 / 208; border-radius: var(--radius-mark); background: var(--color-surface); }
