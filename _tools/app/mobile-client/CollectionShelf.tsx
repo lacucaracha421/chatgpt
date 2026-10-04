@@ -52,6 +52,7 @@ export function workCaseData(item: CollectionSummary, urls: {front?: string | nu
 
 // Case data is all scalar. Parent picking/count updates must not redraw unchanged 3D faces.
 const ShelfObject = memo(LightCase, (before, after) => before.selected === after.selected &&
+  before.frontPending === after.frontPending && before.spinePending === after.spinePending &&
   Object.keys(before.data).length === Object.keys(after.data).length &&
   Object.entries(before.data).every(([key, value]) => value === after.data[key as keyof CaseData]));
 
@@ -64,12 +65,13 @@ export function ShelfTile({item, revision, active, privacy, picked, extra, onTap
   const host = useRef<HTMLButtonElement>(null);
   const cover = collectionCover(item);
   const front = useCoverUrl(item, cover, revision, active && !privacy, host);
-  // The real spine (an upgraded server publishes `spineArtworkId`) waits for the front, so the
-  // visible covers keep the ticket queue first; until it decodes the case prints its title.
+  // Keep front tickets first; the shared case holds both faces until the spine
+  // is ready too (or the readiness cap admits a neutral missing face).
   const spineId = item.type === 'manga' ? null : item.spineArtworkId;
   const spine = useCoverUrl(item, spineId, revision, active && !privacy && !!spineId && (front !== null || (!cover && !item.coverAssetId)), host);
   return <button ref={host} type="button" className="collection-card" data-collection-id={item.id} aria-selected={picked} aria-label={item.name} onClick={() => onTap(item.id)}>
-    <span className="collection-card__light"><ShelfObject data={workCaseData(item, {front, spine: spineId ? spine : null}, privacy)} selected={picked}/></span>
+    <span className="collection-card__light"><ShelfObject data={workCaseData(item, {front, spine: spineId ? spine : null}, privacy)} selected={picked}
+      frontPending={!privacy && !!(cover || item.coverAssetId) && !front} spinePending={!privacy && !!spineId && !spine}/></span>
     <span className="collection-card__meta"><span className="collection-card__name">{item.name}</span>{extra && <span className="collection-card__extra">{extra}</span>}</span>
   </button>;
 }

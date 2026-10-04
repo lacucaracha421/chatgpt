@@ -579,7 +579,8 @@ describe("CollectionBrowser", () => {
       showcase: false,
     });
 
-    expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
+    // The source is assigned while the complete shelf item waits to decode.
+    expect(screen.getByAltText("Astral Chain")).toHaveAttribute(
       "src",
       "http://lakomics.localhost/collection-source-thumbnail/c1",
     );
@@ -592,7 +593,7 @@ describe("CollectionBrowser", () => {
       showcase: false,
     });
 
-    expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
+    expect(screen.getByAltText("Astral Chain")).toHaveAttribute(
       "src",
       "http://lakomics.localhost/thumbnail/asset-1",
     );
@@ -759,7 +760,7 @@ describe("CollectionBrowser", () => {
       showcase: false,
     });
 
-    expect(screen.getByRole("img", { name: "Astral Chain" })).toHaveAttribute(
+    expect(screen.getByAltText("Astral Chain")).toHaveAttribute(
       "src",
       "http://lakomics.localhost/work-artwork-thumbnail/artwork-1",
     );

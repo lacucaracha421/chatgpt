@@ -131,6 +131,8 @@ it('cold start on the shelf with a saturated native media lane: every first-scre
   render(<Collections active paused={false} backRef={{current:null}}/>);
   await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
   for(let t=0;t<30;t++)await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});
+  // jsdom never loads images: settle every requested face the way the browser would, then let the shelf reveal it.
+  await act(async()=>{for(const image of document.querySelectorAll('.collection-light-case img'))image.dispatchEvent(new Event('load'));await vi.advanceTimersByTimeAsync(1000);});
   // The shared light case shows the cover through StableImage; a case still without one shows its material.
   const shown=[...document.querySelectorAll('.collection-light-case .cs-front img')].filter(image=>(image as HTMLElement).style.visibility!=='hidden').length;
   console.info(`[perf] collections shelf saturated cold start: firstScreen=${FIRST_SCREEN} requested=${requests} shownAt30s=${shown}`);
