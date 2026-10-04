@@ -667,6 +667,29 @@ describe("App", () => {
     expect(within(rail).getByRole("button", { name: "메모" })).toHaveAttribute("aria-current", "page");
   });
 
+  it("replaces a 내용 검색 with the next one, and 검색 해제 returns to the view before the first search", async () => {
+    localStorage.setItem("lakomics.libraryPath", "C:\Lakomics");
+    const libraryGateway = gateway();
+    libraryGateway.descriptionSearchStatus = vi.fn().mockResolvedValue({ available: true, indexed: 1, qwenIndexed: 0, precise: false, worker: "ready" });
+    libraryGateway.prewarmDescriptionSearch = vi.fn().mockResolvedValue(undefined);
+    libraryGateway.searchByDescription = vi.fn().mockResolvedValue({ route: "cosine", translation: "x", assetIds: [asset.id], precise: false });
+    libraryGateway.refreshAssets = vi.fn().mockResolvedValue([asset]);
+    const user = userEvent.setup();
+    render(<App gateway={libraryGateway} selectFolder={vi.fn()} subscribeDrops={noDrops} />);
+    await screen.findByRole("main", { name: "라이브러리 작업 공간" });
+    for (const query of ["눈 내리는 겨울", "노을 지는 하늘"]) {
+      await user.keyboard("{Control>}q{/Control}");
+      await user.type(within(await screen.findByRole("dialog", { name: "찾기" })).getByRole("combobox"), query);
+      await screen.findByRole("option", { name: new RegExp(`‘${query}’ 장면 찾기`) });
+      await user.keyboard("{Enter}");
+      expect(await screen.findByText(query, { selector: "h1, h2, [class*=title]" })).toBeInTheDocument();
+    }
+    await user.click(screen.getByRole("button", { name: "검색 해제" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "검색 해제" })).not.toBeInTheDocument());
+    expect(screen.queryByText("눈 내리는 겨울")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "에셋" })).toHaveAttribute("aria-current", "page");
+  });
+
   it("opens the 찾기 palette with Ctrl+Q and keeps the existing quick-view shortcuts", async () => {
     localStorage.setItem("lakomics.libraryPath", "C:\\Lakomics");
     const libraryGateway = gateway();

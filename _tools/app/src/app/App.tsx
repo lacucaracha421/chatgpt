@@ -431,7 +431,9 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
     if (next.kind === "settings" && view.kind !== "settings") settingsReturnViewRef.current = view;
     if (next.kind === "collections") updatePreferences({ collectionType: next.typeFilter });
     if (JSON.stringify(next) === JSON.stringify(view)) return;
-    if (backNavigationTab(next) === backNavigationTab(view)) viewHistoryRef.current.push(view);
+    // A new 내용 검색 (or 그래도 보기) replaces the current one, so searches never stack in history.
+    if (view.kind === "description_search" && next.kind === "description_search") { /* replace */ }
+    else if (backNavigationTab(next) === backNavigationTab(view)) viewHistoryRef.current.push(view);
     else {
       viewHistoryRef.current = [];
       homeReturnRef.current = Boolean(options.fromHome) && view.kind === "home";
@@ -826,10 +828,11 @@ function LibraryWorkspace({ libraryRoot, subscribeDrops, startAssetDrag, subscri
                     onPointerDragEnd={finishPointerDrag}
                     onPointerDragCancel={cancelPointerDrag}
                     onExitDescriptionSearch={() => {
-                      // 검색 해제 on forced results leaves the search instead of going back to its "no match" state.
-                      const history = viewHistoryRef.current, previous = history[history.length - 1];
-                      if (view.kind === "description_search" && view.force && previous?.kind === "description_search" && previous.query === view.query && !previous.force) history.pop();
-                      if (!navigateBack()) navigateView({ kind: "classification", classificationId: null });
+                      // 검색 해제 leaves the search entirely: skip any search state still in history and return to
+                      // the view before it; without one, open 에셋 전체 without recording the search for back.
+                      const history = viewHistoryRef.current;
+                      while (history[history.length - 1]?.kind === "description_search") history.pop();
+                      if (!navigateBack()) setView({ kind: "classification", classificationId: null });
                     }}
                   />
                   </CharacterFolderContent>
