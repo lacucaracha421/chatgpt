@@ -9,7 +9,7 @@ import { XMarkIcon } from "@heroicons/react/24/outline";
 import { MagnifyingGlassIcon, PhotoIcon } from "../shared/ui/ArchiveIcons";
 import { useDelayedBusy } from "../shared/useDelayedBusy";
 import { thumbnailUrl } from "../assets/mediaUrl";
-import { DESCRIPTION_PREVIEW_COUNT, DESCRIPTION_QUERY_MIN_LENGTH, useDescriptionPreview, type DescriptionPreview, type DescriptionSearchSource } from "../assets/descriptionSearch";
+import { DESCRIPTION_PREVIEW_COUNT, descriptionQueryReady, useDescriptionPreview, type DescriptionPreview, type DescriptionSearchSource } from "../assets/descriptionSearch";
 import { modalDialogOpen } from "./modalDialog";
 import type { ChromeSearchInfo } from "./WorkspaceChromeContext";
 import { usePrivacy } from "../privacy/PrivacyContext";
@@ -21,10 +21,10 @@ export type PaletteSearch = { info: ChromeSearchInfo; apply: (query: string) => 
 /** 내용 검색: where to ask, and how to open the result state for a query. */
 export type PaletteDescriptionSearch = { source: DescriptionSearchSource | null; open: (query: string) => void };
 
-/** The "이미지 내용" row: shown in 전체 while at least two characters are typed and the search is available. */
+/** The "이미지 내용" row: shown in 전체 once a description is typed (descriptionQueryReady) and the search is available. */
 function descriptionEntries(search: PaletteDescriptionSearch | null | undefined, preview: DescriptionPreview, text: string, busy: boolean, privacy: boolean): NavigationEntry[] {
   const typed = text.trim();
-  if (!search || !preview.available || typed.length < DESCRIPTION_QUERY_MIN_LENGTH) return [];
+  if (!search || !preview.available || !descriptionQueryReady(typed)) return [];
   // The quiet busy status takes the meta slot: beside a full strip there is no room, and wrapping would make the row jump.
   return [{ id: "description-search", group: "content", label: `‘${typed}’ 장면 찾기`, icon: <PhotoIcon />, activity: busy ? "장면을 찾는 중…" : "Enter",
     detail: <DescriptionStrip preview={preview} privacy={privacy} />, run: () => search.open(typed) }];

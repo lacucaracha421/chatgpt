@@ -38,13 +38,17 @@ const type = (input: HTMLElement, value: string) => fireEvent.change(input, { ta
 const thumbs = () => [...document.body.querySelectorAll<HTMLImageElement>(".command-palette__thumb img")].map(image => decodeURIComponent(image.src.split("/thumbnail/")[1] ?? ""));
 
 describe("이미지 내용 palette group", () => {
-  it("shows a first row in 전체 for two or more characters once the search is available, and starts the worker on open", async () => {
+  it("shows a first row in 전체 for two or more characters or one Hangul syllable once the search is available, and starts the worker on open", async () => {
     const { input, source } = setup();
     await flush();
     expect(source.status).toHaveBeenCalledOnce();
     expect(source.prewarm).toHaveBeenCalledOnce();
-    type(input, "눈");
-    expect(screen.queryByRole("group", { name: "이미지 내용" })).toBeNull();
+    for (const single of ["ㄴ", "a", "1"]) {
+      type(input, single);
+      expect(screen.queryByRole("group", { name: "이미지 내용" })).toBeNull();
+    }
+    type(input, "밤");
+    expect(within(screen.getByRole("group", { name: "이미지 내용" })).getByRole("option")).toHaveTextContent("‘밤’ 장면 찾기");
     type(input, "눈 내리는");
     const group = screen.getByRole("group", { name: "이미지 내용" });
     expect(within(screen.getByRole("listbox")).getAllByRole("group")[0]).toBe(group);

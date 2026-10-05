@@ -613,6 +613,13 @@ fn nl_search_gate_examples_with_fixture_vocabulary() {
     for query in GATE_NO_MATCH {
         assert!(!vocab.passes(query), "{query}");
     }
+    // A lone complete syllable passes when a caption pair contains it; jamo and unknown syllables do not.
+    for query in ["비", " 하 ", "머"] {
+        assert!(vocab.passes(query), "{query}");
+    }
+    for query in ["ㅂ", "뷁", "a"] {
+        assert!(!vocab.passes(query), "{query}");
+    }
     // "maid" is known only as an auto-tag word.
     let without_tags = Vocabulary {
         tag_words: HashSet::new(),

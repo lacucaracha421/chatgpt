@@ -66,8 +66,13 @@ struct Vocabulary {
     tag_words: HashSet<String>,
 }
 impl Vocabulary {
-    /// Coverage of the query's units is at least `GATE`; a query without units never passes.
+    /// Coverage of the query's units is at least `GATE`; a query without units never passes, except
+    /// a lone complete Hangul syllable (밤, 눈), which passes when some caption pair contains it.
     fn passes(&self, query: &str) -> bool {
+        let mut syllable = query.trim().chars();
+        if let (Some(c @ '\u{ac00}'..='\u{d7a3}'), None) = (syllable.next(), syllable.next()) {
+            return self.pairs.iter().any(|pair| pair.contains(c));
+        }
         let units = text_units(query);
         let known = units
             .iter()

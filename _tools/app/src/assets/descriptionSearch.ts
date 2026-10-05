@@ -5,7 +5,11 @@ import type { DescriptionSearchResult, LibraryGateway } from "../library/types";
 /** 내용 검색 (natural-language image search): shared by the 찾기 palette preview and the 에셋 result state. */
 export const DESCRIPTION_SEARCH_LIMIT = 200;
 export const DESCRIPTION_PREVIEW_COUNT = 7;
-export const DESCRIPTION_QUERY_MIN_LENGTH = 2;
+/** Two or more characters, or one complete Hangul syllable (밤, 눈): a lone jamo or Latin letter is not a description. */
+export function descriptionQueryReady(text: string) {
+  const typed = text.trim();
+  return typed.length >= 2 || /^[가-힣]$/.test(typed);
+}
 /** The preview asks only after typing has paused this long (and no Hangul composition is active). */
 export const DESCRIPTION_TYPING_PAUSE_MS = 400;
 const CACHE_LIMIT = 24;
@@ -114,7 +118,7 @@ export function useDescriptionPreview({ source, open, query, composing, enabled 
   const running = useRef(false);
   const queued = useRef<string | null>(null);
   const key = descriptionSearchKey(query);
-  const wanted = open && enabled && available && search && !composing && key.length >= DESCRIPTION_QUERY_MIN_LENGTH ? key : null;
+  const wanted = open && enabled && available && search && !composing && descriptionQueryReady(key) ? key : null;
 
   useEffect(() => {
     if (!open) { latest.current = null; queued.current = null; }
