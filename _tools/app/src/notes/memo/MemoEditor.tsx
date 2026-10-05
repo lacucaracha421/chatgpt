@@ -6,6 +6,8 @@ import { Dialog } from '../../shared/ui/Dialog';
 import { Menu, type MenuItem } from '../../shared/ui/Menu';
 import { addMemoSection, appendToSection, deleteMemoSection, editItem, editSectionBody, joinItem, memoBody, memoMode, memoSections, moveItem, moveMemoSection, moveMemoSectionTo, parseMemo, pasteItems, renameMemoSection, sectionCopy, sectionText, splitItem, toggleItem, type MemoDocument, type MemoItem } from './memoModel';
 import { revealCaretIn } from '../model';
+import { subscribeToTauriDrops, type NativeFileDropEvent } from '../../ingestion/useFileDrop';
+import { nativeDropClientPoint } from '../../app/workspaceDragTargets';
 import { useMemoSectionDrag } from './useMemoSectionDrag';
 import './memo.css';
 
@@ -126,6 +128,8 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
   const statusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const root = useRef<HTMLDivElement>(null);
   const areas = useRef(new Map<string, HTMLTextAreaElement>());
+  const [fileOver, setFileOver] = useState(false);
+  const dropHandler = useRef<(event: NativeFileDropEvent) => void>(() => {});
   const focusTarget = useRef<{ id: string; at: number } | null>(null);
   const revealTarget = useRef<string | null>(null);
   const opened = useRef<string | null>(null);
@@ -187,6 +191,65 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
     if (onChange(memoBody(next), structural) === false) { documentRef.current.doc = previous; focusTarget.current = null; return false; }
     return true;
   }
+  // Keep the native listener stable while edits, selection and section filters change.
+  useLayoutEffect(() => {
+    dropHandler.current = event => {
+      if (event.type === 'leave' || event.type === 'cancel') { setFileOver(false); return; }
+      const editor = root.current;
+      const point = nativeDropClientPoint(event.position);
+      const contains = (node: Element) => {
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom;
+      };
+      const hit = document.elementFromPoint?.(point.x, point.y);
+      const over = !!editor && !readOnly && !editor.closest('[hidden], [inert], [aria-hidden="true"]') && getComputedStyle(editor).visibility !== 'hidden'
+        && contains(editor) && (!hit || editor.contains(hit));
+      setFileOver(event.type !== 'drop' && over);
+      if (!over || event.type !== 'drop' || !event.paths.length) return;
+      const pointed = [...editor.querySelectorAll<HTMLElement>('.memo-section')].find(contains)?.dataset.memoDropSection;
+      const focused = [...areas.current.entries()].find(([, area]) => area === document.activeElement);
+      const focusedSection = focused && (mode === 'text' ? focused[0] : sections.find(section => section.items.some(item => item.id === focused[0]))?.id);
+      const target = pointed ?? focusedSection ?? shown[shown.length - 1]?.id;
+      if (!target) return;
+      const text = event.paths.join('\n');
+      let next: MemoDocument;
+      let nextFocus: { id: string; at: number };
+      if (focused && target === focusedSection) {
+        const [id, area] = focused;
+        const start = area.selectionStart, end = area.selectionEnd;
+        if (mode === 'text') {
+          next = editSectionBody(documentRef.current.doc, id, area.value.slice(0, start) + text + area.value.slice(end));
+          nextFocus = { id, at: start + text.length };
+        } else {
+          next = pasteItems(documentRef.current.doc, id, start, end, text, mode);
+          nextFocus = { id: event.paths.length > 1 ? 'line-' + (next.nextId - 1) : id, at: event.paths.length > 1 ? event.paths[event.paths.length - 1]!.length : start + text.length };
+        }
+      } else {
+        next = documentRef.current.doc;
+        if (mode === 'text') {
+          const current = sectionText(sections.find(section => section.id === target)!).replace(/\r\n|\r/g, '\n');
+          next = editSectionBody(next, target, current + (current ? '\n' : '') + text);
+          nextFocus = { id: target, at: Number.MAX_SAFE_INTEGER };
+        } else {
+          for (const path of event.paths) next = appendToSection(next, target, path, mode);
+          nextFocus = { id: 'line-' + (next.nextId - 1), at: Number.MAX_SAFE_INTEGER };
+        }
+      }
+      // The ordinary edit callback owns limits, saving, sync and note undo history.
+      if (apply(next)) focus(nextFocus.id, nextFocus.at);
+    };
+  });
+  useEffect(() => {
+    if (touch || readOnly) return;
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void subscribeToTauriDrops(event => { if (active) dropHandler.current(event); }).then(stop => {
+      if (active) unlisten = stop; else stop();
+    }).catch(() => {
+      if (active) setStatus({ id: 'add', text: '파일 놓기를 시작하지 못했습니다.' });
+    });
+    return () => { active = false; unlisten?.(); };
+  }, [touch, readOnly]);
   function key(event: KeyboardEvent<HTMLTextAreaElement>, item: MemoItem) {
     const area = event.currentTarget; const start = area.selectionStart, end = area.selectionEnd;
     if (event.key === 'Enter') {
@@ -243,7 +306,8 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
       {!readOnly && targets.length > 0 && <Menu label="다른 섹션으로 옮기기" trigger={<ArrowsRightLeftIcon aria-hidden="true"/>} triggerClassName={`memo-move${touch ? ' memo-move--touch' : ''}`} open={moveMenu === item.id} onOpenChange={open => setMoveMenu(open ? item.id : null)} content={moveContent}/>}
     </div>;
   }
-  return <div ref={root} tabIndex={-1} className={`memo-editor${touch ? ' memo-editor--touch' : ''}${sectionDrag.dragged ? ' memo-editor--dragging' : ''}`} onPointerDownCapture={sectionDrag.resetClick} onClickCapture={sectionDrag.clickCapture}>
+  return <div ref={root} tabIndex={-1} className={`memo-editor${touch ? ' memo-editor--touch' : ''}${sectionDrag.dragged ? ' memo-editor--dragging' : ''}${fileOver && !readOnly ? ' memo-editor--file-over' : ''}`} onPointerDownCapture={sectionDrag.resetClick} onClickCapture={sectionDrag.clickCapture}>
+    {fileOver && !readOnly && <span className="memo-file-drop-hint" role="status">파일 경로 넣기</span>}
     {named.length >= 2 && <div className="memo-chips" aria-label="메모 섹션">
       <button type="button" aria-label={mode === 'todo' ? `전체 ${sections.reduce((total, section) => total + tasks(section.items).filter(item => !item.done).length, 0)}` : '전체'} aria-pressed={!activeFilter} onClick={() => setFilter(null)}>전체{mode === 'todo' && <small> {sections.reduce((total, section) => total + tasks(section.items).filter(item => !item.done).length, 0)}</small>}</button>
       {named.map(section => <button key={section.id} type="button" aria-label={`${section.title || '제목 없음'}${mode === 'todo' ? ` ${tasks(section.items).filter(item => !item.done).length}` : ''}`} aria-pressed={activeFilter === section.id} onClick={() => setFilter(section.id)}>{section.title || '제목 없음'}{mode === 'todo' && <small> {tasks(section.items).filter(item => !item.done).length}</small>}</button>)}
@@ -258,7 +322,7 @@ export function MemoEditor({ noteId, body, touch = false, readOnly = false, reve
         { id: 'delete', label: '섹션 삭제', destructive: true, onSelect: () => setDeleteTarget(section.id) },
       ];
       return <section className={`memo-section${sectionDrag.dragged === section.id ? ' memo-section--dragging' : ''}`} key={`${noteId}:${section.id}`}
-        data-memo-section={section.heading ? section.id : undefined} style={sectionDrag.style(section.id)}>
+        data-memo-section={section.heading ? section.id : undefined} data-memo-drop-section={section.id} style={sectionDrag.style(section.id)}>
         {section.heading && <div className={`memo-section-head${canDrag ? ' memo-section-head--draggable' : ''}`}
           onPointerDownCapture={event => {
             sectionDrag.pointerDown(event, section.id);
