@@ -23,7 +23,6 @@ import { modalDialogOpen } from "./modalDialog";
 import { ChromeSettingsDock, ChromeTarget } from "./WorkspaceChrome";
 import { useWorkspaceChrome, type ChromeMeta } from "./WorkspaceChromeContext";
 import { clampSidebarWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from "./sidebarWidth";
-import { createIndexSlide } from "./indexSlide";
 
 export function workspaceArea(view: AssetView): "home" | "assets" | "collections" | "manga" | "notes" | "exchange" | "private_vault" | "manage" {
   if (view.kind === "home") return "home";
@@ -121,20 +120,6 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
     const timer = window.setTimeout(finish, duration);
     return () => { window.clearTimeout(timer); animation.onfinish = null; animation.cancel(); finish(); };
   }, [indexClosed, settling]);
-  // A user show/hide slides the content with the sidebar edge, then lays it out once (indexSlide.ts).
-  const navigationRoot = useRef<HTMLDivElement>(null);
-  const indexSlot = useRef<HTMLDivElement>(null);
-  const [indexSlide] = useState(createIndexSlide);
-  const shownToggle = useRef({ area, hidden: indexHiddenByUser });
-  const indexToggling = chrome?.indexToggling === true;
-  useLayoutEffect(() => {
-    const previous = shownToggle.current;
-    shownToggle.current = { area, hidden: indexHiddenByUser };
-    // Area switches keep their own transition: a slide still running ends at once.
-    if (!canToggleIndex || hideIndex || previous.area !== area) { indexSlide.stop(); return; }
-    if (previous.hidden !== indexHiddenByUser && indexToggling) indexSlide.start(navigationRoot.current, indexSlot.current);
-  }, [area, canToggleIndex, hideIndex, indexHiddenByUser, indexToggling, indexSlide]);
-  useEffect(() => () => indexSlide.stop(), [indexSlide]);
   const indexContent = useRef<ReactNode>(null);
   const assetTotalCount = useAssetTotalCount(area === "assets");
   const artistOverview = useArtistOverview();
@@ -227,7 +212,7 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
         }}
       />
     </aside>;
-  return <div ref={navigationRoot} className="workspace-navigation">
+  return <div className="workspace-navigation">
     <nav className="workspace-rail" aria-label="주요 영역">
       <span className="workspace-mark"><img src={lakomicsMark} alt="Lakomics" width="32" height="32" /></span>
       {railAreas.map(({ key, label, Icon }) => {
@@ -246,7 +231,7 @@ export function WorkspaceNavigation({ view, requestedView = view, settling = fal
         <MorePanel entries={moreEntries} current={requestedArea === "manage"} onOpenChange={(open) => { if (open) queuesRequested.current?.(); }} />
       </div>
     </nav>
-    <div ref={indexSlot} className="workspace-index-slot" data-toggling={canToggleIndex && !hideIndex && chrome.indexToggling ? "" : undefined} data-state={hideIndex || indexHiddenByUser ? "closed" : "open"} inert={hideIndex || indexHiddenByUser || chrome?.pending || undefined} aria-hidden={hideIndex || indexHiddenByUser || undefined} style={{ "--workspace-index-width": `${width}px` } as CSSProperties}>
+    <div className="workspace-index-slot" data-state={hideIndex || indexHiddenByUser ? "closed" : "open"} inert={hideIndex || indexHiddenByUser || chrome?.pending || undefined} aria-hidden={hideIndex || indexHiddenByUser || undefined} style={{ "--workspace-index-width": `${width}px` } as CSSProperties}>
       <div ref={indexClip} className="workspace-index-clip" hidden={indexClosed} style={{opacity: !indexClosed && settling && (previousClosed.current || indexEntrance.current) ? 0 : undefined}}>{indexContent.current}</div>
     </div>
     <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} entries={paletteEntries} recentKey={find.recentKey} loading={find.loading} error={find.error} search={paletteSearch} descriptionSearch={descriptionSearch} findPlaces={(query) => placeEntries(places, query, view, onNavigate)} findTags={findTags} fallbackFocus={() => paletteButton.current} />

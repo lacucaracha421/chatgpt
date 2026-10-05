@@ -83,6 +83,9 @@
 .series-automation { padding: var(--space-1) var(--space-4); border-top: 1px solid var(--color-border); font-size: var(--text-sm); }
 .character-folder-content { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .character-folder-content > .asset-browser { flex: 1; min-height: 0; }
+/* Layout-neutral at rest; a preparing browser takes the painted one's box (FolderKindSwitch). */
+.folder-kind-switch { display: contents; }
+.folder-kind-switch[data-preparing] { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; pointer-events: none; }
 
 .series-automatic-toggle[data-active="true"] { color: var(--color-text); }
 .series-automatic-toggle[data-active="true"] svg { fill: currentColor; }

@@ -25,9 +25,8 @@ type ChromeContextValue = {
   openFind: () => void;
   setFindAction: (action: (() => void) | null) => void;
   indexHidden: Record<string, boolean>;
+  /** A user show/hide; it moves the content with the area switch's view transition (WorkspaceChrome.tsx). */
   setIndexHidden: (area: string, hidden: boolean) => void;
-  /** True for a moment after a user toggle, so only that toggle animates the sidebar width. */
-  indexToggling?: boolean;
 };
 
 // Keep the context identity independent of Fast Refresh component updates,

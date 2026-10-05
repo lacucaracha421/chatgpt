@@ -14,30 +14,36 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); workload.restricted = false; workload.ready = true; vi.useRealTimers(); vi.restoreAllMocks(); });
 
-it("uses prepared frames on hover and delays full playback until timeline interaction", () => {
+it("plays the video live on hover, keeping prepared frames until its first frame shows", () => {
   const request = vi.fn();
   const release = vi.fn();
   const { container, rerender } = render(<VideoTileMedia asset={video()} active={false} onRequestActive={request} onReleaseActive={release} onRetry={vi.fn()} />);
   fireEvent.pointerEnter(container.querySelector(".video-tile")!);
-  vi.advanceTimersByTime(159);
+  act(() => vi.advanceTimersByTime(159));
   expect(request).not.toHaveBeenCalled();
-  vi.advanceTimersByTime(1);
+  act(() => vi.advanceTimersByTime(1));
   expect(request).toHaveBeenCalledOnce();
 
   rerender(<VideoTileMedia asset={video()} active onRequestActive={request} onReleaseActive={release} onRetry={vi.fn()} />);
-  expect(container.querySelector("video")).toBeNull();
+  const media = container.querySelector("video") as HTMLVideoElement;
+  expect(media.muted).toBe(true);
+  expect(media.loop).toBe(true);
+  expect(media.play).toHaveBeenCalledOnce();
+  expect(media).not.toHaveAttribute("data-shown");
+  // Until the video plays, the prepared frames keep the tile alive.
   expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/1"));
   act(() => vi.advanceTimersByTime(720));
   expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", expect.stringContaining("/scrub-frame/video-1/3"));
 
-  const slider = container.querySelector(".video-tile__scrub") as HTMLDivElement;
-  vi.spyOn(slider, "getBoundingClientRect").mockReturnValue({ left: 0, width: 100, top: 0, right: 100, bottom: 6, height: 6, x: 0, y: 0, toJSON: () => ({}) });
-  fireEvent.pointerDown(slider, { pointerId: 1, clientX: 50 });
-  const media = container.querySelector("video") as HTMLVideoElement;
-  expect(media.muted).toBe(true);
-  expect(media.play).toHaveBeenCalledOnce();
+  fireEvent.playing(media);
+  expect(media).toHaveAttribute("data-shown");
+  const still = screen.getByRole("img", { name: "clip.webm" }).getAttribute("src");
+  act(() => vi.advanceTimersByTime(1_440));
+  expect(screen.getByRole("img", { name: "clip.webm" })).toHaveAttribute("src", still!);
+
   fireEvent.pointerLeave(container.querySelector(".video-tile")!);
   expect(release).toHaveBeenCalledOnce();
+  expect(container.querySelector("video")).toBeNull();
 });
 
 it("updates the still image immediately when its thumbnail source revision changes", () => {

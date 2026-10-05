@@ -90,6 +90,8 @@
   object-fit: cover;
   pointer-events: none;
 }
+/* Hidden until it plays, so a hover never flashes black over the still. */
+.video-tile video:not([data-shown]) { opacity: 0; }
 
 .video-tile__duration,
 .video-tile__icon,

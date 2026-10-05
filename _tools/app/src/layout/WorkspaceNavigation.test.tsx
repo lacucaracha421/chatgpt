@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -41,17 +41,12 @@ it("offers a collection list when detail was opened without a remembered list", 
 const baseProps = { collectionType: "game" as const, width: 208, onWidthChange: vi.fn(), assetNavigation: null, reviewCount: 0, trashCount: 0 };
 const assetsView = { kind: "classification" as const, classificationId: null };
 
-it("changes index presence without transitions, except a user toggle that slides the width", () => {
+it("changes index presence without CSS transitions; a user toggle moves it with a view transition instead", () => {
   const css = readFileSync('src/styles/chrome.css', 'utf8');
   const indexRules = css.match(/[^{}]*workspace-index-(?:slot|clip)[^{}]*\{[^}]*\}/g)!;
-  const plain = indexRules.filter(rule => !rule.includes('data-toggling'));
-  expect(plain.length).toBeGreaterThan(0);
-  expect(plain.join('\n')).not.toMatch(/transform|transition/);
-  expect(plain.join('\n')).toContain('display: none');
-  // Only a user show/hide (data-toggling, user 2026-10-05) animates, and only the width.
-  const toggling = indexRules.filter(rule => rule.includes('data-toggling')).join('\n');
-  expect(toggling).toMatch(/transition: width 220ms/);
-  expect(toggling).not.toMatch(/transform/);
+  expect(indexRules.length).toBeGreaterThan(0);
+  expect(indexRules.join('\n')).not.toMatch(/transform|transition|data-toggling/);
+  expect(indexRules.join('\n')).toContain('display: none');
 });
 
 it("fades an appearing index only when the content cross-fade starts", () => {
@@ -152,20 +147,15 @@ it("opens 망가 with its index closed, then remembers shown and hidden across w
   expect(screen.getByRole("button", { name: "사이드바 보이기" })).toBeInTheDocument();
 });
 
-it("slides the index width only for a moment after a user toggle", async () => {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
-  try {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    const { container } = render(<IndexToggleWorkspace />);
-    const slot = container.querySelector<HTMLElement>(".workspace-index-slot")!;
-    expect(slot).not.toHaveAttribute("data-toggling");
-    await user.click(screen.getByRole("button", { name: "사이드바 보이기" }));
-    expect(slot).toHaveAttribute("data-toggling");
-    await act(async () => { vi.advanceTimersByTime(400); });
-    expect(slot).not.toHaveAttribute("data-toggling");
-  } finally {
-    vi.useRealTimers();
-  }
+it("switches the index at once on a user toggle when view transitions are unavailable", async () => {
+  const user = userEvent.setup();
+  const { container } = render(<IndexToggleWorkspace />);
+  const slot = container.querySelector<HTMLElement>(".workspace-index-slot")!;
+  expect(slot).toHaveAttribute("data-state", "closed");
+  await user.click(screen.getByRole("button", { name: "사이드바 보이기" }));
+  expect(slot).toHaveAttribute("data-state", "open");
+  expect(slot).not.toHaveAttribute("data-toggling");
+  expect(document.documentElement).not.toHaveAttribute("data-area-view-transition");
 });
 
 it("limits index toggling to manga and preserves preferences for other areas", async () => {

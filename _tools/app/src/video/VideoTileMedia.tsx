@@ -24,6 +24,8 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   const [playedRatio, setPlayedRatio] = useState(0);
   const [hoverFrame, setHoverFrame] = useState<number | null>(null);
   const [playbackRequested, setPlaybackRequested] = useState(false);
+  /** The hover preview plays the video itself; the still stays until its first frame is on screen. */
+  const [videoShown, setVideoShown] = useState(false);
   const [videoDuration, setVideoDuration] = useState(asset.media.durationMs / 1_000);
   const clearTimers = () => {
     if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
@@ -39,11 +41,11 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
     if (!video) return;
     video.src = playbackSrc ?? playbackUrl(asset.id);
     video.muted = true;
-    void video.play().catch(() => undefined);
-    return () => { video.pause(); video.removeAttribute("src"); video.load(); };
+    void video.play()?.catch(() => undefined);
+    return () => { video.pause(); video.removeAttribute("src"); video.load(); setVideoShown(false); };
   }, [active, asset.id, playbackRequested, playbackSrc, privacyMode]);
   useEffect(() => {
-    if (!active || privacyMode || asset.media.scrubFrameCount <= 1) {
+    if (!active || privacyMode || videoShown || asset.media.scrubFrameCount <= 1) {
       setHoverFrame(null);
       return;
     }
@@ -60,9 +62,9 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
       frameTimer.current = null;
       setHoverFrame(null);
     };
-  }, [active, asset.media.scrubFrameCount, privacyMode]);
+  }, [active, asset.media.scrubFrameCount, privacyMode, videoShown]);
   useEffect(() => () => clearTimers(), []);
-  const leave = () => { clearTimers(); scrubbingRef.current = false; setScrubbing(false); setPreviewRatio(null); setHoverFrame(null); setPlaybackRequested(false); onReleaseActive(); };
+  const leave = () => { clearTimers(); scrubbingRef.current = false; setScrubbing(false); setPreviewRatio(null); setHoverFrame(null); setPlaybackRequested(false); setVideoShown(false); onReleaseActive(); };
   const seekToRatio = (ratio: number, live: boolean) => {
     const clamped = Math.max(0, Math.min(1, ratio));
     setPreviewRatio(clamped);
@@ -130,14 +132,17 @@ export function VideoTileMedia({ asset, active, onRequestActive, onReleaseActive
   const alt = asset.title || asset.originalName;
   const previewFrame = previewRatio === null ? hoverFrame : Math.round(previewRatio * Math.max(0, asset.media.scrubFrameCount - 1));
   const stillUrl = previewFrame === null || asset.media.scrubFrameCount <= 0 ? (thumbnailSrc === null ? null : thumbnailSrc ?? assetThumbnailUrl(asset)) : scrubFrameUrl(asset.id, previewFrame, asset.thumbnailRevision);
-  return <div className="video-tile" onPointerEnter={() => { if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current); hoverTimer.current = window.setTimeout(onRequestActive, 160); }} onPointerLeave={leave}>
-    {/* 재생 프리뷰가 위에 깔리므로, 정지 타일에서는 scrub 미리보기 프레임을 img로 보여준다. */}
+  return <div className="video-tile" onPointerEnter={() => { if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current); hoverTimer.current = window.setTimeout(() => { setPlaybackRequested(true); onRequestActive(); }, 160); }} onPointerLeave={leave}>
+    {/* 재생 프리뷰가 위에 깔리므로, 영상 첫 프레임이 뜨기 전까지는 scrub 미리보기 프레임을 img로 보여준다. */}
     {stillUrl && <img src={stillUrl} alt={alt} decoding="async" draggable={false} />}
     {active && playbackRequested && <video
       ref={videoRef}
       src={playbackSrc ?? playbackUrl(asset.id)}
       muted
+      loop
       playsInline
+      data-shown={videoShown || undefined}
+      onPlaying={() => setVideoShown(true)}
       draggable={false}
       preload="metadata"
       aria-label={`${alt} 미리보기`}

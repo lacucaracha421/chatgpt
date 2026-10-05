@@ -5,7 +5,8 @@ import { AnchoredPanel } from "../shared/ui/AnchoredPanel";
 import type { ChromeSearchSpec } from "./ChromeSearch";
 import "../styles/chrome.css";
 import { ChromeContext, ChromePresenceContext, useWorkspaceChrome, type Slot, type Targets, type ChromeMeta, type ChromeSearchActions, type ChromeSearchInfo } from "./WorkspaceChromeContext";
-import { swapSearchResults } from "../shared/motion/viewSwap";
+import { startViewSwap, swapSearchResults, viewTransitionRunning, type ViewSwap } from "../shared/motion/viewSwap";
+import { reducedMotion } from "../shared/motion/curves";
 
 /** A view-specific search editor; `content` renders in the index head, `open` lets the 찾기 palette open it. */
 export type ChromeSearchSurfaceSpec = ChromeSearchSpec & { open: (draft: string) => void; content: ReactNode };
@@ -22,8 +23,12 @@ export type ViewChromeSpec = {
 const INDEX_HIDDEN_KEY = "lakomics.workspace.indexHidden.v1";
 /** 망가 opens with its sidebar closed until the user shows it (user, 2026-10-05); a stored choice wins. */
 const INDEX_HIDDEN_DEFAULT: Record<string, boolean> = { manga: true };
-/** Long enough for the sidebar width transition (220 ms) to finish before the slot stops animating. */
-const INDEX_TOGGLE_MS = 300;
+/**
+ * A user show/hide runs the area switch's view transition (viewTransitions.css): the sidebar fades in or out
+ * under the content, whose box moves to its new place and width as one piece (user, 2026-10-05).
+ */
+const AREA_VIEW_TRANSITION = "data-area-view-transition";
+const INDEX_TOGGLE_TRANSITION = "index";
 function readIndexHidden(): Record<string, boolean> {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(INDEX_HIDDEN_KEY) ?? "{}");
@@ -37,19 +42,26 @@ export function WorkspaceChromeProvider({ scope, pending = false, children }: Pr
   const [storedIndexHidden, updateIndexHidden] = useState(readIndexHidden);
   // Areas without a stored choice use their default; consumers read `indexHidden[area] === true`.
   const indexHidden = useMemo(() => ({ ...INDEX_HIDDEN_DEFAULT, ...storedIndexHidden }), [storedIndexHidden]);
-  // Only a user toggle animates the sidebar width; area switches keep their own view transition.
-  const [indexToggling, setIndexToggling] = useState(false);
-  const toggleTimer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(toggleTimer.current), []);
+  // The latest requested choice: a second toggle before the first one's snapshot commits wins.
+  const requestedIndexHidden = useRef(storedIndexHidden);
+  const indexSwap = useRef<ViewSwap | null>(null);
+  useEffect(() => () => indexSwap.current?.cancel(), []);
   const setIndexHidden = useCallback((area: string, hidden: boolean) => {
     // The choice is stored explicitly, so a shown 망가 sidebar stays shown despite its closed default.
-    const next = { ...storedIndexHidden, [area]: hidden };
-    updateIndexHidden(next);
-    setIndexToggling(true);
-    window.clearTimeout(toggleTimer.current);
-    toggleTimer.current = window.setTimeout(() => setIndexToggling(false), INDEX_TOGGLE_MS);
+    const next = { ...requestedIndexHidden.current, [area]: hidden };
+    requestedIndexHidden.current = next;
     try { localStorage.setItem(INDEX_HIDDEN_KEY, JSON.stringify(next)); } catch { /* Keep the toggle usable when storage is unavailable. */ }
-  }, [storedIndexHidden]);
+    // A toggle still running ends at once; one whose snapshot has not committed drops its commit.
+    indexSwap.current?.cancel();
+    indexSwap.current = null;
+    const commit = () => updateIndexHidden(requestedIndexHidden.current);
+    // Reduced motion, or another view transition owning the document (an area switch): switch at once.
+    const swap = reducedMotion() || viewTransitionRunning() ? null
+      : startViewSwap({ attribute: AREA_VIEW_TRANSITION, value: INDEX_TOGGLE_TRANSITION, commit });
+    if (!swap) { commit(); return; }
+    indexSwap.current = swap;
+    void swap.finished.then(() => { if (indexSwap.current === swap) indexSwap.current = null; });
+  }, []);
   const [targets, setTargets] = useState<Targets>({ navigation: null, actions: null, search: null, settings: null, header: null, details: null });
   const [registrations, setRegistrations] = useState<ChromeMeta[]>([]);
   const setTarget = useCallback((slot: Slot, element: HTMLElement | null) => {
@@ -75,8 +87,8 @@ export function WorkspaceChromeProvider({ scope, pending = false, children }: Pr
   const findAction = useRef<(() => void) | null>(null);
   const setFindAction = useCallback((action: (() => void) | null) => { findAction.current = action; }, []);
   const openFind = useCallback(() => findAction.current?.(), []);
-  const value = useMemo(() => ({ openFind, setFindAction, scope, pending, targets, setTarget, publish, unpublish, meta, getMeta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden, indexToggling }),
-    [openFind, setFindAction, scope, pending, targets, setTarget, publish, unpublish, meta, getMeta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden, indexToggling]);
+  const value = useMemo(() => ({ openFind, setFindAction, scope, pending, targets, setTarget, publish, unpublish, meta, getMeta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden }),
+    [openFind, setFindAction, scope, pending, targets, setTarget, publish, unpublish, meta, getMeta, setSearchActions, applySearch, openSearch, indexHidden, setIndexHidden]);
   return <ChromeContext.Provider value={value}><ChromePresenceContext.Provider value>{children}</ChromePresenceContext.Provider></ChromeContext.Provider>;
 }
 

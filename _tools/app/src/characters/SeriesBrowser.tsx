@@ -8,6 +8,7 @@ import { useCoalescedRefreshVersion } from "../shared/useCoalescedRefreshVersion
 import { cloneElement, useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { cancelSegmentSwap, swapSegment } from "../shared/motion/viewSwap";
 import { preloadImages } from "../shared/motion/viewportImages";
+import { READY_CAP_MS } from "../shared/motion/AreaSwitch";
 import { motionDefaults, motionTime, reducedMotion } from "../shared/motion/curves";
 import { ChevronRightIcon, EllipsisHorizontalIcon, FolderIcon, PencilIcon, UserGroupIcon, UserIcon } from "@heroicons/react/24/outline";
 import type { AlbumEntry, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
@@ -510,7 +511,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   useEffect(() => {
     if (!preparedPage || preparedPage.scope !== scope || preparedPage.token !== generation.current || shelfLoading) return;
     let active = true;
-    void preloadImages(privacyMode ? [] : firstScreenImages(preparedPage.page.items)).then(() => {
+    // The whole READY_CAP_MS: a tile past a shorter cap would mount late and fade in on its own.
+    void preloadImages(privacyMode ? [] : firstScreenImages(preparedPage.page.items), READY_CAP_MS).then(() => {
       if (!active || preparedPage.token !== generation.current) return;
       const commit = () => {
         setPage(preparedPage.page); setPageScope(scope); setPreparedPage(null);

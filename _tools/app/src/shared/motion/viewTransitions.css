@@ -38,3 +38,15 @@ html[data-area-view-transition="hero"]::view-transition-new(index),
 html[data-area-view-transition="hero"]::view-transition-group(root),
 html[data-area-view-transition="hero"]::view-transition-group(main),
 html[data-area-view-transition="hero"]::view-transition-group(index) { animation-duration: 180ms; }
+
+/* 망가 sidebar show/hide (user, 2026-10-05): the same transition as an area switch, but only the content's place
+   and width change. Stretching both content frames to the moving box scaled them differently and they ghosted;
+   instead each keeps its own size, anchored top-left to the moving box, so the content slides as one piece and
+   left-aligned text lines up in both. The old frame stays solid underneath while the new one fades in quickly
+   on top (no see-through mid-frame). The content passes over the sidebar, which fades in or out beneath it. */
+@keyframes index-toggle-content-in { from { opacity: 0; } }
+html[data-area-view-transition="index"]::view-transition-group(main) { z-index: 1; overflow: clip; }
+html[data-area-view-transition="index"]::view-transition-old(main),
+html[data-area-view-transition="index"]::view-transition-new(main) { inline-size: auto; block-size: auto; mix-blend-mode: normal; }
+html[data-area-view-transition="index"]::view-transition-old(main) { animation: none; }
+html[data-area-view-transition="index"]::view-transition-new(main) { animation-name: index-toggle-content-in; animation-duration: 90ms; }
