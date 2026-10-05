@@ -41,7 +41,8 @@ import { CharacterAssignPicker } from "../characters/CharacterAssignPicker";
 import { moveAssetsToCharacters, type CharacterTarget } from "../characters/api";
 import { characterHubApi, type CharacterGroup, type CharacterHubApi } from "../characters/hubApi";
 import { applySelectionGesture, emptySelection, focusAsset, moveSelectionFocus, reconcileSelection, selectAllLoaded, type SelectionGesture, type SelectionState } from "./selection";
-import { FolderFilterControl, FolderShelf } from "./FolderShelf";
+import { FolderFilterHelp, FolderShelf } from "./FolderShelf";
+import { SegmentedControl } from "../shared/ui/SegmentedControl";
 import { descriptionSearchError, searchDescription } from "./descriptionSearch";
 import { prefetchedRead, publishAssetFolderFilters } from "./folderPrefetch";
 import type { AutoTagFilter } from "../autotags/types";
@@ -634,11 +635,12 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
       </article>)}
     />
   </> : null;
-  const folderFilterControl = plainFolderId && folderChildren.length > 0 ? <FolderFilterControl
+  const folderFilterControl = plainFolderId && folderChildren.length > 0 ? <SegmentedControl
       label="폴더 이미지 필터"
       options={[{ value: "direct", label: "미분류", count: folderEntry?.assetCount }, { value: "all", label: "전체", count: folderEntry?.totalAssetCount }]}
       value={directOnly ? "direct" : "all"}
       onChange={value => setDirectOnlyState({ folderId: plainFolderId, value: value === "direct" })}
+      fullWidth
     /> : null;
   // Outside the gallery (loading, empty, error) the shelf needs the gallery's own side padding.
   // Same padding as the gallery scroll area (layout-dependent gap + scrollbar lane), so the shelf does
@@ -669,7 +671,7 @@ export function AssetBrowser({ navigationMemory, onReviewVideos, galleryLayout =
     if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.key.toLowerCase() !== "i" || (event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
     event.preventDefault(); setInspectorOpen(open => !open);
   }}>
-    {<AssetToolbar title={descriptionQuery ?? artistScope?.title} titleLeading={descriptionQuery !== null ? <Badge>이미지 내용</Badge> : undefined} scopeControl={folderFilterControl} titleAccessory={descriptionQuery !== null ? descriptionAccessory : <>{artistScope?.accessory}<AutoTagFilterBadges resultCount={activePage?.totalCount ?? null} /></>} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} inspectorOpen={inspectorOpen} inspectorAvailable onInspectorOpenChange={setInspectorOpen} />}
+    {<AssetToolbar title={descriptionQuery ?? artistScope?.title} titleLeading={descriptionQuery !== null ? <Badge>이미지 내용</Badge> : undefined} scopeControl={folderFilterControl} scopeHelp={folderFilterControl ? <FolderFilterHelp inLabel /> : undefined} titleAccessory={descriptionQuery !== null ? descriptionAccessory : <>{artistScope?.accessory}<AutoTagFilterBadges resultCount={activePage?.totalCount ?? null} /></>} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} view={view} classifications={classifications} albums={albums} collections={collections} sort={sort} mediaFilter={mediaFilter} aspectFilter={aspectFilter} metadataVisible={metadataVisible} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} thumbnailRowHeight={thumbnailRowHeight} onSortChange={onSortChange} onMediaFilterChange={changeMediaFilter} onAspectFilterChange={changeAspectFilter} onMetadataVisibleChange={onMetadataVisibleChange} onThumbnailRowHeightChange={onThumbnailRowHeightChange} onReshuffle={reshuffle} inspectorOpen={inspectorOpen} inspectorAvailable onInspectorOpenChange={setInspectorOpen} />}
     {newAssetsAvailable && <div role="status">새 자료가 있습니다. <Button size="sm" onClick={showNewest}>처음부터 보기</Button></div>}
     {message && <Toast actionLabel={undoAssetIds ? "실행 취소" : undefined} onAction={undoAssetIds ? undoTrash : undefined} actionDisabled={batchPending} onDismiss={() => dismissMessage(null)}>{message}</Toast>}
     {characterNotice && <Toast secondaryActionLabel="열기" onSecondaryAction={() => {

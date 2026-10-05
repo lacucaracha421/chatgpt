@@ -2,6 +2,7 @@ import {memo, useCallback, useRef, useState, type ReactNode} from 'react';
 import {LightCase} from '../src/collections/case/LightCase';
 import {workCasePlatform, type CaseData} from '../src/collections/case/CollectionCase';
 import {PerRowControl} from '../src/shared/ui/PerRowControl';
+import {ViewOptionsSection} from '../src/shared/ui/ViewOptionsSection';
 // The shared shelf geometry (rows, planks, the picked case's title) is the PC list's stylesheet.
 import '../src/collections/CollectionBrowser.css';
 import '../src/collections/collectionShelfRules.css';
@@ -81,9 +82,9 @@ export function ShelfTile({item, revision, active, privacy, picked, extra, onTap
 export function ShelfViewSheet({type, view, onChange, onClose}: {type: CollectionKind; view: ShelfView; onChange(patch: Partial<ShelfView>): void; onClose(): void}) {
   const options: {value: ShelfLayout; label: string}[] = [{value: 'grid', label: '격자'}, {value: 'shelf', label: '선반'}, ...(type === 'manga' ? [{value: 'bookcase' as const, label: '책장'}] : [])];
   return <BottomSheet title="보기" onClose={onClose}><div className="ui-view-options__content shelf-view-sheet">
-    <section className="ui-view-options__section"><span className="ui-view-options__label">배치</span>
+    <ViewOptionsSection title="배치">
       <SegmentedControl label="배치" options={options} value={view.layout} onChange={layout => onChange({layout})} fullWidth/>
-    </section>
-    <PerRowControl value={view.perRow} min={SHELF_PER_ROW.min} max={SHELF_PER_ROW.max} onChange={perRow => onChange({perRow})}/>
+      <PerRowControl value={view.perRow} min={SHELF_PER_ROW.min} max={SHELF_PER_ROW.max} onChange={perRow => onChange({perRow})}/>
+    </ViewOptionsSection>
   </div></BottomSheet>;
 }

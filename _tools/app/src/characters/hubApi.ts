@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AssetSummary } from "../library/types";
+import type { AssetAspectFilter, AssetMediaFilter, AssetSort, AssetSummary } from "../library/types";
 export type CharacterSeries = { classificationId: string; heroAssetId: string | null; autoClassify: boolean };
 /** `thumbnailRevision`: the preview Asset's current thumbnail revision, for a cacheable card URL. */
 export type SeriesFolder = { classificationId: string; thumbnailAssetId: string | null; thumbnailRevision?: string | null };
@@ -7,7 +7,9 @@ export type CharacterGroup = { id: string; seriesId: string; name: string; revis
 // referenceTargetId selects eligible reference/thumbnail images; an empty ID denotes an unsaved character.
 // Pair it with the same targetId to restrict candidates to that character folder.
 export type SeriesGalleryFilter = "unclassified" | "needs_review" | "all";
-export type CharacterBrowseQuery = { seriesId: string; targetId: string | null; groupId?: string | null; referenceTargetId?: string; seriesFilter?: SeriesGalleryFilter; after: string | null; limit: number; all: boolean };
+/** The 보기 menu's sort and filters for a series, group or character gallery; sent only when not the default (newest, no filters). */
+export type CharacterBrowseView = { sort: AssetSort; randomPivot: string | null; mediaKind: Exclude<AssetMediaFilter, "all"> | null; aspectRatio: Exclude<AssetAspectFilter, "all"> | null };
+export type CharacterBrowseQuery = { seriesId: string; targetId: string | null; groupId?: string | null; referenceTargetId?: string; seriesFilter?: SeriesGalleryFilter; after: string | null; limit: number; all: boolean; view?: CharacterBrowseView };
 export type CharacterBrowsePage = { items: AssetSummary[]; nextCursor: string | null; totalCount: number; unavailableReferenceIds?: string[] };
 export type ManualCharacterRequest = { seriesId: string; displayName: string; assetIds: string[] };
 export type SeriesAssetExclusionRequest = { seriesId: string; assetIds: string[]; excluded: boolean };
@@ -34,7 +36,7 @@ export const characterHubApi = {
   series: (): Promise<CharacterSeries[]> => invoke("character_series"),
   groups: async (seriesId: string): Promise<CharacterGroup[]> => (await invoke<Omit<CharacterGroup, "seriesId">[]>("character_groups", { seriesId })).map(group => ({ ...group, seriesId })),
   saveSeries: (request: CharacterSeries): Promise<CharacterSeries> => invoke("save_character_series", { request }),
-  browse: (query: CharacterBrowseQuery): Promise<CharacterBrowsePage> => invoke("browse_character_assets", { query }),
+  browse: ({ view, ...query }: CharacterBrowseQuery): Promise<CharacterBrowsePage> => invoke("browse_character_assets", view ? { query, view } : { query }),
   createManualCharacter: (request: ManualCharacterRequest): Promise<import("./api").CharacterTarget> => invoke("create_manual_character", { request }),
   completeReview: (request: CharacterReviewCompletionRequest): Promise<number> => invoke("complete_character_review", { request }),
   setSeriesAssetExcluded: (request: SeriesAssetExclusionRequest): Promise<number> => invoke("set_character_series_asset_excluded", { request }),

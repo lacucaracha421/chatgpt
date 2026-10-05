@@ -9,7 +9,7 @@ import { SeriesBrowser } from "./SeriesBrowser";
 import { draftReferenceRegions, type ReferenceRegion, type CharacterTarget } from "./api";
 import { createCharacterFixture, fixtureAssets, fixtureClassifications } from "./characterFixtures";
 import { LibraryProvider } from "../library/LibraryContext";
-import type { LibraryGateway } from "../library/types";
+import type { AssetSort, LibraryGateway } from "../library/types";
 import { type CharacterGroup, type CharacterHubApi, type SeriesFolder } from "./hubApi";
 import { ChromeSettingsDock, WorkspaceChromeProvider } from "../layout/WorkspaceChrome";
 import { emptyShadowSummary, type ShadowReviewApi } from "./shadowReviewApi";
@@ -124,7 +124,7 @@ it("keeps missing-original status across picker pages and refreshes it on retry"
   expect(screen.getByRole("option", { name: "이미지 5.webp" })).toHaveAttribute("aria-selected", "true");
 });
 
-async function mount(targetId?: string, pendingOnly = false, groups: CharacterGroup[] = [], groupId?: string, withChrome = false, legacy?: { targetOverrides?: Partial<CharacterTarget>; seriesAutoClassify?: boolean; excludedCount?: number; targetEnabled?: boolean; folders?: SeriesFolder[]; exclusions?: string[]; privacyMode?: boolean; sourceUrl?: string; candidates?: number; shadowItems?: string[]; fault?: boolean; inspect?: (seriesId: string, targetId: string | null, assetIds: string[], regions?: Record<string, unknown>) => Promise<unknown[]> }) {
+async function mount(targetId?: string, pendingOnly = false, groups: CharacterGroup[] = [], groupId?: string, withChrome = false, legacy?: { sort?: AssetSort; onSortChange?: (sort: AssetSort) => void; targetOverrides?: Partial<CharacterTarget>; seriesAutoClassify?: boolean; excludedCount?: number; targetEnabled?: boolean; folders?: SeriesFolder[]; exclusions?: string[]; privacyMode?: boolean; sourceUrl?: string; candidates?: number; shadowItems?: string[]; fault?: boolean; inspect?: (seriesId: string, targetId: string | null, assetIds: string[], regions?: Record<string, unknown>) => Promise<unknown[]> }) {
   const api=createCharacterFixture(), sourceTargets=await api.targets();
   const targets = sourceTargets.map(target => target.id === (targetId ?? "hina") ? {
     ...target,
@@ -144,7 +144,7 @@ async function mount(targetId?: string, pendingOnly = false, groups: CharacterGr
   const navigate=vi.fn(),changed=vi.fn();
   const onGalleryLayoutChange=vi.fn(),onMetadataVisibleChange=vi.fn(),onPrivacyModeChange=vi.fn(),onThumbnailRowHeightChange=vi.fn();
   const gateway={listAssets:vi.fn().mockResolvedValue({items:fixtureAssets,nextCursor:null}),openLibrary:vi.fn()} as unknown as LibraryGateway;
-  const browser=<SeriesBrowser folderExclusions={legacy?.exclusions ?? []} targetId={targetId} groupId={groupId} series={{classificationId:"series",heroAssetId:null,autoClassify:legacy?.seriesAutoClassify ?? true}} targets={targets} groups={groups} classifications={[...fixtureClassifications, {id:"machines",name:"기체",kind:"tag",parentId:"series",iconKey:null,colorKey:null}]} galleryLayout="masonry" onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={legacy?.privacyMode ?? false} onPrivacyModeChange={onPrivacyModeChange} metadataVisible onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={180} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} shadowApi={shadowApi} />;
+  const browser=<SeriesBrowser folderExclusions={legacy?.exclusions ?? []} targetId={targetId} groupId={groupId} series={{classificationId:"series",heroAssetId:null,autoClassify:legacy?.seriesAutoClassify ?? true}} targets={targets} groups={groups} classifications={[...fixtureClassifications, {id:"machines",name:"기체",kind:"tag",parentId:"series",iconKey:null,colorKey:null}]} galleryLayout="masonry" onGalleryLayoutChange={onGalleryLayoutChange} sort={legacy?.sort} onSortChange={legacy?.onSortChange} privacyMode={legacy?.privacyMode ?? false} onPrivacyModeChange={onPrivacyModeChange} metadataVisible onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={180} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={0} onNavigate={navigate} onChanged={changed} api={api} hubApi={hubApi} shadowApi={shadowApi} />;
   const content = withChrome ? <WorkspaceChromeProvider scope="series"><div className="workspace-navigation"><aside className="workspace-index"><ChromeSettingsDock /></aside>{browser}</div></WorkspaceChromeProvider> : browser;
   const rendered = render(<LibraryProvider gateway={gateway}>{legacy?.fault ? <PrivacyProvider privacyMode={false} setPrivacyMode={() => undefined}><FaultGameProvider>{content}</FaultGameProvider></PrivacyProvider> : content}</LibraryProvider>);
   const navigateToCharacter = (id?: string) => rendered.rerender(<LibraryProvider gateway={gateway}>{cloneElement(browser, { targetId: id })}</LibraryProvider>);
@@ -214,6 +214,41 @@ it("provides working display settings inside character folders", async () => {
   expect(callbacks.onGalleryLayoutChange).toHaveBeenCalledWith("justified");
   expect(callbacks.onMetadataVisibleChange).not.toHaveBeenCalled();
   expect(callbacks.onPrivacyModeChange).not.toHaveBeenCalled();
+});
+const viewSections = () => [...screen.getByRole("menu").querySelectorAll(".ui-section-label__title")].map(node => node.textContent);
+it("offers a plain folder's 보기 options in a series folder and sends them with the series query", async () => {
+  const onSortChange = vi.fn();
+  const { browse } = await mount(undefined, false, [], undefined, false, { sort: "newest", onSortChange });
+  await screen.findByRole("option", { name: "이미지 5.webp" });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "보기" }));
+  // 미분류/전체 stays above the series gallery, so the menu starts with 종류.
+  expect(viewSections()).toEqual(["종류", "배치", "정렬", "비율", "표시"]);
+  expect(within(screen.getByRole("radiogroup", { name: "정렬" })).getAllByRole("radio").map(radio => radio.textContent)).toEqual(["최신순", "오래된순", "좋아요순", "랜덤"]);
+  expect(screen.getAllByRole("switch").map(item => item.getAttribute("aria-label"))).toEqual(["비공개 모드", "NSFW 필터", "정보"]);
+  await user.click(within(screen.getByRole("radiogroup", { name: "종류" })).getByRole("radio", { name: "영상" }));
+  await waitFor(() => expect(browse).toHaveBeenLastCalledWith(expect.objectContaining({ targetId: null, seriesFilter: "unclassified",
+    view: { sort: "newest", randomPivot: null, mediaKind: "videos", aspectRatio: null } })));
+  await user.click(within(screen.getByRole("radiogroup", { name: "정렬" })).getByRole("radio", { name: "좋아요순" }));
+  expect(onSortChange).toHaveBeenCalledWith("favorites");
+});
+it("offers sort, kind and ratio in a character folder and reshuffles a random character gallery", async () => {
+  const { browse } = await mount("hina", false, [], undefined, false, { sort: "random", onSortChange: vi.fn() });
+  await waitFor(() => expect(browse).toHaveBeenCalledWith(expect.objectContaining({ targetId: "hina",
+    view: expect.objectContaining({ sort: "random", randomPivot: expect.any(String), mediaKind: null, aspectRatio: null }) })));
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "보기" }));
+  expect(viewSections()).toEqual(["종류", "배치", "정렬", "비율", "표시"]);
+  const pivot = browse.mock.lastCall![0].view.randomPivot;
+  await user.click(screen.getByRole("button", { name: "다시 섞기" }));
+  await waitFor(() => expect(browse.mock.lastCall![0].view.randomPivot).not.toBe(pivot));
+  await user.click(within(screen.getByRole("radiogroup", { name: "비율" })).getByRole("radio", { name: "세로형" }));
+  await waitFor(() => expect(browse).toHaveBeenLastCalledWith(expect.objectContaining({ targetId: "hina", view: expect.objectContaining({ sort: "random", aspectRatio: "portrait" }) })));
+});
+it("keeps the default series query free of a view", async () => {
+  const { browse } = await mount(undefined, false, [], undefined, false, { sort: "newest", onSortChange: vi.fn() });
+  await screen.findByRole("option", { name: "이미지 5.webp" });
+  expect(browse.mock.calls.every(([query]) => !("view" in query))).toBe(true);
 });
 it("opens a character relation from its card without changing classifications",async()=>{
   const {navigate,browse}=await mount(); const user=userEvent.setup();

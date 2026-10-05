@@ -6,7 +6,7 @@ import { useContext, useLayoutEffect, useRef, useState, type ReactNode } from "r
 import { AreaEntering, READY_CAP_MS, viewReady } from "../shared/motion/AreaSwitch";
 import { revealTogether, waitForViewportImages } from "../shared/motion/viewportImages";
 import { ChromeContext, useWorkspaceChrome, type Targets } from "../layout/WorkspaceChromeContext";
-import type { AlbumEntry, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
+import type { AlbumEntry, AssetSort, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
 import { Menu } from "../shared/ui/Menu";
 import { commandErrorMessage } from "../library/errorMessage";
 import type { useCharacterHub } from "./useCharacterHub";
@@ -28,9 +28,11 @@ export function opensAsSeries(id: string, series: CharacterSeries[], classificat
   return series.some(entry => entry.classificationId === id) && !inOriginals(id, classifications);
 }
 
-export function CharacterFolderContent({ children, requestedAsset, onRequestedAssetHandled, clearSelectionRequest, galleryDrag, view, hub, classifications, albums = [], galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onAssetsChanged }: {
+export function CharacterFolderContent({ children, sort, onSortChange, requestedAsset, onRequestedAssetHandled, clearSelectionRequest, galleryDrag, view, hub, classifications, albums = [], galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onAssetsChanged }: {
   requestedAsset?: AssetSummary | null; onRequestedAssetHandled?: () => void;
   clearSelectionRequest?: number; galleryDrag?: CharacterGalleryDrag;
+  /** The asset sort shared with plain folders (App preferences); series, groups and characters use it too. */
+  sort?: AssetSort; onSortChange?: (sort: AssetSort) => void;
   children: ReactNode; view: AssetView; hub: ReturnType<typeof useCharacterHub>; classifications: ClassificationEntry[]; albums?: AlbumEntry[];
   galleryLayout: "masonry" | "justified"; onGalleryLayoutChange: (layout: "masonry" | "justified") => void;
   privacyMode: boolean; onPrivacyModeChange: (value: boolean) => void;
@@ -63,7 +65,7 @@ export function CharacterFolderContent({ children, requestedAsset, onRequestedAs
     catch (error) { setError(commandErrorMessage(error, "폴더의 분류 설정을 저장하지 못했습니다.")); }
     finally { setBusy(false); }
   }
-  if (series && !originalScope) return <FolderKindSwitch kind="series"><SeriesBrowser requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} folderExclusions={folderExclusions} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} onNavigate={onNavigate} onChanged={hub.refresh} /></FolderKindSwitch>;
+  if (series && !originalScope) return <FolderKindSwitch kind="series"><SeriesBrowser sort={sort} onSortChange={onSortChange} requestedAsset={requestedAsset} onRequestedAssetHandled={onRequestedAssetHandled} clearSelectionRequest={clearSelectionRequest} galleryDrag={galleryDrag} folderExclusions={folderExclusions} series={series} targetId={view.kind === "classification" ? view.characterId : undefined} groupId={view.kind === "classification" ? view.characterGroupId : undefined} targets={hub.targets} groups={hub.groups} classifications={classifications} albums={albums} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} privacyMode={privacyMode} onPrivacyModeChange={onPrivacyModeChange} metadataVisible={metadataVisible} onMetadataVisibleChange={onMetadataVisibleChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} refreshVersion={refreshVersion + hub.revision} onNavigate={onNavigate} onChanged={hub.refresh} /></FolderKindSwitch>;
   async function register() {
     if (!id || busy) return;
     setBusy(true); setError(null);

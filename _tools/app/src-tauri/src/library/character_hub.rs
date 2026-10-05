@@ -1,11 +1,11 @@
 //! Presentation and date-ordered navigation for registered series and characters.
 use super::{
     characters::{Error, Result},
-    models::AssetSummary,
+    models::{AspectRatioFilter, AssetSort, AssetSummary, MediaKindFilter},
     query::asset_summaries_by_ids,
     Library,
 };
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, types::Value, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +30,22 @@ pub struct BrowseQuery {
     pub all: bool,
     #[serde(default)]
     pub series_filter: Option<SeriesGalleryFilter>,
+}
+/// The 보기 menu's sort and filters for a series, group or character gallery, as in a plain
+/// folder. Reference pickers ignore it; the default (newest, no filters) keeps the paths of
+/// [`Library::browse_character_assets`] unchanged.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BrowseView {
+    pub sort: AssetSort,
+    pub random_pivot: Option<String>,
+    pub media_kind: Option<MediaKindFilter>,
+    pub aspect_ratio: Option<AspectRatioFilter>,
+}
+impl BrowseView {
+    fn is_default(&self) -> bool {
+        self.sort == AssetSort::Newest && self.media_kind.is_none() && self.aspect_ratio.is_none()
+    }
 }
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -168,6 +184,17 @@ WHERE a.status='normal' AND (
 )
 "#;
 
+/// [`TARGET_GALLERY_COUNT_SQL`]'s rows (`id,collected_at`) for [`BrowseView`] paging.
+static TARGET_SCOPE_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let sql = TARGET_GALLERY_COUNT_SQL.replacen(
+        "SELECT COUNT(*) FROM dedup d",
+        "SELECT a.id,a.collected_at FROM dedup d",
+        1,
+    );
+    assert_ne!(sql, TARGET_GALLERY_COUNT_SQL);
+    sql
+});
+
 pub(super) fn validate_art(connection: &Connection, id: &str) -> Result<()> {
     if !connection.query_row("SELECT EXISTS(SELECT 1 FROM assets WHERE id=?1 AND status='normal' AND media_kind='image')", [id], |r| r.get::<_, bool>(0))? {
         return Err(Error::Invalid("정상 이미지에서 대표 이미지를 선택해 주세요."));
@@ -237,6 +264,25 @@ impl Library {
         Ok(request)
     }
     pub fn browse_character_assets(&self, query: BrowseQuery) -> Result<BrowsePage> {
+        self.validate_browse_query(&query)?;
+        let cursor: Option<(String, String)> = query
+            .after
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()?;
+        if query.group_id.is_none() && query.reference_target_id.is_none() {
+            if let Some(target_id) = query.target_id.as_deref() {
+                return self.browse_character_target_assets(
+                    &query.series_id,
+                    target_id,
+                    cursor.as_ref(),
+                    query.limit,
+                );
+            }
+        }
+        self.browse_character_scope_assets(query, cursor)
+    }
+    fn validate_browse_query(&self, query: &BrowseQuery) -> Result<()> {
         if !(1..=200).contains(&query.limit) {
             return Err(Error::Invalid("조회 개수가 올바르지 않습니다."));
         }
@@ -276,21 +322,13 @@ impl Library {
         {
             return Err(Error::Stale);
         }
-        let cursor: Option<(String, String)> = query
-            .after
-            .as_deref()
-            .map(serde_json::from_str)
-            .transpose()?;
-        if query.group_id.is_none() && query.reference_target_id.is_none() {
-            if let Some(target_id) = query.target_id.as_deref() {
-                return self.browse_character_target_assets(
-                    &query.series_id,
-                    target_id,
-                    cursor.as_ref(),
-                    query.limit,
-                );
-            }
-        }
+        Ok(())
+    }
+    fn browse_character_scope_assets(
+        &self,
+        query: BrowseQuery,
+        cursor: Option<(String, String)>,
+    ) -> Result<BrowsePage> {
         let (ids, total) = {
             let connection = self.connection()?;
             let gallery_scope = SERIES_GALLERY_SCOPE;
@@ -485,6 +523,149 @@ impl Library {
             items,
             next_cursor,
             total_count: total as u64,
+            unavailable_reference_ids: Vec::new(),
+        })
+    }
+    /// A series, group or character gallery under the 보기 menu's sort and filters. The
+    /// membership rules are the default paths' scopes; only the order and the media/aspect
+    /// filters (the same rules as a plain folder) are added on top.
+    pub fn browse_character_assets_with_view(
+        &self,
+        query: BrowseQuery,
+        view: &BrowseView,
+    ) -> Result<BrowsePage> {
+        if view.is_default() || query.reference_target_id.is_some() {
+            return self.browse_character_assets(query);
+        }
+        self.validate_browse_query(&query)?;
+        let text = |value: &str| Value::Text(value.to_owned());
+        let (scope, mut values) = if let Some(group_id) = query.group_id.as_deref() {
+            (
+                GROUP_GALLERY_SCOPE,
+                vec![text(&query.series_id), text(group_id)],
+            )
+        } else if let Some(target_id) = query.target_id.as_deref() {
+            (
+                TARGET_SCOPE_SQL.as_str(),
+                vec![text(&query.series_id), text(target_id)],
+            )
+        } else {
+            (
+                SERIES_GALLERY_SCOPE,
+                vec![
+                    text(&query.series_id),
+                    Value::Null,
+                    Value::Integer(i64::from(query.all)),
+                    query
+                        .series_filter
+                        .map_or(Value::Null, |filter| text(filter.stored())),
+                ],
+            )
+        };
+        let n = values.len();
+        let (media, aspect, c1, c2, c3, pivot, limit) =
+            (n + 1, n + 2, n + 3, n + 4, n + 5, n + 6, n + 7);
+        let filter = format!(
+            "(?{media} IS NULL OR (?{media}='images' AND x.media_kind IN ('image','gif')) OR (?{media}='videos' AND x.media_kind='video'))
+            AND (?{aspect} IS NULL OR (?{aspect}='square' AND x.width*5>=x.height*4 AND x.width*4<=x.height*5)
+              OR (?{aspect}='landscape' AND x.width*4>x.height*5) OR (?{aspect}='portrait' AND x.width*5<x.height*4))"
+        );
+        values.push(view.media_kind.map_or(Value::Null, |kind| {
+            text(match kind {
+                MediaKindFilter::Images => "images",
+                MediaKindFilter::Videos => "videos",
+            })
+        }));
+        values.push(view.aspect_ratio.map_or(Value::Null, |ratio| {
+            text(match ratio {
+                AspectRatioFilter::Square => "square",
+                AspectRatioFilter::Landscape => "landscape",
+                AspectRatioFilter::Portrait => "portrait",
+            })
+        }));
+        let (after, order) = match view.sort {
+            AssetSort::Newest => (
+                format!("(collected_at,id)<(?{c1},?{c2})"),
+                "collected_at DESC,id DESC",
+            ),
+            AssetSort::Oldest => (
+                format!("(collected_at,id)>(?{c1},?{c2})"),
+                "collected_at ASC,id ASC",
+            ),
+            AssetSort::Favorites => (
+                format!("(liked,collected_at,id)<(?{c1},?{c2},?{c3})"),
+                "liked DESC,collected_at DESC,id DESC",
+            ),
+            AssetSort::Random => (
+                format!("(bucket,hash,id)>(?{c1},?{c2},?{c3})"),
+                "bucket ASC,hash ASC,id ASC",
+            ),
+        };
+        // Cursor keys follow the order: [collected_at, id], [liked, collected_at, id] or
+        // [bucket, content_hash, id].
+        let keys: Vec<Value> = match query.after.as_deref() {
+            None => vec![Value::Null; 3],
+            Some(token) => match view.sort {
+                AssetSort::Newest | AssetSort::Oldest => {
+                    let (at, id): (String, String) = serde_json::from_str(token)?;
+                    vec![Value::Text(at), Value::Text(id), Value::Null]
+                }
+                AssetSort::Favorites | AssetSort::Random => {
+                    let (key, second, id): (i64, String, String) = serde_json::from_str(token)?;
+                    vec![Value::Integer(key), Value::Text(second), Value::Text(id)]
+                }
+            },
+        };
+        let connection = self.connection()?;
+        let total: i64 = connection.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM ({scope}) s CROSS JOIN assets x ON x.id=s.id WHERE {filter}"
+            ),
+            rusqlite::params_from_iter(values.iter()),
+            |r| r.get(0),
+        )?;
+        values.extend(keys);
+        values.push(text(view.random_pivot.as_deref().unwrap_or("")));
+        values.push(Value::Integer(query.limit as i64 + 1));
+        let sql = format!(
+            "SELECT id,collected_at,liked,hash,bucket FROM (
+              SELECT x.id AS id,x.collected_at AS collected_at,EXISTS(SELECT 1 FROM asset_likes l WHERE l.asset_id=x.id) AS liked,
+                x.content_hash AS hash,CASE WHEN x.content_hash>=?{pivot} THEN 0 ELSE 1 END AS bucket
+              FROM ({scope}) s CROSS JOIN assets x ON x.id=s.id WHERE {filter}
+            ) WHERE (?{c1} IS NULL OR {after}) ORDER BY {order} LIMIT ?{limit}"
+        );
+        let rows = connection
+            .prepare(&sql)?
+            .query_map(rusqlite::params_from_iter(values.iter()), |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, i64>(4)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let next_cursor = if rows.len() > query.limit {
+            let (id, at, liked, hash, bucket) = &rows[query.limit - 1];
+            Some(match view.sort {
+                AssetSort::Newest | AssetSort::Oldest => serde_json::to_string(&(at, id))?,
+                AssetSort::Favorites => serde_json::to_string(&(liked, at, id))?,
+                AssetSort::Random => serde_json::to_string(&(bucket, hash, id))?,
+            })
+        } else {
+            None
+        };
+        let page_ids = rows
+            .into_iter()
+            .take(query.limit)
+            .map(|(id, ..)| id)
+            .collect::<Vec<_>>();
+        let items = asset_summaries_by_ids(&connection, &page_ids)?;
+        Ok(BrowsePage {
+            items,
+            next_cursor,
+            total_count: u64::try_from(total).unwrap_or(0),
             unavailable_reference_ids: Vec::new(),
         })
     }
@@ -840,6 +1021,121 @@ mod tests {
             .browse_character_assets(query(SeriesGalleryFilter::All, true))
             .unwrap();
         assert_eq!(all.total_count, 6);
+    }
+    #[test]
+    fn browse_view_sorts_and_filters_series_and_character_galleries() {
+        let f = Fixture::new();
+        let target = f.ready("A");
+        f.library
+            .connection()
+            .unwrap()
+            .execute_batch(
+                "UPDATE assets SET collected_at='2026-09-0'||substr(id,7,1);
+                 UPDATE assets SET media_kind='video' WHERE id='asset-1';
+                 INSERT INTO video_assets(asset_id,duration_ms,container,video_codec,preparation_state) VALUES('asset-1',1000,'mp4','h264','pending');
+                 INSERT INTO albums(id,name,created_at) VALUES('likes','마음에 들어요','2026-09-08');
+                 INSERT INTO asset_albums(asset_id,album_id) VALUES('asset-3','likes');
+                 UPDATE assets SET width=200,height=100 WHERE id IN ('asset-2','asset-5');",
+            )
+            .unwrap();
+        // Every page of one gallery under a view, two at a time through the cursor.
+        let pages = |target_id: Option<String>, view: BrowseView| {
+            let (mut ids, mut after, mut totals) = (Vec::new(), None, Vec::new());
+            loop {
+                let page = f
+                    .library
+                    .browse_character_assets_with_view(
+                        BrowseQuery {
+                            series_id: f.series.clone(),
+                            target_id: target_id.clone(),
+                            group_id: None,
+                            reference_target_id: None,
+                            after,
+                            limit: 2,
+                            all: target_id.is_none(),
+                            series_filter: target_id.is_none().then_some(SeriesGalleryFilter::All),
+                        },
+                        &view,
+                    )
+                    .unwrap();
+                totals.push(page.total_count);
+                ids.extend(page.items.into_iter().map(|asset| asset.id));
+                after = page.next_cursor;
+                if after.is_none() {
+                    break;
+                }
+            }
+            assert!(totals.windows(2).all(|pair| pair[0] == pair[1]));
+            (ids, totals[0])
+        };
+        let ids = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| format!("asset-{name}"))
+                .collect::<Vec<_>>()
+        };
+        let view = |sort, media_kind, aspect_ratio| BrowseView {
+            sort,
+            random_pivot: Some("8".into()),
+            media_kind,
+            aspect_ratio,
+        };
+
+        assert_eq!(
+            pages(None, view(AssetSort::Oldest, None, None)),
+            (ids(&["0", "1", "2", "3", "4", "5"]), 6)
+        );
+        assert_eq!(
+            pages(None, view(AssetSort::Favorites, None, None)),
+            (ids(&["3", "5", "4", "2", "1", "0"]), 6)
+        );
+        assert_eq!(
+            pages(
+                None,
+                view(AssetSort::Newest, Some(MediaKindFilter::Images), None)
+            ),
+            (ids(&["5", "4", "3", "2", "0"]), 5)
+        );
+        assert_eq!(
+            pages(
+                None,
+                view(AssetSort::Newest, Some(MediaKindFilter::Videos), None)
+            ),
+            (ids(&["1"]), 1)
+        );
+        assert_eq!(
+            pages(
+                None,
+                view(AssetSort::Newest, None, Some(AspectRatioFilter::Landscape))
+            ),
+            (ids(&["5", "2"]), 2)
+        );
+        let (shuffled, total) = pages(None, view(AssetSort::Random, None, None));
+        assert_eq!(total, 6);
+        let mut sorted = shuffled.clone();
+        sorted.sort();
+        assert_eq!(sorted, ids(&["0", "1", "2", "3", "4", "5"]));
+        assert_eq!(pages(None, view(AssetSort::Random, None, None)).0, shuffled);
+
+        let character = Some(target.id.clone());
+        assert_eq!(
+            pages(character.clone(), view(AssetSort::Oldest, None, None)),
+            (ids(&["0", "1", "2", "3", "4"]), 5)
+        );
+        assert_eq!(
+            pages(
+                character.clone(),
+                view(AssetSort::Newest, None, Some(AspectRatioFilter::Square))
+            ),
+            (ids(&["4", "3", "1", "0"]), 4)
+        );
+        assert_eq!(
+            pages(
+                character,
+                view(AssetSort::Favorites, Some(MediaKindFilter::Images), None)
+            ),
+            (ids(&["3", "4", "2", "0"]), 4)
+        );
     }
     #[test]
     fn target_gallery_keeps_root_moved_relations_and_drops_stale_membership() {

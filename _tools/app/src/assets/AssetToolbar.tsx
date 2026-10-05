@@ -10,6 +10,7 @@ import { GalleryViewMenu } from "./GalleryViewMenu";
 
 type AssetToolbarProps = {
   scopeControl?: ReactNode;
+  scopeHelp?: ReactNode;
   galleryLayout?: "masonry" | "justified";
   onGalleryLayoutChange?: (layout: "masonry" | "justified") => void;
   view: AssetView;
@@ -43,7 +44,7 @@ type AssetToolbarProps = {
 // 상단바는 선택 상태와 무관하게 제목·보기 설정·창 제어 슬롯을 고정한다.
 // 선택 작업은 SelectionBar(갤러리 위 고정 바)에서 수행한다.
 export function AssetToolbar({
-  scopeControl, galleryLayout = "masonry", onGalleryLayoutChange, view: rawView, classifications, albums, collections = [], sort, mediaFilter, aspectFilter, metadataVisible, privacyMode, thumbnailRowHeight,
+  scopeControl, scopeHelp, galleryLayout = "masonry", onGalleryLayoutChange, view: rawView, classifications, albums, collections = [], sort, mediaFilter, aspectFilter, metadataVisible, privacyMode, thumbnailRowHeight,
   onSortChange, onMediaFilterChange, onAspectFilterChange, onMetadataVisibleChange, onPrivacyModeChange, onThumbnailRowHeightChange, onReshuffle, inspectorOpen = false, inspectorAvailable = false, onInspectorOpenChange, title, titleAccessory, titleLeading,
 }: AssetToolbarProps) {
   const {nsfwFilter} = usePrivacy();
@@ -60,7 +61,7 @@ export function AssetToolbar({
   const ranked = rawView.kind === "description_search";
   const location = title ?? (view.kind === "description_search" ? view.query : view.kind === "creator" ? "작가" : view.kind === "collection" ? collections.find((entry) => entry.id === view.collectionId)?.name ?? "컬렉션" : view.kind === "unsorted" ? "미분류" : view.kind === "trash" ? "휴지통" : view.kind === "album" ? albums.find((entry) => entry.id === view.albumId)?.name ?? "앨범" : view.kind === "collections" ? "컬렉션" : view.kind === "albums" ? "앨범" : classifications.find((entry) => entry.id === view.classificationId)?.name ?? "전체");
   const sortLabel = ranked ? "관련도순" : ({ newest: "최신순", oldest: "오래된순", favorites: "좋아요순", random: "랜덤" } as const)[sort];
-  const viewControls = <GalleryViewMenu scopeControl={scopeControl} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} sort={sort} onSortChange={ranked ? undefined : onSortChange} onReshuffle={onReshuffle}
+  const viewControls = <GalleryViewMenu scopeControl={scopeControl} scopeHelp={scopeHelp} galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} sort={sort} onSortChange={ranked ? undefined : onSortChange} onReshuffle={onReshuffle}
       mediaFilter={filterable ? mediaFilter : undefined} onMediaFilterChange={filterable ? onMediaFilterChange : undefined}
       thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange}
       aspectFilter={filterable ? aspectFilter : undefined} onAspectFilterChange={filterable ? onAspectFilterChange : undefined}

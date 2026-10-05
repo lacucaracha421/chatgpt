@@ -11,7 +11,7 @@ import { preloadImages } from "../shared/motion/viewportImages";
 import { READY_CAP_MS } from "../shared/motion/AreaSwitch";
 import { motionDefaults, motionTime, reducedMotion } from "../shared/motion/curves";
 import { ChevronRightIcon, EllipsisHorizontalIcon, FolderIcon, PencilIcon, UserGroupIcon, UserIcon } from "@heroicons/react/24/outline";
-import type { AlbumEntry, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
+import type { AlbumEntry, AssetAspectFilter, AssetMediaFilter, AssetSort, AssetSummary, AssetView, ClassificationEntry } from "../library/types";
 import { useLibrary } from "../library/LibraryContext";
 import { commandErrorMessage } from "../library/errorMessage";
 import { AssetGallery, galleryFirstScreen, tileHasThumbnail, tileThumbnailUrl } from "../assets/AssetGallery";
@@ -46,7 +46,7 @@ import { shadowReviewApi, type ShadowReviewApi } from "./shadowReviewApi";
 import { S36ScoringWarning, S36SeriesControl, readinessLabel, useS36CharacterExclusion, useS36Readiness, s36PublicationApi, type S36Readiness } from "./S36Publication";
 import { characterApi, draftReferenceRegions, moveAssetsToCharacters, type CharacterApi, type CharacterTarget } from "./api";
 import { prefetchRead, prefetchedRead, useFolderPrefetchIntent } from "../assets/folderPrefetch";
-import { characterHubApi, type CharacterBrowsePage, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesGalleryFilter, type SeriesFolder } from "./hubApi";
+import { characterHubApi, type CharacterBrowsePage, type CharacterBrowseView, type CharacterGroup, type CharacterHubApi, type CharacterSeries, type SeriesGalleryFilter, type SeriesFolder } from "./hubApi";
 import "./CharacterManagement.css";
 import "./SeriesBrowser.css";
 
@@ -57,6 +57,8 @@ type Props = {
   folderExclusions?: string[];
   series: CharacterSeries; targetId?: string; groupId?: string; targets: CharacterTarget[]; groups?: CharacterGroup[]; classifications: ClassificationEntry[];
   galleryLayout: "masonry" | "justified"; onGalleryLayoutChange: (layout: "masonry" | "justified") => void;
+  /** The asset sort shared with plain folders; without `onSortChange` the gallery stays newest-first. */
+  sort?: AssetSort; onSortChange?: (sort: AssetSort) => void;
   privacyMode: boolean; onPrivacyModeChange: (value: boolean) => void;
   metadataVisible: boolean; onMetadataVisibleChange: (value: boolean) => void;
   thumbnailRowHeight: number; onThumbnailRowHeightChange: (value: number) => void; refreshVersion: number;
@@ -75,6 +77,7 @@ const CharacterPanelIcon = (props: ComponentProps<"svg">) => <svg viewBox="0 0 2
   <path d="M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5M10 7h4v4h-4zM7 17l2-3h6l2 3" />
 </svg>;
 const emptyPage = (): CharacterBrowsePage => ({ items: [], nextCursor: null, totalCount: 0 });
+const createRandomPivot = () => crypto.randomUUID().split("-").join("");
 /**
  * Hover prefetch of a series overview: the reads its switch gates on (the first page in `load` and the
  * excluded-count, folder and candidate reads below), with the same arguments, so the switch takes them.
@@ -98,7 +101,7 @@ function characterStatus(target: CharacterTarget, readiness: S36Readiness | unde
   return { detail, warning: Boolean(s36 && (s36.wrong > 0 || s36.status === "keep")) };
 }
 
-export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId, groupId, targets, groups = [], classifications, galleryLayout, onGalleryLayoutChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi }: Props) {
+export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSelectionRequest = 0, galleryDrag, albums = [], folderExclusions = [], series, targetId, groupId, targets, groups = [], classifications, galleryLayout, onGalleryLayoutChange, sort = "newest", onSortChange, privacyMode, onPrivacyModeChange, metadataVisible, onMetadataVisibleChange, thumbnailRowHeight, onThumbnailRowHeightChange, refreshVersion, onNavigate, onChanged, api = characterApi, hubApi = characterHubApi, shadowApi = shadowReviewApi }: Props) {
   void onPrivacyModeChange;
   void onMetadataVisibleChange;
   const { gateway, library } = useLibrary();
@@ -142,6 +145,10 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const [legacyExcludedCount, setLegacyExcludedCount] = useState(0);
   const [excludedLoading, setExcludedLoading] = useState(true);
   const [undo, setUndo] = useState<string[]>([]);
+  // 보기 filters, as in a plain folder: they stay while moving between series, groups and characters.
+  const [mediaFilter, setMediaFilter] = useState<AssetMediaFilter>("all");
+  const [aspectFilter, setAspectFilter] = useState<AssetAspectFilter>("all");
+  const [randomPivot, setRandomPivot] = useState(createRandomPivot);
   const generation = useRef(0), pending = useRef(false), saving = useRef(false);
   const loadedScope = useRef<string | null>(null);
   // The scope the shown page belongs to. On a scope switch the previous images stay until the new
@@ -181,6 +188,14 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const seriesGalleryViews = legacyExcludedCount > 0
     ? [...ordinarySeriesGalleryViews, { value: "excluded" as const, label: "자동 분류 제외" }]
     : ordinarySeriesGalleryViews;
+  // The 보기 sort and filters apply to the series, group and character galleries, not to the
+  // pickers or the legacy 자동 분류 제외 list (its own command has no sort or filters).
+  const viewApplies = !picking && !(!targetId && !currentGroup && excludedOnly);
+  const sorted = viewApplies && Boolean(onSortChange) ? sort : "newest";
+  const browseView: CharacterBrowseView | undefined = viewApplies && (sorted !== "newest" || mediaFilter !== "all" || aspectFilter !== "all")
+    ? { sort: sorted, randomPivot: sorted === "random" ? randomPivot : null, mediaKind: mediaFilter === "all" ? null : mediaFilter, aspectRatio: aspectFilter === "all" ? null : aspectFilter }
+    : undefined;
+  const filtered = Boolean(browseView?.mediaKind || browseView?.aspectRatio);
   const members = targets.filter(t => t.seriesClassificationId === series.classificationId);
   // Per-character image counts come from the character index (character folders are hidden from the
   // folder tree, so their tree counts are missing); the folder tree is only a fallback.
@@ -208,7 +223,7 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
   const s36Driven = (targetId: string) => Boolean(s36Settings?.series.includes(series.classificationId) && !s36Settings.excludedTargets.includes(targetId));
   const name = classifications.find(c => c.id === series.classificationId)?.name ?? "시리즈";
   const pickerScope = picking && picking.kind !== "hero" ? `${series.classificationId}:${editor?.target?.id ?? "new"}:${pickFromSeries ? "series" : "character"}:${all}` : null;
-  const scope = `${series.classificationId}:${picking ? picking.kind === "hero" ? "pick-hero" : `pick-${editor?.target?.id ?? "new"}-${pickFromSeries}` : targetId ? `character-${targetId}` : currentGroup ? `group-${currentGroup.id}` : `series-${seriesGalleryView}`}:${all}`;
+  const scope = `${series.classificationId}:${picking ? picking.kind === "hero" ? "pick-hero" : `pick-${editor?.target?.id ?? "new"}-${pickFromSeries}` : targetId ? `character-${targetId}` : currentGroup ? `group-${currentGroup.id}` : `series-${seriesGalleryView}`}:${all}${browseView ? `|${JSON.stringify(browseView)}` : ""}`;
   const ids = page.items.map(a => a.id);
   const selectedIds = [...selection.ids];
   const currentReferenceIds = new Set(current ? [
@@ -232,7 +247,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         groupId: picking ? null : currentGroup?.id ?? null,
         ...(picking && picking.kind !== "hero" ? { referenceTargetId: editor?.target?.id ?? "" } : {}),
         ...(!picking && !targetId && !currentGroup && !excludedOnly ? { seriesFilter: seriesGalleryView as SeriesGalleryFilter } : {}),
-        all: !picking && !targetId && !currentGroup ? seriesGalleryView === "all" : all, after, limit: 100 };
+        all: !picking && !targetId && !currentGroup ? seriesGalleryView === "all" : all, after, limit: 100,
+        ...(browseView ? { view: browseView } : {}) };
       const next = !picking && !targetId && !currentGroup && excludedOnly
         ? await hubApi.excludedAssets(series.classificationId, after, 100)
         : await prefetchedRead(hubApi, "browse", query, () => hubApi.browse(query));
@@ -435,7 +451,8 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
     ? (signal) => collectPages((after) => !targetId && !currentGroup && excludedOnly
       ? hubApi.excludedAssets(series.classificationId, after, 100)
       : hubApi.browse({ seriesId: series.classificationId, targetId: targetId ?? null, groupId: currentGroup?.id ?? null,
-        ...(!targetId && !currentGroup ? { seriesFilter: seriesGalleryView as SeriesGalleryFilter, all: seriesGalleryView === "all" } : { all }), after, limit: 100 }), signal)
+        ...(!targetId && !currentGroup ? { seriesFilter: seriesGalleryView as SeriesGalleryFilter, all: seriesGalleryView === "all" } : { all }), after, limit: 100,
+        ...(browseView ? { view: browseView } : {}) }), signal)
     : null;
   const editorTarget = editor?.target ?? null;
   const editorS36 = editorTarget
@@ -550,7 +567,10 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
           { id: "edit-group", label: "그룹 편집", icon: <PencilIcon aria-hidden="true" />, onSelect: () => setGroupEditRequest(v => v + 1) },
           ...faultItem,
         ]} />}
-        {!picking && <GalleryViewMenu galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} inspectorOpen={inspector} inspectorAvailable={selectedIds.length > 0} onInspectorOpenChange={setInspector} />}
+        {!picking && <GalleryViewMenu galleryLayout={galleryLayout} onGalleryLayoutChange={onGalleryLayoutChange} thumbnailRowHeight={thumbnailRowHeight} onThumbnailRowHeightChange={onThumbnailRowHeightChange} inspectorOpen={inspector} inspectorAvailable={selectedIds.length > 0} onInspectorOpenChange={setInspector}
+          sort={sorted} onSortChange={viewApplies ? onSortChange : undefined} onReshuffle={() => setRandomPivot(createRandomPivot())}
+          mediaFilter={mediaFilter} onMediaFilterChange={viewApplies ? setMediaFilter : undefined}
+          aspectFilter={aspectFilter} onAspectFilterChange={viewApplies ? setAspectFilter : undefined} />}
       </div>}
       chrome={{
         summary: `${galleryLayout === "masonry" ? "폭포수" : "같은 높이"} · ${thumbnailRowHeight}px${privacyMode ? " · 비공개" : ""}`,
@@ -633,8 +653,9 @@ export function SeriesBrowser({ requestedAsset, onRequestedAssetHandled, clearSe
         {picking && picking.kind !== "hero" && Boolean(page.unavailableReferenceIds?.length) && <p className="character-message" role="status">원본이 없는 이미지는 선택할 수 없습니다. 썸네일은 남아 있을 수 있습니다.</p>}
         {error && <p className="character-message" role="alert">{error}<Button size="sm" onClick={() => { pickerPages.current.clear(); setReload(v => v + 1); }}>다시 시도</Button></p>}
         {!!undo.length && <div className="character-actions"><span>휴지통으로 이동했습니다.</span><Button size="sm" onClick={() => void action(async () => { await gateway.restoreAssets(undo); setUndo([]); })}>실행 취소</Button></div>}
-        {!loading && !error && !page.items.length && <p className="series-gallery__empty">{picking ? "선택할 수 있는 이미지가 없습니다." : current ? "이 캐릭터의 이미지가 없습니다." : currentGroup ? "이 그룹에 연결된 이미지가 없습니다." : seriesGalleryView === "all" ? "이 시리즈에 이미지가 없습니다." : excludedOnly ? "자동 분류에서 제외한 이미지가 없습니다." : "미분류 이미지가 없습니다."}</p>}
-      </>} layout={galleryLayout} groupDates items={page.items} scopeKey={pageScope ?? undefined} navigationScopeKey={pageScope?.replace(/:series-(unclassified|all|excluded):/, ':series:')} totalCount={page.totalCount} metadataVisible={metadataVisible} privacyMode={privacyMode} targetRowHeight={thumbnailRowHeight}
+        {!loading && !error && !page.items.length && filtered && <p className="series-gallery__empty">조건에 맞는 이미지가 없습니다.<Button size="sm" variant="ghost" onClick={() => { setMediaFilter("all"); setAspectFilter("all"); }}>필터 초기화</Button></p>}
+        {!loading && !error && !page.items.length && !filtered && <p className="series-gallery__empty">{picking ? "선택할 수 있는 이미지가 없습니다." : current ? "이 캐릭터의 이미지가 없습니다." : currentGroup ? "이 그룹에 연결된 이미지가 없습니다." : seriesGalleryView === "all" ? "이 시리즈에 이미지가 없습니다." : excludedOnly ? "자동 분류에서 제외한 이미지가 없습니다." : "미분류 이미지가 없습니다."}</p>}
+      </>} layout={galleryLayout} groupDates={sorted === "newest" || sorted === "oldest"} favoritesView={sorted === "favorites"} items={page.items} scopeKey={pageScope ?? undefined} navigationScopeKey={pageScope?.replace(/:series-(unclassified|all|excluded):/, ':series:')} totalCount={page.totalCount} metadataVisible={metadataVisible} privacyMode={privacyMode} targetRowHeight={thumbnailRowHeight}
         captionLabel={picking && picking.kind !== "hero" ? asset => page.unavailableReferenceIds?.includes(asset.id) ? "원본 없음 · 선택 불가" : null : undefined}
         selectedAssetIds={picking ? new Set(picking.ids) : selection.ids} focusAssetId={picking ? null : selection.focusId}
         hasNextPage={Boolean(page.nextCursor) && !loading && !error && pageScope === scope} onLoadNextPage={() => void load(page.nextCursor)}

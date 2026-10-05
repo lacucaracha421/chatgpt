@@ -780,13 +780,17 @@ pub async fn save_character_series(
 #[tauri::command]
 pub async fn browse_character_assets(
     query: crate::library::character_hub::BrowseQuery,
+    view: Option<crate::library::character_hub::BrowseView>,
     state: State<'_, AppState>,
 ) -> Result<crate::library::character_hub::BrowsePage, CommandError> {
     let library = current_required(state)?;
-    tauri::async_runtime::spawn_blocking(move || library.browse_character_assets(query))
-        .await
-        .map_err(|_| super::background_task_error())?
-        .map_err(Into::into)
+    let view = view.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || {
+        library.browse_character_assets_with_view(query, &view)
+    })
+    .await
+    .map_err(|_| super::background_task_error())?
+    .map_err(Into::into)
 }
 #[tauri::command]
 pub async fn apply_automatic_characters(

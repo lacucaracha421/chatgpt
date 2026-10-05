@@ -38,6 +38,20 @@ it("keeps only title and View in the toolbar, with every choice in View", async 
   expect(screen.getByRole("switch", { name: "정보" })).toBeVisible();
 });
 
+it("groups 보기 into labelled sections: scope and kind first, layout and sort next, rarely used choices last", async () => {
+  const user = userEvent.setup();
+  renderChrome(<AssetToolbar {...baseProps} view={{ kind: "classification", classificationId: "game" }} inspectorAvailable onInspectorOpenChange={vi.fn()}
+    scopeControl={<span>미분류 2 · 전체 167</span>} scopeHelp={<button type="button" aria-label="미분류와 전체 설명" />} />);
+  await user.click(screen.getByRole("button", { name: "보기" }));
+  const menu = screen.getByRole("menu");
+  const sections = [...menu.querySelectorAll<HTMLElement>(".ui-view-options__section")];
+  expect(sections.map(section => section.querySelector(".ui-section-label__title")?.textContent)).toEqual(["범위", "종류", "배치", "정렬", "비율", "표시"]);
+  expect(within(sections[0].querySelector<HTMLElement>(".ui-section-label")!).getByRole("button", { name: "미분류와 전체 설명" })).toBeInTheDocument();
+  expect(within(sections[0]).getByText("미분류 2 · 전체 167")).toBeInTheDocument();
+  expect(within(sections[2]).getByRole("slider", { name: "한 줄에" })).toBeInTheDocument();
+  expect(within(sections[5]).getAllByRole("switch").map(item => item.getAttribute("aria-label"))).toEqual(["비공개 모드", "NSFW 필터", "정보"]);
+});
+
 it("changes media kind from the segmented control", async () => {
   const user = userEvent.setup();
   const onMediaFilterChange = vi.fn();

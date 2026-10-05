@@ -45,19 +45,26 @@ type FolderFilterControlProps<T extends string> = {
 };
 
 export function FolderFilterControl<T extends string>({ label, options, value, onChange, className }: FolderFilterControlProps<T>) {
-  const [open, setOpen] = useState(false);
   return <div className={["folder-filter", className].filter(Boolean).join(" ")}>
     <SegmentedControl label={label} options={options} value={value} onChange={onChange} />
-    <AnchoredPanel
-      open={open}
-      onOpenChange={setOpen}
-      title="미분류와 전체"
-      trigger={<Button size="icon" variant="ghost" aria-label="미분류와 전체 설명"><InformationCircleIcon aria-hidden="true" /></Button>}
-    >
-      <div className="folder-filter__explanation">
-        <p><strong>미분류</strong>: 이 폴더에 바로 들어 있고 아직 캐릭터나 하위 폴더에 없는 이미지</p>
-        <p><strong>전체</strong>: 캐릭터와 하위 폴더까지 모두</p>
-      </div>
-    </AnchoredPanel>
+    <FolderFilterHelp />
   </div>;
+}
+
+/** The ⓘ explaining 미분류 and 전체; `inLabel` sizes it for the end of a section label (the 보기 범위 section). */
+export function FolderFilterHelp({ inLabel = false }: { inLabel?: boolean }) {
+  const [open, setOpen] = useState(false);
+  return <AnchoredPanel
+    open={open}
+    onOpenChange={setOpen}
+    title="미분류와 전체"
+    trigger={inLabel
+      ? <button type="button" className="ui-section-label__open" aria-label="미분류와 전체 설명"><InformationCircleIcon aria-hidden="true" /></button>
+      : <Button size="icon" variant="ghost" aria-label="미분류와 전체 설명"><InformationCircleIcon aria-hidden="true" /></Button>}
+  >
+    <div className="folder-filter__explanation">
+      <p><strong>미분류</strong>: 이 폴더에 바로 들어 있고 아직 캐릭터나 하위 폴더에 없는 이미지</p>
+      <p><strong>전체</strong>: 캐릭터와 하위 폴더까지 모두</p>
+    </div>
+  </AnchoredPanel>;
 }

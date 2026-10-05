@@ -785,12 +785,13 @@ select.ui-text-input {
 .ui-selection-check { position: absolute; z-index: 4; top: 0; left: 0; display: grid; place-items: center; width: var(--selection-check-size); height: var(--selection-check-size); color: var(--color-on-accent); background: var(--color-accent); border-radius: 0 0 var(--radius-control) 0; box-shadow: 1px 1px 0 color-mix(in srgb, var(--color-bg) 62%, transparent); pointer-events: none; font: 700 calc(var(--selection-check-size) * 0.6) / 1 var(--font-ui); }
 .ui-selection-check::after { content: "\2713"; }
 
-.ui-view-options { width: min(19rem, calc(100vw - var(--space-6))); }
-.ui-view-options__content { display: grid; gap: var(--space-3); padding: var(--space-3); }
+/* 보기 (PC menu and tablet sheet): labelled sections (5px square + hairline), 24 between sections, 8 inside. */
+.ui-view-options { width: min(19rem, calc(100vw - var(--space-6))); max-height: var(--radix-dropdown-menu-content-available-height, none); overflow-y: auto; }
+.ui-view-options__content { display: grid; gap: var(--space-6); padding: var(--space-4); }
 .ui-view-options__section { display: grid; gap: var(--space-2); }
-.ui-view-options__label { color: var(--color-muted); font-size: var(--type-meta); font-weight: 600; }
 .ui-per-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); }
 .ui-per-row .ui-slider { min-width: 0; }
+.ui-per-row .ui-slider > span { flex: none; white-space: nowrap; }
 .ui-per-row .ui-slider input { min-width: 0; width: 100%; }
 .ui-per-row output { font-size: var(--type-meta); color: var(--color-text); font-variant-numeric: tabular-nums; }
 
